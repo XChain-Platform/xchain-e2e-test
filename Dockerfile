@@ -6,6 +6,6 @@ WORKDIR /XChainE2ETest
 RUN npm install
 
 COPY ./src /XChainE2ETest/src
-COPY ./.env /XChainE2ETest/.env
+COPY ./.en[v] /XChainE2ETest/.env
 
 CMD ["npm", "run", "api"]
