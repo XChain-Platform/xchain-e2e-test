@@ -8,4 +8,4 @@ RUN npm install
 COPY ./src /XChainE2ETest/src
 COPY ./.en[v] /XChainE2ETest/.env
 
-CMD ["npm", "run", "api"]
+CMD ["npm", "test"]
