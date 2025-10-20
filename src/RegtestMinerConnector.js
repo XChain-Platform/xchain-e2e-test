@@ -51,6 +51,44 @@ class RegtestMinerConnector {
             return null
         }
     }
+    
+    async setMiningTime(maxTime, txAddedTime){
+        const data = {
+            jsonrpc: '2.0',
+            method: 'set_mining_time',
+            params: {"max_time":maxTime, "tx_added_time":txAddedTime},
+            id: 1
+        }
+        
+        // Make the request to the node
+        const response = await axios.post(this.url, data)
+
+        // Verify if there is a result and return it
+        if (response.data && response.data.result) {
+            return response.data.result
+        } else {
+            return null
+        }
+    }
+	
+	async setDefaultMiningTime(){
+        const data = {
+            jsonrpc: '2.0',
+            method: 'set_default_mining_time',
+            params: {},
+            id: 1
+        }
+        
+        // Make the request to the node
+        const response = await axios.post(this.url, data)
+
+        // Verify if there is a result and return it
+        if (response.data && response.data.result) {
+            return response.data.result
+        } else {
+            return null
+        }
+    }
 }
 
 module.exports = RegtestMinerConnector

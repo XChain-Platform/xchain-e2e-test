@@ -8,9 +8,20 @@ const XChainHubConnector = require('../src/XChainHubConnector.js')
 const XChainIndexerConnector = require('../src/XChainIndexerConnector.js')
 const RegtestMinerConnector = require('../src/RegtestMinerConnector.js')
 const Database = require('../src/db.js')
+const CryptoNetworks = require('../src/CryptoNetworks')
 
 global.COIN = process.env.COIN
 global.NETWORK = process.env.NETWORK
+
+if (COIN === null || COIN === undefined){
+    let networkSplit = NETWORK.split("-")
+    global.COIN = networkSplit[0]
+    global.NETWORK = networkSplit[1]
+}
+
+global.NETWORK_OBJECT = CryptoNetworks.getBitcoinJsNetwork(COIN+"-"+NETWORK)
+
+
 var HUB_URL =  process.env.HUB_URL
 var HUB_PORT =  process.env.HUB_PORT
 var NODE_URL = process.env.NODE_URL
@@ -20,41 +31,69 @@ var NODE_PASS = process.env.NODE_PASSWORD
 var DATABASE_URL = "mariadb"
 var DATABASE_PORT = 3306
 var UTXO_TRACKER_URL = process.env.UTXO_TRACKER_URL
-var UTXO_TRACKER_PORT = process.env.UTXO_TRACKER_PORT
+var UTXO_TRACKER_PORT = process.env.UTXO_TRACKER_API_PORT
 var ENCODER_URL = process.env.ENCODER_URL
-var ENCODER_PORT = process.env.ENCODER_PORT
+var ENCODER_PORT = process.env.ENCODER_API_PORT
 var INDEXER_URL = process.env.INDEXER_HOST
-var INDEXER_PORT = process.env.INDEXER_PORT
+var INDEXER_PORT = process.env.INDEXER_API_PORT
 var INDEXER_DATABASE_NAME = process.env.INDEXER_DB_NAME
 var INDEXER_DATABASE_USER = process.env.INDEXER_DB_USER
 var INDEXER_DATABASE_PASS = process.env.INDEXER_DB_PASS
 var REGTEST_MINER_URL = process.env.REGTEST_MINER_URL
-var REGTEST_MINER_PORT = process.env.REGTEST_MINER_PORT
+var REGTEST_MINER_PORT = process.env.REGTEST_MINER_API_PORT
 
 function checkAllEnvironmentalVariables(){
-    return 
-      NODE_URL
-      && NODE_PORT
-      && NODE_USER
-      && NODE_PASS
-      && DATABASE_URL
-      && DATABASE_PORT
-      && UTXO_TRACKER_URL
-      && UTXO_TRACKER_PORT
-      && ENCODER_URL
-      && ENCODER_PORT
-      && INDEXER_URL
-      && INDEXER_PORT
-      && INDEXER_DATABASE_NAME
-      && INDEXER_DATABASE_USER
-      && INDEXER_DATABASE_PASS
-      && REGTEST_MINER_URL
-      && REGTEST_MINER_PORT
+    let variableArray = [
+        NODE_URL, 
+        NODE_PORT,
+        NODE_USER,
+        NODE_PASS,
+        DATABASE_URL,
+        DATABASE_PORT,
+        UTXO_TRACKER_URL,
+        UTXO_TRACKER_PORT,
+        ENCODER_URL,
+        ENCODER_PORT,
+        INDEXER_URL,
+        INDEXER_PORT,
+        INDEXER_DATABASE_NAME,
+        INDEXER_DATABASE_USER,
+        INDEXER_DATABASE_PASS,
+        REGTEST_MINER_URL,
+        REGTEST_MINER_PORT
+    ]
+    
+    return variableArray.every((variable) => variable !== null && variable !== undefined)
+}
+
+function printAllEnvironmentalVariables(){
+    console.log({
+      node_url:NODE_URL,
+      node_port:NODE_PORT,
+      node_user:NODE_USER,
+      node_pass:NODE_PASS,
+      database_url:DATABASE_URL,
+      database_port:DATABASE_PORT,
+      utxo_tracker_url:UTXO_TRACKER_URL,
+      utxo_tracker_port:UTXO_TRACKER_PORT,
+      encoder_url:ENCODER_URL,
+      encoder_port:ENCODER_PORT,
+      indexer_url:INDEXER_URL,
+      indexer_port:INDEXER_PORT,
+      indexer_database_name:INDEXER_DATABASE_NAME,
+      indexer_database_user:INDEXER_DATABASE_USER,
+      indexer_database_pass:INDEXER_DATABASE_PASS,
+      regtest_miner_url:REGTEST_MINER_URL,
+      regtest_miner_port:REGTEST_MINER_PORT
+    })
 }
 
 exports.mochaHooks = {
     async beforeAll(){
         if (!checkAllEnvironmentalVariables()){
+            printAllEnvironmentalVariables()
+        
+        
             console.log("Connecting to the hub")
             global.hubConnector = new XChainHubConnector(HUB_URL, HUB_PORT)
             let pingHub = await hubConnector.ping()
@@ -143,10 +182,17 @@ exports.mochaHooks = {
         let pingRegtestMiner = await regtestMinerConnector.ping()
         if (!pingRegtestMiner){
             throw new Error("Can't connect to the XChain Regtest Miner module")
+        } else {
+            await regtestMinerConnector.setMiningTime(1000, 1000)
         }
     },
 
     async afterAll(){
+        try{
+            await regtestMinerConnector.setDefaultMiningTime()
+        } catch (err){
+            console.log("There was a problem setting the default mining time values for the regtest miner")
+        }
         //decoder.stop()
     }
 }
