@@ -237,7 +237,7 @@ class Database {
             LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
             LEFT JOIN index_addresses ia ON ia.id = s.source_id
             LEFT JOIN index_addresses ia2 ON ia2.id = s.destination_id
-            LEFT JOIN index_memo im ON im.id = s.memo_id
+            LEFT JOIN index_memos im ON im.id = s.memo_id
             LEFT JOIN index_statuses ist ON ist.id = s.status_id
             LEFT JOIN index_tickers itick ON itick.id = s.tick_id 
         `+"WHERE "+whereClauses.join(" AND ");
