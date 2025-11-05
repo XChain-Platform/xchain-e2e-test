@@ -35,8 +35,8 @@ module.exports = {
         
         let wallet = await this.getWallet(label)
         wallet.coin = coin
-		wallet.network = network
-		
+        wallet.network = network
+        
         if (wallet.mnemonic == null){
             if (!mnemonic){
                 mnemonic = bip39.generateMnemonic()
@@ -60,6 +60,35 @@ module.exports = {
         console.log(wallet)
         wallet["addresses"].push({privateKey: address.privateKey, publicKey: address.publicKey, address:testAddress})
         return {mnemonic:mnemonic, privateKey: address.privateKey, publicKey: address.publicKey, address:testAddress}
+    },
+    
+    async getNewFundedAddress(label, coin, network, mnemonic = null, addressType="legacy", addressIndex=0, amountToFund){
+        let newAddressInfo = await this.getNewAddress(label, coin, network, mnemonic, addressType, addressIndex)
+        let newAddress = newAddressInfo["address"]
+        
+        console.log("Sending funds ("+amountToFund+") to "+newAddress)
+        let txId = await regtestMinerConnector.sendFunds(newAddress, amountToFund)
+        try {
+            let txExists = await nodeConnector.waitForTx(txId)
+            
+            if (!txExists){
+                throw new Error("The sent tx didn't appear in the blockchain")
+            }           
+        } catch (err){
+            throw new Error("The sent tx didn't appear in the blockchain")
+        }
+        console.log("Waiting for the utxos for "+newAddress)
+        try {
+            let addressHasUtxos = await utxoTrackerConnector.waitForUtxos(newAddress)
+            
+            if (!addressHasUtxos){
+                throw new Error("The utxo tracker couldn't parse the utxo")
+            }
+        } catch (err){
+            throw new Error("The utxo tracker couldn't parse the utxo")
+        }
+        
+        return newAddressInfo
     }
 }
 
