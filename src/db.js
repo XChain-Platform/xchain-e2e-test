@@ -496,8 +496,12 @@ class Database {
             whereValues.push(amount)
         }
         if (memo != null){
-            whereClauses.push("im.memo = ?")
-            whereValues.push(memo)
+            if (memo == ''){
+                whereClauses.push("im.memo IS NULL")
+            } else {
+                whereClauses.push("im.memo = ?")
+                whereValues.push(memo)
+            }
         }
         if (status != null){
             whereClauses.push("ist.status = ?")
@@ -646,10 +650,10 @@ class Database {
         
         while (Date.now() < endTime){
             try {
-                let listExists = await this.checkList(listObject)
+                let listActionIndex = await this.checkList(listObject)
                 
-                if (listExists){
-                    return true
+                if (listActionIndex >= 0){
+                    return listActionIndex
                 }
                 
                 await this.sleep(1000)
@@ -659,7 +663,7 @@ class Database {
             }
         }
         
-        return false
+        return -1
     }
     
     async checkList({blockIndex,txHash,source,type,edit,listActionIndex,status,items}){
@@ -718,21 +722,20 @@ class Database {
         try {
             const rows = await connection.query(query, whereValues)
             if (rows.length > 0){
-                
-                return true
+                newActionIndex = rows[0]["action_index"]
             } else {
-                return false  
+                return -1               
             }
         } catch (err) {
             console.error('Error with database query (broadcast):', err);
-            return false;
+            return -1
         } finally {
             await connection.release()
         }
         
         if (newActionIndex){
             let leftJoin = ""
-            let fields = ""
+            let field = ""
             switch (type){
                 case 1: //TICK
                     leftJoin = " LEFT JOIN index_tickers it ON it.id = li.item_id "
@@ -753,7 +756,7 @@ class Database {
             
             try {
                 const rows = await connection.query(queryItems, [newActionIndex])
-                if (rows.length > 0){
+                if (rows.length == items.length){
                     let itemsClone = items.slice()
                     
                     for (let nextRowIndex in rows){
@@ -767,21 +770,398 @@ class Database {
                     }
                     
                     if (itemsClone.length == 0){
-                        return true
+                        return newActionIndex
                     } else {
-                        return false
+                        console.log("ERROR! List items don't match with the items in the database")
+                        return -1
                     }
                 } else {
-                    return false  
+                    console.log("ERROR! List items don't have the same length as the items in the database")
+                    return -1  
                 }
             } catch (err) {
                 console.error('Error with database query (broadcast):', err);
-                return false;
+                return -1;
             } finally {
                 await connection.release()
             }
         } else {
-            return false
+            console.error("ERROR! Couldn't find the new list action index");
+            return -1
+        }
+    }
+    
+    async waitForAirdrop(airdropObject, timeMax = 30000){
+        const endTime = Date.now() + timeMax
+        
+        while (Date.now() < endTime){
+            try {
+                let airdropNewActionIndex = await this.checkAirdrop(airdropObject)
+                
+                if (airdropNewActionIndex >= 0){
+                    return airdropNewActionIndex
+                }
+                
+                await this.sleep(1000)
+            } catch(err) {
+                console.log(err)
+                await this.sleep(1000)
+            }
+        }
+        
+        return -1
+    }
+    
+    async getListAddresses(listActionIndex){
+        let listType = null
+            
+        //Check the type of the list
+        const queryList = "SELECT type FROM lists WHERE action_index = ?"
+        
+        let connection = await this.getConnection()
+        
+        try {
+            const rows = await connection.query(queryList, [listActionIndex])
+            if (rows.length > 0){
+                listType = parseInt(rows[0]["type"])
+            } else {
+                console.log("ERROR! Couldn't get the type of a list")
+                return null 
+            }
+        } catch (err) {
+            console.log(err)
+            return null
+        } finally {
+            await connection.release()
+        }
+        
+        if (listType){
+            let addressesQuery = null
+            
+            switch (listType){
+                case 1: //TICK
+                    addressesQuery = `
+                        WITH totalCredits AS (
+                        SELECT address_id, tick_id, SUM(amount) AS total
+                        FROM credits
+                        GROUP BY address_id, tick_id
+                    ),
+                    totalDebits AS (
+                        SELECT address_id, tick_id, SUM(amount) AS total
+                        FROM debits
+                        GROUP BY address_id, tick_id
+                    )
+                    SELECT 
+                        DISTINCT(ia.id) AS address `+
+                        //, 
+                        //ia.address, 
+                        //it.id, 
+                        //COALESCE(tc.total, 0) - COALESCE(td.total, 0) AS balance
+                    `FROM index_addresses ia 
+                    LEFT JOIN index_tickers it ON it.id IN (SELECT item_id FROM list_items WHERE action_index = ?)
+                    LEFT JOIN totalCredits tc ON tc.tick_id = it.id AND tc.address_id = ia.id
+                    LEFT JOIN totalDebits td ON td.tick_id = it.id AND td.address_id = ia.id
+                    WHERE
+                        COALESCE(tc.total, 0) > 0 OR COALESCE(td.total, 0) > 0;
+                    `
+                    break
+                case 2: //address
+                    addressesQuery = `
+                        SELECT 
+                            ia.id AS address
+                        FROM list_items li
+                        LEFT JOIN index_addresses ia ON ia.id = li.item_id
+                        WHERE li.action_index = ?
+                    `
+                    break
+            }
+            
+            
+            try {
+                connection = await this.getConnection()
+                
+                const rows = await connection.query(addressesQuery, [listActionIndex])
+                let result = []
+                    
+                for (let nextRowIndex in rows){
+                    result.push(rows[nextRowIndex]["address"])
+                }
+                    
+                return result
+            } catch (err) {
+                console.log(err)
+                console.error("Couldn't get a list of addresses from a list")
+            }
+        }
+        
+        console.log("ERROR: there is no list with action index "+listActionIndex)
+        return null
+    }
+    
+    async checkAirdrop({blockIndex,txHash,source,tick,amount,tick2,amount2,listActionIndex,listActionIndex2,memo,memo2,status}){
+        let whereClauses = []
+        let whereValues = []
+        
+        if (blockIndex != null){
+            whereClauses.push("tr.block_index = ?")
+            whereValues.push(blockIndex)
+        }
+        if (txHash != null){
+            whereClauses.push("itx.hash = ?")
+            whereValues.push(txHash)
+        }
+        if (source != null){
+            whereClauses.push("ia.address = ?")
+            whereValues.push(source)
+        }
+        if (tick != null){
+            whereClauses.push("itick.tick = ?")
+            whereValues.push(tick)
+        }
+        if (amount != null){
+            whereClauses.push("a.amount = ?")
+            whereValues.push(amount)
+        }
+        if (listActionIndex != null){
+            whereClauses.push("a.list_action_index = ?")
+            whereValues.push(listActionIndex)
+        }
+        if (memo != null){
+            whereClauses.push("im.memo = ?")
+            whereValues.push(memo)
+        }
+        if (status != null){
+            whereClauses.push("ist.status = ?")
+            whereValues.push(status)
+        }
+         
+        const query = `
+            SELECT 
+                tr.block_index AS block_index,
+                itx.hash AS tx_hash,
+                a.action_index,
+                ia.address AS source,
+                itick.tick AS tick,
+                a.amount,
+                im.memo,
+                a.list_action_index,
+                ist.status AS status 
+            FROM airdrops a
+            LEFT JOIN actions act ON act.action_index = a.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ia ON ia.id = tr.source_id
+            LEFT JOIN index_statuses ist ON ist.id = a.status_id
+            LEFT JOIN index_tickers itick ON itick.id = a.tick_id
+            LEFT JOIN index_memos im ON im.id = a.memo_id
+        `+"WHERE "+whereClauses.join(" AND ");
+        
+        let connection = await this.getConnection()
+        let newActionIndex = null
+        try {
+            const rows = await connection.query(query, whereValues)
+            if (rows.length > 0){
+                newActionIndex = rows[0]["action_index"]
+            } else {
+                console.error('Error with database query: rows are empty');
+                console.log(query)
+                console.log(whereValues)
+                return -1               
+            }
+        } catch (err) {
+            console.error('Error with database query (airdrop):', err);
+            return -1
+        } finally {
+            await connection.release()
+        }
+        
+        //Check for a second tick
+        if (tick2 != null){
+            let tickClauseIndex = whereClauses.indexOf("itick.tick = ?")
+            let tickAmountClauseIndex = whereClauses.indexOf("a.amount = ?")
+            whereValues.splice(tickClauseIndex, 1, tick2)
+            whereValues.splice(tickAmountClauseIndex, 1, amount2)
+            
+            if (listActionIndex2 != null){
+                let listActionIndexClauseIndex = whereClauses.indexOf("a.list_action_index = ?")
+                whereValues.splice(listActionIndexClauseIndex, 1, listActionIndex2)
+            }
+            
+            if (memo2 != null){
+                let memoClauseIndex = whereClauses.indexOf("im.memo = ?")
+                whereValues.splice(memoClauseIndex, 1, memo2)
+            }
+            
+            let connection = await this.getConnection()
+            try {
+                const rows = await connection.query(query, whereValues)
+                if (rows.length > 0){
+                    //Continue
+                } else {
+                    console.error('Error with database query: second airdrop does not exist');
+                    console.log(query)
+                    console.log(whereValues)
+                    return -1               
+                }
+            } catch (err) {
+                console.error('Error with database query (airdrop):', err);
+                return -1
+            } finally {
+                await connection.release()
+            }
+        }
+        
+        if (newActionIndex){
+            let addressesId = await this.getListAddresses(listActionIndex)
+            let addressesId2 = null
+            
+            if (listActionIndex2){
+                addressesId2 = await this.getListAddresses(listActionIndex2)
+            } else {
+                addressesId2 = addressesId
+            }
+            
+            if (addressesId){
+                let addressesIdArray = "("+addressesId.join(",")+")"            
+                let addressesId2Array = "("+addressesId2.join(",")+")"   
+                
+                let checkCreditsQuery = `
+                    SELECT DISTINCT(c.address_id) FROM credits c
+                    LEFT JOIN actions act ON act.action_index = c.action_index
+                    LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+                    LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+                    LEFT JOIN index_tickers itick ON itick.id = c.tick_id 
+                    WHERE amount = ?
+                        AND itx.hash = ?
+                        AND itick.tick = ?
+                `
+                
+                try {
+                    const rows = await connection.query(
+                        checkCreditsQuery+" AND address_id IN "+addressesIdArray, [
+                            amount, //amount
+                            txHash, //txHash
+                            tick //tick's name
+                        ]
+                    )
+                    if (rows.length == addressesId.length){
+                        //return newActionIndex
+                    } else {
+                        console.error('Error: there are '+rows.length+" credits for an airdrop of "+addressesId.length+" addresses");
+                        return -1               
+                    }
+                } catch (err) {
+                    console.error('Error getting ', err);
+                    return -1
+                } finally {
+                    await connection.release()
+                }
+                
+                if (tick2 != null){
+                    try {
+                        const rows = await connection.query(
+                            checkCreditsQuery+" AND address_id IN "+addressesId2Array, [
+                                amount2, //amount
+                                txHash, //txHash
+                                tick2 //tick's name
+                            ]
+                        )
+                        if (rows.length == addressesId2.length){
+                            //continue
+                        } else {
+                            console.error('Error: there are '+rows.length+" credits for an airdrop of "+addressesId2.length+" addresses");
+                            return -1               
+                        }
+                    } catch (err) {
+                        console.error('Error getting ', err);
+                        return -1
+                    } finally {
+                        await connection.release()
+                    }
+                }
+                
+                
+                let checkDebitQuery = `
+                    SELECT d.*, itick.tick as tick FROM debits d
+                    LEFT JOIN actions act ON act.action_index = d.action_index
+                    LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+                    LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+                    LEFT JOIN index_addresses ia ON ia.id = tr.source_id
+                    LEFT JOIN index_tickers itick ON itick.id = d.tick_id 
+                    WHERE ia.address = ?
+                        AND d.amount = ?
+                        AND itx.hash = ?
+                        AND itick.tick = ?
+                `
+                
+                try {
+                    const rows = await connection.query(
+                        checkDebitQuery, [
+                            source, //address
+                            amount*addressesId.length, //amount
+                            txHash, //txHash
+                            tick //tick's name
+                        ]
+                    )
+                    if (rows.length == 1){
+                        if ((rows[0]["tick"] == tick)
+                            && (rows[0]["amount"] == amount*addressesId.length)
+                        ){
+                            //continue
+                        } else {
+                            console.error("The debits aren't right")
+                            return -1
+                        }
+                    } else {
+                        console.error("There should be 1 debit, "+rows.length+" found")
+                        return -1               
+                    }
+                } catch (err) {
+                    console.error('Error with query (obtaining an airdrop debit)', err);
+                    return -1
+                } finally {
+                    await connection.release()
+                }
+                
+                if (tick2 != null){
+                    try {
+                        const rows = await connection.query(
+                            checkDebitQuery, [
+                                source, //address
+                                amount2*(addressesId2?addressesId2.length:addressesId.length), //amount
+                                txHash, //txHash
+                                tick2 //tick's name
+                            ]
+                        )
+                        if (rows.length == 1){
+                            if ((rows[0]["tick"] == tick2)
+                                && (rows[0]["amount"] == amount2*addressesId2.length)
+                            ){
+                                //continue
+                            } else {
+                                console.error("The debits aren't right")
+                                return -1
+                            }
+                        } else {
+                            console.error("There should be 1 debit, "+rows.length+" found")
+                            return -1               
+                        }
+                    } catch (err) {
+                        console.error('Error with query (obtaining an airdrop debit)', err);
+                        return -1
+                    } finally {
+                        await connection.release()
+                    }
+                    
+                    return newActionIndex
+                }
+            } else {
+                console.error("ERROR! Couldn't get addresses from list");
+                return -1
+            }
+        } else {
+            console.error("ERROR! Couldn't find the new airdrop action index");
+            return -1
         }
     }
 }

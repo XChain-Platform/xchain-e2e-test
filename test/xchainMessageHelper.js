@@ -17,10 +17,10 @@ global.wallets = {}
 
 module.exports = {
     async sendIssueV0(addressInfo, tick, maxSupply, maxMint, decimals, description, mintSupply, 
-        transfer, transferSupply, lockMaxSupply, lockMaxMint, lockDescription, lockRug,
-        lockSleep, lockCallback, callbackBlock, callbackTick, callbackAmount, 
-        allowList, blockList, mintAddressMax, mintStartBlock, mintStopBlock, lockMint,
-        lockMintSupply
+        transfer='', transferSupply='', lockMaxSupply='', lockMaxMint='', lockDescription='', lockRug='',
+        lockSleep='', lockCallback='', callbackBlock='', callbackTick='', callbackAmount='', 
+        allowList='', blockList='', mintAddressMax='', mintStartBlock='', mintStopBlock='', lockMint='',
+        lockMintSupply=''
     ){
         let address = addressInfo["address"]
     
@@ -497,12 +497,12 @@ module.exports = {
         let command = "LIST"
         let listVersion = 0
         
-        let listMessage = command+"|"+listVersion+"|"+items.join("|")
+        let listMessage = command+"|"+listVersion+"|"+type+"|"+items.join("|")
     
         console.log("Creating and sending LIST V0 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, listMessage)
         
-        let listExists = await indexerDatabase.waitForList(
+        let listActionIndex = await indexerDatabase.waitForList(
             {
                 source:address,
                 txHash:txHash,
@@ -511,7 +511,145 @@ module.exports = {
                 items
             }
         )
-        assert(broadcastExists)
+        assert(listActionIndex >= 0)
+        return listActionIndex
+    },
+    
+    async sendListV1(addressInfo, edit, listActionIndex, items, finalTypeToCheck, finalItemsToCheck){
+        let address = addressInfo["address"]
+    
+        let command = "LIST"
+        let listVersion = 1
+        
+        let listMessage = command+"|"+listVersion+"|"+edit+"|"+listActionIndex+"|"+items.join("|")
+    
+        console.log("Creating and sending LIST V1 tx...")
+        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, listMessage)
+        
+        let newListActionIndex = await indexerDatabase.waitForList(
+            {
+                source:address,
+                txHash:txHash,
+                type:finalTypeToCheck,
+                status:"valid",
+                items:finalItemsToCheck
+            }
+        )
+        assert(newListActionIndex >= 0)
+        return newListActionIndex
+    },
+    
+    async sendAirdropV0(addressInfo, tick, amount, listActionIndex, memo){
+        let address = addressInfo["address"]
+    
+        let command = "AIRDROP"
+        let airdropVersion = 0
+        
+        let airdropMessage = command+"|"+airdropVersion+"|"+tick+"|"+amount+"|"+listActionIndex+"|"+memo
+    
+        console.log("Creating and sending AIRDROP V0 tx...")
+        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, airdropMessage)
+        
+        let newAirdropActionIndex = await indexerDatabase.waitForAirdrop(
+            {
+                source:address,
+                txHash:txHash,
+                tick:tick,
+                amount:amount,
+                listActionIndex:listActionIndex,
+                memo:memo,
+                status:"valid"
+            }
+        )
+        assert(newAirdropActionIndex >= 0)
+        return newAirdropActionIndex
+    },
+    
+    async sendAirdropV1(addressInfo, tick1, amount1, tick2, amount2, listActionIndex, memo){
+        let address = addressInfo["address"]
+    
+        let command = "AIRDROP"
+        let airdropVersion = 1
+        
+        let airdropMessage = command+"|"+airdropVersion+"|"+listActionIndex+"|"+tick1+"|"+amount1+"|"+tick2+"|"+amount2+"|"+memo
+    
+        console.log("Creating and sending AIRDROP V1 tx...")
+        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, airdropMessage)
+        
+        let newAirdropActionIndex = await indexerDatabase.waitForAirdrop(
+            {
+                source:address,
+                txHash:txHash,
+                tick:tick1,
+                amount:amount1,
+                listActionIndex:listActionIndex,
+                tick2:tick2,
+                amount2:amount2,
+                memo:memo,
+                status:"valid"
+            }
+        )
+        assert(newAirdropActionIndex >= 0)
+        return newAirdropActionIndex
+    },
+    
+    async sendAirdropV2(addressInfo, tick1, amount1, tick2, amount2, listActionIndex, listActionIndex2, memo){
+        let address = addressInfo["address"]
+    
+        let command = "AIRDROP"
+        let airdropVersion = 2
+        
+        let airdropMessage = command+"|"+airdropVersion+"|"+tick1+"|"+amount1+"|"+listActionIndex+"|"+tick2+"|"+amount2+"|"+listActionIndex2+"|"+memo
+    
+        console.log("Creating and sending AIRDROP V2 tx...")
+        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, airdropMessage)
+        
+        let newAirdropActionIndex = await indexerDatabase.waitForAirdrop(
+            {
+                source:address,
+                txHash:txHash,
+                tick:tick1,
+                amount:amount1,
+                listActionIndex:listActionIndex,
+                tick2:tick2,
+                amount2:amount2,
+                listActionIndex2:listActionIndex2,
+                memo:memo,
+                status:"valid"
+            }
+        )
+        assert(newAirdropActionIndex >= 0)
+        return newAirdropActionIndex
+    },
+    
+    async sendAirdropV3(addressInfo, tick1, amount1, tick2, amount2, listActionIndex, listActionIndex2, memo, memo2){
+        let address = addressInfo["address"]
+    
+        let command = "AIRDROP"
+        let airdropVersion = 3
+        
+        let airdropMessage = command+"|"+airdropVersion+"|"+tick1+"|"+amount1+"|"+listActionIndex+"|"+memo+"|"+tick2+"|"+amount2+"|"+listActionIndex2+"|"+memo2
+    
+        console.log("Creating and sending AIRDROP V3 tx...")
+        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, airdropMessage)
+        
+        let newAirdropActionIndex = await indexerDatabase.waitForAirdrop(
+            {
+                source:address,
+                txHash:txHash,
+                tick:tick1,
+                amount:amount1,
+                listActionIndex:listActionIndex,
+                tick2:tick2,
+                amount2:amount2,
+                listActionIndex2:listActionIndex2,
+                memo:memo,
+                memo2:memo2,
+                status:"valid"
+            }
+        )
+        assert(newAirdropActionIndex >= 0)
+        return newAirdropActionIndex
     }
 }
 

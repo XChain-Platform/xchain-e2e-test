@@ -13,6 +13,8 @@ const {ECPairFactory} = require('ecpair')
 const assert = require('assert');
 
 const TEST_FEE = 5460 //litecoin dust limit
+//const GAS_TICK = "XCHAIN"
+const GAS_TICK = "GAS"
 
 describe('Create Issue Messages', () => {
     it('should create Issue Messages v0', async () => {
@@ -27,25 +29,7 @@ describe('Create Issue Messages', () => {
             2, 
             0, 
             "Issuance v0 test", 
-            10, 
-            '',
-            '',
-            '',
-            '',
-            '',
-            '',
-            '',
-            '',
-            '',
-            '',
-            '',
-            '',
-            '',
-            '',
-            '',
-            '',
-            '',
-            ''
+            10
         )
         
         await xchainMessageHelper.sendIssueV0(
@@ -55,25 +39,7 @@ describe('Create Issue Messages', () => {
             5, 
             0, 
             "2nd Issuance v0 test", 
-            20, 
-            '',
-            '',
-            '',
-            '',
-            '',
-            '',
-            '',
-            '',
-            '',
-            '',
-            '',
-            '',
-            '',
-            '',
-            '',
-            '',
-            '',
-            ''
+            20
         )
     }); 
     it('should create an Issue Message v1', async () => {
@@ -255,5 +221,439 @@ describe('Create Issue Messages', () => {
             ]
         )
     });
-    
+    it('should create a LIST Message v1 with addresses', async () => {
+        console.log("Creating new addresses for the test")
+        let listAddress0 = await cryptoHelper.getNewFundedAddress("LIST.V1", COIN, NETWORK, null, "legacy",0,1) 
+        let listAddress1 = await cryptoHelper.getNewAddress("LIST.V1", COIN, NETWORK, null, "legacy",1) 
+        let listAddress2 = await cryptoHelper.getNewAddress("LIST.V1", COIN, NETWORK, null, "legacy",2) 
+        let listAddress3 = await cryptoHelper.getNewAddress("LIST.V1", COIN, NETWORK, null, "legacy",3) 
+        let listAddress4 = await cryptoHelper.getNewAddress("LIST.V1", COIN, NETWORK, null, "legacy",4) 
+        let listAddress5 = await cryptoHelper.getNewAddress("LIST.V1", COIN, NETWORK, null, "legacy",5) 
+        let listAddress6 = await cryptoHelper.getNewAddress("LIST.V1", COIN, NETWORK, null, "legacy",6) 
+        
+        let addressListV0ActionIndex = await xchainMessageHelper.sendListV0(
+            listAddress0,
+            2, //type 2=ADDRESS
+            [
+                listAddress1["address"],
+                listAddress2["address"],
+                listAddress3["address"],
+            ]
+        )
+        
+        let addressListV1ActionIndex = await xchainMessageHelper.sendListV1(
+            listAddress0,
+            1, //edit 1=ADD
+            addressListV0ActionIndex,
+            [
+                listAddress4["address"],
+                listAddress5["address"],
+                listAddress6["address"],
+            ],
+            2,
+            [
+                listAddress1["address"],
+                listAddress2["address"],
+                listAddress3["address"],
+                listAddress4["address"],
+                listAddress5["address"],
+                listAddress6["address"],
+            ]
+        )
+        
+        await xchainMessageHelper.sendListV1(
+            listAddress0,
+            2, //edit 1=REMOVE
+            addressListV1ActionIndex,
+            [
+                listAddress4["address"]
+            ],
+            2,
+            [
+                listAddress1["address"],
+                listAddress2["address"],
+                listAddress3["address"],
+                listAddress5["address"],
+                listAddress6["address"],
+            ]
+        )
+    });
+    it('should create an AIRDROP Message v0 with an address list', async () => {
+        console.log("Creating new addresses for the test")
+        let airdropAddressInfo = await cryptoHelper.getNewFundedAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy",0,1) 
+        let airdropAddress = airdropAddressInfo["address"]
+        let airdropTick = "AIRDROPADDv0"+airdropAddress.substring(airdropAddress.length-8)
+        
+        //Issue gas token
+        //await xchainMessageHelper.sendIssueV0(
+        //    airdropAddressInfo,
+        //    GAS_TICK, 
+        //    1000000000, 
+        //    100, 
+        //    0, 
+        //    "GAS ISSUE", 
+        //    100
+        //)
+        
+        //Mint some gas
+        await xchainMessageHelper.sendMintV0(
+            airdropAddressInfo,
+            GAS_TICK, 
+            100, 
+            airdropAddress,
+            ""
+        )
+        
+        //Create the tick to distribute
+        await xchainMessageHelper.sendIssueV0(
+            airdropAddressInfo,
+            airdropTick, 
+            100, 
+            100, 
+            0, 
+            "Airdrop address v0 test", 
+            100
+        )
+        
+        //Create the list to test
+        let listAddressInfo1 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy",1) 
+        let listAddressInfo2 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy",2) 
+        let listAddressInfo3 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy",3) 
+        let listAddressInfo4 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy",4) 
+        let listAddressInfo5 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy",5) 
+        let listAddressInfo6 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy",6) 
+        
+        let airdropAddressListActionIndex = await xchainMessageHelper.sendListV0(
+            airdropAddressInfo,
+            2, //type 2=ADDRESS
+            [
+                listAddressInfo1["address"],
+                listAddressInfo2["address"],
+                listAddressInfo3["address"],
+                listAddressInfo4["address"],
+                listAddressInfo5["address"],
+                listAddressInfo6["address"],
+            ]
+        )
+        
+        //Create the airdrop
+        let airdropAddressesV0ActionIndex = await xchainMessageHelper.sendAirdropV0(
+            airdropAddressInfo,
+            airdropTick,
+            1,
+            airdropAddressListActionIndex,
+            "AIRDROP ADDRESSES TEST V0"
+        )
+    });
+    it('should create an AIRDROP Message v0 with a tick list', async () => {
+        console.log("Creating new addresses for the test")
+        let airdropAddressInfo = await cryptoHelper.getNewFundedAddress("AIRDROP.TICKS.V0", COIN, NETWORK, null, "legacy",0,1) 
+        let airdropAddress = airdropAddressInfo["address"]
+        let airdropTicks = [
+            "AIRDROPTICv0Tick1"+airdropAddress.substring(airdropAddress.length-8),
+            "AIRDROPTICv0Tick2"+airdropAddress.substring(airdropAddress.length-8),
+            "AIRDROPTICv0Tick3"+airdropAddress.substring(airdropAddress.length-8)
+        ]
+        
+        for (let nextTickIndex in airdropTicks){
+            await xchainMessageHelper.sendIssueV0(
+                airdropAddressInfo,
+                airdropTicks[nextTickIndex], 
+                100, 
+                10, 
+                0, 
+                "AIRDROP V0 TICK "+nextTickIndex, 
+                10
+            )
+        }
+        
+        //Mint some gas
+        await xchainMessageHelper.sendMintV0(
+            airdropAddressInfo,
+            GAS_TICK, 
+            100, 
+            airdropAddress,
+            ""
+        )
+        
+        //Create the list to test
+        let listAddressInfo1 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy",1) 
+        let listAddressInfo2 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy",2) 
+        let listAddressInfo3 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy",3) 
+        let listAddressInfo4 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy",4) 
+        let listAddressInfo5 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy",5) 
+        let listAddressInfo6 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy",6) 
+        let listAddressesInfo = [
+            listAddressInfo1,
+            listAddressInfo2,
+            listAddressInfo3,
+            listAddressInfo4,
+            listAddressInfo5,
+            listAddressInfo6
+        ]
+        
+        //Send ticks to have some tick1 and tick2 holders
+        for (let nextAddressInfoIndex in listAddressesInfo){
+            if (nextAddressInfoIndex <= 3){//Send tick1 to the first 4 addresses
+                await xchainMessageHelper.sendSendV0(
+                    airdropAddressInfo,
+                    airdropTicks[0], 
+                    1,
+                    listAddressesInfo[nextAddressInfoIndex]["address"],
+                    "AIRDROP v0 send tick to create holder list "+nextAddressInfoIndex
+                )
+            } else {
+                await xchainMessageHelper.sendSendV0(
+                    airdropAddressInfo,
+                    airdropTicks[1], 
+                    1,
+                    listAddressesInfo[nextAddressInfoIndex]["address"],
+                    "AIRDROP v0 send tick to create holder list "+nextAddressInfoIndex
+                )
+            }
+        }
+        
+        //Create the list using the ticks
+        let airdropTicksListActionIndex = await xchainMessageHelper.sendListV0(
+            airdropAddressInfo,
+            1, //type 2=TICKS
+            [
+                airdropTicks[0],
+                airdropTicks[1]
+            ]
+        )
+        
+        //Create the airdrop
+        let airdropTicksV0ActionIndex = await xchainMessageHelper.sendAirdropV0(
+            airdropAddressInfo,
+            airdropTicks[2], //Send tick3 to tick1's holders and tick2's holders
+            1,
+            airdropTicksListActionIndex,
+            "AIRDROP TICKS TEST V0"
+        )
+    });
+    it('should create an AIRDROP Message v1 with an address list', async () => {
+        console.log("Creating new addresses for the test")
+        let airdropAddressInfo = await cryptoHelper.getNewFundedAddress("AIRDROP.ADDRESSES.V1", COIN, NETWORK, null, "legacy",0,1) 
+        let airdropAddress = airdropAddressInfo["address"]
+        let airdropTick1 = "AIRDROP1ADDv1"+airdropAddress.substring(airdropAddress.length-8)
+        let airdropTick2 = "AIRDROP2ADDv1"+airdropAddress.substring(airdropAddress.length-8)
+        
+        //Mint some gas
+        await xchainMessageHelper.sendMintV0(
+            airdropAddressInfo,
+            GAS_TICK, 
+            100, 
+            airdropAddress,
+            ""
+        )
+        
+        //Create the ticks to distribute
+        await xchainMessageHelper.sendIssueV0(
+            airdropAddressInfo,
+            airdropTick1, 
+            100, 
+            100, 
+            0, 
+            "Airdrop1 address v1 test", 
+            100
+        )
+        
+        await xchainMessageHelper.sendIssueV0(
+            airdropAddressInfo,
+            airdropTick2, 
+            100, 
+            100, 
+            0, 
+            "Airdrop2 address v1 test", 
+            100
+        )
+        
+        //Create the list to test
+        let listAddressInfo1 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V1", COIN, NETWORK, null, "legacy",1) 
+        let listAddressInfo2 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V1", COIN, NETWORK, null, "legacy",2) 
+        let listAddressInfo3 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V1", COIN, NETWORK, null, "legacy",3) 
+        let listAddressInfo4 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V1", COIN, NETWORK, null, "legacy",4) 
+        let listAddressInfo5 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V1", COIN, NETWORK, null, "legacy",5) 
+        let listAddressInfo6 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V1", COIN, NETWORK, null, "legacy",6) 
+        
+        let airdropAddressListActionIndex = await xchainMessageHelper.sendListV0(
+            airdropAddressInfo,
+            2, //type 2=ADDRESS
+            [
+                listAddressInfo1["address"],
+                listAddressInfo2["address"],
+                listAddressInfo3["address"],
+                listAddressInfo4["address"],
+                listAddressInfo5["address"],
+                listAddressInfo6["address"],
+            ]
+        )
+        
+        //Create the airdrop
+        let airdropAddressesV1ActionIndex = await xchainMessageHelper.sendAirdropV1(
+            airdropAddressInfo,
+            airdropTick1,
+            1,
+            airdropTick2,
+            2,
+            airdropAddressListActionIndex,
+            "AIRDROP ADDRESSES TEST V1"
+        )
+    });
+    it('should create an AIRDROP Message v2 with an address list', async () => {
+        console.log("Creating new addresses for the test")
+        let airdropAddressInfo = await cryptoHelper.getNewFundedAddress("AIRDROP.ADDRESSES.V2", COIN, NETWORK, null, "legacy",0,1) 
+        let airdropAddress = airdropAddressInfo["address"]
+        let airdropTick1 = "AIRDROP1ADDv2"+airdropAddress.substring(airdropAddress.length-8)
+        let airdropTick2 = "AIRDROP2ADDv2"+airdropAddress.substring(airdropAddress.length-8)
+        
+        //Mint some gas
+        await xchainMessageHelper.sendMintV0(
+            airdropAddressInfo,
+            GAS_TICK, 
+            100, 
+            airdropAddress,
+            ""
+        )
+        
+        //Create the ticks to distribute
+        await xchainMessageHelper.sendIssueV0(
+            airdropAddressInfo,
+            airdropTick1, 
+            100, 
+            100, 
+            0, 
+            "Airdrop1 address v2 test", 
+            100
+        )
+        
+        await xchainMessageHelper.sendIssueV0(
+            airdropAddressInfo,
+            airdropTick2, 
+            100, 
+            100, 
+            0, 
+            "Airdrop2 address v2 test", 
+            100
+        )
+        
+        //Create the lists to test
+        let listAddressInfo1 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V2", COIN, NETWORK, null, "legacy",1) 
+        let listAddressInfo2 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V2", COIN, NETWORK, null, "legacy",2) 
+        let listAddressInfo3 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V2", COIN, NETWORK, null, "legacy",3) 
+        let listAddressInfo4 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V2", COIN, NETWORK, null, "legacy",4) 
+        let listAddressInfo5 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V2", COIN, NETWORK, null, "legacy",5) 
+        let listAddressInfo6 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V2", COIN, NETWORK, null, "legacy",6) 
+        
+        let airdropAddressListActionIndex1 = await xchainMessageHelper.sendListV0(
+            airdropAddressInfo,
+            2, //type 2=ADDRESS
+            [
+                listAddressInfo1["address"],
+                listAddressInfo2["address"],
+                listAddressInfo3["address"],
+                listAddressInfo4["address"]
+            ]
+        )
+        
+        let airdropAddressListActionIndex2 = await xchainMessageHelper.sendListV0(
+            airdropAddressInfo,
+            2, //type 2=ADDRESS
+            [
+                listAddressInfo5["address"],
+                listAddressInfo6["address"],
+            ]
+        )
+        
+        //Create the airdrop
+        let airdropAddressesV2ActionIndex = await xchainMessageHelper.sendAirdropV2(
+            airdropAddressInfo,
+            airdropTick1,
+            1,
+            airdropTick2,
+            2,
+            airdropAddressListActionIndex1,
+            airdropAddressListActionIndex2,
+            "AIRDROP ADDRESSES TEST V2"
+        )
+    });
+    it('should create an AIRDROP Message v3 with an address list', async () => {
+        console.log("Creating new addresses for the test")
+        let airdropAddressInfo = await cryptoHelper.getNewFundedAddress("AIRDROP.ADDRESSES.V3", COIN, NETWORK, null, "legacy",0,1) 
+        let airdropAddress = airdropAddressInfo["address"]
+        let airdropTick1 = "AIRDROP1ADDv3"+airdropAddress.substring(airdropAddress.length-8)
+        let airdropTick2 = "AIRDROP2ADDv3"+airdropAddress.substring(airdropAddress.length-8)
+        
+        //Mint some gas
+        await xchainMessageHelper.sendMintV0(
+            airdropAddressInfo,
+            GAS_TICK, 
+            100, 
+            airdropAddress,
+            ""
+        )
+        
+        //Create the ticks to distribute
+        await xchainMessageHelper.sendIssueV0(
+            airdropAddressInfo,
+            airdropTick1, 
+            100, 
+            100, 
+            0, 
+            "Airdrop1 address v3 test", 
+            100
+        )
+        
+        await xchainMessageHelper.sendIssueV0(
+            airdropAddressInfo,
+            airdropTick2, 
+            100, 
+            100, 
+            0, 
+            "Airdrop2 address v3 test", 
+            100
+        )
+        
+        //Create the lists to test
+        let listAddressInfo1 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V3", COIN, NETWORK, null, "legacy",1) 
+        let listAddressInfo2 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V3", COIN, NETWORK, null, "legacy",2) 
+        let listAddressInfo3 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V3", COIN, NETWORK, null, "legacy",3) 
+        let listAddressInfo4 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V3", COIN, NETWORK, null, "legacy",4) 
+        let listAddressInfo5 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V3", COIN, NETWORK, null, "legacy",5) 
+        let listAddressInfo6 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V3", COIN, NETWORK, null, "legacy",6) 
+        
+        let airdropAddressListActionIndex1 = await xchainMessageHelper.sendListV0(
+            airdropAddressInfo,
+            2, //type 2=ADDRESS
+            [
+                listAddressInfo1["address"],
+                listAddressInfo2["address"],
+                listAddressInfo3["address"],
+                listAddressInfo4["address"]
+            ]
+        )
+        
+        let airdropAddressListActionIndex2 = await xchainMessageHelper.sendListV0(
+            airdropAddressInfo,
+            2, //type 2=ADDRESS
+            [
+                listAddressInfo5["address"],
+                listAddressInfo6["address"],
+            ]
+        )
+        
+        //Create the airdrop
+        let airdropAddressesV3ActionIndex = await xchainMessageHelper.sendAirdropV3(
+            airdropAddressInfo,
+            airdropTick1,
+            1,
+            airdropTick2,
+            2,
+            airdropAddressListActionIndex1,
+            airdropAddressListActionIndex2,
+            "AIRDROP ADDRESSES TEST V3 memo1",
+            "AIRDROP ADDRESSES TEST V3 memo2"
+        )
+    });
 })
