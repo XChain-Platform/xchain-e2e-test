@@ -650,6 +650,49 @@ module.exports = {
         )
         assert(newAirdropActionIndex >= 0)
         return newAirdropActionIndex
+    },
+    
+    async sendDispenserV0(addressInfo, giveCoin, giveTick, giveAmount,
+      giveEscrow, getCoin, getTick, getAmount, getAddress, fiatCode,
+      fiatAmount, expiration, allowList, blockList, memo
+    ){
+        let address = addressInfo["address"]
+    
+        let command = "DISPENSER"
+        let dispenserVersion = 0
+        
+        let dispenserMessage = command+"|"+dispenserVersion
+            +"|"+giveCoin+"|"+giveTick+"|"+giveAmount+"|"+giveEscrow
+            +"|"+getCoin+"|"+getTick+"|"+getAmount+"|"+getAddress
+            +"|"+fiatCode+"|"+fiatAmount+"|"+expiration+"|"+allowList
+            +"|"+blockList+"|"+memo
+            
+        console.log("Creating and sending DISPENSER V0 tx...")
+        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, dispenserMessage)
+        
+        let newDispenserActionIndex = await indexerDatabase.waitForDispenser(
+            {
+                source:address,
+                txHash,
+                giveCoin,
+                giveTick,
+                giveAmount,
+                giveEscrow,
+                getCoin,
+                getTick,
+                getAmount,
+                getAddress,
+                fiatCode,
+                fiatAmount,
+                expiration,
+                allowList,
+                blockList,
+                memo,               
+                status:"valid"
+            }
+        )
+        assert(newDispenserActionIndex >= 0)
+        return newDispenserActionIndex
     }
 }
 

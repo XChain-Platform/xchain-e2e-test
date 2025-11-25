@@ -1164,6 +1164,158 @@ class Database {
             return -1
         }
     }
+    
+    async waitForDispenser(dispenserObject, timeMax = 30000){
+        const endTime = Date.now() + timeMax
+        
+        while (Date.now() < endTime){
+            try {
+                let dispenserActionIndex = await this.checkDispenser(dispenserObject)
+                
+                if (dispenserActionIndex >= 0){
+                    return dispenserActionIndex
+                }
+                
+                await this.sleep(1000)
+            } catch(err) {
+                console.log(err)
+                await this.sleep(1000)
+            }
+        }
+        
+        return -1
+    }
+    
+    async checkDispenser({blockIndex, txHash, source, giveCoin, giveTick, giveAmount, giveEscrow, 
+      getCoin, getTick, getAmount, getAddress, fiatCode, fiatAmount,
+      expiration, allowList, blockList, memo, status}){
+        let whereClauses = []
+        let whereValues = []
+        
+        if (blockIndex != null){
+            whereClauses.push("tr.block_index = ?")
+            whereValues.push(blockIndex)
+        }
+        if (txHash != null){
+            whereClauses.push("itx.hash = ?")
+            whereValues.push(txHash)
+        }
+        if (source != null){
+            whereClauses.push("ias.address = ?")
+            whereValues.push(source)
+        }
+        if (giveCoin != null){
+            whereClauses.push("give_ic.coin = ?")
+            whereValues.push(giveCoin)
+        }
+        if (giveTick != null){
+            whereClauses.push("give_it.tick = ?")
+            whereValues.push(giveTick)
+        }
+        if (giveAmount != null){
+            whereClauses.push("d.give_amount = ?")
+            whereValues.push(giveAmount)
+        }   
+        if (giveEscrow != null){
+            whereClauses.push("d.give_escrow = ?")
+            whereValues.push(giveEscrow)
+        }   
+        if (getCoin != null){
+            whereClauses.push("get_ic.coin = ?")
+            whereValues.push(getCoin)
+        }
+        if (getTick != null){
+            whereClauses.push("get_it.tick = ?")
+            whereValues.push(getTick)
+        }
+        if (getAmount != null){
+            whereClauses.push("d.get_amount = ?")
+            whereValues.push(getAmount)
+        }   
+        if (getAddress != null){
+            whereClauses.push("ia.address = ?")
+            whereValues.push(getAddress)
+        } else {
+            whereClauses.push("get_ia.address = ias.address")
+        }
+        if (fiatCode != null){
+            whereClauses.push("if.code = ?")
+            whereValues.push(fiatCode)
+        }   
+        if (expiration != null){
+            whereClauses.push("d.expiration = ?")
+            whereValues.push(expiration)
+        }   
+        if (allowList != null){
+            whereClauses.push("d.allowList = ?")
+            whereValues.push(allowList)
+        }   
+        if (blockList != null){
+            whereClauses.push("d.blockList = ?")
+            whereValues.push(blockList)
+        }   
+        if (memo != null){
+            whereClauses.push("im.memo = ?")
+            whereValues.push(memo)
+        }   
+        if (status != null){
+            whereClauses.push("ist.status = ?")
+            whereValues.push(status)
+        }
+         
+        const query = `
+            SELECT 
+                tr.block_index AS block_index,
+                itx.hash AS tx_hash,
+                d.action_index,
+                give_ic.coin AS give_coin,
+                give_it.tick AS give_tick,
+                d.give_amount,
+                d.give_escrow,
+                get_ic.coin AS get_coin,
+                get_it.tick AS get_tick,
+                d.get_amount,
+                get_ia.address AS get_address,
+                if.code AS fiat_code,
+                d.fiat_amount,
+                d.expiration,
+                d.allow_list,
+                d.block_list,
+                im.memo AS memo,
+                ist.status AS status 
+            FROM dispensers d
+            LEFT JOIN actions act ON act.action_index = d.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ias ON ias.id = tr.source_id
+            LEFT JOIN index_coins give_ic ON give_ic.id = d.give_coin_id
+            LEFT JOIN index_tickers give_it ON give_it.id = d.give_tick_id
+            LEFT JOIN index_coins get_ic ON get_ic.id = d.get_coin_id
+            LEFT JOIN index_tickers get_it ON get_it.id = d.get_tick_id
+            LEFT JOIN index_addresses get_ia ON get_ia.id = d.get_address_id
+            LEFT JOIN index_fiats if ON if.id = d.fiat_id
+            LEFT JOIN index_memos im ON im.id = d.memo_id
+            LEFT JOIN index_statuses ist ON ist.id = d.status_id
+        `+"WHERE "+whereClauses.join(" AND ");
+        
+        let connection = await this.getConnection()
+        let newActionIndex = null
+        try {
+            const rows = await connection.query(query, whereValues)
+            if (rows.length > 0){
+                newActionIndex = rows[0]["action_index"]
+            } else {
+                return -1               
+            }
+        } catch (err) {
+            console.error('Error with database query (dispenser):', err);
+            return -1
+        } finally {
+            await connection.release()
+        }
+        
+        return newActionIndex
+    }
 }
 
 module.exports = Database

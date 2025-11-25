@@ -656,4 +656,49 @@ describe('Create Issue Messages', () => {
             "AIRDROP ADDRESSES TEST V3 memo2"
         )
     });
+    it('should create a DISPENSER Message v0', async () => {
+        console.log("Creating new addresses for the test")
+        let dispenserAddressInfo = await cryptoHelper.getNewFundedAddress("DISPENSER.V0", COIN, NETWORK, null, "legacy",0,1) 
+        let dispenserAddress = dispenserAddressInfo["address"]
+        let dispenserTick = "DISPENSERv0"+dispenserAddress.substring(dispenserAddress.length-8)
+        
+        //Mint some gas
+        //await xchainMessageHelper.sendMintV0(
+        //    dispenserAddressInfo,
+        //    GAS_TICK, 
+        //    100, 
+        //    dispenserAddress,
+        //    ""
+        //)
+        
+        //Create the tick to dispense
+        await xchainMessageHelper.sendIssueV0(
+            dispenserAddressInfo,
+            dispenserTick, 
+            100, 
+            100, 
+            0, 
+            "Dispenser v0 test", 
+            100
+        )
+        
+        //Create the dispenser
+        let dispenserV0ActionIndex = await xchainMessageHelper.sendDispenserV0(
+            dispenserAddressInfo,
+            "LTC",
+            dispenserTick,
+            1,
+            10,
+            "LTC",
+            null,
+            5,
+            dispenserAddressInfo["address"],
+            null,
+            null,
+            null,
+            null,
+            null,
+            'This is a dispenser v0 test'
+        )
+    });
 })
