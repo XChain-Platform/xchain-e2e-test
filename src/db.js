@@ -61,6 +61,10 @@ class Database {
         return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
+    isNullOrNullString(value){
+        return value == null || value == ""
+    }
+
     // Handle getting a database Connection    
     async getConnection(){
         if(this.transactionConnection)
@@ -1192,73 +1196,73 @@ class Database {
         let whereClauses = []
         let whereValues = []
         
-        if (blockIndex != null){
+        if (!this.isNullOrNullString(blockIndex)){
             whereClauses.push("tr.block_index = ?")
             whereValues.push(blockIndex)
         }
-        if (txHash != null){
+        if (!this.isNullOrNullString(txHash)){
             whereClauses.push("itx.hash = ?")
             whereValues.push(txHash)
         }
-        if (source != null){
+        if (!this.isNullOrNullString(source)){
             whereClauses.push("ias.address = ?")
             whereValues.push(source)
         }
-        if (giveCoin != null){
+        if (!this.isNullOrNullString(giveCoin)){
             whereClauses.push("give_ic.coin = ?")
             whereValues.push(giveCoin)
         }
-        if (giveTick != null){
+        if (!this.isNullOrNullString(giveTick)){
             whereClauses.push("give_it.tick = ?")
             whereValues.push(giveTick)
         }
-        if (giveAmount != null){
+        if (!this.isNullOrNullString(giveAmount)){
             whereClauses.push("d.give_amount = ?")
             whereValues.push(giveAmount)
         }   
-        if (giveEscrow != null){
+        if (!this.isNullOrNullString(giveEscrow)){
             whereClauses.push("d.give_escrow = ?")
             whereValues.push(giveEscrow)
         }   
-        if (getCoin != null){
+        if (!this.isNullOrNullString(getCoin)){
             whereClauses.push("get_ic.coin = ?")
             whereValues.push(getCoin)
         }
-        if (getTick != null){
+        if (!this.isNullOrNullString(getTick)){
             whereClauses.push("get_it.tick = ?")
             whereValues.push(getTick)
         }
-        if (getAmount != null){
+        if (!this.isNullOrNullString(getAmount)){
             whereClauses.push("d.get_amount = ?")
             whereValues.push(getAmount)
         }   
-        if (getAddress != null){
-            whereClauses.push("ia.address = ?")
+        if (!this.isNullOrNullString(getAddress)){
+            whereClauses.push("get_ia.address = ?")
             whereValues.push(getAddress)
         } else {
             whereClauses.push("get_ia.address = ias.address")
         }
-        if (fiatCode != null){
-            whereClauses.push("if.code = ?")
+        if (!this.isNullOrNullString(fiatCode)){
+            whereClauses.push("ifs.code = ?")
             whereValues.push(fiatCode)
         }   
-        if (expiration != null){
+        if (!this.isNullOrNullString(expiration)){
             whereClauses.push("d.expiration = ?")
             whereValues.push(expiration)
         }   
-        if (allowList != null){
-            whereClauses.push("d.allowList = ?")
+        if (!this.isNullOrNullString(allowList)){
+            whereClauses.push("d.allow_list = ?")
             whereValues.push(allowList)
         }   
-        if (blockList != null){
-            whereClauses.push("d.blockList = ?")
+        if (!this.isNullOrNullString(blockList)){
+            whereClauses.push("d.block_list = ?")
             whereValues.push(blockList)
         }   
-        if (memo != null){
+        if (!this.isNullOrNullString(memo)){
             whereClauses.push("im.memo = ?")
             whereValues.push(memo)
         }   
-        if (status != null){
+        if (!this.isNullOrNullString(status)){
             whereClauses.push("ist.status = ?")
             whereValues.push(status)
         }
@@ -1276,7 +1280,7 @@ class Database {
                 get_it.tick AS get_tick,
                 d.get_amount,
                 get_ia.address AS get_address,
-                if.code AS fiat_code,
+                ifs.code AS fiat_code,
                 d.fiat_amount,
                 d.expiration,
                 d.allow_list,
@@ -1293,7 +1297,7 @@ class Database {
             LEFT JOIN index_coins get_ic ON get_ic.id = d.get_coin_id
             LEFT JOIN index_tickers get_it ON get_it.id = d.get_tick_id
             LEFT JOIN index_addresses get_ia ON get_ia.id = d.get_address_id
-            LEFT JOIN index_fiats if ON if.id = d.fiat_id
+            LEFT JOIN index_fiats ifs ON ifs.id = d.fiat_id
             LEFT JOIN index_memos im ON im.id = d.memo_id
             LEFT JOIN index_statuses ist ON ist.id = d.status_id
         `+"WHERE "+whereClauses.join(" AND ");
@@ -1309,6 +1313,125 @@ class Database {
             }
         } catch (err) {
             console.error('Error with database query (dispenser):', err);
+            return -1
+        } finally {
+            await connection.release()
+        }
+        
+        return newActionIndex
+    }
+    
+    async waitForDispense(dispenseObject, timeMax = 30000){
+        const endTime = Date.now() + timeMax
+        
+        while (Date.now() < endTime){
+            try {
+                let dispenseActionIndex = await this.checkDispense(dispenseObject)
+                
+                if (dispenseActionIndex >= 0){
+                    return dispenseActionIndex
+                }
+                
+                await this.sleep(1000)
+            } catch(err) {
+                console.log(err)
+                await this.sleep(1000)
+            }
+        }
+        
+        return -1
+    }
+    
+    async checkDispense({blockIndex, txHash, source, giveCoin,
+      giveTick, giveAmount, getCoin, getTick, getAmount,
+      destination, status}){
+        let whereClauses = []
+        let whereValues = []
+        
+        if (!this.isNullOrNullString(blockIndex)){
+            whereClauses.push("tr.block_index = ?")
+            whereValues.push(blockIndex)
+        }
+        if (!this.isNullOrNullString(txHash)){
+            whereClauses.push("itx.hash = ?")
+            whereValues.push(txHash)
+        }
+        if (!this.isNullOrNullString(source)){
+            whereClauses.push("ias.address = ?")
+            whereValues.push(source)
+        }
+        if (!this.isNullOrNullString(giveCoin)){
+            whereClauses.push("give_ic.coin = ?")
+            whereValues.push(giveCoin)
+        }
+        if (!this.isNullOrNullString(giveTick)){
+            whereClauses.push("give_it.tick = ?")
+            whereValues.push(giveTick)
+        }
+        if (!this.isNullOrNullString(giveAmount)){
+            whereClauses.push("d.give_amount = ?")
+            whereValues.push(giveAmount)
+        }   
+        if (!this.isNullOrNullString(getCoin)){
+            whereClauses.push("get_ic.coin = ?")
+            whereValues.push(getCoin)
+        }
+        if (!this.isNullOrNullString(getTick)){
+            whereClauses.push("get_it.tick = ?")
+            whereValues.push(getTick)
+        }
+        if (!this.isNullOrNullString(getAmount)){
+            whereClauses.push("d.get_amount = ?")
+            whereValues.push(getAmount)
+        }   
+        if (!this.isNullOrNullString(destination)){
+            whereClauses.push("iad.address = ?")
+            whereValues.push(destination)
+        }    
+        if (!this.isNullOrNullString(status)){
+            whereClauses.push("ist.status = ?")
+            whereValues.push(status)
+        }
+         
+        const query = `
+            SELECT 
+                tr.block_index AS block_index,
+                itx.hash AS tx_hash,
+                d.action_index,
+                ias.address as source,
+                d.dispenser_action_index,
+                give_ic.coin AS give_coin,
+                give_it.tick AS give_tick,
+                d.give_amount,
+                get_ic.coin AS get_coin,
+                get_it.tick AS get_tick,
+                d.get_amount,
+                iad.address AS destination,
+                ist.status AS status 
+            FROM dispenses d
+            LEFT JOIN actions act ON act.action_index = d.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ias ON ias.id = tr.source_id
+            LEFT JOIN index_coins give_ic ON give_ic.id = d.give_coin_id
+            LEFT JOIN index_tickers give_it ON give_it.id = d.give_tick_id
+            LEFT JOIN index_coins get_ic ON get_ic.id = d.get_coin_id
+            LEFT JOIN index_tickers get_it ON get_it.id = d.get_tick_id
+            LEFT JOIN index_addresses iad ON iad.id = d.destination_id
+            LEFT JOIN index_statuses ist ON ist.id = d.status_id
+        `+"WHERE "+whereClauses.join(" AND ");
+        
+        let connection = await this.getConnection()
+        let newActionIndex = null
+        try {
+            const rows = await connection.query(query, whereValues)
+            if (rows.length > 0){
+                newActionIndex = rows[0]["action_index"]
+            } else {
+                return -1               
+            }
+        } catch (err) {
+            console.error('Error with database query (dispense):', err);
             return -1
         } finally {
             await connection.release()

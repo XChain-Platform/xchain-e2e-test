@@ -662,15 +662,6 @@ describe('Create Issue Messages', () => {
         let dispenserAddress = dispenserAddressInfo["address"]
         let dispenserTick = "DISPENSERv0"+dispenserAddress.substring(dispenserAddress.length-8)
         
-        //Mint some gas
-        //await xchainMessageHelper.sendMintV0(
-        //    dispenserAddressInfo,
-        //    GAS_TICK, 
-        //    100, 
-        //    dispenserAddress,
-        //    ""
-        //)
-        
         //Create the tick to dispense
         await xchainMessageHelper.sendIssueV0(
             dispenserAddressInfo,
@@ -681,6 +672,9 @@ describe('Create Issue Messages', () => {
             "Dispenser v0 test", 
             100
         )
+        
+        let expirationDate = new Date()
+        expirationDate.setMonth(expirationDate.getMonth() + 3)
         
         //Create the dispenser
         let dispenserV0ActionIndex = await xchainMessageHelper.sendDispenserV0(
@@ -695,10 +689,73 @@ describe('Create Issue Messages', () => {
             dispenserAddressInfo["address"],
             null,
             null,
-            null,
+            Math.floor(expirationDate.getTime() / 1000),//expiration
             null,
             null,
             'This is a dispenser v0 test'
         )
+    });
+    it('should dispense a token from a dispenser', async () => {
+        console.log("Creating new addresses for the test")
+        let dispenserAddressInfo = await cryptoHelper.getNewFundedAddress("DISPENSER.V0.DISPENSE", COIN, NETWORK, null, "legacy",0,1) 
+        let dispenseAddressInfo = await cryptoHelper.getNewFundedAddress("DISPENSE", COIN, NETWORK, null, "legacy",0,1) 
+        let dispenserAddress = dispenserAddressInfo["address"]
+        let dispenseAddress = dispenseAddressInfo["address"]
+        let dispenserTick = "DISPENSERv0DISPENSE"+dispenserAddress.substring(dispenserAddress.length-8)
+        
+        //Create the tick to dispense
+        await xchainMessageHelper.sendIssueV0(
+            dispenserAddressInfo,
+            dispenserTick, 
+            100, 
+            100, 
+            0, 
+            "Dispenser v0 test to dispense", 
+            100
+        )
+        
+        let expirationDate = new Date()
+        expirationDate.setMonth(expirationDate.getMonth() + 3)
+        
+        //Create the dispenser
+        let dispenserV0ActionIndex = await xchainMessageHelper.sendDispenserV0(
+            dispenserAddressInfo,
+            "LTC",
+            dispenserTick,
+            1,
+            10,
+            "LTC",
+            null,
+            0.05,
+            dispenserAddressInfo["address"],
+            null,
+            null,
+            Math.floor(expirationDate.getTime() / 1000),//expiration
+            null,
+            null,
+            'This is a dispenser v0 test to dispense'
+        )
+        
+        //Get a dispense
+        let txHash = await transactionHelper.createSimpleTransaction(
+            dispenseAddressInfo,
+            dispenserAddress,
+            5000000
+        )
+        
+        //Check if the dispense exists
+        let dispenseActionIndex = await indexerDatabase.waitForDispense({
+            txHash: txHash,
+            source: dispenseAddressInfo["address"],
+            giveCoin: "LTC",
+            giveTick: dispenserTick,
+            giveAmount: 1,
+            getCoin: "LTC",
+            getAmount: 0.05,
+            destination: dispenseAddressInfo["address"],
+            status: "valid"
+        })
+        
+        assert(dispenseActionIndex >= 0)
     });
 })

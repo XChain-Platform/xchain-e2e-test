@@ -661,6 +661,34 @@ module.exports = {
         let command = "DISPENSER"
         let dispenserVersion = 0
         
+        if (giveCoin == null){
+            giveCoin = ""
+        }
+        if (giveTick == null){
+            giveTick = ""
+        }
+        if (getCoin == null){
+            getCoin = ""
+        }
+        if (getTick == null){
+            getTick = ""
+        }
+        if (fiatCode == null){
+            fiatCode = ""
+        }
+        if (fiatAmount == null){
+            fiatAmount = ""
+        }
+        if (expiration == null){
+            expiration = ""
+        }
+        if (allowList == null){
+            allowList = ""
+        }
+        if (blockList == null){
+            blockList = ""
+        }
+        
         let dispenserMessage = command+"|"+dispenserVersion
             +"|"+giveCoin+"|"+giveTick+"|"+giveAmount+"|"+giveEscrow
             +"|"+getCoin+"|"+getTick+"|"+getAmount+"|"+getAddress
@@ -673,21 +701,21 @@ module.exports = {
         let newDispenserActionIndex = await indexerDatabase.waitForDispenser(
             {
                 source:address,
-                txHash,
-                giveCoin,
-                giveTick,
-                giveAmount,
-                giveEscrow,
-                getCoin,
-                getTick,
-                getAmount,
-                getAddress,
-                fiatCode,
-                fiatAmount,
-                expiration,
-                allowList,
-                blockList,
-                memo,               
+                txHash:txHash,
+                giveCoin:giveCoin,
+                giveTick:giveTick,
+                giveAmount:giveAmount,
+                giveEscrow:giveEscrow,
+                getCoin:getCoin,
+                getTick:getTick,
+                getAmount:getAmount,
+                getAddress:getAddress,
+                fiatCode:fiatCode,
+                fiatAmount:fiatAmount,
+                expiration:expiration,
+                allowList:allowList,
+                blockList:blockList,
+                memo:memo,               
                 status:"valid"
             }
         )

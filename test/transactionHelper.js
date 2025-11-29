@@ -2,6 +2,7 @@ const ecc = require('tiny-secp256k1')
 const bitcoin = require('bitcoinjs-lib')
 const {ECPairFactory} = require('ecpair')
 const psbtutils = require('bitcoinjs-lib/src/psbt/psbtutils')
+const CryptoNetworks = require('../src/CryptoNetworks')
 
 const TEST_FEE = 5460
 
@@ -150,6 +151,132 @@ module.exports = {
             return txHash   
         }
         
+    },
+    
+    isSegwitUTXO(utxo) {
+        try {
+            const script = bitcoin.script.decompile(Buffer.from(utxo.scriptPubKey, 'hex'));
+            
+            return script[0] === 0x00;
+        } catch (error) {
+            return false;
+        }
+    },
+    
+    async createSimpleTransaction(addressInfo, destinationAddress, amount){
+        let psbt = new bitcoin.Psbt({ network: NETWORK_OBJECT })
+        let feePerBytes = await nodeConnector.getFeePerKilobyte(1)/1000
+        
+        let utxoSequence = 0xffffffff
+        let inputSatoshis = 0
+
+        utxosList = await utxoTrackerConnector.getUtxosFromAddress(addressInfo["address"])
+        utxosList = utxosList["utxos"]
+        
+        if ((utxosList == null) || (utxosList.length == 0)){
+            throw new Error("couldn't find any utxos for address "+addressInfo["address"])
+        }
+        
+        //Remove duplicated utxos
+        let utxoIndex = 0
+        while (utxoIndex < utxosList.length){
+            let nextUtxo = utxosList[utxoIndex]
+            
+            let utxoDupIndex = utxoIndex + 1
+            while (utxoDupIndex < utxosList.length){
+                let nextUtxoDup = utxosList[utxoDupIndex]
+                
+                if ((nextUtxoDup.txid == nextUtxo.txid) && (nextUtxoDup.vout == nextUtxo.vout)){
+                    utxosList.splice(utxoDupIndex, 1)
+                } else {
+                    utxoDupIndex = utxoDupIndex + 1
+                }
+            }
+            
+            utxoIndex = utxoIndex+1
+        }
+
+        //Order the utxosList from the biggest value to the smallest
+        utxosList.sort((a,b)=> b.value - a.value)
+        
+        let estimatedFee = NETWORK_OBJECT.dustThreshold
+        
+        let nextUtxoIndex = 0
+        while (nextUtxoIndex < utxosList.length){
+            let nextUtxo = utxosList[nextUtxoIndex]
+            nextUtxo.value = parseInt(nextUtxo.value)
+            
+            if (this.isSegwitUTXO(nextUtxo)){
+                let nextInput = {
+                    hash: nextUtxo.txid,
+                    index: nextUtxo.vout,
+                    sequence: utxoSequence,
+                    witnessUtxo: {
+                        script: Buffer.from(nextUtxo.scriptPubKey, 'hex'),
+                        value: nextUtxo.value,
+                    }
+                }
+                psbt.addInput(nextInput)
+                inputSatoshis = inputSatoshis + nextUtxo.value
+            } else {
+                let wholeUtxoHex = await nodeConnector.getTransactionHex(nextUtxo.txid)
+                let nextInput = {
+                    hash: nextUtxo.txid,
+                    index: nextUtxo.vout,
+                    sequence: utxoSequence,
+                    nonWitnessUtxo: Buffer.from(wholeUtxoHex, 'hex')
+                }
+                psbt.addInput(nextInput)
+                inputSatoshis = inputSatoshis + nextUtxo.value
+            }
+            
+            if (inputSatoshis > amount + estimatedFee){
+                break
+            }
+            
+            nextUtxoIndex = nextUtxoIndex + 1
+        }
+        
+        let changeSatoshis = inputSatoshis - amount - estimatedFee
+        
+        psbt.addOutput({
+            address: destinationAddress,
+            value: BigInt(amount)
+        })
+        
+        if (changeSatoshis > 0) {
+            psbt.addOutput({
+                address: addressInfo["address"],
+                value: BigInt(changeSatoshis)
+            })
+        }
+        
+        //
+        //SIGNING THE TRANSACTION
+        //
+        
+        var ECPair = ECPairFactory(ecc);
+        let keyToSign = ECPair.fromPrivateKey(addressInfo["privateKey"], { NETWORK_OBJECT });
+
+        for (let proxInputIndex in psbt.data.inputs){
+            let proxInput = psbt.data.inputs[proxInputIndex]            
+            psbt.signInput(parseInt(proxInputIndex), keyToSign);
+        }
+        
+        psbt.finalizeAllInputs();
+        let tx = psbt.extractTransaction()
+        let txHash = tx.getId()
+        let txHex = tx.toHex()
+        
+        //let txHex = tx.toHex()
+        console.log("Sending a simple transaction...")
+        console.log(txHex)
+        txHash = await nodeConnector.broadcastTx(txHex)
+        //wait for the transaction to be confirmed
+        console.log("Waiting for the simple transaction ("+txHash+") to be confirmed...")
+        let txExists = await nodeConnector.waitForTx(txHash, 60000)
+        
+        return txHash   
     }
 }
 
