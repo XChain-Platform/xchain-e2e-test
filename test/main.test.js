@@ -1,5 +1,6 @@
 const cryptoHelper = require('./cryptoHelper')
 const transactionHelper = require('./transactionHelper')
+const xchainMessageHelper = require('./xchainMessageHelper')
 const RegtestMinerConnector = require('../src/RegtestMinerConnector')
 const { BIP32Factory } = require('bip32')
 const ecc = require('tiny-secp256k1')
@@ -12,171 +13,749 @@ const {ECPairFactory} = require('ecpair')
 const assert = require('assert');
 
 const TEST_FEE = 5460 //litecoin dust limit
+//const GAS_TICK = "XCHAIN"
+const GAS_TICK = "GAS"
 
 describe('Create Issue Messages', () => {
-    it('should create a simple Issue Message v0', async () => {
+    it('should create Issue Messages v0', async () => {
         console.log("Creating new address for testing issues v0 format")
-        let issueAddress = await cryptoHelper.getNewAddress("ISSUE.V0", COIN, NETWORK, null, "legacy") //Obtain a new address to issue some tick
+        let issueAddress = await cryptoHelper.getNewFundedAddress("ISSUE.V0", COIN, NETWORK, null, "legacy", 0, 1)
         let newAddress = issueAddress["address"]
-        let addressPublicKey = issueAddress["publicKey"]
-        let addressPrivateKey = issueAddress["privateKey"]
-        
-        console.log("Sending funds to "+newAddress)
-        let txId = await regtestMinerConnector.sendFunds(newAddress, 1)
-        try {
-            let txExists = await nodeConnector.waitForTx(txId)
-            
-            if (!txExists){
-                throw new Error("The sent tx didn't appear in the blockchain")
-            }           
-        } catch (err){
-            throw new Error("The sent tx didn't appear in the blockchain")
-        }
-        console.log("Waiting for the utxos for "+newAddress)
-        try {
-            let addressHasUtxos = await utxoTrackerConnector.waitForUtxos(newAddress)
-            
-            if (!addressHasUtxos){
-                throw new Error("The utxo tracker couldn't parse the utxo")
-            }
-        } catch (err){
-            throw new Error("The utxo tracker couldn't parse the utxo")
-        }
-        
-        let command = "ISSUE"
-        let issueVersion = 0
-        let tick = "TESTV0"+newAddress.substring(newAddress.length-8)
-        let maxSupply = 10
-        let maxMint = 2
-        let decimals = 0
-        let description = "Issuance v0 test"
-        let mintSupply = 5        
-        let transfer = ''
-        let transferSupply = ''
-        let lockMaxSupply = ''
-        let lockMaxMint = ''
-        let lockDescription = ''
-        let lockRug = ''
-        let lockSleep = ''
-        let lockCallback = ''
-        let callbackBlock = ''
-        let callbackTick = ''
-        let callbackAmount = ''
-        let allowList = ''
-        let blockList = ''
-        let mintAddressMax = ''
-        let mintStartBlock = ''
-        let mintStopBlock = ''
-        let lockMint = ''
-        let lockMintSupply = ''
-        
-        let issueMessage = command
-            +"|"+issueVersion+"|"+tick+"|"+maxSupply
-            +"|"+maxMint+"|"+decimals+"|"+description+"|"+mintSupply
-            +"|"+transfer+"|"+transferSupply+"|"+lockMaxSupply+"|"+lockMaxMint
-            +"|"+lockDescription+"|"+lockRug+"|"+lockSleep+"|"+lockCallback
-            +"|"+callbackBlock+"|"+callbackTick+"|"+callbackAmount+"|"+allowList
-            +"|"+blockList+"|"+mintAddressMax+"|"+mintStartBlock+"|"+mintStopBlock
-            +"|"+lockMint+"|"+lockMintSupply
-        
-        let txHash = await transactionHelper.createAndSendTransaction(issueAddress, issueMessage)
-        
-        console.log("Waiting for issue in the database...")
-        let issueExists = await indexerDatabase.waitForIssue(
-            {
-                source:newAddress, 
-                tick:tick,
-                txHash:txHash,
-                description:description,
-                maxSupply:maxSupply,
-                maxMint:maxMint,
-                decimals:decimals, 
-                mintSupply:mintSupply,
-                status:"valid"
-            }
+                
+        await xchainMessageHelper.sendIssueV0(
+            issueAddress,
+            "TESTV0"+newAddress.substring(newAddress.length-8), 
+            100, 
+            2, 
+            0, 
+            "Issuance v0 test", 
+            10
         )
         
-        assert(issueExists)
-    });
-    it('should create a simple Issue Message v1', async () => {
+        await xchainMessageHelper.sendIssueV0(
+            issueAddress,
+            "TESTV2"+newAddress.substring(newAddress.length-8), 
+            100, 
+            5, 
+            0, 
+            "2nd Issuance v0 test", 
+            20
+        )
+    }); 
+    it('should create an Issue Message v1', async () => {
         console.log("Creating new address for testing issues v1 format")
-        let issueAddress = await cryptoHelper.getNewAddress("ISSUE.V1", COIN, NETWORK, null, "legacy") //Obtain a new address to issue some tick
+        let issueAddress = await cryptoHelper.getNewFundedAddress("ISSUE.V1", COIN, NETWORK, null, "legacy", 0, 1) //Obtain a new address to issue some tick
         let newAddress = issueAddress["address"]
-        let addressPublicKey = issueAddress["publicKey"]
-        let addressPrivateKey = issueAddress["privateKey"]
-        
-        console.log("Sending funds to "+newAddress)
-        let txId = await regtestMinerConnector.sendFunds(newAddress, 1)
-        try {
-            let txExists = await nodeConnector.waitForTx(txId)
-            
-            if (!txExists){
-                throw new Error("The sent tx didn't appear in the blockchain")
-            }           
-        } catch (err){
-            throw new Error("The sent tx didn't appear in the blockchain")
-        }
-        console.log("Waiting for the utxos for "+newAddress)
-        try {
-            let addressHasUtxos = await utxoTrackerConnector.waitForUtxos(newAddress)
-            
-            if (!addressHasUtxos){
-                throw new Error("The utxo tracker couldn't parse the utxo")
-            }
-        } catch (err){
-            throw new Error("The utxo tracker couldn't parse the utxo")
-        }
-        
-        let command = "ISSUE"
-        let issueVersion = 1
-        let tick = "TEST"+newAddress.substring(newAddress.length-8)
-        let description = "Ticker issuance TEST"
-        let issueMessage = command+"|"+issueVersion+"|"+tick+"|"+description
-        
-        let txHash = await transactionHelper.createAndSendTransaction(issueAddress, issueMessage)
-        
-        console.log("Waiting for issue in the database...")
-        let issueExists = await indexerDatabase.waitForIssue(
-            {
-                source:newAddress, 
-                tick:tick,
-                txHash:txHash,
-                description:description
-            }
+                
+        await xchainMessageHelper.sendIssueV1(
+            issueAddress,
+            "TEST"+newAddress.substring(newAddress.length-8), 
+            "Ticker issuance TEST"
         )
-        
-        assert(issueExists)
     });
-    it('should create a simple Send Message', async () => {
+    it('should create a MINT v0', async () => {
+        console.log("Creating new address for testing MINTs v0 format")
+        let mintAddress = await cryptoHelper.getNewFundedAddress("MINT.V0", COIN, NETWORK, null, "legacy", 0, 1) //Obtain a new address to issue some tick
+        let issueV0Wallet = await cryptoHelper.getWallet("ISSUE.V0")
+        let issueV0WalletAddress = issueV0Wallet.addresses[0]
+                
+        await xchainMessageHelper.sendMintV0(
+            issueV0WalletAddress,
+            "TESTV0"+issueV0WalletAddress["address"].substring(issueV0WalletAddress["address"].length-8),
+            2,
+            mintAddress["address"],
+            "A simple MINT test v0"
+        )
+    });
+    it('should create a SEND Message v0', async () => {
         console.log("Creating new address for the test")
         let sendAddress = await cryptoHelper.getNewAddress("SEND.V0", COIN, NETWORK, null, "legacy") //Obtain a new address to send some tick
         let issueV0Wallet = await cryptoHelper.getWallet("ISSUE.V0")
         let issueV0WalletAddress = issueV0Wallet.addresses[0]
         
-        console.log("Sending tokens from "+issueV0WalletAddress["address"]+" to "+sendAddress["address"])
+        await xchainMessageHelper.sendSendV0(
+            issueV0WalletAddress,
+            "TESTV0"+issueV0WalletAddress["address"].substring(issueV0WalletAddress["address"].length-8), 
+            1,
+            sendAddress["address"],
+            "A simple SEND test v0"
+        )
+    });
+    it('should create a SEND Message v1', async () => {
+        console.log("Creating new address for the test")
+        let sendAddress1 = await cryptoHelper.getNewAddress("SEND.V1", COIN, NETWORK, null, "legacy", 0) //Obtain a new address to send some tick
+        let sendAddress2 = await cryptoHelper.getNewAddress("SEND.V1", COIN, NETWORK, null, "legacy", 1) //Obtain a second new address to send some tick
+        let issueV0Wallet = await cryptoHelper.getWallet("ISSUE.V0")
+        let issueV0WalletAddress = issueV0Wallet.addresses[0]
+        
+        console.log("Sending tokens from "+issueV0WalletAddress["address"]+" to "+sendAddress1["address"]+" and to "+sendAddress2["address"])
         let command = "SEND"
         let sendVersion = 1
         let tick = "TESTV0"+issueV0WalletAddress["address"].substring(issueV0WalletAddress["address"].length-8)
-        let amount = 1
-        let destination = sendAddress["address"]
-        let memo = "A simple send test"
+        let amount1 = 1
+        let destination1 = sendAddress1["address"]
+        let amount2 = 1
+        let destination2 = sendAddress2["address"]
+        let memo = "A simple SEND test v1"
         
-        let sendMessage = command+"|"+sendVersion+"|"+tick+"|"+amount+"|"+destination+"|"+memo
+        await xchainMessageHelper.sendSendV1(
+            issueV0WalletAddress,
+            "TESTV0"+issueV0WalletAddress["address"].substring(issueV0WalletAddress["address"].length-8), 
+            1,
+            sendAddress1["address"],
+            2,
+            sendAddress2["address"],
+            "A simple SEND test v1"
+        )
+    });
+    it('should create a SEND Message v2', async () => {
+        console.log("Creating new address for the test")
+        let sendAddress1 = await cryptoHelper.getNewAddress("SEND.V2", COIN, NETWORK, null, "legacy", 0) //Obtain a new address to send some tick
+        let sendAddress2 = await cryptoHelper.getNewAddress("SEND.V2", COIN, NETWORK, null, "legacy", 1) //Obtain a second new address to send some tick
+        let issueV0Wallet = await cryptoHelper.getWallet("ISSUE.V0")
+        let issueV0WalletAddress = issueV0Wallet.addresses[0]
         
-        let txHash = await transactionHelper.createAndSendTransaction(issueV0WalletAddress, sendMessage)
+        await xchainMessageHelper.sendSendV2(
+            issueV0WalletAddress,
+            "TESTV0"+issueV0WalletAddress["address"].substring(issueV0WalletAddress["address"].length-8), 
+            1,
+            sendAddress1["address"],
+            "TESTV2"+issueV0WalletAddress["address"].substring(issueV0WalletAddress["address"].length-8), 
+            2,
+            sendAddress2["address"],
+            "A simple SEND test v2"
+        )
+    });
+    it('should create a SEND Message v3', async () => {
+        console.log("Creating new address for the test")
+        let sendAddress1 = await cryptoHelper.getNewAddress("SEND.V3", COIN, NETWORK, null, "legacy", 0) //Obtain a new address to send some tick
+        let sendAddress2 = await cryptoHelper.getNewAddress("SEND.V3", COIN, NETWORK, null, "legacy", 1) //Obtain a second new address to send some tick
+        let issueV0Wallet = await cryptoHelper.getWallet("ISSUE.V0")
+        let issueV0WalletAddress = issueV0Wallet.addresses[0]
         
-        let sendExists = await indexerDatabase.waitForSend(
-            {
-                source:issueV0WalletAddress["address"],
-                destination:sendAddress["address"],
-                tick:tick,
-                amount:amount,
-                txHash:txHash,
-                memo:memo,
-                status:"valid"
-            }
+        await xchainMessageHelper.sendSendV3(
+            issueV0WalletAddress,
+            "TESTV0"+issueV0WalletAddress["address"].substring(issueV0WalletAddress["address"].length-8), 
+            1,
+            sendAddress1["address"],
+            "1st SEND test v3",
+            "TESTV2"+issueV0WalletAddress["address"].substring(issueV0WalletAddress["address"].length-8), 
+            2,
+            sendAddress2["address"],
+            "2nd SEND test v3"
+        )
+    });
+    it('should create a BROADCAST Message v0', async () => {
+        console.log("Creating new address for the test")
+        let broadcastAddress = await cryptoHelper.getNewFundedAddress("BROADCAST.V0", COIN, NETWORK, null, "legacy",0,1) 
+        
+        await xchainMessageHelper.sendBroadcastV0(
+            broadcastAddress,
+            "A simple BROADCAST test v0", 
+            1
+        )
+    });
+    it('should create a BROADCAST Message v1', async () => {
+        console.log("Creating new address for the test")
+        let broadcastAddress = await cryptoHelper.getNewFundedAddress("BROADCAST.V1", COIN, NETWORK, null, "legacy",0,1) 
+        
+        await xchainMessageHelper.sendBroadcastV1(
+            broadcastAddress,
+            "A simple BROADCAST test v1", 
+            1,
+            0.01,
+            "Memo test for BROADCAST v1"
+        )
+    });
+    it('should create a BROADCAST Message v2', async () => {
+        console.log("Creating new address for the test")
+        let broadcastAddress = await cryptoHelper.getNewFundedAddress("BROADCAST.V2", COIN, NETWORK, null, "legacy",0,1) 
+        
+        await xchainMessageHelper.sendBroadcastV2(
+            broadcastAddress,
+            "A simple BROADCAST test v2", 
+            0.01,
+            "Memo test for BROADCAST v2"
+        )
+    });
+    it('should create a BROADCAST Message v3', async () => {
+        console.log("Creating new address for the test")
+        let broadcastAddress = await cryptoHelper.getNewFundedAddress("BROADCAST.V3", COIN, NETWORK, null, "legacy",0,1) 
+        
+        await xchainMessageHelper.sendBroadcastV3(
+            broadcastAddress,
+            1, //TODO: this test won't work if there isn't at least one action in the db
+            0.01,
+            "Memo test for BROADCAST v3"
+        )
+    });
+    it('should create a LIST Message v0 with tickers', async () => {
+        let issueV0Wallet = await cryptoHelper.getWallet("ISSUE.V0")
+        let issueV0WalletAddress = issueV0Wallet.addresses[0]
+        console.log("Creating new address for the test")
+        let listAddress = await cryptoHelper.getNewFundedAddress("LIST.V0.TICKERS", COIN, NETWORK, null, "legacy",0,1) 
+        
+        await xchainMessageHelper.sendListV0(
+            listAddress,
+            1, //type 1=TICKERS
+            [
+                "TESTV0"+issueV0WalletAddress["address"].substring(issueV0WalletAddress["address"].length-8),
+                "TESTV2"+issueV0WalletAddress["address"].substring(issueV0WalletAddress["address"].length-8)
+            ]
+        )
+    });
+    it('should create a LIST Message v0 with addresses', async () => {
+        console.log("Creating new addresses for the test")
+        let listAddress0 = await cryptoHelper.getNewFundedAddress("LIST.V0", COIN, NETWORK, null, "legacy",0,1) 
+        let listAddress1 = await cryptoHelper.getNewAddress("LIST.V0", COIN, NETWORK, null, "legacy",1) 
+        let listAddress2 = await cryptoHelper.getNewAddress("LIST.V0", COIN, NETWORK, null, "legacy",2) 
+        let listAddress3 = await cryptoHelper.getNewAddress("LIST.V0", COIN, NETWORK, null, "legacy",3) 
+        
+        await xchainMessageHelper.sendListV0(
+            listAddress0,
+            2, //type 2=ADDRESS
+            [
+                listAddress1["address"],
+                listAddress2["address"],
+                listAddress3["address"],
+            ]
+        )
+    });
+    it('should create a LIST Message v1 with addresses', async () => {
+        console.log("Creating new addresses for the test")
+        let listAddress0 = await cryptoHelper.getNewFundedAddress("LIST.V1", COIN, NETWORK, null, "legacy",0,1) 
+        let listAddress1 = await cryptoHelper.getNewAddress("LIST.V1", COIN, NETWORK, null, "legacy",1) 
+        let listAddress2 = await cryptoHelper.getNewAddress("LIST.V1", COIN, NETWORK, null, "legacy",2) 
+        let listAddress3 = await cryptoHelper.getNewAddress("LIST.V1", COIN, NETWORK, null, "legacy",3) 
+        let listAddress4 = await cryptoHelper.getNewAddress("LIST.V1", COIN, NETWORK, null, "legacy",4) 
+        let listAddress5 = await cryptoHelper.getNewAddress("LIST.V1", COIN, NETWORK, null, "legacy",5) 
+        let listAddress6 = await cryptoHelper.getNewAddress("LIST.V1", COIN, NETWORK, null, "legacy",6) 
+        
+        let addressListV0ActionIndex = await xchainMessageHelper.sendListV0(
+            listAddress0,
+            2, //type 2=ADDRESS
+            [
+                listAddress1["address"],
+                listAddress2["address"],
+                listAddress3["address"],
+            ]
         )
         
-        assert(sendExists)
-    })
+        let addressListV1ActionIndex = await xchainMessageHelper.sendListV1(
+            listAddress0,
+            1, //edit 1=ADD
+            addressListV0ActionIndex,
+            [
+                listAddress4["address"],
+                listAddress5["address"],
+                listAddress6["address"],
+            ],
+            2,
+            [
+                listAddress1["address"],
+                listAddress2["address"],
+                listAddress3["address"],
+                listAddress4["address"],
+                listAddress5["address"],
+                listAddress6["address"],
+            ]
+        )
+        
+        await xchainMessageHelper.sendListV1(
+            listAddress0,
+            2, //edit 1=REMOVE
+            addressListV1ActionIndex,
+            [
+                listAddress4["address"]
+            ],
+            2,
+            [
+                listAddress1["address"],
+                listAddress2["address"],
+                listAddress3["address"],
+                listAddress5["address"],
+                listAddress6["address"],
+            ]
+        )
+    });
+    it('should create an AIRDROP Message v0 with an address list', async () => {
+        console.log("Creating new addresses for the test")
+        let airdropAddressInfo = await cryptoHelper.getNewFundedAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy",0,1) 
+        let airdropAddress = airdropAddressInfo["address"]
+        let airdropTick = "AIRDROPADDv0"+airdropAddress.substring(airdropAddress.length-8)
+        
+        //Issue gas token
+        //await xchainMessageHelper.sendIssueV0(
+        //    airdropAddressInfo,
+        //    GAS_TICK, 
+        //    1000000000, 
+        //    100, 
+        //    0, 
+        //    "GAS ISSUE", 
+        //    100
+        //)
+        
+        //Mint some gas
+        await xchainMessageHelper.sendMintV0(
+            airdropAddressInfo,
+            GAS_TICK, 
+            100, 
+            airdropAddress,
+            ""
+        )
+        
+        //Create the tick to distribute
+        await xchainMessageHelper.sendIssueV0(
+            airdropAddressInfo,
+            airdropTick, 
+            100, 
+            100, 
+            0, 
+            "Airdrop address v0 test", 
+            100
+        )
+        
+        //Create the list to test
+        let listAddressInfo1 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy",1) 
+        let listAddressInfo2 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy",2) 
+        let listAddressInfo3 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy",3) 
+        let listAddressInfo4 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy",4) 
+        let listAddressInfo5 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy",5) 
+        let listAddressInfo6 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy",6) 
+        
+        let airdropAddressListActionIndex = await xchainMessageHelper.sendListV0(
+            airdropAddressInfo,
+            2, //type 2=ADDRESS
+            [
+                listAddressInfo1["address"],
+                listAddressInfo2["address"],
+                listAddressInfo3["address"],
+                listAddressInfo4["address"],
+                listAddressInfo5["address"],
+                listAddressInfo6["address"],
+            ]
+        )
+        
+        //Create the airdrop
+        let airdropAddressesV0ActionIndex = await xchainMessageHelper.sendAirdropV0(
+            airdropAddressInfo,
+            airdropTick,
+            1,
+            airdropAddressListActionIndex,
+            "AIRDROP ADDRESSES TEST V0"
+        )
+    });
+    it('should create an AIRDROP Message v0 with a tick list', async () => {
+        console.log("Creating new addresses for the test")
+        let airdropAddressInfo = await cryptoHelper.getNewFundedAddress("AIRDROP.TICKS.V0", COIN, NETWORK, null, "legacy",0,1) 
+        let airdropAddress = airdropAddressInfo["address"]
+        let airdropTicks = [
+            "AIRDROPTICv0Tick1"+airdropAddress.substring(airdropAddress.length-8),
+            "AIRDROPTICv0Tick2"+airdropAddress.substring(airdropAddress.length-8),
+            "AIRDROPTICv0Tick3"+airdropAddress.substring(airdropAddress.length-8)
+        ]
+        
+        for (let nextTickIndex in airdropTicks){
+            await xchainMessageHelper.sendIssueV0(
+                airdropAddressInfo,
+                airdropTicks[nextTickIndex], 
+                100, 
+                10, 
+                0, 
+                "AIRDROP V0 TICK "+nextTickIndex, 
+                10
+            )
+        }
+        
+        //Mint some gas
+        await xchainMessageHelper.sendMintV0(
+            airdropAddressInfo,
+            GAS_TICK, 
+            100, 
+            airdropAddress,
+            ""
+        )
+        
+        //Create the list to test
+        let listAddressInfo1 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy",1) 
+        let listAddressInfo2 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy",2) 
+        let listAddressInfo3 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy",3) 
+        let listAddressInfo4 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy",4) 
+        let listAddressInfo5 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy",5) 
+        let listAddressInfo6 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy",6) 
+        let listAddressesInfo = [
+            listAddressInfo1,
+            listAddressInfo2,
+            listAddressInfo3,
+            listAddressInfo4,
+            listAddressInfo5,
+            listAddressInfo6
+        ]
+        
+        //Send ticks to have some tick1 and tick2 holders
+        for (let nextAddressInfoIndex in listAddressesInfo){
+            if (nextAddressInfoIndex <= 3){//Send tick1 to the first 4 addresses
+                await xchainMessageHelper.sendSendV0(
+                    airdropAddressInfo,
+                    airdropTicks[0], 
+                    1,
+                    listAddressesInfo[nextAddressInfoIndex]["address"],
+                    "AIRDROP v0 send tick to create holder list "+nextAddressInfoIndex
+                )
+            } else {
+                await xchainMessageHelper.sendSendV0(
+                    airdropAddressInfo,
+                    airdropTicks[1], 
+                    1,
+                    listAddressesInfo[nextAddressInfoIndex]["address"],
+                    "AIRDROP v0 send tick to create holder list "+nextAddressInfoIndex
+                )
+            }
+        }
+        
+        //Create the list using the ticks
+        let airdropTicksListActionIndex = await xchainMessageHelper.sendListV0(
+            airdropAddressInfo,
+            1, //type 2=TICKS
+            [
+                airdropTicks[0],
+                airdropTicks[1]
+            ]
+        )
+        
+        //Create the airdrop
+        let airdropTicksV0ActionIndex = await xchainMessageHelper.sendAirdropV0(
+            airdropAddressInfo,
+            airdropTicks[2], //Send tick3 to tick1's holders and tick2's holders
+            1,
+            airdropTicksListActionIndex,
+            "AIRDROP TICKS TEST V0"
+        )
+    });
+    it('should create an AIRDROP Message v1 with an address list', async () => {
+        console.log("Creating new addresses for the test")
+        let airdropAddressInfo = await cryptoHelper.getNewFundedAddress("AIRDROP.ADDRESSES.V1", COIN, NETWORK, null, "legacy",0,1) 
+        let airdropAddress = airdropAddressInfo["address"]
+        let airdropTick1 = "AIRDROP1ADDv1"+airdropAddress.substring(airdropAddress.length-8)
+        let airdropTick2 = "AIRDROP2ADDv1"+airdropAddress.substring(airdropAddress.length-8)
+        
+        //Mint some gas
+        await xchainMessageHelper.sendMintV0(
+            airdropAddressInfo,
+            GAS_TICK, 
+            100, 
+            airdropAddress,
+            ""
+        )
+        
+        //Create the ticks to distribute
+        await xchainMessageHelper.sendIssueV0(
+            airdropAddressInfo,
+            airdropTick1, 
+            100, 
+            100, 
+            0, 
+            "Airdrop1 address v1 test", 
+            100
+        )
+        
+        await xchainMessageHelper.sendIssueV0(
+            airdropAddressInfo,
+            airdropTick2, 
+            100, 
+            100, 
+            0, 
+            "Airdrop2 address v1 test", 
+            100
+        )
+        
+        //Create the list to test
+        let listAddressInfo1 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V1", COIN, NETWORK, null, "legacy",1) 
+        let listAddressInfo2 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V1", COIN, NETWORK, null, "legacy",2) 
+        let listAddressInfo3 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V1", COIN, NETWORK, null, "legacy",3) 
+        let listAddressInfo4 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V1", COIN, NETWORK, null, "legacy",4) 
+        let listAddressInfo5 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V1", COIN, NETWORK, null, "legacy",5) 
+        let listAddressInfo6 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V1", COIN, NETWORK, null, "legacy",6) 
+        
+        let airdropAddressListActionIndex = await xchainMessageHelper.sendListV0(
+            airdropAddressInfo,
+            2, //type 2=ADDRESS
+            [
+                listAddressInfo1["address"],
+                listAddressInfo2["address"],
+                listAddressInfo3["address"],
+                listAddressInfo4["address"],
+                listAddressInfo5["address"],
+                listAddressInfo6["address"],
+            ]
+        )
+        
+        //Create the airdrop
+        let airdropAddressesV1ActionIndex = await xchainMessageHelper.sendAirdropV1(
+            airdropAddressInfo,
+            airdropTick1,
+            1,
+            airdropTick2,
+            2,
+            airdropAddressListActionIndex,
+            "AIRDROP ADDRESSES TEST V1"
+        )
+    });
+    it('should create an AIRDROP Message v2 with an address list', async () => {
+        console.log("Creating new addresses for the test")
+        let airdropAddressInfo = await cryptoHelper.getNewFundedAddress("AIRDROP.ADDRESSES.V2", COIN, NETWORK, null, "legacy",0,1) 
+        let airdropAddress = airdropAddressInfo["address"]
+        let airdropTick1 = "AIRDROP1ADDv2"+airdropAddress.substring(airdropAddress.length-8)
+        let airdropTick2 = "AIRDROP2ADDv2"+airdropAddress.substring(airdropAddress.length-8)
+        
+        //Mint some gas
+        await xchainMessageHelper.sendMintV0(
+            airdropAddressInfo,
+            GAS_TICK, 
+            100, 
+            airdropAddress,
+            ""
+        )
+        
+        //Create the ticks to distribute
+        await xchainMessageHelper.sendIssueV0(
+            airdropAddressInfo,
+            airdropTick1, 
+            100, 
+            100, 
+            0, 
+            "Airdrop1 address v2 test", 
+            100
+        )
+        
+        await xchainMessageHelper.sendIssueV0(
+            airdropAddressInfo,
+            airdropTick2, 
+            100, 
+            100, 
+            0, 
+            "Airdrop2 address v2 test", 
+            100
+        )
+        
+        //Create the lists to test
+        let listAddressInfo1 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V2", COIN, NETWORK, null, "legacy",1) 
+        let listAddressInfo2 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V2", COIN, NETWORK, null, "legacy",2) 
+        let listAddressInfo3 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V2", COIN, NETWORK, null, "legacy",3) 
+        let listAddressInfo4 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V2", COIN, NETWORK, null, "legacy",4) 
+        let listAddressInfo5 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V2", COIN, NETWORK, null, "legacy",5) 
+        let listAddressInfo6 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V2", COIN, NETWORK, null, "legacy",6) 
+        
+        let airdropAddressListActionIndex1 = await xchainMessageHelper.sendListV0(
+            airdropAddressInfo,
+            2, //type 2=ADDRESS
+            [
+                listAddressInfo1["address"],
+                listAddressInfo2["address"],
+                listAddressInfo3["address"],
+                listAddressInfo4["address"]
+            ]
+        )
+        
+        let airdropAddressListActionIndex2 = await xchainMessageHelper.sendListV0(
+            airdropAddressInfo,
+            2, //type 2=ADDRESS
+            [
+                listAddressInfo5["address"],
+                listAddressInfo6["address"],
+            ]
+        )
+        
+        //Create the airdrop
+        let airdropAddressesV2ActionIndex = await xchainMessageHelper.sendAirdropV2(
+            airdropAddressInfo,
+            airdropTick1,
+            1,
+            airdropTick2,
+            2,
+            airdropAddressListActionIndex1,
+            airdropAddressListActionIndex2,
+            "AIRDROP ADDRESSES TEST V2"
+        )
+    });
+    it('should create an AIRDROP Message v3 with an address list', async () => {
+        console.log("Creating new addresses for the test")
+        let airdropAddressInfo = await cryptoHelper.getNewFundedAddress("AIRDROP.ADDRESSES.V3", COIN, NETWORK, null, "legacy",0,1) 
+        let airdropAddress = airdropAddressInfo["address"]
+        let airdropTick1 = "AIRDROP1ADDv3"+airdropAddress.substring(airdropAddress.length-8)
+        let airdropTick2 = "AIRDROP2ADDv3"+airdropAddress.substring(airdropAddress.length-8)
+        
+        //Mint some gas
+        await xchainMessageHelper.sendMintV0(
+            airdropAddressInfo,
+            GAS_TICK, 
+            100, 
+            airdropAddress,
+            ""
+        )
+        
+        //Create the ticks to distribute
+        await xchainMessageHelper.sendIssueV0(
+            airdropAddressInfo,
+            airdropTick1, 
+            100, 
+            100, 
+            0, 
+            "Airdrop1 address v3 test", 
+            100
+        )
+        
+        await xchainMessageHelper.sendIssueV0(
+            airdropAddressInfo,
+            airdropTick2, 
+            100, 
+            100, 
+            0, 
+            "Airdrop2 address v3 test", 
+            100
+        )
+        
+        //Create the lists to test
+        let listAddressInfo1 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V3", COIN, NETWORK, null, "legacy",1) 
+        let listAddressInfo2 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V3", COIN, NETWORK, null, "legacy",2) 
+        let listAddressInfo3 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V3", COIN, NETWORK, null, "legacy",3) 
+        let listAddressInfo4 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V3", COIN, NETWORK, null, "legacy",4) 
+        let listAddressInfo5 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V3", COIN, NETWORK, null, "legacy",5) 
+        let listAddressInfo6 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V3", COIN, NETWORK, null, "legacy",6) 
+        
+        let airdropAddressListActionIndex1 = await xchainMessageHelper.sendListV0(
+            airdropAddressInfo,
+            2, //type 2=ADDRESS
+            [
+                listAddressInfo1["address"],
+                listAddressInfo2["address"],
+                listAddressInfo3["address"],
+                listAddressInfo4["address"]
+            ]
+        )
+        
+        let airdropAddressListActionIndex2 = await xchainMessageHelper.sendListV0(
+            airdropAddressInfo,
+            2, //type 2=ADDRESS
+            [
+                listAddressInfo5["address"],
+                listAddressInfo6["address"],
+            ]
+        )
+        
+        //Create the airdrop
+        let airdropAddressesV3ActionIndex = await xchainMessageHelper.sendAirdropV3(
+            airdropAddressInfo,
+            airdropTick1,
+            1,
+            airdropTick2,
+            2,
+            airdropAddressListActionIndex1,
+            airdropAddressListActionIndex2,
+            "AIRDROP ADDRESSES TEST V3 memo1",
+            "AIRDROP ADDRESSES TEST V3 memo2"
+        )
+    });
+    it('should create a DISPENSER Message v0', async () => {
+        console.log("Creating new addresses for the test")
+        let dispenserAddressInfo = await cryptoHelper.getNewFundedAddress("DISPENSER.V0", COIN, NETWORK, null, "legacy",0,1) 
+        let dispenserAddress = dispenserAddressInfo["address"]
+        let dispenserTick = "DISPENSERv0"+dispenserAddress.substring(dispenserAddress.length-8)
+        
+        //Create the tick to dispense
+        await xchainMessageHelper.sendIssueV0(
+            dispenserAddressInfo,
+            dispenserTick, 
+            100, 
+            100, 
+            0, 
+            "Dispenser v0 test", 
+            100
+        )
+        
+        let expirationDate = new Date()
+        expirationDate.setMonth(expirationDate.getMonth() + 3)
+        
+        //Create the dispenser
+        let dispenserV0ActionIndex = await xchainMessageHelper.sendDispenserV0(
+            dispenserAddressInfo,
+            "LTC",
+            dispenserTick,
+            1,
+            10,
+            "LTC",
+            null,
+            5,
+            dispenserAddressInfo["address"],
+            null,
+            null,
+            Math.floor(expirationDate.getTime() / 1000),//expiration
+            null,
+            null,
+            'This is a dispenser v0 test'
+        )
+    });
+    it('should dispense a token from a dispenser', async () => {
+        console.log("Creating new addresses for the test")
+        let dispenserAddressInfo = await cryptoHelper.getNewFundedAddress("DISPENSER.V0.DISPENSE", COIN, NETWORK, null, "legacy",0,1) 
+        let dispenseAddressInfo = await cryptoHelper.getNewFundedAddress("DISPENSE", COIN, NETWORK, null, "legacy",0,1) 
+        let dispenserAddress = dispenserAddressInfo["address"]
+        let dispenseAddress = dispenseAddressInfo["address"]
+        let dispenserTick = "DISPENSERv0DISPENSE"+dispenserAddress.substring(dispenserAddress.length-8)
+        
+        //Create the tick to dispense
+        await xchainMessageHelper.sendIssueV0(
+            dispenserAddressInfo,
+            dispenserTick, 
+            100, 
+            100, 
+            0, 
+            "Dispenser v0 test to dispense", 
+            100
+        )
+        
+        let expirationDate = new Date()
+        expirationDate.setMonth(expirationDate.getMonth() + 3)
+        
+        //Create the dispenser
+        let dispenserV0ActionIndex = await xchainMessageHelper.sendDispenserV0(
+            dispenserAddressInfo,
+            "LTC",
+            dispenserTick,
+            1,
+            10,
+            "LTC",
+            null,
+            0.05,
+            dispenserAddressInfo["address"],
+            null,
+            null,
+            Math.floor(expirationDate.getTime() / 1000),//expiration
+            null,
+            null,
+            'This is a dispenser v0 test to dispense'
+        )
+        
+        //Get a dispense
+        let txHash = await transactionHelper.createSimpleTransaction(
+            dispenseAddressInfo,
+            dispenserAddress,
+            5000000
+        )
+        
+        //Check if the dispense exists
+        let dispenseActionIndex = await indexerDatabase.waitForDispense({
+            txHash: txHash,
+            source: dispenseAddressInfo["address"],
+            giveCoin: "LTC",
+            giveTick: dispenserTick,
+            giveAmount: 1,
+            getCoin: "LTC",
+            getAmount: 0.05,
+            destination: dispenseAddressInfo["address"],
+            status: "valid"
+        })
+        
+        assert(dispenseActionIndex >= 0)
+    });
 })
