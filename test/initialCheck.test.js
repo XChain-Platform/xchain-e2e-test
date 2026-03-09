@@ -9,6 +9,10 @@ const XChainIndexerConnector = require('../src/XChainIndexerConnector.js')
 const RegtestMinerConnector = require('../src/RegtestMinerConnector.js')
 const Database = require('../src/db.js')
 const CryptoNetworks = require('../src/CryptoNetworks')
+const cryptoHelper = require('./cryptoHelper')
+const xchainMessageHelper = require('./xchainMessageHelper')
+
+const GAS_TICK = "XCHAIN"
 
 global.COIN = process.env.COIN
 global.NETWORK = process.env.NETWORK
@@ -184,6 +188,26 @@ exports.mochaHooks = {
             throw new Error("Can't connect to the XChain Regtest Miner module")
         } else {
             await regtestMinerConnector.setMiningTime(1000, 1000)
+        }
+
+        // Ensure the GAS token exists before any tests run
+        console.log("Checking if GAS token ("+GAS_TICK+") exists...")
+        const gasTokenExists = await indexerDatabase.checkIssue({ tick: GAS_TICK, status: 'valid' })
+        if (!gasTokenExists) {
+            console.log("GAS token not found, creating it...")
+            let gasAddressInfo = await cryptoHelper.getNewFundedAddress("GAS.TOKEN", COIN, NETWORK, null, "legacy", 0, 1)
+            await xchainMessageHelper.sendIssueV0(
+                gasAddressInfo,
+                GAS_TICK,
+                1000000000,
+                1000000,
+                0,
+                "XChain GAS Token",
+                1000000
+            )
+            console.log("GAS token ("+GAS_TICK+") created successfully")
+        } else {
+            console.log("GAS token ("+GAS_TICK+") already exists")
         }
     },
 
