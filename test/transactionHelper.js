@@ -78,7 +78,7 @@ module.exports = {
             null
         )
         
-        let encodeType = txPsbtHex["encode_type"]
+        let encodeType = txPsbtHex["encoding"]
         txPsbtHex = txPsbtHex["psbt"]
         
         let psbtToSign = bitcoin.Psbt.fromHex(txPsbtHex)
