@@ -13,8 +13,7 @@ const {ECPairFactory} = require('ecpair')
 const assert = require('assert');
 
 const TEST_FEE = 5460 //litecoin dust limit
-//const GAS_TICK = "XCHAIN"
-const GAS_TICK = "GAS"
+const GAS_TICK = "XCHAIN"
 
 describe('Create Issue Messages', () => {
     it('should create Issue Messages v0', async () => {
