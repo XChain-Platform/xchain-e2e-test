@@ -162,7 +162,8 @@ class BlockchainConnector {
             if (responseData.result) {
                 return responseData.result
             } else {
-                throw new Error('Error sending transaction to the node');
+                const nodeError = responseData.error ? JSON.stringify(responseData.error) : 'unknown error';
+                throw new Error('Error sending transaction to the node: ' + nodeError);
             }
         } catch (error) {
             console.error('Error:', error.message);
