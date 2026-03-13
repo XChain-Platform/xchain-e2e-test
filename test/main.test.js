@@ -67,82 +67,43 @@ describe('Create Issue Messages', () => {
         )
     });
     it('should create a SEND Message v0', async () => {
-        console.log("Creating new address for the test")
-        let sendAddress = await cryptoHelper.getNewAddress("SEND.V0", COIN, NETWORK, null, "legacy") //Obtain a new address to send some tick
-        let issueV0Wallet = await cryptoHelper.getWallet("ISSUE.V0")
-        let issueV0WalletAddress = issueV0Wallet.addresses[0]
-        
-        await xchainMessageHelper.sendSendV0(
-            issueV0WalletAddress,
-            "TESTV0"+issueV0WalletAddress["address"].substring(issueV0WalletAddress["address"].length-8), 
-            1,
-            sendAddress["address"],
-            "A simple SEND test v0"
-        )
+        let senderAddress = await cryptoHelper.getNewFundedAddress("SEND.V0", COIN, NETWORK, null, "legacy", 0, 1)
+        let destAddress = await cryptoHelper.getNewAddress("SEND.V0.DEST", COIN, NETWORK, null, "legacy", 0)
+        let tick = "SENDv0"+senderAddress["address"].substring(senderAddress["address"].length-8)
+
+        await xchainMessageHelper.sendIssueV0(senderAddress, tick, 100, 2, 0, "SEND v0 test token", 10)
+        await xchainMessageHelper.sendSendV0(senderAddress, tick, 1, destAddress["address"], "A simple SEND test v0")
     });
     it('should create a SEND Message v1', async () => {
-        console.log("Creating new address for the test")
-        let sendAddress1 = await cryptoHelper.getNewAddress("SEND.V1", COIN, NETWORK, null, "legacy", 0) //Obtain a new address to send some tick
-        let sendAddress2 = await cryptoHelper.getNewAddress("SEND.V1", COIN, NETWORK, null, "legacy", 1) //Obtain a second new address to send some tick
-        let issueV0Wallet = await cryptoHelper.getWallet("ISSUE.V0")
-        let issueV0WalletAddress = issueV0Wallet.addresses[0]
-        
-        console.log("Sending tokens from "+issueV0WalletAddress["address"]+" to "+sendAddress1["address"]+" and to "+sendAddress2["address"])
-        let command = "SEND"
-        let sendVersion = 1
-        let tick = "TESTV0"+issueV0WalletAddress["address"].substring(issueV0WalletAddress["address"].length-8)
-        let amount1 = 1
-        let destination1 = sendAddress1["address"]
-        let amount2 = 1
-        let destination2 = sendAddress2["address"]
-        let memo = "A simple SEND test v1"
-        
-        await xchainMessageHelper.sendSendV1(
-            issueV0WalletAddress,
-            "TESTV0"+issueV0WalletAddress["address"].substring(issueV0WalletAddress["address"].length-8), 
-            1,
-            sendAddress1["address"],
-            2,
-            sendAddress2["address"],
-            "A simple SEND test v1"
-        )
+        let senderAddress = await cryptoHelper.getNewFundedAddress("SEND.V1", COIN, NETWORK, null, "legacy", 0, 1)
+        let destAddress1 = await cryptoHelper.getNewAddress("SEND.V1.DEST1", COIN, NETWORK, null, "legacy", 0)
+        let destAddress2 = await cryptoHelper.getNewAddress("SEND.V1.DEST2", COIN, NETWORK, null, "legacy", 0)
+        let tick = "SENDv1"+senderAddress["address"].substring(senderAddress["address"].length-8)
+
+        await xchainMessageHelper.sendIssueV0(senderAddress, tick, 100, 5, 0, "SEND v1 test token", 20)
+        await xchainMessageHelper.sendSendV1(senderAddress, tick, 1, destAddress1["address"], 2, destAddress2["address"], "A simple SEND test v1")
     });
     it('should create a SEND Message v2', async () => {
-        console.log("Creating new address for the test")
-        let sendAddress1 = await cryptoHelper.getNewAddress("SEND.V2", COIN, NETWORK, null, "legacy", 0) //Obtain a new address to send some tick
-        let sendAddress2 = await cryptoHelper.getNewAddress("SEND.V2", COIN, NETWORK, null, "legacy", 1) //Obtain a second new address to send some tick
-        let issueV0Wallet = await cryptoHelper.getWallet("ISSUE.V0")
-        let issueV0WalletAddress = issueV0Wallet.addresses[0]
-        
-        await xchainMessageHelper.sendSendV2(
-            issueV0WalletAddress,
-            "TESTV0"+issueV0WalletAddress["address"].substring(issueV0WalletAddress["address"].length-8), 
-            1,
-            sendAddress1["address"],
-            "TESTV2"+issueV0WalletAddress["address"].substring(issueV0WalletAddress["address"].length-8), 
-            2,
-            sendAddress2["address"],
-            "A simple SEND test v2"
-        )
+        let senderAddress = await cryptoHelper.getNewFundedAddress("SEND.V2", COIN, NETWORK, null, "legacy", 0, 1)
+        let destAddress1 = await cryptoHelper.getNewAddress("SEND.V2.DEST1", COIN, NETWORK, null, "legacy", 0)
+        let destAddress2 = await cryptoHelper.getNewAddress("SEND.V2.DEST2", COIN, NETWORK, null, "legacy", 0)
+        let tick1 = "SENDv2a"+senderAddress["address"].substring(senderAddress["address"].length-7)
+        let tick2 = "SENDv2b"+senderAddress["address"].substring(senderAddress["address"].length-7)
+
+        await xchainMessageHelper.sendIssueV0(senderAddress, tick1, 100, 2, 0, "SEND v2 test token 1", 10)
+        await xchainMessageHelper.sendIssueV0(senderAddress, tick2, 100, 5, 0, "SEND v2 test token 2", 20)
+        await xchainMessageHelper.sendSendV2(senderAddress, tick1, 1, destAddress1["address"], tick2, 2, destAddress2["address"], "A simple SEND test v2")
     });
     it('should create a SEND Message v3', async () => {
-        console.log("Creating new address for the test")
-        let sendAddress1 = await cryptoHelper.getNewAddress("SEND.V3", COIN, NETWORK, null, "legacy", 0) //Obtain a new address to send some tick
-        let sendAddress2 = await cryptoHelper.getNewAddress("SEND.V3", COIN, NETWORK, null, "legacy", 1) //Obtain a second new address to send some tick
-        let issueV0Wallet = await cryptoHelper.getWallet("ISSUE.V0")
-        let issueV0WalletAddress = issueV0Wallet.addresses[0]
-        
-        await xchainMessageHelper.sendSendV3(
-            issueV0WalletAddress,
-            "TESTV0"+issueV0WalletAddress["address"].substring(issueV0WalletAddress["address"].length-8), 
-            1,
-            sendAddress1["address"],
-            "1st SEND test v3",
-            "TESTV2"+issueV0WalletAddress["address"].substring(issueV0WalletAddress["address"].length-8), 
-            2,
-            sendAddress2["address"],
-            "2nd SEND test v3"
-        )
+        let senderAddress = await cryptoHelper.getNewFundedAddress("SEND.V3", COIN, NETWORK, null, "legacy", 0, 1)
+        let destAddress1 = await cryptoHelper.getNewAddress("SEND.V3.DEST1", COIN, NETWORK, null, "legacy", 0)
+        let destAddress2 = await cryptoHelper.getNewAddress("SEND.V3.DEST2", COIN, NETWORK, null, "legacy", 0)
+        let tick1 = "SENDv3a"+senderAddress["address"].substring(senderAddress["address"].length-7)
+        let tick2 = "SENDv3b"+senderAddress["address"].substring(senderAddress["address"].length-7)
+
+        await xchainMessageHelper.sendIssueV0(senderAddress, tick1, 100, 2, 0, "SEND v3 test token 1", 10)
+        await xchainMessageHelper.sendIssueV0(senderAddress, tick2, 100, 5, 0, "SEND v3 test token 2", 20)
+        await xchainMessageHelper.sendSendV3(senderAddress, tick1, 1, destAddress1["address"], "1st SEND test v3", tick2, 2, destAddress2["address"], "2nd SEND test v3")
     });
     it('should create a BROADCAST Message v0', async () => {
         console.log("Creating new address for the test")
