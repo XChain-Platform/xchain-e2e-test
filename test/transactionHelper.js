@@ -142,14 +142,26 @@ module.exports = {
         //wait for the transaction to be confirmed
         console.log("Waiting for the transaction ("+txHash+") to be confirmed...")
         let txExists = await nodeConnector.waitForTx(txHash, 60000)
-        
+
         if (spentTxHash != null){
             console.log("Waiting for the second transaction ("+spentTxHash+") to be confirmed...")
             let spentTxExists = await nodeConnector.waitForTx(spentTxHash, 60000)
-            return spentTxHash
-        } else {
-            return txHash   
         }
+
+        // Wait for the utxo-tracker to reflect the change UTXO from txHash so the next
+        // encoder call does not pick up already-spent inputs.
+        console.log("Waiting for the utxo-tracker to index the change UTXO from tx "+txHash+"...")
+        const trackerEnd = Date.now() + 30000
+        while (Date.now() < trackerEnd) {
+            try {
+                let result = await utxoTrackerConnector.getUtxosFromAddress(addressInfo["address"])
+                let utxos = result["utxos"] || []
+                if (utxos.some(u => u.txid === txHash)) break
+            } catch (e) {}
+            await new Promise(r => setTimeout(r, 500))
+        }
+
+        return spentTxHash != null ? spentTxHash : txHash
         
     },
     
