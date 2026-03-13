@@ -406,7 +406,7 @@ module.exports = {
         console.log("Creating and sending BROADCAST V0 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, broadcastMessage)
         
-        let broadcastExists = await indexerDatabase.waitForBroadcast(
+        let broadcastActionIndex = await indexerDatabase.waitForBroadcast(
             {
                 source:address,
                 txHash:txHash,
@@ -415,9 +415,10 @@ module.exports = {
                 status:"valid"
             }
         )
-        assert(broadcastExists)
+        assert(broadcastActionIndex >= 0)
+        return broadcastActionIndex
     },
-    
+
     async sendBroadcastV1(addressInfo, message, value, fee, memo){
         let address = addressInfo["address"]
     
@@ -429,7 +430,7 @@ module.exports = {
         console.log("Creating and sending BROADCAST V1 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, broadcastMessage)
         
-        let broadcastExists = await indexerDatabase.waitForBroadcast(
+        let broadcastActionIndex = await indexerDatabase.waitForBroadcast(
             {
                 source:address,
                 txHash:txHash,
@@ -440,9 +441,10 @@ module.exports = {
                 status:"valid"
             }
         )
-        assert(broadcastExists)
+        assert(broadcastActionIndex >= 0)
+        return broadcastActionIndex
     },
-    
+
     async sendBroadcastV2(addressInfo, message, fee, memo){
         let address = addressInfo["address"]
     
@@ -454,7 +456,7 @@ module.exports = {
         console.log("Creating and sending BROADCAST V2 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, broadcastMessage)
         
-        let broadcastExists = await indexerDatabase.waitForBroadcast(
+        let broadcastActionIndex = await indexerDatabase.waitForBroadcast(
             {
                 source:address,
                 txHash:txHash,
@@ -464,9 +466,10 @@ module.exports = {
                 status:"valid"
             }
         )
-        assert(broadcastExists)
+        assert(broadcastActionIndex >= 0)
+        return broadcastActionIndex
     },
-    
+
     async sendBroadcastV3(addressInfo, broadcastActionIndex, value, memo){
         let address = addressInfo["address"]
     
@@ -478,7 +481,7 @@ module.exports = {
         console.log("Creating and sending BROADCAST V3 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, broadcastMessage)
         
-        let broadcastExists = await indexerDatabase.waitForBroadcast(
+        let broadcastV3ActionIndex = await indexerDatabase.waitForBroadcast(
             {
                 source:address,
                 txHash:txHash,
@@ -488,7 +491,7 @@ module.exports = {
                 status:"valid"
             }
         )
-        assert(broadcastExists)
+        assert(broadcastV3ActionIndex >= 0)
     },
     
     async sendListV0(addressInfo, type, items){

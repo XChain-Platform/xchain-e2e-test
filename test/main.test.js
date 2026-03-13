@@ -139,12 +139,18 @@ describe('Create Issue Messages', () => {
         )
     });
     it('should create a BROADCAST Message v3', async () => {
-        console.log("Creating new address for the test")
-        let broadcastAddress = await cryptoHelper.getNewFundedAddress("BROADCAST.V3", COIN, NETWORK, null, "legacy",0,1) 
-        
+        let broadcastAddress = await cryptoHelper.getNewFundedAddress("BROADCAST.V3", COIN, NETWORK, null, "legacy",0,1)
+
+        // Create a V0 broadcast first so V3 can reference it
+        let broadcastV0ActionIndex = await xchainMessageHelper.sendBroadcastV0(
+            broadcastAddress,
+            "BROADCAST v3 feed",
+            1
+        )
+
         await xchainMessageHelper.sendBroadcastV3(
             broadcastAddress,
-            1, //TODO: this test won't work if there isn't at least one action in the db
+            broadcastV0ActionIndex,
             0.01,
             "Memo test for BROADCAST v3"
         )
@@ -639,11 +645,11 @@ describe('Create Issue Messages', () => {
         //Create the dispenser
         let dispenserV0ActionIndex = await xchainMessageHelper.sendDispenserV0(
             dispenserAddressInfo,
-            "LTC",
+            COIN_CODE,
             dispenserTick,
             1,
             10,
-            "LTC",
+            COIN_CODE,
             null,
             5,
             dispenserAddressInfo["address"],
@@ -680,11 +686,11 @@ describe('Create Issue Messages', () => {
         //Create the dispenser
         let dispenserV0ActionIndex = await xchainMessageHelper.sendDispenserV0(
             dispenserAddressInfo,
-            "LTC",
+            COIN_CODE,
             dispenserTick,
             1,
             10,
-            "LTC",
+            COIN_CODE,
             null,
             0.05,
             dispenserAddressInfo["address"],
@@ -695,22 +701,22 @@ describe('Create Issue Messages', () => {
             null,
             'This is a dispenser v0 test to dispense'
         )
-        
+
         //Get a dispense
         let txHash = await transactionHelper.createSimpleTransaction(
             dispenseAddressInfo,
             dispenserAddress,
             5000000
         )
-        
+
         //Check if the dispense exists
         let dispenseActionIndex = await indexerDatabase.waitForDispense({
             txHash: txHash,
             source: dispenseAddressInfo["address"],
-            giveCoin: "LTC",
+            giveCoin: COIN_CODE,
             giveTick: dispenserTick,
             giveAmount: 1,
-            getCoin: "LTC",
+            getCoin: COIN_CODE,
             getAmount: 0.05,
             destination: dispenseAddressInfo["address"],
             status: "valid"

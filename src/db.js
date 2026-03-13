@@ -551,23 +551,23 @@ class Database {
     
     async waitForBroadcast(broadcastObject, timeMax = 30000){
         const endTime = Date.now() + timeMax
-        
+
         while (Date.now() < endTime){
             try {
-                let mintExists = await this.checkBroadcast(broadcastObject)
-                
-                if (mintExists){
-                    return true
+                let broadcastActionIndex = await this.checkBroadcast(broadcastObject)
+
+                if (broadcastActionIndex >= 0){
+                    return broadcastActionIndex
                 }
-                
+
                 await this.sleep(1000)
             } catch(err) {
                 console.log(err)
                 await this.sleep(1000)
             }
         }
-        
-        return false
+
+        return -1
     }
     
     async checkBroadcast({blockIndex,txHash,source,message,value,fee,memo,broadcastActionIndex,status}){
@@ -633,22 +633,22 @@ class Database {
         `+"WHERE "+whereClauses.join(" AND ");
         
         let connection = await this.getConnection()
-        
+
         try {
-        const rows = await connection.query(query, whereValues)
+            const rows = await connection.query(query, whereValues)
             if (rows.length > 0){
-                return true
+                return Number(rows[0]["action_index"])
             } else {
-                return false  
+                return -1
             }
         } catch (err) {
             console.error('Error with database query (broadcast):', err);
-            return false;
+            return -1;
         } finally {
             await connection.release()
         }
     }
-    
+
     async waitForList(listObject, timeMax = 30000){
         const endTime = Date.now() + timeMax
         

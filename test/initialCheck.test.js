@@ -25,6 +25,9 @@ if (COIN === null || COIN === undefined){
 
 global.NETWORK_OBJECT = CryptoNetworks.getBitcoinJsNetwork(COIN+"-"+NETWORK)
 
+const COIN_CODE_MAP = { bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' }
+global.COIN_CODE = COIN_CODE_MAP[COIN] || COIN.toUpperCase().slice(0, 3)
+
 
 var HUB_URL =  process.env.HUB_URL
 var HUB_PORT =  process.env.HUB_PORT
