@@ -26,11 +26,11 @@ class CryptoNetworks {
     static getBitcoinJsNetwork(networkName){
         switch(networkName){
             case "bitcoin-mainnet":
-                return bitcoin.networks.bitcoin
+                return { ...bitcoin.networks.bitcoin, dustThreshold: 546 }
             case "bitcoin-testnet":
-                return bitcoin.networks.testnet         
+                return { ...bitcoin.networks.testnet, dustThreshold: 546 }
             case "bitcoin-regtest":
-                return bitcoin.networks.regtest
+                return { ...bitcoin.networks.regtest, dustThreshold: 546 }
             case "dogecoin-mainnet":
                 return {
                     "messagePrefix": '\x19Dogecoin Signed Message:\n',
