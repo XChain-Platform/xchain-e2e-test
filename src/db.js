@@ -1040,8 +1040,9 @@ class Database {
                         AND itick.tick = ?
                 `
                 
+                let creditsConn1 = await this.getConnection()
                 try {
-                    const rows = await connection.query(
+                    const rows = await creditsConn1.query(
                         checkCreditsQuery+" AND address_id IN "+addressesIdArray, [
                             amount, //amount
                             txHash, //txHash
@@ -1052,18 +1053,19 @@ class Database {
                         //return newActionIndex
                     } else {
                         console.error('Error: there are '+rows.length+" credits for an airdrop of "+addressesId.length+" addresses");
-                        return -1               
+                        return -1
                     }
                 } catch (err) {
                     console.error('Error getting ', err);
                     return -1
                 } finally {
-                    await connection.release()
+                    await creditsConn1.release()
                 }
-                
+
                 if (tick2 != null){
+                    let creditsConn2 = await this.getConnection()
                     try {
-                        const rows = await connection.query(
+                        const rows = await creditsConn2.query(
                             checkCreditsQuery+" AND address_id IN "+addressesId2Array, [
                                 amount2, //amount
                                 txHash, //txHash
@@ -1074,32 +1076,33 @@ class Database {
                             //continue
                         } else {
                             console.error('Error: there are '+rows.length+" credits for an airdrop of "+addressesId2.length+" addresses");
-                            return -1               
+                            return -1
                         }
                     } catch (err) {
                         console.error('Error getting ', err);
                         return -1
                     } finally {
-                        await connection.release()
+                        await creditsConn2.release()
                     }
                 }
-                
-                
+
+
                 let checkDebitQuery = `
                     SELECT d.*, itick.tick as tick FROM debits d
                     LEFT JOIN actions act ON act.action_index = d.action_index
                     LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
                     LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
                     LEFT JOIN index_addresses ia ON ia.id = tr.source_id
-                    LEFT JOIN index_tickers itick ON itick.id = d.tick_id 
+                    LEFT JOIN index_tickers itick ON itick.id = d.tick_id
                     WHERE ia.address = ?
                         AND d.amount = ?
                         AND itx.hash = ?
                         AND itick.tick = ?
                 `
-                
+
+                let debitConn1 = await this.getConnection()
                 try {
-                    const rows = await connection.query(
+                    const rows = await debitConn1.query(
                         checkDebitQuery, [
                             source, //address
                             amount*addressesId.length, //amount
@@ -1118,18 +1121,19 @@ class Database {
                         }
                     } else {
                         console.error("There should be 1 debit, "+rows.length+" found")
-                        return -1               
+                        return -1
                     }
                 } catch (err) {
                     console.error('Error with query (obtaining an airdrop debit)', err);
                     return -1
                 } finally {
-                    await connection.release()
+                    await debitConn1.release()
                 }
                 
                 if (tick2 != null){
+                    let debitConn2 = await this.getConnection()
                     try {
-                        const rows = await connection.query(
+                        const rows = await debitConn2.query(
                             checkDebitQuery, [
                                 source, //address
                                 amount2*(addressesId2?addressesId2.length:addressesId.length), //amount
@@ -1148,17 +1152,19 @@ class Database {
                             }
                         } else {
                             console.error("There should be 1 debit, "+rows.length+" found")
-                            return -1               
+                            return -1
                         }
                     } catch (err) {
                         console.error('Error with query (obtaining an airdrop debit)', err);
                         return -1
                     } finally {
-                        await connection.release()
+                        await debitConn2.release()
                     }
-                    
+
                     return newActionIndex
                 }
+
+                return newActionIndex
             } else {
                 console.error("ERROR! Couldn't get addresses from list");
                 return -1

@@ -253,13 +253,13 @@ module.exports = {
         
         psbt.addOutput({
             address: destinationAddress,
-            value: BigInt(amount)
+            value: amount
         })
-        
+
         if (changeSatoshis > 0) {
             psbt.addOutput({
                 address: addressInfo["address"],
-                value: BigInt(changeSatoshis)
+                value: changeSatoshis
             })
         }
         
