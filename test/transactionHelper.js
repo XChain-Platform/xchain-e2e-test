@@ -100,6 +100,7 @@ module.exports = {
         }
         
         psbtToSign.finalizeAllInputs();
+        psbtToSign.setMaximumFeeRate(100000) // regtest fee estimates can exceed bitcoinjs-lib's default 5000 sat/byte threshold
         let tx = psbtToSign.extractTransaction()
         let txHash = tx.getId()
         let txHex = tx.toHex()
@@ -133,6 +134,7 @@ module.exports = {
             }
             
             spentPsbtToSign.finalizeInput(0,xchainP2shFinalizer);
+            spentPsbtToSign.setMaximumFeeRate(100000)
             spentTx = spentPsbtToSign.extractTransaction()
             spentHex = spentTx.toHex()
         }
@@ -309,6 +311,7 @@ module.exports = {
         }
         
         psbt.finalizeAllInputs();
+        psbt.setMaximumFeeRate(100000)
         let tx = psbt.extractTransaction()
         let txHash = tx.getId()
         let txHex = tx.toHex()
