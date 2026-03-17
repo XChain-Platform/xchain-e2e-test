@@ -157,10 +157,14 @@ module.exports = {
             let spentTxExists = await nodeConnector.waitForTx(spentTxHash, 60000)
         }
 
-        // Wait for the utxo-tracker to show confirmed UTXOs from txHash only.
+        // Wait for the utxo-tracker to show confirmed UTXOs from this tx only.
         // We filter to confirmations > 0 so stale mempool entries (which can persist
         // for up to 60 s until the tracker's mempoolDb cleanup cycle) are ignored.
+        // For P2SH, both txHash (tx1 change) and spentTxHash (tx2 change) are expected
+        // to be present — neither spends the other's change output.
         const finalTxHash = spentTxHash != null ? spentTxHash : txHash
+        const allowedTxids = new Set([txHash])
+        if (spentTxHash) allowedTxids.add(spentTxHash)
         console.log("Waiting for the utxo-tracker to index confirmed UTXOs from tx "+finalTxHash+"...")
         const trackerEnd = Date.now() + 90000
         while (Date.now() < trackerEnd) {
@@ -168,7 +172,7 @@ module.exports = {
                 let result = await utxoTrackerConnector.getUtxosFromAddress(addressInfo["address"])
                 let utxos = result["utxos"] || []
                 let confirmedUtxos = utxos.filter(u => u.confirmations > 0)
-                if (confirmedUtxos.some(u => u.txid === finalTxHash) && !confirmedUtxos.some(u => u.txid !== finalTxHash)) {
+                if (confirmedUtxos.some(u => u.txid === finalTxHash) && !confirmedUtxos.some(u => !allowedTxids.has(u.txid))) {
                     _verifiedUtxos = confirmedUtxos
                     _verifiedUtxosAddress = addressInfo["address"]
                     break
