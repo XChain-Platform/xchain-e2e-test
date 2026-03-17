@@ -6,6 +6,12 @@ const CryptoNetworks = require('../src/CryptoNetworks')
 
 const TEST_FEE = 5460
 
+// Verified confirmed UTXOs from the last tx wait loop, keyed by address.
+// Passed directly to the encoder on the next call to bypass the tracker fetch,
+// preventing stale mempool-db outputs from being picked up.
+let _verifiedUtxos = null
+let _verifiedUtxosAddress = null
+
 function xchainP2shFinalizer(inputIndex, input, script, isSegwit, isP2SH, isP2WSH){
     if (isP2SH){
         const decompiled = bitcoin.script.decompile(script);
@@ -63,8 +69,11 @@ function xchainP2shFinalizer(inputIndex, input, script, isSegwit, isP2SH, isP2WS
 module.exports = {
     async createAndSendTransaction(addressInfo, data){
         console.log("Creating the transaction...")
+        const utxoListForEncoder = (_verifiedUtxosAddress === addressInfo["address"] && _verifiedUtxos) ? _verifiedUtxos : []
+        _verifiedUtxos = null
+        _verifiedUtxosAddress = null
         let txPsbtHex = await encoderConnector.createTx(
-            [], //utxoList - the encoder will find the utxos
+            utxoListForEncoder, //utxoList - use cached confirmed UTXOs if available
             addressInfo["address"], //pubkey
             [], //customOutputs - None
             data,
@@ -148,20 +157,36 @@ module.exports = {
             let spentTxExists = await nodeConnector.waitForTx(spentTxHash, 60000)
         }
 
-        // Wait for the utxo-tracker to reflect the change UTXO from txHash AND confirm that
-        // all stale (already-spent) UTXOs are gone, so the encoder doesn't pick up spent inputs.
-        console.log("Waiting for the utxo-tracker to index the change UTXO from tx "+txHash+"...")
-        const trackerEnd = Date.now() + 30000
+        // Wait for the utxo-tracker to show confirmed UTXOs from txHash only.
+        // We filter to confirmations > 0 so stale mempool entries (which can persist
+        // for up to 60 s until the tracker's mempoolDb cleanup cycle) are ignored.
+        const finalTxHash = spentTxHash != null ? spentTxHash : txHash
+        console.log("Waiting for the utxo-tracker to index confirmed UTXOs from tx "+finalTxHash+"...")
+        const trackerEnd = Date.now() + 90000
         while (Date.now() < trackerEnd) {
             try {
                 let result = await utxoTrackerConnector.getUtxosFromAddress(addressInfo["address"])
                 let utxos = result["utxos"] || []
-                if (utxos.some(u => u.txid === txHash) && !utxos.some(u => u.txid !== txHash)) break
+                let confirmedUtxos = utxos.filter(u => u.confirmations > 0)
+                if (confirmedUtxos.some(u => u.txid === finalTxHash) && !confirmedUtxos.some(u => u.txid !== finalTxHash)) {
+                    _verifiedUtxos = confirmedUtxos
+                    _verifiedUtxosAddress = addressInfo["address"]
+                    break
+                }
             } catch (e) {}
             await new Promise(r => setTimeout(r, 500))
         }
+        if (!_verifiedUtxos) {
+            // Timed out — save whatever confirmed UTXOs are available as a best-effort fallback
+            try {
+                let result = await utxoTrackerConnector.getUtxosFromAddress(addressInfo["address"])
+                let utxos = result["utxos"] || []
+                _verifiedUtxos = utxos.filter(u => u.confirmations > 0)
+                _verifiedUtxosAddress = addressInfo["address"]
+            } catch (e) {}
+        }
 
-        return spentTxHash != null ? spentTxHash : txHash
+        return finalTxHash
         
     },
     
@@ -176,6 +201,10 @@ module.exports = {
     },
     
     async createSimpleTransaction(addressInfo, destinationAddress, amount){
+        if (_verifiedUtxosAddress === addressInfo["address"]) {
+            _verifiedUtxos = null
+            _verifiedUtxosAddress = null
+        }
         let psbt = new bitcoin.Psbt({ network: NETWORK_OBJECT })
         let feePerBytes = await nodeConnector.getFeePerKilobyte(1)/1000
         
@@ -288,17 +317,29 @@ module.exports = {
         console.log("Waiting for the simple transaction ("+txHash+") to be confirmed...")
         let txExists = await nodeConnector.waitForTx(txHash, 60000)
 
-        // Wait for the utxo-tracker to reflect the change UTXO from txHash and for stale
-        // UTXOs to be removed, ensuring the block has been mined and indexed.
-        console.log("Waiting for the utxo-tracker to index the change UTXO from simple tx "+txHash+"...")
-        const trackerEnd = Date.now() + 30000
+        // Wait for confirmed UTXOs only; ignore stale mempool entries.
+        console.log("Waiting for the utxo-tracker to index confirmed UTXOs from simple tx "+txHash+"...")
+        const trackerEnd = Date.now() + 90000
         while (Date.now() < trackerEnd) {
             try {
                 let result = await utxoTrackerConnector.getUtxosFromAddress(addressInfo["address"])
                 let utxos = result["utxos"] || []
-                if (utxos.some(u => u.txid === txHash) && !utxos.some(u => u.txid !== txHash)) break
+                let confirmedUtxos = utxos.filter(u => u.confirmations > 0)
+                if (confirmedUtxos.some(u => u.txid === txHash) && !confirmedUtxos.some(u => u.txid !== txHash)) {
+                    _verifiedUtxos = confirmedUtxos
+                    _verifiedUtxosAddress = addressInfo["address"]
+                    break
+                }
             } catch (e) {}
             await new Promise(r => setTimeout(r, 500))
+        }
+        if (!_verifiedUtxos) {
+            try {
+                let result = await utxoTrackerConnector.getUtxosFromAddress(addressInfo["address"])
+                let utxos = result["utxos"] || []
+                _verifiedUtxos = utxos.filter(u => u.confirmations > 0)
+                _verifiedUtxosAddress = addressInfo["address"]
+            } catch (e) {}
         }
 
         return txHash
