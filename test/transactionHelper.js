@@ -165,8 +165,6 @@ module.exports = {
         // For P2SH, both txHash (tx1 change) and spentTxHash (tx2 change) are expected
         // to be present — neither spends the other's change output.
         const finalTxHash = spentTxHash != null ? spentTxHash : txHash
-        const allowedTxids = new Set([txHash])
-        if (spentTxHash) allowedTxids.add(spentTxHash)
         console.log("Waiting for the utxo-tracker to index confirmed UTXOs from tx "+finalTxHash+"...")
         const trackerEnd = Date.now() + 90000
         while (Date.now() < trackerEnd) {
@@ -174,7 +172,7 @@ module.exports = {
                 let result = await utxoTrackerConnector.getUtxosFromAddress(addressInfo["address"])
                 let utxos = result["utxos"] || []
                 let confirmedUtxos = utxos.filter(u => u.confirmations > 0)
-                if (confirmedUtxos.some(u => u.txid === finalTxHash) && !confirmedUtxos.some(u => !allowedTxids.has(u.txid))) {
+                if (confirmedUtxos.some(u => u.txid === finalTxHash)) {
                     _verifiedUtxos = confirmedUtxos
                     _verifiedUtxosAddress = addressInfo["address"]
                     break
@@ -332,7 +330,7 @@ module.exports = {
                 let result = await utxoTrackerConnector.getUtxosFromAddress(addressInfo["address"])
                 let utxos = result["utxos"] || []
                 let confirmedUtxos = utxos.filter(u => u.confirmations > 0)
-                if (confirmedUtxos.some(u => u.txid === txHash) && !confirmedUtxos.some(u => u.txid !== txHash)) {
+                if (confirmedUtxos.some(u => u.txid === txHash)) {
                     _verifiedUtxos = confirmedUtxos
                     _verifiedUtxosAddress = addressInfo["address"]
                     break
