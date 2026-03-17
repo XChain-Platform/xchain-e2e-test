@@ -148,15 +148,15 @@ module.exports = {
             let spentTxExists = await nodeConnector.waitForTx(spentTxHash, 60000)
         }
 
-        // Wait for the utxo-tracker to reflect the change UTXO from txHash so the next
-        // encoder call does not pick up already-spent inputs.
+        // Wait for the utxo-tracker to reflect the change UTXO from txHash AND confirm that
+        // all stale (already-spent) UTXOs are gone, so the encoder doesn't pick up spent inputs.
         console.log("Waiting for the utxo-tracker to index the change UTXO from tx "+txHash+"...")
         const trackerEnd = Date.now() + 30000
         while (Date.now() < trackerEnd) {
             try {
                 let result = await utxoTrackerConnector.getUtxosFromAddress(addressInfo["address"])
                 let utxos = result["utxos"] || []
-                if (utxos.some(u => u.txid === txHash)) break
+                if (utxos.some(u => u.txid === txHash) && !utxos.some(u => u.txid !== txHash)) break
             } catch (e) {}
             await new Promise(r => setTimeout(r, 500))
         }
@@ -287,8 +287,21 @@ module.exports = {
         //wait for the transaction to be confirmed
         console.log("Waiting for the simple transaction ("+txHash+") to be confirmed...")
         let txExists = await nodeConnector.waitForTx(txHash, 60000)
-        
-        return txHash   
+
+        // Wait for the utxo-tracker to reflect the change UTXO from txHash and for stale
+        // UTXOs to be removed, ensuring the block has been mined and indexed.
+        console.log("Waiting for the utxo-tracker to index the change UTXO from simple tx "+txHash+"...")
+        const trackerEnd = Date.now() + 30000
+        while (Date.now() < trackerEnd) {
+            try {
+                let result = await utxoTrackerConnector.getUtxosFromAddress(addressInfo["address"])
+                let utxos = result["utxos"] || []
+                if (utxos.some(u => u.txid === txHash) && !utxos.some(u => u.txid !== txHash)) break
+            } catch (e) {}
+            await new Promise(r => setTimeout(r, 500))
+        }
+
+        return txHash
     }
 }
 
