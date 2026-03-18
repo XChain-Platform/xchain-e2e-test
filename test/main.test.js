@@ -710,6 +710,7 @@ describe('Create Issue Messages', () => {
         )
 
         //Check if the dispense exists
+        console.log("Waiting for DISPENSE in the database (txHash: "+txHash+")...")
         let dispenseActionIndex = await indexerDatabase.waitForDispense({
             txHash: txHash,
             source: dispenseAddressInfo["address"],
@@ -720,8 +721,15 @@ describe('Create Issue Messages', () => {
             getAmount: 0.05,
             destination: dispenseAddressInfo["address"],
             status: "valid"
-        })
-        
+        }, 60000)
+
+        if (dispenseActionIndex < 0) {
+            // Debug: query without filters to see if any dispense exists for this tx
+            let debugResult = await indexerDatabase.waitForDispense({ txHash: txHash }, 5000)
+            console.log("Debug - dispense by txHash only:", debugResult)
+            let debugResult2 = await indexerDatabase.waitForDispense({ source: dispenseAddressInfo["address"] }, 5000)
+            console.log("Debug - dispense by source only:", debugResult2)
+        }
         assert(dispenseActionIndex >= 0)
     });
 })
