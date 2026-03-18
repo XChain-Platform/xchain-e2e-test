@@ -54,15 +54,16 @@ describe('Create Issue Messages', () => {
     });
     it('should create a MINT v0', async () => {
         console.log("Creating new address for testing MINTs v0 format")
-        let mintAddress = await cryptoHelper.getNewFundedAddress("MINT.V0", COIN, NETWORK, null, "legacy", 0, 1) //Obtain a new address to issue some tick
-        let issueV0Wallet = await cryptoHelper.getWallet("ISSUE.V0")
-        let issueV0WalletAddress = issueV0Wallet.addresses[0]
-                
+        let issuerAddress = await cryptoHelper.getNewFundedAddress("MINT.V0.ISSUER", COIN, NETWORK, null, "legacy", 0, 1)
+        let mintDestination = await cryptoHelper.getNewAddress("MINT.V0.DEST", COIN, NETWORK, null, "legacy", 0)
+        let tick = "MINTv0"+issuerAddress["address"].substring(issuerAddress["address"].length-8)
+
+        await xchainMessageHelper.sendIssueV0(issuerAddress, tick, 100, 2, 0, "MINT test token", 10)
         await xchainMessageHelper.sendMintV0(
-            issueV0WalletAddress,
-            "TESTV0"+issueV0WalletAddress["address"].substring(issueV0WalletAddress["address"].length-8),
+            issuerAddress,
+            tick,
             2,
-            mintAddress["address"],
+            mintDestination["address"],
             "A simple MINT test v0"
         )
     });
