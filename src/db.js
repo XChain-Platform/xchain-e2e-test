@@ -106,25 +106,25 @@ class Database {
     }
 
     async waitForIssue(issueObject, timeMax = 30000){
-    
+
         const endTime = Date.now() + timeMax
-        
+
         while (Date.now() < endTime){
             try {
-                let issueExists = await this.checkIssue(issueObject)
-                
-                if (issueExists){
-                    return true
+                let row = await this.checkIssue(issueObject)
+
+                if (row){
+                    return row
                 }
-                
+
                 await this.sleep(1000)
             } catch(err) {
                 console.log(err)
                 await this.sleep(1000)
             }
         }
-        
-        return false
+
+        return null
     }
 
     async checkIssue({source, tick, txHash, maxSupply, maxMint, decimals, description, 
@@ -193,13 +193,13 @@ class Database {
         try {
             const rows = await connection.query(query, whereValues)
             if (rows.length > 0){
-                return true
+                return rows[0]
             } else {
-                return false  
+                return null
             }
         } catch (err) {
             console.error('Error with database query (issue):', err);
-            return false;
+            return null;
         } finally {
             await connection.release()
         }
@@ -207,23 +207,23 @@ class Database {
     
     async waitForSend(sendObject, timeMax = 30000){
         const endTime = Date.now() + timeMax
-        
+
         while (Date.now() < endTime){
             try {
-                let sendExists = await this.checkSend(sendObject)
-                
-                if (sendExists){
-                    return true
+                let row = await this.checkSend(sendObject)
+
+                if (row){
+                    return row
                 }
-                
+
                 await this.sleep(1000)
             } catch(err) {
                 console.log(err)
                 await this.sleep(1000)
             }
         }
-        
-        return false
+
+        return null
     }
     
     async checkSend({source,destination,tick,amount,txHash,memo,status}){
@@ -282,15 +282,15 @@ class Database {
         let connection = await this.getConnection()
         
         try {
-        const rows = await connection.query(query, whereValues)//[source,destination,tick,amount,txHash])
+        const rows = await connection.query(query, whereValues)
             if (rows.length > 0){
-                return true
+                return rows[0]
             } else {
-                return false  
+                return null
             }
         } catch (err) {
             console.error('Error with database query (send):', err);
-            return false;
+            return null;
         } finally {
             await connection.release()
         }
@@ -298,23 +298,23 @@ class Database {
     
     async waitForCredit(creditObject, timeMax = 30000){
         const endTime = Date.now() + timeMax
-        
+
         while (Date.now() < endTime){
             try {
-                let creditExists = await this.checkCredit(creditObject)
-                
-                if (creditExists){
-                    return true
+                let row = await this.checkCredit(creditObject)
+
+                if (row){
+                    return row
                 }
-                
+
                 await this.sleep(1000)
             } catch(err) {
                 console.log(err)
                 await this.sleep(1000)
             }
         }
-        
-        return false
+
+        return null
     }
     
     async checkCredit({blockIndex,txHash,tick,address,amount}){
@@ -363,13 +363,13 @@ class Database {
         try {
         const rows = await connection.query(query, whereValues)
             if (rows.length > 0){
-                return true
+                return rows[0]
             } else {
-                return false  
+                return null
             }
         } catch (err) {
             console.error('Error with database query (credit):', err);
-            return false;
+            return null;
         } finally {
             await connection.release()
         }
@@ -377,23 +377,23 @@ class Database {
     
     async waitForDebit(debitObject, timeMax = 30000){
         const endTime = Date.now() + timeMax
-        
+
         while (Date.now() < endTime){
             try {
-                let debitExists = await this.checkDebit(debitObject)
-                
-                if (debitExists){
-                    return true
+                let row = await this.checkDebit(debitObject)
+
+                if (row){
+                    return row
                 }
-                
+
                 await this.sleep(1000)
             } catch(err) {
                 console.log(err)
                 await this.sleep(1000)
             }
         }
-        
-        return false
+
+        return null
     }
     
     async checkDebit({blockIndex,txHash,tick,address,amount}){
@@ -442,13 +442,13 @@ class Database {
         try {
         const rows = await connection.query(query, whereValues)
             if (rows.length > 0){
-                return true
+                return rows[0]
             } else {
-                return false  
+                return null
             }
         } catch (err) {
             console.error('Error with database query (debit):', err);
-            return false;
+            return null;
         } finally {
             await connection.release()
         }
@@ -456,23 +456,23 @@ class Database {
     
     async waitForMint(mintObject, timeMax = 30000){
         const endTime = Date.now() + timeMax
-        
+
         while (Date.now() < endTime){
             try {
-                let mintExists = await this.checkMint(mintObject)
-                
-                if (mintExists){
-                    return true
+                let row = await this.checkMint(mintObject)
+
+                if (row){
+                    return row
                 }
-                
+
                 await this.sleep(1000)
             } catch(err) {
                 console.log(err)
                 await this.sleep(1000)
             }
         }
-        
-        return false
+
+        return null
     }
     
     async checkMint({blockIndex,txHash,tick,destination,amount,memo,status}){
@@ -537,13 +537,13 @@ class Database {
         try {
         const rows = await connection.query(query, whereValues)
             if (rows.length > 0){
-                return true
+                return rows[0]
             } else {
-                return false  
+                return null
             }
         } catch (err) {
             console.error('Error with database query (mint):', err);
-            return false;
+            return null;
         } finally {
             await connection.release()
         }
@@ -554,10 +554,10 @@ class Database {
 
         while (Date.now() < endTime){
             try {
-                let broadcastActionIndex = await this.checkBroadcast(broadcastObject)
+                let row = await this.checkBroadcast(broadcastObject)
 
-                if (broadcastActionIndex >= 0){
-                    return broadcastActionIndex
+                if (row){
+                    return row
                 }
 
                 await this.sleep(1000)
@@ -567,7 +567,7 @@ class Database {
             }
         }
 
-        return -1
+        return null
     }
     
     async checkBroadcast({blockIndex,txHash,source,message,value,fee,memo,broadcastActionIndex,status}){
@@ -637,13 +637,13 @@ class Database {
         try {
             const rows = await connection.query(query, whereValues)
             if (rows.length > 0){
-                return Number(rows[0]["action_index"])
+                return rows[0]
             } else {
-                return -1
+                return null
             }
         } catch (err) {
             console.error('Error with database query (broadcast):', err);
-            return -1;
+            return null;
         } finally {
             await connection.release()
         }
@@ -651,23 +651,23 @@ class Database {
 
     async waitForList(listObject, timeMax = 30000){
         const endTime = Date.now() + timeMax
-        
+
         while (Date.now() < endTime){
             try {
-                let listActionIndex = await this.checkList(listObject)
-                
-                if (listActionIndex >= 0){
-                    return listActionIndex
+                let row = await this.checkList(listObject)
+
+                if (row){
+                    return row
                 }
-                
+
                 await this.sleep(1000)
             } catch(err) {
                 console.log(err)
                 await this.sleep(1000)
             }
         }
-        
-        return -1
+
+        return null
     }
     
     async checkList({blockIndex,txHash,source,type,edit,listActionIndex,status,items}){
@@ -722,22 +722,23 @@ class Database {
         `+"WHERE "+whereClauses.join(" AND ");
         
         let connection = await this.getConnection()
-        let newActionIndex = null
+        let listRow = null
         try {
             const rows = await connection.query(query, whereValues)
             if (rows.length > 0){
-                newActionIndex = rows[0]["action_index"]
+                listRow = rows[0]
             } else {
-                return -1               
+                return null
             }
         } catch (err) {
-            console.error('Error with database query (broadcast):', err);
-            return -1
+            console.error('Error with database query (list):', err);
+            return null
         } finally {
             await connection.release()
         }
-        
-        if (newActionIndex){
+
+        if (listRow){
+            let newActionIndex = listRow["action_index"]
             let leftJoin = ""
             let field = ""
             switch (type){
@@ -750,70 +751,70 @@ class Database {
                     field = " ia.address AS item_name "
                     break
             }
-            
+
             //Check the list's items
             const queryItems = "SELECT "+field+
                 " FROM list_items li "+leftJoin+
                 " WHERE li.action_index = ?"
-            
+
             connection = await this.getConnection()
-            
+
             try {
                 const rows = await connection.query(queryItems, [newActionIndex])
                 if (rows.length == items.length){
                     let itemsClone = items.slice()
-                    
+
                     for (let nextRowIndex in rows){
                         let nextRow = rows[nextRowIndex]
-                        
+
                         let itemIndex = itemsClone.indexOf(nextRow["item_name"])
-                        
+
                         if (itemIndex >= 0){
                             itemsClone.splice(itemIndex, 1)
                         }
                     }
-                    
+
                     if (itemsClone.length == 0){
-                        return newActionIndex
+                        return listRow
                     } else {
                         console.log("ERROR! List items don't match with the items in the database")
-                        return -1
+                        return null
                     }
                 } else {
                     console.log("ERROR! List items don't have the same length as the items in the database")
-                    return -1  
+                    return null
                 }
             } catch (err) {
-                console.error('Error with database query (broadcast):', err);
-                return -1;
+                console.error('Error with database query (list items):', err);
+                return null;
             } finally {
                 await connection.release()
             }
         } else {
             console.error("ERROR! Couldn't find the new list action index");
-            return -1
+            return null
         }
     }
     
     async waitForAirdrop(airdropObject, timeMax = 30000){
         const endTime = Date.now() + timeMax
-        
+
         while (Date.now() < endTime){
             try {
-                let airdropNewActionIndex = await this.checkAirdrop(airdropObject)
-                
-                if (airdropNewActionIndex >= 0){
-                    return airdropNewActionIndex
+                let row = await this.checkAirdrop(airdropObject)
+
+                if (row){
+                    return row
                 }
-                
+
                 await this.sleep(1000)
             } catch(err) {
                 console.log(err)
                 await this.sleep(1000)
             }
         }
-        
-        return -1
+
+        return null
     }
     
     async getListAddresses(listActionIndex){
@@ -902,10 +903,10 @@ class Database {
         return null
     }
     
-    async checkAirdrop({blockIndex,txHash,source,tick,amount,tick2,amount2,listActionIndex,listActionIndex2,memo,memo2,status}){
+    async checkAirdrop({blockIndex,txHash,source,tick,amount,listActionIndex,memo,status}){
         let whereClauses = []
         let whereValues = []
-        
+
         if (blockIndex != null){
             whereClauses.push("tr.block_index = ?")
             whereValues.push(blockIndex)
@@ -938,9 +939,9 @@ class Database {
             whereClauses.push("ist.status = ?")
             whereValues.push(status)
         }
-         
+
         const query = `
-            SELECT 
+            SELECT
                 tr.block_index AS block_index,
                 itx.hash AS tx_hash,
                 a.action_index,
@@ -949,7 +950,7 @@ class Database {
                 a.amount,
                 im.memo,
                 a.list_action_index,
-                ist.status AS status 
+                ist.status AS status
             FROM airdrops a
             LEFT JOIN actions act ON act.action_index = a.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
@@ -959,241 +960,42 @@ class Database {
             LEFT JOIN index_tickers itick ON itick.id = a.tick_id
             LEFT JOIN index_memos im ON im.id = a.memo_id
         `+"WHERE "+whereClauses.join(" AND ");
-        
+
         let connection = await this.getConnection()
-        let newActionIndex = null
         try {
             const rows = await connection.query(query, whereValues)
             if (rows.length > 0){
-                newActionIndex = rows[0]["action_index"]
+                return rows[0]
             } else {
-                console.error('Error with database query: rows are empty');
-                console.log(query)
-                console.log(whereValues)
-                return -1               
+                return null
             }
         } catch (err) {
             console.error('Error with database query (airdrop):', err);
-            return -1
+            return null
         } finally {
             await connection.release()
-        }
-        
-        //Check for a second tick
-        if (tick2 != null){
-            let tickClauseIndex = whereClauses.indexOf("itick.tick = ?")
-            let tickAmountClauseIndex = whereClauses.indexOf("a.amount = ?")
-            whereValues.splice(tickClauseIndex, 1, tick2)
-            whereValues.splice(tickAmountClauseIndex, 1, amount2)
-            
-            if (listActionIndex2 != null){
-                let listActionIndexClauseIndex = whereClauses.indexOf("a.list_action_index = ?")
-                whereValues.splice(listActionIndexClauseIndex, 1, listActionIndex2)
-            }
-            
-            if (memo2 != null){
-                let memoClauseIndex = whereClauses.indexOf("im.memo = ?")
-                whereValues.splice(memoClauseIndex, 1, memo2)
-            }
-            
-            let connection = await this.getConnection()
-            try {
-                const rows = await connection.query(query, whereValues)
-                if (rows.length > 0){
-                    //Continue
-                } else {
-                    console.error('Error with database query: second airdrop does not exist');
-                    console.log(query)
-                    console.log(whereValues)
-                    return -1               
-                }
-            } catch (err) {
-                console.error('Error with database query (airdrop):', err);
-                return -1
-            } finally {
-                await connection.release()
-            }
-        }
-        
-        if (newActionIndex){
-            let addressesId = await this.getListAddresses(listActionIndex)
-            let addressesId2 = null
-            
-            if (listActionIndex2){
-                addressesId2 = await this.getListAddresses(listActionIndex2)
-            } else {
-                addressesId2 = addressesId
-            }
-            
-            if (addressesId){
-                let addressesIdArray = "("+addressesId.join(",")+")"            
-                let addressesId2Array = "("+addressesId2.join(",")+")"   
-                
-                let checkCreditsQuery = `
-                    SELECT DISTINCT(c.address_id) FROM credits c
-                    LEFT JOIN actions act ON act.action_index = c.action_index
-                    LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
-                    LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
-                    LEFT JOIN index_tickers itick ON itick.id = c.tick_id 
-                    WHERE amount = ?
-                        AND itx.hash = ?
-                        AND itick.tick = ?
-                `
-                
-                let creditsConn1 = await this.getConnection()
-                try {
-                    const rows = await creditsConn1.query(
-                        checkCreditsQuery+" AND address_id IN "+addressesIdArray, [
-                            amount, //amount
-                            txHash, //txHash
-                            tick //tick's name
-                        ]
-                    )
-                    if (rows.length == addressesId.length){
-                        //return newActionIndex
-                    } else {
-                        console.error('Error: there are '+rows.length+" credits for an airdrop of "+addressesId.length+" addresses");
-                        return -1
-                    }
-                } catch (err) {
-                    console.error('Error getting ', err);
-                    return -1
-                } finally {
-                    await creditsConn1.release()
-                }
-
-                if (tick2 != null){
-                    let creditsConn2 = await this.getConnection()
-                    try {
-                        const rows = await creditsConn2.query(
-                            checkCreditsQuery+" AND address_id IN "+addressesId2Array, [
-                                amount2, //amount
-                                txHash, //txHash
-                                tick2 //tick's name
-                            ]
-                        )
-                        if (rows.length == addressesId2.length){
-                            //continue
-                        } else {
-                            console.error('Error: there are '+rows.length+" credits for an airdrop of "+addressesId2.length+" addresses");
-                            return -1
-                        }
-                    } catch (err) {
-                        console.error('Error getting ', err);
-                        return -1
-                    } finally {
-                        await creditsConn2.release()
-                    }
-                }
-
-
-                let checkDebitQuery = `
-                    SELECT d.*, itick.tick as tick FROM debits d
-                    LEFT JOIN actions act ON act.action_index = d.action_index
-                    LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
-                    LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
-                    LEFT JOIN index_addresses ia ON ia.id = tr.source_id
-                    LEFT JOIN index_tickers itick ON itick.id = d.tick_id
-                    WHERE ia.address = ?
-                        AND d.amount = ?
-                        AND itx.hash = ?
-                        AND itick.tick = ?
-                `
-
-                let debitConn1 = await this.getConnection()
-                try {
-                    const rows = await debitConn1.query(
-                        checkDebitQuery, [
-                            source, //address
-                            amount*addressesId.length, //amount
-                            txHash, //txHash
-                            tick //tick's name
-                        ]
-                    )
-                    if (rows.length == 1){
-                        if ((rows[0]["tick"] == tick)
-                            && (rows[0]["amount"] == amount*addressesId.length)
-                        ){
-                            //continue
-                        } else {
-                            console.error("The debits aren't right")
-                            return -1
-                        }
-                    } else {
-                        console.error("There should be 1 debit, "+rows.length+" found")
-                        return -1
-                    }
-                } catch (err) {
-                    console.error('Error with query (obtaining an airdrop debit)', err);
-                    return -1
-                } finally {
-                    await debitConn1.release()
-                }
-                
-                if (tick2 != null){
-                    let debitConn2 = await this.getConnection()
-                    try {
-                        const rows = await debitConn2.query(
-                            checkDebitQuery, [
-                                source, //address
-                                amount2*(addressesId2?addressesId2.length:addressesId.length), //amount
-                                txHash, //txHash
-                                tick2 //tick's name
-                            ]
-                        )
-                        if (rows.length == 1){
-                            if ((rows[0]["tick"] == tick2)
-                                && (rows[0]["amount"] == amount2*addressesId2.length)
-                            ){
-                                //continue
-                            } else {
-                                console.error("The debits aren't right")
-                                return -1
-                            }
-                        } else {
-                            console.error("There should be 1 debit, "+rows.length+" found")
-                            return -1
-                        }
-                    } catch (err) {
-                        console.error('Error with query (obtaining an airdrop debit)', err);
-                        return -1
-                    } finally {
-                        await debitConn2.release()
-                    }
-
-                    return newActionIndex
-                }
-
-                return newActionIndex
-            } else {
-                console.error("ERROR! Couldn't get addresses from list");
-                return -1
-            }
-        } else {
-            console.error("ERROR! Couldn't find the new airdrop action index");
-            return -1
         }
     }
     
     async waitForDispenser(dispenserObject, timeMax = 30000){
         const endTime = Date.now() + timeMax
-        
+
         while (Date.now() < endTime){
             try {
-                let dispenserActionIndex = await this.checkDispenser(dispenserObject)
-                
-                if (dispenserActionIndex >= 0){
-                    return dispenserActionIndex
+                let row = await this.checkDispenser(dispenserObject)
+
+                if (row){
+                    return row
                 }
-                
+
                 await this.sleep(1000)
             } catch(err) {
                 console.log(err)
                 await this.sleep(1000)
             }
         }
-        
-        return -1
+
+        return null
     }
     
     async checkDispenser({blockIndex, txHash, source, giveCoin, giveTick, giveAmount, giveEscrow, 
@@ -1309,43 +1111,40 @@ class Database {
         `+"WHERE "+whereClauses.join(" AND ");
         
         let connection = await this.getConnection()
-        let newActionIndex = null
         try {
             const rows = await connection.query(query, whereValues)
             if (rows.length > 0){
-                newActionIndex = rows[0]["action_index"]
+                return rows[0]
             } else {
-                return -1               
+                return null
             }
         } catch (err) {
             console.error('Error with database query (dispenser):', err);
-            return -1
+            return null
         } finally {
             await connection.release()
         }
-        
-        return newActionIndex
     }
     
     async waitForDispense(dispenseObject, timeMax = 30000){
         const endTime = Date.now() + timeMax
-        
+
         while (Date.now() < endTime){
             try {
-                let dispenseActionIndex = await this.checkDispense(dispenseObject)
-                
-                if (dispenseActionIndex >= 0){
-                    return dispenseActionIndex
+                let row = await this.checkDispense(dispenseObject)
+
+                if (row){
+                    return row
                 }
-                
+
                 await this.sleep(1000)
             } catch(err) {
                 console.log(err)
                 await this.sleep(1000)
             }
         }
-        
-        return -1
+
+        return null
     }
     
     async checkDispense({blockIndex, txHash, source, giveCoin,
@@ -1428,22 +1227,19 @@ class Database {
         `+"WHERE "+whereClauses.join(" AND ");
         
         let connection = await this.getConnection()
-        let newActionIndex = null
         try {
             const rows = await connection.query(query, whereValues)
             if (rows.length > 0){
-                newActionIndex = rows[0]["action_index"]
+                return rows[0]
             } else {
-                return -1               
+                return null
             }
         } catch (err) {
             console.error('Error with database query (dispense):', err);
-            return -1
+            return null
         } finally {
             await connection.release()
         }
-        
-        return newActionIndex
     }
 }
 

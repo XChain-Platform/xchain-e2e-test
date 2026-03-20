@@ -20,6 +20,6 @@
     "tiny-secp256k1": "^2.2.3"
   },
   "scripts": {
-    "test": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js"
+    "test": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/actions/**/*.test.js'"
   }
 }

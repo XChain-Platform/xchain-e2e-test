@@ -10,7 +10,7 @@ const RegtestMinerConnector = require('../src/RegtestMinerConnector.js')
 const Database = require('../src/db.js')
 const CryptoNetworks = require('../src/CryptoNetworks')
 const cryptoHelper = require('./cryptoHelper')
-const xchainMessageHelper = require('./xchainMessageHelper')
+const issueHelper = require('./helpers/issueHelper')
 
 const GAS_TICK = "XCHAIN"
 
@@ -199,7 +199,7 @@ exports.mochaHooks = {
         if (!gasTokenExists) {
             console.log("GAS token not found, creating it...")
             let gasAddressInfo = await cryptoHelper.getNewFundedAddress("GAS.TOKEN", COIN, NETWORK, null, "legacy", 0, 1)
-            await xchainMessageHelper.sendIssueV0(
+            await issueHelper.sendIssueV0(
                 gasAddressInfo,
                 GAS_TICK,
                 1000000000,
