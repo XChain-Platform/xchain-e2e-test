@@ -67,7 +67,7 @@ function xchainP2shFinalizer(inputIndex, input, script, isSegwit, isP2SH, isP2WS
 }
 
 module.exports = {
-    async createAndSendTransaction(addressInfo, data){
+    async createAndSendTransaction(addressInfo, data, rawData = null){
         console.log("Creating the transaction...")
         const utxoListForEncoder = (_verifiedUtxosAddress === addressInfo["address"] && _verifiedUtxos) ? _verifiedUtxos : []
         _verifiedUtxos = null
@@ -77,7 +77,7 @@ module.exports = {
             addressInfo["address"], //pubkey
             [], //customOutputs - None
             data,
-            null, //rawData
+            rawData, //rawData
             null, //TEST_FEE, //exact_fee
             false, //rbf - false, it's not needed for this test
             null, //outputType - the encoder will automatically determine which output type to use 

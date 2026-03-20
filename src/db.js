@@ -1241,6 +1241,448 @@ class Database {
             await connection.release()
         }
     }
+
+    // ─── Generic waitFor wrapper ───────────────────────────────────────
+    async _waitFor(checkFn, params, timeMax = 30000){
+        const endTime = Date.now() + timeMax
+        while (Date.now() < endTime){
+            try {
+                let row = await checkFn.call(this, params)
+                if (row) return row
+                await this.sleep(1000)
+            } catch(err) {
+                console.log(err)
+                await this.sleep(1000)
+            }
+        }
+        return null
+    }
+
+    // ─── ADDRESS ───────────────────────────────────────────────────────
+    async waitForAddressOption(obj, timeMax = 30000){ return this._waitFor(this.checkAddressOption, obj, timeMax) }
+
+    async checkAddressOption({txHash, source, feePreference, requireMemo, status}){
+        let w = [], v = []
+        if (txHash != null){ w.push("itx.hash = ?"); v.push(txHash) }
+        if (source != null){ w.push("ia.address = ?"); v.push(source) }
+        if (feePreference != null){ w.push("ao.fee_preference = ?"); v.push(feePreference) }
+        if (requireMemo != null){ w.push("ao.require_memo = ?"); v.push(requireMemo) }
+        if (status != null){ w.push("ist.status = ?"); v.push(status) }
+        const query = `
+            SELECT ao.*, itx.hash AS tx_hash, ia.address AS source, im.memo AS memo, ist.status AS status
+            FROM addresses ao
+            LEFT JOIN actions act ON act.action_index = ao.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ia ON ia.id = tr.source_id
+            LEFT JOIN index_memos im ON im.id = ao.memo_id
+            LEFT JOIN index_statuses ist ON ist.id = ao.status_id
+        `+"WHERE "+w.join(" AND ");
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch (err) {
+            console.error('Error with database query (address):', err);
+            return null
+        } finally {
+            await connection.release()
+        }
+    }
+
+    // ─── DESTROY ───────────────────────────────────────────────────────
+    async waitForDestroy(obj, timeMax = 30000){ return this._waitFor(this.checkDestroy, obj, timeMax) }
+
+    async checkDestroy({txHash, source, tick, amount, memo, status}){
+        let w = [], v = []
+        if (txHash != null){ w.push("itx.hash = ?"); v.push(txHash) }
+        if (source != null){ w.push("ia.address = ?"); v.push(source) }
+        if (tick != null){ w.push("itick.tick = ?"); v.push(tick) }
+        if (amount != null){ w.push("d.amount = ?"); v.push(amount) }
+        if (memo != null){ w.push("im.memo = ?"); v.push(memo) }
+        if (status != null){ w.push("ist.status = ?"); v.push(status) }
+        const query = `
+            SELECT d.*, itx.hash AS tx_hash, ia.address AS source, itick.tick AS tick, im.memo AS memo, ist.status AS status
+            FROM destroys d
+            LEFT JOIN actions act ON act.action_index = d.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ia ON ia.id = tr.source_id
+            LEFT JOIN index_tickers itick ON itick.id = d.tick_id
+            LEFT JOIN index_memos im ON im.id = d.memo_id
+            LEFT JOIN index_statuses ist ON ist.id = d.status_id
+        `+"WHERE "+w.join(" AND ");
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch (err) {
+            console.error('Error with database query (destroy):', err);
+            return null
+        } finally {
+            await connection.release()
+        }
+    }
+
+    // ─── MESSAGE ───────────────────────────────────────────────────────
+    async waitForMessage(obj, timeMax = 30000){ return this._waitFor(this.checkMessage, obj, timeMax) }
+
+    async checkMessage({txHash, source, destination, plaintextMessage, status}){
+        let w = [], v = []
+        if (txHash != null){ w.push("itx.hash = ?"); v.push(txHash) }
+        if (source != null){ w.push("ias.address = ?"); v.push(source) }
+        if (destination != null){ w.push("iad.address = ?"); v.push(destination) }
+        if (plaintextMessage != null){ w.push("m.plaintext_message = ?"); v.push(plaintextMessage) }
+        if (status != null){ w.push("ist.status = ?"); v.push(status) }
+        const query = `
+            SELECT m.*, itx.hash AS tx_hash, ias.address AS source, iad.address AS destination, ist.status AS status
+            FROM messages m
+            LEFT JOIN actions act ON act.action_index = m.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ias ON ias.id = tr.source_id
+            LEFT JOIN index_addresses iad ON iad.id = m.destination_id
+            LEFT JOIN index_statuses ist ON ist.id = m.status_id
+        `+"WHERE "+w.join(" AND ");
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch (err) {
+            console.error('Error with database query (message):', err);
+            return null
+        } finally {
+            await connection.release()
+        }
+    }
+
+    // ─── FILE ──────────────────────────────────────────────────────────
+    async waitForFile(obj, timeMax = 30000){ return this._waitFor(this.checkFile, obj, timeMax) }
+
+    async checkFile({txHash, source, name, title, status}){
+        let w = [], v = []
+        if (txHash != null){ w.push("itx.hash = ?"); v.push(txHash) }
+        if (source != null){ w.push("ia.address = ?"); v.push(source) }
+        if (name != null){ w.push("f.name = ?"); v.push(name) }
+        if (title != null){ w.push("f.title = ?"); v.push(title) }
+        if (status != null){ w.push("ist.status = ?"); v.push(status) }
+        const query = `
+            SELECT f.*, itx.hash AS tx_hash, ia.address AS source, im.memo AS memo, ist.status AS status
+            FROM files f
+            LEFT JOIN actions act ON act.action_index = f.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ia ON ia.id = tr.source_id
+            LEFT JOIN index_memos im ON im.id = f.memo_id
+            LEFT JOIN index_statuses ist ON ist.id = f.status_id
+        `+"WHERE "+w.join(" AND ");
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch (err) {
+            console.error('Error with database query (file):', err);
+            return null
+        } finally {
+            await connection.release()
+        }
+    }
+
+    // ─── SLEEP ─────────────────────────────────────────────────────────
+    async waitForSleep(obj, timeMax = 30000){ return this._waitFor(this.checkSleep, obj, timeMax) }
+
+    async checkSleep({txHash, source, type, tick, resumeBlock, status}){
+        let w = [], v = []
+        if (txHash != null){ w.push("itx.hash = ?"); v.push(txHash) }
+        if (source != null){ w.push("ia.address = ?"); v.push(source) }
+        if (type != null){ w.push("s.type = ?"); v.push(type) }
+        if (tick != null){ w.push("itick.tick = ?"); v.push(tick) }
+        if (resumeBlock != null){ w.push("s.resume_block = ?"); v.push(resumeBlock) }
+        if (status != null){ w.push("ist.status = ?"); v.push(status) }
+        const query = `
+            SELECT s.*, itx.hash AS tx_hash, ia.address AS source, itick.tick AS tick, im.memo AS memo, ist.status AS status
+            FROM sleeps s
+            LEFT JOIN actions act ON act.action_index = s.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ia ON ia.id = tr.source_id
+            LEFT JOIN index_tickers itick ON itick.id = s.tick_id
+            LEFT JOIN index_memos im ON im.id = s.memo_id
+            LEFT JOIN index_statuses ist ON ist.id = s.status_id
+        `+"WHERE "+w.join(" AND ");
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch (err) {
+            console.error('Error with database query (sleep):', err);
+            return null
+        } finally {
+            await connection.release()
+        }
+    }
+
+    // ─── SWEEP ─────────────────────────────────────────────────────────
+    async waitForSweep(obj, timeMax = 30000){ return this._waitFor(this.checkSweep, obj, timeMax) }
+
+    async checkSweep({txHash, source, destination, balances, ownerships, escrows, status}){
+        let w = [], v = []
+        if (txHash != null){ w.push("itx.hash = ?"); v.push(txHash) }
+        if (source != null){ w.push("ias.address = ?"); v.push(source) }
+        if (destination != null){ w.push("iad.address = ?"); v.push(destination) }
+        if (balances != null){ w.push("sw.balances = ?"); v.push(balances) }
+        if (ownerships != null){ w.push("sw.ownerships = ?"); v.push(ownerships) }
+        if (escrows != null){ w.push("sw.escrows = ?"); v.push(escrows) }
+        if (status != null){ w.push("ist.status = ?"); v.push(status) }
+        const query = `
+            SELECT sw.*, itx.hash AS tx_hash, ias.address AS source, iad.address AS destination, im.memo AS memo, ist.status AS status
+            FROM sweeps sw
+            LEFT JOIN actions act ON act.action_index = sw.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ias ON ias.id = tr.source_id
+            LEFT JOIN index_addresses iad ON iad.id = sw.destination_id
+            LEFT JOIN index_memos im ON im.id = sw.memo_id
+            LEFT JOIN index_statuses ist ON ist.id = sw.status_id
+        `+"WHERE "+w.join(" AND ");
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch (err) {
+            console.error('Error with database query (sweep):', err);
+            return null
+        } finally {
+            await connection.release()
+        }
+    }
+
+    // ─── DIVIDEND ──────────────────────────────────────────────────────
+    async waitForDividend(obj, timeMax = 30000){ return this._waitFor(this.checkDividend, obj, timeMax) }
+
+    async checkDividend({txHash, source, tick, dividendTick, amount, status}){
+        let w = [], v = []
+        if (txHash != null){ w.push("itx.hash = ?"); v.push(txHash) }
+        if (source != null){ w.push("ia.address = ?"); v.push(source) }
+        if (tick != null){ w.push("itick.tick = ?"); v.push(tick) }
+        if (dividendTick != null){ w.push("itick2.tick = ?"); v.push(dividendTick) }
+        if (amount != null){ w.push("d.amount = ?"); v.push(amount) }
+        if (status != null){ w.push("ist.status = ?"); v.push(status) }
+        const query = `
+            SELECT d.*, itx.hash AS tx_hash, ia.address AS source, itick.tick AS tick, itick2.tick AS dividend_tick, im.memo AS memo, ist.status AS status
+            FROM dividends d
+            LEFT JOIN actions act ON act.action_index = d.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ia ON ia.id = tr.source_id
+            LEFT JOIN index_tickers itick ON itick.id = d.tick_id
+            LEFT JOIN index_tickers itick2 ON itick2.id = d.dividend_tick_id
+            LEFT JOIN index_memos im ON im.id = d.memo_id
+            LEFT JOIN index_statuses ist ON ist.id = d.status_id
+        `+"WHERE "+w.join(" AND ");
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch (err) {
+            console.error('Error with database query (dividend):', err);
+            return null
+        } finally {
+            await connection.release()
+        }
+    }
+
+    // ─── CALLBACK ──────────────────────────────────────────────────────
+    async waitForCallback(obj, timeMax = 30000){ return this._waitFor(this.checkCallback, obj, timeMax) }
+
+    async checkCallback({txHash, source, tick, callbackTick, status}){
+        let w = [], v = []
+        if (txHash != null){ w.push("itx.hash = ?"); v.push(txHash) }
+        if (source != null){ w.push("ia.address = ?"); v.push(source) }
+        if (tick != null){ w.push("itick.tick = ?"); v.push(tick) }
+        if (callbackTick != null){ w.push("itick2.tick = ?"); v.push(callbackTick) }
+        if (status != null){ w.push("ist.status = ?"); v.push(status) }
+        const query = `
+            SELECT c.*, itx.hash AS tx_hash, ia.address AS source, itick.tick AS tick, itick2.tick AS callback_tick, im.memo AS memo, ist.status AS status
+            FROM callbacks c
+            LEFT JOIN actions act ON act.action_index = c.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ia ON ia.id = tr.source_id
+            LEFT JOIN index_tickers itick ON itick.id = c.tick_id
+            LEFT JOIN index_tickers itick2 ON itick2.id = c.callback_tick_id
+            LEFT JOIN index_memos im ON im.id = c.memo_id
+            LEFT JOIN index_statuses ist ON ist.id = c.status_id
+        `+"WHERE "+w.join(" AND ");
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch (err) {
+            console.error('Error with database query (callback):', err);
+            return null
+        } finally {
+            await connection.release()
+        }
+    }
+
+    // ─── ORDER ─────────────────────────────────────────────────────────
+    async waitForOrder(obj, timeMax = 30000){ return this._waitFor(this.checkOrder, obj, timeMax) }
+
+    async checkOrder({txHash, source, giveCoin, giveTick, giveAmount, getCoin, getTick, getAmount, getAddress, expiration, status}){
+        let w = [], v = []
+        if (txHash != null){ w.push("itx.hash = ?"); v.push(txHash) }
+        if (source != null){ w.push("ias.address = ?"); v.push(source) }
+        if (giveCoin != null){ w.push("give_ic.coin = ?"); v.push(giveCoin) }
+        if (giveTick != null){ w.push("give_it.tick = ?"); v.push(giveTick) }
+        if (giveAmount != null){ w.push("o.give_amount = ?"); v.push(giveAmount) }
+        if (getCoin != null){ w.push("get_ic.coin = ?"); v.push(getCoin) }
+        if (getTick != null){ w.push("get_it.tick = ?"); v.push(getTick) }
+        if (getAmount != null){ w.push("o.get_amount = ?"); v.push(getAmount) }
+        if (getAddress != null){ w.push("get_ia.address = ?"); v.push(getAddress) }
+        if (expiration != null){ w.push("o.expiration = ?"); v.push(expiration) }
+        if (status != null){ w.push("ist.status = ?"); v.push(status) }
+        const query = `
+            SELECT o.*, itx.hash AS tx_hash, ias.address AS source,
+                give_ic.coin AS give_coin, give_it.tick AS give_tick,
+                get_ic.coin AS get_coin, get_it.tick AS get_tick,
+                get_ia.address AS get_address, im.memo AS memo, ist.status AS status
+            FROM orders o
+            LEFT JOIN actions act ON act.action_index = o.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ias ON ias.id = tr.source_id
+            LEFT JOIN index_coins give_ic ON give_ic.id = o.give_coin_id
+            LEFT JOIN index_tickers give_it ON give_it.id = o.give_tick_id
+            LEFT JOIN index_coins get_ic ON get_ic.id = o.get_coin_id
+            LEFT JOIN index_tickers get_it ON get_it.id = o.get_tick_id
+            LEFT JOIN index_addresses get_ia ON get_ia.id = o.get_address_id
+            LEFT JOIN index_memos im ON im.id = o.memo_id
+            LEFT JOIN index_statuses ist ON ist.id = o.status_id
+        `+"WHERE "+w.join(" AND ");
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch (err) {
+            console.error('Error with database query (order):', err);
+            return null
+        } finally {
+            await connection.release()
+        }
+    }
+
+    // ─── SWAP ──────────────────────────────────────────────────────────
+    async waitForSwap(obj, timeMax = 30000){ return this._waitFor(this.checkSwap, obj, timeMax) }
+
+    async checkSwap({txHash, source, giveCoin, giveTick, giveAmount, getCoin, getTick, getAmount, getAddress, expiration, status}){
+        let w = [], v = []
+        if (txHash != null){ w.push("itx.hash = ?"); v.push(txHash) }
+        if (source != null){ w.push("ias.address = ?"); v.push(source) }
+        if (giveCoin != null){ w.push("give_ic.coin = ?"); v.push(giveCoin) }
+        if (giveTick != null){ w.push("give_it.tick = ?"); v.push(giveTick) }
+        if (giveAmount != null){ w.push("s.give_amount = ?"); v.push(giveAmount) }
+        if (getCoin != null){ w.push("get_ic.coin = ?"); v.push(getCoin) }
+        if (getTick != null){ w.push("get_it.tick = ?"); v.push(getTick) }
+        if (getAmount != null){ w.push("s.get_amount = ?"); v.push(getAmount) }
+        if (getAddress != null){ w.push("get_ia.address = ?"); v.push(getAddress) }
+        if (expiration != null){ w.push("s.expiration = ?"); v.push(expiration) }
+        if (status != null){ w.push("ist.status = ?"); v.push(status) }
+        const query = `
+            SELECT s.*, itx.hash AS tx_hash, ias.address AS source,
+                give_ic.coin AS give_coin, give_it.tick AS give_tick,
+                get_ic.coin AS get_coin, get_it.tick AS get_tick,
+                get_ia.address AS get_address, im.memo AS memo, ist.status AS status
+            FROM swaps s
+            LEFT JOIN actions act ON act.action_index = s.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ias ON ias.id = tr.source_id
+            LEFT JOIN index_coins give_ic ON give_ic.id = s.give_coin_id
+            LEFT JOIN index_tickers give_it ON give_it.id = s.give_tick_id
+            LEFT JOIN index_coins get_ic ON get_ic.id = s.get_coin_id
+            LEFT JOIN index_tickers get_it ON get_it.id = s.get_tick_id
+            LEFT JOIN index_addresses get_ia ON get_ia.id = s.get_address_id
+            LEFT JOIN index_memos im ON im.id = s.memo_id
+            LEFT JOIN index_statuses ist ON ist.id = s.status_id
+        `+"WHERE "+w.join(" AND ");
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch (err) {
+            console.error('Error with database query (swap):', err);
+            return null
+        } finally {
+            await connection.release()
+        }
+    }
+
+    // ─── BATCH ─────────────────────────────────────────────────────────
+    async waitForBatch(obj, timeMax = 30000){ return this._waitFor(this.checkBatch, obj, timeMax) }
+
+    async checkBatch({txHash, source, status}){
+        let w = [], v = []
+        if (txHash != null){ w.push("itx.hash = ?"); v.push(txHash) }
+        if (source != null){ w.push("ia.address = ?"); v.push(source) }
+        if (status != null){ w.push("ist.status = ?"); v.push(status) }
+        const query = `
+            SELECT b.*, itx.hash AS tx_hash, ia.address AS source, ist.status AS status
+            FROM batches b
+            LEFT JOIN actions act ON act.action_index = b.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ia ON ia.id = tr.source_id
+            LEFT JOIN index_statuses ist ON ist.id = b.status_id
+        `+"WHERE "+w.join(" AND ");
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch (err) {
+            console.error('Error with database query (batch):', err);
+            return null
+        } finally {
+            await connection.release()
+        }
+    }
+
+    // ─── LINK ──────────────────────────────────────────────────────────
+    async waitForLink(obj, timeMax = 30000){ return this._waitFor(this.checkLink, obj, timeMax) }
+
+    async checkLink({txHash, source, coin1, coin1ActionIndex, coin2, coin2ActionIndex, status}){
+        let w = [], v = []
+        if (txHash != null){ w.push("itx.hash = ?"); v.push(txHash) }
+        if (source != null){ w.push("ia.address = ?"); v.push(source) }
+        if (coin1 != null){ w.push("ic1.coin = ?"); v.push(coin1) }
+        if (coin1ActionIndex != null){ w.push("l.coin1_action_index = ?"); v.push(coin1ActionIndex) }
+        if (coin2 != null){ w.push("ic2.coin = ?"); v.push(coin2) }
+        if (coin2ActionIndex != null){ w.push("l.coin2_action_index = ?"); v.push(coin2ActionIndex) }
+        if (status != null){ w.push("ist.status = ?"); v.push(status) }
+        const query = `
+            SELECT l.*, itx.hash AS tx_hash, ia.address AS source,
+                ic1.coin AS coin1, ic2.coin AS coin2, im.memo AS memo, ist.status AS status
+            FROM links l
+            LEFT JOIN actions act ON act.action_index = l.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ia ON ia.id = tr.source_id
+            LEFT JOIN index_coins ic1 ON ic1.id = l.coin1_id
+            LEFT JOIN index_coins ic2 ON ic2.id = l.coin2_id
+            LEFT JOIN index_memos im ON im.id = l.memo_id
+            LEFT JOIN index_statuses ist ON ist.id = l.status_id
+        `+"WHERE "+w.join(" AND ");
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch (err) {
+            console.error('Error with database query (link):', err);
+            return null
+        } finally {
+            await connection.release()
+        }
+    }
 }
 
 module.exports = Database
