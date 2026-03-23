@@ -26,7 +26,7 @@ module.exports = {
             getCoin: getCoin,
             getTick: getTick,
             getAmount: getAmount,
-            status: "open"
+            status: "valid"
         })
 
         return { txHash, order: row }

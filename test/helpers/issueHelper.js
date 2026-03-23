@@ -2,7 +2,7 @@ const transactionHelper = require('../transactionHelper')
 
 module.exports = {
     async sendIssueV0(addressInfo, tick, maxSupply, maxMint, decimals, description, mintSupply,
-        transfer='', transferSupply='', lockMaxSupply='', lockMaxMint='', lockDescription='', lockRug='',
+        transfer='', transferSupply='', lockMaxSupply='', lockMaxMint='', lockDescription='',
         lockSleep='', lockCallback='', callbackBlock='', callbackTick='', callbackAmount='',
         allowList='', blockList='', mintAddressMax='', mintStartBlock='', mintStopBlock='', lockMint='',
         lockMintSupply=''
@@ -12,7 +12,7 @@ module.exports = {
         let issueMessage = "ISSUE|0|"+tick+"|"+maxSupply
             +"|"+maxMint+"|"+decimals+"|"+description+"|"+mintSupply
             +"|"+transfer+"|"+transferSupply+"|"+lockMaxSupply+"|"+lockMaxMint
-            +"|"+lockDescription+"|"+lockRug+"|"+lockSleep+"|"+lockCallback
+            +"|"+lockDescription+"|"+lockSleep+"|"+lockCallback
             +"|"+callbackBlock+"|"+callbackTick+"|"+callbackAmount+"|"+allowList
             +"|"+blockList+"|"+mintAddressMax+"|"+mintStartBlock+"|"+mintStopBlock
             +"|"+lockMint+"|"+lockMintSupply

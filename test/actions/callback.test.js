@@ -22,7 +22,7 @@ describe('CALLBACK', () => {
             // callbackBlock=1 (already passed), callbackTick, callbackAmount=1
             let mainIssueResult = await issueHelper.sendIssueV0(
                 addr, mainTick, 100, 10, 0, "Callback main token", 10,
-                '', '', '', '', '', '', '', '', // transfer through lockCallback
+                '', '', '', '', '', '', '', // transfer through lockCallback
                 1, // callbackBlock = 1 (very low, already passed)
                 callbackTick, // callbackTick
                 1  // callbackAmount per unit

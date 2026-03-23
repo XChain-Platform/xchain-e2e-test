@@ -114,7 +114,7 @@ module.exports = {
                 addressInfo["address"], //pubkey
                 [], //customOutputs - None
                 data,
-                null, //rawData
+                rawData, //rawData
                 null, //TEST_FEE, //exact_fee
                 false, //rbf - false, it's not needed for this test
                 null, //outputType - the encoder will automatically determine which output type to use 
