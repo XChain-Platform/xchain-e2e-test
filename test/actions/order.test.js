@@ -70,7 +70,7 @@ describe('ORDER', () => {
             let closedOrder = await indexerDatabase.waitForOrder({
                 source: address,
                 giveTick: giveTick,
-                status: "closed"
+                orderStatus: "closed"
             }, 30000)
             assert(closedOrder, "Order should be closed after cancel")
         })

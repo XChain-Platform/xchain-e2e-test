@@ -1529,7 +1529,7 @@ class Database {
     // ─── ORDER ─────────────────────────────────────────────────────────
     async waitForOrder(obj, timeMax = 30000){ return this._waitFor(this.checkOrder, obj, timeMax) }
 
-    async checkOrder({txHash, source, giveCoin, giveTick, giveAmount, getCoin, getTick, getAmount, getAddress, expiration, status}){
+    async checkOrder({txHash, source, giveCoin, giveTick, giveAmount, getCoin, getTick, getAmount, getAddress, expiration, status, orderStatus}){
         let w = [], v = []
         if (txHash != null){ w.push("itx.hash = ?"); v.push(txHash) }
         if (source != null){ w.push("ias.address = ?"); v.push(source) }
@@ -1542,11 +1542,13 @@ class Database {
         if (getAddress != null){ w.push("get_ia.address = ?"); v.push(getAddress) }
         if (expiration != null){ w.push("o.expiration = ?"); v.push(expiration) }
         if (status != null){ w.push("ist.status = ?"); v.push(status) }
+        if (orderStatus != null){ w.push("os_ist.status = ?"); v.push(orderStatus) }
         const query = `
             SELECT o.*, itx.hash AS tx_hash, ias.address AS source,
                 give_ic.coin AS give_coin, give_it.tick AS give_tick,
                 get_ic.coin AS get_coin, get_it.tick AS get_tick,
-                get_ia.address AS get_address, im.memo AS memo, ist.status AS status
+                get_ia.address AS get_address, im.memo AS memo, ist.status AS status,
+                os_ist.status AS order_status
             FROM orders o
             LEFT JOIN actions act ON act.action_index = o.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
@@ -1559,6 +1561,9 @@ class Database {
             LEFT JOIN index_addresses get_ia ON get_ia.id = o.get_address_id
             LEFT JOIN index_memos im ON im.id = o.memo_id
             LEFT JOIN index_statuses ist ON ist.id = o.status_id
+            LEFT JOIN order_statuses os ON os.order_action_index = o.action_index
+                AND os.action_index = (SELECT MAX(os2.action_index) FROM order_statuses os2 WHERE os2.order_action_index = o.action_index)
+            LEFT JOIN index_statuses os_ist ON os_ist.id = os.status_id
         `+"WHERE "+w.join(" AND ");
         let connection = await this.getConnection()
         try {
@@ -1575,7 +1580,7 @@ class Database {
     // ─── SWAP ──────────────────────────────────────────────────────────
     async waitForSwap(obj, timeMax = 30000){ return this._waitFor(this.checkSwap, obj, timeMax) }
 
-    async checkSwap({txHash, source, giveCoin, giveTick, giveAmount, getCoin, getTick, getAmount, getAddress, expiration, status}){
+    async checkSwap({txHash, source, giveCoin, giveTick, giveAmount, getCoin, getTick, getAmount, getAddress, expiration, status, swapStatus}){
         let w = [], v = []
         if (txHash != null){ w.push("itx.hash = ?"); v.push(txHash) }
         if (source != null){ w.push("ias.address = ?"); v.push(source) }
@@ -1588,11 +1593,13 @@ class Database {
         if (getAddress != null){ w.push("get_ia.address = ?"); v.push(getAddress) }
         if (expiration != null){ w.push("s.expiration = ?"); v.push(expiration) }
         if (status != null){ w.push("ist.status = ?"); v.push(status) }
+        if (swapStatus != null){ w.push("ss_ist.status = ?"); v.push(swapStatus) }
         const query = `
             SELECT s.*, itx.hash AS tx_hash, ias.address AS source,
                 give_ic.coin AS give_coin, give_it.tick AS give_tick,
                 get_ic.coin AS get_coin, get_it.tick AS get_tick,
-                get_ia.address AS get_address, im.memo AS memo, ist.status AS status
+                get_ia.address AS get_address, im.memo AS memo, ist.status AS status,
+                ss_ist.status AS swap_status
             FROM swaps s
             LEFT JOIN actions act ON act.action_index = s.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
@@ -1605,6 +1612,9 @@ class Database {
             LEFT JOIN index_addresses get_ia ON get_ia.id = s.get_address_id
             LEFT JOIN index_memos im ON im.id = s.memo_id
             LEFT JOIN index_statuses ist ON ist.id = s.status_id
+            LEFT JOIN swap_statuses ss ON ss.swap_action_index = s.action_index
+                AND ss.action_index = (SELECT MAX(ss2.action_index) FROM swap_statuses ss2 WHERE ss2.swap_action_index = s.action_index)
+            LEFT JOIN index_statuses ss_ist ON ss_ist.id = ss.status_id
         `+"WHERE "+w.join(" AND ");
         let connection = await this.getConnection()
         try {

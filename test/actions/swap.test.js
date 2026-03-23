@@ -70,7 +70,7 @@ describe('SWAP', () => {
             let closedSwap = await indexerDatabase.waitForSwap({
                 source: address,
                 giveTick: giveTick,
-                status: "closed"
+                swapStatus: "closed"
             }, 30000)
             assert(closedSwap, "Swap should be closed after cancel")
         })
