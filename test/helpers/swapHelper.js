@@ -42,5 +42,22 @@ module.exports = {
         await new Promise(r => setTimeout(r, 5000))
 
         return { txHash }
+    },
+
+    async sendSwapEditV2(addressInfo, swapActionIndex, expiration, allowList, blockList, memo){
+        if (expiration == null) expiration = ""
+        if (allowList == null) allowList = ""
+        if (blockList == null) blockList = ""
+
+        let swapMessage = "SWAP|2|"+swapActionIndex
+            +"|"+expiration+"|"+allowList+"|"+blockList+"|"+(memo || "")
+
+        console.log("Creating and sending SWAP EDIT V2 tx...")
+        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, swapMessage)
+
+        console.log("Waiting for SWAP edit to be indexed...")
+        await new Promise(r => setTimeout(r, 5000))
+
+        return { txHash }
     }
 }

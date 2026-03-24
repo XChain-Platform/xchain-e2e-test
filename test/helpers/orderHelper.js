@@ -45,5 +45,22 @@ module.exports = {
         await new Promise(r => setTimeout(r, 5000))
 
         return { txHash }
+    },
+
+    async sendOrderEditV2(addressInfo, orderActionIndex, expiration, allowList, blockList, memo){
+        if (expiration == null) expiration = ""
+        if (allowList == null) allowList = ""
+        if (blockList == null) blockList = ""
+
+        let orderMessage = "ORDER|2|"+orderActionIndex
+            +"|"+expiration+"|"+allowList+"|"+blockList+"|"+(memo || "")
+
+        console.log("Creating and sending ORDER EDIT V2 tx...")
+        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, orderMessage)
+
+        console.log("Waiting for ORDER edit to be indexed...")
+        await new Promise(r => setTimeout(r, 5000))
+
+        return { txHash }
     }
 }

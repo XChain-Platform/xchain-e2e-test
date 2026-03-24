@@ -1,6 +1,7 @@
 const assert = require('assert')
 const cryptoHelper = require('../cryptoHelper')
 const issueHelper = require('../helpers/issueHelper')
+const listHelper = require('../helpers/listHelper')
 
 describe('ISSUE', () => {
     describe('v0', () => {
@@ -37,6 +38,74 @@ describe('ISSUE', () => {
                 "Ticker issuance TEST"
             )
             assert(result.issue, "Issue v1 should exist in DB")
+        })
+    })
+
+    describe('v2 - edit mint params', () => {
+        it('should edit mint params of an existing token', async () => {
+            let addr = await cryptoHelper.getNewFundedAddress("ISSUE.V2", COIN, NETWORK, null, "legacy", 0, 1)
+            let address = addr["address"]
+            let tick = "ISSUEv2"+address.substring(address.length-8)
+
+            // Create token first
+            await issueHelper.sendIssueV0(addr, tick, 1000, 10, 0, "Issue v2 test", 50)
+
+            // Edit mint params: increase max_mint to 20
+            let result = await issueHelper.sendIssueV2(addr, tick, 20, 0, null, null, null, null, "Updating max_mint")
+            assert(result.issue, "Issue v2 should exist in DB")
+        })
+    })
+
+    describe('v3 - edit lock params', () => {
+        it('should lock params of an existing token', async () => {
+            let addr = await cryptoHelper.getNewFundedAddress("ISSUE.V3", COIN, NETWORK, null, "legacy", 0, 1)
+            let address = addr["address"]
+            let tick = "ISSUEv3"+address.substring(address.length-8)
+
+            // Create token first
+            await issueHelper.sendIssueV0(addr, tick, 1000, 10, 0, "Issue v3 test", 50)
+
+            // Lock description and sleep
+            let result = await issueHelper.sendIssueV3(addr, tick, null, null, 1, 1, null, null, null, "Locking description and sleep")
+            assert(result.issue, "Issue v3 should exist in DB")
+        })
+    })
+
+    describe('v4 - edit callback params', () => {
+        it('should set callback params on an existing token', async () => {
+            let addr = await cryptoHelper.getNewFundedAddress("ISSUE.V4", COIN, NETWORK, null, "legacy", 0, 1)
+            let address = addr["address"]
+            let tick = "ISSUEv4"+address.substring(address.length-8)
+            let callbackTick = "ISSUEv4CB"+address.substring(address.length-8)
+
+            // Create both tokens
+            await issueHelper.sendIssueV0(addr, tick, 1000, 10, 0, "Issue v4 test", 50)
+            await issueHelper.sendIssueV0(addr, callbackTick, 1000, 10, 0, "Callback tick", 100)
+
+            // Set callback params
+            let result = await issueHelper.sendIssueV4(addr, tick, 999999, callbackTick, 1, "Setting callback")
+            assert(result.issue, "Issue v4 should exist in DB")
+        })
+    })
+
+    describe('v5 - edit list params', () => {
+        it('should set allow/block lists on an existing token', async () => {
+            let addr = await cryptoHelper.getNewFundedAddress("ISSUE.V5", COIN, NETWORK, null, "legacy", 0, 1)
+            let address = addr["address"]
+            let tick = "ISSUEv5"+address.substring(address.length-8)
+
+            // Create token
+            await issueHelper.sendIssueV0(addr, tick, 1000, 10, 0, "Issue v5 test", 50)
+
+            // Create an allow list
+            let allowAddr = await cryptoHelper.getNewAddress("ISSUE.V5.ALLOW", COIN, NETWORK, null, "legacy", 0)
+            let listResult = await listHelper.sendListV0(addr, "allow", [allowAddr["address"]])
+            assert(listResult.list, "List should be created")
+            let allowListActionIndex = Number(listResult.list["action_index"])
+
+            // Set allow list on token
+            let result = await issueHelper.sendIssueV5(addr, tick, allowListActionIndex, null, "Setting allow list")
+            assert(result.issue, "Issue v5 should exist in DB")
         })
     })
 })

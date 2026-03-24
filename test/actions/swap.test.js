@@ -75,4 +75,44 @@ describe('SWAP', () => {
             assert(closedSwap, "Swap should be closed after cancel")
         })
     })
+
+    describe('v2 - edit', () => {
+        it('should create and edit a swap', async () => {
+            let addr = await cryptoHelper.getNewFundedAddress("SWAP.V2", COIN, NETWORK, null, "legacy", 0, 1)
+            let address = addr["address"]
+            let giveTick = "SWPGIVEv2"+address.substring(address.length-8)
+            let getTick = "SWPGETv2"+address.substring(address.length-8)
+
+            await issueHelper.sendIssueV0(addr, giveTick, 100, 50, 0, "Swap edit give token", 50)
+            await issueHelper.sendIssueV0(addr, getTick, 100, 50, 0, "Swap edit get token", 50)
+            await gasHelper.mintGas(addr, 100)
+
+            let expirationDate = new Date()
+            expirationDate.setMonth(expirationDate.getMonth() + 3)
+
+            // Create swap
+            let createResult = await swapHelper.sendSwapV0(
+                addr,
+                COIN_CODE, giveTick, 10,
+                COIN_CODE, getTick, 5,
+                address,
+                Math.floor(expirationDate.getTime() / 1000),
+                null, null,
+                "Swap to edit"
+            )
+            assert(createResult.swap, "Swap should be created")
+            let swapActionIndex = Number(createResult.swap["action_index"])
+
+            // Edit: extend expiration
+            let newExpiration = new Date()
+            newExpiration.setMonth(newExpiration.getMonth() + 6)
+
+            let editResult = await swapHelper.sendSwapEditV2(
+                addr, swapActionIndex,
+                Math.floor(newExpiration.getTime() / 1000),
+                null, null, "Extending swap expiration"
+            )
+            assert(editResult.txHash, "Swap edit tx should have been sent")
+        })
+    })
 })

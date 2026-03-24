@@ -77,4 +77,72 @@ describe('DISPENSER', () => {
             assert(dispenseRow, "Dispense should exist in DB")
         })
     })
+
+    describe('v1 - cancel', () => {
+        it('should create and cancel a dispenser', async () => {
+            let addr = await cryptoHelper.getNewFundedAddress("DISPENSER.V1", COIN, NETWORK, null, "legacy", 0, 1)
+            let address = addr["address"]
+            let tick = "DISPv1"+address.substring(address.length-8)
+
+            await issueHelper.sendIssueV0(addr, tick, 100, 100, 0, "Dispenser cancel test", 100)
+
+            let expirationDate = new Date()
+            expirationDate.setMonth(expirationDate.getMonth() + 3)
+
+            let createResult = await dispenserHelper.sendDispenserV0(
+                addr,
+                COIN_CODE, tick, 1, 10,
+                COIN_CODE, null, 5, addr["address"],
+                null, null, Math.floor(expirationDate.getTime() / 1000),
+                null, null, 'Dispenser to cancel'
+            )
+            assert(createResult.dispenser, "Dispenser should be created")
+            let dispenserActionIndex = Number(createResult.dispenser["action_index"])
+
+            // Cancel
+            let cancelResult = await dispenserHelper.sendDispenserCancelV1(addr, dispenserActionIndex, "Cancelling dispenser")
+            assert(cancelResult.txHash, "Cancel tx should have been sent")
+
+            let closedDispenser = await indexerDatabase.waitForDispenser({
+                source: address,
+                giveTick: tick,
+                status: "cancelled"
+            }, 30000)
+            assert(closedDispenser, "Dispenser should be cancelled")
+        })
+    })
+
+    describe('v2 - edit', () => {
+        it('should create and edit a dispenser', async () => {
+            let addr = await cryptoHelper.getNewFundedAddress("DISPENSER.V2", COIN, NETWORK, null, "legacy", 0, 1)
+            let address = addr["address"]
+            let tick = "DISPv2"+address.substring(address.length-8)
+
+            await issueHelper.sendIssueV0(addr, tick, 200, 200, 0, "Dispenser edit test", 200)
+
+            let expirationDate = new Date()
+            expirationDate.setMonth(expirationDate.getMonth() + 3)
+
+            let createResult = await dispenserHelper.sendDispenserV0(
+                addr,
+                COIN_CODE, tick, 1, 10,
+                COIN_CODE, null, 5, addr["address"],
+                null, null, Math.floor(expirationDate.getTime() / 1000),
+                null, null, 'Dispenser to edit'
+            )
+            assert(createResult.dispenser, "Dispenser should be created")
+            let dispenserActionIndex = Number(createResult.dispenser["action_index"])
+
+            // Edit: add more escrow
+            let newExpiration = new Date()
+            newExpiration.setMonth(newExpiration.getMonth() + 6)
+
+            let editResult = await dispenserHelper.sendDispenserEditV2(
+                addr, dispenserActionIndex,
+                50, Math.floor(newExpiration.getTime() / 1000),
+                null, null, "Refilling dispenser"
+            )
+            assert(editResult.txHash, "Edit tx should have been sent")
+        })
+    })
 })

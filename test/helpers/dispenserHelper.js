@@ -39,5 +39,35 @@ module.exports = {
         })
 
         return { txHash, dispenser: dispenserRow }
+    },
+
+    async sendDispenserCancelV1(addressInfo, dispenserActionIndex, memo){
+        let msg = "DISPENSER|1|"+dispenserActionIndex+"|"+(memo || "")
+
+        console.log("Creating and sending DISPENSER CANCEL V1 tx...")
+        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
+
+        console.log("Waiting for DISPENSER cancel to be indexed...")
+        await new Promise(r => setTimeout(r, 5000))
+
+        return { txHash }
+    },
+
+    async sendDispenserEditV2(addressInfo, dispenserActionIndex, giveEscrow, expiration, allowList, blockList, memo){
+        if (giveEscrow == null) giveEscrow = ""
+        if (expiration == null) expiration = ""
+        if (allowList == null) allowList = ""
+        if (blockList == null) blockList = ""
+
+        let msg = "DISPENSER|2|"+dispenserActionIndex
+            +"|"+giveEscrow+"|"+expiration+"|"+allowList+"|"+blockList+"|"+(memo || "")
+
+        console.log("Creating and sending DISPENSER EDIT V2 tx...")
+        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
+
+        console.log("Waiting for DISPENSER edit to be indexed...")
+        await new Promise(r => setTimeout(r, 5000))
+
+        return { txHash }
     }
 }
