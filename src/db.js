@@ -1242,6 +1242,31 @@ class Database {
         }
     }
 
+    // ─── DISPENSER STATUS ────────────────────────────────────────────────
+    async waitForDispenserStatus(obj, timeMax = 30000){ return this._waitFor(this.checkDispenserStatus, obj, timeMax) }
+
+    async checkDispenserStatus({dispenserActionIndex, status}){
+        let w = [], v = []
+        if (dispenserActionIndex != null){ w.push("ds.dispenser_action_index = ?"); v.push(dispenserActionIndex) }
+        if (status != null){ w.push("ist.status = ?"); v.push(status) }
+        if (w.length === 0) return null
+        const query = `
+            SELECT ds.action_index, ds.dispenser_action_index, ist.status AS status
+            FROM dispenser_statuses ds
+            LEFT JOIN index_statuses ist ON ist.id = ds.status_id
+        `+"WHERE "+w.join(" AND ")+" ORDER BY ds.action_index DESC LIMIT 1";
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch (err) {
+            console.error('Error with database query (dispenser_status):', err);
+            return null
+        } finally {
+            await connection.release()
+        }
+    }
+
     // ─── Generic waitFor wrapper ───────────────────────────────────────
     async _waitFor(checkFn, params, timeMax = 30000){
         const endTime = Date.now() + timeMax

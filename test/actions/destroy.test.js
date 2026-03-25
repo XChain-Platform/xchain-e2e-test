@@ -27,14 +27,21 @@ describe('DESTROY', () => {
             let tick2 = "DESTv1B"+address.substring(address.length-8)
 
             // Issue two tokens with supply
-            await issueHelper.sendIssueV0(addr, tick1, 100, 50, 0, "Destroy v1 token A", 50)
-            await issueHelper.sendIssueV0(addr, tick2, 100, 50, 0, "Destroy v1 token B", 50)
+            let issue1 = await issueHelper.sendIssueV0(addr, tick1, 100, 50, 0, "Destroy v1 token A", 50)
+            assert(issue1.issue, "Issue token A should exist in DB")
+            let issue2 = await issueHelper.sendIssueV0(addr, tick2, 100, 50, 0, "Destroy v1 token B", 50)
+            assert(issue2.issue, "Issue token B should exist in DB")
 
             // Destroy both in one tx
             let result = await destroyHelper.sendDestroyV1(addr, [
                 { tick: tick1, amount: 5 },
                 { tick: tick2, amount: 10 }
             ], "Multi-destroy v1")
+            if (!result.destroy) {
+                // Debug: query without filters
+                let debugResult = await indexerDatabase.waitForDestroy({ txHash: result.txHash }, 5000)
+                console.log("Debug - destroy v1 by txHash only:", debugResult)
+            }
             assert(result.destroy, "Destroy v1 should exist in DB")
         })
     })
@@ -47,14 +54,20 @@ describe('DESTROY', () => {
             let tick2 = "DESTv2B"+address.substring(address.length-8)
 
             // Issue two tokens with supply
-            await issueHelper.sendIssueV0(addr, tick1, 100, 50, 0, "Destroy v2 token A", 50)
-            await issueHelper.sendIssueV0(addr, tick2, 100, 50, 0, "Destroy v2 token B", 50)
+            let issue1 = await issueHelper.sendIssueV0(addr, tick1, 100, 50, 0, "Destroy v2 token A", 50)
+            assert(issue1.issue, "Issue token A should exist in DB")
+            let issue2 = await issueHelper.sendIssueV0(addr, tick2, 100, 50, 0, "Destroy v2 token B", 50)
+            assert(issue2.issue, "Issue token B should exist in DB")
 
             // Destroy both with individual memos
             let result = await destroyHelper.sendDestroyV2(addr, [
                 { tick: tick1, amount: 5, memo: "Burning token A" },
                 { tick: tick2, amount: 10, memo: "Burning token B" }
             ])
+            if (!result.destroy) {
+                let debugResult = await indexerDatabase.waitForDestroy({ txHash: result.txHash }, 5000)
+                console.log("Debug - destroy v2 by txHash only:", debugResult)
+            }
             assert(result.destroy, "Destroy v2 should exist in DB")
         })
     })

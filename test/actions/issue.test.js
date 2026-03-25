@@ -63,10 +63,15 @@ describe('ISSUE', () => {
             let tick = "ISSUEv3"+address.substring(address.length-8)
 
             // Create token first
-            await issueHelper.sendIssueV0(addr, tick, 1000, 10, 0, "Issue v3 test", 50)
+            let issueResult = await issueHelper.sendIssueV0(addr, tick, 1000, 10, 0, "Issue v3 test", 50)
+            assert(issueResult.issue, "Initial issue v0 should exist in DB")
 
             // Lock description and sleep
             let result = await issueHelper.sendIssueV3(addr, tick, null, null, 1, 1, null, null, null, "Locking description and sleep")
+            if (!result.issue) {
+                let debugResult = await indexerDatabase.waitForIssue({ txHash: result.txHash }, 5000)
+                console.log("Debug - issue v3 by txHash only:", debugResult)
+            }
             assert(result.issue, "Issue v3 should exist in DB")
         })
     })
@@ -99,7 +104,7 @@ describe('ISSUE', () => {
 
             // Create an allow list
             let allowAddr = await cryptoHelper.getNewAddress("ISSUE.V5.ALLOW", COIN, NETWORK, null, "legacy", 0)
-            let listResult = await listHelper.sendListV0(addr, "allow", [allowAddr["address"]])
+            let listResult = await listHelper.sendListV0(addr, 2, [allowAddr["address"]])
             assert(listResult.list, "List should be created")
             let allowListActionIndex = Number(listResult.list["action_index"])
 

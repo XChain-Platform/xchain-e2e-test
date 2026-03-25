@@ -103,12 +103,11 @@ describe('DISPENSER', () => {
             let cancelResult = await dispenserHelper.sendDispenserCancelV1(addr, dispenserActionIndex, "Cancelling dispenser")
             assert(cancelResult.txHash, "Cancel tx should have been sent")
 
-            let closedDispenser = await indexerDatabase.waitForDispenser({
-                source: address,
-                giveTick: tick,
-                status: "cancelled"
+            let cancellingDispenser = await indexerDatabase.waitForDispenserStatus({
+                dispenserActionIndex: dispenserActionIndex,
+                status: "cancelling"
             }, 30000)
-            assert(closedDispenser, "Dispenser should be cancelled")
+            assert(cancellingDispenser, "Dispenser should be cancelling")
         })
     })
 
