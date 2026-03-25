@@ -37,16 +37,20 @@ module.exports = {
         console.log("Creating and sending DESTROY V1 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, destroyMessage)
 
+        // Note: indexer createDestroy uses action_index as unique key, so in a
+        // multi-destroy only the last entry survives (overwrites previous ones).
+        // We check the last destroy until the indexer adds a composite key.
+        let last = destroys[destroys.length - 1]
         console.log("Waiting for DESTROY in the database...")
-        let firstDestroyRow = await indexerDatabase.waitForDestroy({
+        let destroyRow = await indexerDatabase.waitForDestroy({
             txHash: txHash,
             source: addressInfo["address"],
-            tick: destroys[0].tick,
-            amount: destroys[0].amount,
+            tick: last.tick,
+            amount: last.amount,
             status: "valid"
         })
 
-        return { txHash, destroy: firstDestroyRow }
+        return { txHash, destroy: destroyRow }
     },
 
     async sendDestroyV2(addressInfo, destroys){
@@ -59,15 +63,17 @@ module.exports = {
         console.log("Creating and sending DESTROY V2 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, destroyMessage)
 
+        // Note: same indexer limitation as v1 — only last destroy survives.
+        let last = destroys[destroys.length - 1]
         console.log("Waiting for DESTROY in the database...")
-        let firstDestroyRow = await indexerDatabase.waitForDestroy({
+        let destroyRow = await indexerDatabase.waitForDestroy({
             txHash: txHash,
             source: addressInfo["address"],
-            tick: destroys[0].tick,
-            amount: destroys[0].amount,
+            tick: last.tick,
+            amount: last.amount,
             status: "valid"
         })
 
-        return { txHash, destroy: firstDestroyRow }
+        return { txHash, destroy: destroyRow }
     }
 }

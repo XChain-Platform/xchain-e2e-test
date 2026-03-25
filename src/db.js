@@ -175,10 +175,11 @@ class Database {
             
             
         const query = `
-            SELECT i.*, 
-                itick.tick AS tick, 
-                itx.hash AS tx_hash, 
-                ia.address AS source 
+            SELECT i.*,
+                itick.tick AS tick,
+                itx.hash AS tx_hash,
+                ia.address AS source,
+                ist.status AS status
             FROM issues i
             LEFT JOIN actions act ON act.action_index = i.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
