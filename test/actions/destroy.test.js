@@ -37,11 +37,6 @@ describe('DESTROY', () => {
                 { tick: tick1, amount: 5 },
                 { tick: tick2, amount: 10 }
             ], "Multi-destroy v1")
-            if (!result.destroy) {
-                // Debug: query without filters
-                let debugResult = await indexerDatabase.waitForDestroy({ txHash: result.txHash }, 5000)
-                console.log("Debug - destroy v1 by txHash only:", debugResult)
-            }
             assert(result.destroy, "Destroy v1 should exist in DB")
         })
     })
@@ -64,10 +59,6 @@ describe('DESTROY', () => {
                 { tick: tick1, amount: 5, memo: "Burning token A" },
                 { tick: tick2, amount: 10, memo: "Burning token B" }
             ])
-            if (!result.destroy) {
-                let debugResult = await indexerDatabase.waitForDestroy({ txHash: result.txHash }, 5000)
-                console.log("Debug - destroy v2 by txHash only:", debugResult)
-            }
             assert(result.destroy, "Destroy v2 should exist in DB")
         })
     })

@@ -71,10 +71,6 @@ describe('ISSUE', () => {
 
             // Lock description and sleep
             let result = await issueHelper.sendIssueV3(addr, tick, null, null, 1, 1, null, null, null, "Locking description and sleep")
-            if (!result.issue) {
-                let debugResult = await indexerDatabase.waitForIssue({ txHash: result.txHash }, 5000)
-                console.log("Debug - issue v3 by txHash only:", debugResult)
-            }
             assert(result.issue, "Issue v3 should exist in DB")
         })
     })
