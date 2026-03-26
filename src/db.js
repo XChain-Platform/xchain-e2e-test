@@ -1688,6 +1688,40 @@ class Database {
         }
     }
 
+    // ─── SWAP MATCH ───────────────────────────────────────────────────
+    async waitForSwapMatch(obj, timeMax = 30000){ return this._waitFor(this.checkSwapMatch, obj, timeMax) }
+
+    async checkSwapMatch({giveActionIndex, getActionIndex, giveTick, getTick, giveAmount, getAmount, status}){
+        let w = [], v = []
+        if (giveActionIndex != null){ w.push("sm.give_action_index = ?"); v.push(giveActionIndex) }
+        if (getActionIndex != null){ w.push("sm.get_action_index = ?"); v.push(getActionIndex) }
+        if (giveTick != null){ w.push("give_it.tick = ?"); v.push(giveTick) }
+        if (getTick != null){ w.push("get_it.tick = ?"); v.push(getTick) }
+        if (giveAmount != null){ w.push("sm.give_amount = ?"); v.push(giveAmount) }
+        if (getAmount != null){ w.push("sm.get_amount = ?"); v.push(getAmount) }
+        if (status != null){ w.push("ist.status = ?"); v.push(status) }
+        if (w.length === 0) return null
+        const query = `
+            SELECT sm.*,
+                give_it.tick AS give_tick, get_it.tick AS get_tick,
+                ist.status AS status
+            FROM swap_matches sm
+            LEFT JOIN index_tickers give_it ON give_it.id = sm.give_tick_id
+            LEFT JOIN index_tickers get_it ON get_it.id = sm.get_tick_id
+            LEFT JOIN index_statuses ist ON ist.id = sm.status_id
+        `+"WHERE "+w.join(" AND ");
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch (err) {
+            console.error('Error with database query (swap_match):', err);
+            return null
+        } finally {
+            await connection.release()
+        }
+    }
+
     // ─── BATCH ─────────────────────────────────────────────────────────
     async waitForBatch(obj, timeMax = 30000){ return this._waitFor(this.checkBatch, obj, timeMax) }
 
