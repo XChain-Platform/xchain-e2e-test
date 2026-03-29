@@ -78,6 +78,61 @@ describe('DISPENSER', () => {
         })
     })
 
+    describe('dispense - balance verification', () => {
+        it('should credit recipient and debit dispenser after dispense', async () => {
+            let dispenserAddr = await cryptoHelper.getNewFundedAddress("DISPENSER.BAL", COIN, NETWORK, null, "legacy", 0, 1)
+            let buyerAddr = await cryptoHelper.getNewFundedAddress("DISPENSER.BAL.BUYER", COIN, NETWORK, null, "legacy", 0, 1)
+            let dispenserAddress = dispenserAddr["address"]
+            let buyerAddress = buyerAddr["address"]
+            let tick = "DISPBALv0"+dispenserAddress.substring(dispenserAddress.length-8)
+
+            // Issue token with 4 decimals, escrow 50 units in dispenser
+            await issueHelper.sendIssueV0(dispenserAddr, tick, 100, 100, 4, "Dispenser balance test", 100)
+
+            let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
+
+            // Dispenser: give 2.5000 tokens per 0.001 BTC (100000 sats)
+            let dispenserResult = await dispenserHelper.sendDispenserV0(
+                dispenserAddr,
+                COIN_CODE, tick, "2.5", 50,
+                COIN_CODE, null, 0.001, dispenserAddr["address"],
+                null, null, expiration,
+                null, null, 'Balance verification dispenser'
+            )
+            assert(dispenserResult.dispenser, "Dispenser should be created")
+
+            // Buyer sends 0.002 BTC (200000 sats) -> should get 2 * 2.5 = 5.0000 tokens
+            let txHash = await transactionHelper.createSimpleTransaction(
+                buyerAddr, dispenserAddress, 200000
+            )
+
+            console.log("Waiting for DISPENSE in the database...")
+            let dispenseRow = await indexerDatabase.waitForDispense({
+                txHash: txHash,
+                source: buyerAddress,
+                giveTick: tick,
+                status: "valid"
+            }, 60000)
+            assert(dispenseRow, "Dispense should exist in DB")
+
+            // Verify buyer received credit
+            let credit = await indexerDatabase.waitForCredit({
+                address: buyerAddress,
+                tick: tick,
+                amount: "5"
+            }, 30000)
+            assert(credit, "Buyer should be credited 5 tokens")
+
+            // Verify dispenser was debited
+            let debit = await indexerDatabase.waitForDebit({
+                address: dispenserAddress,
+                tick: tick,
+                amount: "5"
+            }, 30000)
+            assert(debit, "Dispenser should be debited 5 tokens")
+        })
+    })
+
     describe('v1 - cancel', () => {
         it('should create and cancel a dispenser', async () => {
             let addr = await cryptoHelper.getNewFundedAddress("DISPENSER.V1", COIN, NETWORK, null, "legacy", 0, 1)

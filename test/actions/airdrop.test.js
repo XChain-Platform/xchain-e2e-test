@@ -42,6 +42,46 @@ describe('AIRDROP', () => {
         })
     })
 
+    describe('v0 - balance verification', () => {
+        it('should credit each recipient and debit the source', async () => {
+            let addr = await cryptoHelper.getNewFundedAddress("AIRDROP.BAL.V0", COIN, NETWORK, null, "legacy", 0, 1)
+            let address = addr["address"]
+            let tick = "AIRBALv0"+address.substring(address.length-8)
+
+            await gasHelper.mintGas(addr, 100)
+            await issueHelper.sendIssueV0(addr, tick, 1000, 100, 0, "Airdrop balance test", 100)
+
+            // Create 3 recipient addresses and a list
+            let r1 = await cryptoHelper.getNewAddress("AIRDROP.BAL.V0", COIN, NETWORK, null, "legacy", 1)
+            let r2 = await cryptoHelper.getNewAddress("AIRDROP.BAL.V0", COIN, NETWORK, null, "legacy", 2)
+            let r3 = await cryptoHelper.getNewAddress("AIRDROP.BAL.V0", COIN, NETWORK, null, "legacy", 3)
+
+            let listResult = await listHelper.sendListV0(addr, 2, [
+                r1["address"], r2["address"], r3["address"]
+            ])
+            assert(listResult.list, "Address list should exist")
+            let listAI = Number(listResult.list["action_index"])
+
+            // Airdrop 5 tokens to each of 3 recipients = 15 total
+            let result = await airdropHelper.sendAirdropV0(addr, tick, 5, listAI, "Balance check airdrop")
+            assert(result.airdrop, "Airdrop should exist in DB")
+
+            // Verify each recipient got credited
+            let credit1 = await indexerDatabase.waitForCredit({ address: r1["address"], tick: tick, amount: "5" }, 30000)
+            assert(credit1, "Recipient 1 should be credited 5 tokens")
+
+            let credit2 = await indexerDatabase.waitForCredit({ address: r2["address"], tick: tick, amount: "5" }, 30000)
+            assert(credit2, "Recipient 2 should be credited 5 tokens")
+
+            let credit3 = await indexerDatabase.waitForCredit({ address: r3["address"], tick: tick, amount: "5" }, 30000)
+            assert(credit3, "Recipient 3 should be credited 5 tokens")
+
+            // Verify source was debited 15 total
+            let debit = await indexerDatabase.waitForDebit({ address: address, tick: tick, amount: "15" }, 30000)
+            assert(debit, "Source should be debited 15 tokens")
+        })
+    })
+
     describe('v0 - tick list', () => {
         it('should create an AIRDROP Message v0 with a tick list', async () => {
             let airdropAddressInfo = await cryptoHelper.getNewFundedAddress("AIRDROP.TICKS.V0", COIN, NETWORK, null, "legacy", 0, 1)
