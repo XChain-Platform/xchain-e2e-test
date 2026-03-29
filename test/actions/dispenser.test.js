@@ -123,13 +123,13 @@ describe('DISPENSER', () => {
             }, 30000)
             assert(credit, "Buyer should be credited 5 tokens")
 
-            // Verify dispenser was debited
+            // Verify escrow debit happened at dispenser creation (50 tokens escrowed)
             let debit = await indexerDatabase.waitForDebit({
                 address: dispenserAddress,
                 tick: tick,
-                amount: "5"
+                amount: "50"
             }, 30000)
-            assert(debit, "Dispenser should be debited 5 tokens")
+            assert(debit, "Dispenser should have escrowed 50 tokens")
         })
     })
 
