@@ -81,13 +81,13 @@ describe('DIVIDEND', () => {
             }, 30000)
             assert(credit2, "Holder2 (3 units) should receive 30 dividend tokens")
 
-            // Verify source was debited
+            // Verify source was debited (only external holders: 2*10 + 3*10 = 50)
             let debit = await indexerDatabase.waitForDebit({
                 address: address,
-                tick: dividendTick
+                tick: dividendTick,
+                amount: "50"
             }, 30000)
-            assert(debit, "Source should be debited dividend tokens")
-            console.log("Dividend debit amount:", debit.amount)
+            assert(debit, "Source should be debited 50 tokens (external holders only)")
         })
     })
 })
