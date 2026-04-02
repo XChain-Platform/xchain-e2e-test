@@ -1719,6 +1719,88 @@ class Database {
             await connection.release()
         }
     }
+
+    // ─── ORDER_MATCH ──────────────────────────────────────────────────
+    async waitForOrderMatch(obj, timeMax = 30000){ return this._waitFor(this.checkOrderMatch, obj, timeMax) }
+
+    async checkOrderMatch({giveActionIndex, getActionIndex, status}){
+        let w = [], v = []
+        if (giveActionIndex != null){ w.push("m.give_action_index = ?"); v.push(giveActionIndex) }
+        if (getActionIndex != null){ w.push("m.get_action_index = ?"); v.push(getActionIndex) }
+        if (status != null){ w.push("ist.status = ?"); v.push(status) }
+        const query = `
+            SELECT m.*, ist.status AS status
+            FROM order_matches m
+            LEFT JOIN index_statuses ist ON ist.id = m.status_id
+        `+"WHERE "+w.join(" AND ");
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch (err) {
+            console.error('Error with database query (order_match):', err);
+            return null
+        } finally {
+            await connection.release()
+        }
+    }
+
+    // ─── COINPAY ──────────────────────────────────────────────────────
+    async waitForCoinpay(obj, timeMax = 30000){ return this._waitFor(this.checkCoinpay, obj, timeMax) }
+
+    async checkCoinpay({txHash, obligationActionIndex, status}){
+        let w = [], v = []
+        if (txHash != null){ w.push("itx.hash = ?"); v.push(txHash) }
+        if (obligationActionIndex != null){ w.push("m.obligation_action_index = ?"); v.push(obligationActionIndex) }
+        if (status != null){ w.push("ist.status = ?"); v.push(status) }
+        const query = `
+            SELECT m.*, itx.hash AS tx_hash, ist.status AS status
+            FROM coinpays m
+            LEFT JOIN actions act ON act.action_index = m.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_statuses ist ON ist.id = m.status_id
+        `+"WHERE "+w.join(" AND ");
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch (err) {
+            console.error('Error with database query (coinpay):', err);
+            return null
+        } finally {
+            await connection.release()
+        }
+    }
+
+    // ─── COINPAY_OBLIGATION ───────────────────────────────────────────
+    async waitForCoinpayObligation(obj, timeMax = 30000){ return this._waitFor(this.checkCoinpayObligation, obj, timeMax) }
+
+    async checkCoinpayObligation({actionIndex, coinpayStatus}){
+        let w = [], v = []
+        if (actionIndex != null){ w.push("co.action_index = ?"); v.push(actionIndex) }
+        if (coinpayStatus != null){ w.push("ist.status = ?"); v.push(coinpayStatus) }
+        const query = `
+            SELECT co.*, ia1.address AS payer_address, ia2.address AS payee_address, c1.coin, ist.status AS coinpay_status
+            FROM coinpay_obligations co
+            INNER JOIN index_addresses ia1 ON ia1.id = co.payer_address_id
+            INNER JOIN index_addresses ia2 ON ia2.id = co.payee_address_id
+            INNER JOIN index_coins c1 ON c1.id = co.coin_id
+            INNER JOIN coinpay_statuses cs ON cs.coinpay_action_index = co.action_index
+            INNER JOIN index_statuses ist ON ist.id = cs.status_id
+            WHERE cs.action_index = (SELECT MAX(cs2.action_index) FROM coinpay_statuses cs2 WHERE cs2.coinpay_action_index = co.action_index)
+              AND `+w.join(" AND ");
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch (err) {
+            console.error('Error with database query (coinpay_obligation):', err);
+            return null
+        } finally {
+            await connection.release()
+        }
+    }
 }
 
 module.exports = Database

@@ -67,7 +67,7 @@ function xchainP2shFinalizer(inputIndex, input, script, isSegwit, isP2SH, isP2WS
 }
 
 module.exports = {
-    async createAndSendTransaction(addressInfo, data, rawData = null){
+    async createAndSendTransaction(addressInfo, data, rawData = null, customOutputs = []){
         console.log("Creating the transaction...")
         const utxoListForEncoder = (_verifiedUtxosAddress === addressInfo["address"] && _verifiedUtxos) ? _verifiedUtxos : []
         _verifiedUtxos = null
@@ -75,7 +75,7 @@ module.exports = {
         let txPsbtHex = await encoderConnector.createTx(
             utxoListForEncoder, //utxoList - use cached confirmed UTXOs if available
             addressInfo["address"], //pubkey
-            [], //customOutputs - None
+            customOutputs, //customOutputs - payment outputs (e.g., COINPay)
             data,
             rawData, //rawData
             null, //TEST_FEE, //exact_fee
