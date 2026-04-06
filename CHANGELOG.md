@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-04-06
+
+### Added
+- Boundary test suite (144 tests across 6 files) for testing the test suite's operational limits — run with `npm run test:boundary`
+- Polling timeout boundaries: validates waitFor* methods with timeMax of 0, -1, 1ms, and Number.MAX_SAFE_INTEGER; covers Database, BlockchainConnector, and UtxoTracker
+- Connection pool boundaries: tests pool exhaustion with 15 concurrent calls, multi-failure retry recovery, connection release guarantees on success/error/empty results, and transactionConnection bypass
+- WHERE clause construction boundaries: validates all-null filters (graceful SQL error handling), single/multiple field combinations, empty strings as valid filter values, very long strings, SQL metacharacter safety, numeric zero inclusion, and placeholder-to-parameter count consistency
+- Identifier & string boundaries: tests wallet labels (empty, special chars, unicode, 10K chars), cache idempotency, case sensitivity, addressIndex derivation (0, 999, determinism), cross-network address generation, and multi-address accumulation
+- Connector boundaries: validates URL construction, waitForTx/waitForUtxos error recovery and zero-timeout behavior, HubConnector endpoint parsing (HUB_VALIDATORS, HUB_URL, HUB_API_HOST fallback chain, empty/whitespace/missing values), and multi-endpoint fallback ordering
+- Global state & service discovery boundaries: tests all 9 CryptoNetworks configurations (dustThreshold consistency), getFirstBlock defaults, isNullOrNullString JS loose-equality edge cases (0, false), wallet cache stress (100 rapid labels), and hub multi-endpoint failover
+- Error propagation boundaries: tests sendFunds null/throw, waitForTx false/throw, waitForUtxos false/throw, Database check* SQL errors returning null, waitFor* timeout-then-null, intermittent error recovery, zero-timeout + error combinations, and wallet cache integrity after funding failures
+- `test:boundary` npm script
+
 ## [0.2.4] - 2026-04-06
 
 ### Added
