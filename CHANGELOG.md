@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-04-06
+
+### Added
+- Smoke test suite (7 files, 12 tests) for fast infrastructure health checks — run with `npm run test:smoke`
+- Tests verify bootstrap globals, all 6 service connector pings, database schema presence, BIP39/BIP32 crypto toolchain, regtest mining control, GAS token existence, and a minimal ISSUE+SEND E2E round-trip
+- `test:smoke` npm script with `--bail` flag for fast-fail behavior and 30s timeout
+
 ## [0.2.2] - 2026-04-06
 
 ### Added
