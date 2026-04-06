@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-04-06
+
+### Added
+- Fuzz test suite (170 tests across 6 files) using fast-check property-based testing — run with `npm run test:fuzz`
+- Custom fuzz generators module with domain-specific arbitraries for XChain types: type confusion values (null, NaN, Infinity, arrays, objects), string mutations (SQL injection, pipe delimiters, null bytes, oversized), numeric edges, filter objects, ACTION fields, connector inputs, and hub config structures
+- Database filter fuzzing: all 34 check* methods fuzzed with 200 random filter objects each — validates no crashes, connection release on query path, and placeholder-to-parameter count consistency across checkIssue, checkSend, checkCredit, checkDebit, checkMint, checkBroadcast, checkList, checkAirdrop, checkDispenser, checkDispense, checkDispenserStatus, checkAddressOption, checkDestroy, checkMessage, checkFile, checkSleep, checkSweep, checkDividend, checkCallback, checkOrder, checkOrderMatch, checkSwap, checkSwapMatch, checkBatch, checkLink, checkCoinpay, checkCoinpayObligation, checkContract, checkExecution, checkDeposit, checkWithdrawal, checkStake, checkUnstake, checkDelegation, and checkRewardClaim
+- ACTION message fuzzing: 17 helper methods fuzzed for string construction safety — validates pipe delimiter injection, null/undefined/NaN coercion to string literals, object/array coercion, and Symbol rejection
+- Connector fuzzing: all 6 connector constructors fuzzed with random host/port values, hub endpoint parsing with fuzzed HUB_VALIDATORS/HUB_URL/HUB_PORT, hub _call response handling with fuzzed axios responses, and waitForTx/waitForUtxos with fuzzed identifiers
+- Crypto input fuzzing: wallet labels (strings, non-string types, Symbol rejection), coin/network combos (all 9 valid + random invalid), addressIndex (0-10000 + negative/float/NaN/Infinity), fuzzed mnemonics, and CryptoNetworks with random input types
+- Config parsing fuzzing: hub config destructuring with missing/null/fuzzed-type keys, isNullOrNullString comprehensive type coverage documenting JS loose-equality traps (0, false, [] treated as null-like), env var validation pattern, and Database constructor with fuzzed connection params
+- waitFor* polling fuzzed with bounded timeMax values (0, -1, NaN, random integers)
+- `test:fuzz` and `test:fuzz:quick` npm scripts
+- `fast-check` devDependency
+
 ## [0.2.5] - 2026-04-06
 
 ### Added
