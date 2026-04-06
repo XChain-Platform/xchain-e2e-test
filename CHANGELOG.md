@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-04-06
+
+### Added
+- Performance testing framework with custom Mocha reporter, poll instrumentation, and CI gate tooling
+- Custom performance reporter (`test/reporters/performance-reporter.js`) that captures per-test timing via `process.hrtime.bigint()`, memory snapshots via `process.memoryUsage()`, and writes JSON results to `perf-results/`
+- Performance metrics collector (`test/perf/perfCollector.js`) — global singleton for bootstrap phase timing and poll tracking
+- Poll instrumentation across all 19 `waitFor*` methods and `_waitFor()` in `src/db.js` — tracks poll count, duration, and resolution status per call
+- Bootstrap phase timing in `initialCheck.test.js` — measures `env-resolution`, `connector-init`, `service-pings`, `gas-token-check`, and `teardown`
+- CI performance gate (`scripts/perf-gate.js`) — checks total suite time, per-test max, peak RSS, poll overhead ratio, and unresolved poll count against configurable thresholds
+- Markdown report generator (`scripts/perf-report.js`) — produces top 10 slowest tests, bootstrap breakdown with bar charts, poll analysis by method, test duration distribution, and memory trend
+- `test:perf`, `test:perf:actions`, `test:perf:e2e`, `perf:gate`, and `perf:report` npm scripts
+
 ## [0.2.7] - 2026-04-06
 
 ### Security

@@ -12,6 +12,12 @@ const CryptoNetworks = require('../src/CryptoNetworks')
 const cryptoHelper = require('./cryptoHelper')
 const issueHelper = require('./helpers/issueHelper')
 
+let perfCollector = null
+try { perfCollector = require('./perf/perfCollector') } catch(e) {}
+const phase = perfCollector
+    ? (name, fn) => perfCollector.phase(name, fn)
+    : (name, fn) => fn()
+
 const GAS_TICK = "XCHAIN"
 
 global.COIN = process.env.COIN
@@ -104,156 +110,168 @@ function printAllEnvironmentalVariables(){
 
 exports.mochaHooks = {
     async beforeAll(){
+        if (perfCollector) perfCollector.startRun()
+
         if (NETWORK === 'mainnet' && process.env.ALLOW_MAINNET !== 'true'){
             throw new Error('Refusing to run tests against mainnet. Set ALLOW_MAINNET=true to override.')
         }
 
-        if (!checkAllEnvironmentalVariables()){
-            printAllEnvironmentalVariables()
-        
-        
-            console.log("Connecting to the hub")
-            let hubEndpoints = XChainHubConnector.parseEndpoints();
-            global.hubConnector = new XChainHubConnector(hubEndpoints)
-            let pingHub = await hubConnector.ping()
-            
-            if (pingHub){
-                let hubConfigs = await hubConnector.getAllConfig()
-                
-                if (hubConfigs){
-                    //NODE_URL = hubConfigs[COIN][NETWORK]["node"]["host"]
-                    NODE_URL = "localhost"
-                    NODE_PORT = hubConfigs[COIN][NETWORK]["node"]["server_port"]
-                    NODE_USER = hubConfigs[COIN][NETWORK]["node"]["user"]
-                    NODE_PASS = hubConfigs[COIN][NETWORK]["node"]["pass"]
-                    
-                    //DATABASE_URL = hubConfigs[COIN][NETWORK]["database"]["host"]
-                    DATABASE_URL = "localhost"
-                    DATABASE_PORT = hubConfigs[COIN][NETWORK]["database"]["port"]
-                    
-                    //UTXO_TRACKER_URL = hubConfigs[COIN][NETWORK]["xchain-utxo-tracker"]["host"]
-                    UTXO_TRACKER_URL = "localhost"
-                    UTXO_TRACKER_PORT = hubConfigs[COIN][NETWORK]["xchain-utxo-tracker"]["server_port"]
-                    
-                    //ENCODER_URL = hubConfigs[COIN][NETWORK]["xchain-encoder"]["host"]
-                    ENCODER_URL = "localhost"
-                    ENCODER_PORT = hubConfigs[COIN][NETWORK]["xchain-encoder"]["server_port"]
-                    
-                    //INDEXER_URL = hubConfigs[COIN][NETWORK]["xchain-indexer"]["host"]
-                    INDEXER_URL = "localhost"
-                    INDEXER_PORT = hubConfigs[COIN][NETWORK]["xchain-indexer"]["server_port"]
-                    INDEXER_DATABASE_NAME = hubConfigs[COIN][NETWORK]["xchain-indexer"]["name"]
-                    INDEXER_DATABASE_USER = hubConfigs[COIN][NETWORK]["xchain-indexer"]["user"]
-                    INDEXER_DATABASE_PASS = hubConfigs[COIN][NETWORK]["xchain-indexer"]["pass"]
-                    
-                    //REGTEST_MINER_URL = hubConfigs[COIN][NETWORK]["xchain-regtest-miner"]["host"]
-                    REGTEST_MINER_URL = "localhost"
-                    REGTEST_MINER_PORT = hubConfigs[COIN][NETWORK]["xchain-regtest-miner"]["server_port"]
-                } else {
-                    throw new Error("There was an error trying to get all the configs from the hub")
-                }
-            } else {
-                throw new Error("Can't connect to the XChain Hub")
-            }
-            
-            
-        }
-        
-        global.nodeConnector = new BlockchainConnector(
-            NODE_URL, NODE_PORT, NODE_USER, NODE_PASS
-        )
-        global.utxoTrackerConnector = new XChainUtxoTrackerConnector(UTXO_TRACKER_URL, UTXO_TRACKER_PORT)
-        global.encoderConnector = new XChainEncoderConnector(ENCODER_URL, ENCODER_PORT)
-        global.indexerConnector = new XChainIndexerConnector(INDEXER_URL, INDEXER_PORT)
-        global.indexerDatabase = new Database(DATABASE_URL, DATABASE_PORT, INDEXER_DATABASE_NAME, INDEXER_DATABASE_USER, INDEXER_DATABASE_PASS)
-        global.regtestMinerConnector = new RegtestMinerConnector(REGTEST_MINER_URL, REGTEST_MINER_PORT)
-        
-        try {
-            let pingNode = await nodeConnector.getNetworkInfo()
-            if (!pingNode){
-                throw new Error("Can't connect to the node")
-            }
-        } catch (err){
-            console.log(err)
-            throw new Error("There was an error trying to connect to the node")
-        }
-                
-        let pingUtxoTracker = await utxoTrackerConnector.ping()
-        if (!pingUtxoTracker){
-            throw new Error("Can't connect to the XChain Utxo Tracker module")
-        }
-        
-        let pingEncoder = await encoderConnector.ping()
-        if (!pingEncoder){
-            throw new Error("Can't connect to the XChain Encoder module")
-        }
-        
-        let pingIndexer = await indexerConnector.ping()
-        if (!pingIndexer){
-            throw new Error("Can't connect to the XChain Indexer module")
-        }
-        
-        let pingIndexerDatabase = await indexerDatabase.ping()
-        if (!pingIndexerDatabase){
-            throw new Error("Can't connect to the XChain Indexer Database")
-        }       
-        
-        let pingRegtestMiner = await regtestMinerConnector.ping()
-        if (!pingRegtestMiner){
-            throw new Error("Can't connect to the XChain Regtest Miner module")
-        } else {
-            await regtestMinerConnector.setMiningTime(1000, 1000)
-        }
+        await phase('env-resolution', async () => {
+            if (!checkAllEnvironmentalVariables()){
+                printAllEnvironmentalVariables()
 
-        // Ensure the GAS token exists before any tests run
-        console.log("Checking if GAS token ("+GAS_TICK+") exists...")
-        const gasTokenExists = await indexerDatabase.checkIssue({ tick: GAS_TICK, status: 'valid' })
-        if (!gasTokenExists) {
-            console.log("GAS token not found, creating it...")
-            let gasAddressInfo = await cryptoHelper.getNewFundedAddress("GAS.TOKEN", COIN, NETWORK, null, "legacy", 0, 1)
-            await issueHelper.sendIssueV0(
-                gasAddressInfo,
-                GAS_TICK,
-                1000000000,
-                1000000,
-                0,
-                "XChain GAS Token",
-                1000000
+
+                console.log("Connecting to the hub")
+                let hubEndpoints = XChainHubConnector.parseEndpoints();
+                global.hubConnector = new XChainHubConnector(hubEndpoints)
+                let pingHub = await hubConnector.ping()
+
+                if (pingHub){
+                    let hubConfigs = await hubConnector.getAllConfig()
+
+                    if (hubConfigs){
+                        //NODE_URL = hubConfigs[COIN][NETWORK]["node"]["host"]
+                        NODE_URL = "localhost"
+                        NODE_PORT = hubConfigs[COIN][NETWORK]["node"]["server_port"]
+                        NODE_USER = hubConfigs[COIN][NETWORK]["node"]["user"]
+                        NODE_PASS = hubConfigs[COIN][NETWORK]["node"]["pass"]
+
+                        //DATABASE_URL = hubConfigs[COIN][NETWORK]["database"]["host"]
+                        DATABASE_URL = "localhost"
+                        DATABASE_PORT = hubConfigs[COIN][NETWORK]["database"]["port"]
+
+                        //UTXO_TRACKER_URL = hubConfigs[COIN][NETWORK]["xchain-utxo-tracker"]["host"]
+                        UTXO_TRACKER_URL = "localhost"
+                        UTXO_TRACKER_PORT = hubConfigs[COIN][NETWORK]["xchain-utxo-tracker"]["server_port"]
+
+                        //ENCODER_URL = hubConfigs[COIN][NETWORK]["xchain-encoder"]["host"]
+                        ENCODER_URL = "localhost"
+                        ENCODER_PORT = hubConfigs[COIN][NETWORK]["xchain-encoder"]["server_port"]
+
+                        //INDEXER_URL = hubConfigs[COIN][NETWORK]["xchain-indexer"]["host"]
+                        INDEXER_URL = "localhost"
+                        INDEXER_PORT = hubConfigs[COIN][NETWORK]["xchain-indexer"]["server_port"]
+                        INDEXER_DATABASE_NAME = hubConfigs[COIN][NETWORK]["xchain-indexer"]["name"]
+                        INDEXER_DATABASE_USER = hubConfigs[COIN][NETWORK]["xchain-indexer"]["user"]
+                        INDEXER_DATABASE_PASS = hubConfigs[COIN][NETWORK]["xchain-indexer"]["pass"]
+
+                        //REGTEST_MINER_URL = hubConfigs[COIN][NETWORK]["xchain-regtest-miner"]["host"]
+                        REGTEST_MINER_URL = "localhost"
+                        REGTEST_MINER_PORT = hubConfigs[COIN][NETWORK]["xchain-regtest-miner"]["server_port"]
+                    } else {
+                        throw new Error("There was an error trying to get all the configs from the hub")
+                    }
+                } else {
+                    throw new Error("Can't connect to the XChain Hub")
+                }
+
+
+            }
+        })
+
+        await phase('connector-init', async () => {
+            global.nodeConnector = new BlockchainConnector(
+                NODE_URL, NODE_PORT, NODE_USER, NODE_PASS
             )
-            console.log("GAS token ("+GAS_TICK+") created successfully")
-        } else {
-            console.log("GAS token ("+GAS_TICK+") already exists")
-        }
+            global.utxoTrackerConnector = new XChainUtxoTrackerConnector(UTXO_TRACKER_URL, UTXO_TRACKER_PORT)
+            global.encoderConnector = new XChainEncoderConnector(ENCODER_URL, ENCODER_PORT)
+            global.indexerConnector = new XChainIndexerConnector(INDEXER_URL, INDEXER_PORT)
+            global.indexerDatabase = new Database(DATABASE_URL, DATABASE_PORT, INDEXER_DATABASE_NAME, INDEXER_DATABASE_USER, INDEXER_DATABASE_PASS)
+            global.regtestMinerConnector = new RegtestMinerConnector(REGTEST_MINER_URL, REGTEST_MINER_PORT)
+        })
+
+        await phase('service-pings', async () => {
+            try {
+                let pingNode = await nodeConnector.getNetworkInfo()
+                if (!pingNode){
+                    throw new Error("Can't connect to the node")
+                }
+            } catch (err){
+                console.log(err)
+                throw new Error("There was an error trying to connect to the node")
+            }
+
+            let pingUtxoTracker = await utxoTrackerConnector.ping()
+            if (!pingUtxoTracker){
+                throw new Error("Can't connect to the XChain Utxo Tracker module")
+            }
+
+            let pingEncoder = await encoderConnector.ping()
+            if (!pingEncoder){
+                throw new Error("Can't connect to the XChain Encoder module")
+            }
+
+            let pingIndexer = await indexerConnector.ping()
+            if (!pingIndexer){
+                throw new Error("Can't connect to the XChain Indexer module")
+            }
+
+            let pingIndexerDatabase = await indexerDatabase.ping()
+            if (!pingIndexerDatabase){
+                throw new Error("Can't connect to the XChain Indexer Database")
+            }
+
+            let pingRegtestMiner = await regtestMinerConnector.ping()
+            if (!pingRegtestMiner){
+                throw new Error("Can't connect to the XChain Regtest Miner module")
+            } else {
+                await regtestMinerConnector.setMiningTime(1000, 1000)
+            }
+        })
+
+        await phase('gas-token-check', async () => {
+            // Ensure the GAS token exists before any tests run
+            console.log("Checking if GAS token ("+GAS_TICK+") exists...")
+            const gasTokenExists = await indexerDatabase.checkIssue({ tick: GAS_TICK, status: 'valid' })
+            if (!gasTokenExists) {
+                console.log("GAS token not found, creating it...")
+                let gasAddressInfo = await cryptoHelper.getNewFundedAddress("GAS.TOKEN", COIN, NETWORK, null, "legacy", 0, 1)
+                await issueHelper.sendIssueV0(
+                    gasAddressInfo,
+                    GAS_TICK,
+                    1000000000,
+                    1000000,
+                    0,
+                    "XChain GAS Token",
+                    1000000
+                )
+                console.log("GAS token ("+GAS_TICK+") created successfully")
+            } else {
+                console.log("GAS token ("+GAS_TICK+") already exists")
+            }
+        })
     },
 
     async afterAll(){
-        try{
-            await regtestMinerConnector.setDefaultMiningTime()
-        } catch (err){
-            console.log("There was a problem setting the default mining time values for the regtest miner")
-        }
+        await phase('teardown', async () => {
+            try{
+                await regtestMinerConnector.setDefaultMiningTime()
+            } catch (err){
+                console.log("There was a problem setting the default mining time values for the regtest miner")
+            }
 
-        // Clear wallet key material from memory
-        if (global.wallets) {
-            for (const label of Object.keys(global.wallets)) {
-                const w = global.wallets[label]
-                if (w.seed && Buffer.isBuffer(w.seed)) w.seed.fill(0)
-                if (w.addresses) {
-                    for (const addr of w.addresses) {
-                        if (addr.privateKey && Buffer.isBuffer(addr.privateKey)) addr.privateKey.fill(0)
+            // Clear wallet key material from memory
+            if (global.wallets) {
+                for (const label of Object.keys(global.wallets)) {
+                    const w = global.wallets[label]
+                    if (w.seed && Buffer.isBuffer(w.seed)) w.seed.fill(0)
+                    if (w.addresses) {
+                        for (const addr of w.addresses) {
+                            if (addr.privateKey && Buffer.isBuffer(addr.privateKey)) addr.privateKey.fill(0)
+                        }
                     }
                 }
+                global.wallets = {}
             }
-            global.wallets = {}
-        }
 
-        // Close database connection pool
-        try {
-            if (global.indexerDatabase && global.indexerDatabase.pool) {
-                await global.indexerDatabase.pool.end()
+            // Close database connection pool
+            try {
+                if (global.indexerDatabase && global.indexerDatabase.pool) {
+                    await global.indexerDatabase.pool.end()
+                }
+            } catch (err) {
+                console.log("There was a problem closing the database connection pool")
             }
-        } catch (err) {
-            console.log("There was a problem closing the database connection pool")
-        }
+        })
     }
 }

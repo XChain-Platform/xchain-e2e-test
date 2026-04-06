@@ -1,7 +1,7 @@
 {
   "name": "xchain-e2e-test",
   "description": "xchain-e2e-test is an end-to-end testing suite for the XChain platform to ensure data integrity",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "license": "SEE LICENSE IN LICENSE.md",
   "repository": {
     "type": "git",
@@ -27,7 +27,12 @@
     "test:e2e": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/e2e/**/*.e2e.js'",
     "test:boundary": "mocha 'test/boundary/**/*.boundary.js'",
     "test:fuzz": "mocha --timeout 60000 'test/fuzz/**/*.fuzz.js'",
-    "test:fuzz:quick": "mocha --timeout 30000 'test/fuzz/**/*.fuzz.js'"
+    "test:fuzz:quick": "mocha --timeout 30000 'test/fuzz/**/*.fuzz.js'",
+    "test:perf": "mocha --reporter ./test/reporters/performance-reporter.js --bail --timeout 30000 --exit --require ./test/initialCheck.test.js 'test/smoke/**/*.smoke.js'",
+    "test:perf:actions": "mocha --reporter ./test/reporters/performance-reporter.js --timeout 0 --exit --require ./test/initialCheck.test.js 'test/actions/**/*.test.js'",
+    "test:perf:e2e": "mocha --reporter ./test/reporters/performance-reporter.js --timeout 0 --exit --require ./test/initialCheck.test.js 'test/e2e/**/*.e2e.js'",
+    "perf:gate": "node scripts/perf-gate.js",
+    "perf:report": "node scripts/perf-report.js"
   },
   "devDependencies": {
     "fast-check": "^4.6.0",

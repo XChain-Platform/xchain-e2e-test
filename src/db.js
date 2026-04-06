@@ -65,6 +65,15 @@ class Database {
         return value == null || value == ""
     }
 
+    _recordPerfPoll(method, startMs, polls, resolved) {
+        try {
+            const collector = require('../test/perf/perfCollector')
+            collector.recordPoll({ method, startMs, endMs: Date.now(), polls, resolved })
+        } catch (e) {
+            // perfCollector not loaded (unit tests, etc.) — silently skip
+        }
+    }
+
     // Handle getting a database Connection    
     async getConnection(){
         if(this.transactionConnection)
@@ -106,14 +115,17 @@ class Database {
     }
 
     async waitForIssue(issueObject, timeMax = 30000){
-
-        const endTime = Date.now() + timeMax
+        const startMs = Date.now()
+        const endTime = startMs + timeMax
+        let polls = 0
 
         while (Date.now() < endTime){
+            polls++
             try {
                 let row = await this.checkIssue(issueObject)
 
                 if (row){
+                    this._recordPerfPoll('checkIssue', startMs, polls, true)
                     return row
                 }
 
@@ -124,6 +136,7 @@ class Database {
             }
         }
 
+        this._recordPerfPoll('checkIssue', startMs, polls, false)
         return null
     }
 
@@ -207,13 +220,17 @@ class Database {
     }
     
     async waitForSend(sendObject, timeMax = 30000){
-        const endTime = Date.now() + timeMax
+        const startMs = Date.now()
+        const endTime = startMs + timeMax
+        let polls = 0
 
         while (Date.now() < endTime){
+            polls++
             try {
                 let row = await this.checkSend(sendObject)
 
                 if (row){
+                    this._recordPerfPoll('checkSend', startMs, polls, true)
                     return row
                 }
 
@@ -224,6 +241,7 @@ class Database {
             }
         }
 
+        this._recordPerfPoll('checkSend', startMs, polls, false)
         return null
     }
     
@@ -298,13 +316,17 @@ class Database {
     }
     
     async waitForCredit(creditObject, timeMax = 30000){
-        const endTime = Date.now() + timeMax
+        const startMs = Date.now()
+        const endTime = startMs + timeMax
+        let polls = 0
 
         while (Date.now() < endTime){
+            polls++
             try {
                 let row = await this.checkCredit(creditObject)
 
                 if (row){
+                    this._recordPerfPoll('checkCredit', startMs, polls, true)
                     return row
                 }
 
@@ -315,6 +337,7 @@ class Database {
             }
         }
 
+        this._recordPerfPoll('checkCredit', startMs, polls, false)
         return null
     }
     
@@ -377,13 +400,17 @@ class Database {
     }
     
     async waitForDebit(debitObject, timeMax = 30000){
-        const endTime = Date.now() + timeMax
+        const startMs = Date.now()
+        const endTime = startMs + timeMax
+        let polls = 0
 
         while (Date.now() < endTime){
+            polls++
             try {
                 let row = await this.checkDebit(debitObject)
 
                 if (row){
+                    this._recordPerfPoll('checkDebit', startMs, polls, true)
                     return row
                 }
 
@@ -393,6 +420,8 @@ class Database {
                 await this.sleep(1000)
             }
         }
+
+        this._recordPerfPoll('checkDebit', startMs, polls, false)
 
         return null
     }
@@ -456,13 +485,17 @@ class Database {
     }
     
     async waitForMint(mintObject, timeMax = 30000){
-        const endTime = Date.now() + timeMax
+        const startMs = Date.now()
+        const endTime = startMs + timeMax
+        let polls = 0
 
         while (Date.now() < endTime){
+            polls++
             try {
                 let row = await this.checkMint(mintObject)
 
                 if (row){
+                    this._recordPerfPoll('checkMint', startMs, polls, true)
                     return row
                 }
 
@@ -473,6 +506,7 @@ class Database {
             }
         }
 
+        this._recordPerfPoll('checkMint', startMs, polls, false)
         return null
     }
     
@@ -551,13 +585,17 @@ class Database {
     }
     
     async waitForBroadcast(broadcastObject, timeMax = 30000){
-        const endTime = Date.now() + timeMax
+        const startMs = Date.now()
+        const endTime = startMs + timeMax
+        let polls = 0
 
         while (Date.now() < endTime){
+            polls++
             try {
                 let row = await this.checkBroadcast(broadcastObject)
 
                 if (row){
+                    this._recordPerfPoll('checkBroadcast', startMs, polls, true)
                     return row
                 }
 
@@ -567,6 +605,8 @@ class Database {
                 await this.sleep(1000)
             }
         }
+
+        this._recordPerfPoll('checkBroadcast', startMs, polls, false)
 
         return null
     }
@@ -651,13 +691,17 @@ class Database {
     }
 
     async waitForList(listObject, timeMax = 30000){
-        const endTime = Date.now() + timeMax
+        const startMs = Date.now()
+        const endTime = startMs + timeMax
+        let polls = 0
 
         while (Date.now() < endTime){
+            polls++
             try {
                 let row = await this.checkList(listObject)
 
                 if (row){
+                    this._recordPerfPoll('checkList', startMs, polls, true)
                     return row
                 }
 
@@ -668,6 +712,7 @@ class Database {
             }
         }
 
+        this._recordPerfPoll('checkList', startMs, polls, false)
         return null
     }
     
@@ -798,13 +843,17 @@ class Database {
     }
     
     async waitForAirdrop(airdropObject, timeMax = 30000){
-        const endTime = Date.now() + timeMax
+        const startMs = Date.now()
+        const endTime = startMs + timeMax
+        let polls = 0
 
         while (Date.now() < endTime){
+            polls++
             try {
                 let row = await this.checkAirdrop(airdropObject)
 
                 if (row){
+                    this._recordPerfPoll('checkAirdrop', startMs, polls, true)
                     return row
                 }
 
@@ -815,6 +864,7 @@ class Database {
             }
         }
 
+        this._recordPerfPoll('checkAirdrop', startMs, polls, false)
         return null
     }
     
@@ -979,13 +1029,17 @@ class Database {
     }
     
     async waitForDispenser(dispenserObject, timeMax = 30000){
-        const endTime = Date.now() + timeMax
+        const startMs = Date.now()
+        const endTime = startMs + timeMax
+        let polls = 0
 
         while (Date.now() < endTime){
+            polls++
             try {
                 let row = await this.checkDispenser(dispenserObject)
 
                 if (row){
+                    this._recordPerfPoll('checkDispenser', startMs, polls, true)
                     return row
                 }
 
@@ -996,6 +1050,7 @@ class Database {
             }
         }
 
+        this._recordPerfPoll('checkDispenser', startMs, polls, false)
         return null
     }
     
@@ -1128,13 +1183,17 @@ class Database {
     }
     
     async waitForDispense(dispenseObject, timeMax = 30000){
-        const endTime = Date.now() + timeMax
+        const startMs = Date.now()
+        const endTime = startMs + timeMax
+        let polls = 0
 
         while (Date.now() < endTime){
+            polls++
             try {
                 let row = await this.checkDispense(dispenseObject)
 
                 if (row){
+                    this._recordPerfPoll('checkDispense', startMs, polls, true)
                     return row
                 }
 
@@ -1145,6 +1204,7 @@ class Database {
             }
         }
 
+        this._recordPerfPoll('checkDispense', startMs, polls, false)
         return null
     }
     
@@ -1270,17 +1330,24 @@ class Database {
 
     // ─── Generic waitFor wrapper ───────────────────────────────────────
     async _waitFor(checkFn, params, timeMax = 30000){
-        const endTime = Date.now() + timeMax
+        const startMs = Date.now()
+        const endTime = startMs + timeMax
+        let polls = 0
         while (Date.now() < endTime){
+            polls++
             try {
                 let row = await checkFn.call(this, params)
-                if (row) return row
+                if (row) {
+                    this._recordPerfPoll(checkFn.name || 'unknown', startMs, polls, true)
+                    return row
+                }
                 await this.sleep(1000)
             } catch(err) {
                 console.log(err)
                 await this.sleep(1000)
             }
         }
+        this._recordPerfPoll(checkFn.name || 'unknown', startMs, polls, false)
         return null
     }
 
@@ -1873,11 +1940,18 @@ class Database {
     // ── VM / Contract Methods ──
 
     async waitForContract(params, timeMax = 30000){
-        const endTime = Date.now() + timeMax
+        const startMs = Date.now()
+        const endTime = startMs + timeMax
+        let polls = 0
         while(Date.now() < endTime){
-            try { let row = await this.checkContract(params); if(row) return row; await this.sleep(1000); }
-            catch(err){ await this.sleep(1000); }
+            polls++
+            try {
+                let row = await this.checkContract(params)
+                if(row) { this._recordPerfPoll('checkContract', startMs, polls, true); return row }
+                await this.sleep(1000)
+            } catch(err){ await this.sleep(1000) }
         }
+        this._recordPerfPoll('checkContract', startMs, polls, false)
         return null
     }
 
@@ -1903,11 +1977,18 @@ class Database {
     }
 
     async waitForExecution(params, timeMax = 30000){
-        const endTime = Date.now() + timeMax
+        const startMs = Date.now()
+        const endTime = startMs + timeMax
+        let polls = 0
         while(Date.now() < endTime){
-            try { let row = await this.checkExecution(params); if(row) return row; await this.sleep(1000); }
-            catch(err){ await this.sleep(1000); }
+            polls++
+            try {
+                let row = await this.checkExecution(params)
+                if(row) { this._recordPerfPoll('checkExecution', startMs, polls, true); return row }
+                await this.sleep(1000)
+            } catch(err){ await this.sleep(1000) }
         }
+        this._recordPerfPoll('checkExecution', startMs, polls, false)
         return null
     }
 
@@ -1935,11 +2016,18 @@ class Database {
     }
 
     async waitForDeposit(params, timeMax = 30000){
-        const endTime = Date.now() + timeMax
+        const startMs = Date.now()
+        const endTime = startMs + timeMax
+        let polls = 0
         while(Date.now() < endTime){
-            try { let row = await this.checkDeposit(params); if(row) return row; await this.sleep(1000); }
-            catch(err){ await this.sleep(1000); }
+            polls++
+            try {
+                let row = await this.checkDeposit(params)
+                if(row) { this._recordPerfPoll('checkDeposit', startMs, polls, true); return row }
+                await this.sleep(1000)
+            } catch(err){ await this.sleep(1000) }
         }
+        this._recordPerfPoll('checkDeposit', startMs, polls, false)
         return null
     }
 
@@ -1969,11 +2057,18 @@ class Database {
     }
 
     async waitForWithdrawal(params, timeMax = 30000){
-        const endTime = Date.now() + timeMax
+        const startMs = Date.now()
+        const endTime = startMs + timeMax
+        let polls = 0
         while(Date.now() < endTime){
-            try { let row = await this.checkWithdrawal(params); if(row) return row; await this.sleep(1000); }
-            catch(err){ await this.sleep(1000); }
+            polls++
+            try {
+                let row = await this.checkWithdrawal(params)
+                if(row) { this._recordPerfPoll('checkWithdrawal', startMs, polls, true); return row }
+                await this.sleep(1000)
+            } catch(err){ await this.sleep(1000) }
         }
+        this._recordPerfPoll('checkWithdrawal', startMs, polls, false)
         return null
     }
 
@@ -2005,11 +2100,18 @@ class Database {
     // ── Staking Methods ──
 
     async waitForStake(params, timeMax = 30000){
-        const endTime = Date.now() + timeMax
+        const startMs = Date.now()
+        const endTime = startMs + timeMax
+        let polls = 0
         while(Date.now() < endTime){
-            try { let row = await this.checkStake(params); if(row) return row; await this.sleep(1000); }
-            catch(err){ await this.sleep(1000); }
+            polls++
+            try {
+                let row = await this.checkStake(params)
+                if(row) { this._recordPerfPoll('checkStake', startMs, polls, true); return row }
+                await this.sleep(1000)
+            } catch(err){ await this.sleep(1000) }
         }
+        this._recordPerfPoll('checkStake', startMs, polls, false)
         return null
     }
 
@@ -2036,11 +2138,18 @@ class Database {
     }
 
     async waitForUnstake(params, timeMax = 30000){
-        const endTime = Date.now() + timeMax
+        const startMs = Date.now()
+        const endTime = startMs + timeMax
+        let polls = 0
         while(Date.now() < endTime){
-            try { let row = await this.checkUnstake(params); if(row) return row; await this.sleep(1000); }
-            catch(err){ await this.sleep(1000); }
+            polls++
+            try {
+                let row = await this.checkUnstake(params)
+                if(row) { this._recordPerfPoll('checkUnstake', startMs, polls, true); return row }
+                await this.sleep(1000)
+            } catch(err){ await this.sleep(1000) }
         }
+        this._recordPerfPoll('checkUnstake', startMs, polls, false)
         return null
     }
 
@@ -2067,11 +2176,18 @@ class Database {
     }
 
     async waitForDelegation(params, timeMax = 30000){
-        const endTime = Date.now() + timeMax
+        const startMs = Date.now()
+        const endTime = startMs + timeMax
+        let polls = 0
         while(Date.now() < endTime){
-            try { let row = await this.checkDelegation(params); if(row) return row; await this.sleep(1000); }
-            catch(err){ await this.sleep(1000); }
+            polls++
+            try {
+                let row = await this.checkDelegation(params)
+                if(row) { this._recordPerfPoll('checkDelegation', startMs, polls, true); return row }
+                await this.sleep(1000)
+            } catch(err){ await this.sleep(1000) }
         }
+        this._recordPerfPoll('checkDelegation', startMs, polls, false)
         return null
     }
 
@@ -2097,11 +2213,18 @@ class Database {
     }
 
     async waitForRewardClaim(params, timeMax = 30000){
-        const endTime = Date.now() + timeMax
+        const startMs = Date.now()
+        const endTime = startMs + timeMax
+        let polls = 0
         while(Date.now() < endTime){
-            try { let row = await this.checkRewardClaim(params); if(row) return row; await this.sleep(1000); }
-            catch(err){ await this.sleep(1000); }
+            polls++
+            try {
+                let row = await this.checkRewardClaim(params)
+                if(row) { this._recordPerfPoll('checkRewardClaim', startMs, polls, true); return row }
+                await this.sleep(1000)
+            } catch(err){ await this.sleep(1000) }
         }
+        this._recordPerfPoll('checkRewardClaim', startMs, polls, false)
         return null
     }
 
