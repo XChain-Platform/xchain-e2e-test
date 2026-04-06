@@ -140,14 +140,12 @@ module.exports = {
         }
         
         //let txHex = tx.toHex()
-        console.log("Sending the transaction...")
-        console.log(txHex)
+        console.log("Sending the transaction... (hex length: "+txHex.length+")")
         txHash = await nodeConnector.broadcastTx(txHex)
         let spentTxHash = null
         
         if (spentHex != null){
-            console.log("Sending the second transaction...")
-            console.log(spentHex)
+            console.log("Sending the second transaction... (hex length: "+spentHex.length+")")
             spentTxHash = await nodeConnector.broadcastTx(spentHex)
         }
         //wait for the transaction to be confirmed
@@ -315,8 +313,7 @@ module.exports = {
         let txHex = tx.toHex()
         
         //let txHex = tx.toHex()
-        console.log("Sending a simple transaction...")
-        console.log(txHex)
+        console.log("Sending a simple transaction... (hex length: "+txHex.length+")")
         txHash = await nodeConnector.broadcastTx(txHex)
         //wait for the transaction to be confirmed
         console.log("Waiting for the simple transaction ("+txHash+") to be confirmed...")

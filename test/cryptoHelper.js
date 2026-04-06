@@ -7,10 +7,6 @@ const bip32 = BIP32Factory(ecc)
 const bitcoin = require('bitcoinjs-lib')
 const CryptoNetworks = require('../src/CryptoNetworks')
 
-const rpcUser = 'rpc';
-const rpcPassword = 'rpc';
-const url = 'http://localhost:8333';        
-
 global.wallets = {}
 
 module.exports = {
@@ -57,7 +53,6 @@ module.exports = {
                 testAddress = bitcoin.payments.p2pkh({ pubkey: address.publicKey, network }).address
                 break
         }
-        console.log(wallet)
         wallet["addresses"].push({privateKey: address.privateKey, publicKey: address.publicKey, address:testAddress})
         return {mnemonic:mnemonic, privateKey: address.privateKey, publicKey: address.publicKey, address:testAddress}
     },

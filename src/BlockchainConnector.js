@@ -80,7 +80,6 @@ class BlockchainConnector {
                 let txHex = await this.getTransactionHex(txid)
                 return true
             } catch(err) {
-                console.log(err)
                 await this.sleep(1000)
             }
         }

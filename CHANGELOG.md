@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-04-06
+
+### Security
+- Mask RPC and database credentials in `printAllEnvironmentalVariables()` diagnostic output
+- Remove `console.log(wallet)` that exposed private keys to stdout
+- Add mainnet guard — test suite refuses to run against mainnet unless `ALLOW_MAINNET=true` is set
+- Redact full transaction hex from logs, show only hex length
+- Zero out private keys and seed buffers in `afterAll` teardown
+- Close database connection pool in `afterAll` to prevent resource leaks
+- Remove verbose error logging in `BlockchainConnector.waitForTx` that could leak connection details
+- Stop baking `.env` into Docker image layers — credentials must be passed at runtime via `--env-file`
+
+### Removed
+- Unused hardcoded `rpcUser`, `rpcPassword`, and `url` constants from `cryptoHelper.js`
+
+### Fixed
+- Resolve 3 npm audit vulnerabilities (diff DoS, serialize-javascript RCE/CPU exhaustion) via overrides for mocha transitive deps
+
 ## [0.2.6] - 2026-04-06
 
 ### Added

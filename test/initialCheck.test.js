@@ -73,12 +73,19 @@ function checkAllEnvironmentalVariables(){
     return variableArray.every((variable) => variable !== null && variable !== undefined)
 }
 
+function maskSecret(value){
+    if (value == null || value === undefined) return '(not set)'
+    const str = String(value)
+    if (str.length <= 4) return '****'
+    return '****' + str.slice(-4)
+}
+
 function printAllEnvironmentalVariables(){
     console.log({
       node_url:NODE_URL,
       node_port:NODE_PORT,
-      node_user:NODE_USER,
-      node_pass:NODE_PASS,
+      node_user:maskSecret(NODE_USER),
+      node_pass:maskSecret(NODE_PASS),
       database_url:DATABASE_URL,
       database_port:DATABASE_PORT,
       utxo_tracker_url:UTXO_TRACKER_URL,
@@ -88,8 +95,8 @@ function printAllEnvironmentalVariables(){
       indexer_url:INDEXER_URL,
       indexer_port:INDEXER_PORT,
       indexer_database_name:INDEXER_DATABASE_NAME,
-      indexer_database_user:INDEXER_DATABASE_USER,
-      indexer_database_pass:INDEXER_DATABASE_PASS,
+      indexer_database_user:maskSecret(INDEXER_DATABASE_USER),
+      indexer_database_pass:maskSecret(INDEXER_DATABASE_PASS),
       regtest_miner_url:REGTEST_MINER_URL,
       regtest_miner_port:REGTEST_MINER_PORT
     })
@@ -97,6 +104,10 @@ function printAllEnvironmentalVariables(){
 
 exports.mochaHooks = {
     async beforeAll(){
+        if (NETWORK === 'mainnet' && process.env.ALLOW_MAINNET !== 'true'){
+            throw new Error('Refusing to run tests against mainnet. Set ALLOW_MAINNET=true to override.')
+        }
+
         if (!checkAllEnvironmentalVariables()){
             printAllEnvironmentalVariables()
         
@@ -221,6 +232,28 @@ exports.mochaHooks = {
         } catch (err){
             console.log("There was a problem setting the default mining time values for the regtest miner")
         }
-        //decoder.stop()
+
+        // Clear wallet key material from memory
+        if (global.wallets) {
+            for (const label of Object.keys(global.wallets)) {
+                const w = global.wallets[label]
+                if (w.seed && Buffer.isBuffer(w.seed)) w.seed.fill(0)
+                if (w.addresses) {
+                    for (const addr of w.addresses) {
+                        if (addr.privateKey && Buffer.isBuffer(addr.privateKey)) addr.privateKey.fill(0)
+                    }
+                }
+            }
+            global.wallets = {}
+        }
+
+        // Close database connection pool
+        try {
+            if (global.indexerDatabase && global.indexerDatabase.pool) {
+                await global.indexerDatabase.pool.end()
+            }
+        } catch (err) {
+            console.log("There was a problem closing the database connection pool")
+        }
     }
 }
