@@ -1,0 +1,149 @@
+'use strict'
+
+// Integration tests for the full address funding flow:
+// cryptoHelper.getNewFundedAddress → regtestMinerConnector → nodeConnector → utxoTrackerConnector
+
+const assert = require('assert')
+const sinon = require('sinon')
+const bitcoin = require('bitcoinjs-lib')
+
+const CryptoNetworks = require('../../../src/CryptoNetworks')
+
+const cryptoHelper = require('../../../test/cryptoHelper')
+
+describe('Funding Flow — cryptoHelper.getNewFundedAddress', function () {
+
+    let savedGlobals
+
+    beforeEach(function () {
+        savedGlobals = {
+            NETWORK_OBJECT: global.NETWORK_OBJECT,
+            wallets: global.wallets,
+            regtestMinerConnector: global.regtestMinerConnector,
+            nodeConnector: global.nodeConnector,
+            utxoTrackerConnector: global.utxoTrackerConnector,
+        }
+
+        global.NETWORK_OBJECT = CryptoNetworks.getBitcoinJsNetwork('bitcoin-regtest')
+        global.wallets = {}
+    })
+
+    afterEach(function () {
+        Object.assign(global, savedGlobals)
+        sinon.restore()
+    })
+
+    describe('Scenario 3.2.5: Full address funding flow', function () {
+
+        it('generates address, funds it, waits for confirmation and UTXOs', async function () {
+            const fundingTxId = 'funding' + '00'.repeat(28)
+            let sendFundsCalled = null
+            let waitForTxCalled = null
+            let waitForUtxosCalled = null
+
+            global.regtestMinerConnector = {
+                sendFunds: async function (address, amount) {
+                    sendFundsCalled = { address, amount }
+                    return fundingTxId
+                }
+            }
+
+            global.nodeConnector = {
+                waitForTx: async function (txid) {
+                    waitForTxCalled = txid
+                    return true
+                }
+            }
+
+            global.utxoTrackerConnector = {
+                waitForUtxos: async function (address) {
+                    waitForUtxosCalled = address
+                    return true
+                }
+            }
+
+            const result = await cryptoHelper.getNewFundedAddress(
+                'FUNDING.TEST', 'bitcoin', 'regtest', null, 'legacy', 0, 1
+            )
+
+            // Returns a valid address info object
+            assert(result.mnemonic, 'should have a mnemonic')
+            assert(result.privateKey, 'should have a private key')
+            assert(result.publicKey, 'should have a public key')
+            assert(result.address, 'should have an address')
+            assert(typeof result.address === 'string', 'address is a string')
+
+            // sendFunds was called with the generated address and requested amount
+            assert(sendFundsCalled, 'regtestMinerConnector.sendFunds should have been called')
+            assert.strictEqual(sendFundsCalled.address, result.address)
+            assert.strictEqual(sendFundsCalled.amount, 1)
+
+            // waitForTx was called with the funding txid
+            assert.strictEqual(waitForTxCalled, fundingTxId)
+
+            // waitForUtxos was called with the generated address
+            assert.strictEqual(waitForUtxosCalled, result.address)
+
+            // Wallet is cached globally
+            assert(global.wallets['FUNDING.TEST'], 'wallet should be cached')
+            assert.strictEqual(global.wallets['FUNDING.TEST'].mnemonic, result.mnemonic)
+        })
+
+        it('throws when waitForTx returns false', async function () {
+            global.regtestMinerConnector = {
+                sendFunds: async () => 'sometxid'
+            }
+            global.nodeConnector = {
+                waitForTx: async () => false
+            }
+            global.utxoTrackerConnector = {
+                waitForUtxos: async () => true
+            }
+
+            await assert.rejects(
+                () => cryptoHelper.getNewFundedAddress('FAIL.TEST', 'bitcoin', 'regtest', null, 'legacy', 0, 1),
+                { message: "The sent tx didn't appear in the blockchain" }
+            )
+        })
+
+        it('throws when waitForUtxos returns false', async function () {
+            global.regtestMinerConnector = {
+                sendFunds: async () => 'sometxid'
+            }
+            global.nodeConnector = {
+                waitForTx: async () => true
+            }
+            global.utxoTrackerConnector = {
+                waitForUtxos: async () => false
+            }
+
+            await assert.rejects(
+                () => cryptoHelper.getNewFundedAddress('FAIL.TEST2', 'bitcoin', 'regtest', null, 'legacy', 0, 1),
+                { message: "The utxo tracker couldn't parse the utxo" }
+            )
+        })
+    })
+
+    describe('Scenario: Wallet cache persistence across calls', function () {
+
+        it('second getNewAddress for same label reuses existing mnemonic', async function () {
+            const addr1 = await cryptoHelper.getNewAddress('CACHE.TEST', 'bitcoin', 'regtest', null, 'legacy', 0)
+            const addr2 = await cryptoHelper.getNewAddress('CACHE.TEST', 'bitcoin', 'regtest', null, 'legacy', 1)
+
+            // The wallet stores the mnemonic; addr2.mnemonic is null due to code behavior
+            // (only the first call returns the mnemonic in the result object)
+            const wallet = global.wallets['CACHE.TEST']
+            assert.strictEqual(wallet.mnemonic, addr1.mnemonic, 'wallet stores first mnemonic')
+            assert.notStrictEqual(addr1.address, addr2.address, 'different addresses for different indices')
+            assert.strictEqual(wallet.addresses.length, 2, 'wallet has 2 addresses')
+        })
+
+        it('different labels produce independent wallets', async function () {
+            const addr1 = await cryptoHelper.getNewAddress('WALLET.A', 'bitcoin', 'regtest')
+            const addr2 = await cryptoHelper.getNewAddress('WALLET.B', 'bitcoin', 'regtest')
+
+            assert.notStrictEqual(addr1.mnemonic, addr2.mnemonic, 'different mnemonics')
+            assert.notStrictEqual(addr1.address, addr2.address, 'different addresses')
+        })
+    })
+})

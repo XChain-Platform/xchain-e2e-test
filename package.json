@@ -1,7 +1,7 @@
 {
   "name": "xchain-e2e-test",
   "description": "xchain-e2e-test is an end-to-end testing suite for the XChain platform to ensure data integrity",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "license": "SEE LICENSE IN LICENSE.md",
   "repository": {
     "type": "git",
@@ -21,7 +21,8 @@
   },
   "scripts": {
     "test": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/actions/**/*.test.js'",
-    "test:unit": "mocha 'test/unit/**/*.test.js'"
+    "test:unit": "mocha 'test/unit/**/*.test.js'",
+    "test:integration": "mocha 'test/integration/**/*.test.js'"
   },
   "devDependencies": {
     "sinon": "^21.0.3"

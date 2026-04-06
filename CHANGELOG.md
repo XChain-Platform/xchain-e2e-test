@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-04-06
+
+### Added
+- Integration test suite (72 tests) for test suite orchestration — run with `npm run test:integration`
+- Tests cover bootstrap lifecycle (env-var and hub-discovery paths), transaction pipeline (OP_RETURN, UTXO caching, address funding), helper-to-DB assertion contracts (issue, send, dispenser, batch), database connection pool management, polling integration, wallet/UTXO state management, and error propagation across all layers
+- `test:integration` npm script
+- Shared mock fixtures for service responses, database rows, and mariadb ESM injection
+
 ## [0.2.1] - 2026-04-06
 
 ### Added
