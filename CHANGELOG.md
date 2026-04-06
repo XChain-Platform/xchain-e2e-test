@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-04-06
+
+### Added
+- E2E test suite for the test suite itself (28 tests across 6 files) — run with `npm run test:e2e`
+- Tests validate bootstrap machinery, transaction pipeline (OP_RETURN and P2SH paths), action flow orchestration (issue-then-send chain, negative status detection, batch unpacking), polling reliability under real latency, teardown/cleanup, and result accuracy with false positive prevention
+- `test:e2e` npm script with `--timeout 0` and `--require ./test/initialCheck.test.js`
+
 ## [0.2.3] - 2026-04-06
 
 ### Added
