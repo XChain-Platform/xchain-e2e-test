@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-04-06
+
+### Added
+- Unit test suite (360 tests) for internal logic — run with `npm run test:unit`
+- Tests cover CryptoNetworks, Database query builders/polling, all 21 action helpers, 6 service connectors, cryptoHelper, transactionHelper, and initialCheck bootstrap
+- `sinon` dev dependency for test stubs
+- `test:unit` npm script
+
 ## [0.2.0] - 2026-04-06
 
 ### Added
