@@ -102,7 +102,8 @@ exports.mochaHooks = {
         
         
             console.log("Connecting to the hub")
-            global.hubConnector = new XChainHubConnector(HUB_URL, HUB_PORT)
+            let hubEndpoints = XChainHubConnector.parseEndpoints();
+            global.hubConnector = new XChainHubConnector(hubEndpoints)
             let pingHub = await hubConnector.ping()
             
             if (pingHub){
