@@ -1869,6 +1869,262 @@ class Database {
             await connection.release()
         }
     }
+
+    // ── VM / Contract Methods ──
+
+    async waitForContract(params, timeMax = 30000){
+        const endTime = Date.now() + timeMax
+        while(Date.now() < endTime){
+            try { let row = await this.checkContract(params); if(row) return row; await this.sleep(1000); }
+            catch(err){ await this.sleep(1000); }
+        }
+        return null
+    }
+
+    async checkContract({source, txHash, status}){
+        let w = [], v = []
+        if(source){ w.push("ia.address = ?"); v.push(source); }
+        if(txHash){ w.push("itx.hash = ?"); v.push(txHash); }
+        if(status){ w.push("ist.status = ?"); v.push(status); }
+        if(w.length === 0) return null
+        let query = `SELECT c.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status
+            FROM contracts c
+            LEFT JOIN actions act ON act.action_index = c.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ia ON ia.id = c.source_id
+            LEFT JOIN index_statuses ist ON ist.id = c.status_id
+            WHERE ` + w.join(" AND ")
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch(err){ return null } finally { await connection.release() }
+    }
+
+    async waitForExecution(params, timeMax = 30000){
+        const endTime = Date.now() + timeMax
+        while(Date.now() < endTime){
+            try { let row = await this.checkExecution(params); if(row) return row; await this.sleep(1000); }
+            catch(err){ await this.sleep(1000); }
+        }
+        return null
+    }
+
+    async checkExecution({contractIndex, caller, methodName, txHash, status}){
+        let w = [], v = []
+        if(contractIndex){ w.push("e.contract_index = ?"); v.push(contractIndex); }
+        if(caller){ w.push("ia.address = ?"); v.push(caller); }
+        if(methodName){ w.push("e.method_name = ?"); v.push(methodName); }
+        if(txHash){ w.push("itx.hash = ?"); v.push(txHash); }
+        if(status){ w.push("ist.status = ?"); v.push(status); }
+        if(w.length === 0) return null
+        let query = `SELECT e.*, ia.address AS caller, itx.hash AS tx_hash, ist.status AS status
+            FROM contract_executions e
+            LEFT JOIN actions act ON act.action_index = e.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ia ON ia.id = e.caller_id
+            LEFT JOIN index_statuses ist ON ist.id = e.status_id
+            WHERE ` + w.join(" AND ")
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch(err){ return null } finally { await connection.release() }
+    }
+
+    async waitForDeposit(params, timeMax = 30000){
+        const endTime = Date.now() + timeMax
+        while(Date.now() < endTime){
+            try { let row = await this.checkDeposit(params); if(row) return row; await this.sleep(1000); }
+            catch(err){ await this.sleep(1000); }
+        }
+        return null
+    }
+
+    async checkDeposit({source, contractIndex, tick, amount, txHash, status}){
+        let w = [], v = []
+        if(source){ w.push("ia.address = ?"); v.push(source); }
+        if(contractIndex){ w.push("d.contract_index = ?"); v.push(contractIndex); }
+        if(tick){ w.push("itick.tick = ?"); v.push(tick); }
+        if(amount){ w.push("d.amount = ?"); v.push(amount); }
+        if(txHash){ w.push("itx.hash = ?"); v.push(txHash); }
+        if(status){ w.push("ist.status = ?"); v.push(status); }
+        if(w.length === 0) return null
+        let query = `SELECT d.*, ia.address AS source, itick.tick AS tick, itx.hash AS tx_hash, ist.status AS status
+            FROM deposits d
+            LEFT JOIN actions act ON act.action_index = d.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ia ON ia.id = d.source_id
+            LEFT JOIN index_tickers itick ON itick.id = d.tick_id
+            LEFT JOIN index_statuses ist ON ist.id = d.status_id
+            WHERE ` + w.join(" AND ")
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch(err){ return null } finally { await connection.release() }
+    }
+
+    async waitForWithdrawal(params, timeMax = 30000){
+        const endTime = Date.now() + timeMax
+        while(Date.now() < endTime){
+            try { let row = await this.checkWithdrawal(params); if(row) return row; await this.sleep(1000); }
+            catch(err){ await this.sleep(1000); }
+        }
+        return null
+    }
+
+    async checkWithdrawal({source, contractIndex, tick, amount, txHash, status}){
+        let w = [], v = []
+        if(source){ w.push("ia.address = ?"); v.push(source); }
+        if(contractIndex){ w.push("wd.contract_index = ?"); v.push(contractIndex); }
+        if(tick){ w.push("itick.tick = ?"); v.push(tick); }
+        if(amount){ w.push("wd.amount = ?"); v.push(amount); }
+        if(txHash){ w.push("itx.hash = ?"); v.push(txHash); }
+        if(status){ w.push("ist.status = ?"); v.push(status); }
+        if(w.length === 0) return null
+        let query = `SELECT wd.*, ia.address AS source, itick.tick AS tick, itx.hash AS tx_hash, ist.status AS status
+            FROM withdrawals wd
+            LEFT JOIN actions act ON act.action_index = wd.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ia ON ia.id = wd.source_id
+            LEFT JOIN index_tickers itick ON itick.id = wd.tick_id
+            LEFT JOIN index_statuses ist ON ist.id = wd.status_id
+            WHERE ` + w.join(" AND ")
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch(err){ return null } finally { await connection.release() }
+    }
+
+    // ── Staking Methods ──
+
+    async waitForStake(params, timeMax = 30000){
+        const endTime = Date.now() + timeMax
+        while(Date.now() < endTime){
+            try { let row = await this.checkStake(params); if(row) return row; await this.sleep(1000); }
+            catch(err){ await this.sleep(1000); }
+        }
+        return null
+    }
+
+    async checkStake({source, tier, txHash, status}){
+        let w = [], v = []
+        if(source){ w.push("ia.address = ?"); v.push(source); }
+        if(tier){ w.push("s.tier = ?"); v.push(tier); }
+        if(txHash){ w.push("itx.hash = ?"); v.push(txHash); }
+        if(status){ w.push("ist.status = ?"); v.push(status); }
+        if(w.length === 0) return null
+        let query = `SELECT s.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status
+            FROM stakes s
+            LEFT JOIN actions act ON act.action_index = s.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ia ON ia.id = s.source_id
+            LEFT JOIN index_statuses ist ON ist.id = s.status_id
+            WHERE ` + w.join(" AND ")
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch(err){ return null } finally { await connection.release() }
+    }
+
+    async waitForUnstake(params, timeMax = 30000){
+        const endTime = Date.now() + timeMax
+        while(Date.now() < endTime){
+            try { let row = await this.checkUnstake(params); if(row) return row; await this.sleep(1000); }
+            catch(err){ await this.sleep(1000); }
+        }
+        return null
+    }
+
+    async checkUnstake({source, tier, txHash, status}){
+        let w = [], v = []
+        if(source){ w.push("ia.address = ?"); v.push(source); }
+        if(tier){ w.push("u.tier = ?"); v.push(tier); }
+        if(txHash){ w.push("itx.hash = ?"); v.push(txHash); }
+        if(status){ w.push("ist.status = ?"); v.push(status); }
+        if(w.length === 0) return null
+        let query = `SELECT u.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status
+            FROM unstakes u
+            LEFT JOIN actions act ON act.action_index = u.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ia ON ia.id = u.source_id
+            LEFT JOIN index_statuses ist ON ist.id = u.status_id
+            WHERE ` + w.join(" AND ")
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch(err){ return null } finally { await connection.release() }
+    }
+
+    async waitForDelegation(params, timeMax = 30000){
+        const endTime = Date.now() + timeMax
+        while(Date.now() < endTime){
+            try { let row = await this.checkDelegation(params); if(row) return row; await this.sleep(1000); }
+            catch(err){ await this.sleep(1000); }
+        }
+        return null
+    }
+
+    async checkDelegation({source, txHash, status}){
+        let w = [], v = []
+        if(source){ w.push("ia.address = ?"); v.push(source); }
+        if(txHash){ w.push("itx.hash = ?"); v.push(txHash); }
+        if(status){ w.push("ist.status = ?"); v.push(status); }
+        if(w.length === 0) return null
+        let query = `SELECT d.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status
+            FROM delegations d
+            LEFT JOIN actions act ON act.action_index = d.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ia ON ia.id = d.source_id
+            LEFT JOIN index_statuses ist ON ist.id = d.status_id
+            WHERE ` + w.join(" AND ")
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch(err){ return null } finally { await connection.release() }
+    }
+
+    async waitForRewardClaim(params, timeMax = 30000){
+        const endTime = Date.now() + timeMax
+        while(Date.now() < endTime){
+            try { let row = await this.checkRewardClaim(params); if(row) return row; await this.sleep(1000); }
+            catch(err){ await this.sleep(1000); }
+        }
+        return null
+    }
+
+    async checkRewardClaim({source, txHash, status}){
+        let w = [], v = []
+        if(source){ w.push("ia.address = ?"); v.push(source); }
+        if(txHash){ w.push("itx.hash = ?"); v.push(txHash); }
+        if(status){ w.push("ist.status = ?"); v.push(status); }
+        if(w.length === 0) return null
+        let query = `SELECT rc.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status
+            FROM reward_claims rc
+            LEFT JOIN actions act ON act.action_index = rc.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ia ON ia.id = rc.source_id
+            LEFT JOIN index_statuses ist ON ist.id = rc.status_id
+            WHERE ` + w.join(" AND ")
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch(err){ return null } finally { await connection.release() }
+    }
 }
 
 module.exports = Database
