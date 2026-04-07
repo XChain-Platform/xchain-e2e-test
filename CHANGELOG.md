@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-04-06
+
+### Added
+- Regression test suite with 114 tests across 7 files in `test/regression/` covering all critical test framework infrastructure
+- P0 tests (74): service connectors, crypto/wallet management, transaction pipeline, database polling, bootstrap orchestration
+- P1 tests (20): action helper message construction, teardown hooks, error propagation and resilience
+- P2 tests (20): cross-chain config resolution, fuzz/boundary regression anchors, SQL injection safety, perfCollector observability
+- Three-tier execution model with `[regression:pN]` Mocha grep tags for per-commit (P0), merge-gate (P0+P1), and full (P0+P1+P2) runs
+- `test:regression`, `test:regression:p0`, and `test:regression:p0p1` npm scripts
+
 ## [0.3.0] - 2026-04-07
 
 ### Added
