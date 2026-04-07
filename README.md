@@ -4,11 +4,14 @@
 # XChain Platform End-to-End Test Suite
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.3.1-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.3.3-blue" alt="Version">
   <img src="https://img.shields.io/badge/tests-953%2B%20passing-brightgreen" alt="Tests">
-  <img src="https://img.shields.io/badge/coverage-unit%20%7C%20integration%20%7C%20e2e%20%7C%20fuzz%20%7C%20chaos%20%7C%20mutation%20%7C%20boundary%20%7C%20smoke%20%7C%20regression-brightgreen" alt="Coverage">
   <img src="https://img.shields.io/badge/node-%3E%3D18-green" alt="Node">
   <img src="https://img.shields.io/badge/license-Dankest%20Community-orange" alt="License">
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/coverage-unit%20%7C%20integration%20%7C%20e2e%20%7C%20fuzz%20%7C%20chaos%20%7C%20mutation%20%7C%20boundary%20%7C%20smoke%20%7C%20regression-brightgreen" alt="Coverage">
 </p>
 
 End-to-end Mocha test suite for the XChain Platform. Exercises the full platform stack — encoder, decoder, indexer, explorer, hub, UTXO tracker, and regtest miner — against a live regtest deployment. Tests are not mocked; they broadcast real transactions to a regtest coin node and verify that the platform processes them correctly end to end.
