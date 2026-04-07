@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-07
+
+### Added
+- Mutation testing infrastructure using Stryker Mutator to assess test suite defect-detection capability
+- Phase 1 config (`stryker.config.mjs`) targeting src/ connectors, test helpers, and cryptoHelper/transactionHelper against unit tests
+- Phase 2 config (`stryker.phase2.config.mjs`) extending Phase 1 with integration tests for broader coverage
+- Mutation report generator (`scripts/mutation-report.js`) producing markdown summaries with per-file scores and survived mutant details
+- `test:mutate`, `test:mutate:integration`, `test:mutate:dry-run`, and `mutate:report` npm scripts
+
 ## [0.2.9] - 2026-04-06
 
 ### Added

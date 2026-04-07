@@ -1,7 +1,7 @@
 {
   "name": "xchain-e2e-test",
   "description": "xchain-e2e-test is an end-to-end testing suite for the XChain platform to ensure data integrity",
-  "version": "0.2.9",
+  "version": "0.3.0",
   "license": "SEE LICENSE IN LICENSE.md",
   "repository": {
     "type": "git",
@@ -34,9 +34,15 @@
     "test:perf:actions": "mocha --reporter ./test/reporters/performance-reporter.js --timeout 0 --exit --require ./test/initialCheck.test.js 'test/actions/**/*.test.js'",
     "test:perf:e2e": "mocha --reporter ./test/reporters/performance-reporter.js --timeout 0 --exit --require ./test/initialCheck.test.js 'test/e2e/**/*.e2e.js'",
     "perf:gate": "node scripts/perf-gate.js",
-    "perf:report": "node scripts/perf-report.js"
+    "perf:report": "node scripts/perf-report.js",
+    "test:mutate": "npx stryker run",
+    "test:mutate:integration": "npx stryker run stryker.phase2.config.mjs",
+    "test:mutate:dry-run": "npx stryker run --dryRunOnly",
+    "mutate:report": "node scripts/mutation-report.js"
   },
   "devDependencies": {
+    "@stryker-mutator/core": "^8.7.1",
+    "@stryker-mutator/mocha-runner": "^8.7.1",
     "fast-check": "^4.6.0",
     "sinon": "^21.0.3"
   },
