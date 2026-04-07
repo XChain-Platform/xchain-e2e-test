@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-04-06
+
+### Changed
+- `README.md` — expanded from minimal stub to full component README matching platform conventions: version badge, feature list, documentation links, quick start, scripts table, test suite breakdown, dependency tables, related links
+
 ## [0.3.1] - 2026-04-06
 
 ### Added
