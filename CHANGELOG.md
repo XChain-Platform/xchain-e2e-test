@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.9] - 2026-04-06
+
+### Added
+- Chaos engineering test suite with 12 experiments across 77 tests targeting test infrastructure resilience
+- Shared chaos helpers module (`test/chaos/chaos-helpers.js`) with mock connection/pool factories and global save/restore utilities
+- P0 experiments: connector timeout cascade, pool exhaustion, GAS token bootstrap failure, teardown failure handling
+- P1 experiments: hub auto-discovery total failure, malformed PSBT detection, database mid-query disconnect recovery, UTXO cache isolation, partial hub config validation
+- P2 experiments: performance reporter write failure, unhandled promise rejection detection, concurrent wallet access safety
+- `test:chaos` and `test:chaos:quick` (P0-only) npm scripts
+
 ## [0.2.8] - 2026-04-06
 
 ### Added

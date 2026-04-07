@@ -1,7 +1,7 @@
 {
   "name": "xchain-e2e-test",
   "description": "xchain-e2e-test is an end-to-end testing suite for the XChain platform to ensure data integrity",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "license": "SEE LICENSE IN LICENSE.md",
   "repository": {
     "type": "git",
@@ -28,6 +28,8 @@
     "test:boundary": "mocha 'test/boundary/**/*.boundary.js'",
     "test:fuzz": "mocha --timeout 60000 'test/fuzz/**/*.fuzz.js'",
     "test:fuzz:quick": "mocha --timeout 30000 'test/fuzz/**/*.fuzz.js'",
+    "test:chaos": "mocha --timeout 10000 'test/chaos/**/*.chaos.js'",
+    "test:chaos:quick": "mocha --timeout 10000 --grep '@P0' 'test/chaos/**/*.chaos.js'",
     "test:perf": "mocha --reporter ./test/reporters/performance-reporter.js --bail --timeout 30000 --exit --require ./test/initialCheck.test.js 'test/smoke/**/*.smoke.js'",
     "test:perf:actions": "mocha --reporter ./test/reporters/performance-reporter.js --timeout 0 --exit --require ./test/initialCheck.test.js 'test/actions/**/*.test.js'",
     "test:perf:e2e": "mocha --reporter ./test/reporters/performance-reporter.js --timeout 0 --exit --require ./test/initialCheck.test.js 'test/e2e/**/*.e2e.js'",
