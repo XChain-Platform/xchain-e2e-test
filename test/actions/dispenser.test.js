@@ -3,6 +3,7 @@ const cryptoHelper = require('../cryptoHelper')
 const transactionHelper = require('../transactionHelper')
 const issueHelper = require('../helpers/issueHelper')
 const dispenserHelper = require('../helpers/dispenserHelper')
+const priceSnapshotHelper = require('../helpers/priceSnapshotHelper')
 
 describe('DISPENSER', () => {
     describe('v0', () => {
@@ -130,6 +131,89 @@ describe('DISPENSER', () => {
                 amount: "50"
             }, 30000)
             assert(debit, "Dispenser should have escrowed 50 tokens")
+        })
+    })
+
+    describe('v0 - FIAT (Mode 1 — validator price oracle)', () => {
+        it('should dispense priced from a seeded FIAT price snapshot', async function() {
+            // Mode 1 derives the coin price from FIAT_AMOUNT and a finalized
+            // GET_COIN/FIAT price_snapshots row (24h reverse-match, newest-first).
+            // We clear the pair and seed exactly one deterministic row, so the
+            // assertion is exact. This assumes the e2e regtest hub is not
+            // continuously finalizing live CoinGecko rows for this pair
+            // (the planned Slice-1 design — CoinGecko prices are mainnet-live
+            // and cannot be asserted exactly).
+            if (!(await priceSnapshotHelper.isAvailable())) {
+                console.log('Hub DB (price_snapshots) not reachable — skipping FIAT dispenser test')
+                this.skip()
+                return
+            }
+
+            let dispenserAddr = await cryptoHelper.getNewFundedAddress("DISPENSER.FIAT", COIN, NETWORK, null, "legacy", 0, 1)
+            let buyerAddr     = await cryptoHelper.getNewFundedAddress("DISPENSER.FIAT.BUYER", COIN, NETWORK, null, "legacy", 0, 1)
+            let dispenserAddress = dispenserAddr["address"]
+            let buyerAddress     = buyerAddr["address"]
+            let tick = "DISPFIAT"+dispenserAddress.substring(dispenserAddress.length-8)
+
+            // 0-decimal token; escrow 50 units in the dispenser.
+            await issueHelper.sendIssueV0(dispenserAddr, tick, 100, 100, 0, "FIAT dispenser test", 100)
+
+            let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
+
+            // FIAT dispenser: priced at 100.00 USD per 1 token. GET_AMOUNT is
+            // ignored for FIAT dispensers (pass 0).
+            let dispenserResult = await dispenserHelper.sendDispenserV0(
+                dispenserAddr,
+                COIN_CODE, tick, 1, 50,
+                COIN_CODE, null, 0, dispenserAddr["address"],
+                "USD", "100.00", expiration,
+                null, null, 'FIAT Mode 1 dispenser'
+            )
+            assert(dispenserResult.dispenser, "FIAT dispenser should be created")
+
+            // Seed a deterministic price: 1 coin = 50000 USD.
+            //   coin_per_token = FIAT_AMOUNT / price = 100 / 50000 = 0.002 coin
+            // block_timestamp is set 1h in the past so it is guaranteed <= the
+            // payment tx block_time yet well inside the 24h reverse-match window
+            // (robust even if the regtest block clock lags real time).
+            let pair  = COIN_CODE + "/USD"
+            let price  = 50000
+            let fiatAmount = 100
+            await priceSnapshotHelper.clearPair(pair)
+            await priceSnapshotHelper.seedSnapshot({
+                coinPair: pair,
+                price: price.toFixed(8),
+                blockTimestamp: Math.floor(Date.now() / 1000) - 3600,
+                roundNumber: 999000001
+            })
+
+            // Buyer pays 0.011 coin (1,100,000 sats):
+            //   units = floor(0.011 / 0.002) = floor(5.5) = 5 tokens
+            let paySats = 1100000
+            let txHash = await transactionHelper.createSimpleTransaction(
+                buyerAddr, dispenserAddress, paySats
+            )
+
+            let coinAmount    = paySats / 1e8                 // 0.011
+            let coinPerToken  = fiatAmount / price             // 0.002
+            let expectedUnits = Math.floor(coinAmount / coinPerToken)  // 5
+            let expectedCredit = String(expectedUnits)         // GIVE_AMOUNT = 1, 0 decimals
+
+            console.log("Waiting for FIAT DISPENSE in the database (txHash: "+txHash+")...")
+            let dispenseRow = await indexerDatabase.waitForDispense({
+                txHash: txHash,
+                source: buyerAddress,
+                giveTick: tick,
+                status: "valid"
+            }, 60000)
+            assert(dispenseRow, "FIAT dispense should exist in DB and be valid")
+
+            let credit = await indexerDatabase.waitForCredit({
+                address: buyerAddress,
+                tick: tick,
+                amount: expectedCredit
+            }, 30000)
+            assert(credit, "Buyer should be credited "+expectedCredit+" tokens (FIAT Mode 1 reverse-match)")
         })
     })
 
