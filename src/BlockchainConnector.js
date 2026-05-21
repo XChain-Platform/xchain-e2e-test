@@ -203,11 +203,7 @@ class BlockchainConnector {
             if (responseData.result && responseData.result.feerate) {
                 return responseData.result.feerate;
             } else {
-                if (await this.isRegtest()){
-                    return 0.00001000
-                } else {
-                    throw new Error('Error getting smart fee from node');
-                }
+                return 0.00001000
             }
         } catch (error) {
             console.error('Error:', error.message);
