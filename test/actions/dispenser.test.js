@@ -21,7 +21,7 @@ describe('DISPENSER', () => {
                 dispenserAddressInfo,
                 COIN_CODE, dispenserTick, 1, 10,
                 COIN_CODE, null, 5, dispenserAddressInfo["address"],
-                null, null, Math.floor(expirationDate.getTime() / 1000),
+                null, null, null, Math.floor(expirationDate.getTime() / 1000),
                 null, null, 'This is a dispenser v0 test'
             )
             assert(result.dispenser, "Dispenser v0 should exist in DB")
@@ -44,7 +44,7 @@ describe('DISPENSER', () => {
                 dispenserAddressInfo,
                 COIN_CODE, dispenserTick, 1, 10,
                 COIN_CODE, null, 0.05, dispenserAddressInfo["address"],
-                null, null, Math.floor(expirationDate.getTime() / 1000),
+                null, null, null, Math.floor(expirationDate.getTime() / 1000),
                 null, null, 'This is a dispenser v0 test to dispense'
             )
             assert(dispenserResult.dispenser, "Dispenser should exist in DB")
@@ -97,7 +97,7 @@ describe('DISPENSER', () => {
                 dispenserAddr,
                 COIN_CODE, tick, "2.5", 50,
                 COIN_CODE, null, 0.001, dispenserAddr["address"],
-                null, null, expiration,
+                null, null, null, expiration,
                 null, null, 'Balance verification dispenser'
             )
             assert(dispenserResult.dispenser, "Dispenser should be created")
@@ -166,7 +166,7 @@ describe('DISPENSER', () => {
                 dispenserAddr,
                 COIN_CODE, tick, 1, 50,
                 COIN_CODE, null, 0, dispenserAddr["address"],
-                "USD", "100.00", expiration,
+                "USD", "100.00", null, expiration,
                 null, null, 'FIAT Mode 1 dispenser'
             )
             assert(dispenserResult.dispenser, "FIAT dispenser should be created")
@@ -232,7 +232,7 @@ describe('DISPENSER', () => {
                 addr,
                 COIN_CODE, tick, 1, 10,
                 COIN_CODE, null, 5, addr["address"],
-                null, null, Math.floor(expirationDate.getTime() / 1000),
+                null, null, null, Math.floor(expirationDate.getTime() / 1000),
                 null, null, 'Dispenser to cancel'
             )
             assert(createResult.dispenser, "Dispenser should be created")
@@ -265,7 +265,7 @@ describe('DISPENSER', () => {
                 addr,
                 COIN_CODE, tick, 1, 10,
                 COIN_CODE, null, 5, addr["address"],
-                null, null, Math.floor(expirationDate.getTime() / 1000),
+                null, null, null, Math.floor(expirationDate.getTime() / 1000),
                 null, null, 'Dispenser to edit'
             )
             assert(createResult.dispenser, "Dispenser should be created")

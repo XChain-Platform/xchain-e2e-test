@@ -3,7 +3,7 @@ const transactionHelper = require('../transactionHelper')
 module.exports = {
     async sendDispenserV0(addressInfo, giveCoin, giveTick, giveAmount,
       giveEscrow, getCoin, getTick, getAmount, getAddress, fiatCode,
-      fiatAmount, expiration, allowList, blockList, memo
+      fiatAmount, oracleAddress, expiration, allowList, blockList, memo
     ){
         let address = addressInfo["address"]
 
@@ -13,6 +13,7 @@ module.exports = {
         if (getTick == null) getTick = ""
         if (fiatCode == null) fiatCode = ""
         if (fiatAmount == null) fiatAmount = ""
+        if (oracleAddress == null) oracleAddress = ""
         if (expiration == null) expiration = ""
         if (allowList == null) allowList = ""
         if (blockList == null) blockList = ""
@@ -20,8 +21,8 @@ module.exports = {
         let dispenserMessage = "DISPENSER|0"
             +"|"+giveCoin+"|"+giveTick+"|"+giveAmount+"|"+giveEscrow
             +"|"+getCoin+"|"+getTick+"|"+getAmount+"|"+getAddress
-            +"|"+fiatCode+"|"+fiatAmount+"|"+expiration+"|"+allowList
-            +"|"+blockList+"|"+memo
+            +"|"+fiatCode+"|"+fiatAmount+"|"+oracleAddress
+            +"|"+expiration+"|"+allowList+"|"+blockList+"|"+memo
 
         console.log("Creating and sending DISPENSER V0 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, dispenserMessage)
