@@ -42,10 +42,17 @@ function makeGatedCiphertext(plaintext) {
 // Stub key-handoff payload — the indexer rule only checks for a
 // structurally-valid MESSAGE v2 in the same tx, not for ciphertext
 // correctness. The wallet validates the actual key payload at unlock
-// time. Returning a placeholder hex string keeps the e2e harness
-// independent of the SDK's ECIES implementation.
+// time. Returning a placeholder hex blob shaped like a real ECIES
+// envelope (ephemeralPubkey || iv || authTag || ciphertext) keeps
+// the e2e harness independent of the SDK's ECIES implementation.
 function stubEncryptedMessage(keyHashHex) {
-    return Buffer.from('xchain.gated_keys.v1:' + keyHashHex, 'utf8').toString('hex')
+    // 33 (ephemeralPubkey) + 12 (iv) + 16 (authTag) + 33 (v1 handoff
+    // plaintext: [0x01][32-byte K]). Filled with deterministic-ish
+    // bytes derived from keyHashHex so each call is distinct.
+    const seed = Buffer.from(keyHashHex.padEnd(64, '0'), 'hex')
+    const blob = Buffer.alloc(94)
+    for (let i = 0; i < blob.length; i++) blob[i] = seed[i % seed.length] ^ (i + 1)
+    return blob.toString('hex')
 }
 
 // Query the indexer's gated_files table directly. Returns null when
