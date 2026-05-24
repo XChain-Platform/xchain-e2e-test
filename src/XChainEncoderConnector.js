@@ -83,14 +83,19 @@ class XChainEncoderConnector {
             response = await axios.post(this.url, dataToSend)
         } catch (err){
             console.log(err)
-            throw new Error('Error trying to create a tx with the encoder module');
+            throw new Error('Error trying to create a tx with the encoder module: ' + (err && err.message));
         }
 
         // Verify if there is a result and return it
         if (response.data.result) {
             return response.data.result;
         } else {
-            throw new Error('Error trying to create a tx with the encoder module');
+            // Surface the JSON-RPC error so callers (e.g. the stale-UTXO
+            // retry helper) can pattern-match on the underlying cause —
+            // common transient: "no utxos were provided and no utxos found".
+            const rpcErr = response.data && response.data.error;
+            const detail = rpcErr ? (rpcErr.message || JSON.stringify(rpcErr)) : 'no result and no error returned';
+            throw new Error('Error trying to create a tx with the encoder module: ' + detail);
         }
     }
 }

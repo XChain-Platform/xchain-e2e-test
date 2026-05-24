@@ -4,6 +4,7 @@ const transactionHelper = require('../transactionHelper')
 const issueHelper = require('../helpers/issueHelper')
 const dispenserHelper = require('../helpers/dispenserHelper')
 const priceSnapshotHelper = require('../helpers/priceSnapshotHelper')
+const gasHelper = require('../helpers/gasHelper')
 
 describe('DISPENSER', () => {
     describe('v0', () => {
@@ -13,6 +14,8 @@ describe('DISPENSER', () => {
             let dispenserTick = "DISPENSERv0"+dispenserAddress.substring(dispenserAddress.length-8)
 
             await issueHelper.sendIssueV0(dispenserAddressInfo, dispenserTick, 100, 100, 0, "Dispenser v0 test", 100)
+            // 3-month expiration tips ~2 days past the 90-day free window — needs GAS for the fee.
+            await gasHelper.ensureGasBalance(dispenserAddressInfo, '100')
 
             let expirationDate = new Date()
             expirationDate.setMonth(expirationDate.getMonth() + 3)
@@ -36,6 +39,7 @@ describe('DISPENSER', () => {
             let dispenserTick = "DISPENSERv0DISPENSE"+dispenserAddress.substring(dispenserAddress.length-8)
 
             await issueHelper.sendIssueV0(dispenserAddressInfo, dispenserTick, 100, 100, 0, "Dispenser v0 test to dispense", 100)
+            await gasHelper.ensureGasBalance(dispenserAddressInfo, '100')
 
             let expirationDate = new Date()
             expirationDate.setMonth(expirationDate.getMonth() + 3)
@@ -224,6 +228,7 @@ describe('DISPENSER', () => {
             let tick = "DISPv1"+address.substring(address.length-8)
 
             await issueHelper.sendIssueV0(addr, tick, 100, 100, 0, "Dispenser cancel test", 100)
+            await gasHelper.ensureGasBalance(addr, '100')
 
             let expirationDate = new Date()
             expirationDate.setMonth(expirationDate.getMonth() + 3)
@@ -257,6 +262,8 @@ describe('DISPENSER', () => {
             let tick = "DISPv2"+address.substring(address.length-8)
 
             await issueHelper.sendIssueV0(addr, tick, 200, 200, 0, "Dispenser edit test", 200)
+            // EDIT v2 stretches expiration to +6 months — chargeable ~91 days at 550 gas/day = 0.5 XCHAIN.
+            await gasHelper.ensureGasBalance(addr, '100')
 
             let expirationDate = new Date()
             expirationDate.setMonth(expirationDate.getMonth() + 3)

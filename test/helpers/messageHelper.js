@@ -1,8 +1,9 @@
 const transactionHelper = require('../transactionHelper')
 
 module.exports = {
+    // MESSAGE wire format: MESSAGE|VERSION|COIN|DESTINATION|...
     async sendMessageV3(addressInfo, destination, plaintextMessage){
-        let messageStr = "MESSAGE|3|"+destination+"|"+plaintextMessage
+        let messageStr = "MESSAGE|3|"+COIN_CODE+"|"+destination+"|"+plaintextMessage
 
         console.log("Creating and sending MESSAGE V3 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, messageStr)
@@ -20,7 +21,7 @@ module.exports = {
     },
 
     async sendMessageV0(addressInfo, destination, encryptionMethod, encryptionKey){
-        let messageStr = "MESSAGE|0|"+destination+"|"+encryptionMethod+"|"+encryptionKey
+        let messageStr = "MESSAGE|0|"+COIN_CODE+"|"+destination+"|"+encryptionMethod+"|"+encryptionKey
 
         console.log("Creating and sending MESSAGE V0 (sender key) tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, messageStr)
@@ -38,7 +39,7 @@ module.exports = {
     },
 
     async sendMessageV1(addressInfo, destination, encryptionMethod, encryptionKey){
-        let messageStr = "MESSAGE|1|"+destination+"|"+encryptionMethod+"|"+encryptionKey
+        let messageStr = "MESSAGE|1|"+COIN_CODE+"|"+destination+"|"+encryptionMethod+"|"+encryptionKey
 
         console.log("Creating and sending MESSAGE V1 (receiver key) tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, messageStr)
@@ -56,7 +57,7 @@ module.exports = {
     },
 
     async sendMessageV2(addressInfo, destination, encryptedMessage){
-        let messageStr = "MESSAGE|2|"+destination+"|"+encryptedMessage
+        let messageStr = "MESSAGE|2|"+COIN_CODE+"|"+destination+"|"+encryptedMessage
 
         console.log("Creating and sending MESSAGE V2 (encrypted) tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, messageStr)

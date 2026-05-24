@@ -42,8 +42,14 @@ describe('COINPAY', function () {
             )
             assert(buyerOrder.order, "Buyer ORDER should exist in DB")
 
-            // 7. Wait for ORDER_MATCH with pending_coinpay status
+            // 7. Wait for ORDER_MATCH with pending_coinpay status — filter by the
+            // specific orders this test created so we don't pick up a leftover
+            // pending obligation from a previous run. The matcher records the
+            // newer order (buyer) on the get side and the existing order (seller)
+            // on the give side (see indexer/db.js createOrderMatch).
             let orderMatch = await indexerDatabase.waitForOrderMatch({
+                giveActionIndex: Number(sellerOrder.order["action_index"]),
+                getActionIndex:  Number(buyerOrder.order["action_index"]),
                 status: 'pending_coinpay'
             }, 30000)
             assert(orderMatch, "ORDER_MATCH with pending_coinpay should exist")

@@ -91,7 +91,11 @@ module.exports = {
                 if (attempt < MAX_ATTEMPTS && _isStaleUtxoError(err)) {
                     _verifiedUtxos = null
                     _verifiedUtxosAddress = null
-                    console.log("Broadcast failed (attempt " + attempt + "/" + MAX_ATTEMPTS + ") with stale UTXO — clearing cache, waiting " + (WAIT_MS/1000) + "s, retrying...")
+                    console.log("Broadcast failed (attempt " + attempt + "/" + MAX_ATTEMPTS + ") with stale UTXO — clearing cache, mining a block, waiting " + (WAIT_MS/1000) + "s, retrying...")
+                    // Force-mine a block. Confirms any pending tx in the mempool
+                    // (so its outputs become spendable) and forces the utxo-tracker
+                    // to re-scan, surfacing change outputs the encoder needs.
+                    try { await regtestMinerConnector.generateBlocks(1) } catch (e) {}
                     await new Promise(r => setTimeout(r, WAIT_MS))
                     lastErr = err
                     continue
@@ -168,12 +172,12 @@ module.exports = {
                 spentPsbtToSign.signInput(parseInt(proxInputIndex), keyToSign);
             }
             
-            // Input 0 carries the XChain P2SH-encoded payload and needs the
-            // custom finalizer. Any additional inputs are regular fee-funding
-            // P2PKH/segwit inputs that finalize with the default rules.
-            spentPsbtToSign.finalizeInput(0, xchainP2shFinalizer);
-            for (let i = 1; i < spentPsbtToSign.data.inputs.length; i++) {
-                spentPsbtToSign.finalizeInput(i);
+            // Every input in the spent tx carries an XChain P2SH-encoded
+            // payload chunk (large action data like DEPLOY code is split
+            // across multiple P2SH inputs by the encoder). All of them
+            // need the custom finalizer.
+            for (let i = 0; i < spentPsbtToSign.data.inputs.length; i++) {
+                spentPsbtToSign.finalizeInput(i, xchainP2shFinalizer);
             }
             spentPsbtToSign.setMaximumFeeRate(100000)
             spentTx = spentPsbtToSign.extractTransaction()

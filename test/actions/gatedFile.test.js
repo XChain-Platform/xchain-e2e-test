@@ -78,6 +78,10 @@ describe('FILE — token-gated content', function () {
     const TICK = 'GATEDTEST' + Date.now().toString().slice(-6)
     const plaintext = Buffer.from('top secret holder-only content')
     const { ciphertext, keyHash } = makeGatedCiphertext(plaintext)
+    // The encoder validator requires a string for rawData and the on-chain
+    // path treats the string as opaque bytes (Latin-1). Send the AES-GCM
+    // ciphertext bytes byte-identically via the 'binary' string encoding.
+    const ciphertextRaw = ciphertext.toString('binary')
 
     let issuer
     let recipient
@@ -105,11 +109,11 @@ describe('FILE — token-gated content', function () {
         // gating fields are positionally correct in the action string.
         const fileCmd = ['FILE', '0', 'secret.txt', 'text/plain', 'Gated Secret', '',
                          TICK, '1', keyHash].join('|')
-        const selfMsgCmd = ['MESSAGE', '2', COIN, issuer.address, stubEncryptedMessage(keyHash)].join('|')
+        const selfMsgCmd = ['MESSAGE', '2', COIN_CODE, issuer.address, stubEncryptedMessage(keyHash)].join('|')
         const commands = [fileCmd, selfMsgCmd]
         const batchMessage = 'BATCH|0|' + commands.join(';')
 
-        const txHash = await transactionHelper.createAndSendTransaction(issuer, batchMessage, ciphertext)
+        const txHash = await transactionHelper.createAndSendTransaction(issuer, batchMessage, ciphertextRaw)
 
         await indexerDatabase.waitForBatch({
             txHash,
@@ -137,7 +141,7 @@ describe('FILE — token-gated content', function () {
 
     it('issuer can transfer the gated token in BATCH(SEND, MESSAGE-to-recipient)', async function () {
         const sendCmd = ['SEND', '0', TICK, '1', recipient.address, ''].join('|')
-        const handoffCmd = ['MESSAGE', '2', COIN, recipient.address, stubEncryptedMessage(keyHash)].join('|')
+        const handoffCmd = ['MESSAGE', '2', COIN_CODE, recipient.address, stubEncryptedMessage(keyHash)].join('|')
         await batchHelper.sendBatchV0(issuer, [sendCmd, handoffCmd])
 
         await indexerDatabase.waitForSend({
@@ -151,16 +155,14 @@ describe('FILE — token-gated content', function () {
     })
 
     it('rejects bare SEND of the gated token with no sibling MESSAGE', async function () {
+        // sendHelper.sendSendV0 doesn't throw on a timeout — waitForSend
+        // resolves to null. So we check the resolved value: if `send` is
+        // non-null AND status='valid', the gate isn't being enforced.
         const res = await sendHelper.sendSendV0(issuer, TICK, '1', recipient.address, '')
-            .then(() => ({ ok: true }))
+            .then((r) => ({ ok: r && r.send && r.send.status === 'valid', result: r }))
             .catch((err) => ({ ok: false, err }))
 
-        // Either the helper times out waiting for a 'valid' row (which
-        // sendHelper does), or the row lands with an 'invalid:' status.
-        // Both outcomes confirm the indexer rejected the gated transfer.
         if (res.ok) {
-            // If sendHelper succeeded with status='valid', the rule isn't
-            // being enforced — fail loudly.
             assert.fail('bare SEND of a gated token unexpectedly succeeded')
         }
     })
@@ -187,11 +189,11 @@ describe('FILE — token-gated content', function () {
         // Publish member 1 atomically with the self-handoff.
         const f1 = ['FILE', '0', 'pack-1.txt', 'text/plain', 'Pack 1', '',
                     TICK, '1', packHash].join('|')
-        const mSelf = ['MESSAGE', '2', COIN, issuer.address, stubEncryptedMessage(packHash)].join('|')
+        const mSelf = ['MESSAGE', '2', COIN_CODE, issuer.address, stubEncryptedMessage(packHash)].join('|')
         const tx1 = await transactionHelper.createAndSendTransaction(
             issuer,
             'BATCH|0|' + [f1, mSelf].join(';'),
-            ct1,
+            ct1.toString('binary'),
         )
         await indexerDatabase.waitForBatch({ txHash: tx1, source: issuer.address, status: 'valid' })
         const row1 = await indexerDatabase.waitForFile({ txHash: tx1, name: 'pack-1.txt', status: 'valid' })
@@ -201,7 +203,7 @@ describe('FILE — token-gated content', function () {
         // since the key is already on chain from member 1.
         const f2 = ['FILE', '0', 'pack-2.txt', 'text/plain', 'Pack 2', '',
                     TICK, '1', packHash].join('|')
-        const tx2 = await transactionHelper.createAndSendTransaction(issuer, f2, ct2)
+        const tx2 = await transactionHelper.createAndSendTransaction(issuer, f2, ct2.toString('binary'))
         const row2 = await indexerDatabase.waitForFile({ txHash: tx2, name: 'pack-2.txt', status: 'valid' })
         assert(row2, 'pack member 2 should land valid')
 
@@ -217,7 +219,7 @@ describe('FILE — token-gated content', function () {
         // issuer-only check in actions/file.js.
         const { ciphertext: spamCt, keyHash: spamHash } = makeGatedCiphertext(Buffer.from('spam'))
         const fileCmd = 'FILE|0|spam.txt|text/plain|Spam||' + TICK + '|1|' + spamHash
-        const txHash = await transactionHelper.createAndSendTransaction(outsider, fileCmd, spamCt)
+        const txHash = await transactionHelper.createAndSendTransaction(outsider, fileCmd, spamCt.toString('binary'))
 
         // Wait for the FILE row but expect status to be the issuer-only error.
         const row = await indexerDatabase.waitForFile({

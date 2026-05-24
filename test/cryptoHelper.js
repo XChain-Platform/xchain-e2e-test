@@ -60,29 +60,39 @@ module.exports = {
     async getNewFundedAddress(label, coin, network, mnemonic = null, addressType="legacy", addressIndex=0, amountToFund){
         let newAddressInfo = await this.getNewAddress(label, coin, network, mnemonic, addressType, addressIndex)
         let newAddress = newAddressInfo["address"]
-        
+
         console.log("Sending funds ("+amountToFund+") to "+newAddress)
         let txId = await regtestMinerConnector.sendFunds(newAddress, amountToFund)
         try {
             let txExists = await nodeConnector.waitForTx(txId)
-            
+
             if (!txExists){
                 throw new Error("The sent tx didn't appear in the blockchain")
-            }           
+            }
         } catch (err){
             throw new Error("The sent tx didn't appear in the blockchain")
         }
         console.log("Waiting for the utxos for "+newAddress)
-        try {
-            let addressHasUtxos = await utxoTrackerConnector.waitForUtxos(newAddress)
-            
-            if (!addressHasUtxos){
-                throw new Error("The utxo tracker couldn't parse the utxo")
+        // First pass: short wait, then if it stalls force-mine a block in case
+        // the funding tx is stuck in the regtest miner's mempool (happens under
+        // full-suite load when many funding txes pile up). Repeat up to 3 times
+        // before declaring failure.
+        let addressHasUtxos = false
+        for (let attempt = 1; attempt <= 3 && !addressHasUtxos; attempt++){
+            try {
+                addressHasUtxos = await utxoTrackerConnector.waitForUtxos(newAddress, 20000)
+            } catch (err) {
+                addressHasUtxos = false
             }
-        } catch (err){
+            if (!addressHasUtxos) {
+                console.log("UTXOs still not visible — nudging miner to mine a block (attempt "+attempt+"/3)")
+                try { await regtestMinerConnector.generateBlocks(1) } catch (e) {}
+            }
+        }
+        if (!addressHasUtxos){
             throw new Error("The utxo tracker couldn't parse the utxo")
         }
-        
+
         return newAddressInfo
     }
 }
