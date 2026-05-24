@@ -100,11 +100,32 @@ class RegtestMinerConnector {
             params: {},
             id: 1
         }
-        
+
         // Make the request to the node
         const response = await axios.post(this.url, data)
 
         // Verify if there is a result and return it
+        if (response.data && response.data.result) {
+            return response.data.result
+        } else {
+            return null
+        }
+    }
+
+    // Mine `count` empty blocks via the regtest miner's generatetoaddress.
+    // Use this in tests that need to advance block height past indexer
+    // time-locked states (e.g. STAKE's ACTIVATION_DELAY_BLOCKS) without
+    // sending real transactions.
+    async generateBlocks(count){
+        const data = {
+            jsonrpc: '2.0',
+            method: 'generate_blocks',
+            params: {count: count},
+            id: 1
+        }
+
+        const response = await axios.post(this.url, data)
+
         if (response.data && response.data.result) {
             return response.data.result
         } else {

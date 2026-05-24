@@ -68,7 +68,10 @@ function xchainP2shFinalizer(inputIndex, input, script, isSegwit, isP2SH, isP2WS
 
 function _isStaleUtxoError(err){
     const msg = (err && err.message) || ''
-    return /missingorspent|missing\s*or\s*spent|bad-txns-inputs/i.test(msg)
+    // `missingorspent`/`bad-txns-inputs` — node rejected because inputs were already spent.
+    // `no utxos ... no utxos found` — encoder asked the tracker for UTXOs but the tracker
+    // hadn't yet indexed the change output from the source's previous tx.
+    return /missingorspent|missing\s*or\s*spent|bad-txns-inputs|no utxos.*no utxos/i.test(msg)
 }
 
 module.exports = {
@@ -77,18 +80,19 @@ module.exports = {
     // references inputs the bitcoind has already spent, and broadcast would die
     // with `bad-txns-inputs-missingorspent`. Drop the cache and wait briefly so
     // the tracker can catch up, then rebuild from scratch.
-    async createAndSendTransaction(addressInfo, data, rawData = null, customOutputs = []){
-        const MAX_ATTEMPTS = 3
+    async createAndSendTransaction(addressInfo, data, rawData = null, customOutputs = [], outputType = null){
+        const MAX_ATTEMPTS = 5
+        const WAIT_MS = 3000
         let lastErr
         for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             try {
-                return await this._doCreateAndSendTransaction(addressInfo, data, rawData, customOutputs)
+                return await this._doCreateAndSendTransaction(addressInfo, data, rawData, customOutputs, outputType)
             } catch (err) {
                 if (attempt < MAX_ATTEMPTS && _isStaleUtxoError(err)) {
                     _verifiedUtxos = null
                     _verifiedUtxosAddress = null
-                    console.log("Broadcast failed (attempt " + attempt + "/" + MAX_ATTEMPTS + ") with missing/spent input — clearing UTXO cache, waiting 2s, retrying...")
-                    await new Promise(r => setTimeout(r, 2000))
+                    console.log("Broadcast failed (attempt " + attempt + "/" + MAX_ATTEMPTS + ") with stale UTXO — clearing cache, waiting " + (WAIT_MS/1000) + "s, retrying...")
+                    await new Promise(r => setTimeout(r, WAIT_MS))
                     lastErr = err
                     continue
                 }
@@ -98,7 +102,7 @@ module.exports = {
         throw lastErr
     },
 
-    async _doCreateAndSendTransaction(addressInfo, data, rawData = null, customOutputs = []){
+    async _doCreateAndSendTransaction(addressInfo, data, rawData = null, customOutputs = [], outputType = null){
         console.log("Creating the transaction...")
         const utxoListForEncoder = (_verifiedUtxosAddress === addressInfo["address"] && _verifiedUtxos) ? _verifiedUtxos : []
         _verifiedUtxos = null
@@ -111,10 +115,10 @@ module.exports = {
             rawData, //rawData
             null, //TEST_FEE, //exact_fee
             false, //rbf - false, it's not needed for this test
-            null, //outputType - the encoder will automatically determine which output type to use 
+            outputType, //outputType - null = encoder picks; "P2SH" forces the P2SH 2-tx path (handler supports it)
             addressInfo["address"], //changeAddress - the bitcoins will return to the same address
-            null, 
-            null, 
+            null,
+            null,
             null
         )
         
@@ -148,12 +152,12 @@ module.exports = {
                 rawData, //rawData
                 null, //TEST_FEE, //exact_fee
                 false, //rbf - false, it's not needed for this test
-                null, //outputType - the encoder will automatically determine which output type to use 
+                outputType, //outputType - propagate the caller's choice (null = auto, "P2SH" = forced)
                 addressInfo["address"], //changeAddress - the bitcoins will return to the same address
-                txHash, 
-                txHex, 
+                txHash,
+                txHex,
                 null
-            )           
+            )
             
             spentTxPsbtHex = spentTxPsbtHex["psbt"]
             
@@ -164,7 +168,13 @@ module.exports = {
                 spentPsbtToSign.signInput(parseInt(proxInputIndex), keyToSign);
             }
             
-            spentPsbtToSign.finalizeInput(0,xchainP2shFinalizer);
+            // Input 0 carries the XChain P2SH-encoded payload and needs the
+            // custom finalizer. Any additional inputs are regular fee-funding
+            // P2PKH/segwit inputs that finalize with the default rules.
+            spentPsbtToSign.finalizeInput(0, xchainP2shFinalizer);
+            for (let i = 1; i < spentPsbtToSign.data.inputs.length; i++) {
+                spentPsbtToSign.finalizeInput(i);
+            }
             spentPsbtToSign.setMaximumFeeRate(100000)
             spentTx = spentPsbtToSign.extractTransaction()
             spentHex = spentTx.toHex()

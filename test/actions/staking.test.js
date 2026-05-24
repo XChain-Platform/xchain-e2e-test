@@ -49,6 +49,11 @@ describe('Staking — STAKE, UNSTAKE, DELEGATE', function () {
 
     describe('UNSTAKE v0 — Begin unstaking', function () {
         it('should create an unstake record with cooldown', async function () {
+            // STAKE doesn't take effect until ACTIVATION_DELAY_BLOCKS (6) later.
+            // On regtest each tx mines ~1 block, so without explicit block
+            // advancement the STAKE from the previous describe block is still
+            // inactive and UNSTAKE fails with 'no active stake at tier'.
+            await regtestMinerConnector.generateBlocks(7)
             let result = await stakeHelper.sendUnstakeV0(stakerAddr, 1)
             assert(result.unstake, 'Unstake record should exist in DB')
             assert.strictEqual(result.unstake.status, 'valid', 'Unstake status should be valid')
@@ -73,6 +78,8 @@ describe('Staking — STAKE, UNSTAKE, DELEGATE', function () {
 
             // Stake first
             await stakeHelper.sendStakeV0(delegateAddr, 1, '', delegatePubkey)
+            // Advance past ACTIVATION_DELAY_BLOCKS so DELEGATE sees an active stake.
+            await regtestMinerConnector.generateBlocks(7)
         })
 
         it('should delegate to a new signing key', async function () {

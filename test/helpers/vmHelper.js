@@ -8,7 +8,11 @@ module.exports = {
         if(constructorParams) msg += "|" + constructorParams
 
         console.log("Creating and sending DEPLOY V0 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg, null, "P2SH")
+        // DEPLOY carries the full contract bytecode (hex-encoded) which can exceed
+        // OP_RETURN limits — force P2SH (the helper supports its 2-tx finalizer).
+        // Auto-selected P2WSH encoding hits "Not finalized" because the helper's
+        // PSBT signing path only handles legacy P2PKH inputs + the P2SH finalizer.
+        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg, null, [], "P2SH")
 
         console.log("Waiting for contract in the database...")
         let contractRow = await indexerDatabase.waitForContract({
