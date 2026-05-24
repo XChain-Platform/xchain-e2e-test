@@ -10,6 +10,15 @@ describe('Staking — STAKE, UNSTAKE, DELEGATE', function () {
     let signingPubkey = null
 
     before(async function () {
+        // STAKE/UNSTAKE/DELEGATE are BTC-only by protocol design — the indexer
+        // action handlers (xchain-indexer/src/actions/{stake,unstake,delegate}.js)
+        // explicitly reject COIN !== 'BTC' with status='invalid: ACTION (BTC only)',
+        // so these tests can only pass on the bitcoin chain.
+        if (COIN_CODE !== 'BTC') {
+            console.log('STAKE/UNSTAKE/DELEGATE are BTC-only — skipping on ' + COIN_CODE)
+            this.skip()
+            return
+        }
         // Fund a staker address with BTC and XCHAIN
         stakerAddr = await cryptoHelper.getNewFundedAddress(
             "staker", COIN, NETWORK, null, "legacy", 0, 0.01

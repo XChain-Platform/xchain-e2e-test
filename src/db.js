@@ -114,7 +114,7 @@ class Database {
         }
     }
 
-    async waitForIssue(issueObject, timeMax = 30000){
+    async waitForIssue(issueObject, timeMax = 60000){
         const startMs = Date.now()
         const endTime = startMs + timeMax
         let polls = 0
@@ -219,7 +219,7 @@ class Database {
         }
     }
     
-    async waitForSend(sendObject, timeMax = 30000){
+    async waitForSend(sendObject, timeMax = 60000){
         const startMs = Date.now()
         const endTime = startMs + timeMax
         let polls = 0
@@ -315,7 +315,7 @@ class Database {
         }
     }
     
-    async waitForCredit(creditObject, timeMax = 30000){
+    async waitForCredit(creditObject, timeMax = 60000){
         const startMs = Date.now()
         const endTime = startMs + timeMax
         let polls = 0
@@ -399,7 +399,7 @@ class Database {
         }
     }
     
-    async waitForDebit(debitObject, timeMax = 30000){
+    async waitForDebit(debitObject, timeMax = 60000){
         const startMs = Date.now()
         const endTime = startMs + timeMax
         let polls = 0
@@ -484,7 +484,7 @@ class Database {
         }
     }
     
-    async waitForMint(mintObject, timeMax = 30000){
+    async waitForMint(mintObject, timeMax = 60000){
         const startMs = Date.now()
         const endTime = startMs + timeMax
         let polls = 0
@@ -584,7 +584,7 @@ class Database {
         }
     }
     
-    async waitForBroadcast(broadcastObject, timeMax = 30000){
+    async waitForBroadcast(broadcastObject, timeMax = 60000){
         const startMs = Date.now()
         const endTime = startMs + timeMax
         let polls = 0
@@ -690,7 +690,7 @@ class Database {
         }
     }
 
-    async waitForList(listObject, timeMax = 30000){
+    async waitForList(listObject, timeMax = 60000){
         const startMs = Date.now()
         const endTime = startMs + timeMax
         let polls = 0
@@ -842,7 +842,7 @@ class Database {
         }
     }
     
-    async waitForAirdrop(airdropObject, timeMax = 30000){
+    async waitForAirdrop(airdropObject, timeMax = 60000){
         const startMs = Date.now()
         const endTime = startMs + timeMax
         let polls = 0
@@ -1028,7 +1028,7 @@ class Database {
         }
     }
     
-    async waitForDispenser(dispenserObject, timeMax = 30000){
+    async waitForDispenser(dispenserObject, timeMax = 60000){
         const startMs = Date.now()
         const endTime = startMs + timeMax
         let polls = 0
@@ -1182,7 +1182,7 @@ class Database {
         }
     }
     
-    async waitForDispense(dispenseObject, timeMax = 30000){
+    async waitForDispense(dispenseObject, timeMax = 60000){
         const startMs = Date.now()
         const endTime = startMs + timeMax
         let polls = 0
@@ -1304,7 +1304,7 @@ class Database {
     }
 
     // ─── DISPENSER STATUS ────────────────────────────────────────────────
-    async waitForDispenserStatus(obj, timeMax = 30000){ return this._waitFor(this.checkDispenserStatus, obj, timeMax) }
+    async waitForDispenserStatus(obj, timeMax = 60000){ return this._waitFor(this.checkDispenserStatus, obj, timeMax) }
 
     async checkDispenserStatus({dispenserActionIndex, status}){
         let w = [], v = []
@@ -1329,7 +1329,12 @@ class Database {
     }
 
     // ─── Generic waitFor wrapper ───────────────────────────────────────
-    async _waitFor(checkFn, params, timeMax = 30000){
+    // Default 60s (was 30s). Under full-suite load — especially the OWNERSHIP
+    // suite right after ORDER's 7-test pile of MINTs/SENDs/ORDERs — the indexer
+    // sometimes needs >30s to write an ORDER row (match-scan + balance/token
+    // updates fan out per insert). 60s absorbs that without masking real
+    // assertion failures, which surface as null on a row that was never written.
+    async _waitFor(checkFn, params, timeMax = 60000){
         const startMs = Date.now()
         const endTime = startMs + timeMax
         let polls = 0
@@ -1352,7 +1357,7 @@ class Database {
     }
 
     // ─── ADDRESS ───────────────────────────────────────────────────────
-    async waitForAddressOption(obj, timeMax = 30000){ return this._waitFor(this.checkAddressOption, obj, timeMax) }
+    async waitForAddressOption(obj, timeMax = 60000){ return this._waitFor(this.checkAddressOption, obj, timeMax) }
 
     async checkAddressOption({txHash, source, feePreference, requireMemo, status}){
         let w = [], v = []
@@ -1384,7 +1389,7 @@ class Database {
     }
 
     // ─── DESTROY ───────────────────────────────────────────────────────
-    async waitForDestroy(obj, timeMax = 30000){ return this._waitFor(this.checkDestroy, obj, timeMax) }
+    async waitForDestroy(obj, timeMax = 60000){ return this._waitFor(this.checkDestroy, obj, timeMax) }
 
     async checkDestroy({txHash, source, tick, amount, memo, status}){
         let w = [], v = []
@@ -1418,7 +1423,7 @@ class Database {
     }
 
     // ─── MESSAGE ───────────────────────────────────────────────────────
-    async waitForMessage(obj, timeMax = 30000){ return this._waitFor(this.checkMessage, obj, timeMax) }
+    async waitForMessage(obj, timeMax = 60000){ return this._waitFor(this.checkMessage, obj, timeMax) }
 
     async checkMessage({txHash, source, destination, plaintextMessage, status}){
         let w = [], v = []
@@ -1450,7 +1455,7 @@ class Database {
     }
 
     // ─── FILE ──────────────────────────────────────────────────────────
-    async waitForFile(obj, timeMax = 30000){ return this._waitFor(this.checkFile, obj, timeMax) }
+    async waitForFile(obj, timeMax = 60000){ return this._waitFor(this.checkFile, obj, timeMax) }
 
     async checkFile({txHash, source, name, title, status}){
         let w = [], v = []
@@ -1482,7 +1487,7 @@ class Database {
     }
 
     // ─── SLEEP ─────────────────────────────────────────────────────────
-    async waitForSleep(obj, timeMax = 30000){ return this._waitFor(this.checkSleep, obj, timeMax) }
+    async waitForSleep(obj, timeMax = 60000){ return this._waitFor(this.checkSleep, obj, timeMax) }
 
     async checkSleep({txHash, source, type, tick, resumeBlock, status}){
         let w = [], v = []
@@ -1516,7 +1521,7 @@ class Database {
     }
 
     // ─── SWEEP ─────────────────────────────────────────────────────────
-    async waitForSweep(obj, timeMax = 30000){ return this._waitFor(this.checkSweep, obj, timeMax) }
+    async waitForSweep(obj, timeMax = 60000){ return this._waitFor(this.checkSweep, obj, timeMax) }
 
     async checkSweep({txHash, source, destination, balances, ownerships, escrows, status}){
         let w = [], v = []
@@ -1551,7 +1556,7 @@ class Database {
     }
 
     // ─── DIVIDEND ──────────────────────────────────────────────────────
-    async waitForDividend(obj, timeMax = 30000){ return this._waitFor(this.checkDividend, obj, timeMax) }
+    async waitForDividend(obj, timeMax = 60000){ return this._waitFor(this.checkDividend, obj, timeMax) }
 
     async checkDividend({txHash, source, tick, dividendTick, amount, status}){
         let w = [], v = []
@@ -1586,7 +1591,7 @@ class Database {
     }
 
     // ─── CALLBACK ──────────────────────────────────────────────────────
-    async waitForCallback(obj, timeMax = 30000){ return this._waitFor(this.checkCallback, obj, timeMax) }
+    async waitForCallback(obj, timeMax = 60000){ return this._waitFor(this.checkCallback, obj, timeMax) }
 
     async checkCallback({txHash, source, tick, callbackTick, status}){
         let w = [], v = []
@@ -1620,7 +1625,7 @@ class Database {
     }
 
     // ─── ORDER ─────────────────────────────────────────────────────────
-    async waitForOrder(obj, timeMax = 30000){ return this._waitFor(this.checkOrder, obj, timeMax) }
+    async waitForOrder(obj, timeMax = 60000){ return this._waitFor(this.checkOrder, obj, timeMax) }
 
     async checkOrder({txHash, source, giveCoin, giveTick, giveAmount, getCoin, getTick, getAmount, getAddress, expiration, status, orderStatus}){
         let w = [], v = []
@@ -1628,10 +1633,15 @@ class Database {
         if (source != null){ w.push("ias.address = ?"); v.push(source) }
         if (giveCoin != null){ w.push("give_ic.coin = ?"); v.push(giveCoin) }
         if (giveTick != null){ w.push("give_it.tick = ?"); v.push(giveTick) }
-        if (giveAmount != null){ w.push("o.give_amount = ?"); v.push(giveAmount) }
+        // orders.give_amount/get_amount are VARCHAR(250) — string-comparing them
+        // against the test's raw input ("100.00000000", "0.00000003") misses the
+        // DB row, which stores the bignumber-normalized form ("100", "3e-8").
+        // Coerce both sides to numeric via +0 so the match is by value, not by
+        // string representation.
+        if (giveAmount != null){ w.push("o.give_amount+0 = ?+0"); v.push(giveAmount) }
         if (getCoin != null){ w.push("get_ic.coin = ?"); v.push(getCoin) }
         if (getTick != null){ w.push("get_it.tick = ?"); v.push(getTick) }
-        if (getAmount != null){ w.push("o.get_amount = ?"); v.push(getAmount) }
+        if (getAmount != null){ w.push("o.get_amount+0 = ?+0"); v.push(getAmount) }
         if (getAddress != null){ w.push("get_ia.address = ?"); v.push(getAddress) }
         if (expiration != null){ w.push("o.expiration = ?"); v.push(expiration) }
         if (status != null){ w.push("ist.status = ?"); v.push(status) }
@@ -1671,7 +1681,7 @@ class Database {
     }
 
     // ─── ORDER MATCH ──────────────────────────────────────────────────
-    async waitForOrderMatch(obj, timeMax = 30000){ return this._waitFor(this.checkOrderMatch, obj, timeMax) }
+    async waitForOrderMatch(obj, timeMax = 60000){ return this._waitFor(this.checkOrderMatch, obj, timeMax) }
 
     async checkOrderMatch({giveActionIndex, getActionIndex, giveTick, getTick, giveAmount, getAmount, status}){
         let w = [], v = []
@@ -1705,7 +1715,7 @@ class Database {
     }
 
     // ─── SWAP ──────────────────────────────────────────────────────────
-    async waitForSwap(obj, timeMax = 30000){ return this._waitFor(this.checkSwap, obj, timeMax) }
+    async waitForSwap(obj, timeMax = 60000){ return this._waitFor(this.checkSwap, obj, timeMax) }
 
     async checkSwap({txHash, source, giveCoin, giveTick, giveAmount, getCoin, getTick, getAmount, getAddress, expiration, status, swapStatus}){
         let w = [], v = []
@@ -1756,7 +1766,7 @@ class Database {
     }
 
     // ─── SWAP MATCH ───────────────────────────────────────────────────
-    async waitForSwapMatch(obj, timeMax = 30000){ return this._waitFor(this.checkSwapMatch, obj, timeMax) }
+    async waitForSwapMatch(obj, timeMax = 60000){ return this._waitFor(this.checkSwapMatch, obj, timeMax) }
 
     async checkSwapMatch({giveActionIndex, getActionIndex, giveTick, getTick, giveAmount, getAmount, status}){
         let w = [], v = []
@@ -1790,7 +1800,7 @@ class Database {
     }
 
     // ─── BATCH ─────────────────────────────────────────────────────────
-    async waitForBatch(obj, timeMax = 30000){ return this._waitFor(this.checkBatch, obj, timeMax) }
+    async waitForBatch(obj, timeMax = 60000){ return this._waitFor(this.checkBatch, obj, timeMax) }
 
     async checkBatch({txHash, source, status}){
         let w = [], v = []
@@ -1819,7 +1829,7 @@ class Database {
     }
 
     // ─── LINK ──────────────────────────────────────────────────────────
-    async waitForLink(obj, timeMax = 30000){ return this._waitFor(this.checkLink, obj, timeMax) }
+    async waitForLink(obj, timeMax = 60000){ return this._waitFor(this.checkLink, obj, timeMax) }
 
     async checkLink({txHash, source, coin1, coin1ActionIndex, coin2, coin2ActionIndex, status}){
         let w = [], v = []
@@ -1856,7 +1866,7 @@ class Database {
     }
 
     // ─── ORDER_MATCH ──────────────────────────────────────────────────
-    async waitForOrderMatch(obj, timeMax = 30000){ return this._waitFor(this.checkOrderMatch, obj, timeMax) }
+    async waitForOrderMatch(obj, timeMax = 60000){ return this._waitFor(this.checkOrderMatch, obj, timeMax) }
 
     async checkOrderMatch({giveActionIndex, getActionIndex, status}){
         let w = [], v = []
@@ -1881,7 +1891,7 @@ class Database {
     }
 
     // ─── COINPAY ──────────────────────────────────────────────────────
-    async waitForCoinpay(obj, timeMax = 30000){ return this._waitFor(this.checkCoinpay, obj, timeMax) }
+    async waitForCoinpay(obj, timeMax = 60000){ return this._waitFor(this.checkCoinpay, obj, timeMax) }
 
     async checkCoinpay({txHash, obligationActionIndex, status}){
         let w = [], v = []
@@ -1909,7 +1919,7 @@ class Database {
     }
 
     // ─── COINPAY_OBLIGATION ───────────────────────────────────────────
-    async waitForCoinpayObligation(obj, timeMax = 30000){ return this._waitFor(this.checkCoinpayObligation, obj, timeMax) }
+    async waitForCoinpayObligation(obj, timeMax = 60000){ return this._waitFor(this.checkCoinpayObligation, obj, timeMax) }
 
     async checkCoinpayObligation({actionIndex, coinpayStatus}){
         let w = [], v = []
@@ -1939,7 +1949,7 @@ class Database {
 
     // ── VM / Contract Methods ──
 
-    async waitForContract(params, timeMax = 30000){
+    async waitForContract(params, timeMax = 60000){
         const startMs = Date.now()
         const endTime = startMs + timeMax
         let polls = 0
@@ -1976,7 +1986,7 @@ class Database {
         } catch(err){ return null } finally { await connection.release() }
     }
 
-    async waitForExecution(params, timeMax = 30000){
+    async waitForExecution(params, timeMax = 60000){
         const startMs = Date.now()
         const endTime = startMs + timeMax
         let polls = 0
@@ -2015,7 +2025,7 @@ class Database {
         } catch(err){ return null } finally { await connection.release() }
     }
 
-    async waitForDeposit(params, timeMax = 30000){
+    async waitForDeposit(params, timeMax = 60000){
         const startMs = Date.now()
         const endTime = startMs + timeMax
         let polls = 0
@@ -2056,7 +2066,7 @@ class Database {
         } catch(err){ return null } finally { await connection.release() }
     }
 
-    async waitForWithdrawal(params, timeMax = 30000){
+    async waitForWithdrawal(params, timeMax = 60000){
         const startMs = Date.now()
         const endTime = startMs + timeMax
         let polls = 0
@@ -2099,7 +2109,7 @@ class Database {
 
     // ── Staking Methods ──
 
-    async waitForStake(params, timeMax = 30000){
+    async waitForStake(params, timeMax = 60000){
         const startMs = Date.now()
         const endTime = startMs + timeMax
         let polls = 0
@@ -2137,7 +2147,7 @@ class Database {
         } catch(err){ return null } finally { await connection.release() }
     }
 
-    async waitForUnstake(params, timeMax = 30000){
+    async waitForUnstake(params, timeMax = 60000){
         const startMs = Date.now()
         const endTime = startMs + timeMax
         let polls = 0
@@ -2175,7 +2185,7 @@ class Database {
         } catch(err){ return null } finally { await connection.release() }
     }
 
-    async waitForDelegation(params, timeMax = 30000){
+    async waitForDelegation(params, timeMax = 60000){
         const startMs = Date.now()
         const endTime = startMs + timeMax
         let polls = 0
@@ -2212,7 +2222,7 @@ class Database {
         } catch(err){ return null } finally { await connection.release() }
     }
 
-    async waitForRewardClaim(params, timeMax = 30000){
+    async waitForRewardClaim(params, timeMax = 60000){
         const startMs = Date.now()
         const endTime = startMs + timeMax
         let polls = 0

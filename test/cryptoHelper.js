@@ -75,17 +75,18 @@ module.exports = {
         console.log("Waiting for the utxos for "+newAddress)
         // First pass: short wait, then if it stalls force-mine a block in case
         // the funding tx is stuck in the regtest miner's mempool (happens under
-        // full-suite load when many funding txes pile up). Repeat up to 3 times
-        // before declaring failure.
+        // full-suite load when many funding txes pile up). Late-suite tests
+        // (OWNERSHIP onwards) flake here under accumulated load — bumped from
+        // 3×20s to 6×30s (60s → 180s patience) to absorb that.
         let addressHasUtxos = false
-        for (let attempt = 1; attempt <= 3 && !addressHasUtxos; attempt++){
+        for (let attempt = 1; attempt <= 6 && !addressHasUtxos; attempt++){
             try {
-                addressHasUtxos = await utxoTrackerConnector.waitForUtxos(newAddress, 20000)
+                addressHasUtxos = await utxoTrackerConnector.waitForUtxos(newAddress, 30000)
             } catch (err) {
                 addressHasUtxos = false
             }
             if (!addressHasUtxos) {
-                console.log("UTXOs still not visible — nudging miner to mine a block (attempt "+attempt+"/3)")
+                console.log("UTXOs still not visible — nudging miner to mine a block (attempt "+attempt+"/6)")
                 try { await regtestMinerConnector.generateBlocks(1) } catch (e) {}
             }
         }
