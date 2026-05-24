@@ -19,12 +19,11 @@ describe('COINPAY', function () {
                 "COINPAY.BUYER", COIN, NETWORK, null, "legacy", 0, 2
             )
 
-            // 3. Issue a token to the seller
+            // 3. Issue a token to the seller, fully minting maxSupply at issue time
+            //    (the 7th arg `mintSupply` already credits 1000 to the seller —
+            //    a separate MINT would exceed maxSupply).
             let tick = "CP" + sellerAddr["address"].substring(5, 12).toUpperCase()
             await issueHelper.sendIssueV0(sellerAddr, tick, "1000", "1000", "8", "COINPay test token", "1000")
-
-            // 4. Mint tokens to the seller
-            await mintHelper.sendMintV0(sellerAddr, tick, "1000")
 
             // 5. Seller creates ORDER: sell 100 tokens for 0.001 native coin
             let expiration = Math.floor(Date.now() / 1000) + 86400 // 24 hours from now
