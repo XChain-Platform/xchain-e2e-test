@@ -14,13 +14,15 @@ module.exports = {
         if (blockList == null) blockList = ""
         if (giveOwnership == null) giveOwnership = ""
         if (getOwnership == null) getOwnership = ""
-        // Wire-format: ownership side carries empty *_AMOUNT. The DB stores NULL
-        // for the empty side, so the waitFor predicate has to query with null
-        // (not "") or the row will never match.
+        // Wire-format: ownership side carries empty *_AMOUNT, native-coin side carries
+        // empty *_TICK. The DB stores NULL for both. The waitFor predicate has to query
+        // with null (not "") on those sides or the row will never match.
         let giveAmountWire = (giveOwnership == 1) ? "" : giveAmount
         let getAmountWire  = (getOwnership  == 1) ? "" : getAmount
         let giveAmountQuery = (giveOwnership == 1) ? null : giveAmount
         let getAmountQuery  = (getOwnership  == 1) ? null : getAmount
+        let giveTickQuery = (giveTick === "" || giveTick == null) ? null : giveTick
+        let getTickQuery  = (getTick  === "" || getTick  == null) ? null : getTick
 
         let orderMessage = "ORDER|0|"+giveCoin+"|"+giveTick+"|"+giveAmountWire+"|"+giveOwnership
             +"|"+getCoin+"|"+getTick+"|"+getAmountWire+"|"+getOwnership+"|"+getAddress
@@ -34,10 +36,10 @@ module.exports = {
             txHash: txHash,
             source: addressInfo["address"],
             giveCoin: giveCoin,
-            giveTick: giveTick,
+            giveTick: giveTickQuery,
             giveAmount: giveAmountQuery,
             getCoin: getCoin,
-            getTick: getTick,
+            getTick: getTickQuery,
             getAmount: getAmountQuery,
             status: "valid"
         })
