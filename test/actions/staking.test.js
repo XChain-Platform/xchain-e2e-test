@@ -1,6 +1,6 @@
 const assert = require('assert')
 const crypto = require('crypto')
-const cryptoHelper = require('../helpers/cryptoHelper')
+const cryptoHelper = require('../cryptoHelper')
 const stakeHelper = require('../helpers/stakeHelper')
 const gasHelper = require('../helpers/gasHelper')
 
