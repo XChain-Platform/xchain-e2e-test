@@ -15,13 +15,15 @@ describe('SWEEP', () => {
             await issueHelper.sendIssueV0(sourceAddr, tick, 100, 50, 0, "Sweep v0 test token", 50)
             await gasHelper.mintGas(sourceAddr, 100)
 
-            // Sweep balances only (no ownerships/escrows)
+            // Sweep balances only (no ownerships / orders / swaps / dispensers)
             let result = await sweepHelper.sendSweepV0(
                 sourceAddr,
                 destAddr["address"],
                 1, // balances
                 0, // ownerships
-                0, // escrows
+                0, // orders
+                0, // swaps
+                0, // dispensers
                 "Sweep test v0"
             )
             assert(result.sweep, "Sweep v0 should exist in DB")

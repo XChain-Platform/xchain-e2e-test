@@ -1,9 +1,13 @@
 const transactionHelper = require('../transactionHelper')
 
 module.exports = {
+    // DISPENSER v0 wire format:
+    //   VERSION|GIVE_COIN|GIVE_TICK|GIVE_AMOUNT|GIVE_OWNERSHIP|GIVE_ESCROW|GET_COIN|GET_TICK|GET_AMOUNT|GET_ADDRESS|FIAT_CODE|FIAT_AMOUNT|ORACLE_ADDRESS|EXPIRATION|ALLOW_LIST|BLOCK_LIST|MEMO
+    // giveOwnership is optional (default empty = 0). When set to 1, the dispenser sells
+    // ownership of GIVE_TICK as a single-shot transfer — GIVE_AMOUNT and GIVE_ESCROW must be empty.
     async sendDispenserV0(addressInfo, giveCoin, giveTick, giveAmount,
       giveEscrow, getCoin, getTick, getAmount, getAddress, fiatCode,
-      fiatAmount, oracleAddress, expiration, allowList, blockList, memo
+      fiatAmount, oracleAddress, expiration, allowList, blockList, memo, giveOwnership
     ){
         let address = addressInfo["address"]
 
@@ -17,9 +21,11 @@ module.exports = {
         if (expiration == null) expiration = ""
         if (allowList == null) allowList = ""
         if (blockList == null) blockList = ""
+        if (giveOwnership == null) giveOwnership = ""
+        if (giveOwnership == 1) { giveAmount = ""; giveEscrow = "" }
 
         let dispenserMessage = "DISPENSER|0"
-            +"|"+giveCoin+"|"+giveTick+"|"+giveAmount+"|"+giveEscrow
+            +"|"+giveCoin+"|"+giveTick+"|"+giveAmount+"|"+giveOwnership+"|"+giveEscrow
             +"|"+getCoin+"|"+getTick+"|"+getAmount+"|"+getAddress
             +"|"+fiatCode+"|"+fiatAmount+"|"+oracleAddress
             +"|"+expiration+"|"+allowList+"|"+blockList+"|"+memo

@@ -182,9 +182,9 @@ describe('Fuzz — ACTION Message Construction', function () {
     fuzzMessageConstruction('destroyHelper', 'sendDestroyV0',
         fc.tuple(f, f, f))
 
-    // SWEEP V0: destination, balances, ownerships, escrows, memo
+    // SWEEP V0: destination, balances, ownerships, orders, swaps, dispensers, memo
     fuzzMessageConstruction('sweepHelper', 'sendSweepV0',
-        fc.tuple(f, f, f, f, f))
+        fc.tuple(f, f, f, f, f, f, f))
 
     // DIVIDEND V0: tick, dividendTick, amount, memo
     fuzzMessageConstruction('dividendHelper', 'sendDividendV0',
