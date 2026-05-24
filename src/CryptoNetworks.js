@@ -56,15 +56,21 @@ class CryptoNetworks {
                     "dustThreshold": 546
                 }
             case "dogecoin-regtest":
+                // Dogecoin v1.14.x regtest reuses Bitcoin-testnet-style address
+                // prefixes (pubKeyHash 0x6f → 'm'/'n', WIF 0xef → 'c'). It does
+                // NOT use the Dogecoin testnet prefix (0x71 → 'n' starts but
+                // different checksum space). Generating addresses with 0x71
+                // here produces strings that dogecoind regards as "Invalid
+                // Dogecoin address" and rejects any sendtoaddress against.
                 return {
                     "messagePrefix": '\x19Dogecoin Signed Message:\n',
                     "bip32": {
-                       "public": 0x0432a9a8,
-                       "private": 0x0432a243
+                       "public": 0x043587cf,
+                       "private": 0x04358394
                     },
-                    "pubKeyHash": 0x71,
+                    "pubKeyHash": 0x6f,
                     "scriptHash": 0xc4,
-                    "wif": 0xf1,
+                    "wif": 0xef,
                     "dustThreshold": 546
                 }
             case "litecoin-mainnet":
