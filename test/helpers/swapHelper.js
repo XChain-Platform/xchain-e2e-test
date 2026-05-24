@@ -14,11 +14,15 @@ module.exports = {
         if (blockList == null) blockList = ""
         if (giveOwnership == null) giveOwnership = ""
         if (getOwnership == null) getOwnership = ""
-        if (giveOwnership == 1) giveAmount = ""
-        if (getOwnership == 1) getAmount = ""
+        // Wire-format: ownership side carries empty *_AMOUNT. The DB stores NULL
+        // for the empty side, so the waitFor predicate has to query with null.
+        let giveAmountWire = (giveOwnership == 1) ? "" : giveAmount
+        let getAmountWire  = (getOwnership  == 1) ? "" : getAmount
+        let giveAmountQuery = (giveOwnership == 1) ? null : giveAmount
+        let getAmountQuery  = (getOwnership  == 1) ? null : getAmount
 
-        let swapMessage = "SWAP|0|"+giveCoin+"|"+giveTick+"|"+giveAmount+"|"+giveOwnership
-            +"|"+getCoin+"|"+getTick+"|"+getAmount+"|"+getOwnership+"|"+getAddress
+        let swapMessage = "SWAP|0|"+giveCoin+"|"+giveTick+"|"+giveAmountWire+"|"+giveOwnership
+            +"|"+getCoin+"|"+getTick+"|"+getAmountWire+"|"+getOwnership+"|"+getAddress
             +"|"+expiration+"|"+allowList+"|"+blockList+"|"+memo
 
         console.log("Creating and sending SWAP V0 tx...")
@@ -30,10 +34,10 @@ module.exports = {
             source: addressInfo["address"],
             giveCoin: giveCoin,
             giveTick: giveTick,
-            giveAmount: giveAmount,
+            giveAmount: giveAmountQuery,
             getCoin: getCoin,
             getTick: getTick,
-            getAmount: getAmount,
+            getAmount: getAmountQuery,
             status: "valid"
         })
 

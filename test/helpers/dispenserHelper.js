@@ -22,10 +22,15 @@ module.exports = {
         if (allowList == null) allowList = ""
         if (blockList == null) blockList = ""
         if (giveOwnership == null) giveOwnership = ""
-        if (giveOwnership == 1) { giveAmount = ""; giveEscrow = "" }
+        // Wire-format: ownership dispenser carries empty GIVE_AMOUNT and GIVE_ESCROW.
+        // The DB stores NULL for those, so waitFor must query with null (not "").
+        let giveAmountWire  = (giveOwnership == 1) ? "" : giveAmount
+        let giveEscrowWire  = (giveOwnership == 1) ? "" : giveEscrow
+        let giveAmountQuery = (giveOwnership == 1) ? null : giveAmount
+        let giveEscrowQuery = (giveOwnership == 1) ? null : giveEscrow
 
         let dispenserMessage = "DISPENSER|0"
-            +"|"+giveCoin+"|"+giveTick+"|"+giveAmount+"|"+giveOwnership+"|"+giveEscrow
+            +"|"+giveCoin+"|"+giveTick+"|"+giveAmountWire+"|"+giveOwnership+"|"+giveEscrowWire
             +"|"+getCoin+"|"+getTick+"|"+getAmount+"|"+getAddress
             +"|"+fiatCode+"|"+fiatAmount+"|"+oracleAddress
             +"|"+expiration+"|"+allowList+"|"+blockList+"|"+memo
@@ -36,7 +41,7 @@ module.exports = {
         let dispenserRow = await indexerDatabase.waitForDispenser({
             source: address, txHash: txHash,
             giveCoin: giveCoin, giveTick: giveTick,
-            giveAmount: giveAmount, giveEscrow: giveEscrow,
+            giveAmount: giveAmountQuery, giveEscrow: giveEscrowQuery,
             getCoin: getCoin, getTick: getTick,
             getAmount: getAmount, getAddress: getAddress,
             fiatCode: fiatCode, fiatAmount: fiatAmount,
