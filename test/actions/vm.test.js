@@ -1,5 +1,5 @@
 const assert = require('assert')
-const cryptoHelper = require('../helpers/cryptoHelper')
+const cryptoHelper = require('../cryptoHelper')
 const vmHelper = require('../helpers/vmHelper')
 const issueHelper = require('../helpers/issueHelper')
 const mintHelper = require('../helpers/mintHelper')
