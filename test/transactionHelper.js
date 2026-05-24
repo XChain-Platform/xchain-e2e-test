@@ -70,8 +70,13 @@ function _isStaleUtxoError(err){
     const msg = (err && err.message) || ''
     // `missingorspent`/`bad-txns-inputs` — node rejected because inputs were already spent.
     // `no utxos ... no utxos found` — encoder asked the tracker for UTXOs but the tracker
-    // hadn't yet indexed the change output from the source's previous tx.
-    return /missingorspent|missing\s*or\s*spent|bad-txns-inputs|no utxos.*no utxos/i.test(msg)
+    //   hadn't yet indexed the change output from the source's previous tx.
+    // `Internal encoder error` — the encoder sanitizes non-TypeError/RangeError messages
+    //   to this generic string before returning over JSON-RPC. In practice on the regtest
+    //   stack this is almost always the "no utxos" case caught above (visible in the
+    //   encoder's own console.error log). Retrying is safe even if the cause turns out
+    //   to be something else, since we'd hit the same error again and surface it.
+    return /missingorspent|missing\s*or\s*spent|bad-txns-inputs|no utxos.*no utxos|Internal encoder error/i.test(msg)
 }
 
 module.exports = {
