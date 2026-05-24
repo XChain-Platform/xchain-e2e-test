@@ -150,11 +150,16 @@ class BlockchainConnector {
 
             // Make the request to the node
             const response = await fetch(this.url, options);
-            
+
             if (!response.ok) {
-                throw new Error(`Error trying to send a transaction to the node`);
+                // Bitcoin/Litecoin/Dogecoin Core returns the JSON-RPC error
+                // body even on HTTP 500 (the wire-format error). Surface it
+                // so non-standard-script / dust / sighash rejections aren't
+                // masked behind a generic message.
+                const bodyText = await response.text().catch(() => '<unreadable body>');
+                throw new Error(`Error trying to send a transaction to the node — HTTP ${response.status} ${response.statusText}: ${bodyText}`);
             }
-            
+
             const responseData = await response.json();
 
             // Verify if there is a result and return the hex
