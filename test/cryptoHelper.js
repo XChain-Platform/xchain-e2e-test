@@ -86,12 +86,18 @@ module.exports = {
                 addressHasUtxos = false
             }
             if (!addressHasUtxos) {
-                console.log("UTXOs still not visible — nudging miner to mine a block (attempt "+attempt+"/6)")
+                // Log tracker/node sync state so the next stall has diagnosable
+                // evidence (block-height lag vs total stuck vs node not advancing).
+                const sync = await utxoTrackerConnector.getSyncStatus()
+                const syncStr = sync ? `tracker=${sync.tracker_height} node=${sync.node_height} lag=${sync.lag}` : "sync-status=unavailable"
+                console.log(`UTXOs still not visible (${syncStr}) — nudging miner to mine a block (attempt ${attempt}/6)`)
                 try { await regtestMinerConnector.generateBlocks(1) } catch (e) {}
             }
         }
         if (!addressHasUtxos){
-            throw new Error("The utxo tracker couldn't parse the utxo")
+            const sync = await utxoTrackerConnector.getSyncStatus()
+            const syncStr = sync ? `tracker=${sync.tracker_height} node=${sync.node_height} lag=${sync.lag}` : "sync-status=unavailable"
+            throw new Error(`The utxo tracker couldn't parse the utxo (${syncStr})`)
         }
 
         return newAddressInfo

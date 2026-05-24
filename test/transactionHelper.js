@@ -86,8 +86,11 @@ module.exports = {
     // with `bad-txns-inputs-missingorspent`. Drop the cache and wait briefly so
     // the tracker can catch up, then rebuild from scratch.
     async createAndSendTransaction(addressInfo, data, rawData = null, customOutputs = [], outputType = null){
-        const MAX_ATTEMPTS = 5
-        const WAIT_MS = 3000
+        // Bumped 5×3s → 8×5s (was failing the ORDER partial-fill test under
+        // full-suite load where the tracker takes >15s to reflect a SELL's
+        // spent change outputs to the BUY's encoder request).
+        const MAX_ATTEMPTS = 8
+        const WAIT_MS = 5000
         let lastErr
         for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             try {

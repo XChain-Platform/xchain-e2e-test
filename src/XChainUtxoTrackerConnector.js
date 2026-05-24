@@ -65,6 +65,27 @@ class UtxoTracker {
         }
     }
     
+    async getSyncStatus(){
+        try {
+            const data = {
+                jsonrpc: '2.0',
+                method: 'get_sync_status',
+                id: 1
+            };
+            const options = {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            };
+            const response = await fetch(this.url, options);
+            if (!response.ok) return null;
+            const responseData = await response.json();
+            return responseData.result || null;
+        } catch (error) {
+            return null;
+        }
+    }
+
     async waitForUtxos(address, timeMax = 60000){
         const endTime = Date.now() + timeMax
         
