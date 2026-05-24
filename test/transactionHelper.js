@@ -66,8 +66,39 @@ function xchainP2shFinalizer(inputIndex, input, script, isSegwit, isP2SH, isP2WS
         
 }
 
+function _isStaleUtxoError(err){
+    const msg = (err && err.message) || ''
+    return /missingorspent|missing\s*or\s*spent|bad-txns-inputs/i.test(msg)
+}
+
 module.exports = {
+    // Wrap the build+sign+broadcast in a small retry loop. The encoder may pull
+    // UTXOs from the utxo-tracker during an indexing-lag window, build a tx that
+    // references inputs the bitcoind has already spent, and broadcast would die
+    // with `bad-txns-inputs-missingorspent`. Drop the cache and wait briefly so
+    // the tracker can catch up, then rebuild from scratch.
     async createAndSendTransaction(addressInfo, data, rawData = null, customOutputs = []){
+        const MAX_ATTEMPTS = 3
+        let lastErr
+        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            try {
+                return await this._doCreateAndSendTransaction(addressInfo, data, rawData, customOutputs)
+            } catch (err) {
+                if (attempt < MAX_ATTEMPTS && _isStaleUtxoError(err)) {
+                    _verifiedUtxos = null
+                    _verifiedUtxosAddress = null
+                    console.log("Broadcast failed (attempt " + attempt + "/" + MAX_ATTEMPTS + ") with missing/spent input — clearing UTXO cache, waiting 2s, retrying...")
+                    await new Promise(r => setTimeout(r, 2000))
+                    lastErr = err
+                    continue
+                }
+                throw err
+            }
+        }
+        throw lastErr
+    },
+
+    async _doCreateAndSendTransaction(addressInfo, data, rawData = null, customOutputs = []){
         console.log("Creating the transaction...")
         const utxoListForEncoder = (_verifiedUtxosAddress === addressInfo["address"] && _verifiedUtxos) ? _verifiedUtxos : []
         _verifiedUtxos = null
