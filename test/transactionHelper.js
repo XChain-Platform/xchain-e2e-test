@@ -86,11 +86,12 @@ module.exports = {
     // with `bad-txns-inputs-missingorspent`. Drop the cache and wait briefly so
     // the tracker can catch up, then rebuild from scratch.
     async createAndSendTransaction(addressInfo, data, rawData = null, customOutputs = [], outputType = null){
-        // Bumped 5×3s → 8×5s (was failing the ORDER partial-fill test under
-        // full-suite load where the tracker takes >15s to reflect a SELL's
-        // spent change outputs to the BUY's encoder request).
+        // 8 attempts gives ample budget under full-suite load where the tracker
+        // can take >15s to reflect a prior tx's change outputs to the next tx's
+        // encoder request. Per-retry wait is handled by quiesce() (active wait
+        // for ready=true), not a blind sleep — so we don't pay timing-tax on a
+        // fast stack and don't undershoot on a slow one.
         const MAX_ATTEMPTS = 8
-        const WAIT_MS = 5000
         let lastErr
         for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             try {
@@ -99,12 +100,15 @@ module.exports = {
                 if (attempt < MAX_ATTEMPTS && _isStaleUtxoError(err)) {
                     _verifiedUtxos = null
                     _verifiedUtxosAddress = null
-                    console.log("Broadcast failed (attempt " + attempt + "/" + MAX_ATTEMPTS + ") with stale UTXO — clearing cache, mining a block, waiting " + (WAIT_MS/1000) + "s, retrying...")
-                    // Force-mine a block. Confirms any pending tx in the mempool
-                    // (so its outputs become spendable) and forces the utxo-tracker
-                    // to re-scan, surfacing change outputs the encoder needs.
-                    try { await regtestMinerConnector.generateBlocks(1) } catch (e) {}
-                    await new Promise(r => setTimeout(r, WAIT_MS))
+                    console.log("Broadcast failed (attempt " + attempt + "/" + MAX_ATTEMPTS + ") with stale UTXO — quiescing stack before retry...")
+                    // Active wait for the regtest stack to fully settle (mempool
+                    // empty, tracker committed-height == node height) instead of
+                    // a blind sleep. quiesce() itself mines a block when mempool
+                    // is non-empty, so straggling broadcasts get confirmed before
+                    // we re-ask the encoder for UTXOs.
+                    try {
+                        await utxoTrackerConnector.quiesce({ timeoutMs: 10000, pollMs: 250, regtestMiner: regtestMinerConnector })
+                    } catch (e) { /* swallow — next retry surfaces any persistent issue */ }
                     lastErr = err
                     continue
                 }
