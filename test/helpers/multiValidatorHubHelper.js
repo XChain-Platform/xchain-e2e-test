@@ -176,6 +176,21 @@ class MultiValidatorHub {
                 else                                process.env.BTC_INDEXER_API_URL = savedIndexerUrl;
             }
         }
+
+        // Mutual validator registration. Each hub maintains its own per-hub
+        // `validators` table (consulted by PeerManager for sig verification +
+        // by Consensus for leader rotation); without registration each hub
+        // drops every signed message from its peers with "Invalid signature".
+        // Production deployments bootstrap this via the registervalidator
+        // JSON-RPC; in-process we call it directly.
+        for (let i = 0; i < this.hubs.length; i++) {
+            for (let j = 0; j < this.hubs.length; j++) {
+                await this.hubs[i].registerValidator(
+                    this.identities[j].pubkeyHex,
+                    '127.0.0.1:' + this.ports[j]
+                );
+            }
+        }
     }
 
     // Validator pubkeys (hex), in hub index order.
