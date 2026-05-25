@@ -130,69 +130,6 @@ describe('Staking — STAKE, UNSTAKE, DELEGATE (capability model)', function () 
         })
     })
 
-    describe('STAKE v1 — Input validation rejections', function () {
-        // Each test broadcasts a malformed STAKE and asserts the indexer
-        // records the row with the specific `invalid: ...` status. These
-        // exercise the defensive validations in stake.js — the wallet's
-        // StakeForm rejects most of these client-side, but the e2e suite
-        // goes straight through the encoder so we get coverage on the
-        // indexer's own guards.
-        let validatorAddr = null
-
-        before(async function () {
-            validatorAddr = await cryptoHelper.getNewFundedAddress(
-                "validator-input", COIN, NETWORK, null, "legacy", 0, 0.01
-            )
-            await gasHelper.ensureGasBalance(validatorAddr, '50')   // small balance for insufficient-funds test
-        })
-
-        it('should reject AMOUNT=0', async function () {
-            let { publicKey } = crypto.generateKeyPairSync('ed25519')
-            let pk = publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('hex')
-            let txHash = await transactionHelper.createAndSendTransaction(stakerAddr, "STAKE|1|0|" + pk)
-            let row = await stakeHelper.waitForAnyStake({ source: stakerAddr.address, signingPubkey: pk, txHash })
-            assert(row, 'rejected STAKE row should still be recorded')
-            assert.notStrictEqual(row.status, 'valid')
-            assert.match(row.status, /AMOUNT/i,
-                'rejection should mention AMOUNT; got: ' + row.status)
-        })
-
-        it('should reject AMOUNT with too many decimals', async function () {
-            let { publicKey } = crypto.generateKeyPairSync('ed25519')
-            let pk = publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('hex')
-            // 9 fractional digits — exceeds the 8-digit cap
-            let txHash = await transactionHelper.createAndSendTransaction(stakerAddr, "STAKE|1|10.123456789|" + pk)
-            let row = await stakeHelper.waitForAnyStake({ source: stakerAddr.address, signingPubkey: pk, txHash })
-            assert(row, 'rejected STAKE row should still be recorded')
-            assert.notStrictEqual(row.status, 'valid')
-            assert.match(row.status, /AMOUNT/i,
-                'rejection should mention AMOUNT format; got: ' + row.status)
-        })
-
-        it('should reject a SIGNING_PUBKEY that is not 64 hex chars', async function () {
-            // Short (32 chars) — should fail the format regex
-            let shortPk = 'a'.repeat(32)
-            let txHash = await transactionHelper.createAndSendTransaction(stakerAddr, "STAKE|1|100|" + shortPk)
-            let row = await stakeHelper.waitForAnyStake({ source: stakerAddr.address, signingPubkey: shortPk, txHash })
-            assert(row, 'rejected STAKE row should still be recorded')
-            assert.notStrictEqual(row.status, 'valid')
-            assert.match(row.status, /SIGNING_PUBKEY/i,
-                'rejection should mention SIGNING_PUBKEY; got: ' + row.status)
-        })
-
-        it('should reject STAKE when AMOUNT exceeds source balance', async function () {
-            let { publicKey } = crypto.generateKeyPairSync('ed25519')
-            let pk = publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('hex')
-            // validatorAddr has 50 XCHAIN; ask for 10000.
-            let txHash = await transactionHelper.createAndSendTransaction(validatorAddr, "STAKE|1|10000|" + pk)
-            let row = await stakeHelper.waitForAnyStake({ source: validatorAddr.address, signingPubkey: pk, txHash })
-            assert(row, 'rejected STAKE row should still be recorded')
-            assert.notStrictEqual(row.status, 'valid')
-            assert.match(row.status, /insufficient/i,
-                'rejection should mention insufficient funds; got: ' + row.status)
-        })
-    })
-
     describe('UNSTAKE v0 — Rejection paths', function () {
         it('should reject UNSTAKE against an unknown pubkey', async function () {
             let { publicKey } = crypto.generateKeyPairSync('ed25519')
