@@ -57,6 +57,7 @@ const cryptoHelper = require('../cryptoHelper')
 const stakeHelper = require('../helpers/stakeHelper')
 const gasHelper = require('../helpers/gasHelper')
 const vmHelper = require('../helpers/vmHelper')
+const transactionHelper = require('../transactionHelper')
 const { MultiValidatorHub } = require('../helpers/multiValidatorHubHelper')
 
 async function _settleStack() {
@@ -176,6 +177,19 @@ module.exports = {
         const deploy = await vmHelper.sendDeployV0(owner, CONTRACT_CODE, 500000)
         assert.strictEqual(deploy.contract.status, 'valid', 'deploy should be valid')
         contractIndex = deploy.contract.action_index
+
+        // 6) Fund a publisher address and wire it as each hub's broadcast hook.
+        //    Only the round leader actually invokes the hook (followers no-op),
+        //    so a single shared funded address is safe across all 3 hubs.
+        const publisherAddr = await cryptoHelper.getNewFundedAddress(
+            'mvh-publisher', COIN, NETWORK, null, 'legacy', 0, 0.02
+        )
+        await regtestMinerConnector.generateBlocks(2)
+        await _settleStack()
+        mvh.setBroadcastHook(async (wirePayload) => {
+            const txHash = await transactionHelper.createAndSendTransaction(publisherAddr, wirePayload)
+            return { txid: txHash }
+        })
     })
 
     after(async function () {

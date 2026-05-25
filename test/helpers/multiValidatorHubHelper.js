@@ -129,6 +129,13 @@ class MultiValidatorHub {
         }
         this.ports = await _pickFreePorts(this.count, this.basePort);
 
+        // The hub's _resolveBtcIndexerUrl() reads process.env.BTC_INDEXER_API_URL
+        // on every 15s poll (not just at start). Set it for the lifetime of the
+        // harness and restore once on stop() — otherwise polls after start()
+        // return undefined and the hubs silently never see pending requests.
+        this._savedIndexerUrl = process.env.BTC_INDEXER_API_URL;
+        process.env.BTC_INDEXER_API_URL = this.btcIndexerApiUrl;
+
         // Start each hub. Sequential start (rather than Promise.all) so the
         // logs interleave cleanly and DB creation doesn't race.
         for (let i = 0; i < this.count; i++) {
@@ -149,32 +156,20 @@ class MultiValidatorHub {
                 P2P_MSG_DEDUP_TTL:      60000,
                 P2P_MAX_PAYLOAD:        1048576,
                 ORACLE_EPOCH_START:     this.oracleEpochStart,
-                // BTC_INDEXER_API_URL is read from process.env by the hub;
-                // we set it once here for all hubs (they share the same indexer).
             };
 
-            // The hub's BTC indexer lookup falls back to process.env.BTC_INDEXER_API_URL
-            // when not in p2pConfig or hub configs table. Set it for the duration of start().
-            const savedIndexerUrl = process.env.BTC_INDEXER_API_URL;
-            process.env.BTC_INDEXER_API_URL = this.btcIndexerApiUrl;
-
-            try {
-                const hub = new XChainHub(
-                    this.dbHost, this.dbPort, this.dbNames[i],
-                    this.dbUser, this.dbPass,
-                    p2pConfig
-                );
-                await hub.start();
-                await hub.startP2P();
-                await hub.startConsensus();
-                // startOracle, startCrossChain, startReorgHandler, startGovernance
-                // intentionally skipped — the harness is attestation-focused.
-                await hub.startAttestation();
-                this.hubs.push(hub);
-            } finally {
-                if (savedIndexerUrl === undefined) delete process.env.BTC_INDEXER_API_URL;
-                else                                process.env.BTC_INDEXER_API_URL = savedIndexerUrl;
-            }
+            const hub = new XChainHub(
+                this.dbHost, this.dbPort, this.dbNames[i],
+                this.dbUser, this.dbPass,
+                p2pConfig
+            );
+            await hub.start();
+            await hub.startP2P();
+            await hub.startConsensus();
+            // startOracle, startCrossChain, startReorgHandler, startGovernance
+            // intentionally skipped — the harness is attestation-focused.
+            await hub.startAttestation();
+            this.hubs.push(hub);
         }
 
         // Mutual validator registration. Each hub maintains its own per-hub
@@ -196,6 +191,19 @@ class MultiValidatorHub {
     // Validator pubkeys (hex), in hub index order.
     getPubkeys(){ return this.identities.map(id => id.pubkeyHex); }
 
+    // Wire a broadcast hook into each hub's AttestationPublisher. Only the
+    // round leader actually invokes it (others no-op per request), so a
+    // single shared hook is safe. `fn(wirePayload, event)` should return
+    // `{ txid }`.
+    setBroadcastHook(fn){
+        for (const hub of this.hubs) {
+            const publisher = hub.getAttestationPublisher && hub.getAttestationPublisher();
+            if (publisher && typeof publisher.setBroadcastHook === 'function') {
+                publisher.setBroadcastHook(fn);
+            }
+        }
+    }
+
     // Stop all hubs + their timers; close DB connections. Idempotent.
     //
     // The hubs' PeerManager.stop() awaits httpServer.close(), which waits for
@@ -216,6 +224,12 @@ class MultiValidatorHub {
             }
         }
         this.hubs = [];
+
+        // Restore process.env.BTC_INDEXER_API_URL to whatever the host test
+        // process had before start() — keeps the harness hermetic.
+        if (this._savedIndexerUrl === undefined) delete process.env.BTC_INDEXER_API_URL;
+        else                                      process.env.BTC_INDEXER_API_URL = this._savedIndexerUrl;
+        this._savedIndexerUrl = undefined;
     }
 
     async _stopOne(hub){
