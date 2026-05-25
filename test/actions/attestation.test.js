@@ -49,6 +49,37 @@ module.exports = {
         xchain.state.set('callback_status', xchain.getInputParam(2));
         xchain.state.set('callback_payload', xchain.getInputParam(3));
         xchain.state.set('callback_context', xchain.getInputParam(4));
+    },
+    askOracleExpiring: function(xchain) {
+        var url = xchain.getInputParam(0);
+        var requestId = xchain.attestation.request(
+            'http_get',
+            url,
+            'handleExpiry',
+            ['ctx-expiry'],
+            { redundancy: 1, deadlineBlocks: 2 }
+        );
+        xchain.state.set('expiring_request_id', requestId);
+        return requestId;
+    },
+    askOracleQuorum: function(xchain) {
+        var url = xchain.getInputParam(0);
+        var requestId = xchain.attestation.request(
+            'http_get',
+            url,
+            'handleResponse',
+            ['ctx-quorum'],
+            { redundancy: 3, deadlineBlocks: 20 }
+        );
+        xchain.state.set('quorum_request_id', requestId);
+        return requestId;
+    },
+    handleExpiry: function(xchain) {
+        xchain.state.set('expiry_request_id', xchain.getInputParam(0));
+        xchain.state.set('expiry_provider_id', xchain.getInputParam(1));
+        xchain.state.set('expiry_status', xchain.getInputParam(2));
+        xchain.state.set('expiry_payload', xchain.getInputParam(3));
+        xchain.state.set('expiry_context', xchain.getInputParam(4));
     }
 };
 `
@@ -158,6 +189,44 @@ module.exports = {
         assert.strictEqual(JSON.parse(cbContext.state_value), 'ctx-42')
     })
 
+    it('auto-expires a request whose DEADLINE_BLOCK passes without a response, firing the callback with status=expired', async function () {
+        // Fire a fresh request with a short deadline (deadlineBlocks=2)
+        let exec = await vmHelper.sendExecuteV0(operatorAddr, contractIndex, 'askOracleExpiring', ['https://example.com/v1/expiring/789'])
+        assert.strictEqual(exec.execution.status, 'valid', 'execute status: ' + exec.execution.status)
+
+        let request = await indexerDatabase.waitForAttestationRequest({
+            txHash:        exec.txHash,
+            requestStatus: 'pending'
+        })
+        assert(request, 'expiring-request row should exist with status=pending')
+        let expiringRequestId = request.request_id
+
+        // Advance past DEADLINE_BLOCK. deadlineBlocks=2 + comfortable margin so the
+        // per-block expiry pipeline definitely runs at deadline+1.
+        await regtestMinerConnector.generateBlocks(5)
+
+        // Request status should flip to 'expired'
+        let expired = await indexerDatabase.waitForAttestationRequest({
+            requestId:     expiringRequestId,
+            requestStatus: 'expired'
+        }, 30000)
+        assert(expired, 'request should auto-expire past its DEADLINE_BLOCK')
+
+        // Callback should have fired with status='expired' (per spec §4.3)
+        let expiryStatus     = await indexerDatabase.getContractState(contractIndex, 'expiry_status')
+        let expiryRequestId  = await indexerDatabase.getContractState(contractIndex, 'expiry_request_id')
+        let expiryProviderId = await indexerDatabase.getContractState(contractIndex, 'expiry_provider_id')
+        let expiryPayload    = await indexerDatabase.getContractState(contractIndex, 'expiry_payload')
+        let expiryContext    = await indexerDatabase.getContractState(contractIndex, 'expiry_context')
+        assert(expiryStatus,    'expiry_status state row should exist')
+        assert(expiryRequestId, 'expiry_request_id state row should exist')
+        assert.strictEqual(JSON.parse(expiryStatus.state_value),     'expired')
+        assert.strictEqual(JSON.parse(expiryRequestId.state_value),  expiringRequestId)
+        assert.strictEqual(JSON.parse(expiryProviderId.state_value), 'http_get')
+        assert.strictEqual(JSON.parse(expiryPayload.state_value),    '')
+        assert.strictEqual(JSON.parse(expiryContext.state_value),    'ctx-expiry')
+    })
+
     it('rejects a signature from an unstaked pubkey', async function () {
         // Fresh validator with no stake — sig verification should drop their signature
         let badValidator = new attestationHelper.MockAttestationValidator()
@@ -193,5 +262,111 @@ module.exports = {
             requestStatus: 'pending'
         })
         assert(stillPending, 'request from invalid-sig response should remain pending')
+    })
+
+    it('accepts a redundancy=3 response with 3 valid signatures (PBFT quorum)', async function () {
+        // Stake two additional validators so the snapshot N >= 3 at the request block.
+        // With N=3 and REDUNDANCY=3, the indexer's max(REDUNDANCY, PBFT(N)) = max(3, 1) = 3
+        // valid sigs required.
+        let v2 = new attestationHelper.MockAttestationValidator()
+        let v3 = new attestationHelper.MockAttestationValidator()
+        await stakeHelper.sendStakeV1(operatorAddr, '1500.00000000', v2.pubkey)
+        await stakeHelper.sendStakeV1(operatorAddr, '1500.00000000', v3.pubkey)
+        // Advance past activation delay
+        await regtestMinerConnector.generateBlocks(7)
+
+        // Fire a request with redundancy=3
+        let exec = await vmHelper.sendExecuteV0(operatorAddr, contractIndex, 'askOracleQuorum', ['https://example.com/v1/quorum/abc'])
+        assert.strictEqual(exec.execution.status, 'valid', 'execute status: ' + exec.execution.status)
+
+        let request = await indexerDatabase.waitForAttestationRequest({
+            txHash:        exec.txHash,
+            requestStatus: 'pending'
+        })
+        assert(request, 'quorum-request row should exist with status=pending')
+        assert.strictEqual(Number(request.redundancy), 3)
+
+        // Broadcast a response signed by all 3 validators
+        const responsePayload = '{"quorum":3,"ok":true}'
+        await attestationHelper.broadcastAttestationResponse(operatorAddr, {
+            requestId:       request.request_id,
+            providerId:      'http_get',
+            responsePayload: responsePayload,
+            status:          'ok',
+            meta:            '200',
+            validators:      [validator, v2, v3]
+        })
+
+        // Response should land as valid with all 3 sigs recorded
+        let response = await indexerDatabase.waitForAttestationResponse({
+            requestId:      request.request_id,
+            responseStatus: 'ok',
+            status:         'valid'
+        })
+        assert(response, 'attestation_responses row should exist with response_status=ok and status=valid (3-sig path)')
+
+        let sigs = await indexerDatabase.getAttestationValidatorSignatures(response.action_index)
+        assert.strictEqual(sigs.length, 3, 'should have exactly 3 verified signatures')
+
+        // Request flipped to fulfilled
+        let updatedRequest = await indexerDatabase.checkAttestationRequest({
+            requestId:     request.request_id,
+            requestStatus: 'fulfilled'
+        })
+        assert(updatedRequest, 'request_status should flip to fulfilled')
+
+        // Callback fired (writes to the shared callback_* state keys)
+        let cbStatus  = await indexerDatabase.getContractState(contractIndex, 'callback_status')
+        let cbContext = await indexerDatabase.getContractState(contractIndex, 'callback_context')
+        assert(cbStatus,  'callback_status state row should exist')
+        assert.strictEqual(JSON.parse(cbStatus.state_value),  'ok')
+        assert.strictEqual(JSON.parse(cbContext.state_value), 'ctx-quorum')
+
+        // Stash the extra validators for the next test
+        this.test.parent.ctx.extraValidators = [v2, v3]
+    })
+
+    it('rejects a redundancy=3 response with only 2 valid signatures', async function () {
+        let extras = this.test.parent.ctx.extraValidators
+        // Skip if the prior test didn't run (e.g. user used --grep)
+        if (!extras || extras.length < 1) {
+            console.log('Skipping insufficient-sigs test — prior 3-stake setup missing')
+            this.skip()
+            return
+        }
+
+        let exec = await vmHelper.sendExecuteV0(operatorAddr, contractIndex, 'askOracleQuorum', ['https://example.com/v1/quorum/def'])
+        assert.strictEqual(exec.execution.status, 'valid')
+        let request = await indexerDatabase.waitForAttestationRequest({
+            txHash:        exec.txHash,
+            requestStatus: 'pending'
+        })
+        assert(request, 'insufficient-sigs request should exist as pending')
+
+        // Sign with only 2 of the 3 staked validators
+        await attestationHelper.broadcastAttestationResponse(operatorAddr, {
+            requestId:       request.request_id,
+            providerId:      'http_get',
+            responsePayload: '{"quorum":3,"ok":true}',
+            status:          'ok',
+            meta:            '200',
+            validators:      [validator, extras[0]]
+        })
+
+        // Either no row (broadcast failed at validation) or row exists with non-valid status
+        let resp = await indexerDatabase.waitForAttestationResponse({
+            requestId: request.request_id
+        }, 10000)
+        if (resp) {
+            assert.notStrictEqual(resp.status, 'valid',
+                '2-of-3 sig response should NOT be marked valid; got status=' + resp.status)
+        }
+
+        // Request remains pending
+        let stillPending = await indexerDatabase.checkAttestationRequest({
+            requestId:     request.request_id,
+            requestStatus: 'pending'
+        })
+        assert(stillPending, 'request should remain pending after under-quorum response')
     })
 })
