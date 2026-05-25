@@ -73,7 +73,12 @@ async function fetchGatedFileRow(actionIndex) {
 }
 
 describe('FILE — token-gated content', function () {
-    this.timeout(120000)
+    // Set at the describe level: the bare-SEND test below intentionally waits
+    // out three 60s waitFor* calls (≈180s plus tx-confirm) to verify the
+    // gate is enforced. Per-it `this.timeout(240000)` inside that test body
+    // wasn't overriding the describe's timer in mocha 11.7, so the test was
+    // being killed at the describe-level 120s.
+    this.timeout(240000)
 
     const TICK = 'GATEDTEST' + Date.now().toString().slice(-6)
     const plaintext = Buffer.from('top secret holder-only content')
