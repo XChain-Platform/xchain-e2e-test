@@ -88,18 +88,36 @@ module.exports = {
     // with `bad-txns-inputs-missingorspent`. Drop the cache and wait briefly so
     // the tracker can catch up, then rebuild from scratch.
     async createAndSendTransaction(addressInfo, data, rawData = null, customOutputs = [], outputType = null){
-        // 8 attempts gives ample budget under full-suite load where the tracker
-        // can take >15s to reflect a prior tx's change outputs to the next tx's
-        // encoder request. Per-retry wait is handled by quiesce() (active wait
-        // for ready=true), not a blind sleep — so we don't pay timing-tax on a
-        // fast stack and don't undershoot on a slow one.
-        const MAX_ATTEMPTS = 8
+        // 15 attempts gives generous budget under full-suite load. Session 4
+        // settled on 8; one stubborn ORDER partial-fill failure burned all 8
+        // with identical rebuilds, suggesting the tracker had a phantom UTXO
+        // that didn't clear within an 80s window. Per-retry wait is handled by
+        // quiesce() (active wait for ready=true) at 20s timeout per attempt.
+        const MAX_ATTEMPTS = 15
         let lastErr
         for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             try {
                 return await this._doCreateAndSendTransaction(addressInfo, data, rawData, customOutputs, outputType)
             } catch (err) {
                 if (attempt < MAX_ATTEMPTS && _isStaleUtxoError(err)) {
+                    // TRAP LOG: capture tracker's view of this address at the
+                    // moment of failure. The encoder picks utxos[0] (sorted by
+                    // value desc), so the first entry is what got rejected.
+                    // Cross-check against bitcoind's gettxout to identify
+                    // phantoms next time the bug surfaces under load.
+                    try {
+                        const addr = addressInfo && addressInfo["address"]
+                        if (addr) {
+                            const snap = await utxoTrackerConnector.getUtxosFromAddress(addr)
+                            const utxos = (snap && snap["utxos"]) || []
+                            const sorted = utxos.slice().sort((a,b) => Number(b.value) - Number(a.value))
+                            console.log("STALE-UTXO TRAP [" + addr + "] tracker reports " + utxos.length + " UTXO(s):")
+                            for (let i = 0; i < sorted.length; i++) {
+                                const u = sorted[i]
+                                console.log("  [" + i + "] " + u.txid + ":" + u.vout + " value=" + u.value + " conf=" + u.confirmations + (i === 0 ? "  <- encoder picked this" : ""))
+                            }
+                        }
+                    } catch (e) { /* trap log is best-effort */ }
                     _verifiedUtxos = null
                     _verifiedUtxosAddress = null
                     console.log("Broadcast failed (attempt " + attempt + "/" + MAX_ATTEMPTS + ") with stale UTXO — quiescing stack before retry...")
@@ -109,7 +127,7 @@ module.exports = {
                     // is non-empty, so straggling broadcasts get confirmed before
                     // we re-ask the encoder for UTXOs.
                     try {
-                        await utxoTrackerConnector.quiesce({ timeoutMs: 10000, pollMs: 250, regtestMiner: regtestMinerConnector })
+                        await utxoTrackerConnector.quiesce({ timeoutMs: 20000, pollMs: 250, regtestMiner: regtestMinerConnector })
                     } catch (e) { /* swallow — next retry surfaces any persistent issue */ }
                     lastErr = err
                     continue
