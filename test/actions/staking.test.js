@@ -72,6 +72,15 @@ describe('Staking — STAKE, UNSTAKE, DELEGATE (capability model)', function () 
     })
 
     describe('STAKE v2 — Top-up validation rejections', function () {
+        // Run order: this block lands AFTER `UNSTAKE v0 — Begin unstaking`,
+        // but the source-mismatch test relies on the pubkey's stake being
+        // VISIBLE-AS-ACTIVE at the time of the v2 broadcast. UNSTAKE doesn't
+        // deactivate instantly — it sets deactivation_block = unstake_block
+        // + ACTIVATION_DELAY_BLOCKS (6), giving the validator a grace
+        // period to keep participating. So as long as fewer than 6 blocks
+        // elapse between the UNSTAKE block and this v2 broadcast, the
+        // stake is still queryable as active and the SOURCE check fires
+        // correctly. Don't insert generateBlocks(7) before this block.
         let otherAddr = null
 
         before(async function () {
@@ -83,9 +92,10 @@ describe('Staking — STAKE, UNSTAKE, DELEGATE (capability model)', function () 
         })
 
         it('should reject a v2 top-up from a different source address', async function () {
-            // signingPubkey already has an active stake from stakerAddr.
-            // otherAddr tries to top it up — the indexer must reject as
-            // "SOURCE (does not own this stake)".
+            // signingPubkey already has an active stake from stakerAddr
+            // (within UNSTAKE's 6-block deactivation grace period — see
+            // block comment above). otherAddr tries to top it up — the
+            // indexer must reject as "SOURCE (does not own this stake)".
             let msg = "STAKE|2|500.00000000|" + signingPubkey
             let txHash = await transactionHelper.createAndSendTransaction(otherAddr, msg)
             let row = await stakeHelper.waitForAnyStake({
