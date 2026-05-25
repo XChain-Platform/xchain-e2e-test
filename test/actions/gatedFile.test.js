@@ -155,10 +155,12 @@ describe('FILE — token-gated content', function () {
     })
 
     it('rejects bare SEND of the gated token with no sibling MESSAGE', async function () {
-        // Worst-case path here is ~5 retries x 3s + tx confirm (~60s) +
-        // tracker wait (20s) + waitForSend (30s) which can exceed mocha's
-        // default 120s test timeout under full-suite load.
-        this.timeout(180000)
+        // The encoder picks the P2SH 2-tx path for this SEND (gated-token
+        // wire size pushes past OP_RETURN), so we wait for two confirms
+        // not one. Worst case: 2 x 60s tx confirm + 20s tracker + 30s
+        // waitForSend ≈ 170s — 180s was right at the boundary and flaked.
+        // 240s gives a real margin for retries + load.
+        this.timeout(240000)
         // sendHelper.sendSendV0 doesn't throw on a timeout — waitForSend
         // resolves to null. So we check the resolved value: if `send` is
         // non-null AND status='valid', the gate isn't being enforced.
