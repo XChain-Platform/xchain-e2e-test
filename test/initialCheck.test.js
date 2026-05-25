@@ -242,6 +242,34 @@ exports.mochaHooks = {
         })
     },
 
+    // After every test, wait for the regtest stack to be quiescent before
+    // the next test starts. "Quiescent" = node mempool empty AND tracker
+    // committed-height == node height. This eliminates the ordering-dependent
+    // flakes where a previous test leaves a mid-batch state that breaks the
+    // next test's encoder queries with phantom "no utxos" errors.
+    //
+    // Failures here are logged but never throw — we don't want to mask the
+    // actual test outcome with barrier issues. The 15s timeout is generous
+    // for regtest under load; quiescence usually lands in < 1s on a clean
+    // stack.
+    async afterEach(){
+        try {
+            const status = await utxoTrackerConnector.quiesce({
+                timeoutMs: 15000,
+                pollMs: 250,
+                regtestMiner: regtestMinerConnector,
+            })
+            if (!status || !status.ready){
+                const summary = status
+                    ? `mempool=${status.mempool_size} tracker=${status.tracker_height} node=${status.node_height} lag=${status.lag}`
+                    : 'no-response'
+                console.log(`afterEach: stack did not reach quiescence within 15s (${summary})`)
+            }
+        } catch (err){
+            console.log('afterEach: quiesce failed: ' + (err && err.message))
+        }
+    },
+
     async afterAll(){
         await phase('teardown', async () => {
             try{

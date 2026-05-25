@@ -86,6 +86,49 @@ class UtxoTracker {
         }
     }
 
+    // Single-shot probe — returns the tracker's is_quiescent payload
+    // (or null on RPC error). Caller waits via quiesce() below.
+    async getQuiescentStatus(){
+        try {
+            const data = { jsonrpc: '2.0', method: 'is_quiescent', id: 1 };
+            const options = {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            };
+            const response = await fetch(this.url, options);
+            if (!response.ok) return null;
+            const responseData = await response.json();
+            return responseData.result || null;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    // Test framework barrier — polls tracker.is_quiescent until ready or
+    // timeout. Pre-test/afterEach hooks call this so the next test starts
+    // from a fully-settled stack (no mid-batch state, no mempool backlog).
+    //
+    // When something is still in flight, optionally nudge it forward by
+    // mining a block via the regtest miner — this confirms any straggling
+    // mempool tx and pushes the tracker into committing the latest batch.
+    async quiesce({ timeoutMs = 30000, pollMs = 250, regtestMiner = null } = {}){
+        const deadline = Date.now() + timeoutMs
+        let last = null
+        while (Date.now() < deadline){
+            const status = await this.getQuiescentStatus()
+            last = status
+            if (status && status.ready) return status
+            // Not ready — if a regtestMiner was passed, mine a block to
+            // unblock mempool/batch progression.
+            if (regtestMiner && status && status.mempool_size > 0){
+                try { await regtestMiner.generateBlocks(1) } catch (e) {}
+            }
+            await this.sleep(pollMs)
+        }
+        return last  // Return the last status seen (may have ready=false)
+    }
+
     async waitForUtxos(address, timeMax = 60000){
         const endTime = Date.now() + timeMax
         
