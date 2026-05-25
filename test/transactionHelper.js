@@ -69,6 +69,8 @@ function xchainP2shFinalizer(inputIndex, input, script, isSegwit, isP2SH, isP2WS
 function _isStaleUtxoError(err){
     const msg = (err && err.message) || ''
     // `missingorspent`/`bad-txns-inputs` — node rejected because inputs were already spent.
+    // `Missing inputs` — bitcoin/dogecoin's bare RPC error -25 message for the same condition
+    //   (kept as a distinct pattern because the JSON-RPC layer can deliver either form).
     // `no utxos ... no utxos found` — encoder asked the tracker for UTXOs but the tracker
     //   hadn't yet indexed the change output from the source's previous tx.
     // `Internal encoder error` — the encoder sanitizes non-TypeError/RangeError messages
@@ -76,7 +78,7 @@ function _isStaleUtxoError(err){
     //   stack this is almost always the "no utxos" case caught above (visible in the
     //   encoder's own console.error log). Retrying is safe even if the cause turns out
     //   to be something else, since we'd hit the same error again and surface it.
-    return /missingorspent|missing\s*or\s*spent|bad-txns-inputs|no utxos.*no utxos|Internal encoder error/i.test(msg)
+    return /missingorspent|missing\s*or\s*spent|missing\s+inputs|bad-txns-inputs|no utxos.*no utxos|Internal encoder error/i.test(msg)
 }
 
 module.exports = {
