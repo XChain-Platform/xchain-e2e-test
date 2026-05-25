@@ -155,7 +155,14 @@ module.exports = {
             addressInfo["address"], //changeAddress - the bitcoins will return to the same address
             null,
             null,
-            null
+            null,
+            // unconfirmed=false: e2e test traffic always waits for confirmation
+            // before issuing the next tx, so we should never need to spend a
+            // mempool UTXO. Filtering them out at the encoder defends against
+            // the tracker's mempool DB carrying stale entries (a node-side
+            // dropped tx that the tracker's 60s mempool poll hasn't yet
+            // reconciled — see STALE-UTXO TRAP log).
+            false
         )
         
         let encodeType = txPsbtHex["encoding"]
@@ -192,7 +199,8 @@ module.exports = {
                 addressInfo["address"], //changeAddress - the bitcoins will return to the same address
                 txHash,
                 txHex,
-                null
+                null,
+                false  // unconfirmed=false — see comment above
             )
             
             spentTxPsbtHex = spentTxPsbtHex["psbt"]

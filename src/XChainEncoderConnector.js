@@ -56,7 +56,7 @@ class XChainEncoderConnector {
         }
     }
     
-    async createTx(utxosList, pubkey, customOutputs, data, rawData, exactFee, rbf, outputType, changeAddress, p2shHash, p2shHex, compressedPubKey){
+    async createTx(utxosList, pubkey, customOutputs, data, rawData, exactFee, rbf, outputType, changeAddress, p2shHash, p2shHex, compressedPubKey, unconfirmed){
         const dataToSend = {
             jsonrpc: '2.0',
             method: 'create_tx',
@@ -72,7 +72,8 @@ class XChainEncoderConnector {
                 change:changeAddress,
                 p2shHash:p2shHash,
                 p2shHex:p2shHex,
-                compressedPubKey:compressedPubKey
+                compressedPubKey:compressedPubKey,
+                unconfirmed:unconfirmed
             },
             id: 1
         }
