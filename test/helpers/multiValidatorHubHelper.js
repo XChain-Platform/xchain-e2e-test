@@ -235,9 +235,10 @@ class MultiValidatorHub {
     async _stopOne(hub){
         // Stop attestation subsystems first (their poll timers + message
         // handlers reference peerManager; clearing first avoids hits after close).
-        if (hub.attestationRound     && typeof hub.attestationRound.stop     === 'function') await _withTimeout(hub.attestationRound.stop(),     3000, 'attestationRound.stop');
-        if (hub.attestationConsensus && typeof hub.attestationConsensus.stop === 'function') await _withTimeout(hub.attestationConsensus.stop(), 3000, 'attestationConsensus.stop');
-        if (hub.attestationPublisher && typeof hub.attestationPublisher.stop === 'function') await _withTimeout(hub.attestationPublisher.stop(), 3000, 'attestationPublisher.stop');
+        if (hub.attestationSpotChecker && typeof hub.attestationSpotChecker.stop === 'function') await _withTimeout(hub.attestationSpotChecker.stop(), 3000, 'attestationSpotChecker.stop');
+        if (hub.attestationRound       && typeof hub.attestationRound.stop       === 'function') await _withTimeout(hub.attestationRound.stop(),       3000, 'attestationRound.stop');
+        if (hub.attestationConsensus   && typeof hub.attestationConsensus.stop   === 'function') await _withTimeout(hub.attestationConsensus.stop(),   3000, 'attestationConsensus.stop');
+        if (hub.attestationPublisher   && typeof hub.attestationPublisher.stop   === 'function') await _withTimeout(hub.attestationPublisher.stop(),   3000, 'attestationPublisher.stop');
 
         // Force-close WS server + connections so peerManager.stop() →
         // httpServer.close() doesn't wait for a graceful drain.
