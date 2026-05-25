@@ -1,6 +1,32 @@
 const transactionHelper = require('../transactionHelper')
 
+// Poll until a stake/unstake row with the given txHash appears (any status).
+// Used by negative-path tests that need to read back an invalid-status row.
+async function waitForAnyStake({source, signingPubkey, txHash}, timeMax = 60000){
+    const startMs = Date.now(), endTime = startMs + timeMax
+    while(Date.now() < endTime){
+        let row = await indexerDatabase.checkStake({source, signingPubkey, txHash}).catch(() => null)
+        if(row) return row
+        await new Promise(r => setTimeout(r, 1000))
+    }
+    return null
+}
+
+async function waitForAnyUnstake({source, signingPubkey, txHash}, timeMax = 60000){
+    const startMs = Date.now(), endTime = startMs + timeMax
+    while(Date.now() < endTime){
+        let row = await indexerDatabase.checkUnstake({source, signingPubkey, txHash}).catch(() => null)
+        if(row) return row
+        await new Promise(r => setTimeout(r, 1000))
+    }
+    return null
+}
+
 module.exports = {
+    // Negative-path helpers — return the row regardless of status so the
+    // test can assert against the specific rejection reason.
+    waitForAnyStake,
+    waitForAnyUnstake,
     // STAKE v1 — create a new stake (capability model: capabilities auto-qualify by amount).
     // See claude/reports/specs/2026-05-24_capability-staking-model.md
     async sendStakeV1(addressInfo, amount, signingPubkey){

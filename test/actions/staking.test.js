@@ -3,6 +3,7 @@ const crypto = require('crypto')
 const cryptoHelper = require('../cryptoHelper')
 const stakeHelper = require('../helpers/stakeHelper')
 const gasHelper = require('../helpers/gasHelper')
+const transactionHelper = require('../transactionHelper')
 
 describe('Staking — STAKE, UNSTAKE, DELEGATE (capability model)', function () {
 
@@ -67,6 +68,75 @@ describe('Staking — STAKE, UNSTAKE, DELEGATE (capability model)', function () 
             assert(result.unstake, 'Unstake record should exist in DB')
             assert.strictEqual(result.unstake.status, 'valid', 'Unstake status should be valid')
             assert(result.unstake.cooldown_end_block > 0, 'Cooldown end block should be set')
+        })
+    })
+
+    describe('STAKE v2 — Top-up validation rejections', function () {
+        let otherAddr = null
+
+        before(async function () {
+            // A second address that does NOT own the original pubkey's stake
+            otherAddr = await cryptoHelper.getNewFundedAddress(
+                "other-staker", COIN, NETWORK, null, "legacy", 0, 0.01
+            )
+            await gasHelper.ensureGasBalance(otherAddr, '2000')
+        })
+
+        it('should reject a v2 top-up from a different source address', async function () {
+            // signingPubkey already has an active stake from stakerAddr.
+            // otherAddr tries to top it up — the indexer must reject as
+            // "SOURCE (does not own this stake)".
+            let msg = "STAKE|2|500.00000000|" + signingPubkey
+            let txHash = await transactionHelper.createAndSendTransaction(otherAddr, msg)
+            let row = await stakeHelper.waitForAnyStake({
+                source:        otherAddr.address,
+                signingPubkey: signingPubkey,
+                txHash:        txHash
+            })
+            assert(row, 'top-up row should be recorded (even when rejected)')
+            assert.notStrictEqual(row.status, 'valid',
+                'top-up from a different source should be rejected; got status=' + row.status)
+            assert.match(row.status, /SOURCE/i,
+                'rejection reason should mention SOURCE; got: ' + row.status)
+        })
+
+        it('should reject a v2 top-up against a fresh (never-staked) pubkey', async function () {
+            // Generate a NEW pubkey that no one has staked.
+            let { publicKey } = crypto.generateKeyPairSync('ed25519')
+            let freshPubkey = publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('hex')
+
+            let msg = "STAKE|2|500.00000000|" + freshPubkey
+            let txHash = await transactionHelper.createAndSendTransaction(stakerAddr, msg)
+            let row = await stakeHelper.waitForAnyStake({
+                source:        stakerAddr.address,
+                signingPubkey: freshPubkey,
+                txHash:        txHash
+            })
+            assert(row, 'top-up row should be recorded (even when rejected)')
+            assert.notStrictEqual(row.status, 'valid',
+                'top-up against a fresh pubkey should be rejected; got status=' + row.status)
+            assert.match(row.status, /no active stake to top up/i,
+                'rejection reason should mention "no active stake to top up"; got: ' + row.status)
+        })
+    })
+
+    describe('UNSTAKE v0 — Rejection paths', function () {
+        it('should reject UNSTAKE against an unknown pubkey', async function () {
+            let { publicKey } = crypto.generateKeyPairSync('ed25519')
+            let unknownPubkey = publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('hex')
+
+            let msg = "UNSTAKE|0|" + unknownPubkey
+            let txHash = await transactionHelper.createAndSendTransaction(stakerAddr, msg)
+            let row = await stakeHelper.waitForAnyUnstake({
+                source:        stakerAddr.address,
+                signingPubkey: unknownPubkey,
+                txHash:        txHash
+            })
+            assert(row, 'unstake row should be recorded (even when rejected)')
+            assert.notStrictEqual(row.status, 'valid',
+                'UNSTAKE against an unknown pubkey should be rejected; got status=' + row.status)
+            assert.match(row.status, /no active stake/i,
+                'rejection reason should mention "no active stake"; got: ' + row.status)
         })
     })
 
