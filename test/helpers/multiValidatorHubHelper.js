@@ -71,6 +71,16 @@ async function _pickFreePorts(count, base) {
     return picked;
 }
 
+// Promise.race with a tagged-error timeout. The slow path (a hub close
+// that gets stuck on a peer drain) gets bounded so the test harness
+// can finish teardown deterministically.
+function _withTimeout(promise, ms, label){
+    return Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout ' + (label || '') + ' after ' + ms + 'ms')), ms))
+    ]);
+}
+
 class MultiValidatorHub {
 
     /**
@@ -172,18 +182,55 @@ class MultiValidatorHub {
     getPubkeys(){ return this.identities.map(id => id.pubkeyHex); }
 
     // Stop all hubs + their timers; close DB connections. Idempotent.
+    //
+    // The hubs' PeerManager.stop() awaits httpServer.close(), which waits for
+    // all WebSocket connections to fully drain. With N cross-connected hubs
+    // shutting down in sequence, each one's stop() can block waiting for
+    // peers that are themselves waiting — a classic coordinated-shutdown
+    // race. Mitigations:
+    //   1. Force-close WS connections + destroy the httpServer's sockets
+    //      BEFORE calling peerManager.stop(), so close() doesn't wait.
+    //   2. Race every step with a per-step timeout — defensive in case
+    //      the hub's close path still hangs on something else.
     async stop(){
         for (const hub of this.hubs) {
             try {
-                if (hub.attestationRound     && hub.attestationRound._pollTimer) clearInterval(hub.attestationRound._pollTimer);
-                if (hub.attestationConsensus && typeof hub.attestationConsensus.stop === 'function') await hub.attestationConsensus.stop();
-                if (hub.attestationPublisher && typeof hub.attestationPublisher.stop === 'function') await hub.attestationPublisher.stop();
-                await hub.close();
+                await _withTimeout(this._stopOne(hub), 10000, 'hub.stop');
             } catch (e) {
                 console.warn('MultiValidatorHub: stop error: ' + (e && e.message ? e.message : e));
             }
         }
         this.hubs = [];
+    }
+
+    async _stopOne(hub){
+        // Stop attestation subsystems first (their poll timers + message
+        // handlers reference peerManager; clearing first avoids hits after close).
+        if (hub.attestationRound     && typeof hub.attestationRound.stop     === 'function') await _withTimeout(hub.attestationRound.stop(),     3000, 'attestationRound.stop');
+        if (hub.attestationConsensus && typeof hub.attestationConsensus.stop === 'function') await _withTimeout(hub.attestationConsensus.stop(), 3000, 'attestationConsensus.stop');
+        if (hub.attestationPublisher && typeof hub.attestationPublisher.stop === 'function') await _withTimeout(hub.attestationPublisher.stop(), 3000, 'attestationPublisher.stop');
+
+        // Force-close WS server + connections so peerManager.stop() →
+        // httpServer.close() doesn't wait for a graceful drain.
+        const pm = hub.peerManager;
+        if (pm) {
+            try {
+                for (const [, peer] of pm.peers) {
+                    if (peer.reconnectTimer) clearTimeout(peer.reconnectTimer);
+                    if (peer.ws) { try { peer.ws.terminate(); } catch {} }
+                }
+                if (pm.wss) {
+                    pm.wss.clients.forEach(ws => { try { ws.terminate(); } catch {} });
+                }
+                if (pm.httpServer && typeof pm.httpServer.closeAllConnections === 'function') {
+                    pm.httpServer.closeAllConnections();
+                }
+            } catch (e) {
+                console.warn('MultiValidatorHub: force-close peers failed: ' + (e && e.message ? e.message : e));
+            }
+        }
+
+        await _withTimeout(hub.close(), 5000, 'hub.close');
     }
 
     // Drop the per-hub MariaDB databases. Call after stop() to clean up

@@ -24,7 +24,10 @@ const COUNT = 3;
 const PEER_WAIT_MS = 8000;
 
 describe('MultiValidatorHub harness — bring-up smoke', function () {
-    this.timeout(60_000);
+    // 3 hubs × (DB init + schema migrations + P2P bind + peer connect) can run
+    // ~15s; teardown (hub.close + DB drop) adds more. Generous budget so we're
+    // measuring correctness, not racing the timeout.
+    this.timeout(180_000);
 
     let mvh;
 
