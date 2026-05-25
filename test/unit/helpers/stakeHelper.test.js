@@ -22,44 +22,51 @@ describe('stakeHelper', () => {
 
     afterEach(() => sinon.restore())
 
-    describe('sendStakeV0', () => {
+    describe('sendStakeV1 (new stake)', () => {
         it('should build correct message', async () => {
-            const result = await helper.sendStakeV0(addressInfo, '1', 'BTC,LTC', 'pubkey123')
+            const result = await helper.sendStakeV1(addressInfo, '1000.00000000', 'pubkey123')
 
             const msg = createTxStub.firstCall.args[1]
-            assert.strictEqual(msg, 'STAKE|0|1|BTC,LTC|pubkey123')
+            assert.strictEqual(msg, 'STAKE|1|1000.00000000|pubkey123')
             assert.strictEqual(result.txHash, 'abc123')
             assert.deepStrictEqual(result.stake, { id: 220 })
         })
 
-        it('should use empty string for null chains', async () => {
-            await helper.sendStakeV0(addressInfo, '2', null, 'pubkey456')
+        it('should call waitForStake with source + signingPubkey + txHash', async () => {
+            await helper.sendStakeV1(addressInfo, '500', 'pubkey456')
+            const waitArg = global.indexerDatabase.waitForStake.firstCall.args[0]
+            assert.strictEqual(waitArg.source, 'addr1')
+            assert.strictEqual(waitArg.signingPubkey, 'pubkey456')
+            assert.strictEqual(waitArg.txHash, 'abc123')
+            assert.strictEqual(waitArg.status, 'valid')
+        })
+    })
+
+    describe('sendStakeV2 (top-up)', () => {
+        it('should build correct message', async () => {
+            const result = await helper.sendStakeV2(addressInfo, '250.00000000', 'pubkey123')
 
             const msg = createTxStub.firstCall.args[1]
-            assert.strictEqual(msg, 'STAKE|0|2||pubkey456')
-        })
-
-        it('should call waitForStake with correct args', async () => {
-            await helper.sendStakeV0(addressInfo, '1', 'BTC', 'pk')
-            const waitArg = global.indexerDatabase.waitForStake.firstCall.args[0]
-            assert.strictEqual(waitArg.tier, '1')
-            assert.strictEqual(waitArg.source, 'addr1')
+            assert.strictEqual(msg, 'STAKE|2|250.00000000|pubkey123')
+            assert.deepStrictEqual(result.stake, { id: 220 })
         })
     })
 
     describe('sendUnstakeV0', () => {
         it('should build correct message', async () => {
-            const result = await helper.sendUnstakeV0(addressInfo, '1')
+            const result = await helper.sendUnstakeV0(addressInfo, 'pubkey789')
 
             const msg = createTxStub.firstCall.args[1]
-            assert.strictEqual(msg, 'UNSTAKE|0|1')
+            assert.strictEqual(msg, 'UNSTAKE|0|pubkey789')
             assert.strictEqual(result.txHash, 'abc123')
             assert.deepStrictEqual(result.unstake, { id: 221 })
         })
 
-        it('should call waitForUnstake once', async () => {
-            await helper.sendUnstakeV0(addressInfo, '2')
-            assert(global.indexerDatabase.waitForUnstake.calledOnce)
+        it('should call waitForUnstake with source + signingPubkey', async () => {
+            await helper.sendUnstakeV0(addressInfo, 'pubkey789')
+            const waitArg = global.indexerDatabase.waitForUnstake.firstCall.args[0]
+            assert.strictEqual(waitArg.source, 'addr1')
+            assert.strictEqual(waitArg.signingPubkey, 'pubkey789')
         })
     })
 

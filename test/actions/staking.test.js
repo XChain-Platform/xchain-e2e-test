@@ -4,7 +4,7 @@ const cryptoHelper = require('../cryptoHelper')
 const stakeHelper = require('../helpers/stakeHelper')
 const gasHelper = require('../helpers/gasHelper')
 
-describe('Staking — STAKE, UNSTAKE, DELEGATE', function () {
+describe('Staking — STAKE, UNSTAKE, DELEGATE (capability model)', function () {
 
     let stakerAddr = null
     let signingPubkey = null
@@ -23,8 +23,8 @@ describe('Staking — STAKE, UNSTAKE, DELEGATE', function () {
         stakerAddr = await cryptoHelper.getNewFundedAddress(
             "staker", COIN, NETWORK, null, "legacy", 0, 0.01
         )
-        // Ensure staker has enough XCHAIN for Tier 1 staking (1000 XCHAIN)
-        await gasHelper.ensureGasBalance(stakerAddr, '2000')
+        // Ensure staker has enough XCHAIN for staking + top-up (default price min_stake = 1000)
+        await gasHelper.ensureGasBalance(stakerAddr, '3000')
 
         // Generate an Ed25519 signing keypair (64 hex chars = 32 byte pubkey)
         let { publicKey } = crypto.generateKeyPairSync('ed25519')
@@ -32,38 +32,38 @@ describe('Staking — STAKE, UNSTAKE, DELEGATE', function () {
         signingPubkey = spkiDer.subarray(12).toString('hex') // Strip 12-byte SPKI prefix
     })
 
-    describe('STAKE v0 — Stake XCHAIN for validation', function () {
-        it('should stake Tier 1 and create a stake record with XCHAIN debited', async function () {
-            let result = await stakeHelper.sendStakeV0(stakerAddr, 1, '', signingPubkey)
+    describe('STAKE v1 — Create a new stake', function () {
+        it('should stake XCHAIN and create a valid stake record', async function () {
+            let result = await stakeHelper.sendStakeV1(stakerAddr, '1000.00000000', signingPubkey)
             assert(result.stake, 'Stake record should exist in DB')
             assert.strictEqual(result.stake.status, 'valid', 'Stake status should be valid')
-            assert.strictEqual(parseInt(result.stake.tier), 1, 'Tier should be 1')
+            assert.strictEqual(parseInt(result.stake.version), 1, 'Version should be 1 (new stake)')
         })
 
-        it('should reject duplicate stake at the same tier', async function () {
-            // Generate a different signing key
-            let { publicKey } = crypto.generateKeyPairSync('ed25519')
-            let spkiDer = publicKey.export({ format: 'der', type: 'spki' })
-            let newPubkey = spkiDer.subarray(12).toString('hex')
-
-            // Try to stake again at Tier 1 — should be rejected
-            let result = await stakeHelper.sendStakeV0(stakerAddr, 1, '', newPubkey)
-            // The waitFor will return null or the row with invalid status
-            // Either outcome means the duplicate was rejected
-            if(result.stake){
-                assert.notStrictEqual(result.stake.status, 'valid', 'Duplicate stake should not be valid')
+        it('should reject a second v1 stake reusing the same pubkey', async function () {
+            // Reusing an active pubkey for a fresh stake should be rejected
+            let result = await stakeHelper.sendStakeV1(stakerAddr, '500.00000000', signingPubkey)
+            if (result.stake) {
+                assert.notStrictEqual(result.stake.status, 'valid', 'Duplicate-pubkey stake should not be valid')
             }
         })
     })
 
-    describe('UNSTAKE v0 — Begin unstaking', function () {
-        it('should create an unstake record with cooldown', async function () {
-            // STAKE doesn't take effect until ACTIVATION_DELAY_BLOCKS (6) later.
-            // On regtest each tx mines ~1 block, so without explicit block
-            // advancement the STAKE from the previous describe block is still
-            // inactive and UNSTAKE fails with 'no active stake at tier'.
+    describe('STAKE v2 — Top up an existing stake', function () {
+        it('should accept a top-up to the same pubkey from the same source', async function () {
+            // Advance past the activation window so the v1 stake is observable as active for the v2 top-up check
             await regtestMinerConnector.generateBlocks(7)
-            let result = await stakeHelper.sendUnstakeV0(stakerAddr, 1)
+            let result = await stakeHelper.sendStakeV2(stakerAddr, '500.00000000', signingPubkey)
+            assert(result.stake, 'Top-up stake record should exist in DB')
+            assert.strictEqual(result.stake.status, 'valid', 'Top-up status should be valid')
+            assert.strictEqual(parseInt(result.stake.version), 2, 'Version should be 2 (top-up)')
+        })
+    })
+
+    describe('UNSTAKE v0 — Begin unstaking by pubkey', function () {
+        it('should create an unstake record with cooldown', async function () {
+            await regtestMinerConnector.generateBlocks(7)
+            let result = await stakeHelper.sendUnstakeV0(stakerAddr, signingPubkey)
             assert(result.unstake, 'Unstake record should exist in DB')
             assert.strictEqual(result.unstake.status, 'valid', 'Unstake status should be valid')
             assert(result.unstake.cooldown_end_block > 0, 'Cooldown end block should be set')
@@ -75,7 +75,6 @@ describe('Staking — STAKE, UNSTAKE, DELEGATE', function () {
         let delegatePubkey = null
 
         before(async function () {
-            // Set up a fresh staker for delegation tests
             delegateAddr = await cryptoHelper.getNewFundedAddress(
                 "delegator", COIN, NETWORK, null, "legacy", 0, 0.01
             )
@@ -86,7 +85,7 @@ describe('Staking — STAKE, UNSTAKE, DELEGATE', function () {
             delegatePubkey = spkiDer.subarray(12).toString('hex')
 
             // Stake first
-            await stakeHelper.sendStakeV0(delegateAddr, 1, '', delegatePubkey)
+            await stakeHelper.sendStakeV1(delegateAddr, '1000.00000000', delegatePubkey)
             // Advance past ACTIVATION_DELAY_BLOCKS so DELEGATE sees an active stake.
             await regtestMinerConnector.generateBlocks(7)
         })

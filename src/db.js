@@ -2125,20 +2125,21 @@ class Database {
         return null
     }
 
-    async checkStake({source, tier, txHash, status}){
+    async checkStake({source, signingPubkey, txHash, status}){
         let w = [], v = []
         if(source){ w.push("ia.address = ?"); v.push(source); }
-        if(tier){ w.push("s.tier = ?"); v.push(tier); }
+        if(signingPubkey){ w.push("ip.pubkey = ?"); v.push(String(signingPubkey).toLowerCase()); }
         if(txHash){ w.push("itx.hash = ?"); v.push(txHash); }
         if(status){ w.push("ist.status = ?"); v.push(status); }
         if(w.length === 0) return null
-        let query = `SELECT s.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status
+        let query = `SELECT s.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status, ip.pubkey AS signing_pubkey
             FROM stakes s
             LEFT JOIN actions act ON act.action_index = s.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
             LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
             LEFT JOIN index_addresses ia ON ia.id = s.source_id
             LEFT JOIN index_statuses ist ON ist.id = s.status_id
+            LEFT JOIN index_pubkeys ip ON ip.id = s.signing_pubkey_id
             WHERE ` + w.join(" AND ")
         let connection = await this.getConnection()
         try {
@@ -2163,24 +2164,119 @@ class Database {
         return null
     }
 
-    async checkUnstake({source, tier, txHash, status}){
+    async checkUnstake({source, signingPubkey, txHash, status}){
         let w = [], v = []
         if(source){ w.push("ia.address = ?"); v.push(source); }
-        if(tier){ w.push("u.tier = ?"); v.push(tier); }
+        if(signingPubkey){ w.push("ip.pubkey = ?"); v.push(String(signingPubkey).toLowerCase()); }
         if(txHash){ w.push("itx.hash = ?"); v.push(txHash); }
         if(status){ w.push("ist.status = ?"); v.push(status); }
         if(w.length === 0) return null
-        let query = `SELECT u.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status
+        let query = `SELECT u.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status, ip.pubkey AS signing_pubkey
             FROM unstakes u
             LEFT JOIN actions act ON act.action_index = u.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
             LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
             LEFT JOIN index_addresses ia ON ia.id = u.source_id
             LEFT JOIN index_statuses ist ON ist.id = u.status_id
+            LEFT JOIN index_pubkeys ip ON ip.id = u.signing_pubkey_id
             WHERE ` + w.join(" AND ")
         let connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch(err){ return null } finally { await connection.release() }
+    }
+
+    // ── Attestation Methods ──
+
+    async waitForAttestationRequest(params, timeMax = 60000){
+        const startMs = Date.now()
+        const endTime = startMs + timeMax
+        let polls = 0
+        while(Date.now() < endTime){
+            polls++
+            try {
+                let row = await this.checkAttestationRequest(params)
+                if(row) { this._recordPerfPoll('checkAttestationRequest', startMs, polls, true); return row }
+                await this.sleep(1000)
+            } catch(err){ await this.sleep(1000) }
+        }
+        this._recordPerfPoll('checkAttestationRequest', startMs, polls, false)
+        return null
+    }
+
+    async checkAttestationRequest({requestId, txHash, requestStatus}){
+        let w = [], v = []
+        if(requestId){     w.push("ar.request_id = ?");      v.push(String(requestId).toLowerCase()); }
+        if(txHash){        w.push("itx.hash = ?");           v.push(txHash); }
+        if(requestStatus){ w.push("ar.request_status = ?");  v.push(requestStatus); }
+        if(w.length === 0) return null
+        let query = `SELECT ar.*, itx.hash AS tx_hash
+            FROM attestation_requests ar
+            LEFT JOIN actions act ON act.action_index = ar.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            WHERE ` + w.join(" AND ") + `
+            LIMIT 1`
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch(err){ return null } finally { await connection.release() }
+    }
+
+    async waitForAttestationResponse(params, timeMax = 60000){
+        const startMs = Date.now()
+        const endTime = startMs + timeMax
+        let polls = 0
+        while(Date.now() < endTime){
+            polls++
+            try {
+                let row = await this.checkAttestationResponse(params)
+                if(row) { this._recordPerfPoll('checkAttestationResponse', startMs, polls, true); return row }
+                await this.sleep(1000)
+            } catch(err){ await this.sleep(1000) }
+        }
+        this._recordPerfPoll('checkAttestationResponse', startMs, polls, false)
+        return null
+    }
+
+    async checkAttestationResponse({requestId, txHash, responseStatus, status}){
+        let w = [], v = []
+        if(requestId){       w.push("ar.request_id = ?");       v.push(String(requestId).toLowerCase()); }
+        if(txHash){          w.push("itx.hash = ?");            v.push(txHash); }
+        if(responseStatus){  w.push("ar.response_status = ?");  v.push(responseStatus); }
+        if(status){          w.push("ist.status = ?");          v.push(status); }
+        if(w.length === 0) return null
+        let query = `SELECT ar.*, itx.hash AS tx_hash, ist.status AS status
+            FROM attestation_responses ar
+            LEFT JOIN actions act ON act.action_index = ar.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_statuses ist ON ist.id = ar.status_id
+            WHERE ` + w.join(" AND ") + `
+            LIMIT 1`
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch(err){ return null } finally { await connection.release() }
+    }
+
+    async getAttestationValidatorSignatures(responseActionIndex){
+        let query = `SELECT * FROM attestation_validator_signatures WHERE response_action_index = ?`
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, [responseActionIndex])
+            return rows
+        } catch(err){ return [] } finally { await connection.release() }
+    }
+
+    async getContractState(contractIndex, stateKey){
+        let query = `SELECT * FROM contract_state WHERE contract_index = ? AND state_key = ? ORDER BY block_index DESC, action_index DESC LIMIT 1`
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, [contractIndex, stateKey])
             return rows.length > 0 ? rows[0] : null
         } catch(err){ return null } finally { await connection.release() }
     }

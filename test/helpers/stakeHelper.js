@@ -1,37 +1,59 @@
 const transactionHelper = require('../transactionHelper')
 
 module.exports = {
-    async sendStakeV0(addressInfo, tier, chains, signingPubkey){
+    // STAKE v1 — create a new stake (capability model: capabilities auto-qualify by amount).
+    // See claude/reports/specs/2026-05-24_capability-staking-model.md
+    async sendStakeV1(addressInfo, amount, signingPubkey){
         let address = addressInfo["address"]
-        let msg = "STAKE|0|" + tier + "|" + (chains || "") + "|" + signingPubkey
+        let msg = "STAKE|1|" + amount + "|" + signingPubkey
 
-        console.log("Creating and sending STAKE V0 tx...")
+        console.log("Creating and sending STAKE V1 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for stake in the database...")
         let stakeRow = await indexerDatabase.waitForStake({
-            source: address,
-            tier: tier,
-            txHash: txHash,
-            status: "valid"
+            source:        address,
+            signingPubkey: signingPubkey,
+            txHash:        txHash,
+            status:        "valid"
         })
 
         return { txHash, stake: stakeRow }
     },
 
-    async sendUnstakeV0(addressInfo, tier){
+    // STAKE v2 — top up an existing stake (same pubkey, same source)
+    async sendStakeV2(addressInfo, amount, signingPubkey){
         let address = addressInfo["address"]
-        let msg = "UNSTAKE|0|" + tier
+        let msg = "STAKE|2|" + amount + "|" + signingPubkey
+
+        console.log("Creating and sending STAKE V2 (top-up) tx...")
+        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
+
+        console.log("Waiting for top-up stake row in the database...")
+        let stakeRow = await indexerDatabase.waitForStake({
+            source:        address,
+            signingPubkey: signingPubkey,
+            txHash:        txHash,
+            status:        "valid"
+        })
+
+        return { txHash, stake: stakeRow }
+    },
+
+    // UNSTAKE v0 — begin cooldown for a stake identified by pubkey
+    async sendUnstakeV0(addressInfo, signingPubkey){
+        let address = addressInfo["address"]
+        let msg = "UNSTAKE|0|" + signingPubkey
 
         console.log("Creating and sending UNSTAKE V0 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for unstake in the database...")
         let unstakeRow = await indexerDatabase.waitForUnstake({
-            source: address,
-            tier: tier,
-            txHash: txHash,
-            status: "valid"
+            source:        address,
+            signingPubkey: signingPubkey,
+            txHash:        txHash,
+            status:        "valid"
         })
 
         return { txHash, unstake: unstakeRow }
