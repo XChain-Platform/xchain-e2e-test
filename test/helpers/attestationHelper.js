@@ -45,18 +45,22 @@ class MockAttestationValidator {
     }
 }
 
-// Build the pipe-delimited ATTESTATION_RESPONSE wire payload signed by N validators
+// Build the pipe-delimited ATTESTATION_RESPONSE wire payload signed by N validators.
+// RESPONSE_PAYLOAD travels base64 on the wire (binary-safe, no embedded `|`).
+// Sigs hash the decoded bytes, which round-trip-equal the raw utf8 bytes —
+// so MockAttestationValidator.sign() is unchanged.
 function buildAttestationResponseAction({ requestId, providerId, responsePayload, status, meta, validators }) {
     const sigCount = validators.length;
     const sigPairs = validators
         .map(v => v.pubkey + '|' + v.sign(requestId, providerId, responsePayload, status, meta))
         .join('|');
+    const responsePayloadB64 = Buffer.from(String(responsePayload || ''), 'utf8').toString('base64');
     return [
         'ATTESTATION_RESPONSE',
         '0',
         requestId,
         providerId,
-        responsePayload,
+        responsePayloadB64,
         status,
         meta || '',
         String(sigCount),
