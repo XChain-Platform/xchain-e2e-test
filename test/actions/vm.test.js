@@ -36,7 +36,7 @@ describe('VM — Smart Contracts', function () {
     before(async function () {
         // Fund a deployer address with BTC and XCHAIN (for gas fees)
         deployerAddr = await cryptoHelper.getNewFundedAddress(
-            "vm-deployer", COIN, NETWORK, null, "legacy", 0, 0.01
+            "vm-deployer", COIN, NETWORK, null, "legacy", 0, 1
         )
         // Ensure deployer has XCHAIN for gas
         await gasHelper.ensureGasBalance(deployerAddr, '100')

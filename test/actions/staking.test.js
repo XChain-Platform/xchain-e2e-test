@@ -22,7 +22,7 @@ describe('Staking — STAKE, UNSTAKE, DELEGATE (capability model)', function () 
         }
         // Fund a staker address with BTC and XCHAIN
         stakerAddr = await cryptoHelper.getNewFundedAddress(
-            "staker", COIN, NETWORK, null, "legacy", 0, 0.01
+            "staker", COIN, NETWORK, null, "legacy", 0, 1
         )
         // Ensure staker has enough XCHAIN for staking + top-up (default price min_stake = 1000)
         await gasHelper.ensureGasBalance(stakerAddr, '3000')
@@ -86,7 +86,7 @@ describe('Staking — STAKE, UNSTAKE, DELEGATE (capability model)', function () 
         before(async function () {
             // A second address that does NOT own the original pubkey's stake
             otherAddr = await cryptoHelper.getNewFundedAddress(
-                "other-staker", COIN, NETWORK, null, "legacy", 0, 0.01
+                "other-staker", COIN, NETWORK, null, "legacy", 0, 1
             )
             await gasHelper.ensureGasBalance(otherAddr, '2000')
         })
@@ -156,7 +156,7 @@ describe('Staking — STAKE, UNSTAKE, DELEGATE (capability model)', function () 
 
         before(async function () {
             delegateAddr = await cryptoHelper.getNewFundedAddress(
-                "delegator", COIN, NETWORK, null, "legacy", 0, 0.01
+                "delegator", COIN, NETWORK, null, "legacy", 0, 1
             )
             await gasHelper.ensureGasBalance(delegateAddr, '2000')
 
