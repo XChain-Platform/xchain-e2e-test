@@ -24,12 +24,14 @@ const fs   = require('fs');
 const net  = require('net');
 const mariadb = require('mariadb');
 
-// Locate the xchain-hub package. The e2e test repo doesn't list it as an
-// npm dep; it lives adjacent in the monorepo or under xchain-node's
-// modules/. Try a few well-known locations or accept an explicit override.
+// Locate the xchain-hub package. Lives adjacent in the monorepo
+// (host-process dev), under xchain-node's modules/, or staged into the
+// e2e build context by LIBRARY_BUNDLES (in-container at /XChainE2ETest/
+// xchain-hub/). Try a few well-known locations or accept an explicit override.
 function _loadHubModule(rel){
     const candidates = [
         process.env.XCHAIN_HUB_PATH && path.join(process.env.XCHAIN_HUB_PATH, rel),
+        path.resolve(__dirname, '../../xchain-hub', rel),                          // bundled into e2e image
         path.resolve(__dirname, '../../../xchain-hub', rel),                       // monorepo dev
         path.resolve(__dirname, '../../../../xchain-hub', rel),                    // xchain-node layout
         path.resolve(__dirname, '../../../../../modules/xchain-hub', rel)          // installed via xchain-node
