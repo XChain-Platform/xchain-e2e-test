@@ -72,18 +72,15 @@ function _isStaleUtxoError(err){
     // `Missing inputs` — bitcoin/dogecoin's bare RPC error -25 message for the same condition
     //   (kept as a distinct pattern because the JSON-RPC layer can deliver either form).
     // `no utxos ... no utxos found` — encoder asked the tracker for UTXOs but the tracker
-    //   hadn't yet indexed the change output from the source's previous tx.
-    // `Cannot read propert(y|ies)... 'txid'` — encoder threw a TypeError when sorting an
-    //   empty UTXO list (utxos[0]["txid"]). Happens when `unconfirmed=false` filters out
-    //   all the tracker's UTXOs because the source's funding tx is still in mempool. Retry
-    //   succeeds after quiesce mines a block and the funding confirms. The encoder ought
-    //   to throw "no utxos" post-filter; this pattern is a defensive shim until that lands.
+    //   hadn't yet indexed the change output from the source's previous tx. Also covers
+    //   the `unconfirmed=false`-stripped-everything case (encoder throws the same message
+    //   from the post-filter empty check).
     // `Internal encoder error` — the encoder sanitizes non-TypeError/RangeError messages
     //   to this generic string before returning over JSON-RPC. In practice on the regtest
     //   stack this is almost always the "no utxos" case caught above (visible in the
     //   encoder's own console.error log). Retrying is safe even if the cause turns out
     //   to be something else, since we'd hit the same error again and surface it.
-    return /missingorspent|missing\s*or\s*spent|missing\s+inputs|bad-txns-inputs|no utxos.*no utxos|Cannot read propert(y|ies).*['"]?txid['"]?|Internal encoder error/i.test(msg)
+    return /missingorspent|missing\s*or\s*spent|missing\s+inputs|bad-txns-inputs|no utxos.*no utxos|Internal encoder error/i.test(msg)
 }
 
 module.exports = {
