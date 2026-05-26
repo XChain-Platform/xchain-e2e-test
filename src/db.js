@@ -2318,6 +2318,166 @@ class Database {
         } catch(err){ return null } finally { await connection.release() }
     }
 
+    // ── Contract-targeted staking (STAKE v3 / UNSTAKE v1 / DELEGATE v1) ──
+
+    async waitForContractStake(params, timeMax = 60000){
+        const startMs = Date.now(), endTime = startMs + timeMax
+        let polls = 0
+        while(Date.now() < endTime){
+            polls++
+            try {
+                let row = await this.checkContractStake(params)
+                if(row){ this._recordPerfPoll('checkContractStake', startMs, polls, true); return row }
+                await this.sleep(1000)
+            } catch(err){ await this.sleep(1000) }
+        }
+        this._recordPerfPoll('checkContractStake', startMs, polls, false)
+        return null
+    }
+
+    async checkContractStake({source, signingPubkey, contractIndex, tick, txHash, status}){
+        let w = [], v = []
+        if(source){ w.push("ia.address = ?"); v.push(source) }
+        if(signingPubkey){ w.push("ip.pubkey = ?"); v.push(String(signingPubkey).toLowerCase()) }
+        if(contractIndex !== undefined && contractIndex !== null){ w.push("cs.target_contract_index = ?"); v.push(Number(contractIndex)) }
+        if(tick){ w.push("t.tick = ?"); v.push(tick) }
+        if(txHash){ w.push("itx.hash = ?"); v.push(txHash) }
+        if(status){ w.push("ist.status = ?"); v.push(status) }
+        if(w.length === 0) return null
+        let query = `SELECT cs.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status,
+                            ip.pubkey AS signing_pubkey, t.tick AS tick
+            FROM contract_stakes cs
+            LEFT JOIN actions act ON act.action_index = cs.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ia ON ia.id = cs.source_id
+            LEFT JOIN index_statuses ist ON ist.id = cs.status_id
+            LEFT JOIN index_pubkeys ip ON ip.id = cs.signing_pubkey_id
+            LEFT JOIN index_tickers t ON t.id = cs.tick_id
+            WHERE ` + w.join(" AND ")
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch(err){ return null } finally { await connection.release() }
+    }
+
+    async waitForContractUnstake(params, timeMax = 60000){
+        const startMs = Date.now(), endTime = startMs + timeMax
+        let polls = 0
+        while(Date.now() < endTime){
+            polls++
+            try {
+                let row = await this.checkContractUnstake(params)
+                if(row){ this._recordPerfPoll('checkContractUnstake', startMs, polls, true); return row }
+                await this.sleep(1000)
+            } catch(err){ await this.sleep(1000) }
+        }
+        this._recordPerfPoll('checkContractUnstake', startMs, polls, false)
+        return null
+    }
+
+    async checkContractUnstake({source, signingPubkey, contractIndex, tick, txHash, status}){
+        let w = [], v = []
+        if(source){ w.push("ia.address = ?"); v.push(source) }
+        if(signingPubkey){ w.push("ip.pubkey = ?"); v.push(String(signingPubkey).toLowerCase()) }
+        if(contractIndex !== undefined && contractIndex !== null){ w.push("cu.target_contract_index = ?"); v.push(Number(contractIndex)) }
+        if(tick){ w.push("t.tick = ?"); v.push(tick) }
+        if(txHash){ w.push("itx.hash = ?"); v.push(txHash) }
+        if(status){ w.push("ist.status = ?"); v.push(status) }
+        if(w.length === 0) return null
+        let query = `SELECT cu.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status,
+                            ip.pubkey AS signing_pubkey, t.tick AS tick
+            FROM contract_unstakes cu
+            LEFT JOIN actions act ON act.action_index = cu.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ia ON ia.id = cu.source_id
+            LEFT JOIN index_statuses ist ON ist.id = cu.status_id
+            LEFT JOIN index_pubkeys ip ON ip.id = cu.signing_pubkey_id
+            LEFT JOIN index_tickers t ON t.id = cu.tick_id
+            WHERE ` + w.join(" AND ")
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch(err){ return null } finally { await connection.release() }
+    }
+
+    async waitForContractDelegation(params, timeMax = 60000){
+        const startMs = Date.now(), endTime = startMs + timeMax
+        let polls = 0
+        while(Date.now() < endTime){
+            polls++
+            try {
+                let row = await this.checkContractDelegation(params)
+                if(row){ this._recordPerfPoll('checkContractDelegation', startMs, polls, true); return row }
+                await this.sleep(1000)
+            } catch(err){ await this.sleep(1000) }
+        }
+        this._recordPerfPoll('checkContractDelegation', startMs, polls, false)
+        return null
+    }
+
+    async checkContractDelegation({source, contractIndex, tick, txHash, status}){
+        let w = [], v = []
+        if(source){ w.push("ia.address = ?"); v.push(source) }
+        if(contractIndex !== undefined && contractIndex !== null){ w.push("cd.target_contract_index = ?"); v.push(Number(contractIndex)) }
+        if(tick){ w.push("t.tick = ?"); v.push(tick) }
+        if(txHash){ w.push("itx.hash = ?"); v.push(txHash) }
+        if(status){ w.push("ist.status = ?"); v.push(status) }
+        if(w.length === 0) return null
+        let query = `SELECT cd.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status, t.tick AS tick
+            FROM contract_delegations cd
+            LEFT JOIN actions act ON act.action_index = cd.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ia ON ia.id = cd.source_id
+            LEFT JOIN index_statuses ist ON ist.id = cd.status_id
+            LEFT JOIN index_tickers t ON t.id = cd.tick_id
+            WHERE ` + w.join(" AND ")
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch(err){ return null } finally { await connection.release() }
+    }
+
+    async waitForSlashEvent(params, timeMax = 60000){
+        const startMs = Date.now(), endTime = startMs + timeMax
+        let polls = 0
+        while(Date.now() < endTime){
+            polls++
+            try {
+                let row = await this.checkSlashEvent(params)
+                if(row){ this._recordPerfPoll('checkSlashEvent', startMs, polls, true); return row }
+                await this.sleep(1000)
+            } catch(err){ await this.sleep(1000) }
+        }
+        this._recordPerfPoll('checkSlashEvent', startMs, polls, false)
+        return null
+    }
+
+    async checkSlashEvent({contractIndex, signingPubkey, tick, executionIndex}){
+        let w = [], v = []
+        if(contractIndex !== undefined && contractIndex !== null){ w.push("se.target_contract_index = ?"); v.push(Number(contractIndex)) }
+        if(signingPubkey){ w.push("ip.pubkey = ?"); v.push(String(signingPubkey).toLowerCase()) }
+        if(tick){ w.push("t.tick = ?"); v.push(tick) }
+        if(executionIndex !== undefined && executionIndex !== null){ w.push("se.execution_index = ?"); v.push(Number(executionIndex)) }
+        if(w.length === 0) return null
+        let query = `SELECT se.*, ip.pubkey AS signing_pubkey, t.tick AS tick, ia.address AS destination_address
+            FROM slash_events se
+            LEFT JOIN index_pubkeys ip ON ip.id = se.signing_pubkey_id
+            LEFT JOIN index_tickers t ON t.id = se.tick_id
+            LEFT JOIN index_addresses ia ON ia.id = se.destination_id
+            WHERE ` + w.join(" AND ") + ` ORDER BY se.id ASC LIMIT 1`
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch(err){ return null } finally { await connection.release() }
+    }
+
     async waitForRewardClaim(params, timeMax = 60000){
         const startMs = Date.now()
         const endTime = startMs + timeMax

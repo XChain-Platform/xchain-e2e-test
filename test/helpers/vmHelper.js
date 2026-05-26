@@ -24,6 +24,28 @@ module.exports = {
         return { txHash, contract: contractRow }
     },
 
+    // DEPLOY v1 — stakeable contract. cooldownBlocks + slashDestination are required for the
+    // contract to accept STAKE v3. slashDestination may be the string 'BURN' to route slashed
+    // funds to the chain's burn address. Pass an empty string for constructorParams to skip.
+    async sendDeployV1(addressInfo, code, gasLimit, constructorParams, cooldownBlocks, slashDestination){
+        let address = addressInfo["address"]
+        let codeHex = Buffer.from(code, 'utf8').toString('hex')
+        let msg = "DEPLOY|1|" + codeHex + "|" + gasLimit + "|" + (constructorParams || '')
+                  + "|" + cooldownBlocks + "|" + (slashDestination || '')
+
+        console.log("Creating and sending DEPLOY V1 tx...")
+        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg, null, [], "P2SH")
+
+        console.log("Waiting for stakeable contract in the database...")
+        let contractRow = await indexerDatabase.waitForContract({
+            source: address,
+            txHash: txHash,
+            status: "valid"
+        })
+
+        return { txHash, contract: contractRow }
+    },
+
     async sendExecuteV0(addressInfo, contractActionIndex, method, params){
         let address = addressInfo["address"]
         let msg = "EXECUTE|0|" + contractActionIndex + "|" + method

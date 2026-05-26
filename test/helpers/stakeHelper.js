@@ -134,5 +134,68 @@ module.exports = {
         })
 
         return { txHash, claim: claimRow }
+    },
+
+    // STAKE v3 — contract-targeted stake (any tick). The contract must have been
+    // deployed with cooldown_blocks + slash_destination set (DEPLOY v1+).
+    async sendStakeV3(addressInfo, amount, signingPubkey, contractIndex, tick){
+        let address = addressInfo["address"]
+        let msg = "STAKE|3|" + amount + "|" + signingPubkey + "|" + contractIndex + "|" + tick
+
+        console.log("Creating and sending STAKE V3 tx...")
+        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
+
+        console.log("Waiting for contract stake in the database...")
+        let stakeRow = await indexerDatabase.waitForContractStake({
+            source:         address,
+            signingPubkey:  signingPubkey,
+            contractIndex:  contractIndex,
+            tick:           tick,
+            txHash:         txHash,
+            status:         "valid"
+        })
+
+        return { txHash, stake: stakeRow }
+    },
+
+    // UNSTAKE v1 — begin cooldown for a contract-targeted stake
+    async sendUnstakeV1(addressInfo, signingPubkey, contractIndex, tick){
+        let address = addressInfo["address"]
+        let msg = "UNSTAKE|1|" + signingPubkey + "|" + contractIndex + "|" + tick
+
+        console.log("Creating and sending UNSTAKE V1 tx...")
+        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
+
+        console.log("Waiting for contract unstake in the database...")
+        let unstakeRow = await indexerDatabase.waitForContractUnstake({
+            source:        address,
+            signingPubkey: signingPubkey,
+            contractIndex: contractIndex,
+            tick:          tick,
+            txHash:        txHash,
+            status:        "valid"
+        })
+
+        return { txHash, unstake: unstakeRow }
+    },
+
+    // DELEGATE v1 — rotate signing key for a contract-targeted stake
+    async sendDelegateV1(addressInfo, newSigningPubkey, contractIndex, tick){
+        let address = addressInfo["address"]
+        let msg = "DELEGATE|1|" + newSigningPubkey + "|" + contractIndex + "|" + tick
+
+        console.log("Creating and sending DELEGATE V1 tx...")
+        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
+
+        console.log("Waiting for contract delegation in the database...")
+        let delegationRow = await indexerDatabase.waitForContractDelegation({
+            source:        address,
+            contractIndex: contractIndex,
+            tick:          tick,
+            txHash:        txHash,
+            status:        "valid"
+        })
+
+        return { txHash, delegation: delegationRow }
     }
 }
