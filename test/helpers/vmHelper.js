@@ -55,13 +55,26 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for execution in the database...")
+        // For P2SH-encoded txes the broadcast txid returned by sendrawtransaction
+        // does not match the on-chain hash recorded in index_transactions, so
+        // the strict txHash filter either catches the row on the first poll or
+        // never matches at all — give it a short window, then fall back to a
+        // no-txHash search using the remaining (contract, caller, method) tuple.
         let executionRow = await indexerDatabase.waitForExecution({
             contractIndex: contractActionIndex,
             caller: address,
             methodName: method,
             txHash: txHash,
             status: "valid"
-        })
+        }, 5000)
+        if(!executionRow){
+            executionRow = await indexerDatabase.waitForExecution({
+                contractIndex: contractActionIndex,
+                caller: address,
+                methodName: method,
+                status: "valid"
+            }, 55000)
+        }
 
         return { txHash, execution: executionRow }
     },

@@ -107,15 +107,17 @@ describe('Contract Staking — STAKE v3 / UNSTAKE v1 / DELEGATE v1 + slashing', 
             assert.strictEqual(result.stake.tick, 'XCHAIN', 'tick match')
         })
 
-        it('should report 0 stake from the VM before activation passes', async function () {
-            // Activation is 6 blocks after the STAKE — execute immediately to see pre-activation behavior
+        it('should let the VM read getStake successfully', async function () {
+            // The contract's isStaked() calls xchain.contract.getStake under the hood —
+            // we don't capture return values in contract_executions, so a successful
+            // VM read is confirmed by status='valid' + gas_used covering the read
+            // (VM_STATE_READ = 100 gas + a handful for getInputParam/math.gte).
             let exec = await vmHelper.sendExecuteV0(staker, contractIndex, 'isStaked', [pubkey])
             assert(exec.execution, 'execution row exists')
-            // The execution may report 'no' since the stake hasn't activated yet OR
-            // by the time the test runs the 6 blocks may have passed.
-            // Either result is acceptable for this assertion — the point is the VM read works.
-            assert(['yes', 'no'].indexOf(String(exec.execution.return_value || '').replace(/"/g, '')) >= 0,
-                'getStake should return a recognized value')
+            assert.strictEqual(exec.execution.status, 'valid',
+                'getStake call should succeed inside the VM')
+            assert(Number(exec.execution.gas_used) >= 100,
+                'gas_used should at least cover VM_STATE_READ (100)')
         })
     })
 
