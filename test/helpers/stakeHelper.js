@@ -104,9 +104,10 @@ module.exports = {
 
     async sendRevokeDelegationV0(addressInfo, signingPubkey){
         let address = addressInfo["address"]
-        let msg = "REVOKE_DELEGATION|0|" + signingPubkey
+        // Capability revoke is now DELEGATE v2 (wire) — same single-param shape
+        let msg = "DELEGATE|2|" + signingPubkey
 
-        console.log("Creating and sending REVOKE_DELEGATION V0 tx...")
+        console.log("Creating and sending DELEGATE v2 (capability revoke) tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for revocation in the database...")
@@ -119,11 +120,11 @@ module.exports = {
         return { txHash, revocation: revocationRow }
     },
 
-    async sendClaimRewardsV0(addressInfo){
+    async sendCollectV0(addressInfo){
         let address = addressInfo["address"]
-        let msg = "CLAIM_REWARDS|0"
+        let msg = "COLLECT|0"
 
-        console.log("Creating and sending CLAIM_REWARDS V0 tx...")
+        console.log("Creating and sending COLLECT V0 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for reward claim in the database...")

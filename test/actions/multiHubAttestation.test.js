@@ -1,7 +1,7 @@
 /*********************************************************************
  * E2E test — Phase B live PBFT through MultiValidatorHub
  *
- * Drives an ATTESTATION_REQUEST(redundancy=3) end-to-end through three
+ * Drives an ATTEST v0 (request)(redundancy=3) end-to-end through three
  * real in-process xchain-hub instances (via MultiValidatorHub):
  *
  *   1. Stake each hub's pubkey on-chain so the attestation capability
@@ -11,7 +11,7 @@
  *   3. EXECUTE the contract.
  *   4. The three hubs poll the indexer, detect the request, each fetches
  *      the body via http_get, broadcasts ATTEST_PROPOSE; PBFT runs
- *      PROPOSE → PREPARE → COMMIT; leader publishes ATTESTATION_RESPONSE
+ *      PROPOSE → PREPARE → COMMIT; leader publishes ATTEST v1 (response)
  *      on-chain.
  *   5. Indexer processes the response, fires the callback EXECUTE,
  *      contract state records the response payload.
@@ -83,7 +83,7 @@ async function _settleStack() {
 
 const FIXED_BODY = '{"score":42,"meta":"multihub"}'
 
-describe('Phase B — multi-hub PBFT for ATTESTATION_REQUEST (redundancy=3)', function () {
+describe('Phase B — multi-hub PBFT for ATTEST v0 (request) (redundancy=3)', function () {
     // Big budget: 3 hubs × (start + DB init) + on-chain staking + activation wait
     // + contract deploy/execute + PBFT round-trip + block confirmations.
     this.timeout(10 * 60 * 1000)
@@ -215,7 +215,7 @@ module.exports = {
     })
 
     it('drives a redundancy=3 request through real PBFT and fires the callback', async function () {
-        // EXECUTE the contract — emits ATTESTATION_REQUEST(redundancy=3).
+        // EXECUTE the contract — emits ATTEST v0 (request)(redundancy=3).
         const exec = await vmHelper.sendExecuteV0(owner, contractIndex, 'askOracle', [testUrl])
         assert.strictEqual(exec.execution.status, 'valid', 'execute should be valid')
 
@@ -232,7 +232,7 @@ module.exports = {
         await regtestMinerConnector.generateBlocks(6)
 
         // The hubs poll the indexer every 15s for new pending requests, then
-        // run PBFT and the leader publishes ATTESTATION_RESPONSE on-chain.
+        // run PBFT and the leader publishes ATTEST v1 (response) on-chain.
         // Allow generous time for the full cycle: poll latency + fetch + PBFT
         // PROPOSE/PREPARE/COMMIT + on-chain broadcast + indexer-side response
         // handling + callback EXECUTE.

@@ -1,11 +1,11 @@
 /*********************************************************************
  * E2E test — LLM attestation provider, redundancy=1
  *
- * Drives an ATTESTATION_REQUEST(provider='llm', redundancy=1) through a
+ * Drives an ATTEST v0 (request, provider='llm', redundancy=1) through a
  * single in-process xchain-hub via the LLM provider's `claude_spawn`
  * transport. Single-validator means no PBFT — the one responsible hub
  * fetches via the spawned `claude` CLI and publishes the on-chain
- * ATTESTATION_RESPONSE directly.
+ * ATTEST v1 (response) directly.
  *
  * Auth: HUB_CLAUDE_CONFIG_DIR points at a dir populated by a prior
  *   `CLAUDE_CONFIG_DIR=<dir> claude login`. The hub's `claude-spawn`

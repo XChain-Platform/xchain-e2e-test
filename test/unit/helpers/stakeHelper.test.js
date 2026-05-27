@@ -87,11 +87,11 @@ describe('stakeHelper', () => {
     })
 
     describe('sendRevokeDelegationV0', () => {
-        it('should build correct message', async () => {
+        it('should build correct message (DELEGATE v2 capability revoke)', async () => {
             const result = await helper.sendRevokeDelegationV0(addressInfo, 'oldPubkey')
 
             const msg = createTxStub.firstCall.args[1]
-            assert.strictEqual(msg, 'REVOKE_DELEGATION|0|oldPubkey')
+            assert.strictEqual(msg, 'DELEGATE|2|oldPubkey')
             assert.strictEqual(result.txHash, 'abc123')
             assert.deepStrictEqual(result.revocation, { id: 222 })
         })
@@ -102,12 +102,12 @@ describe('stakeHelper', () => {
         })
     })
 
-    describe('sendClaimRewardsV0', () => {
+    describe('sendCollectV0', () => {
         it('should build correct message with no params', async () => {
-            const result = await helper.sendClaimRewardsV0(addressInfo)
+            const result = await helper.sendCollectV0(addressInfo)
 
             const msg = createTxStub.firstCall.args[1]
-            assert.strictEqual(msg, 'CLAIM_REWARDS|0')
+            assert.strictEqual(msg, 'COLLECT|0')
             assert.strictEqual(result.txHash, 'abc123')
             assert.deepStrictEqual(result.claim, { id: 223 })
         })

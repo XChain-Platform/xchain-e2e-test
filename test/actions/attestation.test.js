@@ -15,7 +15,7 @@ const attestationHelper = require('../helpers/attestationHelper')
  *      defines a handleResponse callback.
  *   3. Execute askOracle() — indexer should create an attestation_requests
  *      row with status='pending'.
- *   4. Broadcast a real, signed ATTESTATION_RESPONSE — indexer verifies the
+ *   4. Broadcast a real, signed ATTEST v1 (response) — indexer verifies the
  *      signature against the real `attestation` capability check, marks the
  *      request fulfilled, and injects a system EXECUTE that runs the callback.
  *   5. Assert callback executed and wrote the expected values to contract state.
@@ -113,7 +113,7 @@ module.exports = {
         contractIndex = deploy.contract.action_index
     })
 
-    it('emits ATTESTATION_REQUEST on EXECUTE and stores it pending', async function () {
+    it('emits ATTEST v0 (request) on EXECUTE and stores it pending', async function () {
         let exec = await vmHelper.sendExecuteV0(operatorAddr, contractIndex, 'askOracle', ['https://example.com/v1/score/123'])
         assert(exec.execution, 'execution row should exist')
         assert.strictEqual(exec.execution.status, 'valid', 'execute status: ' + exec.execution.status)
@@ -133,7 +133,7 @@ module.exports = {
         this.test.parent.ctx.requestId = request.request_id
     })
 
-    it('accepts a signed ATTESTATION_RESPONSE, fulfills the request, and fires the callback', async function () {
+    it('accepts a signed ATTEST v1 (response), fulfills the request, and fires the callback', async function () {
         // Pick up requestId from the prior test
         let requestId = this.test.parent.ctx.requestId
         if (!requestId) {

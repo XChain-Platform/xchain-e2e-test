@@ -1,7 +1,7 @@
 /*********************************************************************
  * E2E test helper — Mock Attestation Validator
  *
- * Generates a real Ed25519 keypair and signs ATTESTATION_RESPONSE bodies
+ * Generates a real Ed25519 keypair and signs ATTEST v1 (response) bodies
  * using the same canonical message the indexer's verifier expects.
  *
  * This is "mock" only in the sense that the validator runs inside the
@@ -45,7 +45,7 @@ class MockAttestationValidator {
     }
 }
 
-// Build the pipe-delimited ATTESTATION_RESPONSE wire payload signed by N validators.
+// Build the pipe-delimited ATTEST v1 (response) wire payload signed by N validators.
 // RESPONSE_PAYLOAD travels base64 on the wire (binary-safe, no embedded `|`).
 // Sigs hash the decoded bytes, which round-trip-equal the raw utf8 bytes —
 // so MockAttestationValidator.sign() is unchanged.
@@ -56,8 +56,8 @@ function buildAttestationResponseAction({ requestId, providerId, responsePayload
         .join('|');
     const responsePayloadB64 = Buffer.from(String(responsePayload || ''), 'utf8').toString('base64');
     return [
-        'ATTESTATION_RESPONSE',
-        '0',
+        'ATTEST',
+        '1',
         requestId,
         providerId,
         responsePayloadB64,
@@ -68,10 +68,10 @@ function buildAttestationResponseAction({ requestId, providerId, responsePayload
     ].join('|');
 }
 
-// Broadcast a signed ATTESTATION_RESPONSE action from a funded address
+// Broadcast a signed ATTEST v1 (response) action from a funded address
 async function broadcastAttestationResponse(broadcasterAddressInfo, payload) {
     const wireData = buildAttestationResponseAction(payload);
-    console.log('Broadcasting ATTESTATION_RESPONSE for request ' + String(payload.requestId).substring(0, 16) + '...');
+    console.log('Broadcasting ATTEST v1 (response) for request ' + String(payload.requestId).substring(0, 16) + '...');
     return await transactionHelper.createAndSendTransaction(broadcasterAddressInfo, wireData);
 }
 

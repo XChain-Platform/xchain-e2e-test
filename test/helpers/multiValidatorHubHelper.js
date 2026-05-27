@@ -8,7 +8,7 @@
  *
  * Used to drive real PBFT consensus across multiple validators in tests:
  *   ATTEST_PROPOSE → ATTEST_PREPARE → ATTEST_COMMIT → on-chain
- *   ATTESTATION_RESPONSE published by the leader → indexer callback.
+ *   ATTEST v1 (response) published by the leader → indexer callback.
  *
  * Unlike MockAttestationValidator (which signs in-process but bypasses
  * the hub entirely), this harness exercises the full validator pipeline.
