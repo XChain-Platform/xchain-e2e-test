@@ -14,15 +14,10 @@ function newSigningPubkey(){
 
 describe('Contract Staking — STAKE v3 / UNSTAKE v1 / DELEGATE v1 + slashing', function () {
 
-    // The whole contract-staking system is currently BTC-only (mirrors the capability
-    // staking gate in stake.js / unstake.js / delegate.js handlers). Other chains will
-    // be evaluated once contract-staking is stable on BTC.
-    before(async function () {
-        if (COIN_CODE !== 'BTC') {
-            console.log('Contract staking is BTC-only — skipping on ' + COIN_CODE)
-            this.skip()
-        }
-    })
+    // Contract staking is multi-chain — exercised against the XCHAIN token that
+    // initialCheck.test.js ISSUEs on every chain at suite startup. Capability
+    // staking (STAKE v1/v2 / UNSTAKE v0 / DELEGATE v0/v2 / COLLECT) remains
+    // BTC-only at the protocol level.
 
     // STAKE-GATED contract: lets the test exercise getStake/getTotalStaked/getStakers/slash
     // through real method invocations. Stored as a small string so the e2e log stays readable.
