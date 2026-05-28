@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-05-28
+
+### Fixed
+- `cryptoHelper.getNewAddress()` now returns the wallet's stored mnemonic instead of the local `mnemonic` parameter. The parameter is only populated on the first call for a given wallet label, so subsequent calls returned a null mnemonic even though address derivation was unaffected. This broke the determinism check in the crypto smoke test (`004-crypto.smoke.js`). Updated the chaos/integration tests that had pinned the previous null-return behavior.
+
 ## [0.3.3] - 2026-04-06
 
 ### Changed

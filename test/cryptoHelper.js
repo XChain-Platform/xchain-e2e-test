@@ -54,7 +54,7 @@ module.exports = {
                 break
         }
         wallet["addresses"].push({privateKey: address.privateKey, publicKey: address.publicKey, address:testAddress})
-        return {mnemonic:mnemonic, privateKey: address.privateKey, publicKey: address.publicKey, address:testAddress}
+        return {mnemonic: wallet.mnemonic, privateKey: address.privateKey, publicKey: address.publicKey, address:testAddress}
     },
     
     async getNewFundedAddress(label, coin, network, mnemonic = null, addressType="legacy", addressIndex=0, amountToFund){

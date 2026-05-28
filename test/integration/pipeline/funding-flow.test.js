@@ -130,8 +130,8 @@ describe('Funding Flow — cryptoHelper.getNewFundedAddress', function () {
             const addr1 = await cryptoHelper.getNewAddress('CACHE.TEST', 'bitcoin', 'regtest', null, 'legacy', 0)
             const addr2 = await cryptoHelper.getNewAddress('CACHE.TEST', 'bitcoin', 'regtest', null, 'legacy', 1)
 
-            // The wallet stores the mnemonic; addr2.mnemonic is null due to code behavior
-            // (only the first call returns the mnemonic in the result object)
+            // The wallet stores the mnemonic; getNewAddress reports wallet.mnemonic,
+            // so both addr1 and addr2 carry the same mnemonic in their result objects.
             const wallet = global.wallets['CACHE.TEST']
             assert.strictEqual(wallet.mnemonic, addr1.mnemonic, 'wallet stores first mnemonic')
             assert.notStrictEqual(addr1.address, addr2.address, 'different addresses for different indices')

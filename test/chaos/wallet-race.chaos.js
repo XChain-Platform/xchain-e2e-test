@@ -84,7 +84,7 @@ describe('Chaos Experiment 11 — Concurrent Wallet Access @P2', function () {
 
             const results = await Promise.all(promises)
 
-            // Filter out any null mnemonics (only first call generates mnemonic)
+            // Every call now reports wallet.mnemonic; guard against nulls anyway.
             const mnemonics = results.map(r => r.mnemonic).filter(m => m !== null)
             assert(mnemonics.length >= 1, 'at least one result should have a mnemonic')
 
@@ -149,10 +149,9 @@ describe('Chaos Experiment 11 — Concurrent Wallet Access @P2', function () {
             assert.strictEqual(global.wallets['CHAOS.REUSE'].addresses.length, 2)
             // First call generates and returns the mnemonic
             assert.ok(addr1.mnemonic, 'first call should return mnemonic')
-            // Note: getNewAddress returns the `mnemonic` parameter, not wallet.mnemonic.
-            // On second call with mnemonic=null (default), the returned mnemonic is null
-            // even though the wallet internally still has one. This is expected behavior.
-            assert.strictEqual(addr2.mnemonic, null, 'second call returns null mnemonic param')
+            // getNewAddress returns wallet.mnemonic, so subsequent calls for the
+            // same label report the same mnemonic the wallet was initialized with.
+            assert.strictEqual(addr2.mnemonic, addr1.mnemonic, 'second call returns the wallet mnemonic')
             // But the wallet itself retains the mnemonic
             assert.strictEqual(global.wallets['CHAOS.REUSE'].mnemonic, addr1.mnemonic)
             // Different addresses (different index)

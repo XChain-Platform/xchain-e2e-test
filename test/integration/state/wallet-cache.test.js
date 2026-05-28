@@ -91,9 +91,8 @@ describe('State Management — Wallet Cache', function () {
 
             assert.strictEqual(addr1.mnemonic, testMnemonic)
 
-            // Second call without mnemonic reuses the wallet's stored mnemonic.
-            // Note: the returned mnemonic field is null (code only returns the local param),
-            // but the wallet object preserves the original mnemonic.
+            // Second call without mnemonic reuses the wallet's stored mnemonic,
+            // and getNewAddress now reports that stored mnemonic back in the result.
             const addr2 = await cryptoHelper.getNewAddress('EXPLICIT', 'bitcoin', 'regtest', null, 'legacy', 1)
             const wallet = await cryptoHelper.getWallet('EXPLICIT')
 
