@@ -1,7 +1,7 @@
 {
   "name": "xchain-e2e-test",
   "description": "xchain-e2e-test is an end-to-end testing suite for the XChain platform to ensure data integrity",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "license": "SEE LICENSE IN LICENSE.md",
   "repository": {
     "type": "git",
@@ -51,6 +51,7 @@
     "sinon": "^21.0.3"
   },
   "overrides": {
+    "qs": "^6.15.2",
     "mocha": {
       "diff": "^8.0.4",
       "serialize-javascript": "^7.0.5"
