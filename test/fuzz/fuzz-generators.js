@@ -160,7 +160,7 @@ const sleepFilterArb = filterObjectArb([
 ])
 
 const sweepFilterArb = filterObjectArb([
-    'txHash', 'source', 'destination', 'balances', 'ownerships', 'escrows', 'status'
+    'txHash', 'source', 'destination', 'balances', 'ownerships', 'orders', 'swaps', 'dispensers', 'status'
 ])
 
 const dividendFilterArb = filterObjectArb([

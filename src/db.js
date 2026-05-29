@@ -1522,14 +1522,16 @@ class Database {
     // ─── SWEEP ─────────────────────────────────────────────────────────
     async waitForSweep(obj, timeMax = 60000){ return this._waitFor(this.checkSweep, obj, timeMax) }
 
-    async checkSweep({txHash, source, destination, balances, ownerships, escrows, status}){
+    async checkSweep({txHash, source, destination, balances, ownerships, orders, swaps, dispensers, status}){
         let w = [], v = []
         if (txHash != null){ w.push("itx.hash = ?"); v.push(txHash) }
         if (source != null){ w.push("ias.address = ?"); v.push(source) }
         if (destination != null){ w.push("iad.address = ?"); v.push(destination) }
         if (balances != null){ w.push("sw.balances = ?"); v.push(balances) }
         if (ownerships != null){ w.push("sw.ownerships = ?"); v.push(ownerships) }
-        if (escrows != null){ w.push("sw.escrows = ?"); v.push(escrows) }
+        if (orders != null){ w.push("sw.orders = ?"); v.push(orders) }
+        if (swaps != null){ w.push("sw.swaps = ?"); v.push(swaps) }
+        if (dispensers != null){ w.push("sw.dispensers = ?"); v.push(dispensers) }
         if (status != null){ w.push("ist.status = ?"); v.push(status) }
         const query = `
             SELECT sw.*, itx.hash AS tx_hash, ias.address AS source, iad.address AS destination, im.memo AS memo, ist.status AS status

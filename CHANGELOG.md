@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- `db.js` `checkSweep()` and the `sweepFilterArb` fuzz generator now match against the three-flag SWEEP schema (`orders` / `swaps` / `dispensers`) instead of the removed `escrows` column. `sweepHelper.test.js` is updated to the current `sendSweepV0()` six-flag wire format (`balances|ownerships|orders|swaps|dispensers`), which had drifted from the helper after the SWEEP restructure.
+
 ## [0.3.8] - 2026-05-29
 
 ### Changed
