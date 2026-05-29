@@ -119,7 +119,7 @@ class CryptoNetworks {
         //TODO: this should get a config file from a server
         switch(networkName){
             case "bitcoin-mainnet":
-                return 844000
+                return 900000
             case "bitcoin-testnet":
                 return 0
             case "bitcoin-regtest":

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-05-29
+
+### Changed
+- `CryptoNetworks.getFirstBlock()` for `bitcoin-mainnet` now returns `900000` instead of `844000`, matching the encoder and decoder mainnet ingest floor. Keeps the first-block constant consistent across all three services. The regtest suite (which starts at block 0) is unaffected.
+
 ## [0.3.7] - 2026-05-28
 
 ### Changed
