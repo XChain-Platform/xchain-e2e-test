@@ -945,8 +945,7 @@ class Database {
                     
                 return result
             } catch (err) {
-                console.log(err)
-                console.error("Couldn't get a list of addresses from a list")
+                console.error("Couldn't get a list of addresses from a list:", err);
             }
         }
         

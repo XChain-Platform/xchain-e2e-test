@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.7] - 2026-05-28
+
+### Changed
+- `db.js` — `getListAddresses()` error handling now logs the caught error through a single structured `console.error` call (`"Couldn't get a list of addresses from a list:", err`) instead of a bare `console.log(err)` followed by a context-only `console.error`. Matches the error-logging idiom used by every other catch block in the file.
+
 ## [0.3.6] - 2026-05-28
 
 ### Security
