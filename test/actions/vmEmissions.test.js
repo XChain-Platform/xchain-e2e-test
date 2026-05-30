@@ -3,6 +3,7 @@ const cryptoHelper = require('../cryptoHelper')
 const vmHelper = require('../helpers/vmHelper')
 const issueHelper = require('../helpers/issueHelper')
 const gasHelper = require('../helpers/gasHelper')
+const orderHelper = require('../helpers/orderHelper')
 
 /**
  * VM Emissions — proves that contract-emitted actions of several types flow through
@@ -112,6 +113,16 @@ describe('VM Emissions — emitted action variety', function () {
             JOIN index_addresses ia ON ia.id=o.get_address_id WHERE o.action_index=?`, [actionIndex])
         return rows.length ? rows[0].addr : null
     }
+    async function pollBalance(address, tick, want, timeMax = 30000) {
+        const end = Date.now() + timeMax
+        let v = null
+        while (Date.now() < end) {
+            v = await balanceOf(address, tick)
+            if (v === want) return v
+            await new Promise(r => setTimeout(r, 1000))
+        }
+        return v
+    }
     async function fundedContract(code, tick, depositAmt) {
         // Issue tick to deployer, deploy the contract, deposit `tick` into it.
         await issueHelper.sendIssueV0(deployer, tick, '1000', '1000', '0', 'vm emit', '1000')
@@ -212,6 +223,42 @@ describe('VM Emissions — emitted action variety', function () {
         assert.strictEqual(Number(row.emitted_count), 0, 'no emissions should be committed')
         // The whole execution rolled back — the GIVE side must NOT have been escrowed.
         assert.strictEqual(await balanceOf(contractAddr, tick), '100', 'contract balance must be unchanged')
+    })
+
+    it("a contract's self-addressed token ORDER gets matched; proceeds credit the contract (option A payoff)", async function () {
+        const tick = randTick('VEM')
+        const ci = await fundedContract(SELF_ORDERER, tick, '100')
+        const contractAddr = `C:${CHAIN}:${ci}`
+
+        // Contract emits: GIVE 40 `tick`, GET 5 XCHAIN, GET_ADDRESS defaults to itself.
+        const ex = await vmHelper.sendExecuteV0(deployer, ci, 'mkselforder', [tick])
+        assert.strictEqual(ex.execution.status, 'valid')
+        const em = await emissionsFor(ex.execution.action_index)
+        const contractOrderIndex = Number(em[0].action_index)
+
+        // Counterparty posts the exact counter-order: GIVE 5 XCHAIN, GET 40 `tick`.
+        const buyer = await cryptoHelper.getNewFundedAddress('vmemit-buyer', COIN, NETWORK, null, 'legacy', 0, 1)
+        await gasHelper.ensureGasBalance(buyer, '100') // buyer needs XCHAIN to give
+        const expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
+        const counter = await orderHelper.sendOrderV0(
+            buyer, CHAIN, 'XCHAIN', 5, CHAIN, tick, 40,
+            buyer.address, expiration, null, null, 'buying contract tick'
+        )
+        assert(counter.order, 'counter-order row should exist')
+
+        const match = await indexerDatabase.waitForOrderMatch({
+            giveActionIndex: contractOrderIndex,
+            getActionIndex: Number(counter.order.action_index),
+            status: 'valid'
+        }, 30000)
+        assert(match, 'order match should exist (contract order matched the counter-order)')
+
+        // Payoff: the contract's own balance is credited with the GET proceeds on-ledger.
+        assert.strictEqual(await pollBalance(contractAddr, 'XCHAIN', '5', 30000), '5',
+            'contract should receive 5 XCHAIN proceeds into its own balance')
+        // ...and its escrowed GIVE (40 tick) was released to the buyer.
+        assert.strictEqual(await balanceOf(contractAddr, tick), '60', 'contract GIVE released (100 deposited - 40 given)')
+        assert.strictEqual(await balanceOf(buyer.address, tick), '40', 'buyer received the contract tick')
     })
 
     it('emits DISPENSER; a dispenser row is created from the contract', async function () {
