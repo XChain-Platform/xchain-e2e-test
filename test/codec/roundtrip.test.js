@@ -34,6 +34,7 @@ const XChainEncoder =
     tryRequire(path.resolve(__dirname, '../../../xchain-encoder/src/XChainEncoder.js'));
 const XChainDecoder =
     tryRequire(path.resolve(__dirname, '../../../xchain-decoder/src/XChainDecoder.js'));
+const bitcoin = tryRequire('bitcoinjs-lib');   // for P2SH/P2WSH redeem-script decompile
 
 const NETWORK = 'bitcoin-regtest';
 const MAGIC = Buffer.from('XCHN', 'utf8');
@@ -41,6 +42,11 @@ const OP_RETURN_SIZE = 80;          // XChainEncoder OP_RETURN_SIZE
 const OP_RETURN_CHUNK = OP_RETURN_SIZE - MAGIC.length;   // 76 data bytes / chunk
 const MULTISIGN_CHUNK = 60;         // MULTISIGN_SIZE(69) - magic(4) - 5 script overhead
 const MULTISIGN_SLOT = 64;          // two 32-byte pubkey halves
+const P2SH_CHUNK = 476;             // P2SH_SIZE(520) - 44 script overhead
+const P2WSH_CHUNK = 3571;           // PW2SH_SIZE(3615) - 44 script overhead
+// Any valid base58check address works — prepareData only extracts its 20-byte
+// hash for the redeem script's OP_HASH160 push.
+const REDEEM_ADDR = '1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2';
 
 // --- Deterministic PRNG so failures are reproducible (no Math.random). ---
 function mulberry32(seed) {
@@ -113,7 +119,21 @@ async function roundtripMultisign(enc, dec, payload, txid) {
     return Buffer.concat(out);
 }
 
-(XChainEncoder && XChainDecoder ? describe : describe.skip)
+// P2SH / P2WSH: the data chunk rides RAW (un-obfuscated) as the first push of a
+// redeem/witness script — compile([chunk, OP_DROP, OP_DUP, OP_HASH160, hash,
+// OP_EQUALVERIFY, OP_CHECKSIG]). The reader recovers it with
+// bitcoin.script.decompile(redeemScript)[0]. (XChainDecoder L361/L380.) Only the
+// separate "XCHN"+marker OP_RETURN is obfuscated — covered separately below.
+function roundtripRedeem(enc, payload, encoding) {
+    const prepared = enc.prepareData(payload, encoding, REDEEM_ADDR);
+    const out = prepared.dataBufferArray.map((redeemScript) => {
+        const decompiled = bitcoin.script.decompile(redeemScript);
+        return Buffer.from(decompiled[0]);   // first push = the data chunk
+    });
+    return Buffer.concat(out);
+}
+
+(XChainEncoder && XChainDecoder && bitcoin ? describe : describe.skip)
 ('Phase 1a — codec carrier round-trip', function () {
     this.timeout(0);
 
@@ -186,6 +206,40 @@ async function roundtripMultisign(enc, dec, payload, txid) {
                 // tail past the payload is zero-pad (the only loss is known padding)
                 assert.ok(back.subarray(payload.length).every((b) => b === 0),
                     `MULTISIGN tail not zero-pad at ${n} bytes`);
+            }
+        });
+    });
+
+    describe('P2SH / P2WSH carrier (raw data in redeem/witness script)', function () {
+        it('P2SH round-trips exactly across single- and multi-chunk payloads', function () {
+            const rng = mulberry32(0x2541);
+            const sizes = [1, 100, P2SH_CHUNK - 1, P2SH_CHUNK, P2SH_CHUNK + 1, P2SH_CHUNK * 2 + 7];
+            for (const n of sizes) {
+                const payload = randBytes(rng, n);
+                const back = roundtripRedeem(enc, payload, 'P2SH');
+                assert.ok(back.equals(payload), `P2SH round-trip failed at ${n} bytes`);
+            }
+        });
+
+        it('P2WSH round-trips exactly, including past the single-chunk ceiling', function () {
+            const rng = mulberry32(0x2772);
+            const sizes = [1, 500, P2WSH_CHUNK - 1, P2WSH_CHUNK, P2WSH_CHUNK + 1, P2WSH_CHUNK * 2 + 13];
+            for (const n of sizes) {
+                const payload = randBytes(rng, n);
+                const back = roundtripRedeem(enc, payload, 'P2WSH');
+                assert.ok(back.equals(payload), `P2WSH round-trip failed at ${n} bytes`);
+            }
+        });
+
+        it('the obfuscated reveal markers ("XCHNp2sh"/"XCHNp2wsh") round-trip', async function () {
+            // These markers (an obfuscated OP_RETURN) tell the decoder to go read
+            // the redeem/witness scripts. They use the same AES-CTR carrier.
+            const rng = mulberry32(0x3001);
+            for (const tag of ['p2sh', 'p2wsh']) {
+                const marker = Buffer.concat([MAGIC, Buffer.from(tag, 'utf8')]);
+                const txid = randTxid(rng);
+                const back = await dec.removeObfuscation(await enc.obfuscate(marker, txid), txid);
+                assert.ok(back.equals(marker), `${tag} marker did not round-trip`);
             }
         });
     });
