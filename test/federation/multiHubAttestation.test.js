@@ -73,6 +73,7 @@ const gasHelper = require('../helpers/gasHelper')
 const vmHelper = require('../helpers/vmHelper')
 const transactionHelper = require('../transactionHelper')
 const { MultiValidatorHub } = require('../helpers/multiValidatorHubHelper')
+const { requireFederationEnv, assertCleanValidatorSet } = require('../helpers/federationGuards')
 
 async function _settleStack() {
     // Wait until mempool is empty + tracker is caught up, so subsequent
@@ -120,16 +121,12 @@ module.exports = {
 `
 
     before(async function () {
-        if (COIN_CODE !== 'BTC') {
-            console.log('Phase B PBFT test requires BTC chain — skipping on ' + COIN_CODE)
-            this.skip()
-            return
-        }
-        if (!process.env.HUB_DB_USER || !process.env.HUB_DB_PASS) {
-            console.log('Phase B PBFT test requires HUB_DB_USER/HUB_DB_PASS env vars — skipping')
-            this.skip()
-            return
-        }
+        // Loud-fail (in CI / the federation phase) or graceful-skip (ad-hoc dev)
+        // on missing prerequisites; never silently green.
+        if (!requireFederationEnv(this)) return
+        // Responsible-set selection spans ALL staked validators — a polluted
+        // chain makes this test's hubs unreliable to select. Fail fast.
+        await assertCleanValidatorSet(indexerDatabase)
 
         // 1) Start a local HTTP server returning a fixed body. All three hubs
         //    fetch the same URL; byte_equality consensus converges trivially.

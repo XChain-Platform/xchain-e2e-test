@@ -27,6 +27,7 @@ const gasHelper = require('../helpers/gasHelper')
 const vmHelper = require('../helpers/vmHelper')
 const transactionHelper = require('../transactionHelper')
 const { MultiValidatorHub } = require('../helpers/multiValidatorHubHelper')
+const { requireFederationEnv, assertCleanValidatorSet } = require('../helpers/federationGuards')
 
 async function _settleStack() {
     await utxoTrackerConnector.quiesce({ timeoutMs: 30000, pollMs: 250, regtestMiner: regtestMinerConnector })
@@ -69,15 +70,12 @@ module.exports = {
 `
 
     before(async function () {
-        if (COIN_CODE !== 'BTC') { this.skip(); return }
-        if (!process.env.HUB_DB_USER || !process.env.HUB_DB_PASS) {
-            console.log('LLM attestation test requires HUB_DB_USER/HUB_DB_PASS — skipping')
-            this.skip(); return
-        }
-        if (!process.env.HUB_CLAUDE_CONFIG_DIR && !process.env.CLAUDE_CONFIG_DIR) {
-            console.log('LLM attestation test requires HUB_CLAUDE_CONFIG_DIR (or CLAUDE_CONFIG_DIR) pointing at a `claude login`-populated dir — skipping')
-            this.skip(); return
-        }
+        // Loud-fail (in CI / the federation phase) or graceful-skip (ad-hoc dev)
+        // on missing prerequisites — including the claude_spawn config dir.
+        if (!requireFederationEnv(this, { needsClaudeConfig: true })) return
+        // redundancy=1 → the single hub must be the sole responsible validator,
+        // so the chain must have no other active stakes. Fail fast if it does.
+        await assertCleanValidatorSet(indexerDatabase)
 
         mvh = new MultiValidatorHub({ count: 1 })
         await mvh.start()

@@ -2149,6 +2149,24 @@ class Database {
         } catch(err){ return null } finally { await connection.release() }
     }
 
+    // Count currently-active, valid stakes (those still in the validator
+    // snapshot — not deactivated). Used by the hub-federation tests to assert a
+    // clean validator set before staking their own hubs: leftover stakes would
+    // skew the deterministic responsible-set selection and make those tests
+    // flaky. Zero on a freshly-reset regtest chain.
+    async getActiveStakeCount(){
+        let query = `SELECT COUNT(*) AS n
+            FROM stakes s
+            LEFT JOIN index_statuses ist ON ist.id = s.status_id
+            WHERE ist.status = 'valid'
+              AND (s.deactivation_block IS NULL OR s.deactivation_block = 0)`
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query)
+            return rows.length > 0 ? Number(rows[0].n) : 0
+        } finally { await connection.release() }
+    }
+
     async waitForUnstake(params, timeMax = 60000){
         const startMs = Date.now()
         const endTime = startMs + timeMax
@@ -2225,7 +2243,7 @@ class Database {
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ return null } finally { await connection.release() }
+        } catch(err){ this._warnOnSchemaError('checkAttestationRequest', err); return null } finally { await connection.release() }
     }
 
     async waitForAttestationResponse(params, timeMax = 60000){
@@ -2264,7 +2282,7 @@ class Database {
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ return null } finally { await connection.release() }
+        } catch(err){ this._warnOnSchemaError('checkAttestationResponse', err); return null } finally { await connection.release() }
     }
 
     async getAttestationValidatorSignatures(responseActionIndex){
@@ -2280,7 +2298,19 @@ class Database {
             try { parsed = JSON.parse(rows[0].validator_signatures) } catch(e){ return [] }
             if(!Array.isArray(parsed)) return []
             return parsed.map(s => ({ validator_pubkey: s.pubkey, validator_sig: s.sig }))
-        } catch(err){ return [] } finally { await connection.release() }
+        } catch(err){ this._warnOnSchemaError('getAttestationValidatorSignatures', err); return [] } finally { await connection.release() }
+    }
+
+    // Distinguish a schema drift (missing table / renamed column) from a normal
+    // "no rows yet" poll. The attestation helpers above poll and legitimately
+    // return null/[] while waiting, so a swallowed SQL error used to masquerade
+    // as a benign timeout (this is exactly how the attestation_requests →
+    // attests table consolidation slipped through). Surface those loudly.
+    _warnOnSchemaError(where, err){
+        if(err && (err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR')){
+            console.error('[db] ' + where + ': attestation schema drift — ' + err.message +
+                ' (a query references a table/column that no longer exists)')
+        }
     }
 
     async getContractState(contractIndex, stateKey){

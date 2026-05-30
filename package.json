@@ -22,6 +22,9 @@
   },
   "scripts": {
     "test": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/actions/**/*.test.js'",
+    "test:federation": "E2E_REQUIRE_FEDERATION=1 mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/federation/multiHubAttestation.test.js'",
+    "test:attestation:llm": "E2E_REQUIRE_FEDERATION=1 mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/federation/llmAttestation.test.js'",
+    "test:vm": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/actions/vm*.test.js' test/actions/contractStaking.test.js",
     "test:smoke": "mocha --bail --timeout 30000 --exit --require ./test/initialCheck.test.js 'test/smoke/**/*.smoke.js'",
     "test:unit": "mocha 'test/unit/**/*.test.js'",
     "test:integration": "mocha 'test/integration/**/*.test.js'",
