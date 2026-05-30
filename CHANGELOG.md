@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Dependency installs are now reproducible: `package-lock.json` is committed to the repo (previously git-ignored) and the Docker image is built with `npm ci` instead of `npm install`. The lockfile is generated with the `file:`-linked `xchain-hub` staged so it captures xchain-hub's transitive dependencies (express, cors, ws, geoip-lite, etc.); `npm ci` then installs that exact tree and fails the build if the lockfile is out of sync with `package.json`, rather than silently resolving newer versions.
 - `db.js` `checkSweep()` and the `sweepFilterArb` fuzz generator now match against the three-flag SWEEP schema (`orders` / `swaps` / `dispensers`) instead of the removed `escrows` column. `sweepHelper.test.js` is updated to the current `sendSweepV0()` six-flag wire format (`balances|ownerships|orders|swaps|dispensers`), which had drifted from the helper after the SWEEP restructure.
 
 ## [0.3.8] - 2026-05-29
