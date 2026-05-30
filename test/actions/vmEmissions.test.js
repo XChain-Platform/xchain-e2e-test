@@ -1,0 +1,157 @@
+const assert = require('assert')
+const cryptoHelper = require('../cryptoHelper')
+const vmHelper = require('../helpers/vmHelper')
+const issueHelper = require('../helpers/issueHelper')
+const gasHelper = require('../helpers/gasHelper')
+
+/**
+ * VM Emissions — proves that contract-emitted actions of several types flow through
+ * the real action handlers and land on-chain, including multiple emissions in a
+ * single execution. Verified against the indexer DB (balances, supply,
+ * contract_emissions, and the emitted action's own table row).
+ */
+describe('VM Emissions — emitted action variety', function () {
+
+    const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
+
+    // Sends two different amounts to two recipients in one execution.
+    const MULTI_SEND = `module.exports = { payout: function(){
+        var t = xchain.getInputParam(0);
+        xchain.emit.send({ tick: t, quantity: '10', destination: xchain.getInputParam(1) });
+        xchain.emit.send({ tick: t, quantity: '20', destination: xchain.getInputParam(2) });
+    } };`
+
+    const DESTROYER = `module.exports = { burn: function(){
+        xchain.emit.destroy({ tick: xchain.getInputParam(0), quantity: '30' });
+    } };`
+
+    const CASTER = `module.exports = { announce: function(){
+        xchain.emit.broadcast({ message: 'hello-from-contract', value: '' });
+    } };`
+
+    // Token-for-token order: give the test tick (a ${CHAIN}-network token) for XCHAIN.
+    // GIVE_COIN must be a supported network. GET_ADDRESS must be an explicit real address —
+    // a contract's synthetic C:${CHAIN}:N address fails the isCryptoAddress format check, so
+    // it cannot default GET_ADDRESS to itself.
+    const ORDERER = `module.exports = { mkorder: function(){
+        xchain.emit.order({ giveCoin: '${CHAIN}', giveTick: xchain.getInputParam(0), giveAmount: '40',
+            getCoin: '${CHAIN}', getTick: 'XCHAIN', getAmount: '5',
+            getAddress: xchain.getInputParam(1) });
+    } };`
+
+    // Native-coin dispenser: dispense 10 of the test tick per trigger for 1 ${CHAIN}.
+    // GET_ADDRESS must be a fresh real address (anti-replay: no prior on-chain activity).
+    const DISPENSERR = `module.exports = { mkdisp: function(){
+        xchain.emit.dispenser({ giveCoin: '${CHAIN}', giveTick: xchain.getInputParam(0), giveAmount: '10',
+            giveEscrow: '100', getCoin: '${CHAIN}', getTick: '', getAmount: '1',
+            getAddress: xchain.getInputParam(1) });
+    } };`
+
+    let deployer = null
+
+    async function q(sql, params) {
+        const conn = await indexerDatabase.getConnection()
+        try { return await conn.query(sql, params) }
+        finally { await conn.release() }
+    }
+    async function emissionsFor(executionIndex) {
+        return await q(`SELECT emitted_action, action_index FROM contract_emissions
+                        WHERE execution_index=? ORDER BY position`, [executionIndex])
+    }
+    async function balanceOf(address, tick) {
+        const rows = await q(`SELECT b.amount FROM balances b
+            JOIN index_addresses ia ON ia.id=b.address_id
+            JOIN index_tickers it ON it.id=b.tick_id
+            WHERE ia.address=? AND it.tick=?`, [address, tick])
+        return rows.length ? String(rows[0].amount) : null
+    }
+    async function tokenSupply(tick) {
+        const rows = await q(`SELECT t.supply FROM tokens t JOIN index_tickers it ON it.id=t.tick_id WHERE it.tick=?`, [tick])
+        return rows.length ? String(rows[0].supply) : null
+    }
+    async function rowCount(table, actionIndex) {
+        const rows = await q(`SELECT COUNT(*) AS c FROM ${table} WHERE action_index=?`, [actionIndex])
+        return Number(rows[0].c)
+    }
+    async function fundedContract(code, tick, depositAmt) {
+        // Issue tick to deployer, deploy the contract, deposit `tick` into it.
+        await issueHelper.sendIssueV0(deployer, tick, '1000', '1000', '0', 'vm emit', '1000')
+        const dep = await vmHelper.sendDeployV0(deployer, code, 250000)
+        const ci = dep.contract.action_index
+        await vmHelper.sendDepositV0(deployer, ci, tick, depositAmt)
+        return ci
+    }
+    function randTick(p) { let s = p; for (let i = 0; i < 5; i++) s += String.fromCharCode(65 + Math.floor(Math.random() * 26)); return s }
+
+    before(async function () {
+        deployer = await cryptoHelper.getNewFundedAddress('vmemit-deployer', COIN, NETWORK, null, 'legacy', 0, 1)
+        await gasHelper.ensureGasBalance(deployer, '500')
+    })
+
+    it('emits two SENDs in one execution; both land in order', async function () {
+        const tick = randTick('VES')
+        const ci = await fundedContract(MULTI_SEND, tick, '100')
+        const contractAddr = `C:${CHAIN}:${ci}`
+        const a = await cryptoHelper.getNewFundedAddress('vmemit-a', COIN, NETWORK, null, 'legacy', 0, 1)
+        const b = await cryptoHelper.getNewFundedAddress('vmemit-b', COIN, NETWORK, null, 'legacy', 0, 1)
+
+        const ex = await vmHelper.sendExecuteV0(deployer, ci, 'payout', [tick, a.address, b.address])
+        assert.strictEqual(ex.execution.status, 'valid')
+        assert.strictEqual(Number(ex.execution.emitted_count), 2, 'two emissions expected')
+
+        const em = await emissionsFor(ex.execution.action_index)
+        assert.deepStrictEqual(em.map(e => e.emitted_action), ['SEND', 'SEND'])
+        assert.strictEqual(await balanceOf(a.address, tick), '10')
+        assert.strictEqual(await balanceOf(b.address, tick), '20')
+        assert.strictEqual(await balanceOf(contractAddr, tick), '70', 'contract debited 30 total')
+    })
+
+    it('emits DESTROY; contract balance and token supply drop', async function () {
+        const tick = randTick('VED')
+        const ci = await fundedContract(DESTROYER, tick, '100')
+        const contractAddr = `C:${CHAIN}:${ci}`
+        const supplyBefore = await tokenSupply(tick)
+
+        const ex = await vmHelper.sendExecuteV0(deployer, ci, 'burn', [tick])
+        assert.strictEqual(ex.execution.status, 'valid')
+        const em = await emissionsFor(ex.execution.action_index)
+        assert.strictEqual(em[0].emitted_action, 'DESTROY')
+        assert.strictEqual(await balanceOf(contractAddr, tick), '70', 'contract burned 30')
+        assert.strictEqual(await tokenSupply(tick), String(Number(supplyBefore) - 30), 'supply dropped by 30')
+    })
+
+    it('emits BROADCAST; a broadcast row is created from the contract', async function () {
+        const dep = await vmHelper.sendDeployV0(deployer, CASTER, 200000)
+        const ci = dep.contract.action_index
+        const ex = await vmHelper.sendExecuteV0(deployer, ci, 'announce', [])
+        assert.strictEqual(ex.execution.status, 'valid')
+        const em = await emissionsFor(ex.execution.action_index)
+        assert.strictEqual(em[0].emitted_action, 'BROADCAST')
+        assert.strictEqual(await rowCount('broadcasts', em[0].action_index), 1, 'broadcast row should exist')
+    })
+
+    it('emits ORDER; an order row is created from the contract', async function () {
+        const tick = randTick('VEO')
+        const ci = await fundedContract(ORDERER, tick, '100')
+        const recv = await cryptoHelper.getNewAddress('vmemit-ord-recv', COIN, NETWORK, null, 'legacy', 0)
+        const ex = await vmHelper.sendExecuteV0(deployer, ci, 'mkorder', [tick, recv.address])
+        assert(ex.execution, 'execution row should exist (ORDER emission must succeed)')
+        assert.strictEqual(ex.execution.status, 'valid')
+        const em = await emissionsFor(ex.execution.action_index)
+        assert.strictEqual(em[0].emitted_action, 'ORDER')
+        assert.strictEqual(await rowCount('orders', em[0].action_index), 1, 'order row should exist')
+    })
+
+    it('emits DISPENSER; a dispenser row is created from the contract', async function () {
+        const tick = randTick('VEP')
+        const ci = await fundedContract(DISPENSERR, tick, '100')
+        // Fresh (unfunded) address — required as the dispenser GET_ADDRESS.
+        const fresh = await cryptoHelper.getNewAddress('vmemit-disp-recv', COIN, NETWORK, null, 'legacy', 0)
+        const ex = await vmHelper.sendExecuteV0(deployer, ci, 'mkdisp', [tick, fresh.address])
+        assert(ex.execution, 'execution row should exist (DISPENSER emission must succeed)')
+        assert.strictEqual(ex.execution.status, 'valid')
+        const em = await emissionsFor(ex.execution.action_index)
+        assert.strictEqual(em[0].emitted_action, 'DISPENSER')
+        assert.strictEqual(await rowCount('dispensers', em[0].action_index), 1, 'dispenser row should exist')
+    })
+})
