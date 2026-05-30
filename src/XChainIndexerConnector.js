@@ -55,6 +55,32 @@ class XChainIndexerConnector {
             return false
         }
     }
+
+    // Fetch the indexer's health report (sync state + DB circuit-breaker status).
+    // Returns the result object on success, or null if the call fails.
+    async health(){
+        const data = {
+            jsonrpc: '2.0',
+            method: 'health',
+            id: 1
+        }
+
+        // Make the request to the node
+        var response = null
+        try {
+            response = await axios.post(this.url, data)
+        } catch (err) {
+            console.log(err)
+            return null
+        }
+
+        // Verify if there is a result and return it
+        if (response.data && response.data.result) {
+            return response.data.result;
+        } else {
+            return null
+        }
+    }
 }
 
 module.exports = XChainIndexerConnector
