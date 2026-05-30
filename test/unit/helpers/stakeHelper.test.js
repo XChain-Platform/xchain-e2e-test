@@ -113,7 +113,7 @@ describe('stakeHelper', () => {
         })
 
         it('should call waitForRewardClaim with source address', async () => {
-            await helper.sendClaimRewardsV0(addressInfo)
+            await helper.sendCollectV0(addressInfo)
             assert(global.indexerDatabase.waitForRewardClaim.calledOnce)
             const waitArg = global.indexerDatabase.waitForRewardClaim.firstCall.args[0]
             assert.strictEqual(waitArg.source, 'addr1')
