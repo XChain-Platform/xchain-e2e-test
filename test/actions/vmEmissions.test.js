@@ -49,6 +49,16 @@ describe('VM Emissions — emitted action variety', function () {
             getCoin: '${CHAIN}', getTick: 'XCHAIN', getAmount: '5' });
     } };`
 
+    // Self-addressed order whose GET side is NATIVE coin (getTick empty). A contract cannot
+    // receive native coin at its synthetic address, so this emission must be rejected and the
+    // whole execution must roll back (the GIVE side must NOT be escrowed). Proves the
+    // intended half of the GET_ADDRESS rule: contract addresses are allowed for token
+    // proceeds only, never native coin.
+    const NATIVE_ORDERER = `module.exports = { mknativeorder: function(){
+        xchain.emit.order({ giveCoin: '${CHAIN}', giveTick: xchain.getInputParam(0), giveAmount: '40',
+            getCoin: '${CHAIN}', getTick: '', getAmount: '1' });
+    } };`
+
     // Native-coin dispenser: dispense 10 of the test tick per trigger for 1 ${CHAIN}.
     // GET_ADDRESS must be a fresh real address (anti-replay: no prior on-chain activity).
     const DISPENSERR = `module.exports = { mkdisp: function(){
@@ -187,6 +197,21 @@ describe('VM Emissions — emitted action variety', function () {
             'GET_ADDRESS should default to the contract address')
         // ...and the GIVE side (40) must be escrowed out of the contract's balance (100 -> 60).
         assert.strictEqual(await balanceOf(contractAddr, tick), '60', 'contract GIVE_AMOUNT should be escrowed')
+    })
+
+    it('rejects a self-addressed ORDER whose GET side is native coin', async function () {
+        const tick = randTick('VEN')
+        const ci = await fundedContract(NATIVE_ORDERER, tick, '100')
+        const contractAddr = `C:${CHAIN}:${ci}`
+
+        // Status-agnostic helper — the emission is rejected and the execution reverts.
+        const ex = await vmHelper.sendExecuteV0Invalid(deployer, ci, 'mknativeorder', [tick])
+        const row = ex.execution
+        assert(row, 'an execution row should be recorded')
+        assert.notStrictEqual(row.status, 'valid', 'a contract cannot receive native coin via its own ORDER')
+        assert.strictEqual(Number(row.emitted_count), 0, 'no emissions should be committed')
+        // The whole execution rolled back — the GIVE side must NOT have been escrowed.
+        assert.strictEqual(await balanceOf(contractAddr, tick), '100', 'contract balance must be unchanged')
     })
 
     it('emits DISPENSER; a dispenser row is created from the contract', async function () {

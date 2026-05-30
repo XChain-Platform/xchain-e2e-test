@@ -103,6 +103,33 @@ module.exports = {
         return { txHash, execution: executionRow }
     },
 
+    // EXECUTE expected to FAIL (reverted / rejected emission). The valid-only
+    // waitForExecution can never observe a failed execution, so broadcast and poll the
+    // row status-agnostically on (contract, caller, method) — mirrors sendDeployV1Invalid.
+    async sendExecuteV0Invalid(addressInfo, contractActionIndex, method, params, timeMax = 40000){
+        let address = addressInfo["address"]
+        let msg = "EXECUTE|0|" + contractActionIndex + "|" + method
+        if(params && params.length > 0) msg += "|" + params.join("|")
+
+        console.log("Creating and sending (expected-failed) EXECUTE V0 tx...")
+        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
+
+        console.log("Waiting for the failed execution row in the database...")
+        let end = Date.now() + timeMax
+        let row = null
+        while(Date.now() < end){
+            row = await indexerDatabase.checkExecution({
+                contractIndex: contractActionIndex,
+                caller:        address,
+                methodName:    method
+            }).catch(() => null)
+            if(row) break
+            await new Promise(r => setTimeout(r, 1000))
+        }
+
+        return { txHash, execution: row }
+    },
+
     async sendDepositV0(addressInfo, contractActionIndex, tick, quantity){
         let address = addressInfo["address"]
         let msg = "DEPOSIT|0|" + contractActionIndex + "|" + tick + "|" + quantity
