@@ -47,6 +47,20 @@ describe('VM Emissions — emitted action variety', function () {
             getAddress: xchain.getInputParam(1) });
     } };`
 
+    // Coin-scoped message to a real address. Exercises the MESSAGE emission's leading
+    // COIN field: without it the DESTINATION would land in the COIN slot and the handler
+    // would reject it as 'invalid: COIN (value)', aborting the whole execution.
+    const MESSENGER = `module.exports = { ping: function(){
+        xchain.emit.message({ coin: '${CHAIN}', destination: xchain.getInputParam(0) });
+    } };`
+
+    // Public (non-gated) file. A contract can only emit a public FILE — gated files
+    // require SOURCE to be the GATE_TICKER issuer, which a contract address is not — so
+    // this covers the emit.file -> FILE handler -> files-row plumbing.
+    const FILER = `module.exports = { publish: function(){
+        xchain.emit.file({ name: 'contract-note.txt', type: 'text/plain', title: 'Note', memo: 'from contract' });
+    } };`
+
     let deployer = null
 
     async function q(sql, params) {
@@ -153,5 +167,28 @@ describe('VM Emissions — emitted action variety', function () {
         const em = await emissionsFor(ex.execution.action_index)
         assert.strictEqual(em[0].emitted_action, 'DISPENSER')
         assert.strictEqual(await rowCount('dispensers', em[0].action_index), 1, 'dispenser row should exist')
+    })
+
+    it('emits MESSAGE; a message row is created from the contract', async function () {
+        const dep = await vmHelper.sendDeployV0(deployer, MESSENGER, 200000)
+        const ci = dep.contract.action_index
+        const recv = await cryptoHelper.getNewAddress('vmemit-msg-recv', COIN, NETWORK, null, 'legacy', 0)
+        const ex = await vmHelper.sendExecuteV0(deployer, ci, 'ping', [recv.address])
+        assert(ex.execution, 'execution row should exist (MESSAGE emission must succeed)')
+        assert.strictEqual(ex.execution.status, 'valid')
+        const em = await emissionsFor(ex.execution.action_index)
+        assert.strictEqual(em[0].emitted_action, 'MESSAGE')
+        assert.strictEqual(await rowCount('messages', em[0].action_index), 1, 'message row should exist')
+    })
+
+    it('emits FILE; a file row is created from the contract', async function () {
+        const dep = await vmHelper.sendDeployV0(deployer, FILER, 200000)
+        const ci = dep.contract.action_index
+        const ex = await vmHelper.sendExecuteV0(deployer, ci, 'publish', [])
+        assert(ex.execution, 'execution row should exist (FILE emission must succeed)')
+        assert.strictEqual(ex.execution.status, 'valid')
+        const em = await emissionsFor(ex.execution.action_index)
+        assert.strictEqual(em[0].emitted_action, 'FILE')
+        assert.strictEqual(await rowCount('files', em[0].action_index), 1, 'file row should exist')
     })
 })
