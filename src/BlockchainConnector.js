@@ -123,7 +123,7 @@ class BlockchainConnector {
                 throw new Error('Error getting transaction hex');
             }
         } catch (error) {
-            console.error('Error:', error.message);
+            console.error('Error:', error);
             throw error;
         }
     }
@@ -170,7 +170,7 @@ class BlockchainConnector {
                 throw new Error('Error sending transaction to the node: ' + nodeError);
             }
         } catch (error) {
-            console.error('Error:', error.message);
+            console.error('Error:', error);
             throw error;
         }
     }
@@ -211,7 +211,7 @@ class BlockchainConnector {
                 return 0.00001000
             }
         } catch (error) {
-            console.error('Error:', error.message);
+            console.error('Error:', error);
             throw error;
         }
     }

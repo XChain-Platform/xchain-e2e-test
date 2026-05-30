@@ -183,7 +183,7 @@ class UtxoTracker {
                 throw new Error('Error getting utxos');
             }
         } catch (error) {
-            console.error('Error fetching UTXOs:', error.message);
+            console.error('Error fetching UTXOs:', error);
             throw error;
         }
     }
