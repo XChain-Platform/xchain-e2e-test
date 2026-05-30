@@ -39,6 +39,16 @@ describe('VM Emissions — emitted action variety', function () {
             getAddress: xchain.getInputParam(1) });
     } };`
 
+    // Token-for-token order with NO explicit GET_ADDRESS — it defaults to the contract's
+    // own derived address (C:${CHAIN}:N). Proves a contract can be the GET_ADDRESS recipient
+    // of its own same-chain token ORDER: proceeds settle on the XChain ledger to the
+    // contract's balance. Before this was allowed, the default-to-SOURCE produced the
+    // contract's synthetic address, which failed isCryptoAddress and aborted the execution.
+    const SELF_ORDERER = `module.exports = { mkselforder: function(){
+        xchain.emit.order({ giveCoin: '${CHAIN}', giveTick: xchain.getInputParam(0), giveAmount: '40',
+            getCoin: '${CHAIN}', getTick: 'XCHAIN', getAmount: '5' });
+    } };`
+
     // Native-coin dispenser: dispense 10 of the test tick per trigger for 1 ${CHAIN}.
     // GET_ADDRESS must be a fresh real address (anti-replay: no prior on-chain activity).
     const DISPENSERR = `module.exports = { mkdisp: function(){
@@ -86,6 +96,11 @@ describe('VM Emissions — emitted action variety', function () {
     async function rowCount(table, actionIndex) {
         const rows = await q(`SELECT COUNT(*) AS c FROM ${table} WHERE action_index=?`, [actionIndex])
         return Number(rows[0].c)
+    }
+    async function orderGetAddress(actionIndex) {
+        const rows = await q(`SELECT ia.address AS addr FROM orders o
+            JOIN index_addresses ia ON ia.id=o.get_address_id WHERE o.action_index=?`, [actionIndex])
+        return rows.length ? rows[0].addr : null
     }
     async function fundedContract(code, tick, depositAmt) {
         // Issue tick to deployer, deploy the contract, deposit `tick` into it.
@@ -154,6 +169,24 @@ describe('VM Emissions — emitted action variety', function () {
         const em = await emissionsFor(ex.execution.action_index)
         assert.strictEqual(em[0].emitted_action, 'ORDER')
         assert.strictEqual(await rowCount('orders', em[0].action_index), 1, 'order row should exist')
+    })
+
+    it('emits a self-addressed token ORDER; GET_ADDRESS defaults to the contract itself', async function () {
+        const tick = randTick('VES')
+        const ci = await fundedContract(SELF_ORDERER, tick, '100')
+        const contractAddr = `C:${CHAIN}:${ci}`
+
+        const ex = await vmHelper.sendExecuteV0(deployer, ci, 'mkselforder', [tick])
+        assert(ex.execution, 'execution row should exist (self-addressed ORDER must succeed)')
+        assert.strictEqual(ex.execution.status, 'valid', 'a contract may receive its own token ORDER proceeds')
+        const em = await emissionsFor(ex.execution.action_index)
+        assert.strictEqual(em[0].emitted_action, 'ORDER')
+        assert.strictEqual(await rowCount('orders', em[0].action_index), 1, 'order row should exist')
+        // The recipient must be the contract's own derived address...
+        assert.strictEqual(await orderGetAddress(em[0].action_index), contractAddr,
+            'GET_ADDRESS should default to the contract address')
+        // ...and the GIVE side (40) must be escrowed out of the contract's balance (100 -> 60).
+        assert.strictEqual(await balanceOf(contractAddr, tick), '60', 'contract GIVE_AMOUNT should be escrowed')
     })
 
     it('emits DISPENSER; a dispenser row is created from the contract', async function () {
