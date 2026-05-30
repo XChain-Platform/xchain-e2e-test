@@ -2212,12 +2212,14 @@ class Database {
         if(txHash){        w.push("itx.hash = ?");           v.push(txHash); }
         if(requestStatus){ w.push("ar.request_status = ?");  v.push(requestStatus); }
         if(w.length === 0) return null
+        // ATTEST request + response rows now share the consolidated `attests`
+        // table, version-discriminated (0 = request, 1 = response).
         let query = `SELECT ar.*, itx.hash AS tx_hash
-            FROM attestation_requests ar
+            FROM attests ar
             LEFT JOIN actions act ON act.action_index = ar.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
             LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
-            WHERE ` + w.join(" AND ") + `
+            WHERE ar.version = 0 AND ` + w.join(" AND ") + `
             LIMIT 1`
         let connection = await this.getConnection()
         try {
@@ -2249,13 +2251,14 @@ class Database {
         if(responseStatus){  w.push("ar.response_status = ?");  v.push(responseStatus); }
         if(status){          w.push("ist.status = ?");          v.push(status); }
         if(w.length === 0) return null
+        // Response rows live in the consolidated `attests` table as version = 1.
         let query = `SELECT ar.*, itx.hash AS tx_hash, ist.status AS status
-            FROM attestation_responses ar
+            FROM attests ar
             LEFT JOIN actions act ON act.action_index = ar.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
             LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
             LEFT JOIN index_statuses ist ON ist.id = ar.status_id
-            WHERE ` + w.join(" AND ") + `
+            WHERE ar.version = 1 AND ` + w.join(" AND ") + `
             LIMIT 1`
         let connection = await this.getConnection()
         try {
@@ -2265,11 +2268,18 @@ class Database {
     }
 
     async getAttestationValidatorSignatures(responseActionIndex){
-        let query = `SELECT * FROM attestation_validator_signatures WHERE response_action_index = ?`
+        // Verified federation sigs are no longer a separate table — they're
+        // inlined as a JSON array (`[{pubkey, sig}, ...]`) on the version = 1
+        // response row. Parse + reshape to the prior {validator_pubkey, validator_sig} form.
+        let query = `SELECT validator_signatures FROM attests WHERE action_index = ? AND version = 1 LIMIT 1`
         let connection = await this.getConnection()
         try {
             const rows = await connection.query(query, [responseActionIndex])
-            return rows
+            if(rows.length === 0 || !rows[0].validator_signatures) return []
+            let parsed
+            try { parsed = JSON.parse(rows[0].validator_signatures) } catch(e){ return [] }
+            if(!Array.isArray(parsed)) return []
+            return parsed.map(s => ({ validator_pubkey: s.pubkey, validator_sig: s.sig }))
         } catch(err){ return [] } finally { await connection.release() }
     }
 
