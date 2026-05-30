@@ -136,11 +136,15 @@ describe('Contract Staking — STAKE v3 / UNSTAKE v1 / DELEGATE v1 + slashing', 
             await gasHelper.ensureGasBalance(staker, '500')
             let pk = newSigningPubkey()
 
-            let result = await stakeHelper.sendStakeV3(staker, '100.00000000', pk, deploy.contract.action_index, 'XCHAIN')
-            if (result.stake) {
-                assert.notStrictEqual(result.stake.status, 'valid',
-                    'STAKE v3 against non-stakeable contract must not succeed')
-            }
+            // Use the status-agnostic helper: the valid-only waitForContractStake would
+            // stall the full 60s and never observe the rejection, making the assertion
+            // vacuous (the row IS written with the invalid status — see stake.js).
+            let result = await stakeHelper.sendStakeV3Invalid(staker, '100.00000000', pk, deploy.contract.action_index, 'XCHAIN')
+            assert(result.stake, 'a (rejected) contract_stakes row should be recorded')
+            assert.notStrictEqual(result.stake.status, 'valid',
+                'STAKE v3 against non-stakeable contract must not succeed')
+            assert(/not stakeable/i.test(result.stake.status),
+                `status should cite the non-stakeable contract (got: ${result.stake.status})`)
         })
 
         it('should reject STAKE v3 against an unknown contract index', async function () {
@@ -150,12 +154,14 @@ describe('Contract Staking — STAKE v3 / UNSTAKE v1 / DELEGATE v1 + slashing', 
             await gasHelper.ensureGasBalance(staker, '500')
             let pk = newSigningPubkey()
 
-            // Action index that almost certainly doesn't exist as a contract
-            let result = await stakeHelper.sendStakeV3(staker, '100.00000000', pk, 999999999, 'XCHAIN')
-            if (result.stake) {
-                assert.notStrictEqual(result.stake.status, 'valid',
-                    'STAKE v3 against unknown contract must not succeed')
-            }
+            // Action index that almost certainly doesn't exist as a contract.
+            // Status-agnostic helper for the same reason as the non-stakeable case above.
+            let result = await stakeHelper.sendStakeV3Invalid(staker, '100.00000000', pk, 999999999, 'XCHAIN')
+            assert(result.stake, 'a (rejected) contract_stakes row should be recorded')
+            assert.notStrictEqual(result.stake.status, 'valid',
+                'STAKE v3 against unknown contract must not succeed')
+            assert(/unknown/i.test(result.stake.status),
+                `status should cite the unknown contract index (got: ${result.stake.status})`)
         })
     })
 })

@@ -159,6 +159,36 @@ module.exports = {
         return { txHash, stake: stakeRow }
     },
 
+    // STAKE v3 expected to be REJECTED. The valid-only waitForContractStake can never
+    // observe an intentionally-invalid stake, so broadcast and poll the row
+    // status-agnostically (invalid contract stakes still write a contract_stakes row
+    // carrying the rejection status — see xchain-indexer stake.js _parseContractStake,
+    // which calls createContractStake unconditionally). Filters on the unique
+    // (source, pubkey, target, tick) tuple — not txHash — so it stays robust to encoding.
+    async sendStakeV3Invalid(addressInfo, amount, signingPubkey, contractIndex, tick, timeMax = 60000){
+        let address = addressInfo["address"]
+        let msg = "STAKE|3|" + amount + "|" + signingPubkey + "|" + contractIndex + "|" + tick
+
+        console.log("Creating and sending (expected-invalid) STAKE V3 tx...")
+        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
+
+        console.log("Waiting for the rejected contract_stakes row in the database...")
+        let end = Date.now() + timeMax
+        let row = null
+        while(Date.now() < end){
+            row = await indexerDatabase.checkContractStake({
+                source:        address,
+                signingPubkey: signingPubkey,
+                contractIndex: contractIndex,
+                tick:          tick
+            }).catch(() => null)
+            if(row) break
+            await new Promise(r => setTimeout(r, 1000))
+        }
+
+        return { txHash, stake: row }
+    },
+
     // UNSTAKE v1 — begin cooldown for a contract-targeted stake
     async sendUnstakeV1(addressInfo, signingPubkey, contractIndex, tick){
         let address = addressInfo["address"]
