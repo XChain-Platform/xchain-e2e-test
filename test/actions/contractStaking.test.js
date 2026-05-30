@@ -62,11 +62,13 @@ describe('Contract Staking — STAKE v3 / UNSTAKE v1 / DELEGATE v1 + slashing', 
             )
             await gasHelper.ensureGasBalance(deployer, '500')
 
-            // 100001 is above the max
-            let result = await vmHelper.sendDeployV1(deployer, STAKE_GATED_CONTRACT, 300000, '', 100001, 'BURN')
-            if (result.contract) {
-                assert.notStrictEqual(result.contract.status, 'valid', 'out-of-range cooldown should fail validation')
-            }
+            // 100001 is above the max — must be rejected (use the status-agnostic helper;
+            // the valid-only waitForContract would stall 60s and never observe the rejection,
+            // making this assertion vacuous).
+            let result = await vmHelper.sendDeployV1Invalid(deployer, STAKE_GATED_CONTRACT, 300000, '', 100001, 'BURN')
+            assert(result.contract, 'a (rejected) contract row should be recorded')
+            assert.notStrictEqual(result.contract.status, 'valid', 'out-of-range cooldown should fail validation')
+            assert(/COOLDOWN_BLOCKS/i.test(result.contract.status), `status should cite COOLDOWN_BLOCKS (got: ${result.contract.status})`)
         })
     })
 

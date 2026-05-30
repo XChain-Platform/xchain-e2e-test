@@ -46,6 +46,30 @@ module.exports = {
         return { txHash, contract: contractRow }
     },
 
+    // DEPLOY v1 expected to be REJECTED. The valid-only waitForContract can never observe an
+    // intentionally-invalid deploy, so broadcast and poll the contract row status-agnostically
+    // (invalid deploys still write a contracts row, carrying the rejection status).
+    async sendDeployV1Invalid(addressInfo, code, gasLimit, constructorParams, cooldownBlocks, slashDestination){
+        let address = addressInfo["address"]
+        let codeHex = Buffer.from(code, 'utf8').toString('hex')
+        let msg = "DEPLOY|1|" + codeHex + "|" + gasLimit + "|" + (constructorParams || '')
+                  + "|" + cooldownBlocks + "|" + (slashDestination || '')
+
+        console.log("Creating and sending (expected-invalid) DEPLOY V1 tx...")
+        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg, null, [], "P2SH")
+
+        console.log("Waiting for the rejected contract row in the database...")
+        let end = Date.now() + 60000
+        let row = null
+        while(Date.now() < end){
+            row = await indexerDatabase.checkContract({ source: address })
+            if(row) break
+            await new Promise(r => setTimeout(r, 1000))
+        }
+
+        return { txHash, contract: row }
+    },
+
     async sendExecuteV0(addressInfo, contractActionIndex, method, params){
         let address = addressInfo["address"]
         let msg = "EXECUTE|0|" + contractActionIndex + "|" + method
