@@ -114,4 +114,32 @@ describe('MultiValidatorHub — byzantine fault tolerance (L5)', function () {
         assert.notStrictEqual(after.GAS_PRICE, forgedValue,
             'forged config was applied — safety violated');
     });
+
+    it('SAFETY: an equivocating leader cannot make a follower adopt two configs for one seq', async function () {
+        const COIN = 'BTC', NET = 'regtest', MODULE = 'node';
+        const follower = mvh.hubs[1];
+        const seq = 8000;   // fresh, above any applied seq
+        const configA = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: '111' } } } };
+        const configB = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: '222' } } } };
+        const digestA = follower.consensus._digest(configA);
+        const digestB = follower.consensus._digest(configB);
+        const env = (digest, config) => ({
+            sender: '127.0.0.1:58000',   // the (byzantine) leader
+            data: { seq, configDigest: digest, config, btcBlockHeight: seed.blockIndex }
+        });
+
+        // First proposal locks the follower onto config A.
+        await follower.consensus._handlePrePrepare(env(digestA, configA));
+        assert.ok(follower.consensus.pendingProposals.has(seq), 'first PRE_PREPARE should create a proposal');
+
+        // Equivocation: a second, conflicting PRE_PREPARE for the SAME seq (config B,
+        // with its own valid digest). The follower must stay locked to the first
+        // config — dedup-by-seq is the safety mechanism, so it cannot adopt both.
+        await follower.consensus._handlePrePrepare(env(digestB, configB));
+
+        const prop = follower.consensus.pendingProposals.get(seq);
+        assert.strictEqual(prop.digest, digestA,
+            'follower switched to the equivocating second config — double-adoption');
+        assert.notStrictEqual(prop.digest, digestB);
+    });
 });
