@@ -50,6 +50,14 @@ describe('VM Emissions — emitted action variety', function () {
             getCoin: '${CHAIN}', getTick: 'XCHAIN', getAmount: '5' });
     } };`
 
+    // Self-addressed token order with a caller-supplied EXPIRATION (input param 1), so the
+    // test can make it expire and assert the escrow refunds to the contract.
+    const EXPIRING_ORDERER = `module.exports = { mkexporder: function(){
+        xchain.emit.order({ giveCoin: '${CHAIN}', giveTick: xchain.getInputParam(0), giveAmount: '40',
+            getCoin: '${CHAIN}', getTick: 'XCHAIN', getAmount: '5',
+            expiration: xchain.getInputParam(1) });
+    } };`
+
     // Self-addressed order whose GET side is NATIVE coin (getTick empty). A contract cannot
     // receive native coin at its synthetic address, so this emission must be rejected and the
     // whole execution must roll back (the GIVE side must NOT be escrowed). Proves the
@@ -259,6 +267,33 @@ describe('VM Emissions — emitted action variety', function () {
         // ...and its escrowed GIVE (40 tick) was released to the buyer.
         assert.strictEqual(await balanceOf(contractAddr, tick), '60', 'contract GIVE released (100 deposited - 40 given)')
         assert.strictEqual(await balanceOf(buyer.address, tick), '40', 'buyer received the contract tick')
+    })
+
+    it("a contract's self-addressed token ORDER refunds the escrow to the contract on expiry", async function () {
+        const tick = randTick('VEX')
+        const ci = await fundedContract(EXPIRING_ORDERER, tick, '100')
+        const contractAddr = `C:${CHAIN}:${ci}`
+        // Far enough ahead to survive creation (EXECUTE confirms in ~20s), soon enough to expire.
+        const expiration = Math.floor(Date.now() / 1000) + 45
+
+        const ex = await vmHelper.sendExecuteV0(deployer, ci, 'mkexporder', [tick, String(expiration)])
+        assert.strictEqual(ex.execution.status, 'valid', 'self-addressed expiring order must be created')
+        // GIVE (40) escrowed out of the contract on creation: 100 -> 60.
+        assert.strictEqual(await balanceOf(contractAddr, tick), '60', 'GIVE escrowed on order creation')
+
+        // Drive blocks forward until block_time passes EXPIRATION and the per-block expiry sweep
+        // (XChainIndexer processExpirations) fires. Batch-mine + poll — robust whether regtest
+        // block_time tracks wall-clock or advances ~1s/block (median-time-past).
+        let refunded = null
+        const deadline = Date.now() + 150000
+        while (Date.now() < deadline) {
+            await regtestMinerConnector.generateBlocks(5)
+            refunded = await balanceOf(contractAddr, tick)
+            if (refunded === '100') break
+            await new Promise(r => setTimeout(r, 2000))
+        }
+        // order_expire.js credits the refunded GIVE back to the order SOURCE (the contract): 60 -> 100.
+        assert.strictEqual(refunded, '100', 'escrow refunded to the contract on order expiry')
     })
 
     it('emits DISPENSER; a dispenser row is created from the contract', async function () {
