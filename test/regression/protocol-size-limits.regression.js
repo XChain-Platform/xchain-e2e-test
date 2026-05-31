@@ -22,6 +22,8 @@ const protocol = require('../../../xchain-documentation/protocol/constants.js')
 const encoderValidator = require('../../../xchain-encoder/src/validator.js')
 const XChainDecoder     = require('../../../xchain-decoder/src/XChainDecoder.js')
 const sdkValidator      = require('../../../xchain-sdk/src/validator.js')
+const indexerDeploy     = require('../../../xchain-indexer/src/actions/deploy.js')
+const XChainVM          = require('../../../xchain-vm/src/index.js')
 
 describe('Protocol size-limit drift guard', () => {
 
@@ -77,6 +79,25 @@ describe('Protocol size-limit drift guard', () => {
                 sdkValidator.MAX_CODE_SIZE,
                 protocol.MAX_CODE_SIZE,
                 'SDK MAX_CODE_SIZE drifted from the canonical protocol constant — the indexer (DEPLOY) and VM isolate limit must also stay equal to this value'
+            )
+        })
+
+        it('[regression:p0] indexer DEPLOY MAX_CODE_SIZE === canonical', () => {
+            // The indexer is the on-chain arbiter for contract code size — it
+            // rejects any DEPLOY whose code exceeds this. If it drifts below the
+            // SDK/encoder, a contract the SDK accepts would be rejected on chain.
+            assert.strictEqual(
+                indexerDeploy.MAX_CODE_SIZE,
+                protocol.MAX_CODE_SIZE,
+                'indexer DEPLOY MAX_CODE_SIZE drifted from the canonical protocol constant'
+            )
+        })
+
+        it('[regression:p0] VM isolate maxCodeSize === canonical', () => {
+            assert.strictEqual(
+                XChainVM.MAX_CODE_SIZE,
+                protocol.MAX_CODE_SIZE,
+                'VM isolate code-size limit drifted from the canonical protocol constant'
             )
         })
     })
