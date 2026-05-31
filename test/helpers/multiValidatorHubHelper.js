@@ -222,7 +222,7 @@ class MultiValidatorHub {
             try {
                 await _withTimeout(this._stopOne(hub), 10000, 'hub.stop');
             } catch (e) {
-                console.warn('MultiValidatorHub: stop error: ' + (e && e.message ? e.message : e));
+                console.warn('MultiValidatorHub: stop error:', e);
             }
         }
         this.hubs = [];
@@ -258,7 +258,7 @@ class MultiValidatorHub {
                     pm.httpServer.closeAllConnections();
                 }
             } catch (e) {
-                console.warn('MultiValidatorHub: force-close peers failed: ' + (e && e.message ? e.message : e));
+                console.warn('MultiValidatorHub: force-close peers failed:', e);
             }
         }
 
@@ -276,7 +276,7 @@ class MultiValidatorHub {
         try {
             for (const name of this.dbNames) {
                 try { await pool.query('DROP DATABASE IF EXISTS `' + name + '`'); }
-                catch (e) { console.warn('MultiValidatorHub: drop ' + name + ' failed: ' + (e && e.message ? e.message : e)); }
+                catch (e) { console.warn('MultiValidatorHub: drop ' + name + ' failed:', e); }
             }
         } finally {
             try { await pool.end(); } catch {}

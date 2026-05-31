@@ -62,7 +62,7 @@ function run() {
             const custom = JSON.parse(fs.readFileSync(args.config, 'utf8'))
             thresholds = { ...thresholds, ...custom }
         } catch (e) {
-            console.error(`[perf-gate] Error reading config: ${e.message}`)
+            console.error('[perf-gate] Error reading config:', e)
             process.exit(2)
         }
     }
@@ -84,7 +84,7 @@ function run() {
     try {
         data = JSON.parse(fs.readFileSync(filePath, 'utf8'))
     } catch (e) {
-        console.error(`[perf-gate] Error parsing results: ${e.message}`)
+        console.error('[perf-gate] Error parsing results:', e)
         process.exit(2)
     }
 
