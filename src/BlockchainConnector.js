@@ -215,6 +215,33 @@ class BlockchainConnector {
             throw error;
         }
     }
+
+    // --- Generic JSON-RPC + regtest reorg primitives ---------------------------------
+    // The class's other methods each duplicate the fetch boilerplate; this is a thin
+    // generic caller used by the chain/reorg helpers below (added for on-chain reorg
+    // e2e — invalidateBlock orphans a sub-chain so the indexer's reorg rollback runs).
+    async _rpc(method, params = []){
+        const auth = Buffer.from(`${this.rpcUser}:${this.rpcPassword}`).toString('base64');
+        const response = await fetch(this.url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Basic ${auth}` },
+            body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params })
+        });
+        if (!response.ok) throw new Error(`${method}: HTTP ${response.status}`);
+        const data = await response.json();
+        if (data.error) throw new Error(`${method} RPC error: ` + JSON.stringify(data.error));
+        return data.result;
+    }
+    async getBlockCount(){ return await this._rpc('getblockcount'); }
+    async getBestBlockHash(){ return await this._rpc('getbestblockhash'); }
+    async getBlockHash(height){ return await this._rpc('getblockhash', [Number(height)]); }
+    async invalidateBlock(hash){ return await this._rpc('invalidateblock', [hash]); }
+    async reconsiderBlock(hash){ return await this._rpc('reconsiderblock', [hash]); }
+    async getRawMempool(){ return await this._rpc('getrawmempool'); }
+    // Mine a block containing EXACTLY `txs` (default: none) — ignores the mempool. This is
+    // what lets a reorg DROP an orphaned tx: after invalidateBlock, mine empty blocks to build
+    // a longer competing chain that excludes the mempool tx. (Bitcoin Core 0.19+ `generateblock`.)
+    async generateBlock(address, txs = []){ return await this._rpc('generateblock', [address, txs]); }
 }
 
 module.exports = BlockchainConnector
