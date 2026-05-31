@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- `package.json` — aligned the `mariadb` driver to the `^3.5.2` range used across the platform. The driver was previously pinned to `~3.4.5` (a patch-only range, one minor line behind the `xchain-dashboard` host); the caret range now tracks 3.x minor releases consistently with every other service, removing the version drift and the mix of `~`/`^` range operators across the platform. No source changes.
+
 ### Added
 - `src/XChainIndexerConnector.js` — new `health()` wrapper that calls the indexer's `health` JSON-RPC method and returns the report object (sync state + database circuit-breaker status), or `null` on failure. Complements the existing `ping()` wrapper.
 
