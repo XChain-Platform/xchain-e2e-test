@@ -17,7 +17,7 @@ const gasHelper = require('../helpers/gasHelper')
 // contract-facing path. Likely the SWEEP handler's fee-payment validation has no valid mode in an
 // emission context. Un-skip once that's resolved, or reframe as a rejection assertion if contract
 // SWEEP is intentionally unsupported. See claude/reports/2026-05-31_e2e-vm-testing-buildout.md (Finding B).
-describe.skip('VM Contract SWEEP — a contract sweeps its own order escrow', function () {
+describe('VM Contract SWEEP — a contract sweeps its own order escrow', function () {
 
     const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
 
@@ -99,7 +99,10 @@ describe.skip('VM Contract SWEEP — a contract sweeps its own order escrow', fu
         // The contract keeps its un-escrowed remainder (BALANCES:0 → spendable balance untouched).
         assert.strictEqual(await balanceOf(contractAddr, tick), '60',
             'contract spendable balance is untouched (only the order escrow was swept)')
-        assert.strictEqual(await balanceOf(deployer.address, tick), null,
-            'the EXECUTE caller received nothing — the sweep enumerated the contract, not the caller')
+        // The EXECUTE caller is the token issuer (minted 1000, deposited 100 → holds 900). The
+        // sweep must not credit the caller: its balance stays exactly 900, proving the swept
+        // escrow went to DESTINATION and getAddressEscrows enumerated the CONTRACT, not the caller.
+        assert.strictEqual(await balanceOf(deployer.address, tick), '900',
+            'the EXECUTE caller balance is unchanged by the sweep — it enumerated the contract, not the caller')
     })
 })

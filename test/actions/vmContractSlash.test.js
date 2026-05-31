@@ -15,11 +15,7 @@ const gasHelper = require('../helpers/gasHelper')
  * Verified against the indexer DB: contract_stakes (remaining), slash_events, and the
  * burn-address balance. (contract_executions has no return_value, so we assert via DB state.)
  */
-// SKIPPED: blocked by a residual encoder DEPLOY-V1 fee shortfall ("min relay fee not met,
-// 671 < 673") in single-file/subset-mode e2etest — the 214afab +32 safety margin is present but
-// a few sat short for the v1 P2SH reveal. Un-skip once the encoder fee margin is widened.
-// See claude/reports/2026-05-31_e2e-vm-testing-buildout.md (Finding A).
-describe.skip('VM Contract SLASH — a contract slashes its own staker', function () {
+describe('VM Contract SLASH — a contract slashes its own staker', function () {
 
     // Ed25519 pubkey as a 64-hex string (same pattern as contractStaking.test.js / staking.test.js).
     function newSigningPubkey(){
@@ -71,8 +67,15 @@ describe.skip('VM Contract SLASH — a contract slashes its own staker', functio
             JOIN index_pubkeys pk ON pk.id=se.signing_pubkey_id
             JOIN index_addresses ia ON ia.id=se.destination_id
             WHERE se.target_contract_index=? AND pk.pubkey=?
-            ORDER BY se.action_index DESC LIMIT 1`, [Number(ci), pk])
+            ORDER BY se.id DESC LIMIT 1`, [Number(ci), pk])
         return rows.length ? { amount: String(rows[0].amount), dest: rows[0].dest } : null
+    }
+    // The contract's configured slash destination address (BURN sentinel resolved at DEPLOY time).
+    async function slashDestAddress(ci) {
+        const rows = await q(`SELECT ia.address AS address FROM contracts c
+            JOIN index_addresses ia ON ia.id=c.slash_destination_id
+            WHERE c.action_index=?`, [Number(ci)])
+        return rows.length ? rows[0].address : null
     }
     async function emissionAction(executionIndex) {
         const rows = await q(`SELECT emitted_action FROM contract_emissions
@@ -102,6 +105,11 @@ describe.skip('VM Contract SLASH — a contract slashes its own staker', functio
     })
 
     it('slashes 50: stake drops to 150, 50 credited to the burn destination, slash_events written', async function () {
+        // BURN is a global, shared destination that accumulates across every slash on the stack,
+        // so assert a +50 delta rather than an absolute balance (the DB is not pristine).
+        const burnAddr = await slashDestAddress(contractIndex)
+        const burnBefore = Number(await balanceOf(burnAddr, 'XCHAIN')) || 0
+
         const ex = await vmHelper.sendExecuteV0(staker, contractIndex, 'doSlash', [pubkey, '50'])
         assert.strictEqual(ex.execution.status, 'valid', 'doSlash execution must be valid')
         assert.deepStrictEqual(await emissionAction(ex.execution.action_index), ['SLASH'],
@@ -115,8 +123,8 @@ describe.skip('VM Contract SLASH — a contract slashes its own staker', functio
         assert.strictEqual(await activeStake(contractIndex, pubkey, 'XCHAIN'), 150,
             'stake should be reduced to 150 after slashing 50')
         // The slashed 50 XCHAIN was credited to the contract's slash destination (BURN address).
-        assert.strictEqual(await balanceOf(ev.dest, 'XCHAIN'), '50',
-            'burn destination should be credited the slashed 50 XCHAIN')
+        assert.strictEqual(Number(await balanceOf(ev.dest, 'XCHAIN')), burnBefore + 50,
+            'burn destination should be credited exactly the slashed 50 XCHAIN')
     })
 
     it('over-slash is capped at the available stake (slash 300 of 150 → 150, stake → 0)', async function () {
