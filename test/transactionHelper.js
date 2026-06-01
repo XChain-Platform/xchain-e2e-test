@@ -92,7 +92,7 @@ module.exports = {
     // references inputs the bitcoind has already spent, and broadcast would die
     // with `bad-txns-inputs-missingorspent`. Drop the cache and wait briefly so
     // the tracker can catch up, then rebuild from scratch.
-    async createAndSendTransaction(addressInfo, data, rawData = null, customOutputs = [], outputType = null){
+    async createAndSendTransaction(addressInfo, data, rawData = null, customOutputs = [], outputType = null, compressedPubKey = null){
         // 15 attempts gives generous budget under full-suite load. Session 4
         // settled on 8; one stubborn ORDER partial-fill failure burned all 8
         // with identical rebuilds, suggesting the tracker had a phantom UTXO
@@ -102,7 +102,7 @@ module.exports = {
         let lastErr
         for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             try {
-                return await this._doCreateAndSendTransaction(addressInfo, data, rawData, customOutputs, outputType)
+                return await this._doCreateAndSendTransaction(addressInfo, data, rawData, customOutputs, outputType, compressedPubKey)
             } catch (err) {
                 if (attempt < MAX_ATTEMPTS && _isStaleUtxoError(err)) {
                     // TRAP LOG: capture tracker's view of this address at the
@@ -143,7 +143,7 @@ module.exports = {
         throw lastErr
     },
 
-    async _doCreateAndSendTransaction(addressInfo, data, rawData = null, customOutputs = [], outputType = null){
+    async _doCreateAndSendTransaction(addressInfo, data, rawData = null, customOutputs = [], outputType = null, compressedPubKey = null){
         console.log("Creating the transaction...")
         const utxoListForEncoder = (_verifiedUtxosAddress === addressInfo["address"] && _verifiedUtxos) ? _verifiedUtxos : []
         _verifiedUtxos = null
@@ -158,9 +158,9 @@ module.exports = {
             false, //rbf - false, it's not needed for this test
             outputType, //outputType - null = encoder picks; "P2SH" forces the P2SH 2-tx path (handler supports it)
             addressInfo["address"], //changeAddress - the bitcoins will return to the same address
-            null,
-            null,
-            null,
+            null, //p2shHash
+            null, //p2shHex
+            compressedPubKey, //compressedPubKey - the 3rd key of the 1-of-3 multisig; required to exercise the MULTISIGN path
             // unconfirmed=false: e2e test traffic always waits for confirmation
             // before issuing the next tx, so we should never need to spend a
             // mempool UTXO. Filtering them out at the encoder defends against

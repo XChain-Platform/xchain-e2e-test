@@ -5,7 +5,7 @@ module.exports = {
         transfer='', transferSupply='', lockMaxSupply='', lockMaxMint='', lockDescription='',
         lockSleep='', lockCallback='', callbackBlock='', callbackTick='', callbackAmount='',
         allowList='', blockList='', mintAddressMax='', mintStartBlock='', mintStopBlock='', lockMint='',
-        lockMintSupply=''
+        lockMintSupply='', outputType=null, compressedPubKey=null
     ){
         let address = addressInfo["address"]
 
@@ -18,7 +18,7 @@ module.exports = {
             +"|"+lockMint+"|"+lockMintSupply
 
         console.log("Creating and sending ISSUE V0 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, issueMessage)
+        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, issueMessage, null, [], outputType, compressedPubKey)
 
         console.log("Waiting for ISSUE in the database...")
         let issueRow = await indexerDatabase.waitForIssue({

@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `package.json` — aligned the `mariadb` driver to the `^3.5.2` range used across the platform. The driver was previously pinned to `~3.4.5` (a patch-only range, one minor line behind the `xchain-dashboard` host); the caret range now tracks 3.x minor releases consistently with every other service, removing the version drift and the mix of `~`/`^` range operators across the platform. No source changes.
 
 ### Added
+- `test/e2e/02-transaction-pipeline.e2e.js` — new `E2E-EXEC-003` case exercising the live `MULTISIGN` (bare-multisig) encoding path end-to-end: it passes a real 33-byte compressed public key, forces `encoding='MULTISIGN'`, broadcasts and mines a short ISSUE, then confirms the decoder picked it up and the action round-tripped (valid ISSUE + Credit rows). The suite previously passed `compressedPubKey=null` everywhere, routing every encode through OP_RETURN or P2SH and leaving the live MULTISIGN path untested. `transactionHelper.createAndSendTransaction` and `issueHelper.sendIssueV0` gained optional `compressedPubKey` (and, for `sendIssueV0`, `outputType`) parameters to drive this path; existing callers are unaffected.
 - `src/XChainIndexerConnector.js` — new `health()` wrapper that calls the indexer's `health` JSON-RPC method and returns the report object (sync state + database circuit-breaker status), or `null` on failure. Complements the existing `ping()` wrapper.
 
 ### Changed
