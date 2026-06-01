@@ -96,9 +96,16 @@ describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
             assert.strictEqual(result, false);
         });
 
-        it('throws when HTTP response is not ok', async function () {
+        it('returns false when HTTP response is not ok', async function () {
             fetchStub.resolves(makeErrorResponse(503));
-            await assert.rejects(() => tracker.ping(), /HTTP error/);
+            const result = await tracker.ping();
+            assert.strictEqual(result, false);
+        });
+
+        it('returns false when fetch rejects', async function () {
+            fetchStub.rejects(new Error('network down'));
+            const result = await tracker.ping();
+            assert.strictEqual(result, false);
         });
 
         it('sends a POST with Content-Type application/json to the tracker URL', async function () {

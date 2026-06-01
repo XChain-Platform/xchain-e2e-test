@@ -48,20 +48,24 @@ class UtxoTracker {
             body: JSON.stringify(data)
         };
         
-        // Make the request to the node
-        const response = await fetch(this.url, options);
-            
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-            
-        const responseData = await response.json();
-            
-        // Verify if there is a result and return it
-        if (responseData.result) {
-            return true;
-        } else {
-            return false
+        try {
+            // Make the request to the node
+            const response = await fetch(this.url, options);
+
+            if (!response.ok) {
+                return false;
+            }
+
+            const responseData = await response.json();
+
+            // Verify if there is a result and return it
+            if (responseData.result) {
+                return true;
+            } else {
+                return false;
+            }
+        } catch (error) {
+            return false;
         }
     }
     

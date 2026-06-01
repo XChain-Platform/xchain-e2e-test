@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- `src/XChainUtxoTrackerConnector.js` — `ping()` now returns `false` on any network error or non-2xx HTTP status instead of throwing, matching every other connector in the suite. Previously a non-200 tracker response (429, 503, …) propagated `HTTP error! status: N` out of the caller, masking the intended `Can't connect to the XChain Utxo Tracker module` message at the `initialCheck` ping site. The unit test is updated to expect the `false` return.
 - `package.json` — aligned the `mariadb` driver to the `^3.5.2` range used across the platform. The driver was previously pinned to `~3.4.5` (a patch-only range, one minor line behind the `xchain-dashboard` host); the caret range now tracks 3.x minor releases consistently with every other service, removing the version drift and the mix of `~`/`^` range operators across the platform. No source changes.
 
 ### Added
