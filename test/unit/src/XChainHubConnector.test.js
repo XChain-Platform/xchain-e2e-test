@@ -148,6 +148,23 @@ describe('XChainHubConnector', function () {
             const result = await conn.getAllConfig();
             assert.deepStrictEqual(result, configs);
         });
+
+        it('unwraps the { configs, seq, watermark } envelope to the flat tree', async function () {
+            const conn = new XChainHubConnector(['http://hub1:10000']);
+            const configs = { bitcoin: { regtest: { node: { server_port: 18443 } } } };
+            sinon.stub(conn, '_call').resolves({ configs, seq: 7, watermark: 7 });
+
+            const result = await conn.getAllConfig();
+            assert.deepStrictEqual(result, configs);
+        });
+
+        it('returns null when _call returns null', async function () {
+            const conn = new XChainHubConnector(['http://hub1:10000']);
+            sinon.stub(conn, '_call').resolves(null);
+
+            const result = await conn.getAllConfig();
+            assert.strictEqual(result, null);
+        });
     });
 
     // ── parseEndpoints ────────────────────────────────────────────────────

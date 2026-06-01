@@ -104,7 +104,7 @@ describe('Bootstrap — hub discovery fallback', function () {
         it('initializes connectors from hub config', async function () {
             // Hub responds to ping and getallconfigs
             axiosStub.onFirstCall().resolves({ data: { jsonrpc: '2.0', result: true, id: 1 } })
-            axiosStub.onSecondCall().resolves({ data: { jsonrpc: '2.0', result: hubFixtures.validConfig, id: 1 } })
+            axiosStub.onSecondCall().resolves({ data: { jsonrpc: '2.0', result: { configs: hubFixtures.validConfig, seq: 0, watermark: 0 }, id: 1 } })
 
             process.env.HUB_URL = 'hubhost'
             process.env.HUB_PORT = '10000'

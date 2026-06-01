@@ -58,7 +58,20 @@ class XChainHubConnector {
     }
 
     async getAllConfig(){
-        return await this._call({ jsonrpc: '2.0', method: 'getallconfigs', params: [], id: 1 });
+        let result = await this._call({ jsonrpc: '2.0', method: 'getallconfigs', params: [], id: 1 });
+        return this._applyConfigResult(result);
+    }
+
+    // Normalize the getallconfigs result to the flat coin→network→service tree.
+    // Newer hubs wrap the payload as { configs, seq, watermark }; older hubs
+    // return the bare tree directly. Callers index hubConfigs[coin][network]
+    // [service][param], so unwrap the envelope when present.
+    _applyConfigResult(result){
+        if(result === null) return null;
+        if(result && typeof result === 'object' && result.configs && typeof result.configs === 'object' && ('seq' in result)){
+            return result.configs;
+        }
+        return result;
     }
 }
 
