@@ -115,18 +115,24 @@ function isTransientStackError(err) {
 // transient stack races, so sequential actions from one address don't flake
 // under regtest load. Mirrors transactionHelper.createAndSendTransaction.
 async function submit(sdk, actionData, encoderOpts, opts, attempts = 6) {
+    // Default to confirmed-only UTXOs (like the connector suite): submitAction
+    // waits for indexer confirmation, so each action's change is mined before the
+    // next runs. Spending unconfirmed UTXOs invites the tracker's stale mempool
+    // view → bad-txns-inputs-missingorspent. Caller can override.
+    const eo = Object.assign({ unconfirmed: false }, encoderOpts);
     let lastErr;
     for (let i = 1; i <= attempts; i++) {
+        // Settle the stack BEFORE building so the encoder + tracker see a
+        // consistent, fully-confirmed UTXO set (including the previous action's
+        // change). quiesce mines any pending mempool and waits tracker==node.
         try {
-            return await sdk.submitAction(actionData, encoderOpts, opts);
+            await global.utxoTrackerConnector.quiesce({ timeoutMs: 20000, pollMs: 250, regtestMiner: global.regtestMinerConnector });
+        } catch (e) { /* best effort */ }
+        try {
+            return await sdk.submitAction(actionData, eo, opts);
         } catch (err) {
             lastErr = err;
-            if (i < attempts && isTransientStackError(err)) {
-                try {
-                    await global.utxoTrackerConnector.quiesce({ timeoutMs: 20000, pollMs: 250, regtestMiner: global.regtestMinerConnector });
-                } catch (e) { /* next attempt surfaces any persistent issue */ }
-                continue;
-            }
+            if (i < attempts && isTransientStackError(err)) continue;
             throw err;
         }
     }
