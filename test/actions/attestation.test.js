@@ -369,4 +369,117 @@ module.exports = {
         })
         assert(stillPending, 'request should remain pending after under-quorum response')
     })
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Non-`ok` response statuses (retryable).
+    //
+    // ATTEST v1 carries one of ['ok','timeout','no_quorum','provider_error',
+    // 'expired']. The three RETRYABLE statuses — timeout / no_quorum /
+    // provider_error — are NOT terminal: even a fully valid-signature response
+    // carrying one of them must leave the originating request `pending` (another
+    // federation round may still reach `ok` before the deadline) and must NOT
+    // inject a callback EXECUTE. Only `ok` (fulfilled) closes the request and
+    // fires the callback. These tests exercise the RETRYABLE_STATUSES branch of
+    // _parseResponse across the full hub-to-indexer wire, guarding the
+    // no-callback / no-status-flip invariant against regression.
+    // ─────────────────────────────────────────────────────────────────────────
+    const RETRYABLE_STATUSES = ['no_quorum', 'timeout', 'provider_error']
+
+    RETRYABLE_STATUSES.forEach(function (retryStatus) {
+        it('leaves the request pending and injects no callback for a valid response with status=' + retryStatus, async function () {
+            // Fresh pending request (redundancy=1 — a single staked validator sig suffices)
+            let exec = await vmHelper.sendExecuteV0(operatorAddr, contractIndex, 'askOracle', ['https://example.com/v1/retry/' + retryStatus])
+            assert.strictEqual(exec.execution.status, 'valid', 'execute status: ' + exec.execution.status)
+            let request = await indexerDatabase.waitForAttestationRequest({ txHash: exec.txHash, requestStatus: 'pending' })
+            assert(request, 'pending request should exist for status=' + retryStatus)
+            let requestId = request.request_id
+
+            // Broadcast a properly-signed response carrying the retryable status. The
+            // staked validator's signature is valid (validSigs=1 >= redundancy=1), so
+            // the response row itself lands status='valid' — this is exactly the
+            // RETRYABLE_STATUSES case: a valid response that must still leave the
+            // request open (distinct from an invalid-sig response, covered above).
+            await attestationHelper.broadcastAttestationResponse(operatorAddr, {
+                requestId:       requestId,
+                providerId:      'http_get',
+                responsePayload: '',
+                status:          retryStatus,
+                meta:            '',
+                validators:      [validator]
+            })
+
+            // Response row lands valid with response_status = the retryable value
+            let response = await indexerDatabase.waitForAttestationResponse({
+                requestId:      requestId,
+                responseStatus: retryStatus,
+                status:         'valid'
+            })
+            assert(response, 'response row should exist with response_status=' + retryStatus + ' and status=valid')
+
+            // Invariant 1: the request must NOT flip — it stays pending for a retry
+            let stillPending = await indexerDatabase.checkAttestationRequest({
+                requestId:     requestId,
+                requestStatus: 'pending'
+            })
+            assert(stillPending, 'request must remain pending after a retryable status=' + retryStatus + ' response')
+
+            // Invariant 2: no callback EXECUTE was injected (no terminal resolution)
+            assert(!response.callback_execute_action_index,
+                'no callback should be injected for retryable status=' + retryStatus +
+                '; got callback_execute_action_index=' + response.callback_execute_action_index)
+        })
+    })
+
+    it('fulfills the request with a callback when an ok response follows an earlier retryable (no_quorum) response', async function () {
+        // Fresh pending request (deadlineBlocks=10 leaves comfortable room for two rounds)
+        let exec = await vmHelper.sendExecuteV0(operatorAddr, contractIndex, 'askOracle', ['https://example.com/v1/retry-then-ok/abc'])
+        assert.strictEqual(exec.execution.status, 'valid', 'execute status: ' + exec.execution.status)
+        let request = await indexerDatabase.waitForAttestationRequest({ txHash: exec.txHash, requestStatus: 'pending' })
+        assert(request, 'pending request should exist')
+        let requestId = request.request_id
+
+        // Round 1 — a valid no_quorum response leaves the request pending
+        await attestationHelper.broadcastAttestationResponse(operatorAddr, {
+            requestId:       requestId,
+            providerId:      'http_get',
+            responsePayload: '',
+            status:          'no_quorum',
+            meta:            '',
+            validators:      [validator]
+        })
+        let firstResp = await indexerDatabase.waitForAttestationResponse({
+            requestId:      requestId,
+            responseStatus: 'no_quorum',
+            status:         'valid'
+        })
+        assert(firstResp, 'no_quorum response row should land valid')
+        assert(!firstResp.callback_execute_action_index, 'no_quorum round must not inject a callback')
+        let stillPending = await indexerDatabase.checkAttestationRequest({ requestId: requestId, requestStatus: 'pending' })
+        assert(stillPending, 'request should remain pending after the no_quorum round')
+
+        // Round 2 — a subsequent ok response on the SAME request fulfills it and fires the callback
+        const okPayload = '{"score":9}'
+        await attestationHelper.broadcastAttestationResponse(operatorAddr, {
+            requestId:       requestId,
+            providerId:      'http_get',
+            responsePayload: okPayload,
+            status:          'ok',
+            meta:            '200',
+            validators:      [validator]
+        })
+        let okResp = await indexerDatabase.waitForAttestationResponse({
+            requestId:      requestId,
+            responseStatus: 'ok',
+            status:         'valid'
+        })
+        assert(okResp, 'ok response row should land valid after the earlier no_quorum round')
+
+        // Request is now terminal: fulfilled
+        let fulfilled = await indexerDatabase.checkAttestationRequest({ requestId: requestId, requestStatus: 'fulfilled' })
+        assert(fulfilled, 'request should flip to fulfilled once a valid ok response arrives')
+
+        // Callback EXECUTE injected on the ok response row
+        assert(okResp.callback_execute_action_index,
+            'ok response after a retryable round should inject the callback EXECUTE')
+    })
 })
