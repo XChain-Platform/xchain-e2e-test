@@ -102,4 +102,37 @@ describe('[sdk] misc actions', function () {
         console.log('    [sdk] SWEEP status=' + res.indexed.status);
         expect(res.indexed.status).to.equal('valid');
     });
+
+    it('getStatus exposes node_tip and non-negative lag_blocks per coin', async function () {
+        const status = await sdk.getStatus();
+        expect(status, 'status object').to.be.an('object');
+        // The chain-tip reference and the indexer lag must both be present so a
+        // caller can detect a stalled indexer from this single call.
+        expect(status.node_tip, 'node_tip map').to.be.an('object');
+        expect(status.lag_blocks, 'lag_blocks map').to.be.an('object');
+        const coins = Object.keys(status.last_block || {});
+        expect(coins.length, 'at least one active coin in last_block').to.be.greaterThan(0);
+        let sawTip = false;
+        for (const coin of coins) {
+            // Both new maps must carry an entry for every coin the indexer reports.
+            expect(status.node_tip, 'node_tip has ' + coin).to.have.property(coin);
+            expect(status.lag_blocks, 'lag_blocks has ' + coin).to.have.property(coin);
+            const tip = status.node_tip[coin];
+            const lag = status.lag_blocks[coin];
+            // node_tip/lag_blocks may be null when the chain-tip source is
+            // unavailable; when present, the tip must be at or ahead of the
+            // indexer position and the lag must be a non-negative integer.
+            if (tip === null) {
+                expect(lag, 'lag_blocks ' + coin + ' is null when node_tip is null').to.equal(null);
+            } else {
+                sawTip = true;
+                expect(tip, 'node_tip ' + coin).to.be.a('number');
+                expect(lag, 'lag_blocks ' + coin).to.be.a('number').and.to.be.at.least(0);
+                expect(tip, 'node_tip >= last_block ' + coin).to.be.at.least(Number(status.last_block[coin]));
+            }
+        }
+        // In the e2e regtest stack the decoder is co-located, so at least one
+        // coin must report a real chain tip — not silently degrade to null.
+        expect(sawTip, 'at least one coin reports a non-null node_tip').to.equal(true);
+    });
 });
