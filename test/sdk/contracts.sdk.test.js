@@ -67,19 +67,13 @@ describe('[sdk] smart contracts (VM)', function () {
         expect(res.indexed.status).to.equal('valid');
     });
 
-    // PENDING — explorer contract-read bug (not the SDK / VM): the VM persists
-    // state correctly (contract_state.count = "1" after increment) and EXECUTE
-    // indexes valid, but the explorer returns empty for /contract/{i} and
-    // /contract/{i}/state. Two query-builder faults in xchain-explorer/src/db.js:
-    //   - getContract filters m.contract_index (the contracts table is keyed by
-    //     action_index, so the column is absent → no rows).
-    //   - getContractState has two '?' placeholders (subquery + outer WHERE) but
-    //     binds a single arg → mismatch → no rows.
-    // Un-skip once the explorer contract reads are fixed.
-    it.skip('contract state reflects the increment (SDK explorer read — explorer bug)', async function () {
+    it('contract state reflects the increment (SDK explorer read)', async function () {
         await mine(1);
         const state = await sdk.getContractState(contractIndex, 'count');
-        const val = state && (state.value ?? state.count ?? (state.data && state.data.value));
-        expect(String(val)).to.equal('1');
+        const rows = (state && state.data) || [];
+        const row = rows.find(r => r.state_key === 'count');
+        expect(row, 'count state row').to.exist;
+        // state_value is stored JSON-encoded (e.g. "1").
+        expect(String(JSON.parse(row.state_value))).to.equal('1');
     });
 });

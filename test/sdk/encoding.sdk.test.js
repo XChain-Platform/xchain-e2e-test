@@ -18,8 +18,8 @@ const { makeSdk, submit, fundedGasAddress, uniqueTick, submitOpts } = require('.
 // OP_RETURN + P2SH + P2WSH pass end-to-end through the SDK.
 // PENDING (documented open bug — un-skip when fixed):
 //   - MULTISIGN: encoder rejects the fake-pubkey outputs as "dust".
-const ENCODINGS = ['OP_RETURN', 'P2SH', 'P2WSH'];
-const PENDING_ENCODINGS = ['MULTISIGN'];
+const ENCODINGS = ['OP_RETURN', 'MULTISIGN', 'P2SH', 'P2WSH'];
+const PENDING_ENCODINGS = [];
 
 describe('[sdk] encoding methods via submitAction', function () {
     this.timeout(0);

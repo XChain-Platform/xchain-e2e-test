@@ -44,16 +44,7 @@ describe('[sdk] token-gated FILE (BATCH FILE + MESSAGE v2)', function () {
         console.log('    [sdk] issuer=' + issuer.address + ' gateTicker=' + tick);
     });
 
-    // PENDING — indexer BATCH sub-action state-bleed (not the SDK): the gated
-    // FILE itself indexes valid (FILE : ... : text/plain : GATE=... : valid), but
-    // the paired MESSAGE v2 inside the BATCH is rejected "invalid: ENCRYPTION_METHOD
-    // (format)" — even though the identical MESSAGE v2 is valid standalone (see
-    // messaging.sdk.test.js). The FILE sub-action's ENCRYPTION_METHOD field bleeds
-    // into the MESSAGE sub-action's data during BATCH processing. Since the whole
-    // tx is then invalid, the gated-content publish flow (which REQUIRES
-    // BATCH(FILE, MESSAGE v2)) cannot complete. Fix is in the indexer's BATCH
-    // sub-action field isolation. Un-skip once fixed.
-    it.skip('publishes a gated FILE with a paired MESSAGE v2 (indexer BATCH state-bleed)', async function () {
+    it('publishes a gated FILE with a paired MESSAGE v2', async function () {
         // Encrypt the content through the SDK's gated-file helper.
         const { ciphertext, keyHash } = sdk.gatedFile.encryptFileBytes(Buffer.from('top secret payload'));
 
