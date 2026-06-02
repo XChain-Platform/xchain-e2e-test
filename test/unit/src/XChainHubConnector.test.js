@@ -6,6 +6,18 @@ const axios  = require('axios');
 
 const XChainHubConnector = require('../../../src/XChainHubConnector');
 
+// Build an Axios-style error for a non-2xx response that still carries a valid
+// JSON-RPC body — e.g. the hub's HTTP 503 "degraded" health response when its DB
+// pool is down. Axios attaches the full response to the thrown error as err.response.
+function degraded503Error(body) {
+    const err = new Error('Request failed with status code 503');
+    err.response = {
+        status: 503,
+        data: { jsonrpc: '2.0', id: 1, result: body || { status: 'degraded', db: false } }
+    };
+    return err;
+}
+
 describe('XChainHubConnector', function () {
 
     let axiosPostStub;
@@ -92,6 +104,26 @@ describe('XChainHubConnector', function () {
             const result = await conn._call({ method: 'test' });
             assert.strictEqual(result, false);
         });
+
+        it('surfaces the JSON-RPC body of a 503 "degraded" response instead of discarding it', async function () {
+            const conn = new XChainHubConnector(['http://hub1:10000']);
+            axiosPostStub.rejects(degraded503Error());
+
+            const result = await conn._call({ method: 'ping' });
+            // The reachable-but-degraded body is returned, not null.
+            assert.deepStrictEqual(result, { status: 'degraded', db: false });
+        });
+
+        it('prefers a healthy endpoint over a degraded one when both are present', async function () {
+            const conn = new XChainHubConnector(['http://hub1:10000', 'http://hub2:10000']);
+            axiosPostStub
+                .onFirstCall().rejects(degraded503Error())
+                .onSecondCall().resolves({ data: { result: 'pong' } });
+
+            const result = await conn._call({ method: 'ping' });
+            assert.strictEqual(result, 'pong');
+            assert.strictEqual(axiosPostStub.callCount, 2);
+        });
     });
 
     // ── ping ─────────────────────────────────────────────────────────────
@@ -111,6 +143,15 @@ describe('XChainHubConnector', function () {
 
             const result = await conn.ping();
             assert.strictEqual(result, false);
+        });
+
+        it('returns true (reachable) for a degraded hub rather than masking it as down', async function () {
+            // A live hub with a dead DB pool must NOT read the same as a crashed one.
+            const conn = new XChainHubConnector(['http://hub1:10000']);
+            sinon.stub(conn, '_call').resolves({ status: 'degraded', db: false });
+
+            const result = await conn.ping();
+            assert.strictEqual(result, true);
         });
 
         it('sends JSON-RPC ping payload', async function () {
@@ -161,6 +202,24 @@ describe('XChainHubConnector', function () {
         it('returns null when _call returns null', async function () {
             const conn = new XChainHubConnector(['http://hub1:10000']);
             sinon.stub(conn, '_call').resolves(null);
+
+            const result = await conn.getAllConfig();
+            assert.strictEqual(result, null);
+        });
+
+        it('returns null (not the degraded body) when the hub reports degraded', async function () {
+            // A {status:"degraded"} body is not a config tree — it must not be
+            // returned as one, or the caller would index into it as config.
+            const conn = new XChainHubConnector(['http://hub1:10000']);
+            sinon.stub(conn, '_call').resolves({ status: 'degraded', db: false });
+
+            const result = await conn.getAllConfig();
+            assert.strictEqual(result, null);
+        });
+
+        it('returns null when the hub returns a {error} config body', async function () {
+            const conn = new XChainHubConnector(['http://hub1:10000']);
+            sinon.stub(conn, '_call').resolves({ error: 'there was an error trying to get all configs' });
 
             const result = await conn.getAllConfig();
             assert.strictEqual(result, null);

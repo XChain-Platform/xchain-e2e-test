@@ -93,6 +93,58 @@ describe('Chaos Experiment 3 — Hub Auto-Discovery Total Failure @P1', function
         })
     })
 
+    describe('reachable-but-degraded hub (HTTP 503) is distinguished from total failure', function () {
+
+        // Axios throws on non-2xx but attaches the full response to err.response.
+        // The hub's ping() returns HTTP 503 with a valid JSON-RPC "degraded" body
+        // when its DB pool is down — a live hub, not an unreachable one.
+        function degraded503Error() {
+            const err = new Error('Request failed with status code 503')
+            err.response = {
+                status: 503,
+                data: { jsonrpc: '2.0', id: 1, result: { status: 'degraded', db: false } }
+            }
+            return err
+        }
+
+        it('_call surfaces the degraded body rather than returning null', async function () {
+            sinon.stub(axios, 'post').rejects(degraded503Error())
+            const hub = new XChainHubConnector('10.255.255.1', '9999')
+
+            const result = await hub._call({ jsonrpc: '2.0', method: 'ping', id: 1 })
+
+            assert.deepStrictEqual(result, { status: 'degraded', db: false })
+        })
+
+        it('ping reports a degraded hub as reachable (true), not down (false)', async function () {
+            sinon.stub(axios, 'post').rejects(degraded503Error())
+            const hub = new XChainHubConnector('10.255.255.1', '9999')
+
+            const result = await hub.ping()
+
+            assert.strictEqual(result, true)
+        })
+
+        it('bootstrap no longer throws the "Can\'t connect" diagnostic for a degraded hub', async function () {
+            sinon.stub(axios, 'post').rejects(degraded503Error())
+
+            async function bootstrapFromHub() {
+                const endpoints = ['http://10.255.255.1:9999', 'http://10.255.255.2:9999']
+                const hub = new XChainHubConnector(endpoints)
+                const pingResult = await hub.ping()
+                if (!pingResult) {
+                    throw new Error("Can't connect to the XChain Hub. Tried endpoints: " + endpoints.join(', '))
+                }
+                // A degraded hub is up but cannot serve config; getAllConfig
+                // returns null so the caller takes the "couldn't get configs" path.
+                return hub.getAllConfig()
+            }
+
+            const config = await bootstrapFromHub()
+            assert.strictEqual(config, null)
+        })
+    })
+
     describe('parseEndpoints with invalid env vars', function () {
 
         it('returns localhost fallback when no env vars set', function () {
