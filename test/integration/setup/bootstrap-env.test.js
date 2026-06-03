@@ -17,7 +17,9 @@ require('../fixtures/mockMariadb')
 const BlockchainConnector = require('../../../src/BlockchainConnector')
 const XChainUtxoTrackerConnector = require('../../../src/XChainUtxoTrackerConnector')
 const XChainEncoderConnector = require('../../../src/XChainEncoderConnector')
+const XChainDecoderConnector = require('../../../src/XChainDecoderConnector')
 const XChainIndexerConnector = require('../../../src/XChainIndexerConnector')
+const XChainExplorerConnector = require('../../../src/XChainExplorerConnector')
 const RegtestMinerConnector = require('../../../src/RegtestMinerConnector')
 const Database = require('../../../src/db')
 const CryptoNetworks = require('../../../src/CryptoNetworks')
@@ -35,7 +37,9 @@ describe('Bootstrap — environment variable path', function () {
             nodeConnector: global.nodeConnector,
             utxoTrackerConnector: global.utxoTrackerConnector,
             encoderConnector: global.encoderConnector,
+            decoderConnector: global.decoderConnector,
             indexerConnector: global.indexerConnector,
+            explorerConnector: global.explorerConnector,
             indexerDatabase: global.indexerDatabase,
             regtestMinerConnector: global.regtestMinerConnector,
             hubConnector: global.hubConnector,
@@ -69,8 +73,14 @@ describe('Bootstrap — environment variable path', function () {
         global.encoderConnector = new XChainEncoderConnector(
             envVars.ENCODER_URL, envVars.ENCODER_API_PORT
         )
+        global.decoderConnector = new XChainDecoderConnector(
+            envVars.DECODER_URL, envVars.DECODER_API_PORT
+        )
         global.indexerConnector = new XChainIndexerConnector(
             envVars.INDEXER_HOST, envVars.INDEXER_API_PORT
+        )
+        global.explorerConnector = new XChainExplorerConnector(
+            envVars.EXPLORER_URL, envVars.EXPLORER_API_PORT
         )
         global.indexerDatabase = new Database(
             envVars.DATABASE_URL || 'mariadb', envVars.DATABASE_PORT || 3306,
@@ -94,8 +104,12 @@ describe('Bootstrap — environment variable path', function () {
         UTXO_TRACKER_API_PORT: '3030',
         ENCODER_URL: '127.0.0.1',
         ENCODER_API_PORT: '3031',
+        DECODER_URL: '127.0.0.1',
+        DECODER_API_PORT: '3034',
         INDEXER_HOST: '127.0.0.1',
         INDEXER_API_PORT: '3032',
+        EXPLORER_URL: '127.0.0.1',
+        EXPLORER_API_PORT: '3035',
         INDEXER_DB_NAME: 'XChain_BTC_Regtest_Indexer',
         INDEXER_DB_USER: 'root',
         INDEXER_DB_PASS: 'password',
@@ -105,7 +119,7 @@ describe('Bootstrap — environment variable path', function () {
 
     describe('Scenario 3.1.1: Full bootstrap with all env vars (bitcoin-regtest)', function () {
 
-        it('initializes all 6 global connectors with correct URLs', function () {
+        it('initializes all 8 global connectors with correct URLs', function () {
             bootstrapFromEnv(fullEnv)
 
             assert(global.nodeConnector instanceof BlockchainConnector)
@@ -117,8 +131,14 @@ describe('Bootstrap — environment variable path', function () {
             assert(global.encoderConnector instanceof XChainEncoderConnector)
             assert.strictEqual(global.encoderConnector.url, 'http://127.0.0.1:3031')
 
+            assert(global.decoderConnector instanceof XChainDecoderConnector)
+            assert.strictEqual(global.decoderConnector.url, 'http://127.0.0.1:3034')
+
             assert(global.indexerConnector instanceof XChainIndexerConnector)
             assert.strictEqual(global.indexerConnector.url, 'http://127.0.0.1:3032')
+
+            assert(global.explorerConnector instanceof XChainExplorerConnector)
+            assert.strictEqual(global.explorerConnector.url, 'http://127.0.0.1:3035')
 
             assert(global.indexerDatabase instanceof Database)
             assert.strictEqual(global.indexerDatabase.host, 'mariadb')

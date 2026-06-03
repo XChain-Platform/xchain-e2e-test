@@ -4,8 +4,10 @@ dotenv.config()
 const BlockchainConnector = require('../src/BlockchainConnector.js')
 const XChainUtxoTrackerConnector = require('../src/XChainUtxoTrackerConnector.js')
 const XChainEncoderConnector = require('../src/XChainEncoderConnector.js')
+const XChainDecoderConnector = require('../src/XChainDecoderConnector.js')
 const XChainHubConnector = require('../src/XChainHubConnector.js')
 const XChainIndexerConnector = require('../src/XChainIndexerConnector.js')
+const XChainExplorerConnector = require('../src/XChainExplorerConnector.js')
 const RegtestMinerConnector = require('../src/RegtestMinerConnector.js')
 const Database = require('../src/db.js')
 const CryptoNetworks = require('../src/CryptoNetworks')
@@ -47,8 +49,12 @@ var UTXO_TRACKER_URL = process.env.UTXO_TRACKER_URL
 var UTXO_TRACKER_PORT = process.env.UTXO_TRACKER_API_PORT
 var ENCODER_URL = process.env.ENCODER_URL
 var ENCODER_PORT = process.env.ENCODER_API_PORT
+var DECODER_URL = process.env.DECODER_URL
+var DECODER_PORT = process.env.DECODER_API_PORT
 var INDEXER_URL = process.env.INDEXER_HOST
 var INDEXER_PORT = process.env.INDEXER_API_PORT
+var EXPLORER_URL = process.env.EXPLORER_URL
+var EXPLORER_PORT = process.env.EXPLORER_API_PORT
 var INDEXER_DATABASE_NAME = process.env.INDEXER_DB_NAME
 var INDEXER_DATABASE_USER = process.env.INDEXER_DB_USER
 var INDEXER_DATABASE_PASS = process.env.INDEXER_DB_PASS
@@ -67,8 +73,12 @@ function checkAllEnvironmentalVariables(){
         UTXO_TRACKER_PORT,
         ENCODER_URL,
         ENCODER_PORT,
+        DECODER_URL,
+        DECODER_PORT,
         INDEXER_URL,
         INDEXER_PORT,
+        EXPLORER_URL,
+        EXPLORER_PORT,
         INDEXER_DATABASE_NAME,
         INDEXER_DATABASE_USER,
         INDEXER_DATABASE_PASS,
@@ -98,8 +108,12 @@ function printAllEnvironmentalVariables(){
       utxo_tracker_port:UTXO_TRACKER_PORT,
       encoder_url:ENCODER_URL,
       encoder_port:ENCODER_PORT,
+      decoder_url:DECODER_URL,
+      decoder_port:DECODER_PORT,
       indexer_url:INDEXER_URL,
       indexer_port:INDEXER_PORT,
+      explorer_url:EXPLORER_URL,
+      explorer_port:EXPLORER_PORT,
       indexer_database_name:INDEXER_DATABASE_NAME,
       indexer_database_user:maskSecret(INDEXER_DATABASE_USER),
       indexer_database_pass:maskSecret(INDEXER_DATABASE_PASS),
@@ -175,7 +189,9 @@ exports.mochaHooks = {
             )
             global.utxoTrackerConnector = new XChainUtxoTrackerConnector(UTXO_TRACKER_URL, UTXO_TRACKER_PORT)
             global.encoderConnector = new XChainEncoderConnector(ENCODER_URL, ENCODER_PORT)
+            global.decoderConnector = new XChainDecoderConnector(DECODER_URL, DECODER_PORT)
             global.indexerConnector = new XChainIndexerConnector(INDEXER_URL, INDEXER_PORT)
+            global.explorerConnector = new XChainExplorerConnector(EXPLORER_URL, EXPLORER_PORT)
             global.indexerDatabase = new Database(DATABASE_URL, DATABASE_PORT, INDEXER_DATABASE_NAME, INDEXER_DATABASE_USER, INDEXER_DATABASE_PASS)
             global.regtestMinerConnector = new RegtestMinerConnector(REGTEST_MINER_URL, REGTEST_MINER_PORT)
         })
@@ -201,9 +217,19 @@ exports.mochaHooks = {
                 throw new Error("Can't connect to the XChain Encoder module")
             }
 
+            let pingDecoder = await decoderConnector.ping()
+            if (!pingDecoder){
+                throw new Error("Can't connect to the XChain Decoder module")
+            }
+
             let pingIndexer = await indexerConnector.ping()
             if (!pingIndexer){
                 throw new Error("Can't connect to the XChain Indexer module")
+            }
+
+            let pingExplorer = await explorerConnector.ping()
+            if (!pingExplorer){
+                throw new Error("Can't connect to the XChain Explorer module")
             }
 
             let pingIndexerDatabase = await indexerDatabase.ping()

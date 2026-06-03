@@ -16,9 +16,19 @@ describe('SMOKE: Service Connectivity', () => {
         assert(result, 'Encoder should respond to ping')
     })
 
+    it('should ping the decoder', async () => {
+        const result = await decoderConnector.ping()
+        assert(result, 'Decoder should respond to ping')
+    })
+
     it('should ping the indexer', async () => {
         const result = await indexerConnector.ping()
         assert(result, 'Indexer should respond to ping')
+    })
+
+    it('should ping the explorer', async () => {
+        const result = await explorerConnector.ping()
+        assert(result, 'Explorer should respond to ping')
     })
 
     it('should ping the indexer database', async () => {
