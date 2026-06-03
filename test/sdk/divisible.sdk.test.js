@@ -24,10 +24,26 @@
 const { expect } = require('chai');
 const { makeSdk, submit, fundedGasAddress, uniqueTick, submitOpts } = require('./sdkHelper');
 
+// Expand scientific notation to a plain fixed-decimal string, no floats.
+// The explorer can return very small balances as e.g. "1e-18" — the VALUE is
+// correct, just formatted in scientific notation. "1e-18" -> "0.000000000000000001".
+function sciToFixed(x) {
+    const s = String(x).trim();
+    const m = /^(-?)(\d+)(?:\.(\d+))?[eE]([+-]?\d+)$/.exec(s);
+    if (!m) return s; // already plain decimal/integer
+    const sign = m[1], digits = m[2] + (m[3] || ''), exp = parseInt(m[4], 10);
+    const point = m[2].length + exp; // decimal-point index within `digits`
+    let out;
+    if (point <= 0)              out = '0.' + '0'.repeat(-point) + digits;
+    else if (point >= digits.length) out = digits + '0'.repeat(point - digits.length);
+    else                         out = digits.slice(0, point) + '.' + digits.slice(point);
+    return sign + out;
+}
+
 // Normalise a decimal string for value-equality comparison without floats:
-// trim trailing zeros in the fractional part (and a bare trailing dot).
+// expand any scientific notation, then trim trailing fractional zeros.
 function normAmt(x) {
-    let s = String(x);
+    let s = sciToFixed(x);
     if (s.indexOf('.') >= 0) {
         s = s.replace(/0+$/, '');
         if (s.endsWith('.')) s = s.slice(0, -1);
