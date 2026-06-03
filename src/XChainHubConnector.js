@@ -32,6 +32,10 @@ class XChainHubConnector {
         } else {
             this.urls = ["http://" + endpoints + ":" + port];
         }
+        // Per-endpoint failure detail from the most recent _call(). Populated with
+        // "url → code|message" strings for each unreachable endpoint so callers
+        // can report exactly what was tried and why, instead of a bare null.
+        this.lastFailures = [];
     }
 
     async sleep(ms) {
@@ -47,6 +51,7 @@ class XChainHubConnector {
         // unreachable endpoint. Capture such a body as a fallback, but keep
         // trying the remaining endpoints in case one is fully healthy.
         let degraded = null;
+        this.lastFailures = [];
         for(let url of this.urls){
             try {
                 let response = await axios.post(url, data, { timeout });
@@ -56,6 +61,7 @@ class XChainHubConnector {
                 if(err.response && err.response.data && err.response.data.result !== undefined){
                     degraded = err.response.data.result;
                 } else {
+                    this.lastFailures.push(url + ' → ' + (err.code || err.message));
                     console.warn('Hub endpoint ' + url + ' failed: ', err);
                 }
             }

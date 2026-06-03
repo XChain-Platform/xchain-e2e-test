@@ -176,7 +176,10 @@ exports.mochaHooks = {
                         throw new Error("There was an error trying to get all the configs from the hub")
                     }
                 } else {
-                    throw new Error("Can't connect to the XChain Hub")
+                    let failures = (hubConnector.lastFailures && hubConnector.lastFailures.length)
+                        ? ' No hub endpoints reachable: [' + hubConnector.lastFailures.join(', ') + ']'
+                        : ''
+                    throw new Error("Can't connect to the XChain Hub." + failures)
                 }
 
 
