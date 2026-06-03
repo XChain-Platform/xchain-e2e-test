@@ -1,62 +1,53 @@
 /*********************************************************************
- * 
+ *
  * Copyright © 2025 Dankest, LLC
  * Based on XChain Platform by Dankest, LLC – https://dankest.llc
  *
  * Licensed under the Dankest Community License (Apache License 2.0 + Additional Terms).
  * You may not use this file except in compliance with that License.
- * 
+ *
  * A copy of the License is available at:
  *     https://dankest.llc/license
  *
  * This software is provided “AS IS”, without warranties or conditions of any kind.
- * 
+ *
  **********************************************************************
  *
  * XChain End-to-End Test Suite - UTXO Tracker Connector
- * 
+ *
  * This file handles connecting to XChain UTXO tracker instances
- * 
+ *
  ********************************************************************/
 
 // Load required libraries
-const fetch = require('cross-fetch')
+const axios = require('axios')
 
 class UtxoTracker {
     constructor(url, port) {
         this.url = "http://"+url+":"+port
         this.port = port
     }
-    
+
     async sleep(ms) {
         return new Promise((resolve) => setTimeout(resolve, ms));
     }
-    
+
     async ping(){
         const data = {
             jsonrpc: '2.0',
             method: 'ping',
             id: 1
         }
-        
-        // Options configuration for fetch
-        const options = {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(data)
-        };
-        
+
         try {
-            // Make the request to the node
-            const response = await fetch(this.url, options);
+            // Make the request to the node. axios throws on non-2xx, which the
+            // catch below turns into `false` — ping() is a boolean reachability
+            // probe, matching every other connector in the suite.
+            const response = await axios.post(this.url, data, {
+                headers: { 'Content-Type': 'application/json' }
+            });
 
-            if (!response.ok) {
-                return false;
-            }
-
-            const responseData = await response.json();
+            const responseData = response.data;
 
             // Verify if there is a result and return it
             if (responseData.result) {
@@ -68,7 +59,7 @@ class UtxoTracker {
             return false;
         }
     }
-    
+
     async getSyncStatus(){
         try {
             const data = {
@@ -76,14 +67,10 @@ class UtxoTracker {
                 method: 'get_sync_status',
                 id: 1
             };
-            const options = {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
-            };
-            const response = await fetch(this.url, options);
-            if (!response.ok) return null;
-            const responseData = await response.json();
+            const response = await axios.post(this.url, data, {
+                headers: { 'Content-Type': 'application/json' }
+            });
+            const responseData = response.data;
             return responseData.result || null;
         } catch (error) {
             return null;
@@ -95,14 +82,10 @@ class UtxoTracker {
     async getQuiescentStatus(){
         try {
             const data = { jsonrpc: '2.0', method: 'is_quiescent', id: 1 };
-            const options = {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(data)
-            };
-            const response = await fetch(this.url, options);
-            if (!response.ok) return null;
-            const responseData = await response.json();
+            const response = await axios.post(this.url, data, {
+                headers: { 'Content-Type': 'application/json' }
+            });
+            const responseData = response.data;
             return responseData.result || null;
         } catch (error) {
             return null;
@@ -135,11 +118,11 @@ class UtxoTracker {
 
     async waitForUtxos(address, timeMax = 60000){
         const endTime = Date.now() + timeMax
-        
+
         while (Date.now() < endTime){
             try {
                 let addressUtxos = await this.getUtxosFromAddress(address)
-                
+
                 if (addressUtxos["utxos"].length > 0){
                     return true
                 }
@@ -149,10 +132,10 @@ class UtxoTracker {
                 await this.sleep(1000)
             }
         }
-        
+
         return false
     }
-    
+
     async getUtxosFromAddress(address) {
         try {
             const data = {
@@ -162,23 +145,12 @@ class UtxoTracker {
                 id: 1
             };
 
-            // Options configuration for fetch
-            const options = {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(data)
-            };
+            // Make the request to the node (axios throws automatically on non-2xx)
+            const response = await axios.post(this.url, data, {
+                headers: { 'Content-Type': 'application/json' }
+            });
 
-            // Make the request to the node
-            const response = await fetch(this.url, options);
-            
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            
-            const responseData = await response.json();
+            const responseData = response.data;
 
             // Verify if there is a result and return it
             if (responseData.result) {

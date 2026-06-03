@@ -136,8 +136,7 @@ npm run test:regression:p0
 
 | Package | Purpose |
 |---|---|
-| `axios` | HTTP client for Encoder, Hub, Indexer, and Miner JSON-RPC calls |
-| `cross-fetch` | Fetch API for Blockchain Node and UTXO Tracker JSON-RPC calls |
+| `axios` | HTTP client for all service connector JSON-RPC calls |
 | `bitcoinjs-lib` | Bitcoin primitives — PSBT construction, transaction signing, address generation |
 | `bip32` | BIP32 HD wallet key derivation |
 | `bip39` | BIP39 mnemonic seed generation |

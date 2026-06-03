@@ -2,51 +2,26 @@
 
 const assert = require('assert');
 const sinon  = require('sinon');
+const axios  = require('axios');
 
-// ── cross-fetch injection ──────────────────────────────────────────────────
-// XChainUtxoTrackerConnector captures `fetch` at require-time just like
-// BlockchainConnector, so we need the same cache-injection pattern.
-// We reuse the same crossFetchCacheKey since it resolves to the same path.
+// ── axios injection ─────────────────────────────────────────────────────────
+// XChainUtxoTrackerConnector issues its JSON-RPC calls via axios.post, like the
+// other connectors. We stub axios.post directly (resolved at call time off the
+// shared axios object).
 
-let fetchStub;
-let UtxoTracker;
-let crossFetchCacheKey;
-
-before(function () {
-    fetchStub = sinon.stub();
-    crossFetchCacheKey = require.resolve('cross-fetch');
-
-    require.cache[crossFetchCacheKey] = {
-        id: crossFetchCacheKey,
-        filename: crossFetchCacheKey,
-        loaded: true,
-        exports: fetchStub
-    };
-
-    UtxoTracker = require('../../../src/XChainUtxoTrackerConnector');
-});
-
-after(function () {
-    delete require.cache[crossFetchCacheKey];
-    delete require.cache[require.resolve('../../../src/XChainUtxoTrackerConnector')];
-});
+const UtxoTracker = require('../../../src/XChainUtxoTrackerConnector');
 
 // ── helpers ───────────────────────────────────────────────────────────────
 
-function makeOkResponse(body) {
-    return {
-        ok: true,
-        status: 200,
-        json: async () => body
-    };
+function makeResponse(body) {
+    return { status: 200, data: body };
 }
 
-function makeErrorResponse(status) {
-    return {
-        ok: false,
-        status,
-        json: async () => ({})
-    };
+// Axios rejects on non-2xx with an Error carrying a `.response`.
+function makeHttpError(status) {
+    const err = new Error(`Request failed with status code ${status}`);
+    err.response = { status, statusText: 'Error', data: {} };
+    return err;
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────
@@ -57,10 +32,15 @@ describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
     const PORT = 3000;
 
     let tracker;
+    let axiosPostStub;
 
     beforeEach(function () {
-        fetchStub.reset();
+        axiosPostStub = sinon.stub(axios, 'post');
         tracker = new UtxoTracker(URL, PORT);
+    });
+
+    afterEach(function () {
+        sinon.restore();
     });
 
     // ── constructor ──────────────────────────────────────────────────────
@@ -79,42 +59,41 @@ describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
 
     describe('ping', function () {
         it('returns true when responseData.result is truthy', async function () {
-            fetchStub.resolves(makeOkResponse({ result: 'pong' }));
+            axiosPostStub.resolves(makeResponse({ result: 'pong' }));
             const result = await tracker.ping();
             assert.strictEqual(result, true);
         });
 
         it('returns false when responseData.result is falsy', async function () {
-            fetchStub.resolves(makeOkResponse({ result: null }));
+            axiosPostStub.resolves(makeResponse({ result: null }));
             const result = await tracker.ping();
             assert.strictEqual(result, false);
         });
 
         it('returns false when result key is absent', async function () {
-            fetchStub.resolves(makeOkResponse({}));
+            axiosPostStub.resolves(makeResponse({}));
             const result = await tracker.ping();
             assert.strictEqual(result, false);
         });
 
-        it('returns false when HTTP response is not ok', async function () {
-            fetchStub.resolves(makeErrorResponse(503));
+        it('returns false when the HTTP response is an error status', async function () {
+            axiosPostStub.rejects(makeHttpError(503));
             const result = await tracker.ping();
             assert.strictEqual(result, false);
         });
 
-        it('returns false when fetch rejects', async function () {
-            fetchStub.rejects(new Error('network down'));
+        it('returns false when axios rejects', async function () {
+            axiosPostStub.rejects(new Error('network down'));
             const result = await tracker.ping();
             assert.strictEqual(result, false);
         });
 
         it('sends a POST with Content-Type application/json to the tracker URL', async function () {
-            fetchStub.resolves(makeOkResponse({ result: 'pong' }));
+            axiosPostStub.resolves(makeResponse({ result: 'pong' }));
             await tracker.ping();
 
-            const [url, opts] = fetchStub.firstCall.args;
+            const [url, , opts] = axiosPostStub.firstCall.args;
             assert.strictEqual(url, tracker.url);
-            assert.strictEqual(opts.method, 'POST');
             assert.strictEqual(opts.headers['Content-Type'], 'application/json');
         });
     });
@@ -126,34 +105,32 @@ describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
         const fakeResult = { utxos: [{ txid: 'abc', vout: 0, value: 5000 }] };
 
         it('sends get_utxos with {address} in params', async function () {
-            fetchStub.resolves(makeOkResponse({ result: fakeResult }));
+            axiosPostStub.resolves(makeResponse({ result: fakeResult }));
 
             await tracker.getUtxosFromAddress(ADDRESS);
 
-            const [url, opts] = fetchStub.firstCall.args;
+            const [url, data] = axiosPostStub.firstCall.args;
             assert.strictEqual(url, tracker.url);
-
-            const body = JSON.parse(opts.body);
-            assert.strictEqual(body.method, 'get_utxos');
-            assert.deepStrictEqual(body.params, { address: ADDRESS });
+            assert.strictEqual(data.method, 'get_utxos');
+            assert.deepStrictEqual(data.params, { address: ADDRESS });
         });
 
         it('returns result on success', async function () {
-            fetchStub.resolves(makeOkResponse({ result: fakeResult }));
+            axiosPostStub.resolves(makeResponse({ result: fakeResult }));
             const result = await tracker.getUtxosFromAddress(ADDRESS);
             assert.deepStrictEqual(result, fakeResult);
         });
 
-        it('throws when HTTP response is not ok', async function () {
-            fetchStub.resolves(makeErrorResponse(500));
+        it('throws when the HTTP request fails (axios rejects on non-2xx)', async function () {
+            axiosPostStub.rejects(makeHttpError(500));
             await assert.rejects(
                 () => tracker.getUtxosFromAddress(ADDRESS),
-                /HTTP error/
+                /500/
             );
         });
 
         it('throws when result is missing', async function () {
-            fetchStub.resolves(makeOkResponse({ result: null }));
+            axiosPostStub.resolves(makeResponse({ result: null }));
             await assert.rejects(
                 () => tracker.getUtxosFromAddress(ADDRESS),
                 /Error getting utxos/

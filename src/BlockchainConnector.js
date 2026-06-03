@@ -1,26 +1,26 @@
 /*********************************************************************
- * 
+ *
  * Copyright © 2025 Dankest, LLC
  * Based on XChain Platform by Dankest, LLC – https://dankest.llc
  *
  * Licensed under the Dankest Community License (Apache License 2.0 + Additional Terms).
  * You may not use this file except in compliance with that License.
- * 
+ *
  * A copy of the License is available at:
  *     https://dankest.llc/license
  *
  * This software is provided “AS IS”, without warranties or conditions of any kind.
- * 
+ *
  **********************************************************************
  *
  * XChain End-to-End Test Suite - Blockchain Connector Class
- * 
+ *
  * This file handles pulling blockchain data from a coin daemon
- * 
+ *
  ********************************************************************/
 
 // Load required libraries
-const fetch = require('cross-fetch')
+const axios = require('axios')
 
 class BlockchainConnector {
     constructor(url, port, rpcUser, rpcPassword) {
@@ -28,38 +28,32 @@ class BlockchainConnector {
         this.rpcUser = rpcUser
         this.rpcPassword = rpcPassword
     }
-    
+
     async sleep(ms) {
         return new Promise((resolve) => setTimeout(resolve, ms));
     }
-    
+
     async getNetworkInfo(){
         const data = {
             jsonrpc: '2.0',
             method: 'getnetworkinfo',
             id: 1
         };
-        
-        // Options configuration for fetch
+
+        // Options configuration for axios (axios throws automatically on non-2xx)
         const auth = Buffer.from(`${this.rpcUser}:${this.rpcPassword}`).toString('base64');
         const options = {
-            method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Basic ${auth}`
-            },
-            body: JSON.stringify(data)
+            }
         };
 
         try {
             // Make the request to the node
-            const response = await fetch(this.url, options);
-            
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            
-            const responseData = await response.json();
+            const response = await axios.post(this.url, data, options);
+
+            const responseData = response.data;
 
             // Verify if there is a result and return it
             if (responseData.result) {
@@ -74,7 +68,7 @@ class BlockchainConnector {
 
     async waitForTx(txid, timeMax = 10000){
         const endTime = Date.now() + timeMax
-        
+
         while (Date.now() < endTime){
             try {
                 let txHex = await this.getTransactionHex(txid)
@@ -83,7 +77,7 @@ class BlockchainConnector {
                 await this.sleep(1000)
             }
         }
-        
+
         return false
     }
 
@@ -96,25 +90,19 @@ class BlockchainConnector {
                 id: 1,
             };
 
-            // Options configuration for fetch
+            // Options configuration for axios
             const auth = Buffer.from(`${this.rpcUser}:${this.rpcPassword}`).toString('base64');
             const options = {
-                method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Basic ${auth}`
-                },
-                body: JSON.stringify(data)
+                }
             };
 
-            // Make the request to the node
-            const response = await fetch(this.url, options);
-            
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            
-            const responseData = await response.json();
+            // Make the request to the node (axios throws automatically on non-2xx)
+            const response = await axios.post(this.url, data, options);
+
+            const responseData = response.data;
 
             // Verify if there is a result and return the hex
             if (responseData.result && responseData.result.hex) {
@@ -127,7 +115,7 @@ class BlockchainConnector {
             throw error;
         }
     }
-    
+
     async broadcastTx(txHex){
         try {
             const data = {
@@ -136,31 +124,20 @@ class BlockchainConnector {
                 params: [txHex],
                 id: 1
             }
-            
-            // Options configuration for fetch
+
+            // Options configuration for axios
             const auth = Buffer.from(`${this.rpcUser}:${this.rpcPassword}`).toString('base64');
             const options = {
-                method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Basic ${auth}`
-                },
-                body: JSON.stringify(data)
+                }
             };
 
             // Make the request to the node
-            const response = await fetch(this.url, options);
+            const response = await axios.post(this.url, data, options);
 
-            if (!response.ok) {
-                // Bitcoin/Litecoin/Dogecoin Core returns the JSON-RPC error
-                // body even on HTTP 500 (the wire-format error). Surface it
-                // so non-standard-script / dust / sighash rejections aren't
-                // masked behind a generic message.
-                const bodyText = await response.text().catch(() => '<unreadable body>');
-                throw new Error(`Error trying to send a transaction to the node — HTTP ${response.status} ${response.statusText}: ${bodyText}`);
-            }
-
-            const responseData = await response.json();
+            const responseData = response.data;
 
             // Verify if there is a result and return the hex
             if (responseData.result) {
@@ -171,10 +148,21 @@ class BlockchainConnector {
             }
         } catch (error) {
             console.error('Error:', error);
+            // Bitcoin/Litecoin/Dogecoin Core returns the JSON-RPC error body even
+            // on HTTP 500 (the wire-format error). Axios rejects on non-2xx, so
+            // surface the body it captured (error.response.data) — otherwise
+            // non-standard-script / dust / sighash rejections would be masked
+            // behind a generic axios message.
+            if (error.response) {
+                const body = typeof error.response.data === 'string'
+                    ? error.response.data
+                    : JSON.stringify(error.response.data);
+                throw new Error(`Error trying to send a transaction to the node — HTTP ${error.response.status} ${error.response.statusText}: ${body}`);
+            }
             throw error;
         }
     }
-    
+
     async getFeePerKilobyte(blocksNumber) {
         try {
             const data = {
@@ -184,25 +172,19 @@ class BlockchainConnector {
                 id: 1,
             };
 
-            // Options configuration for fetch
+            // Options configuration for axios
             const auth = Buffer.from(`${this.rpcUser}:${this.rpcPassword}`).toString('base64');
             const options = {
-                method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Basic ${auth}`
-                },
-                body: JSON.stringify(data)
+                }
             };
 
-            // Make the request to the node
-            const response = await fetch(this.url, options);
-            
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            
-            const responseData = await response.json();
+            // Make the request to the node (axios throws automatically on non-2xx)
+            const response = await axios.post(this.url, data, options);
+
+            const responseData = response.data;
 
             // Verify if there is a result and return the hex
             if (responseData.result && responseData.result.feerate) {
@@ -217,18 +199,15 @@ class BlockchainConnector {
     }
 
     // --- Generic JSON-RPC + regtest reorg primitives ---------------------------------
-    // The class's other methods each duplicate the fetch boilerplate; this is a thin
+    // The class's other methods each duplicate the axios boilerplate; this is a thin
     // generic caller used by the chain/reorg helpers below (added for on-chain reorg
     // e2e — invalidateBlock orphans a sub-chain so the indexer's reorg rollback runs).
     async _rpc(method, params = []){
         const auth = Buffer.from(`${this.rpcUser}:${this.rpcPassword}`).toString('base64');
-        const response = await fetch(this.url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Basic ${auth}` },
-            body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params })
+        const response = await axios.post(this.url, { jsonrpc: '2.0', id: 1, method, params }, {
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Basic ${auth}` }
         });
-        if (!response.ok) throw new Error(`${method}: HTTP ${response.status}`);
-        const data = await response.json();
+        const data = response.data;
         if (data.error) throw new Error(`${method} RPC error: ` + JSON.stringify(data.error));
         return data.result;
     }

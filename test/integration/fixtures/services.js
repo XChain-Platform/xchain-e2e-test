@@ -3,14 +3,14 @@
 // Mock JSON-RPC response shapes matching real service contracts.
 
 module.exports = {
-    // BlockchainConnector responses (cross-fetch)
+    // BlockchainConnector responses (axios)
     node: {
-        networkInfo: { result: { version: 250000, subversion: '/Satoshi:25.0.0/' }, error: null, id: 1 },
-        broadcastOk: (txid) => ({ result: txid, error: null, id: 1 }),
-        broadcastFail: (code, msg) => ({ result: null, error: { code, message: msg }, id: 1 }),
-        getRawTx: (hex) => ({ result: { hex }, error: null, id: 1 }),
-        estimateFee: (rate) => ({ result: { feerate: rate }, error: null, id: 1 }),
-        estimateFeeNoRate: { result: { errors: ['Insufficient data'] }, error: null, id: 1 },
+        networkInfo: { data: { result: { version: 250000, subversion: '/Satoshi:25.0.0/' }, error: null, id: 1 } },
+        broadcastOk: (txid) => ({ data: { result: txid, error: null, id: 1 } }),
+        broadcastFail: (code, msg) => ({ data: { result: null, error: { code, message: msg }, id: 1 } }),
+        getRawTx: (hex) => ({ data: { result: { hex }, error: null, id: 1 } }),
+        estimateFee: (rate) => ({ data: { result: { feerate: rate }, error: null, id: 1 } }),
+        estimateFeeNoRate: { data: { result: { errors: ['Insufficient data'] }, error: null, id: 1 } },
     },
 
     // XChainEncoderConnector responses (axios)
@@ -25,10 +25,10 @@ module.exports = {
         }),
     },
 
-    // XChainUtxoTrackerConnector responses (cross-fetch)
+    // XChainUtxoTrackerConnector responses (axios)
     utxoTracker: {
-        pingOk: { result: true },
-        utxosForAddress: (utxos) => ({ result: { utxos } }),
+        pingOk: { data: { result: true } },
+        utxosForAddress: (utxos) => ({ data: { result: { utxos } } }),
         sampleUtxo: (txid, vout, value, confirmations) => ({
             txid: txid || 'aabb' + '00'.repeat(30),
             vout: vout || 0,

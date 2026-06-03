@@ -2,54 +2,26 @@
 
 const assert = require('assert');
 const sinon = require('sinon');
+const axios = require('axios');
 
-// ── cross-fetch injection ──────────────────────────────────────────────────
-// BlockchainConnector captures `fetch` in a module-level const at require-time.
-// We inject a stub into require.cache BEFORE the first require so the module
-// picks up the stub instead of the real network function.
+// ── axios injection ─────────────────────────────────────────────────────────
+// BlockchainConnector issues its JSON-RPC calls via axios.post. We stub
+// axios.post directly (the connector resolves it at call time off the shared
+// axios object), matching the pattern used by the other connector unit tests.
 
-let fetchStub;
-let BlockchainConnector;
-let crossFetchCacheKey;
-
-before(function () {
-    fetchStub = sinon.stub();
-    crossFetchCacheKey = require.resolve('cross-fetch');
-
-    // Replace the cached cross-fetch export with our stub
-    require.cache[crossFetchCacheKey] = {
-        id: crossFetchCacheKey,
-        filename: crossFetchCacheKey,
-        loaded: true,
-        exports: fetchStub
-    };
-
-    // Now require the connector — it will capture our stub as its `fetch`
-    BlockchainConnector = require('../../../src/BlockchainConnector');
-});
-
-after(function () {
-    // Restore the real cross-fetch so other test files are unaffected
-    delete require.cache[crossFetchCacheKey];
-    delete require.cache[require.resolve('../../../src/BlockchainConnector')];
-});
+const BlockchainConnector = require('../../../src/BlockchainConnector');
 
 // ── helpers ───────────────────────────────────────────────────────────────
 
-function makeOkResponse(body) {
-    return {
-        ok: true,
-        status: 200,
-        json: async () => body
-    };
+function makeResponse(body) {
+    return { status: 200, data: body };
 }
 
-function makeErrorResponse(status) {
-    return {
-        ok: false,
-        status,
-        json: async () => ({})
-    };
+// Axios rejects on non-2xx with an Error carrying a `.response`.
+function makeHttpError(status, data = {}) {
+    const err = new Error(`Request failed with status code ${status}`);
+    err.response = { status, statusText: 'Error', data };
+    return err;
 }
 
 function expectedAuth(user, pass) {
@@ -66,10 +38,15 @@ describe('BlockchainConnector', function () {
     const PASS = 'rpcpass';
 
     let connector;
+    let axiosPostStub;
 
     beforeEach(function () {
-        fetchStub.reset();
+        axiosPostStub = sinon.stub(axios, 'post');
         connector = new BlockchainConnector(URL, PORT, USER, PASS);
+    });
+
+    afterEach(function () {
+        sinon.restore();
     });
 
     // ── constructor ──────────────────────────────────────────────────────
@@ -90,45 +67,43 @@ describe('BlockchainConnector', function () {
     describe('getNetworkInfo', function () {
         it('sends the correct JSON-RPC payload with method getnetworkinfo', async function () {
             const fakeResult = { version: 210000 };
-            fetchStub.resolves(makeOkResponse({ result: fakeResult }));
+            axiosPostStub.resolves(makeResponse({ result: fakeResult }));
 
             await connector.getNetworkInfo();
 
-            const [url, opts] = fetchStub.firstCall.args;
+            const [url, data] = axiosPostStub.firstCall.args;
             assert.strictEqual(url, connector.url);
-
-            const body = JSON.parse(opts.body);
-            assert.strictEqual(body.jsonrpc, '2.0');
-            assert.strictEqual(body.method, 'getnetworkinfo');
-            assert.strictEqual(body.id, 1);
+            assert.strictEqual(data.jsonrpc, '2.0');
+            assert.strictEqual(data.method, 'getnetworkinfo');
+            assert.strictEqual(data.id, 1);
         });
 
         it('sends a valid Basic auth header', async function () {
-            fetchStub.resolves(makeOkResponse({ result: { version: 1 } }));
+            axiosPostStub.resolves(makeResponse({ result: { version: 1 } }));
             await connector.getNetworkInfo();
 
-            const [, opts] = fetchStub.firstCall.args;
+            const opts = axiosPostStub.firstCall.args[2];
             assert.strictEqual(opts.headers['Authorization'], expectedAuth(USER, PASS));
         });
 
         it('returns the result on success', async function () {
             const fakeResult = { subversion: '/Satoshi:0.21/' };
-            fetchStub.resolves(makeOkResponse({ result: fakeResult }));
+            axiosPostStub.resolves(makeResponse({ result: fakeResult }));
 
             const result = await connector.getNetworkInfo();
             assert.deepStrictEqual(result, fakeResult);
         });
 
-        it('throws when HTTP response is not ok', async function () {
-            fetchStub.resolves(makeErrorResponse(500));
+        it('throws when the HTTP request fails (axios rejects on non-2xx)', async function () {
+            axiosPostStub.rejects(makeHttpError(500));
             await assert.rejects(
                 () => connector.getNetworkInfo(),
-                /HTTP error/
+                /Error in network request/
             );
         });
 
         it('throws when response has no result', async function () {
-            fetchStub.resolves(makeOkResponse({ result: null }));
+            axiosPostStub.resolves(makeResponse({ result: null }));
             await assert.rejects(
                 () => connector.getNetworkInfo(),
                 /Error/
@@ -143,32 +118,31 @@ describe('BlockchainConnector', function () {
         const HEX  = 'deadbeef';
 
         it('sends getrawtransaction with [txid, true]', async function () {
-            fetchStub.resolves(makeOkResponse({ result: { hex: HEX } }));
+            axiosPostStub.resolves(makeResponse({ result: { hex: HEX } }));
 
             await connector.getTransactionHex(TXID);
 
-            const [, opts] = fetchStub.firstCall.args;
-            const body = JSON.parse(opts.body);
-            assert.strictEqual(body.method, 'getrawtransaction');
-            assert.deepStrictEqual(body.params, [TXID, true]);
+            const data = axiosPostStub.firstCall.args[1];
+            assert.strictEqual(data.method, 'getrawtransaction');
+            assert.deepStrictEqual(data.params, [TXID, true]);
         });
 
         it('returns result.hex on success', async function () {
-            fetchStub.resolves(makeOkResponse({ result: { hex: HEX } }));
+            axiosPostStub.resolves(makeResponse({ result: { hex: HEX } }));
             const result = await connector.getTransactionHex(TXID);
             assert.strictEqual(result, HEX);
         });
 
-        it('throws when HTTP response is not ok', async function () {
-            fetchStub.resolves(makeErrorResponse(503));
+        it('throws when the HTTP request fails (axios rejects on non-2xx)', async function () {
+            axiosPostStub.rejects(makeHttpError(503));
             await assert.rejects(
                 () => connector.getTransactionHex(TXID),
-                /HTTP error/
+                /503/
             );
         });
 
         it('throws when result or result.hex is missing', async function () {
-            fetchStub.resolves(makeOkResponse({ result: {} }));
+            axiosPostStub.resolves(makeResponse({ result: {} }));
             await assert.rejects(
                 () => connector.getTransactionHex(TXID),
                 /Error/
@@ -183,33 +157,33 @@ describe('BlockchainConnector', function () {
         const TX_HASH = 'txhash999';
 
         it('sends sendrawtransaction with [txHex]', async function () {
-            fetchStub.resolves(makeOkResponse({ result: TX_HASH }));
+            axiosPostStub.resolves(makeResponse({ result: TX_HASH }));
 
             await connector.broadcastTx(TX_HEX);
 
-            const [, opts] = fetchStub.firstCall.args;
-            const body = JSON.parse(opts.body);
-            assert.strictEqual(body.method, 'sendrawtransaction');
-            assert.deepStrictEqual(body.params, [TX_HEX]);
+            const data = axiosPostStub.firstCall.args[1];
+            assert.strictEqual(data.method, 'sendrawtransaction');
+            assert.deepStrictEqual(data.params, [TX_HEX]);
         });
 
         it('returns result on success', async function () {
-            fetchStub.resolves(makeOkResponse({ result: TX_HASH }));
+            axiosPostStub.resolves(makeResponse({ result: TX_HASH }));
             const result = await connector.broadcastTx(TX_HEX);
             assert.strictEqual(result, TX_HASH);
         });
 
-        it('throws when HTTP response is not ok', async function () {
-            fetchStub.resolves(makeErrorResponse(400));
+        it('surfaces the node error body when the HTTP request fails', async function () {
+            // Core returns the JSON-RPC error body even on HTTP 500.
+            axiosPostStub.rejects(makeHttpError(500, { error: { code: -26, message: 'dust' } }));
             await assert.rejects(
                 () => connector.broadcastTx(TX_HEX),
-                /Error/
+                /HTTP 500/
             );
         });
 
         it('throws with node error JSON when result is missing', async function () {
             const nodeError = { code: -25, message: 'bad tx' };
-            fetchStub.resolves(makeOkResponse({ result: null, error: nodeError }));
+            axiosPostStub.resolves(makeResponse({ result: null, error: nodeError }));
             await assert.rejects(
                 () => connector.broadcastTx(TX_HEX),
                 /bad tx/
@@ -217,7 +191,7 @@ describe('BlockchainConnector', function () {
         });
 
         it('throws with "unknown error" when result and error are both missing', async function () {
-            fetchStub.resolves(makeOkResponse({ result: null }));
+            axiosPostStub.resolves(makeResponse({ result: null }));
             await assert.rejects(
                 () => connector.broadcastTx(TX_HEX),
                 /unknown error/
@@ -263,30 +237,26 @@ describe('BlockchainConnector', function () {
     describe('getFeePerKilobyte', function () {
         it('returns feerate when present in response', async function () {
             const feerate = 0.00012345;
-            fetchStub.resolves(makeOkResponse({ result: { feerate } }));
+            axiosPostStub.resolves(makeResponse({ result: { feerate } }));
 
             const result = await connector.getFeePerKilobyte(6);
             assert.strictEqual(result, feerate);
         });
 
         it('sends estimatesmartfee with the blocksNumber param', async function () {
-            fetchStub.resolves(makeOkResponse({ result: { feerate: 0.0001 } }));
+            axiosPostStub.resolves(makeResponse({ result: { feerate: 0.0001 } }));
 
             await connector.getFeePerKilobyte(3);
 
-            const [, opts] = fetchStub.firstCall.args;
-            const body = JSON.parse(opts.body);
-            assert.strictEqual(body.method, 'estimatesmartfee');
-            assert.deepStrictEqual(body.params, [3]);
+            const data = axiosPostStub.firstCall.args[1];
+            assert.strictEqual(data.method, 'estimatesmartfee');
+            assert.deepStrictEqual(data.params, [3]);
         });
 
-        it('throws TypeError when feerate is absent because isRegtest() does not exist', async function () {
-            // The source calls `this.isRegtest()` which is NOT defined on the class.
-            fetchStub.resolves(makeOkResponse({ result: {} }));
-            await assert.rejects(
-                () => connector.getFeePerKilobyte(6),
-                TypeError
-            );
+        it('falls back to the default feerate when feerate is absent', async function () {
+            axiosPostStub.resolves(makeResponse({ result: {} }));
+            const result = await connector.getFeePerKilobyte(6);
+            assert.strictEqual(result, 0.00001000);
         });
     });
 });

@@ -30,8 +30,8 @@ describe('[regression:p0] Service Connectors', function () {
     })
 
     // ── BlockchainConnector ──────────────────────────────────────────────
-    // BlockchainConnector uses cross-fetch (binds at require time).
-    // We stub at the prototype level to avoid require.cache issues.
+    // BlockchainConnector uses axios. These cases stub the connector's own
+    // methods directly (no network), so the HTTP client is not exercised here.
 
     describe('BlockchainConnector', function () {
 
