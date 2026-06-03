@@ -77,7 +77,7 @@ describe('Bootstrap — environment variable path', function () {
             envVars.DECODER_URL, envVars.DECODER_API_PORT
         )
         global.indexerConnector = new XChainIndexerConnector(
-            envVars.INDEXER_HOST, envVars.INDEXER_API_PORT
+            envVars.INDEXER_URL, envVars.INDEXER_API_PORT
         )
         global.explorerConnector = new XChainExplorerConnector(
             envVars.EXPLORER_URL, envVars.EXPLORER_API_PORT
@@ -106,7 +106,7 @@ describe('Bootstrap — environment variable path', function () {
         ENCODER_API_PORT: '3031',
         DECODER_URL: '127.0.0.1',
         DECODER_API_PORT: '3034',
-        INDEXER_HOST: '127.0.0.1',
+        INDEXER_URL: '127.0.0.1',
         INDEXER_API_PORT: '3032',
         EXPLORER_URL: '127.0.0.1',
         EXPLORER_API_PORT: '3035',

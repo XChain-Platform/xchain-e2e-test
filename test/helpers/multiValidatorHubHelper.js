@@ -92,7 +92,7 @@ class MultiValidatorHub {
      * @param opts.dbNamePrefix         per-hub DB name prefix (defaults to 'XChain_BTC_Regtest_MVH_'+pid)
      * @param opts.basePort             starting P2P port to probe (defaults to 28000)
      * @param opts.btcIndexerApiUrl     URL the hubs poll for pending requests
-     *                                  (defaults from env: BTC_INDEXER_API_URL → http://INDEXER_HOST:INDEXER_API_PORT)
+     *                                  (defaults from env: BTC_INDEXER_API_URL → http://INDEXER_URL:INDEXER_API_PORT)
      * @param opts.oracleEpochStart    ORACLE_EPOCH_START required by the hub even when oracle isn't started
      */
     constructor(opts) {
@@ -106,7 +106,7 @@ class MultiValidatorHub {
         this.basePort      = opts.basePort || 28000;
         this.btcIndexerApiUrl = opts.btcIndexerApiUrl
             || process.env.BTC_INDEXER_API_URL
-            || ('http://' + (process.env.INDEXER_HOST || 'localhost') + ':' + (process.env.INDEXER_API_PORT || '12001'));
+            || ('http://' + (process.env.INDEXER_URL || 'localhost') + ':' + (process.env.INDEXER_API_PORT || '12001'));
         this.oracleEpochStart = opts.oracleEpochStart || Date.now() - 60_000;
 
         this.hubs         = [];
