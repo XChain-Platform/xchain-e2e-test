@@ -190,8 +190,16 @@ module.exports = {
         
         let spentTx = null
         let spentHex = null
-        if (encodeType == "P2SH"){
-            console.log("Creating the second transaction (the encode type P2SH was chosen)...")
+        // P2SH and P2WSH are both two-transaction schemes: tx1 creates the
+        // data-bearing outputs (P2SH redeem scripts / P2WSH witness scripts),
+        // tx2 spends them to reveal the payload chunks on-chain. The encoder
+        // builds the spending PSBT for either encoding when handed tx1's hash +
+        // hex; xchainP2shFinalizer auto-detects P2SH vs P2WSH per input and
+        // produces the right scriptSig (P2SH) or witness (P2WSH). Large payloads
+        // (e.g. an ~8 KB FILE) fan out across several P2WSH outputs, so tx2 can
+        // carry multiple witness-revealing inputs.
+        if (encodeType == "P2SH" || encodeType == "P2WSH"){
+            console.log("Creating the second transaction (the encode type "+encodeType+" was chosen)...")
             let spentTxPsbtHex = await encoderConnector.createTx(
                 [], //utxoList - the encoder will find the utxos
                 addressInfo["address"], //pubkey
@@ -217,10 +225,10 @@ module.exports = {
                 spentPsbtToSign.signInput(parseInt(proxInputIndex), keyToSign);
             }
             
-            // Every input in the spent tx carries an XChain P2SH-encoded
-            // payload chunk (large action data like DEPLOY code is split
-            // across multiple P2SH inputs by the encoder). All of them
-            // need the custom finalizer.
+            // Every input in the spent tx carries an XChain payload chunk
+            // (large action data like DEPLOY code or a multi-KB FILE is split
+            // across multiple P2SH/P2WSH inputs by the encoder). All of them
+            // need the custom finalizer, which detects the per-input encoding.
             for (let i = 0; i < spentPsbtToSign.data.inputs.length; i++) {
                 spentPsbtToSign.finalizeInput(i, xchainP2shFinalizer);
             }
