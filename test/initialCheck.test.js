@@ -255,14 +255,20 @@ exports.mochaHooks = {
             if (!gasTokenExists) {
                 console.log("GAS token not found, creating it...")
                 let gasAddressInfo = await cryptoHelper.getNewFundedAddress("GAS.TOKEN", COIN, NETWORK, null, "legacy", 0, 1)
+                // XCHAIN is an open-mint GAS faucet on testnet/regtest: anyone MINTs it (no owner
+                // check, no fee) to grab gas to play. Genesis therefore mints NO initial supply
+                // (mintSupply=0) and leaves minting unlocked + open from genesis (lockMint unset,
+                // mintStartBlock unset => 0). MAX_MINT is held high here so the e2e suite — which
+                // mints 100–5000 gas per call via gasHelper — isn't throttled; the real testnet
+                // bootstrap can impose a tighter per-mint cap separately.
                 await issueHelper.sendIssueV0(
                     gasAddressInfo,
                     GAS_TICK,
-                    1000000000,
-                    1000000,
-                    0,
+                    100000000,   // MAX_SUPPLY
+                    100000,      // MAX_MINT (per tx) — high for e2e; real faucet may cap tighter
+                    0,           // decimals
                     "XChain GAS Token",
-                    1000000
+                    0            // MINT_SUPPLY — faucet: no pre-minted supply
                 )
                 console.log("GAS token ("+GAS_TICK+") created successfully")
             } else {
