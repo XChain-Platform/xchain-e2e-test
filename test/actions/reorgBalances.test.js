@@ -2,6 +2,12 @@ const assert = require('assert')
 const cryptoHelper = require('../cryptoHelper')
 const issueHelper = require('../helpers/issueHelper')
 const sendHelper = require('../helpers/sendHelper')
+const mintHelper = require('../helpers/mintHelper')
+
+// GAS token. Issuing a new token charges an ISSUANCE_FEE payable in GAS (XCHAIN);
+// on testnet/regtest XCHAIN is an open faucet (anyone MINTs it — no owner check,
+// no fee), so a fresh issuer grabs gas via a MINT before it can ISSUE.
+const GAS_TICK = 'XCHAIN'
 
 /**
  * Money-path reorg convergence (on-chain) — proves the decoder + indexer roll back
@@ -50,6 +56,10 @@ describe('Money Reorg — SEND rolls back, balances + supply converge across an 
         const sender = await cryptoHelper.getNewFundedAddress('moneyreorg-sender', COIN, NETWORK, null, 'legacy', 0, 1)
         const dest   = await cryptoHelper.getNewAddress('moneyreorg-dest', COIN, NETWORK, null, 'legacy', 0)
         const tick   = 'MRG' + sender['address'].substring(sender['address'].length - 8)
+
+        // Grab GAS first — the sender needs an XCHAIN balance to pay the ISSUANCE_FEE.
+        // XCHAIN is an open faucet on testnet/regtest: anyone MINTs it (no owner check, no fee).
+        await mintHelper.sendMintV0(sender, GAS_TICK, 10)
 
         // ISSUE in an early block: mintSupply credited to the sender.
         const MINT = 100
