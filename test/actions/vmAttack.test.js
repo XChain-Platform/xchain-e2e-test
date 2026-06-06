@@ -39,6 +39,14 @@ describe('VM Attack — hostile contracts on-chain', function () {
         for (var i = 0; i < 60; i++) { xchain.emit.send({ tick: 'AAA', quantity: '1', destination: 'x' }); }
     } };`
 
+    // HOST-ABORT (Finding A, 2026-06-06): a single bulk allocation makes V8 call
+    // abort() (process-wide SIGABRT), bypassing the isolate memory limit. With the
+    // old in-process VM this crashes the indexer itself — block processing halts,
+    // no execution row is ever written, and the "still alive" check below fails.
+    // With out-of-process execution it is contained: the worker dies, the executor
+    // returns a deterministic resource failure, and the block advances.
+    const MEMORY_BOMB = `module.exports = { run: function(){ var a = new Array(100000000).fill('x'); return a.length; } };`
+
     let deployer = null
 
     async function q(sql, params) {
@@ -106,6 +114,18 @@ describe('VM Attack — hostile contracts on-chain', function () {
         assert.strictEqual(Number(row.emitted_count), 0, 'no emissions should be committed')
         const em = await q('SELECT id FROM contract_emissions WHERE execution_index=?', [row.action_index])
         assert.strictEqual(em.length, 0)
+    })
+
+    it('a bulk-allocation host-abort is contained without crashing the indexer', async function () {
+        const dep = await vmHelper.sendDeployV0(deployer, MEMORY_BOMB, 200000)
+        const ci = dep.contract.action_index
+        await rawExecute(deployer, ci, 'run')
+        const row = await waitForAnyExecution(ci, deployer.address, 'run')
+        // If the indexer crashed (old in-process VM), no row is ever written and
+        // this times out → the fix is what makes the row appear at all.
+        assert(row, 'host-abort execution should be recorded (indexer survived the abort)')
+        assert.notStrictEqual(row.status, 'valid', 'a host-aborting contract must fail')
+        assert.strictEqual(Number(row.emitted_count), 0, 'no emissions on a contained abort')
     })
 
     it('the indexer is still alive and processing after the attacks', async function () {
