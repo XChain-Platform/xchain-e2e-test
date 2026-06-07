@@ -39,19 +39,19 @@ describe('VM Attack — hostile contracts on-chain', function () {
         for (var i = 0; i < 60; i++) { xchain.emit.send({ tick: 'AAA', quantity: '1', destination: 'x' }); }
     } };`
 
-    // HOST-ABORT (Finding A, 2026-06-06): a single bulk allocation makes V8 call
-    // abort() (process-wide SIGABRT), bypassing the isolate memory limit. With the
-    // old in-process VM this crashes the indexer itself — block processing halts,
-    // no execution row is ever written, and the "still alive" check below fails.
-    // With out-of-process execution it is contained: the worker dies, the executor
-    // returns a deterministic resource failure, and the block advances.
+    // Bulk-allocation bomb. Historically (Finding A) this made V8 abort() the host
+    // process; F3 allocation metering now charges the fill by size, so it hits the
+    // gas ceiling (out_of_gas) BEFORE V8 services it — fast, deterministic, and it
+    // never even reaches the out-of-process executor's host-abort containment (which
+    // remains the load-bearing defense for paths F3 can't wrap). Either way the
+    // hostile contract is contained: a non-valid execution, no emissions, block advances.
     const MEMORY_BOMB = `module.exports = { run: function(){ var a = new Array(100000000).fill('x'); return a.length; } };`
 
     // The SAME bulk allocation, but in the contract's constructor (initialize).
     // Exercises the DEPLOY status path: a failed constructor deletes the contract
-    // row, but its execution row persists, and (F1) the consensus-hashed status
-    // must intern as the normalized resource token — NOT the raw, arch-divergent
-    // VM error string the constructor failure produced.
+    // row, but its execution row persists, and the consensus-hashed status must
+    // intern as a normalized token (F1) — NOT the raw VM error string. Under F3 the
+    // constructor fill is gas-bounded, so the token is 'out_of_gas'.
     const CONSTRUCTOR_BOMB = `module.exports = { initialize: function(){ var a = new Array(100000000).fill('x'); return a.length; } };`
 
     let deployer = null
@@ -123,19 +123,20 @@ describe('VM Attack — hostile contracts on-chain', function () {
         assert.strictEqual(em.length, 0)
     })
 
-    it('a bulk-allocation host-abort is contained without crashing the indexer', async function () {
+    it('a bulk-allocation bomb is gas-bounded and contained without crashing the indexer', async function () {
         const dep = await vmHelper.sendDeployV0(deployer, MEMORY_BOMB, 200000)
         const ci = dep.contract.action_index
         await rawExecute(deployer, ci, 'run')
         const row = await waitForAnyExecution(ci, deployer.address, 'run')
-        // If the indexer crashed (old in-process VM), no row is ever written and
-        // this times out → the fix is what makes the row appear at all.
-        assert(row, 'host-abort execution should be recorded (indexer survived the abort)')
-        assert.notStrictEqual(row.status, 'valid', 'a host-aborting contract must fail')
-        assert.strictEqual(Number(row.emitted_count), 0, 'no emissions on a contained abort')
+        // If the indexer crashed (old in-process VM), no row is ever written and this
+        // times out → the row appearing at all is the containment proof.
+        assert(row, 'bulk-allocation execution should be recorded (indexer survived)')
+        // F3 charges the fill by size → out_of_gas before V8 allocates.
+        assert.strictEqual(row.status, 'out_of_gas', `expected out_of_gas (got: ${row.status})`)
+        assert.strictEqual(Number(row.emitted_count), 0, 'no emissions on a contained failure')
     })
 
-    it('a host-abort in the constructor interns as out_of_resource and the indexer survives', async function () {
+    it('a bulk-allocation bomb in the constructor interns as out_of_gas and the indexer survives', async function () {
         const before = await tip()
         // Fresh address so its only 'constructor' execution is this one (every DEPLOY
         // records a method='constructor' execution row; a separate address keeps the
@@ -154,10 +155,12 @@ describe('VM Attack — hostile contracts on-chain', function () {
             if (row) break
             await new Promise(r => setTimeout(r, 1000))
         }
-        assert(row, 'constructor execution should be recorded (indexer survived the constructor abort)')
-        assert.strictEqual(row.status, 'out_of_resource',
-            `constructor host-abort must intern as the normalized resource token (got: ${row.status})`)
-        assert.strictEqual(Number(row.emitted_count), 0, 'no emissions on a contained constructor abort')
+        assert(row, 'constructor execution should be recorded (indexer survived the constructor failure)')
+        // Under F3 the constructor fill is gas-bounded; deploy.js must record the
+        // normalized bare token (not the raw 'invalid: constructor failed: ...' string).
+        assert.strictEqual(row.status, 'out_of_gas',
+            `constructor failure must intern as the normalized token (got: ${row.status})`)
+        assert.strictEqual(Number(row.emitted_count), 0, 'no emissions on a contained constructor failure')
         const after = await tip()
         assert(after >= before, `block tip should keep advancing (before=${before} after=${after})`)
     })
