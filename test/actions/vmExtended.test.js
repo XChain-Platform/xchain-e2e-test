@@ -200,7 +200,13 @@ describe('VM Extended — on-chain capabilities', function () {
             await vmHelper.sendExecuteV0(deployer, ci, 'burn', []).catch(() => {})
             const row = await waitForAnyExecution(ci, deployer.address, 'burn')
             assert(row, 'an execution row should be recorded for the out-of-gas attempt')
-            assert.strictEqual(row.status, 'out_of_gas', `gas exhaustion should yield status 'out_of_gas' (got: ${row.status})`)
+            // Resource exhaustion collapses to one host-independent consensus token
+            // (which ceiling fires — gas vs the wall-clock net — is a host-timing
+            // race that must not change the hashed status_id). The gas-specific
+            // detail survives un-hashed in error_message.
+            assert.strictEqual(row.status, 'out_of_resource', `gas exhaustion should yield status 'out_of_resource' (got: ${row.status})`)
+            assert.match(String(row.error_message || ''), /out_of_gas:/,
+                `the gas meter (not the wall-clock net) should have bound the loop (error_message: ${row.error_message})`)
             assert.strictEqual(Number(row.emitted_count), 0, 'no emissions on gas exhaustion')
 
             // Caller must be charged gas (the full burned amount) for the failed attempt.

@@ -51,7 +51,8 @@ describe('VM Attack — hostile contracts on-chain', function () {
     // Exercises the DEPLOY status path: a failed constructor deletes the contract
     // row, but its execution row persists, and the consensus-hashed status must
     // intern as a normalized token (F1) — NOT the raw VM error string. Under F3 the
-    // constructor fill is gas-bounded, so the token is 'out_of_gas'.
+    // constructor fill is gas-bounded; the consensus token is the collapsed
+    // 'out_of_resource' (with the raw out_of_gas detail kept in error_message).
     const CONSTRUCTOR_BOMB = `module.exports = { initialize: function(){ var a = new Array(100000000).fill('x'); return a.length; } };`
 
     let deployer = null
@@ -99,7 +100,14 @@ describe('VM Attack — hostile contracts on-chain', function () {
         await rawExecute(deployer, ci, 'run')
         const row = await waitForAnyExecution(ci, deployer.address, 'run')
         assert(row, 'loop execution should be recorded')
-        assert.strictEqual(row.status, 'out_of_gas', `expected out_of_gas (got: ${row.status})`)
+        // The consensus status collapses the whole resource-exhaustion family
+        // (out_of_gas / timeout / out_of_memory / out_of_stack) to one
+        // host-independent token — which ceiling fires (gas vs the wall-clock
+        // net) is a host-timing race that must not change the hashed status_id.
+        // The gas-specific detail survives (un-hashed) in error_message.
+        assert.strictEqual(row.status, 'out_of_resource', `expected out_of_resource (got: ${row.status})`)
+        assert.match(String(row.error_message || ''), /out_of_gas:/,
+            `gas meter (not the wall-clock net) should have bound the loop (error_message: ${row.error_message})`)
     })
 
     it('deep recursion fails without crashing the indexer', async function () {
@@ -131,12 +139,16 @@ describe('VM Attack — hostile contracts on-chain', function () {
         // If the indexer crashed (old in-process VM), no row is ever written and this
         // times out → the row appearing at all is the containment proof.
         assert(row, 'bulk-allocation execution should be recorded (indexer survived)')
-        // F3 charges the fill by size → out_of_gas before V8 allocates.
-        assert.strictEqual(row.status, 'out_of_gas', `expected out_of_gas (got: ${row.status})`)
+        // F3 charges the fill by size → gas-bounded before V8 allocates. The
+        // consensus status is the collapsed resource-exhaustion token; the raw
+        // out_of_gas detail (proving F3 metering, not a timeout/abort) is in error_message.
+        assert.strictEqual(row.status, 'out_of_resource', `expected out_of_resource (got: ${row.status})`)
+        assert.match(String(row.error_message || ''), /out_of_gas:/,
+            `F3 size metering should bind the fill with gas, not the wall-clock net (error_message: ${row.error_message})`)
         assert.strictEqual(Number(row.emitted_count), 0, 'no emissions on a contained failure')
     })
 
-    it('a bulk-allocation bomb in the constructor interns as out_of_gas and the indexer survives', async function () {
+    it('a bulk-allocation bomb in the constructor interns as out_of_resource and the indexer survives', async function () {
         const before = await tip()
         // Fresh address so its only 'constructor' execution is this one (every DEPLOY
         // records a method='constructor' execution row; a separate address keeps the
@@ -157,9 +169,13 @@ describe('VM Attack — hostile contracts on-chain', function () {
         }
         assert(row, 'constructor execution should be recorded (indexer survived the constructor failure)')
         // Under F3 the constructor fill is gas-bounded; deploy.js must record the
-        // normalized bare token (not the raw 'invalid: constructor failed: ...' string).
-        assert.strictEqual(row.status, 'out_of_gas',
+        // normalized, host-independent resource-exhaustion token (not the raw
+        // 'invalid: constructor failed: ...' string, and not a distinct out_of_gas
+        // token that would fork against a slow validator's wall-clock timeout).
+        assert.strictEqual(row.status, 'out_of_resource',
             `constructor failure must intern as the normalized token (got: ${row.status})`)
+        assert.match(String(row.error_message || ''), /out_of_gas:/,
+            `the gas-bounded detail should survive in error_message (got: ${row.error_message})`)
         assert.strictEqual(Number(row.emitted_count), 0, 'no emissions on a contained constructor failure')
         const after = await tip()
         assert(after >= before, `block tip should keep advancing (before=${before} after=${after})`)
