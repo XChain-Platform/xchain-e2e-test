@@ -47,6 +47,13 @@ describe('VM Attack — hostile contracts on-chain', function () {
     // returns a deterministic resource failure, and the block advances.
     const MEMORY_BOMB = `module.exports = { run: function(){ var a = new Array(100000000).fill('x'); return a.length; } };`
 
+    // The SAME bulk allocation, but in the contract's constructor (initialize).
+    // Exercises the DEPLOY status path: a failed constructor deletes the contract
+    // row, but its execution row persists, and (F1) the consensus-hashed status
+    // must intern as the normalized resource token — NOT the raw, arch-divergent
+    // VM error string the constructor failure produced.
+    const CONSTRUCTOR_BOMB = `module.exports = { initialize: function(){ var a = new Array(100000000).fill('x'); return a.length; } };`
+
     let deployer = null
 
     async function q(sql, params) {
@@ -126,6 +133,33 @@ describe('VM Attack — hostile contracts on-chain', function () {
         assert(row, 'host-abort execution should be recorded (indexer survived the abort)')
         assert.notStrictEqual(row.status, 'valid', 'a host-aborting contract must fail')
         assert.strictEqual(Number(row.emitted_count), 0, 'no emissions on a contained abort')
+    })
+
+    it('a host-abort in the constructor interns as out_of_resource and the indexer survives', async function () {
+        const before = await tip()
+        // Fresh address so its only 'constructor' execution is this one (every DEPLOY
+        // records a method='constructor' execution row; a separate address keeps the
+        // lookup unambiguous without needing the deleted contract's action_index).
+        const ctorDeployer = await cryptoHelper.getNewFundedAddress('vmatk-ctor', COIN, NETWORK, null, 'legacy', 0, 1)
+        await gasHelper.ensureGasBalance(ctorDeployer, '500')
+        // sendDeployV0 waits for a VALID contract row, which never appears here (a
+        // failed constructor deletes the contract). Broadcast the DEPLOY directly with
+        // a constructor param (required to run the constructor) and poll the execution.
+        const codeHex = Buffer.from(CONSTRUCTOR_BOMB, 'utf8').toString('hex')
+        await transactionHelper.createAndSendTransaction(ctorDeployer, `DEPLOY|0|${codeHex}|200000|1`, null, [], 'P2SH')
+        let row = null
+        const end = Date.now() + 90000
+        while (Date.now() < end) {
+            row = await indexerDatabase.checkExecution({ caller: ctorDeployer.address, methodName: 'constructor' }).catch(() => null)
+            if (row) break
+            await new Promise(r => setTimeout(r, 1000))
+        }
+        assert(row, 'constructor execution should be recorded (indexer survived the constructor abort)')
+        assert.strictEqual(row.status, 'out_of_resource',
+            `constructor host-abort must intern as the normalized resource token (got: ${row.status})`)
+        assert.strictEqual(Number(row.emitted_count), 0, 'no emissions on a contained constructor abort')
+        const after = await tip()
+        assert(after >= before, `block tip should keep advancing (before=${before} after=${after})`)
     })
 
     it('the indexer is still alive and processing after the attacks', async function () {
