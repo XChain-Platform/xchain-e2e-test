@@ -1,0 +1,99 @@
+/*********************************************************************
+ *
+ * Copyright © 2025–2026 Dankest, LLC
+ * Based on XChain Platform by Dankest, LLC – https://dankest.llc
+ *
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * This file is part of XChain Platform. Licensed under the GNU Affero
+ * General Public License v3.0 or later; see LICENSE.md.
+ *
+ **********************************************************************
+ * LIVE cross-repo drift-lock for the consensus hash CONFORMANCE PAIR.
+ *
+ * xchain-sync validators independently recompute each block's ledger/actions/
+ * contract hashes via src/BlockHasher.js, and HALT if they disagree with the
+ * source. That only stays correct while BlockHasher is byte-identical to the
+ * indexer's xchain-indexer/src/db.js getBlockHashes(). The unit golden in each
+ * repo locks the serialization, but only THIS test exercises the full pipeline
+ * (the 8 gathering queries + chaining + getDataHash) against REAL indexer-
+ * produced data on the running stack.
+ *
+ * For every block the e2e stack has indexed, recompute the three hashes with
+ * sync's BlockHasher against the indexer DB and assert they equal the indexer's
+ * COMMITTED hashes (blocks -> index_transactions). Any drift between the two
+ * implementations reddens here. Sync is not otherwise wired into the e2e stack;
+ * this needs only the indexer DB (global.indexerDatabase) + the sibling sync repo.
+ ********************************************************************/
+
+const assert = require('assert');
+const path   = require('path');
+
+// Sibling xchain-sync (monorepo layout). If it's not present (sync excluded from
+// a given checkout), skip rather than fail.
+let BlockHasher, SyncUtility;
+try {
+    BlockHasher = require(path.join(__dirname, '../../../xchain-sync/src/BlockHasher.js'));
+    SyncUtility = require(path.join(__dirname, '../../../xchain-sync/src/utility.js'));
+} catch (e) { /* handled in before() */ }
+
+const COMMITTED_HASH_SQL =
+    'SELECT t1.hash AS ledger_hash, t2.hash AS actions_hash, t3.hash AS contract_hash ' +
+    'FROM blocks b ' +
+    'LEFT JOIN index_transactions t1 ON (t1.id = b.ledger_hash_id) ' +
+    'LEFT JOIN index_transactions t2 ON (t2.id = b.actions_hash_id) ' +
+    'LEFT JOIN index_transactions t3 ON (t3.id = b.contract_hash_id) ' +
+    'WHERE b.block_index = ?';
+
+describe('consensus hash conformance: sync BlockHasher == indexer committed hashes @regression', function () {
+    this.timeout(0);
+
+    let dbAdapter, hasher, blockIndexes;
+
+    before(async function () {
+        if (!BlockHasher || !SyncUtility) {
+            console.log('xchain-sync not present alongside e2e — skipping conformance drift-lock');
+            this.skip();
+        }
+        if (!global.indexerDatabase || !global.indexerDatabase.pool) {
+            console.log('indexer DB not available — skipping conformance drift-lock');
+            this.skip();
+        }
+        const pool = global.indexerDatabase.pool;
+        // BlockHasher needs a `doQuery(sql, params)` over the INDEXER db.
+        dbAdapter = {
+            doQuery: async (sql, params) => {
+                const conn = await pool.getConnection();
+                try { return await conn.query(sql, params); }
+                finally { conn.release(); }
+            }
+        };
+        hasher = new BlockHasher(dbAdapter, new SyncUtility());
+        const rows = await dbAdapter.doQuery('SELECT block_index FROM blocks ORDER BY block_index ASC', []);
+        blockIndexes = rows.map(r => Number(r.block_index));
+    });
+
+    it('has indexed blocks to verify', function () {
+        assert.ok(blockIndexes && blockIndexes.length > 0,
+            'no blocks indexed — the e2e stack must have processed blocks before this runs');
+    });
+
+    it('every indexed block recomputes to its committed ledger/actions/contract hash', async function () {
+        const mismatches = [];
+        for (const idx of blockIndexes) {
+            const computed = await hasher.computeBlockHashes(idx);
+            const rows = await dbAdapter.doQuery(COMMITTED_HASH_SQL, [idx]);
+            const committed = rows[0] || {};
+            for (const f of ['ledger_hash', 'actions_hash', 'contract_hash']) {
+                if (computed[f] !== committed[f]) {
+                    mismatches.push({ block: idx, field: f, computed: computed[f], committed: committed[f] });
+                }
+            }
+        }
+        assert.strictEqual(mismatches.length, 0,
+            'sync BlockHasher diverged from indexer committed hashes (conformance pair drifted) — ' +
+            'update BOTH xchain-sync/src/BlockHasher.js and xchain-indexer/src/db.js getBlockHashes + ' +
+            'regenerate the golden, and bump CONSENSUS_VERSION:\n' +
+            JSON.stringify(mismatches.slice(0, 10), null, 2));
+    });
+});
