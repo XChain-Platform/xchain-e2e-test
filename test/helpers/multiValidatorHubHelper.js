@@ -132,6 +132,12 @@ class MultiValidatorHub {
         // overwrite the resolved map post-start). Absent ⇒ engine idles (no matching).
         this.crossChainIndexerUrls = opts.crossChainIndexerUrls || null;
 
+        // Pre-supplied validator identities (`[{pubkeyHex, privkeyHex}, ...]`). When given,
+        // the harness uses these instead of generating fresh keypairs — required for a live
+        // on-chain proof where the hubs' signing keys MUST equal the pubkeys staked on BTC.
+        // Length must be >= count (extras ignored).
+        this.presetIdentities = opts.identities || null;
+
         this.hubs         = [];
         this.identities   = [];    // [{pubkeyHex, privkeyHex}]
         this.dbNames      = [];
@@ -146,10 +152,16 @@ class MultiValidatorHub {
             throw new Error('MultiValidatorHub: HUB_DB_USER and HUB_DB_PASS must be set');
         }
 
-        // Generate keypairs + pick ports + name DBs up front so the SEED_NODES
-        // list can cross-reference (each hub points at every other's P2P_PORT).
+        if (this.presetIdentities && this.presetIdentities.length < this.count) {
+            throw new Error('MultiValidatorHub: identities provided (' + this.presetIdentities.length + ') < count (' + this.count + ')');
+        }
+
+        // Generate keypairs (or use pre-supplied ones) + pick ports + name DBs up front so
+        // the SEED_NODES list can cross-reference (each hub points at every other's P2P_PORT).
         for (let i = 0; i < this.count; i++) {
-            this.identities.push(ValidatorIdentity.generate());
+            this.identities.push(this.presetIdentities
+                ? { pubkeyHex: this.presetIdentities[i].pubkeyHex, privkeyHex: this.presetIdentities[i].privkeyHex }
+                : ValidatorIdentity.generate());
             this.dbNames.push(this.dbNamePrefix + i);
         }
         this.ports = await _pickFreePorts(this.count, this.basePort);
