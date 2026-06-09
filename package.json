@@ -62,5 +62,8 @@
       "diff": "^8.0.4",
       "serialize-javascript": "^7.0.5"
     }
+  },
+  "engines": {
+    "node": ">=22.0.0"
   }
 }
