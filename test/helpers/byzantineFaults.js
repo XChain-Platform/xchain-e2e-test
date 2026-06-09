@@ -34,6 +34,19 @@ function silenceValidator(hub) {
     return () => { hub.consensus._handleMessage = orig; };
 }
 
+// As silenceValidator, but for the cross-chain DEX PBFT engine (a separate
+// consensus instance from the config Consensus). CrossChainDexConsensus.start()
+// registers an arrow listener that calls `this._handleMessage` at call time, so
+// replacing it on the instance mutes the node's DEX votes (PROPOSE/PREPARE/
+// COMMIT/VIEW_CHANGE) while leaving its config/oracle consensus untouched.
+function silenceDexValidator(hub) {
+    const dex = hub.getCrossChainDex && hub.getCrossChainDex();
+    if (!dex || !dex.consensus) throw new Error('silenceDexValidator: hub has no started cross-chain DEX engine');
+    const orig = dex.consensus._handleMessage;
+    dex.consensus._handleMessage = () => {};
+    return () => { dex.consensus._handleMessage = orig; };
+}
+
 // Build a PRE_PREPARE envelope with a deliberately WRONG digest for its config
 // (a forged proposal). A correct follower must reject it on the digest check and
 // create no pending proposal. `seq` should be above any already-applied seq.
@@ -50,4 +63,4 @@ function forgedPrePrepare(seq, config, blockIndex) {
     };
 }
 
-module.exports = { silenceValidator, forgedPrePrepare };
+module.exports = { silenceValidator, silenceDexValidator, forgedPrePrepare };

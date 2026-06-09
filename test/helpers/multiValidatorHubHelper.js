@@ -121,6 +121,17 @@ class MultiValidatorHub {
             || ('http://' + (process.env.INDEXER_URL || 'localhost') + ':' + (process.env.INDEXER_API_PORT || '12001'));
         this.oracleEpochStart = opts.oracleEpochStart || Date.now() - 60_000;
 
+        // Subsystem toggles. Attestation is the historical default (the harness was
+        // built attestation-first); a DEX-federation run flips startCrossChain on and
+        // can skip attestation to stay lean. At least one must be on to be useful.
+        this.startAttestationSubsystem = opts.startAttestation !== false;
+        this.startCrossChainSubsystem  = opts.startCrossChain === true;
+        // Per-coin cross-chain indexer URLs the DEX engine polls for the offer book.
+        // { LTC: '<url>', DOGE: '<url>', BTC: '<url>' } — wired onto each hub's engine
+        // AFTER startCrossChain (the engine reads indexers at construction, so we
+        // overwrite the resolved map post-start). Absent ⇒ engine idles (no matching).
+        this.crossChainIndexerUrls = opts.crossChainIndexerUrls || null;
+
         this.hubs         = [];
         this.identities   = [];    // [{pubkeyHex, privkeyHex}]
         this.dbNames      = [];
@@ -170,6 +181,10 @@ class MultiValidatorHub {
                 P2P_MSG_DEDUP_TTL:      60000,
                 P2P_MAX_PAYLOAD:        1048576,
                 ORACLE_EPOCH_START:     this.oracleEpochStart,
+                // Long poll so the engine's auto-discovery timer never races the
+                // test's manual _discoverAndMatch() triggers — rounds are driven
+                // deterministically, not on a 15s wall clock.
+                XDEX_POLL_MS:           600000,
             };
 
             const hub = new XChainHub(
@@ -180,9 +195,24 @@ class MultiValidatorHub {
             await hub.start();
             await hub.startP2P();
             await hub.startConsensus();
-            // startOracle, startCrossChain, startReorgHandler, startGovernance
-            // intentionally skipped — the harness is attestation-focused.
-            await hub.startAttestation();
+            // startOracle, startReorgHandler, startGovernance intentionally skipped.
+            if(this.startCrossChainSubsystem){
+                await hub.startCrossChain();
+                // The engine resolved its (empty) per-coin indexer map at construction;
+                // point it at the offer-book mock now. The byzantine test repoints one
+                // hub's map to a divergent book after start().
+                if(this.crossChainIndexerUrls){
+                    let dex = hub.getCrossChainDex && hub.getCrossChainDex();
+                    if(dex && dex.indexers){
+                        for(let coin of Object.keys(this.crossChainIndexerUrls)){
+                            dex.indexers[coin] = { url: this.crossChainIndexerUrls[coin], key: '' };
+                        }
+                    }
+                }
+            }
+            if(this.startAttestationSubsystem){
+                await hub.startAttestation();
+            }
             this.hubs.push(hub);
         }
 
@@ -204,6 +234,10 @@ class MultiValidatorHub {
 
     // Validator pubkeys (hex), in hub index order.
     getPubkeys(){ return this.identities.map(id => id.pubkeyHex); }
+
+    // CrossChainDexEngine instances, in hub index order (null per hub when the
+    // DEX subsystem wasn't started). Used by DEX-federation tests to drive rounds.
+    getCrossChainDexes(){ return this.hubs.map(h => (h.getCrossChainDex && h.getCrossChainDex()) || null); }
 
     // Wire a broadcast hook into each hub's AttestationPublisher. Only the
     // round leader actually invokes it (others no-op per request), so a
@@ -249,6 +283,11 @@ class MultiValidatorHub {
     async _stopOne(hub){
         // Stop attestation subsystems first (their poll timers + message
         // handlers reference peerManager; clearing first avoids hits after close).
+        // Stop the DEX engine + anchor first (their poll/flush timers + the consensus
+        // message handler reference peerManager; clear before the WS force-close).
+        if (hub.getCrossChainDexAnchor && hub.getCrossChainDexAnchor() && typeof hub.getCrossChainDexAnchor().stop === 'function') await _withTimeout(hub.getCrossChainDexAnchor().stop(), 3000, 'crossChainDexAnchor.stop');
+        if (hub.getCrossChainDex && hub.getCrossChainDex() && typeof hub.getCrossChainDex().stop === 'function') await _withTimeout(hub.getCrossChainDex().stop(), 3000, 'crossChainDex.stop');
+
         if (hub.attestationSpotChecker && typeof hub.attestationSpotChecker.stop === 'function') await _withTimeout(hub.attestationSpotChecker.stop(), 3000, 'attestationSpotChecker.stop');
         if (hub.attestationRound       && typeof hub.attestationRound.stop       === 'function') await _withTimeout(hub.attestationRound.stop(),       3000, 'attestationRound.stop');
         if (hub.attestationConsensus   && typeof hub.attestationConsensus.stop   === 'function') await _withTimeout(hub.attestationConsensus.stop(),   3000, 'attestationConsensus.stop');
@@ -296,4 +335,4 @@ class MultiValidatorHub {
     }
 }
 
-module.exports = { MultiValidatorHub };
+module.exports = { MultiValidatorHub, ValidatorIdentity };
