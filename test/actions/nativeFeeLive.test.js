@@ -126,7 +126,8 @@ describe('Native-coin fee payment (live stack)', function () {
         await seedPrice('XCHAIN/USD', '1.00000000', tip, 999200011)
         await seedPrice(COIN_CODE + '/USD', '100000.00000000', tip, 999200012)
 
-        let addr = await cryptoHelper.getNewFundedAddress("NATIVEFEE.NEG", COIN, NETWORK, null, "legacy", 0, 1)
+        // seedGas=false — this case asserts the no-fee-output, no-XCHAIN-balance path.
+        let addr = await cryptoHelper.getNewFundedAddress("NATIVEFEE.NEG", COIN, NETWORK, null, "legacy", 0, 1, false)
         let address = addr["address"]
         let tick = "NFN" + address.substring(address.length - 8)
 

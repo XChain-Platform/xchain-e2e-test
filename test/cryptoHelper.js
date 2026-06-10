@@ -67,7 +67,7 @@ module.exports = {
         return {mnemonic: wallet.mnemonic, privateKey: address.privateKey, publicKey: address.publicKey, address:testAddress}
     },
     
-    async getNewFundedAddress(label, coin, network, mnemonic = null, addressType="legacy", addressIndex=0, amountToFund){
+    async getNewFundedAddress(label, coin, network, mnemonic = null, addressType="legacy", addressIndex=0, amountToFund, seedGas = true){
         let newAddressInfo = await this.getNewAddress(label, coin, network, mnemonic, addressType, addressIndex)
         let newAddress = newAddressInfo["address"]
 
@@ -108,6 +108,17 @@ module.exports = {
             const sync = await utxoTrackerConnector.getSyncStatus()
             const syncStr = sync ? `tracker=${sync.tracker_height} node=${sync.node_height} lag=${sync.lag}` : "sync-status=unavailable"
             throw new Error(`The utxo tracker couldn't parse the utxo (${syncStr})`)
+        }
+
+        if (seedGas) {
+            // UNIFIED_FEES + ISSUANCE_FEE activate at block 0 on regtest/testnet, so a
+            // freshly funded address can't pay gas-schedule fees (ISSUE = 1 XCHAIN).
+            // XCHAIN is an open-mint faucet on test networks — grab gas here so every
+            // "funded" address is actually usable. Tests that need a zero-gas address
+            // (e.g. the native-fee negative case) pass seedGas=false.
+            const gasHelper = require('./helpers/gasHelper')
+            console.log("Minting 100 XCHAIN gas to " + newAddress)
+            await gasHelper.ensureGasBalance(newAddressInfo, 100)
         }
 
         return newAddressInfo
