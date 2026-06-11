@@ -105,6 +105,14 @@ function contractIndexOf(indexed) {
     return a ? a.action_index : null;
 }
 
+// Per-action status. The waiter's normalized top-level `status` only goes
+// non-valid for "invalid:"-prefixed rejections; VM execution failures
+// ('failed' / 'reverted' / 'out_of_resource') live on the action row itself.
+function actionStatusOf(indexed) {
+    const a = indexed && Array.isArray(indexed.actions) ? indexed.actions[0] : null;
+    return a ? a.status : (indexed && indexed.status);
+}
+
 async function readState(sdk, contractIndex, key) {
     const state = await sdk.getContractState(contractIndex, key);
     const rows = (state && state.data) || [];
@@ -168,9 +176,9 @@ describe('[sdk] cross-contract calls (emit.execute)', function () {
             { pubkey: deployer.address, change: deployer.address },
             submitOpts({ wif: deployer.wif })
         );
-        console.log('    [sdk] EXECUTE callFail status=' + res.indexed.status);
-        // 'emission failed: EXECUTE: reverted' → stable 'failed' token
-        expect(res.indexed.status).to.equal('failed');
+        console.log('    [sdk] EXECUTE callFail status=' + actionStatusOf(res.indexed));
+        // 'emission failed: EXECUTE: reverted' → stable 'failed' token on the action row
+        expect(actionStatusOf(res.indexed)).to.equal('failed');
         await mine(1);
 
         // A's own pre-call state write must NOT survive
@@ -185,8 +193,8 @@ describe('[sdk] cross-contract calls (emit.execute)', function () {
             { pubkey: deployer.address, change: deployer.address },
             submitOpts({ wif: deployer.wif })
         );
-        console.log('    [sdk] EXECUTE recurse status=' + res.indexed.status);
-        expect(res.indexed.status).to.equal('failed');
+        console.log('    [sdk] EXECUTE recurse status=' + actionStatusOf(res.indexed));
+        expect(actionStatusOf(res.indexed)).to.equal('failed');
         await mine(1);
         // depthMarker would have been written at every level — all rolled back
         expect(await readState(sdk, indexA, 'depthMarker')).to.equal(null);
