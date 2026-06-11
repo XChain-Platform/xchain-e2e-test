@@ -8,6 +8,9 @@ RUN mkdir /XChainE2ETest/
 # Must precede the package.json COPY so npm ci can resolve the
 # file:./xchain-hub dep.
 COPY ./xchain-hub /XChainE2ETest/xchain-hub
+# xchain-sdk is staged the same way (LIBRARY_BUNDLES) so the test:sdk
+# suites can resolve it via the file: dep inside the image.
+COPY ./xchain-sdk /XChainE2ETest/xchain-sdk
 COPY ./package.json /XChainE2ETest/package.json
 COPY ./package-lock.json /XChainE2ETest/package-lock.json
 WORKDIR /XChainE2ETest

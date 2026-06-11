@@ -4,6 +4,7 @@ node_modules/
 perf-results/
 # Staged at build time by xchain-node (LIBRARY_BUNDLES) — not part of the repo
 /xchain-hub/
+/xchain-sdk/
 
 # Coverage output (c8/nyc) — generated, not source
 coverage/

@@ -17,7 +17,8 @@
     "mariadb": "3.5.2",
     "mocha": "^11.7.2",
     "tiny-secp256k1": "2.2.4",
-    "xchain-hub": "file:./xchain-hub"
+    "xchain-hub": "file:./xchain-hub",
+    "xchain-sdk": "file:./xchain-sdk"
   },
   "scripts": {
     "test": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/actions/**/*.test.js'",
@@ -29,7 +30,9 @@
     "test:security": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/security/**/*.test.js'",
     "test:smoke": "mocha --bail --timeout 30000 --exit --require ./test/initialCheck.test.js 'test/smoke/**/*.smoke.js'",
     "test:unit": "mocha 'test/unit/**/*.test.js'",
-    "test:integration": "mocha 'test/integration/**/*.test.js'",
+    "test:integration": "npm run test:integration:stubbed && npm run test:integration:live",
+    "test:integration:stubbed": "mocha --timeout 0 --exit 'test/integration/*/**/*.test.js'",
+    "test:integration:live": "mocha --timeout 0 --exit 'test/integration/*.integration.test.js'",
     "test:e2e": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/e2e/**/*.e2e.js'",
     "test:boundary": "mocha 'test/boundary/**/*.boundary.js'",
     "test:fuzz": "mocha --timeout 60000 'test/fuzz/**/*.fuzz.js'",
