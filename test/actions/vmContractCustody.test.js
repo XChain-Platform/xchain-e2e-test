@@ -163,6 +163,10 @@ describe('VM Contract Custody — emitted entities belong to the contract, not t
         const ci = dep.contract.action_index
         const contractAddr = `C:${CHAIN}:${ci}`
 
+        // The emitted ISSUE pays the issuance fee from the CONTRACT's balance (economic
+        // fees stay intact for emissions — only the per-tx processing fee is skipped).
+        await vmHelper.sendDepositV0(deployer, ci, 'XCHAIN', 10)
+
         const ex = await vmHelper.sendExecuteV0(deployer, ci, 'create', [tick])
         assert.strictEqual(ex.execution.status, 'valid')
         const em = await emissionsFor(ex.execution.action_index)
@@ -184,6 +188,9 @@ describe('VM Contract Custody — emitted entities belong to the contract, not t
         const dep = await vmHelper.sendDeployV0(deployer, ISSUER, 300000)
         const ci = dep.contract.action_index
         const contractAddr = `C:${CHAIN}:${ci}`
+
+        // Fund the contract for the emitted ISSUE's issuance fee (see custody test above).
+        await vmHelper.sendDepositV0(deployer, ci, 'XCHAIN', 10)
 
         const ex = await vmHelper.sendExecuteV0(deployer, ci, 'create', [tick])
         assert.strictEqual(ex.execution.status, 'valid')
@@ -214,6 +221,9 @@ describe('VM Contract Custody — emitted entities belong to the contract, not t
         const dep = await vmHelper.sendDeployV0(deployer, ISSUER, 300000)
         const ci = dep.contract.action_index
         const contractAddr = `C:${CHAIN}:${ci}`
+
+        // Fund the contract for the emitted ISSUE's issuance fee (see custody test above).
+        await vmHelper.sendDepositV0(deployer, ci, 'XCHAIN', 10)
 
         let ex = await vmHelper.sendExecuteV0(deployer, ci, 'create', [tick])
         assert.strictEqual(ex.execution.status, 'valid')

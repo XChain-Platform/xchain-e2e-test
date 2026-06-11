@@ -221,6 +221,9 @@ describe('VM Extended — on-chain capabilities', function () {
             const ci = dep.contract.action_index
             const tick = randTick('VMI')
 
+            // The emitted ISSUE pays the issuance fee from the CONTRACT's balance — fund it.
+            await vmHelper.sendDepositV0(deployer, ci, 'XCHAIN', 10)
+
             const ex = await vmHelper.sendExecuteV0(deployer, ci, 'mintToken', [tick])
             assert(ex.execution, 'mintToken should produce an execution row')
             assert.strictEqual(ex.execution.status, 'valid')

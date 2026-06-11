@@ -65,7 +65,9 @@ async function waitFor(fn, timeoutMs = 10000, stepMs = 150) {
 const count = (pool, table, where = '1') => pool.query('SELECT COUNT(*) c FROM ' + table + ' WHERE ' + where).then(r => Number(r[0].c)).catch(() => 0);
 
 describe('Hub-DB WS mirror — live broadcaster ↔ sync (distributed) @integration', function () {
-    this.timeout(120000);
+    // 300s: the disposable MariaDB alone takes ~40s on a loaded host (tmpfs
+    // datadir; was 60s+ on disk) before the broadcaster↔sync bootstrap runs.
+    this.timeout(300000);
     const SRC = 'HubWsMirror_src', REP = 'HubWsMirror_replica';
     let db, srcPool, repPool, server, wss, broadcaster, sync, port;
 

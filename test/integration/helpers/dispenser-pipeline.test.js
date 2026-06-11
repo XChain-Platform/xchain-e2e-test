@@ -54,7 +54,7 @@ describe('Dispenser Helper → DB Assertion Pipeline', function () {
 
     describe('Scenario 3.3.3: Dispenser V0 complex parameter mapping', function () {
 
-        it('maps all 15 parameters correctly to message and DB filter', async function () {
+        it('maps all parameters correctly to message and DB filter', async function () {
             let waitForDispenserArgs = null
 
             global.indexerDatabase = {
@@ -76,15 +76,18 @@ describe('Dispenser Helper → DB Assertion Pipeline', function () {
                 'getAddr123',    // getAddress
                 'USD',           // fiatCode
                 '1.50',          // fiatAmount
+                null,            // oracleAddress → ""
                 '999999',        // expiration
                 'allowAddr1',    // allowList
                 'blockAddr1',    // blockList
                 'test dispenser' // memo
             )
 
-            // Verify message construction — all 15 fields in pipe-delimited order
+            // Verify message construction — pipe-delimited order incl. the
+            // GIVE_OWNERSHIP (empty = 0) and ORACLE_ADDRESS slots:
+            // VERSION|GIVE_COIN|GIVE_TICK|GIVE_AMOUNT|GIVE_OWNERSHIP|GIVE_ESCROW|GET_COIN|GET_TICK|GET_AMOUNT|GET_ADDRESS|FIAT_CODE|FIAT_AMOUNT|ORACLE_ADDRESS|EXPIRATION|ALLOW_LIST|BLOCK_LIST|MEMO
             const message = createTxStub.firstCall.args[1]
-            assert(message.startsWith('DISPENSER|0|BTC|MYTOKEN|10|100||OTHERTOKEN|5|getAddr123|USD|1.50|999999|allowAddr1|blockAddr1|test dispenser'))
+            assert(message.startsWith('DISPENSER|0|BTC|MYTOKEN|10||100||OTHERTOKEN|5|getAddr123|USD|1.50||999999|allowAddr1|blockAddr1|test dispenser'))
 
             // Verify waitForDispenser received all filter parameters
             assert(waitForDispenserArgs, 'waitForDispenser should have been called')
@@ -128,6 +131,7 @@ describe('Dispenser Helper → DB Assertion Pipeline', function () {
                 'addr',    // getAddress
                 null,      // fiatCode → ""
                 null,      // fiatAmount → ""
+                null,      // oracleAddress → ""
                 null,      // expiration → ""
                 null,      // allowList → ""
                 null,      // blockList → ""
@@ -136,8 +140,8 @@ describe('Dispenser Helper → DB Assertion Pipeline', function () {
 
             const message = createTxStub.firstCall.args[1]
             // Null fields coerced to empty strings: giveCoin,giveTick → "",""
-            // Format: DISPENSER|0|giveCoin|giveTick|giveAmount|giveEscrow|getCoin|getTick|getAmount|getAddress|fiatCode|fiatAmount|expiration|allowList|blockList|memo
-            assert.strictEqual(message, 'DISPENSER|0|||10|100|||5|addr||||||memo')
+            // Format: DISPENSER|0|GIVE_COIN|GIVE_TICK|GIVE_AMOUNT|GIVE_OWNERSHIP|GIVE_ESCROW|GET_COIN|GET_TICK|GET_AMOUNT|GET_ADDRESS|FIAT_CODE|FIAT_AMOUNT|ORACLE_ADDRESS|EXPIRATION|ALLOW_LIST|BLOCK_LIST|MEMO
+            assert.strictEqual(message, 'DISPENSER|0|||10||100|||5|addr|||||||memo')
         })
     })
 })

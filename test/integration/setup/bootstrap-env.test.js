@@ -190,7 +190,10 @@ describe('Bootstrap — environment variable path', function () {
             assert.strictEqual(result.COIN, 'dogecoin')
             assert.strictEqual(result.NETWORK, 'regtest')
             assert.strictEqual(result.COIN_CODE, 'DOGE')
-            assert.strictEqual(result.NETWORK_OBJECT.pubKeyHash, 0x71)
+            // Dogecoin v1.14 regtest uses Bitcoin-testnet-style prefixes
+            // (0x6f), NOT the Dogecoin testnet prefix 0x71 — dogecoind
+            // rejects 0x71 regtest addresses (CryptoNetworks.js, 10ca0c6).
+            assert.strictEqual(result.NETWORK_OBJECT.pubKeyHash, 0x6f)
         })
     })
 

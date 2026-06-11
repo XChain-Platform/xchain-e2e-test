@@ -72,8 +72,11 @@ describe('Funding Flow — cryptoHelper.getNewFundedAddress', function () {
                 }
             }
 
+            // seedGas=false — the faucet gas-mint rides the full encoder pipeline,
+            // which these connector stubs don't model; it's covered by the live e2e
+            // suites (every action test funds through it).
             const result = await cryptoHelper.getNewFundedAddress(
-                'FUNDING.TEST', 'bitcoin', 'regtest', null, 'legacy', 0, 1
+                'FUNDING.TEST', 'bitcoin', 'regtest', null, 'legacy', 0, 1, false
             )
 
             // Returns a valid address info object
@@ -118,18 +121,21 @@ describe('Funding Flow — cryptoHelper.getNewFundedAddress', function () {
 
         it('throws when waitForUtxos returns false', async function () {
             global.regtestMinerConnector = {
-                sendFunds: async () => 'sometxid'
+                sendFunds: async () => 'sometxid',
+                generateBlocks: async () => []
             }
             global.nodeConnector = {
                 waitForTx: async () => true
             }
             global.utxoTrackerConnector = {
-                waitForUtxos: async () => false
+                waitForUtxos: async () => false,
+                getSyncStatus: async () => null
             }
 
             await assert.rejects(
-                () => cryptoHelper.getNewFundedAddress('FAIL.TEST2', 'bitcoin', 'regtest', null, 'legacy', 0, 1),
-                { message: "The utxo tracker couldn't parse the utxo" }
+                () => cryptoHelper.getNewFundedAddress('FAIL.TEST2', 'bitcoin', 'regtest', null, 'legacy', 0, 1, false),
+                // Message carries a tracker/node sync-state suffix for stall diagnosis.
+                { message: /The utxo tracker couldn't parse the utxo/ }
             )
         })
     })
