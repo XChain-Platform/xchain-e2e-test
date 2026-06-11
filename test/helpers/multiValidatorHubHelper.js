@@ -40,7 +40,7 @@ const mariadb = require('mariadb');
 // (host-process dev), under xchain-node's modules/, or staged into the
 // e2e build context by LIBRARY_BUNDLES (in-container at /XChainE2ETest/
 // xchain-hub/). Try a few well-known locations or accept an explicit override.
-function _loadHubModule(rel){
+function _resolveHubFile(rel){
     const candidates = [
         process.env.XCHAIN_HUB_PATH && path.join(process.env.XCHAIN_HUB_PATH, rel),
         path.resolve(__dirname, '../../xchain-hub', rel),                          // bundled into e2e image
@@ -49,15 +49,17 @@ function _loadHubModule(rel){
         path.resolve(__dirname, '../../../../../modules/xchain-hub', rel)          // installed via xchain-node
     ].filter(Boolean);
     for (const p of candidates) {
-        try {
-            if (fs.existsSync(p)) return require(p);
-        } catch (_) { /* try next */ }
+        if (fs.existsSync(p)) return p;
     }
     throw new Error(
         'MultiValidatorHub: cannot resolve xchain-hub source. Set XCHAIN_HUB_PATH ' +
         'to the xchain-hub directory or place xchain-hub adjacent to xchain-e2e-test. ' +
         'Tried: ' + candidates.join(', ')
     );
+}
+
+function _loadHubModule(rel){
+    return require(_resolveHubFile(rel));
 }
 
 const XChainHub        = _loadHubModule('src/XChainHub.js');
@@ -295,9 +297,8 @@ class MultiValidatorHub {
     async _stopOne(hub){
         // Stop attestation subsystems first (their poll timers + message
         // handlers reference peerManager; clearing first avoids hits after close).
-        // Stop the DEX engine + anchor first (their poll/flush timers + the consensus
+        // Stop the DEX engine first (its poll/flush timers + the consensus
         // message handler reference peerManager; clear before the WS force-close).
-        if (hub.getCrossChainDexAnchor && hub.getCrossChainDexAnchor() && typeof hub.getCrossChainDexAnchor().stop === 'function') await _withTimeout(hub.getCrossChainDexAnchor().stop(), 3000, 'crossChainDexAnchor.stop');
         if (hub.getCrossChainDex && hub.getCrossChainDex() && typeof hub.getCrossChainDex().stop === 'function') await _withTimeout(hub.getCrossChainDex().stop(), 3000, 'crossChainDex.stop');
 
         if (hub.attestationSpotChecker && typeof hub.attestationSpotChecker.stop === 'function') await _withTimeout(hub.attestationSpotChecker.stop(), 3000, 'attestationSpotChecker.stop');
@@ -347,4 +348,4 @@ class MultiValidatorHub {
     }
 }
 
-module.exports = { MultiValidatorHub, ValidatorIdentity };
+module.exports = { MultiValidatorHub, ValidatorIdentity, loadHubModule: _loadHubModule, resolveHubFile: _resolveHubFile };

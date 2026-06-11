@@ -33,6 +33,16 @@
  * mirror TRANSPORT (hub_db_sync WS/REST) is covered by its own unit + L2
  * tests; this run accepts the ON-CHAIN pipeline.
  *
+ * SIGNER PATH IS PRODUCTION: broadcasts go through the hub's signer-loader
+ * (HUB_SIGNER_MODULE) loading a staged copy of examples/doge-signer.example.js
+ * — the exact module operators install in ~/hub-signer — which drives the sdk
+ * two-phase P2SH pipeline (encoder createTx → signPsbt → broadcast →
+ * spendP2sh → signRevealPsbt → broadcast). A walletSign-only or custom test
+ * hook would skip the phase-2 reveal path, which is precisely where the
+ * 2026-06-11 mainnet shakedown bug hid. The test only wraps the production
+ * hook to mine + quiesce after each publish (regtest has no organic blocks,
+ * and the tracker must see fresh UTXOs between the v0 and v1 publishes).
+ *
  * The follow-up recovery drill (wipe indexer DB → reindex from chain →
  * src/recovery.js → byte-identical hash triples) is driven by the runner
  * after this suite passes — see the acceptance report.
@@ -45,9 +55,12 @@ const crypto = require('crypto');
 const zlib   = require('zlib');
 const path   = require('path');
 
+const fs = require('fs');
+const { encode: wifEncode } = require('wif');
+
 const cryptoHelper      = require('../cryptoHelper');
-const transactionHelper = require('../transactionHelper');
-const { MultiValidatorHub, ValidatorIdentity } = require('../helpers/multiValidatorHubHelper');
+const CryptoNetworks    = require('../../src/CryptoNetworks');
+const { MultiValidatorHub, ValidatorIdentity, loadHubModule, resolveHubFile } = require('../helpers/multiValidatorHubHelper');
 
 const SNAPSHOT_BLOCK = 100;            // deterministic regtest anchor (XDEX_SNAPSHOT_BLOCK)
 
@@ -58,8 +71,47 @@ describe('ANCHOR live acceptance — DOGE regtest on-chain pipeline', function (
 
     let mvh = null, hub = null, identity = null;
     let publisherAddr = null;
-    let broadcasts = [];               // { payload, txid }
+    let signerDir = null;              // staged production signer (~/hub-signer analogue)
+    let broadcasts = [];               // { payload, txid, phase1_txid }
     let matchId = crypto.createHash('sha256').update('anchor-acceptance-' + Date.now()).digest('hex');
+
+    // Stage examples/doge-signer.example.js the way an operator installs it:
+    // its own directory with its own node_modules (symlinked to the checkouts
+    // the e2e host already has), loaded via HUB_SIGNER_MODULE through the
+    // hub's REAL signer-loader boot path.
+    function stageProductionSigner(addressInfo){
+        const examplePath = resolveHubFile('examples/doge-signer.example.js');
+        // os.tmpdir(), NOT __dirname: the e2e tree may live on a Parallels
+        // share where symlink creation is unreliable; /tmp is always local.
+        signerDir = path.join(require('os').tmpdir(), 'xchain-anchor-signer-' + process.pid);
+        fs.rmSync(signerDir, { recursive: true, force: true });
+        fs.mkdirSync(path.join(signerDir, 'node_modules'), { recursive: true });
+        fs.copyFileSync(examplePath, path.join(signerDir, 'signer.js'));
+        for (const dep of ['xchain-sdk', 'dotenv']) {
+            let target;
+            try { target = path.dirname(require.resolve(dep + '/package.json')); }
+            catch (e) {
+                target = path.resolve(__dirname, '../../../', dep);            // monorepo sibling checkout
+                if (!fs.existsSync(target)) throw new Error('cannot resolve ' + dep + ' for the staged signer');
+            }
+            fs.symlinkSync(target, path.join(signerDir, 'node_modules', dep), 'dir');
+        }
+
+        // The signer's .env contract, via process env (dotenv never overrides
+        // existing vars, and no .env file is written — the WIF stays in memory).
+        const network = CryptoNetworks.getBitcoinJsNetwork(COIN + '-' + NETWORK);
+        process.env.DOGE_NETWORK     = COIN + '-' + NETWORK;
+        process.env.DOGE_ADDRESS     = addressInfo.address;
+        process.env.DOGE_WIF         = wifEncode(network.wif, Buffer.from(addressInfo.privateKey), true);
+        process.env.DOGE_ENCODER_URL = 'http://' + (process.env.ENCODER_URL || 'localhost') + ':' +
+                                       (process.env.ENCODER_API_PORT || '3023');
+        process.env.HUB_SIGNER_MODULE = path.join(signerDir, 'signer.js');
+
+        const { loadSignerHooks } = loadHubModule('src/lib/signer-loader.js');
+        const hooks = loadSignerHooks(process.env);
+        assert.ok(hooks && hooks.broadcastFn, 'signer-loader wired the example signer\'s broadcast hook');
+        return hooks;
+    }
 
     async function indexerQuery(sql, params){
         let conn = await indexerDatabase.getConnection();
@@ -96,12 +148,17 @@ describe('ANCHOR live acceptance — DOGE regtest on-chain pipeline', function (
         await regtestMinerConnector.generateBlocks(2);
         await utxoTrackerConnector.quiesce({ timeoutMs: 60000, pollMs: 250, regtestMiner: regtestMinerConnector });
 
+        // PRODUCTION signer path: signer-loader → staged doge-signer.example.js
+        // → sdk two-phase P2SH pipeline. The wrapper only adds regtest
+        // block-production so the tracker sees fresh UTXOs before the next
+        // publish in the same flush.
+        const hooks = stageProductionSigner(publisherAddr);
         hub.stateAnchorPublisher.setBroadcastHook(async (payload) => {
-            const txid = await transactionHelper.createAndSendTransaction(publisherAddr, payload);
-            broadcasts.push({ payload, txid });
+            const result = await hooks.broadcastFn(payload);
+            broadcasts.push({ payload, txid: result.txid, phase1_txid: result.phase1_txid });
             await regtestMinerConnector.generateBlocks(1);
             await utxoTrackerConnector.quiesce({ timeoutMs: 60000, pollMs: 250, regtestMiner: regtestMinerConnector });
-            return { txid };
+            return result;
         });
 
         // Rerunnability on a dirty regtest chain: the indexer's replay guards
@@ -135,6 +192,9 @@ describe('ANCHOR live acceptance — DOGE regtest on-chain pipeline', function (
 
     after(async function () {
         if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
+        if (signerDir) fs.rmSync(signerDir, { recursive: true, force: true });
+        delete process.env.DOGE_WIF;
+        delete process.env.HUB_SIGNER_MODULE;
     });
 
     it('checkpoints REAL indexer state and lands quorum-signed ANCHOR v0+v1 on the DOGE chain', async function () {
@@ -197,14 +257,27 @@ describe('ANCHOR live acceptance — DOGE regtest on-chain pipeline', function (
             'INSERT IGNORE INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount) VALUES (?, ?, ?, ?)',
             [snapBlock, 'cross_chain', identity.getPubkeyHex().toLowerCase(), '1']);
 
-        // 2. Flush → REAL on-chain publication (v0 checkpoint + v1 archive).
-        await hub.stateAnchorPublisher.flush();
+        // 2. Flush → REAL on-chain publication (v0 checkpoint + v1 archive)
+        // through the production signer pipeline.
+        let summary = await hub.stateAnchorPublisher.flush();
         assert.ok(broadcasts.length >= 2, 'expected v0 + v1 broadcasts, got ' + broadcasts.length);
         let v0 = broadcasts.find(b => b.payload.split('|')[1] === '0');
         let v1 = broadcasts.find(b => b.payload.split('|')[1] === '1');
         assert.ok(v0 && v0.txid, 'v0 published with a real txid');
         assert.ok(v1 && v1.txid, 'v1 published with a real txid');
-        console.log('    on-chain: v0 ' + v0.txid + ' / v1 ' + v1.txid);
+        // The two-phase property the walletSign-only gap used to hide: each
+        // publish must produce a DISTINCT phase-1 funding tx and phase-2
+        // reveal tx (the decodable one). A single-tx publish here means the
+        // reveal leg silently vanished — exactly the production bug class.
+        for (let b of [v0, v1]) {
+            assert.ok(b.phase1_txid, 'publish went two-phase (phase-1 txid present)');
+            assert.notStrictEqual(b.phase1_txid, b.txid, 'phase-2 reveal txid differs from phase-1');
+        }
+        // The flush summary reports the same publication (anchorflush RPC surface).
+        assert.strictEqual(summary.anchored.length, 1, 'flush summary reports the v0 anchor');
+        assert.strictEqual(summary.anchored[0].txid, v0.txid);
+        assert.strictEqual(summary.archive, 'published');
+        console.log('    on-chain: v0 ' + v0.txid + ' / v1 ' + v1.txid + ' (phase-1: ' + v0.phase1_txid + ' / ' + v1.phase1_txid + ')');
 
         // 3. Confirm + let decoder/indexer catch up, then assert OUR parsed rows
         // (a dirty chain may carry anchors from prior runs — match on content).
