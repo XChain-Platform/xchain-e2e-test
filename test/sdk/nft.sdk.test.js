@@ -43,6 +43,33 @@ function rawBalance(balances, tick) {
 // Pass requireValid:false so the waiter returns it instead of throwing.
 function expectInvalid(opts) { return submitOpts(Object.assign({ requireValid: false }, opts)); }
 
+// submitAction's `indexed` result is a transaction ({ actions: [{ action_index }] }) on
+// the polling path, or a single action on the WS path — handle both (matches the other
+// sdk e2e suites).
+function actionIndexOf(indexed) {
+    if (!indexed) return undefined;
+    if (indexed.action_index !== undefined && indexed.action_index !== null) return indexed.action_index;
+    const a = Array.isArray(indexed.actions) ? indexed.actions[0] : null;
+    return a ? a.action_index : undefined;
+}
+
+// The per-action status on the indexed transaction is the reliable signal;
+// res.indexed.status is computed by the SDK waiter and is inconsistent across its
+// WS/polling paths (invalid actions can read as 'valid' on the polling path).
+function statusOf(res) {
+    const a = res && res.indexed && Array.isArray(res.indexed.actions) ? res.indexed.actions[0] : null;
+    return (a && a.status) || (res && res.indexed && res.indexed.status);
+}
+
+// Classify by re-fetching the action's FLAT record via getAction (has decimals /
+// lock_max_supply). getToken returns a nested display object whose fields isNft
+// can't read, so it's the wrong input for classification.
+async function classifyNft(sdk, res) {
+    const idx = actionIndexOf(res && res.indexed);
+    if (idx === undefined || idx === null) return false;
+    return sdk.nft.isNft(await sdk.getAction(idx));
+}
+
 describe('[sdk] NFT pattern (ISSUE DECIMALS=0 + LOCK_MAX_SUPPLY=1)', function () {
     this.timeout(0);
 
@@ -62,10 +89,8 @@ describe('[sdk] NFT pattern (ISSUE DECIMALS=0 + LOCK_MAX_SUPPLY=1)', function ()
             { pubkey: issuer.address, change: issuer.address },
             submitOpts({ wif: issuer.wif })
         );
-        expect(res.indexed.status, 'unique ISSUE').to.equal('valid');
-
-        const token = await sdk.getToken(tick);
-        expect(sdk.nft.isNft(token), 'classifier sees an NFT').to.equal(true);
+        expect(statusOf(res), 'unique ISSUE').to.equal('valid');
+        expect(await classifyNft(sdk, res), 'classifier sees an NFT').to.equal(true);
         expect(String(rawBalance(await sdk.getBalances(issuer.address), tick)), 'issuer holds the 1-of-1').to.equal('1');
     });
 
@@ -83,10 +108,8 @@ describe('[sdk] NFT pattern (ISSUE DECIMALS=0 + LOCK_MAX_SUPPLY=1)', function ()
             { pubkey: issuer.address, change: issuer.address },
             submitOpts({ wif: issuer.wif })
         );
-        expect(res.indexed.status, 'zero-supply fair-mint lock').to.equal('valid');
-
-        const token = await sdk.getToken(tick);
-        expect(sdk.nft.isNft(token), 'locked fair-mint edition is an NFT').to.equal(true);
+        expect(statusOf(res), 'zero-supply fair-mint lock').to.equal('valid');
+        expect(await classifyNft(sdk, res), 'locked fair-mint edition is an NFT').to.equal(true);
     });
 
     it('rejects LOCK_MAX_SUPPLY when no MAX_SUPPLY cap is declared (brick guard)', async function () {
@@ -96,7 +119,7 @@ describe('[sdk] NFT pattern (ISSUE DECIMALS=0 + LOCK_MAX_SUPPLY=1)', function ()
             { pubkey: issuer.address, change: issuer.address },
             expectInvalid({ wif: issuer.wif })
         );
-        expect(res.indexed.status, 'lock with no cap').to.match(/^invalid/);
+        expect(statusOf(res), 'lock with no cap').to.match(/^invalid/);
     });
 
     it('enforces indivisibility: a fractional SEND of an NFT is rejected', async function () {
@@ -106,14 +129,14 @@ describe('[sdk] NFT pattern (ISSUE DECIMALS=0 + LOCK_MAX_SUPPLY=1)', function ()
             { pubkey: issuer.address, change: issuer.address },
             submitOpts({ wif: issuer.wif })
         );
-        expect(res.indexed.status, 'NFT ISSUE').to.equal('valid');
+        expect(statusOf(res), 'NFT ISSUE').to.equal('valid');
 
         res = await submit(sdk,
             { action: 'SEND', params: { tick, amount: '0.5', destination: other.address } },
             { pubkey: issuer.address, change: issuer.address },
             expectInvalid({ wif: issuer.wif })
         );
-        expect(res.indexed.status, 'fractional NFT SEND').to.match(/^invalid/);
+        expect(statusOf(res), 'fractional NFT SEND').to.match(/^invalid/);
     });
 
     describe('collections (parent/child sub-TICKs)', function () {
@@ -126,7 +149,7 @@ describe('[sdk] NFT pattern (ISSUE DECIMALS=0 + LOCK_MAX_SUPPLY=1)', function ()
                 { pubkey: issuer.address, change: issuer.address },
                 submitOpts({ wif: issuer.wif })
             );
-            expect(res.indexed.status, 'parent ISSUE').to.equal('valid');
+            expect(statusOf(res), 'parent ISSUE').to.equal('valid');
         });
 
         it('the parent owner can issue a child item', async function () {
@@ -135,8 +158,8 @@ describe('[sdk] NFT pattern (ISSUE DECIMALS=0 + LOCK_MAX_SUPPLY=1)', function ()
                 { pubkey: issuer.address, change: issuer.address },
                 submitOpts({ wif: issuer.wif })
             );
-            expect(res.indexed.status, 'child ISSUE from owner').to.equal('valid');
-            expect(sdk.nft.isNft(await sdk.getToken(parent + '.I1')), 'child is an NFT').to.equal(true);
+            expect(statusOf(res), 'child ISSUE from owner').to.equal('valid');
+            expect(await classifyNft(sdk, res), 'child is an NFT').to.equal(true);
         });
 
         it('a non-owner cannot issue a child item under the parent', async function () {
@@ -145,7 +168,7 @@ describe('[sdk] NFT pattern (ISSUE DECIMALS=0 + LOCK_MAX_SUPPLY=1)', function ()
                 { pubkey: other.address, change: other.address },
                 expectInvalid({ wif: other.wif })
             );
-            expect(res.indexed.status, 'child ISSUE from non-owner').to.match(/^invalid/);
+            expect(statusOf(res), 'child ISSUE from non-owner').to.match(/^invalid/);
         });
     });
 
@@ -159,16 +182,16 @@ describe('[sdk] NFT pattern (ISSUE DECIMALS=0 + LOCK_MAX_SUPPLY=1)', function ()
                 { pubkey: issuer.address, change: issuer.address },
                 submitOpts({ wif: issuer.wif })
             );
-            expect(issued.indexed.status, 'NFT ISSUE').to.equal('valid');
-            issueActionIndex = issued.indexed.action_index;
+            expect(statusOf(issued), 'NFT ISSUE').to.equal('valid');
+            issueActionIndex = actionIndexOf(issued.indexed);
 
             const file = await submit(sdk,
                 { action: 'FILE', params: { name: 'art.png', type: 'image/png', title: 'Cover' } },
                 { pubkey: issuer.address, change: issuer.address, rawData: Buffer.from('\x89PNG fake bytes').toString('binary') },
                 submitOpts({ wif: issuer.wif })
             );
-            expect(file.indexed.status, 'FILE upload').to.equal('valid');
-            fileActionIndex = file.indexed.action_index;
+            expect(statusOf(file), 'FILE upload').to.equal('valid');
+            fileActionIndex = actionIndexOf(file.indexed);
         });
 
         it('the token owner can LINK a FILE to the token', async function () {
@@ -177,7 +200,7 @@ describe('[sdk] NFT pattern (ISSUE DECIMALS=0 + LOCK_MAX_SUPPLY=1)', function ()
                 { pubkey: issuer.address, change: issuer.address },
                 submitOpts({ wif: issuer.wif })
             );
-            expect(res.indexed.status, 'owner LINK').to.equal('valid');
+            expect(statusOf(res), 'owner LINK').to.equal('valid');
         });
 
         it('a non-owner cannot LINK content to the token', async function () {
@@ -186,7 +209,63 @@ describe('[sdk] NFT pattern (ISSUE DECIMALS=0 + LOCK_MAX_SUPPLY=1)', function ()
                 { pubkey: other.address, change: other.address },
                 expectInvalid({ wif: other.wif })
             );
-            expect(res.indexed.status, 'non-owner LINK').to.match(/^invalid/);
+            expect(statusOf(res), 'non-owner LINK').to.match(/^invalid/);
+        });
+    });
+
+    // Exercises the order_match indivisibility fix on a real DEX trade: an NFT sold
+    // through ORDER must settle an INTEGER amount (the matcher quantizes fills to the
+    // tick's 0 decimals). DB-confirmed so the assertion is deterministic.
+    describe('trading (order_match settles NFTs as integers)', function () {
+        let tick;
+        const expiry = () => Math.floor(Date.now() / 1000) + 90 * 86400;
+
+        before(async function () {
+            tick = uniqueTick('NFTTR');
+            const res = await submit(sdk,
+                { action: 'ISSUE', params: { tick, maxSupply: 5, decimals: 0, lockMaxSupply: 1, mintSupply: 5 } },
+                { pubkey: issuer.address, change: issuer.address },
+                submitOpts({ wif: issuer.wif })
+            );
+            expect(statusOf(res), 'edition ISSUE').to.equal('valid');
+        });
+
+        it('an NFT sell order matched by a buy order settles an integer NFT amount', async function () {
+            // issuer sells 3 NFT for 30 XCHAIN
+            const sell = await submit(sdk,
+                { action: 'ORDER', params: {
+                    giveCoin: COIN, giveTick: tick, giveAmount: 3,
+                    getCoin: COIN, getTick: 'XCHAIN', getAmount: 30,
+                    getAddress: issuer.address, expiration: expiry(),
+                } },
+                { pubkey: issuer.address, change: issuer.address },
+                submitOpts({ wif: issuer.wif })
+            );
+            expect(statusOf(sell), 'sell ORDER').to.equal('valid');
+
+            // other buys 3 NFT for 30 XCHAIN — auto-matches the sell
+            const buy = await submit(sdk,
+                { action: 'ORDER', params: {
+                    giveCoin: COIN, giveTick: 'XCHAIN', giveAmount: 30,
+                    getCoin: COIN, getTick: tick, getAmount: 3,
+                    getAddress: other.address, expiration: expiry(),
+                } },
+                { pubkey: other.address, change: other.address },
+                submitOpts({ wif: other.wif })
+            );
+            expect(statusOf(buy), 'buy ORDER').to.equal('valid');
+
+            // DB-confirm the match settled exactly 3 NFT on the give side — an integer,
+            // not a fractional artifact (this is the order_match indivisibility guarantee).
+            const match = await global.indexerDatabase.waitForOrderMatch({
+                giveTick: tick, getTick: 'XCHAIN', giveAmount: '3', status: 'valid',
+            });
+            expect(match, 'order_match recorded with integer give_amount=3').to.exist;
+
+            // And the buyer holds exactly 3 NFT, no fractional dust.
+            const bal = String(rawBalance(await sdk.getBalances(other.address), tick));
+            expect(bal, 'buyer holds integer NFT amount').to.equal('3');
+            expect(bal.includes('.'), 'no fractional NFT settled').to.equal(false);
         });
     });
 });
