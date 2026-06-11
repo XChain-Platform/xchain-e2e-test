@@ -37,12 +37,17 @@ async function seedPrice(coinPair, price, referenceBlock, roundNumber){
     let conn = await indexerDatabase.getConnection()
     try {
         await conn.query("DELETE FROM price_snapshots WHERE coin_pair = ?", [coinPair])
+        // Anchor block_timestamp to the CHAIN's clock, not Date.now(): the
+        // staleness cap and price matching compare against block times, and
+        // regtest block timestamps drift from wall time under sustained mining.
+        let rows = await conn.query("SELECT block_time FROM blocks ORDER BY block_index DESC LIMIT 1")
+        let chainNow = rows.length ? Number(rows[0].block_time) : Math.floor(Date.now() / 1000)
         await conn.query(
             `INSERT INTO price_snapshots
                (round_number, coin_pair, price, reference_block, reference_chain,
                 block_timestamp, validator_count, consensus_round, consensus_proof, status)
              VALUES (?, ?, ?, ?, 'BTC', ?, 1, 1, '[]', 'finalized')`,
-            [roundNumber, coinPair, price, referenceBlock, Math.floor(Date.now() / 1000) - 60]
+            [roundNumber, coinPair, price, referenceBlock, chainNow - 60]
         )
     } finally { await conn.release() }
 }

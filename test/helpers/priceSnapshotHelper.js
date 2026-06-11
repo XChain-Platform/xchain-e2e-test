@@ -21,22 +21,29 @@ const mariadb = require('mariadb')
 // shortcut topology.
 
 function resolveParams(){
-    if (process.env.HUB_DB_HOST){
+    // Mirror the INDEXER's own resolution exactly: it reads hub-owned price
+    // tables from the hub DB only when BOTH HUB_DB_HOST and HUB_DB_NAME are
+    // configured, otherwise from its LOCAL indexer DB (it logs a warning to
+    // that effect at boot). Seeding must write wherever the indexer reads —
+    // HUB_DB_HOST alone is injected into the e2e container for the federation
+    // suites, so keying on it seeded XChain_Hub while the indexer matched
+    // against its local table: deterministic "no matching price snapshot".
+    if (process.env.HUB_DB_HOST && process.env.HUB_DB_NAME){
         return {
             host:     process.env.HUB_DB_HOST,
             port:     parseInt(process.env.HUB_DB_PORT) || 3306,
-            database: process.env.HUB_DB_NAME || 'XChain_Hub',
+            database: process.env.HUB_DB_NAME,
             user:     process.env.HUB_DB_USER,
             password: process.env.HUB_DB_PASS
         }
     }
-    // Fallback: reuse the e2e MariaDB connection, point at the hub database.
+    // Single-host topology: the indexer reads its own DB — seed there.
     let idb = global.indexerDatabase
     if (!idb) return null
     return {
         host:     idb.host,
         port:     idb.port,
-        database: process.env.HUB_DB_NAME || 'XChain_Hub',
+        database: idb.dbName,
         user:     idb.user,
         password: idb.pass
     }
@@ -70,6 +77,24 @@ module.exports = {
             await conn.query("DELETE FROM price_snapshots WHERE coin_pair = ?", [coinPair])
         } finally {
             await conn.end().catch(() => {})
+        }
+    },
+
+    // Latest indexed block_time — the CHAIN's clock, which is what the indexer
+    // compares snapshots against (reversePriceMatch bounds on the payment tx's
+    // BLOCK_TIME, and the staleness cap measures age vs the block being
+    // processed). Anchor seeds to this, not Date.now(): wall-clock seeds raced
+    // both ways — too old trips ORACLE_MAX_PRICE_AGE_SECONDS (1800s), too new
+    // lands in the chain's future when regtest block timestamps lag wall time.
+    async latestBlockTime(){
+        // Always read blocks from the INDEXER DB (the hub DB has no blocks
+        // table), via the suite's existing pool.
+        let conn = await global.indexerDatabase.getConnection()
+        try {
+            let rows = await conn.query("SELECT block_time FROM blocks ORDER BY block_index DESC LIMIT 1")
+            return rows.length ? Number(rows[0].block_time) : Math.floor(Date.now() / 1000)
+        } finally {
+            await conn.release().catch(() => {})
         }
     },
 

@@ -187,10 +187,11 @@ describe('DISPENSER', () => {
 
             // Seed a deterministic price: 1 coin = 50000 USD.
             //   coin_per_token = FIAT_AMOUNT / price = 100 / 50000 = 0.002 coin
-            // block_timestamp sits 10 min in the past: guaranteed <= the payment
-            // tx block_time (regtest block clock tracks real time) while well
-            // inside ORACLE_MAX_PRICE_AGE_SECONDS (1800s) — the staleness cap
-            // rejects prices older than 30 min vs the block being processed.
+            // Anchor the seed to the CHAIN's clock (latest block_time), 60s in
+            // its past: reversePriceMatch bounds on the payment tx's BLOCK_TIME
+            // and the staleness cap (ORACLE_MAX_PRICE_AGE_SECONDS = 1800s)
+            // measures age vs the processed block — wall-clock seeds raced both
+            // rules depending on how far regtest block timestamps drift.
             let pair  = COIN_CODE + "/USD"
             let price  = 50000
             let fiatAmount = 100
@@ -198,7 +199,7 @@ describe('DISPENSER', () => {
             await priceSnapshotHelper.seedSnapshot({
                 coinPair: pair,
                 price: price.toFixed(8),
-                blockTimestamp: Math.floor(Date.now() / 1000) - 600,
+                blockTimestamp: (await priceSnapshotHelper.latestBlockTime()) - 60,
                 roundNumber: 999000001
             })
 
