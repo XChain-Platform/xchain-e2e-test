@@ -185,9 +185,16 @@ describe('[sdk] NFT pattern (ISSUE DECIMALS=0 + LOCK_MAX_SUPPLY=1)', function ()
             expect(statusOf(issued), 'NFT ISSUE').to.equal('valid');
             issueActionIndex = actionIndexOf(issued.indexed);
 
+            // A real (decodable) 24x24 PNG — an orange square — so the
+            // explorer's raw endpoint serves a renderable image and visual
+            // passes of the NFT surfaces show actual artwork.
+            const ART_PNG = Buffer.from(
+                'iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAIAAABvFaqvAAAAJ0lEQVR4nGNYECBCFcSwIEDk+2QpCtGoQaMGjRo0atCoQSPXIKogAHcNd64kvBMEAAAAAElFTkSuQmCC',
+                'base64'
+            );
             const file = await submit(sdk,
                 { action: 'FILE', params: { name: 'art.png', type: 'image/png', title: 'Cover' } },
-                { pubkey: issuer.address, change: issuer.address, rawData: Buffer.from('\x89PNG fake bytes').toString('binary') },
+                { pubkey: issuer.address, change: issuer.address, rawData: ART_PNG.toString('binary') },
                 submitOpts({ wif: issuer.wif })
             );
             expect(statusOf(file), 'FILE upload').to.equal('valid');
