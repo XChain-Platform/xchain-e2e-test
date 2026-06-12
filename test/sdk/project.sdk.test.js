@@ -29,13 +29,34 @@
  ********************************************************************/
 
 const { expect } = require('chai');
-const { makeSdk, submit, fundedGasAddress, uniqueTick, submitOpts } = require('./sdkHelper');
+const { makeSdk, submit, fundedGasAddress, uniqueTick, submitOpts, isTransientStackError } = require('./sdkHelper');
 
 const COIN = (typeof global.COIN_CODE !== 'undefined' && global.COIN_CODE) || 'BTC';
 
 // An action that the indexer rejects still gets indexed with status 'invalid'.
 // Pass requireValid:false so the waiter returns it instead of throwing.
 function expectInvalid(opts) { return submitOpts(Object.assign({ requireValid: false }, opts)); }
+
+// setRoster drives two submits inside the SDK (LIST then LINK) without the
+// submit() helper's quiesce+retry barrier, so wrap the whole recipe in the
+// same transient-stack retry. Only the first leg (LIST) races the tracker —
+// the LINK leg waits for the LIST to index, which settles the stack.
+async function setRosterWithRetry(sdk, wif, params, opts, attempts = 6) {
+    let lastErr;
+    for (let i = 1; i <= attempts; i++) {
+        try {
+            await global.utxoTrackerConnector.quiesce({ timeoutMs: 20000, pollMs: 250, regtestMiner: global.regtestMinerConnector });
+        } catch (e) { /* best effort */ }
+        try {
+            return await sdk.setRoster(wif, params, opts);
+        } catch (err) {
+            lastErr = err;
+            if (i < attempts && isTransientStackError(err)) continue;
+            throw err;
+        }
+    }
+    throw lastErr;
+}
 
 // submitAction's `indexed` result is a transaction ({ actions: [{ action_index }] }) on
 // the polling path, or a single action on the WS path — handle both.
@@ -92,7 +113,7 @@ describe('[sdk] Project registry (TICK + tick-LIST + owner-validated LINK)', fun
     });
 
     it('owner publishes a multi-item roster and attests it (setRoster recipe)', async function () {
-        const { list, link } = await sdk.setRoster(owner.wif, {
+        const { list, link } = await setRosterWithRetry(sdk, owner.wif, {
             coin:             COIN,
             issueActionIndex: projectIssueIndex,
             ticks:            [memberA, memberB],
@@ -138,7 +159,7 @@ describe('[sdk] Project registry (TICK + tick-LIST + owner-validated LINK)', fun
     it('a roster edit + re-attestation supersedes the previous roster (latest wins)', async function () {
         // Derive roster v2 from v1 by removing memberB, then re-attest
         const current = await sdk.getProject(projectTick);
-        const { list, link } = await sdk.setRoster(owner.wif, {
+        const { list, link } = await setRosterWithRetry(sdk, owner.wif, {
             coin:             COIN,
             issueActionIndex: projectIssueIndex,
             edit:             { listActionIndex: current.roster_action_index, remove: [memberB] },
