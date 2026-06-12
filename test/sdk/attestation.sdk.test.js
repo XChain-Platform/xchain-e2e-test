@@ -92,6 +92,34 @@ module.exports = {
         xchain.state.set('expiry_status', xchain.getInputParam(2));
         xchain.state.set('expiry_payload', xchain.getInputParam(3));
         xchain.state.set('expiry_context', xchain.getInputParam(4));
+    },
+    // E1 paid attestations: the request carries a FEE_TICK|FEE_AMOUNT pair.
+    // The fee is escrowed from the EXECUTE caller (FEE_PAYER = the EXECUTE
+    // SOURCE, not the contract). Integer fee: the regtest GAS tick (XCHAIN) is
+    // issued with decimals=0, so the ledger rounds fractional amounts.
+    askOraclePaid: function(xchain) {
+        var url = xchain.getInputParam(0);
+        var requestId = xchain.attestation.request(
+            'http_get',
+            url,
+            'handleResponse',
+            ['ctx-paid'],
+            { redundancy: 1, deadlineBlocks: 10, feeTick: 'XCHAIN', feeAmount: '2' }
+        );
+        xchain.state.set('paid_request_id', requestId);
+        return requestId;
+    },
+    askOraclePaidExpiring: function(xchain) {
+        var url = xchain.getInputParam(0);
+        var requestId = xchain.attestation.request(
+            'http_get',
+            url,
+            'handleExpiry',
+            ['ctx-paid-expiry'],
+            { redundancy: 1, deadlineBlocks: 2, feeTick: 'XCHAIN', feeAmount: '2' }
+        );
+        xchain.state.set('paid_expiring_request_id', requestId);
+        return requestId;
     }
 };
 `;
@@ -106,6 +134,35 @@ function contractIndexOf(indexed) {
 function findAttestation(result, requestId) {
     const rows = (result && result.data) || [];
     return rows.find(r => String(r.request_id) === String(requestId));
+}
+
+// Total escrowed XCHAIN for an address (sum of escrows rows; negative rows are
+// releases). The attestation fee is escrowed from the FEE_PAYER, so this rises
+// by the fee while a request is pending and returns to baseline on settlement.
+async function xchainEscrowSum(address) {
+    const conn = await global.indexerDatabase.getConnection();
+    try {
+        const rows = await conn.query(
+            `SELECT e.amount AS amount FROM escrows e
+               JOIN index_addresses ia ON ia.id = e.address_id
+               JOIN index_tickers   it ON it.id = e.tick_id
+              WHERE ia.address = ? AND it.tick = ?`,
+            [address, 'XCHAIN']);
+        return rows.reduce((sum, r) => sum + Number(r.amount), 0);
+    } finally { await conn.release(); }
+}
+
+// attest_fee validator_rewards rows credited to a staker (source) address.
+async function attestFeeRewards(sourceAddress) {
+    const conn = await global.indexerDatabase.getConnection();
+    try {
+        return await conn.query(
+            `SELECT vr.amount AS amount, vr.round_reference AS round_reference
+               FROM validator_rewards vr
+               JOIN index_addresses ia ON ia.id = vr.source_id
+              WHERE vr.reward_type = 'attest_fee' AND ia.address = ?`,
+            [sourceAddress]);
+    } finally { await conn.release(); }
 }
 
 describe('[sdk] External Attestation Framework (request -> response -> callback)', function () {
@@ -345,5 +402,119 @@ describe('[sdk] External Attestation Framework (request -> response -> callback)
             requestStatus: 'pending'
         });
         expect(stillPending, 'request should remain pending after an invalid-sig response').to.exist;
+    });
+
+    // ---- E1: paid attestations (FEE_TICK|FEE_AMOUNT) ----------------------
+    // The attestation FEE_PAYER is the EXECUTE caller (the operator), NOT the
+    // contract (see execute.processEmission). The fee is escrowed from the
+    // caller; on fulfillment it is released to the REWARD pool and split into
+    // validator_rewards (COLLECTable by the staker); on expiry it is refunded.
+
+    it('a paid request escrows the fee from the caller, fulfillment credits validator_rewards, COLLECT pays the staker', async function () {
+        const escrowBefore = await xchainEscrowSum(operator.address);
+
+        // EXECUTE emits ATTEST v0 carrying FEE_TICK=XCHAIN, FEE_AMOUNT=0.5.
+        const url = AttestationHelpers.httpGet('https://example.com/v1/paid/100');
+        const exec = await submit(sdk,
+            { action: 'EXECUTE', params: { contractActionIndex: contractIndex, method: 'askOraclePaid', params: [url] } },
+            { pubkey: operator.address, change: operator.address },
+            submitOpts({ wif: operator.wif })
+        );
+        expect(exec.indexed.status).to.equal('valid');
+
+        const request = await global.indexerDatabase.waitForAttestationRequest({
+            txHash: exec.txid, requestStatus: 'pending'
+        });
+        expect(request, 'paid request should be pending').to.exist;
+        expect(String(request.fee_amount), 'fee_amount persisted on the request').to.equal('2');
+
+        // The 0.5 fee is escrowed from the caller while the request is pending.
+        await mine(1);
+        const escrowPending = await xchainEscrowSum(operator.address);
+        expect(escrowPending - escrowBefore, 'fee should be escrowed from the caller').to.be.closeTo(2, 1e-9);
+
+        // Federation seam: the staked validator signs an `ok` response.
+        await attestationHelper.broadcastAttestationResponse(operator, {
+            requestId:       request.request_id,
+            providerId:      'http_get',
+            responsePayload: '{"score":9}',
+            status:          'ok',
+            meta:            '200',
+            validators:      [validator]
+        });
+        const fulfilled = await global.indexerDatabase.waitForAttestationRequest({
+            requestId: request.request_id, requestStatus: 'fulfilled'
+        });
+        expect(fulfilled, 'paid request should be fulfilled').to.exist;
+        await mine(1);
+
+        // validator_rewards: one attest_fee row for the responsible set (N=1),
+        // keyed to the request's action_index, credited to the staker (operator).
+        // NOTE: requires a fresh chain — the responsible set is computed
+        // deterministically across ALL staked attestation validators, so a
+        // regtest chain reused across runs routes the reward to a stale
+        // validator. `reset all bitcoin regtest` before running this suite.
+        const rewards = await attestFeeRewards(operator.address);
+        const rewardForThis = rewards.find(r => String(r.round_reference) === String(request.action_index));
+        expect(rewardForThis, 'attest_fee validator_rewards row for this request').to.exist;
+        expect(String(rewardForThis.amount), 'N=1 → the full fee accrues to the one validator').to.equal('2');
+
+        // Escrow released on fulfillment → caller's escrow returns to baseline.
+        const escrowAfter = await xchainEscrowSum(operator.address);
+        expect(escrowAfter - escrowBefore, 'fulfillment releases the escrow').to.be.closeTo(0, 1e-9);
+
+        // COLLECT pays the accrued reward(s) to the staker.
+        const collect = await submit(sdk,
+            { action: 'COLLECT', params: { version: 0 } },
+            { pubkey: operator.address, change: operator.address },
+            submitOpts({ wif: operator.wif })
+        );
+        expect(collect.indexed.status).to.equal('valid');
+        await mine(1);
+
+        const claim = await global.indexerDatabase.waitForRewardClaim({
+            source: operator.address, txHash: collect.txid, status: 'valid'
+        });
+        expect(claim, 'COLLECT should record a valid reward claim').to.exist;
+        expect(Number(claim.amount), 'COLLECT should pay at least the attest fee').to.be.gte(2);
+    });
+
+    it('a paid request that expires past its DEADLINE_BLOCK refunds the fee to the caller', async function () {
+        const escrowBefore = await xchainEscrowSum(operator.address);
+
+        const url = AttestationHelpers.httpGet('https://example.com/v1/paid-expire/200');
+        const exec = await submit(sdk,
+            { action: 'EXECUTE', params: { contractActionIndex: contractIndex, method: 'askOraclePaidExpiring', params: [url] } },
+            { pubkey: operator.address, change: operator.address },
+            submitOpts({ wif: operator.wif })
+        );
+        expect(exec.indexed.status).to.equal('valid');
+
+        const request = await global.indexerDatabase.waitForAttestationRequest({
+            txHash: exec.txid, requestStatus: 'pending'
+        });
+        expect(request, 'expiring paid request should be pending').to.exist;
+        expect(String(request.fee_amount)).to.equal('2');
+
+        await mine(1);
+        const escrowPending = await xchainEscrowSum(operator.address);
+        expect(escrowPending - escrowBefore, 'fee should be escrowed while pending').to.be.closeTo(2, 1e-9);
+
+        // deadlineBlocks=2 + margin so the per-block expiry pipeline fires v2.
+        await mine(5);
+        const expired = await global.indexerDatabase.waitForAttestationRequest({
+            requestId: request.request_id, requestStatus: 'expired'
+        }, 30000);
+        expect(expired, 'paid request should auto-expire').to.exist;
+        await mine(1);
+
+        // Escrow released + refunded → caller's escrow returns to baseline, and
+        // (unlike fulfillment) NO validator reward is created for the request.
+        const escrowAfter = await xchainEscrowSum(operator.address);
+        expect(escrowAfter - escrowBefore, 'expiry releases the escrow (refund to caller)').to.be.closeTo(0, 1e-9);
+
+        const rewards = await attestFeeRewards(operator.address);
+        expect(rewards.find(r => String(r.round_reference) === String(request.action_index)),
+            'an expired request must NOT create a validator reward').to.equal(undefined);
     });
 });

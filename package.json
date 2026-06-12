@@ -55,7 +55,8 @@
     "test:mutate": "npx stryker run",
     "test:mutate:integration": "npx stryker run stryker.phase2.config.mjs",
     "test:mutate:dry-run": "npx stryker run --dryRunOnly",
-    "mutate:report": "node scripts/mutation-report.js"
+    "mutate:report": "node scripts/mutation-report.js",
+    "test:sdk:attestation": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/sdk/attestation.sdk.test.js"
   },
   "devDependencies": {
     "@stryker-mutator/core": "^8.7.1",
