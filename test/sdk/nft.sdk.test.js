@@ -211,6 +211,42 @@ describe('[sdk] NFT pattern (ISSUE DECIMALS=0 + LOCK_MAX_SUPPLY=1)', function ()
             );
             expect(statusOf(res), 'non-owner LINK').to.match(/^invalid/);
         });
+
+        // On-chain TIS document (TIS — On-Chain Format): the token's
+        // information JSON itself lives in a FILE action and DESCRIPTION
+        // points at it as action:<index>. Round-trips authoring (FILE) →
+        // pointing (ISSUE v1) → resolution (explorer raw bytes).
+        it('an on-chain TIS document round-trips via DESCRIPTION action:<index>', async function () {
+            const { json } = sdk.nft.tisDocument({
+                tick, name: 'Cover Art One',
+                imageActionIndex: fileActionIndex,
+                imageType: 'image/png', imageName: 'art.png',
+            });
+            const tisFile = await submit(sdk,
+                { action: 'FILE', params: { name: tick + '.json', type: 'application/json', title: 'Token information' } },
+                { pubkey: issuer.address, change: issuer.address, rawData: Buffer.from(json, 'utf8').toString('binary') },
+                submitOpts({ wif: issuer.wif })
+            );
+            expect(statusOf(tisFile), 'TIS FILE upload').to.equal('valid');
+            const tisActionIndex = actionIndexOf(tisFile.indexed);
+
+            const described = await submit(sdk,
+                { action: 'ISSUE', params: { version: '1', tick, description: 'action:' + tisActionIndex } },
+                { pubkey: issuer.address, change: issuer.address },
+                submitOpts({ wif: issuer.wif })
+            );
+            expect(statusOf(described), 'ISSUE v1 description update').to.equal('valid');
+
+            // The pointer is the token's live description...
+            const token = await sdk.getToken(tick);
+            expect(token.info.description, 'on-chain TIS pointer').to.equal('action:' + tisActionIndex);
+
+            // ...and the explorer serves the document bytes back verbatim.
+            const bytes = await sdk.getGatedFileRaw(tisActionIndex);
+            const doc = JSON.parse(Buffer.from(bytes).toString('utf8'));
+            expect(doc.tick).to.equal(tick.toUpperCase());
+            expect(doc.images[0].data_ref).to.equal('action:' + fileActionIndex);
+        });
     });
 
     // Exercises the order_match indivisibility fix on a real DEX trade: an NFT sold
