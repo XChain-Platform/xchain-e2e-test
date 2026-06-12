@@ -57,10 +57,10 @@ describe(`x402 agent payments — SDK driven (${COIN})`, function () {
         seller = await fundedGasAddress(sdk, 1);
         buyer  = await fundedGasAddress(sdk, 1);
         tick   = uniqueTick('PAY');
-        await submit(sdk, { action: 'ISSUE', params: { tick, maxSupply: '1000000', decimals: 8 } },
-            { pubkey: seller.pubkey, change: seller.address }, submitOpts({ wif: seller.wif }));
+        await submit(sdk, { action: 'ISSUE', params: { tick, maxSupply: '1000000', decimals: 8, mintSupply: '10000' } },
+            { pubkey: seller.address, change: seller.address }, submitOpts({ wif: seller.wif }));
         await submit(sdk, { action: 'SEND', params: { tick, amount: '1000', destination: buyer.address } },
-            { pubkey: seller.pubkey, change: seller.address }, submitOpts({ wif: seller.wif }));
+            { pubkey: seller.address, change: seller.address }, submitOpts({ wif: seller.wif }));
     });
 
     after(() => fs.rmSync(stateRoot, { recursive: true, force: true }));
@@ -110,8 +110,12 @@ describe(`x402 agent payments — SDK driven (${COIN})`, function () {
             const res = await client.fetchUrl(url + '/data');
             expect(res.status).to.equal(200);
             const body = await res.json();
-            expect(body.payment.status).to.equal('provisional_0conf');
-            expect(body.payment.provisional).to.equal(true);
+            // The regtest auto-miner can confirm the SEND before the client's
+            // retry lands, so the grant may arrive already confirmed — both
+            // prove the minConfirmations:0 path; the mempool-side grant itself
+            // is locked by the explorer/sdk unit suites.
+            expect(['provisional_0conf', 'confirmed']).to.include(body.payment.status);
+            expect(body.payment.provisional).to.equal(body.payment.status === 'provisional_0conf');
 
             // Confirm on-chain, then the sweeper must promote the grant.
             await mine(2);
@@ -128,15 +132,20 @@ describe(`x402 agent payments — SDK driven (${COIN})`, function () {
 
     it('3. deposit-metered: fund once, two calls debit, third exhausts back to 402', async function () {
         this.timeout(300000);
+        // Dedicated deposit address: the deposit balance is computed from the
+        // payer's on-chain SENDs to it, so reusing seller.address would count
+        // the other flows' payments as deposit credit.
+        const depositKp = sdk.generateKeyPair();
+        const depositAddress = sdk.deriveAddress(depositKp.publicKey, { type: 'p2pkh' });
         const store = new X402Storefront({
-            gateway: mkGateway({ deposit: { tick, depositAddress: seller.address, pricePerCall: '4' } }),
+            gateway: mkGateway({ deposit: { tick, depositAddress, pricePerCall: '4' } }),
             resource: { metered: true },
         });
         const { url } = await store.start();
         try {
             // Deposit exactly 8 = two 4-priced calls. (Confirmed: deposits only count indexed.)
             const session = buyerSession();
-            await session.send({ tick, amount: '8', destination: seller.address });
+            await session.send({ tick, amount: '8', destination: depositAddress });
 
             const proof = Buffer.from(JSON.stringify({
                 x402Version: 1, scheme: 'xchain-deposit', coin: COIN, payer: buyer.address,
@@ -155,7 +164,7 @@ describe(`x402 agent payments — SDK driven (${COIN})`, function () {
         this.timeout(300000);
         // Seller publishes a token-gated FILE (BATCH of FILE + stub MESSAGE, ciphertext as rawData).
         const plaintext = Buffer.from('the gated artifact: ' + tick, 'utf8');
-        const key        = sdk.gatedFile.generateKey();
+        const { key }    = sdk.gatedFile.generateKey();
         const ciphertext = sdk.gatedFile.encryptWithKey(plaintext, key);
         const keyPayload = sdk.gatedFile.serializeKeyPayload([key]);
 
@@ -183,15 +192,15 @@ describe(`x402 agent payments — SDK driven (${COIN})`, function () {
         // x402 claims are: the 402 advertises the dispenser, and holding
         // >= minBalance of the tick unlocks the resource).
         const accessTick = uniqueTick('ACC');
-        await submit(sdk, { action: 'ISSUE', params: { tick: accessTick, maxSupply: '1000', decimals: 0 } },
-            { pubkey: seller.pubkey, change: seller.address }, submitOpts({ wif: seller.wif }));
+        await submit(sdk, { action: 'ISSUE', params: { tick: accessTick, maxSupply: '1000', decimals: 0, mintSupply: '1000' } },
+            { pubkey: seller.address, change: seller.address }, submitOpts({ wif: seller.wif }));
         const disp = await submit(sdk,
             { action: 'DISPENSER', params: {
                 giveCoin: COIN, giveTick: accessTick, giveAmount: 1, giveEscrow: 100,
                 getCoin: COIN, getAmount: 100000, getAddress: seller.address,
                 expiration: Math.floor(Date.now() / 1000) + 7200,
             } },
-            { pubkey: seller.pubkey, change: seller.address }, submitOpts({ wif: seller.wif }));
+            { pubkey: seller.address, change: seller.address }, submitOpts({ wif: seller.wif }));
         const dispenserIndex = disp.indexed && disp.indexed.action_index;
 
         const store = new X402Storefront({
@@ -210,7 +219,7 @@ describe(`x402 agent payments — SDK driven (${COIN})`, function () {
 
             // Holder unlocks
             await submit(sdk, { action: 'SEND', params: { tick: accessTick, amount: '1', destination: buyer.address } },
-                { pubkey: seller.pubkey, change: seller.address }, submitOpts({ wif: seller.wif }));
+                { pubkey: seller.address, change: seller.address }, submitOpts({ wif: seller.wif }));
             const proof = Buffer.from(JSON.stringify({
                 x402Version: 1, scheme: 'xchain-dispenser', coin: COIN, payer: buyer.address,
             })).toString('base64url');
