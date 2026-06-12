@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `src/CryptoNetworks.js` + dust assertions across the unit/boundary/regression/integration/e2e suites — corrected the Litecoin dust threshold from `546` to `5460` litoshis for all three `litecoin-*` networks (Litecoin Core's dust relay fee is 10× Bitcoin's, so the standard-output dust floor is 5460). Test expectations that pinned a flat 546 for every network now assert per-chain values: 546 for BTC/DOGE, 5460 for LTC; the live bootstrap check derives the expected floor from `COIN`.
+
 ### Added
 - `test/e2e/02-transaction-pipeline.e2e.js` — two live encoding-coverage cases. **P2WSH large-payload (multi-chunk):** forces a ~8 KB `FILE` through the segwit P2WSH path (≈17 witness-script chunks at the 476-byte push limit), drives the two-transaction commit→reveal flow end to end, and asserts the node accepts both transactions and the decoder reassembles the payload into a byte-intact `FILE` row — exercising the multi-output P2WSH fee sizing that no prior test broadcast. This case surfaced three latent `xchain-encoder` P2WSH bugs (chunk size exceeding the consensus push limit, over-credited change, and under-funded reveal fee), now fixed. Segwit-only; skips on chains without segwit. **`MAX_ACTION_DATA_LENGTH` enforcement:** confirms the encoder rejects an over-length (>8192-byte compiled) payload at build time, then proves the decoder/indexer loop stays healthy by round-tripping a normal action immediately after.
 - `test/e2e/03-chain-specific.e2e.js` — chain-gated coverage for decoder block-format handling that Bitcoin lacks: Litecoin MWEB "HogEx" integration transactions and Dogecoin AuxPoW (merged-mining) headers. Each case round-trips an `ISSUE` and asserts the decoder parsed the chain-specific block and decoded the embedded action; both skip unless `COIN` matches, so they exercise the matching regtest stack and no-op elsewhere.

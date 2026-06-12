@@ -180,7 +180,8 @@ describe('Bootstrap — environment variable path', function () {
             assert.strictEqual(result.NETWORK, 'regtest')
             assert.strictEqual(result.COIN_CODE, 'LTC')
             assert.strictEqual(result.NETWORK_OBJECT.pubKeyHash, 0x6f)
-            assert.strictEqual(result.NETWORK_OBJECT.dustThreshold, 546)
+            // Litecoin's dust relay fee is 10× Bitcoin's → 5460 litoshi floor
+            assert.strictEqual(result.NETWORK_OBJECT.dustThreshold, 5460)
         })
 
         it('initializes correctly for dogecoin-regtest', function () {

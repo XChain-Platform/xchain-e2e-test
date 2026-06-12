@@ -14,13 +14,15 @@ const CryptoNetworks = require('../../../src/CryptoNetworks')
 describe('CryptoNetworks', () => {
 
     describe('getBitcoinJsNetwork', () => {
-        const validNetworks = [
-            'bitcoin-mainnet', 'bitcoin-testnet', 'bitcoin-regtest',
-            'dogecoin-mainnet', 'dogecoin-testnet', 'dogecoin-regtest',
-            'litecoin-mainnet', 'litecoin-testnet', 'litecoin-regtest'
-        ]
+        // Litecoin's dust relay fee is 10× Bitcoin's, so its dust floor
+        // is 5460 litoshis (vs 546 sats on BTC/DOGE).
+        const validNetworks = {
+            'bitcoin-mainnet': 546, 'bitcoin-testnet': 546, 'bitcoin-regtest': 546,
+            'dogecoin-mainnet': 546, 'dogecoin-testnet': 546, 'dogecoin-regtest': 546,
+            'litecoin-mainnet': 5460, 'litecoin-testnet': 5460, 'litecoin-regtest': 5460
+        }
 
-        validNetworks.forEach(name => {
+        Object.entries(validNetworks).forEach(([name, expectedDust]) => {
             it(`should return a valid config for "${name}"`, () => {
                 const config = CryptoNetworks.getBitcoinJsNetwork(name)
                 assert(config, `Expected config for ${name}`)
@@ -32,9 +34,9 @@ describe('CryptoNetworks', () => {
                 assert.strictEqual(typeof config.bip32.private, 'number')
             })
 
-            it(`should have dustThreshold 546 for "${name}"`, () => {
+            it(`should have dustThreshold ${expectedDust} for "${name}"`, () => {
                 const config = CryptoNetworks.getBitcoinJsNetwork(name)
-                assert.strictEqual(config.dustThreshold, 546)
+                assert.strictEqual(config.dustThreshold, expectedDust)
             })
         })
 

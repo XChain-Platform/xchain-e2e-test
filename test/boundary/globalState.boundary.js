@@ -71,20 +71,20 @@ describe('Boundary — Global State & Service Discovery', function () {
         it('returns network for litecoin-mainnet', function () {
             const network = CryptoNetworks.getBitcoinJsNetwork('litecoin-mainnet')
             assert.ok(network)
-            assert.strictEqual(network.dustThreshold, 546)
+            assert.strictEqual(network.dustThreshold, 5460)
             assert.strictEqual(network.pubKeyHash, 0x30)
         })
 
         it('returns network for litecoin-testnet', function () {
             const network = CryptoNetworks.getBitcoinJsNetwork('litecoin-testnet')
             assert.ok(network)
-            assert.strictEqual(network.dustThreshold, 546)
+            assert.strictEqual(network.dustThreshold, 5460)
         })
 
         it('returns network for litecoin-regtest', function () {
             const network = CryptoNetworks.getBitcoinJsNetwork('litecoin-regtest')
             assert.ok(network)
-            assert.strictEqual(network.dustThreshold, 546)
+            assert.strictEqual(network.dustThreshold, 5460)
         })
 
         it('returns undefined for unknown network name', function () {
@@ -107,17 +107,19 @@ describe('Boundary — Global State & Service Discovery', function () {
             assert.strictEqual(network, undefined)
         })
 
-        it('all networks have consistent dustThreshold of 546', function () {
-            const networkNames = [
-                'bitcoin-mainnet', 'bitcoin-testnet', 'bitcoin-regtest',
-                'dogecoin-mainnet', 'dogecoin-testnet', 'dogecoin-regtest',
-                'litecoin-mainnet', 'litecoin-testnet', 'litecoin-regtest',
-            ]
+        it('all networks have the correct per-chain dustThreshold', function () {
+            // Litecoin Core's dust relay fee is 10× Bitcoin's, so the
+            // effective dust floor is 5460 litoshis (vs 546 sats on BTC/DOGE).
+            const expectedDust = {
+                'bitcoin-mainnet': 546, 'bitcoin-testnet': 546, 'bitcoin-regtest': 546,
+                'dogecoin-mainnet': 546, 'dogecoin-testnet': 546, 'dogecoin-regtest': 546,
+                'litecoin-mainnet': 5460, 'litecoin-testnet': 5460, 'litecoin-regtest': 5460,
+            }
 
-            networkNames.forEach(name => {
+            Object.entries(expectedDust).forEach(([name, dust]) => {
                 const network = CryptoNetworks.getBitcoinJsNetwork(name)
-                assert.strictEqual(network.dustThreshold, 546,
-                    `${name} should have dustThreshold = 546`)
+                assert.strictEqual(network.dustThreshold, dust,
+                    `${name} should have dustThreshold = ${dust}`)
             })
         })
     })

@@ -46,7 +46,8 @@ describe('[regression:p2] Configuration & Cross-Chain', function () {
     it('[regression:p2] R-CFG-002 — CryptoNetworks resolves correct LTC regtest config', function () {
         const network = CryptoNetworks.getBitcoinJsNetwork('litecoin-regtest')
         assert.ok(network)
-        assert.strictEqual(network.dustThreshold, 546)
+        // Litecoin's dust relay fee is 10× Bitcoin's → 5460 litoshi floor
+        assert.strictEqual(network.dustThreshold, 5460)
         assert.strictEqual(network.bech32, 'rltc')
         assert.strictEqual(network.pubKeyHash, 0x6f)
         assert.ok(network.messagePrefix.includes('Litecoin'))

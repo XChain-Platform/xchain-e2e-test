@@ -43,7 +43,9 @@ describe('E2E: Suite Bootstrap & Initialization', () => {
             assert(NETWORK_OBJECT.bip32, 'NETWORK_OBJECT should have bip32')
             assert(NETWORK_OBJECT.bip32.public !== undefined, 'NETWORK_OBJECT.bip32 should have public')
             assert(NETWORK_OBJECT.bip32.private !== undefined, 'NETWORK_OBJECT.bip32 should have private')
-            assert.strictEqual(NETWORK_OBJECT.dustThreshold, 546, 'dustThreshold should be 546')
+            // Litecoin's dust relay fee is 10× Bitcoin's → 5460 litoshi floor
+            const expectedDust = COIN === 'litecoin' ? 5460 : 546
+            assert.strictEqual(NETWORK_OBJECT.dustThreshold, expectedDust, `dustThreshold should be ${expectedDust}`)
         })
 
         it('should have all seven connectors instantiated with valid URLs', () => {

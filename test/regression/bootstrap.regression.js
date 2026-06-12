@@ -160,15 +160,16 @@ describe('[regression:p0] Bootstrap Orchestration', function () {
         })
 
         it('[regression:p0] R-BOOT-008b — all 9 coin/network combos return valid configs', function () {
-            const combos = [
-                'bitcoin-mainnet', 'bitcoin-testnet', 'bitcoin-regtest',
-                'litecoin-mainnet', 'litecoin-testnet', 'litecoin-regtest',
-                'dogecoin-mainnet', 'dogecoin-testnet', 'dogecoin-regtest'
-            ]
-            for (const combo of combos) {
+            // Litecoin's dust relay fee is 10× Bitcoin's → 5460 litoshi floor
+            const combos = {
+                'bitcoin-mainnet': 546, 'bitcoin-testnet': 546, 'bitcoin-regtest': 546,
+                'litecoin-mainnet': 5460, 'litecoin-testnet': 5460, 'litecoin-regtest': 5460,
+                'dogecoin-mainnet': 546, 'dogecoin-testnet': 546, 'dogecoin-regtest': 546
+            }
+            for (const [combo, dust] of Object.entries(combos)) {
                 const network = CryptoNetworks.getBitcoinJsNetwork(combo)
                 assert.ok(network, `${combo} should return a config`)
-                assert.strictEqual(network.dustThreshold, 546, `${combo} dustThreshold should be 546`)
+                assert.strictEqual(network.dustThreshold, dust, `${combo} dustThreshold should be ${dust}`)
             }
         })
     })
