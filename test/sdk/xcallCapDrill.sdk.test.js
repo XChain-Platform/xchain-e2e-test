@@ -189,7 +189,7 @@ describe('[sdk] XCALL per-block injection cap (25 + carry-forward)', function ()
         console.log('    [xcall-cap] all ' + BURST + ' dispatches finalized, zero executed — releasing DOGE mining');
     });
 
-    it('the first DOGE block injects exactly the cap, in hub-id order; the rest carry forward', async function () {
+    it('the first DOGE block injects exactly the cap, in (snapshot_block, call_id) order; the rest carry forward', async function () {
         const placeholders = callIds.map(() => '?').join(',');
 
         // release DOGE mining block-by-block until everything executed
@@ -220,15 +220,19 @@ describe('[sdk] XCALL per-block injection cap (25 + carry-forward)', function ()
         expect(counts[0], 'first batch fills the cap').to.equal(CAP);
         expect(blocks.length, 'carry-forward to a later block').to.be.at.least(2);
 
-        // deterministic order: the first batch must be the CAP lowest hub ids
-        const hubIds = await hubDb(async (c) => c.query(
-            `SELECT call_id, id FROM cross_chain_calls WHERE phase = 'dispatch' AND call_id IN (${placeholders})`,
+        // deterministic order: the first batch must be the CAP lowest by
+        // (snapshot_block, call_id) — quorum-agreed content, identical on every
+        // hub, so the order no longer depends on which hub DB an indexer mirrors
+        const hubRows = await hubDb(async (c) => c.query(
+            `SELECT call_id, snapshot_block FROM cross_chain_calls WHERE phase = 'dispatch' AND call_id IN (${placeholders})`,
             callIds));
-        const idOf = new Map(hubIds.map(r => [String(r.call_id), Number(r.id)]));
         const firstBatch = new Set(byBlock.get(blocks[0]));
-        const sortedByHubId = [...idOf.entries()].sort((a, b) => a[1] - b[1]).map(e => e[0]);
-        const expectedFirst = new Set(sortedByHubId.slice(0, CAP));
-        expect(firstBatch, 'first batch = lowest hub ids').to.deep.equal(expectedFirst);
+        const sortedByKey = hubRows
+            .map(r => [String(r.call_id), Number(r.snapshot_block)])
+            .sort((a, b) => (a[1] - b[1]) || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+            .map(e => e[0]);
+        const expectedFirst = new Set(sortedByKey.slice(0, CAP));
+        expect(firstBatch, 'first batch = lowest (snapshot_block, call_id)').to.deep.equal(expectedFirst);
     });
 
     it('all results relay back and every callback fires exactly once', async function () {
