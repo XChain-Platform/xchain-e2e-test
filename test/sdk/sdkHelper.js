@@ -153,12 +153,18 @@ async function submit(sdk, actionData, encoderOpts, opts, attempts = 6) {
 
 const GAS_TICK = 'XCHAIN';
 
+// The faucet genesis (initialCheck gas-token-check) issues XCHAIN with
+// MAX_MINT=100000 per transaction. A seed above that is indexed
+// 'invalid: AMOUNT > MAX_MINT' and kills every suite's before-hook on a
+// fresh chain, so the default seed IS the cap (== passes; > fails).
+const GAS_FAUCET_MAX_MINT = 100000;
+
 // Mint XCHAIN gas to an address through the SDK. MINT charges no protocol
 // fee, and on regtest any address may mint the gas token, so this is the
 // bootstrap primitive a real user uses to acquire gas. Required before any
 // action that pays the protocol fee in XCHAIN (ISSUE of a new token, ORDER,
 // SWAP, DISPENSER, CALLBACK, EXECUTE, ...). Also exercises MINT via the SDK.
-async function mintGas(sdk, addr, amount = 1000000) {
+async function mintGas(sdk, addr, amount = GAS_FAUCET_MAX_MINT) {
     return submit(
         sdk,
         { action: 'MINT', params: { tick: GAS_TICK, amount, destination: addr.address } },
@@ -168,7 +174,7 @@ async function mintGas(sdk, addr, amount = 1000000) {
 }
 
 // Fund an address with native coin AND seed it with XCHAIN gas in one call.
-async function fundedGasAddress(sdk, amountToFund = 1, gasAmount = 1000000, addressType = 'p2pkh') {
+async function fundedGasAddress(sdk, amountToFund = 1, gasAmount = GAS_FAUCET_MAX_MINT, addressType = 'p2pkh') {
     const addr = await fundedSdkAddress(sdk, amountToFund, addressType);
     await mintGas(sdk, addr, gasAmount);
     return addr;

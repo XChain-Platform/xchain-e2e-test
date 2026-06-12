@@ -83,8 +83,8 @@ describe('[sdk] SWAP (atomic token exchange)', function () {
         }
         coin = coinCode;
         sdk = makeSdk();
-        addr1 = await fundedGasAddress(sdk, 5, 1000000);
-        addr2 = await fundedGasAddress(sdk, 5, 1000000);
+        addr1 = await fundedGasAddress(sdk, 5);
+        addr2 = await fundedGasAddress(sdk, 5);
         console.log('    [sdk] addr1=' + addr1.address + ' addr2=' + addr2.address);
     });
 

@@ -128,7 +128,7 @@ describe('[sdk] External Attestation Framework (request -> response -> callback)
         // (P2WSH two-phase), several EXECUTEs and (standing in for the
         // federation) the ATTEST v1 response broadcasts. Gas seeds the
         // protocol fees for STAKE/DEPLOY/EXECUTE.
-        operator = await fundedGasAddress(sdk, 5, 1000000);
+        operator = await fundedGasAddress(sdk, 5);
         console.log('    [sdk] operator=' + operator.address);
 
         // A real Ed25519 validator running in-process. Its pubkey is staked
