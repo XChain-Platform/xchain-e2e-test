@@ -1,0 +1,961 @@
+[
+  {
+    "action": "ADDRESS",
+    "version": 0,
+    "format": "VERSION|FEE_PREFERENCE|REQUIRE_MEMO|DISPENSER_PREFERENCE|MEMO",
+    "string": "ADDRESS|0|12345678901234567890|field round trip 827687|VBFPL8P|field round trip 880575",
+    "fields": {
+      "VERSION": "0",
+      "FEE_PREFERENCE": "12345678901234567890",
+      "REQUIRE_MEMO": "field round trip 827687",
+      "DISPENSER_PREFERENCE": "VBFPL8P",
+      "MEMO": "field round trip 880575"
+    }
+  },
+  {
+    "action": "AIRDROP",
+    "version": 0,
+    "format": "VERSION|TICK|AMOUNT|LIST_ACTION_INDEX|MEMO",
+    "string": "AIRDROP|0|A1B2C3|12345678901234567890|100|field round trip 880575",
+    "fields": {
+      "VERSION": "0",
+      "TICK": "A1B2C3",
+      "AMOUNT": "12345678901234567890",
+      "LIST_ACTION_INDEX": "100",
+      "MEMO": "field round trip 880575"
+    }
+  },
+  {
+    "action": "AIRDROP",
+    "version": 1,
+    "format": "VERSION|LIST_ACTION_INDEX|TICK|AMOUNT|TICK|AMOUNT|MEMO",
+    "string": "AIRDROP|1|4761388|FLDTOK|10.5|FLDTOK|1|field round trip 461812",
+    "fields": {
+      "VERSION": "1",
+      "LIST_ACTION_INDEX": "4761388",
+      "TICK": "FLDTOK",
+      "AMOUNT": "1",
+      "MEMO": "field round trip 461812"
+    }
+  },
+  {
+    "action": "AIRDROP",
+    "version": 2,
+    "format": "VERSION|TICK|AMOUNT|LIST_ACTION_INDEX|TICK|AMOUNT|LIST_ACTION_INDEX|MEMO",
+    "string": "AIRDROP|2|FLD.SUB|600|0|FLDTOK|12345678901234567890|100|field round trip 469568",
+    "fields": {
+      "VERSION": "2",
+      "TICK": "FLDTOK",
+      "AMOUNT": "12345678901234567890",
+      "LIST_ACTION_INDEX": "100",
+      "MEMO": "field round trip 469568"
+    }
+  },
+  {
+    "action": "AIRDROP",
+    "version": 3,
+    "format": "VERSION|TICK|AMOUNT|LIST_ACTION_INDEX|MEMO|TICK|AMOUNT|LIST_ACTION_INDEX|MEMO",
+    "string": "AIRDROP|3|FLDTOK|12345678901234567890|4761388|field round trip 570452|FLD.SUB|0|0|field round trip 491863",
+    "fields": {
+      "VERSION": "3",
+      "TICK": "FLD.SUB",
+      "AMOUNT": "0",
+      "LIST_ACTION_INDEX": "0",
+      "MEMO": "field round trip 491863"
+    }
+  },
+  {
+    "action": "ANCHOR",
+    "version": 0,
+    "format": "VERSION|CHAIN|NETWORK|BLOCK_INDEX|BLOCK_HASH|LEDGER_HASH|ACTIONS_HASH|CONTRACT_HASH|CHECKPOINT_SEQ|SNAPSHOT_BLOCK|SIG_COUNT|PUBKEY|SIG|...",
+    "string": "ANCHOR|0|VD5FSBE|VDOS82X|100|e0641cba2d880359|d45c4223cdb7f6eb|2585300bbcb1de20|9d8482ca93d706ad|VBAWYD5|1|66d204a0b44de91e|02abababababababababababababababababababababababababababababababab|562141128fe1beb7|V32OA6X",
+    "fields": {
+      "VERSION": "0",
+      "CHAIN": "VD5FSBE",
+      "NETWORK": "VDOS82X",
+      "BLOCK_INDEX": "100",
+      "BLOCK_HASH": "e0641cba2d880359",
+      "LEDGER_HASH": "d45c4223cdb7f6eb",
+      "ACTIONS_HASH": "2585300bbcb1de20",
+      "CONTRACT_HASH": "9d8482ca93d706ad",
+      "CHECKPOINT_SEQ": "VBAWYD5",
+      "SNAPSHOT_BLOCK": "1",
+      "SIG_COUNT": "66d204a0b44de91e",
+      "PUBKEY": "02abababababababababababababababababababababababababababababababab",
+      "SIG": "562141128fe1beb7",
+      "...": "V32OA6X"
+    }
+  },
+  {
+    "action": "ANCHOR",
+    "version": 1,
+    "format": "VERSION|CHAIN|NETWORK|BLOCK_INDEX|BLOCK_HASH|LEDGER_HASH|ACTIONS_HASH|CONTRACT_HASH|CHECKPOINT_SEQ|SNAPSHOT_BLOCK|MATCH_BATCH_SEQ|MATCH_COUNT|BATCH_CRC32|TOTAL_CHUNKS|ARCHIVE_B64|SIG_COUNT|PUBKEY|SIG|...",
+    "string": "ANCHOR|1|VGB6FR0|V3KW1VK|100|137b77217aa76340|afeadeeddb03dffa|3bccabf7e21c9d5c|a8354dc79a23ea8f|V8FJ8V5|1|V1Z1B04|1|V8A6V6V|V7H2OLI|V62XODE|ee0597ec75e8a925|02abababababababababababababababababababababababababababababababab|97f2e816b30fd9d7|V629Z07",
+    "fields": {
+      "VERSION": "1",
+      "CHAIN": "VGB6FR0",
+      "NETWORK": "V3KW1VK",
+      "BLOCK_INDEX": "100",
+      "BLOCK_HASH": "137b77217aa76340",
+      "LEDGER_HASH": "afeadeeddb03dffa",
+      "ACTIONS_HASH": "3bccabf7e21c9d5c",
+      "CONTRACT_HASH": "a8354dc79a23ea8f",
+      "CHECKPOINT_SEQ": "V8FJ8V5",
+      "SNAPSHOT_BLOCK": "1",
+      "MATCH_BATCH_SEQ": "V1Z1B04",
+      "MATCH_COUNT": "1",
+      "BATCH_CRC32": "V8A6V6V",
+      "TOTAL_CHUNKS": "V7H2OLI",
+      "ARCHIVE_B64": "V62XODE",
+      "SIG_COUNT": "ee0597ec75e8a925",
+      "PUBKEY": "02abababababababababababababababababababababababababababababababab",
+      "SIG": "97f2e816b30fd9d7",
+      "...": "V629Z07"
+    }
+  },
+  {
+    "action": "ANCHOR",
+    "version": 2,
+    "format": "VERSION|MATCH_BATCH_SEQ|CHUNK_INDEX|TOTAL_CHUNKS|ARCHIVE_B64_CHUNK",
+    "string": "ANCHOR|2|VC8HVHS|1|V32H6WC|V2QZFGS",
+    "fields": {
+      "VERSION": "2",
+      "MATCH_BATCH_SEQ": "VC8HVHS",
+      "CHUNK_INDEX": "1",
+      "TOTAL_CHUNKS": "V32H6WC",
+      "ARCHIVE_B64_CHUNK": "V2QZFGS"
+    }
+  },
+  {
+    "action": "ATTEST",
+    "version": 0,
+    "format": "VERSION|REQUEST_ID|PROVIDER_ID|REQUEST_PAYLOAD|CALLBACK_METHOD|CALLBACK_PARAMS_JSON|REDUNDANCY|DEADLINE_BLOCKS",
+    "string": "ATTEST|0|VD5FSBE|VDOS82X|be0641cba2d88035|V9E8VSG|VDIZZYM|V49UGUH|1",
+    "fields": {
+      "VERSION": "0",
+      "REQUEST_ID": "VD5FSBE",
+      "PROVIDER_ID": "VDOS82X",
+      "REQUEST_PAYLOAD": "be0641cba2d88035",
+      "CALLBACK_METHOD": "V9E8VSG",
+      "CALLBACK_PARAMS_JSON": "VDIZZYM",
+      "REDUNDANCY": "V49UGUH",
+      "DEADLINE_BLOCKS": "1"
+    }
+  },
+  {
+    "action": "ATTEST",
+    "version": 1,
+    "format": "VERSION|REQUEST_ID|PROVIDER_ID|RESPONSE_PAYLOAD|STATUS|META|SIG_COUNT|PUBKEY|SIG|...",
+    "string": "ATTEST|1|VGB6FR0|V3KW1VK|9137b77217aa7634|VUWS32|VAGTKUV|feadeeddb03dffa3|02abababababababababababababababababababababababababababababababab|bccabf7e21c9d5ca|V8X1DZ1",
+    "fields": {
+      "VERSION": "1",
+      "REQUEST_ID": "VGB6FR0",
+      "PROVIDER_ID": "V3KW1VK",
+      "RESPONSE_PAYLOAD": "9137b77217aa7634",
+      "STATUS": "VUWS32",
+      "META": "VAGTKUV",
+      "SIG_COUNT": "feadeeddb03dffa3",
+      "PUBKEY": "02abababababababababababababababababababababababababababababababab",
+      "SIG": "bccabf7e21c9d5ca",
+      "...": "V8X1DZ1"
+    }
+  },
+  {
+    "action": "ATTEST",
+    "version": 2,
+    "format": "VERSION|REQUEST_ID",
+    "string": "ATTEST|2|VC8HVHS",
+    "fields": {
+      "VERSION": "2",
+      "REQUEST_ID": "VC8HVHS"
+    }
+  },
+  {
+    "action": "BATCH",
+    "version": 0,
+    "format": "VERSION|COMMAND",
+    "string": "BATCH|0|VD5FSBE",
+    "fields": {
+      "VERSION": "0",
+      "COMMAND": "VD5FSBE"
+    }
+  },
+  {
+    "action": "BROADCAST",
+    "version": 0,
+    "format": "VERSION|MESSAGE|VALUE",
+    "string": "BROADCAST|0|VD5FSBE|VDOS82X",
+    "fields": {
+      "VERSION": "0",
+      "MESSAGE": "VD5FSBE",
+      "VALUE": "VDOS82X"
+    }
+  },
+  {
+    "action": "BROADCAST",
+    "version": 1,
+    "format": "VERSION|MESSAGE|VALUE|FEE|MEMO",
+    "string": "BROADCAST|1|VGB6FR0|V3KW1VK|10.5|field round trip 83851",
+    "fields": {
+      "VERSION": "1",
+      "MESSAGE": "VGB6FR0",
+      "VALUE": "V3KW1VK",
+      "FEE": "10.5",
+      "MEMO": "field round trip 83851"
+    }
+  },
+  {
+    "action": "BROADCAST",
+    "version": 2,
+    "format": "VERSION|MESSAGE|FEE|MEMO",
+    "string": "BROADCAST|2|VC8HVHS|600|field round trip 185559",
+    "fields": {
+      "VERSION": "2",
+      "MESSAGE": "VC8HVHS",
+      "FEE": "600",
+      "MEMO": "field round trip 185559"
+    }
+  },
+  {
+    "action": "BROADCAST",
+    "version": 3,
+    "format": "VERSION|BROADCAST_ACTION_INDEX|VALUE|MEMO",
+    "string": "BROADCAST|3|0|VDNQVSX|field round trip 888085",
+    "fields": {
+      "VERSION": "3",
+      "BROADCAST_ACTION_INDEX": "0",
+      "VALUE": "VDNQVSX",
+      "MEMO": "field round trip 888085"
+    }
+  },
+  {
+    "action": "CALLBACK",
+    "version": 0,
+    "format": "VERSION|TICK|MEMO",
+    "string": "CALLBACK|0|A1B2C3|field round trip 827687",
+    "fields": {
+      "VERSION": "0",
+      "TICK": "A1B2C3",
+      "MEMO": "field round trip 827687"
+    }
+  },
+  {
+    "action": "COINPAY",
+    "version": 0,
+    "format": "VERSION|ORDER_MATCH_ACTION_INDEX",
+    "string": "COINPAY|0|4761388",
+    "fields": {
+      "VERSION": "0",
+      "ORDER_MATCH_ACTION_INDEX": "4761388"
+    }
+  },
+  {
+    "action": "COLLECT",
+    "version": 0,
+    "format": "VERSION",
+    "string": "COLLECT|0",
+    "fields": {
+      "VERSION": "0"
+    }
+  },
+  {
+    "action": "DELEGATE",
+    "version": 0,
+    "format": "VERSION|NEW_SIGNING_PUBKEY",
+    "string": "DELEGATE|0|02abababababababababababababababababababababababababababababababab",
+    "fields": {
+      "VERSION": "0",
+      "NEW_SIGNING_PUBKEY": "02abababababababababababababababababababababababababababababababab"
+    }
+  },
+  {
+    "action": "DELEGATE",
+    "version": 1,
+    "format": "VERSION|NEW_SIGNING_PUBKEY|TARGET_CONTRACT_INDEX|TICK",
+    "string": "DELEGATE|1|02abababababababababababababababababababababababababababababababab|4761388|FLDTOK",
+    "fields": {
+      "VERSION": "1",
+      "NEW_SIGNING_PUBKEY": "02abababababababababababababababababababababababababababababababab",
+      "TARGET_CONTRACT_INDEX": "4761388",
+      "TICK": "FLDTOK"
+    }
+  },
+  {
+    "action": "DELEGATE",
+    "version": 2,
+    "format": "VERSION|SIGNING_PUBKEY",
+    "string": "DELEGATE|2|02abababababababababababababababababababababababababababababababab",
+    "fields": {
+      "VERSION": "2",
+      "SIGNING_PUBKEY": "02abababababababababababababababababababababababababababababababab"
+    }
+  },
+  {
+    "action": "DELEGATE",
+    "version": 3,
+    "format": "VERSION|SIGNING_PUBKEY|TARGET_CONTRACT_INDEX|TICK",
+    "string": "DELEGATE|3|02abababababababababababababababababababababababababababababababab|0|A1B2C3",
+    "fields": {
+      "VERSION": "3",
+      "SIGNING_PUBKEY": "02abababababababababababababababababababababababababababababababab",
+      "TARGET_CONTRACT_INDEX": "0",
+      "TICK": "A1B2C3"
+    }
+  },
+  {
+    "action": "DEPLOY",
+    "version": 0,
+    "format": "VERSION|CODE_ENCODING|GAS_LIMIT|CONSTRUCTOR_PARAMS",
+    "string": "DEPLOY|0|cdbe0641cba2d880|0|V5EY2M5",
+    "fields": {
+      "VERSION": "0",
+      "CODE_ENCODING": "cdbe0641cba2d880",
+      "GAS_LIMIT": "0",
+      "CONSTRUCTOR_PARAMS": "V5EY2M5"
+    }
+  },
+  {
+    "action": "DEPLOY",
+    "version": 1,
+    "format": "VERSION|CODE_ENCODING|GAS_LIMIT|CONSTRUCTOR_PARAMS|COOLDOWN_BLOCKS|SLASH_DESTINATION",
+    "string": "DEPLOY|1|f39137b77217aa76|0|V4FU22F|0|n4nbVcRRR5sEHyp2VYuLUvCyDmQmBoonoK",
+    "fields": {
+      "VERSION": "1",
+      "CODE_ENCODING": "f39137b77217aa76",
+      "GAS_LIMIT": "0",
+      "CONSTRUCTOR_PARAMS": "V4FU22F",
+      "COOLDOWN_BLOCKS": "0",
+      "SLASH_DESTINATION": "n4nbVcRRR5sEHyp2VYuLUvCyDmQmBoonoK"
+    }
+  },
+  {
+    "action": "DEPOSIT",
+    "version": 0,
+    "format": "VERSION|CONTRACT_ACTION_INDEX|TICK|QUANTITY",
+    "string": "DEPOSIT|0|4761388|A1B2C3|VBFPL8P",
+    "fields": {
+      "VERSION": "0",
+      "CONTRACT_ACTION_INDEX": "4761388",
+      "TICK": "A1B2C3",
+      "QUANTITY": "VBFPL8P"
+    }
+  },
+  {
+    "action": "DESTROY",
+    "version": 0,
+    "format": "VERSION|TICK|AMOUNT|MEMO",
+    "string": "DESTROY|0|A1B2C3|12345678901234567890|field round trip 691516",
+    "fields": {
+      "VERSION": "0",
+      "TICK": "A1B2C3",
+      "AMOUNT": "12345678901234567890",
+      "MEMO": "field round trip 691516"
+    }
+  },
+  {
+    "action": "DESTROY",
+    "version": 1,
+    "format": "VERSION|TICK|AMOUNT|TICK|AMOUNT|MEMO",
+    "string": "DESTROY|1|A1B2C3|1|FLD.SUB|0|field round trip 238576",
+    "fields": {
+      "VERSION": "1",
+      "TICK": "FLD.SUB",
+      "AMOUNT": "0",
+      "MEMO": "field round trip 238576"
+    }
+  },
+  {
+    "action": "DESTROY",
+    "version": 2,
+    "format": "VERSION|TICK|AMOUNT|MEMO|TICK|AMOUNT|MEMO",
+    "string": "DESTROY|2|FLD.SUB|600|field round trip 185559|FLDTOK|12345678901234567890|field round trip 732947",
+    "fields": {
+      "VERSION": "2",
+      "TICK": "FLDTOK",
+      "AMOUNT": "12345678901234567890",
+      "MEMO": "field round trip 732947"
+    }
+  },
+  {
+    "action": "DISPENSER",
+    "version": 0,
+    "format": "VERSION|GIVE_COIN|GIVE_TICK|GIVE_AMOUNT|GIVE_OWNERSHIP|GIVE_ESCROW|GET_COIN|GET_TICK|GET_AMOUNT|GET_ADDRESS|FIAT_CODE|FIAT_AMOUNT|ORACLE_ADDRESS|EXPIRATION|ALLOW_LIST|BLOCK_LIST|MEMO",
+    "string": "DISPENSER|0|VD5FSBE|A1B2C3|12345678901234567890|1|0|V713FET|XCHAIN|0|mvuKWKvgzrkxh8QgNZ91vMBZUKN5BFYmo3|ba2d880359d45c42|0|msK1rsgNVFPM4cR3X5rngczTKa6EtT4WKD|12345678901234567890|1|1|field round trip 461528",
+    "fields": {
+      "VERSION": "0",
+      "GIVE_COIN": "VD5FSBE",
+      "GIVE_TICK": "A1B2C3",
+      "GIVE_AMOUNT": "12345678901234567890",
+      "GIVE_OWNERSHIP": "1",
+      "GIVE_ESCROW": "0",
+      "GET_COIN": "V713FET",
+      "GET_TICK": "XCHAIN",
+      "GET_AMOUNT": "0",
+      "GET_ADDRESS": "mvuKWKvgzrkxh8QgNZ91vMBZUKN5BFYmo3",
+      "FIAT_CODE": "ba2d880359d45c42",
+      "FIAT_AMOUNT": "0",
+      "ORACLE_ADDRESS": "msK1rsgNVFPM4cR3X5rngczTKa6EtT4WKD",
+      "EXPIRATION": "12345678901234567890",
+      "ALLOW_LIST": "1",
+      "BLOCK_LIST": "1",
+      "MEMO": "field round trip 461528"
+    }
+  },
+  {
+    "action": "DISPENSER",
+    "version": 1,
+    "format": "VERSION|DISPENSER_ACTION_INDEX|MEMO",
+    "string": "DISPENSER|1|4761388|field round trip 216486",
+    "fields": {
+      "VERSION": "1",
+      "DISPENSER_ACTION_INDEX": "4761388",
+      "MEMO": "field round trip 216486"
+    }
+  },
+  {
+    "action": "DISPENSER",
+    "version": 2,
+    "format": "VERSION|DISPENSER_ACTION_INDEX|GIVE_ESCROW|EXPIRATION|ALLOW_LIST|BLOCK_LIST|MEMO",
+    "string": "DISPENSER|2|100|600|1|0|1|field round trip 732947",
+    "fields": {
+      "VERSION": "2",
+      "DISPENSER_ACTION_INDEX": "100",
+      "GIVE_ESCROW": "600",
+      "EXPIRATION": "1",
+      "ALLOW_LIST": "0",
+      "BLOCK_LIST": "1",
+      "MEMO": "field round trip 732947"
+    }
+  },
+  {
+    "action": "DIVIDEND",
+    "version": 0,
+    "format": "VERSION|TICK|DIVIDEND_TICK|AMOUNT|MEMO",
+    "string": "DIVIDEND|0|A1B2C3|A1B2C3|12345678901234567890|field round trip 880575",
+    "fields": {
+      "VERSION": "0",
+      "TICK": "A1B2C3",
+      "DIVIDEND_TICK": "A1B2C3",
+      "AMOUNT": "12345678901234567890",
+      "MEMO": "field round trip 880575"
+    }
+  },
+  {
+    "action": "EXECUTE",
+    "version": 0,
+    "format": "VERSION|CONTRACT_ACTION_INDEX|METHOD|PARAMS...",
+    "string": "EXECUTE|0|4761388|VDOS82X|VBFPL8P",
+    "fields": {
+      "VERSION": "0",
+      "CONTRACT_ACTION_INDEX": "4761388",
+      "METHOD": "VDOS82X",
+      "PARAMS...": "VBFPL8P"
+    }
+  },
+  {
+    "action": "FILE",
+    "version": 0,
+    "format": "VERSION|NAME|TYPE|TITLE|MEMO|GATE_TICKER|ENCRYPTION_METHOD|KEY_HASH",
+    "string": "FILE|0|VD5FSBE|VDOS82X|VBFPL8P|field round trip 880575|FLDTOK|V713FET|41cba2d880359d45",
+    "fields": {
+      "VERSION": "0",
+      "NAME": "VD5FSBE",
+      "TYPE": "VDOS82X",
+      "TITLE": "VBFPL8P",
+      "MEMO": "field round trip 880575",
+      "GATE_TICKER": "FLDTOK",
+      "ENCRYPTION_METHOD": "V713FET",
+      "KEY_HASH": "41cba2d880359d45"
+    }
+  },
+  {
+    "action": "ISSUE",
+    "version": 0,
+    "format": "VERSION|TICK|MAX_SUPPLY|MAX_MINT|DECIMALS|DESCRIPTION|MINT_SUPPLY|TRANSFER|TRANSFER_SUPPLY|LOCK_MAX_SUPPLY|LOCK_MAX_MINT|LOCK_DESCRIPTION|LOCK_SLEEP|LOCK_CALLBACK|CALLBACK_BLOCK|CALLBACK_TICK|CALLBACK_AMOUNT|ALLOW_LIST|BLOCK_LIST|MINT_ADDRESS_MAX|MINT_START_BLOCK|MINT_STOP_BLOCK|LOCK_MINT|LOCK_MINT_SUPPLY|MEMO",
+    "string": "ISSUE|0|A1B2C3|12345678901234567890|12345678901234567890|4761388|field round trip 17807|600|0|0|1|1|field round trip 641587|0|1|100|FLD.SUB|0|0|0|n4nbVcRRR5sEHyp2VYuLUvCyDmQmBoonoK|4761388|1|0|1|field round trip 304039",
+    "fields": {
+      "VERSION": "0",
+      "TICK": "A1B2C3",
+      "MAX_SUPPLY": "12345678901234567890",
+      "MAX_MINT": "12345678901234567890",
+      "DECIMALS": "4761388",
+      "DESCRIPTION": "field round trip 17807",
+      "MINT_SUPPLY": "600",
+      "TRANSFER": "0",
+      "TRANSFER_SUPPLY": "0",
+      "LOCK_MAX_SUPPLY": "1",
+      "LOCK_MAX_MINT": "1",
+      "LOCK_DESCRIPTION": "field round trip 641587",
+      "LOCK_SLEEP": "0",
+      "LOCK_CALLBACK": "1",
+      "CALLBACK_BLOCK": "100",
+      "CALLBACK_TICK": "FLD.SUB",
+      "CALLBACK_AMOUNT": "0",
+      "ALLOW_LIST": "0",
+      "BLOCK_LIST": "0",
+      "MINT_ADDRESS_MAX": "n4nbVcRRR5sEHyp2VYuLUvCyDmQmBoonoK",
+      "MINT_START_BLOCK": "4761388",
+      "MINT_STOP_BLOCK": "1",
+      "LOCK_MINT": "0",
+      "LOCK_MINT_SUPPLY": "1",
+      "MEMO": "field round trip 304039"
+    }
+  },
+  {
+    "action": "ISSUE",
+    "version": 1,
+    "format": "VERSION|TICK|DESCRIPTION|MEMO",
+    "string": "ISSUE|1|A1B2C3|field round trip 216486|field round trip 575179",
+    "fields": {
+      "VERSION": "1",
+      "TICK": "A1B2C3",
+      "DESCRIPTION": "field round trip 216486",
+      "MEMO": "field round trip 575179"
+    }
+  },
+  {
+    "action": "ISSUE",
+    "version": 2,
+    "format": "VERSION|TICK|MAX_MINT|MINT_SUPPLY|TRANSFER_SUPPLY|MINT_ADDRESS_MAX|MINT_START_BLOCK|MINT_STOP_BLOCK|MEMO",
+    "string": "ISSUE|2|FLD.SUB|600|1|0|mvuKWKvgzrkxh8QgNZ91vMBZUKN5BFYmo3|100|1|field round trip 452568",
+    "fields": {
+      "VERSION": "2",
+      "TICK": "FLD.SUB",
+      "MAX_MINT": "600",
+      "MINT_SUPPLY": "1",
+      "TRANSFER_SUPPLY": "0",
+      "MINT_ADDRESS_MAX": "mvuKWKvgzrkxh8QgNZ91vMBZUKN5BFYmo3",
+      "MINT_START_BLOCK": "100",
+      "MINT_STOP_BLOCK": "1",
+      "MEMO": "field round trip 452568"
+    }
+  },
+  {
+    "action": "ISSUE",
+    "version": 3,
+    "format": "VERSION|TICK|LOCK_MAX_SUPPLY|LOCK_MAX_MINT|LOCK_DESCRIPTION|LOCK_SLEEP|LOCK_CALLBACK|LOCK_MINT|LOCK_MINT_SUPPLY|MEMO",
+    "string": "ISSUE|3|FLDTOK|1|1|field round trip 570452|1|0|0|0|field round trip 122501",
+    "fields": {
+      "VERSION": "3",
+      "TICK": "FLDTOK",
+      "LOCK_MAX_SUPPLY": "1",
+      "LOCK_MAX_MINT": "1",
+      "LOCK_DESCRIPTION": "field round trip 570452",
+      "LOCK_SLEEP": "1",
+      "LOCK_CALLBACK": "0",
+      "LOCK_MINT": "0",
+      "LOCK_MINT_SUPPLY": "0",
+      "MEMO": "field round trip 122501"
+    }
+  },
+  {
+    "action": "ISSUE",
+    "version": 4,
+    "format": "VERSION|TICK|CALLBACK_BLOCK|CALLBACK_TICK|CALLBACK_AMOUNT|MEMO",
+    "string": "ISSUE|4|FLDTOK|1|A1B2C3|1|field round trip 41733",
+    "fields": {
+      "VERSION": "4",
+      "TICK": "FLDTOK",
+      "CALLBACK_BLOCK": "1",
+      "CALLBACK_TICK": "A1B2C3",
+      "CALLBACK_AMOUNT": "1",
+      "MEMO": "field round trip 41733"
+    }
+  },
+  {
+    "action": "ISSUE",
+    "version": 5,
+    "format": "VERSION|TICK|ALLOW_LIST|BLOCK_LIST|MEMO",
+    "string": "ISSUE|5|FLD.SUB|0|1|field round trip 192789",
+    "fields": {
+      "VERSION": "5",
+      "TICK": "FLD.SUB",
+      "ALLOW_LIST": "0",
+      "BLOCK_LIST": "1",
+      "MEMO": "field round trip 192789"
+    }
+  },
+  {
+    "action": "LINK",
+    "version": 0,
+    "format": "VERSION|COIN1|COIN1_ACTION_INDEX|COIN2|COIN2_ACTION_INDEX|MEMO",
+    "string": "LINK|0|VD5FSBE|4761388|VBFPL8P|4761388|field round trip 17807",
+    "fields": {
+      "VERSION": "0",
+      "COIN1": "VD5FSBE",
+      "COIN1_ACTION_INDEX": "4761388",
+      "COIN2": "VBFPL8P",
+      "COIN2_ACTION_INDEX": "4761388",
+      "MEMO": "field round trip 17807"
+    }
+  },
+  {
+    "action": "LIST",
+    "version": 0,
+    "format": "VERSION|TYPE|ITEM",
+    "string": "LIST|0|VD5FSBE|VDOS82X",
+    "fields": {
+      "VERSION": "0",
+      "TYPE": "VD5FSBE",
+      "ITEM": "VDOS82X"
+    }
+  },
+  {
+    "action": "LIST",
+    "version": 1,
+    "format": "VERSION|EDIT|LIST_ACTION_INDEX|ITEM",
+    "string": "LIST|1|VGB6FR0|0|V9IG3LB",
+    "fields": {
+      "VERSION": "1",
+      "EDIT": "VGB6FR0",
+      "LIST_ACTION_INDEX": "0",
+      "ITEM": "V9IG3LB"
+    }
+  },
+  {
+    "action": "MESSAGE",
+    "version": 0,
+    "format": "VERSION|COIN|DESTINATION|ENCRYPTION_METHOD|ENCRYPTION_KEY",
+    "string": "MESSAGE|0|VD5FSBE|mvuKWKvgzrkxh8QgNZ91vMBZUKN5BFYmo3|VBFPL8P|VEK9S6M",
+    "fields": {
+      "VERSION": "0",
+      "COIN": "VD5FSBE",
+      "DESTINATION": "mvuKWKvgzrkxh8QgNZ91vMBZUKN5BFYmo3",
+      "ENCRYPTION_METHOD": "VBFPL8P",
+      "ENCRYPTION_KEY": "VEK9S6M"
+    }
+  },
+  {
+    "action": "MESSAGE",
+    "version": 1,
+    "format": "VERSION|COIN|DESTINATION|ENCRYPTION_METHOD|ENCRYPTION_KEY",
+    "string": "MESSAGE|1|VGB6FR0|msK1rsgNVFPM4cR3X5rngczTKa6EtT4WKD|V9IG3LB|V1DX8GT",
+    "fields": {
+      "VERSION": "1",
+      "COIN": "VGB6FR0",
+      "DESTINATION": "msK1rsgNVFPM4cR3X5rngczTKa6EtT4WKD",
+      "ENCRYPTION_METHOD": "V9IG3LB",
+      "ENCRYPTION_KEY": "V1DX8GT"
+    }
+  },
+  {
+    "action": "MESSAGE",
+    "version": 2,
+    "format": "VERSION|COIN|DESTINATION|ENCRYPTED_MESSAGE",
+    "string": "MESSAGE|2|VC8HVHS|n4nbVcRRR5sEHyp2VYuLUvCyDmQmBoonoK|V32H6WC",
+    "fields": {
+      "VERSION": "2",
+      "COIN": "VC8HVHS",
+      "DESTINATION": "n4nbVcRRR5sEHyp2VYuLUvCyDmQmBoonoK",
+      "ENCRYPTED_MESSAGE": "V32H6WC"
+    }
+  },
+  {
+    "action": "MESSAGE",
+    "version": 3,
+    "format": "VERSION|COIN|DESTINATION|PLAINTEXT_MESSAGE",
+    "string": "MESSAGE|3|V27Q0EU|mvuKWKvgzrkxh8QgNZ91vMBZUKN5BFYmo3|VEOQR7I",
+    "fields": {
+      "VERSION": "3",
+      "COIN": "V27Q0EU",
+      "DESTINATION": "mvuKWKvgzrkxh8QgNZ91vMBZUKN5BFYmo3",
+      "PLAINTEXT_MESSAGE": "VEOQR7I"
+    }
+  },
+  {
+    "action": "MINT",
+    "version": 0,
+    "format": "VERSION|TICK|AMOUNT|DESTINATION|MEMO",
+    "string": "MINT|0|A1B2C3|12345678901234567890|mvuKWKvgzrkxh8QgNZ91vMBZUKN5BFYmo3|field round trip 880575",
+    "fields": {
+      "VERSION": "0",
+      "TICK": "A1B2C3",
+      "AMOUNT": "12345678901234567890",
+      "DESTINATION": "mvuKWKvgzrkxh8QgNZ91vMBZUKN5BFYmo3",
+      "MEMO": "field round trip 880575"
+    }
+  },
+  {
+    "action": "ORDER",
+    "version": 0,
+    "format": "VERSION|GIVE_COIN|GIVE_TICK|GIVE_AMOUNT|GIVE_OWNERSHIP|GET_COIN|GET_TICK|GET_AMOUNT|GET_OWNERSHIP|GET_ADDRESS|EXPIRATION|ALLOW_LIST|BLOCK_LIST|MEMO",
+    "string": "ORDER|0|VD5FSBE|A1B2C3|12345678901234567890|1|VALO9S|XCHAIN|1|0|mvuKWKvgzrkxh8QgNZ91vMBZUKN5BFYmo3|12345678901234567890|1|0|field round trip 855525",
+    "fields": {
+      "VERSION": "0",
+      "GIVE_COIN": "VD5FSBE",
+      "GIVE_TICK": "A1B2C3",
+      "GIVE_AMOUNT": "12345678901234567890",
+      "GIVE_OWNERSHIP": "1",
+      "GET_COIN": "VALO9S",
+      "GET_TICK": "XCHAIN",
+      "GET_AMOUNT": "1",
+      "GET_OWNERSHIP": "0",
+      "GET_ADDRESS": "mvuKWKvgzrkxh8QgNZ91vMBZUKN5BFYmo3",
+      "EXPIRATION": "12345678901234567890",
+      "ALLOW_LIST": "1",
+      "BLOCK_LIST": "0",
+      "MEMO": "field round trip 855525"
+    }
+  },
+  {
+    "action": "ORDER",
+    "version": 1,
+    "format": "VERSION|ORDER_ACTION_INDEX|MEMO",
+    "string": "ORDER|1|4761388|field round trip 216486",
+    "fields": {
+      "VERSION": "1",
+      "ORDER_ACTION_INDEX": "4761388",
+      "MEMO": "field round trip 216486"
+    }
+  },
+  {
+    "action": "ORDER",
+    "version": 2,
+    "format": "VERSION|ORDER_ACTION_INDEX|EXPIRATION|ALLOW_LIST|BLOCK_LIST|MEMO",
+    "string": "ORDER|2|100|600|0|0|field round trip 718576",
+    "fields": {
+      "VERSION": "2",
+      "ORDER_ACTION_INDEX": "100",
+      "EXPIRATION": "600",
+      "ALLOW_LIST": "0",
+      "BLOCK_LIST": "0",
+      "MEMO": "field round trip 718576"
+    }
+  },
+  {
+    "action": "PRICE",
+    "version": 0,
+    "format": "VERSION|ROUND|TIMESTAMP|PAIR_COUNT|...|SIG_COUNT|...",
+    "string": "PRICE|0|VD5FSBE|VDOS82X|100|VEK9S6M|0641cba2d880359d|V49UGUH",
+    "fields": {
+      "VERSION": "0",
+      "ROUND": "VD5FSBE",
+      "TIMESTAMP": "VDOS82X",
+      "PAIR_COUNT": "100",
+      "...": "V49UGUH",
+      "SIG_COUNT": "0641cba2d880359d"
+    }
+  },
+  {
+    "action": "PRICE",
+    "version": 1,
+    "format": "VERSION|COIN|TICK|FIAT|VALUE|FEE|MEMO",
+    "string": "PRICE|1|VGB6FR0|FLDTOK|V9IG3LB|V1DX8GT|1|field round trip 461812",
+    "fields": {
+      "VERSION": "1",
+      "COIN": "VGB6FR0",
+      "TICK": "FLDTOK",
+      "FIAT": "V9IG3LB",
+      "VALUE": "V1DX8GT",
+      "FEE": "1",
+      "MEMO": "field round trip 461812"
+    }
+  },
+  {
+    "action": "SEND",
+    "version": 0,
+    "format": "VERSION|TICK|AMOUNT|DESTINATION|MEMO",
+    "string": "SEND|0|A1B2C3|12345678901234567890|mvuKWKvgzrkxh8QgNZ91vMBZUKN5BFYmo3|field round trip 880575",
+    "fields": {
+      "VERSION": "0",
+      "TICK": "A1B2C3",
+      "AMOUNT": "12345678901234567890",
+      "DESTINATION": "mvuKWKvgzrkxh8QgNZ91vMBZUKN5BFYmo3",
+      "MEMO": "field round trip 880575"
+    }
+  },
+  {
+    "action": "SEND",
+    "version": 1,
+    "format": "VERSION|TICK|AMOUNT|DESTINATION|AMOUNT|DESTINATION|MEMO",
+    "string": "SEND|1|A1B2C3|1|n4nbVcRRR5sEHyp2VYuLUvCyDmQmBoonoK|0|msK1rsgNVFPM4cR3X5rngczTKa6EtT4WKD|field round trip 461812",
+    "fields": {
+      "VERSION": "1",
+      "TICK": "A1B2C3",
+      "AMOUNT": "0",
+      "DESTINATION": "msK1rsgNVFPM4cR3X5rngczTKa6EtT4WKD",
+      "MEMO": "field round trip 461812"
+    }
+  },
+  {
+    "action": "SEND",
+    "version": 2,
+    "format": "VERSION|TICK|AMOUNT|DESTINATION|TICK|AMOUNT|DESTINATION|MEMO",
+    "string": "SEND|2|FLD.SUB|600|msK1rsgNVFPM4cR3X5rngczTKa6EtT4WKD|FLDTOK|12345678901234567890|mvuKWKvgzrkxh8QgNZ91vMBZUKN5BFYmo3|field round trip 469568",
+    "fields": {
+      "VERSION": "2",
+      "TICK": "FLDTOK",
+      "AMOUNT": "12345678901234567890",
+      "DESTINATION": "mvuKWKvgzrkxh8QgNZ91vMBZUKN5BFYmo3",
+      "MEMO": "field round trip 469568"
+    }
+  },
+  {
+    "action": "SEND",
+    "version": 3,
+    "format": "VERSION|TICK|AMOUNT|DESTINATION|MEMO|TICK|AMOUNT|DESTINATION|MEMO",
+    "string": "SEND|3|FLDTOK|12345678901234567890|mvuKWKvgzrkxh8QgNZ91vMBZUKN5BFYmo3|field round trip 570452|FLD.SUB|0|msK1rsgNVFPM4cR3X5rngczTKa6EtT4WKD|field round trip 491863",
+    "fields": {
+      "VERSION": "3",
+      "TICK": "FLD.SUB",
+      "AMOUNT": "0",
+      "DESTINATION": "msK1rsgNVFPM4cR3X5rngczTKa6EtT4WKD",
+      "MEMO": "field round trip 491863"
+    }
+  },
+  {
+    "action": "SLEEP",
+    "version": 0,
+    "format": "VERSION|RESUME_BLOCK|MEMO",
+    "string": "SLEEP|0|4761388|field round trip 827687",
+    "fields": {
+      "VERSION": "0",
+      "RESUME_BLOCK": "4761388",
+      "MEMO": "field round trip 827687"
+    }
+  },
+  {
+    "action": "SLEEP",
+    "version": 1,
+    "format": "VERSION|RESUME_BLOCK|TICK|MEMO",
+    "string": "SLEEP|1|4761388|FLDTOK|field round trip 575179",
+    "fields": {
+      "VERSION": "1",
+      "RESUME_BLOCK": "4761388",
+      "TICK": "FLDTOK",
+      "MEMO": "field round trip 575179"
+    }
+  },
+  {
+    "action": "STAKE",
+    "version": 1,
+    "format": "VERSION|AMOUNT|SIGNING_PUBKEY",
+    "string": "STAKE|1|1.234567890123456789|02abababababababababababababababababababababababababababababababab",
+    "fields": {
+      "VERSION": "1",
+      "AMOUNT": "1.234567890123456789",
+      "SIGNING_PUBKEY": "02abababababababababababababababababababababababababababababababab"
+    }
+  },
+  {
+    "action": "STAKE",
+    "version": 2,
+    "format": "VERSION|AMOUNT|SIGNING_PUBKEY",
+    "string": "STAKE|2|12345678901234567890|02abababababababababababababababababababababababababababababababab",
+    "fields": {
+      "VERSION": "2",
+      "AMOUNT": "12345678901234567890",
+      "SIGNING_PUBKEY": "02abababababababababababababababababababababababababababababababab"
+    }
+  },
+  {
+    "action": "STAKE",
+    "version": 3,
+    "format": "VERSION|AMOUNT|SIGNING_PUBKEY|TARGET_CONTRACT_INDEX|TICK",
+    "string": "STAKE|3|0|02abababababababababababababababababababababababababababababababab|4761388|A1B2C3",
+    "fields": {
+      "VERSION": "3",
+      "AMOUNT": "0",
+      "SIGNING_PUBKEY": "02abababababababababababababababababababababababababababababababab",
+      "TARGET_CONTRACT_INDEX": "4761388",
+      "TICK": "A1B2C3"
+    }
+  },
+  {
+    "action": "SWAP",
+    "version": 0,
+    "format": "VERSION|GIVE_COIN|GIVE_TICK|GIVE_AMOUNT|GIVE_OWNERSHIP|GET_COIN|GET_TICK|GET_AMOUNT|GET_OWNERSHIP|GET_ADDRESS|EXPIRATION|ALLOW_LIST|BLOCK_LIST|MEMO",
+    "string": "SWAP|0|VD5FSBE|A1B2C3|12345678901234567890|1|VALO9S|XCHAIN|1|0|mvuKWKvgzrkxh8QgNZ91vMBZUKN5BFYmo3|12345678901234567890|1|0|field round trip 855525",
+    "fields": {
+      "VERSION": "0",
+      "GIVE_COIN": "VD5FSBE",
+      "GIVE_TICK": "A1B2C3",
+      "GIVE_AMOUNT": "12345678901234567890",
+      "GIVE_OWNERSHIP": "1",
+      "GET_COIN": "VALO9S",
+      "GET_TICK": "XCHAIN",
+      "GET_AMOUNT": "1",
+      "GET_OWNERSHIP": "0",
+      "GET_ADDRESS": "mvuKWKvgzrkxh8QgNZ91vMBZUKN5BFYmo3",
+      "EXPIRATION": "12345678901234567890",
+      "ALLOW_LIST": "1",
+      "BLOCK_LIST": "0",
+      "MEMO": "field round trip 855525"
+    }
+  },
+  {
+    "action": "SWAP",
+    "version": 1,
+    "format": "VERSION|SWAP_ACTION_INDEX|MEMO",
+    "string": "SWAP|1|4761388|field round trip 216486",
+    "fields": {
+      "VERSION": "1",
+      "SWAP_ACTION_INDEX": "4761388",
+      "MEMO": "field round trip 216486"
+    }
+  },
+  {
+    "action": "SWAP",
+    "version": 2,
+    "format": "VERSION|SWAP_ACTION_INDEX|EXPIRATION|ALLOW_LIST|BLOCK_LIST|MEMO",
+    "string": "SWAP|2|100|600|0|0|field round trip 718576",
+    "fields": {
+      "VERSION": "2",
+      "SWAP_ACTION_INDEX": "100",
+      "EXPIRATION": "600",
+      "ALLOW_LIST": "0",
+      "BLOCK_LIST": "0",
+      "MEMO": "field round trip 718576"
+    }
+  },
+  {
+    "action": "SWEEP",
+    "version": 0,
+    "format": "VERSION|DESTINATION|BALANCES|OWNERSHIPS|ORDERS|SWAPS|DISPENSERS|MEMO",
+    "string": "SWEEP|0|mvuKWKvgzrkxh8QgNZ91vMBZUKN5BFYmo3|VDOS82X|1|VEK9S6M|VALO9S|V713FET|field round trip 300603",
+    "fields": {
+      "VERSION": "0",
+      "DESTINATION": "mvuKWKvgzrkxh8QgNZ91vMBZUKN5BFYmo3",
+      "BALANCES": "VDOS82X",
+      "OWNERSHIPS": "1",
+      "ORDERS": "VEK9S6M",
+      "SWAPS": "VALO9S",
+      "DISPENSERS": "V713FET",
+      "MEMO": "field round trip 300603"
+    }
+  },
+  {
+    "action": "UNSTAKE",
+    "version": 0,
+    "format": "VERSION|SIGNING_PUBKEY",
+    "string": "UNSTAKE|0|02abababababababababababababababababababababababababababababababab",
+    "fields": {
+      "VERSION": "0",
+      "SIGNING_PUBKEY": "02abababababababababababababababababababababababababababababababab"
+    }
+  },
+  {
+    "action": "UNSTAKE",
+    "version": 1,
+    "format": "VERSION|SIGNING_PUBKEY|TARGET_CONTRACT_INDEX|TICK",
+    "string": "UNSTAKE|1|02abababababababababababababababababababababababababababababababab|4761388|FLDTOK",
+    "fields": {
+      "VERSION": "1",
+      "SIGNING_PUBKEY": "02abababababababababababababababababababababababababababababababab",
+      "TARGET_CONTRACT_INDEX": "4761388",
+      "TICK": "FLDTOK"
+    }
+  },
+  {
+    "action": "WITHDRAW",
+    "version": 0,
+    "format": "VERSION|CONTRACT_ACTION_INDEX|TICK|QUANTITY",
+    "string": "WITHDRAW|0|4761388|A1B2C3|VBFPL8P",
+    "fields": {
+      "VERSION": "0",
+      "CONTRACT_ACTION_INDEX": "4761388",
+      "TICK": "A1B2C3",
+      "QUANTITY": "VBFPL8P"
+    }
+  }
+]

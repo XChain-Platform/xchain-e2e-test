@@ -23,6 +23,7 @@
   },
   "scripts": {
     "test": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/actions/**/*.test.js'",
+    "test:codec": "mocha --no-config --timeout 30000 --exit 'test/codec/**/*.test.js'",
     "test:sdk": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/sdk/**/*.sdk.test.js'",
     "test:federation": "E2E_REQUIRE_FEDERATION=1 mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/federation/multiHubAttestation.test.js'",
     "test:attestation:llm": "E2E_REQUIRE_FEDERATION=1 mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/federation/llmAttestation.test.js'",
