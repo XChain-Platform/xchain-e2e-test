@@ -32,11 +32,22 @@ async function waitForAnyUnstake({source, signingPubkey, txHash}, timeMax = 6000
     return null
 }
 
+async function waitForAnyDelegation({source, txHash}, timeMax = 60000){
+    const startMs = Date.now(), endTime = startMs + timeMax
+    while(Date.now() < endTime){
+        let row = await indexerDatabase.checkDelegation({source, txHash}).catch(() => null)
+        if(row) return row
+        await new Promise(r => setTimeout(r, 1000))
+    }
+    return null
+}
+
 module.exports = {
     // Negative-path helpers — return the row regardless of status so the
     // test can assert against the specific rejection reason.
     waitForAnyStake,
     waitForAnyUnstake,
+    waitForAnyDelegation,
     // STAKE v1 — create a new stake (capability model: capabilities auto-qualify by amount).
     // See claude/reports/specs/2026-05-24_capability-staking-model.md
     async sendStakeV1(addressInfo, amount, signingPubkey){
@@ -128,6 +139,43 @@ module.exports = {
         })
 
         return { txHash, revocation: revocationRow }
+    },
+
+    // DELEGATE v2 against the source's ORIGINAL stake signing key — the
+    // key-compromise completion path. Recorded ONLY in stake_key_revocations
+    // (NOT delegations), so it waits on the dedicated revocations checker.
+    async sendStakeKeyRevoke(addressInfo, signingPubkey){
+        let address = addressInfo["address"]
+        let msg = "DELEGATE|2|" + signingPubkey
+
+        console.log("Creating and sending DELEGATE v2 (stake-key revoke) tx...")
+        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
+
+        console.log("Waiting for stake-key revocation in the database...")
+        let revocationRow = await indexerDatabase.waitForStakeKeyRevocation({
+            source:        address,
+            signingPubkey: signingPubkey,
+            txHash:        txHash,
+            status:        "valid"
+        })
+
+        return { txHash, revocation: revocationRow }
+    },
+
+    // DELEGATE expected to be REJECTED (any version that records its rejection
+    // in the delegations table — v0 collisions, v2 double-revokes). Broadcasts
+    // and polls the row status-agnostically so the test can assert the reason.
+    async sendDelegateInvalid(addressInfo, version, signingPubkey){
+        let address = addressInfo["address"]
+        let msg = "DELEGATE|" + version + "|" + signingPubkey
+
+        console.log("Creating and sending (expected-invalid) DELEGATE v" + version + " tx...")
+        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
+
+        console.log("Waiting for the rejected delegations row in the database...")
+        let row = await waitForAnyDelegation({ source: address, txHash: txHash })
+
+        return { txHash, delegation: row }
     },
 
     async sendCollectV0(addressInfo){

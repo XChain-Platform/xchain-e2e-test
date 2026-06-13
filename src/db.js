@@ -2358,6 +2358,50 @@ class Database {
         } catch(err){ return null } finally { await connection.release() }
     }
 
+    // ── Stake-key revocations (DELEGATE v2 against the ORIGINAL stake key) ──
+    // Stake-key-mode revokes write ONLY stake_key_revocations (a delegations
+    // row would read as an active delegation and re-add the key to the
+    // effective signer set), so they are invisible to checkDelegation.
+
+    async waitForStakeKeyRevocation(params, timeMax = 60000){
+        const startMs = Date.now()
+        const endTime = startMs + timeMax
+        let polls = 0
+        while(Date.now() < endTime){
+            polls++
+            try {
+                let row = await this.checkStakeKeyRevocation(params)
+                if(row) { this._recordPerfPoll('checkStakeKeyRevocation', startMs, polls, true); return row }
+                await this.sleep(1000)
+            } catch(err){ await this.sleep(1000) }
+        }
+        this._recordPerfPoll('checkStakeKeyRevocation', startMs, polls, false)
+        return null
+    }
+
+    async checkStakeKeyRevocation({source, signingPubkey, txHash, status}){
+        let w = [], v = []
+        if(source){ w.push("ia.address = ?"); v.push(source); }
+        if(signingPubkey){ w.push("ip.pubkey = ?"); v.push(String(signingPubkey).toLowerCase()); }
+        if(txHash){ w.push("itx.hash = ?"); v.push(txHash); }
+        if(status){ w.push("ist.status = ?"); v.push(status); }
+        if(w.length === 0) return null
+        let query = `SELECT r.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status, ip.pubkey AS signing_pubkey
+            FROM stake_key_revocations r
+            LEFT JOIN actions act ON act.action_index = r.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ia ON ia.id = r.source_id
+            LEFT JOIN index_statuses ist ON ist.id = r.status_id
+            LEFT JOIN index_pubkeys ip ON ip.id = r.signing_pubkey_id
+            WHERE ` + w.join(" AND ")
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch(err){ return null } finally { await connection.release() }
+    }
+
     // ── Contract-targeted staking (STAKE v3 / UNSTAKE v1 / DELEGATE v1) ──
 
     async waitForContractStake(params, timeMax = 60000){
