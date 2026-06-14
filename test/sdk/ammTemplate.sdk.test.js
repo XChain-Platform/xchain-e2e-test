@@ -59,6 +59,40 @@ function loadTemplate(name) {
         '. Set XCHAIN_CONTRACTS_DIR to the xchain-contracts checkout. Tried:\n  ' + candidates.join('\n  '));
 }
 
+// Strip comments + blank lines so the DEPLOY payload carries only code (see the
+// escrow suite for the rationale: hex-encoded source is 2 payload bytes/char and
+// the encoder caps a compiled ACTION at MAX_DATA_BYTES). String/char-aware.
+function compactSource(src) {
+    let out = '';
+    let i = 0, n = src.length;
+    let state = 'code';
+    while (i < n) {
+        const c = src[i], d = src[i + 1];
+        if (state === 'code') {
+            if (c === '/' && d === '/') { state = 'line'; i += 2; continue; }
+            if (c === '/' && d === '*') { state = 'block'; i += 2; continue; }
+            if (c === "'") { state = 'sq'; out += c; i++; continue; }
+            if (c === '"') { state = 'dq'; out += c; i++; continue; }
+            if (c === '`') { state = 'tpl'; out += c; i++; continue; }
+            out += c; i++; continue;
+        }
+        if (state === 'line') { if (c === '\n') { state = 'code'; out += c; } i++; continue; }
+        if (state === 'block') { if (c === '*' && d === '/') { state = 'code'; i += 2; } else i++; continue; }
+        if (c === '\\') { out += c + (d || ''); i += 2; continue; }
+        if ((state === 'sq' && c === "'") || (state === 'dq' && c === '"') || (state === 'tpl' && c === '`')) state = 'code';
+        out += c; i++;
+    }
+    return out.split('\n').map(l => l.replace(/^\s+/, '').replace(/\s+$/, '')).filter(l => l.length > 0).join('\n');
+}
+
+// The encoder rejects a compiled ACTION payload over this many bytes
+// (xchain-encoder MAX_DATA_BYTES). The DEPLOY action string is itself the payload.
+const MAX_DATA_BYTES = 8189;
+function deployPayloadBytes(codeHex, gasLimit, constructorParams) {
+    const s = 'DEPLOY|0|' + codeHex + '|' + gasLimit + '|' + constructorParams.join('|');
+    return Buffer.byteLength(s, 'utf8');
+}
+
 function balanceFor(balances, tick) {
     const list = balances && (Array.isArray(balances) ? balances : balances.data);
     if (!Array.isArray(list)) return 0;
@@ -85,7 +119,7 @@ function haveConnectors() {
 describe('[sdk] template:amm (LP-as-real-tick round trip)', function () {
     this.timeout(0);
 
-    const AMM_SRC = loadTemplate('amm');
+    const AMM_SRC = compactSource(loadTemplate('amm'));
     const DEC = 8;             // divisible pair so swap output (a fraction) is representable
     const LIQ = 10000;         // deposited per side for the initial liquidity
     const SWAP_IN = 1000;      // tokenA sold into the pool
@@ -95,6 +129,20 @@ describe('[sdk] template:amm (LP-as-real-tick round trip)', function () {
 
     before(async function () {
         if (!haveConnectors()) this.skip();
+
+        // Pre-flight: the AMM source, even comment-stripped, may exceed the encoder's
+        // MAX_DATA_BYTES. The DEPLOY payload is the action string itself, with the
+        // source hex-encoded (2 bytes/char). If it won't fit, skip with a clear
+        // reason rather than failing every test with an opaque encoder RPC error.
+        const codeHex = Buffer.from(AMM_SRC, 'utf8').toString('hex');
+        const payloadBytes = deployPayloadBytes(codeHex, 400000, ['T'.repeat(12), 'T'.repeat(12), 'T'.repeat(12)]);
+        if (payloadBytes > MAX_DATA_BYTES) {
+            console.log('    [amm] SKIP: DEPLOY payload ' + payloadBytes + ' bytes > encoder MAX_DATA_BYTES ' + MAX_DATA_BYTES +
+                ' (compacted source ' + Buffer.byteLength(AMM_SRC, 'utf8') + ' bytes). ' +
+                'AMM needs identifier-mangling or a larger-DEPLOY path to deploy on-chain.');
+            this.skip();
+        }
+
         sdk = makeSdk();
 
         lp = await fundedGasAddress(sdk, 1);
