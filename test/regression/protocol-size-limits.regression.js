@@ -111,4 +111,35 @@ describe('Protocol size-limit drift guard', () => {
             )
         })
     })
+
+    describe('Chunked DEPLOY caps (MAX_DEPLOY_CHUNKS / MAX_DEPLOYCHUNK_PART_BYTES)', () => {
+
+        const chunkHelper        = require('../../../xchain-sdk/src/chunkHelper.js')
+        const indexerDeployChunk = require('../../../xchain-indexer/src/actions/deploy_chunk.js')
+
+        it('[regression:p0] MAX_DEPLOY_CHUNKS === canonical across SDK + indexer', () => {
+            assert.strictEqual(chunkHelper.MAX_DEPLOY_CHUNKS, protocol.MAX_DEPLOY_CHUNKS,
+                'SDK chunkHelper MAX_DEPLOY_CHUNKS drifted from the canonical protocol constant')
+            assert.strictEqual(indexerDeploy.MAX_DEPLOY_CHUNKS, protocol.MAX_DEPLOY_CHUNKS,
+                'indexer DEPLOY MAX_DEPLOY_CHUNKS drifted from the canonical protocol constant')
+            assert.strictEqual(indexerDeployChunk.MAX_DEPLOY_CHUNKS, protocol.MAX_DEPLOY_CHUNKS,
+                'indexer DEPLOYCHUNK MAX_DEPLOY_CHUNKS drifted from the canonical protocol constant')
+        })
+
+        it('[regression:p0] MAX_DEPLOYCHUNK_PART_BYTES === canonical across SDK + indexer', () => {
+            assert.strictEqual(chunkHelper.MAX_DEPLOYCHUNK_PART_BYTES, protocol.MAX_DEPLOYCHUNK_PART_BYTES,
+                'SDK chunkHelper MAX_DEPLOYCHUNK_PART_BYTES drifted from the canonical protocol constant')
+            assert.strictEqual(indexerDeployChunk.MAX_DEPLOYCHUNK_PART_BYTES, protocol.MAX_DEPLOYCHUNK_PART_BYTES,
+                'indexer DEPLOYCHUNK MAX_DEPLOYCHUNK_PART_BYTES drifted from the canonical protocol constant')
+        })
+
+        it('[regression:p0] a max-size DEPLOYCHUNK part + action overhead fits the compiled cap', () => {
+            // The per-chunk budget must leave room for the DEPLOYCHUNK action overhead
+            // (prefix + 64-char CODE_HASH + indices) under MAX_ACTION_DATA_LENGTH, or a
+            // full-size chunk the SDK produces would be silently dropped by the decoder.
+            const worst = 'DEPLOYCHUNK|0|' + 'f'.repeat(64) + '|15|16|' + 'A'.repeat(protocol.MAX_DEPLOYCHUNK_PART_BYTES)
+            assert.ok(Buffer.byteLength(worst, 'utf8') + protocol.OP_RETURN_PUSH_OVERHEAD <= protocol.MAX_ACTION_DATA_LENGTH,
+                'a max-size DEPLOYCHUNK part + overhead exceeds MAX_ACTION_DATA_LENGTH')
+        })
+    })
 })
