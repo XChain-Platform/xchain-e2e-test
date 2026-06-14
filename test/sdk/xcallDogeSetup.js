@@ -169,8 +169,12 @@ async function main() {
     }
 
     // ── 3. XCHAIN gas (MINT — no protocol fee). Validity confirmed via balance.
+    //       Cap at the genesis XCHAIN MAX_MINT (100000) — a single MINT above it
+    //       is indexed 'invalid: AMOUNT > MAX_MINT', leaving the deployer with no
+    //       GAS and the DEPLOY rejecting 'insufficient funds (GAS)'. 100000 is
+    //       three orders past the ~1 XCHAIN DEPLOY fee, so one mint is plenty.
     await submitAndIndex('MINT gas',
-        { action: 'MINT', params: { tick: 'XCHAIN', amount: 1000000, destination: deployer.address } }, {});
+        { action: 'MINT', params: { tick: 'XCHAIN', amount: 100000, destination: deployer.address } }, {});
 
     // ── 4. DEPLOY the target contract, fee in native DOGE. The explorer does
     //       not serve DOGE regtest, so the SDK's quote rail (payFeeInNativeCoin
