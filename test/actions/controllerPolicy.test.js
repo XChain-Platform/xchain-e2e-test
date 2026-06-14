@@ -428,19 +428,27 @@ describe('Controller Policy Layer — bindings, enforcement, royalty split + per
         await issueHelper.sendIssueV0(owner, tick, '100000', '100000', '0', 'cverify E2', '100000')
         // Guard emits SEND but its manifest permits only ISSUE.
         const dep = await vmHelper.sendDeployV0(owner, MANIFEST_FORBIDS_SEND, 250000)
-        await submitRaw(owner, issueBindWire(tick, dep.contract.action_index, 'transfer', 0, 0))
+        const ctrl = dep.contract.action_index
+        // Fund the contract so its guard's SEND emission WOULD succeed if the allowlist permitted
+        // it — otherwise the emission fails on insufficient balance regardless of the manifest,
+        // which made the original assertion a false green. With the contract funded, a blocked
+        // SEND is attributable to the allowlist alone. (The definitive, balance-independent proof
+        // lives in the indexer integration suite: 16-controller-permissions asserts the
+        // constructor-emission denial on the execution error message.)
+        await vmHelper.sendDepositV0(owner, ctrl, tick, '100')
+        await submitRaw(owner, issueBindWire(tick, ctrl, 'transfer', 0, 0))
         await waitTokenController(tick, e => e.action_class === 'transfer' && e.is_unbind === 0)
         await mine(1)
 
         const recip = await cryptoHelper.getNewFundedAddress('cv-e2r', COIN, NETWORK, null, 'legacy', 0, 1)
         const before = await balanceOf(recip.address, tick)
-        // The SEND triggers the transfer guard; the guard's own SEND emission is not in
-        // the allowlist → throws → guard DENIES → the original SEND is blocked.
+        // The SEND triggers the transfer guard; the (now-funded) guard's SEND emission is not in
+        // the allowlist → throws → guard DENIES → the original SEND is blocked (recipient gets none).
         await submitRaw(owner, `SEND|0|${tick}|10|${recip.address}|manifest-blocked`)
         await sleep(7000)
         const after = await balanceOf(recip.address, tick)
-        assert.strictEqual(after, before, 'SEND blocked: a disallowed guard emission denies the action')
-        console.log('   E2 manifest-forbidden emission denied the action — OK')
+        assert.strictEqual(after, before, 'SEND blocked by the allowlist (contract IS funded, so the block is the manifest, not balance)')
+        console.log('   E2 manifest-forbidden emission denied the funded contract — OK')
     })
 
     it('E3. tighter maxTakeBps denies an over-cap legs guard; a looser one allows the same legs', async function () {
