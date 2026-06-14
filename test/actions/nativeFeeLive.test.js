@@ -137,9 +137,16 @@ describe('Native-coin fee payment (live stack)', function () {
         let tick = "NFN" + address.substring(address.length - 8)
 
         // No fee output, no XCHAIN balance -> the issuance fee cannot be paid -> invalid.
-        let txHash = await transactionHelper.createAndSendTransaction(addr, issueMessage(tick))
+        // Opt out of the harness's native-fee injection (last arg) so this path
+        // truly sends a tx with NO fee output. The rejection differs by chain:
+        // BTC falls back to XCHAIN-balance deduction ("insufficient funds (FEE)"),
+        // LTC/DOGE require a native fee output ("native coin output required").
+        let txHash = await transactionHelper.createAndSendTransaction(addr, issueMessage(tick), null, [], null, null, true)
+        let expectedStatus = (COIN_CODE === 'LTC' || COIN_CODE === 'DOGE')
+            ? "invalid: insufficient fee (native coin output required)"
+            : "invalid: insufficient funds (FEE)"
         let invalid = await indexerDatabase.waitForIssue({
-            source: address, tick: tick, txHash: txHash, status: "invalid: insufficient funds (FEE)"
+            source: address, tick: tick, txHash: txHash, status: expectedStatus
         }, 90000)
         assert(invalid, "ISSUE with no fee output and no XCHAIN should be INVALID")
         console.log("negative case: ISSUE correctly rejected (fee unpaid)")

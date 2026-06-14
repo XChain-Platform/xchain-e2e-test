@@ -39,6 +39,13 @@ const GAS_TICK = 'XCHAIN'
  */
 describe('Money Reorg — SEND rolls back, balances + supply converge across an on-chain reorg', function () {
 
+    // Driven by `generateBlock(addr, [])` (mine an EMPTY competing chain so the orphaned SEND is NOT
+    // re-included) — `generateblock` is a Bitcoin Core 0.19 RPC. Dogecoin Core 1.14.x (0.13/0.14 base)
+    // lacks it and answers HTTP 404, so this scenario can't be driven on DOGE regtest. The indexer's
+    // ledger reorg-rollback path is chain-agnostic (rollback.js works on DB rows by block_index) and is
+    // proven on BTC + LTC; skip on DOGE as a node capability gap, not a protocol gap.
+    before(function () { if (global.COIN_CODE === 'DOGE') this.skip() })
+
     async function q(sql, params) {
         const conn = await indexerDatabase.getConnection()
         try { return await conn.query(sql, params) }

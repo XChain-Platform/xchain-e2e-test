@@ -102,7 +102,34 @@ module.exports = {
     // references inputs the bitcoind has already spent, and broadcast would die
     // with `bad-txns-inputs-missingorspent`. Drop the cache and wait briefly so
     // the tracker can catch up, then rebuild from scratch.
-    async createAndSendTransaction(addressInfo, data, rawData = null, customOutputs = [], outputType = null, compressedPubKey = null){
+    async createAndSendTransaction(addressInfo, data, rawData = null, customOutputs = [], outputType = null, compressedPubKey = null, skipNativeFeeInjection = false){
+        // Native-coin fee injection for LTC/DOGE (no-op on BTC). The general
+        // action builder is gas-mode, but LTC/DOGE reject a fee-bearing action
+        // that carries no native fee output. Inject the fee output ONCE here,
+        // outside the retry loop (fee sizing doesn't change across stale-UTXO
+        // rebuilds). Skip when the caller opts out (a test deliberately omitting
+        // the fee) or already supplied a FEE_DESTINATION output of its own
+        // (nativeFeeLive/nativeFeeDispenser pass theirs).
+        let outputs = Array.isArray(customOutputs) ? customOutputs : []
+        if (!skipNativeFeeInjection) {
+            try {
+                const nativeFeeHelper = require('./helpers/nativeFeeHelper')
+                const feeDest = nativeFeeHelper.resolveFeeDestination()
+                const alreadyHasFee = feeDest && outputs.some(o => o && o.address === feeDest)
+                if (!alreadyHasFee) {
+                    const feeOutput = await nativeFeeHelper.getNativeFeeOutput()
+                    if (feeOutput) {
+                        outputs = [feeOutput, ...outputs]
+                        console.log('nativeFeeHelper: injected native fee output ' + feeOutput.value + ' sats -> ' + feeOutput.address)
+                    }
+                }
+            } catch (err) {
+                // Best-effort: never block a tx on fee injection. On BTC and
+                // single-host setups without prices this is simply a no-op.
+                console.log('nativeFeeHelper: fee injection skipped (' + (err && err.message) + ')')
+            }
+        }
+
         // 15 attempts gives generous budget under full-suite load. Session 4
         // settled on 8; one stubborn ORDER partial-fill failure burned all 8
         // with identical rebuilds, suggesting the tracker had a phantom UTXO
@@ -112,7 +139,7 @@ module.exports = {
         let lastErr
         for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             try {
-                return await this._doCreateAndSendTransaction(addressInfo, data, rawData, customOutputs, outputType, compressedPubKey)
+                return await this._doCreateAndSendTransaction(addressInfo, data, rawData, outputs, outputType, compressedPubKey)
             } catch (err) {
                 if (attempt < MAX_ATTEMPTS && _isStaleUtxoError(err)) {
                     // TRAP LOG: capture tracker's view of this address at the

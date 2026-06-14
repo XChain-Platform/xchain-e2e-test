@@ -64,6 +64,13 @@ describe('VM Contract Reorg — EXECUTE state rolls back across an on-chain reor
     }
 
     before(async function () {
+        // The reorg is driven by `generateblock(addr, [])` (mine an EMPTY competing chain so the
+        // orphaned tx is NOT re-included) — an RPC added in Bitcoin Core 0.19. Dogecoin Core 1.14.x
+        // (a 0.13/0.14 base) lacks it and answers HTTP 404 "method not found", so this scenario can't
+        // be driven on DOGE regtest. The indexer's reorg-rollback path is chain-agnostic (rollback.js
+        // operates on DB rows by block_index) and is proven on BTC + LTC; skip on DOGE as a node
+        // capability gap, not a protocol gap.
+        if (global.COIN_CODE === 'DOGE') this.skip()
         deployer = await cryptoHelper.getNewFundedAddress('vmreorg-deployer', COIN, NETWORK, null, 'legacy', 0, 1)
         await gasHelper.ensureGasBalance(deployer, '500')
     })

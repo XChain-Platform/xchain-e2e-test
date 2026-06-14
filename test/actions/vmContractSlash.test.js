@@ -80,6 +80,21 @@ describe('VM Contract SLASH — a contract slashes its own staker', function () 
             ORDER BY se.id DESC LIMIT 1`, [Number(ci), pk])
         return rows.length ? { amount: String(rows[0].amount), dest: rows[0].dest } : null
     }
+    // Poll until the newest slash_events row reaches `expected` amount (or deadline). sendExecuteV0
+    // resolves once the EXECUTE row is 'valid', but the emitted SLASH's slash_events row can land a
+    // beat later through a separate pool connection — on the slower DOGE cadence the immediate read
+    // saw the *previous* slash (50 vs the capped 150). Returns the last-seen row either way so a
+    // genuine mismatch still surfaces in the caller's assertion.
+    async function waitForLatestSlash(ci, pk, expected, ms = 30000) {
+        const deadline = Date.now() + ms
+        let ev = null
+        while (Date.now() < deadline) {
+            ev = await latestSlashEvent(ci, pk)
+            if (ev && ev.amount === String(expected)) return ev
+            await new Promise(r => setTimeout(r, 1000))
+        }
+        return ev
+    }
     // The contract's configured slash destination address (BURN sentinel resolved at DEPLOY time).
     async function slashDestAddress(ci) {
         const rows = await q(`SELECT ia.address AS address FROM contracts c
@@ -125,7 +140,7 @@ describe('VM Contract SLASH — a contract slashes its own staker', function () 
         assert.deepStrictEqual(await emissionAction(ex.execution.action_index), ['SLASH'],
             'one SLASH emission should be recorded')
 
-        const ev = await latestSlashEvent(contractIndex, pubkey)
+        const ev = await waitForLatestSlash(contractIndex, pubkey, 50)
         assert(ev, 'a slash_events row should exist')
         assert.strictEqual(Number(ev.amount), 50, 'slash_events.amount should be 50')
 
@@ -145,7 +160,7 @@ describe('VM Contract SLASH — a contract slashes its own staker', function () 
         const ex = await vmHelper.sendExecuteV0(staker, contractIndex, 'doSlash', [pubkey, '300'])
         assert.strictEqual(ex.execution.status, 'valid', 'over-slash execution still succeeds (capped, not rejected)')
 
-        const ev = await latestSlashEvent(contractIndex, pubkey)
+        const ev = await waitForLatestSlash(contractIndex, pubkey, 150)
         assert.strictEqual(Number(ev.amount), 150, 'slash_events.amount should be capped at the remaining 150')
         assert.strictEqual(await activeStake(contractIndex, pubkey, 'XCHAIN'), 0, 'stake should be fully drained to 0')
         assert.strictEqual(Number(await balanceOf(ev.dest, 'XCHAIN')), destBefore + 150,

@@ -123,6 +123,18 @@ describe('VM Extended — on-chain capabilities', function () {
              JOIN index_tickers it ON it.id=d.tick_id
              WHERE d.action_index=? AND it.tick='XCHAIN'`, [actionIndex])
     }
+    // The caller is charged for the execution either as an XCHAIN gas debit
+    // (BTC / xchain-gas mode) or via a native-coin fee output (LTC/DOGE). EXECUTE
+    // records gas in contract_executions, not the fees table. On native-fee chains
+    // an unpaid fee rejects the action pre-VM, so reaching a VM-outcome status with
+    // metered gas (gas_used > 0) proves the native fee was paid. BTC must still show
+    // the explicit debit (preserving the no-debit-on-failure regression guard).
+    async function feePaidFor(actionIndex, row) {
+        const xchain = await gasDebitFor(actionIndex)
+        if (xchain.length > 0) return true
+        if (COIN_CODE === 'LTC' || COIN_CODE === 'DOGE') return Number(row && row.gas_used) > 0
+        return false
+    }
     async function tickExists(tick) {
         const rows = await q(`SELECT id FROM index_tickers WHERE tick=? LIMIT 1`, [tick])
         return rows.length > 0
@@ -187,8 +199,7 @@ describe('VM Extended — on-chain capabilities', function () {
             assert.strictEqual(emissions.length, 0, 'no contract_emissions rows on revert')
 
             // Caller must be charged gas for the failed attempt (no debit pre-fix).
-            const debit = await gasDebitFor(row.action_index)
-            assert(debit.length > 0, 'caller should be charged GAS for the reverted execution')
+            assert(await feePaidFor(row.action_index, row), 'caller should be charged GAS (xchain debit or native fee) for the reverted execution')
         })
     })
 
@@ -210,8 +221,7 @@ describe('VM Extended — on-chain capabilities', function () {
             assert.strictEqual(Number(row.emitted_count), 0, 'no emissions on gas exhaustion')
 
             // Caller must be charged gas (the full burned amount) for the failed attempt.
-            const debit = await gasDebitFor(row.action_index)
-            assert(debit.length > 0, 'caller should be charged GAS for the out-of-gas execution')
+            assert(await feePaidFor(row.action_index, row), 'caller should be charged GAS (xchain debit or native fee) for the out-of-gas execution')
         })
     })
 

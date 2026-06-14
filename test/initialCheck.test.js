@@ -258,6 +258,16 @@ exports.mochaHooks = {
             }
         })
 
+        await phase('native-fee-price-seed', async () => {
+            // LTC/DOGE require a native-coin fee output on fee-bearing actions,
+            // valued by the indexer against oracle prices. Seed XCHAIN/USD +
+            // {COIN}/USD up front (no-op on BTC) so the very first ISSUE — incl.
+            // the GAS-token bootstrap below — can be priced. transactionHelper
+            // refreshes these during long runs. See helpers/nativeFeeHelper.js.
+            const nativeFeeHelper = require('./helpers/nativeFeeHelper')
+            await nativeFeeHelper.seedGlobalPrices(true)
+        })
+
         await phase('gas-token-check', async () => {
             // Ensure the GAS token exists before any tests run
             console.log("Checking if GAS token ("+GAS_TICK+") exists...")
