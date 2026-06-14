@@ -55,6 +55,10 @@ async function tip() {
     const rows = await q(`SELECT MAX(block_index) AS h FROM blocks`, [])
     return Number(rows[0].h)
 }
+async function contractPermissionsRow(contractIndex) {
+    const rows = await q(`SELECT permissions, max_take_bps FROM contract_permissions WHERE contract_index=? LIMIT 1`, [contractIndex])
+    return rows.length ? rows[0] : null
+}
 async function tokenControllerEvents(tick) {
     return await q(`SELECT tc.action_index, tc.action_class, tc.contract_index, tc.is_unbind,
                            tc.cooldown_blocks, tc.cooldown_end_block, tc.block_index
@@ -163,8 +167,37 @@ const SELF_EMIT_GATE = `module.exports = { guard: function(){
     return {};
 }};`
 
+// ─────────────── Phase E: permissions manifest guard contracts ───────────────
+// A guard that EMITS a SEND of its controlled token but whose manifest permits
+// only ISSUE — the emission must be rejected fail-closed (action denied) before
+// the SEND handler ever runs.
+const MANIFEST_FORBIDS_SEND = `module.exports = {
+    permissions: ['ISSUE'],
+    guard: function(){
+        var from = xchain.getInputParam(1);
+        var tick = xchain.getInputParam(3);
+        xchain.emit.send({ tick: tick, quantity: '1', destination: from });
+        return {};
+    }
+};`
+
+// A royalty guard returning legs that sum to 350 bps, with a contract-declared
+// maxTakeBps passed in — lets one scenario flip allow/deny purely on the manifest.
+function royaltyGateManifest(creator, market, maxTakeBps) {
+    return `module.exports = {
+        maxTakeBps: ${maxTakeBps},
+        guard: function(){
+            var at = xchain.getInputParam(0);
+            if (at === 'ORDER_CREATE' || at === 'SWAP_CREATE') {
+                return { payoutLegs: [ { to: '${creator}', bps: 250 }, { to: '${market}', bps: 100 } ] };
+            }
+            return {};
+        }
+    };`
+}
+
 // ───────────────────────── scenarios ─────────────────────────
-describe('Controller Policy Layer — bindings, enforcement, royalty split (Phases A–D)', function () {
+describe('Controller Policy Layer — bindings, enforcement, royalty split + permissions manifest (Phases A–E)', function () {
     this.timeout(0)
     let owner
 
@@ -371,6 +404,73 @@ describe('Controller Policy Layer — bindings, enforcement, royalty split (Phas
         assert(ord && ord.status === 'valid', 'guarded ORDER committed (deterministic accept)')
         assert((await tip()) >= before, 'ledger advanced past the guarded action')
         console.log('   guarded action deterministically committed (order#', ord.action_index, ') — single-node check OK')
+    })
+
+    // ───────────────────── Phase E: permissions manifest ─────────────────────
+
+    it('E1. manifest persisted at deploy: declared maxTakeBps stored in contract_permissions', async function () {
+        const creator = await cryptoHelper.getNewFundedAddress('cv-e1c', COIN, NETWORK, null, 'legacy', 0, 1)
+        const market  = await cryptoHelper.getNewFundedAddress('cv-e1m', COIN, NETWORK, null, 'legacy', 0, 1)
+        const dep = await vmHelper.sendDeployV0(owner, royaltyGateManifest(creator.address, market.address, 300), 250000)
+        const ci  = dep.contract.action_index
+        // Poll — DEPLOY indexing lags the submit (submitRaw/deploy return on confirm).
+        let row = null
+        const end = Date.now() + 20000
+        while (Date.now() < end) { row = await contractPermissionsRow(ci); if (row) break; await sleep(1000) }
+        assert(row !== null, 'contract_permissions row persisted at deploy')
+        assert.strictEqual(Number(row.max_take_bps), 300, 'declared maxTakeBps stored')
+        assert(row.permissions === null, 'no permissions array declared → NULL (unrestricted)')
+        console.log('   E1 contract_permissions =', row)
+    })
+
+    it('E2. emission allowlist: a guard emitting a non-permitted action is denied (all paths)', async function () {
+        const tick = randTick('CVE')
+        await issueHelper.sendIssueV0(owner, tick, '100000', '100000', '0', 'cverify E2', '100000')
+        // Guard emits SEND but its manifest permits only ISSUE.
+        const dep = await vmHelper.sendDeployV0(owner, MANIFEST_FORBIDS_SEND, 250000)
+        await submitRaw(owner, issueBindWire(tick, dep.contract.action_index, 'transfer', 0, 0))
+        await waitTokenController(tick, e => e.action_class === 'transfer' && e.is_unbind === 0)
+        await mine(1)
+
+        const recip = await cryptoHelper.getNewFundedAddress('cv-e2r', COIN, NETWORK, null, 'legacy', 0, 1)
+        const before = await balanceOf(recip.address, tick)
+        // The SEND triggers the transfer guard; the guard's own SEND emission is not in
+        // the allowlist → throws → guard DENIES → the original SEND is blocked.
+        await submitRaw(owner, `SEND|0|${tick}|10|${recip.address}|manifest-blocked`)
+        await sleep(7000)
+        const after = await balanceOf(recip.address, tick)
+        assert.strictEqual(after, before, 'SEND blocked: a disallowed guard emission denies the action')
+        console.log('   E2 manifest-forbidden emission denied the action — OK')
+    })
+
+    it('E3. tighter maxTakeBps denies an over-cap legs guard; a looser one allows the same legs', async function () {
+        const creator = await cryptoHelper.getNewFundedAddress('cv-e3c', COIN, NETWORK, null, 'legacy', 0, 1)
+        const market  = await cryptoHelper.getNewFundedAddress('cv-e3m', COIN, NETWORK, null, 'legacy', 0, 1)
+
+        // (a) maxTakeBps 300 < Σlegs 350 → DENIED.
+        const tickA = randTick('CVF')
+        await issueHelper.sendIssueV0(owner, tickA, '100000', '100000', '0', 'cverify E3a', '100000')
+        const depA = await vmHelper.sendDeployV0(owner, royaltyGateManifest(creator.address, market.address, 300), 250000)
+        await submitRaw(owner, issueBindWire(tickA, depA.contract.action_index, 'trade', 0, 0))
+        await waitTokenController(tickA, e => e.action_class === 'trade' && e.is_unbind === 0)
+        await mine(1)
+        await submitRaw(owner, `ORDER|0|${COIN_CODE}|${tickA}|1000||${COIN_CODE}|XCHAIN|1000||${owner.address}||||e3-overcap`)
+        assert(await expectOrderRejected(owner.address, tickA), 'over-cap legs: ORDER rejected by tighter per-contract maxTakeBps')
+        console.log('   E3a over-cap legs denied by tighter per-contract maxTakeBps — OK')
+
+        // (b) maxTakeBps 600 > Σlegs 350 → ALLOWED, legs persisted.
+        const tickB = randTick('CVG')
+        await issueHelper.sendIssueV0(owner, tickB, '100000', '100000', '0', 'cverify E3b', '100000')
+        const depB = await vmHelper.sendDeployV0(owner, royaltyGateManifest(creator.address, market.address, 600), 250000)
+        await submitRaw(owner, issueBindWire(tickB, depB.contract.action_index, 'trade', 0, 0))
+        await waitTokenController(tickB, e => e.action_class === 'trade' && e.is_unbind === 0)
+        await mine(1)
+        await submitRaw(owner, `ORDER|0|${COIN_CODE}|${tickB}|1000||${COIN_CODE}|XCHAIN|1000||${owner.address}||||e3-undercap`)
+        const ord = await waitValidOrder(owner.address, tickB)
+        assert(ord && ord.payout_legs, 'within the per-contract cap: order valid + legs persisted')
+        const legs = JSON.parse(ord.payout_legs)
+        assert(legs.length === 2 && legs[0].bps === 250 && legs[1].bps === 100, 'legs preserved under the looser cap')
+        console.log('   E3b legs within the looser cap settled — OK')
     })
 
     it('7. regression: uncontrolled token + address behave byte-for-byte as before', async function () {
