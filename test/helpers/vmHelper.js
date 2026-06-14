@@ -13,12 +13,12 @@ const transactionHelper = require('../transactionHelper')
 module.exports = {
     async sendDeployV0(addressInfo, code, gasLimit, constructorParams){
         let address = addressInfo["address"]
-        let codeHex = Buffer.from(code, 'utf8').toString('hex')
-        let msg = "DEPLOY|0|" + codeHex + "|" + gasLimit
+        let codeB64 = Buffer.from(code, 'utf8').toString('base64')
+        let msg = "DEPLOY|0|" + codeB64 + "|" + gasLimit
         if(constructorParams) msg += "|" + constructorParams
 
         console.log("Creating and sending DEPLOY V0 tx...")
-        // DEPLOY carries the full contract bytecode (hex-encoded) which can exceed
+        // DEPLOY carries the full contract bytecode (base64-encoded) which can exceed
         // OP_RETURN limits — force P2SH (the helper supports its 2-tx finalizer).
         // Auto-selected P2WSH encoding hits "Not finalized" because the helper's
         // PSBT signing path only handles legacy P2PKH inputs + the P2SH finalizer.
@@ -39,8 +39,8 @@ module.exports = {
     // funds to the chain's burn address. Pass an empty string for constructorParams to skip.
     async sendDeployV1(addressInfo, code, gasLimit, constructorParams, cooldownBlocks, slashDestination){
         let address = addressInfo["address"]
-        let codeHex = Buffer.from(code, 'utf8').toString('hex')
-        let msg = "DEPLOY|1|" + codeHex + "|" + gasLimit + "|" + (constructorParams || '')
+        let codeB64 = Buffer.from(code, 'utf8').toString('base64')
+        let msg = "DEPLOY|1|" + codeB64 + "|" + gasLimit + "|" + (constructorParams || '')
                   + "|" + cooldownBlocks + "|" + (slashDestination || '')
 
         console.log("Creating and sending DEPLOY V1 tx...")
@@ -61,8 +61,8 @@ module.exports = {
     // (invalid deploys still write a contracts row, carrying the rejection status).
     async sendDeployV1Invalid(addressInfo, code, gasLimit, constructorParams, cooldownBlocks, slashDestination){
         let address = addressInfo["address"]
-        let codeHex = Buffer.from(code, 'utf8').toString('hex')
-        let msg = "DEPLOY|1|" + codeHex + "|" + gasLimit + "|" + (constructorParams || '')
+        let codeB64 = Buffer.from(code, 'utf8').toString('base64')
+        let msg = "DEPLOY|1|" + codeB64 + "|" + gasLimit + "|" + (constructorParams || '')
                   + "|" + cooldownBlocks + "|" + (slashDestination || '')
 
         console.log("Creating and sending (expected-invalid) DEPLOY V1 tx...")

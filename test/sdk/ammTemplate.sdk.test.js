@@ -130,16 +130,16 @@ describe('[sdk] template:amm (LP-as-real-tick round trip)', function () {
     before(async function () {
         if (!haveConnectors()) this.skip();
 
-        // Pre-flight: the AMM source, even comment-stripped, may exceed the encoder's
-        // MAX_DATA_BYTES. The DEPLOY payload is the action string itself, with the
-        // source hex-encoded (2 bytes/char). If it won't fit, skip with a clear
-        // reason rather than failing every test with an opaque encoder RPC error.
-        const codeHex = Buffer.from(AMM_SRC, 'utf8').toString('hex');
-        const payloadBytes = deployPayloadBytes(codeHex, 400000, ['T'.repeat(12), 'T'.repeat(12), 'T'.repeat(12)]);
+        // Pre-flight: the DEPLOY payload is the action string itself, with the source
+        // base64-encoded (the SDK encodes CODE_ENCODING as base64, ~1.33 bytes/char).
+        // base64 brings the compacted AMM source under the encoder's MAX_DATA_BYTES cap,
+        // so this now deploys single-shot. Skip with a clear reason only if it still
+        // doesn't fit (e.g. the chunked-DEPLOY path is needed).
+        const codeB64 = Buffer.from(AMM_SRC, 'utf8').toString('base64');
+        const payloadBytes = deployPayloadBytes(codeB64, 400000, ['T'.repeat(12), 'T'.repeat(12), 'T'.repeat(12)]);
         if (payloadBytes > MAX_DATA_BYTES) {
             console.log('    [amm] SKIP: DEPLOY payload ' + payloadBytes + ' bytes > encoder MAX_DATA_BYTES ' + MAX_DATA_BYTES +
-                ' (compacted source ' + Buffer.byteLength(AMM_SRC, 'utf8') + ' bytes). ' +
-                'AMM needs identifier-mangling or a larger-DEPLOY path to deploy on-chain.');
+                ' (compacted source ' + Buffer.byteLength(AMM_SRC, 'utf8') + ' bytes). Needs chunked DEPLOY.');
             this.skip();
         }
 
