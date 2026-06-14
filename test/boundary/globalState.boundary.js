@@ -51,21 +51,21 @@ describe('Boundary — Global State & Service Discovery', function () {
         it('returns network for dogecoin-mainnet', function () {
             const network = CryptoNetworks.getBitcoinJsNetwork('dogecoin-mainnet')
             assert.ok(network)
-            assert.strictEqual(network.dustThreshold, 546)
+            assert.strictEqual(network.dustThreshold, 100000)
             assert.strictEqual(network.pubKeyHash, 0x1e)
         })
 
         it('returns network for dogecoin-testnet', function () {
             const network = CryptoNetworks.getBitcoinJsNetwork('dogecoin-testnet')
             assert.ok(network)
-            assert.strictEqual(network.dustThreshold, 546)
+            assert.strictEqual(network.dustThreshold, 100000)
             assert.strictEqual(network.pubKeyHash, 0x71)
         })
 
         it('returns network for dogecoin-regtest', function () {
             const network = CryptoNetworks.getBitcoinJsNetwork('dogecoin-regtest')
             assert.ok(network)
-            assert.strictEqual(network.dustThreshold, 546)
+            assert.strictEqual(network.dustThreshold, 100000)
         })
 
         it('returns network for litecoin-mainnet', function () {
@@ -108,11 +108,12 @@ describe('Boundary — Global State & Service Discovery', function () {
         })
 
         it('all networks have the correct per-chain dustThreshold', function () {
-            // Litecoin Core's dust relay fee is 10× Bitcoin's, so the
-            // effective dust floor is 5460 litoshis (vs 546 sats on BTC/DOGE).
+            // Per-chain dust floors differ: Bitcoin 546 sats; Litecoin 5460
+            // litoshis (10× Bitcoin's dust relay fee); Dogecoin 100000 koinu
+            // (Dogecoin Core's hard dust limit DEFAULT_HARD_DUST_LIMIT = COIN/100/10).
             const expectedDust = {
                 'bitcoin-mainnet': 546, 'bitcoin-testnet': 546, 'bitcoin-regtest': 546,
-                'dogecoin-mainnet': 546, 'dogecoin-testnet': 546, 'dogecoin-regtest': 546,
+                'dogecoin-mainnet': 100000, 'dogecoin-testnet': 100000, 'dogecoin-regtest': 100000,
                 'litecoin-mainnet': 5460, 'litecoin-testnet': 5460, 'litecoin-regtest': 5460,
             }
 
