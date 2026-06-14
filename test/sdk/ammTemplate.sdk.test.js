@@ -108,8 +108,12 @@ async function readState(sdk, contractIndex, key) {
 }
 
 function contractIndexOf(indexed) {
-    const a = indexed && Array.isArray(indexed.actions) ? indexed.actions[0] : null;
-    return a ? a.action_index : null;
+    // The constructor's emit.issue() of the LP tick lands as a sibling action in the
+    // same DEPLOY tx, and getTransaction returns them emitted-first ([ISSUE, DEPLOY]),
+    // so actions[0] is the ISSUE — find the DEPLOY explicitly to get the contract index.
+    const list = indexed && Array.isArray(indexed.actions) ? indexed.actions : [];
+    const deploy = list.find(a => (a.action === 'DEPLOY')) || list[0] || null;
+    return deploy ? deploy.action_index : null;
 }
 
 function haveConnectors() {
