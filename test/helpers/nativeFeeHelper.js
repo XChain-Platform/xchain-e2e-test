@@ -79,11 +79,28 @@ async function seedGlobalPrices(force){
         return
     }
 
-    // Anchor to the chain clock (not Date.now()): staleness is judged against
-    // the processed block's time, and regtest block timestamps drift from wall
-    // time under sustained mining. clearPair first so exactly one finalized row
-    // exists per pair (no ambiguity for getLatestPrice).
-    const blockTimestamp = await priceSnapshotHelper.latestBlockTime()
+    // Anchor to max(chain tip block_time, wall-clock now). The staleness guard
+    // (db.getLatestPrice) is ONE-SIDED: it rejects only when the snapshot is
+    // OLDER than the processed block by > ORACLE_MAX_PRICE_AGE_SECONDS (1800s) —
+    // a future-dated snapshot is accepted. Two regtest regimes must both stay
+    // fresh, and a tip-only anchor fails the first:
+    //   - idle chain: the tip block_time lags wall clock (test-host's DOGE tip ran
+    //     ~6300s behind), yet new actions mine into blocks timestamped ~now, so
+    //     a tip-anchored seed is instantly stale against them. `now` keeps it
+    //     fresh. (This was C4 Bug 2.)
+    //   - sustained mining: regtest block timestamps can drift AHEAD of wall
+    //     clock, so the tip leads `now`; anchoring to the tip tracks it.
+    // max() satisfies both. Safe for the FIAT dispenser reverse-match (which
+    // needs snapshot <= payment block_time): dispenser.test.js re-clears and
+    // re-seeds {COIN}/USD at latestBlockTime()-60 right before its DISPENSE, and
+    // that DISPENSE payment (createSimpleTransaction) never re-seeds — so this
+    // forward anchor can never clobber the dispenser's row.
+    // clearPair first so exactly one finalized row exists per pair (no ambiguity
+    // for getLatestPrice).
+    const blockTimestamp = Math.max(
+        await priceSnapshotHelper.latestBlockTime(),
+        Math.floor(Date.now() / 1000)
+    )
     await priceSnapshotHelper.clearPair('XCHAIN/USD')
     await priceSnapshotHelper.clearPair(global.COIN_CODE + '/USD')
     await priceSnapshotHelper.seedSnapshot({ coinPair: 'XCHAIN/USD', price: XCHAIN_USD, blockTimestamp, roundNumber: XCHAIN_ROUND })

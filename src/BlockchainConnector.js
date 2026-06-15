@@ -117,10 +117,36 @@ class BlockchainConnector {
 
     async broadcastTx(txHex){
         try {
+            return await this._sendRaw([txHex]);
+        } catch (error) {
+            // Regtest-only fee-cap recovery. A regtest chain that has accumulated
+            // test-tx fee history can push estimatesmartfee up to (or just past)
+            // the node's DEFAULT broadcast fee cap (0.10 coin/kvB on modern
+            // Bitcoin/Litecoin Core), so a legitimately-built tx is rejected with
+            // "Fee exceeds maximum configured by user (... maxfeerate)". Retry once
+            // with the cap disabled (maxfeerate = 0 => unlimited). Gated on BOTH
+            // the cap error AND a regtest NETWORK, so the numeric maxfeerate arg
+            // is only ever sent to a node that just proved it enforces the modern
+            // cap — Dogecoin Core 1.14 (2nd arg is a boolean allowhighfees, not a
+            // maxfeerate) doesn't cap, so it never reaches this branch. Mirrors the
+            // regtest-only psbt.setMaximumFeeRate(100000) the suite already uses.
+            const net = String(process.env.NETWORK || (typeof global !== 'undefined' && global.NETWORK) || '');
+            const msg = (error && error.message) || '';
+            if (/maxfeerate|Fee exceeds maximum/i.test(msg) && /regtest/i.test(net)) {
+                return await this._sendRaw([txHex, 0]);
+            }
+            throw error;
+        }
+    }
+
+    // Single sendrawtransaction RPC to the coin node. `params` is [hex] or
+    // [hex, maxfeerate]. Returns the txid; throws carrying the node's error body.
+    async _sendRaw(params){
+        try {
             const data = {
                 jsonrpc: '2.0',
                 method: 'sendrawtransaction',
-                params: [txHex],
+                params,
                 id: 1
             }
 
@@ -146,12 +172,12 @@ class BlockchainConnector {
                 throw new Error('Error sending transaction to the node: ' + nodeError);
             }
         } catch (error) {
-            console.error('Error:', error);
             // Bitcoin/Litecoin/Dogecoin Core returns the JSON-RPC error body even
             // on HTTP 500 (the wire-format error). Axios rejects on non-2xx, so
             // surface the body it captured (error.response.data) — otherwise
             // non-standard-script / dust / sighash rejections would be masked
-            // behind a generic axios message.
+            // behind a generic axios message. (The caller logs/handles; no
+            // console.error here so a recovered regtest fee-cap retry stays quiet.)
             if (error.response) {
                 const body = typeof error.response.data === 'string'
                     ? error.response.data
