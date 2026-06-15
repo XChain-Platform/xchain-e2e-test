@@ -194,6 +194,12 @@ class MultiValidatorHub {
                 P2P_RECONNECT_MAX:      60000,
                 P2P_MSG_DEDUP_TTL:      60000,
                 P2P_MAX_PAYLOAD:        1048576,
+                // In-process tests put every validator on 127.0.0.1, so the
+                // per-IP inbound cap (PeerManager default 3) throttles the mesh
+                // at N>4. Honour an env override so N=10 scale runs can raise it;
+                // unset → undefined → PeerManager keeps its production default 3
+                // (existing N≤4 suites unaffected).
+                P2P_MAX_CONNECTIONS_PER_IP: process.env.P2P_MAX_CONNECTIONS_PER_IP,
                 ORACLE_EPOCH_START:     this.oracleEpochStart,
                 // Long poll so the engine's auto-discovery timer never races the
                 // test's manual _discoverAndMatch() triggers — rounds are driven

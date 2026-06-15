@@ -47,6 +47,18 @@ function silenceDexValidator(hub) {
     return () => { dex.consensus._handleMessage = orig; };
 }
 
+// As silenceValidator, but for the oracle PBFT engine (a separate consensus
+// instance attached per hub by the test's attachOracle() helper as hub._wtOracle).
+// OracleConsensus.start() registers an arrow listener that calls `this._handleMessage`
+// at call time, so replacing it on the instance mutes the node's oracle votes
+// (ORACLE_PROPOSE/PREPARE/COMMIT) while leaving its config/DEX consensus untouched.
+function silenceOracleValidator(hub) {
+    if (!hub._wtOracle) throw new Error('silenceOracleValidator: hub has no attached _wtOracle; call attachOracle() first');
+    const orig = hub._wtOracle._handleMessage;
+    hub._wtOracle._handleMessage = () => {};
+    return () => { hub._wtOracle._handleMessage = orig; };
+}
+
 // Build a PRE_PREPARE envelope with a deliberately WRONG digest for its config
 // (a forged proposal). A correct follower must reject it on the digest check and
 // create no pending proposal. `seq` should be above any already-applied seq.
@@ -63,4 +75,4 @@ function forgedPrePrepare(seq, config, blockIndex) {
     };
 }
 
-module.exports = { silenceValidator, silenceDexValidator, forgedPrePrepare };
+module.exports = { silenceValidator, silenceDexValidator, silenceOracleValidator, forgedPrePrepare };
