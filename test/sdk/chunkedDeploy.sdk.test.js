@@ -44,7 +44,8 @@ const PAD = 'x'.repeat(7000);
 const SRC = [
     'var PAD = "' + PAD + '";',
     'module.exports = {',
-    '  initialize: function(start) {',
+    '  initialize: function (xchain) {',
+    '    var start = xchain.getInputParam(0);',
     '    xchain.state.set("count", String(parseInt(start) || 0));',
     '    xchain.state.set("padlen", String(PAD.length));',
     '  },',
