@@ -1,4 +1,7 @@
-FROM node:latest
+# Pin Node 22 (bookworm, not alpine): the platform requires Node 22 exactly —
+# node:latest resolves to Node 24+, which can't build isolated-vm, and alpine's
+# musl breaks native addon builds. Matches xchain-indexer's base image.
+FROM node:22-bookworm
 
 RUN mkdir /XChainE2ETest/
 # xchain-hub is staged into the build context by xchain-node's install
