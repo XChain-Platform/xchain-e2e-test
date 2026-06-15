@@ -123,23 +123,23 @@ describe('Protocol size-limit drift guard', () => {
             assert.strictEqual(indexerDeploy.MAX_DEPLOY_CHUNKS, protocol.MAX_DEPLOY_CHUNKS,
                 'indexer DEPLOY MAX_DEPLOY_CHUNKS drifted from the canonical protocol constant')
             assert.strictEqual(indexerDeployChunk.MAX_DEPLOY_CHUNKS, protocol.MAX_DEPLOY_CHUNKS,
-                'indexer DEPLOYCHUNK MAX_DEPLOY_CHUNKS drifted from the canonical protocol constant')
+                'indexer v4-carrier MAX_DEPLOY_CHUNKS drifted from the canonical protocol constant')
         })
 
         it('[regression:p0] MAX_DEPLOYCHUNK_PART_BYTES === canonical across SDK + indexer', () => {
             assert.strictEqual(chunkHelper.MAX_DEPLOYCHUNK_PART_BYTES, protocol.MAX_DEPLOYCHUNK_PART_BYTES,
                 'SDK chunkHelper MAX_DEPLOYCHUNK_PART_BYTES drifted from the canonical protocol constant')
             assert.strictEqual(indexerDeployChunk.MAX_DEPLOYCHUNK_PART_BYTES, protocol.MAX_DEPLOYCHUNK_PART_BYTES,
-                'indexer DEPLOYCHUNK MAX_DEPLOYCHUNK_PART_BYTES drifted from the canonical protocol constant')
+                'indexer v4-carrier MAX_DEPLOYCHUNK_PART_BYTES drifted from the canonical protocol constant')
         })
 
-        it('[regression:p0] a max-size DEPLOYCHUNK part + action overhead fits the compiled cap', () => {
-            // The per-chunk budget must leave room for the DEPLOYCHUNK action overhead
+        it('[regression:p0] a max-size v4-carrier part + action overhead fits the compiled cap', () => {
+            // The per-chunk budget must leave room for the DEPLOY v4 carrier action overhead
             // (prefix + 64-char CODE_HASH + indices) under MAX_ACTION_DATA_LENGTH, or a
             // full-size chunk the SDK produces would be silently dropped by the decoder.
-            const worst = 'DEPLOYCHUNK|0|' + 'f'.repeat(64) + '|15|16|' + 'A'.repeat(protocol.MAX_DEPLOYCHUNK_PART_BYTES)
+            const worst = 'DEPLOY|4|' + 'f'.repeat(64) + '|15|16|' + 'A'.repeat(protocol.MAX_DEPLOYCHUNK_PART_BYTES)
             assert.ok(Buffer.byteLength(worst, 'utf8') + protocol.OP_RETURN_PUSH_OVERHEAD <= protocol.MAX_ACTION_DATA_LENGTH,
-                'a max-size DEPLOYCHUNK part + overhead exceeds MAX_ACTION_DATA_LENGTH')
+                'a max-size DEPLOY v4 carrier part + overhead exceeds MAX_ACTION_DATA_LENGTH')
         })
     })
 })

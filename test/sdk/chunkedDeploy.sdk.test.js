@@ -15,11 +15,11 @@
  * XChain Platform E2E - Chunked DEPLOY (large contract) on-chain
  *
  * Proves a contract whose base64 source exceeds the single-action size cap
- * deploys across multiple DEPLOYCHUNK actions + an assembling DEPLOY v2, then
+ * deploys across multiple DEPLOY v4 carrier actions + an assembling DEPLOY v2, then
  * runs — through the live regtest pipeline (encoder → decoder → indexer → VM).
  *
  *   - chunkHelper.planDeploy splits base64(code) into ordered slices + a CODE_HASH
- *   - each slice is uploaded as a DEPLOYCHUNK (confirmed in turn)
+ *   - each slice is uploaded as a DEPLOY v4 carrier (confirmed in turn)
  *   - a DEPLOY v2 carrying CODE_HASH assembles + sha256-verifies + deploys
  *   - the constructor state proves the reassembled source is byte-exact
  *   - an EXECUTE proves the assembled contract actually runs
@@ -75,7 +75,7 @@ function haveConnectors() {
     return global.regtestMinerConnector && global.utxoTrackerConnector && global.nodeConnector;
 }
 
-describe('[sdk] chunked DEPLOY (large contract assembled from DEPLOYCHUNKs)', function () {
+describe('[sdk] chunked DEPLOY (large contract assembled from DEPLOY v4 carriers)', function () {
     this.timeout(0);
 
     let sdk, deployer, plan, contractIndex;
@@ -94,13 +94,13 @@ describe('[sdk] chunked DEPLOY (large contract assembled from DEPLOYCHUNKs)', fu
         console.log('    [chunked] source=' + Buffer.byteLength(SRC, 'utf8') + ' B → ' + plan.totalChunks + ' chunks, hash=' + plan.codeHash.slice(0, 12));
     });
 
-    it('uploads each base64 slice as a DEPLOYCHUNK', async function () {
+    it('uploads each base64 slice as a DEPLOY v4 carrier', async function () {
         for (let i = 0; i < plan.parts.length; i++) {
             const res = await submit(sdk,
-                { action: 'DEPLOYCHUNK', params: { codeHash: plan.codeHash, chunkIndex: i, totalChunks: plan.totalChunks, codePart: plan.parts[i] } },
+                { action: 'DEPLOY', params: { version: '4', codeHash: plan.codeHash, chunkIndex: i, totalChunks: plan.totalChunks, codePart: plan.parts[i] } },
                 { pubkey: deployer.address, change: deployer.address },
                 submitOpts({ wif: deployer.wif }));
-            expect(res.indexed.status, 'DEPLOYCHUNK ' + i + ' indexed').to.equal('valid');
+            expect(res.indexed.status, 'DEPLOY v4 carrier ' + i + ' indexed').to.equal('valid');
             await mine(1);
         }
     });
