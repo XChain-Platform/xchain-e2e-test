@@ -140,6 +140,14 @@ class MultiValidatorHub {
         // Length must be >= count (extras ignored).
         this.presetIdentities = opts.identities || null;
 
+        // Full-node tier (NODEPROOF). When `fullnode` is set, each hub receives it as
+        // its p2pConfig.FULLNODE block (REWARD_SHARE, GENESIS_VERIFIERS, challenge
+        // cadence/depth). `coinRpcUrls[i]` supplies hub i's BTC full-node RPC; a
+        // null/absent entry models a LIGHT validator (no coin node → cannot answer the
+        // possession challenge). Absent ⇒ the FullNodeChallengeRound stays dormant.
+        this.fullnode    = opts.fullnode || null;
+        this.coinRpcUrls = opts.coinRpcUrls || null;
+
         this.hubs         = [];
         this.identities   = [];    // [{pubkeyHex, privkeyHex}]
         this.dbNames      = [];
@@ -207,6 +215,13 @@ class MultiValidatorHub {
                 XDEX_POLL_MS:           600000,
             };
 
+            // Full-node tier: inject the FULLNODE block + this hub's coin RPC (per
+            // index). A hub with no coinRpcUrls entry is a light validator.
+            if (this.fullnode) {
+                p2pConfig.FULLNODE = Object.assign({}, this.fullnode);
+                if (this.coinRpcUrls && this.coinRpcUrls[i]) p2pConfig.FULLNODE.BTC_RPC = this.coinRpcUrls[i];
+            }
+
             const hub = new XChainHub(
                 this.dbHost, this.dbPort, this.dbNames[i],
                 this.dbUser, this.dbPass,
@@ -272,6 +287,17 @@ class MultiValidatorHub {
         }
     }
 
+    // Wire a broadcast hook into each hub's FullNodeChallengeRound (NODEPROOF
+    // verdict publisher). Only the elected leader invokes it per epoch, so a
+    // single shared funded publisher address is safe. `fn(wirePayload)` returns
+    // `{ txid }`.
+    setNodeProofBroadcastHook(fn){
+        for (const hub of this.hubs) {
+            const eng = hub.getFullNodeChallenge && hub.getFullNodeChallenge();
+            if (eng && typeof eng.setBroadcastHook === 'function') eng.setBroadcastHook(fn);
+        }
+    }
+
     // Stop all hubs + their timers; close DB connections. Idempotent.
     //
     // The hubs' PeerManager.stop() awaits httpServer.close(), which waits for
@@ -311,6 +337,7 @@ class MultiValidatorHub {
         if (hub.attestationRound       && typeof hub.attestationRound.stop       === 'function') await _withTimeout(hub.attestationRound.stop(),       3000, 'attestationRound.stop');
         if (hub.attestationConsensus   && typeof hub.attestationConsensus.stop   === 'function') await _withTimeout(hub.attestationConsensus.stop(),   3000, 'attestationConsensus.stop');
         if (hub.attestationPublisher   && typeof hub.attestationPublisher.stop   === 'function') await _withTimeout(hub.attestationPublisher.stop(),   3000, 'attestationPublisher.stop');
+        if (hub.getFullNodeChallenge   && hub.getFullNodeChallenge() && typeof hub.getFullNodeChallenge().stop === 'function') await _withTimeout(hub.getFullNodeChallenge().stop(), 3000, 'fullNodeChallenge.stop');
 
         // Force-close WS server + connections so peerManager.stop() →
         // httpServer.close() doesn't wait for a graceful drain.
