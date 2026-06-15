@@ -201,10 +201,15 @@ describe('MultiValidatorHub — EQUIV_HEADER activation boundary (WI-2 bump 2 / 
             const raw     = rawCanonical(rows[0], ACT - 1);
             const wrapped = eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT, v0RoundId(rows[0]), 0, raw);
 
+            // Count-INDEPENDENT invariant: the weighted quorum can finalize with as few as
+            // 2 of the 4 signers (4000+3000 > 2·S/3), so assert that EVERY stored sig (not
+            // some fixed count) verifies against the raw form and none against the wrapped.
             for (let i = 0; i < rows.length; i++) {
+                const total = JSON.parse(rows[i].validator_signatures).length;
                 assert.strictEqual(rows[i].ledger_hash, TIP.ledger_hash, 'hub ' + i + ' diverged on ledger_hash');
-                assert.ok(verifyingCount(rows[i], raw) >= 3,
-                    'hub ' + i + ' below-gate sigs must verify against the bare raw canonical');
+                assert.ok(total >= 1, 'hub ' + i + ' must carry at least one quorum signature');
+                assert.strictEqual(verifyingCount(rows[i], raw), total,
+                    'hub ' + i + ': EVERY below-gate sig must verify against the bare raw canonical');
                 assert.strictEqual(verifyingCount(rows[i], wrapped), 0,
                     'hub ' + i + ' below-gate sigs must NOT verify against the wrapped canonical (no header was signed)');
             }
@@ -254,9 +259,11 @@ describe('MultiValidatorHub — EQUIV_HEADER activation boundary (WI-2 bump 2 / 
             assert.ok(wrapped.startsWith(prefix), 'wrapped canonical must begin with the exact equivocation prefix');
 
             for (let i = 0; i < rows.length; i++) {
+                const total = JSON.parse(rows[i].validator_signatures).length;
                 assert.strictEqual(rows[i].ledger_hash, TIP.ledger_hash, 'hub ' + i + ' diverged on ledger_hash');
-                assert.ok(verifyingCount(rows[i], wrapped) >= 3,
-                    'hub ' + i + ' above-gate sigs must verify against the EQUIV-wrapped canonical');
+                assert.ok(total >= 1, 'hub ' + i + ' must carry at least one quorum signature');
+                assert.strictEqual(verifyingCount(rows[i], wrapped), total,
+                    'hub ' + i + ': EVERY above-gate sig must verify against the EQUIV-wrapped canonical');
                 assert.strictEqual(verifyingCount(rows[i], raw), 0,
                     'hub ' + i + ' above-gate sigs must NOT verify against the bare raw canonical (the header IS signed)');
             }
