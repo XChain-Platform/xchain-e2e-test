@@ -93,15 +93,55 @@ async function seedGlobalPrices(force){
         ' ' + global.COIN_CODE + '/USD=' + COIN_USD + ' (block_time=' + blockTimestamp + ')')
 }
 
-// The native fee output to attach to an action tx, or null to skip (BTC, no
-// FEE_DESTINATION, or price_snapshots unreachable). Refreshes prices first so a
-// long run never ages out of the staleness window.
-async function getNativeFeeOutput(){
-    if (!isFeeChain()) return null
-    const feeDest = resolveFeeDestination()
-    if (!feeDest) return null
-    await seedGlobalPrices(false)
-    return { address: feeDest, value: FLAT_FEE_SATS }
+// Discover the stack's ACTUAL native-fee mode. Env is an override (matches the
+// container's XCHAIN_FEE_DESTINATION_<CODE>_<NET> / FEE_DESTINATION); otherwise
+// ask the live indexer's `feeschedule` JSON-RPC — the source of truth, since the
+// indexer reads its destination from config.ADDRESS.FEE_DESTINATION, NOT from
+// any env the e2e runner happens to export. This is the fix for the LTC/DOGE
+// action-suite hang: resolveFeeDestination() was env-only, returned null in the
+// e2e env, the fee output was never injected, and every fee-bearing action was
+// rejected (tick never created -> TICK-unknown poll hang). Returns
+// { enabled, destination }; cached after first resolution.
+let _feeMode = null
+async function discoverFeeMode(){
+    if (_feeMode) return _feeMode
+    const envDest = resolveFeeDestination()
+    if (envDest) { _feeMode = { enabled: true, destination: envDest }; return _feeMode }
+    if (global.indexerConnector && typeof global.indexerConnector.call === 'function') {
+        try {
+            const sched = await global.indexerConnector.call('feeschedule', {})
+            if (sched && !sched.error) {
+                _feeMode = { enabled: !!sched.nativeFeeEnabled, destination: sched.feeDestination || null }
+                return _feeMode
+            }
+        } catch (e) {
+            // On a fee chain an unreachable feeschedule is NOT a safe "skip" — it
+            // would silently drop the fee output and hang. Surface it.
+            if (isFeeChain())
+                throw new Error('native-fee discovery failed on ' + global.COIN_CODE +
+                    ' (indexer feeschedule unreachable: ' + (e && e.message) + ')')
+        }
+    }
+    // No env + no API signal: only safe on non-fee chains (BTC = gas mode).
+    if (isFeeChain())
+        throw new Error('cannot determine native-fee mode on ' + global.COIN_CODE +
+            ' (no FEE_DESTINATION env and no indexerConnector.feeschedule)')
+    _feeMode = { enabled: false, destination: null }
+    return _feeMode
 }
 
-module.exports = { resolveFeeDestination, seedGlobalPrices, getNativeFeeOutput, FLAT_FEE_SATS }
+// The native fee output to attach to an action tx, or null to skip (gas-mode
+// chains where native fees are disabled). Throws loudly when native fees ARE
+// enabled but no destination is resolvable — far better than a silent skip that
+// hangs the suite. Refreshes prices first so a long run never ages out.
+async function getNativeFeeOutput(){
+    const mode = await discoverFeeMode()
+    if (!mode.enabled) return null
+    if (!mode.destination)
+        throw new Error('native fee enabled on ' + global.COIN_CODE +
+            ' but no FEE_DESTINATION resolvable (set FEE_DESTINATION or check indexer feeschedule)')
+    await seedGlobalPrices(false)
+    return { address: mode.destination, value: FLAT_FEE_SATS }
+}
+
+module.exports = { resolveFeeDestination, discoverFeeMode, seedGlobalPrices, getNativeFeeOutput, FLAT_FEE_SATS }

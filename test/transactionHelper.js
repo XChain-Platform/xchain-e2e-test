@@ -112,21 +112,21 @@ module.exports = {
         // (nativeFeeLive/nativeFeeDispenser pass theirs).
         let outputs = Array.isArray(customOutputs) ? customOutputs : []
         if (!skipNativeFeeInjection) {
-            try {
-                const nativeFeeHelper = require('./helpers/nativeFeeHelper')
-                const feeDest = nativeFeeHelper.resolveFeeDestination()
-                const alreadyHasFee = feeDest && outputs.some(o => o && o.address === feeDest)
+            // getNativeFeeOutput() discovers the stack's real fee mode (env or
+            // the indexer feeschedule): returns null on gas-mode chains (BTC),
+            // an output on native-fee chains (LTC/DOGE), or THROWS on a fee chain
+            // it can't resolve. Let that throw propagate — a silent skip here is
+            // exactly what hung the LTC/DOGE suite. Dedup against the discovered
+            // destination so callers that supply their own fee output (e.g.
+            // nativeFeeLive/nativeFeeDispenser) aren't double-charged.
+            const nativeFeeHelper = require('./helpers/nativeFeeHelper')
+            const feeOutput = await nativeFeeHelper.getNativeFeeOutput()
+            if (feeOutput) {
+                const alreadyHasFee = outputs.some(o => o && o.address === feeOutput.address)
                 if (!alreadyHasFee) {
-                    const feeOutput = await nativeFeeHelper.getNativeFeeOutput()
-                    if (feeOutput) {
-                        outputs = [feeOutput, ...outputs]
-                        console.log('nativeFeeHelper: injected native fee output ' + feeOutput.value + ' sats -> ' + feeOutput.address)
-                    }
+                    outputs = [feeOutput, ...outputs]
+                    console.log('nativeFeeHelper: injected native fee output ' + feeOutput.value + ' sats -> ' + feeOutput.address)
                 }
-            } catch (err) {
-                // Best-effort: never block a tx on fee injection. On BTC and
-                // single-host setups without prices this is simply a no-op.
-                console.log('nativeFeeHelper: fee injection skipped (' + (err && err.message) + ')')
             }
         }
 
