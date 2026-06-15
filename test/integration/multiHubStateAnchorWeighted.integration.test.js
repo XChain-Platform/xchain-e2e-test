@@ -54,6 +54,7 @@ const assert = require('assert');
 const { MultiValidatorHub, ValidatorIdentity } = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
+const eq = require('../../../xchain-hub/src/equivocation_header.js');
 
 const PEER_WAIT_MS = 8000;
 const SETTLE_MS    = 6000;
@@ -185,10 +186,16 @@ describe('MultiValidatorHub — STAKE_WEIGHTED_QUORUM oracle_publish checkpoint 
             }
 
             // Every hub holds the identical checkpoint, with weighted-quorum sigs
-            // that verify against the canonical.
-            const canonical = ['XCHECKPOINT', 'BTC', 'regtest', String(TIP.block_index), TIP.block_hash,
-                               TIP.ledger_hash, TIP.actions_hash, TIP.contract_hash,
-                               String(rows[0].checkpoint_seq), String(BLOCK_INDEX)].join('|');
+            // that verify against the canonical. At/above the EQUIV flag-day (regtest
+            // activates at genesis → always on) the signed bytes are the v0 raw wrapped
+            // in the uniform header (TAG=XCHECKPOINT, VIEW=0); gate keys on snapshot_block.
+            const raw = ['XCHECKPOINT', 'BTC', 'regtest', String(TIP.block_index), TIP.block_hash,
+                         TIP.ledger_hash, TIP.actions_hash, TIP.contract_hash,
+                         String(rows[0].checkpoint_seq), String(BLOCK_INDEX)].join('|');
+            const canonical = eq.isEquivHeaderActive(BLOCK_INDEX, 'regtest')
+                ? eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT,
+                    'BTC|regtest|' + TIP.block_index + '|' + rows[0].checkpoint_seq, 0, raw)
+                : raw;
             for (let i = 0; i < rows.length; i++) {
                 assert.strictEqual(rows[i].ledger_hash, TIP.ledger_hash, 'hub ' + i + ' diverged on ledger_hash');
                 const sigs = JSON.parse(rows[i].validator_signatures);

@@ -52,6 +52,7 @@ const { MultiValidatorHub, ValidatorIdentity } = require('../helpers/multiValida
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedStakeSnapshot }    = require('../helpers/seededStakeSnapshot');
 const { MockCrossChainOfferBook, makeOrder } = require('../helpers/mockCrossChainOfferBook');
+const eq = require('../../../xchain-hub/src/equivocation_header.js');
 
 const COUNT        = 4;        // quorum 2f+1 = 3
 const PEER_WAIT_MS = 8000;
@@ -161,9 +162,17 @@ describe('MultiValidatorHub — state checkpoints + ANCHOR archive (L2)', functi
         }
 
         // Identical content + quorum signatures that verify over the canonical.
-        let canonical = ['XCHECKPOINT', 'BTC', 'regtest', String(TIP.block_index), TIP.block_hash,
-                         TIP.ledger_hash, TIP.actions_hash, TIP.contract_hash,
-                         String(rows[0].checkpoint_seq), String(BLOCK_INDEX)].join('|');
+        // At/above the EQUIV flag-day (regtest activates at genesis → always on here)
+        // the signed bytes are the v0 raw canonical wrapped in the uniform header
+        // (TAG=XCHECKPOINT, v0 round id chain|network|block_index|checkpoint_seq,
+        // VIEW=0); below it, the bare raw bytes. Gate keys on the snapshot_block.
+        let raw = ['XCHECKPOINT', 'BTC', 'regtest', String(TIP.block_index), TIP.block_hash,
+                   TIP.ledger_hash, TIP.actions_hash, TIP.contract_hash,
+                   String(rows[0].checkpoint_seq), String(BLOCK_INDEX)].join('|');
+        let canonical = eq.isEquivHeaderActive(BLOCK_INDEX, 'regtest')
+            ? eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT,
+                'BTC|regtest|' + TIP.block_index + '|' + rows[0].checkpoint_seq, 0, raw)
+            : raw;
         for (let row of rows) {
             assert.strictEqual(row.ledger_hash, TIP.ledger_hash);
             let sigs = JSON.parse(row.validator_signatures);
@@ -203,9 +212,17 @@ describe('MultiValidatorHub — state checkpoints + ANCHOR archive (L2)', functi
         assert.strictEqual(v1s.length, 1, 'exactly one v1 archive publishes');
 
         // v1: quorum sigs over the extended canonical; archive decompresses to the match.
+        // The v1 archive nests the v0 raw + |batchSeq|count|crc|totalChunks, then (gate on)
+        // wraps it ONCE — and the v1 round id appends batchSeq (the R-4 v0/v1 collision fix)
+        // so v0 and its archive get DISTINCT equivocation keys. f[4]=block_index,
+        // f[9]=checkpoint_seq, f[10]=snapshot_block, f[11]=batchSeq.
         let f = v1s[0].payload.split('|');
-        let canonical = ['XCHECKPOINT', f[2], f[3], f[4], f[5], f[6], f[7], f[8], f[9], f[10],
-                         f[11], f[12], f[13], f[14]].join('|');
+        let raw = ['XCHECKPOINT', f[2], f[3], f[4], f[5], f[6], f[7], f[8], f[9], f[10],
+                   f[11], f[12], f[13], f[14]].join('|');
+        let canonical = eq.isEquivHeaderActive(f[10], 'regtest')
+            ? eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT,
+                f[2] + '|' + f[3] + '|' + f[4] + '|' + f[9] + '|' + f[11], 0, raw)
+            : raw;
         let sigCount = Number(f[16]);
         assert.ok(sigCount >= 3, 'v1 carries >= 2f+1 = 3 sigs, got ' + sigCount);
         let verifying = new Set();
