@@ -158,8 +158,10 @@ describe('VM Attack — hostile contracts on-chain', function () {
         // sendDeployV0 waits for a VALID contract row, which never appears here (a
         // failed constructor deletes the contract). Broadcast the DEPLOY directly with
         // a constructor param (required to run the constructor) and poll the execution.
-        const codeHex = Buffer.from(CONSTRUCTOR_BOMB, 'utf8').toString('hex')
-        await transactionHelper.createAndSendTransaction(ctorDeployer, `DEPLOY|0|${codeHex}|200000|1`, null, [], 'P2SH')
+        // Inline CODE_ENCODING is base64 (DEPLOY_BASE64_CODE active from genesis on regtest);
+        // hex would be rejected at decode, so the constructor — the thing under test — never runs.
+        const codeB64 = Buffer.from(CONSTRUCTOR_BOMB, 'utf8').toString('base64')
+        await transactionHelper.createAndSendTransaction(ctorDeployer, `DEPLOY|0|${codeB64}|200000|1`, null, [], 'P2SH')
         let row = null
         const end = Date.now() + 90000
         while (Date.now() < end) {

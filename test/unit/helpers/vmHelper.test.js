@@ -33,29 +33,30 @@ describe('vmHelper', () => {
     afterEach(() => sinon.restore())
 
     describe('sendDeployV0', () => {
-        it('should hex-encode code and build correct message', async () => {
+        it('should base64-encode code and build correct message', async () => {
             const code = 'function main(){}'
-            const codeHex = Buffer.from(code, 'utf8').toString('hex')
+            const codeB64 = Buffer.from(code, 'utf8').toString('base64')
             const result = await helper.sendDeployV0(addressInfo, code, '50000', 'param1,param2')
 
             const msg = createTxStub.firstCall.args[1]
-            assert.strictEqual(msg, `DEPLOY|0|${codeHex}|50000|param1,param2`)
+            assert.strictEqual(msg, `DEPLOY|0|${codeB64}|50000|param1,param2`)
             assert.strictEqual(result.txHash, 'abc123')
             assert.deepStrictEqual(result.contract, { id: 210 })
         })
 
         it('should omit constructorParams when not provided', async () => {
             const code = 'code'
-            const codeHex = Buffer.from(code, 'utf8').toString('hex')
+            const codeB64 = Buffer.from(code, 'utf8').toString('base64')
             await helper.sendDeployV0(addressInfo, code, '10000')
 
             const msg = createTxStub.firstCall.args[1]
-            assert.strictEqual(msg, `DEPLOY|0|${codeHex}|10000`)
+            assert.strictEqual(msg, `DEPLOY|0|${codeB64}|10000`)
         })
 
-        it('should pass P2SH as fourth arg to createAndSendTransaction', async () => {
+        it('should pass P2SH as the encoding arg to createAndSendTransaction', async () => {
             await helper.sendDeployV0(addressInfo, 'x', '100')
-            assert.strictEqual(createTxStub.firstCall.args[3], 'P2SH')
+            // signature: createAndSendTransaction(addressInfo, msg, null, [], 'P2SH')
+            assert.strictEqual(createTxStub.firstCall.args[4], 'P2SH')
         })
 
         it('should call waitForContract once', async () => {

@@ -25,8 +25,10 @@ describe('VM Deploy Reject — malformed/abusive contracts', function () {
     let deployer = null
 
     async function deployRaw(addr, code) {
-        const hex = Buffer.from(code, 'utf8').toString('hex')
-        return await transactionHelper.createAndSendTransaction(addr, 'DEPLOY|0|' + hex + '|200000', null, [], 'P2SH')
+        // Inline CODE_ENCODING is base64 (DEPLOY_BASE64_CODE active from genesis on regtest);
+        // hex would be rejected at decode, short-circuiting the syntax checks this suite targets.
+        const b64 = Buffer.from(code, 'utf8').toString('base64')
+        return await transactionHelper.createAndSendTransaction(addr, 'DEPLOY|0|' + b64 + '|200000', null, [], 'P2SH')
     }
     async function waitContractAny(source, timeMax = 60000) {
         const end = Date.now() + timeMax
