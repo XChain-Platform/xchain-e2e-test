@@ -30,8 +30,10 @@
  *      broadcasts a NODEPROOF verdict on-chain.
  *   3. The indexer validates the verdict and records full_node_verifications.
  *
- * Asserts: the two FULL hubs are verified (passed rows); the LIGHT hub is NOT,
- * and a `failed_full_node_challenge` slash proposal is recorded for it.
+ * Asserts: the two FULL hubs are verified (passed rows) and accrue passing
+ * verdicts across epochs (a positive participation rate); the LIGHT hub is NOT
+ * verified and accrues none → it earns no full-node reward tranche. The tier is
+ * REWARD-ONLY — non-participation is never slashed (carrot, not stick).
  *
  * The two-tranche reward SPLIT that follows from verification (oracle_base +
  * oracle_full_node) is a pure, deterministic function covered exhaustively by
@@ -80,7 +82,7 @@ const FIXED_SEEDS = [
 const FULLNODE_CFG = {
     CHALLENGE_INTERVAL_BLOCKS:    5,
     CONFIRM_DEPTH:                2,
-    PROOF_WINDOW_BLOCKS:          30,   // small so the window-based slash fires within the test (light never verified → slashed after a full window; honest hubs stay verified)
+    PROOF_WINDOW_BLOCKS:          30,   // verifier-eligibility window (how long a passed proof keeps a node able to vouch); small so epochs turn over quickly within the test
     VERDICT_ACCEPT_WINDOW_BLOCKS: 20,
     REWARD_SHARE:                 '0.25',
     POLL_MS:                      2000,
@@ -228,29 +230,35 @@ describe('Federation — full-node tier (NODEPROOF) possession proof', function 
             'LIGHT validator (no coin node) must NOT be verified')
     })
 
-    it('slashes the persistently-failing LIGHT validator but NOT the honest full hubs', async function () {
-        // Window-based slashing: the LIGHT validator never answers, so after a full
-        // proof window with no passing verdict it is slash-proposed; the honest FULL
-        // hubs pass within the window and must NOT be slashed (the false positive a
-        // per-epoch local slash would produce). Slash proposals are hub-local; check
-        // a FULL hub's view, mining to advance epochs past the window.
-        const fullHub = mvh.hubs[0]
-        let slashed = new Set()
-        const deadline = Date.now() + 180000
+    it('accrues passing verdicts for the FULL hubs while the LIGHT one earns none', async function () {
+        // Reward-only model — there is NO slashing. The full-node reward tranche is
+        // gated on a PARTICIPATION RATE over a trailing window (db.getFullNodeParticipation
+        // → price.js). The LIGHT validator never answers, so it accrues ZERO passing
+        // full_node_verifications → pass-rate 0 → earns no tranche (and is never
+        // penalised). The honest FULL hubs answer across epochs and accumulate
+        // DISTINCT-epoch passes → a positive pass-rate. Mine across several epochs and
+        // assert that participation gap directly (the input the reward gate reads).
+        const wantFull = fullPubkeys.map(p => p.toLowerCase())
+        // DISTINCT passing epochs per pubkey = the participation numerator.
+        const sql = `SELECT ip.pubkey AS pubkey, COUNT(DISTINCT fv.epoch_height) AS epochs
+                       FROM full_node_verifications fv
+                       JOIN index_pubkeys ip ON ip.id = fv.signing_pubkey_id
+                      WHERE fv.passed = 1
+                      GROUP BY ip.pubkey`
+        let byPubkey = new Map()
+        const deadline = Date.now() + 240000
         while (Date.now() < deadline) {
-            const rows = await fullHub.db.doQuery(
-                `SELECT validator_pubkey FROM slash_proposals
-                  WHERE offense_type = 'failed_full_node_challenge'`, [])
-            slashed = new Set(rows.map(r => String(r.validator_pubkey).toLowerCase()))
-            if (slashed.has(lightPubkey.toLowerCase())) break
-            await regtestMinerConnector.generateBlocks(1)   // advance the tip so the window elapses
+            const rows = await _idxQuery(sql, [])
+            byPubkey = new Map(rows.map(r => [String(r.pubkey).toLowerCase(), Number(r.epochs)]))
+            if (wantFull.every(pk => (byPubkey.get(pk) || 0) >= 2)) break
+            await regtestMinerConnector.generateBlocks(1)   // advance the tip so the engine ticks
             await new Promise(r => setTimeout(r, 2000))
         }
-        assert(slashed.has(lightPubkey.toLowerCase()),
-            'LIGHT validator (never answers) must be slashed after the proof window')
-        for (const pk of fullPubkeys) {
-            assert(!slashed.has(pk.toLowerCase()),
-                'honest FULL validator must NOT be slashed (window-based): ' + pk.slice(0, 16) + '...')
+        for (const pk of wantFull) {
+            assert((byPubkey.get(pk) || 0) >= 2,
+                'FULL validator should accrue ≥2 passing epochs (positive pass-rate): ' + pk.slice(0, 16) + '...')
         }
+        assert(!byPubkey.has(lightPubkey.toLowerCase()),
+            'LIGHT validator (never answers) must accrue NO passing verdicts → earns no full-node tranche')
     })
 })
