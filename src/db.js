@@ -49,7 +49,12 @@ class Database {
             // Connection options
             connectionLimit:  10,
             //connectTimeout: 0,
-            insertIdAsNumber: true
+            insertIdAsNumber: true,
+            // BIGINT columns (action_index, tx_index, …) must deserialize as Number, not
+            // BigInt: the consensus hash serializes a BigInt as a quoted string, so a pool
+            // without this diverges from the indexer/sync prod pools (both set bigIntAsNumber)
+            // — it made consensusHashConformance falsely RED on every block with such columns.
+            bigIntAsNumber:   true
         };
         // Setup pool of connections
         this.pool = mariadb.createPool(this.connectionPoolParams);
