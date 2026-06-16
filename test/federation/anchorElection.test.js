@@ -147,7 +147,14 @@ describe('ANCHOR election live — multi-validator per-chain publishers (DOGE re
         // Identical deterministic oracle_publish/cross_chain set on every hub.
         const validators = pubkeys.map(pk => ({ pubkey: pk, amount: '1' }));
         for (const hub of mvh.hubs) {
-            const snap = { async getSnapshot(){ return { validators }; } };
+            const snap = {
+                async getSnapshot(){ return { validators }; },
+                // WI-1: the transport signer-set refresh, Consensus, and XChainHub
+                // resolve the active federation set from getActiveValidatorSnapshot.
+                // These in-process hubs run with network='' → legacy count quorum,
+                // so the equal-stake count set mirrors getSnapshot.
+                async getActiveValidatorSnapshot(){ return { validators, count: validators.length }; },
+            };
             hub.capabilitySnapshot = snap;                    // _getActiveOraclePublishPubkeys
             hub.stateAnchorPublisher.capSnapshot = snap;      // _resolveCapabilitySet (constructor-captured)
         }
@@ -204,7 +211,19 @@ describe('ANCHOR election live — multi-validator per-chain publishers (DOGE re
                 return { txid };
             });
             mvh.hubs[i].rewardTracker = {
-                recordAnchorReward: async (type, round, pubkey, blk) => { rewards.push({ hub: hubIdx, type, round, pubkey, blk }); }
+                recordAnchorReward: async (type, round, pubkey, blk) => {
+                    // Every hub records the reward — the publisher at publish time
+                    // and each peer from the signature-verified V0_DONE / FINALIZED
+                    // (sender = the publisher's pubkey). Production collapses these
+                    // in the shared DB (RewardTracker.recordAnchorReward): one row
+                    // per (reward_type, round_number), lexicographically-smallest
+                    // pubkey wins, same-pubkey idempotent. Mirror that here — the
+                    // in-proc hubs share this one `rewards` array.
+                    const pk = String(pubkey).toLowerCase();
+                    const cur = rewards.find(r => r.type === type && r.round === round);
+                    if (cur) { if (pk < cur.pubkey) { cur.pubkey = pk; cur.hub = hubIdx; } return; }
+                    rewards.push({ hub: hubIdx, type, round, pubkey: pk, blk });
+                }
             };
         }
     });
@@ -338,8 +357,24 @@ describe('ANCHOR election live — multi-validator per-chain publishers (DOGE re
              m.effective_time, sigs]);
 
         const electionBlock = await waitForTip(0);
-        const leader = pubkeys.indexOf(SAP.hashOrder('XANCV1|' + electionBlock, pubkeys)[0]);
-        const nonLeader = (leader + 1) % N;
+        // The failover test mutated electionToleranceBlocks to 2; reset to a wide
+        // window so only rank 0 (the leader) is unlocked and every other hub
+        // refuses — a deterministic single-leader election.
+        for (const hub of mvh.hubs) hub.stateAnchorPublisher.electionToleranceBlocks = 100000;
+
+        // Elect the leader EXACTLY as _startArchiveRound does: hash-order over the
+        // oracle_publish set keyed on _archiveElectionKey(wrapperCp, nextBatchSeq).
+        // The wrapper is the BTC-preferred latest checkpoint; batchSeq is a
+        // non-consuming MAX+1 read, identical on every hub.
+        const sap0 = mvh.hubs[0].stateAnchorPublisher;
+        const cpRow = (await mvh.hubs[0].db.doQuery(
+            "SELECT * FROM state_checkpoints ORDER BY (chain = 'BTC') DESC, id DESC LIMIT 1"))[0];
+        const batchSeq = await sap0._getNextBatchSeq();
+        const archiveKey = sap0._archiveElectionKey(
+            { chain: cpRow.chain, network: cpRow.network, checkpoint_seq: cpRow.checkpoint_seq }, batchSeq);
+        const archiveOrder = SAP.hashOrder(archiveKey, pubkeys);
+        const leader = pubkeys.indexOf(archiveOrder[0]);
+        const nonLeader = pubkeys.indexOf(archiveOrder[archiveOrder.length - 1]);
 
         const sNon = await mvh.hubs[nonLeader].stateAnchorPublisher.flush();
         assert.strictEqual(sNon.archive, 'none', 'a non-leader refuses to start the archive round');

@@ -215,9 +215,14 @@ describe('ANCHOR live acceptance — DOGE regtest on-chain pipeline', function (
         // hub_db_sync would deliver in a hub-connected deployment) so the
         // ANCHOR handler verifies signatures as 'valid' rather than 'unverified'.
         for (let cap of ['oracle_publish', 'cross_chain']) {
+            // WI-1: the indexer verify is stake-weighted on regtest (activates at
+            // genesis) and tallies by DISTINCT source — a blank source FAILS CLOSED.
+            // Seed a non-blank source (the validator's own key = its staking source)
+            // so the single signer is 100% of stake (3·S > 2·S → valid).
             await indexerQuery(
-                'INSERT IGNORE INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount) VALUES (?, ?, ?, ?)',
-                [snapBlock, cap, identity.getPubkeyHex().toLowerCase(), '1']);
+                'INSERT INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount, source) VALUES (?, ?, ?, ?, ?) ' +
+                'ON DUPLICATE KEY UPDATE amount = VALUES(amount), source = VALUES(source)',
+                [snapBlock, cap, identity.getPubkeyHex().toLowerCase(), '1', identity.getPubkeyHex().toLowerCase()]);
         }
         let seeded = await indexerQuery(
             'SELECT capability FROM capability_snapshots WHERE snapshot_block = ?', [snapBlock]);
