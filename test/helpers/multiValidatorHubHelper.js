@@ -208,6 +208,11 @@ class MultiValidatorHub {
                 // unset → undefined → PeerManager keeps its production default 3
                 // (existing N≤4 suites unaffected).
                 P2P_MAX_CONNECTIONS_PER_IP: process.env.P2P_MAX_CONNECTIONS_PER_IP,
+                // Names the deployment network for consensus gating + canonical
+                // derivation (e.g. NODEPROOF's challenge_id binds NETWORK). MUST
+                // match the indexers this hub federates with, or signatures over
+                // network-bound canonicals fail to verify.
+                HUB_NETWORK:            (process.env.NETWORK || 'regtest'),
                 ORACLE_EPOCH_START:     this.oracleEpochStart,
                 // Long poll so the engine's auto-discovery timer never races the
                 // test's manual _discoverAndMatch() triggers — rounds are driven

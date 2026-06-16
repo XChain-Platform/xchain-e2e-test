@@ -63,6 +63,19 @@ const { requireFederationEnv, assertCleanValidatorSet } = require('../helpers/fe
 // Regtest bitcoind JSON-RPC endpoint (with creds) the FULL hubs answer from.
 const COIN_RPC = process.env.FULLNODE_BTC_RPC_URL || ''
 
+// FIXED (deterministic) Ed25519 seeds for the three validators. The indexer's
+// eligible-verifier bootstrap is its FULLNODE.GENESIS_VERIFIERS config, which a
+// separate process must be told BEFORE the verdict lands — so the genesis pubkeys
+// can't be random per run. Seeds 0+1 are the two FULL hubs (and the genesis
+// verifiers); seed 2 is the LIGHT hub. Configure the regtest indexer with
+// FULLNODE_GENESIS_VERIFIERS = the pubkeys of seeds 0+1 (printed by
+// `node test/federation/printNodeProofVerifiers.js`, or below at run start).
+const FIXED_SEEDS = [
+    '01'.repeat(32),   // full hub 0 (genesis verifier)
+    '02'.repeat(32),   // full hub 1 (genesis verifier)
+    '03'.repeat(32),   // light hub 2
+]
+
 // Small, regtest-friendly cadence so an epoch boundary is reached quickly.
 const FULLNODE_CFG = {
     CHALLENGE_INTERVAL_BLOCKS:    5,
@@ -71,7 +84,7 @@ const FULLNODE_CFG = {
     VERDICT_ACCEPT_WINDOW_BLOCKS: 20,
     REWARD_SHARE:                 '0.25',
     POLL_MS:                      2000,
-    COLLECT_MS:                   3000,
+    COLLECT_MS:                   8000,   // long enough for the peer full hub's XNODE_ANSWER to reach the leader before the PASS list closes (so a verdict carries both, not just the leader)
     // GENESIS_VERIFIERS filled in once identities are generated (below).
 }
 
@@ -79,11 +92,18 @@ async function _settleStack() {
     await utxoTrackerConnector.quiesce({ timeoutMs: 30000, pollMs: 250, regtestMiner: regtestMinerConnector })
 }
 
+// Run a raw query through the e2e indexer DB connector (pooled connection).
+async function _idxQuery(sql, args) {
+    const conn = await indexerDatabase.getConnection()
+    try { return await conn.query(sql, args) }
+    finally { await conn.release() }
+}
+
 // Poll a query until it returns rows (or timeout). Returns the rows.
 async function _waitForRows(sql, args, timeoutMs = 120000, label = 'rows') {
     const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
-        const rows = await indexerDatabase.doQuery(sql, args)
+        const rows = await _idxQuery(sql, args)
         if (rows && rows.length > 0) return rows
         await regtestMinerConnector.generateBlocks(1)   // advance the tip so the engine ticks
         await new Promise(r => setTimeout(r, 2000))
@@ -110,10 +130,16 @@ describe('Federation — full-node tier (NODEPROOF) possession proof', function 
         }
         await assertCleanValidatorSet(indexerDatabase)
 
-        // Fixed identities up front so GENESIS_VERIFIERS can name the two full hubs.
-        identities  = [0, 1, 2].map(() => ValidatorIdentity.generate())
+        // Fixed (deterministic) identities so GENESIS_VERIFIERS can name the two
+        // full hubs AND match the regtest indexer's FULLNODE_GENESIS_VERIFIERS env.
+        identities  = FIXED_SEEDS.map((seed) => {
+            const vi = new ValidatorIdentity(seed)
+            return { pubkeyHex: vi.getPubkeyHex(), privkeyHex: seed }
+        })
         fullPubkeys = [identities[0].pubkeyHex, identities[1].pubkeyHex]
         lightPubkey = identities[2].pubkeyHex
+        console.log('NODEPROOF genesis verifiers (set indexer FULLNODE_GENESIS_VERIFIERS to these):')
+        console.log('  ' + fullPubkeys.join(','))
 
         mvh = new MultiValidatorHub({
             count: 3,
@@ -128,6 +154,21 @@ describe('Federation — full-node tier (NODEPROOF) possession proof', function 
         // claimants in the capability snapshot. The light hub is a claimant that
         // cannot answer — exactly the case the proof must catch.
         for (let i = 0; i < identities.length; i++) {
+            // Idempotent on a non-reset chain: a pubkey already staked (e.g. from a
+            // prior run) is already a full_node claimant; STAKE v1 would be rejected
+            // "SIGNING_PUBKEY already in use", so skip it.
+            const existing = await _idxQuery(
+                `SELECT COUNT(*) AS n FROM stakes s
+                   LEFT JOIN index_statuses ist ON ist.id = s.status_id
+                   LEFT JOIN index_pubkeys ip   ON ip.id  = s.signing_pubkey_id
+                  WHERE ist.status = 'valid' AND LOWER(ip.pubkey) = ?
+                    AND (s.deactivation_block IS NULL OR s.deactivation_block = 0)`,
+                [identities[i].pubkeyHex.toLowerCase()]
+            )
+            if (existing && Number(existing[0].n) > 0) {
+                console.log('stake ' + i + ' (' + identities[i].pubkeyHex.slice(0, 16) + '...) already present — skipping')
+                continue
+            }
             const addr = await cryptoHelper.getNewFundedAddress('np-staker-' + i, COIN, NETWORK, null, 'legacy', 0, 0.02)
             await _settleStack()
             await gasHelper.ensureGasBalance(addr, '3000')
@@ -161,17 +202,27 @@ describe('Federation — full-node tier (NODEPROOF) possession proof', function 
         // leader publishes a NODEPROOF verdict that the indexer records.
         await regtestMinerConnector.generateBlocks(6)
 
-        const verifiedRows = await _waitForRows(
-            `SELECT ip.pubkey AS pubkey
-               FROM full_node_verifications fv
-               JOIN index_pubkeys ip ON ip.id = fv.signing_pubkey_id
-              WHERE fv.passed = 1`,
-            [], 240000, 'full_node_verifications'
-        )
-        const verified = new Set(verifiedRows.map(r => String(r.pubkey).toLowerCase()))
+        // Each verdict verifies the epoch's leader-proposed PASS list; leadership
+        // rotates per epoch, so both full hubs become verified across consecutive
+        // epochs. Poll (mining to advance epochs) until BOTH are present, rather
+        // than asserting on the first verdict — which may carry only one.
+        const wantFull = fullPubkeys.map(p => p.toLowerCase())
+        const sql = `SELECT ip.pubkey AS pubkey
+                       FROM full_node_verifications fv
+                       JOIN index_pubkeys ip ON ip.id = fv.signing_pubkey_id
+                      WHERE fv.passed = 1`
+        let verified = new Set()
+        const deadline = Date.now() + 240000
+        while (Date.now() < deadline) {
+            const rows = await _idxQuery(sql, [])
+            verified = new Set(rows.map(r => String(r.pubkey).toLowerCase()))
+            if (wantFull.every(pk => verified.has(pk))) break
+            await regtestMinerConnector.generateBlocks(1)   // advance the tip so the engine ticks
+            await new Promise(r => setTimeout(r, 2000))
+        }
 
-        for (const pk of fullPubkeys) {
-            assert(verified.has(pk.toLowerCase()), 'FULL validator should be verified: ' + pk.slice(0, 16) + '...')
+        for (const pk of wantFull) {
+            assert(verified.has(pk), 'FULL validator should be verified: ' + pk.slice(0, 16) + '...')
         }
         assert(!verified.has(lightPubkey.toLowerCase()),
             'LIGHT validator (no coin node) must NOT be verified')
