@@ -80,7 +80,7 @@ const FIXED_SEEDS = [
 const FULLNODE_CFG = {
     CHALLENGE_INTERVAL_BLOCKS:    5,
     CONFIRM_DEPTH:                2,
-    PROOF_WINDOW_BLOCKS:          100,
+    PROOF_WINDOW_BLOCKS:          30,   // small so the window-based slash fires within the test (light never verified → slashed after a full window; honest hubs stay verified)
     VERDICT_ACCEPT_WINDOW_BLOCKS: 20,
     REWARD_SHARE:                 '0.25',
     POLL_MS:                      2000,
@@ -228,20 +228,29 @@ describe('Federation — full-node tier (NODEPROOF) possession proof', function 
             'LIGHT validator (no coin node) must NOT be verified')
     })
 
-    it('records a failed_full_node_challenge slash proposal for the LIGHT validator', async function () {
-        // Slash proposals are hub-local (SlashDetector writes to each hub's DB);
-        // check a FULL hub's view.
+    it('slashes the persistently-failing LIGHT validator but NOT the honest full hubs', async function () {
+        // Window-based slashing: the LIGHT validator never answers, so after a full
+        // proof window with no passing verdict it is slash-proposed; the honest FULL
+        // hubs pass within the window and must NOT be slashed (the false positive a
+        // per-epoch local slash would produce). Slash proposals are hub-local; check
+        // a FULL hub's view, mining to advance epochs past the window.
         const fullHub = mvh.hubs[0]
-        let rows = []
-        const deadline = Date.now() + 60000
+        let slashed = new Set()
+        const deadline = Date.now() + 180000
         while (Date.now() < deadline) {
-            rows = await fullHub.db.doQuery(
+            const rows = await fullHub.db.doQuery(
                 `SELECT validator_pubkey FROM slash_proposals
                   WHERE offense_type = 'failed_full_node_challenge'`, [])
-            if (rows.some(r => String(r.validator_pubkey).toLowerCase() === lightPubkey.toLowerCase())) break
+            slashed = new Set(rows.map(r => String(r.validator_pubkey).toLowerCase()))
+            if (slashed.has(lightPubkey.toLowerCase())) break
+            await regtestMinerConnector.generateBlocks(1)   // advance the tip so the window elapses
             await new Promise(r => setTimeout(r, 2000))
         }
-        assert(rows.some(r => String(r.validator_pubkey).toLowerCase() === lightPubkey.toLowerCase()),
-            'expected a failed_full_node_challenge proposal for the light validator')
+        assert(slashed.has(lightPubkey.toLowerCase()),
+            'LIGHT validator (never answers) must be slashed after the proof window')
+        for (const pk of fullPubkeys) {
+            assert(!slashed.has(pk.toLowerCase()),
+                'honest FULL validator must NOT be slashed (window-based): ' + pk.slice(0, 16) + '...')
+        }
     })
 })
