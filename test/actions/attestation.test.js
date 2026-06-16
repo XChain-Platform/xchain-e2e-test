@@ -39,6 +39,35 @@ describe('Attestation framework — round-trip request → response → callback
     let validator     = null
     let contractIndex = null
 
+    // Full set of attestation validators staked on this chain, in stake order. The
+    // indexer's responsible-set computation runs over EVERY staked attestation key at
+    // the request's block, so the test must mirror that whole set to predict which keys
+    // are responsible for a given request_id (see computeResponsibleSigners).
+    const stakedValidators = []
+
+    // Stake a validator from its OWN distinct funded source. SWQ source-dedup (active on
+    // regtest at block 0) collapses every key sharing a staking source into ONE slot in a
+    // request's responsible set — so staking all validators from one operator address would
+    // leave only a single survivor (the redundancy=3 cap-at-1/3 bug). A distinct source per
+    // validator keeps them all eligible. Does NOT advance blocks — the caller mines past the
+    // activation delay once after staking a batch.
+    async function stakeValidatorFromOwnSource(v) {
+        // Distinct HD address index per validator (0,1,2,…). cryptoHelper caches ONE
+        // wallet/mnemonic per label, so reusing label 'attest-val' at addressIndex 0 every
+        // time would derive the SAME address → same staking source → SWQ dedup collapses
+        // them back to one slot (the exact bug this fix targets). Indexing by the current
+        // count gives each validator a genuinely distinct source address.
+        let stakeSource = await cryptoHelper.getNewFundedAddress(
+            'attest-val', COIN, NETWORK, null, 'legacy', stakedValidators.length, 0.02
+        )
+        // Enough XCHAIN to stake 1500 (≥ attestation min_stake) + cover the STAKE protocol fee.
+        await gasHelper.ensureGasBalance(stakeSource, '2000')
+        await stakeHelper.sendStakeV1(stakeSource, '1500.00000000', v.pubkey)
+        v.source = stakeSource.address
+        stakedValidators.push(v)
+        return v
+    }
+
     const CONTRACT_CODE = `
 module.exports = {
     askOracle: function(xchain) {
@@ -102,17 +131,19 @@ module.exports = {
             return
         }
 
-        // Fund an operator address that'll own the stake AND broadcast the response action
+        // Fund an operator address that'll own the contract AND broadcast the response actions.
+        // (Validators are staked from their OWN distinct sources — see stakeValidatorFromOwnSource.)
         operatorAddr = await cryptoHelper.getNewFundedAddress(
             'attest-op', COIN, NETWORK, null, 'legacy', 0, 0.02
         )
-        // Enough XCHAIN for: stake (≥1000 for attestation capability) + DEPLOY gas + EXECUTE gas
+        // Enough XCHAIN for: DEPLOY gas + many EXECUTE gas + response-broadcast fees
         await gasHelper.ensureGasBalance(operatorAddr, '5000')
 
-        // Spin up an in-process validator (real keypair). Stake its pubkey so the
-        // indexer's hasCapability('attestation', ...) check passes during sig verify.
+        // Spin up an in-process validator (real keypair) and stake its pubkey from its own
+        // funded source so the indexer's hasCapability('attestation', ...) check passes and
+        // it survives SWQ source-dedup into request responsible sets.
         validator = new attestationHelper.MockAttestationValidator()
-        await stakeHelper.sendStakeV1(operatorAddr, '1500.00000000', validator.pubkey)
+        await stakeValidatorFromOwnSource(validator)
         // Advance past activation delay so the stake is observable
         await regtestMinerConnector.generateBlocks(7)
 
@@ -275,13 +306,15 @@ module.exports = {
     })
 
     it('accepts a redundancy=3 response with 3 valid signatures (PBFT quorum)', async function () {
-        // Stake two additional validators so the snapshot N >= 3 at the request block.
-        // With N=3 and REDUNDANCY=3, the indexer's max(REDUNDANCY, PBFT(N)) = max(3, 1) = 3
-        // valid sigs required.
+        // Stake two additional validators (each from its OWN distinct source — see
+        // stakeValidatorFromOwnSource) so the snapshot has 3 source-distinct validators at the
+        // request block. With 3 validators and REDUNDANCY=3 the responsible set is all 3, so a
+        // 3-signature response can reach quorum. (Staking both from the operator address would
+        // collapse them under SWQ source-dedup and cap valid sigs at 1/3.)
         let v2 = new attestationHelper.MockAttestationValidator()
         let v3 = new attestationHelper.MockAttestationValidator()
-        await stakeHelper.sendStakeV1(operatorAddr, '1500.00000000', v2.pubkey)
-        await stakeHelper.sendStakeV1(operatorAddr, '1500.00000000', v3.pubkey)
+        await stakeValidatorFromOwnSource(v2)
+        await stakeValidatorFromOwnSource(v3)
         // Advance past activation delay
         await regtestMinerConnector.generateBlocks(7)
 
@@ -404,8 +437,16 @@ module.exports = {
             assert(request, 'pending request should exist for status=' + retryStatus)
             let requestId = request.request_id
 
+            // Sign with the request's deterministic responsible validator (top-1 by
+            // SHA256(request_id||pubkey) over the full staked set, source-deduped). Once
+            // 3 validators are staked (the redundancy=3 test above), a hard-coded
+            // `validator` is often NOT the responsible signer for a given request_id, so
+            // its sig is filtered out → 0/1. Picking the responsible key makes the sig
+            // count (1) meet redundancy (1).
+            let signers = attestationHelper.computeResponsibleSigners(requestId, 1, stakedValidators)
+
             // Broadcast a properly-signed response carrying the retryable status. The
-            // staked validator's signature is valid (validSigs=1 >= redundancy=1), so
+            // responsible validator's signature is valid (validSigs=1 >= redundancy=1), so
             // the response row itself lands status='valid' — this is exactly the
             // RETRYABLE_STATUSES case: a valid response that must still leave the
             // request open (distinct from an invalid-sig response, covered above).
@@ -415,7 +456,7 @@ module.exports = {
                 responsePayload: '',
                 status:          retryStatus,
                 meta:            '',
-                validators:      [validator]
+                validators:      signers
             })
 
             // Response row lands valid with response_status = the retryable value
@@ -448,6 +489,11 @@ module.exports = {
         assert(request, 'pending request should exist')
         let requestId = request.request_id
 
+        // Both rounds must be signed by the request's responsible validator (top-1 over the
+        // full staked set, source-deduped) — the same key the indexer will accept for this
+        // request_id. The two rounds target the SAME request_id, so they share one signer.
+        let signers = attestationHelper.computeResponsibleSigners(requestId, 1, stakedValidators)
+
         // Round 1 — a valid no_quorum response leaves the request pending
         await attestationHelper.broadcastAttestationResponse(operatorAddr, {
             requestId:       requestId,
@@ -455,7 +501,7 @@ module.exports = {
             responsePayload: '',
             status:          'no_quorum',
             meta:            '',
-            validators:      [validator]
+            validators:      signers
         })
         let firstResp = await indexerDatabase.waitForAttestationResponse({
             requestId:      requestId,
@@ -475,7 +521,7 @@ module.exports = {
             responsePayload: okPayload,
             status:          'ok',
             meta:            '200',
-            validators:      [validator]
+            validators:      signers
         })
         let okResp = await indexerDatabase.waitForAttestationResponse({
             requestId:      requestId,
