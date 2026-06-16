@@ -7,11 +7,11 @@
  *
  * This file is part of XChain Platform. Licensed under the GNU Affero
  * General Public License v3.0 or later; see LICENSE.md. A commercial
- * license (without AGPL source-disclosure terms) is available —
+ * license (without AGPL source-disclosure terms) is available:
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * DEX Reorg (on-chain) — proves the indexer rolls back an open ORDER (and the
+ * DEX Reorg (on-chain): proves the indexer rolls back an open ORDER (and the
  * GIVE-side escrow it created) across a real chain reorg. order.test.js drives
  * create/cancel/match/expire under normal conditions, but the `orders` rollback
  * AND the escrow-release (give amount debited back into the maker's balance) was
@@ -27,7 +27,7 @@
  * block-scoped `orders` row and releases the escrow. We assert the order is gone
  * and the maker's TOKEN balance is restored to the full minted amount.
  *
- * DOGE-skipped — Dogecoin Core 1.14.x lacks generateblock.
+ * DOGE-skipped: Dogecoin Core 1.14.x lacks generateblock.
  ********************************************************************/
 
 const assert       = require('assert')
@@ -70,7 +70,7 @@ async function mine(n) { try { await regtestMinerConnector.generateBlocks(n) } c
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 function randTick(p) { let s = p; for (let i = 0; i < 6; i++) s += String.fromCharCode(65 + Math.floor(Math.random() * 26)); return s }
 
-describe('DEX Reorg — an open ORDER (and its escrow) rolls back across an on-chain reorg', function () {
+describe('DEX Reorg: an open ORDER (and its escrow) rolls back across an on-chain reorg', function () {
     this.timeout(0)
 
     before(async function () {
@@ -96,14 +96,14 @@ describe('DEX Reorg — an open ORDER (and its escrow) rolls back across an on-c
 
         // Pre-reorg: the order is live and the give amount is escrowed (balance debited
         // 100 -> 70). The escrow debit is the authoritative "open & holding" signal; the
-        // status string is logged for context (not asserted — its exact value varies).
+        // status string is logged for context (not asserted: its exact value varies).
         let ord = await orderRow(orderActionIndex)
         assert(ord, 'order row exists pre-reorg')
         console.log('   order status =', ord.status)
         assert.strictEqual(await balanceOf(maker.address, tick), '70', 'give amount escrowed (balance debited 30)')
         const orderBlock = await blockOfAction(orderActionIndex)
         assert(orderBlock, 'resolved the ORDER block')
-        console.log('   order', orderActionIndex, 'open at block', orderBlock, '— 30', tick, 'escrowed')
+        console.log('   order', orderActionIndex, 'open at block', orderBlock, ': 30', tick, 'escrowed')
 
         // Gate on the indexer catching up to the node tip before reorging.
         let settle = 0
@@ -136,8 +136,8 @@ describe('DEX Reorg — an open ORDER (and its escrow) rolls back across an on-c
             console.log('   indexer tip after reorg', await tip(), 'node tip', await nodeConnector.getBlockCount())
             assert.strictEqual(gone, true, 'orders row rolled back (order gone)')
             assert.strictEqual(await orderCount(tick), 0, 'no order row remains for the tick')
-            assert.strictEqual(bal, '100', 'escrow released — maker balance restored to the full mint')
-            console.log('   ORDER rolled back + escrow released (balance 70 -> 100) — isolation OK')
+            assert.strictEqual(bal, '100', 'escrow released: maker balance restored to the full mint')
+            console.log('   ORDER rolled back + escrow released (balance 70 -> 100): isolation OK')
         } finally {
             await regtestMinerConnector.setDefaultMiningTime()
         }

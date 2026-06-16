@@ -7,11 +7,11 @@
  *
  * This file is part of XChain Platform. Licensed under the GNU Affero
  * General Public License v3.0 or later; see LICENSE.md. A commercial
- * license (without AGPL source-disclosure terms) is available —
+ * license (without AGPL source-disclosure terms) is available:
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Token-Gated Content Reorg (on-chain) — proves the indexer rolls back a gated
+ * Token-Gated Content Reorg (on-chain): proves the indexer rolls back a gated
  * FILE across a real chain reorg, and that the gated-SEND enforcement rule (a
  * SEND of a token with active gated content must be paired with a MESSAGE v2)
  * is itself a function of the rolled-back `gated_files` row. gatedFile.test.js
@@ -22,13 +22,13 @@
  * Mechanism (mirrors controllerReorg/contractStakeReorg): the gate token ISSUE
  * lands in an EARLIER surviving block; the gated FILE (BATCH FILE+MESSAGE-to-self)
  * lands ALONE in block H, giving the token "active gated content" (a bare SEND is
- * then rejected — proven pre-reorg). We gate on indexer-tip==node-tip, pause the
+ * then rejected: proven pre-reorg). We gate on indexer-tip==node-tip, pause the
  * auto-miner, invalidateblock(H), and mine an EMPTY competing chain longer than H
  * so the orphaned FILE is NOT re-included. After the reorg we assert the
- * gated_files row is gone AND a bare SEND of the (now un-gated) token lands valid —
+ * gated_files row is gone AND a bare SEND of the (now un-gated) token lands valid:
  * the enforcement rule rolled back with the row.
  *
- * DOGE-skipped — Dogecoin Core 1.14.x lacks generateblock.
+ * DOGE-skipped: Dogecoin Core 1.14.x lacks generateblock.
  ********************************************************************/
 
 const assert            = require('assert')
@@ -91,7 +91,7 @@ async function mine(n) { try { await regtestMinerConnector.generateBlocks(n) } c
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 function randTick(p) { let s = p; for (let i = 0; i < 6; i++) s += String.fromCharCode(65 + Math.floor(Math.random() * 26)); return s }
 
-describe('Gated Content Reorg — a gated FILE (and its SEND-gating) rolls back across a reorg', function () {
+describe('Gated Content Reorg: a gated FILE (and its SEND-gating) rolls back across a reorg', function () {
     this.timeout(0)
 
     before(async function () {
@@ -109,7 +109,7 @@ describe('Gated Content Reorg — a gated FILE (and its SEND-gating) rolls back 
         await issueHelper.sendIssueV0(issuer, tick, '1000', '0', '0', 'gated-reorg token', '1000')
         await mine(2)
 
-        // Gated FILE (BATCH FILE + MESSAGE-to-self) ALONE in block H — gives the token active gated content.
+        // Gated FILE (BATCH FILE + MESSAGE-to-self) ALONE in block H: gives the token active gated content.
         const fileCmd = ['FILE', '0', fileName, 'text/plain', 'Gated Reorg', '', tick, '1', keyHash].join('|')
         const selfMsg = ['MESSAGE', '2', COIN_CODE, issuer.address, stubEncryptedMessage(keyHash)].join('|')
         await transactionHelper.createAndSendTransaction(issuer, 'BATCH|0|' + fileCmd + ';' + selfMsg, ciphertext.toString('binary'))
@@ -135,7 +135,7 @@ describe('Gated Content Reorg — a gated FILE (and its SEND-gating) rolls back 
         await sleep(1500)
         assert.strictEqual(await balanceOf(recipient.address, tick), recvBefore,
             'bare SEND of the gated token denied pre-reorg (gated-SEND rule has teeth)')
-        console.log('   bare SEND denied pre-reorg — gated-SEND rule active')
+        console.log('   bare SEND denied pre-reorg: gated-SEND rule active')
 
         // ── Reorg out the gated FILE block ──
         await regtestMinerConnector.setMiningTime(3600000, 3600000)
@@ -166,7 +166,7 @@ describe('Gated Content Reorg — a gated FILE (and its SEND-gating) rolls back 
             // The enforcement rule rolled back with the row: a BARE SEND now lands VALID.
             // (Capture the baseline BEFORE restoring the miner: the orphaned pre-reorg
             // denied SEND is back in the mempool and, now that the token is un-gated, is
-            // ALSO valid — so once mining resumes the recipient may receive that 5 PLUS
+            // ALSO valid: so once mining resumes the recipient may receive that 5 PLUS
             // this 7 [=12]. Either way a bare SEND now credits, which is the proof; assert
             // >= 7 rather than an exact amount to tolerate the re-included orphan.)
             const recvBefore2 = Number(await balanceOf(recipient.address, tick))
@@ -181,8 +181,8 @@ describe('Gated Content Reorg — a gated FILE (and its SEND-gating) rolls back 
                 await sleep(2000)
             }
             assert(credited - recvBefore2 >= 7,
-                `bare SEND of the now-ungated token lands valid (gating rule rolled back) — recipient +${credited - recvBefore2}`)
-            console.log('   bare SEND valid post-reorg (recipient now ' + credited + ') — gated-SEND rule rolled back with gated_files')
+                `bare SEND of the now-ungated token lands valid (gating rule rolled back): recipient +${credited - recvBefore2}`)
+            console.log('   bare SEND valid post-reorg (recipient now ' + credited + '): gated-SEND rule rolled back with gated_files')
         } finally {
             await regtestMinerConnector.setDefaultMiningTime()
         }

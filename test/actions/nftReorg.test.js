@@ -7,11 +7,11 @@
  *
  * This file is part of XChain Platform. Licensed under the GNU Affero
  * General Public License v3.0 or later; see LICENSE.md. A commercial
- * license (without AGPL source-disclosure terms) is available —
+ * license (without AGPL source-disclosure terms) is available:
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * NFT Reorg (on-chain) — proves the indexer rolls back a collection CHILD
+ * NFT Reorg (on-chain): proves the indexer rolls back a collection CHILD
  * issuance across a real chain reorg while the parent (in an earlier surviving
  * block) remains. NFTs are a composition of ISSUE (NFT_Standard.md); the
  * `tokens`/`issues`/`balances` rollback for a child sub-TICK was never driven
@@ -26,7 +26,7 @@
  * We assert the child token is gone (and the issuer's child balance reverts) while
  * the parent token survives.
  *
- * DOGE-skipped — Dogecoin Core 1.14.x lacks generateblock (the rollback path is
+ * DOGE-skipped: Dogecoin Core 1.14.x lacks generateblock (the rollback path is
  * chain-agnostic, operating on DB rows by block_index; proven on BTC/LTC).
  ********************************************************************/
 
@@ -62,7 +62,7 @@ async function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 function randTick(p) { let s = p; for (let i = 0; i < 6; i++) s += String.fromCharCode(65 + Math.floor(Math.random() * 26)); return s }
 const j = (x) => JSON.stringify(x, (k, v) => typeof v === 'bigint' ? Number(v) : v)
 
-describe('NFT Reorg — a collection child issuance rolls back across an on-chain reorg', function () {
+describe('NFT Reorg: a collection child issuance rolls back across an on-chain reorg', function () {
     this.timeout(0)
 
     before(async function () {
@@ -129,7 +129,7 @@ describe('NFT Reorg — a collection child issuance rolls back across an on-chai
             // Parent (earlier surviving block) must remain, supply intact.
             assert.strictEqual(await tokenExists(parent), true, 'parent token (earlier block) survives')
             assert.strictEqual(await balanceOf(owner.address, parent), '100', 'parent supply intact')
-            console.log('   parent survived; only the CHILD rolled back — isolation OK')
+            console.log('   parent survived; only the CHILD rolled back: isolation OK')
         } finally {
             await regtestMinerConnector.setDefaultMiningTime()
         }

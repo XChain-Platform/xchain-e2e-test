@@ -7,14 +7,14 @@
  *
  * This file is part of XChain Platform. Licensed under the GNU Affero
  * General Public License v3.0 or later; see LICENSE.md. A commercial
- * license (without AGPL source-disclosure terms) is available —
+ * license (without AGPL source-disclosure terms) is available:
  * contact legal@dankest.llc.
  *
  **********************************************************************
  * NFT pattern parity on the NATIVE-FEE path (Track C.3 deep-dive).
  *
  * NFTs on XChain are a composition of existing primitives (spec:
- * protocol/NFT_Standard.md) — an ISSUE with DECIMALS=0 + LOCK_MAX_SUPPLY=1.
+ * protocol/NFT_Standard.md): an ISSUE with DECIMALS=0 + LOCK_MAX_SUPPLY=1.
  * The SDK suite (test/sdk/nft.sdk.test.js) proves the full pattern on BTC via
  * the XCHAIN-gas fee path. This actions-driven suite re-proves the NFT-specific
  * consensus guarantees on the NATIVE-COIN fee path (LTC/DOGE), confirming the
@@ -92,7 +92,7 @@ describe('NFT pattern parity (native-fee path: DECIMALS=0 + LOCK_MAX_SUPPLY=1)',
         await sendAndSettle(issuer, `SEND|0|${nftTick}|0.5|${other.address}|frac`)
         assert.strictEqual(await balanceOf(other.address, nftTick), '0', 'recipient was NOT credited a fractional NFT')
         assert.strictEqual(await balanceOf(issuer.address, nftTick), '1', 'issuer still holds the whole 1-of-1')
-        console.log('   fractional SEND 0.5 rejected — recipient uncredited, issuer intact')
+        console.log('   fractional SEND 0.5 rejected: recipient uncredited, issuer intact')
     })
 
     describe('collection provenance (parent/child sub-TICKs)', function () {
@@ -110,7 +110,7 @@ describe('NFT pattern parity (native-fee path: DECIMALS=0 + LOCK_MAX_SUPPLY=1)',
             assert.strictEqual(Number(rec.decimals), 0, 'child DECIMALS=0')
             assert.strictEqual(Number(rec.lock_max_supply), 1, 'child LOCK_MAX_SUPPLY=1')
             assert.strictEqual(await balanceOf(issuer.address, child), '1', 'issuer holds the child item')
-            console.log('   child', child, 'issued by parent owner — valid')
+            console.log('   child', child, 'issued by parent owner: valid')
         })
 
         it('a non-owner cannot issue a child item under the parent', async function () {
@@ -118,7 +118,7 @@ describe('NFT pattern parity (native-fee path: DECIMALS=0 + LOCK_MAX_SUPPLY=1)',
             await sendAndSettle(other, `ISSUE|0|${child2}|1|0|0|nope|1|||1`)
             assert.strictEqual(await tokenRecord(child2), null, 'no child token created by a non-owner of the parent')
             assert.strictEqual(await balanceOf(other.address, child2), '0', 'non-owner was not credited the rejected child')
-            console.log('   child', child2, 'from non-owner — rejected (no token created)')
+            console.log('   child', child2, 'from non-owner: rejected (no token created)')
         })
     })
 })
