@@ -26,6 +26,8 @@
 
 const crypto = require('crypto');
 const transactionHelper = require('../transactionHelper');
+// Sibling module — same EQUIV header the indexer's verifier uses (attest.js).
+const eq = require('../../../xchain-indexer/src/equivocation_header.js');
 
 class MockAttestationValidator {
     constructor() {
@@ -36,23 +38,23 @@ class MockAttestationValidator {
         this.pubkey = spkiDer.subarray(12).toString('hex');
     }
 
-    // Canonical message that the indexer's attestation_response.js handler reconstructs.
-    // Must match exactly:
+    // Canonical message that the indexer's attest.js v1 handler reconstructs:
     //   request_id || provider_id || sha256(response_payload) || status || meta
-    _canonical(requestId, providerId, responsePayload, status, meta) {
+    // At/above the EQUIV flag-day the indexer wraps that raw string in the uniform
+    // header (TAG=XATTEST, ROUND_ID=request_id, VIEW=0); we must wrap identically or
+    // ed25519 verification fails. regtest/testnet activate at block 0, so the e2e is
+    // always wrapped — the wrapped bytes don't depend on the block value (only the
+    // activation gate does), so a default snapshotBlock of 0 reproduces it byte-for-byte.
+    _canonical(requestId, providerId, responsePayload, status, meta, snapshotBlock, network) {
         const responseHash = crypto.createHash('sha256').update(String(responsePayload || ''), 'utf8').digest('hex');
-        return Buffer.from(
-            String(requestId) +
-            String(providerId) +
-            responseHash +
-            String(status) +
-            String(meta || ''),
-            'utf8'
-        );
+        let canonRaw = String(requestId) + String(providerId) + responseHash + String(status) + String(meta || '');
+        if (eq.isEquivHeaderActive(snapshotBlock, network))
+            canonRaw = eq.buildEquivCanonical(eq.ENGINE_TAGS.ATTEST, requestId, 0, canonRaw);
+        return Buffer.from(canonRaw, 'utf8');
     }
 
-    sign(requestId, providerId, responsePayload, status, meta) {
-        const message = this._canonical(requestId, providerId, responsePayload, status, meta);
+    sign(requestId, providerId, responsePayload, status, meta, snapshotBlock, network) {
+        const message = this._canonical(requestId, providerId, responsePayload, status, meta, snapshotBlock, network);
         return crypto.sign(null, message, this.privateKey).toString('hex');
     }
 }
@@ -61,10 +63,15 @@ class MockAttestationValidator {
 // RESPONSE_PAYLOAD travels base64 on the wire (binary-safe, no embedded `|`).
 // Sigs hash the decoded bytes, which round-trip-equal the raw utf8 bytes —
 // so MockAttestationValidator.sign() is unchanged.
-function buildAttestationResponseAction({ requestId, providerId, responsePayload, status, meta, validators }) {
+function buildAttestationResponseAction({ requestId, providerId, responsePayload, status, meta, validators, snapshotBlock, network }) {
+    // EQUIV gating mirrors the indexer: the request's block + run network. Callers may
+    // pass the v0 request's block_index explicitly; otherwise default to the run network
+    // (regtest/testnet → always active) at block 0 — byte-identical on those networks.
+    const net = network || process.env.NETWORK || 'regtest';
+    const sb  = (snapshotBlock != null) ? Number(snapshotBlock) : 0;
     const sigCount = validators.length;
     const sigPairs = validators
-        .map(v => v.pubkey + '|' + v.sign(requestId, providerId, responsePayload, status, meta))
+        .map(v => v.pubkey + '|' + v.sign(requestId, providerId, responsePayload, status, meta, sb, net))
         .join('|');
     const responsePayloadB64 = Buffer.from(String(responsePayload || ''), 'utf8').toString('base64');
     return [
