@@ -52,8 +52,8 @@ class Database {
             insertIdAsNumber: true,
             // BIGINT columns (action_index, tx_index, …) must deserialize as Number, not
             // BigInt: the consensus hash serializes a BigInt as a quoted string, so a pool
-            // without this diverges from the indexer/sync prod pools (both set bigIntAsNumber)
-            // — it made consensusHashConformance falsely RED on every block with such columns.
+            // without this diverges from the indexer/sync prod pools (both set bigIntAsNumber);
+            // it made consensusHashConformance falsely RED on every block with such columns.
             bigIntAsNumber:   true
         };
         // Setup pool of connections
@@ -74,7 +74,7 @@ class Database {
             const collector = require('../test/perf/perfCollector')
             collector.recordPoll({ method, startMs, endMs: Date.now(), polls, resolved })
         } catch (e) {
-            // perfCollector not loaded (unit tests, etc.) — silently skip
+            // perfCollector not loaded (unit tests, etc.); silently skip
         }
     }
 
@@ -1332,8 +1332,8 @@ class Database {
     }
 
     // ─── Generic waitFor wrapper ───────────────────────────────────────
-    // Default 60s (was 30s). Under full-suite load — especially the OWNERSHIP
-    // suite right after ORDER's 7-test pile of MINTs/SENDs/ORDERs — the indexer
+    // Default 60s (was 30s). Under full-suite load (especially the OWNERSHIP
+    // suite right after ORDER's 7-test pile of MINTs/SENDs/ORDERs) the indexer
     // sometimes needs >30s to write an ORDER row (match-scan + balance/token
     // updates fan out per insert). 60s absorbs that without masking real
     // assertion failures, which surface as null on a row that was never written.
@@ -1451,6 +1451,46 @@ class Database {
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
             console.error('Error with database query (message):', err);
+            return null
+        } finally {
+            await connection.release()
+        }
+    }
+
+    // ─── PRICE ─────────────────────────────────────────────────────────
+    async waitForPrice(obj, timeMax = 60000){ return this._waitFor(this.checkPrice, obj, timeMax) }
+
+    async checkPrice({txHash, source, version, tick, fiat, value, validationStatus, status}){
+        let w = [], v = []
+        if (txHash != null){ w.push("itx.hash = ?"); v.push(txHash) }
+        if (source != null){ w.push("ias.address = ?"); v.push(source) }
+        if (version != null){ w.push("p.version = ?"); v.push(version) }
+        if (tick != null){ w.push("itick.tick = ?"); v.push(tick) }
+        if (fiat != null){ w.push("ifi.code = ?"); v.push(fiat) }
+        if (value != null){ w.push("p.value = ?"); v.push(value) }
+        if (validationStatus != null){ w.push("p.validation_status = ?"); v.push(validationStatus) }
+        if (status != null){ w.push("ist.status = ?"); v.push(status) }
+        if (w.length === 0) return null
+        const query = `
+            SELECT p.*, itx.hash AS tx_hash, ias.address AS source,
+                   icoin.coin AS v1_coin, itick.tick AS v1_tick, ifi.code AS v1_fiat,
+                   ist.status AS status
+            FROM prices p
+            LEFT JOIN actions act ON act.action_index = p.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ias ON ias.id = p.source_id
+            LEFT JOIN index_coins icoin ON icoin.id = p.coin_id
+            LEFT JOIN index_tickers itick ON itick.id = p.tick_id
+            LEFT JOIN index_fiats ifi ON ifi.id = p.fiat_id
+            LEFT JOIN index_statuses ist ON ist.id = p.status_id
+        `+"WHERE "+w.join(" AND ")+" ORDER BY p.action_index DESC LIMIT 1";
+        let connection = await this.getConnection()
+        try {
+            const rows = await connection.query(query, v)
+            return rows.length > 0 ? rows[0] : null
+        } catch (err) {
+            console.error('Error with database query (price):', err);
             return null
         } finally {
             await connection.release()
@@ -1638,7 +1678,7 @@ class Database {
         if (source != null){ w.push("ias.address = ?"); v.push(source) }
         if (giveCoin != null){ w.push("give_ic.coin = ?"); v.push(giveCoin) }
         if (giveTick != null){ w.push("give_it.tick = ?"); v.push(giveTick) }
-        // orders.give_amount/get_amount are VARCHAR(250) — string-comparing them
+        // orders.give_amount/get_amount are VARCHAR(250), so string-comparing them
         // against the test's raw input ("100.00000000", "0.00000003") misses the
         // DB row, which stores the bignumber-normalized form ("100", "3e-8").
         // Coerce both sides to numeric via +0 so the match is by value, not by
@@ -2154,7 +2194,7 @@ class Database {
     }
 
     // Count currently-active, valid stakes (those still in the validator
-    // snapshot — not deactivated). Used by the hub-federation tests to assert a
+    // snapshot, not deactivated). Used by the hub-federation tests to assert a
     // clean validator set before staking their own hubs: leftover stakes would
     // skew the deterministic responsible-set selection and make those tests
     // flaky. Zero on a freshly-reset regtest chain.
@@ -2290,7 +2330,7 @@ class Database {
     }
 
     async getAttestationValidatorSignatures(responseActionIndex){
-        // Verified federation sigs are no longer a separate table — they're
+        // Verified federation sigs are no longer a separate table; they're
         // inlined as a JSON array (`[{pubkey, sig}, ...]`) on the version = 1
         // response row. Parse + reshape to the prior {validator_pubkey, validator_sig} form.
         let query = `SELECT validator_signatures FROM attests WHERE action_index = ? AND version = 1 LIMIT 1`
@@ -2312,7 +2352,7 @@ class Database {
     // attests table consolidation slipped through). Surface those loudly.
     _warnOnSchemaError(where, err){
         if(err && (err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR')){
-            console.error('[db] ' + where + ': attestation schema drift — ' + err.message +
+            console.error('[db] ' + where + ': attestation schema drift: ' + err.message +
                 ' (a query references a table/column that no longer exists)')
         }
     }
