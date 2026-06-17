@@ -154,34 +154,53 @@ exports.mochaHooks = {
                     let hubConfigs = await hubConnector.getAllConfig()
 
                     if (hubConfigs){
-                        //NODE_URL = hubConfigs[COIN][NETWORK]["node"]["host"]
+                        const coinNet = hubConfigs[COIN] && hubConfigs[COIN][NETWORK]
+                        if (!coinNet) {
+                            throw new Error("Hub returned no config for " + COIN + "/" + NETWORK)
+                        }
+
+                        // Hub schema uses "port" (not "server_port"); DB fields live
+                        // directly in the xchain-indexer entry (db_host/db_port/name/user/pass).
+                        //NODE_URL = coinNet["node"]["host"]
                         NODE_URL = "localhost"
-                        NODE_PORT = hubConfigs[COIN][NETWORK]["node"]["server_port"]
-                        NODE_USER = hubConfigs[COIN][NETWORK]["node"]["user"]
-                        NODE_PASS = hubConfigs[COIN][NETWORK]["node"]["pass"]
+                        NODE_PORT = coinNet["node"]["port"]
+                        NODE_USER = coinNet["node"]["user"]
+                        NODE_PASS = coinNet["node"]["pass"]
 
-                        //DATABASE_URL = hubConfigs[COIN][NETWORK]["database"]["host"]
+                        // DB config comes from the indexer's db_host/db_port fields
+                        // (hub has no top-level "database" section).
+                        //DATABASE_URL = coinNet["xchain-indexer"]["db_host"]
                         DATABASE_URL = "localhost"
-                        DATABASE_PORT = hubConfigs[COIN][NETWORK]["database"]["port"]
+                        DATABASE_PORT = coinNet["xchain-indexer"]["db_port"]
 
-                        //UTXO_TRACKER_URL = hubConfigs[COIN][NETWORK]["xchain-utxo-tracker"]["host"]
+                        //UTXO_TRACKER_URL = coinNet["xchain-utxo-tracker"]["host"]
                         UTXO_TRACKER_URL = "localhost"
-                        UTXO_TRACKER_PORT = hubConfigs[COIN][NETWORK]["xchain-utxo-tracker"]["server_port"]
+                        UTXO_TRACKER_PORT = coinNet["xchain-utxo-tracker"]["port"]
 
-                        //ENCODER_URL = hubConfigs[COIN][NETWORK]["xchain-encoder"]["host"]
+                        //ENCODER_URL = coinNet["xchain-encoder"]["host"]
                         ENCODER_URL = "localhost"
-                        ENCODER_PORT = hubConfigs[COIN][NETWORK]["xchain-encoder"]["server_port"]
+                        ENCODER_PORT = coinNet["xchain-encoder"]["port"]
 
-                        //INDEXER_URL = hubConfigs[COIN][NETWORK]["xchain-indexer"]["host"]
+                        //DECODER_URL = coinNet["xchain-decoder"]["host"]
+                        DECODER_URL = "localhost"
+                        DECODER_PORT = coinNet["xchain-decoder"] && coinNet["xchain-decoder"]["port"]
+
+                        //INDEXER_URL = coinNet["xchain-indexer"]["host"]
                         INDEXER_URL = "localhost"
-                        INDEXER_PORT = hubConfigs[COIN][NETWORK]["xchain-indexer"]["server_port"]
-                        INDEXER_DATABASE_NAME = hubConfigs[COIN][NETWORK]["xchain-indexer"]["name"]
-                        INDEXER_DATABASE_USER = hubConfigs[COIN][NETWORK]["xchain-indexer"]["user"]
-                        INDEXER_DATABASE_PASS = hubConfigs[COIN][NETWORK]["xchain-indexer"]["pass"]
+                        INDEXER_PORT = coinNet["xchain-indexer"]["port"]
+                        INDEXER_DATABASE_NAME = coinNet["xchain-indexer"]["name"]
+                        INDEXER_DATABASE_USER = coinNet["xchain-indexer"]["user"]
+                        INDEXER_DATABASE_PASS = coinNet["xchain-indexer"]["pass"]
 
-                        //REGTEST_MINER_URL = hubConfigs[COIN][NETWORK]["xchain-regtest-miner"]["host"]
+                        //REGTEST_MINER_URL = coinNet["xchain-regtest-miner"]["host"]
                         REGTEST_MINER_URL = "localhost"
-                        REGTEST_MINER_PORT = hubConfigs[COIN][NETWORK]["xchain-regtest-miner"]["server_port"]
+                        REGTEST_MINER_PORT = coinNet["xchain-regtest-miner"] && coinNet["xchain-regtest-miner"]["port"]
+
+                        // Explorer is not coin-scoped in the hub config tree; it
+                        // must be supplied via EXPLORER_URL / EXPLORER_API_PORT env vars.
+                        if (!EXPLORER_URL || !EXPLORER_PORT) {
+                            throw new Error("EXPLORER_URL and EXPLORER_API_PORT must be set in env; explorer is not hub-discoverable")
+                        }
                     } else {
                         throw new Error("There was an error trying to get all the configs from the hub")
                     }
@@ -203,7 +222,7 @@ exports.mochaHooks = {
             global.utxoTrackerConnector = new XChainUtxoTrackerConnector(UTXO_TRACKER_URL, UTXO_TRACKER_PORT)
             global.encoderConnector = new XChainEncoderConnector(ENCODER_URL, ENCODER_PORT)
             global.decoderConnector = new XChainDecoderConnector(DECODER_URL, DECODER_PORT)
-            global.indexerConnector = new XChainIndexerConnector(INDEXER_URL, INDEXER_PORT)
+            global.indexerConnector = new XChainIndexerConnector(INDEXER_URL, INDEXER_PORT, process.env.INDEXER_API_KEY || null)
             global.explorerConnector = new XChainExplorerConnector(EXPLORER_URL, EXPLORER_PORT)
             global.indexerDatabase = new Database(DATABASE_URL, DATABASE_PORT, INDEXER_DATABASE_NAME, INDEXER_DATABASE_USER, INDEXER_DATABASE_PASS)
             global.regtestMinerConnector = new RegtestMinerConnector(REGTEST_MINER_URL, REGTEST_MINER_PORT)
@@ -261,8 +280,8 @@ exports.mochaHooks = {
         await phase('native-fee-price-seed', async () => {
             // LTC/DOGE require a native-coin fee output on fee-bearing actions,
             // valued by the indexer against oracle prices. Seed XCHAIN/USD +
-            // {COIN}/USD up front (no-op on BTC) so the very first ISSUE — incl.
-            // the GAS-token bootstrap below — can be priced. transactionHelper
+            // {COIN}/USD up front (no-op on BTC) so the very first ISSUE (incl.
+            // the GAS-token bootstrap below) can be priced. transactionHelper
             // refreshes these during long runs. See helpers/nativeFeeHelper.js.
             const nativeFeeHelper = require('./helpers/nativeFeeHelper')
             await nativeFeeHelper.seedGlobalPrices(true)
@@ -278,17 +297,17 @@ exports.mochaHooks = {
                 // XCHAIN is an open-mint GAS faucet on testnet/regtest: anyone MINTs it (no owner
                 // check, no fee) to grab gas to play. Genesis therefore mints NO initial supply
                 // (mintSupply=0) and leaves minting unlocked + open from genesis (lockMint unset,
-                // mintStartBlock unset => 0). MAX_MINT is held high here so the e2e suite — which
-                // mints 100–5000 gas per call via gasHelper — isn't throttled; the real testnet
+                // mintStartBlock unset => 0). MAX_MINT is held high here so the e2e suite
+                // (mints 100-5000 gas per call via gasHelper) is not throttled; the real testnet
                 // bootstrap can impose a tighter per-mint cap separately.
                 await issueHelper.sendIssueV0(
                     gasAddressInfo,
                     GAS_TICK,
                     100000000,   // MAX_SUPPLY
-                    100000,      // MAX_MINT (per tx) — high for e2e; real faucet may cap tighter
+                    100000,      // MAX_MINT (per tx): high for e2e; real faucet may cap tighter
                     0,           // decimals
                     "XChain GAS Token",
-                    0            // MINT_SUPPLY — faucet: no pre-minted supply
+                    0            // MINT_SUPPLY: faucet, no pre-minted supply
                 )
                 console.log("GAS token ("+GAS_TICK+") created successfully")
             } else {
@@ -303,7 +322,7 @@ exports.mochaHooks = {
     // flakes where a previous test leaves a mid-batch state that breaks the
     // next test's encoder queries with phantom "no utxos" errors.
     //
-    // Failures here are logged but never throw — we don't want to mask the
+    // Failures here are logged but never throw; we don't want to mask the
     // actual test outcome with barrier issues. The 15s timeout is generous
     // for regtest under load; quiescence usually lands in < 1s on a clean
     // stack.

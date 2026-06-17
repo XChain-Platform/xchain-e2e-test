@@ -19,13 +19,13 @@
  * index passed via XCALL_TARGET_CONTRACT) through every non-expiry result
  * status the protocol defines:
  *
- *   onArrival  → ok               (returns 'pong:<param>' — proves params arrive)
+ *   onArrival  → ok               (returns 'pong:<param>', proves params arrive)
  *   doRevert   → reverted         (xchain.revert in the target)
  *   hidden     → not_callable     (method exists but is NOT in crossCallable)
  *   bigReturn  → payload_too_large (return exceeds the 1024-byte cap)
  *
- * All four calls are fired up front and relay concurrently — this also
- * exercises multiple in-flight calls against the per-block injection cap.
+ * All four calls are fired up front and relay concurrently, also
+ * exercising multiple in-flight calls against the per-block injection cap.
  *
  * Env on top of the BTC regtest e2e env (defaults match devhost):
  *   XCALL_HUB_PUBKEY        relay hub's Ed25519 pubkey (stake target)
@@ -37,9 +37,10 @@
 
 const { expect } = require('chai');
 const axios = require('axios');
+const mariadb = require('mariadb');
 const { makeSdk, submit, fundedGasAddress, mine, submitOpts } = require('./sdkHelper');
 
-// Source-side contract (BTC) — same shape as xcall.sdk.test.js: parameterized
+// Source-side contract (BTC), same shape as xcall.sdk.test.js: parameterized
 // fire-and-record, callback keyed by call_id so concurrent calls don't collide.
 const CONTRACT_A = `
     module.exports = {
@@ -72,6 +73,35 @@ const CONTRACT_A = `
 const SOURCE_INDEXER_URL = 'http://' + (process.env.INDEXER_URL || 'localhost') + ':' + (process.env.INDEXER_API_PORT || '3024');
 const TARGET_INDEXER_URL = process.env.XCALL_TARGET_INDEXER_URL || 'http://localhost:3124';
 const TARGET_MINER_URL   = process.env.XCALL_TARGET_MINER_URL   || 'http://localhost:3125';
+
+const HUB_DB_HOST = process.env.HUB_DB_HOST || '127.0.0.1';
+const HUB_DB_PORT = parseInt(process.env.HUB_DB_PORT || '3306', 10);
+
+// Truncate hub relay tables so stale rows from prior runs don't collide with
+// deterministic call_ids on the next run. Skipped if HUB_DB_USER is absent
+// (single-hub or no-DB-access environments fall through gracefully).
+async function resetHubRelayTables() {
+    const user = process.env.HUB_DB_USER;
+    const pass = process.env.HUB_DB_PASS || '';
+    if (!user) return;
+    const RELAY_TABLES = [
+        'cross_chain_calls',
+        'cross_chain_call_executions',
+        'cross_chain_call_callbacks',
+        'capability_snapshots',
+    ];
+    const conn = await mariadb.createConnection({
+        host: HUB_DB_HOST, port: HUB_DB_PORT,
+        database: 'XChain_Hub', user, password: pass
+    });
+    try {
+        for (const t of RELAY_TABLES) {
+            await conn.query('TRUNCATE TABLE `' + t + '`');
+        }
+    } finally {
+        await conn.end().catch(() => {});
+    }
+}
 
 // method → expected terminal result (payload null = don't assert payload)
 const SCENARIOS = [
@@ -127,6 +157,7 @@ describe('[sdk] cross-chain call result scenarios (real DOGE target)', function 
     before(async function () {
         targetContract = parseInt(process.env.XCALL_TARGET_CONTRACT || '', 10);
         expect(targetContract, 'XCALL_TARGET_CONTRACT env (DOGE target contract action_index from xcallDogeSetup.js)').to.be.a('number').and.to.be.greaterThan(0);
+        await resetHubRelayTables();
         sdk = makeSdk();
         deployer = await fundedGasAddress(sdk, 1);
         console.log('    [xcall-scn] deployer=' + deployer.address + ' target=' + targetContract);
@@ -144,10 +175,10 @@ describe('[sdk] cross-chain call result scenarios (real DOGE target)', function 
             expect(res.indexed.status).to.equal('valid');
         } catch (e) {
             // A prior run already staked this pubkey (from a different funding
-            // address) — the capability stake exists and stays active, which is
+            // address); the capability stake exists and stays active, which is
             // all the relay needs.
             if (!/SIGNING_PUBKEY \(already in use\)/.test(String(e.message))) throw e;
-            console.log('    [xcall-scn] hub pubkey already staked — reusing the active stake');
+            console.log('    [xcall-scn] hub pubkey already staked, reusing the active stake');
         }
         await mine(8); // past ACTIVATION_DELAY_BLOCKS (6)
     });

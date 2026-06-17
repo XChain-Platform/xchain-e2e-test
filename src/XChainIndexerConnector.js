@@ -22,9 +22,10 @@
 const axios = require('axios');
 
 class XChainIndexerConnector {
-    constructor(url, port) {
+    constructor(url, port, apiKey) {
         this.url = "http://"+url+":"+port
         this.port = port
+        this.apiKey = apiKey || null
     }
 
     async sleep(ms) {
@@ -83,7 +84,7 @@ class XChainIndexerConnector {
 
     // Generic JSON-RPC call (object params). Returns the result object on
     // success, or null on transport failure. Method-level validation errors
-    // come back as { error: '...' } INSIDE the result — callers must check.
+    // come back as { error: '...' } INSIDE the result; callers must check.
     async call(method, params){
         const data = {
             jsonrpc: '2.0',
@@ -93,7 +94,8 @@ class XChainIndexerConnector {
         }
         var response = null
         try {
-            response = await axios.post(this.url, data)
+            const config = this.apiKey ? { headers: { 'x-api-key': this.apiKey } } : {}
+            response = await axios.post(this.url, data, config)
         } catch (err) {
             console.log(err)
             return null
@@ -116,7 +118,7 @@ class XChainIndexerConnector {
     }
 
     // Resolve the staking source address that owned/delegated a signing pubkey
-    // as of a block (stakes first, then DELEGATE v0 delegations — block-scoped).
+    // as of a block (stakes first, then DELEGATE v0 delegations; block-scoped).
     // Returns { source } (source null when unknown) or { error } or null.
     async getStakeSourceByPubkey(pubkey, blockIndex){
         return await this.call('getstakesourcebypubkey', {
