@@ -111,6 +111,45 @@ class RegtestMinerConnector {
         }
     }
 
+    // Pause the regtest miner's adaptive auto-mine loop. Call before a
+    // height-deterministic generateBlocks section so a stray mempool tx
+    // cannot cause the miner to fire an extra block concurrently. Always
+    // pair with resumeMining() in a finally block.
+    async pauseMining(){
+        const data = {
+            jsonrpc: '2.0',
+            method: 'pause_mining',
+            params: {},
+            id: 1
+        }
+
+        const response = await axios.post(this.url, data)
+
+        if (response.data && response.data.result) {
+            return response.data.result
+        } else {
+            return null
+        }
+    }
+
+    // Resume the adaptive auto-mine loop after a pauseMining() call.
+    async resumeMining(){
+        const data = {
+            jsonrpc: '2.0',
+            method: 'continue_mining',
+            params: {},
+            id: 1
+        }
+
+        const response = await axios.post(this.url, data)
+
+        if (response.data && response.data.result) {
+            return response.data.result
+        } else {
+            return null
+        }
+    }
+
     // Mine `count` empty blocks via the regtest miner's generatetoaddress.
     // Use this in tests that need to advance block height past indexer
     // time-locked states (e.g. STAKE's ACTIVATION_DELAY_BLOCKS) without

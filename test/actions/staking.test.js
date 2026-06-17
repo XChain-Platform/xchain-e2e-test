@@ -15,18 +15,18 @@ const stakeHelper = require('../helpers/stakeHelper')
 const gasHelper = require('../helpers/gasHelper')
 const transactionHelper = require('../transactionHelper')
 
-describe('Staking — STAKE, UNSTAKE, DELEGATE (capability model)', function () {
+describe('Staking: STAKE, UNSTAKE, DELEGATE (capability model)', function () {
 
     let stakerAddr = null
     let signingPubkey = null
 
     before(async function () {
-        // STAKE/UNSTAKE/DELEGATE are BTC-only by protocol design — the indexer
+        // STAKE/UNSTAKE/DELEGATE are BTC-only by protocol design. The indexer
         // action handlers (xchain-indexer/src/actions/{stake,unstake,delegate}.js)
         // explicitly reject COIN !== 'BTC' with status='invalid: ACTION (BTC only)',
         // so these tests can only pass on the bitcoin chain.
         if (COIN_CODE !== 'BTC') {
-            console.log('STAKE/UNSTAKE/DELEGATE are BTC-only — skipping on ' + COIN_CODE)
+            console.log('STAKE/UNSTAKE/DELEGATE are BTC-only, skipping on ' + COIN_CODE)
             this.skip()
             return
         }
@@ -43,7 +43,7 @@ describe('Staking — STAKE, UNSTAKE, DELEGATE (capability model)', function () 
         signingPubkey = spkiDer.subarray(12).toString('hex') // Strip 12-byte SPKI prefix
     })
 
-    describe('STAKE v1 — Create a new stake', function () {
+    describe('STAKE v1: Create a new stake', function () {
         it('should stake XCHAIN and create a valid stake record', async function () {
             let result = await stakeHelper.sendStakeV1(stakerAddr, '1000.00000000', signingPubkey)
             assert(result.stake, 'Stake record should exist in DB')
@@ -60,10 +60,16 @@ describe('Staking — STAKE, UNSTAKE, DELEGATE (capability model)', function () 
         })
     })
 
-    describe('STAKE v2 — Top up an existing stake', function () {
+    describe('STAKE v2: Top up an existing stake', function () {
         it('should accept a top-up to the same pubkey from the same source', async function () {
-            // Advance past the activation window so the v1 stake is observable as active for the v2 top-up check
-            await regtestMinerConnector.generateBlocks(7)
+            // Advance past the activation window so the v1 stake is observable as active for the v2 top-up check.
+            // Pause the auto-miner so no stray mempool tx can add an extra block during the deterministic advance. #3851
+            await regtestMinerConnector.pauseMining()
+            try {
+                await regtestMinerConnector.generateBlocks(7)
+            } finally {
+                await regtestMinerConnector.resumeMining()
+            }
             let result = await stakeHelper.sendStakeV2(stakerAddr, '500.00000000', signingPubkey)
             assert(result.stake, 'Top-up stake record should exist in DB')
             assert.strictEqual(result.stake.status, 'valid', 'Top-up status should be valid')
@@ -71,9 +77,15 @@ describe('Staking — STAKE, UNSTAKE, DELEGATE (capability model)', function () 
         })
     })
 
-    describe('UNSTAKE v0 — Begin unstaking by pubkey', function () {
+    describe('UNSTAKE v0: Begin unstaking by pubkey', function () {
         it('should create an unstake record with cooldown', async function () {
-            await regtestMinerConnector.generateBlocks(7)
+            // Pause the auto-miner around this deterministic height advance. #3851
+            await regtestMinerConnector.pauseMining()
+            try {
+                await regtestMinerConnector.generateBlocks(7)
+            } finally {
+                await regtestMinerConnector.resumeMining()
+            }
             let result = await stakeHelper.sendUnstakeV0(stakerAddr, signingPubkey)
             assert(result.unstake, 'Unstake record should exist in DB')
             assert.strictEqual(result.unstake.status, 'valid', 'Unstake status should be valid')
@@ -81,11 +93,11 @@ describe('Staking — STAKE, UNSTAKE, DELEGATE (capability model)', function () 
         })
     })
 
-    describe('STAKE v2 — Top-up validation rejections', function () {
-        // Run order: this block lands AFTER `UNSTAKE v0 — Begin unstaking`,
+    describe('STAKE v2: Top-up validation rejections', function () {
+        // Run order: this block lands AFTER the UNSTAKE block above,
         // but the source-mismatch test relies on the pubkey's stake being
         // VISIBLE-AS-ACTIVE at the time of the v2 broadcast. UNSTAKE doesn't
-        // deactivate instantly — it sets deactivation_block = unstake_block
+        // deactivate instantly; it sets deactivation_block = unstake_block
         // + ACTIVATION_DELAY_BLOCKS (6), giving the validator a grace
         // period to keep participating. So as long as fewer than 6 blocks
         // elapse between the UNSTAKE block and this v2 broadcast, the
@@ -103,8 +115,8 @@ describe('Staking — STAKE, UNSTAKE, DELEGATE (capability model)', function () 
 
         it('should reject a v2 top-up from a different source address', async function () {
             // signingPubkey already has an active stake from stakerAddr
-            // (within UNSTAKE's 6-block deactivation grace period — see
-            // block comment above). otherAddr tries to top it up — the
+            // (within UNSTAKE's 6-block deactivation grace period, see
+            // block comment above). otherAddr tries to top it up; the
             // indexer must reject as "SOURCE (does not own this stake)".
             let msg = "STAKE|2|500.00000000|" + signingPubkey
             let txHash = await transactionHelper.createAndSendTransaction(otherAddr, msg)
@@ -140,7 +152,7 @@ describe('Staking — STAKE, UNSTAKE, DELEGATE (capability model)', function () 
         })
     })
 
-    describe('UNSTAKE v0 — Rejection paths', function () {
+    describe('UNSTAKE v0: Rejection paths', function () {
         it('should reject UNSTAKE against an unknown pubkey', async function () {
             let { publicKey } = crypto.generateKeyPairSync('ed25519')
             let unknownPubkey = publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('hex')
@@ -160,7 +172,7 @@ describe('Staking — STAKE, UNSTAKE, DELEGATE (capability model)', function () 
         })
     })
 
-    describe('DELEGATE v0 — Rotate signing key', function () {
+    describe('DELEGATE v0: Rotate signing key', function () {
         let delegateAddr = null
         let delegatePubkey = null
 
@@ -177,7 +189,13 @@ describe('Staking — STAKE, UNSTAKE, DELEGATE (capability model)', function () 
             // Stake first
             await stakeHelper.sendStakeV1(delegateAddr, '1000.00000000', delegatePubkey)
             // Advance past ACTIVATION_DELAY_BLOCKS so DELEGATE sees an active stake.
-            await regtestMinerConnector.generateBlocks(7)
+            // Pause the auto-miner around this deterministic height advance. #3851
+            await regtestMinerConnector.pauseMining()
+            try {
+                await regtestMinerConnector.generateBlocks(7)
+            } finally {
+                await regtestMinerConnector.resumeMining()
+            }
         })
 
         it('should delegate to a new signing key', async function () {
