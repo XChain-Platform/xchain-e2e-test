@@ -36,7 +36,7 @@
  * waitForIndexer:false and resolves indexing state straight from the DOGE
  * indexer DB (same approach as xcallDogeSetup.js).
  *
- * Env (defaults match the devhost stack):
+ * Env (defaults match the local regtest stack):
  *   DEX_DOGE_TICK, DEX_BTC_TICK    (the crossing tick pair — REQUIRED)
  *   XCALL_DOGE_ENCODER_PORT=3123   XCALL_DOGE_MINER_URL=http://localhost:3125
  *   XCALL_DB_HOST=127.0.0.1        XCALL_DB_PORT=13306

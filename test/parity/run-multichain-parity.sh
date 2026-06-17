@@ -15,7 +15,7 @@
 # compare.js (Tier 1 hash-chain identity + Tier 2 structural parity).
 #
 # VENUE: the Ubuntu runtime VM (Docker + native ext4 for bitcoind data). The
-# Parallels REDACTED-LOCAL-PATH share is DEAD (won't fix), so the code is rsync-staged
+# the shared filesystem is unavailable, so the code is rsync-staged
 # (see the staged-tree recipe in memory vm-parallels-share-dead-2026-06-11).
 # Run this from the staged tree's xchain-e2e-test/test/parity directory.
 #
@@ -26,7 +26,7 @@
 # Prereqs on the VM (all documented in memory):
 #   - Node 22 exactly (mariadb ESM; isolated-vm).            [platform-unit-suites-need-node22]
 #   - bitcoind data on native ext4, NOT the share:           [local-regtest-stack-gotchas #1]
-#       export XCHAIN_NODE_DATA_DIR=REDACTED-LOCAL-PATH
+#       export XCHAIN_NODE_DATA_DIR=$HOME/.xchain-node-data
 #   - the xchain-node DB container started first:            [local-regtest-stack-gotchas #2]
 #       docker start xchain-node-database
 #   - DOGE regtest needs v1.14 mempool flags:                [dogecoin-v114-regtest-mempool-priority]

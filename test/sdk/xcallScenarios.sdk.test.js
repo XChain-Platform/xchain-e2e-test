@@ -27,7 +27,7 @@
  * All four calls are fired up front and relay concurrently, also
  * exercising multiple in-flight calls against the per-block injection cap.
  *
- * Env on top of the BTC regtest e2e env (defaults match devhost):
+ * Env on top of the BTC regtest e2e env (defaults match the local regtest stack):
  *   XCALL_HUB_PUBKEY        relay hub's Ed25519 pubkey (stake target)
  *   XCALL_TARGET_CONTRACT   DOGE-side crossCallable contract action_index
  *   XCALL_TARGET_INDEXER_URL=http://localhost:3124

@@ -24,7 +24,7 @@
  * injected XEXEC execution, both directions of the relay on one logical
  * flow, and callbacks resolving on both chains.
  *
- * Env on top of the BTC regtest e2e env (defaults match devhost):
+ * Env on top of the BTC regtest e2e env (defaults match the local regtest stack):
  *   XCALL_HUB_PUBKEY         relay hub's Ed25519 pubkey (stake target)
  *   XCALL_BOUNCER_CONTRACT   DOGE-side bouncer contract action_index
  *   XCALL_TARGET_INDEXER_URL=http://localhost:3124
