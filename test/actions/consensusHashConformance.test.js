@@ -31,10 +31,12 @@ const path   = require('path');
 
 // Sibling xchain-sync (monorepo layout). If it's not present (sync excluded from
 // a given checkout), skip rather than fail.
-let BlockHasher, SyncUtility;
+let BlockHasher, SyncUtility, SyncStateCommitment, SyncDatabase;
 try {
     BlockHasher = require(path.join(__dirname, '../../../xchain-sync/src/BlockHasher.js'));
     SyncUtility = require(path.join(__dirname, '../../../xchain-sync/src/utility.js'));
+    SyncStateCommitment = require(path.join(__dirname, '../../../xchain-sync/src/stateCommitment.js'));
+    SyncDatabase        = require(path.join(__dirname, '../../../xchain-sync/src/db.js'));
 } catch (e) { /* handled in before() */ }
 
 const COMMITTED_HASH_SQL =
@@ -52,11 +54,11 @@ describe('consensus hash conformance: sync BlockHasher == indexer committed hash
 
     before(async function () {
         if (!BlockHasher || !SyncUtility) {
-            console.log('xchain-sync not present alongside e2e — skipping conformance drift-lock');
+            console.log('xchain-sync not present alongside e2e; skipping conformance drift-lock');
             this.skip();
         }
         if (!global.indexerDatabase || !global.indexerDatabase.pool) {
-            console.log('indexer DB not available — skipping conformance drift-lock');
+            console.log('indexer DB not available; skipping conformance drift-lock');
             this.skip();
         }
         const pool = global.indexerDatabase.pool;
@@ -75,7 +77,7 @@ describe('consensus hash conformance: sync BlockHasher == indexer committed hash
 
     it('has indexed blocks to verify', function () {
         assert.ok(blockIndexes && blockIndexes.length > 0,
-            'no blocks indexed — the e2e stack must have processed blocks before this runs');
+            'no blocks indexed: the e2e stack must have processed blocks before this runs');
     });
 
     it('every indexed block recomputes to its committed ledger/actions/contract hash', async function () {
@@ -91,9 +93,70 @@ describe('consensus hash conformance: sync BlockHasher == indexer committed hash
             }
         }
         assert.strictEqual(mismatches.length, 0,
-            'sync BlockHasher diverged from indexer committed hashes (conformance pair drifted) — ' +
-            'update BOTH xchain-sync/src/BlockHasher.js and xchain-indexer/src/db.js getBlockHashes + ' +
+            'sync BlockHasher diverged from indexer committed hashes (conformance pair drifted). ' +
+            'Update BOTH xchain-sync/src/BlockHasher.js and xchain-indexer/src/db.js getBlockHashes + ' +
             'regenerate the golden, and bump CONSENSUS_VERSION:\n' +
             JSON.stringify(mismatches.slice(0, 10), null, 2));
+    });
+});
+
+// Light-client state-commitment conformance (SPV spec sec.4-5). The follower
+// recomputes block_merkle_root from src/stateCommitment.js + db.getBlockLeafRows
+// (a copy of BlockHasher's 10 content queries) and HALTs if it disagrees with the
+// indexer's committed root. The unit golden locks the leaf serialization, but only
+// THIS test exercises getBlockLeafRows + computeBlockMerkleRoot against REAL
+// indexer-produced rows. Read-only: it never writes the indexer DB. (balances_root
+// is covered by the persistent-vs-reference unit fuzz + the live regtest follower
+// halt drill; stakes_root/state_root verification are deferred in Phase 1.)
+describe('state commitment conformance: sync block_merkle_root == indexer committed roots @regression', function () {
+    this.timeout(0);
+
+    let dbAdapter, rootRows;
+
+    before(async function () {
+        if (!SyncStateCommitment || !SyncDatabase) {
+            console.log('xchain-sync not present alongside e2e; skipping state-commitment drift-lock');
+            this.skip();
+        }
+        if (!global.indexerDatabase || !global.indexerDatabase.pool) {
+            console.log('indexer DB not available; skipping state-commitment drift-lock');
+            this.skip();
+        }
+        const pool = global.indexerDatabase.pool;
+        dbAdapter = {
+            doQuery: async (sql, params) => {
+                const conn = await pool.getConnection();
+                try { return await conn.query(sql, params); }
+                finally { conn.release(); }
+            }
+        };
+        // computeBlockMerkleRoot reads its rows via db.getBlockLeafRows; bind the
+        // follower Database method onto the read-only adapter (it only doQuery's).
+        dbAdapter.getBlockLeafRows = SyncDatabase.prototype.getBlockLeafRows.bind(dbAdapter);
+        rootRows = await dbAdapter.doQuery(
+            'SELECT block_index, block_merkle_root FROM state_tree_roots ORDER BY block_index ASC', []);
+    });
+
+    it('has committed state_tree_roots to verify', function () {
+        if (!rootRows || !rootRows.length) {
+            console.log('no state_tree_roots rows (indexer build predates the light-client commitment or runs below the flag-day); skipping');
+            this.skip();
+        }
+        assert.ok(rootRows.length > 0);
+    });
+
+    it('every block block_merkle_root recomputes to the indexer committed value', async function () {
+        if (!rootRows || !rootRows.length) this.skip();
+        const mismatches = [];
+        for (const r of rootRows) {
+            const computed = await SyncStateCommitment.computeBlockMerkleRoot(dbAdapter, Number(r.block_index));
+            if (computed !== r.block_merkle_root) {
+                mismatches.push({ block: Number(r.block_index), computed, committed: r.block_merkle_root });
+            }
+        }
+        assert.strictEqual(mismatches.length, 0,
+            'sync block_merkle_root diverged from indexer committed roots (block-content conformance pair drifted). ' +
+            'Update BOTH xchain-sync/src/db.js getBlockLeafRows / stateCommitment.js and the indexer side, then ' +
+            'regenerate the golden:\n' + JSON.stringify(mismatches.slice(0, 10), null, 2));
     });
 });
