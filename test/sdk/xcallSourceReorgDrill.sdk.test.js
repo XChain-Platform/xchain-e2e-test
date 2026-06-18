@@ -34,7 +34,7 @@
  *     cross_chain_call_executions row was ever written (DOGE held);
  *   - no callback row on the source chain.
  *
- * SHALLOW/pre-injection case only — a reorg deeper than the relay gate that
+ * SHALLOW/pre-injection case only. A reorg deeper than the relay gate that
  * orphans an ALREADY-executed XEXEC is documented IRREVERSIBLE territory and
  * is out of scope (we hold DOGE so the XEXEC never injects).
  *
@@ -87,15 +87,24 @@ const CONTRACT_A = `
 
 const DB_HOST = process.env.XCALL_DB_HOST || '127.0.0.1';
 const DB_PORT = parseInt(process.env.XCALL_DB_PORT || '13306', 10);
+// Hub rows and the DOGE indexer DB can live on separate MariaDB instances (a
+// federated relay-hub DB distinct from the node-stack indexer DB). Each endpoint
+// defaults to XCALL_DB_HOST/PORT so the co-located single-stack case is unchanged.
+const HUB_DB_HOST = process.env.HUB_DB_HOST || DB_HOST;
+const HUB_DB_PORT = parseInt(process.env.HUB_DB_PORT || String(DB_PORT), 10);
+const HUB_DB_NAME = process.env.HUB_DB_NAME || 'XChain_Hub';
+const DOGE_IDX_DB_HOST = process.env.DOGE_IDX_DB_HOST || DB_HOST;
+const DOGE_IDX_DB_PORT = parseInt(process.env.DOGE_IDX_DB_PORT || String(DB_PORT), 10);
+const DOGE_IDX_DB_NAME = process.env.DOGE_IDX_DB_NAME || 'XChain_DOGE_Regtest_Indexer';
 
-async function withConn(database, user, password, fn) {
-    const conn = await mariadb.createConnection({ host: DB_HOST, port: DB_PORT, database, user, password });
+async function withConn(host, port, database, user, password, fn) {
+    const conn = await mariadb.createConnection({ host, port, database, user, password });
     try { return await fn(conn); } finally { await conn.end().catch(() => {}); }
 }
-async function hubDb(fn)   { return withConn('XChain_Hub', process.env.HUB_DB_USER, process.env.HUB_DB_PASS, fn); }
-async function dogeIdx(fn) { return withConn('XChain_DOGE_Regtest_Indexer', process.env.DOGE_IDX_DB_USER, process.env.DOGE_IDX_DB_PASS, fn); }
+async function hubDb(fn)   { return withConn(HUB_DB_HOST, HUB_DB_PORT, HUB_DB_NAME, process.env.HUB_DB_USER, process.env.HUB_DB_PASS, fn); }
+async function dogeIdx(fn) { return withConn(DOGE_IDX_DB_HOST, DOGE_IDX_DB_PORT, DOGE_IDX_DB_NAME, process.env.DOGE_IDX_DB_USER, process.env.DOGE_IDX_DB_PASS, fn); }
 
-// Source (BTC) indexer DB — the global indexerDatabase that initialCheck stands
+// Source (BTC) indexer DB: the global indexerDatabase that initialCheck stands
 // up for the primary stack (COIN=bitcoin).
 async function btcIdx(sql, params) {
     const db = global.indexerDatabase;
@@ -113,7 +122,7 @@ async function readState(sdk, contractIndex, key) {
     const rows = (state && state.data) || [];
     const row = rows.find(r => r.state_key === key);
     // state_value is stored JSON-encoded (the VM's xchain.state.set serializes),
-    // so a string value comes back quoted ("21f8…"); parse it to match the
+    // so a string value comes back quoted ("21f8..."); parse it to match the
     // sibling target-reorg drill and keep callId a bare 64-hex string.
     return row ? JSON.parse(row.state_value) : null;
 }
@@ -156,7 +165,7 @@ describe('[sdk] XCALL source-chain reorg retraction (pre-execution)', function (
         callId = String(await readState(sdk, indexA, 'lastCall'));
         expect(callId).to.match(/^[0-9a-f]{64}$/);
 
-        // Resolve the BTC block that carries the emitted XCALL v0 request — the
+        // Resolve the BTC block that carries the emitted XCALL v0 request, the
         // block we will orphan. Poll briefly for the xcalls row to be indexed.
         const deadline = Date.now() + 60000;
         while (Date.now() < deadline) {
@@ -182,11 +191,11 @@ describe('[sdk] XCALL source-chain reorg retraction (pre-execution)', function (
         }
         expect(n, 'dispatch finalized on the hub').to.equal(1);
 
-        // DOGE held ⇒ no execution row yet (the precondition the retraction protects).
+        // DOGE held: no execution row yet (the precondition the retraction protects).
         const execNow = await dogeIdx(async (c) => Number((await c.query(
             'SELECT COUNT(*) n FROM cross_chain_call_executions WHERE call_id = ?', [callId]))[0].n));
         expect(execNow, 'no XEXEC injected before the reorg (DOGE held)').to.equal(0);
-        console.log('    [xcall-srcreorg] dispatch finalized; DOGE held — no execution yet');
+        console.log('    [xcall-srcreorg] dispatch finalized; DOGE held, no execution yet');
     });
 
     it('orphaning the source block retracts the dispatch and the call never reaches DOGE', async function () {
@@ -195,7 +204,7 @@ describe('[sdk] XCALL source-chain reorg retraction (pre-execution)', function (
 
         // Pause auto-mining so the orphaned XCALL tx cannot be re-mined from the
         // mempool, then build an EMPTY competing chain (generateBlock(addr, []))
-        // longer than the original tip — same mechanism as reorgBalances.test.js.
+        // longer than the original tip (same mechanism as reorgBalances.test.js).
         await miner.setMiningTime(3600000, 3600000);
         try {
             const tipBefore = await node.getBlockCount();
@@ -211,8 +220,8 @@ describe('[sdk] XCALL source-chain reorg retraction (pre-execution)', function (
             expect(await node.getBlockHash(srcBlock), 'the chain actually reorged').to.not.equal(srcHash);
             console.log('    [xcall-srcreorg] BTC reorged onto an empty branch; waiting for rollback.js + hub retraction');
 
-            // Wait for node → decoder → indexer rollback → retractXcallRange → hub
-            // retraction → broadcastDeletion → mirror DELETE to propagate.
+            // Wait for node -> decoder -> indexer rollback -> retractXcallRange -> hub
+            // retraction -> broadcastDeletion -> mirror DELETE to propagate.
             const deadline = Date.now() + 180000;
             let hubStatus = null, btcMirror = -1;
             while (Date.now() < deadline) {
@@ -244,7 +253,7 @@ describe('[sdk] XCALL source-chain reorg retraction (pre-execution)', function (
             expect(dogeMirror, 'target cross_chain_calls mirror deleted').to.equal(0);
             expect(dogeExec, 'target never executed the retracted call').to.equal(0);
 
-            console.log('    [xcall-srcreorg] retracted cleanly — hub=retracted, mirrors gone, no exec, no callback');
+            console.log('    [xcall-srcreorg] retracted cleanly: hub=retracted, mirrors gone, no exec, no callback');
         } finally {
             await miner.setDefaultMiningTime();
         }

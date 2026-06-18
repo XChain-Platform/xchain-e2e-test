@@ -70,6 +70,15 @@ const TARGET_MINER_URL   = process.env.XCALL_TARGET_MINER_URL || 'http://localho
 const DOGE_NODE          = process.env.XCALL_DOGE_NODE_CONTAINER || 'xchain-node-dogecoin-regtest-node';
 const DB_HOST = process.env.XCALL_DB_HOST || '127.0.0.1';
 const DB_PORT = parseInt(process.env.XCALL_DB_PORT || '13306', 10);
+// Hub rows and the DOGE indexer DB can live on separate MariaDB instances (a
+// federated relay-hub DB distinct from the node-stack indexer DB). Each endpoint
+// defaults to XCALL_DB_HOST/PORT so the co-located single-stack case is unchanged.
+const HUB_DB_HOST = process.env.HUB_DB_HOST || DB_HOST;
+const HUB_DB_PORT = parseInt(process.env.HUB_DB_PORT || String(DB_PORT), 10);
+const HUB_DB_NAME = process.env.HUB_DB_NAME || 'XChain_Hub';
+const DOGE_IDX_DB_HOST = process.env.DOGE_IDX_DB_HOST || DB_HOST;
+const DOGE_IDX_DB_PORT = parseInt(process.env.DOGE_IDX_DB_PORT || String(DB_PORT), 10);
+const DOGE_IDX_DB_NAME = process.env.DOGE_IDX_DB_NAME || 'XChain_DOGE_Regtest_Indexer';
 
 function dogeCli(cmd) {
     return execSync('docker exec ' + DOGE_NODE + ' dogecoin-cli -conf=/etc/dogecoin/dogecoin.conf ' + cmd,
@@ -86,12 +95,12 @@ async function mineTarget(count) {
     await rpc(TARGET_MINER_URL, 'generate_blocks', { count: count || 1 });
 }
 
-async function withConn(database, user, password, fn) {
-    const conn = await mariadb.createConnection({ host: DB_HOST, port: DB_PORT, database, user, password });
+async function withConn(host, port, database, user, password, fn) {
+    const conn = await mariadb.createConnection({ host, port, database, user, password });
     try { return await fn(conn); } finally { await conn.end().catch(() => {}); }
 }
-async function hubDb(fn)  { return withConn('XChain_Hub', process.env.HUB_DB_USER, process.env.HUB_DB_PASS, fn); }
-async function dogeIdx(fn){ return withConn('XChain_DOGE_Regtest_Indexer', process.env.DOGE_IDX_DB_USER, process.env.DOGE_IDX_DB_PASS, fn); }
+async function hubDb(fn)  { return withConn(HUB_DB_HOST, HUB_DB_PORT, HUB_DB_NAME, process.env.HUB_DB_USER, process.env.HUB_DB_PASS, fn); }
+async function dogeIdx(fn){ return withConn(DOGE_IDX_DB_HOST, DOGE_IDX_DB_PORT, DOGE_IDX_DB_NAME, process.env.DOGE_IDX_DB_USER, process.env.DOGE_IDX_DB_PASS, fn); }
 
 function contractIndexOf(indexed) {
     const a = indexed && Array.isArray(indexed.actions) ? indexed.actions[0] : null;
