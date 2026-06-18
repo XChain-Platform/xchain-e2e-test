@@ -44,7 +44,7 @@ function rawBalance(balances, tick) {
 function expectInvalid(opts) { return submitOpts(Object.assign({ requireValid: false }, opts)); }
 
 // submitAction's `indexed` result is a transaction ({ actions: [{ action_index }] }) on
-// the polling path, or a single action on the WS path — handle both (matches the other
+// the polling path, or a single action on the WS path. Handle both (matches the other
 // sdk e2e suites).
 function actionIndexOf(indexed) {
     if (!indexed) return undefined;
@@ -98,7 +98,7 @@ describe('[sdk] NFT pattern (ISSUE DECIMALS=0 + LOCK_MAX_SUPPLY=1)', function ()
         // This is the LOCK_MAX_SUPPLY rule: validity now depends on a declared
         // MAX_SUPPLY cap, NOT on minted supply. A pure fair-mint NFT (no MINT_SUPPLY)
         // can therefore declare its cap, open a mint window, and permanently lock the
-        // cap — all in one ISSUE, before any supply exists. (Previously rejected.)
+        // cap, all in one ISSUE, before any supply exists. (Previously rejected.)
         const tick = uniqueTick('NFTFM');
         const res = await submit(sdk,
             { action: 'ISSUE', params: {
@@ -185,7 +185,7 @@ describe('[sdk] NFT pattern (ISSUE DECIMALS=0 + LOCK_MAX_SUPPLY=1)', function ()
             expect(statusOf(issued), 'NFT ISSUE').to.equal('valid');
             issueActionIndex = actionIndexOf(issued.indexed);
 
-            // A real (decodable) 24x24 PNG — an orange square — so the
+            // A real (decodable) 24x24 PNG (an orange square) so the
             // explorer's raw endpoint serves a renderable image and visual
             // passes of the NFT surfaces show actual artwork.
             const ART_PNG = Buffer.from(
@@ -219,7 +219,7 @@ describe('[sdk] NFT pattern (ISSUE DECIMALS=0 + LOCK_MAX_SUPPLY=1)', function ()
             expect(statusOf(res), 'non-owner LINK').to.match(/^invalid/);
         });
 
-        // On-chain TIS document (TIS — On-Chain Format): the token's
+        // On-chain TIS document (TIS On-Chain Format): the token's
         // information JSON itself lives in a FILE action and DESCRIPTION
         // points at it as action:<index>. Round-trips authoring (FILE) →
         // pointing (ISSUE v1) → resolution (explorer raw bytes).
@@ -286,7 +286,7 @@ describe('[sdk] NFT pattern (ISSUE DECIMALS=0 + LOCK_MAX_SUPPLY=1)', function ()
             );
             expect(statusOf(sell), 'sell ORDER').to.equal('valid');
 
-            // other buys 3 NFT for 30 XCHAIN — auto-matches the sell
+            // other buys 3 NFT for 30 XCHAIN, auto-matching the sell
             const buy = await submit(sdk,
                 { action: 'ORDER', params: {
                     giveCoin: COIN, giveTick: 'XCHAIN', giveAmount: 30,
@@ -298,8 +298,8 @@ describe('[sdk] NFT pattern (ISSUE DECIMALS=0 + LOCK_MAX_SUPPLY=1)', function ()
             );
             expect(statusOf(buy), 'buy ORDER').to.equal('valid');
 
-            // DB-confirm the match settled exactly 3 NFT on the give side — an integer,
-            // not a fractional artifact (this is the order_match indivisibility guarantee).
+            // DB-confirm the match settled exactly 3 NFT on the give side (an integer,
+            // not a fractional artifact; this is the order_match indivisibility guarantee).
             const match = await global.indexerDatabase.waitForOrderMatch({
                 giveTick: tick, getTick: 'XCHAIN', giveAmount: '3', status: 'valid',
             });

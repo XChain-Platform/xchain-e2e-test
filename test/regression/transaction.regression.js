@@ -61,7 +61,7 @@ function stubDateNowExpired() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// P0 — Transaction Pipeline Regression Tests
+// P0 : Transaction Pipeline Regression Tests
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('[regression:p0] Transaction Pipeline', function () {
@@ -78,35 +78,35 @@ describe('[regression:p0] Transaction Pipeline', function () {
 
     describe('isSegwitUTXO', function () {
 
-        it('[regression:p0] R-TX-006a — returns true for P2WPKH scriptPubKey', function () {
+        it('[regression:p0] R-TX-006a : returns true for P2WPKH scriptPubKey', function () {
             const hash = 'a'.repeat(40)
             assert.strictEqual(transactionHelper.isSegwitUTXO({ scriptPubKey: '0014' + hash }), true)
         })
 
-        it('[regression:p0] R-TX-006b — returns true for P2WSH scriptPubKey', function () {
+        it('[regression:p0] R-TX-006b : returns true for P2WSH scriptPubKey', function () {
             const hash = 'b'.repeat(64)
             assert.strictEqual(transactionHelper.isSegwitUTXO({ scriptPubKey: '0020' + hash }), true)
         })
 
-        it('[regression:p0] R-TX-006c — returns false for P2PKH scriptPubKey', function () {
+        it('[regression:p0] R-TX-006c : returns false for P2PKH scriptPubKey', function () {
             assert.strictEqual(
                 transactionHelper.isSegwitUTXO({ scriptPubKey: '76a914' + 'a'.repeat(40) + '88ac' }),
                 false
             )
         })
 
-        it('[regression:p0] R-TX-006d — returns false for P2SH scriptPubKey', function () {
+        it('[regression:p0] R-TX-006d : returns false for P2SH scriptPubKey', function () {
             assert.strictEqual(
                 transactionHelper.isSegwitUTXO({ scriptPubKey: 'a914' + 'c'.repeat(40) + '87' }),
                 false
             )
         })
 
-        it('[regression:p0] R-TX-006e — returns false for empty scriptPubKey', function () {
+        it('[regression:p0] R-TX-006e : returns false for empty scriptPubKey', function () {
             assert.strictEqual(transactionHelper.isSegwitUTXO({ scriptPubKey: '' }), false)
         })
 
-        it('[regression:p0] R-TX-006f — returns false for null scriptPubKey (no crash)', function () {
+        it('[regression:p0] R-TX-006f : returns false for null scriptPubKey (no crash)', function () {
             assert.strictEqual(transactionHelper.isSegwitUTXO({ scriptPubKey: null }), false)
         })
     })
@@ -115,7 +115,7 @@ describe('[regression:p0] Transaction Pipeline', function () {
 
     describe('createAndSendTransaction', function () {
 
-        it('[regression:p0] R-TX-001 — calls encoderConnector.createTx with correct arguments', async function () {
+        it('[regression:p0] R-TX-001 : calls encoderConnector.createTx with correct arguments', async function () {
             const ecc    = require('tiny-secp256k1')
             const { ECPairFactory } = require('ecpair')
             const ECPair = ECPairFactory(ecc)
@@ -149,7 +149,7 @@ describe('[regression:p0] Transaction Pipeline', function () {
             assert.strictEqual(args[8], address, 'changeAddress arg')
         })
 
-        it('[regression:p0] R-TX-002 — broadcasts transaction after signing', async function () {
+        it('[regression:p0] R-TX-002 : broadcasts transaction after signing', async function () {
             const ecc    = require('tiny-secp256k1')
             const { ECPairFactory } = require('ecpair')
             const ECPair = ECPairFactory(ecc)
@@ -184,16 +184,16 @@ describe('[regression:p0] Transaction Pipeline', function () {
 
     describe('createSimpleTransaction', function () {
 
-        it('[regression:p0] R-TX-007 — function exists and is callable', function () {
+        it('[regression:p0] R-TX-007 : function exists and is callable', function () {
             assert.strictEqual(typeof transactionHelper.createSimpleTransaction, 'function')
         })
     })
 
-    // ── R-TX-008 — boundary: no UTXOs ────────────────────────────────────
+    // ── R-TX-008 : boundary: no UTXOs ────────────────────────────────────
 
     describe('boundary conditions', function () {
 
-        it('[regression:p0] R-TX-008 — createSimpleTransaction throws when no UTXOs available', async function () {
+        it('[regression:p0] R-TX-008 : createSimpleTransaction throws when no UTXOs available', async function () {
             sinon.stub(global.utxoTrackerConnector, 'getUtxosFromAddress').resolves({ utxos: [] })
             sinon.stub(global.nodeConnector, 'getFeePerKilobyte').resolves(0.001)
 

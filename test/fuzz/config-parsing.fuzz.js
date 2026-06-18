@@ -35,7 +35,7 @@ function createDb() {
     return new Database('localhost', 3306, 'test_db', 'user', 'pass')
 }
 
-describe('Fuzz — Config Parsing', function () {
+describe('Fuzz: Config Parsing', function () {
 
     afterEach(function () {
         sinon.restore()
@@ -177,10 +177,10 @@ describe('Fuzz — Config Parsing', function () {
                     }
                 }
 
-                // Should not crash — destructuring always succeeds when keys exist
+                // Should not crash: destructuring always succeeds when keys exist
                 const result = extractAllConfigs(config, 'bitcoin', 'regtest')
                 assert(typeof result === 'object')
-                // Values may be any type — that's what we're testing
+                // Values may be any type; that's what we're testing
             }), FC_PARAMS)
         })
     })

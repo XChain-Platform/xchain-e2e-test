@@ -21,7 +21,7 @@ require('../fixtures/mockMariadb')
 
 const CryptoNetworks = require('../../../src/CryptoNetworks')
 
-describe('Error Propagation — Setup Errors', function () {
+describe('Error Propagation: Setup Errors', function () {
 
     let savedGlobals
 

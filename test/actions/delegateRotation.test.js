@@ -8,7 +8,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// DELEGATE rotation — the F8 key-rotation lifecycle against the live stack:
+// DELEGATE rotation: the F8 key-rotation lifecycle against the live stack:
 //
 //   STAKE v1 (key K1) → DELEGATE v0 (add K2) → effective signer set holds BOTH
 //   (additive-until-revoked) → DELEGATE v2 revokes the ORIGINAL stake key K1
@@ -25,7 +25,7 @@
 // Membership is observed through the indexer's `getcapabilityvalidators`
 // JSON-RPC (which resolves through the consensus effective-set query), so the
 // suite exercises exactly what PBFT quorum reads see. Assertions check OUR
-// pubkeys' membership only — the shared regtest chain may carry other stakes.
+// pubkeys' membership only; the shared regtest chain may carry other stakes.
 
 const assert = require('assert')
 const crypto = require('crypto')
@@ -34,11 +34,11 @@ const stakeHelper = require('../helpers/stakeHelper')
 const gasHelper = require('../helpers/gasHelper')
 const transactionHelper = require('../transactionHelper')
 
-describe('DELEGATE rotation — additive effective signer set (F8) + collision guards (F9)', function () {
+describe('DELEGATE rotation: additive effective signer set (F8) + collision guards (F9)', function () {
 
     const CAPABILITY = 'price'
     // Caller-supplied threshold (the getcapabilityvalidators RPC honours it
-    // over the venue's local MIN_STAKE config) — keeps the suite independent
+    // over the venue's local MIN_STAKE config), keeping the suite independent
     // of per-venue staking thresholds. All stakes below are sized to it.
     const MIN_STAKE = '1000'
     const STAKE_AMOUNT = '1000.00000000'
@@ -66,7 +66,7 @@ describe('DELEGATE rotation — additive effective signer set (F8) + collision g
     }
 
     // Mine past an activation/deactivation boundary and wait for the indexer
-    // to index it — effective-set queries are block-scoped, so reading the set
+    // to index it. Effective-set queries are block-scoped, so reading the set
     // before the boundary is indexed would assert against the OLD set.
     async function syncPast(blockIndex) {
         await regtestMinerConnector.generateBlocks(7)
@@ -77,7 +77,7 @@ describe('DELEGATE rotation — additive effective signer set (F8) + collision g
     before(async function () {
         // Capability staking (STAKE/DELEGATE v0/v2) is BTC-only by protocol design.
         if (COIN_CODE !== 'BTC') {
-            console.log('STAKE/DELEGATE capability rotation is BTC-only — skipping on ' + COIN_CODE)
+            console.log('STAKE/DELEGATE capability rotation is BTC-only, skipping on ' + COIN_CODE)
             this.skip()
             return
         }
@@ -106,7 +106,7 @@ describe('DELEGATE rotation — additive effective signer set (F8) + collision g
         assert(set.includes(K1), 'K1 should be in the effective set after activation')
     })
 
-    it('DELEGATE v0 ADDS the delegated key — the original stake key remains effective (additive-until-revoked)', async function () {
+    it('DELEGATE v0 ADDS the delegated key; the original stake key remains effective (additive-until-revoked)', async function () {
         let result = await stakeHelper.sendDelegateV0(ownerAddr, K2)
         assert(result.delegation, 'delegation record should exist')
         assert.strictEqual(result.delegation.status, 'valid')
@@ -160,7 +160,7 @@ describe('DELEGATE rotation — additive effective signer set (F8) + collision g
             'rejection reason should mention "already delegated"; got: ' + row.status)
     })
 
-    it('DELEGATE v2 revokes the ORIGINAL stake key — only the delegated key stays effective (F8)', async function () {
+    it('DELEGATE v2 revokes the ORIGINAL stake key; only the delegated key stays effective (F8)', async function () {
         let result = await stakeHelper.sendStakeKeyRevoke(ownerAddr, K1)
         assert(result.revocation, 'stake_key_revocations row should exist')
         assert.strictEqual(result.revocation.status, 'valid')
@@ -182,8 +182,8 @@ describe('DELEGATE rotation — additive effective signer set (F8) + collision g
     })
 
     it('STAKE v2 re-stake of the revoked key restores it to the effective set', async function () {
-        // A revocation suppresses only stake rows with action_index < its own —
-        // the re-stake row postdates it, so K1 re-qualifies on the new amount
+        // A revocation suppresses only stake rows with action_index < its own.
+        // The re-stake row postdates it, so K1 re-qualifies on the new amount
         // alone (the suppressed original 1000 stays suppressed).
         let result = await stakeHelper.sendStakeV2(ownerAddr, STAKE_AMOUNT, K1)
         assert(result.stake, 're-stake record should exist')
@@ -205,8 +205,8 @@ describe('DELEGATE rotation — additive effective signer set (F8) + collision g
         let set = await effectivePubkeys()
         assert(!set.includes(K2), 'revoked delegated key K2 must leave the effective set')
 
-        // The pubkey is freed (getDelegationByPubkey is deactivation-gated) —
-        // a different staker can now claim it.
+        // The pubkey is freed (getDelegationByPubkey is deactivation-gated),
+        // so a different staker can now claim it.
         let redelegate = await stakeHelper.sendDelegateV0(otherAddr, K2)
         assert(redelegate.delegation, 're-delegation record should exist')
         assert.strictEqual(redelegate.delegation.status, 'valid',

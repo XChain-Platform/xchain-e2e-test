@@ -22,9 +22,9 @@ function newSigningPubkey(){
     return spkiDer.subarray(12).toString('hex')
 }
 
-describe('Contract Staking — STAKE v3 / UNSTAKE v1 / DELEGATE v1 + slashing', function () {
+describe('Contract Staking: STAKE v3 / UNSTAKE v1 / DELEGATE v1 + slashing', function () {
 
-    // Contract staking is multi-chain — exercised against the XCHAIN token that
+    // Contract staking is multi-chain; exercised against the XCHAIN token that
     // initialCheck.test.js ISSUEs on every chain at suite startup. Capability
     // staking (STAKE v1/v2 / UNSTAKE v0 / DELEGATE v0/v2 / COLLECT) remains
     // BTC-only at the protocol level.
@@ -50,7 +50,7 @@ describe('Contract Staking — STAKE v3 / UNSTAKE v1 / DELEGATE v1 + slashing', 
         };
     `
 
-    describe('DEPLOY v1 — Stakeable contract metadata', function () {
+    describe('DEPLOY v1: Stakeable contract metadata', function () {
 
         it('should deploy with COOLDOWN_BLOCKS + BURN as slash destination', async function () {
             let deployer = await cryptoHelper.getNewFundedAddress(
@@ -72,7 +72,7 @@ describe('Contract Staking — STAKE v3 / UNSTAKE v1 / DELEGATE v1 + slashing', 
             )
             await gasHelper.ensureGasBalance(deployer, '500')
 
-            // 100001 is above the max — must be rejected (use the status-agnostic helper;
+            // 100001 is above the max, so it must be rejected (use the status-agnostic helper;
             // the valid-only waitForContract would stall 60s and never observe the rejection,
             // making this assertion vacuous).
             let result = await vmHelper.sendDeployV1Invalid(deployer, STAKE_GATED_CONTRACT, 300000, '', 100001, 'BURN')
@@ -82,7 +82,7 @@ describe('Contract Staking — STAKE v3 / UNSTAKE v1 / DELEGATE v1 + slashing', 
         })
     })
 
-    describe('STAKE v3 + getStake + slash + UNSTAKE v1 — Full lifecycle', function () {
+    describe('STAKE v3 + getStake + slash + UNSTAKE v1: Full lifecycle', function () {
 
         let contractIndex = null
         let staker = null
@@ -115,8 +115,8 @@ describe('Contract Staking — STAKE v3 / UNSTAKE v1 / DELEGATE v1 + slashing', 
         })
 
         it('should let the VM read getStake successfully', async function () {
-            // The contract's isStaked() calls xchain.contract.getStake under the hood —
-            // we don't capture return values in contract_executions, so a successful
+            // The contract's isStaked() calls xchain.contract.getStake under the hood.
+            // We don't capture return values in contract_executions, so a successful
             // VM read is confirmed by status='valid' + gas_used covering the read
             // (VM_STATE_READ = 100 gas + a handful for getInputParam/math.gte).
             let exec = await vmHelper.sendExecuteV0(staker, contractIndex, 'isStaked', [pubkey])
@@ -128,7 +128,7 @@ describe('Contract Staking — STAKE v3 / UNSTAKE v1 / DELEGATE v1 + slashing', 
         })
     })
 
-    describe('Validation — Non-stakeable contracts reject STAKE v3', function () {
+    describe('Validation: Non-stakeable contracts reject STAKE v3', function () {
 
         it('should reject STAKE v3 targeting a non-stakeable (DEPLOY v0) contract', async function () {
             // Deploy a regular v0 contract (no cooldown_blocks set)
@@ -139,7 +139,7 @@ describe('Contract Staking — STAKE v3 / UNSTAKE v1 / DELEGATE v1 + slashing', 
             let deploy = await vmHelper.sendDeployV0(deployer, STAKE_GATED_CONTRACT, 300000, '')
             assert(deploy.contract && deploy.contract.status === 'valid', 'baseline DEPLOY v0 must succeed')
 
-            // Try to stake against it — should be rejected by stake.js _parseContractStake
+            // Try to stake against it; it should be rejected by stake.js _parseContractStake
             let staker = await cryptoHelper.getNewFundedAddress(
                 "rejected-staker", COIN, NETWORK, null, "legacy", 0, 1
             )
@@ -148,7 +148,7 @@ describe('Contract Staking — STAKE v3 / UNSTAKE v1 / DELEGATE v1 + slashing', 
 
             // Use the status-agnostic helper: the valid-only waitForContractStake would
             // stall the full 60s and never observe the rejection, making the assertion
-            // vacuous (the row IS written with the invalid status — see stake.js).
+            // vacuous (the row IS written with the invalid status; see stake.js).
             let result = await stakeHelper.sendStakeV3Invalid(staker, '100.00000000', pk, deploy.contract.action_index, 'XCHAIN')
             assert(result.stake, 'a (rejected) contract_stakes row should be recorded')
             assert.notStrictEqual(result.stake.status, 'valid',

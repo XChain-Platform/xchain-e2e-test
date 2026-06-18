@@ -38,14 +38,14 @@ function createDb() {
     return { db, mockConn, mockPool }
 }
 
-describe('Boundary — Connection Pool', function () {
+describe('Boundary: Connection Pool', function () {
 
     afterEach(function () {
         sinon.restore()
         mockMariadb.createPool.resetHistory()
     })
 
-    // ── CP-01: Pool exhaustion — many concurrent getConnection calls ────
+    // ── CP-01: Pool exhaustion (many concurrent getConnection calls) ────
 
     describe('CP-01: Concurrent getConnection calls', function () {
 
@@ -231,7 +231,7 @@ describe('Boundary — Connection Pool', function () {
 
     // ── CP-07: Ping releases connection on both success and failure ─────
 
-    describe('CP-07: ping boundary — connection management', function () {
+    describe('CP-07: ping boundary, connection management', function () {
 
         it('releases connection after successful ping', async function () {
             const { db, mockConn } = createDb()

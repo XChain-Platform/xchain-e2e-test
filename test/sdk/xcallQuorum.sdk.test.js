@@ -20,10 +20,9 @@
  *   1. one hub down (2/3 alive = quorum still reachable) → the relay MUST
  *      still complete, surviving leader rotation via view-change when the
  *      dead hub owned a round;
- *   2. two hubs down (1/3 alive < quorum)               → the relay MUST
- *      stall — no under-quorum row may reach the indexers;
- *   3. hubs restarted                                   → the stalled call
- *      recovers and completes.
+ *   2. two hubs down (1/3 alive < quorum): the relay MUST
+ *      stall; no under-quorum row may reach the indexers;
+ *   3. hubs restarted: the stalled call recovers and completes.
  *
  * VENUE: manages hub containers via docker (runs on the stack host).
  * Container names via XCALL_HUB2_CONTAINER / XCALL_HUB3_CONTAINER.
@@ -152,7 +151,7 @@ describe('[sdk] cross-chain call 2f+1 quorum fault drills (N=3 federation)', fun
 
     it('with ONE hub down (2/3 = quorum) the relay still completes', async function () {
         hubStop(HUB3);
-        console.log('    [xcall-q] ' + HUB3 + ' stopped — 2 of 3 validators alive');
+        console.log('    [xcall-q] ' + HUB3 + ' stopped, 2 of 3 validators alive');
 
         const callId = await fireCall('one-down');
         // generous window: if the dead hub owns the PBFT round, the view-change
@@ -168,9 +167,9 @@ describe('[sdk] cross-chain call 2f+1 quorum fault drills (N=3 federation)', fun
         console.log('    [xcall-q] one-down relay completed: ' + delivered.status);
     });
 
-    it('with TWO hubs down (1/3 < quorum) the relay stalls — no under-quorum row reaches the indexers', async function () {
+    it('with TWO hubs down (1/3 < quorum) the relay stalls: no under-quorum row reaches the indexers', async function () {
         hubStop(HUB2);
-        console.log('    [xcall-q] ' + HUB2 + ' stopped too — 1 of 3 validators alive (< quorum 2)');
+        console.log('    [xcall-q] ' + HUB2 + ' stopped too, 1 of 3 validators alive (< quorum 2)');
 
         const callId = await fireCall('two-down');
 
@@ -193,7 +192,7 @@ describe('[sdk] cross-chain call 2f+1 quorum fault drills (N=3 federation)', fun
         expect(stalled, 'stalled call_id from the previous test').to.match(/^[0-9a-f]{64}$/);
         hubStart(HUB2);
         hubStart(HUB3);
-        console.log('    [xcall-q] federation restored — 3 of 3 alive');
+        console.log('    [xcall-q] federation restored, 3 of 3 alive');
 
         await pumpUntil('stalled call completion after recovery', async () => {
             const r = await rpc(SOURCE_INDEXER_URL, 'getcrosschaincall', { call_id: stalled });

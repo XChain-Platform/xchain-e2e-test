@@ -46,7 +46,7 @@ describe('[sdk] messaging', function () {
     });
 
     it('MESSAGE v2 (encrypted) via messaging.send() to self', async function () {
-        // Real ECIES send — no stub ciphertext, no explicit version. send() resolves
+        // Real ECIES send: no stub ciphertext, no explicit version. send() resolves
         // the recipient pubkey, ECIES-encrypts a binary payload, and lets the format
         // selector pick v2 (which carries no ENCRYPTION_METHOD on the wire). This
         // exercises the full encode path that the version:2 stub used to bypass.

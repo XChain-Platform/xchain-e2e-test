@@ -20,7 +20,7 @@
  * build+sign+broadcast a phase-2 reveal that spends it. This suite
  * forces each encoding through sdk.submitAction() so that two-phase
  * orchestration is exercised end-to-end (it has no other live-stack
- * coverage — the connector suites do the two-phase dance by hand).
+ * coverage; the connector suites do the two-phase dance by hand).
  *
  ********************************************************************/
 
@@ -28,7 +28,7 @@ const { expect } = require('chai');
 const { makeSdk, submit, fundedGasAddress, uniqueTick, submitOpts } = require('./sdkHelper');
 
 // OP_RETURN + P2SH + P2WSH pass end-to-end through the SDK.
-// PENDING (documented open bug — un-skip when fixed):
+// PENDING (documented open bug, un-skip when fixed):
 //   - MULTISIGN: encoder rejects the fake-pubkey outputs as "dust".
 const ENCODINGS = ['OP_RETURN', 'MULTISIGN', 'P2SH', 'P2WSH'];
 const PENDING_ENCODINGS = [];
@@ -76,6 +76,6 @@ describe('[sdk] encoding methods via submitAction', function () {
     }
 
     for (const encoding of PENDING_ENCODINGS) {
-        it.skip('issues a token with ' + encoding + ' encoding (open bug — see header)', function () {});
+        it.skip('issues a token with ' + encoding + ' encoding (open bug, see header)', function () {});
     }
 });

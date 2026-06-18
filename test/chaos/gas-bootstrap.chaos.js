@@ -37,7 +37,7 @@ async function runGasBootstrap(db, cryptoHelper, issueHelper) {
     return true
 }
 
-describe('Chaos Experiment 8 — GAS Token Bootstrap Failure @P0', function () {
+describe('Chaos Experiment 8: GAS Token Bootstrap Failure @P0', function () {
 
     let saved
 

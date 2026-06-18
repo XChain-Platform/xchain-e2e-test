@@ -16,9 +16,9 @@
  *
  * Fires a short-deadline (minimum: 10 blocks) crossExecute while the relay
  * hub container is STOPPED, then mines past the deadline. The source
- * indexer must synthesize the XCALL v2 expiry deterministically — flip the
+ * indexer must synthesize the XCALL v2 expiry deterministically: flip the
  * request to 'expired' and inject the requester's callback with
- * status='expired' — with NO federation involvement. After the hub comes
+ * status='expired', with NO federation involvement. After the hub comes
  * back, the terminal expiry must hold (exactly-once interlock: no late
  * dispatch, no second callback).
  *
@@ -134,7 +134,7 @@ describe('[sdk] cross-chain call deadline expiry (hub down)', function () {
             expect(res.indexed.status).to.equal('valid');
         } catch (e) {
             if (!/SIGNING_PUBKEY \(already in use\)/.test(String(e.message))) throw e;
-            console.log('    [xcall-exp] hub pubkey already staked — reusing the active stake');
+            console.log('    [xcall-exp] hub pubkey already staked, reusing the active stake');
         }
         await mine(8);
     });
@@ -196,7 +196,7 @@ describe('[sdk] cross-chain call deadline expiry (hub down)', function () {
     it('after the hub restarts, the terminal expiry holds (no late dispatch, no double callback)', async function () {
         execSync('docker start ' + HUB_CONTAINER, { stdio: 'inherit' });
         hubStopped = false;
-        console.log('    [xcall-exp] hub restarted — waiting out relay poll cycles');
+        console.log('    [xcall-exp] hub restarted, waiting out relay poll cycles');
 
         // give the hub several XCALL_POLL_MS (3s) cycles + confirmations to act if it (wrongly) wanted to
         for (let i = 0; i < 6; i++) {

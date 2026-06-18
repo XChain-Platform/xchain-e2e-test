@@ -22,7 +22,7 @@ const ECPair = ECPairFactory(ecc)
 const transactionHelper = require('../../../test/transactionHelper')
 const issueHelper = require('../../../test/helpers/issueHelper')
 
-describe('Error Propagation — Connector Errors', function () {
+describe('Error Propagation: Connector Errors', function () {
 
     let savedGlobals
     let addressInfo

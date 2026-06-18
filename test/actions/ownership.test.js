@@ -17,13 +17,13 @@ const orderHelper = require('../helpers/orderHelper')
 const sweepHelper = require('../helpers/sweepHelper')
 
 // End-to-end coverage for token-ownership sales (ORDER/SWAP/DISPENSER with
-// GIVE_OWNERSHIP or GET_OWNERSHIP set). Token-pair scenarios only — the
+// GIVE_OWNERSHIP or GET_OWNERSHIP set). Token-pair scenarios only. The
 // COINPay path (ownership-for-native-coin) is exercised by the COINPay
 // suite once those helpers are ownership-aware.
 describe('OWNERSHIP', () => {
 
     // ──────────────────────────────────────────────────────────────────
-    // Scenario 1 — Ownership ORDER instant settle (token-for-token)
+    // Scenario 1: Ownership ORDER instant settle (token-for-token)
     //
     // addr1 creates jdog (ownership) and a settlement-token bag held by
     // addr2. addr1 lists JDOG ownership for X SETTLE; addr2 posts the
@@ -49,7 +49,7 @@ describe('OWNERSHIP', () => {
 
             let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
 
-            // Seller lists JDOG ownership for 10 SETTLE — GIVE_AMOUNT must be empty
+            // Seller lists JDOG ownership for 10 SETTLE (GIVE_AMOUNT must be empty)
             let sellOrder = await orderHelper.sendOrderV0(
                 addr1,
                 COIN_CODE, jdog,   null,
@@ -97,10 +97,10 @@ describe('OWNERSHIP', () => {
     })
 
     // ──────────────────────────────────────────────────────────────────
-    // Scenario 2 — Ownership ORDER cancel returns ownership
+    // Scenario 2: Ownership ORDER cancel returns ownership
     //
     // Seller lists ownership then cancels. The order status becomes
-    // 'cancelled' and the tick's ownership escrow gate is released —
+    // 'cancelled' and the tick's ownership escrow gate is released;
     // owner_id stays with the seller (it never moved).
     // ──────────────────────────────────────────────────────────────────
     describe('ORDER - ownership cancel returns the gate', () => {
@@ -130,7 +130,7 @@ describe('OWNERSHIP', () => {
             // After listing, an ISSUE v1 description edit should be rejected
             // because the ownership gate is set.
             let blockedEdit = await issueHelper.sendIssueV1(addr, jdog, "Trying to edit while escrowed")
-            // sendIssueV1 waits for status='valid' — we expect that wait to time out.
+            // sendIssueV1 waits for status='valid'; we expect that wait to time out.
             // Verify the issue landed with the ownership-escrowed rejection reason.
             let rejectedIssue = await indexerDatabase.waitForIssue({
                 source: address, tick: jdog,
@@ -145,17 +145,17 @@ describe('OWNERSHIP', () => {
             }, 30000)
             assert(cancelled, "Ownership order should be cancelled")
 
-            // After cancel, the escrow gate is clear — owner-only actions work again
+            // After cancel, the escrow gate is clear; owner-only actions work again
             let postCancelEdit = await issueHelper.sendIssueV1(addr, jdog, "Description after cancel")
             assert(postCancelEdit.issue, "ISSUE v1 should succeed once the ownership gate is released")
         })
     })
 
     // ──────────────────────────────────────────────────────────────────
-    // Scenario 3 — Multiple owner-only actions rejected while escrowed
+    // Scenario 3: Multiple owner-only actions rejected while escrowed
     //
     // Covers the cross-handler guard surface (ISSUE / CALLBACK / SLEEP /
-    // child-ISSUE) — confirms isOwnershipEscrowed() is wired in each.
+    // child-ISSUE). Confirms isOwnershipEscrowed() is wired in each.
     // ──────────────────────────────────────────────────────────────────
     describe('Owner-only actions during ownership escrow', () => {
         it('should reject ISSUE-edit and child-ISSUE while ownership is escrowed', async () => {
@@ -179,7 +179,7 @@ describe('OWNERSHIP', () => {
                 1, 0
             )
 
-            // ISSUE v5 (ALLOW_LIST / BLOCK_LIST edit) — also owner-only — should be rejected
+            // ISSUE v5 (ALLOW_LIST / BLOCK_LIST edit) is also owner-only and should be rejected
             await issueHelper.sendIssueV5(addr, parent, "", "", "Trying to lock-list while escrowed")
             let rejectedV5 = await indexerDatabase.waitForIssue({
                 source: address, tick: parent,
@@ -187,7 +187,7 @@ describe('OWNERSHIP', () => {
             }, 30000)
             assert(rejectedV5, "ISSUE v5 should be rejected while parent ownership is escrowed")
 
-            // Child ISSUE (parent.child) is also gated — uses the 'parent ownership escrowed' message
+            // Child ISSUE (parent.child) is also gated; uses the 'parent ownership escrowed' message
             let child = parent + ".SUB1"
             await issueHelper.sendIssueV0(addr, child, 10, 5, 0, "Trying to mint child while parent escrowed", 5)
             let rejectedChild = await indexerDatabase.waitForIssue({
@@ -199,7 +199,7 @@ describe('OWNERSHIP', () => {
     })
 
     // ──────────────────────────────────────────────────────────────────
-    // Scenario 4 — SWEEP with ORDERS=1 routes ownership to DESTINATION
+    // Scenario 4: SWEEP with ORDERS=1 routes ownership to DESTINATION
     //
     // Seller has an open ownership ORDER, then SWEEPs from their address
     // with ORDERS=1. The open order is cancelled and the JDOG ownership
@@ -234,7 +234,7 @@ describe('OWNERSHIP', () => {
             }, 30000)
             assert(listedOpen, "Ownership order should be open before sweep")
 
-            // SWEEP with ORDERS=1 — no balances/ownerships sweep to keep the test focused
+            // SWEEP with ORDERS=1 (no balances/ownerships sweep to keep the test focused)
             let sweep = await sweepHelper.sendSweepV0(
                 sourceAddr, dest,
                 0, // balances
@@ -253,8 +253,8 @@ describe('OWNERSHIP', () => {
             assert(cancelled, "Ownership order should be cancelled by sweep")
 
             // Owner of jdog tick should be the SWEEP destination (ownership delivered there
-            // rather than back to source). Verified by attempting an ISSUE v1 edit from dest —
-            // if dest is the owner, the edit succeeds; otherwise it would be rejected as
+            // rather than back to source). Verified by attempting an ISSUE v1 edit from dest.
+            // If dest is the owner, the edit succeeds; otherwise it would be rejected as
             // 'issued by another address'.
             // (Skipping the explicit assertion since funding `dest` for gas is extra setup;
             // future expansion: query tokens.owner_id directly via the e2e DB layer.)

@@ -57,7 +57,7 @@ async function runTeardown(regtestMinerConnector, indexerDatabase, wallets) {
     }
 }
 
-describe('Chaos Experiment 6 — Teardown Failure @P0', function () {
+describe('Chaos Experiment 6: Teardown Failure @P0', function () {
 
     let saved
 

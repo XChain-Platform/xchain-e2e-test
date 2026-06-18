@@ -78,17 +78,17 @@ function xchainP2shFinalizer(inputIndex, input, script, isSegwit, isP2SH, isP2WS
 
 function _isStaleUtxoError(err){
     const msg = (err && err.message) || ''
-    // `missingorspent`/`bad-txns-inputs` — node rejected because inputs were already spent.
-    // `Missing inputs` — bitcoin/dogecoin's bare RPC error -25 message for the same condition
+    // `missingorspent`/`bad-txns-inputs`: node rejected because inputs were already spent.
+    // `Missing inputs`: bitcoin/dogecoin's bare RPC error -25 message for the same condition
     //   (kept as a distinct pattern because the JSON-RPC layer can deliver either form).
-    // `no utxos ... no utxos found` — encoder asked the tracker for UTXOs but the tracker
+    // `no utxos ... no utxos found`: encoder asked the tracker for UTXOs but the tracker
     //   hadn't yet indexed the change output from the source's previous tx.
-    // `Cannot read propert(y|ies)... 'txid'` — encoder threw a TypeError when sorting an
+    // `Cannot read propert(y|ies)... 'txid'`: encoder threw a TypeError when sorting an
     //   empty UTXO list (utxos[0]["txid"]). Happens when `unconfirmed=false` filters out
     //   all the tracker's UTXOs because the source's funding tx is still in mempool. Retry
     //   succeeds after quiesce mines a block and the funding confirms. The encoder ought
     //   to throw "no utxos" post-filter; this pattern is a defensive shim until that lands.
-    // `Internal encoder error` — the encoder sanitizes non-TypeError/RangeError messages
+    // `Internal encoder error`: the encoder sanitizes non-TypeError/RangeError messages
     //   to this generic string before returning over JSON-RPC. In practice on the regtest
     //   stack this is almost always the "no utxos" case caught above (visible in the
     //   encoder's own console.error log). Retrying is safe even if the cause turns out
@@ -115,7 +115,7 @@ module.exports = {
             // getNativeFeeOutput() discovers the stack's real fee mode (env or
             // the indexer feeschedule): returns null on gas-mode chains (BTC),
             // an output on native-fee chains (LTC/DOGE), or THROWS on a fee chain
-            // it can't resolve. Let that throw propagate — a silent skip here is
+            // it can't resolve. Let that throw propagate; a silent skip here is
             // exactly what hung the LTC/DOGE suite. Dedup against the discovered
             // destination so callers that supply their own fee output (e.g.
             // nativeFeeLive/nativeFeeDispenser) aren't double-charged.
@@ -162,7 +162,7 @@ module.exports = {
                     } catch (e) { /* trap log is best-effort */ }
                     _verifiedUtxos = null
                     _verifiedUtxosAddress = null
-                    console.log("Broadcast failed (attempt " + attempt + "/" + MAX_ATTEMPTS + ") with stale UTXO — quiescing stack before retry...")
+                    console.log("Broadcast failed (attempt " + attempt + "/" + MAX_ATTEMPTS + ") with stale UTXO; quiescing stack before retry...")
                     // Active wait for the regtest stack to fully settle (mempool
                     // empty, tracker committed-height == node height) instead of
                     // a blind sleep. quiesce() itself mines a block when mempool
@@ -170,7 +170,7 @@ module.exports = {
                     // we re-ask the encoder for UTXOs.
                     try {
                         await utxoTrackerConnector.quiesce({ timeoutMs: 20000, pollMs: 250, regtestMiner: regtestMinerConnector })
-                    } catch (e) { /* swallow — next retry surfaces any persistent issue */ }
+                    } catch (e) { /* swallow; next retry surfaces any persistent issue */ }
                     lastErr = err
                     continue
                 }
@@ -203,7 +203,7 @@ module.exports = {
             // mempool UTXO. Filtering them out at the encoder defends against
             // the tracker's mempool DB carrying stale entries (a node-side
             // dropped tx that the tracker's 60s mempool poll hasn't yet
-            // reconciled — see STALE-UTXO TRAP log).
+            // reconciled; see STALE-UTXO TRAP log).
             false
         )
         
@@ -250,7 +250,7 @@ module.exports = {
                 txHash,
                 txHex,
                 null,
-                false  // unconfirmed=false — see comment above
+                false  // unconfirmed=false; see comment above
             )
             
             spentTxPsbtHex = spentTxPsbtHex["psbt"]
@@ -314,7 +314,7 @@ module.exports = {
             await new Promise(r => setTimeout(r, 500))
         }
         if (!_verifiedUtxos) {
-            // Timed out — save whatever confirmed UTXOs are available as a best-effort fallback
+            // Timed out; save whatever confirmed UTXOs are available as a best-effort fallback
             try {
                 let result = await utxoTrackerConnector.getUtxosFromAddress(addressInfo["address"])
                 let utxos = result["utxos"] || []

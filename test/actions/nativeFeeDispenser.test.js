@@ -15,7 +15,7 @@ const issueHelper = require('../helpers/issueHelper')
 const gasHelper = require('../helpers/gasHelper')
 
 // Live-stack proof of native-coin USD-pegged fee payment, using the DISPENSER expiration fee
-// (which — unlike the ISSUE issuance fee — is NOT gated behind the mainnet activation height
+// (which, unlike the ISSUE issuance fee, is NOT gated behind the mainnet activation height
 // 862633, so it actually charges on a low-height regtest chain).
 //
 // A DISPENSER with an expiration beyond the free-days window charges days * EXPIRATION_FEE_PER_DAY
@@ -40,7 +40,7 @@ async function q(sql, args){
 
 async function seedPrice(coinPair, price, referenceBlock, roundNumber){
     await q("DELETE FROM price_snapshots WHERE coin_pair = ?", [coinPair])
-    // Chain-clock anchor (not Date.now) — see nativeFeeLive.seedPrice.
+    // Chain-clock anchor (not Date.now); see nativeFeeLive.seedPrice.
     let rows = await q("SELECT block_time FROM blocks ORDER BY block_index DESC LIMIT 1")
     let chainNow = rows.length ? Number(rows[0].block_time) : Math.floor(Date.now() / 1000)
     await q(`INSERT INTO price_snapshots
@@ -77,7 +77,7 @@ describe('Native-coin fee payment via DISPENSER expiration fee (live stack)', fu
         let address = addr["address"]
         let tick = "NFD" + address.substring(address.length - 8)
         // Fund XCHAIN for the ISSUE *setup* fee (issuance now charges a fee on regtest after F#1).
-        // The DISPENSER's own expiration fee is still paid natively below — that's what we're verifying.
+        // The DISPENSER's own expiration fee is still paid natively below; that's what we're verifying.
         await gasHelper.ensureGasBalance(addr, '100')
         await issueHelper.sendIssueV0(addr, tick, 1000, 1000, 0, "native fee dispenser test", 1000)
 

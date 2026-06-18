@@ -30,7 +30,7 @@ function mockAxiosPost(result) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// P0 — Connector Regression Tests
+// P0 : Connector Regression Tests
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('[regression:p0] Service Connectors', function () {
@@ -45,7 +45,7 @@ describe('[regression:p0] Service Connectors', function () {
 
     describe('BlockchainConnector', function () {
 
-        it('[regression:p0] R-CONN-001 — getNetworkInfo returns parsed JSON-RPC response', async function () {
+        it('[regression:p0] R-CONN-001 : getNetworkInfo returns parsed JSON-RPC response', async function () {
             const node = new BlockchainConnector('localhost', 18443, 'rpcuser', 'rpcpass')
             const networkInfo = { version: 250000, subversion: '/Satoshi:25.0.0/' }
 
@@ -55,7 +55,7 @@ describe('[regression:p0] Service Connectors', function () {
             assert.strictEqual(result.subversion, '/Satoshi:25.0.0/')
         })
 
-        it('[regression:p0] R-CONN-002 — broadcastTx sends raw hex and returns txid', async function () {
+        it('[regression:p0] R-CONN-002 : broadcastTx sends raw hex and returns txid', async function () {
             const node = new BlockchainConnector('localhost', 18443, 'rpcuser', 'rpcpass')
 
             sinon.stub(node, 'broadcastTx').callsFake(async (txHex) => {
@@ -66,7 +66,7 @@ describe('[regression:p0] Service Connectors', function () {
             assert.strictEqual(result, 'abc123def456')
         })
 
-        it('[regression:p0] R-CONN-003 — waitForTx polls until transaction is confirmed', async function () {
+        it('[regression:p0] R-CONN-003 : waitForTx polls until transaction is confirmed', async function () {
             const node = new BlockchainConnector('localhost', 18443, 'rpcuser', 'rpcpass')
             let callCount = 0
 
@@ -82,7 +82,7 @@ describe('[regression:p0] Service Connectors', function () {
             assert.ok(callCount >= 2, 'should have polled at least twice')
         })
 
-        it('[regression:p0] R-CONN-011a — waitForTx returns false on timeout', async function () {
+        it('[regression:p0] R-CONN-011a : waitForTx returns false on timeout', async function () {
             const node = new BlockchainConnector('localhost', 18443, 'rpcuser', 'rpcpass')
 
             sinon.stub(node, 'getTransactionHex').rejects(new Error('not found'))
@@ -92,7 +92,7 @@ describe('[regression:p0] Service Connectors', function () {
             assert.strictEqual(result, false)
         })
 
-        it('[regression:p0] R-CONN-001b — constructor stores URL with Basic Auth credentials', function () {
+        it('[regression:p0] R-CONN-001b : constructor stores URL with Basic Auth credentials', function () {
             const node = new BlockchainConnector('myhost', 18443, 'user1', 'pass1')
             assert.strictEqual(node.url, 'http://myhost:18443')
             assert.strictEqual(node.rpcUser, 'user1')
@@ -104,7 +104,7 @@ describe('[regression:p0] Service Connectors', function () {
 
     describe('XChainUtxoTrackerConnector', function () {
 
-        it('[regression:p0] R-CONN-004 — getUtxosFromAddress returns UTXO array', async function () {
+        it('[regression:p0] R-CONN-004 : getUtxosFromAddress returns UTXO array', async function () {
             const tracker = new XChainUtxoTrackerConnector('localhost', 3030)
             const utxos = [{ txid: 'aabb', vout: 0, value: 100000 }]
 
@@ -113,7 +113,7 @@ describe('[regression:p0] Service Connectors', function () {
             assert.deepStrictEqual(result.utxos, utxos)
         })
 
-        it('[regression:p0] R-CONN-005 — waitForUtxos polls until UTXOs appear', async function () {
+        it('[regression:p0] R-CONN-005 : waitForUtxos polls until UTXOs appear', async function () {
             const tracker = new XChainUtxoTrackerConnector('localhost', 3030)
             let callCount = 0
 
@@ -129,7 +129,7 @@ describe('[regression:p0] Service Connectors', function () {
             assert.ok(callCount >= 2)
         })
 
-        it('[regression:p0] R-CONN-005b — waitForUtxos returns false on timeout', async function () {
+        it('[regression:p0] R-CONN-005b : waitForUtxos returns false on timeout', async function () {
             const tracker = new XChainUtxoTrackerConnector('localhost', 3030)
 
             sinon.stub(tracker, 'getUtxosFromAddress').resolves({ utxos: [] })
@@ -139,7 +139,7 @@ describe('[regression:p0] Service Connectors', function () {
             assert.strictEqual(result, false)
         })
 
-        it('[regression:p0] R-CONN-004b — constructor stores URL and port', function () {
+        it('[regression:p0] R-CONN-004b : constructor stores URL and port', function () {
             const tracker = new XChainUtxoTrackerConnector('myhost', 3030)
             assert.strictEqual(tracker.url, 'http://myhost:3030')
             assert.strictEqual(tracker.port, 3030)
@@ -150,7 +150,7 @@ describe('[regression:p0] Service Connectors', function () {
 
     describe('XChainEncoderConnector', function () {
 
-        it('[regression:p0] R-CONN-006 — createTx returns PSBT with correct encoding type', async function () {
+        it('[regression:p0] R-CONN-006 : createTx returns PSBT with correct encoding type', async function () {
             const psbtResult = { encoding: 'opreturn', psbt: 'deadbeef' }
             const stub = mockAxiosPost(psbtResult)
             try {
@@ -169,7 +169,7 @@ describe('[regression:p0] Service Connectors', function () {
             }
         })
 
-        it('[regression:p0] R-CONN-006b — ping returns true on success', async function () {
+        it('[regression:p0] R-CONN-006b : ping returns true on success', async function () {
             const stub = mockAxiosPost(true)
             try {
                 const encoder = new XChainEncoderConnector('localhost', 3031)
@@ -180,7 +180,7 @@ describe('[regression:p0] Service Connectors', function () {
             }
         })
 
-        it('[regression:p0] R-CONN-006c — createTx passes all 12 parameters correctly', async function () {
+        it('[regression:p0] R-CONN-006c : createTx passes all 12 parameters correctly', async function () {
             const stub = mockAxiosPost({ encoding: 'opreturn', psbt: 'hex' })
             try {
                 const encoder = new XChainEncoderConnector('localhost', 3031)
@@ -210,7 +210,7 @@ describe('[regression:p0] Service Connectors', function () {
 
     describe('XChainIndexerConnector', function () {
 
-        it('[regression:p0] R-CONN-007 — ping verifies indexer is reachable', async function () {
+        it('[regression:p0] R-CONN-007 : ping verifies indexer is reachable', async function () {
             const stub = mockAxiosPost(true)
             try {
                 const indexer = new XChainIndexerConnector('localhost', 3032)
@@ -221,7 +221,7 @@ describe('[regression:p0] Service Connectors', function () {
             }
         })
 
-        it('[regression:p0] R-CONN-007b — ping returns false on failure', async function () {
+        it('[regression:p0] R-CONN-007b : ping returns false on failure', async function () {
             const stub = sinon.stub(axios, 'post').rejects(new Error('ECONNREFUSED'))
             try {
                 const indexer = new XChainIndexerConnector('localhost', 3032)
@@ -237,7 +237,7 @@ describe('[regression:p0] Service Connectors', function () {
 
     describe('XChainHubConnector', function () {
 
-        it('[regression:p0] R-CONN-008 — getAllConfig returns full service configuration', async function () {
+        it('[regression:p0] R-CONN-008 : getAllConfig returns full service configuration', async function () {
             const config = { bitcoin: { regtest: { node: { host: 'n' } } } }
             const stub = mockAxiosPost(config)
             try {
@@ -249,7 +249,7 @@ describe('[regression:p0] Service Connectors', function () {
             }
         })
 
-        it('[regression:p0] R-CONN-009 — multi-endpoint failover tries all validators', async function () {
+        it('[regression:p0] R-CONN-009 : multi-endpoint failover tries all validators', async function () {
             let callOrder = []
             const stub = sinon.stub(axios, 'post').callsFake(async (url) => {
                 callOrder.push(url)
@@ -269,7 +269,7 @@ describe('[regression:p0] Service Connectors', function () {
             }
         })
 
-        it('[regression:p0] R-CONN-009b — _call returns null when all endpoints fail', async function () {
+        it('[regression:p0] R-CONN-009b : _call returns null when all endpoints fail', async function () {
             const stub = sinon.stub(axios, 'post').rejects(new Error('ECONNREFUSED'))
             try {
                 const hub = new XChainHubConnector(['http://hub1:10000', 'http://hub2:10000'])
@@ -280,7 +280,7 @@ describe('[regression:p0] Service Connectors', function () {
             }
         })
 
-        it('[regression:p0] R-CONN-009c — parseEndpoints parses HUB_VALIDATORS', function () {
+        it('[regression:p0] R-CONN-009c : parseEndpoints parses HUB_VALIDATORS', function () {
             const orig = process.env.HUB_VALIDATORS
             try {
                 process.env.HUB_VALIDATORS = 'hub1:10000, http://hub2:10000'
@@ -294,7 +294,7 @@ describe('[regression:p0] Service Connectors', function () {
             }
         })
 
-        it('[regression:p0] R-CONN-009d — parseEndpoints falls back to HUB_URL+HUB_PORT', function () {
+        it('[regression:p0] R-CONN-009d : parseEndpoints falls back to HUB_URL+HUB_PORT', function () {
             const origV = process.env.HUB_VALIDATORS
             const origU = process.env.HUB_URL
             const origP = process.env.HUB_PORT
@@ -319,7 +319,7 @@ describe('[regression:p0] Service Connectors', function () {
 
     describe('RegtestMinerConnector', function () {
 
-        it('[regression:p0] R-CONN-010 — sendFunds returns funding txid', async function () {
+        it('[regression:p0] R-CONN-010 : sendFunds returns funding txid', async function () {
             const stub = mockAxiosPost('txid-funded-001')
             try {
                 const miner = new RegtestMinerConnector('localhost', 3033)
@@ -334,7 +334,7 @@ describe('[regression:p0] Service Connectors', function () {
             }
         })
 
-        it('[regression:p0] R-CONN-010b — setMiningTime sends correct params', async function () {
+        it('[regression:p0] R-CONN-010b : setMiningTime sends correct params', async function () {
             const stub = mockAxiosPost(true)
             try {
                 const miner = new RegtestMinerConnector('localhost', 3033)
@@ -349,7 +349,7 @@ describe('[regression:p0] Service Connectors', function () {
             }
         })
 
-        it('[regression:p0] R-CONN-010c — setDefaultMiningTime calls correct RPC method', async function () {
+        it('[regression:p0] R-CONN-010c : setDefaultMiningTime calls correct RPC method', async function () {
             const stub = mockAxiosPost(true)
             try {
                 const miner = new RegtestMinerConnector('localhost', 3033)
@@ -361,7 +361,7 @@ describe('[regression:p0] Service Connectors', function () {
             }
         })
 
-        it('[regression:p0] R-CONN-011b — ping returns false when service is unreachable', async function () {
+        it('[regression:p0] R-CONN-011b : ping returns false when service is unreachable', async function () {
             const stub = sinon.stub(axios, 'post').rejects(new Error('ECONNREFUSED'))
             try {
                 const miner = new RegtestMinerConnector('localhost', 3033)
@@ -377,7 +377,7 @@ describe('[regression:p0] Service Connectors', function () {
 
     describe('Constructor URL building', function () {
 
-        it('[regression:p0] R-CONN-011c — all connectors build URL from host and port', function () {
+        it('[regression:p0] R-CONN-011c : all connectors build URL from host and port', function () {
             const node    = new BlockchainConnector('myhost', 1234, 'u', 'p')
             const tracker = new XChainUtxoTrackerConnector('myhost', 2345)
             const encoder = new XChainEncoderConnector('myhost', 3456)
@@ -391,12 +391,12 @@ describe('[regression:p0] Service Connectors', function () {
             assert.strictEqual(miner.url, 'http://myhost:5678')
         })
 
-        it('[regression:p0] R-CONN-011d — HubConnector accepts array of endpoints', function () {
+        it('[regression:p0] R-CONN-011d : HubConnector accepts array of endpoints', function () {
             const hub = new XChainHubConnector(['http://a:1', 'http://b:2'])
             assert.deepStrictEqual(hub.urls, ['http://a:1', 'http://b:2'])
         })
 
-        it('[regression:p0] R-CONN-011e — HubConnector accepts host+port for backward compat', function () {
+        it('[regression:p0] R-CONN-011e : HubConnector accepts host+port for backward compat', function () {
             const hub = new XChainHubConnector('myhost', 9999)
             assert.deepStrictEqual(hub.urls, ['http://myhost:9999'])
         })

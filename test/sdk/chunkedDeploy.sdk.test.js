@@ -16,7 +16,7 @@
  *
  * Proves a contract whose base64 source exceeds the single-action size cap
  * deploys across multiple DEPLOY v4 carrier actions + an assembling DEPLOY v2, then
- * runs — through the live regtest pipeline (encoder → decoder → indexer → VM).
+ * runs through the live regtest pipeline (encoder → decoder → indexer → VM).
  *
  *   - chunkHelper.planDeploy splits base64(code) into ordered slices + a CODE_HASH
  *   - each slice is uploaded as a DEPLOY v4 carrier (confirmed in turn)

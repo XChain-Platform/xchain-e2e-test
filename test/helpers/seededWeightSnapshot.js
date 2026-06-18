@@ -13,13 +13,13 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Seeded SOURCE-KEYED weight snapshot fixture — the STAKE_WEIGHTED_QUORUM (WI-1)
- * twin of seedStakeSnapshot.
+ * Seeded SOURCE-KEYED weight snapshot fixture for the STAKE_WEIGHTED_QUORUM (WI-1),
+ * the twin of seedStakeSnapshot.
  *
  * Above the activation height the federation tally is stake-weighted
  * (3·Σ distinct-source signer weight > 2·S), and the engines resolve the
- * SOURCE-keyed snapshot (getActiveWeightSnapshot / getWeightSnapshot →
- * [{pubkey, source, weight}]) — NOT the count snapshot that seedStakeSnapshot
+ * SOURCE-keyed snapshot (getActiveWeightSnapshot / getWeightSnapshot ->
+ * [{pubkey, source, weight}]), not the count snapshot that seedStakeSnapshot
  * stubs. In an in-process MultiValidatorHub there is no indexer, so this injects
  * a deterministic source-keyed snapshot onto every hub so the weighted path runs
  * with no indexer and no chain.
@@ -27,12 +27,12 @@
  * It also sets hub.network so isStakeWeightedQuorumActive(block, network) is TRUE
  * (regtest/testnet activate at genesis). MultiValidatorHub does not thread
  * HUB_NETWORK, so without this the hubs default to network '' and fall back to the
- * legacy COUNT path — and the weighted tally would never be exercised.
+ * legacy COUNT path, meaning the weighted tally would never be exercised.
  *
  * Pass `validators` as [{pubkey, source, weight}] to model UNEVEN stake (distinct
  * sources, a whale + smalls). A validator whose pubkey is NOT one of the booted
  * hub identities models an offline staker that is in the snapshot (counts toward S)
- * but casts no vote — the way to prove a stake-minority/count-majority of live
+ * but casts no vote. This is the way to prove a stake-minority/count-majority of live
  * hubs cannot finalize. Default: one source per booted identity, equal weight.
  *
  * Quorum semantics: weighted, so use UNEVEN weights to make the test meaningful.

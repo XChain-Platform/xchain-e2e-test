@@ -38,7 +38,7 @@ const X402Storefront = require('../helpers/x402Storefront');
 
 const COIN = (typeof global.COIN_CODE !== 'undefined' && global.COIN_CODE) || 'BTC';
 
-describe(`x402 agent payments — SDK driven (${COIN})`, function () {
+describe(`x402 agent payments: SDK driven (${COIN})`, function () {
 
     let sdk, X402Gateway, X402Client;
     let seller, buyer;            // { wif, address }
@@ -48,7 +48,7 @@ describe(`x402 agent payments — SDK driven (${COIN})`, function () {
     before(async function () {
         this.timeout(600000);
         sdk = makeSdk();
-        // NOTE: the e2e repo vendors xchain-sdk as file:./xchain-sdk — the venue
+        // NOTE: the e2e repo vendors xchain-sdk as file:./xchain-sdk. The venue
         // must have a current clone (stale clones are a known gotcha).
         ({ X402Gateway, X402Client } = require('xchain-sdk'));
         stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'x402-e2e-'));
@@ -111,7 +111,7 @@ describe(`x402 agent payments — SDK driven (${COIN})`, function () {
             expect(res.status).to.equal(200);
             const body = await res.json();
             // The regtest auto-miner can confirm the SEND before the client's
-            // retry lands, so the grant may arrive already confirmed — both
+            // retry lands, so the grant may arrive already confirmed. Both cases
             // prove the minConfirmations:0 path; the mempool-side grant itself
             // is locked by the explorer/sdk unit suites.
             expect(['provisional_0conf', 'confirmed']).to.include(body.payment.status);
@@ -187,10 +187,10 @@ describe(`x402 agent payments — SDK driven (${COIN})`, function () {
     it('6. dispenser hold-to-access: challenge advertises the dispenser; holding the tick grants access', async function () {
         this.timeout(300000);
         // Seller issues ACCESS and lists it in an on-chain dispenser (the buy
-        // path itself — native coin in, tokens out — is proven by the
-        // dedicated dispenser e2e; here the buyer acquires via SEND and the
-        // x402 claims are: the 402 advertises the dispenser, and holding
-        // >= minBalance of the tick unlocks the resource).
+        // path itself, native coin in/tokens out, is proven by the dedicated
+        // dispenser e2e; here the buyer acquires via SEND and the x402 claims
+        // are: the 402 advertises the dispenser, and holding >= minBalance of
+        // the tick unlocks the resource).
         const accessTick = uniqueTick('ACC');
         await submit(sdk, { action: 'ISSUE', params: { tick: accessTick, maxSupply: '1000', decimals: 0, mintSupply: '1000' } },
             { pubkey: seller.address, change: seller.address }, submitOpts({ wif: seller.wif }));

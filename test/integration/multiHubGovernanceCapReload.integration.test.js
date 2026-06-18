@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * E2E integration — capability config hot-reload across a hub federation
+ * E2E integration: capability config hot-reload across a hub federation
  *
  * Boots N=3 in-process XChainHub validators and drives a governance
  * parameter change end-to-end:
@@ -24,13 +24,13 @@
  * _tallyProposal() and emits proposal:finalized directly. Followers learn
  * the outcome solely via the GOV_RESULT broadcast (Governance._handleResult).
  * If _handleResult does not emit proposal:finalized on a passed proposal,
- * follower hubs update the DB row but never hot-reload capConfig — so they
+ * follower hubs update the DB row but never hot-reload capConfig, so they
  * keep serving the OLD MIN_STAKE while the leader serves the new one. Since
  * each hub feeds its own getMinStake() to the indexer when locking the
  * quorum validator set, that split makes the federation compute different
  * qualified sets for the same block and breaks PBFT agreement.
  *
- * This test asserts ALL hubs — not just the leader — converge on the new
+ * This test asserts ALL hubs (not just the leader) converge on the new
  * getMinStake('price') after the proposal passes.
  *
  * Skips when HUB_DB_USER/HUB_DB_PASS are unset (same gate as multiHub).
@@ -51,7 +51,7 @@ const COUNT = 3;
 const PEER_WAIT_MS = 8000;
 
 const OLD_MIN_STAKE = '1000.00000000';
-const NEW_MIN_STAKE = '1200.00000000'; // +20% — within Governance MAX_INCREASE (50%)
+const NEW_MIN_STAKE = '1200.00000000'; // +20%, within Governance MAX_INCREASE (50%)
 
 const CAPS = {
     CAPABILITIES: {
@@ -67,7 +67,7 @@ const CAPS = {
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-describe('MultiValidatorHub — governance capability hot-reload', function () {
+describe('MultiValidatorHub: governance capability hot-reload', function () {
     this.timeout(180_000);
 
     let mvh;
@@ -77,7 +77,7 @@ describe('MultiValidatorHub — governance capability hot-reload', function () {
 
     before(async function () {
         if (!process.env.HUB_DB_USER || !process.env.HUB_DB_PASS) {
-            console.log('Skipping governance hot-reload test — HUB_DB_USER/HUB_DB_PASS not set');
+            console.log('Skipping governance hot-reload test: HUB_DB_USER/HUB_DB_PASS not set');
             this.skip();
         }
         capsPath = path.join(os.tmpdir(), 'mvh_gov_caps_' + process.pid + '.json');
@@ -122,7 +122,7 @@ describe('MultiValidatorHub — governance capability hot-reload', function () {
     it('seeds every hub with the same starting MIN_STAKE', function () {
         const stakes = mvh.hubs.map(h => h.capabilityRegistry.getMinStake('price'));
         assert.ok(stakes.every(s => String(s) === OLD_MIN_STAKE),
-            'all hubs should start at ' + OLD_MIN_STAKE + ' — got ' + stakes.join(','));
+            'all hubs should start at ' + OLD_MIN_STAKE + ', got ' + stakes.join(','));
     });
 
     it('hot-reloads capConfig on EVERY hub (not just the tally leader) after a passed proposal', async function () {
@@ -164,10 +164,10 @@ describe('MultiValidatorHub — governance capability hot-reload', function () {
         assert.strictEqual(leaderRow && leaderRow.status, 'passed',
             'proposal should pass with 3/3 approvals');
 
-        // 6) Every hub — leader AND followers — must serve the NEW threshold.
+        // 6) Every hub (leader AND followers) must serve the NEW threshold.
         const stakes = mvh.hubs.map(h => String(h.capabilityRegistry.getMinStake('price')));
         assert.ok(stakes.every(s => s === stakes[0]),
-            'all hubs must converge on a single MIN_STAKE — got ' + stakes.join(','));
+            'all hubs must converge on a single MIN_STAKE, got ' + stakes.join(','));
         assert.notStrictEqual(stakes[0], OLD_MIN_STAKE,
             'MIN_STAKE must have moved off its startup value on every hub (followers stayed stale)');
         assert.strictEqual(stakes[0], NEW_MIN_STAKE,

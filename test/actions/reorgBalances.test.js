@@ -15,16 +15,16 @@ const sendHelper = require('../helpers/sendHelper')
 const mintHelper = require('../helpers/mintHelper')
 
 // GAS token. Issuing a new token charges an ISSUANCE_FEE payable in GAS (XCHAIN);
-// on testnet/regtest XCHAIN is an open faucet (anyone MINTs it — no owner check,
+// on testnet/regtest XCHAIN is an open faucet (anyone MINTs it; no owner check,
 // no fee), so a fresh issuer grabs gas via a MINT before it can ISSUE.
 const GAS_TICK = 'XCHAIN'
 
 /**
- * Money-path reorg convergence (on-chain) — proves the decoder + indexer roll back
+ * Money-path reorg convergence (on-chain): proves the decoder + indexer roll back
  * LEDGER state (credits/debits → balances, token supply) across a real chain reorg.
  *
  * vmContractReorg.test.js covers contract_state rollback; the integration suite covers
- * individual action rollback with mocked chains — but no test drives a real reorg that
+ * individual action rollback with mocked chains, but no test drives a real reorg that
  * orphans a *money movement* and asserts the balances and supply converge back exactly.
  * That is the highest-stakes rollback path (a wrong balance after a reorg is lost or
  * minted money) and the 18-decimal supply HALT lived precisely here.
@@ -37,10 +37,10 @@ const GAS_TICK = 'XCHAIN'
  * recomputes balances. We assert the sender is made whole, the recipient credit is gone,
  * and the token supply is unchanged (conserved).
  */
-describe('Money Reorg — SEND rolls back, balances + supply converge across an on-chain reorg', function () {
+describe('Money Reorg: SEND rolls back, balances + supply converge across an on-chain reorg', function () {
 
     // Driven by `generateBlock(addr, [])` (mine an EMPTY competing chain so the orphaned SEND is NOT
-    // re-included) — `generateblock` is a Bitcoin Core 0.19 RPC. Dogecoin Core 1.14.x (0.13/0.14 base)
+    // re-included). `generateblock` is a Bitcoin Core 0.19 RPC. Dogecoin Core 1.14.x (0.13/0.14 base)
     // lacks it and answers HTTP 404, so this scenario can't be driven on DOGE regtest. The indexer's
     // ledger reorg-rollback path is chain-agnostic (rollback.js works on DB rows by block_index) and is
     // proven on BTC + LTC; skip on DOGE as a node capability gap, not a protocol gap.
@@ -74,7 +74,7 @@ describe('Money Reorg — SEND rolls back, balances + supply converge across an 
         const dest   = await cryptoHelper.getNewAddress('moneyreorg-dest', COIN, NETWORK, null, 'legacy', 0)
         const tick   = 'MRG' + sender['address'].substring(sender['address'].length - 8)
 
-        // Grab GAS first — the sender needs an XCHAIN balance to pay the ISSUANCE_FEE.
+        // Grab GAS first: the sender needs an XCHAIN balance to pay the ISSUANCE_FEE.
         // XCHAIN is an open faucet on testnet/regtest: anyone MINTs it (no owner check, no fee).
         await mintHelper.sendMintV0(sender, GAS_TICK, 10)
 
@@ -84,7 +84,7 @@ describe('Money Reorg — SEND rolls back, balances + supply converge across an 
         const issueSupply = await supplyOf(tick)
         assert.strictEqual(await balanceOf(sender['address'], tick), String(MINT), 'sender holds full mint pre-send')
 
-        // SEND part of it to dest — lands in a later block H.
+        // SEND part of it to dest; lands in a later block H.
         const AMOUNT = 40
         const result = await sendHelper.sendSendV0(sender, tick, AMOUNT, dest['address'], 'money-reorg SEND')
         assert(result.send && result.credit && result.debit, 'SEND must be indexed pre-reorg')
@@ -92,7 +92,7 @@ describe('Money Reorg — SEND rolls back, balances + supply converge across an 
         assert.strictEqual(await balanceOf(dest['address'], tick), String(AMOUNT), 'dest credited pre-reorg')
 
         // The ISSUE was confirmed+indexed before the SEND was broadcast (helpers wait for
-        // confirmation), so it is necessarily in an earlier, surviving block — orphaning the
+        // confirmation), so it is necessarily in an earlier, surviving block. Orphaning the
         // SEND block leaves the token (and its supply) intact.
         const sendBlock = await blockOfAction(result.send.action_index)
         assert(sendBlock, 'SEND block height resolved')
@@ -108,7 +108,7 @@ describe('Money Reorg — SEND rolls back, balances + supply converge across an 
             await nodeConnector.invalidateBlock(sendHash)
             assert.strictEqual(await nodeConnector.getBlockCount(), sendBlock - 1, 'node rolled back to block before the SEND')
 
-            // Empty competing chain that overtakes the original tip — the mempool SEND is excluded.
+            // Empty competing chain that overtakes the original tip, so the mempool SEND is excluded.
             const need = tipBefore - (sendBlock - 1) + 2
             for (let i = 0; i < need; i++) await nodeConnector.generateBlock(miner, [])
             assert(await nodeConnector.getBlockCount() > tipBefore, 'competing chain must be longer than the original')

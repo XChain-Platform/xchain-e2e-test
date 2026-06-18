@@ -16,7 +16,7 @@ const gasHelper = require('../helpers/gasHelper')
 const transactionHelper = require('../transactionHelper')
 
 /**
- * VM Edge — negative paths, security boundaries, and the deploy-time constructor,
+ * VM Edge: negative paths, security boundaries, and the deploy-time constructor,
  * complementing the happy-path coverage in vmExtended.test.js. All assertions are
  * against the authoritative indexer DB.
  *
@@ -26,7 +26,7 @@ const transactionHelper = require('../transactionHelper')
  *   J. Executing an unknown method fails cleanly with no side effects
  *   K. State delete persists across executions
  */
-describe('VM Edge — negative paths & boundaries', function () {
+describe('VM Edge: negative paths and boundaries', function () {
 
     const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
 
@@ -40,7 +40,7 @@ describe('VM Edge — negative paths & boundaries', function () {
         };
     `
 
-    // Pays out tokens it does not hold — the emitted SEND must fail and roll back.
+    // Pays out tokens it does not hold. The emitted SEND must fail and roll back.
     const SENDER = `
         module.exports = {
             payout: function() {

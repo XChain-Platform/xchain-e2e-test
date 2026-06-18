@@ -34,7 +34,7 @@ const CryptoNetworks = require('../../../src/CryptoNetworks')
 
 const hubFixtures = require('../fixtures/hub')
 
-describe('Bootstrap — hub discovery fallback', function () {
+describe('Bootstrap: hub discovery fallback', function () {
 
     let savedGlobals
     let axiosStub

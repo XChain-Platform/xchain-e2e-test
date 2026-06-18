@@ -24,7 +24,7 @@ describe('DISPENSER', () => {
             let dispenserTick = "DISPENSERv0"+dispenserAddress.substring(dispenserAddress.length-8)
 
             await issueHelper.sendIssueV0(dispenserAddressInfo, dispenserTick, 100, 100, 0, "Dispenser v0 test", 100)
-            // 3-month expiration tips ~2 days past the 90-day free window — needs GAS for the fee.
+            // 3-month expiration tips ~2 days past the 90-day free window, so it needs GAS for the fee.
             await gasHelper.ensureGasBalance(dispenserAddressInfo, '100')
 
             let expirationDate = new Date()
@@ -183,17 +183,17 @@ describe('DISPENSER', () => {
         })
     })
 
-    describe('v0 - FIAT (Mode 1 — validator price oracle)', () => {
+    describe('v0 - FIAT (Mode 1: validator price oracle)', () => {
         it('should dispense priced from a seeded FIAT price snapshot', async function() {
             // Mode 1 derives the coin price from FIAT_AMOUNT and a finalized
             // GET_COIN/FIAT price_snapshots row (24h reverse-match, newest-first).
             // We clear the pair and seed exactly one deterministic row, so the
             // assertion is exact. This assumes the e2e regtest hub is not
             // continuously finalizing live CoinGecko rows for this pair
-            // (the planned Slice-1 design — CoinGecko prices are mainnet-live
+            // (the planned Slice-1 design: CoinGecko prices are mainnet-live
             // and cannot be asserted exactly).
             if (!(await priceSnapshotHelper.isAvailable())) {
-                console.log('Hub DB (price_snapshots) not reachable — skipping FIAT dispenser test')
+                console.log('Hub DB (price_snapshots) not reachable; skipping FIAT dispenser test')
                 this.skip()
                 return
             }
@@ -225,7 +225,7 @@ describe('DISPENSER', () => {
             // Anchor the seed to the CHAIN's clock (latest block_time), 60s in
             // its past: reversePriceMatch bounds on the payment tx's BLOCK_TIME
             // and the staleness cap (ORACLE_MAX_PRICE_AGE_SECONDS = 1800s)
-            // measures age vs the processed block — wall-clock seeds raced both
+            // measures age vs the processed block; wall-clock seeds raced both
             // rules depending on how far regtest block timestamps drift.
             let pair  = COIN_CODE + "/USD"
             let price  = 50000
@@ -309,7 +309,7 @@ describe('DISPENSER', () => {
             let tick = "DISPv2"+address.substring(address.length-8)
 
             await issueHelper.sendIssueV0(addr, tick, 200, 200, 0, "Dispenser edit test", 200)
-            // EDIT v2 stretches expiration to +6 months — chargeable ~91 days at 550 gas/day = 0.5 XCHAIN.
+            // EDIT v2 stretches expiration to +6 months, chargeable ~91 days at 550 gas/day = 0.5 XCHAIN.
             await gasHelper.ensureGasBalance(addr, '100')
 
             let expirationDate = new Date()

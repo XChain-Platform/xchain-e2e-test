@@ -12,7 +12,7 @@
 
 const sinon = require('sinon')
 
-// Shared mariadb mock — MUST be required before db.js
+// Shared mariadb mock: MUST be required before db.js
 const mockMariadb = require('../integration/fixtures/mockMariadb')
 const Database = require('../../src/db')
 

@@ -15,12 +15,12 @@ const gasHelper = require('../helpers/gasHelper')
 const transactionHelper = require('../transactionHelper')
 
 /**
- * VM Restrict — confirms on-chain that contracts containing the banned native-DoS
+ * VM Restrict: confirms on-chain that contracts containing the banned native-DoS
  * literals (BigInt, RegExp) are rejected at DEPLOY, while benign contracts still
  * deploy. These literals expose unmetered native CPU (a block packed with such
  * EXECUTEs could halt the indexer), so they are blocked at the syntax layer.
  */
-describe('VM Restrict — banned native-DoS literals rejected on-chain', function () {
+describe('VM Restrict: banned native-DoS literals rejected on-chain', function () {
 
     let deployer = null
 

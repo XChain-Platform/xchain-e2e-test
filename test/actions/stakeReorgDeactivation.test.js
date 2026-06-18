@@ -15,20 +15,20 @@ const stakeHelper = require('../helpers/stakeHelper')
 const gasHelper = require('../helpers/gasHelper')
 
 /**
- * Stake active-set reorg convergence (on-chain) — proves the indexer's rollback
+ * Stake active-set reorg convergence (on-chain): proves the indexer's rollback
  * re-NULLs the `deactivation_block` that an orphaned UNSTAKE wrote IN PLACE on a
  * surviving parent stake row.
  *
  * UNSTAKE does not create the stake row; it UPDATEs `deactivation_block =
  * unstake_block + ACTIVATION_DELAY_BLOCKS` on the (much earlier) STAKE row, which
- * lives in a surviving block. The reorg orphans only the UNSTAKE action row — the
+ * lives in a surviving block. The reorg orphans only the UNSTAKE action row. The
  * generic action_index delete removes that row, but the in-place column write on
  * the surviving parent is a separate undo. Without an explicit reset, the parent
  * keeps a non-NULL `deactivation_block`; every active-set read gates on
  * `(deactivation_block IS NULL OR deactivation_block > current_block)`, so once the
  * new chain advances past the stale value the validator silently drops out of the
- * active set on the reorged node while a from-genesis replay keeps it active — a
- * consensus-affecting divergence. This asserts the reset converges the column back
+ * active set on the reorged node while a from-genesis replay keeps it active (a
+ * consensus-affecting divergence). This asserts the reset converges the column back
  * to NULL across a real reorg.
  *
  * Mechanism mirrors reorgBalances.test.js: act in block H, pause the auto-miner,
@@ -37,18 +37,18 @@ const gasHelper = require('../helpers/gasHelper')
  * re-included. The node reorgs onto the empty chain; the decoder records the reorg
  * and the indexer's rollback.js runs.
  */
-describe('Stake Reorg — UNSTAKE rolls back, deactivation_block re-NULLs on the surviving stake row', function () {
+describe('Stake Reorg: UNSTAKE rolls back, deactivation_block re-NULLs on the surviving stake row', function () {
 
     let stakerAddr = null
     let signingPubkey = null
 
     before(async function () {
-        // STAKE/UNSTAKE are BTC-only by protocol design — the indexer action
+        // STAKE/UNSTAKE are BTC-only by protocol design. The indexer action
         // handlers reject COIN !== 'BTC'. The reorg is also driven by `generateBlock`
-        // (Bitcoin Core 0.19 RPC), which DOGE/LTC node bases may lack — but capability
+        // (Bitcoin Core 0.19 RPC), which DOGE/LTC node bases may lack, but capability
         // staking only runs on BTC anyway, so the BTC-only gate covers both.
         if (COIN_CODE !== 'BTC') {
-            console.log('STAKE/UNSTAKE are BTC-only — skipping stake-reorg drill on ' + COIN_CODE)
+            console.log('STAKE/UNSTAKE are BTC-only, skipping stake-reorg drill on ' + COIN_CODE)
             this.skip()
             return
         }
@@ -91,7 +91,7 @@ describe('Stake Reorg — UNSTAKE rolls back, deactivation_block re-NULLs on the
     }
 
     it('orphaning the UNSTAKE block clears the stale deactivation_block and keeps the stake valid', async function () {
-        // STAKE in an early block — the helper waits for confirmation+indexing, so it
+        // STAKE in an early block. The helper waits for confirmation+indexing, so it
         // lands in a surviving block below the UNSTAKE we will orphan.
         const stakeRes = await stakeHelper.sendStakeV1(stakerAddr, '1000.00000000', signingPubkey)
         assert(stakeRes.stake, 'STAKE must be indexed')
@@ -102,7 +102,7 @@ describe('Stake Reorg — UNSTAKE rolls back, deactivation_block re-NULLs on the
         // Advance so the STAKE block is strictly below the UNSTAKE block.
         await regtestMinerConnector.generateBlocks(7)
 
-        // UNSTAKE — sets deactivation_block = unstake_block + ACTIVATION_DELAY_BLOCKS
+        // UNSTAKE sets deactivation_block = unstake_block + ACTIVATION_DELAY_BLOCKS
         // on the surviving STAKE row.
         const unstakeRes = await stakeHelper.sendUnstakeV0(stakerAddr, signingPubkey)
         assert(unstakeRes.unstake, 'UNSTAKE must be indexed')
@@ -125,7 +125,7 @@ describe('Stake Reorg — UNSTAKE rolls back, deactivation_block re-NULLs on the
             assert.strictEqual(await nodeConnector.getBlockCount(), unstakeBlock - 1,
                 'node rolled back to the block before the UNSTAKE')
 
-            // Empty competing chain that overtakes the original tip — the mempool UNSTAKE is excluded.
+            // Empty competing chain that overtakes the original tip; the mempool UNSTAKE is excluded.
             const need = tipBefore - (unstakeBlock - 1) + 2
             for (let i = 0; i < need; i++) await nodeConnector.generateBlock(miner, [])
             assert(await nodeConnector.getBlockCount() > tipBefore, 'competing chain must be longer than the original')
@@ -139,7 +139,7 @@ describe('Stake Reorg — UNSTAKE rolls back, deactivation_block re-NULLs on the
                 await new Promise(r => setTimeout(r, 2000))
             }
 
-            // The surviving STAKE row must be back to active (deactivation_block NULL) and still valid —
+            // The surviving STAKE row must be back to active (deactivation_block NULL) and still valid,
             // exactly what a from-genesis replay (with the UNSTAKE never mined) would produce.
             assert(after, 'stake row must still exist after the reorg (STAKE was in a surviving block)')
             assert.strictEqual(after.deactivation, null,

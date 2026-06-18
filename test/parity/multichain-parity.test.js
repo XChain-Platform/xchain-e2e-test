@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * P3(b) — LIVE multi-chain parity: per-chain driver + digest capture.
+ * P3(b): LIVE multi-chain parity: per-chain driver + digest capture.
  *
  * Runs against ONE live regtest stack (the coin currently installed), drives
  * the chain-agnostic corpus through the FULL pipeline deterministically, and
@@ -49,15 +49,15 @@ const OUT_DIR = process.env.PARITY_OUT_DIR || path.join('/tmp', 'parity');
 // Disable the regtest auto-miner so we control block production exactly.
 // The miner takes mining timers in MILLISECONDS and CAPS them at MAX_MINING_TIME
 // (3600000ms / 1h, see xchain-regtest-miner). A larger value (the old 10**9) is
-// REJECTED — setMiningTime errors out and the auto-miner stays ACTIVE at its
+// REJECTED: setMiningTime errors out and the auto-miner stays ACTIVE at its
 // default 30s/5s mempool debounce, which races the explicit per-action mine and
 // scatters actions across empty/double blocks (BTC got away with it because its
 // node is fast enough to always beat the debounce; the slower DOGE stack did
 // not). Pin to the accepted maximum: 1h >> any run, so the explicit
 // generateBlocks(1) below is the ONLY block source.
-const NO_AUTO_MINE = 3600000; // ms — the miner's MAX_MINING_TIME (effectively "never").
+const NO_AUTO_MINE = 3600000; // ms: the miner's MAX_MINING_TIME (effectively "never").
 
-describe('P3(b) multi-chain parity — live driver + digest capture', function () {
+describe('P3(b) multi-chain parity: live driver + digest capture', function () {
     this.timeout(0);
 
     let sdk, roles, coin, pool;
@@ -69,8 +69,8 @@ describe('P3(b) multi-chain parity — live driver + digest capture', function (
     // for EVERY height (incl. empty), so once it has caught up (mempool drained,
     // tracker ready) MAX(block_index) == the node tip. This keeps the driver
     // dependent ONLY on published services (indexer DB + tracker + miner +
-    // encoder via the SDK) — no direct node RPC, which some installs don't
-    // host-publish for the coin node.
+    // encoder via the SDK), with no direct node RPC (which some installs don't
+    // host-publish for the coin node).
     async function indexerHeight() {
         const rows = await pid().query('SELECT MAX(block_index) AS h FROM blocks');
         return rows[0] && rows[0].h != null ? Number(rows[0].h) : null;
@@ -90,7 +90,7 @@ describe('P3(b) multi-chain parity — live driver + digest capture', function (
     // Settle: wait until the utxo-tracker reports quiescent (mempool drained AND
     // tracker synced to the node tip). The tracker's is_quiescent endpoint knows
     // the node height internally, so we need no direct node access. No miner is
-    // passed — auto-mine is off and we mine explicitly per action.
+    // passed: auto-mine is off and we mine explicitly per action.
     async function settle(timeoutMs = 30000) {
         const status = await global.utxoTrackerConnector.quiesce({ timeoutMs, pollMs: 250 });
         return status;
@@ -98,7 +98,7 @@ describe('P3(b) multi-chain parity — live driver + digest capture', function (
 
     // The TRUE node tip, from the tracker's is_quiescent payload (node_height).
     // Mining and per-action targeting must key off the node tip, NOT the
-    // indexer height — the indexer LAGS the node during fast bulk mining, so
+    // indexer height. The indexer LAGS the node during fast bulk mining, so
     // computing block counts from indexerHeight over-mines (non-deterministic
     // baseline). settle() first so the reported tip is post-mempool-drain.
     async function tip() {
@@ -115,7 +115,7 @@ describe('P3(b) multi-chain parity — live driver + digest capture', function (
     // outputs): auto-selection picks P2SH for >80-byte strings (ORDER/DISPENSER),
     // and P2SH is TWO transactions where phase 2 (the data reveal) spends
     // phase 1's unconfirmed output. Bitcoin regtest mines both in one block, but
-    // Dogecoin v1.14 defers the chained phase 2 to the NEXT block — so the data
+    // Dogecoin v1.14 defers the chained phase 2 to the NEXT block, so the data
     // tx lands one height late on DOGE only, silently breaking the
     // one-action-per-block cross-chain height contract. MULTISIGN is one tx on
     // every chain; the encoding choice itself never reaches the indexer state.
@@ -142,8 +142,8 @@ describe('P3(b) multi-chain parity — live driver + digest capture', function (
         await waitIndexerHeight(target);
         // Height alone is NOT confirmation: the indexer writes a blocks row for
         // EMPTY blocks too, so a rejected/unmined action still "reaches" the
-        // height. Require this step's tx to exist at exactly its pinned height —
-        // this is what turns a silently-dropped action into a loud failure.
+        // height. Require this step's tx to exist at exactly its pinned height.
+        // This is what turns a silently-dropped action into a loud failure.
         const txs = await pid().query(
             'SELECT data FROM transactions WHERE block_index = ?', [target]);
         const found = txs.filter(t => String(t.data).startsWith(step.action + '|'));
@@ -171,7 +171,7 @@ describe('P3(b) multi-chain parity — live driver + digest capture', function (
         // freely; the protocol gas MINTs are driven later, inside the pinned
         // phase. The fixed role keys are reused on every chain (see parityCorpus).
         await global.regtestMinerConnector.setDefaultMiningTime();
-        // Pre-mine so the miner's coinbase matures — a fresh post-reset chain
+        // Pre-mine so the miner's coinbase matures. A fresh post-reset chain
         // has no spendable coins until ~100 blocks confirm. These are empty
         // XChain blocks (chain-agnostic hash) below the pinned baseline.
         await global.regtestMinerConnector.generateBlocks(110);
@@ -192,19 +192,19 @@ describe('P3(b) multi-chain parity — live driver + digest capture', function (
 
         // 2. Disable auto-mine, then mine every chain to the SAME baseline
         // height. Mine the EXACT deficit off the true node tip (tip()), so the
-        // baseline is deterministic — no indexer-lag overshoot.
+        // baseline is deterministic with no indexer-lag overshoot.
         await global.regtestMinerConnector.setMiningTime(NO_AUTO_MINE, NO_AUTO_MINE);
         let nh = await tip();
-        expect(nh, 'install mined past PARITY_BASELINE=' + BASELINE_HEIGHT + ' — raise it and re-run all chains')
+        expect(nh, 'install mined past PARITY_BASELINE=' + BASELINE_HEIGHT + ': raise it and re-run all chains')
             .to.be.at.most(BASELINE_HEIGHT);
         if (nh < BASELINE_HEIGHT) await global.regtestMinerConnector.generateBlocks(BASELINE_HEIGHT - nh);
         await waitIndexerHeight(BASELINE_HEIGHT);
         nh = await tip();
-        expect(nh, 'baseline overshoot — node tip past baseline').to.equal(BASELINE_HEIGHT);
+        expect(nh, 'baseline overshoot: node tip past baseline').to.equal(BASELINE_HEIGHT);
 
         // 3a. Genesis: role A ISSUEs the XCHAIN gas token. This is the
         // fee-EXEMPT gas bootstrap (issue.js gasBootstrap), and regtest lets
-        // any address issue GAS — so it is deterministic and chain-agnostic.
+        // any address issue GAS, so it is deterministic and chain-agnostic.
         // Driven as a PINNED action (not initialCheck's timing-dependent
         // auto-genesis) so it is part of the parity set, not a hash-chain fork.
         await driveAction({ role: 'A', label: 'ISSUE XCHAIN (gas genesis)', action: 'ISSUE',
@@ -227,7 +227,7 @@ describe('P3(b) multi-chain parity — live driver + digest capture', function (
         const actionCount = 1 /* XCHAIN genesis */ + 3 /* gas MINTs */ + corpus(coin).length;
         const expected = BASELINE_HEIGHT + actionCount;
         expect(ih, 'indexer tip is not at the pinned corpus end height').to.equal(expected);
-        // Every driven action must exist as a confirmed tx — a height match with
+        // Every driven action must exist as a confirmed tx. A height match with
         // missing txs means actions were silently dropped (driveAction asserts
         // per-action too; this is the belt-and-braces total).
         const n = await pid().query('SELECT COUNT(*) AS n FROM transactions');

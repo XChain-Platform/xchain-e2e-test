@@ -36,7 +36,7 @@ const issueHelper       = require('../helpers/issueHelper')
 const sendHelper        = require('../helpers/sendHelper')
 
 // ═══════════════════════════════════════════════════════════════════════════
-// P1 — Action Helper Regression Tests
+// P1: Action Helper Regression Tests
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('[regression:p1] Action Helpers', function () {
@@ -60,11 +60,11 @@ describe('[regression:p1] Action Helpers', function () {
 
     const fakeAddr = { address: 'addr1', privateKey: Buffer.alloc(32, 1), publicKey: Buffer.alloc(33, 2) }
 
-    // ── R-ACT-001 — ISSUE message construction ──────────────────────────
+    // R-ACT-001: ISSUE message construction
 
     describe('issueHelper', function () {
 
-        it('[regression:p1] R-ACT-001 — sendIssueV0 constructs correct pipe-delimited message', async function () {
+        it('[regression:p1] R-ACT-001: sendIssueV0 constructs correct pipe-delimited message', async function () {
             await issueHelper.sendIssueV0(fakeAddr, 'MYTOKEN', 1000, 100, 8, 'Test', 50)
 
             assert.ok(createTxStub.calledOnce)
@@ -78,7 +78,7 @@ describe('[regression:p1] Action Helpers', function () {
             assert.ok(message.includes('50'), 'should include mintSupply')
         })
 
-        it('[regression:p1] R-ACT-001b — sendIssueV0 calls waitForIssue and waitForCredit', async function () {
+        it('[regression:p1] R-ACT-001b: sendIssueV0 calls waitForIssue and waitForCredit', async function () {
             await issueHelper.sendIssueV0(fakeAddr, 'TOK', 1000, 100, 8, 'desc', 50)
 
             assert.ok(global.indexerDatabase.waitForIssue.calledOnce, 'waitForIssue should be called')
@@ -91,7 +91,7 @@ describe('[regression:p1] Action Helpers', function () {
             assert.strictEqual(issueFilter.status, 'valid')
         })
 
-        it('[regression:p1] R-ACT-001c — sendIssueV0 returns txHash, issue, and credit', async function () {
+        it('[regression:p1] R-ACT-001c: sendIssueV0 returns txHash, issue, and credit', async function () {
             const result = await issueHelper.sendIssueV0(fakeAddr, 'TOK', 1000, 100, 8, 'desc', 50)
 
             assert.strictEqual(result.txHash, 'txhash-test')
@@ -99,7 +99,7 @@ describe('[regression:p1] Action Helpers', function () {
             assert.ok(result.credit, 'should return credit row')
         })
 
-        it('[regression:p1] R-ACT-001d — sendIssueV1 constructs V1 message with tick and description', async function () {
+        it('[regression:p1] R-ACT-001d: sendIssueV1 constructs V1 message with tick and description', async function () {
             global.indexerDatabase.waitForIssue = sinon.stub().resolves({ tick: 'TOK' })
 
             await issueHelper.sendIssueV1(fakeAddr, 'TOK', 'new desc')
@@ -108,18 +108,18 @@ describe('[regression:p1] Action Helpers', function () {
             assert.strictEqual(message, 'ISSUE|1|TOK|new desc')
         })
 
-        it('[regression:p1] R-ACT-005a — sendIssueV0 passes addressInfo as first arg to createAndSendTransaction', async function () {
+        it('[regression:p1] R-ACT-005a: sendIssueV0 passes addressInfo as first arg to createAndSendTransaction', async function () {
             await issueHelper.sendIssueV0(fakeAddr, 'TOK', 1000, 100, 8, 'desc', 50)
 
             assert.strictEqual(createTxStub.firstCall.args[0], fakeAddr)
         })
     })
 
-    // ── R-ACT-002 — SEND message construction ───────────────────────────
+    // R-ACT-002: SEND message construction
 
     describe('sendHelper', function () {
 
-        it('[regression:p1] R-ACT-002 — sendSendV0 constructs correct pipe-delimited message', async function () {
+        it('[regression:p1] R-ACT-002: sendSendV0 constructs correct pipe-delimited message', async function () {
             await sendHelper.sendSendV0(fakeAddr, 'TOK', '100', 'dest1', 'memo1')
 
             assert.ok(createTxStub.calledOnce)
@@ -127,7 +127,7 @@ describe('[regression:p1] Action Helpers', function () {
             assert.strictEqual(message, 'SEND|0|TOK|100|dest1|memo1')
         })
 
-        it('[regression:p1] R-ACT-002b — sendSendV0 calls waitForSend, waitForCredit, waitForDebit', async function () {
+        it('[regression:p1] R-ACT-002b: sendSendV0 calls waitForSend, waitForCredit, waitForDebit', async function () {
             await sendHelper.sendSendV0(fakeAddr, 'TOK', '100', 'dest1', 'memo1')
 
             assert.ok(global.indexerDatabase.waitForSend.calledOnce)
@@ -143,7 +143,7 @@ describe('[regression:p1] Action Helpers', function () {
             assert.strictEqual(debitFilter.address, 'addr1')
         })
 
-        it('[regression:p1] R-ACT-002c — sendSendV0 returns txHash, send, credit, debit', async function () {
+        it('[regression:p1] R-ACT-002c: sendSendV0 returns txHash, send, credit, debit', async function () {
             const result = await sendHelper.sendSendV0(fakeAddr, 'TOK', '100', 'dest1', '')
 
             assert.strictEqual(result.txHash, 'txhash-test')
@@ -152,7 +152,7 @@ describe('[regression:p1] Action Helpers', function () {
             assert.ok(result.debit)
         })
 
-        it('[regression:p1] R-ACT-006 — sendSendV1 calls waitForSend twice for two destinations', async function () {
+        it('[regression:p1] R-ACT-006: sendSendV1 calls waitForSend twice for two destinations', async function () {
             await sendHelper.sendSendV1(fakeAddr, 'TOK', '50', 'dest1', '30', 'dest2', 'memo')
 
             assert.strictEqual(global.indexerDatabase.waitForSend.callCount, 2)
@@ -160,11 +160,11 @@ describe('[regression:p1] Action Helpers', function () {
         })
     })
 
-    // ── R-ACT-007 — error handling ───────────────────────────────────────
+    // R-ACT-007: error handling
 
     describe('error handling', function () {
 
-        it('[regression:p1] R-ACT-007 — action helper propagates createAndSendTransaction errors', async function () {
+        it('[regression:p1] R-ACT-007: action helper propagates createAndSendTransaction errors', async function () {
             createTxStub.restore()
             sinon.stub(transactionHelper, 'createAndSendTransaction').rejects(new Error('encoder down'))
 

@@ -11,19 +11,19 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * P3(b) — LIVE multi-chain parity: the PURE comparison over digest.js
+ * P3(b): LIVE multi-chain parity. The PURE comparison over digest.js
  * artifacts. Two tiers:
  *
- *   TIER 1 (the hard proof) — the resolved consensus hash chain is
+ *   TIER 1 (the hard proof): the resolved consensus hash chain is
  *   byte-identical across every chain. The hash (getBlockHashes,
  *   xchain-indexer/src/db.js:1019) folds SURROGATE ids + protocol amounts +
- *   block_index + the previous hash — never txids, never block hashes, never
- *   raw address strings. So identical action input in identical order yields
+ *   block_index + the previous hash (never txids, never block hashes, never
+ *   raw address strings). So identical action input in identical order yields
  *   identical hashes on BTC, LTC and DOGE even though every chain's
  *   underlying transactions differ. This is exactly the property ANCHOR /
  *   state-checkpoint recovery relies on being chain-agnostic.
  *
- *   TIER 2 (structural parity) — the rest of the indexer DB is byte-identical
+ *   TIER 2 (structural parity): the rest of the indexer DB is byte-identical
  *   across chains AFTER (a) normalising the run's coin literal and (b)
  *   excluding the columns/tables that hold chain-native residue, which differs
  *   BY CONSTRUCTION on a live stack:
@@ -40,7 +40,7 @@
  *   the diff with table + row detail.
  *
  * NOTE (regtest): the three regtest networks share base58 version bytes
- * (pubKeyHash 0x6f / scriptHash 0xc4 / wif 0xef — networks.js), so the SAME
+ * (pubKeyHash 0x6f / scriptHash 0xc4 / wif 0xef, per networks.js), so the SAME
  * pubkey encodes to the SAME address on all three and index_addresses does NOT
  * diverge here. On mainnet it would; Tier 1 holds regardless because the hash
  * is id-based, which is the point. The harness reuses one keypair per role
@@ -64,10 +64,10 @@ const GLOBAL_COLUMN_EXCLUSIONS = [
 
 // Per-coin protocol role addresses (regtest constants from
 // xchain-indexer/src/configs/<CODE>.js, case 'regtest'). These are the ONLY
-// addresses that legitimately differ across chains for an identical corpus —
-// e.g. the xchain-fee-mode issuance fee is credited to the chain's DONATE1, so
-// index_addresses grows a per-coin row. Normalised to role tags before
-// comparison (calibrated against the first real BTC↔DOGE diff, which showed
+// addresses that legitimately differ across chains for an identical corpus
+// (e.g. the xchain-fee-mode issuance fee is credited to the chain's DONATE1, so
+// index_addresses grows a per-coin row). Normalised to role tags before
+// comparison (calibrated against the first real BTC<>DOGE diff, which showed
 // exactly one residual row: DONATE1). FEE_DESTINATION here is each config's
 // real default; the placeholder ('X'*34) is identical cross-chain anyway.
 const SPECIAL_ADDRESSES = {
@@ -95,7 +95,7 @@ const SPECIAL_ADDRESSES = {
     },
 };
 
-// Per-table extra exclusions — pointers into the (chain-native) index_transactions
+// Per-table extra exclusions: pointers into the (chain-native) index_transactions
 // id-space. Identical to equivalence.js CONTENT_MODE_TABLE_EXCLUSIONS.
 const TABLE_COLUMN_EXCLUSIONS = {
     blocks: ['ledger_hash_id', 'actions_hash_id', 'contract_hash_id'],
@@ -104,7 +104,7 @@ const TABLE_COLUMN_EXCLUSIONS = {
 // Tables skipped wholesale.
 //   - index_transactions: chain-native txids/block hashes; verified via Tier 1.
 //   - schema_migrations: migration bookkeeping (wall-clock applied_at; the
-//     applied SET also varies with the DB-create vintage) — infra meta, not
+//     applied SET also varies with the DB-create vintage). Infra meta, not
 //     consensus state.
 const IGNORE_TABLES = new Set(['index_transactions', 'schema_migrations']);
 
@@ -128,7 +128,7 @@ function excludedColumns(table) {
 //   - transactions.data : ORDER/DISPENSER give+get fields hold |COIN|.
 //   - index_coins        : the deduped coin row holds the bare literal.
 //   - ALL tables         : the chain's protocol role addresses (SPECIAL_ADDRESSES)
-//                          become role tags — base58 addresses are 26-35 distinct
+//                          become role tags. Base58 addresses are 26-35 distinct
 //                          chars, so a plain string replace cannot false-match.
 // Applied to the CANONICAL row string after column-exclusion.
 function normalizeCanon(table, canon, coin) {

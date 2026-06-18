@@ -127,7 +127,7 @@ class BlockchainConnector {
             // with the cap disabled (maxfeerate = 0 => unlimited). Gated on BOTH
             // the cap error AND a regtest NETWORK, so the numeric maxfeerate arg
             // is only ever sent to a node that just proved it enforces the modern
-            // cap — Dogecoin Core 1.14 (2nd arg is a boolean allowhighfees, not a
+            // cap; Dogecoin Core 1.14 (2nd arg is a boolean allowhighfees, not a
             // maxfeerate) doesn't cap, so it never reaches this branch. Mirrors the
             // regtest-only psbt.setMaximumFeeRate(100000) the suite already uses.
             const net = String(process.env.NETWORK || (typeof global !== 'undefined' && global.NETWORK) || '');
@@ -174,7 +174,7 @@ class BlockchainConnector {
         } catch (error) {
             // Bitcoin/Litecoin/Dogecoin Core returns the JSON-RPC error body even
             // on HTTP 500 (the wire-format error). Axios rejects on non-2xx, so
-            // surface the body it captured (error.response.data) — otherwise
+            // surface the body it captured (error.response.data); otherwise
             // non-standard-script / dust / sighash rejections would be masked
             // behind a generic axios message. (The caller logs/handles; no
             // console.error here so a recovered regtest fee-cap retry stays quiet.)
@@ -182,7 +182,7 @@ class BlockchainConnector {
                 const body = typeof error.response.data === 'string'
                     ? error.response.data
                     : JSON.stringify(error.response.data);
-                throw new Error(`Error trying to send a transaction to the node — HTTP ${error.response.status} ${error.response.statusText}: ${body}`);
+                throw new Error(`Error trying to send a transaction to the node (HTTP ${error.response.status} ${error.response.statusText}): ${body}`);
             }
             throw error;
         }
@@ -226,7 +226,7 @@ class BlockchainConnector {
     // --- Generic JSON-RPC + regtest reorg primitives ---------------------------------
     // The class's other methods each duplicate the axios boilerplate; this is a thin
     // generic caller used by the chain/reorg helpers below (added for on-chain reorg
-    // e2e — invalidateBlock orphans a sub-chain so the indexer's reorg rollback runs).
+    // e2e: invalidateBlock orphans a sub-chain so the indexer's reorg rollback runs).
     async _rpc(method, params = []){
         const auth = Buffer.from(`${this.rpcUser}:${this.rpcPassword}`).toString('base64');
         const response = await axios.post(this.url, { jsonrpc: '2.0', id: 1, method, params }, {
@@ -242,7 +242,7 @@ class BlockchainConnector {
     async invalidateBlock(hash){ return await this._rpc('invalidateblock', [hash]); }
     async reconsiderBlock(hash){ return await this._rpc('reconsiderblock', [hash]); }
     async getRawMempool(){ return await this._rpc('getrawmempool'); }
-    // Mine a block containing EXACTLY `txs` (default: none) — ignores the mempool. This is
+    // Mine a block containing EXACTLY `txs` (default: none), ignoring the mempool. This is
     // what lets a reorg DROP an orphaned tx: after invalidateBlock, mine empty blocks to build
     // a longer competing chain that excludes the mempool tx. (Bitcoin Core 0.19+ `generateblock`.)
     async generateBlock(address, txs = []){ return await this._rpc('generateblock', [address, txs]); }

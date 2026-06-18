@@ -19,12 +19,12 @@
  * through doubles as scientific notation ("1e-18"). This suite issues an
  * 18-decimal token and sends full-precision amounts through the live pipeline
  * (SDK → encoder → decoder → indexer → explorer), asserting every balance is
- * EXACT — compared as decimal strings, never via Number() (which would itself
+ * EXACT: compared as decimal strings, never via Number() (which would itself
  * lose precision and mask a bug).
  *
  * Regression guard for the SDK setNumberFormats fix: previously the SDK ran
  * amounts through parseFloat, so "1.123456789012345678" was broadcast as
- * "1.1234567890123457" and "0.000000000000000001" as "1e-18" — corrupting the
+ * "1.1234567890123457" and "0.000000000000000001" as "1e-18", corrupting the
  * on-chain ACTION before it ever reached the (precision-correct) indexer.
  *
  *     COIN=bitcoin NETWORK=regtest npm run test:sdk
@@ -37,7 +37,7 @@ const { expect } = require('chai');
 const { makeSdk, submit, fundedGasAddress, uniqueTick, submitOpts } = require('./sdkHelper');
 
 // Expand scientific notation to a plain fixed-decimal string, no floats.
-// The explorer can return very small balances as e.g. "1e-18" — the VALUE is
+// The explorer can return very small balances as e.g. "1e-18". The VALUE is
 // correct, just formatted in scientific notation. "1e-18" -> "0.000000000000000001".
 function sciToFixed(x) {
     const s = String(x).trim();

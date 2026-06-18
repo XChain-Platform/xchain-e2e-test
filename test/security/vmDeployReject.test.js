@@ -14,13 +14,13 @@ const gasHelper = require('../helpers/gasHelper')
 const transactionHelper = require('../transactionHelper')
 
 /**
- * VM Deploy Reject — confirms the indexer rejects malformed/abusive DEPLOYs at the
+ * VM Deploy Reject: confirms the indexer rejects malformed/abusive DEPLOYs at the
  * syntax-validation gate (deploy.js -> vm.validateSyntax), recording a contract row
  * with an invalid status. The encoder happily carries any bytes; rejection happens
- * at indexing. (The 64KB code-size limit is exercised in the library suite, not here
- * — a >64KB payload is impractical to broadcast through the P2SH path.)
+ * at indexing. (The 64KB code-size limit is exercised in the library suite, not here;
+ * a >64KB payload is impractical to broadcast through the P2SH path.)
  */
-describe('VM Deploy Reject — malformed/abusive contracts', function () {
+describe('VM Deploy Reject: malformed/abusive contracts', function () {
 
     let deployer = null
 

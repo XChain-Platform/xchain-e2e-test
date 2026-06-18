@@ -59,7 +59,7 @@ function fuzzCheckMethod(methodName, filterArb) {
             await fc.assert(fc.asyncProperty(filterArb, async (filterObj) => {
                 const { db, mockConn } = createDb()
 
-                // The method must either return a value or return null — never throw unhandled
+                // The method must either return a value or return null (never throw unhandled)
                 const result = await db[methodName](filterObj)
                 // Result must be null or an object (row)
                 assert(result === null || typeof result === 'object',
@@ -179,7 +179,7 @@ const rewardClaimFilterArb = filterObjectArb([
 
 // ── Run fuzz properties for all check* methods ───────────────────
 
-describe('Fuzz — Database Filter Objects', function () {
+describe('Fuzz: Database Filter Objects', function () {
 
     // Core action methods (use != null check)
     fuzzCheckMethod('checkIssue', gen.issueFilterArb)
@@ -191,7 +191,7 @@ describe('Fuzz — Database Filter Objects', function () {
     fuzzCheckMethod('checkList', gen.listFilterArb)
     fuzzCheckMethod('checkAirdrop', gen.airdropFilterArb)
 
-    // Dispenser methods (use isNullOrNullString — loose equality)
+    // Dispenser methods (use isNullOrNullString for loose equality)
     fuzzCheckMethod('checkDispenser', gen.dispenserFilterArb)
     fuzzCheckMethod('checkDispense', gen.dispenseFilterArb)
     fuzzCheckMethod('checkDispenserStatus', gen.dispenserStatusFilterArb)
@@ -233,14 +233,14 @@ describe('Fuzz — Database Filter Objects', function () {
 
 // ── Fuzz waitFor* polling with fuzzed timeMax ────────────────────
 
-describe('Fuzz — waitFor* with fuzzed timeMax', function () {
+describe('Fuzz: waitFor* with fuzzed timeMax', function () {
 
     afterEach(function () {
         sinon.restore()
         mockMariadb.createPool.resetHistory()
     })
 
-    // Use bounded integers only — Infinity/MAX_VALUE with stubbed sleep causes OOM
+    // Use bounded integers only. Infinity/MAX_VALUE with stubbed sleep causes OOM.
     const boundedTimeMaxArb = fc.oneof(
         fc.constant(0),
         fc.constant(-1),
@@ -278,13 +278,13 @@ describe('Fuzz — waitFor* with fuzzed timeMax', function () {
 
 // ── Fuzz isNullOrNullString with all types ───────────────────────
 
-describe('Fuzz — isNullOrNullString type safety', function () {
+describe('Fuzz: isNullOrNullString type safety', function () {
 
     it('never throws for any input type', function () {
         const { db } = createDb()
 
         fc.assert(fc.property(gen.anyFuzzValue, (value) => {
-            // Must never throw — only return true or false
+            // Must never throw; must only return true or false.
             const result = db.isNullOrNullString(value)
             assert(typeof result === 'boolean',
                 `isNullOrNullString returned non-boolean: ${typeof result}`)

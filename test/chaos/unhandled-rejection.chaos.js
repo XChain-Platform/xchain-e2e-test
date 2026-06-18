@@ -18,7 +18,7 @@
 
 const assert = require('assert')
 
-describe('Chaos Experiment 10 — Unhandled Promise Rejection @P2', function () {
+describe('Chaos Experiment 10: Unhandled Promise Rejection @P2', function () {
 
     it('Node.js fires unhandledRejection for uncaught rejected promise', function (done) {
         const marker = 'chaos-unhandled-' + Date.now() + '-' + Math.random()
@@ -59,7 +59,7 @@ describe('Chaos Experiment 10 — Unhandled Promise Rejection @P2', function () 
         }
         process.on('unhandledRejection', handler)
 
-        // This rejection is caught — should NOT trigger the event
+        // This rejection is caught; should NOT trigger the event
         Promise.reject(new Error(marker)).catch(() => {
             // Intentionally caught
         })
@@ -92,7 +92,7 @@ describe('Chaos Experiment 10 — Unhandled Promise Rejection @P2', function () 
             ping: async () => { throw connError }
         }
 
-        // Call without await or .catch — simulates a real bug
+        // Call without await or .catch (simulates a real bug)
         const p = fakeConnector.ping()
 
         setTimeout(() => {

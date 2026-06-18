@@ -14,27 +14,27 @@ const vmHelper = require('../helpers/vmHelper')
 const gasHelper = require('../helpers/gasHelper')
 
 /**
- * Issuance-fee exemption for VM-emitted ISSUE — constructor path.
+ * Issuance-fee exemption for VM-emitted ISSUE (constructor path).
  *
  * A contract whose CONSTRUCTOR calls xchain.emit.issue() runs while the freshly
  * derived contract address holds zero XCHAIN. If the issuance fee were charged
  * against that emitted ISSUE, the fee validation fails with "insufficient funds
- * (FEE)", the constructor reverts, and the whole DEPLOY rolls back — no contract
+ * (FEE)", the constructor reverts, and the whole DEPLOY rolls back: no contract
  * row, no token row. The deployer already paid DEPLOY gas (base + per-byte +
  * per-emission gas), so emitted ISSUEs are fee-exempt by design.
  *
  * The exemption is a consensus rule, gated by its own ISSUANCE_FEE_EMISSION_EXEMPT
- * activation (block 0 / version 2.0.0 — the VM action cohort) so the fee behaviour
+ * activation (block 0 / version 2.0.0, the VM action cohort) so the fee behaviour
  * switches over deterministically at a fixed block rather than implicitly the moment
  * a node upgrades. Without the exemption, a constructor that emits an ISSUE forks the
  * ledger between node versions (revert + rollback vs. success + token row); this guard
  * proves the exempt path: the constructor must succeed with no contract funding.
  *
  * This is the constructor analogue of vmExtended.test.js section D, which pre-funds
- * the contract and emits from an EXECUTE — that path can mask the fee charge, the
+ * the contract and emits from an EXECUTE (that path can mask the fee charge; the
  * constructor path cannot (a brand-new address cannot be pre-funded).
  */
-describe('Issuance fee — VM-emitted ISSUE from a constructor is fee-exempt', function () {
+describe('Issuance fee: VM-emitted ISSUE from a constructor is fee-exempt', function () {
 
     // Coin symbol used in the contract derived address: C:<CHAIN>:<action_index>
     const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
@@ -66,7 +66,7 @@ describe('Issuance fee — VM-emitted ISSUE from a constructor is fee-exempt', f
 
     before(async function () {
         // The deployer funds DEPLOY gas (which covers the per-emission gas for the
-        // constructor's emit.issue). The CONTRACT is deliberately never funded — the
+        // constructor's emit.issue). The CONTRACT is deliberately never funded; the
         // whole point is that the emitted ISSUE must not need a contract balance.
         deployer = await cryptoHelper.getNewFundedAddress('issfee-exempt-deployer', COIN, NETWORK, null, 'legacy', 0, 1)
         await gasHelper.ensureGasBalance(deployer, '500')
@@ -95,7 +95,7 @@ describe('Issuance fee — VM-emitted ISSUE from a constructor is fee-exempt', f
         const dep = await vmHelper.sendDeployV0(deployer, CTOR_MINTER, 300000)
         assert(dep.contract, 'a contract row should exist for the constructor-emit deploy')
         assert.strictEqual(dep.contract.status, 'valid',
-            `DEPLOY must succeed — a charged issuance fee would revert the constructor (status: ${dep.contract.status})`)
+            `DEPLOY must succeed; a charged issuance fee would revert the constructor (status: ${dep.contract.status})`)
 
         const ci = dep.contract.action_index
         const contractAddr = `C:${CHAIN}:${ci}`
@@ -103,12 +103,12 @@ describe('Issuance fee — VM-emitted ISSUE from a constructor is fee-exempt', f
         // The emitted token must exist (the constructor's ISSUE was processed, not rolled back).
         assert(await tickExists(tick), `emitted token ${tick} should exist after a successful constructor deploy`)
 
-        // The contract holds the full minted supply at its derived address — and it
+        // The contract holds the full minted supply at its derived address, and it
         // never held XCHAIN, proving no issuance fee was deducted from it.
         const bal = await balanceOf(contractAddr, tick)
         assert.strictEqual(bal, '1000',
             `contract address ${contractAddr} should hold the constructor-minted supply (got ${bal})`)
         assert.strictEqual(await balanceOf(contractAddr, 'XCHAIN'), null,
-            'contract was never funded with XCHAIN — confirms the emitted ISSUE paid no issuance fee')
+            'contract was never funded with XCHAIN, confirming the emitted ISSUE paid no issuance fee')
     })
 })

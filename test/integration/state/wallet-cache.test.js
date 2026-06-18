@@ -17,7 +17,7 @@ const sinon = require('sinon')
 const bitcoin = require('bitcoinjs-lib')
 const CryptoNetworks = require('../../../src/CryptoNetworks')
 
-describe('State Management — Wallet Cache', function () {
+describe('State Management: Wallet Cache', function () {
 
     let cryptoHelper
     let savedGlobals

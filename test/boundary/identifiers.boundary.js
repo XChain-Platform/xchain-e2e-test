@@ -26,7 +26,7 @@ global.utxoTrackerConnector = { waitForUtxos: async () => true }
 
 const cryptoHelper = require('../cryptoHelper')
 
-describe('Boundary — Identifiers & Strings', function () {
+describe('Boundary: Identifiers & Strings', function () {
 
     beforeEach(function () {
         global.wallets = {}
@@ -58,7 +58,7 @@ describe('Boundary — Identifiers & Strings', function () {
         })
     })
 
-    // ── IS-02: Duplicate wallet label — idempotency ─────────────
+    // ── IS-02: Duplicate wallet label (idempotency) ──────────────
 
     describe('IS-02: getWallet idempotency', function () {
 

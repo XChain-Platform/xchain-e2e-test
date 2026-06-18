@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * L2 integration — STAKE_WEIGHTED_QUORUM (WI-1) R-1 degenerate-case uniformity
+ * L2 integration: STAKE_WEIGHTED_QUORUM (WI-1) R-1 degenerate-case uniformity
  * (Suite C of the regtest e2e plan).
  *
  * Spec §3.6 (R-1): the stake predicate 3·Σweight > 2·S makes BOTH degenerate
@@ -24,15 +24,15 @@
  *     (consensus disabled), uniformly.
  *
  * This drives THREE representative engines that route finalization through the
- * shared predicate — config-change PBFT (Consensus), price (OracleConsensus), and
- * checkpoints (StateCheckpointEngine, oracle_publish) — over real hubs and asserts
- * the SAME finalize/no-finalize decision from each at both degenerate inputs. The
- * cross-service predicate parity (hub bcmath == indexer mathjs over 500 fixtures)
- * and the cross_chain / attestation degenerate paths are covered by the unit
- * suites + Suites A2/A4; this is the live cross-ENGINE uniformity check.
+ * shared predicate: config-change PBFT (Consensus), price (OracleConsensus), and
+ * checkpoints (StateCheckpointEngine, oracle_publish). These run over real hubs
+ * and assert the SAME finalize/no-finalize decision from each at both degenerate
+ * inputs. The cross-service predicate parity (hub bcmath == indexer mathjs over
+ * 500 fixtures) and the cross_chain / attestation degenerate paths are covered by
+ * the unit suites + Suites A2/A4; this is the live cross-ENGINE uniformity check.
  *
  * The S=0 fixture uses ≥2 validators with ALL-ZERO weights so getQuorum's count
- * fast-path (count≤1 → 0) does NOT pre-empt the weighted `0 > 0 → false` — i.e. it
+ * fast-path (count≤1 → 0) does NOT pre-empt the weighted `0 > 0 → false`, i.e. it
  * genuinely exercises the zero-stake predicate, not the single-node shortcut.
  *
  * No chain; disposable Docker MariaDB; skips when neither an env DB nor Docker is
@@ -144,16 +144,16 @@ async function checkpointFinalized(hub) {
     return r.length > 0;
 }
 
-describe('MultiValidatorHub — STAKE_WEIGHTED_QUORUM R-1 degenerate uniformity (WI-1 Suite C, L2)', function () {
+describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM R-1 degenerate uniformity (WI-1 Suite C, L2)', function () {
     this.timeout(300_000);
 
-    // ── C1 — N=1: every engine finalizes on the sole staker's own signature ──
-    describe('C1 — N=1: every engine finalizes on the single staker', function () {
+    // C1 (N=1): every engine finalizes on the sole staker's own signature.
+    describe('C1 (N=1): every engine finalizes on the single staker', function () {
         let db, mvh, seed, engines;
 
         before(async function () {
             db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping C1 — no env DB and Docker unavailable'); this.skip(); }
+            if (!db) { console.log('Skipping C1: no env DB and Docker unavailable'); this.skip(); }
             mvh = new MultiValidatorHub({ count: 1, basePort: 33900, startCrossChain: true, startAttestation: false });
             await mvh.start();
             await sleep(PEER_WAIT_MS);
@@ -191,13 +191,13 @@ describe('MultiValidatorHub — STAKE_WEIGHTED_QUORUM R-1 degenerate uniformity 
         });
     });
 
-    // ── C2 — S=0: no engine finalizes (zero total stake, ≥2 validators) ──
-    describe('C2 — S=0: no engine finalizes under zero total stake', function () {
+    // C2 (S=0): no engine finalizes under zero total stake (≥2 validators).
+    describe('C2 (S=0): no engine finalizes under zero total stake', function () {
         let db, mvh, seed, engines;
 
         before(async function () {
             db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping C2 — no env DB and Docker unavailable'); this.skip(); }
+            if (!db) { console.log('Skipping C2: no env DB and Docker unavailable'); this.skip(); }
             // 2 validators so getQuorum's count fast-path (count≤1 → 0) does NOT fire;
             // ALL weights zero so S=0 and the weighted predicate 0>0 is false.
             mvh = new MultiValidatorHub({ count: 2, basePort: 34000, startCrossChain: true, startAttestation: false });

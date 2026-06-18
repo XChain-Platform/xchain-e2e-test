@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * L2 integration — EQUIV_HEADER (WI-2 bump 2) ACTIVATION BOUNDARY.
+ * L2 integration: EQUIV_HEADER (WI-2 bump 2) ACTIVATION BOUNDARY.
  *
  * Phase A step A4 (the live flag-day no-fork drill) of the EQUIV signed-header
  * work. The WI-2 twin of multiHubActivationBoundary.integration.test.js: proves the
@@ -27,7 +27,7 @@
  *
  * The seam that makes this a TIGHT no-fork test: the checkpoint's block_index comes
  * from the (identical, stubbed) indexer TIP, while the EQUIV gate keys on the
- * snapshot_block — which is the seeded anchor/election block. So we drive the SAME
+ * snapshot_block (the seeded anchor/election block). So we drive the SAME
  * fixture at snapshot_block ACT-1 (below → headerless) vs ACT+1 (above → wrapped),
  * and the RAW canonical is byte-identical on both sides (same block_index, ledger
  * content, checkpoint_seq=1 on a fresh DB). The header is the ONLY delta at the
@@ -41,10 +41,10 @@
  *     stored sigs verify against the wrapped bytes, NOT against the bare raw; the
  *     canonical begins with the exact equivocation prefix.
  *   - Across the boundary the checkpointed LEDGER (ledger_hash + checkpoint_seq) is
- *     identical — only the signature preimage changes. No ledger-hash divergence.
+ *     identical (only the signature preimage changes). No ledger-hash divergence.
  *
  * Both sides run on SEPARATE fresh federations (fresh disposable DB, fresh seq),
- * mirroring multiHubActivationBoundary B1a/B1b — the no-fork property is asserted
+ * mirroring multiHubActivationBoundary B1a/B1b: the no-fork property is asserted
  * across EVERY hub of each side, and the cross-side synthesis (raw-bytes-identical,
  * header-is-only-delta) is asserted once both have captured.
  *
@@ -52,7 +52,7 @@
  * xchain-hub/src/equivocation_header.js (regtest is 0 by default = always wrapped,
  * so the headerless side cannot be reached). Set regtest to e.g. 120 in ALL FIVE
  * copies (xchain-documentation/protocol/constants.js + hub + indexer + sdk +
- * explorer — the parity test enforces equality) for the run, then revert. The suite
+ * explorer; the parity test enforces equality) for the run, then revert. The suite
  * SKIPS with a clear message when the height is still 0 so it never silently passes
  * as a wrapped-only test.
  *
@@ -78,7 +78,7 @@ const SETTLE_MS    = 6000;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Identical stubbed "indexer" tip on every hub — the checkpoint's block_index +
+// Identical stubbed "indexer" tip on every hub: the checkpoint's block_index +
 // ledger content. Held constant across the boundary so only the snapshot_block
 // (the gate input) varies, and the raw canonical stays byte-identical.
 const TIP = {
@@ -124,7 +124,7 @@ function rawCanonical(row, snapshotBlock) {
             String(row.checkpoint_seq), String(snapshotBlock)].join('|');
 }
 
-// The v0 EQUIV round id: chain|network|block_index|checkpoint_seq (VIEW always 0 —
+// The v0 EQUIV round id: chain|network|block_index|checkpoint_seq (VIEW always 0;
 // checkpoints have no view change).
 function v0RoundId(row) {
     return 'BTC|regtest|' + TIP.block_index + '|' + row.checkpoint_seq;
@@ -154,7 +154,7 @@ function verifyingCount(row, canonical) {
     return ok.size;
 }
 
-describe('MultiValidatorHub — EQUIV_HEADER activation boundary (WI-2 bump 2 / A4, L2)', function () {
+describe('MultiValidatorHub: EQUIV_HEADER activation boundary (WI-2 bump 2 / A4, L2)', function () {
     this.timeout(300_000);
 
     // Captured raw canonical from each side for the cross-side synthesis assertion.
@@ -164,7 +164,7 @@ describe('MultiValidatorHub — EQUIV_HEADER activation boundary (WI-2 bump 2 / 
     before(function () {
         if (!Number.isFinite(ACT) || ACT < 2) {
             console.log(
-                'Skipping EQUIV_HEADER activation-boundary suite — regtest ' +
+'Skipping EQUIV_HEADER activation-boundary suite: regtest ' +
                 'EQUIV_HEADER_ACTIVATION is ' + ACT + ' (must be >=2 to reach the headerless ' +
                 'side). Set regtest to e.g. 120 in ALL FIVE EQUIV copies (constants.js + hub + ' +
                 'indexer + sdk + explorer) for this run, then revert (plan A4).');
@@ -177,7 +177,7 @@ describe('MultiValidatorHub — EQUIV_HEADER activation boundary (WI-2 bump 2 / 
         let db, mvh, seed;
         before(async function () {
             db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping EQUIV boundary (below) — no env DB and Docker unavailable'); this.skip(); }
+            if (!db) { console.log('Skipping EQUIV boundary (below): no env DB and Docker unavailable'); this.skip(); }
             mvh = new MultiValidatorHub({ count: 4, basePort: 34200, startCrossChain: true, startAttestation: false });
             await mvh.start();
             await sleep(PEER_WAIT_MS);
@@ -231,7 +231,7 @@ describe('MultiValidatorHub — EQUIV_HEADER activation boundary (WI-2 bump 2 / 
         let db, mvh, seed;
         before(async function () {
             db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping EQUIV boundary (above) — no env DB and Docker unavailable'); this.skip(); }
+            if (!db) { console.log('Skipping EQUIV boundary (above): no env DB and Docker unavailable'); this.skip(); }
             mvh = new MultiValidatorHub({ count: 4, basePort: 34300, startCrossChain: true, startAttestation: false });
             await mvh.start();
             await sleep(PEER_WAIT_MS);
@@ -272,21 +272,21 @@ describe('MultiValidatorHub — EQUIV_HEADER activation boundary (WI-2 bump 2 / 
         });
     });
 
-    // ── SYNTHESIS — the header is the ONLY delta at the flag-day ──
+    // ── SYNTHESIS: the header is the ONLY delta at the flag-day ──
     describe('the flag-day is fork-free: identical ledger, header is the only delta', function () {
         it('the raw ledger bytes are byte-identical across the boundary; only the EQUIV header differs', function () {
             if (rawBelow === null || rawAbove === null) {
-                console.log('Skipping EQUIV boundary synthesis — one side did not capture (DB/Docker unavailable)');
+                console.log('Skipping EQUIV boundary synthesis: one side did not capture (DB/Docker unavailable)');
                 this.skip();
             }
             // snapshot_block is the LAST field of the raw canonical and is the only
-            // thing that differs (ACT-1 vs ACT+1) — strip it to compare the ledger.
+            // thing that differs (ACT-1 vs ACT+1); strip it to compare the ledger.
             const ledgerOf = (raw) => raw.slice(0, raw.lastIndexOf('|'));
             assert.strictEqual(ledgerOf(rawBelow), ledgerOf(rawAbove),
                 'the checkpointed ledger must be byte-identical across the activation boundary');
 
             // Below carries no header; above's signed preimage is exactly the wrapped
-            // form of the same ledger content — so the transition adds the header and
+            // form of the same ledger content, so the transition adds the header and
             // nothing else (no ledger-hash divergence, no fork).
             assert.ok(!rawBelow.startsWith('EQUIV|'), 'below-gate canonical must be headerless');
             const wrappedAbove = eq.buildEquivCanonical(

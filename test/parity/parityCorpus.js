@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * P3(b) — LIVE multi-chain parity: the chain-agnostic action corpus + the
+ * P3(b): LIVE multi-chain parity: the chain-agnostic action corpus + the
  * fixed role keys reused across every chain.
  *
  * This is the LIVE-stack analogue of the indexer scenario 14 corpus
@@ -35,7 +35,7 @@
  *     corpus is height/state-deterministic.
  *   - exactly ONE action per block (the driver mines explicitly with auto-mine
  *     OFF), so every action lands at the same absolute block_index on each
- *     chain and the consensus hash chain — empty blocks included — matches.
+ *     chain and the consensus hash chain (empty blocks included) matches.
  *********************************************************************/
 
 'use strict';
@@ -44,7 +44,7 @@ const ecc = require('tiny-secp256k1');
 const { ECPairFactory } = require('ecpair');
 const ECPair = ECPairFactory(ecc);
 
-// Minimal network descriptor for WIF encoding only — all three regtest chains
+// Minimal network descriptor for WIF encoding only; all three regtest chains
 // share wif 0xef (networks.js), so one WIF imports into every chain's SDK.
 const WIF_NET = {
     messagePrefix: '\x18Bitcoin Signed Message:\n',
@@ -53,7 +53,7 @@ const WIF_NET = {
     pubKeyHash: 0x6f, scriptHash: 0xc4, wif: 0xef,
 };
 
-// Three FIXED private keys (regtest throwaway — deterministic so every run and
+// Three FIXED private keys (regtest throwaway; deterministic so every run and
 // every chain uses the SAME actors, which is REQUIRED for cross-chain parity).
 const ROLE_PRIVKEYS = {
     A: '11'.repeat(32),
@@ -61,14 +61,14 @@ const ROLE_PRIVKEYS = {
     C: '33'.repeat(32),
 };
 
-// Fixed ticks — identical across chains by design (see header).
+// Fixed ticks (identical across chains by design; see header).
 const TICKS = { A: 'MPTA', B: 'MPTB' };
 
 // A far-future expiration so the corpus orders/dispensers NEVER expire during
-// the run (keeps the corpus free of time-based ORDER_EXPIRE — see header).
+// the run (keeps the corpus free of time-based ORDER_EXPIRE; see header).
 // Kept UNDER the MySQL TIMESTAMP / Y2038 ceiling (2147483647): the decoder's
 // `dispensers` expiration column is a unixtime TIMESTAMP and truncates larger
-// values ("Truncated incorrect unixtime value") — a real Y2038 schema limit in
+// values ("Truncated incorrect unixtime value"): a real Y2038 schema limit in
 // the decoder (the `orders` column tolerates bigger). 2033 is far above any
 // regtest wall-clock block time, so nothing expires during the run.
 const FAR_FUTURE = 2000000000; // 2033-05-18 UTC, fixed (not Date.now()).

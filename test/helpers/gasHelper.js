@@ -24,7 +24,7 @@ module.exports = {
     },
 
     // Test-fixture convenience: mint `amount` GAS to addressInfo. Each test run
-    // generates fresh mnemonics so addresses start at zero balance — no need to
+    // generates fresh mnemonics so addresses start at zero balance, so no need to
     // diff against current balance for idempotency in the e2e context.
     async ensureGasBalance(addressInfo, amount){
         return await this.mintGas(addressInfo, amount)

@@ -14,7 +14,7 @@
  *
  * MCP write-path e2e: drives the real `xchain-mcp` stdio server (from
  * the xchain-sdk checkout this repo vendors) against a LIVE regtest
- * stack, over raw newline-delimited JSON-RPC — no MCP client library.
+ * stack, over raw newline-delimited JSON-RPC (no MCP client library).
  * Proves, end to end:
  *
  *   1. write tools are NOT listed without XCHAIN_MCP_WIF + _POLICY
@@ -26,7 +26,7 @@
  *      code before anything is signed
  *
  * The agent key is generated and funded by the harness at runtime and
- * reaches the server ONLY via the child's environment — mirroring the
+ * reaches the server ONLY via the child's environment, mirroring the
  * operator contract (key material never transits the tool channel).
  *
  * Venue: requires the standard e2e regtest stack (see initialCheck).
@@ -44,7 +44,7 @@ const COIN = (typeof global.COIN_CODE !== 'undefined' && global.COIN_CODE) || 'B
 const MCP_COIN = 'R' + COIN;                       // regtest prefix, e.g. RBTC
 
 // The vendored file: dependency (container builds) or the sibling
-// checkout (host runs) — same resolution order as sdkHelper.loadSDK.
+// checkout (host runs). Same resolution order as sdkHelper.loadSDK.
 function resolveSdkRoot() {
     const candidates = [
         path.join(__dirname, '../../xchain-sdk'),
@@ -52,7 +52,7 @@ function resolveSdkRoot() {
     ];
     for (const c of candidates)
         if (fs.existsSync(path.join(c, 'mcp/cli.js'))) return c;
-    throw new Error('No xchain-sdk checkout with mcp/cli.js found beside this repo — refresh the vendored clone.');
+    throw new Error('No xchain-sdk checkout with mcp/cli.js found beside this repo. Refresh the vendored clone.');
 }
 
 // Minimal stdio MCP client: newline-delimited JSON-RPC over a spawned
@@ -141,7 +141,7 @@ class McpChild {
     stop() { try { this.child.kill(); } catch { /* already gone */ } }
 }
 
-describe(`MCP server write path — stdio submit_action (${MCP_COIN})`, function () {
+describe(`MCP server write path: stdio submit_action (${MCP_COIN})`, function () {
 
     let sdk, agent, stateRoot, policyPath;
     const children = [];

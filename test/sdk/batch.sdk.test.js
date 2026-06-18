@@ -15,14 +15,14 @@
  * XChain Platform E2E - SDK BatchBuilder (on-chain)
  *
  * The SDK's fluent BatchBuilder (sdk.batch().send().mint().build()) has only
- * unit coverage — nothing drives a real BATCH built by it through the live
- * pipeline (encoder BATCH encoding → decoder → indexer BATCH expansion). This
+ * unit coverage; nothing drives a real BATCH built by it through the live
+ * pipeline (encoder BATCH encoding -> decoder -> indexer BATCH expansion). This
  * suite builds a multi-SEND BATCH via the SDK, submits it on regtest, and
  * verifies every sub-action took effect (balances moved for each recipient and
  * the issuer was debited the full total in a single transaction).
  *
- * NOTE: BatchBuilder.build() is async (it wraps the SDK's async createAction) —
- * the unit tests await it, but the README/JSDoc show it without `await`. We
+ * NOTE: BatchBuilder.build() is async (it wraps the SDK's async createAction).
+ * The unit tests await it, but the README/JSDoc show it without `await`. We
  * await here, the correct usage.
  *
  *     COIN=bitcoin NETWORK=regtest npm run test:sdk
@@ -71,7 +71,7 @@ describe('[sdk] BatchBuilder multi-action (on-chain)', function () {
         const r1 = newRecipient(sdk);
         const r2 = newRecipient(sdk);
 
-        // Build the BATCH through the fluent SDK API (async — must await).
+        // Build the BATCH through the fluent SDK API (async, must await).
         const built = await sdk.batch()
             .send({ tick, amount: 100, destination: r1.address })
             .send({ tick, amount: 200, destination: r2.address })

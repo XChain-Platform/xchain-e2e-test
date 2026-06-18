@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * E2E — per-chain ANCHOR publisher ELECTION on a LIVE DOGE regtest chain.
+ * E2E: per-chain ANCHOR publisher ELECTION on a LIVE DOGE regtest chain.
  *
  * The multi-validator paths the single-validator mainnet deployment never
  * exercises: four hubs over REAL P2P (Ed25519-verified gossip, per-hub
@@ -19,25 +19,25 @@
  * per-chain publishers by hash-ordering and publishing REAL two-phase
  * P2SH transactions. Verifies:
  *
- *   1. Per-chain election — each pending checkpoint is anchored exactly
+ *   1. Per-chain election: each pending checkpoint is anchored exactly
  *      once, by the hash-order rank-0 validator for that row's key, paid
  *      from that validator's own wallet (no shared-UTXO contention).
- *   2. XANC_V0_DONE back-fill — every other hub's copy of the row gets
+ *   2. XANC_V0_DONE back-fill: every other hub's copy of the row gets
  *      anchor_txid over live P2P; a second flush publishes nothing.
- *   3. Failover ladder — ranks above 0 stay locked inside the tolerance
+ *   3. Failover ladder: ranks above 0 stay locked inside the tolerance
  *      window, rank 1 takes over after it elapses, and the returning
  *      rank 0 does NOT double-anchor (back-fill won the race).
- *   4. Archive round — the per-election-block leader collects 2f+1
+ *   4. Archive round: the per-election-block leader collects 2f+1
  *      co-signatures from followers verifying against their own DBs,
  *      publishes ANCHOR v1, and XANC_FINALIZED back-fills every hub.
- *   5. Rewards — only the winning publisher records anchor_<chain> /
+ *   5. Rewards: only the winning publisher records anchor_<chain> /
  *      anchor_archive rewards.
  *
  * The oracle_publish capability set is stubbed (identical 4-validator
  * snapshot on every hub): resolving REAL on-chain BTC stakes into
  * snapshots is CapabilitySnapshot's own concern, covered by its units
- * and the Tier-2 federation proof. Everything downstream of the set —
- * election, gossip, signing, broadcast, DB state — is live.
+ * and the Tier-2 federation proof. Everything downstream of the set
+ * (election, gossip, signing, broadcast, DB state) is live.
  *
  * Pre-requisites: same dogecoin-regtest stack + env as
  * anchorAcceptance.test.js (node, utxo-tracker, encoder, decoder,
@@ -58,7 +58,7 @@ const { MultiValidatorHub, ValidatorIdentity, loadHubModule } = require('../help
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const N = 4;
 
-describe('ANCHOR election live — multi-validator per-chain publishers (DOGE regtest)', function () {
+describe('ANCHOR election live: multi-validator per-chain publishers (DOGE regtest)', function () {
     this.timeout(20 * 60 * 1000);
 
     let mvh = null, sdk = null, SAP = null;
@@ -125,7 +125,7 @@ describe('ANCHOR election live — multi-validator per-chain publishers (DOGE re
     }
 
     before(async function () {
-        // Full-set capability stubs below — make sure the local-seed seam from
+        // Full-set capability stubs below; make sure the local-seed seam from
         // other suites/processes can't shadow them.
         delete process.env.XDEX_SEED_LOCAL_VALIDATOR;
         process.env.ANCHOR_INTERVAL_MS   = '600000000';            // manual flush only
@@ -159,7 +159,7 @@ describe('ANCHOR election live — multi-validator per-chain publishers (DOGE re
             hub.stateAnchorPublisher.capSnapshot = snap;      // _resolveCapabilitySet (constructor-captured)
         }
 
-        // One funded wallet per hub — separate keys, separate UTXO sets.
+        // One funded wallet per hub (separate keys, separate UTXO sets).
         for (let i = 0; i < N; i++) {
             wallets.push(await cryptoHelper.getNewFundedAddress('elect-pub-' + i, COIN, NETWORK, null, 'legacy', 0, 3.0));
         }
@@ -179,7 +179,7 @@ describe('ANCHOR election live — multi-validator per-chain publishers (DOGE re
                 const encoder = sdk._requireEncoder();
                 // The tracker can be a beat behind right after a publish/mint
                 // confirms (same staleness transactionHelper's trap handles, and
-                // production absorbs via the flush timer) — quiesce and retry.
+                // production absorbs via the flush timer); quiesce and retry.
                 let tx = null;
                 for (let attempt = 1; ; attempt++) {
                     try {
@@ -212,12 +212,12 @@ describe('ANCHOR election live — multi-validator per-chain publishers (DOGE re
             });
             mvh.hubs[i].rewardTracker = {
                 recordAnchorReward: async (type, round, pubkey, blk) => {
-                    // Every hub records the reward — the publisher at publish time
+                    // Every hub records the reward: the publisher at publish time
                     // and each peer from the signature-verified V0_DONE / FINALIZED
                     // (sender = the publisher's pubkey). Production collapses these
                     // in the shared DB (RewardTracker.recordAnchorReward): one row
                     // per (reward_type, round_number), lexicographically-smallest
-                    // pubkey wins, same-pubkey idempotent. Mirror that here — the
+                    // pubkey wins, same-pubkey idempotent. Mirror that here:
                     // in-proc hubs share this one `rewards` array.
                     const pk = String(pubkey).toLowerCase();
                     const cur = rewards.find(r => r.type === type && r.round === round);
@@ -359,7 +359,7 @@ describe('ANCHOR election live — multi-validator per-chain publishers (DOGE re
         const electionBlock = await waitForTip(0);
         // The failover test mutated electionToleranceBlocks to 2; reset to a wide
         // window so only rank 0 (the leader) is unlocked and every other hub
-        // refuses — a deterministic single-leader election.
+        // refuses (deterministic single-leader election).
         for (const hub of mvh.hubs) hub.stateAnchorPublisher.electionToleranceBlocks = 100000;
 
         // Elect the leader EXACTLY as _startArchiveRound does: hash-order over the

@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * E2E integration smoke — MultiValidatorHub harness
+ * E2E integration smoke: MultiValidatorHub harness
  *
  * Verifies the harness can stand up N=3 in-process XChainHub instances
  * with cross-referenced P2P SEED_NODES and have them peer-connect.
@@ -31,11 +31,11 @@ const assert = require('assert');
 const { MultiValidatorHub } = require('../helpers/multiValidatorHubHelper');
 
 const COUNT = 3;
-// Allow plenty of time — first hub start triggers DB create + table init
+// Allow plenty of time: first hub start triggers DB create + table init
 // + migrations; with 3 hubs sequentially that can be ~10s.
 const PEER_WAIT_MS = 8000;
 
-describe('MultiValidatorHub harness — bring-up smoke', function () {
+describe('MultiValidatorHub harness: bring-up smoke', function () {
     // 3 hubs × (DB init + schema migrations + P2P bind + peer connect) can run
     // ~15s; teardown (hub.close + DB drop) adds more. Generous budget so we're
     // measuring correctness, not racing the timeout.
@@ -45,7 +45,7 @@ describe('MultiValidatorHub harness — bring-up smoke', function () {
 
     before(function () {
         if (!process.env.HUB_DB_USER || !process.env.HUB_DB_PASS) {
-            console.log('Skipping MultiValidatorHub smoke — HUB_DB_USER/HUB_DB_PASS not set');
+            console.log('Skipping MultiValidatorHub smoke (HUB_DB_USER/HUB_DB_PASS not set)');
             this.skip();
         }
     });
@@ -84,7 +84,7 @@ describe('MultiValidatorHub harness — bring-up smoke', function () {
             console.log('Peer counts (want >=' + want + '):', peerCounts);
             console.log('Hub ports:', mvh.ports);
         }
-        assert.ok(ok, 'all hubs should see ' + want + ' peers — got ' + peerCounts.join(','));
+        assert.ok(ok, 'all hubs should see ' + want + ' peers, got ' + peerCounts.join(','));
     });
 
     it('each hub has the attestation framework subsystems active', async function () {

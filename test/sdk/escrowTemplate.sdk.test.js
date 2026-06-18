@@ -20,10 +20,10 @@
  *
  *   1. DEPLOY escrow(buyer, seller, arbiter, tick, amount, deadline)
  *   2. BATCH( DEPOSIT(escrow, tick, amount), EXECUTE(escrow, "fund") )
- *      — fund() reads getBalance(self, tick) and arms the escrow ONLY if
+ *      fund() reads getBalance(self, tick) and arms the escrow ONLY if
  *        the just-deposited balance is visible. This is the proof that the
  *        indexer's getBalance/getTokenInfo wiring works in production shape.
- *   3. EXECUTE(escrow, "release") — settles the full held balance to the
+ *   3. EXECUTE(escrow, "release"): settles the full held balance to the
  *      seller via emit.send.
  *
  * Run (on a host with the regtest stack + Node 22):
@@ -61,7 +61,7 @@ function loadTemplate(name) {
 
 // Strip comments + blank lines so the on-chain DEPLOY payload carries only code.
 // The action wire format hex-encodes the source (2 payload bytes per source byte),
-// and the encoder caps a compiled ACTION at 8189 bytes — so the doc-comment-heavy
+// and the encoder caps a compiled ACTION at 8189 bytes, so the doc-comment-heavy
 // repo source must be compacted to deploy. String/char-aware (the templates use no
 // regex literals or `//` inside strings), so this preserves semantics exactly.
 function compactSource(src) {
@@ -144,7 +144,7 @@ describe('[sdk] template:escrow (on-chain custody)', function () {
         if (!haveConnectors()) this.skip();
         sdk = makeSdk();
 
-        // Buyer deploys, funds, and releases — needs native coin + gas.
+        // Buyer deploys, funds, and releases (needs native coin + gas).
         buyer = await fundedGasAddress(sdk, 1);
         // Seller + arbiter only need to exist on-chain as destinations / roles.
         seller  = newAddress(sdk);

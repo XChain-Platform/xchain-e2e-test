@@ -16,7 +16,7 @@
  *
  * One of the newest primitives: DEPLOY v1 (stakeable contract with
  * COOLDOWN_BLOCKS + SLASH_DESTINATION) then STAKE v3 (stake a token
- * against that contract) — driven through sdk.submitAction. Multi-chain
+ * against that contract), driven through sdk.submitAction. Multi-chain
  * by design, exercised here against the XCHAIN token on BTC regtest.
  *
  ********************************************************************/

@@ -47,7 +47,7 @@ function createDb(queryResult) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// P1 — Teardown & Error Handling Regression Tests
+// P1: Teardown & Error Handling Regression Tests
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('[regression:p1] Teardown & Cleanup', function () {
@@ -58,7 +58,7 @@ describe('[regression:p1] Teardown & Cleanup', function () {
 
     // ── R-TEAR-001 ───────────────────────────────────────────────────────
 
-    it('[regression:p1] R-TEAR-001 — setDefaultMiningTime calls correct RPC method', async function () {
+    it('[regression:p1] R-TEAR-001: setDefaultMiningTime calls correct RPC method', async function () {
         const stub = sinon.stub(axios, 'post').resolves({
             data: { jsonrpc: '2.0', result: true, id: 1 }
         })
@@ -70,7 +70,7 @@ describe('[regression:p1] Teardown & Cleanup', function () {
 
     // ── R-TEAR-002 ───────────────────────────────────────────────────────
 
-    it('[regression:p1] R-TEAR-002 — pool.end() closes the connection pool', async function () {
+    it('[regression:p1] R-TEAR-002: pool.end() closes the connection pool', async function () {
         const { db, pool } = createDb()
         await pool.end()
         assert.ok(pool.end.calledOnce)
@@ -78,7 +78,7 @@ describe('[regression:p1] Teardown & Cleanup', function () {
 
     // ── R-TEAR-003 ───────────────────────────────────────────────────────
 
-    it('[regression:p1] R-TEAR-003 — wallet seed buffers can be zeroed', function () {
+    it('[regression:p1] R-TEAR-003: wallet seed buffers can be zeroed', function () {
         const seed = Buffer.from('abcdef1234567890abcdef1234567890', 'hex')
         const privKey = Buffer.alloc(32, 0x42)
 
@@ -106,7 +106,7 @@ describe('[regression:p1] Teardown & Cleanup', function () {
 
     // ── R-TEAR-004 ───────────────────────────────────────────────────────
 
-    it('[regression:p1] R-TEAR-004 — teardown completes even if miner is unavailable', async function () {
+    it('[regression:p1] R-TEAR-004: teardown completes even if miner is unavailable', async function () {
         sinon.stub(axios, 'post').rejects(new Error('ECONNREFUSED'))
         const miner = new RegtestMinerConnector('localhost', 3033)
 
@@ -115,7 +115,7 @@ describe('[regression:p1] Teardown & Cleanup', function () {
         try {
             await miner.setDefaultMiningTime()
         } catch (err) {
-            // swallowed — same as initialCheck.test.js afterAll
+            // swallowed, same as initialCheck.test.js afterAll
         }
         teardownCompleted = true
 
@@ -124,7 +124,7 @@ describe('[regression:p1] Teardown & Cleanup', function () {
 
     // ── R-TEAR-005 ───────────────────────────────────────────────────────
 
-    it('[regression:p1] R-TEAR-005 — pool.end() error does not crash teardown', async function () {
+    it('[regression:p1] R-TEAR-005: pool.end() error does not crash teardown', async function () {
         const { db, pool } = createDb()
         pool.end = sinon.stub().rejects(new Error('pool already closed'))
 
@@ -141,7 +141,7 @@ describe('[regression:p1] Teardown & Cleanup', function () {
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
-// P1 — Error Propagation & Resilience Regression Tests
+// P1: Error Propagation & Resilience Regression Tests
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('[regression:p1] Error Propagation & Resilience', function () {
@@ -152,7 +152,7 @@ describe('[regression:p1] Error Propagation & Resilience', function () {
 
     // ── R-ERR-001 ────────────────────────────────────────────────────────
 
-    it('[regression:p1] R-ERR-001 — connector timeout produces descriptive error', async function () {
+    it('[regression:p1] R-ERR-001: connector timeout produces descriptive error', async function () {
         sinon.stub(axios, 'post').rejects(new Error('ETIMEDOUT'))
         const encoder = new XChainEncoderConnector('localhost', 3031)
 
@@ -164,7 +164,7 @@ describe('[regression:p1] Error Propagation & Resilience', function () {
 
     // ── R-ERR-002 ────────────────────────────────────────────────────────
 
-    it('[regression:p1] R-ERR-002 — db polling survives query error and continues', async function () {
+    it('[regression:p1] R-ERR-002: db polling survives query error and continues', async function () {
         const conn = makeMockConnection()
         conn.query = sinon.stub()
             .onFirstCall().rejects(new Error('ER_CONNECTION_LOST'))
@@ -181,7 +181,7 @@ describe('[regression:p1] Error Propagation & Resilience', function () {
 
     // ── R-ERR-003 ────────────────────────────────────────────────────────
 
-    it('[regression:p1] R-ERR-003 — broadcastTx produces error with node error detail', async function () {
+    it('[regression:p1] R-ERR-003: broadcastTx produces error with node error detail', async function () {
         const node = new BlockchainConnector('localhost', 18443, 'u', 'p')
         // Stub broadcastTx to simulate the error path where the node returns an error object
         // The real implementation throws: 'Error sending transaction to the node: {"code":-26,"message":"dust"}'
@@ -196,7 +196,7 @@ describe('[regression:p1] Error Propagation & Resilience', function () {
 
     // ── R-ERR-005 ────────────────────────────────────────────────────────
 
-    it('[regression:p1] R-ERR-005 — encoder createTx throws descriptive error on failure', async function () {
+    it('[regression:p1] R-ERR-005: encoder createTx throws descriptive error on failure', async function () {
         sinon.stub(axios, 'post').resolves({
             data: { jsonrpc: '2.0', result: null, id: 1 }
         })
@@ -210,7 +210,7 @@ describe('[regression:p1] Error Propagation & Resilience', function () {
 
     // ── R-ERR-006 ────────────────────────────────────────────────────────
 
-    it('[regression:p1] R-ERR-006 — hub _call returns null when all endpoints fail', async function () {
+    it('[regression:p1] R-ERR-006: hub _call returns null when all endpoints fail', async function () {
         sinon.stub(axios, 'post').rejects(new Error('ECONNREFUSED'))
 
         const XChainHubConnector = require('../../src/XChainHubConnector')

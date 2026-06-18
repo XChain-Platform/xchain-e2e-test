@@ -15,7 +15,7 @@
  * XChain Platform E2E - XCALL target-chain (Y) reorg replay drill
  *
  * Reorgs DOGE below an executed XEXEC while the execution is still at
- * depth 1 — UNDER the 2-conf relay gate, so the result leg has not been
+ * depth 1, UNDER the 2-conf relay gate, so the result leg has not been
  * signed yet (executions deeper than the gate are documented IRREVERSIBLE,
  * same posture as the DEX). The drill asserts:
  *
@@ -23,7 +23,7 @@
  *     reprocessing re-injects the XEXEC deterministically (exactly one
  *     execution row, on a new block);
  *   - the result then relays once and the callback fires exactly once
- *     (counter contract) — the reorg cannot double-deliver.
+ *     (counter contract): the reorg cannot double-deliver.
  *
  * VENUE: drives dogecoind directly (invalidateblock) via docker exec on
  * the stack host. DOGE mining is held manually throughout, as in the cap
@@ -169,7 +169,7 @@ describe('[sdk] XCALL target-chain reorg replay (pre-confirmation)', function ()
         executedHash  = dogeCli('getblockhash ' + executedBlock);
         console.log('    [xcall-reorg] executed at DOGE block ' + executedBlock + ' (' + executedHash.substring(0, 16) + '...)');
 
-        // depth 1 — the result leg must NOT be signed yet
+        // depth 1: the result leg must NOT be signed yet
         const resultRows = await hubDb(async (c) => c.query(
             "SELECT COUNT(*) n FROM cross_chain_calls WHERE phase = 'result' AND call_id = ?", [callId]));
         expect(Number(resultRows[0].n), 'no result relay below confirmation depth').to.equal(0);
@@ -177,11 +177,11 @@ describe('[sdk] XCALL target-chain reorg replay (pre-confirmation)', function ()
 
     it('invalidating the executed block rolls back and the new branch re-injects exactly once', async function () {
         dogeCli('invalidateblock ' + executedHash);
-        console.log('    [xcall-reorg] block ' + executedBlock + ' invalidated — mining the replacement branch');
+        console.log('    [xcall-reorg] block ' + executedBlock + ' invalidated; mining the replacement branch');
         await mineTarget(3);
 
         // Deterministic replay re-injects at the SAME HEIGHT on the new branch
-        // (the first new-branch block processed) — distinguish branches by
+        // (the first new-branch block processed); distinguish branches by
         // block HASH, never height.
         const deadline = Date.now() + 180000;
         let rows = [], rowBranchHash = null;
@@ -192,7 +192,7 @@ describe('[sdk] XCALL target-chain reorg replay (pre-confirmation)', function ()
             if (rows.length === 1) {
                 rowBranchHash = dogeCli('getblockhash ' + Number(rows[0].block_index));
                 if (rowBranchHash !== executedHash) break;     // row exists on the NEW branch
-                rowBranchHash = null;                          // stale pre-rollback row — keep waiting
+                rowBranchHash = null;                          // stale pre-rollback row; keep waiting
             }
             await mineTarget(1);
         }
@@ -200,7 +200,7 @@ describe('[sdk] XCALL target-chain reorg replay (pre-confirmation)', function ()
         expect(rows.length, 'exactly one execution row after replay').to.equal(1);
         expect(rowBranchHash, 'execution recorded on a new-branch block').to.be.a('string');
         console.log('    [xcall-reorg] re-injected at DOGE block ' + Number(rows[0].block_index) +
-                    ' (' + String(rowBranchHash).substring(0, 16) + '... — new branch, ' +
+                    ' (' + String(rowBranchHash).substring(0, 16) + '... new branch, ' +
                     (Number(rows[0].block_index) === executedBlock ? 'same height' : 'different height') + ')');
     });
 
@@ -232,6 +232,6 @@ describe('[sdk] XCALL target-chain reorg replay (pre-confirmation)', function ()
         const resultRows = await hubDb(async (c) => c.query(
             "SELECT COUNT(*) n FROM cross_chain_calls WHERE phase = 'result' AND call_id = ?", [callId]));
         expect(Number(resultRows[0].n), 'single result relay row').to.equal(1);
-        console.log('    [xcall-reorg] result relayed once, callback exactly once — replay clean');
+        console.log('    [xcall-reorg] result relayed once, callback exactly once; replay clean');
     });
 });

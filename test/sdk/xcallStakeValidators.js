@@ -12,7 +12,7 @@
  *
  **********************************************************************
  *
- * XCALL e2e — stake additional federation validators (standalone driver).
+ * XCALL e2e: stake additional federation validators (standalone driver).
  *
  * For each Ed25519 pubkey passed as an argv, funds a FRESH address and
  * STAKEs 5000 XCHAIN for the cross_chain capability with that pubkey
@@ -50,7 +50,7 @@ describe('[sdk] stake additional XCALL federation validators', function () {
                 console.log('    [stake-validators] ' + pubkey.substring(0, 16) + '... staked by ' + staker.address);
             } catch (e) {
                 if (/SIGNING_PUBKEY \(already in use\)/.test(String(e.message))) {
-                    console.log('    [stake-validators] ' + pubkey.substring(0, 16) + '... already staked — skipping');
+                    console.log('    [stake-validators] ' + pubkey.substring(0, 16) + '... already staked, skipping');
                 } else {
                     throw e;
                 }

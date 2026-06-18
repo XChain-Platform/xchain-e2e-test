@@ -43,7 +43,7 @@ function getWhereClause(query) {
     return parts.length > 1 ? parts[1].trim() : ''
 }
 
-describe('Boundary — WHERE Clause Construction', function () {
+describe('Boundary: WHERE Clause Construction', function () {
 
     afterEach(function () {
         sinon.restore()
@@ -339,7 +339,7 @@ describe('Boundary — WHERE Clause Construction', function () {
 
     // ── WC-13: Placeholder count matches parameter count ────────
 
-    describe('WC-13: Parameterized query safety — placeholder/value count match', function () {
+    describe('WC-13: Parameterized query safety - placeholder/value count match', function () {
 
         it('checkIssue placeholder count matches params for all non-null fields', async function () {
             const { db, mockConn } = createDb()

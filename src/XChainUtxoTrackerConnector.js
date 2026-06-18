@@ -40,7 +40,7 @@ class UtxoTracker {
 
         try {
             // Make the request to the node. axios throws on non-2xx, which the
-            // catch below turns into `false` — ping() is a boolean reachability
+            // catch below turns into `false`; ping() is a boolean reachability
             // probe, matching every other connector in the suite.
             const response = await axios.post(this.url, data, {
                 headers: { 'Content-Type': 'application/json' }
@@ -76,7 +76,7 @@ class UtxoTracker {
         }
     }
 
-    // Single-shot probe — returns the tracker's is_quiescent payload
+    // Single-shot probe: returns the tracker's is_quiescent payload
     // (or null on RPC error). Caller waits via quiesce() below.
     async getQuiescentStatus(){
         try {
@@ -91,12 +91,12 @@ class UtxoTracker {
         }
     }
 
-    // Test framework barrier — polls tracker.is_quiescent until ready or
+    // Test framework barrier: polls tracker.is_quiescent until ready or
     // timeout. Pre-test/afterEach hooks call this so the next test starts
     // from a fully-settled stack (no mid-batch state, no mempool backlog).
     //
     // When something is still in flight, optionally nudge it forward by
-    // mining a block via the regtest miner — this confirms any straggling
+    // mining a block via the regtest miner. This confirms any straggling
     // mempool tx and pushes the tracker into committing the latest batch.
     async quiesce({ timeoutMs = 30000, pollMs = 250, regtestMiner = null } = {}){
         const deadline = Date.now() + timeoutMs
@@ -105,7 +105,7 @@ class UtxoTracker {
             const status = await this.getQuiescentStatus()
             last = status
             if (status && status.ready) return status
-            // Not ready — if a regtestMiner was passed, mine a block to
+            // Not ready yet: if a regtestMiner was passed, mine a block to
             // unblock mempool/batch progression.
             if (regtestMiner && status && status.mempool_size > 0){
                 try { await regtestMiner.generateBlocks(1) } catch (e) {}

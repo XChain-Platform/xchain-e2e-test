@@ -17,7 +17,7 @@
  *
  * Federation consensus (config-PBFT, and any snapshot-quorum path) derives its
  * quorum N from the on-chain ACTIVE-VALIDATOR snapshot the hub fetches from the
- * indexer at a BTC block boundary — NOT from the peer-registered set. In an
+ * indexer at a BTC block boundary. It does NOT use the peer-registered set. In an
  * in-process MultiValidatorHub there is no indexer, so the snapshot resolves
  * empty and the federation quorum collapses to a single node: PBFT can't carry
  * a change across followers.

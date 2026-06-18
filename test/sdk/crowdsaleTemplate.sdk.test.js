@@ -19,12 +19,12 @@
  * (it is too large as hex), so this also exercises the hex->base64 change.
  *
  *   1. DEPLOY crowdsale(owner, payTick, saleTick, rate, softCap, hardCap, dur, dec)
- *      — the constructor emit.issue()s the sale token (contract becomes its owner).
+ *      The constructor emit.issue()s the sale token (contract becomes its owner).
  *   2. BATCH( DEPOSIT(sale, payTick, amount), EXECUTE(sale, "buy") )
- *      — buy() attributes the deposit via getBalance (the wiring proof).
- *   3. EXECUTE finalize() — at the hard cap → SUCCESS.
- *   4. EXECUTE claim() — buyer mints saleTick = paid * rate.
- *   5. EXECUTE withdraw() — owner takes the proceeds (payTick).
+ *      buy() attributes the deposit via getBalance (the wiring proof).
+ *   3. EXECUTE finalize(): at the hard cap, SUCCESS.
+ *   4. EXECUTE claim(): buyer mints saleTick = paid * rate.
+ *   5. EXECUTE withdraw(): owner takes the proceeds (payTick).
  *
  * Run: COIN=bitcoin NETWORK=regtest npm run test:sdk
  *
@@ -53,7 +53,7 @@ function loadTemplate(name) {
     throw new Error('Could not locate xchain-contracts/' + rel + '. Set XCHAIN_CONTRACTS_DIR.');
 }
 
-// Comment/whitespace strip (string-aware) — keeps the DEPLOY payload small. See escrow suite.
+// Comment/whitespace strip (string-aware): keeps the DEPLOY payload small. See escrow suite.
 function compactSource(src) {
     let out = '', i = 0, n = src.length, state = 'code';
     while (i < n) {

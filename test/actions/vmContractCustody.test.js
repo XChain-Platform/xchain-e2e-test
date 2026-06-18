@@ -16,33 +16,33 @@ const gasHelper = require('../helpers/gasHelper')
 const orderHelper = require('../helpers/orderHelper')
 
 /**
- * VM Contract Custody — proves that a contract's own emitted entities are attributed to the
+ * VM Contract Custody: proves that a contract's own emitted entities are attributed to the
  * CONTRACT (its derived `C:CHAIN:N` address), not to the EXECUTE caller who triggered them.
  *
  * Background: an action's SOURCE used to be re-derived from its transaction
  * (`transactions.source_id`). A VM emission rides the caller's EXECUTE tx and has no tx of its
- * own, so the derivation returned the EXECUTE caller — letting the caller masquerade as the
+ * own, so the derivation returned the EXECUTE caller, letting the caller masquerade as the
  * owner of the contract's tokens/orders/dispensers (a fund-custody + authorization bug). The
  * fix (`xchain-indexer@1ee6413`) persists the true source on `actions.source_id` at creation and
  * reads it everywhere. `vmEmissions.test.js` proves the ORDER-expiry refund leg directly; this
  * file proves the remaining shared-query surfaces:
- *   1. token ownership  — getTokenInfo(OWNER) / tokens.owner_id
- *   2. dispenser expiry — getDispenserInfo(SOURCE) refund target
- *   3. cancel auth      — getOrderInfo(SOURCE) ownership gate
+ *   1. token ownership  - getTokenInfo(OWNER) / tokens.owner_id
+ *   2. dispenser expiry - getDispenserInfo(SOURCE) refund target
+ *   3. cancel auth      - getOrderInfo(SOURCE) ownership gate
  *
  * NOTE ON SWAP: the handover listed "swap expiry refund to the contract" as a sibling surface,
  * but the VM has NO `emit.swap` (see xchain-vm/src/gateway-emit.js) and execute.js has no SWAP
- * emission handler — a contract can never create or own a SWAP, so the source_id fix is a no-op
+ * emission handler. A contract can never create or own a SWAP, so the source_id fix is a no-op
  * for swaps (a swap's source is always its on-chain signer). There is nothing to e2e-test there;
  * the swap leg is intentionally omitted.
  */
-describe('VM Contract Custody — emitted entities belong to the contract, not the caller', function () {
+describe('VM Contract Custody: emitted entities belong to the contract, not the caller', function () {
 
     const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
 
     // Issues a brand-new token from inside the contract, then exposes a re-issue (description
-    // edit). Both emissions carry the contract as SOURCE, so the contract — not the EXECUTE
-    // caller — must become and remain the token OWNER.
+    // edit). Both emissions carry the contract as SOURCE, so the contract (not the EXECUTE
+    // caller) must become and remain the token OWNER.
     const ISSUER = `module.exports = {
         create: function(){
             xchain.emit.issue({ tick: xchain.getInputParam(0), maxSupply: '1000', maxMint: '1000',
@@ -101,7 +101,7 @@ describe('VM Contract Custody — emitted entities belong to the contract, not t
             JOIN index_tickers it ON it.id=t.tick_id WHERE it.tick=?`, [tick])
         return rows.length ? rows[0].d : null
     }
-    // Status of the most recent ISSUE recorded for (address, tick) — used to confirm a
+    // Status of the most recent ISSUE recorded for (address, tick). Used to confirm a
     // non-owner's re-issue was REJECTED rather than merely not-yet-processed.
     async function latestIssueStatus(address, tick) {
         const rows = await q(`SELECT s.status AS st FROM issues i
@@ -163,8 +163,8 @@ describe('VM Contract Custody — emitted entities belong to the contract, not t
         const ci = dep.contract.action_index
         const contractAddr = `C:${CHAIN}:${ci}`
 
-        // The emitted ISSUE pays the issuance fee from the CONTRACT's balance (economic
-        // fees stay intact for emissions — only the per-tx processing fee is skipped).
+        // The emitted ISSUE pays the issuance fee from the CONTRACT's balance.
+        // (Economic fees stay intact for emissions; only the per-tx processing fee is skipped.)
         await vmHelper.sendDepositV0(deployer, ci, 'XCHAIN', 10)
 
         const ex = await vmHelper.sendExecuteV0(deployer, ci, 'create', [tick])
@@ -172,8 +172,8 @@ describe('VM Contract Custody — emitted entities belong to the contract, not t
         const em = await emissionsFor(ex.execution.action_index)
         assert.strictEqual(em[0].emitted_action, 'ISSUE')
 
-        // OWNER must be the contract's derived address — the heart of the source_id fix. Before it,
-        // the ISSUE's source resolved to `deployer` (the EXECUTE caller) and the caller owned the token.
+        // OWNER must be the contract's derived address. This is the heart of the source_id fix.
+        // Before it, the ISSUE's source resolved to `deployer` (the EXECUTE caller) and the caller owned the token.
         assert.strictEqual(await ownerOf(tick), contractAddr,
             'token owner should be the contract, not the EXECUTE caller')
         assert.notStrictEqual(await ownerOf(tick), deployer.address,
@@ -229,7 +229,7 @@ describe('VM Contract Custody — emitted entities belong to the contract, not t
         assert.strictEqual(ex.execution.status, 'valid')
         assert.strictEqual(await descOf(tick), 'v1-contract-owned')
 
-        // The contract re-issues with a new description — its SOURCE matches the token OWNER, so
+        // The contract re-issues with a new description. Its SOURCE matches the token OWNER, so
         // the edit is accepted. (Same wire action the caller was just rejected for.)
         ex = await vmHelper.sendExecuteV0(deployer, ci, 'reissue', [tick, 'v2-by-contract'])
         assert.strictEqual(ex.execution.status, 'valid', 'the owning contract may edit its own token')
@@ -295,16 +295,16 @@ describe('VM Contract Custody — emitted entities belong to the contract, not t
         assert.strictEqual(await balanceOf(contractAddr, tick), '60', 'GIVE escrowed on order creation')
 
         // The caller (deployer) tries to cancel the contract's order. The cancel owner-gate checks
-        // the order's SOURCE (the contract) against the canceller (the deployer) — must be rejected.
+        // the order's SOURCE (the contract) against the canceller (the deployer) and must reject.
         await orderHelper.sendOrderCancelV1(deployer, orderIndex, 'caller tries to cancel')
         // Give the indexer a couple of blocks to settle the rejection.
         await regtestMinerConnector.generateBlocks(2)
         await new Promise(r => setTimeout(r, 3000))
 
-        // The order must still be open and the escrow still held — a wrongful cancel would have
+        // The order must still be open and the escrow still held. A wrongful cancel would have
         // refunded the 40 to the contract (60 -> 100). Staying at 60 proves the cancel was rejected.
         assert.strictEqual(await orderStatus(orderIndex), 'open', "the contract's order must remain open")
         assert.strictEqual(await balanceOf(contractAddr, tick), '60',
-            'escrow must remain held — the non-owner caller cannot cancel the contract order')
+            'escrow must remain held; the non-owner caller cannot cancel the contract order')
     })
 })

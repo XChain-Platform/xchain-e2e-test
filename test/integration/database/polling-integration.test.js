@@ -44,7 +44,7 @@ describe('Database Polling Integration', function () {
         mockMariadb.createPool.resetHistory()
     })
 
-    describe('Scenario: Immediate success — no sleep needed', function () {
+    describe('Scenario: Immediate success (no sleep needed)', function () {
 
         it('waitForIssue returns row on first check', async function () {
             const { db, mockConn } = createDb()
@@ -60,7 +60,7 @@ describe('Database Polling Integration', function () {
         })
     })
 
-    describe('Scenario: Eventual success — check fails then succeeds', function () {
+    describe('Scenario: Eventual success (check fails then succeeds)', function () {
 
         it('waitForIssue returns row after empty results', async function () {
             const { db, mockConn } = createDb()
@@ -78,7 +78,7 @@ describe('Database Polling Integration', function () {
         })
     })
 
-    describe('Scenario: Timeout — check never succeeds', function () {
+    describe('Scenario: Timeout (check never succeeds)', function () {
 
         it('waitForIssue returns null after timeMax', async function () {
             const { db, mockConn } = createDb()
@@ -91,7 +91,7 @@ describe('Database Polling Integration', function () {
         })
     })
 
-    describe('Scenario: Error during poll — continues polling', function () {
+    describe('Scenario: Error during poll (continues polling)', function () {
 
         it('waitForIssue continues after query error and returns row', async function () {
             const { db, mockConn } = createDb()

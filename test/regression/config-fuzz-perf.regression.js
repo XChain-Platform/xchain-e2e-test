@@ -28,14 +28,14 @@ const Database    = require('../../src/db')
 const PerfCollector = require('../perf/perfCollector')
 
 // ═══════════════════════════════════════════════════════════════════════════
-// P2 — Configuration & Cross-Chain Regression Tests
+// P2: Configuration & Cross-Chain Regression Tests
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('[regression:p2] Configuration & Cross-Chain', function () {
 
     // ── R-CFG-001/002/003 ────────────────────────────────────────────────
 
-    it('[regression:p2] R-CFG-001 — CryptoNetworks resolves correct BTC regtest config', function () {
+    it('[regression:p2] R-CFG-001: CryptoNetworks resolves correct BTC regtest config', function () {
         const network = CryptoNetworks.getBitcoinJsNetwork('bitcoin-regtest')
         assert.ok(network)
         assert.strictEqual(network.dustThreshold, 546)
@@ -43,7 +43,7 @@ describe('[regression:p2] Configuration & Cross-Chain', function () {
         assert.ok(network.bip32)
     })
 
-    it('[regression:p2] R-CFG-002 — CryptoNetworks resolves correct LTC regtest config', function () {
+    it('[regression:p2] R-CFG-002: CryptoNetworks resolves correct LTC regtest config', function () {
         const network = CryptoNetworks.getBitcoinJsNetwork('litecoin-regtest')
         assert.ok(network)
         // Litecoin's dust relay fee is 10× Bitcoin's → 5460 litoshi floor
@@ -53,7 +53,7 @@ describe('[regression:p2] Configuration & Cross-Chain', function () {
         assert.ok(network.messagePrefix.includes('Litecoin'))
     })
 
-    it('[regression:p2] R-CFG-003 — CryptoNetworks resolves correct DOGE regtest config', function () {
+    it('[regression:p2] R-CFG-003: CryptoNetworks resolves correct DOGE regtest config', function () {
         const network = CryptoNetworks.getBitcoinJsNetwork('dogecoin-regtest')
         assert.ok(network)
         assert.strictEqual(network.dustThreshold, 546)
@@ -63,7 +63,7 @@ describe('[regression:p2] Configuration & Cross-Chain', function () {
 
     // ── R-CFG-004 ────────────────────────────────────────────────────────
 
-    it('[regression:p2] R-CFG-004 — hub config contains all required service keys', function () {
+    it('[regression:p2] R-CFG-004: hub config contains all required service keys', function () {
         const hubFixture = require('../integration/fixtures/hub')
         const config = hubFixture.validConfig
         const services = config.bitcoin.regtest
@@ -78,21 +78,21 @@ describe('[regression:p2] Configuration & Cross-Chain', function () {
 
     // ── R-CFG-005 ────────────────────────────────────────────────────────
 
-    it('[regression:p2] R-CFG-005 — getFirstBlock returns 0 for bitcoin-regtest', function () {
+    it('[regression:p2] R-CFG-005: getFirstBlock returns 0 for bitcoin-regtest', function () {
         assert.strictEqual(CryptoNetworks.getFirstBlock('bitcoin-regtest'), 0)
     })
 
-    it('[regression:p2] R-CFG-005b — getFirstBlock returns 844000 for bitcoin-mainnet', function () {
+    it('[regression:p2] R-CFG-005b: getFirstBlock returns 844000 for bitcoin-mainnet', function () {
         assert.strictEqual(CryptoNetworks.getFirstBlock('bitcoin-mainnet'), 844000)
     })
 
-    it('[regression:p2] R-CFG-005c — getFirstBlock returns 0 for unknown networks', function () {
+    it('[regression:p2] R-CFG-005c: getFirstBlock returns 0 for unknown networks', function () {
         assert.strictEqual(CryptoNetworks.getFirstBlock('dogecoin-regtest'), 0)
     })
 
     // ── All network configs have required fields ─────────────────────────
 
-    it('[regression:p2] R-CFG-001b — all network configs include required fields', function () {
+    it('[regression:p2] R-CFG-001b: all network configs include required fields', function () {
         const combos = [
             'bitcoin-mainnet', 'bitcoin-testnet', 'bitcoin-regtest',
             'litecoin-mainnet', 'litecoin-testnet', 'litecoin-regtest',
@@ -111,7 +111,7 @@ describe('[regression:p2] Configuration & Cross-Chain', function () {
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
-// P2 — Fuzz & Boundary Regression Anchors
+// P2: Fuzz & Boundary Regression Anchors
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('[regression:p2] Fuzz & Boundary Anchors', function () {
@@ -122,15 +122,15 @@ describe('[regression:p2] Fuzz & Boundary Anchors', function () {
 
     // ── R-FUZZ-001 ───────────────────────────────────────────────────────
 
-    it('[regression:p2] R-FUZZ-001 — CryptoNetworks handles unknown network without crash', function () {
+    it('[regression:p2] R-FUZZ-001: CryptoNetworks handles unknown network without crash', function () {
         const result = CryptoNetworks.getBitcoinJsNetwork('invalid-network')
         assert.strictEqual(result, undefined, 'should return undefined for unknown network')
     })
 
     // ── R-FUZZ-002 ───────────────────────────────────────────────────────
 
-    it('[regression:p2] R-FUZZ-002 — connector constructor handles numeric port as string', function () {
-        // Connectors concatenate host+port — verify no crash with various types
+    it('[regression:p2] R-FUZZ-002: connector constructor handles numeric port as string', function () {
+        // Connectors concatenate host+port; verify no crash with various types
         const node = new BlockchainConnector('host', '1234', 'u', 'p')
         assert.strictEqual(node.url, 'http://host:1234')
 
@@ -140,7 +140,7 @@ describe('[regression:p2] Fuzz & Boundary Anchors', function () {
 
     // ── R-FUZZ-003 ───────────────────────────────────────────────────────
 
-    it('[regression:p2] R-FUZZ-003 — db uses parameterized queries (SQL injection safe)', async function () {
+    it('[regression:p2] R-FUZZ-003: db uses parameterized queries (SQL injection safe)', async function () {
         const conn = {
             query:   sinon.stub().resolves([]),
             release: sinon.stub().resolves()
@@ -162,7 +162,7 @@ describe('[regression:p2] Fuzz & Boundary Anchors', function () {
 
     // ── R-FUZZ-004 ───────────────────────────────────────────────────────
 
-    it('[regression:p2] R-FUZZ-004 — isNullOrNullString with edge types', function () {
+    it('[regression:p2] R-FUZZ-004: isNullOrNullString with edge types', function () {
         const conn = { query: sinon.stub(), release: sinon.stub() }
         const pool = { getConnection: sinon.stub().resolves(conn), end: sinon.stub() }
         mockMariadb.createPool.returns(pool)
@@ -185,7 +185,7 @@ describe('[regression:p2] Fuzz & Boundary Anchors', function () {
 
     // ── R-BNDRY-001 ──────────────────────────────────────────────────────
 
-    it('[regression:p2] R-BNDRY-001 — getConnection retries on pool exhaustion', async function () {
+    it('[regression:p2] R-BNDRY-001: getConnection retries on pool exhaustion', async function () {
         const conn = {
             query:   sinon.stub().resolves([]),
             release: sinon.stub().resolves()
@@ -208,7 +208,7 @@ describe('[regression:p2] Fuzz & Boundary Anchors', function () {
 
     // ── R-BNDRY-002 ──────────────────────────────────────────────────────
 
-    it('[regression:p2] R-BNDRY-002 — waitForIssue handles query error mid-poll gracefully', async function () {
+    it('[regression:p2] R-BNDRY-002: waitForIssue handles query error mid-poll gracefully', async function () {
         const conn = {
             query: sinon.stub()
                 .onFirstCall().rejects(new Error('connection lost'))
@@ -224,9 +224,9 @@ describe('[regression:p2] Fuzz & Boundary Anchors', function () {
         assert.ok(result, 'should recover and return the row')
     })
 
-    // ── R-FUZZ-002b — Hub parseEndpoints edge cases ──────────────────────
+    // ── R-FUZZ-002b: Hub parseEndpoints edge cases ───────────────────────
 
-    it('[regression:p2] R-FUZZ-002b — parseEndpoints handles empty HUB_VALIDATORS', function () {
+    it('[regression:p2] R-FUZZ-002b: parseEndpoints handles empty HUB_VALIDATORS', function () {
         const orig = process.env.HUB_VALIDATORS
         try {
             process.env.HUB_VALIDATORS = ',,,  , '
@@ -240,7 +240,7 @@ describe('[regression:p2] Fuzz & Boundary Anchors', function () {
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
-// P2 — Performance & Observability Regression Tests
+// P2: Performance & Observability Regression Tests
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('[regression:p2] Performance & Observability', function () {
@@ -251,7 +251,7 @@ describe('[regression:p2] Performance & Observability', function () {
 
     // ── R-PERF-001 ───────────────────────────────────────────────────────
 
-    it('[regression:p2] R-PERF-001 — phase() records bootstrap phase with timing', async function () {
+    it('[regression:p2] R-PERF-001: phase() records bootstrap phase with timing', async function () {
         await PerfCollector.phase('test-phase', async () => {
             // simulate some work
         })
@@ -266,7 +266,7 @@ describe('[regression:p2] Performance & Observability', function () {
 
     // ── R-PERF-002 ───────────────────────────────────────────────────────
 
-    it('[regression:p2] R-PERF-002 — recordPoll records polling metrics', function () {
+    it('[regression:p2] R-PERF-002: recordPoll records polling metrics', function () {
         PerfCollector.recordPoll({
             method: 'checkIssue',
             startMs: 1000,
@@ -285,7 +285,7 @@ describe('[regression:p2] Performance & Observability', function () {
 
     // ── R-PERF-003 ───────────────────────────────────────────────────────
 
-    it('[regression:p2] R-PERF-003 — toJSON serializes all collected data', async function () {
+    it('[regression:p2] R-PERF-003: toJSON serializes all collected data', async function () {
         PerfCollector.startRun()
         await PerfCollector.phase('p1', async () => {})
         PerfCollector.recordPoll({ method: 'checkSend', startMs: 1, endMs: 2, polls: 1, resolved: true })
@@ -298,9 +298,9 @@ describe('[regression:p2] Performance & Observability', function () {
         assert.strictEqual(json.pollMetrics.length, 1)
     })
 
-    // ── R-PERF-001b — reset clears all metrics ───────────────────────────
+    // ── R-PERF-001b: reset clears all metrics ────────────────────────────
 
-    it('[regression:p2] R-PERF-001b — reset clears all collected metrics', async function () {
+    it('[regression:p2] R-PERF-001b: reset clears all collected metrics', async function () {
         await PerfCollector.phase('p1', async () => {})
         PerfCollector.recordPoll({ method: 'm', startMs: 1, endMs: 2, polls: 1, resolved: true })
 
@@ -309,9 +309,9 @@ describe('[regression:p2] Performance & Observability', function () {
         assert.strictEqual(PerfCollector.pollMetrics.length, 0)
     })
 
-    // ── R-PERF-001c — phase returns the function's return value ──────────
+    // ── R-PERF-001c: phase returns the function's return value ───────────
 
-    it('[regression:p2] R-PERF-001c — phase returns the async function result', async function () {
+    it('[regression:p2] R-PERF-001c: phase returns the async function result', async function () {
         const result = await PerfCollector.phase('ret-test', async () => 42)
         assert.strictEqual(result, 42)
     })

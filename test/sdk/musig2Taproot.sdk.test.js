@@ -17,7 +17,7 @@
  * The SDK's MuSig2 module (xchain-sdk/src/musig2.js) is the signing
  * primitive behind the xchain-wallet `taproot-musig2` multisig custody
  * scheme. Its unit tests only verify aggregate signatures against the
- * SDK's OWN BIP340 verifier — never against a real node. This suite
+ * SDK's OWN BIP340 verifier, never against a real node. This suite
  * closes that gap: it aggregates real cosigner keys, derives the P2TR
  * address exactly as the wallet does (sdk.musig2.aggregateKeys ->
  * p2tr({ pubkey: aggXOnly }), key-path only, untweaked), funds it on the
@@ -27,11 +27,11 @@
  *
  * It also pins the n-of-n invariant on-chain: a sub-threshold
  * aggregation (the shape a "T-of-N taproot-musig2" config would produce)
- * is REJECTED by the node — which is exactly why xchain-wallet must (and
+ * is REJECTED by the node, which is exactly why xchain-wallet must (and
  * now does) forbid T<N taproot-musig2 configs.
  *
  * Reuses the global connectors stood up by test/initialCheck.test.js
- * (regtestMinerConnector, nodeConnector). BTC-only — taproot is not
+ * (regtestMinerConnector, nodeConnector). BTC-only: taproot is not
  * available on the DOGE regtest node, so the suite self-skips off BTC.
  *
  *     COIN=bitcoin NETWORK=regtest npm run test:sdk
@@ -144,7 +144,7 @@ describe('[sdk] musig2 taproot key-path spend (on-chain)', function () {
         expect(r.accepted, 'node accepted spend' + (r.reason ? ': ' + r.reason : '')).to.equal(true);
     });
 
-    it('sub-threshold (2-of-3) aggregation is REJECTED — pins the n-of-n invariant', async function () {
+    it('sub-threshold (2-of-3) aggregation is REJECTED: pins the n-of-n invariant', async function () {
         const agg = aggregate(musig, 3);
         const utxo = await fundUtxo(agg.p2tr.address);
         const r = await spend(musig, agg, utxo, 2);            // sign with only 2 of the 3 keys

@@ -15,20 +15,20 @@ const issueHelper = require('../helpers/issueHelper')
 const gasHelper = require('../helpers/gasHelper')
 
 /**
- * VM Extended — exercises the smart-contract engine end-to-end against the live
+ * VM Extended: exercises the smart-contract engine end-to-end against the live
  * regtest stack, going beyond the baseline DEPLOY/EXECUTE happy path:
  *
  *   A. State persistence across separate on-chain executions
  *   B. Revert atomicity (no state / no emissions / failed status)
  *   C. Gas exhaustion (out-of-gas execution, no side effects)
- *   D. Emission round trip — emit.issue mints a token to the contract address
+ *   D. Emission round trip: emit.issue mints a token to the contract address
  *   E. DEPOSIT / WITHDRAW token custody round trip
- *   F. Emission round trip — emit.send pays deposited tokens to a recipient
+ *   F. Emission round trip: emit.send pays deposited tokens to a recipient
  *
  * Every assertion is made against the authoritative indexer DB, not VM return
  * values (which are not persisted on-chain).
  */
-describe('VM Extended — on-chain capabilities', function () {
+describe('VM Extended: on-chain capabilities', function () {
 
     // Coin symbol used in the contract derived address: C:<CHAIN>:<action_index>
     const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
@@ -43,7 +43,7 @@ describe('VM Extended — on-chain capabilities', function () {
         };
     `
 
-    // Writes state AND emits an action, then reverts — both must be discarded.
+    // Writes state AND emits an action, then reverts; both must be discarded.
     const REVERT_ATOMIC = `
         module.exports = function() {
             xchain.state.set('ghost', 'should-not-persist');
@@ -212,7 +212,7 @@ describe('VM Extended — on-chain capabilities', function () {
             const row = await waitForAnyExecution(ci, deployer.address, 'burn')
             assert(row, 'an execution row should be recorded for the out-of-gas attempt')
             // Resource exhaustion collapses to one host-independent consensus token
-            // (which ceiling fires — gas vs the wall-clock net — is a host-timing
+            // (whichever ceiling fires, gas or the wall-clock net, is a host-timing
             // race that must not change the hashed status_id). The gas-specific
             // detail survives un-hashed in error_message.
             assert.strictEqual(row.status, 'out_of_resource', `gas exhaustion should yield status 'out_of_resource' (got: ${row.status})`)
@@ -225,13 +225,13 @@ describe('VM Extended — on-chain capabilities', function () {
         })
     })
 
-    describe('D. Emission — emit.issue mints to the contract address', function () {
+    describe('D. Emission: emit.issue mints to the contract address', function () {
         it('contract issues a token to its own derived address', async function () {
             const dep = await vmHelper.sendDeployV0(deployer, MINTER, 300000)
             const ci = dep.contract.action_index
             const tick = randTick('VMI')
 
-            // The emitted ISSUE pays the issuance fee from the CONTRACT's balance — fund it.
+            // The emitted ISSUE pays the issuance fee from the CONTRACT's balance; fund it.
             await vmHelper.sendDepositV0(deployer, ci, 'XCHAIN', 10)
 
             const ex = await vmHelper.sendExecuteV0(deployer, ci, 'mintToken', [tick])
@@ -275,7 +275,7 @@ describe('VM Extended — on-chain capabilities', function () {
         })
     })
 
-    describe('F. Emission — emit.send pays out deposited tokens', function () {
+    describe('F. Emission: emit.send pays out deposited tokens', function () {
         it('contract sends deposited tokens to a recipient', async function () {
             const tick = randTick('VMS')
             await issueHelper.sendIssueV0(deployer, tick, '1000', '1000', '0', 'vm send test', '1000')

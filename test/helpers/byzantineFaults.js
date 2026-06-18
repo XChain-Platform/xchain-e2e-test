@@ -27,7 +27,7 @@
 // so it never PREPAREs, COMMITs, or applies. The consensus listener is an arrow
 // that reads `_handleMessage` at call time, so replacing it on the instance
 // silences the node without detaching the listener. Models a dead/partitioned
-// follower — the federation must still finalize on the honest majority.
+// follower. The federation must still finalize on the honest majority.
 function silenceValidator(hub) {
     const orig = hub.consensus._handleMessage;
     hub.consensus._handleMessage = () => {};

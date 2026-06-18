@@ -25,7 +25,7 @@ const RegtestMinerConnector = require('../../src/RegtestMinerConnector')
 const XChainEncoderConnector = require('../../src/XChainEncoderConnector')
 const XChainIndexerConnector = require('../../src/XChainIndexerConnector')
 
-describe('Boundary — Connectors', function () {
+describe('Boundary: Connectors', function () {
 
     afterEach(function () {
         sinon.restore()
@@ -53,7 +53,7 @@ describe('Boundary — Connectors', function () {
             })
         })
 
-        describe('waitForTx — polling boundary with error recovery', function () {
+        describe('waitForTx: polling boundary with error recovery', function () {
 
             it('returns true on first success even after initial errors', async function () {
                 const bc = new BlockchainConnector('localhost', '8333', 'user', 'pass')
@@ -96,7 +96,7 @@ describe('Boundary — Connectors', function () {
             })
         })
 
-        describe('waitForUtxos — empty vs non-empty UTXO responses', function () {
+        describe('waitForUtxos: empty vs non-empty UTXO responses', function () {
 
             it('returns false when getUtxosFromAddress always returns empty utxos array', async function () {
                 const tracker = new XChainUtxoTrackerConnector('localhost', '8080')
@@ -142,7 +142,7 @@ describe('Boundary — Connectors', function () {
 
     describe('XChainHubConnector', function () {
 
-        describe('constructor — endpoint handling', function () {
+        describe('constructor: endpoint handling', function () {
 
             it('accepts an array of endpoints', function () {
                 const hub = new XChainHubConnector(['http://hub1:10000', 'http://hub2:10000'])
@@ -165,7 +165,7 @@ describe('Boundary — Connectors', function () {
             })
         })
 
-        describe('parseEndpoints — env var parsing', function () {
+        describe('parseEndpoints: env var parsing', function () {
 
             let savedEnv
 
@@ -269,7 +269,7 @@ describe('Boundary — Connectors', function () {
             })
         })
 
-        describe('ping — with empty endpoint list', function () {
+        describe('ping: with empty endpoint list', function () {
 
             it('returns false when no endpoints configured', async function () {
                 const hub = new XChainHubConnector([])
@@ -279,7 +279,7 @@ describe('Boundary — Connectors', function () {
             })
         })
 
-        describe('getAllConfig — with empty endpoint list', function () {
+        describe('getAllConfig: with empty endpoint list', function () {
 
             it('returns null when no endpoints configured', async function () {
                 const hub = new XChainHubConnector([])

@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * E2E integration — capability staking across a multi-validator hub set
+ * E2E integration: capability staking across a multi-validator hub set
  *
  * Boots N=3 in-process XChainHub validators (MultiValidatorHub) and drives
  * the capability subsystem end-to-end:
@@ -55,7 +55,7 @@ const CAPS = {
     oracle_publish: { doge_address: 'D8vFz4p1L37jdg47kT9V9j1Z2nGw6Lp9aT', doge_wallet: '/data/.dogecoin/wallet.dat' }
 };
 
-describe('MultiValidatorHub — capability staking', function () {
+describe('MultiValidatorHub: capability staking', function () {
     this.timeout(180_000);
 
     let mvh;
@@ -63,7 +63,7 @@ describe('MultiValidatorHub — capability staking', function () {
 
     before(function () {
         if (!process.env.HUB_DB_USER || !process.env.HUB_DB_PASS) {
-            console.log('Skipping capability staking test — HUB_DB_USER/HUB_DB_PASS not set');
+            console.log('Skipping capability staking test: HUB_DB_USER/HUB_DB_PASS not set');
             this.skip();
         }
         capsPath = path.join(os.tmpdir(), 'mvh_caps_' + process.pid + '.json');
@@ -81,7 +81,7 @@ describe('MultiValidatorHub — capability staking', function () {
         await new Promise(r => setTimeout(r, PEER_WAIT_MS));
         const peerCounts = mvh.hubs.map(h => h.peerManager ? h.peerManager.peers.size : 0);
         assert.ok(peerCounts.every(c => c >= COUNT - 1),
-            'each hub should see ' + (COUNT - 1) + ' peers — got ' + peerCounts.join(','));
+            'each hub should see ' + (COUNT - 1) + ' peers; got ' + peerCounts.join(','));
     });
 
     it('runs startCapabilities and passes every self-test once config is present', async function () {
@@ -125,6 +125,6 @@ describe('MultiValidatorHub — capability staking', function () {
         await hub.refreshOwnQualification('0', 102);
         m = await q();
         assert.ok(!m.price && !m.cross_chain && !m.oracle_publish && !m.attestation,
-            'stake 0 should fail closed — no capability qualified');
+            'stake 0 should fail closed: no capability qualified');
     });
 });

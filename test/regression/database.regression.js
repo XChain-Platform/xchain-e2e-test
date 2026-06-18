@@ -43,7 +43,7 @@ function createDb(queryResult) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// P0 — Database Polling & Assertions Regression Tests
+// P0: Database Polling & Assertions Regression Tests
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('[regression:p0] Database Polling & Assertions', function () {
@@ -54,7 +54,7 @@ describe('[regression:p0] Database Polling & Assertions', function () {
 
     // ── R-DB-001 ─────────────────────────────────────────────────────────
 
-    it('[regression:p0] R-DB-001 — waitForIssue returns matching record on first poll', async function () {
+    it('[regression:p0] R-DB-001: waitForIssue returns matching record on first poll', async function () {
         const issueRow = { action_index: 1, tick: 'MYTOKEN', status: 'valid' }
         const { db } = createDb([issueRow])
 
@@ -65,7 +65,7 @@ describe('[regression:p0] Database Polling & Assertions', function () {
 
     // ── R-DB-002 ─────────────────────────────────────────────────────────
 
-    it('[regression:p0] R-DB-002 — waitForIssue returns null after timeMax exceeded', async function () {
+    it('[regression:p0] R-DB-002: waitForIssue returns null after timeMax exceeded', async function () {
         const { db } = createDb([])
 
         const result = await db.waitForIssue({ tick: 'NOEXIST' }, 100)
@@ -74,7 +74,7 @@ describe('[regression:p0] Database Polling & Assertions', function () {
 
     // ── R-DB-003 ─────────────────────────────────────────────────────────
 
-    it('[regression:p0] R-DB-003 — waitForSend filters by source, destination, tick', async function () {
+    it('[regression:p0] R-DB-003: waitForSend filters by source, destination, tick', async function () {
         const sendRow = { tick: 'TOK', source: 'addr1', destination: 'addr2', status: 'valid' }
         const { db, conn } = createDb([sendRow])
 
@@ -95,7 +95,7 @@ describe('[regression:p0] Database Polling & Assertions', function () {
 
     // ── R-DB-004 ─────────────────────────────────────────────────────────
 
-    it('[regression:p0] R-DB-004 — waitForCredit matches address, tick, amount', async function () {
+    it('[regression:p0] R-DB-004: waitForCredit matches address, tick, amount', async function () {
         const creditRow = { address: 'addr1', tick: 'TOK', amount: '100' }
         const { db } = createDb([creditRow])
 
@@ -108,7 +108,7 @@ describe('[regression:p0] Database Polling & Assertions', function () {
 
     // ── R-DB-005 ─────────────────────────────────────────────────────────
 
-    it('[regression:p0] R-DB-005 — waitForDebit matches address, tick, amount', async function () {
+    it('[regression:p0] R-DB-005: waitForDebit matches address, tick, amount', async function () {
         const debitRow = { address: 'addr1', tick: 'TOK', amount: '50' }
         const { db } = createDb([debitRow])
 
@@ -121,7 +121,7 @@ describe('[regression:p0] Database Polling & Assertions', function () {
 
     // ── R-DB-006 ─────────────────────────────────────────────────────────
 
-    it('[regression:p0] R-DB-006 — checkIssue builds parameterized SQL with correct placeholders', async function () {
+    it('[regression:p0] R-DB-006: checkIssue builds parameterized SQL with correct placeholders', async function () {
         const { db, conn } = createDb([])
 
         await db.checkIssue({ source: 'addr1', tick: 'TOK', status: 'valid' })
@@ -130,7 +130,7 @@ describe('[regression:p0] Database Polling & Assertions', function () {
         const sql = conn.query.firstCall.args[0]
         const params = conn.query.firstCall.args[1]
 
-        // Count ? placeholders — should match param count
+        // Count ? placeholders; should match param count
         const placeholderCount = (sql.match(/\?/g) || []).length
         assert.strictEqual(placeholderCount, params.length,
             'placeholder count must match param count')
@@ -138,14 +138,14 @@ describe('[regression:p0] Database Polling & Assertions', function () {
 
     // ── R-DB-007 ─────────────────────────────────────────────────────────
 
-    it('[regression:p0] R-DB-007 — constructor creates pool with connectionLimit=10', function () {
+    it('[regression:p0] R-DB-007: constructor creates pool with connectionLimit=10', function () {
         const { db } = createDb()
         assert.strictEqual(db.connectionPoolParams.connectionLimit, 10)
     })
 
     // ── R-DB-008 ─────────────────────────────────────────────────────────
 
-    it('[regression:p0] R-DB-008 — getConnection retries on pool failure', async function () {
+    it('[regression:p0] R-DB-008: getConnection retries on pool failure', async function () {
         const conn = makeMockConnection()
         const pool = makeMockPool(conn)
 
@@ -165,13 +165,13 @@ describe('[regression:p0] Database Polling & Assertions', function () {
 
     // ── R-DB-009 ─────────────────────────────────────────────────────────
 
-    it('[regression:p0] R-DB-009 — ping executes SELECT 1+1 and returns true', async function () {
+    it('[regression:p0] R-DB-009: ping executes SELECT 1+1 and returns true', async function () {
         const { db } = createDb([{ '1 + 1': 2 }])
         const result = await db.ping()
         assert.strictEqual(result, true)
     })
 
-    it('[regression:p0] R-DB-009b — ping returns false on empty result', async function () {
+    it('[regression:p0] R-DB-009b: ping returns false on empty result', async function () {
         const { db } = createDb([])
         const result = await db.ping()
         assert.strictEqual(result, false)
@@ -179,7 +179,7 @@ describe('[regression:p0] Database Polling & Assertions', function () {
 
     // ── Connection release ───────────────────────────────────────────────
 
-    it('[regression:p0] R-DB-006b — connection is released after checkIssue', async function () {
+    it('[regression:p0] R-DB-006b: connection is released after checkIssue', async function () {
         const { db, conn } = createDb([])
 
         await db.checkIssue({ tick: 'TOK' })
@@ -188,7 +188,7 @@ describe('[regression:p0] Database Polling & Assertions', function () {
 
     // ── isNullOrNullString ───────────────────────────────────────────────
 
-    it('[regression:p0] R-DB-006c — isNullOrNullString correctly identifies null-like values', function () {
+    it('[regression:p0] R-DB-006c: isNullOrNullString correctly identifies null-like values', function () {
         const { db } = createDb()
         assert.strictEqual(db.isNullOrNullString(null), true)
         assert.strictEqual(db.isNullOrNullString(undefined), true)
@@ -199,7 +199,7 @@ describe('[regression:p0] Database Polling & Assertions', function () {
 
     // ── Null filters are omitted from WHERE ──────────────────────────────
 
-    it('[regression:p0] R-DB-006d — null filter fields are omitted from WHERE clause', async function () {
+    it('[regression:p0] R-DB-006d: null filter fields are omitted from WHERE clause', async function () {
         const { db, conn } = createDb([])
 
         await db.checkIssue({ source: null, tick: 'TOK', status: null })
@@ -211,7 +211,7 @@ describe('[regression:p0] Database Polling & Assertions', function () {
 
     // ── Polling with multiple iterations ─────────────────────────────────
 
-    it('[regression:p0] R-DB-001b — waitForIssue polls multiple times before finding record', async function () {
+    it('[regression:p0] R-DB-001b: waitForIssue polls multiple times before finding record', async function () {
         const issueRow = { action_index: 1, tick: 'TOK', status: 'valid' }
         const conn = makeMockConnection()
         conn.query = sinon.stub()
@@ -231,7 +231,7 @@ describe('[regression:p0] Database Polling & Assertions', function () {
 
     // ── transactionConnection override ───────────────────────────────────
 
-    it('[regression:p0] R-DB-008b — getConnection returns transactionConnection when set', async function () {
+    it('[regression:p0] R-DB-008b: getConnection returns transactionConnection when set', async function () {
         const { db } = createDb()
         const txConn = { query: sinon.stub(), release: sinon.stub() }
         db.transactionConnection = txConn

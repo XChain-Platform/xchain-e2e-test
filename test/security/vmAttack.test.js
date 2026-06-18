@@ -15,13 +15,13 @@ const gasHelper = require('../helpers/gasHelper')
 const transactionHelper = require('../transactionHelper')
 
 /**
- * VM Attack — deploys & executes hostile contracts on-chain and proves the
+ * VM Attack: deploys & executes hostile contracts on-chain and proves the
  * indexer CONTAINS them: each malicious EXECUTE is recorded as a failed
  * execution (no escape, no emissions), and block processing keeps advancing
  * (a halted indexer would stop producing rows and time these out). This is the
  * end-to-end complement to the direct-VM adversarial harness.
  */
-describe('VM Attack — hostile contracts on-chain', function () {
+describe('VM Attack: hostile contracts on-chain', function () {
 
     // Classic sandbox-escape attempt via the Function constructor chain.
     const ESCAPE = `module.exports = function(){
@@ -41,7 +41,7 @@ describe('VM Attack — hostile contracts on-chain', function () {
 
     // Bulk-allocation bomb. Historically (Finding A) this made V8 abort() the host
     // process; F3 allocation metering now charges the fill by size, so it hits the
-    // gas ceiling (out_of_gas) BEFORE V8 services it — fast, deterministic, and it
+    // gas ceiling (out_of_gas) BEFORE V8 services it: fast, deterministic, and it
     // never even reaches the out-of-process executor's host-abort containment (which
     // remains the load-bearing defense for paths F3 can't wrap). Either way the
     // hostile contract is contained: a non-valid execution, no emissions, block advances.
@@ -50,7 +50,7 @@ describe('VM Attack — hostile contracts on-chain', function () {
     // The SAME bulk allocation, but in the contract's constructor (initialize).
     // Exercises the DEPLOY status path: a failed constructor deletes the contract
     // row, but its execution row persists, and the consensus-hashed status must
-    // intern as a normalized token (F1) — NOT the raw VM error string. Under F3 the
+    // intern as a normalized token (F1), NOT the raw VM error string. Under F3 the
     // constructor fill is gas-bounded; the consensus token is the collapsed
     // 'out_of_resource' (with the raw out_of_gas detail kept in error_message).
     const CONSTRUCTOR_BOMB = `module.exports = { initialize: function(){ var a = new Array(100000000).fill('x'); return a.length; } };`
@@ -102,7 +102,7 @@ describe('VM Attack — hostile contracts on-chain', function () {
         assert(row, 'loop execution should be recorded')
         // The consensus status collapses the whole resource-exhaustion family
         // (out_of_gas / timeout / out_of_memory / out_of_stack) to one
-        // host-independent token — which ceiling fires (gas vs the wall-clock
+        // host-independent token; which ceiling fires (gas vs the wall-clock
         // net) is a host-timing race that must not change the hashed status_id.
         // The gas-specific detail survives (un-hashed) in error_message.
         assert.strictEqual(row.status, 'out_of_resource', `expected out_of_resource (got: ${row.status})`)
@@ -159,7 +159,7 @@ describe('VM Attack — hostile contracts on-chain', function () {
         // failed constructor deletes the contract). Broadcast the DEPLOY directly with
         // a constructor param (required to run the constructor) and poll the execution.
         // Inline CODE_ENCODING is base64 (DEPLOY_BASE64_CODE active from genesis on regtest);
-        // hex would be rejected at decode, so the constructor — the thing under test — never runs.
+        // hex would be rejected at decode, so the constructor (the thing under test) never runs.
         const codeB64 = Buffer.from(CONSTRUCTOR_BOMB, 'utf8').toString('base64')
         await transactionHelper.createAndSendTransaction(ctorDeployer, `DEPLOY|0|${codeB64}|200000|1`, null, [], 'P2SH')
         let row = null
@@ -185,7 +185,7 @@ describe('VM Attack — hostile contracts on-chain', function () {
 
     it('the indexer is still alive and processing after the attacks', async function () {
         const before = await tip()
-        // A normal deploy must still succeed — proves block processing did not halt.
+        // A normal deploy must still succeed; proves block processing did not halt.
         const dep = await vmHelper.sendDeployV0(deployer, `module.exports = function(){ return 'ok'; };`, 200000)
         assert(dep.contract, 'a normal contract should still deploy after the attacks')
         assert.strictEqual(dep.contract.status, 'valid')

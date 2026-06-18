@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// Integration tests for negative test assertions — verifying the E2E suite
+// Integration tests for negative test assertions, verifying the E2E suite
 // can correctly detect and report expected failures.
 
 const assert = require('assert')
@@ -24,7 +24,7 @@ const sendHelper = require('../../../test/helpers/sendHelper')
 const transactionHelper = require('../../../test/transactionHelper')
 const dbRows = require('../fixtures/dbRows')
 
-describe('Error Propagation — Negative Test Assertions', function () {
+describe('Error Propagation: Negative Test Assertions', function () {
 
     let savedGlobals
     let addressInfo
@@ -84,14 +84,14 @@ describe('Error Propagation — Negative Test Assertions', function () {
     describe('Scenario 3.8.2: Timeout vs invalid status distinction', function () {
 
         it('null result from waitForSend is distinguishable from invalid row', function () {
-            // Timeout returns null — the test assertion fails with a clear message
+            // Timeout returns null; the test assertion fails with a clear message
             const timeoutResult = null
             assert.throws(
                 () => assert(timeoutResult, 'Send should be rejected with insufficient funds'),
                 /Send should be rejected with insufficient funds/
             )
 
-            // Invalid row exists — the assertion passes
+            // Invalid row exists, so the assertion passes
             const invalidRow = dbRows.sendRow({ status: 'invalid: insufficient funds' })
             assert(invalidRow, 'Send should be rejected with insufficient funds')
         })

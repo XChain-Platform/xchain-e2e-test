@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Track C.2 — MULTI-HUB fiat oracle round → FIAT-dispenser consumption.
+ * Track C.2: MULTI-HUB fiat oracle round → FIAT-dispenser consumption.
  *
  * C3 chained a SINGLE-validator fiat round → finalized BTC/USD row → the
  * indexer's real reversePriceMatch consumption. The multi-validator version was
@@ -125,14 +125,14 @@ function makePriceDb(hubDb) {
     };
 }
 
-describe('MultiValidatorHub — multi-hub fiat oracle round → FIAT dispenser consumption (C.2)', function () {
+describe('MultiValidatorHub: multi-hub fiat oracle round → FIAT dispenser consumption (C.2)', function () {
     this.timeout(240_000);
 
     let db, mvh, seed, oracle;
 
     before(async function () {
         db = await startDisposableHubDb();
-        if (!db) { console.log('Skipping multi-hub fiat oracle — no env DB and Docker unavailable'); this.skip(); }
+        if (!db) { console.log('Skipping multi-hub fiat oracle: no env DB and Docker unavailable'); this.skip(); }
         mvh = new MultiValidatorHub({ count: 4, basePort: 26100, startAttestation: false });
         await mvh.start();
         await sleep(PEER_WAIT_MS);

@@ -23,9 +23,9 @@ const attestationHelper = require('../helpers/attestationHelper')
  *      `attestation` capability (default min_stake = 1000 XCHAIN).
  *   2. Deploy a contract that emits xchain.attestation.request(...) and
  *      defines a handleResponse callback.
- *   3. Execute askOracle() — indexer should create an attestation_requests
+ *   3. Execute askOracle(). The indexer should create an attestation_requests
  *      row with status='pending'.
- *   4. Broadcast a real, signed ATTEST v1 (response) — indexer verifies the
+ *   4. Broadcast a real, signed ATTEST v1 (response). The indexer verifies the
  *      signature against the real `attestation` capability check, marks the
  *      request fulfilled, and injects a system EXECUTE that runs the callback.
  *   5. Assert callback executed and wrote the expected values to contract state.
@@ -33,7 +33,7 @@ const attestationHelper = require('../helpers/attestationHelper')
  * Spec: claude/reports/specs/2026-05-24_external-attestation-framework.md
  */
 
-describe('Attestation framework — round-trip request → response → callback', function () {
+describe('Attestation framework: round-trip request → response → callback', function () {
 
     let operatorAddr  = null
     let validator     = null
@@ -47,9 +47,9 @@ describe('Attestation framework — round-trip request → response → callback
 
     // Stake a validator from its OWN distinct funded source. SWQ source-dedup (active on
     // regtest at block 0) collapses every key sharing a staking source into ONE slot in a
-    // request's responsible set — so staking all validators from one operator address would
+    // request's responsible set, so staking all validators from one operator address would
     // leave only a single survivor (the redundancy=3 cap-at-1/3 bug). A distinct source per
-    // validator keeps them all eligible. Does NOT advance blocks — the caller mines past the
+    // validator keeps them all eligible. Does NOT advance blocks; the caller mines past the
     // activation delay once after staking a batch.
     async function stakeValidatorFromOwnSource(v) {
         // Distinct HD address index per validator (0,1,2,…). cryptoHelper caches ONE
@@ -126,13 +126,13 @@ module.exports = {
     before(async function () {
         // Attestation framework rides on STAKE + EXECUTE (both BTC-only protocol features).
         if (COIN_CODE !== 'BTC') {
-            console.log('Attestation framework requires BTC chain — skipping on ' + COIN_CODE)
+            console.log('Attestation framework requires BTC chain; skipping on ' + COIN_CODE)
             this.skip()
             return
         }
 
         // Fund an operator address that'll own the contract AND broadcast the response actions.
-        // (Validators are staked from their OWN distinct sources — see stakeValidatorFromOwnSource.)
+        // (Validators are staked from their OWN distinct sources; see stakeValidatorFromOwnSource.)
         operatorAddr = await cryptoHelper.getNewFundedAddress(
             'attest-op', COIN, NETWORK, null, 'legacy', 0, 0.02
         )
@@ -269,7 +269,7 @@ module.exports = {
     })
 
     it('rejects a signature from an unstaked pubkey', async function () {
-        // Fresh validator with no stake — sig verification should drop their signature
+        // Fresh validator with no stake; sig verification should drop their signature
         let badValidator = new attestationHelper.MockAttestationValidator()
 
         // Need a fresh pending request to test against
@@ -278,7 +278,7 @@ module.exports = {
         let request = await indexerDatabase.waitForAttestationRequest({ txHash: exec.txHash, requestStatus: 'pending' })
         assert(request, 'second pending request should exist')
 
-        // Broadcast a response signed only by the unstaked validator — should land as 'invalid'
+        // Broadcast a response signed only by the unstaked validator; should land as 'invalid'
         await attestationHelper.broadcastAttestationResponse(operatorAddr, {
             requestId:       request.request_id,
             providerId:      'http_get',
@@ -306,7 +306,7 @@ module.exports = {
     })
 
     it('accepts a redundancy=3 response with 3 valid signatures (PBFT quorum)', async function () {
-        // Stake two additional validators (each from its OWN distinct source — see
+        // Stake two additional validators (each from its OWN distinct source; see
         // stakeValidatorFromOwnSource) so the snapshot has 3 source-distinct validators at the
         // request block. With 3 validators and REDUNDANCY=3 the responsible set is all 3, so a
         // 3-signature response can reach quorum. (Staking both from the operator address would
@@ -373,7 +373,7 @@ module.exports = {
         let extras = this.test.parent.ctx.extraValidators
         // Skip if the prior test didn't run (e.g. user used --grep)
         if (!extras || extras.length < 1) {
-            console.log('Skipping insufficient-sigs test — prior 3-stake setup missing')
+            console.log('Skipping insufficient-sigs test: prior 3-stake setup missing')
             this.skip()
             return
         }
@@ -417,8 +417,8 @@ module.exports = {
     // Non-`ok` response statuses (retryable).
     //
     // ATTEST v1 carries one of ['ok','timeout','no_quorum','provider_error',
-    // 'expired']. The three RETRYABLE statuses — timeout / no_quorum /
-    // provider_error — are NOT terminal: even a fully valid-signature response
+    // 'expired']. The three RETRYABLE statuses (timeout / no_quorum /
+    // provider_error) are NOT terminal: even a fully valid-signature response
     // carrying one of them must leave the originating request `pending` (another
     // federation round may still reach `ok` before the deadline) and must NOT
     // inject a callback EXECUTE. Only `ok` (fulfilled) closes the request and
@@ -430,7 +430,7 @@ module.exports = {
 
     RETRYABLE_STATUSES.forEach(function (retryStatus) {
         it('leaves the request pending and injects no callback for a valid response with status=' + retryStatus, async function () {
-            // Fresh pending request (redundancy=1 — a single staked validator sig suffices)
+            // Fresh pending request (redundancy=1; a single staked validator sig suffices)
             let exec = await vmHelper.sendExecuteV0(operatorAddr, contractIndex, 'askOracle', ['https://example.com/v1/retry/' + retryStatus])
             assert.strictEqual(exec.execution.status, 'valid', 'execute status: ' + exec.execution.status)
             let request = await indexerDatabase.waitForAttestationRequest({ txHash: exec.txHash, requestStatus: 'pending' })
@@ -447,7 +447,7 @@ module.exports = {
 
             // Broadcast a properly-signed response carrying the retryable status. The
             // responsible validator's signature is valid (validSigs=1 >= redundancy=1), so
-            // the response row itself lands status='valid' — this is exactly the
+            // the response row itself lands status='valid': this is exactly the
             // RETRYABLE_STATUSES case: a valid response that must still leave the
             // request open (distinct from an invalid-sig response, covered above).
             await attestationHelper.broadcastAttestationResponse(operatorAddr, {
@@ -467,7 +467,7 @@ module.exports = {
             })
             assert(response, 'response row should exist with response_status=' + retryStatus + ' and status=valid')
 
-            // Invariant 1: the request must NOT flip — it stays pending for a retry
+            // Invariant 1: the request must NOT flip: it stays pending for a retry
             let stillPending = await indexerDatabase.checkAttestationRequest({
                 requestId:     requestId,
                 requestStatus: 'pending'
@@ -490,11 +490,11 @@ module.exports = {
         let requestId = request.request_id
 
         // Both rounds must be signed by the request's responsible validator (top-1 over the
-        // full staked set, source-deduped) — the same key the indexer will accept for this
+        // full staked set, source-deduped): the same key the indexer will accept for this
         // request_id. The two rounds target the SAME request_id, so they share one signer.
         let signers = attestationHelper.computeResponsibleSigners(requestId, 1, stakedValidators)
 
-        // Round 1 — a valid no_quorum response leaves the request pending
+        // Round 1: a valid no_quorum response leaves the request pending
         await attestationHelper.broadcastAttestationResponse(operatorAddr, {
             requestId:       requestId,
             providerId:      'http_get',
@@ -513,7 +513,7 @@ module.exports = {
         let stillPending = await indexerDatabase.checkAttestationRequest({ requestId: requestId, requestStatus: 'pending' })
         assert(stillPending, 'request should remain pending after the no_quorum round')
 
-        // Round 2 — a subsequent ok response on the SAME request fulfills it and fires the callback
+        // Round 2: a subsequent ok response on the SAME request fulfills it and fires the callback
         const okPayload = '{"score":9}'
         await attestationHelper.broadcastAttestationResponse(operatorAddr, {
             requestId:       requestId,

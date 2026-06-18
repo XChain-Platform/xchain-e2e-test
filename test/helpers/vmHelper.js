@@ -19,7 +19,7 @@ module.exports = {
 
         console.log("Creating and sending DEPLOY V0 tx...")
         // DEPLOY carries the full contract bytecode (base64-encoded) which can exceed
-        // OP_RETURN limits — force P2SH (the helper supports its 2-tx finalizer).
+        // OP_RETURN limits, so force P2SH (the helper supports its 2-tx finalizer).
         // Auto-selected P2WSH encoding hits "Not finalized" because the helper's
         // PSBT signing path only handles legacy P2PKH inputs + the P2SH finalizer.
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg, null, [], "P2SH")
@@ -34,7 +34,7 @@ module.exports = {
         return { txHash, contract: contractRow }
     },
 
-    // DEPLOY v1 — stakeable contract. cooldownBlocks + slashDestination are required for the
+    // DEPLOY v1 (stakeable contract). cooldownBlocks + slashDestination are required for the
     // contract to accept STAKE v3. slashDestination may be the string 'BURN' to route slashed
     // funds to the chain's burn address. Pass an empty string for constructorParams to skip.
     async sendDeployV1(addressInfo, code, gasLimit, constructorParams, cooldownBlocks, slashDestination){
@@ -92,7 +92,7 @@ module.exports = {
         // For P2SH-encoded txes the broadcast txid returned by sendrawtransaction
         // does not match the on-chain hash recorded in index_transactions, so
         // the strict txHash filter either catches the row on the first poll or
-        // never matches at all — give it a short window, then fall back to a
+        // never matches at all. Give it a short window, then fall back to a
         // no-txHash search using the remaining (contract, caller, method) tuple.
         let executionRow = await indexerDatabase.waitForExecution({
             contractIndex: contractActionIndex,
@@ -115,7 +115,7 @@ module.exports = {
 
     // EXECUTE expected to FAIL (reverted / rejected emission). The valid-only
     // waitForExecution can never observe a failed execution, so broadcast and poll the
-    // row status-agnostically on (contract, caller, method) — mirrors sendDeployV1Invalid.
+    // row status-agnostically on (contract, caller, method), mirroring sendDeployV1Invalid.
     async sendExecuteV0Invalid(addressInfo, contractActionIndex, method, params, timeMax = 40000){
         let address = addressInfo["address"]
         let msg = "EXECUTE|0|" + contractActionIndex + "|" + method

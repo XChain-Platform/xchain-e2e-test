@@ -46,7 +46,7 @@ function validateHubConfig(hubConfigs, coin, network) {
 // Simulate what happens when bootstrap reads a missing key without validation
 function accessConfigUnsafe(hubConfigs, coin, network) {
     const cfg = hubConfigs[coin][network]
-    // This is what initialCheck.test.js does — direct property access
+    // This is what initialCheck.test.js does (direct property access)
     return {
         encoderPort: cfg['xchain-encoder']['server_port'],
         utxoPort: cfg['xchain-utxo-tracker']['server_port'],
@@ -54,7 +54,7 @@ function accessConfigUnsafe(hubConfigs, coin, network) {
     }
 }
 
-describe('Chaos Experiment 12 — Partial Hub Config @P1', function () {
+describe('Chaos Experiment 12: Partial Hub Config @P1', function () {
 
     function cloneConfig() {
         return JSON.parse(JSON.stringify(hubFixtures.validConfig))

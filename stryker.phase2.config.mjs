@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Stryker Mutation Testing — Phase 2 Configuration
+ * Stryker Mutation Testing: Phase 2 Configuration
  *
  * Extends Phase 1 by adding integration tests to the test spec.
  * Integration tests exercise connectors and db.js with mock fixtures,

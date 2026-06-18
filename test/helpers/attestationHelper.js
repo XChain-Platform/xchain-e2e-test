@@ -11,13 +11,13 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * E2E test helper — Mock Attestation Validator
+ * E2E test helper: Mock Attestation Validator
  *
  * Generates a real Ed25519 keypair and signs ATTEST v1 (response) bodies
  * using the same canonical message the indexer's verifier expects.
  *
  * This is "mock" only in the sense that the validator runs inside the
- * test process (no hub) — it signs with a real key whose pubkey has been
+ * test process (no hub); it signs with a real key whose pubkey has been
  * staked via the regular STAKE action, so the indexer's capability check
  * + Ed25519 verification exercise the production code paths end-to-end.
  *
@@ -26,7 +26,7 @@
 
 const crypto = require('crypto');
 const transactionHelper = require('../transactionHelper');
-// Sibling modules — same EQUIV header + SWQ gate the indexer's verifier uses (attest.js).
+// Sibling modules: same EQUIV header + SWQ gate the indexer's verifier uses (attest.js).
 const eq  = require('../../../xchain-indexer/src/equivocation_header.js');
 const swq = require('../../../xchain-indexer/src/stake_weighted_quorum.js');
 
@@ -49,7 +49,7 @@ class MockAttestationValidator {
     // At/above the EQUIV flag-day the indexer wraps that raw string in the uniform
     // header (TAG=XATTEST, ROUND_ID=request_id, VIEW=0); we must wrap identically or
     // ed25519 verification fails. regtest/testnet activate at block 0, so the e2e is
-    // always wrapped — the wrapped bytes don't depend on the block value (only the
+    // always wrapped; the wrapped bytes don't depend on the block value (only the
     // activation gate does), so a default snapshotBlock of 0 reproduces it byte-for-byte.
     _canonical(requestId, providerId, responsePayload, status, meta, snapshotBlock, network) {
         const responseHash = crypto.createHash('sha256').update(String(responsePayload || ''), 'utf8').digest('hex');
@@ -65,7 +65,7 @@ class MockAttestationValidator {
     }
 }
 
-// Mirror of xchain-indexer attest.js _computeResponsibleSet — picks the request's
+// Mirror of xchain-indexer attest.js _computeResponsibleSet: picks the request's
 // deterministic responsible signer set so the test signs with exactly the keys the
 // indexer will accept. Sorts the staked validator pool by SHA256(request_id || pubkey);
 // at/above SWQ activation (regtest/testnet → block 0) dedupes by staking source (one
@@ -98,12 +98,12 @@ function computeResponsibleSigners(requestId, redundancy, validators, snapshotBl
 
 // Build the pipe-delimited ATTEST v1 (response) wire payload signed by N validators.
 // RESPONSE_PAYLOAD travels base64 on the wire (binary-safe, no embedded `|`).
-// Sigs hash the decoded bytes, which round-trip-equal the raw utf8 bytes —
+// Sigs hash the decoded bytes, which round-trip-equal the raw utf8 bytes,
 // so MockAttestationValidator.sign() is unchanged.
 function buildAttestationResponseAction({ requestId, providerId, responsePayload, status, meta, validators, snapshotBlock, network }) {
     // EQUIV gating mirrors the indexer: the request's block + run network. Callers may
     // pass the v0 request's block_index explicitly; otherwise default to the run network
-    // (regtest/testnet → always active) at block 0 — byte-identical on those networks.
+    // (regtest/testnet → always active) at block 0, byte-identical on those networks.
     const net = network || process.env.NETWORK || 'regtest';
     const sb  = (snapshotBlock != null) ? Number(snapshotBlock) : 0;
     const sigCount = validators.length;

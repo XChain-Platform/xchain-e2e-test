@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * E2E test — AttestationPublisher operator-signer wiring (F13 regression)
+ * E2E test: AttestationPublisher operator-signer wiring (F13 regression)
  *
  * Finding F13: XChainHub.startAttestation() constructed AttestationPublisher
  * without wiring the HUB_SIGNER_MODULE hooks, so a real validator deployment
@@ -49,7 +49,7 @@ describe('[federation] AttestationPublisher operator-signer wiring (F13)', funct
 
     before(async function () {
         if (!process.env.HUB_DB_USER || !process.env.HUB_DB_PASS) {
-            console.log('        (skipping — HUB_DB_USER/HUB_DB_PASS not set)')
+            console.log('        (skipping: HUB_DB_USER/HUB_DB_PASS not set)')
             this.skip()
         }
 

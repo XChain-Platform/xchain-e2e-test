@@ -83,7 +83,7 @@ describe('Dispenser Helper → DB Assertion Pipeline', function () {
                 'test dispenser' // memo
             )
 
-            // Verify message construction — pipe-delimited order incl. the
+            // Verify message construction: pipe-delimited order incl. the
             // GIVE_OWNERSHIP (empty = 0) and ORACLE_ADDRESS slots:
             // VERSION|GIVE_COIN|GIVE_TICK|GIVE_AMOUNT|GIVE_OWNERSHIP|GIVE_ESCROW|GET_COIN|GET_TICK|GET_AMOUNT|GET_ADDRESS|FIAT_CODE|FIAT_AMOUNT|ORACLE_ADDRESS|EXPIRATION|ALLOW_LIST|BLOCK_LIST|MEMO
             const message = createTxStub.firstCall.args[1]

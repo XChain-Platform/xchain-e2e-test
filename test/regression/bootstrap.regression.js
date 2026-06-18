@@ -27,7 +27,7 @@ const Database    = require('../../src/db')
 const hubFixture  = require('../integration/fixtures/hub')
 
 // ═══════════════════════════════════════════════════════════════════════════
-// P0 — Bootstrap Orchestration Regression Tests
+// P0: Bootstrap Orchestration Regression Tests
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('[regression:p0] Bootstrap Orchestration', function () {
@@ -36,25 +36,25 @@ describe('[regression:p0] Bootstrap Orchestration', function () {
         sinon.restore()
     })
 
-    // ── R-BOOT-001 — env var parsing ─────────────────────────────────────
+    // ── R-BOOT-001: env var parsing ──────────────────────────────────────
 
     describe('Environment variable parsing', function () {
 
-        it('[regression:p0] R-BOOT-001 — COIN_CODE_MAP maps known coins correctly', function () {
+        it('[regression:p0] R-BOOT-001: COIN_CODE_MAP maps known coins correctly', function () {
             const COIN_CODE_MAP = { bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' }
             assert.strictEqual(COIN_CODE_MAP['bitcoin'], 'BTC')
             assert.strictEqual(COIN_CODE_MAP['litecoin'], 'LTC')
             assert.strictEqual(COIN_CODE_MAP['dogecoin'], 'DOGE')
         })
 
-        it('[regression:p0] R-BOOT-001b — COIN_CODE falls back to uppercase slice for unknown coins', function () {
+        it('[regression:p0] R-BOOT-001b: COIN_CODE falls back to uppercase slice for unknown coins', function () {
             const COIN_CODE_MAP = { bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' }
             const coin = 'ethereum'
             const code = COIN_CODE_MAP[coin] || coin.toUpperCase().slice(0, 3)
             assert.strictEqual(code, 'ETH')
         })
 
-        it('[regression:p0] R-BOOT-001c — NETWORK split fallback extracts coin and network', function () {
+        it('[regression:p0] R-BOOT-001c: NETWORK split fallback extracts coin and network', function () {
             // Replicates the logic: if COIN is null, split NETWORK on "-"
             const NETWORK = 'bitcoin-regtest'
             const parts = NETWORK.split('-')
@@ -63,11 +63,11 @@ describe('[regression:p0] Bootstrap Orchestration', function () {
         })
     })
 
-    // ── R-BOOT-002 — Hub discovery fallback ──────────────────────────────
+    // ── R-BOOT-002: Hub discovery fallback ──────────────────────────────
 
     describe('Hub discovery fallback', function () {
 
-        it('[regression:p0] R-BOOT-002 — hub config populates all connector URLs', function () {
+        it('[regression:p0] R-BOOT-002: hub config populates all connector URLs', function () {
             const config = hubFixture.validConfig
             const coin = 'bitcoin'
             const network = 'regtest'
@@ -95,18 +95,18 @@ describe('[regression:p0] Bootstrap Orchestration', function () {
             assert.strictEqual(minerPort, 3033)
         })
 
-        it('[regression:p0] R-BOOT-002b — hub discovery uses localhost for Docker convention', function () {
+        it('[regression:p0] R-BOOT-002b: hub discovery uses localhost for Docker convention', function () {
             // In initialCheck.test.js, all hub-discovered URLs are hardcoded to "localhost"
             const DATABASE_URL = 'localhost'
             assert.strictEqual(DATABASE_URL, 'localhost')
         })
     })
 
-    // ── R-BOOT-003 — connector instantiation ─────────────────────────────
+    // ── R-BOOT-003: connector instantiation ─────────────────────────────
 
     describe('Connector instantiation', function () {
 
-        it('[regression:p0] R-BOOT-003 — all 6 connectors instantiate from config', function () {
+        it('[regression:p0] R-BOOT-003: all 6 connectors instantiate from config', function () {
             const node    = new BlockchainConnector('localhost', 18443, 'rpcuser', 'rpcpass')
             const tracker = new XChainUtxoTrackerConnector('localhost', 3030)
             const encoder = new XChainEncoderConnector('localhost', 3031)
@@ -127,11 +127,11 @@ describe('[regression:p0] Bootstrap Orchestration', function () {
         })
     })
 
-    // ── R-BOOT-007 — mining time configuration ──────────────────────────
+    // ── R-BOOT-007: mining time configuration ───────────────────────────
 
     describe('Mining time configuration', function () {
 
-        it('[regression:p0] R-BOOT-007 — setMiningTime accepts 1000, 1000 params', async function () {
+        it('[regression:p0] R-BOOT-007: setMiningTime accepts 1000, 1000 params', async function () {
             const axios = require('axios')
             const stub = sinon.stub(axios, 'post').resolves({
                 data: { jsonrpc: '2.0', result: true, id: 1 }
@@ -146,11 +146,11 @@ describe('[regression:p0] Bootstrap Orchestration', function () {
         })
     })
 
-    // ── R-BOOT-008 — global COIN/NETWORK/NETWORK_OBJECT ─────────────────
+    // ── R-BOOT-008: global COIN/NETWORK/NETWORK_OBJECT ──────────────────
 
     describe('Global config resolution', function () {
 
-        it('[regression:p0] R-BOOT-008 — CryptoNetworks.getBitcoinJsNetwork returns valid config', function () {
+        it('[regression:p0] R-BOOT-008: CryptoNetworks.getBitcoinJsNetwork returns valid config', function () {
             const network = CryptoNetworks.getBitcoinJsNetwork('bitcoin-regtest')
             assert.ok(network, 'should return a network object')
             assert.strictEqual(network.dustThreshold, 546)
@@ -159,7 +159,7 @@ describe('[regression:p0] Bootstrap Orchestration', function () {
             assert.ok(network.bip32.private, 'should have bip32.private')
         })
 
-        it('[regression:p0] R-BOOT-008b — all 9 coin/network combos return valid configs', function () {
+        it('[regression:p0] R-BOOT-008b: all 9 coin/network combos return valid configs', function () {
             // Litecoin's dust relay fee is 10× Bitcoin's → 5460 litoshi floor
             const combos = {
                 'bitcoin-mainnet': 546, 'bitcoin-testnet': 546, 'bitcoin-regtest': 546,
@@ -174,11 +174,11 @@ describe('[regression:p0] Bootstrap Orchestration', function () {
         })
     })
 
-    // ── R-BOOT-009 — graceful failure ────────────────────────────────────
+    // ── R-BOOT-009: graceful failure ─────────────────────────────────────
 
     describe('Graceful failure on missing service', function () {
 
-        it('[regression:p0] R-BOOT-009 — encoder ping returns false when service is down', async function () {
+        it('[regression:p0] R-BOOT-009: encoder ping returns false when service is down', async function () {
             const axios = require('axios')
             sinon.stub(axios, 'post').rejects(new Error('ECONNREFUSED'))
 
@@ -187,7 +187,7 @@ describe('[regression:p0] Bootstrap Orchestration', function () {
             assert.strictEqual(result, false)
         })
 
-        it('[regression:p0] R-BOOT-009b — indexer ping returns false when service is down', async function () {
+        it('[regression:p0] R-BOOT-009b: indexer ping returns false when service is down', async function () {
             const axios = require('axios')
             sinon.stub(axios, 'post').rejects(new Error('ECONNREFUSED'))
 

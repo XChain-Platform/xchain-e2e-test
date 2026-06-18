@@ -73,7 +73,7 @@ module.exports = {
         console.log("Creating and sending DESTROY V2 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, destroyMessage)
 
-        // Note: same indexer limitation as v1 — only last destroy survives.
+        // Note: same indexer limitation as v1, only last destroy survives.
         let last = destroys[destroys.length - 1]
         console.log("Waiting for DESTROY in the database...")
         let destroyRow = await indexerDatabase.waitForDestroy({

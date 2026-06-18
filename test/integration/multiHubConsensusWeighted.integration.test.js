@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * L2 integration — STAKE_WEIGHTED_QUORUM (WI-1) config-change PBFT.
+ * L2 integration: STAKE_WEIGHTED_QUORUM (WI-1) config-change PBFT.
  *
  * The weighted twin of multiHubConsensus.integration.test.js. Boots in-process
  * XChainHub validators with a SOURCE-keyed weight snapshot (seedWeightSnapshot)
@@ -19,12 +19,12 @@
  * proves the WI-1 thesis end to end over real P2P:
  *
  *   - NEGATIVE (the crux): a set of live hubs that is a COUNT majority (meets the
- *     legacy 2f+1 quorum) but a STAKE minority CANNOT apply a config change — the
+ *     legacy 2f+1 quorum) but a STAKE minority CANNOT apply a config change;
  *     whale source sits in the snapshot (counts toward S) but is offline, so its
  *     weight is never voted. Under the old count rule these 3 votes WOULD apply;
  *     under WI-1 they must not.
  *   - POSITIVE: a healthy weighted federation (whale online) reaches the weighted
- *     quorum and applies the change on EVERY hub — the weighted path doesn't
+ *     quorum and applies the change on EVERY hub (the weighted path doesn't
  *     deadlock a normal round.
  *
  * No indexer / no chain: seedWeightSnapshot injects the snapshot + sets
@@ -59,7 +59,7 @@ function findLeader(mvh) {
     });
 }
 
-describe('MultiValidatorHub — STAKE_WEIGHTED_QUORUM config-change PBFT (WI-1, L2)', function () {
+describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM config-change PBFT (WI-1, L2)', function () {
     this.timeout(240_000);
 
     // ── NEGATIVE: count-majority / stake-minority cannot finalize ────────────
@@ -68,7 +68,7 @@ describe('MultiValidatorHub — STAKE_WEIGHTED_QUORUM config-change PBFT (WI-1, 
 
         before(async function () {
             db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping weighted-PBFT L2 (negative) — no env DB and Docker unavailable'); this.skip(); }
+            if (!db) { console.log('Skipping weighted-PBFT L2 (negative): no env DB and Docker unavailable'); this.skip(); }
             // 3 small hubs live; a 4th WHALE source is in the snapshot but has no hub
             // (offline) so its weight is never voted.
             mvh = new MultiValidatorHub({ count: 3, basePort: 32000 });
@@ -80,7 +80,7 @@ describe('MultiValidatorHub — STAKE_WEIGHTED_QUORUM config-change PBFT (WI-1, 
                     { pubkey: ids[0].pubkeyHex, source: 'sA',    weight: '1000' },
                     { pubkey: ids[1].pubkeyHex, source: 'sB',    weight: '1000' },
                     { pubkey: ids[2].pubkeyHex, source: 'sC',    weight: '1000' },
-                    // Whale source — in the snapshot (S includes it) but offline.
+                    // Whale source: in the snapshot (S includes it) but offline.
                     { pubkey: 'ff'.repeat(32),  source: 'whale', weight: '7000' },
                 ],
             });
@@ -93,9 +93,9 @@ describe('MultiValidatorHub — STAKE_WEIGHTED_QUORUM config-change PBFT (WI-1, 
             if (db)  { await db.stop(); }
         });
 
-        it('count quorum is met (3 of 4) yet the weighted tally is not — config never applies', async function () {
+        it('count quorum is met (3 of 4) yet the weighted tally is not; config never applies', async function () {
             // Sanity: the round-locked COUNT quorum is 3, which the 3 live hubs WOULD
-            // satisfy under the legacy rule — so a non-apply proves weighting gates.
+            // satisfy under the legacy rule, so a non-apply proves weighting gates.
             const countQuorum = mvh.hubs[0].consensus.hub.capabilitySnapshot.getQuorum(seed.snapshot);
             assert.strictEqual(countQuorum, 3, 'expected count quorum 3 for snapshot N=4');
 
@@ -105,7 +105,7 @@ describe('MultiValidatorHub — STAKE_WEIGHTED_QUORUM config-change PBFT (WI-1, 
             assert.ok(leader, 'no round leader among the live hubs');
 
             // The round can never reach weighted quorum, so the propose promise will
-            // reject on timeout — fire-and-forget and assert the change never lands.
+            // reject on timeout; fire-and-forget and assert the change never lands.
             leader.addParametersFromJson(config).catch(() => {});
             await sleep(STALL_WAIT_MS);
 
@@ -124,7 +124,7 @@ describe('MultiValidatorHub — STAKE_WEIGHTED_QUORUM config-change PBFT (WI-1, 
 
         before(async function () {
             db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping weighted-PBFT L2 (positive) — no env DB and Docker unavailable'); this.skip(); }
+            if (!db) { console.log('Skipping weighted-PBFT L2 (positive): no env DB and Docker unavailable'); this.skip(); }
             // 4 hubs: three small + one whale, all live (uneven stake).
             mvh = new MultiValidatorHub({ count: 4, basePort: 32100 });
             await mvh.start();

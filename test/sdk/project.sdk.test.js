@@ -17,7 +17,7 @@
  * Project registries are a composition of existing primitives, not a
  * new action (spec: protocol/Project_Registry.md). A project is a
  * TICK; its official-token roster is a TICK-type LIST attested by a
- * LINK to the project's ISSUE — valid only from the project tick's
+ * LINK to the project's ISSUE, valid only from the project tick's
  * current owner. This suite drives the live regtest stack via
  * sdk.submitAction, dogfoods the sdk.project.* builders, and
  * exercises the authority rule end-to-end:
@@ -39,7 +39,7 @@ function expectInvalid(opts) { return submitOpts(Object.assign({ requireValid: f
 
 // setRoster drives two submits inside the SDK (LIST then LINK) without the
 // submit() helper's quiesce+retry barrier, so wrap the whole recipe in the
-// same transient-stack retry. Only the first leg (LIST) races the tracker —
+// same transient-stack retry. Only the first leg (LIST) races the tracker;
 // the LINK leg waits for the LIST to index, which settles the stack.
 async function setRosterWithRetry(sdk, wif, params, opts, attempts = 6) {
     let lastErr;
@@ -59,7 +59,7 @@ async function setRosterWithRetry(sdk, wif, params, opts, attempts = 6) {
 }
 
 // submitAction's `indexed` result is a transaction ({ actions: [{ action_index }] }) on
-// the polling path, or a single action on the WS path — handle both.
+// the polling path, or a single action on the WS path; handle both.
 function actionIndexOf(indexed) {
     if (!indexed) return undefined;
     if (indexed.action_index !== undefined && indexed.action_index !== null) return indexed.action_index;
@@ -87,7 +87,7 @@ describe('[sdk] Project registry (TICK + tick-LIST + owner-validated LINK)', fun
         console.log('    [sdk] owner=' + owner.address + ' other=' + other.address);
 
         // The project tick (the registry anchor) + two member tokens issued by
-        // the community member ("other") under their own names — the curated
+        // the community member ("other") under their own names; the curated
         // directory model.
         projectTick = uniqueTick('PROJ');
         memberA     = uniqueTick('MEMA');
@@ -135,7 +135,7 @@ describe('[sdk] Project registry (TICK + tick-LIST + owner-validated LINK)', fun
     });
 
     it('a NON-owner cannot attest a roster against the project (invalid LINK)', async function () {
-        // "other" publishes their own list — LIST itself is permissionless...
+        // "other" publishes their own list (LIST itself is permissionless)...
         const list = await submit(sdk,
             { action: 'LIST', params: sdk.project.rosterParams({ ticks: [memberA] }) },
             { pubkey: other.address, change: other.address },

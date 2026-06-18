@@ -25,7 +25,7 @@ const ECPair = ECPairFactory(ecc)
 const { saveGlobals, restoreGlobals, GLOBAL_KEYS } = require('./chaos-helpers')
 const XChainUtxoTrackerConnector = require('../../src/XChainUtxoTrackerConnector')
 
-describe('Chaos Experiment 7 — UTXO Race Condition @P1', function () {
+describe('Chaos Experiment 7: UTXO Race Condition @P1', function () {
 
     let saved
 

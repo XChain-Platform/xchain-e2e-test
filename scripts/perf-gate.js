@@ -175,10 +175,10 @@ function run() {
             console.log(`    FAIL  ${b.metric}: ${b.actual} (threshold: ${b.threshold})`)
         }
         console.log('')
-        console.log(`[perf-gate] FAILED — ${breaches.length} threshold(s) breached`)
+        console.log(`[perf-gate] FAILED: ${breaches.length} threshold(s) breached`)
         process.exit(1)
     } else {
-        console.log('[perf-gate] PASSED — all thresholds within limits')
+        console.log('[perf-gate] PASSED: all thresholds within limits')
         process.exit(0)
     }
 }

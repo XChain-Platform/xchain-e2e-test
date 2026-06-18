@@ -21,7 +21,7 @@ const sinon = require('sinon')
 const { createDb, makeMockConnection, makeMockPool, mockMariadb } = require('./chaos-helpers')
 const Database = require('../../src/db')
 
-describe('Chaos Experiment 2 — Pool Exhaustion @P0', function () {
+describe('Chaos Experiment 2: Pool Exhaustion @P0', function () {
 
     afterEach(function () {
         sinon.restore()
@@ -104,7 +104,7 @@ describe('Chaos Experiment 2 — Pool Exhaustion @P0', function () {
                 try {
                     await db.pool.end()
                 } catch (e) {
-                    // Swallowed — chaos scenario
+                    // Swallowed (chaos scenario)
                 }
             })
             assert(mockPool.end.calledOnce)

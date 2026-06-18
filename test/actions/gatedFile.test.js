@@ -9,7 +9,7 @@
 // contact legal@dankest.llc.
 
 // Token-gated content end-to-end test. Exercises the protocol path
-// added in https://github.com/.../TOKEN_GATED_CONTENT — appending
+// added in https://github.com/.../TOKEN_GATED_CONTENT: appending
 // GATE_TICKER / ENCRYPTION_METHOD / KEY_HASH to FILE, mirroring
 // ciphertext into gated_files, and enforcing the gated-SEND rule
 // (SEND must be batched with a MESSAGE v2 to the recipient).
@@ -49,7 +49,7 @@ function makeGatedCiphertext(plaintext) {
     return { ciphertext, key, keyHash }
 }
 
-// Stub key-handoff payload — the indexer rule only checks for a
+// Stub key-handoff payload. The indexer rule only checks for a
 // structurally-valid MESSAGE v2 in the same tx, not for ciphertext
 // correctness. The wallet validates the actual key payload at unlock
 // time. Returning a placeholder hex blob shaped like a real ECIES
@@ -82,7 +82,7 @@ async function fetchGatedFileRow(actionIndex) {
     }
 }
 
-describe('FILE — token-gated content', function () {
+describe('FILE: token-gated content', function () {
     // Set at the describe level: the bare-SEND test below intentionally waits
     // out three 60s waitFor* calls (≈180s plus tx-confirm) to verify the
     // gate is enforced. Per-it `this.timeout(240000)` inside that test body
@@ -173,10 +173,10 @@ describe('FILE — token-gated content', function () {
         // The encoder picks the P2SH 2-tx path for this SEND (gated-token
         // wire size pushes past OP_RETURN), so we wait for two confirms
         // not one. Worst case: 2 x 60s tx confirm + 20s tracker + 30s
-        // waitForSend ≈ 170s — 180s was right at the boundary and flaked.
+        // waitForSend is about 170s. 180s was right at the boundary and flaked.
         // 240s gives a real margin for retries + load.
         this.timeout(240000)
-        // sendHelper.sendSendV0 doesn't throw on a timeout — waitForSend
+        // sendHelper.sendSendV0 doesn't throw on a timeout. waitForSend
         // resolves to null. So we check the resolved value: if `send` is
         // non-null AND status='valid', the gate isn't being enforced.
         const res = await sendHelper.sendSendV0(issuer, TICK, '1', recipient.address, '')
@@ -188,7 +188,7 @@ describe('FILE — token-gated content', function () {
         }
     })
 
-    it('pack — two gated FILEs sharing one KEY_HASH unlock together', async function () {
+    it('pack: two gated FILEs sharing one KEY_HASH unlock together', async function () {
         // A pack is just multiple gated FILEs that reuse the same key.
         // We publish two files with the same KEY_HASH (and the same
         // GATE_TICKER) and assert both gated_files rows share the hash.
@@ -220,7 +220,7 @@ describe('FILE — token-gated content', function () {
         const row1 = await indexerDatabase.waitForFile({ txHash: tx1, name: 'pack-1.txt', status: 'valid' })
         assert(row1, 'pack member 1 should land valid')
 
-        // Publish member 2 as a standalone FILE — no self-handoff needed
+        // Publish member 2 as a standalone FILE. No self-handoff needed
         // since the key is already on chain from member 1.
         const f2 = ['FILE', '0', 'pack-2.txt', 'text/plain', 'Pack 2', '',
                     TICK, '1', packHash].join('|')

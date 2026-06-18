@@ -17,8 +17,8 @@
  * BTC contract A calls the DOGE bouncer (deployed by xcallDogeSetup.js,
  * index via XCALL_BOUNCER_CONTRACT); the bouncer's crossCallable method
  * crossExecutes BACK to A's crossCallable 'onPong'. The arriving DOGE
- * execution runs at crossHops=1, so the back-call goes out at hops=2 —
- * the XCALL_MAX_HOPS cap — and must still be relayed and executed.
+ * execution runs at crossHops=1, so the back-call goes out at hops=2,
+ * the XCALL_MAX_HOPS cap, and must still be relayed and executed.
  *
  * Proves live: hop accounting across chains, a request EMITTED BY an
  * injected XEXEC execution, both directions of the relay on one logical
@@ -38,7 +38,7 @@ const { makeSdk, submit, fundedGasAddress, mine, submitOpts } = require('./sdkHe
 
 // BTC-side contract: fires the outbound call AND receives the bounced-back
 // call. gasLimit on the outbound leg must cover the bouncer's own
-// emit.crossExecute pre-pay (500+2000+30000+20000 = 52500) — use 100000.
+// emit.crossExecute pre-pay (500+2000+30000+20000 = 52500); use 100000.
 const CONTRACT_A = `
     module.exports = {
         crossCallable: ['onPong'],
@@ -136,7 +136,7 @@ describe('[sdk] cross-chain call hop round trip (BTC→DOGE→BTC)', function ()
             expect(res.indexed.status).to.equal('valid');
         } catch (e) {
             if (!/SIGNING_PUBKEY \(already in use\)/.test(String(e.message))) throw e;
-            console.log('    [xcall-hop] hub pubkey already staked — reusing the active stake');
+            console.log('    [xcall-hop] hub pubkey already staked; reusing the active stake');
         }
         await mine(8);
     });

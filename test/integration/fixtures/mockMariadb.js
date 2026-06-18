@@ -19,7 +19,7 @@
 // MUST be required before any module that depends on mariadb (e.g., db.js).
 //
 // ⚠ PROCESS-WIDE AND PERMANENT: once injected, every later require('mariadb')
-// in the same mocha process gets the mock — including suites that need the
+// in the same mocha process gets the mock, including suites that need the
 // REAL driver (disposableHubDb's readiness probe, in-process MultiValidatorHub
 // pools, the WS-mirror suite). That's why test:integration runs as TWO mocha
 // invocations: test:integration:stubbed (the subdir suites, which may load

@@ -11,24 +11,24 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Track C.2 — N=10 validator-scale probe (config-change PBFT)
+ * Track C.2: N=10 validator-scale probe (config-change PBFT)
  *
  * The federation-sensitive engines are already proven at N=4 (the BFT floor:
- * quorum 3, f=1). Both quorum predicates — count 2f+1 and stake-weighted
- * 3·tally > 2·S — are N-agnostic, so larger N is a throughput/timeout concern,
+ * quorum 3, f=1). Both quorum predicates (count 2f+1 and stake-weighted
+ * 3·tally > 2·S) are N-agnostic, so larger N is a throughput/timeout concern,
  * not a correctness one. This test validates that the harness + the simplest
  * consensus engine (config PBFT) hold at N=10:
  *   - a 10-node full P2P mesh forms (each hub sees 9 peers; 45 connections);
  *   - every hub independently resolves the SAME quorum (7 = 2·⌊9/3⌋+1, f=3);
  *   - a leader-proposed config change reaches COMMIT quorum and applies on ALL
- *     10 hubs — proving _pickFreePorts(10), the mesh, seedStakeSnapshot, and the
+ *     10 hubs, proving _pickFreePorts(10), the mesh, seedStakeSnapshot, and the
  *     settle-wait all scale.
  *
  * One engine is enough to validate the scaling knobs; running every engine at
  * N=10 adds wall-clock without new signal (the quorum math is N-agnostic).
  * Modeled on multiHubConsensus.integration.test.js (the green N=4 version).
  *
- * Runs on a disposable Docker MariaDB — skips cleanly when neither an
+ * Runs on a disposable Docker MariaDB; skips cleanly when neither an
  * env-provisioned DB nor Docker is available.
  ********************************************************************/
 
@@ -49,7 +49,7 @@ const APPLY_WAIT_MS = 8000;   // COMMIT propagation across 10 hubs
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-describe('MultiValidatorHub — N=10 config-change PBFT scale probe (C.2)', function () {
+describe('MultiValidatorHub: N=10 config-change PBFT scale probe (C.2)', function () {
     this.timeout(300_000);
 
     let db, mvh, seed;
@@ -57,7 +57,7 @@ describe('MultiValidatorHub — N=10 config-change PBFT scale probe (C.2)', func
     before(async function () {
         db = await startDisposableHubDb();
         if (!db) {
-            console.log('Skipping N=10 scale probe — no env DB and Docker unavailable');
+            console.log('Skipping N=10 scale probe: no env DB and Docker unavailable');
             this.skip();
         }
         // All 10 validators share 127.0.0.1 in-process; raise the per-IP inbound
@@ -86,7 +86,7 @@ describe('MultiValidatorHub — N=10 config-change PBFT scale probe (C.2)', func
         }
     });
 
-    it('every hub independently resolves the SAME quorum (7 for N=10) — determinism at scale', function () {
+    it('every hub independently resolves the SAME quorum (7 for N=10): determinism at scale', function () {
         const quorums = mvh.hubs.map((h) => h.consensus.hub.capabilitySnapshot.getQuorum(seed.snapshot));
         assert.ok(quorums.every((q) => q === quorums[0]),
             'hubs disagree on quorum N: ' + JSON.stringify(quorums));

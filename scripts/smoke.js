@@ -12,13 +12,13 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Post-deploy smoke check — verifies every running xchain service is up AND serving its JSON-RPC
+ * Post-deploy smoke check. Verifies every running xchain service is up AND serving its JSON-RPC
  * `ping` across all coin/network combos on THIS host. Dependency-free (node built-ins only) so it
  * can be scp'd to any box and run with `node smoke.js`.
  *
  * Discovers services from `docker ps` (no hard-coded ports / combos), reads each container's
- * published host port, and POSTs a JSON-RPC ping. Exits non-zero if any service fails — suitable
- * as a deploy gate. Would have flagged today's encoder + utxo-tracker outages in seconds.
+ * published host port, and POSTs a JSON-RPC ping. Exits non-zero if any service fails, making it
+ * suitable as a deploy gate. Would have flagged today's encoder + utxo-tracker outages in seconds.
  *
  * Usage:  node smoke.js            (check local docker)
  *         ssh <host> 'node smoke.js'   (check a remote box)
@@ -84,13 +84,13 @@ function ping(port) {
     const svcs = discover().sort((a, b) => (a.coin + a.network + a.service).localeCompare(b.coin + b.network + b.service))
     if (!svcs.length) { console.error('No xchain service containers found.'); process.exit(2) }
     let failed = 0
-    console.log(`Smoke check on ${host} — ${svcs.length} services\n`)
+    console.log(`Smoke check on ${host} (${svcs.length} services)\n`)
     for (const s of svcs) {
         const r = await ping(s.port)
         if (!r.ok) failed++
         const label = `${s.coin}/${s.network}`.padEnd(20) + s.service.padEnd(16)
         console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${label} :${s.port || '-'}  ${r.detail}`)
     }
-    console.log(`\n${svcs.length - failed}/${svcs.length} healthy` + (failed ? ` — ${failed} FAILED` : ' — all green'))
+    console.log(`\n${svcs.length - failed}/${svcs.length} healthy` + (failed ? ` (${failed} FAILED)` : ' (all green)'))
     process.exit(failed ? 1 : 0)
 })()

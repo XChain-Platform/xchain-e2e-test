@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// Integration tests for initialCheck.test.js — environment variable bootstrap path.
+// Integration tests for initialCheck.test.js: environment variable bootstrap path.
 //
 // initialCheck.js has deep side effects at require-time (reads process.env, sets globals,
 // requires connector classes). We cannot require it directly in integration tests.
@@ -34,7 +34,7 @@ const RegtestMinerConnector = require('../../../src/RegtestMinerConnector')
 const Database = require('../../../src/db')
 const CryptoNetworks = require('../../../src/CryptoNetworks')
 
-describe('Bootstrap — environment variable path', function () {
+describe('Bootstrap: environment variable path', function () {
 
     let savedGlobals
 
@@ -192,7 +192,7 @@ describe('Bootstrap — environment variable path', function () {
             assert.strictEqual(result.NETWORK, 'regtest')
             assert.strictEqual(result.COIN_CODE, 'DOGE')
             // Dogecoin v1.14 regtest uses Bitcoin-testnet-style prefixes
-            // (0x6f), NOT the Dogecoin testnet prefix 0x71 — dogecoind
+            // (0x6f), NOT the Dogecoin testnet prefix 0x71; dogecoind
             // rejects 0x71 regtest addresses (CryptoNetworks.js, 10ca0c6).
             assert.strictEqual(result.NETWORK_OBJECT.pubKeyHash, 0x6f)
         })

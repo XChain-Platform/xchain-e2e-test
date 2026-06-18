@@ -16,14 +16,14 @@
  *
  * Drives the REAL constant-product AMM template from xchain-contracts
  * through the live regtest pipeline. This is the most demanding custody
- * proof in the library — it exercises every piece of the value model:
+ * proof in the library. It exercises every piece of the value model:
  *
  *   - DEPLOY: the constructor emit.issue()s the LP tick (contract owns it)
- *   - addLiquidity: BATCH(DEPOSIT A, DEPOSIT B, EXECUTE) — reads getBalance
+ *   - addLiquidity: BATCH(DEPOSIT A, DEPOSIT B, EXECUTE); reads getBalance
  *     for BOTH tokens, then emit.mint()s LP shares to the provider
- *   - swap: BATCH(DEPOSIT in, EXECUTE) — getBalance-derived input, emit.send
+ *   - swap: BATCH(DEPOSIT in, EXECUTE); getBalance-derived input, emit.send
  *     of the output, with k (reserveA*reserveB) growing by the 0.3% fee
- *   - removeLiquidity: BATCH(DEPOSIT LP, EXECUTE) — burns LP via emit.destroy
+ *   - removeLiquidity: BATCH(DEPOSIT LP, EXECUTE); burns LP via emit.destroy
  *     and returns both reserves via two emit.send()s
  *
  * The LP tick is a first-class contract-issued tick (the whole point of the
@@ -110,7 +110,7 @@ async function readState(sdk, contractIndex, key) {
 function contractIndexOf(indexed) {
     // The constructor's emit.issue() of the LP tick lands as a sibling action in the
     // same DEPLOY tx, and getTransaction returns them emitted-first ([ISSUE, DEPLOY]),
-    // so actions[0] is the ISSUE — find the DEPLOY explicitly to get the contract index.
+    // so actions[0] is the ISSUE; find the DEPLOY explicitly to get the contract index.
     const list = indexed && Array.isArray(indexed.actions) ? indexed.actions : [];
     const deploy = list.find(a => (a.action === 'DEPLOY')) || list[0] || null;
     return deploy ? deploy.action_index : null;

@@ -44,8 +44,8 @@ mariadbModule.exports = mockMariadb
 mariadbModule.loaded  = true
 require.cache[mariadbPath] = mariadbModule
 
-// Now it is safe to require Database — it will call require('mariadb')
-// and get our mock
+// Now it is safe to require Database. It will call require('mariadb')
+// and get our mock.
 const Database = require('../../../src/db')
 
 // ── Shared mock state ─────────────────────────────────────────────

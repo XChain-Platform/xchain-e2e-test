@@ -18,9 +18,9 @@
  *
  *   1. DEPLOY vesting(grantor, beneficiary, tick, total, cliff, duration, revocable)
  *   2. BATCH( DEPOSIT(vesting, tick, total), EXECUTE(vesting, "fund") )
- *      — fund() reads getBalance(self, tick) and starts the clock only if the
+ *      fund() reads getBalance(self, tick) and starts the clock only if the
  *        deposited balance is visible (the getBalance-wiring proof).
- *   3. mine past `duration`, then the BENEFICIARY EXECUTEs claim() — the contract
+ *   3. mine past `duration`, then the BENEFICIARY EXECUTEs claim() (the contract
  *      computes vested == total and emit.send()s the whole grant to them.
  *
  * Uses cliff=0 + a short duration and mines well past it, so the claim is fully

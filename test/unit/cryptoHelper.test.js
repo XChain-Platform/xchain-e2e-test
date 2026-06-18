@@ -97,7 +97,7 @@ describe('cryptoHelper', function () {
             const firstMnemonic = global.wallets['alice'].mnemonic;
             assert.ok(firstMnemonic, 'mnemonic should be set after first call');
 
-            // Second call — wallet.mnemonic is already set, so the code skips
+            // Second call: wallet.mnemonic is already set, so the code skips
             // mnemonic generation and keeps the existing seed.
             await cryptoHelper.getNewAddress('alice', 'bitcoin', 'regtest');
 

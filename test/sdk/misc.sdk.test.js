@@ -120,8 +120,8 @@ describe('[sdk] misc actions', function () {
         expect(status, 'status object').to.be.an('object');
         // The decoder-tip reference and the indexer->decoder lag must both be present
         // so a caller can detect a stalled indexer from this single call. NOTE: these
-        // measure the indexer->decoder slice only — decoder_tip is the decoder's
-        // highest *processed* block, NOT the coin node's chain tip — so this test
+        // measure the indexer->decoder slice only (decoder_tip is the decoder's
+        // highest *processed* block, NOT the coin node's chain tip); so this test
         // deliberately does not assert anything about the chain->decoder gap (that is
         // surfaced by the decoder's own health() RPC, not /api/status).
         expect(status.decoder_tip, 'decoder_tip map').to.be.an('object');
@@ -149,7 +149,7 @@ describe('[sdk] misc actions', function () {
             }
         }
         // In the e2e regtest stack the decoder is co-located, so at least one coin
-        // must report a real decoder tip — not silently degrade to null.
+        // must report a real decoder tip, not silently degrade to null.
         expect(sawTip, 'at least one coin reports a non-null decoder_tip').to.equal(true);
     });
 });

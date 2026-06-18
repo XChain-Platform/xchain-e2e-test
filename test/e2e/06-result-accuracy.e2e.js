@@ -82,7 +82,7 @@ describe('E2E: Result Accuracy & Reporting Fidelity', () => {
 
             assert.strictEqual(result, null, 'waitForIssue should return null for non-existent tick')
 
-            // Prove that assert(null) would throw — no silent pass path is possible
+            // Prove that assert(null) would throw (no silent pass path is possible)
             let assertionThrew = false
             try {
                 assert(result, 'Should not be truthy')
@@ -90,7 +90,7 @@ describe('E2E: Result Accuracy & Reporting Fidelity', () => {
                 assertionThrew = true
                 assert(e instanceof assert.AssertionError, 'Exception must be AssertionError')
             }
-            assert(assertionThrew, 'assert(null) must throw — guaranteeing no false positive')
+            assert(assertionThrew, 'assert(null) must throw, guaranteeing no false positive')
         })
 
         it('should produce null from waitForSend on a non-existent txHash', async () => {
@@ -105,7 +105,7 @@ describe('E2E: Result Accuracy & Reporting Fidelity', () => {
             } catch (e) {
                 assertionThrew = true
             }
-            assert(assertionThrew, 'assert(null) must throw — guaranteeing no false positive for sends')
+            assert(assertionThrew, 'assert(null) must throw, guaranteeing no false positive for sends')
         })
 
         it('should produce null from waitForCredit on a non-existent txHash', async () => {

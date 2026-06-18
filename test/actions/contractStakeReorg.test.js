@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Contract Staking Reorg (on-chain) — proves a STAKE v3 contract_stakes row
+ * Contract Staking Reorg (on-chain): proves a STAKE v3 contract_stakes row
  * rolls back when its block is orphaned. The capability-staking reorg
  * (stakeReorgDeactivation.test.js) exercises the `unstakes`/`stakes` tables;
  * contract_stakes is a separate dataTable whose block-scoped rollback was not
@@ -19,7 +19,7 @@
  * rolls back, so the staked tokens return to the staker.
  *
  * Mechanism mirrors vmContractReorg/controllerReorg (invalidateblock + empty
- * competing chain). DOGE-skipped — Core 1.14 lacks generateblock.
+ * competing chain). DOGE-skipped (Core 1.14 lacks generateblock).
  ********************************************************************/
 
 const assert       = require('assert')
@@ -75,7 +75,7 @@ async function mine(n){ try { await regtestMinerConnector.generateBlocks(n) } ca
 async function sleep(ms){ return new Promise(r => setTimeout(r, ms)) }
 const j = (x) => JSON.stringify(x, (k, v) => typeof v === 'bigint' ? Number(v) : v)
 
-describe('Contract Staking Reorg — a STAKE v3 row rolls back when its block is orphaned', function () {
+describe('Contract Staking Reorg: a STAKE v3 row rolls back when its block is orphaned', function () {
     this.timeout(0)
 
     before(async function () {
@@ -140,7 +140,7 @@ describe('Contract Staking Reorg — a STAKE v3 row rolls back when its block is
             console.log('   contract_stakes after reorg:', j(rolled))
             assert.strictEqual(rolled.length, 0, 'STAKE v3 contract_stakes row rolled back (stake reverted)')
             assert.strictEqual(await contractExists(ci), true, 'the contract (earlier surviving block) remains')
-            console.log('   DEPLOY survived; only the STAKE rolled back — isolation OK')
+            console.log('   DEPLOY survived; only the STAKE rolled back (isolation OK)')
         } finally {
             await regtestMinerConnector.setDefaultMiningTime()
         }

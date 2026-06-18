@@ -21,7 +21,7 @@ const sinon = require('sinon')
 const axios = require('axios')
 const XChainHubConnector = require('../../src/XChainHubConnector')
 
-describe('Chaos Experiment 3 — Hub Auto-Discovery Total Failure @P1', function () {
+describe('Chaos Experiment 3: Hub Auto-Discovery Total Failure @P1', function () {
 
     let savedEnv
 
@@ -107,7 +107,7 @@ describe('Chaos Experiment 3 — Hub Auto-Discovery Total Failure @P1', function
 
         // Axios throws on non-2xx but attaches the full response to err.response.
         // The hub's ping() returns HTTP 503 with a valid JSON-RPC "degraded" body
-        // when its DB pool is down — a live hub, not an unreachable one.
+        // when its DB pool is down (a live hub, not an unreachable one).
         function degraded503Error() {
             const err = new Error('Request failed with status code 503')
             err.response = {
@@ -176,7 +176,7 @@ describe('Chaos Experiment 3 — Hub Auto-Discovery Total Failure @P1', function
 
             const endpoints = XChainHubConnector.parseEndpoints()
 
-            // Should either return empty or fallback — not crash
+            // Should either return empty or fallback, not crash
             assert(Array.isArray(endpoints))
         })
     })

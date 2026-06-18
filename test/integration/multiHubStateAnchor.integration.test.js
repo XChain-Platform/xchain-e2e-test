@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * L2 integration — state checkpoints + ANCHOR archive across a real
+ * L2 integration: state checkpoints + ANCHOR archive across a real
  * multi-validator hub federation.
  *
  * Boots N=4 in-process XChainHub validators (MultiValidatorHub, real
@@ -30,14 +30,14 @@
  *      XANC_FINALIZED): the elected publisher proposes the match archive,
  *      followers verify it against their OWN cross_chain_matches before
  *      co-signing, and the leader "publishes" ANCHOR v0 + v1 payloads via
- *      a captured broadcast hook (no chain in this harness — the on-chain
+ *      a captured broadcast hook (no chain in this harness; the on-chain
  *      leg is the regtest e2e's job). Back-fill propagates to every hub.
  *
  * This is the federation counterpart to StateCheckpointEngine.test.js /
- * StateAnchorPublisher.test.js (mock-bus algorithm tests) — the same rounds
- * over real hubs, real P2P, real per-hub MariaDB.
+ * StateAnchorPublisher.test.js (mock-bus algorithm tests), running the same
+ * rounds over real hubs, real P2P, real per-hub MariaDB.
  *
- * Runs on a disposable Docker MariaDB — skips cleanly when neither an
+ * Runs on a disposable Docker MariaDB; skips cleanly when neither an
  * env-provisioned DB nor Docker is available.
  ********************************************************************/
 
@@ -61,8 +61,8 @@ const BLOCK_INDEX  = 100;      // seeded BTC anchor (election + snapshot block)
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Identical "indexer" state on every hub — the checkpoint engine's stubbed
-// getblockhashes view (the BTC chain at height 500, hashes chained upstream).
+// Identical "indexer" state on every hub: the checkpoint engine's stubbed
+// getblockhashes view of the BTC chain at height 500, hashes chained upstream.
 const TIP = {
     coin: 'BTC', network: 'regtest', block_index: 500, block_time: 1700000000,
     block_hash: 'c0'.repeat(32), ledger_hash: 'a1'.repeat(32),
@@ -88,16 +88,16 @@ function crossingPair({ ltcIdx, dogeIdx }){
     };
 }
 
-describe('MultiValidatorHub — state checkpoints + ANCHOR archive (L2)', function () {
+describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function () {
     this.timeout(180_000);
 
     let db, mvh, seed, book;
-    let published = [];          // [{ hubIndex, payload }] — captured "on-chain" anchors
+    let published = [];          // [{ hubIndex, payload }] captured "on-chain" anchors
 
     before(async function () {
         db = await startDisposableHubDb();
         if (!db) {
-            console.log('Skipping state-anchor federation L2 — no env DB and Docker unavailable');
+            console.log('Skipping state-anchor federation L2: no env DB and Docker unavailable');
             this.skip();
         }
 
@@ -147,7 +147,7 @@ describe('MultiValidatorHub — state checkpoints + ANCHOR archive (L2)', functi
     });
 
     it('checkpoint round: every hub stores the same 2f+1-signed checkpoint', async function () {
-        // Drive one cadence tick on every hub — only the elected leader initiates;
+        // Drive one cadence tick on every hub. Only the elected leader initiates;
         // followers co-sign over real P2P and adopt the XCHK_FINALIZED row.
         await Promise.all(mvh.hubs.map(h => h.stateCheckpoints._tick()));
         await sleep(SETTLE_MS);
@@ -200,7 +200,7 @@ describe('MultiValidatorHub — state checkpoints + ANCHOR archive (L2)', functi
         published.length = 0;
         await Promise.all(mvh.hubs.map(h => h.stateAnchorPublisher.flush()));
         await sleep(SETTLE_MS);
-        // The archive round finalizes asynchronously (quorum gathers over P2P) —
+        // The archive round finalizes asynchronously (quorum gathers over P2P);
         // the publish happens inside _checkArchiveQuorum on the leader.
 
         let publishers = new Set(published.map(p => p.hubIndex));
@@ -213,7 +213,7 @@ describe('MultiValidatorHub — state checkpoints + ANCHOR archive (L2)', functi
 
         // v1: quorum sigs over the extended canonical; archive decompresses to the match.
         // The v1 archive nests the v0 raw + |batchSeq|count|crc|totalChunks, then (gate on)
-        // wraps it ONCE — and the v1 round id appends batchSeq (the R-4 v0/v1 collision fix)
+        // wraps it ONCE, and the v1 round id appends batchSeq (the R-4 v0/v1 collision fix)
         // so v0 and its archive get DISTINCT equivocation keys. f[4]=block_index,
         // f[9]=checkpoint_seq, f[10]=snapshot_block, f[11]=batchSeq.
         let f = v1s[0].payload.split('|');

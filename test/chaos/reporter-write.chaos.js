@@ -40,7 +40,7 @@ function writeResultsSafe(outputDir, results) {
     }
 }
 
-describe('Chaos Experiment 9 — Performance Reporter Write Failure @P2', function () {
+describe('Chaos Experiment 9: Performance Reporter Write Failure @P2', function () {
 
     afterEach(function () {
         sinon.restore()

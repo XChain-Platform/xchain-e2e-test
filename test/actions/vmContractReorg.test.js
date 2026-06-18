@@ -14,21 +14,21 @@ const vmHelper = require('../helpers/vmHelper')
 const gasHelper = require('../helpers/gasHelper')
 
 /**
- * VM Contract Reorg (on-chain) — proves the indexer rolls back EXECUTE-produced contract state
+ * VM Contract Reorg (on-chain): proves the indexer rolls back EXECUTE-produced contract state
  * across a real chain reorg. Integration tests cover DEPLOY/STAKE/DEPOSIT rollback but cannot run
  * the VM, so contract_state / contract_emissions rollback was never exercised end-to-end.
  *
  * Mechanism: a contract EXECUTE writes contract_state and lands in block H. We pause the auto-miner,
  * `invalidateblock(H)` to orphan it, then mine an EMPTY competing chain longer than H via
- * `generateblock(addr, [])` — which ignores the mempool, so the orphaned EXECUTE tx is NOT
+ * `generateblock(addr, [])`, which ignores the mempool, so the orphaned EXECUTE tx is NOT
  * re-included. The node reorgs onto the empty chain; the decoder + indexer follow and rollback.js
  * deletes the block-scoped contract_state. We assert the state is gone (the DEPLOY, in an earlier
- * surviving block, remains — so this isolates EXECUTE-state rollback).
+ * surviving block, remains, so this isolates EXECUTE-state rollback).
  *
  * Requires the reorg primitives added to BlockchainConnector (invalidateBlock / getBlockHash /
- * getBlockCount / generateBlock) — nodeConnector in the e2e harness.
+ * getBlockCount / generateBlock): nodeConnector in the e2e harness.
  */
-describe('VM Contract Reorg — EXECUTE state rolls back across an on-chain reorg', function () {
+describe('VM Contract Reorg: EXECUTE state rolls back across an on-chain reorg', function () {
 
     const COUNTER = `
         module.exports = {
@@ -65,7 +65,7 @@ describe('VM Contract Reorg — EXECUTE state rolls back across an on-chain reor
 
     before(async function () {
         // The reorg is driven by `generateblock(addr, [])` (mine an EMPTY competing chain so the
-        // orphaned tx is NOT re-included) — an RPC added in Bitcoin Core 0.19. Dogecoin Core 1.14.x
+        // orphaned tx is NOT re-included), an RPC added in Bitcoin Core 0.19. Dogecoin Core 1.14.x
         // (a 0.13/0.14 base) lacks it and answers HTTP 404 "method not found", so this scenario can't
         // be driven on DOGE regtest. The indexer's reorg-rollback path is chain-agnostic (rollback.js
         // operates on DB rows by block_index) and is proven on BTC + LTC; skip on DOGE as a node
@@ -102,7 +102,7 @@ describe('VM Contract Reorg — EXECUTE state rolls back across an on-chain reor
             assert.strictEqual(await nodeConnector.getBlockCount(), executeBlock - 1,
                 'node should roll back to the block before the EXECUTE')
 
-            // Build an EMPTY competing chain that overtakes the original tip — the mempool EXECUTE
+            // Build an EMPTY competing chain that overtakes the original tip; the mempool EXECUTE
             // is excluded, so it never re-enters the active chain.
             const need = tipBefore - (executeBlock - 1) + 2
             for (let i = 0; i < need; i++) await nodeConnector.generateBlock(miner, [])
@@ -117,7 +117,7 @@ describe('VM Contract Reorg — EXECUTE state rolls back across an on-chain reor
                 await new Promise(r => setTimeout(r, 2000))
             }
             assert.strictEqual(rolledBack, null, 'contract_state count must be rolled back (EXECUTE orphaned)')
-            // The DEPLOY was in an earlier, surviving block — the contract itself must remain.
+            // The DEPLOY was in an earlier, surviving block, so the contract itself must remain.
             assert.strictEqual(await contractExists(ci), true, 'the contract (deployed in a surviving block) should remain')
         } finally {
             // Restore normal auto-mining so the stack is left healthy for later suites.

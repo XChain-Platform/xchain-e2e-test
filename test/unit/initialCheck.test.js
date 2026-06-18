@@ -38,7 +38,7 @@ function getCoinCode(coin) {
     return COIN_CODE_MAP[coin] || coin.toUpperCase().slice(0, 3);
 }
 
-describe('initialCheck — COIN_CODE_MAP logic', function () {
+describe('initialCheck: COIN_CODE_MAP logic', function () {
 
     describe('getCoinCode (COIN_CODE_MAP lookup + fallback)', function () {
 
@@ -119,7 +119,7 @@ describe('initialCheck — COIN_CODE_MAP logic', function () {
             // (npm test), which is run against a complete regtest stack.
             //
             // This test serves as an explicit, visible marker of that boundary.
-            assert.ok(true, 'integration testing boundary — see npm test');
+            assert.ok(true, 'integration testing boundary; see npm test');
         });
     });
 });

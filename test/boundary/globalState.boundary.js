@@ -19,7 +19,7 @@ const sinon = require('sinon')
 const CryptoNetworks = require('../../src/CryptoNetworks')
 const XChainHubConnector = require('../../src/XChainHubConnector')
 
-describe('Boundary — Global State & Service Discovery', function () {
+describe('Boundary: Global State & Service Discovery', function () {
 
     afterEach(function () {
         sinon.restore()
@@ -179,7 +179,7 @@ describe('Boundary — Global State & Service Discovery', function () {
             wallet1.coin = 'bitcoin'
             wallet1.network = { name: 'regtest' }
 
-            // Get same label — should return cached wallet, not create new
+            // Get same label: should return cached wallet, not create new
             const wallet2 = await cryptoHelper.getWallet('test')
 
             assert.strictEqual(wallet2, wallet1)
@@ -214,7 +214,7 @@ describe('Boundary — Global State & Service Discovery', function () {
         })
     })
 
-    // ── Hub connector _call boundary — all endpoints fail ───────
+    // ── Hub connector _call boundary: all endpoints fail ───────
 
     describe('Hub multi-endpoint fallback boundaries', function () {
 
@@ -296,7 +296,7 @@ describe('Boundary — Global State & Service Discovery', function () {
             const result = db.isNullOrNullString(0)
             // 0 == "" is true in JS, so this returns true. Documenting this boundary.
             assert.strictEqual(result, true,
-                'JS loose equality: 0 == "" is true — this is the actual behavior')
+                'JS loose equality: 0 == "" is true (this is the actual behavior)')
         })
 
         it('returns false for whitespace-only string', function () {
@@ -311,7 +311,7 @@ describe('Boundary — Global State & Service Discovery', function () {
             // false == "" is true in JS loose comparison
             const result = db.isNullOrNullString(false)
             assert.strictEqual(result, true,
-                'JS loose equality: false == "" is true — documenting actual behavior')
+                'JS loose equality: false == "" is true (documenting actual behavior)')
         })
     })
 })

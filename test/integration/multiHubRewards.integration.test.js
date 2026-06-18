@@ -11,14 +11,14 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * L2 integration — validator reward distribution against a real DB
+ * L2 integration: validator reward distribution against a real DB
  *
  * Boots in-process XChainHub validators on a disposable MariaDB and exercises
  * RewardTracker.distributeRewards against the REAL validator_rewards table
  * (created at hub startup). Asserts:
  *   - the per-round reward is split equally and persisted, one row per
  *     participant;
- *   - re-running the same round is IDEMPOTENT — the INSERT IGNORE on the
+ *   - re-running the same round is IDEMPOTENT (the INSERT IGNORE on the
  *     UNIQUE KEY (validator_pubkey, round_number, reward_type) collapses
  *     concurrent/duplicate writes (multiple hubs finalizing the same round
  *     must not multiply payouts).
@@ -42,14 +42,14 @@ const RewardTracker = require(path.resolve(__dirname, '../../../xchain-hub/src/R
 const COUNT = 2;
 const PK = (c) => c.repeat(64);
 
-describe('MultiValidatorHub — reward distribution (L2)', function () {
+describe('MultiValidatorHub: reward distribution (L2)', function () {
     this.timeout(180_000);
 
     let db, mvh;
 
     before(async function () {
         db = await startDisposableHubDb();
-        if (!db) { console.log('Skipping reward L2 — no env DB and Docker unavailable'); this.skip(); }
+        if (!db) { console.log('Skipping reward L2: no env DB and Docker unavailable'); this.skip(); }
         mvh = new MultiValidatorHub({ count: COUNT, basePort: 34000 });
         await mvh.start();
     });
@@ -80,6 +80,6 @@ describe('MultiValidatorHub — reward distribution (L2)', function () {
         // Idempotency: a second distribution for the same round must not duplicate.
         await rt.distributeRewards(round, participants);
         rows = await hub.db.doQuery(q, [round]);
-        assert.strictEqual(rows.length, 4, 'INSERT IGNORE failed — duplicate reward rows for the same round');
+        assert.strictEqual(rows.length, 4, 'INSERT IGNORE failed: duplicate reward rows for the same round');
     });
 });

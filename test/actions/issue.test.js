@@ -72,7 +72,7 @@ describe('ISSUE', () => {
             let address = addr["address"]
             let tick = "ISSUEv3"+address.substring(address.length-8)
 
-            // Create token first — explicitly set lock fields to 0 so the
+            // Create token first; explicitly set lock fields to 0 so the
             // indexer stores them as 0 (not NULL). isValidLock does not
             // handle NULL, so locking a NULL field fails with "(locked)".
             let issueResult = await issueHelper.sendIssueV0(addr, tick, 1000, 10, 0, "Issue v3 test", 50,

@@ -15,7 +15,7 @@
 const assert = require('assert')
 const sinon = require('sinon')
 
-describe('Bootstrap — teardown resilience', function () {
+describe('Bootstrap: teardown resilience', function () {
 
     let savedMiner
 

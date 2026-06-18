@@ -21,7 +21,7 @@ const ECPair = ECPairFactory(ecc)
 
 const transactionHelper = require('../../../test/transactionHelper')
 
-describe('State Management — UTXO Cache', function () {
+describe('State Management: UTXO Cache', function () {
 
     let savedGlobals
 

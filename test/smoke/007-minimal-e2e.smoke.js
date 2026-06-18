@@ -13,7 +13,7 @@ const cryptoHelper = require('../cryptoHelper')
 const issueHelper = require('../helpers/issueHelper')
 const sendHelper = require('../helpers/sendHelper')
 
-describe('SMOKE: Minimal E2E — ISSUE + SEND', () => {
+describe('SMOKE: Minimal E2E: ISSUE + SEND', () => {
     it('should issue a token and send it to another address', async () => {
         // Generate a funded sender address
         const senderAddress = await cryptoHelper.getNewFundedAddress(

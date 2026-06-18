@@ -21,7 +21,7 @@ const sinon = require('sinon')
 const bitcoin = require('bitcoinjs-lib')
 const { saveGlobals, restoreGlobals } = require('./chaos-helpers')
 
-describe('Chaos Experiment 11 — Concurrent Wallet Access @P2', function () {
+describe('Chaos Experiment 11: Concurrent Wallet Access @P2', function () {
 
     let savedWallets, savedNetwork, savedCoin, savedNetworkObj
     let cryptoHelper

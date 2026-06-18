@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Controller Reorg (on-chain) — proves the indexer rolls back a token
+ * Controller Reorg (on-chain): proves the indexer rolls back a token
  * controller BINDING across a real chain reorg. controllerPolicy.test.js
  * exercises bind/enforce/royalty under normal (auto-mined) conditions, but the
  * `token_controllers` rollback path (a dataTable, block-scoped DELETE in
@@ -25,11 +25,11 @@
  * so the orphaned BIND tx is NOT re-included). The node reorgs; decoder + indexer
  * follow and rollback.js deletes the block-scoped token_controllers row. We
  * assert the binding event is gone (token reverts to uncontrolled), while the
- * ISSUE'd token and the guard contract — in earlier surviving blocks — remain.
+ * ISSUE'd token and the guard contract (in earlier surviving blocks) remain.
  *
  * Requires the reorg primitives on BlockchainConnector (invalidateBlock /
  * getBlockHash / getBlockCount / generateBlock). Dogecoin Core 1.14.x lacks
- * `generateblock`, so this scenario skips on DOGE (a node capability gap — the
+ * `generateblock`, so this scenario skips on DOGE (a node capability gap; the
  * rollback path itself is chain-agnostic, operating on DB rows by block_index).
  ********************************************************************/
 
@@ -41,7 +41,7 @@ const sendHelper        = require('../helpers/sendHelper')
 const vmHelper          = require('../helpers/vmHelper')
 const transactionHelper = require('../transactionHelper')
 
-// Deny a SEND of the bound token — gives the binding observable teeth pre-reorg.
+// Deny a SEND of the bound token to give the binding observable teeth pre-reorg.
 const SEND_GATE = `module.exports = { guard: function(){
     var at = xchain.getInputParam(0);
     if (at === 'SEND') { xchain.revert('send blocked'); }
@@ -97,7 +97,7 @@ async function waitTokenController(tick, predicate, timeMax = 20000) {
     return ev
 }
 
-describe('Controller Reorg — a token binding rolls back across an on-chain reorg', function () {
+describe('Controller Reorg: a token binding rolls back across an on-chain reorg', function () {
     this.timeout(0)
     let owner
 
@@ -137,7 +137,7 @@ describe('Controller Reorg — a token binding rolls back across an on-chain reo
         await transactionHelper.createAndSendTransaction(owner, `SEND|0|${tick}|10|${bob.address}|pre-reorg`)
         await mine(1); await sleep(3000)
         assert.strictEqual(await balanceOf(bob.address, tick), bobBefore, 'SEND denied by the active binding pre-reorg')
-        console.log('   SEND denied by active transfer binding — binding has teeth')
+        console.log('   SEND denied by active transfer binding (binding has teeth)')
 
         // ── Reorg out the BIND block ──
         await regtestMinerConnector.setMiningTime(3600000, 3600000)
@@ -150,7 +150,7 @@ describe('Controller Reorg — a token binding rolls back across an on-chain reo
             assert.strictEqual(await nodeConnector.getBlockCount(), bindBlock - 1,
                 'node rolled back to the block before the BIND')
 
-            // Empty competing chain longer than the original tip — the orphaned BIND
+            // Empty competing chain longer than the original tip; the orphaned BIND
             // (and the orphaned denied-SEND above it) are NOT re-included.
             const need = tipBefore - (bindBlock - 1) + 2
             for (let i = 0; i < need; i++) await nodeConnector.generateBlock(miner, [])
@@ -167,10 +167,10 @@ describe('Controller Reorg — a token binding rolls back across an on-chain reo
             console.log('   token_controllers after reorg:', j(rolled))
             assert.strictEqual(rolled.length, 0, 'token_controllers BIND row rolled back (token reverts to uncontrolled)')
 
-            // ISSUE + DEPLOY were in earlier surviving blocks — they must remain.
+            // ISSUE + DEPLOY were in earlier surviving blocks, so they must remain.
             assert.strictEqual(await tickExists(tick), true, 'the ISSUE\'d token (earlier block) survives')
             assert.strictEqual(await contractExists(ctrl), true, 'the guard contract (earlier block) survives')
-            console.log('   ISSUE + DEPLOY survived; only the BIND rolled back — isolation OK')
+            console.log('   ISSUE + DEPLOY survived; only the BIND rolled back (isolation OK)')
         } finally {
             await regtestMinerConnector.setDefaultMiningTime()
         }

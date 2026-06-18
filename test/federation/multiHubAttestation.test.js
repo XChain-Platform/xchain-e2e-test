@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * E2E test — Phase B live PBFT through MultiValidatorHub
+ * E2E test: Phase B live PBFT through MultiValidatorHub
  *
  * Drives an ATTEST v0 (request)(redundancy=3) end-to-end through three
  * real in-process xchain-hub instances (via MultiValidatorHub):
@@ -41,7 +41,7 @@ dotenv.config()
 
 // MultiValidatorHub uses in-process hubs that fetch the test URL via
 // the http_get provider. Test URL points at a local HTTP server, which
-// the provider's https-only check rejects — patch the provider's fetch
+// the provider's https-only check rejects, so patch the provider's fetch
 // at module level (before any hub starts) so http:// is accepted.
 // This affects only the test process; production code unchanged.
 // Resolution mirrors multiValidatorHubHelper's loader: env override,
@@ -96,7 +96,7 @@ async function _settleStack() {
 
 const FIXED_BODY = '{"score":42,"meta":"multihub"}'
 
-describe('Phase B — multi-hub PBFT for ATTEST v0 (request) (redundancy=3)', function () {
+describe('Phase B: multi-hub PBFT for ATTEST v0 (request) (redundancy=3)', function () {
     // Big budget: 3 hubs × (start + DB init) + on-chain staking + activation wait
     // + contract deploy/execute + PBFT round-trip + block confirmations.
     this.timeout(10 * 60 * 1000)
@@ -136,7 +136,7 @@ module.exports = {
         // Loud-fail (in CI / the federation phase) or graceful-skip (ad-hoc dev)
         // on missing prerequisites; never silently green.
         if (!requireFederationEnv(this)) return
-        // Responsible-set selection spans ALL staked validators — a polluted
+        // Responsible-set selection spans ALL staked validators. A polluted
         // chain makes this test's hubs unreliable to select. Fail fast.
         await assertCleanValidatorSet(indexerDatabase)
 
@@ -191,7 +191,7 @@ module.exports = {
             'mvh-owner', COIN, NETWORK, null, 'legacy', 0, 0.02
         )
         // Make sure the funding tx is fully confirmed (not mempool-only)
-        // before MINT — encoder's unconfirmed=false lookup needs confirmed
+        // before MINT: the encoder's unconfirmed=false lookup needs confirmed
         // UTXOs. Quiesce after explicitly mining a block forces this.
         await regtestMinerConnector.generateBlocks(2)
         await _settleStack()
@@ -224,7 +224,7 @@ module.exports = {
     })
 
     it('drives a redundancy=3 request through real PBFT and fires the callback', async function () {
-        // EXECUTE the contract — emits ATTEST v0 (request)(redundancy=3).
+        // EXECUTE the contract. This emits ATTEST v0 (request)(redundancy=3).
         const exec = await vmHelper.sendExecuteV0(owner, contractIndex, 'askOracle', [testUrl])
         assert.strictEqual(exec.execution.status, 'valid', 'execute should be valid')
 

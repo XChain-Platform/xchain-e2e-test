@@ -16,7 +16,7 @@ const transactionHelper = require('../transactionHelper')
 //
 // This single-host regtest stack has no HUB_DB_* wiring, so the indexer reads price_snapshots from
 // its OWN database (the one global.indexerDatabase connects to). We therefore seed prices directly
-// through indexerDatabase — the exact DB getLatestPrice reads — rather than the hub-DB helper.
+// through indexerDatabase (the exact DB getLatestPrice reads) rather than the hub-DB helper.
 //
 // The fee destination must match what the decoder/indexer were configured with
 // (XCHAIN_FEE_DESTINATION_<COIN>_<NETWORK> / FEE_DESTINATION). Read from the env; skip if absent.
@@ -103,7 +103,7 @@ describe('Native-coin fee payment (live stack)', function () {
         let address = addr["address"]
         let tick = "NFL" + address.substring(address.length - 8)
 
-        // Generous fee output (overpayment is always accepted — only underpayment is rejected).
+        // Generous fee output (overpayment is always accepted; only underpayment is rejected).
         let feeSats = 50000
         let txHash = await transactionHelper.createAndSendTransaction(
             addr, issueMessage(tick), null, [{ address: FEE_DEST, value: feeSats }]
@@ -131,7 +131,7 @@ describe('Native-coin fee payment (live stack)', function () {
         await seedPrice('XCHAIN/USD', '1.00000000', tip, 999200011)
         await seedPrice(COIN_CODE + '/USD', '100000.00000000', tip, 999200012)
 
-        // seedGas=false — this case asserts the no-fee-output, no-XCHAIN-balance path.
+        // seedGas=false: this case asserts the no-fee-output, no-XCHAIN-balance path.
         let addr = await cryptoHelper.getNewFundedAddress("NATIVEFEE.NEG", COIN, NETWORK, null, "legacy", 0, 1, false)
         let address = addr["address"]
         let tick = "NFN" + address.substring(address.length - 8)

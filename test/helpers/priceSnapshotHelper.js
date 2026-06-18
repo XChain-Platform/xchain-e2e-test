@@ -17,14 +17,14 @@ const mariadb = require('mariadb')
 // (the "shared-DB shortcut"). This helper writes to that same table. It
 // resolves the connection from HUB_DB_* env vars, falling back to the same
 // MariaDB the e2e suite already uses (global.indexerDatabase) with the
-// database name overridden to the hub DB — which is exactly the shared-DB
+// database name overridden to the hub DB, which is exactly the shared-DB
 // shortcut topology.
 
 function resolveParams(){
     // Mirror the INDEXER's own resolution exactly: it reads hub-owned price
     // tables from the hub DB only when BOTH HUB_DB_HOST and HUB_DB_NAME are
     // configured, otherwise from its LOCAL indexer DB (it logs a warning to
-    // that effect at boot). Seeding must write wherever the indexer reads —
+    // that effect at boot). Seeding must write wherever the indexer reads:
     // HUB_DB_HOST alone is injected into the e2e container for the federation
     // suites, so keying on it seeded XChain_Hub while the indexer matched
     // against its local table: deterministic "no matching price snapshot".
@@ -37,7 +37,7 @@ function resolveParams(){
             password: process.env.HUB_DB_PASS
         }
     }
-    // Single-host topology: the indexer reads its own DB — seed there.
+    // Single-host topology: the indexer reads its own DB; seed there.
     let idb = global.indexerDatabase
     if (!idb) return null
     return {
@@ -80,11 +80,11 @@ module.exports = {
         }
     },
 
-    // Latest indexed block_time — the CHAIN's clock, which is what the indexer
+    // Latest indexed block_time (the CHAIN's clock, which is what the indexer
     // compares snapshots against (reversePriceMatch bounds on the payment tx's
     // BLOCK_TIME, and the staleness cap measures age vs the block being
     // processed). Anchor seeds to this, not Date.now(): wall-clock seeds raced
-    // both ways — too old trips ORACLE_MAX_PRICE_AGE_SECONDS (1800s), too new
+    // both ways: too old trips ORACLE_MAX_PRICE_AGE_SECONDS (1800s), too new
     // lands in the chain's future when regtest block timestamps lag wall time.
     async latestBlockTime(){
         // Always read blocks from the INDEXER DB (the hub DB has no blocks

@@ -89,7 +89,7 @@ describe('SWAP', () => {
 
     describe('match - full exchange', () => {
         it('should match two counter-swaps and complete the exchange', async () => {
-            // Two separate addresses — matching requires different SOURCE
+            // Two separate addresses (matching requires different SOURCE)
             let addr1 = await cryptoHelper.getNewFundedAddress("SWAP.MATCH1", COIN, NETWORK, null, "legacy", 0, 1)
             let addr2 = await cryptoHelper.getNewFundedAddress("SWAP.MATCH2", COIN, NETWORK, null, "legacy", 0, 1)
             let address1 = addr1["address"]

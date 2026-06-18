@@ -14,7 +14,7 @@
 // Protocol size-limit drift guard
 //
 // Several services independently declare the same protocol-level size caps.
-// They have drifted before — most notably the ACTION data cap, where the
+// They have drifted before: most notably the ACTION data cap, where the
 // encoder accepted compiled payloads the decoder silently dropped (an 8190–8192
 // byte payload compiles to an 8193–8195 byte on-chain push, which the encoder
 // once permitted but the decoder always dropped). These tests assert every
@@ -55,7 +55,7 @@ describe('Protocol size-limit drift guard', () => {
             assert.strictEqual(
                 encoderValidator.MAX_COMPILED_ACTION_DATA_LENGTH,
                 XChainDecoder.MAX_ACTION_DATA_LENGTH,
-                'encoder accepts a different compiled ACTION size than the decoder — payloads in the gap would be silently dropped on chain'
+                'encoder accepts a different compiled ACTION size than the decoder; payloads in the gap would be silently dropped on chain'
             )
         })
 
@@ -78,7 +78,7 @@ describe('Protocol size-limit drift guard', () => {
             assert.ok(overLimit.length > encoderValidator.MAX_COMPILED_ACTION_DATA_LENGTH,
                 'encoder must reject the over-limit payload')
             assert.ok(overLimit.length > XChainDecoder.MAX_ACTION_DATA_LENGTH,
-                'decoder must reject the over-limit payload — otherwise the encoder could mint a tx the decoder drops')
+                'decoder must reject the over-limit payload; otherwise the encoder could mint a tx the decoder drops')
         })
     })
 
@@ -88,12 +88,12 @@ describe('Protocol size-limit drift guard', () => {
             assert.strictEqual(
                 sdkValidator.MAX_CODE_SIZE,
                 protocol.MAX_CODE_SIZE,
-                'SDK MAX_CODE_SIZE drifted from the canonical protocol constant — the indexer (DEPLOY) and VM isolate limit must also stay equal to this value'
+                'SDK MAX_CODE_SIZE drifted from the canonical protocol constant; the indexer (DEPLOY) and VM isolate limit must also stay equal to this value'
             )
         })
 
         it('[regression:p0] indexer DEPLOY MAX_CODE_SIZE === canonical', () => {
-            // The indexer is the on-chain arbiter for contract code size — it
+            // The indexer is the on-chain arbiter for contract code size. It
             // rejects any DEPLOY whose code exceeds this. If it drifts below the
             // SDK/encoder, a contract the SDK accepts would be rejected on chain.
             assert.strictEqual(

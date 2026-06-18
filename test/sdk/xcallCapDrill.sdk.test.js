@@ -21,7 +21,7 @@
  *
  *   - the first processing block injects EXACTLY the cap (25), and they
  *     are the 25 LOWEST hub mirror ids (deterministic injection order);
- *   - the remaining 3 carry forward to a later block — nothing dropped;
+ *   - the remaining 3 carry forward to a later block (nothing dropped);
  *   - all 28 results relay back and the callback fires exactly once each
  *     (the caller contract counts deliveries).
  *
@@ -145,7 +145,7 @@ describe('[sdk] XCALL per-block injection cap (25 + carry-forward)', function ()
         indexA = contractIndexOf(dep.indexed);
         console.log('    [xcall-cap] A=' + indexA);
 
-        // EXECUTE carries no wire GAS_LIMIT — execution bills against the
+        // EXECUTE carries no wire GAS_LIMIT, so execution bills against the
         // protocol ceiling (1M), which covers the 28 × 32,500 pre-pays.
         const res = await submit(sdk,
             { action: 'EXECUTE', params: { contractActionIndex: indexA, method: 'burst', params: [String(targetContract), String(BURST)] } },
@@ -156,7 +156,7 @@ describe('[sdk] XCALL per-block injection cap (25 + carry-forward)', function ()
         await mine(1);
 
         // state.set stores the value JSON-encoded, and the contract stringifies
-        // the array itself — two decode levels.
+        // the array itself, so there are two decode levels.
         callIds = JSON.parse(await readState(sdk, indexA, 'burstIds'));
         expect(callIds, 'burst call ids').to.be.an('array').with.length(BURST);
         expect(new Set(callIds).size, 'distinct ids').to.equal(BURST);
@@ -168,7 +168,7 @@ describe('[sdk] XCALL per-block injection cap (25 + carry-forward)', function ()
         const deadline = Date.now() + 240000;
         let n = 0;
         while (Date.now() < deadline) {
-            await mine(1);                                   // BTC only — confirmations + relay
+            await mine(1);                                   // BTC only: confirmations + relay
             await sleep(2000);
             n = await hubDb(async (c) => {
                 const rows = await c.query(
@@ -186,7 +186,7 @@ describe('[sdk] XCALL per-block injection cap (25 + carry-forward)', function ()
             return Number(rows[0].n);
         });
         expect(executedEarly, 'no executions before DOGE mines').to.equal(0);
-        console.log('    [xcall-cap] all ' + BURST + ' dispatches finalized, zero executed — releasing DOGE mining');
+        console.log('    [xcall-cap] all ' + BURST + ' dispatches finalized, zero executed; releasing DOGE mining');
     });
 
     it('the first DOGE block injects exactly the cap, in (snapshot_block, call_id) order; the rest carry forward', async function () {
@@ -221,7 +221,7 @@ describe('[sdk] XCALL per-block injection cap (25 + carry-forward)', function ()
         expect(blocks.length, 'carry-forward to a later block').to.be.at.least(2);
 
         // deterministic order: the first batch must be the CAP lowest by
-        // (snapshot_block, call_id) — quorum-agreed content, identical on every
+        // (snapshot_block, call_id): quorum-agreed content, identical on every
         // hub, so the order no longer depends on which hub DB an indexer mirrors
         const hubRows = await hubDb(async (c) => c.query(
             `SELECT call_id, snapshot_block FROM cross_chain_calls WHERE phase = 'dispatch' AND call_id IN (${placeholders})`,

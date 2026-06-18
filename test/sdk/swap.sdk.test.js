@@ -29,11 +29,11 @@
  * NOTE on cross-chain: SWAP supports GIVE_COIN != GET_COIN, but a real
  * cross-coin match needs a live multi-chain stack (the hub coordinates the
  * two ledgers). This suite exercises the same-chain path (GIVE_COIN ==
- * GET_COIN == this chain, different ticks) — a complete on-ledger swap that
+ * GET_COIN == this chain, different ticks): a complete on-ledger swap that
  * the SDK fully drives. The cross-coin variant is Phase 4 (LTC/DOGE).
  *
  * SWAP settlement rides on the indexer's matching engine; this suite runs on
- * BTC regtest (skips elsewhere — keeps parity with the connector suite, which
+ * BTC regtest (skips elsewhere, keeping parity with the connector suite, which
  * uses COIN_CODE as GIVE/GET coin).
  *
  ********************************************************************/
@@ -77,7 +77,7 @@ describe('[sdk] SWAP (atomic token exchange)', function () {
     before(async function () {
         const coinCode = global.COIN_CODE || 'BTC';
         if (coinCode !== 'BTC') {
-            console.log('    [sdk] swap suite pinned to BTC — skipping on ' + coinCode);
+            console.log('    [sdk] swap suite pinned to BTC, skipping on ' + coinCode);
             this.skip();
             return;
         }
@@ -115,7 +115,7 @@ describe('[sdk] SWAP (atomic token exchange)', function () {
         const swapIndex = swapIndexOf(res.indexed);
         expect(swapIndex, 'swap action_index').to.not.equal(null);
 
-        // Read the offer back through the SDK — swap_status must reflect 'open'.
+        // Read the offer back through the SDK: swap_status must reflect 'open'.
         await mine(1);
         const viaSdk = await sdk.getSwaps(addr1.address, 'address');
         const row = findSwap(viaSdk, swapIndex);
@@ -238,7 +238,7 @@ describe('[sdk] SWAP (atomic token exchange)', function () {
         }, 45000);
         expect(match, 'swap match should exist').to.exist;
 
-        // Both offers settle to complete — observed through the SDK.
+        // Both offers settle to complete, observed through the SDK.
         await mine(1);
         const row1 = findSwap(await sdk.getSwaps(addr1.address, 'address'), swap1Index);
         const row2 = findSwap(await sdk.getSwaps(addr2.address, 'address'), swap2Index);

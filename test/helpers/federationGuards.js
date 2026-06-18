@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * E2E test helper — Hub-Federation suite guards
+ * E2E test helper: Hub-Federation suite guards
  *
  * The hub-federation attestation suites (multiHubAttestation, llmAttestation)
  * have two properties that make them unfit as silently-skippable, freely-
@@ -22,7 +22,7 @@
  *      which in CI reads as a green pass while testing nothing.
  *   2. The responsible-validator set for a request is chosen by
  *      `top-redundancy by SHA256(request_id‖pubkey)` across ALL staked
- *      attestation validators — so leftover stakes from an earlier suite make
+ *      attestation validators, so leftover stakes from an earlier suite make
  *      the live test hubs unreliable to select, and the round expires instead
  *      of producing a response (surfacing as a multi-minute timeout).
  *
@@ -80,14 +80,14 @@ async function assertCleanValidatorSet(indexerDatabase){
     // capabilities (e.g. a leftover cross_chain stake from a prior drill) they
     // don't pollute a full_node possession-proof run. Default behavior unchanged.
     if (n !== 0 && process.env.E2E_ALLOW_DIRTY_VALIDATOR_SET === '1') {
-        console.warn('assertCleanValidatorSet BYPASSED (E2E_ALLOW_DIRTY_VALIDATOR_SET=1): chain has ' + n + ' active stake(s) — proceeding')
+        console.warn('assertCleanValidatorSet BYPASSED (E2E_ALLOW_DIRTY_VALIDATOR_SET=1): chain has ' + n + ' active stake(s), proceeding')
         return
     }
     assert.strictEqual(n, 0,
         'Hub-federation tests need a clean validator set, but the chain has ' + n +
         ' active stake(s). Reset to a fresh chain first:\n' +
         '    XCHAIN_NODE_DATA_DIR=<data dir> xchain_node reset all bitcoin regtest\n' +
-        '(run each federation suite on its own fresh chain — they are not isolated from prior staking).')
+        '(run each federation suite on its own fresh chain; they are not isolated from prior staking).')
 }
 
 module.exports = { requireFederationEnv, assertCleanValidatorSet }

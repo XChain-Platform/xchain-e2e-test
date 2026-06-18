@@ -18,8 +18,8 @@
 // only, so without a fee output every ISSUE on LTC/DOGE is rejected, the tick
 // is never created, and the suite hangs on the resulting TICK-unknown cascade.
 //
-// validateNativeCoinFee (utility.js) enforces only a LOWER bound — it rejects
-// when paidAmount < 0.95 * oracle-expected and never rejects overpayment — and
+// validateNativeCoinFee (utility.js) enforces only a LOWER bound: it rejects
+// when paidAmount < 0.95 * oracle-expected and never rejects overpayment, and
 // this suite seeds (and therefore controls) the oracle prices. So a single flat
 // fee output that comfortably clears the min for every action is sufficient; no
 // per-action fee computation is needed. BTC is left untouched (gas mode).
@@ -35,8 +35,8 @@ const COIN_USD   = '100000.00000000'
 
 // Flat native fee output (satoshis). With the prices above, the indexer's
 // minAcceptable for an action costing X XCHAIN is 0.95 * X / 100000 coin;
-// 50000 sats (0.0005 coin) clears the min for any action up to ~52 XCHAIN —
-// far above any e2e action — and matches nativeFeeLive's proven output. It is
+// 50000 sats (0.0005 coin) clears the min for any action up to ~52 XCHAIN,
+// far above any e2e action, and matches nativeFeeLive's proven output. It is
 // negligible against the ~1-coin fundings cryptoHelper uses.
 const FLAT_FEE_SATS = 50000
 
@@ -45,7 +45,7 @@ const FLAT_FEE_SATS = 50000
 // the validator would reject every fee as stale. Re-anchored to the chain clock.
 const SEED_REFRESH_MS = 10 * 60 * 1000
 
-// Synthetic round numbers for the seeded snapshots — kept clear of the values
+// Synthetic round numbers for the seeded snapshots, kept clear of the values
 // nativeFeeLive (999200001+) / nativeFeeDispenser use, so the two never collide.
 const XCHAIN_ROUND = 888100001
 const COIN_ROUND   = 888100002
@@ -75,13 +75,13 @@ async function seedGlobalPrices(force){
 
     const available = await priceSnapshotHelper.isAvailable()
     if (!available) {
-        console.log('nativeFeeHelper: price_snapshots not reachable — skipping price seed')
+        console.log('nativeFeeHelper: price_snapshots not reachable; skipping price seed')
         return
     }
 
     // Anchor to max(chain tip block_time, wall-clock now). The staleness guard
     // (db.getLatestPrice) is ONE-SIDED: it rejects only when the snapshot is
-    // OLDER than the processed block by > ORACLE_MAX_PRICE_AGE_SECONDS (1800s) —
+    // OLDER than the processed block by > ORACLE_MAX_PRICE_AGE_SECONDS (1800s);
     // a future-dated snapshot is accepted. Two regtest regimes must both stay
     // fresh, and a tip-only anchor fails the first:
     //   - idle chain: the tip block_time lags wall clock (test-host's DOGE tip ran
@@ -93,7 +93,7 @@ async function seedGlobalPrices(force){
     // max() satisfies both. Safe for the FIAT dispenser reverse-match (which
     // needs snapshot <= payment block_time): dispenser.test.js re-clears and
     // re-seeds {COIN}/USD at latestBlockTime()-60 right before its DISPENSE, and
-    // that DISPENSE payment (createSimpleTransaction) never re-seeds — so this
+    // that DISPENSE payment (createSimpleTransaction) never re-seeds, so this
     // forward anchor can never clobber the dispenser's row.
     // clearPair first so exactly one finalized row exists per pair (no ambiguity
     // for getLatestPrice).
@@ -112,7 +112,7 @@ async function seedGlobalPrices(force){
 
 // Discover the stack's ACTUAL native-fee mode. Env is an override (matches the
 // container's XCHAIN_FEE_DESTINATION_<CODE>_<NET> / FEE_DESTINATION); otherwise
-// ask the live indexer's `feeschedule` JSON-RPC — the source of truth, since the
+// ask the live indexer's `feeschedule` JSON-RPC (the source of truth, since the
 // indexer reads its destination from config.ADDRESS.FEE_DESTINATION, NOT from
 // any env the e2e runner happens to export. This is the fix for the LTC/DOGE
 // action-suite hang: resolveFeeDestination() was env-only, returned null in the
@@ -132,8 +132,8 @@ async function discoverFeeMode(){
                 return _feeMode
             }
         } catch (e) {
-            // On a fee chain an unreachable feeschedule is NOT a safe "skip" — it
-            // would silently drop the fee output and hang. Surface it.
+            // On a fee chain an unreachable feeschedule is NOT a safe "skip":
+            // it would silently drop the fee output and hang. Surface it.
             if (isFeeChain())
                 throw new Error('native-fee discovery failed on ' + global.COIN_CODE +
                     ' (indexer feeschedule unreachable: ' + (e && e.message) + ')')
@@ -149,8 +149,8 @@ async function discoverFeeMode(){
 
 // The native fee output to attach to an action tx, or null to skip (gas-mode
 // chains where native fees are disabled). Throws loudly when native fees ARE
-// enabled but no destination is resolvable — far better than a silent skip that
-// hangs the suite. Refreshes prices first so a long run never ages out.
+// enabled but no destination is resolvable. Throwing loudly is far better than
+// a silent skip that hangs the suite. Refreshes prices first so a long run never ages out.
 async function getNativeFeeOutput(){
     const mode = await discoverFeeMode()
     if (!mode.enabled) return null

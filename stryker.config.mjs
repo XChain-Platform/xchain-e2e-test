@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Stryker Mutation Testing — Phase 1 Configuration
+ * Stryker Mutation Testing: Phase 1 Configuration
  *
  * Targets test infrastructure (src/ connectors, test/helpers/, transactionHelper,
  * cryptoHelper) and runs unit tests to detect mutations.

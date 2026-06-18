@@ -16,12 +16,12 @@ const gasHelper = require('../helpers/gasHelper')
 const orderHelper = require('../helpers/orderHelper')
 
 /**
- * VM Emissions — proves that contract-emitted actions of several types flow through
+ * VM Emissions: proves that contract-emitted actions of several types flow through
  * the real action handlers and land on-chain, including multiple emissions in a
  * single execution. Verified against the indexer DB (balances, supply,
  * contract_emissions, and the emitted action's own table row).
  */
-describe('VM Emissions — emitted action variety', function () {
+describe('VM Emissions: emitted action variety', function () {
 
     const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
 
@@ -41,7 +41,7 @@ describe('VM Emissions — emitted action variety', function () {
     } };`
 
     // Token-for-token order: give the test tick (a ${CHAIN}-network token) for XCHAIN.
-    // GIVE_COIN must be a supported network. GET_ADDRESS must be an explicit real address —
+    // GIVE_COIN must be a supported network. GET_ADDRESS must be an explicit real address;
     // a contract's synthetic C:${CHAIN}:N address fails the isCryptoAddress format check, so
     // it cannot default GET_ADDRESS to itself.
     const ORDERER = `module.exports = { mkorder: function(){
@@ -50,7 +50,7 @@ describe('VM Emissions — emitted action variety', function () {
             getAddress: xchain.getInputParam(1) });
     } };`
 
-    // Token-for-token order with NO explicit GET_ADDRESS — it defaults to the contract's
+    // Token-for-token order with NO explicit GET_ADDRESS. It defaults to the contract's
     // own derived address (C:${CHAIN}:N). Proves a contract can be the GET_ADDRESS recipient
     // of its own same-chain token ORDER: proceeds settle on the XChain ledger to the
     // contract's balance. Before this was allowed, the default-to-SOURCE produced the
@@ -93,8 +93,8 @@ describe('VM Emissions — emitted action variety', function () {
         xchain.emit.message({ coin: '${CHAIN}', destination: xchain.getInputParam(0) });
     } };`
 
-    // Public (non-gated) file. A contract can only emit a public FILE — gated files
-    // require SOURCE to be the GATE_TICKER issuer, which a contract address is not — so
+    // Public (non-gated) file. A contract can only emit a public FILE; gated files
+    // require SOURCE to be the GATE_TICKER issuer, which a contract address is not. So
     // this covers the emit.file -> FILE handler -> files-row plumbing.
     const FILER = `module.exports = { publish: function(){
         xchain.emit.file({ name: 'contract-note.txt', type: 'text/plain', title: 'Note', memo: 'from contract' });
@@ -233,13 +233,13 @@ describe('VM Emissions — emitted action variety', function () {
         const ci = await fundedContract(NATIVE_ORDERER, tick, '100')
         const contractAddr = `C:${CHAIN}:${ci}`
 
-        // Status-agnostic helper — the emission is rejected and the execution reverts.
+        // Status-agnostic helper: the emission is rejected and the execution reverts.
         const ex = await vmHelper.sendExecuteV0Invalid(deployer, ci, 'mknativeorder', [tick])
         const row = ex.execution
         assert(row, 'an execution row should be recorded')
         assert.notStrictEqual(row.status, 'valid', 'a contract cannot receive native coin via its own ORDER')
         assert.strictEqual(Number(row.emitted_count), 0, 'no emissions should be committed')
-        // The whole execution rolled back — the GIVE side must NOT have been escrowed.
+        // The whole execution rolled back; the GIVE side must NOT have been escrowed.
         assert.strictEqual(await balanceOf(contractAddr, tick), '100', 'contract balance must be unchanged')
     })
 
@@ -292,7 +292,7 @@ describe('VM Emissions — emitted action variety', function () {
         assert.strictEqual(await balanceOf(contractAddr, tick), '60', 'GIVE escrowed on order creation')
 
         // Drive blocks forward until block_time passes EXPIRATION and the per-block expiry sweep
-        // (XChainIndexer processExpirations) fires. Batch-mine + poll — robust whether regtest
+        // (XChainIndexer processExpirations) fires. Batch-mine + poll; robust whether regtest
         // block_time tracks wall-clock or advances ~1s/block (median-time-past).
         let refunded = null
         const deadline = Date.now() + 150000
@@ -309,7 +309,7 @@ describe('VM Emissions — emitted action variety', function () {
     it('emits DISPENSER; a dispenser row is created from the contract', async function () {
         const tick = randTick('VEP')
         const ci = await fundedContract(DISPENSERR, tick, '100')
-        // Fresh (unfunded) address — required as the dispenser GET_ADDRESS.
+        // Fresh (unfunded) address required as the dispenser GET_ADDRESS.
         const fresh = await cryptoHelper.getNewAddress('vmemit-disp-recv', COIN, NETWORK, null, 'legacy', 0)
         const ex = await vmHelper.sendExecuteV0(deployer, ci, 'mkdisp', [tick, fresh.address])
         assert(ex.execution, 'execution row should exist (DISPENSER emission must succeed)')

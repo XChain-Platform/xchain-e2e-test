@@ -137,7 +137,7 @@ describe('Issue Helper → DB Assertion Pipeline', function () {
             assert.strictEqual(result.credit, null, 'credit should be null on timeout')
         })
 
-        it('does not throw — caller can assert on null result', function () {
+        it('does not throw; caller can assert on null result', function () {
             // This confirms the pattern: helpers return null, tests use assert(result.issue)
             const result = { txHash: 'abc', issue: null, credit: null }
             assert.throws(

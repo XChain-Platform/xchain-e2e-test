@@ -16,7 +16,7 @@
  *
  * xchain-sdk/src/websocket.js is the real-time client the wallet uses
  * for live balance/action updates. It has only unit tests (mocked
- * sockets) — nothing exercises it end-to-end against the live explorer
+ * sockets); nothing exercises it end-to-end against the live explorer
  * WebSocket server (xchain-explorer/src/ws/*). This suite closes that
  * gap: it opens a real WS to the running explorer, subscribes to the
  * `actions` channel via the SDK's high-level `onAction`, submits a real
@@ -87,7 +87,7 @@ describe('[sdk] websocket live action events', function () {
             submitOpts({ wif: issuer.wif }),
         );
         // The action must have been indexed (NEW_ACTION fires for any indexed action
-        // regardless of validity). We don't hard-require status==='valid' here — the
+        // regardless of validity). We don't hard-require status==='valid' here: the
         // indexed-status read can race the indexer under regtest load, and this suite
         // is about WebSocket delivery, not submit validity.
         expect(res.indexed, 'ISSUE was indexed').to.be.an('object');
@@ -107,7 +107,7 @@ describe('[sdk] websocket live action events', function () {
         expect(evt.data.action, 'event carries the action type').to.equal('ISSUE');
         expect(evt.data.source, 'event carries the source address').to.equal(issuer.address);
         expect(evt.data.action_index, 'event carries a numeric action_index (BigInt-safe)').to.be.a('number');
-        // NOTE: the generic actions feed reports status as null — status lives only on
+        // NOTE: the generic actions feed reports status as null. Status lives only on
         // the per-ACTION-type tables, not the `actions` table. Clients needing status
         // fetch the action detail; the real-time event is a "something changed" signal
         // carrying type + source + index.

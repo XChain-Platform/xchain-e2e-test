@@ -28,7 +28,7 @@ const issueHelper = require('../helpers/issueHelper')
 //     correctly despite the extra AuxPoW commitment data.
 //
 // These properties can only be exercised against a live node of the matching
-// chain — a Bitcoin regtest node produces neither HogEx outputs nor AuxPoW
+// chain. A Bitcoin regtest node produces neither HogEx outputs nor AuxPoW
 // headers. Each case is therefore gated to its chain and skips elsewhere. To
 // run them, provision the matching regtest stack (e.g. `xchain-node install
 // regtest` for litecoin / dogecoin) and point COIN/NETWORK at it.

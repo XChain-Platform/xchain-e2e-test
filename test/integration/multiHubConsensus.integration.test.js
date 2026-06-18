@@ -11,22 +11,22 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * L2 integration — config-change PBFT across a multi-validator hub set
+ * L2 integration: config-change PBFT across a multi-validator hub set
  *
  * Boots N=3 in-process XChainHub validators (MultiValidatorHub) and drives the
  * REAL config-consensus path (Consensus.propose → PRE_PREPARE/PREPARE/COMMIT →
  * _applyConfig) end to end over live P2P. Asserts:
  *   - a config change proposed by the round leader reaches COMMIT quorum and is
- *     applied on EVERY hub (not just the proposer) — i.e. PBFT actually carries
+ *     applied on EVERY hub (not just the proposer), i.e. PBFT actually carries
  *     the change across the federation, persisted to each hub's own DB;
  *   - every hub independently resolves the SAME quorum N for the round
- *     (determinism — the validator-specific bar; divergent N silently splits
+ *     (determinism: the validator-specific bar; divergent N silently splits
  *     the federation).
  *
  * Coverage-matrix gap this closes: PBFT(config) was L1-mocked only (REG-CON-*);
  * L2/L4 were ⬜. Spec: claude/reports/specs/2026-05-30_validator-test-spec.md §6.
  *
- * Runs on a disposable Docker MariaDB (no platform-DB grant needed) — skips
+ * Runs on a disposable Docker MariaDB (no platform-DB grant needed). Skips
  * cleanly only when neither an env-provisioned DB nor Docker is available.
  ********************************************************************/
 
@@ -48,7 +48,7 @@ const APPLY_WAIT_MS = 3000;   // let COMMIT propagate + followers _applyConfig
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-describe('MultiValidatorHub — config-change PBFT (L2)', function () {
+describe('MultiValidatorHub: config-change PBFT (L2)', function () {
     this.timeout(180_000);
 
     let db, mvh, seed;
@@ -56,7 +56,7 @@ describe('MultiValidatorHub — config-change PBFT (L2)', function () {
     before(async function () {
         db = await startDisposableHubDb();
         if (!db) {
-            console.log('Skipping config-PBFT L2 — no env DB and Docker unavailable');
+            console.log('Skipping config-PBFT L2: no env DB and Docker unavailable');
             this.skip();
         }
         mvh = new MultiValidatorHub({ count: COUNT, basePort: 31000 });
@@ -84,7 +84,7 @@ describe('MultiValidatorHub — config-change PBFT (L2)', function () {
     it('every hub independently resolves the SAME, fault-tolerant quorum N (determinism)', function () {
         // The validator-specific bar: divergent quorum N silently splits the
         // federation. Every hub, computing independently from the seeded
-        // snapshot, must agree — and the value must be a real BFT majority.
+        // snapshot, must agree, and the value must be a real BFT majority.
         const quorums = mvh.hubs.map((h) => h.consensus.hub.capabilitySnapshot.getQuorum(seed.snapshot));
         assert.ok(quorums.every((q) => q === quorums[0]),
             'hubs disagree on quorum N: ' + JSON.stringify(quorums));
@@ -108,8 +108,8 @@ describe('MultiValidatorHub — config-change PBFT (L2)', function () {
         await leader.addParametersFromJson(config);   // resolves on COMMIT quorum
         await sleep(APPLY_WAIT_MS);                    // let followers apply too
 
-        // The change must be persisted on EVERY hub's own DB — proof PBFT carried
-        // it across the federation, not just the proposer.
+        // The change must be persisted on EVERY hub's own DB. This is proof PBFT
+        // carried it across the federation, not just the proposer.
         for (let i = 0; i < mvh.hubs.length; i++) {
             const cfg = await mvh.hubs[i].db.getConfig(COIN, NET, MODULE);
             assert.strictEqual(cfg.GAS_PRICE, VALUE,

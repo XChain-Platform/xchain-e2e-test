@@ -209,7 +209,7 @@ function run() {
   console.log(`  Killed: ${killed}  Survived: ${survived}  Timeout: ${timeout}  NoCoverage: ${noCoverage}`)
 
   if (survived > 0) {
-    console.log(`\n${survived} survived mutant(s) — see report for details.`)
+    console.log(`\n${survived} survived mutant(s): see report for details.`)
   }
 }
 

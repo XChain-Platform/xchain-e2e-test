@@ -75,7 +75,7 @@ class XChainHubConnector {
         let result = await this._call({ jsonrpc: '2.0', method: 'ping', id: 1 });
         // A reachable-but-degraded hub returns a non-null {status:"degraded"}
         // body. The hub is up, so report it as reachable rather than as a
-        // connection failure — but log the degraded state so it stays visible.
+        // connection failure; log the degraded state so it stays visible.
         if(result && typeof result === 'object' && result.status === 'degraded'){
             console.warn('Hub reachable but reporting degraded state: ', result);
         }
@@ -86,7 +86,7 @@ class XChainHubConnector {
         let result = await this._call({ jsonrpc: '2.0', method: 'getallconfigs', params: [], id: 1 });
         // A degraded hub returns {status:"degraded"} and a failed config fetch
         // returns {error:...}; neither is a config tree. Don't let those
-        // masquerade as config — return null so the caller takes its
+        // masquerade as config. Return null so the caller takes its
         // "couldn't get configs" path instead of indexing into a non-config object.
         if(result && typeof result === 'object' && (result.status === 'degraded' || result.error !== undefined)){
             console.warn('Hub did not return usable config: ', result);

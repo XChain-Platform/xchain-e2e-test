@@ -11,15 +11,15 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Track C.2 — Cross-chain DEX match → indexer CROSS_SETTLE end-to-end.
+ * Track C.2: Cross-chain DEX match to indexer CROSS_SETTLE end-to-end.
  *
  * The in-process DEX PBFT tests prove a match finalizes with a 2f+1 signature
  * bundle, but they stop at the hub's cross_chain_matches row. The indexer's
  * cross_settle.js (which RE-verifies those signatures against the locked
  * capability snapshot and releases escrow) was only unit-tested with SYNTHETIC
  * rows/sigs. This closes the gap by feeding a REAL multi-hub-finalized match row
- * into the real indexer handler — proving the cross-repo canonical alignment
- * (hub _canonicalMatch ↔ indexer _canonical) and the multi-sig quorum end to end:
+ * into the real indexer handler, proving the cross-repo canonical alignment
+ * (hub _canonicalMatch vs indexer _canonical) and the multi-sig quorum end to end:
  *   - POSITIVE: the federated row passes signature + weighted-quorum verification
  *     → cross_settle reaches STATUS='valid' and records the settlement;
  *   - NEGATIVE: a tampered signature bundle fails quorum → no settlement.
@@ -103,14 +103,14 @@ function makeCtx(coin, pubkeys) {
     return { ctx, calls };
 }
 
-describe('MultiValidatorHub — cross-chain DEX match → indexer CROSS_SETTLE e2e (C.2)', function () {
+describe('MultiValidatorHub: cross-chain DEX match to indexer CROSS_SETTLE e2e (C.2)', function () {
     this.timeout(240_000);
 
     let db, mvh, seed, book, matchRow, pubkeys;
 
     before(async function () {
         db = await startDisposableHubDb();
-        if (!db) { console.log('Skipping cross-settle e2e — no env DB and Docker unavailable'); this.skip(); }
+        if (!db) { console.log('Skipping cross-settle e2e: no env DB and Docker unavailable'); this.skip(); }
 
         book = new MockCrossChainOfferBook();
         await book.start();
@@ -179,7 +179,7 @@ describe('MultiValidatorHub — cross-chain DEX match → indexer CROSS_SETTLE e
         assert.ok(calls.createOrderStatus + calls.createSwapStatus >= 1, 'the settled leg was not completed');
     });
 
-    it('a tampered signature bundle fails quorum — no settlement', async function () {
+    it('a tampered signature bundle fails quorum: no settlement', async function () {
         assert.ok(matchRow, 'no finalized match row from before()');
         const tampered = Object.assign({}, matchRow);
         const sigs = JSON.parse(matchRow.validator_signatures || '[]').map((s) => ({
@@ -195,7 +195,7 @@ describe('MultiValidatorHub — cross-chain DEX match → indexer CROSS_SETTLE e
 
         await handler.parse(null, data, null);
 
-        assert.notStrictEqual(data.STATUS, 'valid', 'a tampered bundle was accepted — quorum/signature check failed open');
+        assert.notStrictEqual(data.STATUS, 'valid', 'a tampered bundle was accepted: quorum/signature check failed open');
         assert.strictEqual(calls.recordSettlement, 0, 'a settlement was recorded for a tampered (sub-quorum) match');
     });
 });

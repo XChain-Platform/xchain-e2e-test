@@ -25,7 +25,7 @@ const ECPair = ECPairFactory(ecc)
 const transactionHelper = require('../../../test/transactionHelper')
 const fixtures = require('../fixtures/services')
 
-describe('Transaction Pipeline — standard OP_RETURN flow', function () {
+describe('Transaction Pipeline: standard OP_RETURN flow', function () {
 
     let savedGlobals
     let testKeyPair
@@ -220,10 +220,10 @@ describe('Transaction Pipeline — standard OP_RETURN flow', function () {
                 getUtxosFromAddress: async () => ({ utxos: confirmedUtxos })
             }
 
-            // First call — should send empty utxos, then cache confirmed UTXOs
+            // First call: should send empty utxos, then cache confirmed UTXOs
             await transactionHelper.createAndSendTransaction(addressInfo, 'ISSUE|0|TEST')
 
-            // Second call — should use cached UTXOs
+            // Second call: should use cached UTXOs
             await transactionHelper.createAndSendTransaction(addressInfo, 'SEND|0|TEST|100')
 
             assert.strictEqual(encoderCalls.length, 2)
@@ -292,7 +292,7 @@ describe('Transaction Pipeline — standard OP_RETURN flow', function () {
             // Call with addressInfo (caches UTXOs for testAddress)
             await transactionHelper.createAndSendTransaction(addressInfo, 'ISSUE|0|TEST')
 
-            // Call with addressInfo2 (different address — should NOT use cached UTXOs)
+            // Call with addressInfo2 (different address, should NOT use cached UTXOs)
             await transactionHelper.createAndSendTransaction(addressInfo2, 'SEND|0|TEST|50')
 
             assert.strictEqual(encoderCalls.length, 2)

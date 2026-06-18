@@ -17,8 +17,8 @@
  *
  * Why: the platform DB user `xchain_hub` lacks CREATE DATABASE, so the
  * MultiValidatorHub harness (which makes one DB per hub) can't run against it.
- * Rather than gate every consensus test on a privileged platform grant — which
- * makes them silently SKIP, reading as "covered" when they aren't — this spins
+ * Rather than gate every consensus test on a privileged platform grant (which
+ * makes them silently SKIP, reading as "covered" when they aren't), this spins
  * a throwaway root MariaDB in Docker that any test can use anywhere.
  * Ref: claude/reports/2026-05-30_validator-testing-handover.md §4.
  *
@@ -31,7 +31,7 @@
  *
  * Resolution order:
  *   1. If HUB_DB_USER/HUB_DB_PASS are already in env (CI provisions a DB), use
- *      them as-is — no Docker, no teardown. Zero silent skips in CI.
+ *      them as-is with no Docker and no teardown. Zero silent skips in CI.
  *   2. Else, if Docker is available, run a throwaway `mariadb:11`, wait until it
  *      accepts connections, export HUB_DB_* into process.env, and return a
  *      handle whose stop() removes the container.
@@ -54,7 +54,7 @@ function dockerAvailable() {
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 // Probe readiness by actually opening a connection (no credentials on any
-// command line — the driver handles auth in-process).
+// command line; the driver handles auth in-process).
 async function waitForReady(host, port, pass, attempts = 180) {
     for (let i = 0; i < attempts; i++) {
         let conn;
@@ -72,7 +72,7 @@ async function waitForReady(host, port, pass, attempts = 180) {
 }
 
 async function startDisposableHubDb(opts = {}) {
-    // (1) Reuse a pre-provisioned DB from env (CI / local platform DB) — but
+    // (1) Reuse a pre-provisioned DB from env (CI / local platform DB), but
     // only if it actually answers. A PRIOR suite's self-provisioned DB exports
     // HUB_DB_* into process.env and its stop() removes the container; trusting
     // stale env here pointed every later suite at a dead port and hung its
@@ -92,7 +92,7 @@ async function startDisposableHubDb(opts = {}) {
                 async stop() {}
             };
         }
-        // Stale env from a torn-down disposable — fall through and self-provision.
+        // Stale env from a torn-down disposable: fall through and self-provision.
     }
 
     // (2) Self-provision a throwaway container.
@@ -107,7 +107,7 @@ async function startDisposableHubDb(opts = {}) {
         '-p', '127.0.0.1:' + port + ':3306',
         // tmpfs datadir: the DB is throwaway by definition, and RAM-backing it
         // cuts MariaDB 11's first-boot "Initializing database files" from 60s+
-        // (observed on a loaded host — it blew the old 60s readiness budget) to
+        // (observed on a loaded host; it blew the old 60s readiness budget) to
         // a few seconds.
         '--tmpfs', '/var/lib/mysql:rw',
         IMAGE
@@ -120,7 +120,7 @@ async function startDisposableHubDb(opts = {}) {
     }
 
     // Export so MultiValidatorHub (and the hub's config layer) pick it up.
-    // Remember what we overwrote so stop() can restore it — leaking these
+    // Remember what we overwrote so stop() can restore it. Leaking these
     // exports poisons the next suite's resolution path (1).
     const prevEnv = {
         HUB_DB_HOST: process.env.HUB_DB_HOST,

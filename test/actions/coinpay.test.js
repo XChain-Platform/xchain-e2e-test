@@ -17,7 +17,7 @@ const coinpayHelper = require('../helpers/coinpayHelper')
 
 describe('COINPAY', function () {
 
-    describe('v0 — Happy path: Token-for-Coin settlement', function () {
+    describe('v0: Happy path: Token-for-Coin settlement', function () {
         it('should create matching native coin orders, send COINPAY, and settle', async function () {
             // 1. Create seller address and fund it
             let sellerAddr = await cryptoHelper.getNewFundedAddress(
@@ -30,7 +30,7 @@ describe('COINPAY', function () {
             )
 
             // 3. Issue a token to the seller, fully minting maxSupply at issue time
-            //    (the 7th arg `mintSupply` already credits 1000 to the seller —
+            //    (the 7th arg `mintSupply` already credits 1000 to the seller;
             //    a separate MINT would exceed maxSupply).
             let tick = "CP" + sellerAddr["address"].substring(5, 12).toUpperCase()
             await issueHelper.sendIssueV0(sellerAddr, tick, "1000", "1000", "8", "COINPay test token", "1000")
@@ -52,7 +52,7 @@ describe('COINPAY', function () {
             )
             assert(buyerOrder.order, "Buyer ORDER should exist in DB")
 
-            // 7. Wait for ORDER_MATCH with pending_coinpay status — filter by the
+            // 7. Wait for ORDER_MATCH with pending_coinpay status. Filter by the
             // specific orders this test created so we don't pick up a leftover
             // pending obligation from a previous run. The matcher records the
             // newer order (buyer) on the get side and the existing order (seller)
@@ -96,13 +96,13 @@ describe('COINPAY', function () {
         })
     })
 
-    describe('v0 — COINPay obligation expires', function () {
+    describe('v0: COINPay obligation expires', function () {
         it('should expire unfulfilled obligation and release escrowed tokens', async function () {
             // This test requires the COINPAY_EXPIRATION to elapse.
             // In regtest, we can mine blocks with future timestamps to trigger expiration.
-            // For now, this is a placeholder — the full test requires mining control
+            // For now, this is a placeholder. The full test requires mining control
             // to advance block_time past the obligation's expiration timestamp.
-            console.log("    (COINPay expiration test requires block time advancement — skipping in basic suite)")
+            console.log("    (COINPay expiration test requires block time advancement; skipping in basic suite)")
         })
     })
 })

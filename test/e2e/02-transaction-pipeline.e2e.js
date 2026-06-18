@@ -28,7 +28,7 @@ describe('E2E: Transaction Pipeline Machinery', () => {
 
             tick = 'E2EPIPE' + addressInfo.address.substring(addressInfo.address.length - 7)
 
-            // Use the full pipeline via issueHelper — validates the complete OP_RETURN path
+            // Use the full pipeline via issueHelper; validates the complete OP_RETURN path
             const result = await issueHelper.sendIssueV0(
                 addressInfo, tick, 100, 10, 0, 'pipe test', 10
             )
@@ -107,7 +107,7 @@ describe('E2E: Transaction Pipeline Machinery', () => {
     describe('E2E-EXEC-003: MULTISIGN (bare multisig) encoding path', () => {
         // The MULTISIGN encoding embeds payload bytes in the pubkeys of a bare
         // 1-of-3 multisig output. The rest of the suite always passes a null
-        // compressedPubKey, which routes every encode through OP_RETURN or P2SH —
+        // compressedPubKey, which routes every encode through OP_RETURN or P2SH,
         // so the live MULTISIGN broadcast path is otherwise never exercised. This
         // case forces it: it requires a real compressed pubkey for the 3rd multisig
         // slot, a relay-valid dust value sized from the bare-multisig script (the
@@ -149,7 +149,7 @@ describe('E2E: Transaction Pipeline Machinery', () => {
         // P2WSH embeds payload chunks in the witness scripts of segwit outputs:
         // tx1 creates the P2WSH outputs, tx2 spends them to reveal the data.
         // Each chunk is pushed as a single script element, so it is bound by the
-        // 520-byte consensus push limit (476 usable after script overhead) — an
+        // 520-byte consensus push limit (476 usable after script overhead), so an
         // ~8 KB payload therefore fans out across ~17 P2WSH outputs/inputs. This
         // case exercises (a) the encoder's fee sizing for a multi-output P2WSH
         // transaction under real node relay rules, (b) the node accepting the
@@ -175,7 +175,7 @@ describe('E2E: Transaction Pipeline Machinery', () => {
 
             // Deterministic ~7.8 KB binary blob. Compiled on-chain ACTION push =
             // FILE message (~40 B, OP_PUSHDATA1) + this blob (OP_PUSHDATA2) +
-            // push prefixes ≈ 7.85 KB — safely under the 8192-byte ceiling. At
+            // push prefixes ≈ 7.85 KB, safely under the 8192-byte ceiling. At
             // 476 usable bytes per witness-script chunk this fans out across
             // ~17 P2WSH outputs/inputs, stressing the multi-output fee sizing.
             const RAW_LEN = 7800
@@ -236,8 +236,8 @@ describe('E2E: Transaction Pipeline Machinery', () => {
         //     over-length transaction is never broadcast through the pipeline;
         //   - the decoder (XChainDecoder MAX_ACTION_DATA_LENGTH) re-checks the
         //     reassembled push inside its live block-parsing loop and skips any
-        //     transaction that exceeds it — defense-in-depth against a tx crafted
-        //     outside the encoder.
+        //     transaction that exceeds it (defense-in-depth against a tx crafted
+        //     outside the encoder).
         // Because both ceilings are identical, the decoder's in-loop guard is
         // unreachable through the legitimate encoder pipeline (every tx the
         // encoder will build is <= 8192 and the decoder accepts it). The

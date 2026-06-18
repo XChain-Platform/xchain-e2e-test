@@ -158,7 +158,7 @@ function fuzzMessageConstruction(helperName, methodName, argsArb) {
 
 const f = gen.actionFieldArb
 
-describe('Fuzz — ACTION Message Construction', function () {
+describe('Fuzz: ACTION Message Construction', function () {
 
     // ISSUE V0: tick, maxSupply, maxMint, decimals, description, mintSupply
     fuzzMessageConstruction('issueHelper', 'sendIssueV0',
@@ -251,7 +251,7 @@ describe('Fuzz — ACTION Message Construction', function () {
 
             // The message will contain the pipe from the tick, creating ambiguity
             assert(typeof capturedMessage === 'string')
-            // Count pipes — should be 3 for "ISSUE|1|tick|description" but will be 4
+            // Count pipes: should be 3 for "ISSUE|1|tick|description" but will be 4
             const pipeCount = (capturedMessage.match(/\|/g) || []).length
             assert(pipeCount > 3, `Pipe in tick should increase field count: got ${pipeCount} pipes`)
         })

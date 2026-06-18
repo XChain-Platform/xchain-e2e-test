@@ -16,12 +16,12 @@ const gasHelper = require('../helpers/gasHelper')
 const transactionHelper = require('../transactionHelper')
 
 /**
- * VM Execute Negative — DEPOSIT / WITHDRAW failure paths on a valid contract.
+ * VM Execute Negative: DEPOSIT / WITHDRAW failure paths on a valid contract.
  * Invalid deposits/withdrawals still write a row (with the rejection status) and
  * must move no balances. (EXECUTE on a nonexistent contract index is covered in the
  * library suite to avoid risking the live indexer's per-block transaction.)
  */
-describe('VM Execute Negative — deposit/withdraw failure paths', function () {
+describe('VM Execute Negative: deposit/withdraw failure paths', function () {
 
     const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
     const NOOP = `module.exports = { ping: function(){ return 'ok'; } };`
@@ -106,7 +106,7 @@ describe('VM Execute Negative — deposit/withdraw failure paths', function () {
         assert.strictEqual(await balanceOf(contractAddr, heldTick), '100')
 
         await rawWithdraw(deployer, contractIndex, heldTick, '200')
-        // Poll for the (rejected) withdrawal row — fetch the latest by action_index, since the
+        // Poll for the (rejected) withdrawal row; fetch the latest by action_index, since the
         // earlier valid deposit/withdraw history may share (source, contract, tick).
         const latestWithdrawal = async () => {
             const rows = await q(`SELECT wd.action_index, ist.status AS status

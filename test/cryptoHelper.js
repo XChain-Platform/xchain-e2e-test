@@ -86,7 +86,7 @@ module.exports = {
         // First pass: short wait, then if it stalls force-mine a block in case
         // the funding tx is stuck in the regtest miner's mempool (happens under
         // full-suite load when many funding txes pile up). Late-suite tests
-        // (OWNERSHIP onwards) flake here under accumulated load — bumped from
+        // (OWNERSHIP onwards) flake here under accumulated load; bumped from
         // 3×20s to 6×30s (60s → 180s patience) to absorb that.
         let addressHasUtxos = false
         for (let attempt = 1; attempt <= 6 && !addressHasUtxos; attempt++){
@@ -100,7 +100,7 @@ module.exports = {
                 // evidence (block-height lag vs total stuck vs node not advancing).
                 const sync = await utxoTrackerConnector.getSyncStatus()
                 const syncStr = sync ? `tracker=${sync.tracker_height} node=${sync.node_height} lag=${sync.lag}` : "sync-status=unavailable"
-                console.log(`UTXOs still not visible (${syncStr}) — nudging miner to mine a block (attempt ${attempt}/6)`)
+                console.log(`UTXOs still not visible (${syncStr}); nudging miner to mine a block (attempt ${attempt}/6)`)
                 try { await regtestMinerConnector.generateBlocks(1) } catch (e) {}
             }
         }
@@ -113,7 +113,7 @@ module.exports = {
         if (seedGas) {
             // UNIFIED_FEES + ISSUANCE_FEE activate at block 0 on regtest/testnet, so a
             // freshly funded address can't pay gas-schedule fees (ISSUE = 1 XCHAIN).
-            // XCHAIN is an open-mint faucet on test networks — grab gas here so every
+            // XCHAIN is an open-mint faucet on test networks; grab gas here so every
             // "funded" address is actually usable. Tests that need a zero-gas address
             // (e.g. the native-fee negative case) pass seedGas=false.
             const gasHelper = require('./helpers/gasHelper')

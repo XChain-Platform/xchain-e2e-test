@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * L2 integration — cross-chain DEX match finalization across a real
+ * L2 integration: cross-chain DEX match finalization across a real
  * multi-validator hub federation.
  *
  * Boots N=4 in-process XChainHub validators (MultiValidatorHub, real PeerManager
@@ -22,7 +22,7 @@
  * independently re-derives the canonical and signs it.
  *
  * This is the federation counterpart to CrossChainDexConsensus.test.js (which
- * proves the algorithm over a MOCK bus) — here the same round runs over real
+ * proves the algorithm over a MOCK bus) and here the same round runs over real
  * hubs, closing the single-validator gap (every prior live proof finalized with
  * `1 sig`). Asserts:
  *   - a match finalizes on every hub with >= 2f+1 = 3 DISTINCT, verifying sigs;
@@ -32,14 +32,14 @@
  *
  * Quorum forces N=4: 2·⌊3/3⌋+1 = 3 (tolerates 1 fault); N=3 → quorum 1 (degenerate).
  *
- * Runs on a disposable Docker MariaDB (no platform-DB grant needed) — skips
+ * Runs on a disposable Docker MariaDB (no platform-DB grant needed); skips
  * cleanly only when neither an env-provisioned DB nor Docker is available.
  *
  * NOTE: the harness resolves xchain-hub via the first of several candidate paths
  * (multiValidatorHubHelper._loadHubModule). On a fresh checkout the monorepo
  * sibling resolves correctly, but if a STALE bundled copy exists at
  * xchain-e2e-test/xchain-hub/ (a gitignored e2e build artifact) it shadows the
- * monorepo source — set XCHAIN_HUB_PATH=<repo>/xchain-hub to force the live hub.
+ * monorepo source. Set XCHAIN_HUB_PATH=<repo>/xchain-hub to force the live hub.
  ********************************************************************/
 
 'use strict';
@@ -54,7 +54,7 @@ const { seedStakeSnapshot }    = require('../helpers/seededStakeSnapshot');
 const { silenceDexValidator }  = require('../helpers/byzantineFaults');
 const { MockCrossChainOfferBook, makeOrder } = require('../helpers/mockCrossChainOfferBook');
 
-const COUNT         = 4;       // quorum 3 — a real BFT majority tolerating 1 fault
+const COUNT         = 4;       // quorum 3, a real BFT majority tolerating 1 fault
 const PEER_WAIT_MS  = 8000;    // mesh forms before we drive a round
 const SETTLE_MS     = 6000;    // PBFT PROPOSE→PREPARE→COMMIT propagation window
 const BLOCK_INDEX   = 100;     // seeded BTC-anchor block (snapshot_block)
@@ -85,7 +85,7 @@ function crossingPair({ ltcIdx, dogeIdx, ltcGive = '90', dogeGive = '40' }){
     };
 }
 
-describe('MultiValidatorHub — cross-chain DEX match PBFT (L2)', function () {
+describe('MultiValidatorHub: cross-chain DEX match PBFT (L2)', function () {
     this.timeout(180_000);
 
     let db, mvh, seed, book;
@@ -93,7 +93,7 @@ describe('MultiValidatorHub — cross-chain DEX match PBFT (L2)', function () {
     before(async function () {
         db = await startDisposableHubDb();
         if (!db) {
-            console.log('Skipping cross-chain DEX federation L2 — no env DB and Docker unavailable');
+            console.log('Skipping cross-chain DEX federation L2: no env DB and Docker unavailable');
             this.skip();
         }
 
@@ -105,7 +105,7 @@ describe('MultiValidatorHub — cross-chain DEX match PBFT (L2)', function () {
             count:           COUNT,
             basePort:        32000,
             startCrossChain: true,
-            startAttestation: false,                  // DEX-focused — skip attestation cost
+            startAttestation: false,                  // DEX-focused; skip attestation cost
             crossChainIndexerUrls: {
                 LTC:  book.urlFor('shared', 'LTC'),
                 DOGE: book.urlFor('shared', 'DOGE')
@@ -255,11 +255,11 @@ describe('MultiValidatorHub — cross-chain DEX match PBFT (L2)', function () {
             // match: even if it locally finalizes on peer COMMIT count, its signature
             // bundle holds < quorum VALID sigs over its own canonical, so the indexer's
             // cross_settle (which re-verifies 2f+1) would reject it. This is the safety
-            // boundary — a bad view harms only itself, never the federation's settlement.
+            // boundary: a bad view harms only itself, never the federation's settlement.
             for (const ev of byz) {
                 const ok = verifyingPubkeys(ev);
                 assert.ok(ok.size < 3,
-                    'byzantine node reached a VALID quorum on a divergent canonical (' + ok.size + ' sigs) — safety violation');
+                    'byzantine node reached a VALID quorum on a divergent canonical (' + ok.size + ' sigs; safety violation)');
             }
         } finally {
             byzDex.indexers = savedIndexers;
@@ -272,7 +272,7 @@ describe('MultiValidatorHub — cross-chain DEX match PBFT (L2)', function () {
             ordersByCoin: crossingPair({ ltcIdx: 12, dogeIdx: 22 })
         });
 
-        // Silence two hubs' DEX consensus — only 2 honest remain, below quorum 3.
+        // Silence two hubs' DEX consensus; only 2 honest remain, below quorum 3.
         const restore0 = silenceDexValidator(mvh.hubs[0]);
         const restore1 = silenceDexValidator(mvh.hubs[1]);
         try {

@@ -25,7 +25,7 @@ const ECPair = ECPairFactory(ecc)
 const { saveGlobals, restoreGlobals, GLOBAL_KEYS } = require('./chaos-helpers')
 const transactionHelper = require('../transactionHelper')
 
-describe('Chaos Experiment 4 — Malformed Encoder Response @P1', function () {
+describe('Chaos Experiment 4: Malformed Encoder Response @P1', function () {
 
     let saved
     let addressInfo

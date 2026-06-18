@@ -41,7 +41,7 @@ function createDb(queryResult) {
     return { db, mockConn, mockPool }
 }
 
-describe('Boundary — Polling Timeouts', function () {
+describe('Boundary: Polling Timeouts', function () {
 
     afterEach(function () {
         sinon.restore()
@@ -99,7 +99,7 @@ describe('Boundary — Polling Timeouts', function () {
 
     describe('PT-02: waitForIssue with timeMax = 1', function () {
 
-        it('returns null — does not run indefinitely', async function () {
+        it('returns null and does not run indefinitely', async function () {
             const { db, mockConn } = createDb()
             const result = await db.waitForIssue({ tick: 'TOK' }, 1)
 
@@ -113,7 +113,7 @@ describe('Boundary — Polling Timeouts', function () {
 
     describe('PT-03: waitForIssue with timeMax = -1', function () {
 
-        it('returns null immediately — endTime is already in the past', async function () {
+        it('returns null immediately because endTime is already in the past', async function () {
             const { db, mockConn } = createDb()
             const result = await db.waitForIssue({ tick: 'TOK' }, -1)
 
@@ -155,7 +155,7 @@ describe('Boundary — Polling Timeouts', function () {
 
     describe('PT-07: waitForIssue with very large timeMax', function () {
 
-        it('does not overflow — exits correctly when record is found on first check', async function () {
+        it('does not overflow and exits correctly when record is found on first check', async function () {
             const { db, mockConn } = createDb()
             const mockRow = { tick: 'TOK', status: 'valid' }
             mockConn.query.resolves([mockRow])
@@ -172,7 +172,7 @@ describe('Boundary — Polling Timeouts', function () {
 
     describe('PT-08: waitForIssue with timeMax = 1000 (equals sleep interval)', function () {
 
-        it('terminates and returns null — does not hang', async function () {
+        it('terminates and returns null, does not hang', async function () {
             const { db, mockConn } = createDb()
             mockConn.query.resolves([])
 
@@ -277,7 +277,7 @@ describe('Boundary — Polling Timeouts', function () {
         })
     })
 
-    // ── PT-09: combined — error during zero-timeout poll ────────
+    // ── PT-09: combined, error during zero-timeout poll ─────────
 
     describe('PT-09: waitForIssue with error and timeMax = 0', function () {
 

@@ -20,7 +20,7 @@ const assert = require('assert')
 const sinon = require('sinon')
 const { createDb, makeMockConnection, makeMockPool, mockMariadb } = require('./chaos-helpers')
 
-describe('Chaos Experiment 5 — Database Mid-Query Disconnect @P1', function () {
+describe('Chaos Experiment 5: Database Mid-Query Disconnect @P1', function () {
 
     afterEach(function () {
         sinon.restore()

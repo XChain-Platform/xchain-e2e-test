@@ -14,7 +14,7 @@
  *
  * XChain Platform E2E - SDK-driven smart contracts (VM)
  *
- * DEPLOY a contract, EXECUTE a method, and read contract state — all
+ * DEPLOY a contract, EXECUTE a method, and read contract state, all
  * through the SDK. DEPLOY's hex-encoded bytecode auto-selects P2WSH, so
  * this also exercises the P2WSH two-phase reveal on a realistic payload.
  *

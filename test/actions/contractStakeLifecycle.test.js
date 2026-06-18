@@ -11,10 +11,10 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Contract Staking — live lifecycle legs NOT covered by contractStaking.test.js:
+ * Contract Staking: live lifecycle legs NOT covered by contractStaking.test.js:
  *   (1) UNSTAKE v1 begins cooldown, and after cooldown_end_block the sweep
  *       credits the staked tokens back to the staker.
- *   (2) live SLASH — an EXECUTE that calls xchain.contract.slash(pubkey,tick,amt)
+ *   (2) live SLASH: an EXECUTE that calls xchain.contract.slash(pubkey,tick,amt)
  *       writes a slash_events row and reduces the active stake. The contract-slash
  *       emission path was only unit-tested (db.slashContractStake-double-count);
  *       this drives it end-to-end on a live stack.
@@ -105,7 +105,7 @@ async function waitActivation(activationBlock){
     while ((await tip()) < activationBlock && guard++ < 120) { await mine(1); await sleep(800) }
 }
 
-describe('Contract Staking Lifecycle — UNSTAKE cooldown sweep + live SLASH', function () {
+describe('Contract Staking Lifecycle: UNSTAKE cooldown sweep + live SLASH', function () {
     this.timeout(0)
     const COOLDOWN = 20
     let contractIndex
@@ -139,7 +139,7 @@ describe('Contract Staking Lifecycle — UNSTAKE cooldown sweep + live SLASH', f
         assert(cooldownEnd >= Number(u.unstake.block_index) + COOLDOWN - 1, 'cooldown_end_block ≈ unstake block + COOLDOWN')
         rows = await stakeRows(contractIndex, 'XCHAIN', staker.address)
         assert(rows.some(r => r.deactivation_block !== null), 'stake row deactivation_block set by unstake')
-        console.log('   unstaked; cooldown_end', cooldownEnd, '— waiting for sweep')
+        console.log('   unstaked; cooldown_end', cooldownEnd, '- waiting for sweep')
 
         const balDuringCooldown = num(await balanceOf(staker.address, 'XCHAIN'))
         // Advance past cooldown_end_block → sweepUnstakes credits the staked amount back.

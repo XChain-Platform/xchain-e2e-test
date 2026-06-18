@@ -16,7 +16,7 @@ const vmHelper = require('../helpers/vmHelper')
 const gasHelper = require('../helpers/gasHelper')
 
 /**
- * VM Contract SLASH — proves the fund-movement of a contract slashing one of its own stakers.
+ * VM Contract SLASH: proves the fund-movement of a contract slashing one of its own stakers.
  * `contractStaking.test.js` deploys a stakeable contract with a ready `doSlash` method but never
  * invokes it; this exercises the full SLASH emission path end-to-end:
  *   contract emits SLASH → indexer _processSlashEmission → staker's stake deducted (LIFO) →
@@ -25,7 +25,7 @@ const gasHelper = require('../helpers/gasHelper')
  * Verified against the indexer DB: contract_stakes (remaining), slash_events, and the
  * burn-address balance. (contract_executions has no return_value, so we assert via DB state.)
  */
-describe('VM Contract SLASH — a contract slashes its own staker', function () {
+describe('VM Contract SLASH: a contract slashes its own staker', function () {
 
     // Ed25519 pubkey as a 64-hex string (same pattern as contractStaking.test.js / staking.test.js).
     function newSigningPubkey(){
@@ -59,7 +59,7 @@ describe('VM Contract SLASH — a contract slashes its own staker', function () 
             WHERE ia.address=? AND it.tick=?`, [address, tick])
         return rows.length ? String(rows[0].amount) : null
     }
-    // Net active stake for (contract, pubkey, tick) — the SUM the gateway's getStake reads.
+    // Net active stake for (contract, pubkey, tick): the SUM the gateway's getStake reads.
     async function activeStake(ci, pk, tick) {
         const rows = await q(`SELECT COALESCE(SUM(CAST(cs.amount AS DECIMAL(30,8))),0) AS amt
             FROM contract_stakes cs
@@ -82,7 +82,7 @@ describe('VM Contract SLASH — a contract slashes its own staker', function () 
     }
     // Poll until the newest slash_events row reaches `expected` amount (or deadline). sendExecuteV0
     // resolves once the EXECUTE row is 'valid', but the emitted SLASH's slash_events row can land a
-    // beat later through a separate pool connection — on the slower DOGE cadence the immediate read
+    // beat later through a separate pool connection; on the slower DOGE cadence the immediate read
     // saw the *previous* slash (50 vs the capped 150). Returns the last-seen row either way so a
     // genuine mismatch still surfaces in the caller's assertion.
     async function waitForLatestSlash(ci, pk, expected, ms = 30000) {
@@ -111,7 +111,7 @@ describe('VM Contract SLASH — a contract slashes its own staker', function () 
     before(async function () {
         const deployer = await cryptoHelper.getNewFundedAddress('slash-deployer', COIN, NETWORK, null, 'legacy', 0, 1)
         await gasHelper.ensureGasBalance(deployer, '500')
-        // DEPLOY v1 — stakeable, cooldown 50 blocks, slash destination BURN.
+        // DEPLOY v1: stakeable, cooldown 50 blocks, slash destination BURN.
         const deploy = await vmHelper.sendDeployV1(deployer, SLASHER, 300000, '', 50, 'BURN')
         assert(deploy.contract && deploy.contract.status === 'valid', 'stakeable contract must deploy clean')
         contractIndex = deploy.contract.action_index

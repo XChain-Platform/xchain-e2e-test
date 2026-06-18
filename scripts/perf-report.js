@@ -78,7 +78,7 @@ function run() {
 
     // Header
     const runDate = data.runAt ? data.runAt.replace('T', ' ').replace(/\.\d+Z$/, ' UTC') : 'unknown'
-    emit(`# Performance Report — ${runDate}`)
+    emit(`# Performance Report: ${runDate}`)
     emit()
 
     // Run metadata

@@ -15,7 +15,7 @@ const issueHelper = require('../helpers/issueHelper')
 const mintHelper = require('../helpers/mintHelper')
 const gasHelper = require('../helpers/gasHelper')
 
-describe('VM — Smart Contracts', function () {
+describe('VM: Smart Contracts', function () {
 
     // Simple counter contract for testing
     const COUNTER_CONTRACT = `
@@ -52,7 +52,7 @@ describe('VM — Smart Contracts', function () {
         await gasHelper.ensureGasBalance(deployerAddr, '100')
     })
 
-    describe('DEPLOY v0 — Deploy a contract', function () {
+    describe('DEPLOY v0: Deploy a contract', function () {
         it('should deploy a counter contract and create a contract record', async function () {
             let result = await vmHelper.sendDeployV0(deployerAddr, COUNTER_CONTRACT, 200000, 'init')
             assert(result.contract, 'Contract record should exist in DB')
@@ -60,7 +60,7 @@ describe('VM — Smart Contracts', function () {
         })
     })
 
-    describe('EXECUTE v0 — Execute a contract method', function () {
+    describe('EXECUTE v0: Execute a contract method', function () {
         let contractIndex = null
 
         before(async function () {
@@ -78,7 +78,7 @@ describe('VM — Smart Contracts', function () {
         })
     })
 
-    describe('DEPLOY v0 — Deploy with constructor', function () {
+    describe('DEPLOY v0: Deploy with constructor', function () {
         it('should deploy with constructor params and execute initialize', async function () {
             let result = await vmHelper.sendDeployV0(deployerAddr, COUNTER_CONTRACT, 200000, 'init')
             assert(result.contract, 'Contract with constructor should deploy')

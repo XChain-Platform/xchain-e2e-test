@@ -11,25 +11,25 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * L2 integration — STAKE_WEIGHTED_QUORUM (WI-1) ACTIVATION BOUNDARY.
+ * L2 integration: STAKE_WEIGHTED_QUORUM (WI-1) ACTIVATION BOUNDARY.
  *
  * Suite B from claude/reports/2026-06-15_wi1-regtest-e2e-plan.md §B. Proves the
  * count→weighted transition is a clean, fork-free flag-day: the SAME federation,
  * the SAME live signer set, evaluated one block BELOW the activation height
  * (legacy COUNT rule) vs one block ABOVE (stake-WEIGHTED rule), and EVERY hub
  * must make the IDENTICAL finalize/no-finalize decision at each block. A hub that
- * flipped early (or late) would fork the ledger at the boundary — this asserts
+ * flipped early (or late) would fork the ledger at the boundary; this asserts
  * none does.
  *
- * Driver: the config-change PBFT engine (hub-internal, no indexer / no chain) —
- * the same engine proven in multiHubConsensusWeighted.integration.test.js. We
- * drive it across the boundary by stubbing _resolveBtcLatestBlock to a synthetic
+ * Driver: the config-change PBFT engine (hub-internal, no indexer / no chain).
+ * This is the same engine proven in multiHubConsensusWeighted.integration.test.js.
+ * We drive it across the boundary by stubbing _resolveBtcLatestBlock to a synthetic
  * block on each round and stubbing BOTH the COUNT snapshot (getActiveValidator-
  * Snapshot) and the WEIGHT snapshot (getActiveWeightSnapshot) with the SAME
- * 4-member set, so only the activation gate — not the validator set — changes
+ * 4-member set, so only the activation gate (not the validator set) changes
  * between rounds.
  *
- *   B1 boundary parity — fixture: 3 live small-stake hubs + 1 offline whale
+ *   B1 boundary parity: fixture is 3 live small-stake hubs + 1 offline whale
  *     (in the snapshot, never votes). S = 10000, the 3 live hold 3000.
  *       • block ACT-1 (COUNT): count quorum = 3 (N=4), the 3 live hubs meet it →
  *         config APPLIES on every hub.
@@ -37,7 +37,7 @@
  *         NOT apply on any hub.
  *     The decision flips with the rule, uniformly across the federation.
  *
- *   B2 single-operator regression — 1 hub is the whole snapshot, so it finalizes
+ *   B2 single-operator regression: 1 hub is the whole snapshot, so it finalizes
  *     on its own signature in BOTH modes (the quorum===0 fast path; weighted S=
  *     its own stake gives 3S>2S). Assert immediate apply below AND above.
  *
@@ -118,27 +118,27 @@ function seedBoundarySnapshot(mvh, members, getBlock) {
     return { restore() { restores.forEach((r) => r()); restores.length = 0; } };
 }
 
-describe('MultiValidatorHub — STAKE_WEIGHTED_QUORUM activation boundary (WI-1 Suite B, L2)', function () {
+describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM activation boundary (WI-1 Suite B, L2)', function () {
     this.timeout(300_000);
 
     before(function () {
         if (!Number.isFinite(ACT) || ACT < 2) {
             console.log(
-                'Skipping WI-1 activation-boundary suite — regtest STAKE_WEIGHTED_QUORUM_ACTIVATION is ' +
+                'Skipping WI-1 activation-boundary suite: regtest STAKE_WEIGHTED_QUORUM_ACTIVATION is ' +
                 ACT + ' (must be ≥2 to reach the COUNT side). Set regtest to e.g. 120 in all three ' +
                 'stake_weighted_quorum.js copies + constants.js for this run, then revert (plan §B).');
             this.skip();
         }
     });
 
-    // ── B1 — boundary parity: same fixture, decision flips with the rule ──
+    // B1: boundary parity. Same fixture, decision flips with the rule.
     //
     // The two sides run on SEPARATE fresh federations (each at seq 0) because the
-    // PBFT leader rotates by seq — a second round in the same federation lands on
+    // PBFT leader rotates by seq. A second round in the same federation lands on
     // a different leader and findLeader (proven at seq 0) wouldn't resolve it. The
     // no-fork property is unaffected: each side is asserted across EVERY hub of its
-    // federation, and only the activation gate differs between them — the validator
-    // set, the live-signer ratio, and the snapshot are identical. The 3 live hubs
+    // federation, and only the activation gate differs between them (the validator
+    // set, the live-signer ratio, and the snapshot are identical). The 3 live hubs
     // are a COUNT majority (3 of N=4) but a STAKE minority (3000/10000).
     const MEMBERS = (ids) => [
         { pubkey: ids[0].pubkeyHex, source: 'sA',    weight: '1000' },
@@ -147,11 +147,11 @@ describe('MultiValidatorHub — STAKE_WEIGHTED_QUORUM activation boundary (WI-1 
         { pubkey: 'ff'.repeat(32),  source: 'whale', weight: '7000' },   // offline
     ];
 
-    describe('B1a — BELOW the height the COUNT rule applies on every hub', function () {
+    describe('B1a: BELOW the height the COUNT rule applies on every hub', function () {
         let db, mvh, seed;
         before(async function () {
             db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping B1a — no env DB and Docker unavailable'); this.skip(); }
+            if (!db) { console.log('Skipping B1a: no env DB and Docker unavailable'); this.skip(); }
             mvh = new MultiValidatorHub({ count: 3, basePort: 32200 });
             await mvh.start();
             await sleep(PEER_WAIT_MS);
@@ -182,11 +182,11 @@ describe('MultiValidatorHub — STAKE_WEIGHTED_QUORUM activation boundary (WI-1 
         });
     });
 
-    describe('B1b — ABOVE the height the WEIGHTED rule blocks the SAME set on every hub', function () {
+    describe('B1b: ABOVE the height the WEIGHTED rule blocks the SAME set on every hub', function () {
         let db, mvh, seed;
         before(async function () {
             db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping B1b — no env DB and Docker unavailable'); this.skip(); }
+            if (!db) { console.log('Skipping B1b: no env DB and Docker unavailable'); this.skip(); }
             mvh = new MultiValidatorHub({ count: 3, basePort: 32250 });
             await mvh.start();
             await sleep(PEER_WAIT_MS);
@@ -198,7 +198,7 @@ describe('MultiValidatorHub — STAKE_WEIGHTED_QUORUM activation boundary (WI-1 
             if (db)  { await db.stop(); }
         });
 
-        it('a stake minority (3000/10000) never finalizes — config applies on NO hub', async function () {
+        it('a stake minority (3000/10000) never finalizes: config applies on NO hub', async function () {
             assert.ok(swq.isStakeWeightedQuorumActive(ACT + 1, 'regtest'),
                 'block ' + (ACT + 1) + ' should be AT/ABOVE the activation height');
             const COIN = 'BTC', NET = 'regtest', MODULE = 'node', VALUE = '9999';
@@ -219,13 +219,13 @@ describe('MultiValidatorHub — STAKE_WEIGHTED_QUORUM activation boundary (WI-1 
         });
     });
 
-    // ── B2 — single-operator finalizes on its own signature in BOTH modes ──
-    describe('B2 — single-operator regression across the boundary', function () {
+    // B2: single-operator finalizes on its own signature in BOTH modes.
+    describe('B2: single-operator regression across the boundary', function () {
         let db, mvh, seed, currentBlock;
 
         before(async function () {
             db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping B2 — no env DB and Docker unavailable'); this.skip(); }
+            if (!db) { console.log('Skipping B2: no env DB and Docker unavailable'); this.skip(); }
             mvh = new MultiValidatorHub({ count: 1, basePort: 32300 });
             await mvh.start();
             await sleep(PEER_WAIT_MS);

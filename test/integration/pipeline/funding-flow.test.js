@@ -21,7 +21,7 @@ const CryptoNetworks = require('../../../src/CryptoNetworks')
 
 const cryptoHelper = require('../../../test/cryptoHelper')
 
-describe('Funding Flow — cryptoHelper.getNewFundedAddress', function () {
+describe('Funding Flow: cryptoHelper.getNewFundedAddress', function () {
 
     let savedGlobals
 
@@ -72,7 +72,7 @@ describe('Funding Flow — cryptoHelper.getNewFundedAddress', function () {
                 }
             }
 
-            // seedGas=false — the faucet gas-mint rides the full encoder pipeline,
+            // seedGas=false: the faucet gas-mint rides the full encoder pipeline,
             // which these connector stubs don't model; it's covered by the live e2e
             // suites (every action test funds through it).
             const result = await cryptoHelper.getNewFundedAddress(

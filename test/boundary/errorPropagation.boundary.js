@@ -56,7 +56,7 @@ function createDb() {
     return { db, mockConn, mockPool }
 }
 
-describe('Boundary — Error Propagation', function () {
+describe('Boundary: Error Propagation', function () {
 
     const MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
 
@@ -269,7 +269,7 @@ describe('Boundary — Error Propagation', function () {
         })
     })
 
-    // ── EP-10: Combined — error + zero timeout ──────────────────
+    // ── EP-10: Combined: error + zero timeout ──────────────────
 
     describe('EP-10: Error conditions combined with zero timeout', function () {
 
@@ -316,7 +316,7 @@ describe('Boundary — Error Propagation', function () {
                 // Expected first failure
             }
 
-            // Second call with same label — wallet is cached, mnemonic reused
+            // Second call with same label; wallet is cached, mnemonic reused
             const result = await cryptoHelper.getNewFundedAddress('retry-fund', 'bitcoin', 'regtest', null, 'legacy', 1, 1.0)
 
             assert.ok(result.address, 'second call should succeed')

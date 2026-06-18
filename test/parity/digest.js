@@ -11,15 +11,15 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * P3(b) — LIVE multi-chain parity: indexer-DB digest capture.
+ * P3(b): LIVE multi-chain parity: indexer-DB digest capture.
  *
  * Dumps the WHOLE live indexer database (every table, every row) plus the
  * resolved consensus hash chain to a JSON artifact on disk. This is the
- * EXPENSIVE half of the parity harness — it runs once per chain against a
- * live regtest stack (encoder → broadcast → coin node → decoder → indexer).
+ * expensive half of the parity harness. It runs once per chain against a
+ * live regtest stack (encoder -> broadcast -> coin node -> decoder -> indexer).
  *
  * All comparison logic (canonicalisation, column/normalisation policy,
- * hash-chain equality) lives in compare.js — a PURE function over these
+ * hash-chain equality) lives in compare.js, a pure function over these
  * artifacts. The split is deliberate: the 3-chain live sweep is slow and
  * fragile, so we capture raw fidelity once and iterate the comparison
  * offline, exactly the way scenario 14's normalisation set was calibrated.
@@ -29,7 +29,7 @@
  * chain-native residue (txids, block hashes) vs. a real chain-dependence bug.
  *
  * The resolved hash chain is read here (not in compare) because it requires
- * the live JOIN into index_transactions — readHashChain mirrors the indexer's
+ * the live JOIN into index_transactions. readHashChain mirrors the indexer's
  * own getBlockHashes provenance (xchain-indexer/src/db.js:1019) and the
  * cross-node oracle (xchain-indexer/.../setup/equivalence.js).
  *********************************************************************/
@@ -73,7 +73,7 @@ function jsonSafeRow(row) {
 
 async function listTables(pool) {
     const rows = await poolQuery(pool, 'SHOW TABLES');
-    // mariadb may tag array results with a `meta` property — Object.values on
+    // mariadb may tag array results with a `meta` property. Object.values on
     // each row yields the single column value regardless of its key name.
     return rows.map(r => String(Object.values(r)[0])).filter(Boolean).sort();
 }
@@ -81,7 +81,7 @@ async function listTables(pool) {
 /**
  * Read the node's chained consensus-hash triple per block, RESOLVED to the
  * hash strings (id-independent), ordered by height. Identical query to the
- * cross-node oracle's readHashChain — the consensus commitment that must hold
+ * cross-node oracle's readHashChain: the consensus commitment that must hold
  * across chains even though every chain's index_transactions id-space differs
  * (it interleaves chain-native txids + block hashes).
  */

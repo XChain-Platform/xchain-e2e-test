@@ -11,17 +11,17 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * P3(b) — deterministic bootstrap, a TRIMMED replacement for
+ * P3(b): deterministic bootstrap, a TRIMMED replacement for
  * test/initialCheck.test.js (use as the mocha --require for the parity suite).
  *
  * initialCheck cannot be used for the parity run for two reasons, both of
  * which break the determinism contract:
  *   1. its service-pings phase pings the COIN NODE and throws if it is not
- *      host-reachable — but some installs (this VM's bitcoin) do NOT publish
+ *      host-reachable (some installs, e.g. this VM's bitcoin, do NOT publish
  *      the node RPC. The parity driver is node-RPC-free by design, so we
  *      simply do not ping the node here.
  *   2. its gas-token-check AUTO-ISSUES the XCHAIN gas token on a fresh chain
- *      at a TIMING-DEPENDENT height — a pre-baseline protocol action that
+ *      at a TIMING-DEPENDENT height, a pre-baseline protocol action that
  *      forks the cumulative consensus hash chain across chains. We do NOT
  *      auto-create gas; the parity suite issues XCHAIN itself as PINNED
  *      corpus step 0 (deterministic, part of the parity set).
@@ -59,7 +59,7 @@ exports.mochaHooks = {
 
         // The hub config reports CONTAINER-INTERNAL endpoints (e.g. mariadb:3306,
         // miner:3005). A host-run reaches services via their PUBLISHED host ports,
-        // which the hub does not know — so connection ports/hosts come from env
+        // which the hub does not know, so connection ports/hosts come from env
         // (the standard e2e var names), while the indexer DB CREDENTIALS (which we
         // must not hardcode) are pulled from the hub config. No secret is logged.
         console.log('[parityBoot] discovering indexer DB credentials from the hub for ' + COIN + '/' + NETWORK);
@@ -84,18 +84,18 @@ exports.mochaHooks = {
         // Credentials are HUB-AUTHORITATIVE (per-coin). The generic INDEXER_DB_*
         // env names are NOT honoured here: dotenv loads the e2e .env, whose
         // single-coin INDEXER_DB_NAME (e.g. BTC's) would silently override the
-        // hub-discovered per-coin DB — which once pointed an entire DOGE run at
+        // hub-discovered per-coin DB. That override once pointed an entire DOGE run at
         // the BTC indexer DB (instant height waits, BTC data digested as DOGE,
         // trivially "identical" hash chains). Deliberate overrides use the
         // PARITY_-prefixed names, which no shared .env defines.
         const dbName = process.env.PARITY_INDEXER_DB_NAME || ix['name'];
         const dbUser = process.env.PARITY_INDEXER_DB_USER || ix['user'];
         const dbPass = process.env.PARITY_INDEXER_DB_PASS || ix['pass'];
-        // The hub names per-coin DBs XChain_<CODE>_<Network>_<Service> — refuse
+        // The hub names per-coin DBs XChain_<CODE>_<Network>_<Service>. Refuse
         // to run if the resolved DB does not belong to this run's coin.
         if (!String(dbName).toUpperCase().includes(global.COIN_CODE)) {
             throw new Error('[parityBoot] indexer DB "' + dbName + '" does not match coin ' +
-                global.COIN_CODE + ' — wrong-DB guard (stale env override or bad hub config)');
+                global.COIN_CODE + ': wrong-DB guard (stale env override or bad hub config)');
         }
         console.log('[parityBoot] indexer DB: ' + dbName);
 
@@ -103,12 +103,12 @@ exports.mochaHooks = {
         global.utxoTrackerConnector = new XChainUtxoTrackerConnector('localhost', trackerPort);
         global.indexerDatabase = new Database(dbHost, dbPort, dbName, dbUser, dbPass);
 
-        // Ping ONLY the services the driver uses — never the node or explorer.
+        // Ping ONLY the services the driver uses; never the node or explorer.
         if (!(await global.utxoTrackerConnector.ping())) throw new Error('[parityBoot] utxo-tracker unreachable');
         if (!(await global.regtestMinerConnector.ping())) throw new Error('[parityBoot] regtest-miner unreachable');
         if (!(await global.indexerDatabase.ping())) throw new Error('[parityBoot] indexer DB unreachable');
 
-        console.log('[parityBoot] ready — miner/tracker/indexer-DB connected; NO node-ping, NO gas-genesis');
+        console.log('[parityBoot] ready: miner/tracker/indexer-DB connected; NO node-ping, NO gas-genesis');
     },
 
     async afterAll() {

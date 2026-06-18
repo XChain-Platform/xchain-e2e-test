@@ -22,7 +22,7 @@ const { createDb, makeMockConnection } = require('./chaos-helpers')
 const BlockchainConnector = require('../../src/BlockchainConnector')
 const XChainUtxoTrackerConnector = require('../../src/XChainUtxoTrackerConnector')
 
-describe('Chaos Experiment 1 — Connector Timeout Cascade @P0', function () {
+describe('Chaos Experiment 1: Connector Timeout Cascade @P0', function () {
 
     afterEach(function () {
         sinon.restore()
@@ -43,7 +43,7 @@ describe('Chaos Experiment 1 — Connector Timeout Cascade @P0', function () {
         })
 
         it('returns true immediately when getTransactionHex resolves (even null)', async function () {
-            // waitForTx returns true on ANY non-throwing response — it only
+            // waitForTx returns true on ANY non-throwing response; it only
             // checks that getTransactionHex didn't throw, not the value.
             const bc = new BlockchainConnector('localhost', '18443', 'user', 'pass')
             bc.sleep = sinon.stub().resolves()

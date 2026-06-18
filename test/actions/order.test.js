@@ -89,7 +89,7 @@ describe('ORDER', () => {
 
     describe('match - full exchange', () => {
         it('should match two counter-orders and complete the exchange', async () => {
-            // Two separate addresses — matching requires different SOURCE
+            // Two separate addresses (matching requires different SOURCE)
             let addr1 = await cryptoHelper.getNewFundedAddress("ORDER.MATCH1", COIN, NETWORK, null, "legacy", 0, 1)
             let addr2 = await cryptoHelper.getNewFundedAddress("ORDER.MATCH2", COIN, NETWORK, null, "legacy", 0, 1)
             let address1 = addr1["address"]
@@ -279,8 +279,8 @@ describe('ORDER', () => {
 
     describe('match - high precision decimals', () => {
         it('should match orders on tokens with 8 decimal places', async () => {
-            // Tokens with 8 decimals — amounts like 0.00000001
-            // Tests that bignumber handles small precision amounts correctly
+            // Tokens with 8 decimals (amounts like 0.00000001).
+            // Tests that bignumber handles small precision amounts correctly.
             let addr1 = await cryptoHelper.getNewFundedAddress("ORDER.HP1", COIN, NETWORK, null, "legacy", 0, 1)
             let addr2 = await cryptoHelper.getNewFundedAddress("ORDER.HP2", COIN, NETWORK, null, "legacy", 0, 1)
             let address1 = addr1["address"]
