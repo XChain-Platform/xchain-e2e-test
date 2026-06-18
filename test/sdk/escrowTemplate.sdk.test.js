@@ -134,7 +134,7 @@ function haveConnectors() {
 describe('[sdk] template:escrow (on-chain custody)', function () {
     this.timeout(0);
 
-    const ESCROW_SRC = compactSource(loadTemplate('escrow'));
+    let ESCROW_SRC;               // loaded in before() so a missing xchain-contracts skips this suite instead of aborting the whole run
     const AMOUNT = 1000;          // escrowed quantity (decimals 0 token)
     const DEADLINE_BLOCKS = 100;  // far enough out that timeout() is irrelevant here
 
@@ -142,6 +142,14 @@ describe('[sdk] template:escrow (on-chain custody)', function () {
 
     before(async function () {
         if (!haveConnectors()) this.skip();
+        // Load the contract template lazily so a missing xchain-contracts checkout
+        // skips this suite with a clear reason instead of aborting the whole run.
+        try {
+            ESCROW_SRC = compactSource(loadTemplate('escrow'));
+        } catch (e) {
+            console.log('    [escrow] SKIP: ' + e.message.split('\n')[0]);
+            this.skip();
+        }
         sdk = makeSdk();
 
         // Buyer deploys, funds, and releases (needs native coin + gas).

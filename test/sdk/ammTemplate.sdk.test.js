@@ -123,7 +123,7 @@ function haveConnectors() {
 describe('[sdk] template:amm (LP-as-real-tick round trip)', function () {
     this.timeout(0);
 
-    const AMM_SRC = compactSource(loadTemplate('amm'));
+    let AMM_SRC;               // loaded in before() so a missing xchain-contracts skips this suite instead of aborting the whole run
     const DEC = 8;             // divisible pair so swap output (a fraction) is representable
     const LIQ = 10000;         // deposited per side for the initial liquidity
     const SWAP_IN = 1000;      // tokenA sold into the pool
@@ -133,6 +133,17 @@ describe('[sdk] template:amm (LP-as-real-tick round trip)', function () {
 
     before(async function () {
         if (!haveConnectors()) this.skip();
+
+        // Load the contract template lazily: a missing xchain-contracts checkout
+        // (e.g. the e2e-test container image without it bundled) skips this suite
+        // with a clear reason rather than throwing at file load and aborting the
+        // entire test:sdk run.
+        try {
+            AMM_SRC = compactSource(loadTemplate('amm'));
+        } catch (e) {
+            console.log('    [amm] SKIP: ' + e.message.split('\n')[0]);
+            this.skip();
+        }
 
         // Pre-flight: the DEPLOY payload is the action string itself, with the source
         // base64-encoded (the SDK encodes CODE_ENCODING as base64, ~1.33 bytes/char).

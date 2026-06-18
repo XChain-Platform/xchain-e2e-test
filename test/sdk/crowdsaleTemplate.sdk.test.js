@@ -102,7 +102,7 @@ function haveConnectors() {
 describe('[sdk] template:crowdsale (on-chain custody)', function () {
     this.timeout(0);
 
-    const SRC = compactSource(loadTemplate('crowdsale'));
+    let SRC;                      // loaded in before() so a missing xchain-contracts skips this suite instead of aborting the whole run
     const RATE = 2, SOFT = 100, HARD = 200, DURATION = 1000, DEC = 0;
     const PAY_IN = HARD; // buy exactly the hard cap so finalize() succeeds immediately
 
@@ -110,6 +110,14 @@ describe('[sdk] template:crowdsale (on-chain custody)', function () {
 
     before(async function () {
         if (!haveConnectors()) this.skip();
+        // Load the contract template lazily so a missing xchain-contracts checkout
+        // skips this suite with a clear reason instead of aborting the whole run.
+        try {
+            SRC = compactSource(loadTemplate('crowdsale'));
+        } catch (e) {
+            console.log('    [crowdsale] SKIP: ' + e.message.split('\n')[0]);
+            this.skip();
+        }
         sdk = makeSdk();
 
         // Single actor is owner + buyer: simplest deterministic SUCCESS path.

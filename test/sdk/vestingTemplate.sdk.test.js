@@ -108,7 +108,7 @@ function haveConnectors() {
 describe('[sdk] template:vesting (on-chain custody)', function () {
     this.timeout(0);
 
-    const VESTING_SRC = compactSource(loadTemplate('vesting'));
+    let VESTING_SRC;              // loaded in before() so a missing xchain-contracts skips this suite instead of aborting the whole run
     const TOTAL = 1000;
     const CLIFF = 0;
     const DURATION = 5;   // blocks; we mine well past this so the claim is fully vested
@@ -117,6 +117,14 @@ describe('[sdk] template:vesting (on-chain custody)', function () {
 
     before(async function () {
         if (!haveConnectors()) this.skip();
+        // Load the contract template lazily so a missing xchain-contracts checkout
+        // skips this suite with a clear reason instead of aborting the whole run.
+        try {
+            VESTING_SRC = compactSource(loadTemplate('vesting'));
+        } catch (e) {
+            console.log('    [vesting] SKIP: ' + e.message.split('\n')[0]);
+            this.skip();
+        }
         sdk = makeSdk();
 
         grantor = await fundedGasAddress(sdk, 1);          // deploys + funds the grant
