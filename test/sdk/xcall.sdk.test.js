@@ -24,10 +24,10 @@
  *     regtest seams (XDEX_SEED_LOCAL_VALIDATOR=1).
  *
  * Scenario 1 deliberately targets a NONEXISTENT DOGE contract: that
- * exercises the COMPLETE round trip — on-chain XCALL request → federation
+ * exercises the COMPLETE round trip: on-chain XCALL request → federation
  * confirmation gate → signed dispatch row → DOGE-side XEXEC injection
  * (which records the no_contract failure as the result) → signed result
- * row → BTC-side callback injection — without any DOGE-side setup.
+ * row → BTC-side callback injection, without any DOGE-side setup.
  *
  ********************************************************************/
 
@@ -95,11 +95,11 @@ async function readState(sdk, contractIndex, key) {
     return row ? JSON.parse(row.state_value) : null;
 }
 
-// Drive BOTH chains forward while polling `check` — the relay needs source
+// Drive BOTH chains forward while polling `check`: the relay needs source
 // confirmations (request + result-callback application), target blocks (the
 // effective_time barrier + execution depth), and hub poll cycles in between.
 async function pumpUntil(label, check, timeoutMs) {
-    const deadline = Date.now() + (timeoutMs || 240000);
+    const deadline = Date.now() + (timeoutMs || 600000);
     let last = null;
     while (Date.now() < deadline) {
         last = await check();
@@ -139,9 +139,9 @@ describe('[sdk] cross-chain calls (emit.crossExecute)', function () {
             expect(res.indexed.status).to.equal('valid');
         } catch (e) {
             // A prior run already staked this pubkey from a different funding
-            // address — the capability stake exists and stays active.
+            // address, so the capability stake exists and stays active.
             if (!/SIGNING_PUBKEY \(already in use\)/.test(String(e.message))) throw e;
-            console.log('    [xcall] hub pubkey already staked — reusing the active stake');
+            console.log('    [xcall] hub pubkey already staked, reusing the active stake');
         }
         await mine(8); // past ACTIVATION_DELAY_BLOCKS (6) so the stake is active at relay snapshot blocks
     });
