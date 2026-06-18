@@ -49,7 +49,7 @@ const CONTRACT_A = `
                 gasLimit:       50000,
                 callbackMethod: 'onResult',
                 callbackParams: ['echo-ctx'],
-                deadlineBlocks: 600
+                deadlineBlocks: 4000
             });
             xchain.state.set('lastCall', id);
             return id;
@@ -191,10 +191,14 @@ describe('[sdk] cross-chain calls (emit.crossExecute)', function () {
     });
 
     it('the result relays back and the callback delivers exactly one no_contract outcome', async function () {
+        // The result leg is gated by the SOURCE chain's relay margin (now +
+        // XCALL_RELAY_MARGIN_BLOCKS * nominal-BTC-interval). At 1 margin block that
+        // is ~600s of wall-clock before the source-side effective_time<=block_time
+        // gate clears, so this wait needs headroom well past the 600s default.
         await pumpUntil('source-side request completion', async () => {
             const r = await rpc(SOURCE_INDEXER_URL, 'getcrosschaincall', { call_id: callId });
             return (r && r.call && r.call.request_status === 'completed') ? r : null;
-        });
+        }, 1200000);
 
         const delivered = await pumpUntil('callback state write', async () => {
             return await readState(sdk, indexA, 'result:' + callId);
