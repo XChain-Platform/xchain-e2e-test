@@ -170,7 +170,7 @@ exports.mochaHooks = {
                         // DB config comes from the indexer's db_host/db_port fields
                         // (hub has no top-level "database" section).
                         //DATABASE_URL = coinNet["xchain-indexer"]["db_host"]
-                        DATABASE_URL = "localhost"
+                        DATABASE_URL = "127.0.0.1"
                         DATABASE_PORT = coinNet["xchain-indexer"]["db_port"]
 
                         //UTXO_TRACKER_URL = coinNet["xchain-utxo-tracker"]["host"]
