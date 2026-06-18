@@ -41,6 +41,41 @@ describe('DISPENSER', () => {
         })
     })
 
+    describe('v0 - FRESH non-SOURCE GET_ADDRESS (wallet sub-address model)', () => {
+        it('should open on a FRESH non-SOURCE GET_ADDRESS with escrow debiting SOURCE', async () => {
+            // Mirrors the xchain-wallet per-account dispenser sub-address model:
+            // SOURCE holds the token and signs (escrow debits it); GET_ADDRESS is
+            // a brand-new address the dispenser operates on (the wallet's C=2
+            // branch). The protocol fresh-address exception permits opening on an
+            // unfunded address with no DISPENSER_PREFERENCE pre-config.
+            let sourceInfo = await cryptoHelper.getNewFundedAddress("DISPENSER.FRESH.SOURCE", COIN, NETWORK, null, "legacy", 0, 1)
+            let sourceAddress = sourceInfo["address"]
+            let tick = "DISPFRESH"+sourceAddress.substring(sourceAddress.length-8)
+
+            // Fresh, UNFUNDED, non-SOURCE address (distinct label -> distinct seed).
+            let freshGetInfo = await cryptoHelper.getNewAddress("DISPENSER.FRESH.GETADDR", COIN, NETWORK)
+            let freshGetAddress = freshGetInfo["address"]
+            assert.notStrictEqual(freshGetAddress, sourceAddress, "GET_ADDRESS must differ from SOURCE")
+
+            await issueHelper.sendIssueV0(sourceInfo, tick, 100, 100, 0, "Fresh GET_ADDRESS dispenser", 100)
+
+            // No EXPIRATION (matches the wallet flow, which sets none): stays in
+            // the free 90-day window, needs no GAS, and never writes an epoch into
+            // the decoder's DATETIME expiration column.
+            let result = await dispenserHelper.sendDispenserV0(
+                sourceInfo,
+                COIN_CODE, tick, 1, 10,
+                COIN_CODE, null, 5, freshGetAddress,
+                null, null, null, null,
+                null, null, 'Fresh non-SOURCE GET_ADDRESS dispenser'
+            )
+            // waitForDispenser asserts source=SOURCE AND get_address=freshGetAddress
+            // with status=valid: proves escrow debited SOURCE while the dispenser
+            // lives on the fresh non-SOURCE address.
+            assert(result.dispenser, "Dispenser should exist with fresh non-SOURCE GET_ADDRESS")
+        })
+    })
+
     describe('dispense', () => {
         it('should dispense a token from a dispenser', async () => {
             let dispenserAddressInfo = await cryptoHelper.getNewFundedAddress("DISPENSER.V0.DISPENSE", COIN, NETWORK, null, "legacy", 0, 1)
