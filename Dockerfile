@@ -1,4 +1,4 @@
-# Pin Node 22 (bookworm, not alpine): the platform requires Node 22 exactly —
+# Pin Node 22 (bookworm, not alpine): the platform requires Node 22 exactly.
 # node:latest resolves to Node 24+, which can't build isolated-vm, and alpine's
 # musl breaks native addon builds. Matches xchain-indexer's base image.
 FROM node:22-bookworm
@@ -21,6 +21,14 @@ RUN npm ci
 
 COPY ./src /XChainE2ETest/src
 COPY ./test /XChainE2ETest/test
+
+# xchain-contracts is staged into the build context by xchain-node's install
+# path (LIBRARY_BUNDLES), same as xchain-hub/xchain-sdk above. It is plain
+# contract-template source (no npm deps), so it lands after npm ci to avoid
+# invalidating the dependency cache layer. The template suites resolve it via
+# XCHAIN_CONTRACTS_DIR=/XChainE2ETest/xchain-contracts (set by ConfigService);
+# at runtime a missing checkout makes those suites skip rather than abort the run.
+COPY ./xchain-contracts /XChainE2ETest/xchain-contracts
 
 # .env is NOT copied into the image to avoid baking credentials into layers.
 # Pass credentials via docker run --env-file or environment variables at runtime.
