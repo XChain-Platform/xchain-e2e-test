@@ -65,6 +65,24 @@ function loadStakeSourceModule() {
 }
 const { getStakeSourceByPubkey } = loadStakeSourceModule()
 
+// Load the MASTER xchain-indexer Database class so we can run the REAL
+// reward-writer leg (_resolveActiveStakeSourceId, 828db2d) against the live DB.
+// That method only uses this.doQuery + this.getStatusId, so we bind it to the
+// same adapter rather than constructing a full Database. Requires the master
+// src dir to be present (XCHAIN_INDEXER_PATH inside the e2e image, or adjacent
+// in the monorepo); db.js's only non-builtin deps are mariadb + ./stateHash.
+function loadIndexerDbModule() {
+    const candidates = [
+        process.env.XCHAIN_INDEXER_PATH && path.join(process.env.XCHAIN_INDEXER_PATH, 'src/db.js'),
+        path.resolve(__dirname, '../../../xchain-indexer/src/db.js'),
+        path.resolve(__dirname, '../../../../xchain-indexer/src/db.js'),
+        path.resolve(__dirname, '../../../../../modules/xchain-indexer/src/db.js')
+    ].filter(Boolean)
+    for (const p of candidates) if (fs.existsSync(p)) return require(p)
+    throw new Error('cannot load master xchain-indexer db.js; set XCHAIN_INDEXER_PATH or run in the monorepo')
+}
+const MasterIndexerDb = loadIndexerDbModule()
+
 describe('Delegated reward SOURCE RESOLUTION on real on-chain data (d0abcfd / 828db2d)', function () {
 
     const CAPABILITY = 'price'
@@ -201,6 +219,35 @@ describe('Delegated reward SOURCE RESOLUTION on real on-chain data (d0abcfd / 82
         let rpc = await indexerConnector.getStakeSourceByPubkey(pubkeyB, blockB)
         assert(rpc && !rpc.error, 'live RPC resolution should answer')
         assert.strictEqual(rpc.source, addrA.address, 'live RPC also resolves pubkeyB to addrA')
+    })
+
+    it('recovery byte-identity: the reward-writer leg and the archive/recovery leg resolve the SAME source (828db2d)', async function () {
+        // Archive/recovery leg: getStakeSourceByPubkey is what the hub pins into
+        // the ANCHOR archive, and what recovery.js restores as source_id via
+        // createAddress(r.source) (xchain-indexer/src/recovery.js:280-288).
+        let archive = await getStakeSourceByPubkey(indexerLike, { pubkey: pubkeyB, block_index: blockB })
+        assert(!archive.error, 'archive-leg resolution should not error: ' + archive.error)
+        assert.strictEqual(archive.source, addrA.address, 'archive leg resolves delegated pubkeyB to addrA')
+
+        // Normal-write leg: the REAL master _resolveActiveStakeSourceId, bound to
+        // our DB adapter (it uses only this.doQuery + this.getStatusId).
+        // createValidatorReward stores exactly this source_id.
+        let pubkeyBId = await idxDb.getPubkeyId(pubkeyB.toLowerCase())
+        assert(pubkeyBId, 'pubkeyB must have an index_pubkeys id')
+        let writerSourceId = await MasterIndexerDb.prototype._resolveActiveStakeSourceId.call(idxDb, pubkeyBId, blockB)
+        assert(writerSourceId !== null && writerSourceId !== undefined,
+            'writer leg must resolve a source_id (a counted key must resolve)')
+        let writerRow = await idxDb.doQuery('SELECT address FROM index_addresses WHERE id=?', [writerSourceId])
+        let writerAddr = writerRow.length ? String(writerRow[0].address) : null
+
+        // The invariant ANCHOR recovery relies on: the source_id the normal path
+        // STORED must equal the source the archive PINS (and recovery restores),
+        // so a recovery rewrite is byte-identical. Pre-828db2d the normal path
+        // used a loose latest-by-action_index resolve that could diverge.
+        assert.strictEqual(writerAddr, archive.source,
+            'normal-write source_id must resolve to the same address the archive/recovery leg pins')
+        assert.strictEqual(writerAddr, addrA.address, 'both legs resolve to addrA')
+        console.log('    recovery byte-identity proven: writer=' + writerAddr + ' archive=' + archive.source)
     })
 
     it('slash exclusion: the FIXED resolver drops a slashed delegated key; the pre-fix SQL would still resolve it', async function () {
