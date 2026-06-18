@@ -33,21 +33,26 @@ describe('[sdk] stake additional XCALL federation validators', function () {
     this.timeout(0);
 
     it('stakes every pubkey in XCALL_STAKE_PUBKEYS', async function () {
-        const pubkeys = String(process.env.XCALL_STAKE_PUBKEYS || '').split(',').map(s => s.trim()).filter(Boolean);
-        if (!pubkeys.length || pubkeys.some(p => !/^[0-9a-f]{64}$/.test(p)))
-            throw new Error('XCALL_STAKE_PUBKEYS must be a comma-separated list of 64-hex pubkeys');
+        // Each entry is `pubkey` (defaults to 5000) or `pubkey:amount` for an
+        // uneven federation. Stake-weighted quorum dedupes by SOURCE, so each pubkey
+        // gets its own fresh funder (one source per validator); uneven amounts let a
+        // 2f+1 drill keep the down-first hub strictly under 1/3 of total stake.
+        const specs = String(process.env.XCALL_STAKE_PUBKEYS || '').split(',').map(s => s.trim()).filter(Boolean)
+            .map(s => { const [pk, amt] = s.split(':'); return { pubkey: pk, amount: amt || '5000' }; });
+        if (!specs.length || specs.some(s => !/^[0-9a-f]{64}$/.test(s.pubkey) || !/^[0-9]+(\.[0-9]+)?$/.test(s.amount)))
+            throw new Error('XCALL_STAKE_PUBKEYS must be comma-separated `pubkey` or `pubkey:amount` (64-hex pubkeys)');
 
         const sdk = makeSdk();
-        for (const pubkey of pubkeys) {
+        for (const { pubkey, amount } of specs) {
             const staker = await fundedGasAddress(sdk, 1);
             try {
                 const res = await submit(sdk,
-                    { action: 'STAKE', params: { amount: '5000.00000000', signingPubkey: pubkey } },
+                    { action: 'STAKE', params: { amount: Number(amount).toFixed(8), signingPubkey: pubkey } },
                     { pubkey: staker.address, change: staker.address },
                     submitOpts({ wif: staker.wif })
                 );
                 if (res.indexed.status !== 'valid') throw new Error('STAKE indexed ' + res.indexed.status);
-                console.log('    [stake-validators] ' + pubkey.substring(0, 16) + '... staked by ' + staker.address);
+                console.log('    [stake-validators] ' + pubkey.substring(0, 16) + '... staked ' + amount + ' by ' + staker.address);
             } catch (e) {
                 if (/SIGNING_PUBKEY \(already in use\)/.test(String(e.message))) {
                     console.log('    [stake-validators] ' + pubkey.substring(0, 16) + '... already staked, skipping');
@@ -57,6 +62,6 @@ describe('[sdk] stake additional XCALL federation validators', function () {
             }
         }
         await mine(8); // past ACTIVATION_DELAY_BLOCKS (6)
-        console.log('    [stake-validators] done (' + pubkeys.length + ' pubkeys, activation mined)');
+        console.log('    [stake-validators] done (' + specs.length + ' pubkeys, activation mined)');
     });
 });
