@@ -133,6 +133,15 @@ describe('SPV Phase 2: CHECKPOINT_COMMITMENT cross-service parity', function () 
             'pre-flag-day canonical must NOT contain any root');
     });
 
+    it('explorer merkle.js is a byte-identical twin of the indexer merkle.js (Phase 3 proof server)', function () {
+        // The Phase 3 proof server builds SMT/block proofs with an explorer-local copy
+        // of merkle.js; a client recomputes with the SDK's merkle logic and binds to the
+        // indexer-committed root. A single byte of drift makes server proofs unverifiable.
+        const idx = fs.readFileSync(path.join(ROOT, 'xchain-indexer/src/merkle.js'), 'utf8');
+        const exp = fs.readFileSync(path.join(ROOT, 'xchain-explorer/src/merkle.js'), 'utf8');
+        assert.strictEqual(exp, idx, 'xchain-explorer/src/merkle.js drifted from the indexer merkle.js');
+    });
+
     it('post-flag-day but null roots (legacy row): hub/SDK keep the rootless canonical', function () {
         // A pre-Phase-1 / legacy row carries null roots even though its snapshot_block is
         // post-flag-day. The presence-aware gate keeps it on the rootless canonical so its
