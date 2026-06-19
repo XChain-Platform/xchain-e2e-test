@@ -131,13 +131,23 @@ describe('MultiValidatorHub: byzantine fault tolerance (L5)', function () {
         const COIN = 'BTC', NET = 'regtest', MODULE = 'node';
         const follower = mvh.hubs[1];
         const seq = 8000;   // fresh, above any applied seq
+        const view = 0;
         const configA = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: '111' } } } };
         const configB = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: '222' } } } };
         const digestA = follower.consensus._digest(configA);
         const digestB = follower.consensus._digest(configB);
+        // A PRE_PREPARE is only accepted from the validator the rotation
+        // designates as leader for (seq, view) and only with a registered sender
+        // (the _isKnownSender + leader-identity guards in Consensus._handlePrePrepare).
+        // An equivocating leader is still the LEGITIMATE leader; it just emits two
+        // conflicting configs for one seq. Address the envelope from that leader so
+        // the follower processes it (a hardcoded non-leader/unregistered sender is
+        // correctly dropped before any proposal is created).
+        const N = follower.consensus.validatorSet.length;
+        const leaderAddr = follower.consensus.validatorSet[(seq + view) % N].addr;
         const env = (digest, config) => ({
-            sender: '127.0.0.1:58000',   // the (byzantine) leader
-            data: { seq, configDigest: digest, config, btcBlockHeight: seed.blockIndex }
+            sender: leaderAddr,          // the (byzantine, but legitimate) leader
+            data: { seq, view, configDigest: digest, config, btcBlockHeight: seed.blockIndex }
         });
 
         // First proposal locks the follower onto config A.
