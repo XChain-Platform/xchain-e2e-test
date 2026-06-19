@@ -240,6 +240,29 @@ describe('[sdk] XCALL per-block injection cap (25 + carry-forward)', function ()
     it('the first DOGE block injects exactly the cap, in (snapshot_block, call_id) order; the rest carry forward', async function () {
         const placeholders = callIds.map(() => '?').join(',');
 
+        // Barrier: test 2 proved all 28 finalized in the HUB DB, but injection reads
+        // the DOGE indexer's OWN mirror, which the relay populates progressively
+        // (HubDbBroadcaster/HubDbSync is time-driven, not block-driven), so right
+        // after finalization only a subset of the 28 has landed locally. Releasing
+        // DOGE before they all arrive makes the first block inject the partial set
+        // (< CAP) and the deterministic first-batch assertion fails. Wait until every
+        // dispatch row is mirrored, WITHOUT mining DOGE here: a target block would
+        // trigger a partial injection and lock in the short first batch.
+        const mirrorDeadline = Date.now() + 120000;
+        let mirrored = 0;
+        while (Date.now() < mirrorDeadline) {
+            mirrored = await dogeIdx(async (c) => {
+                const r = await c.query(
+                    `SELECT COUNT(*) n FROM cross_chain_calls WHERE phase = 'dispatch' AND call_id IN (${placeholders})`,
+                    callIds);
+                return Number(r[0].n);
+            });
+            if (mirrored === BURST) break;
+            await sleep(2000);
+        }
+        expect(mirrored, 'all dispatches mirrored to the DOGE indexer before release').to.equal(BURST);
+        console.log('    [xcall-cap] all ' + BURST + ' dispatches mirrored locally; releasing DOGE block-by-block');
+
         // release DOGE mining block-by-block until everything executed
         const deadline = Date.now() + 240000;
         let rows = [];
