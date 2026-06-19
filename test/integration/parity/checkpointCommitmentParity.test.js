@@ -142,6 +142,16 @@ describe('SPV Phase 2: CHECKPOINT_COMMITMENT cross-service parity', function () 
         assert.strictEqual(exp, idx, 'xchain-explorer/src/merkle.js drifted from the indexer merkle.js');
     });
 
+    it('sdk merkle.js is a byte-identical twin of the indexer merkle.js (Phase 4 light client)', function () {
+        // The Phase 4 sdk.light client recomputes balances_root / block_merkle_root
+        // and the state-root sub-path with an sdk-local copy of merkle.js, binding to
+        // the indexer-committed root. A single byte of drift makes a valid server proof
+        // fail to verify (or, worse, lets a forged one pass), so it must match exactly.
+        const idx = fs.readFileSync(path.join(ROOT, 'xchain-indexer/src/merkle.js'), 'utf8');
+        const sdk = fs.readFileSync(path.join(ROOT, 'xchain-sdk/src/merkle.js'), 'utf8');
+        assert.strictEqual(sdk, idx, 'xchain-sdk/src/merkle.js drifted from the indexer merkle.js');
+    });
+
     it('post-flag-day but null roots (legacy row): hub/SDK keep the rootless canonical', function () {
         // A pre-Phase-1 / legacy row carries null roots even though its snapshot_block is
         // post-flag-day. The presence-aware gate keeps it on the rootless canonical so its
