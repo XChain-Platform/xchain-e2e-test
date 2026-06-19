@@ -197,10 +197,21 @@ describe('[sdk] XCALL per-block injection cap (25 + carry-forward)', function ()
 
     it('all dispatches finalize while DOGE mining is held', async function () {
         const placeholders = callIds.map(() => '?').join(',');
+        // The whole premise of the cap test is that the burst's 28 dispatches share
+        // a SINGLE snapshot and become injectable at once. The relay stamps each
+        // dispatch with snapshot_block = the source tip at finalization, so if the
+        // tip advances while the relay finalizes (it does ~a batch per poll), the
+        // dispatches land at DIFFERENT snapshots (e.g. 14@N + 14@N+1) and injection
+        // fragments instead of producing the deterministic 25 + carry-forward.
+        // Advance BTC one block at a time ONLY until the relay starts finalizing
+        // (the margin is crossed), then FREEZE: all 28 are eligible from the same
+        // source block, so once one finalizes the rest finalize at that same frozen
+        // tip regardless of how many polls the relay takes.
         const deadline = Date.now() + 240000;
         let n = 0;
+        let frozen = false;
         while (Date.now() < deadline) {
-            await mine(1);                                   // BTC only: confirmations + relay
+            if (!frozen) await mine(1);                     // cross the relay margin by the minimum...
             await sleep(2000);
             n = await hubDb(async (c) => {
                 const rows = await c.query(
@@ -208,6 +219,7 @@ describe('[sdk] XCALL per-block injection cap (25 + carry-forward)', function ()
                     callIds);
                 return Number(rows[0].n);
             });
+            if (n > 0) frozen = true;                       // ...then freeze the source tip so all 28 share it
             if (n === BURST) break;
         }
         expect(n, 'finalized dispatch rows').to.equal(BURST);
