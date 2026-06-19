@@ -197,30 +197,34 @@ describe('[sdk] XCALL per-block injection cap (25 + carry-forward)', function ()
 
     it('all dispatches finalize while DOGE mining is held', async function () {
         const placeholders = callIds.map(() => '?').join(',');
-        // The whole premise of the cap test is that the burst's 28 dispatches share
-        // a SINGLE snapshot and become injectable at once. The relay stamps each
-        // dispatch with snapshot_block = the source tip at finalization, so if the
-        // tip advances while the relay finalizes (it does ~a batch per poll), the
-        // dispatches land at DIFFERENT snapshots (e.g. 14@N + 14@N+1) and injection
-        // fragments instead of producing the deterministic 25 + carry-forward.
-        // Advance BTC one block at a time ONLY until the relay starts finalizing
-        // (the margin is crossed), then FREEZE: all 28 are eligible from the same
-        // source block, so once one finalizes the rest finalize at that same frozen
-        // tip regardless of how many polls the relay takes.
-        const deadline = Date.now() + 240000;
+        const miner = global.regtestMinerConnector;
+        // The cap test's premise is that the burst's 28 dispatches share a SINGLE
+        // snapshot and become injectable at once. The relay stamps each dispatch
+        // with snapshot_block = the source tip at finalization. The regtest miner
+        // auto-mines empty blocks (submit()/quiesce leaves it in fast mode), so the
+        // tip drifts forward between the relay's finalization waves (it finalizes ~a
+        // batch per poll) and the 28 land at different snapshots (e.g. 14@N +
+        // 14@N+1), fragmenting the deterministic 25 + carry-forward. So: cross the
+        // relay confirmation margin in one shot, then PAUSE auto-mining (same freeze
+        // the reorg drills use) so the source tip stays put and every dispatch
+        // finalizes at the one snapshot.
+        await miner.setMiningTime(3600000, 3600000);        // freeze: stop auto-mining empty blocks
         let n = 0;
-        let frozen = false;
-        while (Date.now() < deadline) {
-            if (!frozen) await mine(1);                     // cross the relay margin by the minimum...
-            await sleep(2000);
-            n = await hubDb(async (c) => {
-                const rows = await c.query(
-                    `SELECT COUNT(*) n FROM cross_chain_calls WHERE phase = 'dispatch' AND status = 'finalized' AND call_id IN (${placeholders})`,
-                    callIds);
-                return Number(rows[0].n);
-            });
-            if (n > 0) frozen = true;                       // ...then freeze the source tip so all 28 share it
-            if (n === BURST) break;
+        try {
+            await mine(3);                                  // explicit blocks to clear the relay margin, then no more
+            const deadline = Date.now() + 240000;
+            while (Date.now() < deadline) {
+                await sleep(2000);                          // poll only; the source tip is frozen
+                n = await hubDb(async (c) => {
+                    const rows = await c.query(
+                        `SELECT COUNT(*) n FROM cross_chain_calls WHERE phase = 'dispatch' AND status = 'finalized' AND call_id IN (${placeholders})`,
+                        callIds);
+                    return Number(rows[0].n);
+                });
+                if (n === BURST) break;
+            }
+        } finally {
+            await miner.setDefaultMiningTime();             // restore auto-mining for the injection + result legs
         }
         expect(n, 'finalized dispatch rows').to.equal(BURST);
 
