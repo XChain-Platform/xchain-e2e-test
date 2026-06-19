@@ -27,7 +27,10 @@
  *        DELETE the local rows so the call is never dispatched/executed.
  *
  * Asserts (per the code trace):
- *   - hub: the dispatch row for call_id -> status='retracted' (not deleted);
+ *   - hub: the dispatch row for call_id -> status='retracted' (not deleted).
+ *     In a shared-DB venue (XCALL_HUB_MIRROR_SHARED=1) the indexer mirror-delete
+ *     hits this same row, so 'retracted'-then-deleted (null) is also accepted; a
+ *     live 'finalized'/'dispatched' status still fails (retraction never fired);
  *   - source BTC indexer: the xcalls v0 row for call_id is gone, and its
  *     cross_chain_calls mirror row is gone;
  *   - target DOGE indexer: cross_chain_calls mirror row gone, and NO
@@ -96,6 +99,16 @@ const HUB_DB_NAME = process.env.HUB_DB_NAME || 'XChain_Hub';
 const DOGE_IDX_DB_HOST = process.env.DOGE_IDX_DB_HOST || DB_HOST;
 const DOGE_IDX_DB_PORT = parseInt(process.env.DOGE_IDX_DB_PORT || String(DB_PORT), 10);
 const DOGE_IDX_DB_NAME = process.env.DOGE_IDX_DB_NAME || 'XChain_DOGE_Regtest_Indexer';
+
+// In a co-located ("shared-DB") venue the source indexer's hub-mirror DB IS the
+// relay/hub DB, so rollback's mirror-delete (hub_db_sync.js) removes the row from
+// the very table this drill reads as "the hub row". Retraction is then observable
+// as a DELETE, not a status flip the row retains. Set XCALL_HUB_MIRROR_SHARED=1
+// for that venue: the assertion then accepts the row being gone (null) as well as
+// 'retracted', but still fails on a live status ('finalized'/'dispatched') that
+// means retraction never fired. The default (separate hub + indexer DBs) keeps
+// the strict 'retracted'-retained check.
+const HUB_MIRROR_SHARED = process.env.XCALL_HUB_MIRROR_SHARED === '1' || process.env.XCALL_HUB_MIRROR_SHARED === 'true';
 
 async function withConn(host, port, database, user, password, fn) {
     const conn = await mariadb.createConnection({ host, port, database, user, password });
@@ -230,11 +243,23 @@ describe('[sdk] XCALL source-chain reorg retraction (pre-execution)', function (
                     "SELECT status FROM cross_chain_calls WHERE call_id = ? AND phase = 'dispatch' LIMIT 1", [callId]));
                 hubStatus = hr.length ? hr[0].status : null;
                 btcMirror = await btcCount('SELECT COUNT(*) n FROM cross_chain_calls WHERE call_id = ?', [callId]);
-                if (hubStatus === 'retracted' && btcMirror === 0) break;
+                // Separate-DB: wait for the retained 'retracted' flip. Shared-DB: the
+                // flip is immediately followed by the mirror-delete, so the row is gone
+                // (null) once it finalized (it started 'finalized', never null).
+                const retracted = hubStatus === 'retracted' || (HUB_MIRROR_SHARED && hubStatus === null);
+                if (retracted && btcMirror === 0) break;
             }
 
-            // Hub keeps the row but flips it to 'retracted' (audit continuity).
-            expect(hubStatus, 'hub dispatch row marked retracted').to.equal('retracted');
+            if (HUB_MIRROR_SHARED) {
+                // Shared-DB venue: a flip to 'retracted' immediately followed by the
+                // mirror-delete is the expected outcome, so the row may already be gone
+                // (null). A live status ('finalized'/'dispatched') means retraction
+                // never fired.
+                expect(hubStatus, 'hub dispatch row retracted (or retracted+mirror-deleted in shared-DB venue)').to.be.oneOf(['retracted', null]);
+            } else {
+                // Hub keeps the row but flips it to 'retracted' (audit continuity).
+                expect(hubStatus, 'hub dispatch row marked retracted').to.equal('retracted');
+            }
 
             // Source-chain indexer: the XCALL v0 row is gone and its mirror is gone.
             expect(await btcCount('SELECT COUNT(*) n FROM xcalls WHERE call_id = ?', [callId]),

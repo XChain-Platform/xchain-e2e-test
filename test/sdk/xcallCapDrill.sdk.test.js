@@ -127,17 +127,22 @@ describe('[sdk] XCALL per-block injection cap (25 + carry-forward)', function ()
         deployer = await fundedGasAddress(sdk, 1);
         console.log('    [xcall-cap] deployer=' + deployer.address + ' target=' + targetContract);
 
-        // Drain in-flight debris from earlier runs: any finalized dispatch
-        // without an execution would jump the queue (lower hub ids) and break
-        // the first-batch assertion.
-        const deadline = Date.now() + 300000;
-        while (Date.now() < deadline) {
-            const backlog = await hubDb(async (c) => Number((await c.query(
+        // Drain injection-competing debris from earlier runs: a dispatch that is
+        // mirrored on the DOGE indexer but NOT yet executed there would inject ahead
+        // of this run's calls (lower hub ids) and break the first-batch assertion.
+        // Gate on the DOGE indexer's OWN tables, because injection reads the local
+        // mirror: a relay-hub dispatch that never synced into this indexer's mirror
+        // cannot inject and must not be counted (else the drain burns its whole
+        // deadline on debris that mining can never clear), and a call already
+        // executed locally no longer competes regardless of its hub result state.
+        const drainDeadline = Date.now() + 300000;
+        while (Date.now() < drainDeadline) {
+            const competing = await dogeIdx(async (c) => Number((await c.query(
                 `SELECT COUNT(*) n FROM cross_chain_calls d
-                 WHERE d.phase = 'dispatch' AND d.status = 'finalized' AND d.target_chain = 'DOGE'
-                   AND NOT EXISTS (SELECT 1 FROM cross_chain_calls r WHERE r.call_id = d.call_id AND r.phase = 'result')`))[0].n));
-            if (backlog === 0) break;
-            console.log('    [xcall-cap] draining ' + backlog + ' in-flight call(s) from earlier runs...');
+                 WHERE d.phase = 'dispatch' AND d.target_chain = 'DOGE'
+                   AND NOT EXISTS (SELECT 1 FROM cross_chain_call_executions e WHERE e.call_id = d.call_id)`))[0].n));
+            if (competing === 0) break;
+            console.log('    [xcall-cap] draining ' + competing + ' un-executed call(s) from earlier runs...');
             await mine(1);
             await mineTarget(1);
             await sleep(3000);
@@ -156,17 +161,35 @@ describe('[sdk] XCALL per-block injection cap (25 + carry-forward)', function ()
 
         // EXECUTE carries no wire GAS_LIMIT, so execution bills against the
         // protocol ceiling (1M), which covers the 28 × 32,500 pre-pays.
-        const res = await submit(sdk,
-            { action: 'EXECUTE', params: { contractActionIndex: indexA, method: 'burst', params: [String(targetContract), String(BURST)] } },
-            { pubkey: deployer.address, change: deployer.address },
-            submitOpts({ wif: deployer.wif })
-        );
-        expect(res.indexed.status, 'burst EXECUTE').to.equal('valid');
+        //
+        // The SDK action-waiter can mis-attribute a federated relay action's
+        // "SIGNING_PUBKEY (already in use)" (the hub signing pubkey is reused
+        // across the 28 dispatch signatures) to THIS EXECUTE even though the burst
+        // itself lands and round-trips. Tolerate that one error and confirm the
+        // EXECUTE's effect via contract state below instead of the waiter's verdict.
+        try {
+            const res = await submit(sdk,
+                { action: 'EXECUTE', params: { contractActionIndex: indexA, method: 'burst', params: [String(targetContract), String(BURST)] } },
+                { pubkey: deployer.address, change: deployer.address },
+                submitOpts({ wif: deployer.wif })
+            );
+            expect(res.indexed.status, 'burst EXECUTE').to.equal('valid');
+        } catch (e) {
+            if (!/SIGNING_PUBKEY \(already in use\)/.test(String(e.message))) throw e;
+            console.log('    [xcall-cap] waiter mis-attributed SIGNING_PUBKEY; confirming burst via state');
+        }
         await mine(1);
 
-        // state.set stores the value JSON-encoded, and the contract stringifies
-        // the array itself, so there are two decode levels.
-        callIds = JSON.parse(await readState(sdk, indexA, 'burstIds'));
+        // The EXECUTE may have landed even if the waiter threw, so poll for the
+        // burst to be indexed. state.set stores the value JSON-encoded and the
+        // contract stringifies the array itself, so there are two decode levels.
+        const burstDeadline = Date.now() + 60000;
+        while (Date.now() < burstDeadline) {
+            const raw = await readState(sdk, indexA, 'burstIds');
+            if (raw != null) { callIds = JSON.parse(raw); if (callIds.length === BURST) break; }
+            await mine(1);
+            await sleep(2000);
+        }
         expect(callIds, 'burst call ids').to.be.an('array').with.length(BURST);
         expect(new Set(callIds).size, 'distinct ids').to.equal(BURST);
         console.log('    [xcall-cap] ' + BURST + ' calls emitted from one EXECUTE');
