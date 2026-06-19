@@ -7,7 +7,7 @@
  *
  * This file is part of XChain Platform. Licensed under the GNU Affero
  * General Public License v3.0 or later; see LICENSE.md. A commercial
- * license (without AGPL source-disclosure terms) is available —
+ * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
  **********************************************************************
@@ -22,7 +22,7 @@
 const axios = require('axios');
 
 class XChainEncoderConnector {
-    constructor(url, port, rpcUser, rpcPassword) {
+    constructor(url, port) {
         this.url = "http://"+url+":"+port
         this.port = port
     }
@@ -91,8 +91,8 @@ class XChainEncoderConnector {
             return response.data.result;
         } else {
             // Surface the JSON-RPC error so callers (e.g. the stale-UTXO
-            // retry helper) can pattern-match on the underlying cause —
-            // common transient: "no utxos were provided and no utxos found".
+            // retry helper) can pattern-match on the underlying cause.
+            // Common transient: "no utxos were provided and no utxos found".
             const rpcErr = response.data && response.data.error;
             const detail = rpcErr ? (rpcErr.message || JSON.stringify(rpcErr)) : 'no result and no error returned';
             throw new Error('Error trying to create a tx with the encoder module: ' + detail);

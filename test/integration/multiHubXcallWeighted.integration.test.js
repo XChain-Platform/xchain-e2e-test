@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Track C.2 — STAKE_WEIGHTED_QUORUM for XCALL relay dispatch (cross_chain).
+ * Track C.2: STAKE_WEIGHTED_QUORUM for XCALL relay dispatch (cross_chain).
  *
  * XCALL result-delivery quorum was unit-tested (stubbed) but never driven through
  * a real in-process federation. This is the XCALL twin of the cross-chain DEX
@@ -20,14 +20,14 @@
  * the weighted quorum gates whether a cross_chain_calls row finalizes:
  *   - NEGATIVE: 3 live small-stake hubs (count majority) + an offline whale source
  *     in the snapshot → weighted tally (3·1000 !> 2·10000) refuses → NO row;
- *   - POSITIVE: 4 live uneven-weight hubs (no source ≥ 2/3) → multi-signer weighted
- *     quorum → the dispatch row finalizes on every hub with ≥2 distinct sigs.
+ *   - POSITIVE: 4 live uneven-weight hubs (no source >= 2/3) → multi-signer weighted
+ *     quorum → the dispatch row finalizes on every hub with >=2 distinct sigs.
  *
  * There is no offer book / discovery for XCALL, so the round is driven by calling
  * consensus.propose directly on the deterministic round leader with a hand-built
  * dispatch row (every canonical field populated). Followers' validateProposedMatch
- * re-verifies against the source-chain indexer via _indexerCall — unavailable
- * in-process — so it is overridden to accept (that path is covered by
+ * re-verifies against the source-chain indexer via _indexerCall, which is
+ * unavailable in-process, so it is overridden to accept (that path is covered by
  * CrossChainCallEngine.test.js); the quorum/signature aggregation under test is
  * unaffected. regtest activates weighting at height 0.
  *
@@ -78,9 +78,9 @@ function dispatchRow(roundId, callId) {
 
 // Drive ONE dispatch round: override validateProposedMatch on every hub, pick the
 // callId/leader, propose on the leader, collect finalize events. `requireLiveLeader`
-// searches callIds until the deterministic leader is a live (registered) hub —
-// needed for the negative case so the refusal is a genuine stake-minority refusal,
-// not leader-absence.
+// searches callIds until the deterministic leader is a live (registered) hub.
+// This is needed for the negative case so the refusal is a genuine stake-minority
+// refusal, not leader-absence.
 async function driveDispatch(mvh, validators, seedBase, requireLiveLeader) {
     const engines = mvh.hubs.map((h) => h.crossChainCalls);
     engines.forEach((e) => { e.validateProposedMatch = async () => true; });
@@ -108,16 +108,16 @@ async function driveDispatch(mvh, validators, seedBase, requireLiveLeader) {
     return { events, callId, leaderIdx, row };
 }
 
-describe('MultiValidatorHub — STAKE_WEIGHTED_QUORUM XCALL dispatch relay (C.2)', function () {
+describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM XCALL dispatch relay (C.2)', function () {
     this.timeout(240_000);
 
-    // ── NEGATIVE: stake-minority of live hubs cannot finalize a dispatch ──
+    // NEGATIVE: stake-minority of live hubs cannot finalize a dispatch
     describe('a stake-minority (count-majority) of live hubs cannot finalize an XCALL dispatch', function () {
         let db, mvh, seed, validators;
 
         before(async function () {
             db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping XCALL weighted (negative) — no env DB and Docker unavailable'); this.skip(); }
+            if (!db) { console.log('Skipping XCALL weighted (negative): no env DB and Docker unavailable'); this.skip(); }
             mvh = new MultiValidatorHub({ count: 3, basePort: 26400, startCrossChain: true, startAttestation: false });
             await mvh.start();
             await sleep(PEER_WAIT_MS);
@@ -150,18 +150,18 @@ describe('MultiValidatorHub — STAKE_WEIGHTED_QUORUM XCALL dispatch relay (C.2)
         });
     });
 
-    // ── POSITIVE: a healthy weighted federation finalizes the dispatch ──
+    // POSITIVE: a healthy weighted federation finalizes the dispatch
     describe('a healthy weighted federation finalizes the XCALL dispatch on every hub', function () {
         let db, mvh, seed, validators;
 
         before(async function () {
             db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping XCALL weighted (positive) — no env DB and Docker unavailable'); this.skip(); }
+            if (!db) { console.log('Skipping XCALL weighted (positive): no env DB and Docker unavailable'); this.skip(); }
             mvh = new MultiValidatorHub({ count: 4, basePort: 26410, startCrossChain: true, startAttestation: false });
             await mvh.start();
             await sleep(PEER_WAIT_MS);
             const ids = mvh.identities;
-            // Uneven weights, no single source ≥ 2/3 of S=10000 → multi-signer quorum.
+            // Uneven weights, no single source >= 2/3 of S=10000 → multi-signer quorum.
             validators = [
                 { pubkey: ids[0].pubkeyHex, source: 'sA', weight: '4000' },
                 { pubkey: ids[1].pubkeyHex, source: 'sB', weight: '3000' },
@@ -177,7 +177,7 @@ describe('MultiValidatorHub — STAKE_WEIGHTED_QUORUM XCALL dispatch relay (C.2)
             if (db)  { await db.stop(); }
         });
 
-        it('the weighted quorum is reached — the dispatch finalizes on EVERY hub with ≥2 distinct sigs', async function () {
+        it('the weighted quorum is reached: the dispatch finalizes on EVERY hub with >=2 distinct sigs', async function () {
             const { events, row } = await driveDispatch(mvh, validators, 'xcall-pos', false);
             assert.strictEqual(events.length, 4, 'expected all 4 hubs to finalize, got ' + events.length);
             const callIds = new Set(events.map((e) => String(e.row && e.row.call_id)));

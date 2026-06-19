@@ -11,8 +11,8 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Programmable Policy Layer — controller-gated tokens & accounts + royalty/fee
- * split (xchain-indexer Phases A–D). End-to-end integration regression against a
+ * Programmable Policy Layer: controller-gated tokens & accounts + royalty/fee
+ * split (xchain-indexer Phases A-D). End-to-end integration regression against a
  * live bitcoin-regtest stack via the connector helpers (initialCheck globals).
  *
  * The controller binding actions have no SDK builder yet (Phase F), so they are
@@ -21,7 +21,7 @@
  *   ADDRESS format 1: ADDRESS|1|CONTROLLER|ACTION_CLASS|COOLDOWN_BLOCKS|UNBIND|MEMO
  *
  * Covers: bind + drop-cooldown gating, action-class routing, the catch-all 'all'
- * class (most-specific-wins fallback — one binding gates many classes, a specific
+ * class (most-specific-wins fallback: one binding gates many classes, a specific
  * binding overrides it for that class only), royalty/fee split persistence + EXACT
  * conservation across partial fills, recipient address gate, guard-of-guard
  * recursion control, and an uncontrolled-token regression. The
@@ -149,13 +149,13 @@ const RECIP_GATE = `module.exports = { guard: function(){
     xchain.revert('inbound denied');
 }};`
 
-// Denies EVERY action it gates — used on the 'all' class to prove one binding
+// Denies EVERY action it gates. Used on the 'all' class to prove one binding
 // gates multiple concrete classes (transfer + trade) via the fallback.
 const ALL_DENY_GATE = `module.exports = { guard: function(){
     xchain.revert('all-class denied');
 }};`
 
-// Allows whatever it gates — used as a class-specific OVERRIDE on top of 'all'.
+// Allows whatever it gates. Used as a class-specific OVERRIDE on top of 'all'.
 const ALLOW_GATE = `module.exports = { guard: function(){ return {}; }};`
 
 function royaltyGate(creator, market) {
@@ -169,7 +169,7 @@ function royaltyGate(creator, market) {
 }
 
 // Emits a SEND of its OWN controlled token (from the contract's deposited
-// balance) back to the original sender — exercises the guard-of-guard skip
+// balance) back to the original sender. Exercises the guard-of-guard skip
 // (IS_GUARD_EMISSION) + depth cap. Allows the action.
 const SELF_EMIT_GATE = `module.exports = { guard: function(){
     var from = xchain.getInputParam(1);
@@ -180,7 +180,7 @@ const SELF_EMIT_GATE = `module.exports = { guard: function(){
 
 // ─────────────── Phase E: permissions manifest guard contracts ───────────────
 // A guard that EMITS a SEND of its controlled token but whose manifest permits
-// only ISSUE — the emission must be rejected fail-closed (action denied) before
+// only ISSUE. The emission must be rejected fail-closed (action denied) before
 // the SEND handler ever runs.
 const MANIFEST_FORBIDS_SEND = `module.exports = {
     permissions: ['ISSUE'],
@@ -193,7 +193,7 @@ const MANIFEST_FORBIDS_SEND = `module.exports = {
 };`
 
 // A royalty guard returning legs that sum to 350 bps, with a contract-declared
-// maxTakeBps passed in — lets one scenario flip allow/deny purely on the manifest.
+// maxTakeBps passed in. Lets one scenario flip allow/deny purely on the manifest.
 function royaltyGateManifest(creator, market, maxTakeBps) {
     return `module.exports = {
         maxTakeBps: ${maxTakeBps},
@@ -208,7 +208,7 @@ function royaltyGateManifest(creator, market, maxTakeBps) {
 }
 
 // ───────────────────────── scenarios ─────────────────────────
-describe('Controller Policy Layer — bindings, enforcement, royalty split + permissions manifest (Phases A–E)', function () {
+describe('Controller Policy Layer: bindings, enforcement, royalty split + permissions manifest (Phases A-E)', function () {
     this.timeout(0)
     let owner
 
@@ -241,13 +241,13 @@ describe('Controller Policy Layer — bindings, enforcement, royalty split + per
         const bob = await cryptoHelper.getNewFundedAddress('cv-bob', COIN, NETWORK, null, 'legacy', 0, 1)
         const sres = await sendHelper.sendSendV0(owner, tick, '10', bob.address, 'routing-send')
         assert(sres.send, 'SEND of trade-bound token is ALLOWED (class routing)')
-        console.log('   SEND allowed under trade binding — routing OK; bob balance =', await balanceOf(bob.address, tick))
+        console.log('   SEND allowed under trade binding; routing OK; bob balance =', await balanceOf(bob.address, tick))
 
         // GATING: an ORDER listing the token must be REJECTED while bound.
         await submitRaw(owner, `ORDER|0|${COIN_CODE}|${tick}|50||${COIN_CODE}|XCHAIN|50||${owner.address}||||blocked-order`)
         await mine(1)
         assert(await expectOrderRejected(owner.address, tick), 'ORDER is REJECTED while trade controller is active')
-        console.log('   ORDER rejected while bound — gating OK')
+        console.log('   ORDER rejected while bound; gating OK')
 
         // UNBIND -> cooldown begins; still gates until cooldown_end_block.
         await submitRaw(owner, issueBindWire(tick, ctrl, 'trade', COOLDOWN, 1))
@@ -263,18 +263,18 @@ describe('Controller Policy Layer — bindings, enforcement, royalty split + per
         await submitRaw(owner, `ORDER|0|${COIN_CODE}|${tick}|50||${COIN_CODE}|XCHAIN|50||${owner.address}||||cooldown-order`)
         await mine(1)
         assert(await expectOrderRejected(owner.address, tick), 'ORDER still REJECTED during drop cooldown (anti-instant-drop)')
-        console.log('   ORDER still rejected during cooldown — cooldown teeth OK')
+        console.log('   ORDER still rejected during cooldown; cooldown teeth OK')
 
         // Advance past cooldown_end_block -> ORDER now ACCEPTED.
         const endBlock = Number(unbindEv.cooldown_end_block)
         let guard = 0
         while ((await tip()) <= endBlock && guard++ < 90) { await mine(1); await sleep(1000) }
-        console.log('   tip', await tip(), '> cooldown_end', endBlock, '— cooldown expired')
+        console.log('   tip', await tip(), '> cooldown_end', endBlock, '(cooldown expired)')
         await submitRaw(owner, `ORDER|0|${COIN_CODE}|${tick}|50||${COIN_CODE}|XCHAIN|50||${owner.address}||||after-cooldown`)
         await mine(1); await sleep(2500)
         let allowed = await waitValidOrder(owner.address, tick, 20000)
         assert(allowed && allowed.status === 'valid', 'ORDER ACCEPTED after cooldown expiry')
-        console.log('   ORDER accepted after cooldown — expiry OK. order#', allowed.action_index)
+        console.log('   ORDER accepted after cooldown; expiry OK. order#', allowed.action_index)
     })
 
     it('2b. transfer controller denies SEND of the token', async function () {
@@ -291,7 +291,7 @@ describe('Controller Policy Layer — bindings, enforcement, royalty split + per
         await mine(1); await sleep(3000)
         const after = await balanceOf(carol.address, tick)
         assert(before === after, 'SEND of transfer-bound token is REJECTED (recipient balance unchanged)')
-        console.log('   SEND blocked by transfer controller — OK. carol balance still', after)
+        console.log('   SEND blocked by transfer controller; OK. carol balance still', after)
     })
 
     it('3. royalty split: payout_legs stored + exact conservation across partial fills', async function () {
@@ -343,7 +343,7 @@ describe('Controller Policy Layer — bindings, enforcement, royalty split + per
             console.log(`   fill ${proceeds}: seller+${dOwner} creator+${dCreator} market+${dMarket} (sum=${dOwner+dCreator+dMarket})`)
             // 2.5% + 1.0% of `proceeds`; seller gets remainder. The split rounds the leg
             // to tick precision (deterministic, mathjs bcdiv half-up), so each leg is within
-            // [floor,ceil] of its exact bps amount — what matters for consensus is determinism
+            // [floor,ceil] of its exact bps amount. What matters for consensus is determinism
             // + EXACT conservation (seller absorbs any rounding).
             const exC = proceeds * 250 / 10000, exM = proceeds * 100 / 10000
             assert(dCreator === Math.floor(exC) || dCreator === Math.ceil(exC), 'creator leg ≈ 2.5%')
@@ -353,7 +353,7 @@ describe('Controller Policy Layer — bindings, enforcement, royalty split + per
         }
         await fillAndCheck(400)
         await fillAndCheck(300)
-        console.log('   royalty split conserved across two partial fills — OK')
+        console.log('   royalty split conserved across two partial fills; OK')
     })
 
     it('4. recipient address gate: inbound SEND to a gated address reverts', async function () {
@@ -374,7 +374,7 @@ describe('Controller Policy Layer — bindings, enforcement, royalty split + per
         await mine(1); await sleep(3000)
         const after = await balanceOf(recip.address, tick)
         assert(before === after, 'inbound SEND to gated recipient REVERTS (no credit)')
-        console.log('   inbound SEND reverted by recipient gate — OK. recip balance', after)
+        console.log('   inbound SEND reverted by recipient gate; OK. recip balance', after)
     })
 
     it('5. guard-of-guard: guard emits its own controlled token, depth-capped, settles', async function () {
@@ -395,7 +395,7 @@ describe('Controller Policy Layer — bindings, enforcement, royalty split + per
         const after = await balanceOf(dave.address, tick)
         assert(Number(after) - Number(before) === 10, 'recipient credited the user SEND')
         // The guard emitted 1 token back to the sender (owner) from the contract.
-        console.log('   guard-of-guard SEND settled; dave +', Number(after) - Number(before), '— OK')
+        console.log('   guard-of-guard SEND settled; dave +', Number(after) - Number(before), '(OK)')
     })
 
     it('6. determinism (single-node bound): guarded action is consensus-recorded; gas deterministic', async function () {
@@ -414,7 +414,7 @@ describe('Controller Policy Layer — bindings, enforcement, royalty split + per
         const ord = await waitValidOrder(owner.address, tick, 20000)
         assert(ord && ord.status === 'valid', 'guarded ORDER committed (deterministic accept)')
         assert((await tip()) >= before, 'ledger advanced past the guarded action')
-        console.log('   guarded action deterministically committed (order#', ord.action_index, ') — single-node check OK')
+        console.log('   guarded action deterministically committed (order#', ord.action_index, '); single-node check OK')
     })
 
     // ───────────────────── Phase E: permissions manifest ─────────────────────
@@ -424,13 +424,13 @@ describe('Controller Policy Layer — bindings, enforcement, royalty split + per
         const market  = await cryptoHelper.getNewFundedAddress('cv-e1m', COIN, NETWORK, null, 'legacy', 0, 1)
         const dep = await vmHelper.sendDeployV0(owner, royaltyGateManifest(creator.address, market.address, 300), 250000)
         const ci  = dep.contract.action_index
-        // Poll — DEPLOY indexing lags the submit (submitRaw/deploy return on confirm).
+        // Poll: DEPLOY indexing lags the submit (submitRaw/deploy return on confirm).
         let row = null
         const end = Date.now() + 20000
         while (Date.now() < end) { row = await contractPermissionsRow(ci); if (row) break; await sleep(1000) }
         assert(row !== null, 'contract_permissions row persisted at deploy')
         assert.strictEqual(Number(row.max_take_bps), 300, 'declared maxTakeBps stored')
-        assert(row.permissions === null, 'no permissions array declared → NULL (unrestricted)')
+        assert(row.permissions === null, 'no permissions array declared -> NULL (unrestricted)')
         console.log('   E1 contract_permissions =', row)
     })
 
@@ -441,7 +441,7 @@ describe('Controller Policy Layer — bindings, enforcement, royalty split + per
         const dep = await vmHelper.sendDeployV0(owner, MANIFEST_FORBIDS_SEND, 250000)
         const ctrl = dep.contract.action_index
         // Fund the contract so its guard's SEND emission WOULD succeed if the allowlist permitted
-        // it — otherwise the emission fails on insufficient balance regardless of the manifest,
+        // it. Otherwise the emission fails on insufficient balance regardless of the manifest,
         // which made the original assertion a false green. With the contract funded, a blocked
         // SEND is attributable to the allowlist alone. (The definitive, balance-independent proof
         // lives in the indexer integration suite: 16-controller-permissions asserts the
@@ -454,19 +454,19 @@ describe('Controller Policy Layer — bindings, enforcement, royalty split + per
         const recip = await cryptoHelper.getNewFundedAddress('cv-e2r', COIN, NETWORK, null, 'legacy', 0, 1)
         const before = await balanceOf(recip.address, tick)
         // The SEND triggers the transfer guard; the (now-funded) guard's SEND emission is not in
-        // the allowlist → throws → guard DENIES → the original SEND is blocked (recipient gets none).
+        // the allowlist -> throws -> guard DENIES -> the original SEND is blocked (recipient gets none).
         await submitRaw(owner, `SEND|0|${tick}|10|${recip.address}|manifest-blocked`)
         await sleep(7000)
         const after = await balanceOf(recip.address, tick)
         assert.strictEqual(after, before, 'SEND blocked by the allowlist (contract IS funded, so the block is the manifest, not balance)')
-        console.log('   E2 manifest-forbidden emission denied the funded contract — OK')
+        console.log('   E2 manifest-forbidden emission denied the funded contract; OK')
     })
 
     it('E3. tighter maxTakeBps denies an over-cap legs guard; a looser one allows the same legs', async function () {
         const creator = await cryptoHelper.getNewFundedAddress('cv-e3c', COIN, NETWORK, null, 'legacy', 0, 1)
         const market  = await cryptoHelper.getNewFundedAddress('cv-e3m', COIN, NETWORK, null, 'legacy', 0, 1)
 
-        // (a) maxTakeBps 300 < Σlegs 350 → DENIED.
+        // (a) maxTakeBps 300 < Σlegs 350 -> DENIED.
         const tickA = randTick('CVF')
         await issueHelper.sendIssueV0(owner, tickA, '100000', '100000', '0', 'cverify E3a', '100000')
         const depA = await vmHelper.sendDeployV0(owner, royaltyGateManifest(creator.address, market.address, 300), 250000)
@@ -475,9 +475,9 @@ describe('Controller Policy Layer — bindings, enforcement, royalty split + per
         await mine(1)
         await submitRaw(owner, `ORDER|0|${COIN_CODE}|${tickA}|1000||${COIN_CODE}|XCHAIN|1000||${owner.address}||||e3-overcap`)
         assert(await expectOrderRejected(owner.address, tickA), 'over-cap legs: ORDER rejected by tighter per-contract maxTakeBps')
-        console.log('   E3a over-cap legs denied by tighter per-contract maxTakeBps — OK')
+        console.log('   E3a over-cap legs denied by tighter per-contract maxTakeBps; OK')
 
-        // (b) maxTakeBps 600 > Σlegs 350 → ALLOWED, legs persisted.
+        // (b) maxTakeBps 600 > Σlegs 350 -> ALLOWED, legs persisted.
         const tickB = randTick('CVG')
         await issueHelper.sendIssueV0(owner, tickB, '100000', '100000', '0', 'cverify E3b', '100000')
         const depB = await vmHelper.sendDeployV0(owner, royaltyGateManifest(creator.address, market.address, 600), 250000)
@@ -489,10 +489,10 @@ describe('Controller Policy Layer — bindings, enforcement, royalty split + per
         assert(ord && ord.payout_legs, 'within the per-contract cap: order valid + legs persisted')
         const legs = JSON.parse(ord.payout_legs)
         assert(legs.length === 2 && legs[0].bps === 250 && legs[1].bps === 100, 'legs preserved under the looser cap')
-        console.log('   E3b legs within the looser cap settled — OK')
+        console.log('   E3b legs within the looser cap settled; OK')
     })
 
-    // ───────────────────── 'all' class — most-specific-wins fallback ─────────────────────
+    // ───────────────────── 'all' class: most-specific-wins fallback ─────────────────────
 
     it("8. 'all' class: one binding gates multiple classes; a specific binding overrides it for that class only", async function () {
         const tick = randTick('CVL')
@@ -512,35 +512,35 @@ describe('Controller Policy Layer — bindings, enforcement, royalty split + per
         await submitRaw(owner, `SEND|0|${tick}|10|${fred.address}|all-blocked-send`)
         await mine(1); await sleep(3000)
         assert.strictEqual(await balanceOf(fred.address, tick), before, "SEND falls back to the 'all' guard and is DENIED")
-        console.log("   SEND denied via 'all' fallback (transfer class) — OK")
+        console.log("   SEND denied via 'all' fallback (transfer class); OK")
 
         // ...and an ORDER (trade) is ALSO blocked by the same single 'all' binding.
         await submitRaw(owner, `ORDER|0|${COIN_CODE}|${tick}|50||${COIN_CODE}|XCHAIN|50||${owner.address}||||all-blocked-order`)
         await mine(1)
         assert(await expectOrderRejected(owner.address, tick), "ORDER falls back to the 'all' guard and is DENIED")
-        console.log("   ORDER denied via 'all' fallback (trade class) — one binding gates both — OK")
+        console.log("   ORDER denied via 'all' fallback (trade class); one binding gates both; OK")
 
         // OVERRIDE: bind a permissive controller to the specific 'transfer' class on top of 'all'.
-        // (Binding a specific class while 'all' is bound must be ALLOWED — it is the override.)
+        // (Binding a specific class while 'all' is bound must be ALLOWED; it is the override.)
         const depAllow = await vmHelper.sendDeployV0(owner, ALLOW_GATE, 250000)
         await submitRaw(owner, issueBindWire(tick, depAllow.contract.action_index, 'transfer', 0, 0))
         await mine(1)
         await waitTokenController(tick, e => e.action_class === 'transfer' && Number(e.is_unbind) === 0)
         console.log("   bound specific 'transfer' -> allow guard (override on top of 'all')")
 
-        // SEND now resolves to the specific transfer controller (most-specific wins) → ALLOWED.
+        // SEND now resolves to the specific transfer controller (most-specific wins) -> ALLOWED.
         before = await balanceOf(fred.address, tick)
         const sres = await sendHelper.sendSendV0(owner, tick, '10', fred.address, 'override-send')
         assert(sres.send, 'SEND now routes to the specific transfer controller (most-specific wins) and is ALLOWED')
         assert.strictEqual(Number(await balanceOf(fred.address, tick)) - Number(before), 10, 'recipient credited under the override')
-        console.log("   SEND allowed under specific 'transfer' override — OK")
+        console.log("   SEND allowed under specific 'transfer' override; OK")
 
         // The override is class-scoped: ORDER (trade) still has no specific binding, so it STILL
         // falls back to the 'all' deny guard.
         await submitRaw(owner, `ORDER|0|${COIN_CODE}|${tick}|50||${COIN_CODE}|XCHAIN|50||${owner.address}||||still-blocked-order`)
         await mine(1)
         assert(await expectOrderRejected(owner.address, tick), "ORDER still falls back to 'all' (override is class-scoped)")
-        console.log("   ORDER still denied via 'all' — override is class-scoped — OK")
+        console.log("   ORDER still denied via 'all'; override is class-scoped; OK")
     })
 
     it('7. regression: uncontrolled token + address behave byte-for-byte as before', async function () {
@@ -557,6 +557,6 @@ describe('Controller Policy Layer — bindings, enforcement, royalty split + per
         const ord = await waitValidOrder(owner.address, tick, 20000)
         assert(ord && ord.status === 'valid', 'uncontrolled ORDER accepted')
         assert(ord.payout_legs === null, 'uncontrolled ORDER has NULL payout_legs')
-        console.log('   uncontrolled token unchanged (payout_legs NULL) — OK')
+        console.log('   uncontrolled token unchanged (payout_legs NULL); OK')
     })
 })

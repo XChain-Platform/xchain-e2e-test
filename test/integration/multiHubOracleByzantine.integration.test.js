@@ -11,13 +11,13 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Track C.2 — Byzantine fault tolerance for the price-oracle PBFT engine.
+ * Track C.2: Byzantine fault tolerance for the price-oracle PBFT engine.
  *
  * Byzantine coverage existed for config-PBFT and DEX-PBFT but the oracle round
  * was only unit-tested. This drives the REAL OracleConsensus PBFT round over
  * live P2P with a silenced (partitioned) oracle validator, proving:
- *   - LIVENESS (f=1): one silent oracle validator does NOT stall the round —
- *     the honest 3-of-4 reach quorum and finalize the correct median on every
+ *   - LIVENESS (f=1): one silent oracle validator does NOT stall the round.
+ *     The honest 3-of-4 reach quorum and finalize the correct median on every
  *     honest hub; the silenced hub legitimately stores nothing.
  *   - SAFETY (2-of-4 down): with two oracle validators silenced, quorum (3) is
  *     unreachable → NO price_snapshots row finalizes on any hub.
@@ -98,7 +98,7 @@ async function snapshotRows(hub) {
         [ROUND, PAIR]);
 }
 
-// The deterministic round leader (every hub agrees — same validator set + round).
+// The deterministic round leader (every hub agrees: same validator set + round).
 function findOracleLeader(mvh) {
     return mvh.hubs.find((h) => {
         const l = h._wtOracle._getLeader(ROUND);
@@ -120,16 +120,16 @@ function seedEqual(mvh) {
     });
 }
 
-describe('MultiValidatorHub — oracle-PBFT byzantine fault tolerance (C.2)', function () {
+describe('MultiValidatorHub: oracle-PBFT byzantine fault tolerance (C.2)', function () {
     this.timeout(240_000);
 
-    // ── LIVENESS: one silenced oracle validator does not stall the round ──
+    // LIVENESS: one silenced oracle validator does not stall the round
     describe('LIVENESS (f=1): a silent oracle validator does not stall finalization', function () {
         let db, mvh, seed, oracle, restore;
 
         before(async function () {
             db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping oracle-byzantine liveness — no env DB and Docker unavailable'); this.skip(); }
+            if (!db) { console.log('Skipping oracle-byzantine liveness: no env DB and Docker unavailable'); this.skip(); }
             mvh = new MultiValidatorHub({ count: 4, basePort: 26200, startAttestation: false });
             await mvh.start();
             await sleep(PEER_WAIT_MS);
@@ -169,13 +169,13 @@ describe('MultiValidatorHub — oracle-PBFT byzantine fault tolerance (C.2)', fu
         });
     });
 
-    // ── SAFETY: two silenced validators → quorum unreachable → no finalization ──
+    // SAFETY: two silenced validators → quorum unreachable → no finalization
     describe('SAFETY (2-of-4 down): quorum is unreachable, nothing finalizes', function () {
         let db, mvh, seed, oracle, restores = [];
 
         before(async function () {
             db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping oracle-byzantine safety — no env DB and Docker unavailable'); this.skip(); }
+            if (!db) { console.log('Skipping oracle-byzantine safety: no env DB and Docker unavailable'); this.skip(); }
             mvh = new MultiValidatorHub({ count: 4, basePort: 26210, startAttestation: false });
             await mvh.start();
             await sleep(PEER_WAIT_MS);
@@ -205,7 +205,7 @@ describe('MultiValidatorHub — oracle-PBFT byzantine fault tolerance (C.2)', fu
             for (let i = 0; i < mvh.hubs.length; i++) {
                 const rows = await snapshotRows(mvh.hubs[i]);
                 assert.strictEqual(rows.length, 0,
-                    'hub ' + i + ' finalized a price below quorum (got ' + rows.length + ' rows) — safety violation');
+                    'hub ' + i + ' finalized a price below quorum (got ' + rows.length + ' rows): safety violation');
             }
         });
     });

@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * L2 integration — oracle determinism across a multi-validator hub set
+ * L2 integration - oracle determinism across a multi-validator hub set
  *
  * Boots N=4 in-process XChainHub validators on a disposable DB, gives each its
  * own real OracleConsensus, and feeds every hub the SAME price submissions but
@@ -22,7 +22,7 @@
  *   - every hub serializes the IDENTICAL canonical PRICE v0 payload (so the
  *     leader's aggregate is reproducible by every follower);
  *   - every hub SIGNS that payload with its own real identity, and every
- *     signature verifies against the shared canonical payload — i.e. any hub
+ *     signature verifies against the shared canonical payload - i.e. any hub
  *     can validate any other's PRICE v0 signature. Divergence here silently
  *     stalls oracle rounds.
  *
@@ -52,7 +52,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Same submissions, different arrival order per hub. v6 lists its pairs
 // LTC-first so some orders build the aggregate array in a different pair order
-// — the canonical (sorted) payload must absorb that.
+// - the canonical (sorted) payload must absorb that.
 const ENTRIES = [
     ['v0', [{ coinPair: 'BTC/USD', price: '59000' }, { coinPair: 'LTC/USD', price: '70' }]],
     ['v1', [{ coinPair: 'BTC/USD', price: '60000' }, { coinPair: 'LTC/USD', price: '72' }]],
@@ -71,14 +71,14 @@ const ORDERS = [
 const subsFor = (order) => new Map(order.map((i) => [ENTRIES[i][0], { prices: ENTRIES[i][1] }]));
 const priceMap = (results) => Object.fromEntries(results.map((p) => [p.coinPair, p.price]));
 
-describe('MultiValidatorHub — oracle determinism (L2)', function () {
+describe('MultiValidatorHub - oracle determinism (L2)', function () {
     this.timeout(180_000);
 
     let db, mvh, seed;
 
     before(async function () {
         db = await startDisposableHubDb();
-        if (!db) { console.log('Skipping oracle L2 — no env DB and Docker unavailable'); this.skip(); }
+        if (!db) { console.log('Skipping oracle L2 - no env DB and Docker unavailable'); this.skip(); }
         mvh = new MultiValidatorHub({ count: COUNT, basePort: 33000 });
         await mvh.start();
         await sleep(PEER_WAIT_MS);
@@ -108,19 +108,19 @@ describe('MultiValidatorHub — oracle determinism (L2)', function () {
     });
 
     it('every hub signs the IDENTICAL canonical payload, and all signatures cross-verify', function () {
-        const round = 100, ts = 1700000000;
+        const round = 100, ts = 1700000000, btcHeight = 799000;  // #4232: height is in the signed canonical
         const signed = mvh.hubs.map((h, i) => {
             const agg = h._oracleConsensus._aggregateAll(subsFor(ORDERS[i]));
             return {
-                payload: h._oracleConsensus._buildPriceV0Payload(round, ts, agg),
-                sig:     h._oracleConsensus._signPriceV0(round, ts, agg)
+                payload: h._oracleConsensus._buildPriceV0Payload(round, ts, agg, btcHeight),
+                sig:     h._oracleConsensus._signPriceV0(round, ts, agg, btcHeight)
             };
         });
 
         // 1. Identical canonical payload on every hub despite different arrival order.
         for (let i = 1; i < signed.length; i++) {
             assert.strictEqual(signed[i].payload, signed[0].payload,
-                'hub ' + i + ' produced a different canonical payload — signatures cannot match');
+                'hub ' + i + ' produced a different canonical payload - signatures cannot match');
         }
 
         // 2. Each hub really signed (with a distinct identity) and the signature

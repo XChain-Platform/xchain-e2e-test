@@ -6,24 +6,24 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  **********************************************************************
- * Integration — distributed Hub-DB WS mirror (HubDbBroadcaster ↔ HubDbSync)
+ * Integration: distributed Hub-DB WS mirror (HubDbBroadcaster <-> HubDbSync)
  *
  * Proves the cross-host hub-DB replication channel LIVE end-to-end, not just via
  * the per-side unit tests. Wires the REAL hub-side broadcaster and the REAL
  * indexer-side sync client across a REAL WebSocket + REST, between two real
  * (disposable) MariaDB databases:
  *
- *   SRC  ("hub DB")     ── HubDbBroadcaster (WS push) ─┐
- *        │  REST /hub-db/snapshot/<table>              ├─→ HubDbSync ─→ REP ("indexer hub-mirror DB")
- *        └─ (ws server /hub-db/subscribe) ─────────────┘
+ *   SRC  ("hub DB")     -- HubDbBroadcaster (WS push) -+
+ *        |  REST /hub-db/snapshot/<table>              +-> HubDbSync -> REP ("indexer hub-mirror DB")
+ *        +- (ws server /hub-db/subscribe) -------------+
  *
  * Coverage:
- *   1. BOOTSTRAP — rows present in SRC before the indexer starts are pulled via the
+ *   1. BOOTSTRAP: rows present in SRC before the indexer starts are pulled via the
  *      REST snapshot endpoint on HubDbSync.start().
- *   2. SUBSCRIBE — start() registers a live subscriber on the broadcaster.
- *   3. LIVE STREAM — a row inserted into SRC + broadcast after start arrives over the
+ *   2. SUBSCRIBE: start() registers a live subscriber on the broadcaster.
+ *   3. LIVE STREAM: a row inserted into SRC + broadcast after start arrives over the
  *      WebSocket and is applied to REP (price_snapshots).
- *   4. CROSS-CHAIN — the same live channel carries cross_chain_matches +
+ *   4. CROSS-CHAIN: the same live channel carries cross_chain_matches +
  *      capability_snapshots (the cross-chain DEX settlement mirror).
  *
  * Real schemas are loaded from the shipped .sql files (hub + indexer). Self-provisions
@@ -64,16 +64,16 @@ async function waitFor(fn, timeoutMs = 10000, stepMs = 150) {
 }
 const count = (pool, table, where = '1') => pool.query('SELECT COUNT(*) c FROM ' + table + ' WHERE ' + where).then(r => Number(r[0].c)).catch(() => 0);
 
-describe('Hub-DB WS mirror — live broadcaster ↔ sync (distributed) @integration', function () {
+describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration', function () {
     // 300s: the disposable MariaDB alone takes ~40s on a loaded host (tmpfs
-    // datadir; was 60s+ on disk) before the broadcaster↔sync bootstrap runs.
+    // datadir; was 60s+ on disk) before the broadcaster<->sync bootstrap runs.
     this.timeout(300000);
     const SRC = 'HubWsMirror_src', REP = 'HubWsMirror_replica';
     let db, srcPool, repPool, server, wss, broadcaster, sync, port;
 
     before(async function () {
         db = await startDisposableHubDb();
-        if (!db) { console.log('Skipping hub-DB WS mirror — no env DB and Docker unavailable'); this.skip(); }
+        if (!db) { console.log('Skipping hub-DB WS mirror: no env DB and Docker unavailable'); this.skip(); }
         const base = { host: db.host, port: Number(db.port), user: db.user, password: db.pass, bigIntAsNumber: true, connectionLimit: 4 };
         const admin = mariadb.createPool(base);
         for (const d of [SRC, REP]) { await admin.query('DROP DATABASE IF EXISTS ' + d); await admin.query('CREATE DATABASE ' + d); }
@@ -112,7 +112,7 @@ describe('Hub-DB WS mirror — live broadcaster ↔ sync (distributed) @integrat
         await new Promise(r => server.listen(0, '127.0.0.1', r));
         port = server.address().port;
 
-        // REAL indexer-side sync client → REP, pointed at our hub surface.
+        // REAL indexer-side sync client -> REP, pointed at our hub surface.
         sync = new HubDbSync({ doQuery: (sql, p) => repPool.query(sql, p) }, { hubUrl: 'http://127.0.0.1:' + port });
         assert.strictEqual(sync.enabled, true, 'sync must be enabled (hubUrl + hubDb present)');
         await sync.start();

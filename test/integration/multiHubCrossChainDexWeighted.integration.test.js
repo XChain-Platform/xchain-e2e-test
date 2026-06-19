@@ -11,27 +11,27 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * L2 integration — STAKE_WEIGHTED_QUORUM (WI-1) for the cross_chain capability:
+ * L2 integration: STAKE_WEIGHTED_QUORUM (WI-1) for the cross_chain capability:
  * cross-chain DEX match finalization (Suite A4 of the regtest e2e plan).
  *
- * The weighted twin of multiHubCrossChainDex.integration.test.js — the actual
+ * The weighted twin of multiHubCrossChainDex.integration.test.js. The actual
  * ledger-binding path (a finalized cross_chain_matches row is what releases
  * escrow). Drives the REAL CrossChainDexConsensus PBFT match round
- * (XDEX_MATCH_PROPOSE → PREPARE → COMMIT) over live P2P with a SOURCE-keyed weight
+ * (XDEX_MATCH_PROPOSE -> PREPARE -> COMMIT) over live P2P with a SOURCE-keyed weight
  * snapshot, proving the WI-1 thesis for cross_chain:
  *
  *   - NEGATIVE: 3 live small-stake hubs (a COUNT majority) hold only 3000/10000
  *     stake; a whale source sits in the snapshot (counts toward S) but is OFFLINE.
  *     The 3 live hubs sign the match, the weighted tally (3·3000 !> 2·10000)
- *     refuses → NO match finalizes on any hub → no settleable cross_chain_matches
- *     row. The exact forged-settlement the old count rule would have released.
+ *     refuses -> NO match finalizes on any hub -> no settleable cross_chain_matches
+ *     row. This is exactly the forged-settlement the old count rule would have released.
  *   - POSITIVE: 4 live hubs with uneven weights (4000/3000/2000/1000, no single
- *     source ≥ 2/3) → multi-signer weighted quorum → the identical finalized match
+ *     source >= 2/3) -> multi-signer weighted quorum -> the identical finalized match
  *     lands on every hub.
  *
  * The DEX engine gates weighting on the MATCH's network (row.network='regtest' from
- * the offer book) and passes network explicitly to the weighted check — no
- * cached-network gotcha. seedWeightSnapshot stubs getWeightSnapshot; the leader is
+ * the offer book) and passes network explicitly to the weighted check (no
+ * cached-network gotcha). seedWeightSnapshot stubs getWeightSnapshot; the leader is
  * chosen over the live (registered) pubkeys, so the offline whale can't lead.
  *
  * Shared in-memory offer book (no indexer, no chain); disposable Docker MariaDB;
@@ -59,7 +59,7 @@ const NETWORK      = 'regtest';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// A crossing LTC⇄DOGE ORDER pair (1:1 price → always crosses).
+// A crossing LTC/DOGE ORDER pair (1:1 price -> always crosses).
 function crossingPair({ ltcIdx, dogeIdx, ltcGive = '90', dogeGive = '40' }) {
     return {
         LTC: [ makeOrder({
@@ -93,16 +93,16 @@ async function driveRound(mvh, settleMs = SETTLE_MS) {
     return events;
 }
 
-describe('MultiValidatorHub — STAKE_WEIGHTED_QUORUM cross-chain DEX match (WI-1 Suite A4, L2)', function () {
+describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM cross-chain DEX match (WI-1 Suite A4, L2)', function () {
     this.timeout(240_000);
 
-    // ── NEGATIVE: count-majority / stake-minority of live hubs cannot settle ──
+    // NEGATIVE: count-majority / stake-minority of live hubs cannot settle
     describe('a stake-minority (count-majority) of live hubs cannot finalize a match', function () {
         let db, mvh, seed, book;
 
         before(async function () {
             db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping A4 (negative) — no env DB and Docker unavailable'); this.skip(); }
+            if (!db) { console.log('Skipping A4 (negative): no env DB and Docker unavailable'); this.skip(); }
             book = new MockCrossChainOfferBook();
             await book.start();
             book.setBook('shared', { network: NETWORK, latestBlockIndex: 200,
@@ -146,13 +146,13 @@ describe('MultiValidatorHub — STAKE_WEIGHTED_QUORUM cross-chain DEX match (WI-
         });
     });
 
-    // ── POSITIVE: a healthy weighted federation finalizes the match ──
+    // POSITIVE: a healthy weighted federation finalizes the match
     describe('a healthy weighted federation finalizes the match on every hub', function () {
         let db, mvh, seed, book;
 
         before(async function () {
             db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping A4 (positive) — no env DB and Docker unavailable'); this.skip(); }
+            if (!db) { console.log('Skipping A4 (positive): no env DB and Docker unavailable'); this.skip(); }
             book = new MockCrossChainOfferBook();
             await book.start();
             book.setBook('shared', { network: NETWORK, latestBlockIndex: 200,
@@ -164,7 +164,7 @@ describe('MultiValidatorHub — STAKE_WEIGHTED_QUORUM cross-chain DEX match (WI-
             await mvh.start();
             await sleep(PEER_WAIT_MS);
             const ids = mvh.identities;
-            // Uneven weights, no single source ≥ 2/3 (S=10000) → multi-signer quorum.
+            // Uneven weights, no single source >= 2/3 (S=10000) -> multi-signer quorum.
             seed = seedWeightSnapshot(mvh, {
                 blockIndex: BLOCK_INDEX,
                 validators: [
@@ -183,13 +183,13 @@ describe('MultiValidatorHub — STAKE_WEIGHTED_QUORUM cross-chain DEX match (WI-
             if (db)   { await db.stop(); }
         });
 
-        it('the weighted quorum is reached — the identical match finalizes on EVERY hub', async function () {
+        it('the weighted quorum is reached: the identical match finalizes on EVERY hub', async function () {
             const events = await driveRound(mvh);
             assert.strictEqual(events.length, 4, 'expected all 4 hubs to finalize, got ' + events.length);
             const matchIds = new Set(events.map((e) => e.matchId));
             assert.strictEqual(matchIds.size, 1, 'hubs finalized different match_ids: ' + JSON.stringify([...matchIds]));
 
-            // Each finalize carries ≥2 DISTINCT verifying sigs (no single source ≥2/3),
+            // Each finalize carries >=2 DISTINCT verifying sigs (no single source >=2/3),
             // and persists a finalized row on every hub.
             const dexes = mvh.getCrossChainDexes();
             for (const ev of events) {

@@ -11,14 +11,14 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * E2E test — full-node tier (NODEPROOF) live possession proof
+ * E2E test: full-node tier (NODEPROOF) live possession proof
  *
  * Stands up three real in-process xchain-hub validators against the regtest
  * stack and proves the verified-full-node tier end to end:
  *
  *   - Hubs 0 + 1 are FULL validators (each wired to the regtest bitcoind RPC)
  *     and are the bootstrap GENESIS_VERIFIERS.
- *   - Hub 2 is a LIGHT validator (NO coin RPC) — it stakes the full_node
+ *   - Hub 2 is a LIGHT validator (NO coin RPC). It stakes the full_node
  *     capability but cannot answer the possession challenge.
  *
  * Flow:
@@ -32,15 +32,15 @@
  *
  * Asserts: the two FULL hubs are verified (passed rows) and accrue passing
  * verdicts across epochs (a positive participation rate); the LIGHT hub is NOT
- * verified and accrues none → it earns no full-node reward tranche. The tier is
- * REWARD-ONLY — non-participation is never slashed (carrot, not stick).
+ * verified and accrues none, so it earns no full-node reward tranche. The tier is
+ * REWARD-ONLY: non-participation is never slashed (carrot, not stick).
  *
  * The two-tranche reward SPLIT that follows from verification (oracle_base +
  * oracle_full_node) is a pure, deterministic function covered exhaustively by
  * the indexer unit tests (price.test.js "two-tranche full-node split" +
  * "reward derivation is order-independent"); driving a full PRICE oracle round
  * here would require the oracle subsystem (skipped by MultiValidatorHub), so it
- * is intentionally out of scope for this scenario — see README-NODEPROOF.md.
+ * is intentionally out of scope for this scenario. See README-NODEPROOF.md.
  *
  * VENUE: requires the regtest stack (bitcoind + decoder + indexer + MariaDB)
  * and FULLNODE_BTC_RPC_URL pointing at the regtest bitcoind JSON-RPC endpoint
@@ -67,7 +67,7 @@ const COIN_RPC = process.env.FULLNODE_BTC_RPC_URL || ''
 
 // FIXED (deterministic) Ed25519 seeds for the three validators. The indexer's
 // eligible-verifier bootstrap is its FULLNODE.GENESIS_VERIFIERS config, which a
-// separate process must be told BEFORE the verdict lands — so the genesis pubkeys
+// separate process must be told BEFORE the verdict lands, so the genesis pubkeys
 // can't be random per run. Seeds 0+1 are the two FULL hubs (and the genesis
 // verifiers); seed 2 is the LIGHT hub. Configure the regtest indexer with
 // FULLNODE_GENESIS_VERIFIERS = the pubkeys of seeds 0+1 (printed by
@@ -113,8 +113,8 @@ async function _waitForRows(sql, args, timeoutMs = 120000, label = 'rows') {
     throw new Error('timed out waiting for ' + label)
 }
 
-describe('Federation — full-node tier (NODEPROOF) possession proof', function () {
-    // 3 hubs × (start + DB) + staking + activation + epoch mining + sign round
+describe('Federation: full-node tier (NODEPROOF) possession proof', function () {
+    // 3 hubs x (start + DB) + staking + activation + epoch mining + sign round
     // + on-chain verdict + indexer processing.
     this.timeout(12 * 60 * 1000)
 
@@ -154,7 +154,7 @@ describe('Federation — full-node tier (NODEPROOF) possession proof', function 
 
         // Stake every pubkey above the full_node MIN_STAKE (2000) so all three are
         // claimants in the capability snapshot. The light hub is a claimant that
-        // cannot answer — exactly the case the proof must catch.
+        // cannot answer, which is exactly the case the proof must catch.
         for (let i = 0; i < identities.length; i++) {
             // Idempotent on a non-reset chain: a pubkey already staked (e.g. from a
             // prior run) is already a full_node claimant; STAKE v1 would be rejected
@@ -168,7 +168,7 @@ describe('Federation — full-node tier (NODEPROOF) possession proof', function 
                 [identities[i].pubkeyHex.toLowerCase()]
             )
             if (existing && Number(existing[0].n) > 0) {
-                console.log('stake ' + i + ' (' + identities[i].pubkeyHex.slice(0, 16) + '...) already present — skipping')
+                console.log('stake ' + i + ' (' + identities[i].pubkeyHex.slice(0, 16) + '...) already present, skipping')
                 continue
             }
             const addr = await cryptoHelper.getNewFundedAddress('np-staker-' + i, COIN, NETWORK, null, 'legacy', 0, 0.02)
@@ -207,7 +207,7 @@ describe('Federation — full-node tier (NODEPROOF) possession proof', function 
         // Each verdict verifies the epoch's leader-proposed PASS list; leadership
         // rotates per epoch, so both full hubs become verified across consecutive
         // epochs. Poll (mining to advance epochs) until BOTH are present, rather
-        // than asserting on the first verdict — which may carry only one.
+        // than asserting on the first verdict, which may carry only one.
         const wantFull = fullPubkeys.map(p => p.toLowerCase())
         const sql = `SELECT ip.pubkey AS pubkey
                        FROM full_node_verifications fv
@@ -231,12 +231,12 @@ describe('Federation — full-node tier (NODEPROOF) possession proof', function 
     })
 
     it('accrues passing verdicts for the FULL hubs while the LIGHT one earns none', async function () {
-        // Reward-only model — there is NO slashing. The full-node reward tranche is
+        // Reward-only model: there is NO slashing. The full-node reward tranche is
         // gated on a PARTICIPATION RATE over a trailing window (db.getFullNodeParticipation
-        // → price.js). The LIGHT validator never answers, so it accrues ZERO passing
-        // full_node_verifications → pass-rate 0 → earns no tranche (and is never
+        // -> price.js). The LIGHT validator never answers, so it accrues ZERO passing
+        // full_node_verifications, giving it a pass-rate of 0 and earning no tranche (never
         // penalised). The honest FULL hubs answer across epochs and accumulate
-        // DISTINCT-epoch passes → a positive pass-rate. Mine across several epochs and
+        // DISTINCT-epoch passes for a positive pass-rate. Mine across several epochs and
         // assert that participation gap directly (the input the reward gate reads).
         const wantFull = fullPubkeys.map(p => p.toLowerCase())
         // DISTINCT passing epochs per pubkey = the participation numerator.
@@ -259,6 +259,6 @@ describe('Federation — full-node tier (NODEPROOF) possession proof', function 
                 'FULL validator should accrue ≥2 passing epochs (positive pass-rate): ' + pk.slice(0, 16) + '...')
         }
         assert(!byPubkey.has(lightPubkey.toLowerCase()),
-            'LIGHT validator (never answers) must accrue NO passing verdicts → earns no full-node tranche')
+            'LIGHT validator (never answers) must accrue NO passing verdicts, earning no full-node tranche')
     })
 })

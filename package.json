@@ -12,11 +12,9 @@
     "bip32": "4.0.0",
     "bip39": "^3.1.0",
     "bitcoinjs-lib": "6.1.7",
-    "chai": "^4.5.0",
     "dotenv": "^16.4.5",
     "ecpair": "2.1.0",
     "mariadb": "3.5.2",
-    "mocha": "^11.7.2",
     "tiny-secp256k1": "2.2.4",
     "xchain-hub": "file:./xchain-hub",
     "xchain-sdk": "file:./xchain-sdk"
@@ -67,7 +65,9 @@
   "devDependencies": {
     "@stryker-mutator/core": "^8.7.1",
     "@stryker-mutator/mocha-runner": "^8.7.1",
+    "chai": "^4.5.0",
     "fast-check": "^4.8.0",
+    "mocha": "^11.7.5",
     "sinon": "^21.0.3"
   },
   "overrides": {

@@ -37,7 +37,7 @@
  *   - source BTC indexer: the orders row + its cross_chain_matches mirror gone;
  *   - target DOGE indexer: the cross_chain_matches mirror gone.
  *
- * SHALLOW/pre-settlement case — exactly like the XCALL source-reorg drill, the
+ * SHALLOW/pre-settlement case: exactly like the XCALL source-reorg drill, the
  * scope is the retraction path (retractMatchRange + pushdexreorg), not deep
  * settlement reversal.
  *
@@ -45,7 +45,7 @@
  * auto-starts: peerManager present), the hub2 key staked for the cross_chain
  * capability, BTC_INDEXER_URL/DOGE_INDEXER_URL wired (hub pull), and the BTC
  * indexer's HUB_API_URL wired (retraction push). Identical wiring to the XCALL
- * source-reorg venue — no DEX-specific config is needed.
+ * source-reorg venue; no DEX-specific config is needed.
  *
  * Env: DEX_BTC_TICK, DEX_DOGE_TICK, DEX_DOGE_ORDER_INDEX (from dexDogeSetup),
  * HUB_DB_USER/PASS, DOGE_IDX_DB_USER/PASS, XCALL_DB_HOST/PORT. Uses the BTC
@@ -72,7 +72,7 @@ async function withConn(database, user, password, fn) {
 async function hubDb(fn)   { return withConn('XChain_Hub', process.env.HUB_DB_USER, process.env.HUB_DB_PASS, fn); }
 async function dogeIdx(fn) { return withConn('XChain_DOGE_Regtest_Indexer', process.env.DOGE_IDX_DB_USER, process.env.DOGE_IDX_DB_PASS, fn); }
 
-// Source (BTC) indexer DB — the global indexerDatabase initialCheck stands up.
+// Source (BTC) indexer DB: the global indexerDatabase initialCheck stands up.
 async function btcIdx(sql, params) {
     const db = global.indexerDatabase;
     const conn = await db.getConnection();
@@ -88,12 +88,12 @@ describe('[sdk] cross-chain DEX match source-chain reorg retraction (pre-settlem
     this.timeout(0);
 
     let sdk, maker, btcOrderIndex, srcBlock, dogeRecv;
-    // Pre-reorg indexer match-mirror counts. The hub→indexer DB mirror (HubDbSync)
+    // Pre-reorg indexer match-mirror counts. The hub->indexer DB mirror (HubDbSync)
     // is only active when HUB_DB_SYNC_ENABLED=true on the indexer; a single-hub
     // regtest venue (like this one and the XCALL drill's) runs it OFF to avoid the
     // match/call/snapshot barriers, so indexers don't mirror cross_chain_matches.
     // We capture the pre-reorg counts and assert the broadcast-deletion only when
-    // the mirror was actually populated — so the drill validates the full path under
+    // the mirror was actually populated, so the drill validates the full path under
     // HubDbSync and the hub-only retraction (the consensus property) without it.
     let btcMirrorBefore = 0, dogeMirrorBefore = 0;
 
@@ -178,7 +178,7 @@ describe('[sdk] cross-chain DEX match source-chain reorg retraction (pre-settlem
             await sleep(2000);
         }
         console.log('    [dex-srcreorg] indexer match mirrors: BTC=' + btcMirrorBefore + ' DOGE=' + dogeMirrorBefore +
-            (btcMirrorBefore || dogeMirrorBefore ? '' : ' (HubDbSync disabled — mirror-deletion not exercised this run)'));
+            (btcMirrorBefore || dogeMirrorBefore ? '' : ' (HubDbSync disabled: mirror-deletion not exercised this run)'));
     });
 
     it('orphaning the source block retracts the match and deletes both mirrors', async function () {
@@ -187,7 +187,7 @@ describe('[sdk] cross-chain DEX match source-chain reorg retraction (pre-settlem
 
         // Pause auto-mining so the orphaned ORDER tx cannot be re-mined from the
         // mempool, then build an EMPTY competing chain longer than the original
-        // tip — same mechanism as reorgBalances.test.js / the XCALL src-reorg drill.
+        // tip (same mechanism as reorgBalances.test.js / the XCALL src-reorg drill).
         await miner.setMiningTime(3600000, 3600000);
         try {
             const tipBefore = await node.getBlockCount();
@@ -203,8 +203,8 @@ describe('[sdk] cross-chain DEX match source-chain reorg retraction (pre-settlem
             expect(await node.getBlockHash(srcBlock), 'the chain actually reorged').to.not.equal(srcHash);
             console.log('    [dex-srcreorg] BTC reorged onto an empty branch; waiting for rollback.js + hub retraction');
 
-            // Wait for node → decoder → indexer rollback → retractMatchRange (queued
-            // via HubPushQueue) → hub retractMatchesForReorg → status='retracted'.
+            // Wait for node -> decoder -> indexer rollback -> retractMatchRange (queued
+            // via HubPushQueue) -> hub retractMatchesForReorg -> status='retracted'.
             const deadline = Date.now() + 180000;
             let hubStatus = null, btcOrderRows = -1, btcMirror = -1, dogeMirror = -1;
             while (Date.now() < deadline) {
@@ -234,10 +234,10 @@ describe('[sdk] cross-chain DEX match source-chain reorg retraction (pre-settlem
             if (dogeMirrorBefore > 0)
                 expect(dogeMirror, 'target cross_chain_matches mirror deleted').to.equal(0);
 
-            console.log('    [dex-srcreorg] retracted cleanly — hub=retracted, BTC order rolled back' +
+            console.log('    [dex-srcreorg] retracted cleanly: hub=retracted, BTC order rolled back' +
                 (btcMirrorBefore || dogeMirrorBefore
                     ? ' (mirrors deleted: BTC=' + (btcMirror === 0) + ' DOGE=' + (dogeMirror === 0) + ')'
-                    : ' (indexer mirrors n/a — HubDbSync off)'));
+                    : ' (indexer mirrors n/a: HubDbSync off)'));
         } finally {
             await miner.setDefaultMiningTime();
         }

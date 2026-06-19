@@ -11,21 +11,21 @@
 const assert = require('assert')
 
 /**
- * Performance — live-stack service latency budgets.
+ * Performance: live-stack service latency budgets.
  *
  * Drives the running regtest stack through the same global connectors the rest
  * of the e2e suite uses, and asserts that each service's request/response path
  * stays inside a budget. These are read-only probes (ping / sync-status / health
- * / a trivial DB round-trip) — deliberately NOT the block-confirmation path, whose
- * wall-clock is bounded by miner cadence, not service performance.
+ * / a trivial DB round-trip). They are deliberately NOT the block-confirmation path,
+ * whose wall-clock is bounded by miner cadence, not service performance.
  *
  * The budgets are GENEROUS regression ceilings, not SLOs: a warm stack answers
  * these in tens of milliseconds, so the ceilings (hundreds of ms to a couple of
- * seconds) only trip when a service has become pathologically slow — a wedged
- * pool, a missing index, an O(n) config scan. Each case asserts on the MEDIAN of
+ * seconds) only trip when a service has become pathologically slow (a wedged
+ * pool, a missing index, an O(n) config scan). Each case asserts on the MEDIAN of
  * N samples (robust to GC/scheduler outliers) after a short warm-up; p95 and max
  * are logged for visibility but not gated. Correctness is checked first so a fast
- * failure (connection refused → instant `false`) can't sneak under a latency bar.
+ * failure (connection refused -> instant `false`) can't sneak under a latency bar.
  *
  * Complements test/perf/perfCollector.js + the performance-reporter, which
  * measure whole-suite timing as a wrapper; this file is the only place that
@@ -49,8 +49,8 @@ function percentile(sortedAsc, p) {
 }
 
 // Run `fn` WARMUP times (discarded), then SAMPLES times under timing.
-// `validate(result)` must return truthy for every sample or the test fails —
-// this guarantees we are timing real work, not a fast error path.
+// `validate(result)` must return truthy for every sample or the test fails.
+// This guarantees we are timing real work, not a fast error path.
 async function measure(label, fn, validate) {
     for (let i = 0; i < WARMUP; i++) {
         try { await fn() } catch (_) { /* warm-up errors ignored */ }
@@ -112,7 +112,7 @@ describe('Performance: live-stack service latency (regression budgets, not SLOs)
 
     it('utxo-tracker sync-status read stays within the read budget', async function () {
         // getSyncStatus() returns the tracker's indexed-height/tip payload (or null
-        // on RPC error) — a heavier read than ping, exercising the status handler.
+        // on RPC error). It is a heavier read than ping, exercising the status handler.
         assert.ok(isObject(await utxoTrackerConnector.getSyncStatus()), 'utxo-tracker sync status unavailable')
         const s = await measure('utxo-tracker getSyncStatus', () => utxoTrackerConnector.getSyncStatus(), isObject)
         assert.ok(s.median < QUERY_BUDGET_MS, `median ${s.median.toFixed(1)}ms exceeds ${QUERY_BUDGET_MS}ms`)

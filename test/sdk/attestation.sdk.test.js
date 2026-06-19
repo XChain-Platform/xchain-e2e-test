@@ -14,7 +14,7 @@
  *
  * XChain Platform E2E - SDK-driven External Attestation Framework
  *
- * Drives the attestation round-trip the way a real dapp does — through
+ * Drives the attestation round-trip the way a real dapp does, through
  * the public xchain-sdk API:
  *
  *   1. STAKE v1 (sdk.submitAction) qualifies a validator pubkey for the
@@ -23,10 +23,10 @@
  *   2. DEPLOY (sdk.submitAction) a contract that calls
  *      xchain.attestation.request(...) and defines a callback.
  *   3. The request URL is validated/normalised with sdk.attestation.httpGet
- *      before being passed into EXECUTE — exactly the pre-flight a dapp does.
+ *      before being passed into EXECUTE (exactly the pre-flight a dapp does).
  *   4. EXECUTE (sdk.submitAction) emits ATTEST v0 (request); the dapp reads
  *      the pending request back via sdk.getAttestations(...).
- *   5. A signed ATTEST v1 (response) is injected — this is the ONE seam that
+ *   5. A signed ATTEST v1 (response) is injected. This is the ONE seam that
  *      is NOT an SDK user surface: responses are produced + broadcast by the
  *      hub federation (validators), never by a dapp. There is intentionally
  *      no ATTEST action in the SDK (v0 is VM-emitted, v1 hub-broadcast, v2
@@ -37,7 +37,7 @@
  *      (getContractState / getAttestations).
  *
  * Attestation rides on STAKE + EXECUTE, which are BTC-only protocol
- * features — this suite skips on non-BTC chains.
+ * features. This suite skips on non-BTC chains.
  *
  * Spec: claude/reports/specs/2026-05-24_external-attestation-framework.md
  *
@@ -174,7 +174,7 @@ describe('[sdk] External Attestation Framework (request -> response -> callback)
         // STAKE + EXECUTE (and thus the attestation framework) are BTC-only.
         const coinCode = global.COIN_CODE || 'BTC';
         if (coinCode !== 'BTC') {
-            console.log('    [sdk] attestation requires BTC chain — skipping on ' + coinCode);
+            console.log('    [sdk] attestation requires BTC chain, skipping on ' + coinCode);
             this.skip();
             return;
         }
@@ -193,7 +193,7 @@ describe('[sdk] External Attestation Framework (request -> response -> callback)
         // signature verification exercise the production paths.
         validator = new attestationHelper.MockAttestationValidator();
 
-        // STAKE v1 (capability staking) — aggregate stake auto-qualifies the
+        // STAKE v1 (capability staking): aggregate stake auto-qualifies the
         // pubkey for `attestation` (default min 1000 XCHAIN). Driven via SDK.
         const stakeRes = await submit(sdk,
             { action: 'STAKE', params: { version: 1, amount: '1500.00000000', signingPubkey: validator.pubkey } },
@@ -284,7 +284,7 @@ describe('[sdk] External Attestation Framework (request -> response -> callback)
         const responsePayload = '{"score":7}';
 
         // Federation seam: a staked validator signs + the response is broadcast.
-        // (Responses are not an SDK user surface — see the file header.)
+        // (Responses are not an SDK user surface; see the file header.)
         await attestationHelper.broadcastAttestationResponse(operator, {
             requestId:       requestId,
             providerId:      'http_get',
@@ -307,7 +307,7 @@ describe('[sdk] External Attestation Framework (request -> response -> callback)
         expect(sigs.length).to.equal(1);
         expect(String(sigs[0].validator_pubkey).toLowerCase()).to.equal(validator.pubkey.toLowerCase());
 
-        // Request flips to fulfilled — observed through the SDK.
+        // Request flips to fulfilled, observed through the SDK.
         await mine(1);
         const viaSdk = await sdk.getAttestations(contractIndex, 'contract');
         const row = findAttestation(viaSdk, requestId);
@@ -352,7 +352,7 @@ describe('[sdk] External Attestation Framework (request -> response -> callback)
         }, 30000);
         expect(expired, 'request should auto-expire past DEADLINE_BLOCK').to.exist;
 
-        // Callback fired with status=expired — read via the SDK.
+        // Callback fired with status=expired, read via the SDK.
         const getVal = (st, key) => {
             const r = ((st && st.data) || []).find(x => x.state_key === key);
             return r ? JSON.parse(r.state_value) : undefined;
@@ -380,7 +380,7 @@ describe('[sdk] External Attestation Framework (request -> response -> callback)
         });
         expect(request, 'fresh pending request').to.exist;
 
-        // Response signed only by the unstaked validator — must not validate.
+        // Response signed only by the unstaked validator; must not validate.
         await attestationHelper.broadcastAttestationResponse(operator, {
             requestId:       request.request_id,
             providerId:      'http_get',
@@ -450,16 +450,16 @@ describe('[sdk] External Attestation Framework (request -> response -> callback)
 
         // validator_rewards: one attest_fee row for the responsible set (N=1),
         // keyed to the request's action_index, credited to the staker (operator).
-        // NOTE: requires a fresh chain — the responsible set is computed
+        // NOTE: requires a fresh chain. The responsible set is computed
         // deterministically across ALL staked attestation validators, so a
         // regtest chain reused across runs routes the reward to a stale
         // validator. `reset all bitcoin regtest` before running this suite.
         const rewards = await attestFeeRewards(operator.address);
         const rewardForThis = rewards.find(r => String(r.round_reference) === String(request.action_index));
         expect(rewardForThis, 'attest_fee validator_rewards row for this request').to.exist;
-        expect(String(rewardForThis.amount), 'N=1 → the full fee accrues to the one validator').to.equal('2');
+        expect(String(rewardForThis.amount), 'N=1, so the full fee accrues to the one validator').to.equal('2');
 
-        // Escrow released on fulfillment → caller's escrow returns to baseline.
+        // Escrow released on fulfillment: caller's escrow returns to baseline.
         const escrowAfter = await xchainEscrowSum(operator.address);
         expect(escrowAfter - escrowBefore, 'fulfillment releases the escrow').to.be.closeTo(0, 1e-9);
 
@@ -508,8 +508,8 @@ describe('[sdk] External Attestation Framework (request -> response -> callback)
         expect(expired, 'paid request should auto-expire').to.exist;
         await mine(1);
 
-        // Escrow released + refunded → caller's escrow returns to baseline, and
-        // (unlike fulfillment) NO validator reward is created for the request.
+        // Escrow released + refunded: caller's escrow returns to baseline.
+        // Unlike fulfillment, NO validator reward is created for the request.
         const escrowAfter = await xchainEscrowSum(operator.address);
         expect(escrowAfter - escrowBefore, 'expiry releases the escrow (refund to caller)').to.be.closeTo(0, 1e-9);
 

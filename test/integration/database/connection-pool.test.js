@@ -23,7 +23,7 @@ const sinon = require('sinon')
 const mockMariadb = require('../fixtures/mockMariadb')
 const Database = require('../../../src/db')
 
-// ── Helpers ──────────────────────────────────────────────────────
+// Helpers
 
 let mockPool
 let mockConnection
@@ -164,7 +164,7 @@ describe('Database Connection Pool Integration', function () {
         })
     })
 
-    describe('Query builder integration — WHERE clause construction', function () {
+    describe('Query builder integration: WHERE clause construction', function () {
 
         it('checkIssue builds correct WHERE with multiple filters', async function () {
             const db = createDb()
@@ -205,7 +205,7 @@ describe('Database Connection Pool Integration', function () {
             const query = mockConnection.query.firstCall.args[0]
             const params = mockConnection.query.firstCall.args[1]
 
-            // Extract just the WHERE portion — JOINs legitimately contain ia.address/ist.status
+            // Extract just the WHERE portion. JOINs legitimately contain ia.address/ist.status.
             const whereClause = query.split('WHERE')[1] || ''
 
             assert(whereClause.includes('itick.tick = ?'), 'WHERE includes tick')

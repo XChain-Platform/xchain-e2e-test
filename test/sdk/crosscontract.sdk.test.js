@@ -15,10 +15,10 @@
  * XChain Platform E2E - SDK-driven cross-contract calls (emit.execute)
  *
  * Deploys a caller contract (A) and a callee contract (B), then proves:
- *   1. A→B deferred call updates B's state, with B seeing A's derived
+ *   1. A->B deferred call updates B's state, with B seeing A's derived
  *      address as the source (caller authentication).
- *   2. A→B→A callback round-trip (cycles within the depth budget).
- *   3. A failed callee (revert in B) rolls back the WHOLE tree —
+ *   2. A->B->A callback round-trip (cycles within the depth budget).
+ *   3. A failed callee (revert in B) rolls back the WHOLE tree,
  *      including A's own state writes from the same method.
  *   4. Exceeding MAX_CALL_DEPTH (4) fails the tree deterministically.
  *
@@ -150,7 +150,7 @@ describe('[sdk] cross-contract calls (emit.execute)', function () {
         console.log('    [sdk] A=' + indexA + ' B=' + indexB);
     });
 
-    it('A→B call updates B and authenticates A; B→A callback lands (round trip)', async function () {
+    it('A->B call updates B and authenticates A; B->A callback lands (round trip)', async function () {
         const res = await submit(sdk,
             { action: 'EXECUTE', params: { contractActionIndex: indexA, method: 'callB', params: [String(indexB)] } },
             { pubkey: deployer.address, change: deployer.address },
@@ -177,7 +177,7 @@ describe('[sdk] cross-contract calls (emit.execute)', function () {
             submitOpts({ wif: deployer.wif })
         );
         console.log('    [sdk] EXECUTE callFail status=' + actionStatusOf(res.indexed));
-        // 'emission failed: EXECUTE: reverted' → stable 'failed' token on the action row
+        // 'emission failed: EXECUTE: reverted' -> stable 'failed' token on the action row
         expect(actionStatusOf(res.indexed)).to.equal('failed');
         await mine(1);
 
@@ -196,7 +196,7 @@ describe('[sdk] cross-contract calls (emit.execute)', function () {
         console.log('    [sdk] EXECUTE recurse status=' + actionStatusOf(res.indexed));
         expect(actionStatusOf(res.indexed)).to.equal('failed');
         await mine(1);
-        // depthMarker would have been written at every level — all rolled back
+        // depthMarker would have been written at every level; all rolled back
         expect(await readState(sdk, indexA, 'depthMarker')).to.equal(null);
     });
 });

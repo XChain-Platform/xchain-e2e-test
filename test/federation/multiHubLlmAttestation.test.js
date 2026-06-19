@@ -11,19 +11,19 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * Track C.2 — Multi-hub LLM attestation under real PBFT (redundancy=3).
+ * Track C.2: Multi-hub LLM attestation under real PBFT (redundancy=3).
  *
- * llmAttestation.test.js covers the single-hub LLM path (redundancy=1, no PBFT —
+ * llmAttestation.test.js covers the single-hub LLM path (redundancy=1, no PBFT;
  * the sole responsible hub self-agrees). multiHubAttestation.test.js covers
- * multi-hub PBFT but for the http_get provider. The gap is multi-hub LLM: N≥2
+ * multi-hub PBFT but for the http_get provider. The gap is multi-hub LLM: N>=2
  * hubs each spawning their own `claude` CLI and reaching PBFT agreement over the
- * model responses. This closes it — a redundancy=3 ATTEST v0 (provider='llm')
+ * model responses. This closes it: a redundancy=3 ATTEST v0 (provider='llm')
  * driven through three real in-process hubs:
  *   1. stake all three hub pubkeys on-chain (attestation capability);
  *   2. deploy a contract that requests provider='llm', redundancy=3;
- *   3. EXECUTE → each hub fetches via claude_spawn → ATTEST_PROPOSE → PBFT
- *      PROPOSE/PREPARE/COMMIT → leader publishes ATTEST v1 on-chain;
- *   4. assert ≥3 verified signatures (one per hub) + the callback fires with the
+ *   3. EXECUTE -> each hub fetches via claude_spawn -> ATTEST_PROPOSE -> PBFT
+ *      PROPOSE/PREPARE/COMMIT -> leader publishes ATTEST v1 on-chain;
+ *   4. assert >=3 verified signatures (one per hub) + the callback fires with the
  *      model's answer ("4").
  *
  * Structure mirrors multiHubAttestation.test.js (staking loop, publisher hook);
@@ -52,7 +52,7 @@ async function _settleStack() {
     await utxoTrackerConnector.quiesce({ timeoutMs: 30000, pollMs: 250, regtestMiner: regtestMinerConnector })
 }
 
-describe('Phase B — multi-hub PBFT for LLM attestation (redundancy=3)', function () {
+describe('Phase B: multi-hub PBFT for LLM attestation (redundancy=3)', function () {
     this.timeout(15 * 60 * 1000)
 
     let mvh           = null
@@ -60,7 +60,7 @@ describe('Phase B — multi-hub PBFT for LLM attestation (redundancy=3)', functi
     let owner         = null
     let stakers       = []
 
-    // Deterministic arithmetic prompt — every hub's model must answer "4", so
+    // Deterministic arithmetic prompt: every hub's model must answer "4", so
     // the PBFT byte-equality consensus over the responses converges.
     const CONTRACT_CODE = `
 module.exports = {
@@ -165,7 +165,7 @@ module.exports = {
         // Past CONFIRMATIONS so the hubs fetch.
         await regtestMinerConnector.generateBlocks(6)
 
-        // Generous wait — 3× claude CLI cold-start + PBFT + on-chain broadcast.
+        // Generous wait: 3x claude CLI cold-start + PBFT + on-chain broadcast.
         const response = await indexerDatabase.waitForAttestationResponse({
             requestId:      requestId,
             responseStatus: 'ok',
@@ -173,9 +173,9 @@ module.exports = {
         }, 300_000)
         assert(response, 'attestation_responses row should land with status=ok')
 
-        // ≥3 verified signatures, one per hub — the multi-hub PBFT proof.
+        // >=3 verified signatures, one per hub: the multi-hub PBFT proof.
         const sigs = await indexerDatabase.getAttestationValidatorSignatures(response.action_index)
-        assert(sigs.length >= 3, 'expected ≥3 verified validator signatures, got ' + sigs.length)
+        assert(sigs.length >= 3, 'expected >=3 verified validator signatures, got ' + sigs.length)
         const sigPubkeys = new Set(sigs.map(s => String(s.validator_pubkey).toLowerCase()))
         for (const pk of mvh.getPubkeys()) {
             assert(sigPubkeys.has(pk.toLowerCase()), 'expected sig from hub pubkey ' + pk.slice(0, 16) + '...')

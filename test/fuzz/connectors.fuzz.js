@@ -28,13 +28,13 @@ const gen = require('./fuzz-generators')
 
 const FC_PARAMS = { numRuns: 200 }
 
-describe('Fuzz — Connector URL Construction', function () {
+describe('Fuzz: Connector URL Construction', function () {
 
     afterEach(function () {
         sinon.restore()
     })
 
-    // ── BlockchainConnector ─────────────────────────────────────
+    // BlockchainConnector
 
     describe('BlockchainConnector constructor', function () {
 
@@ -58,7 +58,7 @@ describe('Fuzz — Connector URL Construction', function () {
         })
     })
 
-    // ── XChainUtxoTrackerConnector ──────────────────────────────
+    // XChainUtxoTrackerConnector
 
     describe('XChainUtxoTrackerConnector constructor', function () {
 
@@ -71,7 +71,7 @@ describe('Fuzz — Connector URL Construction', function () {
         })
     })
 
-    // ── XChainEncoderConnector ──────────────────────────────────
+    // XChainEncoderConnector
 
     describe('XChainEncoderConnector constructor', function () {
 
@@ -84,7 +84,7 @@ describe('Fuzz — Connector URL Construction', function () {
         })
     })
 
-    // ── XChainIndexerConnector ──────────────────────────────────
+    // XChainIndexerConnector
 
     describe('XChainIndexerConnector constructor', function () {
 
@@ -97,7 +97,7 @@ describe('Fuzz — Connector URL Construction', function () {
         })
     })
 
-    // ── RegtestMinerConnector ───────────────────────────────────
+    // RegtestMinerConnector
 
     describe('RegtestMinerConnector constructor', function () {
 
@@ -110,7 +110,7 @@ describe('Fuzz — Connector URL Construction', function () {
         })
     })
 
-    // ── XChainHubConnector ──────────────────────────────────────
+    // XChainHubConnector
 
     describe('XChainHubConnector constructor', function () {
 
@@ -139,7 +139,7 @@ describe('Fuzz — Connector URL Construction', function () {
     })
 })
 
-describe('Fuzz — Hub Endpoint Parsing', function () {
+describe('Fuzz: Hub Endpoint Parsing', function () {
 
     let savedEnv
 
@@ -196,7 +196,7 @@ describe('Fuzz — Hub Endpoint Parsing', function () {
     })
 })
 
-describe('Fuzz — Hub _call Response Handling', function () {
+describe('Fuzz: Hub _call Response Handling', function () {
 
     afterEach(function () {
         sinon.restore()
@@ -209,7 +209,7 @@ describe('Fuzz — Hub _call Response Handling', function () {
             const postStub = sinon.stub(axios, 'post').resolves({ data: responseData })
             const hub = new XChainHubConnector(['http://localhost:10000'])
 
-            // Result is either the extracted value or null — never crashes
+            // Result is either the extracted value or null; never crashes.
             await hub._call({ jsonrpc: '2.0', method: 'test', id: 1 })
             postStub.restore()
         }), { numRuns: 100 })
@@ -234,7 +234,7 @@ describe('Fuzz — Hub _call Response Handling', function () {
     })
 })
 
-describe('Fuzz — BlockchainConnector.waitForTx with fuzzed txid', function () {
+describe('Fuzz: BlockchainConnector.waitForTx with fuzzed txid', function () {
 
     afterEach(function () {
         sinon.restore()
@@ -252,7 +252,7 @@ describe('Fuzz — BlockchainConnector.waitForTx with fuzzed txid', function () 
     })
 })
 
-describe('Fuzz — UtxoTracker.waitForUtxos with fuzzed address', function () {
+describe('Fuzz: UtxoTracker.waitForUtxos with fuzzed address', function () {
 
     afterEach(function () {
         sinon.restore()

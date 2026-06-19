@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * E2E test helper — Multi-Validator Hub Harness
+ * E2E test helper: Multi-Validator Hub Harness
  *
  * Spins up N XChainHub instances in-process, each with its own:
  *   - MariaDB hub DB (auto-bootstrapped via hub.start())
@@ -19,8 +19,8 @@
  *   - P2P_PORT + cross-referenced SEED_NODES
  *
  * Used to drive real PBFT consensus across multiple validators in tests:
- *   ATTEST_PROPOSE → ATTEST_PREPARE → ATTEST_COMMIT → on-chain
- *   ATTEST v1 (response) published by the leader → indexer callback.
+ *   ATTEST_PROPOSE -> ATTEST_PREPARE -> ATTEST_COMMIT -> on-chain
+ *   ATTEST v1 (response) published by the leader -> indexer callback.
  *
  * Unlike MockAttestationValidator (which signs in-process but bypasses
  * the hub entirely), this harness exercises the full validator pipeline.
@@ -106,7 +106,7 @@ class MultiValidatorHub {
      * @param opts.dbNamePrefix         per-hub DB name prefix (defaults to 'XChain_BTC_Regtest_MVH_'+pid)
      * @param opts.basePort             starting P2P port to probe (defaults to 28000)
      * @param opts.btcIndexerApiUrl     URL the hubs poll for pending requests
-     *                                  (defaults from env: BTC_INDEXER_API_URL → http://INDEXER_URL:INDEXER_API_PORT)
+     *                                  (defaults from env: BTC_INDEXER_API_URL -> http://INDEXER_URL:INDEXER_API_PORT)
      * @param opts.oracleEpochStart    ORACLE_EPOCH_START required by the hub even when oracle isn't started
      */
     constructor(opts) {
@@ -129,22 +129,22 @@ class MultiValidatorHub {
         this.startAttestationSubsystem = opts.startAttestation !== false;
         this.startCrossChainSubsystem  = opts.startCrossChain === true;
         // Per-coin cross-chain indexer URLs the DEX engine polls for the offer book.
-        // { LTC: '<url>', DOGE: '<url>', BTC: '<url>' } — wired onto each hub's engine
+        // { LTC: '<url>', DOGE: '<url>', BTC: '<url>' } wired onto each hub's engine
         // AFTER startCrossChain (the engine reads indexers at construction, so we
-        // overwrite the resolved map post-start). Absent ⇒ engine idles (no matching).
+        // overwrite the resolved map post-start). Absent means the engine idles with no matching.
         this.crossChainIndexerUrls = opts.crossChainIndexerUrls || null;
 
         // Pre-supplied validator identities (`[{pubkeyHex, privkeyHex}, ...]`). When given,
-        // the harness uses these instead of generating fresh keypairs — required for a live
-        // on-chain proof where the hubs' signing keys MUST equal the pubkeys staked on BTC.
+        // the harness uses these instead of generating fresh keypairs. This is required for a
+        // live on-chain proof where the hubs' signing keys MUST equal the pubkeys staked on BTC.
         // Length must be >= count (extras ignored).
         this.presetIdentities = opts.identities || null;
 
         // Full-node tier (NODEPROOF). When `fullnode` is set, each hub receives it as
         // its p2pConfig.FULLNODE block (REWARD_SHARE, GENESIS_VERIFIERS, challenge
         // cadence/depth). `coinRpcUrls[i]` supplies hub i's BTC full-node RPC; a
-        // null/absent entry models a LIGHT validator (no coin node → cannot answer the
-        // possession challenge). Absent ⇒ the FullNodeChallengeRound stays dormant.
+        // null/absent entry models a LIGHT validator (no coin node, cannot answer the
+        // possession challenge). Absent means the FullNodeChallengeRound stays dormant.
         this.fullnode    = opts.fullnode || null;
         this.coinRpcUrls = opts.coinRpcUrls || null;
 
@@ -154,7 +154,7 @@ class MultiValidatorHub {
         this.ports        = [];
     }
 
-    // Stand up `count` hubs. Idempotent — re-calling reuses the existing instances.
+    // Stand up `count` hubs. Idempotent: re-calling reuses the existing instances.
     async start(){
         if (this.hubs.length > 0) return;
 
@@ -178,7 +178,7 @@ class MultiValidatorHub {
 
         // The hub's _resolveBtcIndexerUrl() reads process.env.BTC_INDEXER_API_URL
         // on every 15s poll (not just at start). Set it for the lifetime of the
-        // harness and restore once on stop() — otherwise polls after start()
+        // harness and restore once on stop(); otherwise polls after start()
         // return undefined and the hubs silently never see pending requests.
         this._savedIndexerUrl = process.env.BTC_INDEXER_API_URL;
         process.env.BTC_INDEXER_API_URL = this.btcIndexerApiUrl;
@@ -205,8 +205,8 @@ class MultiValidatorHub {
                 // In-process tests put every validator on 127.0.0.1, so the
                 // per-IP inbound cap (PeerManager default 3) throttles the mesh
                 // at N>4. Honour an env override so N=10 scale runs can raise it;
-                // unset → undefined → PeerManager keeps its production default 3
-                // (existing N≤4 suites unaffected).
+                // unset -> undefined -> PeerManager keeps its production default 3
+                // (existing N<=4 suites unaffected).
                 P2P_MAX_CONNECTIONS_PER_IP: process.env.P2P_MAX_CONNECTIONS_PER_IP,
                 // Names the deployment network for consensus gating + canonical
                 // derivation (e.g. NODEPROOF's challenge_id binds NETWORK). MUST
@@ -215,7 +215,7 @@ class MultiValidatorHub {
                 HUB_NETWORK:            (process.env.NETWORK || 'regtest'),
                 ORACLE_EPOCH_START:     this.oracleEpochStart,
                 // Long poll so the engine's auto-discovery timer never races the
-                // test's manual _discoverAndMatch() triggers — rounds are driven
+                // test's manual _discoverAndMatch() triggers. Rounds are driven
                 // deterministically, not on a 15s wall clock.
                 XDEX_POLL_MS:           600000,
             };
@@ -308,11 +308,11 @@ class MultiValidatorHub {
     // The hubs' PeerManager.stop() awaits httpServer.close(), which waits for
     // all WebSocket connections to fully drain. With N cross-connected hubs
     // shutting down in sequence, each one's stop() can block waiting for
-    // peers that are themselves waiting — a classic coordinated-shutdown
+    // peers that are themselves waiting: a classic coordinated-shutdown
     // race. Mitigations:
     //   1. Force-close WS connections + destroy the httpServer's sockets
     //      BEFORE calling peerManager.stop(), so close() doesn't wait.
-    //   2. Race every step with a per-step timeout — defensive in case
+    //   2. Race every step with a per-step timeout, defensive in case
     //      the hub's close path still hangs on something else.
     async stop(){
         for (const hub of this.hubs) {
@@ -325,7 +325,7 @@ class MultiValidatorHub {
         this.hubs = [];
 
         // Restore process.env.BTC_INDEXER_API_URL to whatever the host test
-        // process had before start() — keeps the harness hermetic.
+        // process had before start(), keeping the harness hermetic.
         if (this._savedIndexerUrl === undefined) delete process.env.BTC_INDEXER_API_URL;
         else                                      process.env.BTC_INDEXER_API_URL = this._savedIndexerUrl;
         this._savedIndexerUrl = undefined;
@@ -344,7 +344,7 @@ class MultiValidatorHub {
         if (hub.attestationPublisher   && typeof hub.attestationPublisher.stop   === 'function') await _withTimeout(hub.attestationPublisher.stop(),   3000, 'attestationPublisher.stop');
         if (hub.getFullNodeChallenge   && hub.getFullNodeChallenge() && typeof hub.getFullNodeChallenge().stop === 'function') await _withTimeout(hub.getFullNodeChallenge().stop(), 3000, 'fullNodeChallenge.stop');
 
-        // Force-close WS server + connections so peerManager.stop() →
+        // Force-close WS server + connections so peerManager.stop() ->
         // httpServer.close() doesn't wait for a graceful drain.
         const pm = hub.peerManager;
         if (pm) {

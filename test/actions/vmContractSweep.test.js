@@ -15,19 +15,19 @@ const issueHelper = require('../helpers/issueHelper')
 const gasHelper = require('../helpers/gasHelper')
 
 /**
- * VM Contract SWEEP — closes the last `actions.source_id` reader not yet e2e-covered:
+ * VM Contract SWEEP: closes the last `actions.source_id` reader not yet e2e-covered.
  * `getAddressEscrows(SOURCE)`. A contract opens its own (self-addressed) token ORDER, then emits
  * SWEEP{orders:1}. The SWEEP handler enumerates the SOURCE's open escrows via getAddressEscrows,
  * cancels the order, and credits its escrow to DESTINATION. Because SOURCE is read from
- * actions.source_id, the enumeration must find the CONTRACT's order — not the EXECUTE caller's
+ * actions.source_id, the enumeration must find the CONTRACT's order, not the EXECUTE caller's
  * (which is empty). Pre-fix, source mis-derivation would have swept the caller's escrow set.
  */
-// SKIPPED: surfaced that contract-emitted SWEEP currently FAILS — the contract's SWEEP emission
+// SKIPPED: surfaced that contract-emitted SWEEP currently FAILS. The contract's SWEEP emission
 // indexes as `failed` (the prior ORDER emission succeeds), so getAddressEscrows(SOURCE) has no
 // contract-facing path. Likely the SWEEP handler's fee-payment validation has no valid mode in an
 // emission context. Un-skip once that's resolved, or reframe as a rejection assertion if contract
 // SWEEP is intentionally unsupported. See claude/reports/2026-05-31_e2e-vm-testing-buildout.md (Finding B).
-describe('VM Contract SWEEP — a contract sweeps its own order escrow', function () {
+describe('VM Contract SWEEP: a contract sweeps its own order escrow', function () {
 
     const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
 
@@ -101,18 +101,18 @@ describe('VM Contract SWEEP — a contract sweeps its own order escrow', functio
         assert.strictEqual(sw.execution.status, 'valid', 'sweep emission must succeed')
         assert.strictEqual((await emissionsFor(sw.execution.action_index))[0].emitted_action, 'SWEEP')
 
-        // 3. The contract's order was cancelled and its 40-token escrow credited to DESTINATION —
-        //    proving getAddressEscrows enumerated the CONTRACT's escrow (source_id), not the caller's.
+        // 3. The contract's order was cancelled and its 40-token escrow credited to DESTINATION.
+        //    This proves getAddressEscrows enumerated the CONTRACT's escrow (source_id), not the caller's.
         assert.strictEqual(await orderStatus(orderIndex), 'cancelled', "the contract's order should be cancelled")
         assert.strictEqual(await balanceOf(dest.address, tick), '40',
             'the swept order escrow (40) should be credited to the destination')
-        // The contract keeps its un-escrowed remainder (BALANCES:0 → spendable balance untouched).
+        // The contract keeps its un-escrowed remainder (BALANCES:0 -> spendable balance untouched).
         assert.strictEqual(await balanceOf(contractAddr, tick), '60',
             'contract spendable balance is untouched (only the order escrow was swept)')
-        // The EXECUTE caller is the token issuer (minted 1000, deposited 100 → holds 900). The
+        // The EXECUTE caller is the token issuer (minted 1000, deposited 100 -> holds 900). The
         // sweep must not credit the caller: its balance stays exactly 900, proving the swept
         // escrow went to DESTINATION and getAddressEscrows enumerated the CONTRACT, not the caller.
         assert.strictEqual(await balanceOf(deployer.address, tick), '900',
-            'the EXECUTE caller balance is unchanged by the sweep — it enumerated the contract, not the caller')
+            'the EXECUTE caller balance is unchanged by the sweep (it enumerated the contract, not the caller)')
     })
 })

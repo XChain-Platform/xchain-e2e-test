@@ -12,16 +12,16 @@
  *
  **********************************************************************
  *
- * Reference x402 storefront for e2e tests — the seller side of the
+ * Reference x402 storefront for e2e tests: the seller side of the
  * agent-payment flow. Wraps the SDK's X402Gateway in a raw in-process
  * HTTP server (ephemeral port; same pattern as mockCrossChainOfferBook):
  *
  *   GET /data       paid JSON resource (per-call / deposit / dispenser,
  *                   per the gateway's configured schemes)
  *   GET /gated-key  after payment, returns the gated-FILE symmetric key
- *                   as a serializeKeyPayload hex blob — the buyer then
+ *                   as a serializeKeyPayload hex blob. The buyer then
  *                   fetches the ciphertext from the explorer and
- *                   decrypts client-side
+ *                   decrypts client-side.
  *
  * This is also the canonical example of running a storefront: real
  * deployments swap the in-process server for their own app and keep

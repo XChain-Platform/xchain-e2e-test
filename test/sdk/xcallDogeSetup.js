@@ -12,7 +12,7 @@
  *
  **********************************************************************
  *
- * XCALL e2e — DOGE-side target setup driver (standalone, not a mocha suite).
+ * XCALL e2e: DOGE-side target setup driver (standalone, not a mocha suite).
  *
  * Stands up the TARGET side of the cross-chain call campaign on a DOGE
  * regtest stack: seeds the oracle prices the native-coin fee path needs,
@@ -26,8 +26,8 @@
  * Env (defaults match the local regtest stack):
  *   XCALL_DOGE_ENCODER_PORT=3123  XCALL_DOGE_MINER_URL=http://localhost:3125
  *   XCALL_DB_HOST=127.0.0.1 XCALL_DB_PORT=13306
- *   HUB_DB_USER/HUB_DB_PASS        (XChain_Hub — price seeding)
- *   DOGE_IDX_DB_USER/DOGE_IDX_DB_PASS (XChain_DOGE_Regtest_Indexer — reads)
+ *   HUB_DB_USER/HUB_DB_PASS        (XChain_Hub: price seeding)
+ *   DOGE_IDX_DB_USER/DOGE_IDX_DB_PASS (XChain_DOGE_Regtest_Indexer: reads)
  *
  * Usage: node test/sdk/xcallDogeSetup.js
  *
@@ -60,10 +60,10 @@ const CONTRACT_B = `
     };
 `;
 
-// Hop bouncer (X→Y→X round trip): a crossCallable method that itself
+// Hop bouncer (X->Y->X round trip): a crossCallable method that itself
 // crossExecutes BACK to the originating BTC contract (index arrives as the
 // call param). The arriving execution runs at crossHops=1, so the back-call
-// goes out at hops=2 — exactly the XCALL_MAX_HOPS cap.
+// goes out at hops=2, exactly the XCALL_MAX_HOPS cap.
 const CONTRACT_C = `
     module.exports = {
         crossCallable: ['bounce'],
@@ -111,7 +111,7 @@ async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function main() {
     // ── 1. Seed the prices the DOGE native-fee path reads (XChain_Hub,
-    //       anchored to the DOGE chain clock — wall-clock seeds race both ways).
+    //       anchored to the DOGE chain clock; wall-clock seeds race both ways).
     const blockTime = await dogeIdx(async (c) => {
         const rows = await c.query('SELECT block_time FROM blocks ORDER BY block_index DESC LIMIT 1');
         return rows.length ? Number(rows[0].block_time) : Math.floor(Date.now() / 1000);
@@ -168,8 +168,8 @@ async function main() {
         throw new Error(label + ': tx ' + txid + ' never indexed');
     }
 
-    // ── 3. XCHAIN gas (MINT — no protocol fee). Validity confirmed via balance.
-    //       Cap at the genesis XCHAIN MAX_MINT (100000) — a single MINT above it
+    // ── 3. XCHAIN gas (MINT: no protocol fee). Validity confirmed via balance.
+    //       Cap at the genesis XCHAIN MAX_MINT (100000). A single MINT above it
     //       is indexed 'invalid: AMOUNT > MAX_MINT', leaving the deployer with no
     //       GAS and the DEPLOY rejecting 'insufficient funds (GAS)'. 100000 is
     //       three orders past the ~1 XCHAIN DEPLOY fee, so one mint is plenty.
@@ -178,13 +178,13 @@ async function main() {
 
     // ── 4. DEPLOY the target contract, fee in native DOGE. The explorer does
     //       not serve DOGE regtest, so the SDK's quote rail (payFeeInNativeCoin
-    //       → explorer feequote) is unavailable — size the fee output directly
+    //       -> explorer feequote) is unavailable. Size the fee output directly
     //       from the consensus formula instead:
-    //         gasCost        = VM_DEPLOY_BASE(100000) + codeBytes × VM_DEPLOY_PER_BYTE(10)
-    //         feeXchain      = gasCost × GAS_PRICE(0.00001)
-    //         expectedNative = feeXchain × (XCHAIN/USD ÷ DOGE/USD)   [seeded 1.0 / 0.1]
+    //         gasCost        = VM_DEPLOY_BASE(100000) + codeBytes x VM_DEPLOY_PER_BYTE(10)
+    //         feeXchain      = gasCost x GAS_PRICE(0.00001)
+    //         expectedNative = feeXchain x (XCHAIN/USD / DOGE/USD)   [seeded 1.0 / 0.1]
     //       paid to the chain's FEE_DESTINATION (DOGE regtest), mid-band of the
-    //       0.95–1.10 tolerance.
+    //       0.95-1.10 tolerance.
     const FEE_DESTINATION = 'mfees5pa2HwNBonk5vG23aDWkN9fuDJib4';
 
     async function deployContract(label, code) {
@@ -205,7 +205,7 @@ async function main() {
              LEFT JOIN index_statuses ix ON ix.id = c.status_id
              WHERE c.action_index = ?`, [actionIndex]));
         if (!contractRows.length)
-            throw new Error('DEPLOY ' + label + ' indexed (action ' + actionIndex + ') but no contracts row — deploy failed validation');
+            throw new Error('DEPLOY ' + label + ' indexed (action ' + actionIndex + ') but no contracts row: deploy failed validation');
         const status = contractRows[0].status || 'n/a';
         console.log('[doge-setup] ' + label + ' contract status=' + status);
         if (status !== 'valid')

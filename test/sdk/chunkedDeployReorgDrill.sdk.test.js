@@ -15,7 +15,7 @@
  * XChain Platform E2E - Chunked DEPLOY reorg drill
  *
  * Proves the chunked-DEPLOY reorg-safety property the handler relies on
- * (deploy.js): "assembly never consumes a chunk that does not precede it →
+ * (deploy.js): "assembly never consumes a chunk that does not precede it ->
  * any reorg dropping a chunk also drops the dependent DEPLOY, so rollback
  * needs no bespoke logic." A v2 assembling DEPLOY reads only VALID v4 chunk
  * carriers at a LOWER action_index, so the carriers are strictly below the
@@ -26,14 +26,14 @@
  *   1. Chunk-deploys a large contract (DEPLOY v4 carriers + assembling DEPLOY v2)
  *      and runs it, so the contract is live with seeded + executed state.
  *   2. Orphans the block carrying the FIRST chunk carrier by building an EMPTY
- *      competing chain (auto-mining held, generateBlock(addr, []) — same
+ *      competing chain (auto-mining held, generateBlock(addr, []) using the same
  *      mechanism as reorgBalances.test.js / xcallSourceReorgDrill), and asserts
  *      rollback.js cascaded the removal: NO deploy_chunks rows, NO contracts row,
  *      and NO contract_state for that code_hash survive on the orphan branch.
  *   3. Resumes mining so the orphaned txs re-mine from the mempool (they chain
  *      via the deployer's change UTXOs, so they confirm in dependency order) and
- *      asserts the contract reassembles DETERMINISTICALLY — same code_hash and
- *      byte-identical constructor/execution state — proving a reorg cannot
+ *      asserts the contract reassembles DETERMINISTICALLY (same code_hash and
+ *      byte-identical constructor/execution state), proving a reorg cannot
  *      corrupt a chunk-assembled contract.
  *
  * VENUE: BTC (or LTC) regtest stack stood up by initialCheck. Uses the same
@@ -54,7 +54,7 @@ const { makeSdk, submit, fundedGasAddress, mine, submitOpts } = require('./sdkHe
 const { chunkHelper } = require('xchain-sdk');
 
 // A contract too large for a single DEPLOY: a ~7 KB string literal pads the source
-// past the base64 single-action budget, forcing ≥2 chunks. The string survives (it is
+// past the base64 single-action budget, forcing >=2 chunks. The string survives (it is
 // code, not a comment); `padlen` proves byte-exact reassembly and `increment` proves
 // the assembled contract runs. No xchain.* calls in module scope so readManifest is
 // clean and the constructor initializes state.
@@ -103,7 +103,7 @@ async function readState(sdk, contractIndex, key) {
 
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-describe('[sdk] chunked DEPLOY reorg drill (orphaned chunk → assembled contract rolls back)', function () {
+describe('[sdk] chunked DEPLOY reorg drill (orphaned chunk -> assembled contract rolls back)', function () {
     this.timeout(0);
 
     let sdk, deployer, plan, contractIndex, codeHash, firstChunkBlock;
@@ -111,17 +111,17 @@ describe('[sdk] chunked DEPLOY reorg drill (orphaned chunk → assembled contrac
     before(async function () {
         if (!haveConnectors()) this.skip();
         // Reorg via an empty competing chain is a BTC/LTC mechanism; DOGE regtest uses a
-        // different (fast-chain) mining model — skip it, as reorgBalances.test.js does.
+        // different (fast-chain) mining model. Skip it, as reorgBalances.test.js does.
         if (global.COIN_CODE === 'DOGE') this.skip();
         sdk = makeSdk();
         deployer = await fundedGasAddress(sdk, 1);
 
         plan = chunkHelper.planDeploy(SRC, { gasLimit: GAS_LIMIT, constructorParams: [String(START)] });
         expect(plan.single, 'source must NOT fit a single DEPLOY (else not testing chunking)').to.equal(false);
-        expect(plan.totalChunks, 'expected ≥2 chunks').to.be.greaterThan(1);
+        expect(plan.totalChunks, 'expected >=2 chunks').to.be.greaterThan(1);
         codeHash = plan.codeHash;
         console.log('    [chunk-reorg] deployer=' + deployer.address +
-                    ' source=' + Buffer.byteLength(SRC, 'utf8') + ' B → ' + plan.totalChunks +
+                    ' source=' + Buffer.byteLength(SRC, 'utf8') + ' B -> ' + plan.totalChunks +
                     ' chunks, hash=' + codeHash.slice(0, 12));
     });
 
@@ -158,7 +158,7 @@ describe('[sdk] chunked DEPLOY reorg drill (orphaned chunk → assembled contrac
         expect(await readState(sdk, contractIndex, 'padlen'), 'padlen matches the reassembled source').to.equal(String(PAD.length));
         expect(await readState(sdk, contractIndex, 'count'), 'increment ran on the assembled contract').to.equal(String(START + 1));
 
-        // Resolve the block carrying the FIRST chunk carrier — the one we orphan. All chunk
+        // Resolve the block carrying the FIRST chunk carrier (the one we orphan). All chunk
         // rows are indexed by now (the contract assembled from them), so MIN() is populated.
         const rows = await idxQuery('SELECT MIN(block_index) AS n FROM deploy_chunks WHERE code_hash = ?', [codeHash]);
         firstChunkBlock = Number(rows[0].n);
@@ -191,9 +191,9 @@ describe('[sdk] chunked DEPLOY reorg drill (orphaned chunk → assembled contrac
             for (let i = 0; i < need; i++) await node.generateBlock(payout, []);
             expect(await node.getBlockCount(), 'competing chain overtakes the original tip').to.be.greaterThan(tipBefore);
             expect(await node.getBlockHash(firstChunkBlock), 'the chain actually reorged').to.not.equal(chunkHash);
-            console.log('    [chunk-reorg] reorged onto an empty branch; waiting for decoder → indexer rollback');
+            console.log('    [chunk-reorg] reorged onto an empty branch; waiting for decoder -> indexer rollback');
 
-            // Wait for node → decoder → indexer rollback.js to delete block_index >= firstChunkBlock
+            // Wait for node -> decoder -> indexer rollback.js to delete block_index >= firstChunkBlock
             // across deploy_chunks / contracts / contract_state.
             const deadline = Date.now() + 180000;
             let chunks = -1, contracts = -1, state = -1;
@@ -207,7 +207,7 @@ describe('[sdk] chunked DEPLOY reorg drill (orphaned chunk → assembled contrac
             expect(chunks, 'all chunk carriers removed by rollback').to.equal(0);
             expect(contracts, 'the dependent assembled contract removed by rollback').to.equal(0);
             expect(state, 'the contract state removed by rollback').to.equal(0);
-            console.log('    [chunk-reorg] rollback clean — chunks, contract, and state all gone on the orphan branch');
+            console.log('    [chunk-reorg] rollback clean: chunks, contract, and state all gone on the orphan branch');
         } finally {
             // Leave auto-mining ON for the re-injection phase (mempool drains naturally).
             await miner.setDefaultMiningTime();
@@ -218,7 +218,7 @@ describe('[sdk] chunked DEPLOY reorg drill (orphaned chunk → assembled contrac
         // Auto-mining resumed in the previous phase's finally. The orphaned chunk carriers,
         // the assembling DEPLOY, and the EXECUTE are back in the mempool; they chain via the
         // deployer's change UTXOs, so they re-confirm in dependency order and the contract
-        // reassembles. A reorg must not change WHAT gets built — only WHERE.
+        // reassembles. A reorg must not change WHAT gets built, only WHERE.
         const deadline = Date.now() + 240000;
         let row = null;
         while (Date.now() < deadline) {
@@ -238,6 +238,6 @@ describe('[sdk] chunked DEPLOY reorg drill (orphaned chunk → assembled contrac
             'all chunk carriers re-indexed on the new branch').to.equal(plan.totalChunks);
         expect(await readState(sdk, newIndex, 'padlen'), 'reassembled source byte-exact after the reorg').to.equal(String(PAD.length));
         expect(await readState(sdk, newIndex, 'count'), 'constructor + increment replayed deterministically').to.equal(String(START + 1));
-        console.log('    [chunk-reorg] reassembled deterministically — newIndex=' + newIndex + ' hash=' + codeHash.slice(0, 12) + ' (reorg safe)');
+        console.log('    [chunk-reorg] reassembled deterministically: newIndex=' + newIndex + ' hash=' + codeHash.slice(0, 12) + ' (reorg safe)');
     });
 });

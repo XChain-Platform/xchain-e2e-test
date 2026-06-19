@@ -11,16 +11,16 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * E2E test helper — Mock cross-chain offer book (indexer stand-in)
+ * E2E test helper: Mock cross-chain offer book (indexer stand-in)
  *
  * A tiny in-process HTTP JSON-RPC server that answers `getopencrosschainorders`
- * exactly like xchain-indexer's api.js:393 — `{ latest_block_index, network,
- * count, orders }` — so a CrossChainDexEngine can discover + independently
+ * exactly like xchain-indexer's api.js:393: `{ latest_block_index, network,
+ * count, orders }`, so a CrossChainDexEngine can discover + independently
  * re-validate matches with NO real indexer behind it.
  *
  * Why an HTTP mock (vs monkeypatching the engine): the DEX federation proof
  * hinges on every follower INDEPENDENTLY re-fetching the book in
- * validateProposedMatch → _findOpenOffer → _indexerCall before it will sign a
+ * validateProposedMatch -> _findOpenOffer -> _indexerCall before it will sign a
  * leader's proposed match. Serving over real HTTP keeps the engine's actual
  * network path intact, and per-path "books" let one validator be pointed at a
  * DIVERGENT book (the byzantine case) while the honest majority shares one.
@@ -42,14 +42,14 @@ const http = require('http');
 class MockCrossChainOfferBook {
 
     constructor(){
-        // name → { network, latestBlockIndex, ordersByCoin: { LTC:[...], DOGE:[...] } }
+        // name -> { network, latestBlockIndex, ordersByCoin: { LTC:[...], DOGE:[...] } }
         this.books  = new Map();
         this.server = null;
         this.port   = null;
         this._reqCount = 0;          // observability: how many polls the engines made
     }
 
-    // Register / replace a named book. ordersByCoin maps COIN → array of offers
+    // Register / replace a named book. ordersByCoin maps COIN -> array of offers
     // (built via makeOrder/makeSwap). Missing coins serve an empty book.
     setBook(name, { network = 'regtest', latestBlockIndex = 200, ordersByCoin = {} } = {}){
         this.books.set(name, { network, latestBlockIndex, ordersByCoin });
@@ -77,7 +77,7 @@ class MockCrossChainOfferBook {
         });
     }
 
-    // Full URL for a given book + coin — what a hub's engine.indexers[COIN].url is set to.
+    // Full URL for a given book + coin: what a hub's engine.indexers[COIN].url is set to.
     urlFor(name, coin){ return 'http://127.0.0.1:' + this.port + '/book/' + name + '/' + coin; }
 
     _handle(req, res){
@@ -115,7 +115,7 @@ class MockCrossChainOfferBook {
     }
 }
 
-// ── Offer builders (byte-faithful to the indexer's mapped rows) ────────────────
+// Offer builders (byte-faithful to the indexer's mapped rows)
 
 // A cross-chain ORDER offer on `home_coin`. `give`/`get` are { coin, tick, amount,
 // ownership } describing the give leg (escrowed by the maker) and the get leg.

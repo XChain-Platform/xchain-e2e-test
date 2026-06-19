@@ -11,35 +11,35 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * L2 integration — STAKE_WEIGHTED_QUORUM (WI-1) for the oracle_publish
+ * L2 integration: STAKE_WEIGHTED_QUORUM (WI-1) for the oracle_publish
  * capability: state-checkpoint finalization (Suite A5 of the regtest e2e plan).
  *
  * The weighted twin of multiHubStateAnchor.integration.test.js, restricted to the
- * checkpoint round (StateCheckpointEngine: XCHK_SIGN_REQ → XCHK_SIGN →
+ * checkpoint round (StateCheckpointEngine: XCHK_SIGN_REQ -> XCHK_SIGN ->
  * XCHK_FINALIZED). Drives the REAL round over live P2P with a SOURCE-keyed weight
  * snapshot, proving the WI-1 thesis for oracle_publish:
  *
- *   - NEGATIVE: 3 live small-stake hubs (a COUNT majority — they alone would meet
- *     2f+1) hold only 3000/10000 stake; a whale source sits in the snapshot
- *     (counts toward S) but is OFFLINE. The 3 live hubs co-sign, the weighted
- *     tally (3·3000 = 9000 !> 2·10000 = 20000) refuses → NO checkpoint finalizes
- *     on any hub. The regression the old count rule would have missed.
- *   - POSITIVE: the whale is online (4th hub) → the weighted quorum is reached →
+ *   - NEGATIVE: 3 live small-stake hubs (a COUNT majority, would meet 2f+1) hold
+ *     only 3000/10000 stake; a whale source sits in the snapshot (counts toward S)
+ *     but is OFFLINE. The 3 live hubs co-sign, the weighted tally
+ *     (3·3000 = 9000 !> 2·10000 = 20000) refuses -> NO checkpoint finalizes on any hub.
+ *     This is the regression the old count rule would have missed.
+ *   - POSITIVE: the whale is online (4th hub) -> the weighted quorum is reached ->
  *     the identical 3+-signed checkpoint lands in EVERY hub's state_checkpoints.
  *
  * Election seam: the cadence leader is pubkeys[snapshot_block % N] over the SORTED
  * oracle_publish set. The offline whale's placeholder pubkey 'ff'*32 is the
- * maximum 32-byte value, so it sorts LAST (index N-1); snapshot_block 100 → index
- * 100 % 4 = 0 → always a live hub leads. (Otherwise an offline-leader round would
+ * maximum 32-byte value, so it sorts LAST (index N-1); snapshot_block 100 -> index
+ * 100 % 4 = 0 -> always a live hub leads. (Otherwise an offline-leader round would
  * never start, masking the stake test.)
  *
  * Gotcha: StateCheckpointEngine caches this.network at construction (before
- * seedWeightSnapshot sets hub.network), so we set cps.network='regtest' per hub —
- * otherwise the engine resolves an unknown network and the weighted gate is OFF.
+ * seedWeightSnapshot sets hub.network), so we set cps.network='regtest' per hub.
+ * Without this the engine resolves an unknown network and the weighted gate is OFF.
  *
- * No chain: the indexer view is stubbed (_indexerCall → TIP); disposable Docker
+ * No chain: the indexer view is stubbed (_indexerCall -> TIP); disposable Docker
  * MariaDB; skips when neither an env DB nor Docker is available. Runs with regtest
- * activation = 0 (always weighted) — no constant edit needed.
+ * activation = 0 (always weighted), no constant edit needed.
  *
  * Spec: claude/reports/2026-06-14_cross-chain-quorum-security-spec.md §3.7, §10;
  * plan §A5.
@@ -58,11 +58,11 @@ const eq = require('../../../xchain-hub/src/equivocation_header.js');
 
 const PEER_WAIT_MS = 8000;
 const SETTLE_MS    = 6000;
-const BLOCK_INDEX  = 100;       // seeded BTC anchor (snapshot + election block); 100 % 4 = 0 → live leader
+const BLOCK_INDEX  = 100;       // seeded BTC anchor (snapshot + election block); 100 % 4 = 0 -> live leader
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Identical stubbed "indexer" tip on every hub — the checkpoint engine's
+// Identical stubbed "indexer" tip on every hub: the checkpoint engine's
 // getblockhashes view (network MUST be set, the engine refuses a network-agnostic
 // checkpoint).
 const TIP = {
@@ -96,16 +96,16 @@ async function checkpointRows(hub) {
         ['BTC', 'regtest', TIP.block_index]);
 }
 
-describe('MultiValidatorHub — STAKE_WEIGHTED_QUORUM oracle_publish checkpoint (WI-1 Suite A5, L2)', function () {
+describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM oracle_publish checkpoint (WI-1 Suite A5, L2)', function () {
     this.timeout(240_000);
 
-    // ── NEGATIVE: count-majority / stake-minority of live hubs cannot finalize ──
+    // NEGATIVE: count-majority / stake-minority of live hubs cannot finalize
     describe('a stake-minority (count-majority) of live hubs cannot finalize a checkpoint', function () {
         let db, mvh, seed;
 
         before(async function () {
             db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping A5 (negative) — no env DB and Docker unavailable'); this.skip(); }
+            if (!db) { console.log('Skipping A5 (negative): no env DB and Docker unavailable'); this.skip(); }
             // 3 live small hubs; a 4th WHALE source is in the snapshot but offline.
             mvh = new MultiValidatorHub({ count: 3, basePort: 33200, startCrossChain: true, startAttestation: false });
             await mvh.start();
@@ -130,7 +130,7 @@ describe('MultiValidatorHub — STAKE_WEIGHTED_QUORUM oracle_publish checkpoint 
             if (db)  { await db.stop(); }
         });
 
-        it('the 3 live signers are a stake minority — no checkpoint is stored on any hub', async function () {
+        it('the 3 live signers are a stake minority: no checkpoint is stored on any hub', async function () {
             await tickAll(mvh);
             for (let i = 0; i < mvh.hubs.length; i++) {
                 const rows = await checkpointRows(mvh.hubs[i]);
@@ -140,20 +140,20 @@ describe('MultiValidatorHub — STAKE_WEIGHTED_QUORUM oracle_publish checkpoint 
         });
     });
 
-    // ── POSITIVE: a healthy weighted federation finalizes the checkpoint ──
+    // POSITIVE: a healthy weighted federation finalizes the checkpoint
     describe('a healthy weighted federation (whale online) finalizes on every hub', function () {
         let db, mvh, seed;
 
         before(async function () {
             db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping A5 (positive) — no env DB and Docker unavailable'); this.skip(); }
+            if (!db) { console.log('Skipping A5 (positive): no env DB and Docker unavailable'); this.skip(); }
             // 4 hubs: three small + one whale, all live (uneven stake).
             mvh = new MultiValidatorHub({ count: 4, basePort: 33300, startCrossChain: true, startAttestation: false });
             await mvh.start();
             await sleep(PEER_WAIT_MS);
             const ids = mvh.identities;
-            // Uneven weights where NO single source clears 2/3 (S=10000, 2S/3≈6666):
-            // the weighted quorum requires ≥2 distinct sources to co-sign, so this
+            // Uneven weights where NO single source clears 2/3 (S=10000, 2S/3~6666):
+            // the weighted quorum requires >=2 distinct sources to co-sign, so this
             // exercises the multi-signer weighted aggregation path (not the single
             // supermajority fast path).
             seed = seedWeightSnapshot(mvh, {
@@ -166,7 +166,7 @@ describe('MultiValidatorHub — STAKE_WEIGHTED_QUORUM oracle_publish checkpoint 
                 ],
             });
             wireCheckpointEngine(mvh);
-            // S = 10000; e.g. 4000+3000 = 7000 → 3·7000 > 2·10000 → finalizes.
+            // S = 10000; e.g. 4000+3000 = 7000 -> 3·7000 > 2·10000 -> finalizes.
         });
 
         after(async function () {
@@ -175,7 +175,7 @@ describe('MultiValidatorHub — STAKE_WEIGHTED_QUORUM oracle_publish checkpoint 
             if (db)  { await db.stop(); }
         });
 
-        it('the weighted quorum is reached — the identical checkpoint lands on EVERY hub', async function () {
+        it('the weighted quorum is reached: the identical checkpoint lands on EVERY hub', async function () {
             await tickAll(mvh);
 
             const rows = [];
@@ -187,7 +187,7 @@ describe('MultiValidatorHub — STAKE_WEIGHTED_QUORUM oracle_publish checkpoint 
 
             // Every hub holds the identical checkpoint, with weighted-quorum sigs
             // that verify against the canonical. At/above the EQUIV flag-day (regtest
-            // activates at genesis → always on) the signed bytes are the v0 raw wrapped
+            // activates at genesis -> always on) the signed bytes are the v0 raw wrapped
             // in the uniform header (TAG=XCHECKPOINT, VIEW=0); gate keys on snapshot_block.
             const raw = ['XCHECKPOINT', 'BTC', 'regtest', String(TIP.block_index), TIP.block_hash,
                          TIP.ledger_hash, TIP.actions_hash, TIP.contract_hash,

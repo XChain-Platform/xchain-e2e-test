@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * E2E acceptance — ANCHOR on a LIVE DOGE regtest chain.
+ * E2E acceptance: ANCHOR on a LIVE DOGE regtest chain.
  *
  * The on-chain leg the L2 federation test can't cover: a real hub
  * (in-process, single validator via the XDEX_SEED_LOCAL_VALIDATOR seam)
@@ -29,13 +29,13 @@
  *     XDEX_SEED_LOCAL_VALIDATOR=1.
  *
  * The synthetic cross-chain match is signed by the seeded validator and the
- * capability snapshot rows are hand-mirrored into the indexer DB — the
+ * capability snapshot rows are hand-mirrored into the indexer DB (the
  * mirror TRANSPORT (hub_db_sync WS/REST) is covered by its own unit + L2
- * tests; this run accepts the ON-CHAIN pipeline.
+ * tests; this run accepts the ON-CHAIN pipeline).
  *
  * SIGNER PATH IS PRODUCTION: broadcasts go through the hub's signer-loader
  * (HUB_SIGNER_MODULE) loading a staged copy of examples/doge-signer.example.js
- * — the exact module operators install in ~/hub-signer — which drives the sdk
+ * (the exact module operators install in ~/hub-signer), which drives the sdk
  * two-phase P2SH pipeline (encoder createTx → signPsbt → broadcast →
  * spendP2sh → signRevealPsbt → broadcast). A walletSign-only or custom test
  * hook would skip the phase-2 reveal path, which is precisely where the
@@ -43,9 +43,9 @@
  * hook to mine + quiesce after each publish (regtest has no organic blocks,
  * and the tracker must see fresh UTXOs between the v0 and v1 publishes).
  *
- * The follow-up recovery drill (wipe indexer DB → reindex from chain →
- * src/recovery.js → byte-identical hash triples) is driven by the runner
- * after this suite passes — see the acceptance report.
+ * The follow-up recovery drill (wipe indexer DB -> reindex from chain ->
+ * src/recovery.js -> byte-identical hash triples) is driven by the runner
+ * after this suite passes -- see the acceptance report.
  ********************************************************************/
 
 'use strict';
@@ -66,7 +66,7 @@ const SNAPSHOT_BLOCK = 100;            // deterministic regtest anchor (XDEX_SNA
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-describe('ANCHOR live acceptance — DOGE regtest on-chain pipeline', function () {
+describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
     this.timeout(15 * 60 * 1000);
 
     let mvh = null, hub = null, identity = null;
@@ -98,7 +98,7 @@ describe('ANCHOR live acceptance — DOGE regtest on-chain pipeline', function (
         }
 
         // The signer's .env contract, via process env (dotenv never overrides
-        // existing vars, and no .env file is written — the WIF stays in memory).
+        // existing vars, and no .env file is written; the WIF stays in memory).
         const network = CryptoNetworks.getBitcoinJsNetwork(COIN + '-' + NETWORK);
         process.env.DOGE_NETWORK     = COIN + '-' + NETWORK;
         process.env.DOGE_ADDRESS     = addressInfo.address;
@@ -120,7 +120,7 @@ describe('ANCHOR live acceptance — DOGE regtest on-chain pipeline', function (
     }
 
     before(async function () {
-        // Deterministic regtest seams — set BEFORE any hub engine is constructed.
+        // Deterministic regtest seams: set BEFORE any hub engine is constructed.
         process.env.XDEX_SEED_LOCAL_VALIDATOR = '1';
         process.env.XDEX_SNAPSHOT_BLOCK       = String(SNAPSHOT_BLOCK);
         process.env.CHECKPOINT_CHAINS         = 'DOGE';
@@ -140,16 +140,16 @@ describe('ANCHOR live acceptance — DOGE regtest on-chain pipeline', function (
         identity = new ValidatorIdentity(mvh.identities[0].privkeyHex);
 
         // Fund the publisher address; every ANCHOR broadcast goes through the
-        // REAL client pipeline (encoder createTx → sign → broadcast → P2SH
-        // reveal tx) — identical to how a production operator publishes.
+        // REAL client pipeline (encoder createTx -> sign -> broadcast -> P2SH
+        // reveal tx), identical to how a production operator publishes.
         publisherAddr = await cryptoHelper.getNewFundedAddress(
             'anchor-publisher', COIN, NETWORK, null, 'legacy', 0, 2.0
         );
         await regtestMinerConnector.generateBlocks(2);
         await utxoTrackerConnector.quiesce({ timeoutMs: 60000, pollMs: 250, regtestMiner: regtestMinerConnector });
 
-        // PRODUCTION signer path: signer-loader → staged doge-signer.example.js
-        // → sdk two-phase P2SH pipeline. The wrapper only adds regtest
+        // PRODUCTION signer path: signer-loader -> staged doge-signer.example.js
+        // -> sdk two-phase P2SH pipeline. The wrapper only adds regtest
         // block-production so the tracker sees fresh UTXOs before the next
         // publish in the same flush.
         const hooks = stageProductionSigner(publisherAddr);
@@ -207,7 +207,7 @@ describe('ANCHOR live acceptance — DOGE regtest on-chain pipeline', function (
         assert.match(String(cp.ledger_hash), /^[0-9a-f]{64}$/);
         console.log('    checkpoint: DOGE@' + cp.block_index + ' ledger ' + String(cp.ledger_hash).slice(0, 16) + '... snapshot_block ' + cp.snapshot_block);
 
-        // The REAL snapshot block resolved by the hub at tick time — everything
+        // The REAL snapshot block resolved by the hub at tick time; everything
         // downstream (capability mirror rows, the synthetic match) keys on it.
         let snapBlock = Number(cp.snapshot_block);
 
@@ -216,9 +216,9 @@ describe('ANCHOR live acceptance — DOGE regtest on-chain pipeline', function (
         // ANCHOR handler verifies signatures as 'valid' rather than 'unverified'.
         for (let cap of ['oracle_publish', 'cross_chain']) {
             // WI-1: the indexer verify is stake-weighted on regtest (activates at
-            // genesis) and tallies by DISTINCT source — a blank source FAILS CLOSED.
+            // genesis) and tallies by DISTINCT source; a blank source FAILS CLOSED.
             // Seed a non-blank source (the validator's own key = its staking source)
-            // so the single signer is 100% of stake (3·S > 2·S → valid).
+            // so the single signer is 100% of stake (3·S > 2·S -> valid).
             await indexerQuery(
                 'INSERT INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount, source) VALUES (?, ?, ?, ?, ?) ' +
                 'ON DUPLICATE KEY UPDATE amount = VALUES(amount), source = VALUES(source)',
@@ -253,7 +253,7 @@ describe('ANCHOR live acceptance — DOGE regtest on-chain pipeline', function (
              m.b_kind, m.b_tick, m.b_amount, m.b_filled_before, m.b_ownership, m.b_payout_addr,
              m.effective_time, sigs]);
 
-        // Persist the cross_chain set into the HUB's local capability_snapshots —
+        // Persist the cross_chain set into the HUB's local capability_snapshots:
         // what CrossChainDexConsensus._broadcastPropose does when a real match
         // finalizes (the synthetic match bypassed the engine). The archive
         // builder resolves capability sets from here when no BTC indexer
@@ -262,7 +262,7 @@ describe('ANCHOR live acceptance — DOGE regtest on-chain pipeline', function (
             'INSERT IGNORE INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount) VALUES (?, ?, ?, ?)',
             [snapBlock, 'cross_chain', identity.getPubkeyHex().toLowerCase(), '1']);
 
-        // 2. Flush → REAL on-chain publication (v0 checkpoint + v1 archive)
+        // 2. Flush -> REAL on-chain publication (v0 checkpoint + v1 archive)
         // through the production signer pipeline.
         let summary = await hub.stateAnchorPublisher.flush();
         assert.ok(broadcasts.length >= 2, 'expected v0 + v1 broadcasts, got ' + broadcasts.length);
@@ -273,7 +273,7 @@ describe('ANCHOR live acceptance — DOGE regtest on-chain pipeline', function (
         // The two-phase property the walletSign-only gap used to hide: each
         // publish must produce a DISTINCT phase-1 funding tx and phase-2
         // reveal tx (the decodable one). A single-tx publish here means the
-        // reveal leg silently vanished — exactly the production bug class.
+        // reveal leg silently vanished, which is exactly the production bug class.
         for (let b of [v0, v1]) {
             assert.ok(b.phase1_txid, 'publish went two-phase (phase-1 txid present)');
             assert.notStrictEqual(b.phase1_txid, b.txid, 'phase-2 reveal txid differs from phase-1');
@@ -285,7 +285,7 @@ describe('ANCHOR live acceptance — DOGE regtest on-chain pipeline', function (
         console.log('    on-chain: v0 ' + v0.txid + ' / v1 ' + v1.txid + ' (phase-1: ' + v0.phase1_txid + ' / ' + v1.phase1_txid + ')');
 
         // 3. Confirm + let decoder/indexer catch up, then assert OUR parsed rows
-        // (a dirty chain may carry anchors from prior runs — match on content).
+        // (a dirty chain may carry anchors from prior runs; match on content).
         await regtestMinerConnector.generateBlocks(3);
         let r0 = null, r1 = null;
         for (let i = 0; i < 60 && (!r0 || !r1); i++) {
@@ -302,7 +302,7 @@ describe('ANCHOR live acceptance — DOGE regtest on-chain pipeline', function (
         assert.ok(r1, 'v1 row for our archive present');
 
         // v0: the on-chain checkpoint equals what the hub signed over the REAL
-        // indexer hashes — the full circle (indexer → hub → chain → indexer).
+        // indexer hashes (the full circle: indexer -> hub -> chain -> indexer).
         assert.strictEqual(String(r0.status), 'valid', 'v0 verified against the mirrored oracle_publish set');
         assert.strictEqual(String(r0.chain), 'DOGE');
         assert.strictEqual(Number(r0.block_index), Number(cp.block_index));

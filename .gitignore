@@ -9,3 +9,7 @@ perf-results/
 # Coverage output (c8/nyc) — generated, not source
 coverage/
 .nyc_output/
+
+# Stryker mutation-report build artifacts — generated, embed absolute paths (curated .md reports are kept)
+reports/mutation/*.html
+reports/mutation/*.json

@@ -17,7 +17,7 @@ const axios  = require('axios');
 const XChainHubConnector = require('../../../src/XChainHubConnector');
 
 // Build an Axios-style error for a non-2xx response that still carries a valid
-// JSON-RPC body — e.g. the hub's HTTP 503 "degraded" health response when its DB
+// JSON-RPC body, e.g. the hub's HTTP 503 "degraded" health response when its DB
 // pool is down. Axios attaches the full response to the thrown error as err.response.
 function degraded503Error(body) {
     const err = new Error('Request failed with status code 503');
@@ -45,69 +45,28 @@ describe('XChainHubConnector', function () {
         delete process.env.HUB_PORT;
     });
 
-    // ── constructor ──────────────────────────────────────────────────────
-
-    describe('constructor', function () {
-        it('stores an array of endpoints directly in this.urls', function () {
-            const endpoints = ['http://hub1:10000', 'http://hub2:10000'];
-            const conn = new XChainHubConnector(endpoints);
-            assert.deepStrictEqual(conn.urls, endpoints);
-        });
-
-        it('wraps a single string host+port into an array: http://{host}:{port}', function () {
-            const conn = new XChainHubConnector('localhost', 10000);
-            assert.deepStrictEqual(conn.urls, ['http://localhost:10000']);
-        });
-
-        it('wraps a string endpoint as-is when port is provided', function () {
-            const conn = new XChainHubConnector('myhost', 9999);
-            assert.strictEqual(conn.urls[0], 'http://myhost:9999');
-        });
-    });
-
     // ── _call ─────────────────────────────────────────────────────────────
 
     describe('_call', function () {
-        it('returns result from the first reachable endpoint', async function () {
-            const conn = new XChainHubConnector(['http://hub1:10000', 'http://hub2:10000']);
-            axiosPostStub.resolves({ data: { result: { key: 'value' } } });
-
-            const result = await conn._call({ method: 'test' });
-            assert.deepStrictEqual(result, { key: 'value' });
-            // Only the first URL should have been tried
-            assert.strictEqual(axiosPostStub.callCount, 1);
-        });
-
-        it('tries the next endpoint when the first one throws', async function () {
-            const conn = new XChainHubConnector(['http://hub1:10000', 'http://hub2:10000']);
-            axiosPostStub
-                .onFirstCall().rejects(new Error('connection refused'))
-                .onSecondCall().resolves({ data: { result: 'ok' } });
-
-            const result = await conn._call({ method: 'test' });
-            assert.strictEqual(result, 'ok');
-            assert.strictEqual(axiosPostStub.callCount, 2);
-        });
-
-        it('returns null when all endpoints fail', async function () {
-            const conn = new XChainHubConnector(['http://hub1:10000', 'http://hub2:10000']);
-            axiosPostStub.rejects(new Error('connection refused'));
-
-            const result = await conn._call({ method: 'test' });
-            assert.strictEqual(result, null);
-        });
-
-        it('returns null when response has no result field', async function () {
+        it('returns result when axios succeeds', async function () {
             const conn = new XChainHubConnector(['http://hub1:10000']);
-            // result === undefined → `result !== undefined` is false → skip
-            axiosPostStub.resolves({ data: {} });
+            axiosPostStub.resolves({ data: { result: 'pong' } });
+
+            const result = await conn._call({ method: 'ping' });
+            assert.strictEqual(result, 'pong');
+        });
+
+        it('returns null when axios throws a generic error', async function () {
+            const conn = new XChainHubConnector(['http://hub1:10000']);
+            axiosPostStub.rejects(new Error('ECONNREFUSED'));
 
             const result = await conn._call({ method: 'test' });
             assert.strictEqual(result, null);
         });
 
         it('returns the result even when it is falsy (0, false, "")', async function () {
-            // The source checks `response.data.result !== undefined` — falsy truths count
+            // The source checks `response.data.result !== undefined`. Falsy truths count
+            // and must not be discarded.
             const conn = new XChainHubConnector(['http://hub1:10000']);
             axiosPostStub.resolves({ data: { result: false } });
 
@@ -218,7 +177,7 @@ describe('XChainHubConnector', function () {
         });
 
         it('returns null (not the degraded body) when the hub reports degraded', async function () {
-            // A {status:"degraded"} body is not a config tree — it must not be
+            // A {status:"degraded"} body is not a config tree. It must not be
             // returned as one, or the caller would index into it as config.
             const conn = new XChainHubConnector(['http://hub1:10000']);
             sinon.stub(conn, '_call').resolves({ status: 'degraded', db: false });

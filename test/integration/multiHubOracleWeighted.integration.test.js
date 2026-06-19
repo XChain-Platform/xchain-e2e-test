@@ -11,24 +11,24 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * L2 integration — STAKE_WEIGHTED_QUORUM (WI-1) for the price capability:
+ * L2 integration: STAKE_WEIGHTED_QUORUM (WI-1) for the price capability:
  * oracle PRICE-round finalization (Suite A3 of the regtest e2e plan).
  *
- * Drives the REAL OracleConsensus PBFT round (ORACLE_PROPOSE → ORACLE_PREPARE →
- * ORACLE_COMMIT → price_snapshots) over live P2P with a SOURCE-keyed weight
+ * Drives the REAL OracleConsensus PBFT round (ORACLE_PROPOSE -> ORACLE_PREPARE ->
+ * ORACLE_COMMIT -> price_snapshots) over live P2P with a SOURCE-keyed weight
  * snapshot, proving the WI-1 thesis for the price capability:
  *
  *   - NEGATIVE: 3 live small-stake hubs (a COUNT majority) hold only 3000/10000
  *     stake; a whale source sits in the weight snapshot (counts toward S) but is
  *     OFFLINE. The 3 live hubs co-sign, the weighted tally (3·3000 !> 2·10000)
- *     refuses → NO price_snapshots row finalizes on any hub.
+ *     refuses -> NO price_snapshots row finalizes on any hub.
  *   - POSITIVE: 4 live hubs with uneven weights (4000/3000/2000/1000, no single
- *     source ≥ 2/3) → multi-signer weighted quorum → the identical price_snapshots
+ *     source >= 2/3) -> multi-signer weighted quorum -> the identical price_snapshots
  *     row lands on every hub.
  *
  * The harness doesn't start the oracle subsystem, so we attach a real
  * OracleConsensus per hub (start() registers the P2P handlers) WITHOUT
- * OracleRound.start() — no price-fetch cadence — and inject identical submissions
+ * OracleRound.start() (no price-fetch cadence) and inject identical submissions
  * directly into each hub's round buffer, then call finalizeRound() on every hub.
  * OracleConsensus reads hub.network live (no cached-network gotcha), so
  * seedWeightSnapshot's hub.network='regtest' is enough to activate weighting.
@@ -36,9 +36,9 @@
  * whale (never registered) can't be elected leader.
  *
  * The weighted quorum tallies signer STAKE over pending.signatures.keys() (the
- * only pubkey-keyed record; prepares/commits are address-keyed) — the exact path
- * the indexer re-verifies. No chain; disposable Docker MariaDB; skips when neither
- * an env DB nor Docker is available. regtest activation = 0 (always weighted).
+ * only pubkey-keyed record; prepares/commits are address-keyed). This is the exact
+ * path the indexer re-verifies. No chain; disposable Docker MariaDB; skips when
+ * neither an env DB nor Docker is available. regtest activation = 0 (always weighted).
  *
  * Spec: claude/reports/2026-06-14_cross-chain-quorum-security-spec.md §3.7, §10;
  * plan §A3.
@@ -61,7 +61,7 @@ const OracleRound     = hubRequire('src/OracleRound.js');
 
 const PEER_WAIT_MS = 8000;
 const SETTLE_MS    = 6000;
-const BLOCK_INDEX  = 100;       // BTC block boundary the round locks the snapshot at (≥0 → weighted on regtest)
+const BLOCK_INDEX  = 100;       // BTC block boundary the round locks the snapshot at (>=0 -> weighted on regtest)
 const BLOCK_TIME   = 1700000000;
 const ROUND        = 100;
 const PAIR         = 'BTC/USD';
@@ -110,16 +110,16 @@ async function snapshotRows(hub) {
         [ROUND, PAIR]);
 }
 
-describe('MultiValidatorHub — STAKE_WEIGHTED_QUORUM price PBFT round (WI-1 Suite A3, L2)', function () {
+describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM price PBFT round (WI-1 Suite A3, L2)', function () {
     this.timeout(240_000);
 
-    // ── NEGATIVE: count-majority / stake-minority of live hubs cannot finalize ──
+    // NEGATIVE: count-majority / stake-minority of live hubs cannot finalize
     describe('a stake-minority (count-majority) of live hubs cannot finalize a price round', function () {
         let db, mvh, seed, oracle;
 
         before(async function () {
             db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping A3 (negative) — no env DB and Docker unavailable'); this.skip(); }
+            if (!db) { console.log('Skipping A3 (negative): no env DB and Docker unavailable'); this.skip(); }
             mvh = new MultiValidatorHub({ count: 3, basePort: 33400, startAttestation: false });
             await mvh.start();
             await sleep(PEER_WAIT_MS);
@@ -145,7 +145,7 @@ describe('MultiValidatorHub — STAKE_WEIGHTED_QUORUM price PBFT round (WI-1 Sui
             if (db)  { await db.stop(); }
         });
 
-        it('the 3 live signers are a stake minority — no price snapshot is stored on any hub', async function () {
+        it('the 3 live signers are a stake minority: no price snapshot is stored on any hub', async function () {
             await finalizeAll(mvh);
             for (let i = 0; i < mvh.hubs.length; i++) {
                 const rows = await snapshotRows(mvh.hubs[i]);
@@ -155,19 +155,19 @@ describe('MultiValidatorHub — STAKE_WEIGHTED_QUORUM price PBFT round (WI-1 Sui
         });
     });
 
-    // ── POSITIVE: a healthy weighted federation finalizes the price round ──
+    // POSITIVE: a healthy weighted federation finalizes the price round
     describe('a healthy weighted federation finalizes the price on every hub', function () {
         let db, mvh, seed, oracle;
 
         before(async function () {
             db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping A3 (positive) — no env DB and Docker unavailable'); this.skip(); }
+            if (!db) { console.log('Skipping A3 (positive): no env DB and Docker unavailable'); this.skip(); }
             mvh = new MultiValidatorHub({ count: 4, basePort: 33500, startAttestation: false });
             await mvh.start();
             await sleep(PEER_WAIT_MS);
             const ids = mvh.identities;
-            // Uneven weights, no single source ≥ 2/3 (S=10000, 2S/3≈6666): the
-            // weighted quorum needs ≥2 distinct sources → exercises the multi-signer
+            // Uneven weights, no single source >= 2/3 (S=10000, 2S/3~6666): the
+            // weighted quorum needs >=2 distinct sources -> exercises the multi-signer
             // aggregation path.
             seed = seedWeightSnapshot(mvh, {
                 blockIndex: BLOCK_INDEX,
@@ -189,7 +189,7 @@ describe('MultiValidatorHub — STAKE_WEIGHTED_QUORUM price PBFT round (WI-1 Sui
             if (db)  { await db.stop(); }
         });
 
-        it('the weighted quorum is reached — the identical price snapshot lands on EVERY hub', async function () {
+        it('the weighted quorum is reached: the identical price snapshot lands on EVERY hub', async function () {
             await finalizeAll(mvh);
             const seen = [];
             for (let i = 0; i < mvh.hubs.length; i++) {

@@ -30,7 +30,7 @@ const cryptoHelper = require('../cryptoHelper')
 
 const FC_PARAMS = { numRuns: 200 }
 
-describe('Fuzz — CryptoHelper', function () {
+describe('Fuzz: CryptoHelper', function () {
 
     beforeEach(function () {
         global.wallets = {}
@@ -41,7 +41,7 @@ describe('Fuzz — CryptoHelper', function () {
         global.wallets = {}
     })
 
-    // ── getWallet with fuzzed labels ────────────────────────────
+    // getWallet with fuzzed labels
 
     describe('getWallet with fuzzed labels', function () {
 
@@ -60,7 +60,7 @@ describe('Fuzz — CryptoHelper', function () {
                     // JavaScript's `in` operator converts label to string for property lookup
                     assert(wallet !== null && wallet !== undefined)
                 } catch (e) {
-                    // Symbol labels will throw in `label in wallets` — this is expected
+                    // Symbol labels will throw in `label in wallets` (this is expected)
                     if (e instanceof TypeError && e.message.includes('Cannot convert a Symbol')) {
                         return
                     }
@@ -78,7 +78,7 @@ describe('Fuzz — CryptoHelper', function () {
         })
     })
 
-    // ── getNewAddress with fuzzed coin/network ──────────────────
+    // getNewAddress with fuzzed coin/network
 
     describe('getNewAddress with fuzzed coin/network combos', function () {
 
@@ -115,7 +115,7 @@ describe('Fuzz — CryptoHelper', function () {
                     const label = `fuzz-invalid-${coin}-${network}`
                     try {
                         await cryptoHelper.getNewAddress(label, coin, network, null, 'legacy', 0)
-                        // If it doesn't throw, that's a finding — but not a crash
+                        // If it doesn't throw, that's a finding, but not a crash
                     } catch (e) {
                         // Expected: invalid network causes error in bip32 or payments
                         assert(e instanceof Error || e instanceof TypeError)
@@ -125,7 +125,7 @@ describe('Fuzz — CryptoHelper', function () {
         })
     })
 
-    // ── getNewAddress with fuzzed addressIndex ──────────────────
+    // getNewAddress with fuzzed addressIndex
 
     describe('getNewAddress with fuzzed addressIndex', function () {
 
@@ -153,7 +153,7 @@ describe('Fuzz — CryptoHelper', function () {
                     try {
                         await cryptoHelper.getNewAddress(label, 'bitcoin', 'regtest', null, 'legacy', idx)
                     } catch (e) {
-                        // BIP32 derivation may throw for invalid indices — expected
+                        // BIP32 derivation may throw for invalid indices (expected)
                         assert(e instanceof Error || e instanceof TypeError || e instanceof RangeError)
                     }
                 }
@@ -161,7 +161,7 @@ describe('Fuzz — CryptoHelper', function () {
         })
     })
 
-    // ── getNewAddress with fuzzed mnemonic ──────────────────────
+    // getNewAddress with fuzzed mnemonic
 
     describe('getNewAddress with fuzzed mnemonic', function () {
 
@@ -171,7 +171,7 @@ describe('Fuzz — CryptoHelper', function () {
                 try {
                     await cryptoHelper.getNewAddress(label, 'bitcoin', 'regtest', mnemonic, 'legacy', 0)
                     // bip39.mnemonicToSeedSync works with any string (generates a seed)
-                    // even invalid mnemonics produce a seed — this is by design
+                    // even invalid mnemonics produce a seed, which is by design
                 } catch (e) {
                     assert(e instanceof Error || e instanceof TypeError)
                 }
@@ -179,11 +179,11 @@ describe('Fuzz — CryptoHelper', function () {
         })
     })
 
-    // ── CryptoNetworks.getBitcoinJsNetwork with fuzzed names ────
+    // CryptoNetworks.getBitcoinJsNetwork with fuzzed names
 
     describe('CryptoNetworks.getBitcoinJsNetwork with fuzzed input', function () {
 
-        it('never crashes — returns object or undefined', function () {
+        it('never crashes: returns object or undefined', function () {
             fc.assert(fc.property(gen.anyFuzzValue, (networkName) => {
                 try {
                     const result = CryptoNetworks.getBitcoinJsNetwork(networkName)
@@ -198,7 +198,7 @@ describe('Fuzz — CryptoHelper', function () {
 
     describe('CryptoNetworks.getFirstBlock with fuzzed input', function () {
 
-        it('never crashes — returns a number', function () {
+        it('never crashes: returns a number', function () {
             fc.assert(fc.property(gen.anyFuzzValue, (networkName) => {
                 const result = CryptoNetworks.getFirstBlock(networkName)
                 assert(typeof result === 'number', `should return number, got: ${typeof result}`)

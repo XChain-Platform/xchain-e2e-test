@@ -19,9 +19,9 @@
  * the public xchain-sdk API. Unlike the connector-based suites under
  * test/actions/ (which call the encoder/indexer directly and sign PSBTs
  * by hand), everything here flows through sdk.submitAction(), so the
- * SDK's own orchestration — action-string building, format selection,
+ * SDK's own orchestration (action-string building, format selection,
  * encoder calls, PSBT signing, P2SH/P2WSH two-phase reveal, broadcast
- * and indexer confirmation — is what is under test.
+ * and indexer confirmation) is what is under test.
  *
  * Reuses the live regtest stack + global connectors that
  * test/initialCheck.test.js stands up (regtestMinerConnector,
@@ -29,7 +29,7 @@
  *
  *     npm run test:sdk
  *
- * (requires Node 22 — the indexer DB layer pulled in by initialCheck
+ * (requires Node 22: the indexer DB layer pulled in by initialCheck
  * uses the mariadb ESM build.)
  *
  ********************************************************************/
@@ -114,8 +114,8 @@ async function fundedSdkAddress(sdk, amountToFund = 1, addressType = 'p2pkh') {
 }
 
 // Transient regtest-stack errors that warrant a quiesce + rebuild rather
-// than a hard failure — same class the connector suite's transactionHelper
-// retries (stale/spent UTXOs, tracker lag, mempool chain limits). These are
+// than a hard failure (same class the connector suite's transactionHelper
+// retries: stale/spent UTXOs, tracker lag, mempool chain limits). These are
 // timing characteristics of a fast regtest stack, not action-level failures
 // (a genuinely invalid action is rejected later by the indexer, not here).
 function isTransientStackError(err) {
@@ -130,7 +130,7 @@ async function submit(sdk, actionData, encoderOpts, opts, attempts = 6) {
     // Default to confirmed-only UTXOs (like the connector suite): submitAction
     // waits for indexer confirmation, so each action's change is mined before the
     // next runs. Spending unconfirmed UTXOs invites the tracker's stale mempool
-    // view → bad-txns-inputs-missingorspent. Caller can override.
+    // view -> bad-txns-inputs-missingorspent. Caller can override.
     const eo = Object.assign({ unconfirmed: false }, encoderOpts);
     let lastErr;
     for (let i = 1; i <= attempts; i++) {
