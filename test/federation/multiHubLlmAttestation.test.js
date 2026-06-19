@@ -71,7 +71,7 @@ module.exports = {
             envelope,
             'handleResponse',
             ['ctx-llm-mvh'],
-            { redundancy: 3, deadlineBlocks: 30 }
+            { redundancy: 3, deadlineBlocks: 20 }
         );
         xchain.state.set('pending_request_id', requestId);
         return requestId;
