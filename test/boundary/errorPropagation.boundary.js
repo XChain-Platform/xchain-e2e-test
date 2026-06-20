@@ -28,7 +28,10 @@ global.nodeConnector = {
 }
 global.utxoTrackerConnector = {
     waitForUtxos: async () => true,
-    getUtxosFromAddress: async () => ({ utxos: [] })
+    getUtxosFromAddress: async () => ({ utxos: [] }),
+    // getNewFundedAddress queries sync status for its diagnostic message before
+    // throwing the "utxo tracker couldn't parse" error; null yields "sync-status=unavailable".
+    getSyncStatus: async () => null
 }
 global.encoderConnector = { createTx: async () => {} }
 
@@ -60,6 +63,23 @@ describe('Boundary: Error Propagation', function () {
 
     beforeEach(function () {
         global.wallets = {}
+        // Sibling boundary files (globalState, identifiers) also assign these connector
+        // globals at module-load time, and the last require wins, clobbering the mocks
+        // defined above (notably dropping getSyncStatus). Re-establish them per test so
+        // these error-propagation cases are immune to cross-file load order.
+        global.regtestMinerConnector = { sendFunds: async () => 'txid-stub' }
+        global.nodeConnector = {
+            waitForTx: async () => true,
+            broadcastTx: async () => 'txhash-stub',
+            getFeePerKilobyte: async () => 0.001,
+            getTransactionHex: async () => ''
+        }
+        global.utxoTrackerConnector = {
+            waitForUtxos: async () => true,
+            getUtxosFromAddress: async () => ({ utxos: [] }),
+            getSyncStatus: async () => null
+        }
+        global.encoderConnector = { createTx: async () => {} }
     })
 
     afterEach(function () {
@@ -292,7 +312,9 @@ describe('Boundary: Error Propagation', function () {
                 // Expected first failure
             }
 
-            const result = await cryptoHelper.getNewFundedAddress('retry-fund', 'bitcoin', 'regtest', null, 'legacy', 1, 1.0)
+            // seedGas=false: this asserts wallet-cache reuse, not gas seeding, so skip the
+            // native-fee/oracle path that a unit run can't satisfy.
+            const result = await cryptoHelper.getNewFundedAddress('retry-fund', 'bitcoin', 'regtest', null, 'legacy', 1, 1.0, false)
 
             assert.ok(result.address, 'second call should succeed')
             assert.strictEqual(global.wallets['retry-fund'].addresses.length, 2,

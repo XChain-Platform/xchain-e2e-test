@@ -145,9 +145,13 @@ describe('transactionHelper', function () {
             const dateStub = stubDateNowExpired();
 
             try {
+                // skipNativeFeeInjection=true: this test asserts the encoder/broadcast
+                // connector contract, not fee discovery, so opt out of the native-fee
+                // path (which needs live oracle/feeschedule infra unavailable in a unit run).
                 await transactionHelper.createAndSendTransaction(
                     { address, privateKey: privKey, publicKey: keyPair.publicKey },
-                    { action: 'ISSUE' }
+                    { action: 'ISSUE' },
+                    null, [], null, null, true
                 );
             } finally {
                 dateStub.restore();
@@ -182,7 +186,8 @@ describe('transactionHelper', function () {
             try {
                 await transactionHelper.createAndSendTransaction(
                     { address, privateKey: privKey, publicKey: keyPair.publicKey },
-                    {}
+                    {},
+                    null, [], null, null, true
                 );
             } finally {
                 dateStub.restore();

@@ -41,7 +41,10 @@ describe('swapHelper', () => {
             )
 
             const msg = createTxStub.firstCall.args[1]
-            assert.strictEqual(msg, 'SWAP|0|BTC|TOK|100|LTC|LTOK|200|getAddr|1000|allow1|block1|memo')
+            // Canonical SWAP v0: VERSION|GIVE_COIN|GIVE_TICK|GIVE_AMOUNT|GIVE_OWNERSHIP|
+            // GET_COIN|GET_TICK|GET_AMOUNT|GET_OWNERSHIP|GET_ADDRESS|EXPIRATION|ALLOW_LIST|
+            // BLOCK_LIST|MEMO. Both ownership fields are empty for a normal swap.
+            assert.strictEqual(msg, 'SWAP|0|BTC|TOK|100||LTC|LTOK|200||getAddr|1000|allow1|block1|memo')
             assert.strictEqual(result.txHash, 'abc123')
             assert.deepStrictEqual(result.swap, { id: 180 })
         })
@@ -53,7 +56,7 @@ describe('swapHelper', () => {
             )
 
             const msg = createTxStub.firstCall.args[1]
-            assert.strictEqual(msg, 'SWAP|0|BTC|TOK|100|LTC|LTOK|200|||||memo')
+            assert.strictEqual(msg, 'SWAP|0|BTC|TOK|100||LTC|LTOK|200||||||memo')
         })
 
         it('should call waitForSwap once', async () => {

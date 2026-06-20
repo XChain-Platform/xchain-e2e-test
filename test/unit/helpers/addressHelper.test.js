@@ -34,7 +34,7 @@ describe('addressHelper', () => {
             const result = await helper.sendAddressV0(addressInfo, '1', '0', 'note')
 
             const msg = createTxStub.firstCall.args[1]
-            assert.strictEqual(msg, 'ADDRESS|0|1|0|note')
+            assert.strictEqual(msg, 'ADDRESS|0|1|0|1|note')
             assert.strictEqual(result.txHash, 'abc123')
             assert.deepStrictEqual(result.addressOption, { id: 120 })
         })

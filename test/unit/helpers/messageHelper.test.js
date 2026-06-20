@@ -21,20 +21,27 @@ describe('messageHelper', () => {
     let createTxStub
 
     beforeEach(() => {
+        // The MESSAGE wire format carries a COIN field sourced from the global COIN_CODE
+        // (set by the live harness); the builders read it as a bare global, so the unit
+        // test must provide it or every send throws ReferenceError.
+        global.COIN_CODE = 'BTC'
         createTxStub = sinon.stub(transactionHelper, 'createAndSendTransaction').resolves('abc123')
         global.indexerDatabase = {
             waitForMessage: sinon.stub().resolves({ id: 60 }),
         }
     })
 
-    afterEach(() => sinon.restore())
+    afterEach(() => {
+        sinon.restore()
+        delete global.COIN_CODE
+    })
 
     describe('sendMessageV3', () => {
         it('should build correct message for plaintext', async () => {
             const result = await helper.sendMessageV3(addressInfo, 'dest1', 'Hello world')
 
             const msg = createTxStub.firstCall.args[1]
-            assert.strictEqual(msg, 'MESSAGE|3|dest1|Hello world')
+            assert.strictEqual(msg, 'MESSAGE|3|BTC|dest1|Hello world')
             assert.strictEqual(result.txHash, 'abc123')
             assert.deepStrictEqual(result.message, { id: 60 })
         })
@@ -50,7 +57,7 @@ describe('messageHelper', () => {
             const result = await helper.sendMessageV0(addressInfo, 'dest1', 'AES256', 'pubkey123')
 
             const msg = createTxStub.firstCall.args[1]
-            assert.strictEqual(msg, 'MESSAGE|0|dest1|AES256|pubkey123')
+            assert.strictEqual(msg, 'MESSAGE|0|BTC|dest1|AES256|pubkey123')
             assert.strictEqual(result.txHash, 'abc123')
             assert.deepStrictEqual(result.message, { id: 60 })
         })
@@ -61,7 +68,7 @@ describe('messageHelper', () => {
             const result = await helper.sendMessageV1(addressInfo, 'dest1', 'RSA', 'recvkey456')
 
             const msg = createTxStub.firstCall.args[1]
-            assert.strictEqual(msg, 'MESSAGE|1|dest1|RSA|recvkey456')
+            assert.strictEqual(msg, 'MESSAGE|1|BTC|dest1|RSA|recvkey456')
             assert.strictEqual(result.txHash, 'abc123')
         })
     })
@@ -71,7 +78,7 @@ describe('messageHelper', () => {
             const result = await helper.sendMessageV2(addressInfo, 'dest1', 'encryptedblob')
 
             const msg = createTxStub.firstCall.args[1]
-            assert.strictEqual(msg, 'MESSAGE|2|dest1|encryptedblob')
+            assert.strictEqual(msg, 'MESSAGE|2|BTC|dest1|encryptedblob')
             assert.strictEqual(result.txHash, 'abc123')
         })
     })

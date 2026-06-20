@@ -40,11 +40,15 @@ describe('dispenserHelper', () => {
                 'BTC', 'TOK', '100', '50',
                 'LTC', 'LTOK', '200', 'getAddr',
                 'USD', '9.99', '1000',
-                'allowList1', 'blockList1', 'memo'
+                '7000', 'allowList1', 'blockList1', 'memo'
             )
 
             const msg = createTxStub.firstCall.args[1]
-            assert.strictEqual(msg, 'DISPENSER|0|BTC|TOK|100|50|LTC|LTOK|200|getAddr|USD|9.99|1000|allowList1|blockList1|memo')
+            // Canonical DISPENSER v0: VERSION|GIVE_COIN|GIVE_TICK|GIVE_AMOUNT|GIVE_OWNERSHIP|
+            // GIVE_ESCROW|GET_COIN|GET_TICK|GET_AMOUNT|GET_ADDRESS|FIAT_CODE|FIAT_AMOUNT|
+            // ORACLE_ADDRESS|EXPIRATION|ALLOW_LIST|BLOCK_LIST|MEMO. GIVE_OWNERSHIP is empty
+            // for a normal (non-ownership) dispenser.
+            assert.strictEqual(msg, 'DISPENSER|0|BTC|TOK|100||50|LTC|LTOK|200|getAddr|USD|9.99|1000|7000|allowList1|blockList1|memo')
             assert.strictEqual(result.txHash, 'abc123')
             assert.deepStrictEqual(result.dispenser, { id: 160 })
         })
@@ -55,11 +59,11 @@ describe('dispenserHelper', () => {
                 null, null, '100', '50',
                 null, null, '200', 'getAddr',
                 null, null, null,
-                null, null, 'memo'
+                null, null, null, 'memo'
             )
 
             const msg = createTxStub.firstCall.args[1]
-            assert.strictEqual(msg, 'DISPENSER|0|||100|50|||200|getAddr||||||memo')
+            assert.strictEqual(msg, 'DISPENSER|0|||100||50|||200|getAddr|||||||memo')
         })
 
         it('should call waitForDispenser once', async () => {
