@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.8] - 2026-06-20
+
 ### Fixed
 - `src/CryptoNetworks.js` + dust assertions across the unit/boundary/regression/integration/e2e suites — corrected the Litecoin dust threshold from `546` to `5460` litoshis for all three `litecoin-*` networks (Litecoin Core's dust relay fee is 10× Bitcoin's, so the standard-output dust floor is 5460). Test expectations that pinned a flat 546 for every network now assert per-chain values: 546 for BTC/DOGE, 5460 for LTC; the live bootstrap check derives the expected floor from `COIN`.
 - `test/sdk/messaging.sdk.test.js` — the MESSAGE v2 case now drives a real `sdk.sendMessage()` (recipient-pubkey lookup → ECIES encrypt → format selection → encode → broadcast), then reads the message back through `getMessagesForAddress` and asserts it decrypts to the exact sent bytes with the inferred ECIES method (1). It previously submitted a hand-built `version: 2` action with a stub ciphertext, which bypassed the SDK encode path entirely — so the suite stayed green even though `messaging.send()` threw `NO_MATCHING_FORMAT` for every encrypted send. The case also asserts the encoded action is `MESSAGE|2|...` with no `ENCRYPTION_METHOD` field.
@@ -42,8 +44,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dependency installs are now reproducible: `package-lock.json` is committed to the repo (previously git-ignored) and the Docker image is built with `npm ci` instead of `npm install`. The lockfile is generated with the `file:`-linked `xchain-hub` staged so it captures xchain-hub's transitive dependencies (express, cors, ws, geoip-lite, etc.); `npm ci` then installs that exact tree and fails the build if the lockfile is out of sync with `package.json`, rather than silently resolving newer versions.
 - `db.js` `checkSweep()` and the `sweepFilterArb` fuzz generator now match against the three-flag SWEEP schema (`orders` / `swaps` / `dispensers`) instead of the removed `escrows` column. `sweepHelper.test.js` is updated to the current `sendSweepV0()` six-flag wire format (`balances|ownerships|orders|swaps|dispensers`), which had drifted from the helper after the SWEEP restructure.
 - `test/regression/protocol-size-limits.regression.js` — the contract code-size drift guard now also asserts the indexer's DEPLOY `MAX_CODE_SIZE` and the VM isolate's `maxCodeSize` against the canonical protocol constant, not just the SDK's copy. Previously those two services' local caps were documented as canonical but unguarded, so a drift in either would not have failed the suite.
-
-## [0.3.8] - 2026-05-29
 
 ### Changed
 - `CryptoNetworks.getFirstBlock()` for `bitcoin-mainnet` now returns `900000` instead of `844000`, matching the encoder and decoder mainnet ingest floor. Keeps the first-block constant consistent across all three services. The regtest suite (which starts at block 0) is unaffected.

@@ -38,21 +38,21 @@ End-to-end Mocha test suite for the XChain Platform. Exercises the full platform
 
 ## Documentation
 
-Full documentation is available in the [xchain-documentation](https://github.com/XChain-platform/xchain-documentation/tree/master/components/e2e-test) repository:
+Full documentation is available in the [xchain-documentation](https://github.com/XChain-Platform/xchain-documentation/tree/master/components/e2e-test) repository:
 
 | Document | Description |
 |---|---|
-| [README](https://github.com/XChain-platform/xchain-documentation/blob/master/components/e2e-test/README.md) | Overview, architecture, test lifecycle, service connectors |
-| [Architecture](https://github.com/XChain-platform/xchain-documentation/blob/master/components/e2e-test/ARCHITECTURE.md) | Data flow, connector classes, bootstrap sequence, polling pattern |
-| [Configuration](https://github.com/XChain-platform/xchain-documentation/blob/master/components/e2e-test/CONFIGURATION.md) | Environment variables, hub discovery fallback, Docker setup |
-| [Operations](https://github.com/XChain-platform/xchain-documentation/blob/master/components/e2e-test/OPERATIONS.md) | Running tests, Docker execution, troubleshooting, CI integration |
+| [README](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/e2e-test/README.md) | Overview, architecture, test lifecycle, service connectors |
+| [Architecture](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/e2e-test/ARCHITECTURE.md) | Data flow, connector classes, bootstrap sequence, polling pattern |
+| [Configuration](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/e2e-test/CONFIGURATION.md) | Environment variables, hub discovery fallback, Docker setup |
+| [Operations](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/e2e-test/OPERATIONS.md) | Running tests, Docker execution, troubleshooting, CI integration |
 
 ## Quick Start
 
 Clone the repository and install dependencies:
 
 ```bash
-git clone https://github.com/XChain-platform/xchain-e2e-test.git
+git clone https://github.com/XChain-Platform/xchain-e2e-test.git
 cd xchain-e2e-test
 npm install
 ```
@@ -162,11 +162,11 @@ npm run test:regression:p0
 
 ## Related
 
-- [Regtest Development Guide](https://github.com/XChain-platform/xchain-documentation/blob/master/developer-guide/REGTEST_DEVELOPMENT.md): setting up a local regtest environment
-- [Regtest Miner](https://github.com/XChain-platform/xchain-regtest-miner): auto-mining service the E2E suite depends on
-- [Encoder](https://github.com/XChain-platform/xchain-encoder): constructs XChain transactions tested by this suite
-- [Indexer](https://github.com/XChain-platform/xchain-indexer): processes transactions and maintains token state verified by this suite
-- [Testing Guide](https://github.com/XChain-platform/xchain-documentation/blob/master/developer-guide/TESTING.md): platform-wide testing philosophy and coverage
+- [Regtest Development Guide](https://github.com/XChain-Platform/xchain-documentation/blob/master/developer-guide/REGTEST_DEVELOPMENT.md): setting up a local regtest environment
+- [Regtest Miner](https://github.com/XChain-Platform/xchain-regtest-miner): auto-mining service the E2E suite depends on
+- [Encoder](https://github.com/XChain-Platform/xchain-encoder): constructs XChain transactions tested by this suite
+- [Indexer](https://github.com/XChain-Platform/xchain-indexer): processes transactions and maintains token state verified by this suite
+- [Testing Guide](https://github.com/XChain-Platform/xchain-documentation/blob/master/developer-guide/TESTING.md): platform-wide testing philosophy and coverage
 
 ---
 
