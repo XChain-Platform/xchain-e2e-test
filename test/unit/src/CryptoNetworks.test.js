@@ -74,12 +74,19 @@ describe('CryptoNetworks', () => {
             assert.strictEqual(CryptoNetworks.getBitcoinJsNetwork('litecoin-regtest').bech32, 'rltc')
         })
 
-        it('should have matching dogecoin testnet and regtest configs', () => {
+        it('should return canonical dogecoin testnet and regtest configs', () => {
+            // DOGE testnet and regtest share the P2SH version (0xc4) but use distinct
+            // pubKeyHash/wif prefixes: testnet 0x71/0xf1, regtest the bitcoin-regtest
+            // 0x6f/0xef. These values are byte-identical across every service repo
+            // (guarded by the cross-repo parity test below); they are NOT interchangeable.
             const testnet = CryptoNetworks.getBitcoinJsNetwork('dogecoin-testnet')
             const regtest = CryptoNetworks.getBitcoinJsNetwork('dogecoin-regtest')
-            assert.strictEqual(testnet.pubKeyHash, regtest.pubKeyHash)
-            assert.strictEqual(testnet.scriptHash, regtest.scriptHash)
-            assert.strictEqual(testnet.wif, regtest.wif)
+            assert.strictEqual(testnet.pubKeyHash, 0x71)
+            assert.strictEqual(testnet.scriptHash, 0xc4)
+            assert.strictEqual(testnet.wif, 0xf1)
+            assert.strictEqual(regtest.pubKeyHash, 0x6f)
+            assert.strictEqual(regtest.scriptHash, 0xc4)
+            assert.strictEqual(regtest.wif, 0xef)
         })
     })
 

@@ -48,8 +48,10 @@ describe('[regression:p2] Configuration & Cross-Chain', function () {
     it('[regression:p2] R-CFG-003: CryptoNetworks resolves correct DOGE regtest config', function () {
         const network = CryptoNetworks.getBitcoinJsNetwork('dogecoin-regtest')
         assert.ok(network)
-        assert.strictEqual(network.dustThreshold, 546)
-        assert.strictEqual(network.pubKeyHash, 0x71)
+        // DOGE uses a 100000-koinu dust floor on every network; regtest carries the
+        // bitcoin-regtest 0x6f pubKeyHash prefix. Both are canonical across all repos.
+        assert.strictEqual(network.dustThreshold, 100000)
+        assert.strictEqual(network.pubKeyHash, 0x6f)
         assert.ok(network.messagePrefix.includes('Dogecoin'))
     })
 
