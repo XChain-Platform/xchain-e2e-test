@@ -28,15 +28,12 @@ const gen = require('./fuzz-generators')
 // Inject mock mariadb before requiring anything that depends on db.js
 require('../integration/fixtures/mockMariadb')
 
-// ── Globals required by helpers ──────────────────────────────────
-
 global.wallets = {}
 global.COIN = 'bitcoin'
 global.NETWORK = 'regtest'
 global.NETWORK_OBJECT = { dustThreshold: 546 }
 global.COIN_CODE = 'BTC'
 
-// Stub connectors at the global level
 global.nodeConnector = {
     waitForTx: async () => true,
     broadcastTx: async () => 'txhash-stub',
@@ -60,7 +57,6 @@ global.regtestMinerConnector = {
 }
 global.indexerConnector = { ping: async () => true }
 
-// Create a mock indexerDatabase with all waitFor*/check* methods
 const mockDbResults = {
     issue: { tick: 'TOK', status: 'valid' },
     send: { tick: 'TOK', source: 'addr', status: 'valid' },
@@ -101,15 +97,11 @@ for (const [name, row] of Object.entries(mockDbResults)) {
 }
 global.indexerDatabase.ping = async () => true
 
-// ── Capture the message string passed to createAndSendTransaction ─
-
 let capturedMessage = null
 
 const transactionHelper = require('../transactionHelper')
 
 const FC_PARAMS = { numRuns: 200 }
-
-// ── Fuzz helper: test that message construction doesn't crash ────
 
 function fuzzMessageConstruction(helperName, methodName, argsArb) {
     describe(`Fuzz: ${helperName}.${methodName} message construction`, function () {
@@ -153,8 +145,6 @@ function fuzzMessageConstruction(helperName, methodName, argsArb) {
         })
     })
 }
-
-// ── ACTION field tuple generators ────────────────────────────────
 
 const f = gen.actionFieldArb
 
@@ -224,8 +214,6 @@ describe('Fuzz: ACTION Message Construction', function () {
     fuzzMessageConstruction('messageHelper', 'sendMessageV0',
         fc.tuple(f, f))
 
-    // ── Pipe delimiter injection ─────────────────────────────────
-
     describe('Pipe delimiter injection in ACTION fields', function () {
 
         let createAndSendStub
@@ -274,8 +262,6 @@ describe('Fuzz: ACTION Message Construction', function () {
             assert(typeof capturedMessage === 'string')
         })
     })
-
-    // ── Null/undefined coercion in string concatenation ──────────
 
     describe('Null/undefined field coercion', function () {
 

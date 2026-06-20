@@ -28,18 +28,15 @@ describe('E2E: Action Flow Orchestration', () => {
             assert(issueResult.txHash, 'txHash should be returned')
             assert.strictEqual(issueResult.txHash.length, 64, 'txHash should be 64-char hex')
 
-            // Issue record assertions
             assert(issueResult.issue, 'Issue DB record should exist')
             assert.strictEqual(issueResult.issue.tick, tick, 'Issue tick should match')
             assert.strictEqual(issueResult.issue.status, 'valid', 'Issue status should be valid')
 
-            // Credit record assertions
             assert(issueResult.credit, 'Issue credit DB record should exist')
             assert.strictEqual(issueResult.credit.address, addr.address, 'Credit should go to issuer')
             assert.strictEqual(issueResult.credit.tick, tick, 'Credit tick should match')
             assert.strictEqual(Number(issueResult.credit.amount), 10, 'Credit amount should match mintSupply')
 
-            // Cross-table consistency
             assert.strictEqual(issueResult.issue.tx_hash, issueResult.credit.tx_hash,
                 'Issue and credit tx_hash should match (same transaction)')
         })
@@ -52,7 +49,6 @@ describe('E2E: Action Flow Orchestration', () => {
             assert(sendResult.txHash, 'Send txHash should be returned')
             assert(sendResult.txHash !== issueResult.txHash, 'Send txHash should differ from issue txHash')
 
-            // Send record assertions
             assert(sendResult.send, 'Send DB record should exist')
             assert.strictEqual(sendResult.send.status, 'valid', 'Send status should be valid')
             assert.strictEqual(sendResult.send.tick, tick, 'Send tick should match')
@@ -60,18 +56,15 @@ describe('E2E: Action Flow Orchestration', () => {
             assert.strictEqual(sendResult.send.source, addr.address, 'Send source should be sender')
             assert.strictEqual(sendResult.send.destination, dest.address, 'Send destination should be receiver')
 
-            // Credit for receiver
             assert(sendResult.credit, 'Send credit should exist')
             assert.strictEqual(sendResult.credit.address, dest.address, 'Credit should go to destination')
             assert.strictEqual(Number(sendResult.credit.amount), 5, 'Credit amount should match send amount')
             assert.strictEqual(sendResult.credit.tick, tick, 'Credit tick should match')
 
-            // Debit for sender
             assert(sendResult.debit, 'Send debit should exist')
             assert.strictEqual(sendResult.debit.address, addr.address, 'Debit should come from sender')
             assert.strictEqual(Number(sendResult.debit.amount), 5, 'Debit amount should match send amount')
 
-            // Cross-table consistency
             assert.strictEqual(sendResult.send.tx_hash, sendResult.credit.tx_hash,
                 'Send and credit tx_hash should match')
             assert.strictEqual(sendResult.send.tx_hash, sendResult.debit.tx_hash,
@@ -85,10 +78,8 @@ describe('E2E: Action Flow Orchestration', () => {
             const other = await cryptoHelper.getNewFundedAddress('E2E.NEG.OTHER', COIN, NETWORK, null, 'legacy', 0, 1)
             const tick = 'E2ENEG' + owner.address.substring(owner.address.length - 8)
 
-            // Owner creates the token
             await issueHelper.sendIssueV0(owner, tick, 100, 10, 0, 'neg test', 10)
 
-            // Non-owner tries to edit description
             const badMessage = 'ISSUE|1|' + tick + '|Hijacked description'
             const txHash = await transactionHelper.createAndSendTransaction(other, badMessage)
 
@@ -100,7 +91,6 @@ describe('E2E: Action Flow Orchestration', () => {
             assert(invalidRow, 'Invalid issue edit should be recorded in DB')
             assert.strictEqual(invalidRow.status, 'invalid: issued by another address', 'Status should indicate non-owner rejection')
 
-            // Original issue should remain valid
             const originalIssue = await indexerDatabase.checkIssue({ tick: tick, source: owner.address, status: 'valid' })
             assert(originalIssue, 'Original valid issue should still exist')
         })
@@ -109,12 +99,10 @@ describe('E2E: Action Flow Orchestration', () => {
             const addr = await cryptoHelper.getNewFundedAddress('E2E.NEG.SEND', COIN, NETWORK, null, 'legacy', 0, 1)
             const tick = 'E2ENEGS' + addr.address.substring(addr.address.length - 7)
 
-            // Create token with only 10 supply
             await issueHelper.sendIssueV0(addr, tick, 100, 10, 0, 'neg send test', 10)
 
             const dest = await cryptoHelper.getNewAddress('E2E.NEG.SEND.DEST', COIN, NETWORK, null, 'legacy', 0)
 
-            // Try to send 999 when we only have 10
             const sendMessage = 'SEND|0|' + tick + '|999|' + dest.address + '|overspend'
             const txHash = await transactionHelper.createAndSendTransaction(addr, sendMessage)
 
@@ -126,7 +114,6 @@ describe('E2E: Action Flow Orchestration', () => {
             assert(invalidSend, 'Send should be rejected with insufficient funds')
             assert.strictEqual(invalidSend.status, 'invalid: insufficient funds')
 
-            // No credit should exist for invalid sends
             const noCredit = await indexerDatabase.checkCredit({ txHash: txHash, address: dest.address })
             assert(!noCredit, 'No credit should be created for an invalid send')
         })
@@ -137,7 +124,6 @@ describe('E2E: Action Flow Orchestration', () => {
             const addr = await cryptoHelper.getNewFundedAddress('E2E.BATCH', COIN, NETWORK, null, 'legacy', 0, 1)
             const tick = 'E2EBATCH' + addr.address.substring(addr.address.length - 6)
 
-            // Create token with enough supply for batch sends
             await issueHelper.sendIssueV0(addr, tick, 100, 50, 0, 'batch e2e test', 50)
 
             const dest1 = await cryptoHelper.getNewAddress('E2E.BATCH', COIN, NETWORK, null, 'legacy', 1)
@@ -153,7 +139,6 @@ describe('E2E: Action Flow Orchestration', () => {
             assert(batchResult.txHash, 'Batch txHash should be returned')
             assert.strictEqual(batchResult.txHash.length, 64, 'Batch txHash should be 64-char hex')
 
-            // Verify individual send records
             const send1 = await indexerDatabase.waitForSend({
                 source: addr.address,
                 destination: dest1.address,

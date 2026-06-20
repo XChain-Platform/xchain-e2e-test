@@ -161,7 +161,6 @@ exports.mochaHooks = {
 
                         // Hub schema uses "port" (not "server_port"); DB fields live
                         // directly in the xchain-indexer entry (db_host/db_port/name/user/pass).
-                        //NODE_URL = coinNet["node"]["host"]
                         NODE_URL = "localhost"
                         NODE_PORT = coinNet["node"]["port"]
                         NODE_USER = coinNet["node"]["user"]
@@ -169,30 +168,24 @@ exports.mochaHooks = {
 
                         // DB config comes from the indexer's db_host/db_port fields
                         // (hub has no top-level "database" section).
-                        //DATABASE_URL = coinNet["xchain-indexer"]["db_host"]
                         DATABASE_URL = "127.0.0.1"
                         DATABASE_PORT = coinNet["xchain-indexer"]["db_port"]
 
-                        //UTXO_TRACKER_URL = coinNet["xchain-utxo-tracker"]["host"]
                         UTXO_TRACKER_URL = "localhost"
                         UTXO_TRACKER_PORT = coinNet["xchain-utxo-tracker"]["port"]
 
-                        //ENCODER_URL = coinNet["xchain-encoder"]["host"]
                         ENCODER_URL = "localhost"
                         ENCODER_PORT = coinNet["xchain-encoder"]["port"]
 
-                        //DECODER_URL = coinNet["xchain-decoder"]["host"]
                         DECODER_URL = "localhost"
                         DECODER_PORT = coinNet["xchain-decoder"] && coinNet["xchain-decoder"]["port"]
 
-                        //INDEXER_URL = coinNet["xchain-indexer"]["host"]
                         INDEXER_URL = "localhost"
                         INDEXER_PORT = coinNet["xchain-indexer"]["port"]
                         INDEXER_DATABASE_NAME = coinNet["xchain-indexer"]["name"]
                         INDEXER_DATABASE_USER = coinNet["xchain-indexer"]["user"]
                         INDEXER_DATABASE_PASS = coinNet["xchain-indexer"]["pass"]
 
-                        //REGTEST_MINER_URL = coinNet["xchain-regtest-miner"]["host"]
                         REGTEST_MINER_URL = "localhost"
                         REGTEST_MINER_PORT = coinNet["xchain-regtest-miner"] && coinNet["xchain-regtest-miner"]["port"]
 
@@ -355,7 +348,6 @@ exports.mochaHooks = {
                 console.log("There was a problem setting the default mining time values for the regtest miner")
             }
 
-            // Clear wallet key material from memory
             if (global.wallets) {
                 for (const label of Object.keys(global.wallets)) {
                     const w = global.wallets[label]
@@ -369,7 +361,6 @@ exports.mochaHooks = {
                 global.wallets = {}
             }
 
-            // Close database connection pool
             try {
                 if (global.indexerDatabase && global.indexerDatabase.pool) {
                     await global.indexerDatabase.pool.end()

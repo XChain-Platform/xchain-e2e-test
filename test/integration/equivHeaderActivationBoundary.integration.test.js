@@ -115,23 +115,18 @@ function checkpointRows(hub) {
         ['BTC', 'regtest', TIP.block_index]);
 }
 
-// The bare v0 checkpoint canonical for a finalized row (block_index from the TIP,
-// snapshot_block = the seeded anchor block). Byte-for-byte StateCheckpointEngine.
-// _rawCanonicalCheckpoint.
+// Byte-for-byte mirror of StateCheckpointEngine._rawCanonicalCheckpoint.
 function rawCanonical(row, snapshotBlock) {
     return ['XCHECKPOINT', 'BTC', 'regtest', String(TIP.block_index), TIP.block_hash,
             TIP.ledger_hash, TIP.actions_hash, TIP.contract_hash,
             String(row.checkpoint_seq), String(snapshotBlock)].join('|');
 }
 
-// The v0 EQUIV round id: chain|network|block_index|checkpoint_seq (VIEW always 0;
-// checkpoints have no view change).
+// VIEW is always 0 for checkpoints (no view change).
 function v0RoundId(row) {
     return 'BTC|regtest|' + TIP.block_index + '|' + row.checkpoint_seq;
 }
 
-// Collect the finalized checkpoint from every hub; assert each holds exactly one and
-// they are byte-identical on the ledger. Returns the rows.
 async function finalizeOnEveryHub(mvh) {
     await tickAll(mvh);
     const rows = [];
@@ -145,7 +140,6 @@ async function finalizeOnEveryHub(mvh) {
     return rows;
 }
 
-// How many of a row's stored sigs verify against a candidate canonical string.
 function verifyingCount(row, canonical) {
     const sigs = JSON.parse(row.validator_signatures);
     const ok = new Set();
@@ -157,7 +151,6 @@ function verifyingCount(row, canonical) {
 describe('MultiValidatorHub: EQUIV_HEADER activation boundary (WI-2 bump 2 / A4, L2)', function () {
     this.timeout(300_000);
 
-    // Captured raw canonical from each side for the cross-side synthesis assertion.
     let rawBelow = null;
     let rawAbove = null;
 
@@ -172,7 +165,6 @@ describe('MultiValidatorHub: EQUIV_HEADER activation boundary (WI-2 bump 2 / A4,
         }
     });
 
-    // ── BELOW the flag-day (snapshot_block = ACT-1) → headerless bytes ──
     describe('BELOW the height every hub signs the bare headerless canonical', function () {
         let db, mvh, seed;
         before(async function () {
@@ -226,7 +218,6 @@ describe('MultiValidatorHub: EQUIV_HEADER activation boundary (WI-2 bump 2 / A4,
         });
     });
 
-    // ── ABOVE the flag-day (snapshot_block = ACT+1) → header-wrapped bytes ──
     describe('ABOVE the height every hub signs the EQUIV-wrapped canonical', function () {
         let db, mvh, seed;
         before(async function () {
@@ -272,7 +263,6 @@ describe('MultiValidatorHub: EQUIV_HEADER activation boundary (WI-2 bump 2 / A4,
         });
     });
 
-    // ── SYNTHESIS: the header is the ONLY delta at the flag-day ──
     describe('the flag-day is fork-free: identical ledger, header is the only delta', function () {
         it('the raw ledger bytes are byte-identical across the boundary; only the EQUIV header differs', function () {
             if (rawBelow === null || rawAbove === null) {

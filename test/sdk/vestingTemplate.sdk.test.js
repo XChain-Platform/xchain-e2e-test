@@ -117,8 +117,8 @@ describe('[sdk] template:vesting (on-chain custody)', function () {
 
     before(async function () {
         if (!haveConnectors()) this.skip();
-        // Load the contract template lazily so a missing xchain-contracts checkout
-        // skips this suite with a clear reason instead of aborting the whole run.
+        // Load lazily so a missing xchain-contracts checkout skips this suite
+        // instead of aborting the whole run.
         try {
             VESTING_SRC = compactSource(loadTemplate('vesting'));
         } catch (e) {

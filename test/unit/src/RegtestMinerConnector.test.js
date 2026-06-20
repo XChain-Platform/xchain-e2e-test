@@ -33,8 +33,6 @@ describe('RegtestMinerConnector', function () {
         sinon.restore();
     });
 
-    // ── constructor ──────────────────────────────────────────────────────
-
     describe('constructor', function () {
         it('builds the URL as http://{url}:{port}', function () {
             assert.strictEqual(connector.url, `http://${URL}:${PORT}`);
@@ -44,8 +42,6 @@ describe('RegtestMinerConnector', function () {
             assert.strictEqual(connector.port, PORT);
         });
     });
-
-    // ── ping ─────────────────────────────────────────────────────────────
 
     describe('ping', function () {
         it('returns true when response.data.result is truthy', async function () {
@@ -84,8 +80,6 @@ describe('RegtestMinerConnector', function () {
         });
     });
 
-    // ── sendFunds ─────────────────────────────────────────────────────────
-
     describe('sendFunds', function () {
         const ADDRESS = 'bcrt1qtest';
         const AMOUNT  = 1.5;
@@ -117,8 +111,6 @@ describe('RegtestMinerConnector', function () {
         });
     });
 
-    // ── setMiningTime ─────────────────────────────────────────────────────
-
     describe('setMiningTime', function () {
         it('sends the correct JSON-RPC payload', async function () {
             axiosPostStub.resolves({ data: { result: true } });
@@ -143,8 +135,6 @@ describe('RegtestMinerConnector', function () {
             assert.strictEqual(result, null);
         });
     });
-
-    // ── setDefaultMiningTime ──────────────────────────────────────────────
 
     describe('setDefaultMiningTime', function () {
         it('sends the correct JSON-RPC payload with empty params', async function () {

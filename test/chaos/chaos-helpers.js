@@ -16,7 +16,6 @@ const sinon = require('sinon')
 const mockMariadb = require('../integration/fixtures/mockMariadb')
 const Database = require('../../src/db')
 
-// Global keys that chaos tests typically save/restore
 const GLOBAL_KEYS = [
     'COIN', 'NETWORK', 'NETWORK_OBJECT', 'COIN_CODE',
     'encoderConnector', 'nodeConnector', 'utxoTrackerConnector',

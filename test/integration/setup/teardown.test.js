@@ -63,7 +63,6 @@ describe('Bootstrap: teardown resilience', function () {
                 setDefaultMiningTime: async () => { throw new Error('ETIMEDOUT') }
             }
 
-            // The function completes without throwing
             await assert.doesNotReject(() => runAfterAll())
         })
     })

@@ -10,17 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- * E2E test helper: Mock Attestation Validator
- *
- * Generates a real Ed25519 keypair and signs ATTEST v1 (response) bodies
- * using the same canonical message the indexer's verifier expects.
- *
- * This is "mock" only in the sense that the validator runs inside the
- * test process (no hub); it signs with a real key whose pubkey has been
- * staked via the regular STAKE action, so the indexer's capability check
- * + Ed25519 verification exercise the production code paths end-to-end.
- *
  * Spec: claude/reports/specs/2026-05-24_external-attestation-framework.md
  ********************************************************************/
 

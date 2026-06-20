@@ -40,7 +40,6 @@ const destroyHelper     = require('../helpers/destroyHelper')
 const vmHelper          = require('../helpers/vmHelper')
 const transactionHelper = require('../transactionHelper')
 
-// ───────────────────────── DB query helpers ─────────────────────────
 async function q(sql, params) {
     const conn = await indexerDatabase.getConnection()
     try { return await conn.query(sql, params) }
@@ -129,7 +128,6 @@ async function waitAddressController(address, predicate, timeMax = 20000) {
     return ev
 }
 
-// ───────────────────────── guard contracts ─────────────────────────
 // guard params (positional, via getInputParam): 0 actionType, 1 from, 2 to,
 // 3 tick, 4 amount, 5 price, 6 proceedsTick. Deny = xchain.revert(). Allow =
 // return (optionally { payoutLegs }).
@@ -178,7 +176,7 @@ const SELF_EMIT_GATE = `module.exports = { guard: function(){
     return {};
 }};`
 
-// ─────────────── Phase E: permissions manifest guard contracts ───────────────
+// Phase E: permissions manifest guard contracts
 // A guard that EMITS a SEND of its controlled token but whose manifest permits
 // only ISSUE. The emission must be rejected fail-closed (action denied) before
 // the SEND handler ever runs.
@@ -207,7 +205,6 @@ function royaltyGateManifest(creator, market, maxTakeBps) {
     };`
 }
 
-// ───────────────────────── scenarios ─────────────────────────
 describe('Controller Policy Layer: bindings, enforcement, royalty split + permissions manifest (Phases A-E)', function () {
     this.timeout(0)
     let owner
@@ -417,8 +414,6 @@ describe('Controller Policy Layer: bindings, enforcement, royalty split + permis
         console.log('   guarded action deterministically committed (order#', ord.action_index, '); single-node check OK')
     })
 
-    // ───────────────────── Phase E: permissions manifest ─────────────────────
-
     it('E1. manifest persisted at deploy: declared maxTakeBps stored in contract_permissions', async function () {
         const creator = await cryptoHelper.getNewFundedAddress('cv-e1c', COIN, NETWORK, null, 'legacy', 0, 1)
         const market  = await cryptoHelper.getNewFundedAddress('cv-e1m', COIN, NETWORK, null, 'legacy', 0, 1)
@@ -491,8 +486,6 @@ describe('Controller Policy Layer: bindings, enforcement, royalty split + permis
         assert(legs.length === 2 && legs[0].bps === 250 && legs[1].bps === 100, 'legs preserved under the looser cap')
         console.log('   E3b legs within the looser cap settled; OK')
     })
-
-    // ───────────────────── 'all' class: most-specific-wins fallback ─────────────────────
 
     it("8. 'all' class: one binding gates multiple classes; a specific binding overrides it for that class only", async function () {
         const tick = randTick('CVL')

@@ -26,8 +26,6 @@ const XChainHubConnector = require('../../src/XChainHubConnector')
 
 const FC_PARAMS = { numRuns: 200 }
 
-// ── Helpers ──────────────────────────────────────────────────────
-
 function createDb() {
     const mockConn = { query: sinon.stub().resolves([]), release: sinon.stub().resolves() }
     const mockPool = { getConnection: sinon.stub().resolves(mockConn) }
@@ -41,8 +39,6 @@ describe('Fuzz: Config Parsing', function () {
         sinon.restore()
         mockMariadb.createPool.resetHistory()
     })
-
-    // ── Hub config destructuring ────────────────────────────────
 
     describe('Hub config response destructuring', function () {
 
@@ -180,12 +176,9 @@ describe('Fuzz: Config Parsing', function () {
                 // Should not crash: destructuring always succeeds when keys exist
                 const result = extractAllConfigs(config, 'bitcoin', 'regtest')
                 assert(typeof result === 'object')
-                // Values may be any type; that's what we're testing
             }), FC_PARAMS)
         })
     })
-
-    // ── isNullOrNullString comprehensive fuzz ───────────────────
 
     describe('isNullOrNullString with all JS types', function () {
 
@@ -222,8 +215,6 @@ describe('Fuzz: Config Parsing', function () {
             }
         })
     })
-
-    // ── checkAllEnvironmentalVariables pattern fuzz ──────────────
 
     describe('Environment variable validation pattern', function () {
 
@@ -267,8 +258,6 @@ describe('Fuzz: Config Parsing', function () {
             assert.strictEqual(checkAllVars([0, false, '']), true)
         })
     })
-
-    // ── Database constructor with fuzzed parameters ─────────────
 
     describe('Database constructor with fuzzed connection params', function () {
 

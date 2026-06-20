@@ -21,22 +21,15 @@ const XChainHubConnector         = require('../../src/XChainHubConnector')
 const RegtestMinerConnector      = require('../../src/RegtestMinerConnector')
 const CryptoNetworks             = require('../../src/CryptoNetworks')
 
-// Inject mock mariadb before requiring Database
 const mockMariadb = require('../integration/fixtures/mockMariadb')
 const Database    = require('../../src/db')
 const hubFixture  = require('../integration/fixtures/hub')
-
-// ═══════════════════════════════════════════════════════════════════════════
-// P0: Bootstrap Orchestration Regression Tests
-// ═══════════════════════════════════════════════════════════════════════════
 
 describe('[regression:p0] Bootstrap Orchestration', function () {
 
     afterEach(function () {
         sinon.restore()
     })
-
-    // ── R-BOOT-001: env var parsing ──────────────────────────────────────
 
     describe('Environment variable parsing', function () {
 
@@ -55,15 +48,12 @@ describe('[regression:p0] Bootstrap Orchestration', function () {
         })
 
         it('[regression:p0] R-BOOT-001c: NETWORK split fallback extracts coin and network', function () {
-            // Replicates the logic: if COIN is null, split NETWORK on "-"
             const NETWORK = 'bitcoin-regtest'
             const parts = NETWORK.split('-')
             assert.strictEqual(parts[0], 'bitcoin')
             assert.strictEqual(parts[1], 'regtest')
         })
     })
-
-    // ── R-BOOT-002: Hub discovery fallback ──────────────────────────────
 
     describe('Hub discovery fallback', function () {
 
@@ -72,7 +62,6 @@ describe('[regression:p0] Bootstrap Orchestration', function () {
             const coin = 'bitcoin'
             const network = 'regtest'
 
-            // Replicate bootstrap extraction from initialCheck.test.js
             const nodePort      = config[coin][network]['node']['server_port']
             const nodeUser      = config[coin][network]['node']['user']
             const nodePass      = config[coin][network]['node']['pass']
@@ -96,13 +85,10 @@ describe('[regression:p0] Bootstrap Orchestration', function () {
         })
 
         it('[regression:p0] R-BOOT-002b: hub discovery uses localhost for Docker convention', function () {
-            // In initialCheck.test.js, all hub-discovered URLs are hardcoded to "localhost"
             const DATABASE_URL = 'localhost'
             assert.strictEqual(DATABASE_URL, 'localhost')
         })
     })
-
-    // ── R-BOOT-003: connector instantiation ─────────────────────────────
 
     describe('Connector instantiation', function () {
 
@@ -127,8 +113,6 @@ describe('[regression:p0] Bootstrap Orchestration', function () {
         })
     })
 
-    // ── R-BOOT-007: mining time configuration ───────────────────────────
-
     describe('Mining time configuration', function () {
 
         it('[regression:p0] R-BOOT-007: setMiningTime accepts 1000, 1000 params', async function () {
@@ -145,8 +129,6 @@ describe('[regression:p0] Bootstrap Orchestration', function () {
             assert.strictEqual(body.params.tx_added_time, 1000)
         })
     })
-
-    // ── R-BOOT-008: global COIN/NETWORK/NETWORK_OBJECT ──────────────────
 
     describe('Global config resolution', function () {
 
@@ -174,8 +156,6 @@ describe('[regression:p0] Bootstrap Orchestration', function () {
         })
     })
 
-    // ── R-BOOT-009: graceful failure ─────────────────────────────────────
-
     describe('Graceful failure on missing service', function () {
 
         it('[regression:p0] R-BOOT-009: encoder ping returns false when service is down', async function () {
@@ -197,8 +177,6 @@ describe('[regression:p0] Bootstrap Orchestration', function () {
         })
     })
 })
-
-// ── Helper functions (scoped to this file) ───────────────────────────────
 
 function makeMockConnection(queryResult) {
     return {

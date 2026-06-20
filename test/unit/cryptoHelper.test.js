@@ -16,8 +16,6 @@ const sinon  = require('sinon');
 // cryptoHelper.js sets `global.wallets = {}` at module load time and references
 // global.regtestMinerConnector, global.nodeConnector, global.utxoTrackerConnector.
 // We set up stubs for these globals before requiring the module.
-
-// Set up the required globals before the first require
 global.wallets                = {};
 global.regtestMinerConnector  = { sendFunds: async () => {} };
 global.nodeConnector          = { waitForTx: async () => true };
@@ -28,7 +26,6 @@ const cryptoHelper = require('../../test/cryptoHelper');
 describe('cryptoHelper', function () {
 
     beforeEach(function () {
-        // Reset the wallet cache between tests
         global.wallets = {};
     });
 
@@ -36,8 +33,6 @@ describe('cryptoHelper', function () {
         sinon.restore();
         global.wallets = {};
     });
-
-    // ── getWallet ─────────────────────────────────────────────────────────
 
     describe('getWallet', function () {
         it('creates a new wallet skeleton on first call', async function () {
@@ -67,8 +62,6 @@ describe('cryptoHelper', function () {
         });
     });
 
-    // ── getNewAddress ─────────────────────────────────────────────────────
-
     describe('getNewAddress', function () {
         it('returns an object with mnemonic, privateKey, publicKey, address', async function () {
             const result = await cryptoHelper.getNewAddress('alice', 'bitcoin', 'regtest');
@@ -92,7 +85,6 @@ describe('cryptoHelper', function () {
         });
 
         it('does not overwrite the cached wallet mnemonic on a second call for the same label', async function () {
-            // Both calls happen within the same test (beforeEach already cleared wallets).
             const first = await cryptoHelper.getNewAddress('alice', 'bitcoin', 'regtest');
             const firstMnemonic = global.wallets['alice'].mnemonic;
             assert.ok(firstMnemonic, 'mnemonic should be set after first call');
@@ -132,12 +124,9 @@ describe('cryptoHelper', function () {
             const r0 = await cryptoHelper.getNewAddress('alice', 'bitcoin', 'regtest', null, 'legacy', 0);
             // Use a fresh label to avoid seed caching
             const r1 = await cryptoHelper.getNewAddress('bob', 'bitcoin', 'regtest', r0.mnemonic, 'legacy', 1);
-            // Same mnemonic but different index → different address
             assert.notStrictEqual(r0.address, r1.address);
         });
     });
-
-    // ── getNewFundedAddress ───────────────────────────────────────────────
 
     describe('getNewFundedAddress', function () {
         const MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';

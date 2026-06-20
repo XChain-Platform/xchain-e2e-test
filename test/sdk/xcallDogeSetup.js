@@ -110,8 +110,7 @@ async function dogeIdx(fn) {
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function main() {
-    // ── 1. Seed the prices the DOGE native-fee path reads (XChain_Hub,
-    //       anchored to the DOGE chain clock; wall-clock seeds race both ways).
+    // Seed prices anchored to the DOGE chain clock (wall-clock seeds race both ways).
     const blockTime = await dogeIdx(async (c) => {
         const rows = await c.query('SELECT block_time FROM blocks ORDER BY block_index DESC LIMIT 1');
         return rows.length ? Number(rows[0].block_time) : Math.floor(Date.now() / 1000);
@@ -129,7 +128,6 @@ async function main() {
     });
     console.log('[doge-setup] prices seeded (DOGE/USD, XCHAIN/USD) at chain time ' + blockTime);
 
-    // ── 2. SDK + funded deployer.
     const sdk = new XChainSDK({
         network:     'dogecoin-regtest',
         encoderUrl:  'localhost',
@@ -168,23 +166,17 @@ async function main() {
         throw new Error(label + ': tx ' + txid + ' never indexed');
     }
 
-    // ── 3. XCHAIN gas (MINT: no protocol fee). Validity confirmed via balance.
-    //       Cap at the genesis XCHAIN MAX_MINT (100000). A single MINT above it
-    //       is indexed 'invalid: AMOUNT > MAX_MINT', leaving the deployer with no
-    //       GAS and the DEPLOY rejecting 'insufficient funds (GAS)'. 100000 is
-    //       three orders past the ~1 XCHAIN DEPLOY fee, so one mint is plenty.
+    // Cap at the genesis XCHAIN MAX_MINT (100000): a MINT above it is indexed
+    // 'invalid: AMOUNT > MAX_MINT', leaving the deployer without gas for DEPLOY.
     await submitAndIndex('MINT gas',
         { action: 'MINT', params: { tick: 'XCHAIN', amount: 100000, destination: deployer.address } }, {});
 
-    // ── 4. DEPLOY the target contract, fee in native DOGE. The explorer does
-    //       not serve DOGE regtest, so the SDK's quote rail (payFeeInNativeCoin
-    //       -> explorer feequote) is unavailable. Size the fee output directly
-    //       from the consensus formula instead:
-    //         gasCost        = VM_DEPLOY_BASE(100000) + codeBytes x VM_DEPLOY_PER_BYTE(10)
-    //         feeXchain      = gasCost x GAS_PRICE(0.00001)
-    //         expectedNative = feeXchain x (XCHAIN/USD / DOGE/USD)   [seeded 1.0 / 0.1]
-    //       paid to the chain's FEE_DESTINATION (DOGE regtest), mid-band of the
-    //       0.95-1.10 tolerance.
+    // No DOGE explorer, so the SDK feequote rail is unavailable. Size the native
+    // fee output from the consensus formula directly:
+    //   gasCost        = VM_DEPLOY_BASE(100000) + codeBytes x VM_DEPLOY_PER_BYTE(10)
+    //   feeXchain      = gasCost x GAS_PRICE(0.00001)
+    //   expectedNative = feeXchain x (XCHAIN/USD / DOGE/USD)  [seeded 1.0 / 0.1]
+    // paid to the chain's FEE_DESTINATION, mid-band of the 0.95-1.10 tolerance.
     const FEE_DESTINATION = 'mfees5pa2HwNBonk5vG23aDWkN9fuDJib4';
 
     async function deployContract(label, code) {

@@ -31,14 +31,12 @@ describe('State Management: Wallet Cache', function () {
             utxoTrackerConnector: global.utxoTrackerConnector,
         }
 
-        // Fresh wallets state for each test
         global.wallets = {}
         global.NETWORK_OBJECT = CryptoNetworks.getBitcoinJsNetwork('bitcoin-regtest')
 
         // Clear module cache for a clean cryptoHelper
         delete require.cache[require.resolve('../../../test/cryptoHelper')]
         cryptoHelper = require('../../../test/cryptoHelper')
-        // cryptoHelper sets global.wallets = {} on load, but we already did that
     })
 
     afterEach(function () {
@@ -101,8 +99,6 @@ describe('State Management: Wallet Cache', function () {
 
             assert.strictEqual(addr1.mnemonic, testMnemonic)
 
-            // Second call without mnemonic reuses the wallet's stored mnemonic,
-            // and getNewAddress now reports that stored mnemonic back in the result.
             const addr2 = await cryptoHelper.getNewAddress('EXPLICIT', 'bitcoin', 'regtest', null, 'legacy', 1)
             const wallet = await cryptoHelper.getWallet('EXPLICIT')
 

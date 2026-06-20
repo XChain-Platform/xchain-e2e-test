@@ -274,7 +274,6 @@ describe('[sdk] NFT pattern (ISSUE DECIMALS=0 + LOCK_MAX_SUPPLY=1)', function ()
         });
 
         it('an NFT sell order matched by a buy order settles an integer NFT amount', async function () {
-            // issuer sells 3 NFT for 30 XCHAIN
             const sell = await submit(sdk,
                 { action: 'ORDER', params: {
                     giveCoin: COIN, giveTick: tick, giveAmount: 3,
@@ -286,7 +285,6 @@ describe('[sdk] NFT pattern (ISSUE DECIMALS=0 + LOCK_MAX_SUPPLY=1)', function ()
             );
             expect(statusOf(sell), 'sell ORDER').to.equal('valid');
 
-            // other buys 3 NFT for 30 XCHAIN, auto-matching the sell
             const buy = await submit(sdk,
                 { action: 'ORDER', params: {
                     giveCoin: COIN, giveTick: 'XCHAIN', giveAmount: 30,
@@ -305,7 +303,6 @@ describe('[sdk] NFT pattern (ISSUE DECIMALS=0 + LOCK_MAX_SUPPLY=1)', function ()
             });
             expect(match, 'order_match recorded with integer give_amount=3').to.exist;
 
-            // And the buyer holds exactly 3 NFT, no fractional dust.
             const bal = String(rawBalance(await sdk.getBalances(other.address), tick));
             expect(bal, 'buyer holds integer NFT amount').to.equal('3');
             expect(bal.includes('.'), 'no fractional NFT settled').to.equal(false);

@@ -252,7 +252,6 @@ module.exports = {
         }, 180_000)
         assert(response, 'attestation_responses row should land with status=ok')
 
-        // The response must carry at least REDUNDANCY=3 verified signatures.
         const sigs = await indexerDatabase.getAttestationValidatorSignatures(response.action_index)
         assert(sigs.length >= 3, 'expected ≥3 verified validator signatures, got ' + sigs.length)
         const sigPubkeys = new Set(sigs.map(s => String(s.validator_pubkey).toLowerCase()))
@@ -260,17 +259,14 @@ module.exports = {
             assert(sigPubkeys.has(pk.toLowerCase()), 'expected sig from hub pubkey ' + pk.slice(0, 16) + '...')
         }
 
-        // Request flipped to fulfilled
         const fulfilled = await indexerDatabase.checkAttestationRequest({
             requestId:     requestId,
             requestStatus: 'fulfilled'
         })
         assert(fulfilled, 'request_status should be fulfilled')
 
-        // Callback EXECUTE was injected
         assert(response.callback_execute_action_index, 'callback_execute_action_index should be set')
 
-        // Contract state reflects the fetched body
         const cbStatus  = await indexerDatabase.getContractState(contractIndex, 'callback_status')
         const cbPayload = await indexerDatabase.getContractState(contractIndex, 'callback_payload')
         const cbContext = await indexerDatabase.getContractState(contractIndex, 'callback_context')

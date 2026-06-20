@@ -41,7 +41,6 @@ describe('[sdk] foundation actions', function () {
         issuer = await fundedGasAddress(sdk, 1);
         recipient = await fundedSdkAddress(sdk, 1);
         tick = uniqueTick();
-        // Issue the working token: 1000 minted to issuer, headroom to MINT more.
         const res = await submit(sdk,
             { action: 'ISSUE', params: { tick, maxSupply: 1000000, maxMint: 100000, decimals: 0, description: 'foundation', mintSupply: 1000 } },
             { pubkey: issuer.address, change: issuer.address },

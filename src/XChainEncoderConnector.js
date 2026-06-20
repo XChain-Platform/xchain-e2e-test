@@ -18,7 +18,6 @@
  * 
  ********************************************************************/
 
-// Load required libraries
 const axios = require('axios');
 
 class XChainEncoderConnector {
@@ -37,8 +36,7 @@ class XChainEncoderConnector {
             method: 'ping',
             id: 1
         }
-        
-        // Make the request to the node
+
         var response = null
         try {
             response = await axios.post(this.url, data)
@@ -47,14 +45,13 @@ class XChainEncoderConnector {
             return false
         }
 
-        // Verify if there is a result and return it
         if (response.data && response.data.result) {
             return true;
         } else {
             return false
         }
     }
-    
+
     async createTx(utxosList, pubkey, customOutputs, data, rawData, exactFee, rbf, outputType, changeAddress, p2shHash, p2shHex, compressedPubKey, unconfirmed){
         const dataToSend = {
             jsonrpc: '2.0',
@@ -79,14 +76,12 @@ class XChainEncoderConnector {
         
         let response = null
         try{
-            // Make the request to the node
             response = await axios.post(this.url, dataToSend)
         } catch (err){
             console.log(err)
             throw new Error('Error trying to create a tx with the encoder module: ' + (err && err.message));
         }
 
-        // Verify if there is a result and return it
         if (response.data.result) {
             return response.data.result;
         } else {

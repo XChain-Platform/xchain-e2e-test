@@ -72,7 +72,6 @@ async function withConn(database, user, password, fn) {
 async function hubDb(fn)   { return withConn('XChain_Hub', process.env.HUB_DB_USER, process.env.HUB_DB_PASS, fn); }
 async function dogeIdx(fn) { return withConn('XChain_DOGE_Regtest_Indexer', process.env.DOGE_IDX_DB_USER, process.env.DOGE_IDX_DB_PASS, fn); }
 
-// Source (BTC) indexer DB: the global indexerDatabase initialCheck stands up.
 async function btcIdx(sql, params) {
     const db = global.indexerDatabase;
     const conn = await db.getConnection();
@@ -80,7 +79,6 @@ async function btcIdx(sql, params) {
 }
 async function btcCount(sql, params) { return Number((await btcIdx(sql, params))[0].n); }
 
-// Count the hub/DOGE finalized-or-any match rows referencing the BTC order leg.
 const MATCH_REF_WHERE = "((a_chain='BTC' AND a_action_index = ?) OR (b_chain='BTC' AND b_action_index = ?))";
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -161,7 +159,6 @@ describe('[sdk] cross-chain DEX match source-chain reorg retraction (pre-settlem
             await sleep(3000);
         }
         expect(match, 'hub finalized a cross_chain_matches row for the BTC order').to.be.an('object');
-        // The match must cross THIS BTC order against the DOGE order set up by dexDogeSetup.
         const legs = [[match.a_chain, Number(match.a_action_index)], [match.b_chain, Number(match.b_action_index)]];
         expect(legs).to.deep.include(['BTC', btcOrderIndex]);
         expect(legs.map(l => l[0]).sort()).to.deep.equal(['BTC', 'DOGE']);
@@ -224,7 +221,6 @@ describe('[sdk] cross-chain DEX match source-chain reorg retraction (pre-settlem
             // to 'retracted', so it is no longer eligible for settlement.
             expect(hubStatus, 'hub match row marked retracted').to.equal('retracted');
 
-            // PRIMARY: the source-chain indexer rolled the orphaned ORDER back locally.
             expect(btcOrderRows, 'source orders row removed by rollback').to.equal(0);
 
             // CONDITIONAL: the broadcast-deletion is only observable where the indexer

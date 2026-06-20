@@ -35,8 +35,6 @@ describe('XChainEncoderConnector', function () {
         sinon.restore();
     });
 
-    // ── constructor ──────────────────────────────────────────────────────
-
     describe('constructor', function () {
         it('builds the URL as http://{url}:{port}', function () {
             assert.strictEqual(connector.url, `http://${URL}:${PORT}`);
@@ -51,8 +49,6 @@ describe('XChainEncoderConnector', function () {
             assert.strictEqual(connector.rpcPassword, undefined);
         });
     });
-
-    // ── ping ─────────────────────────────────────────────────────────────
 
     describe('ping', function () {
         it('returns true when response.data.result is truthy', async function () {
@@ -74,10 +70,7 @@ describe('XChainEncoderConnector', function () {
         });
     });
 
-    // ── createTx ─────────────────────────────────────────────────────────
-
     describe('createTx', function () {
-        // All 12 parameters the caller will pass
         const utxosList       = [{ txid: 'abc', vout: 0, value: 10000 }];
         const pubkey          = 'mypubkey';
         const customOutputs   = [{ address: 'addr1', value: 500 }];

@@ -53,7 +53,6 @@ describe('swapHelper', () => {
             )
 
             const msg = createTxStub.firstCall.args[1]
-            // getAddress, expiration, allowList, blockList all null→"" → 4 empty fields → 5 pipes
             assert.strictEqual(msg, 'SWAP|0|BTC|TOK|100|LTC|LTOK|200|||||memo')
         })
 
@@ -94,7 +93,6 @@ describe('swapHelper', () => {
             await helper.sendSwapEditV2(addressInfo, '8', null, null, null, 'memo')
 
             const msg = createTxStub.firstCall.args[1]
-            // expiration, allowList, blockList all null→"" → 3 empty → 4 pipes before memo
             assert.strictEqual(msg, 'SWAP|2|8||||memo')
         })
     })

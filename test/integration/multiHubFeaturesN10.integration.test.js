@@ -73,7 +73,6 @@ function equalWeights(mvh) {
     }));
 }
 
-// ---- Oracle round driver (from multiHubOracleWeighted) -----------------------
 const ORACLE_ROUND = 100, PAIR = 'BTC/USD', PRICE = '60000';
 
 async function attachOracle(mvh) {
@@ -100,7 +99,6 @@ function injectSubmissions(mvh) {
     }
 }
 
-// ---- XCALL dispatch driver (from multiHubXcallWeighted) ----------------------
 function callIdFrom(seed) { return crypto.createHash('sha256').update(String(seed)).digest('hex'); }
 
 function dispatchRow(roundId, callId) {
@@ -127,7 +125,6 @@ async function driveDispatch(mvh, validators, seedBase) {
     return { events, row };
 }
 
-// ---- cross-chain DEX match driver (from multiHubCrossChainDexWeighted) -------
 function crossingPair({ ltcIdx, dogeIdx, amount = '40' }) {
     return {
         LTC:  [ makeOrder({ action_index: ltcIdx,  give: { coin: 'LTC',  tick: 'TOKA', amount },

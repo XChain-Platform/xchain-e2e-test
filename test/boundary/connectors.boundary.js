@@ -31,8 +31,6 @@ describe('Boundary: Connectors', function () {
         sinon.restore()
     })
 
-    // ── BlockchainConnector ─────────────────────────────────────
-
     describe('BlockchainConnector', function () {
 
         describe('constructor URL building', function () {
@@ -59,7 +57,6 @@ describe('Boundary: Connectors', function () {
                 const bc = new BlockchainConnector('localhost', '8333', 'user', 'pass')
                 bc.sleep = sinon.stub().resolves()
 
-                // Fail twice, then succeed
                 bc.getTransactionHex = sinon.stub()
                 bc.getTransactionHex.onFirstCall().rejects(new Error('not found'))
                 bc.getTransactionHex.onSecondCall().rejects(new Error('not found'))
@@ -83,8 +80,6 @@ describe('Boundary: Connectors', function () {
             })
         })
     })
-
-    // ── XChainUtxoTrackerConnector ──────────────────────────────
 
     describe('XChainUtxoTrackerConnector', function () {
 
@@ -138,8 +133,6 @@ describe('Boundary: Connectors', function () {
         })
     })
 
-    // ── XChainHubConnector ──────────────────────────────────────
-
     describe('XChainHubConnector', function () {
 
         describe('constructor: endpoint handling', function () {
@@ -179,7 +172,6 @@ describe('Boundary: Connectors', function () {
             })
 
             afterEach(function () {
-                // Restore original env
                 Object.entries(savedEnv).forEach(([key, val]) => {
                     if (val === undefined) delete process.env[key]
                     else process.env[key] = val
@@ -290,8 +282,6 @@ describe('Boundary: Connectors', function () {
         })
     })
 
-    // ── RegtestMinerConnector ───────────────────────────────────
-
     describe('RegtestMinerConnector', function () {
 
         describe('constructor', function () {
@@ -304,8 +294,6 @@ describe('Boundary: Connectors', function () {
         })
     })
 
-    // ── XChainEncoderConnector ──────────────────────────────────
-
     describe('XChainEncoderConnector', function () {
 
         describe('constructor', function () {
@@ -317,8 +305,6 @@ describe('Boundary: Connectors', function () {
             })
         })
     })
-
-    // ── XChainIndexerConnector ──────────────────────────────────
 
     describe('XChainIndexerConnector', function () {
 

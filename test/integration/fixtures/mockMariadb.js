@@ -31,7 +31,6 @@ const Module = require('module')
 
 const mariadbPath = require.resolve('mariadb')
 
-// Only inject once per process
 if (!require.cache[mariadbPath] || !require.cache[mariadbPath]._isMock) {
     const mockMariadb = {
         createPool: sinon.stub().returns({

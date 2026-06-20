@@ -47,7 +47,6 @@ function PerformanceReporter(runner, options) {
     const testResults = []
 
     runner.on(EVENT_RUN_BEGIN, function () {
-        // Trigger perfCollector run start if not already started
         try {
             const collector = require('../perf/perfCollector')
             if (!collector._runMeta.startedAt) collector.startRun()
@@ -120,7 +119,6 @@ function PerformanceReporter(runner, options) {
     })
 }
 
-// Inherit from Spec so Mocha recognizes this as a valid reporter
 Object.setPrototypeOf(PerformanceReporter.prototype, Spec.prototype)
 
 module.exports = PerformanceReporter

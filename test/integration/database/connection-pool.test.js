@@ -19,11 +19,8 @@
 const assert = require('assert')
 const sinon = require('sinon')
 
-// Inject mock mariadb before requiring db.js
 const mockMariadb = require('../fixtures/mockMariadb')
 const Database = require('../../../src/db')
-
-// Helpers
 
 let mockPool
 let mockConnection

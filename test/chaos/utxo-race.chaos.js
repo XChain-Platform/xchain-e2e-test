@@ -118,7 +118,6 @@ describe('Chaos Experiment 7: UTXO Race Condition @P1', function () {
     describe('double-spend detection', function () {
 
         it('second broadcast with same UTXO produces an error from node', async function () {
-            // Simulate a node that rejects double-spend
             const broadcastStub = sinon.stub()
             broadcastStub.onFirstCall().resolves('txid_first')
             broadcastStub.onSecondCall().rejects(new Error('Missing inputs (txid already spent)'))

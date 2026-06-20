@@ -84,8 +84,6 @@ function srcOf(rel) {
     return fs.readFileSync(path.join(ROOT, rel), 'utf8');
 }
 
-// Pull the FIRST argument expression passed to isEquivHeaderActive(...) on a
-// given line-matching anchor in a source string. Returns the trimmed arg text.
 function gateInputArg(source, anchorRegex) {
     const lines = source.split('\n');
     for (const line of lines) {
@@ -98,10 +96,9 @@ function gateInputArg(source, anchorRegex) {
 
 describe('#4196 EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', function () {
 
-    // ---- Pre-req: the gate function itself must be byte-equal on both sides ----
-    // (A divergence here forks the chain regardless of inputs; the cross-service
-    // suite also enforces this, re-asserted here so the input parity rests on a
-    // shared comparison.)
+    // Pre-req: the gate function must be byte-equal on both sides; a divergence here
+    // forks the chain regardless of inputs. The cross-service suite also enforces this;
+    // re-asserted here so input parity rests on a shared comparison.
     it('the isEquivHeaderActive gate + activation map are byte-equal on both services', function () {
         const hubSrc = fs.readFileSync(HUB_EQ_PATH, 'utf8');
         const idxSrc = fs.readFileSync(IDX_EQ_PATH, 'utf8');
@@ -134,11 +131,6 @@ describe('#4196 EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', functi
         assert.strictEqual(hubVerdict, idxVerdict,
             label + ': hub and indexer must agree on the gate verdict for height ' + height);
     }
-
-    // ---- Per-engine: assert the gate INPUT each side uses is a block height, and
-    //      that fed the same height both copies agree. The gate-input source
-    //      expression is read from production so the test fails if a refactor
-    //      swaps an engine's gate input to a non-height value. ----
 
     describe('engines that feed a BTC block height on both sides (assert green)', function () {
 
@@ -234,9 +226,6 @@ describe('#4196 EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', functi
     //      live (xit -> it). ----
     describe('ORACLE gate input (#4232 fix: gate on the BTC block height)', function () {
 
-        // Confirms the #4232 fix landed: the hub ORACLE gate input is btcBlockHeight,
-        // and OracleRound.currentBtcBlockHeight (the real BTC tip) is a distinct field
-        // from the wall-clock round counter, so feeding the height is meaningful.
         it('the hub ORACLE gate now feeds the BTC block height, distinct from the round counter (#4232)', function () {
             const hubArg = gateInputArg(srcOf('xchain-hub/src/OracleConsensus.js'),
                 /isEquivHeaderActive\(btcBlockHeight/);
@@ -254,10 +243,6 @@ describe('#4196 EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', functi
                 'the real BTC height lives in currentBtcBlockHeight, distinct from the round counter');
         });
 
-        // The regression guard (was PENDING under #4232; now live). Asserts the hub
-        // ORACLE gate input is a BTC block height, matching every other engine and the
-        // indexer, AND that the indexer gates on the same height carried in the signed
-        // PRICE v0 payload + wire.
         it('hub ORACLE gate input is a BTC block height, matching every other engine (#4232 fixed)', function () {
             const hubArg = gateInputArg(srcOf('xchain-hub/src/OracleConsensus.js'),
                 /isEquivHeaderActive\(/);

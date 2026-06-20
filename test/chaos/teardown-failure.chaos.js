@@ -21,14 +21,12 @@ const { saveGlobals, restoreGlobals, GLOBAL_KEYS } = require('./chaos-helpers')
 
 // Replicate the afterAll teardown logic from initialCheck.test.js
 async function runTeardown(regtestMinerConnector, indexerDatabase, wallets) {
-    // Phase 1: Reset mining time
     try {
         await regtestMinerConnector.setDefaultMiningTime()
     } catch (err) {
         console.log('There was a problem resetting mining time:', err.message)
     }
 
-    // Phase 2: Clear wallet key material
     try {
         if (wallets) {
             for (const label of Object.keys(wallets)) {
@@ -47,7 +45,6 @@ async function runTeardown(regtestMinerConnector, indexerDatabase, wallets) {
         console.log('Problem clearing wallet keys:', err.message)
     }
 
-    // Phase 3: Close DB pool
     try {
         if (indexerDatabase && indexerDatabase.pool) {
             await indexerDatabase.pool.end()
@@ -94,7 +91,6 @@ describe('Chaos Experiment 6: Teardown Failure @P0', function () {
 
         await runTeardown(mockMiner, mockDb, wallets)
 
-        // Verify key material was zeroed
         assert(seed.every(b => b === 0), 'seed should be zeroed')
         assert(privKey.every(b => b === 0), 'privateKey should be zeroed')
     })

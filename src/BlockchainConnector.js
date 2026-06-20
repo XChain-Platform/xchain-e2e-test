@@ -10,15 +10,8 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
- * XChain End-to-End Test Suite - Blockchain Connector Class
- *
- * This file handles pulling blockchain data from a coin daemon
- *
  ********************************************************************/
 
-// Load required libraries
 const axios = require('axios')
 
 class BlockchainConnector {
@@ -39,7 +32,6 @@ class BlockchainConnector {
             id: 1
         };
 
-        // Options configuration for axios (axios throws automatically on non-2xx)
         const auth = Buffer.from(`${this.rpcUser}:${this.rpcPassword}`).toString('base64');
         const options = {
             headers: {
@@ -49,12 +41,10 @@ class BlockchainConnector {
         };
 
         try {
-            // Make the request to the node
             const response = await axios.post(this.url, data, options);
 
             const responseData = response.data;
 
-            // Verify if there is a result and return it
             if (responseData.result) {
                 return responseData.result;
             } else {
@@ -89,7 +79,6 @@ class BlockchainConnector {
                 id: 1,
             };
 
-            // Options configuration for axios
             const auth = Buffer.from(`${this.rpcUser}:${this.rpcPassword}`).toString('base64');
             const options = {
                 headers: {
@@ -98,12 +87,10 @@ class BlockchainConnector {
                 }
             };
 
-            // Make the request to the node (axios throws automatically on non-2xx)
             const response = await axios.post(this.url, data, options);
 
             const responseData = response.data;
 
-            // Verify if there is a result and return the hex
             if (responseData.result && responseData.result.hex) {
                 return responseData.result.hex;
             } else {
@@ -150,7 +137,6 @@ class BlockchainConnector {
                 id: 1
             }
 
-            // Options configuration for axios
             const auth = Buffer.from(`${this.rpcUser}:${this.rpcPassword}`).toString('base64');
             const options = {
                 headers: {
@@ -159,12 +145,10 @@ class BlockchainConnector {
                 }
             };
 
-            // Make the request to the node
             const response = await axios.post(this.url, data, options);
 
             const responseData = response.data;
 
-            // Verify if there is a result and return the hex
             if (responseData.result) {
                 return responseData.result
             } else {
@@ -197,7 +181,6 @@ class BlockchainConnector {
                 id: 1,
             };
 
-            // Options configuration for axios
             const auth = Buffer.from(`${this.rpcUser}:${this.rpcPassword}`).toString('base64');
             const options = {
                 headers: {
@@ -206,12 +189,10 @@ class BlockchainConnector {
                 }
             };
 
-            // Make the request to the node (axios throws automatically on non-2xx)
             const response = await axios.post(this.url, data, options);
 
             const responseData = response.data;
 
-            // Verify if there is a result and return the hex
             if (responseData.result && responseData.result.feerate) {
                 return responseData.result.feerate;
             } else {

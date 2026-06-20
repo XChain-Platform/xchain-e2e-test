@@ -36,8 +36,6 @@
 const { expect } = require('chai');
 const { makeSdk, submit, fundedSdkAddress, fundedGasAddress, mine, uniqueTick, submitOpts } = require('./sdkHelper');
 
-// Pull an amount for a tick out of whatever shape getBalances returns
-// (mirrors lifecycle.sdk.test.js).
 function balanceFor(balances, tick) {
     if (!balances) return null;
     let list = Array.isArray(balances) ? balances
@@ -126,7 +124,6 @@ describe('[sdk] ticker NAME vs TICK_ID (^id) equivalence', function () {
         console.log('    [sdk] name-send balance=' + a + '  id-send balance=' + b);
         expect(a, 'name-send recipient balance').to.equal(1000);
         expect(b, 'id-send recipient balance').to.equal(1000);
-        // The two reference forms produced the same outcome on the same token.
         expect(a).to.equal(b);
     });
 

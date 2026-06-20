@@ -16,8 +16,6 @@
 
 const fc = require('fast-check')
 
-// ── Category A: Type Confusion Values ────────────────────────────
-
 const typeConfusionArb = fc.oneof(
     fc.constant(null),
     fc.constant(undefined),
@@ -49,8 +47,6 @@ const typeConfusionArb = fc.oneof(
     fc.string()
 )
 
-// ── Category B: String Mutation Values ───────────────────────────
-
 const stringMutationArb = fc.oneof(
     fc.constant(''),
     fc.constant('A'.repeat(10000)),
@@ -68,8 +64,6 @@ const stringMutationArb = fc.oneof(
     fc.string({ minLength: 0, maxLength: 5000 }),
     fc.string({ minLength: 0, maxLength: 200 })
 )
-
-// ── Category C: Numeric Edge Values ──────────────────────────────
 
 const numericEdgeArb = fc.oneof(
     fc.constant(0),
@@ -91,23 +85,17 @@ const numericEdgeArb = fc.oneof(
     fc.double({ noNaN: false })
 )
 
-// ── Any fuzz value (union of all categories) ─────────────────────
-
 const anyFuzzValue = fc.oneof(
     typeConfusionArb,
     stringMutationArb,
     numericEdgeArb
 )
 
-// ── Filter field: either null (omitted) or a fuzz value ──────────
-
 const filterFieldArb = fc.oneof(
     fc.constant(null),
     fc.constant(undefined),
     anyFuzzValue
 )
-
-// ── Database filter object generators ────────────────────────────
 
 function filterObjectArb(fieldNames) {
     const entries = fieldNames.map(name =>
@@ -202,8 +190,6 @@ const dispenserStatusFilterArb = filterObjectArb([
     'dispenserActionIndex', 'status'
 ])
 
-// ── ACTION field generators ──────────────────────────────────────
-
 const actionFieldArb = fc.oneof(
     fc.constant(''),
     fc.constant(null),
@@ -222,8 +208,6 @@ const actionFieldArb = fc.oneof(
     fc.integer(),
     fc.double({ noNaN: false })
 )
-
-// ── Connector input generators ───────────────────────────────────
 
 const hostArb = fc.oneof(
     fc.constant('localhost'),
@@ -253,8 +237,6 @@ const portArb = fc.oneof(
     fc.constant(null),
     fc.string({ minLength: 0, maxLength: 100 })
 )
-
-// ── Hub config generators ────────────────────────────────────────
 
 const hubConfigArb = fc.oneof(
     fc.constant(null),
@@ -292,7 +274,6 @@ module.exports = {
     hostArb,
     portArb,
     hubConfigArb,
-    // Named filter arbs
     issueFilterArb,
     sendFilterArb,
     creditFilterArb,

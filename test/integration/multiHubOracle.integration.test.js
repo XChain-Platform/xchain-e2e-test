@@ -117,14 +117,11 @@ describe('MultiValidatorHub - oracle determinism (L2)', function () {
             };
         });
 
-        // 1. Identical canonical payload on every hub despite different arrival order.
         for (let i = 1; i < signed.length; i++) {
             assert.strictEqual(signed[i].payload, signed[0].payload,
                 'hub ' + i + ' produced a different canonical payload - signatures cannot match');
         }
 
-        // 2. Each hub really signed (with a distinct identity) and the signature
-        //    verifies against the shared canonical payload.
         const canonical = signed[0].payload;
         const pubkeys = new Set();
         signed.forEach((s, i) => {

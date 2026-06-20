@@ -89,11 +89,9 @@ describe('Send Helper → DB Assertion Pipeline', function () {
                 addressInfo, 'MYTOKEN', '100', destAddress, 'test memo'
             )
 
-            // Verify message format
             const message = createTxStub.firstCall.args[1]
             assert.strictEqual(message, 'SEND|0|MYTOKEN|100|' + destAddress + '|test memo')
 
-            // Verify waitForSend filters
             assert.strictEqual(waitForSendArgs.source, addressInfo.address)
             assert.strictEqual(waitForSendArgs.destination, destAddress)
             assert.strictEqual(waitForSendArgs.tick, 'MYTOKEN')
@@ -102,17 +100,14 @@ describe('Send Helper → DB Assertion Pipeline', function () {
             assert.strictEqual(waitForSendArgs.memo, 'test memo')
             assert.strictEqual(waitForSendArgs.status, 'valid')
 
-            // Verify waitForCredit targets the destination (receiver gets credit)
             assert.strictEqual(waitForCreditArgs.address, destAddress)
             assert.strictEqual(waitForCreditArgs.tick, 'MYTOKEN')
             assert.strictEqual(waitForCreditArgs.amount, '100')
 
-            // Verify waitForDebit targets the source (sender gets debited)
             assert.strictEqual(waitForDebitArgs.address, addressInfo.address)
             assert.strictEqual(waitForDebitArgs.tick, 'MYTOKEN')
             assert.strictEqual(waitForDebitArgs.amount, '100')
 
-            // Verify return structure
             assert.strictEqual(result.txHash, 'txhash_send')
             assert(result.send, 'send row should be present')
             assert(result.credit, 'credit row should be present')

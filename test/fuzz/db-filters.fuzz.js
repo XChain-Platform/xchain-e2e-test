@@ -25,8 +25,6 @@ const mockMariadb = require('../integration/fixtures/mockMariadb')
 const Database = require('../../src/db')
 const gen = require('./fuzz-generators')
 
-// ── Helpers ──────────────────────────────────────────────────────
-
 function makeMockConnection() {
     return {
         query: sinon.stub().resolves([]),
@@ -44,8 +42,6 @@ function createDb() {
 }
 
 const FC_PARAMS = { numRuns: 200 }
-
-// ── Generic fuzz property: check* must not crash, must release ───
 
 function fuzzCheckMethod(methodName, filterArb) {
     describe(`Fuzz: ${methodName}`, function () {
@@ -106,8 +102,6 @@ function fuzzCheckMethod(methodName, filterArb) {
         })
     })
 }
-
-// ── Additional filter arbs for methods not in the generators ─────
 
 function filterObjectArb(fieldNames) {
     const entries = fieldNames.map(name =>
@@ -177,8 +171,6 @@ const rewardClaimFilterArb = filterObjectArb([
     'source', 'txHash', 'status'
 ])
 
-// ── Run fuzz properties for all check* methods ───────────────────
-
 describe('Fuzz: Database Filter Objects', function () {
 
     // Core action methods (use != null check)
@@ -196,7 +188,6 @@ describe('Fuzz: Database Filter Objects', function () {
     fuzzCheckMethod('checkDispense', gen.dispenseFilterArb)
     fuzzCheckMethod('checkDispenserStatus', gen.dispenserStatusFilterArb)
 
-    // Additional action methods
     fuzzCheckMethod('checkAddressOption', gen.addressOptionFilterArb)
     fuzzCheckMethod('checkDestroy', gen.destroyFilterArb)
     fuzzCheckMethod('checkMessage', gen.messageFilterArb)
@@ -207,31 +198,25 @@ describe('Fuzz: Database Filter Objects', function () {
     fuzzCheckMethod('checkCallback', gen.callbackFilterArb)
     fuzzCheckMethod('checkOrder', gen.orderFilterArb)
 
-    // Match/batch/link methods
     fuzzCheckMethod('checkOrderMatch', orderMatchFilterArb)
     fuzzCheckMethod('checkSwap', swapFilterArb)
     fuzzCheckMethod('checkSwapMatch', swapMatchFilterArb)
     fuzzCheckMethod('checkBatch', batchFilterArb)
     fuzzCheckMethod('checkLink', linkFilterArb)
 
-    // Coinpay methods
     fuzzCheckMethod('checkCoinpay', coinpayFilterArb)
     fuzzCheckMethod('checkCoinpayObligation', coinpayObligationFilterArb)
 
-    // VM methods
     fuzzCheckMethod('checkContract', contractFilterArb)
     fuzzCheckMethod('checkExecution', executionFilterArb)
     fuzzCheckMethod('checkDeposit', depositFilterArb)
     fuzzCheckMethod('checkWithdrawal', withdrawalFilterArb)
 
-    // Staking methods
     fuzzCheckMethod('checkStake', stakeFilterArb)
     fuzzCheckMethod('checkUnstake', unstakeFilterArb)
     fuzzCheckMethod('checkDelegation', delegationFilterArb)
     fuzzCheckMethod('checkRewardClaim', rewardClaimFilterArb)
 })
-
-// ── Fuzz waitFor* polling with fuzzed timeMax ────────────────────
 
 describe('Fuzz: waitFor* with fuzzed timeMax', function () {
 
@@ -275,8 +260,6 @@ describe('Fuzz: waitFor* with fuzzed timeMax', function () {
         }), { numRuns: 50 })
     })
 })
-
-// ── Fuzz isNullOrNullString with all types ───────────────────────
 
 describe('Fuzz: isNullOrNullString type safety', function () {
 

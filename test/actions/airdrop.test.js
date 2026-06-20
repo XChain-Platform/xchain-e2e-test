@@ -23,13 +23,10 @@ describe('AIRDROP', () => {
             let airdropAddress = airdropAddressInfo["address"]
             let airdropTick = "AIRDROPADDv0"+airdropAddress.substring(airdropAddress.length-8)
 
-            // Mint some gas
             await gasHelper.mintGas(airdropAddressInfo, 100)
 
-            // Create the tick to distribute
             await issueHelper.sendIssueV0(airdropAddressInfo, airdropTick, 100, 100, 0, "Airdrop address v0 test", 100)
 
-            // Create the list
             let listAddressInfo1 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy", 1)
             let listAddressInfo2 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy", 2)
             let listAddressInfo3 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy", 3)
@@ -44,7 +41,6 @@ describe('AIRDROP', () => {
             assert(listResult.list, "Address list should exist in DB")
             let airdropAddressListActionIndex = Number(listResult.list["action_index"])
 
-            // Create the airdrop
             let result = await airdropHelper.sendAirdropV0(
                 airdropAddressInfo, airdropTick, 1, airdropAddressListActionIndex, "AIRDROP ADDRESSES TEST V0"
             )
@@ -61,7 +57,6 @@ describe('AIRDROP', () => {
             await gasHelper.mintGas(addr, 100)
             await issueHelper.sendIssueV0(addr, tick, 1000, 100, 0, "Airdrop balance test", 100)
 
-            // Create 3 recipient addresses and a list
             let r1 = await cryptoHelper.getNewAddress("AIRDROP.BAL.V0", COIN, NETWORK, null, "legacy", 1)
             let r2 = await cryptoHelper.getNewAddress("AIRDROP.BAL.V0", COIN, NETWORK, null, "legacy", 2)
             let r3 = await cryptoHelper.getNewAddress("AIRDROP.BAL.V0", COIN, NETWORK, null, "legacy", 3)
@@ -72,11 +67,9 @@ describe('AIRDROP', () => {
             assert(listResult.list, "Address list should exist")
             let listAI = Number(listResult.list["action_index"])
 
-            // Airdrop 5 tokens to each of 3 recipients = 15 total
             let result = await airdropHelper.sendAirdropV0(addr, tick, 5, listAI, "Balance check airdrop")
             assert(result.airdrop, "Airdrop should exist in DB")
 
-            // Verify each recipient got credited
             let credit1 = await indexerDatabase.waitForCredit({ address: r1["address"], tick: tick, amount: "5" }, 30000)
             assert(credit1, "Recipient 1 should be credited 5 tokens")
 
@@ -86,7 +79,6 @@ describe('AIRDROP', () => {
             let credit3 = await indexerDatabase.waitForCredit({ address: r3["address"], tick: tick, amount: "5" }, 30000)
             assert(credit3, "Recipient 3 should be credited 5 tokens")
 
-            // Verify source was debited 15 total
             let debit = await indexerDatabase.waitForDebit({ address: address, tick: tick, amount: "15" }, 30000)
             assert(debit, "Source should be debited 15 tokens")
         })
@@ -109,10 +101,8 @@ describe('AIRDROP', () => {
                 )
             }
 
-            // Mint some gas
             await gasHelper.mintGas(airdropAddressInfo, 100)
 
-            // Create holder lists by sending ticks
             let listAddressInfo1 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy", 1)
             let listAddressInfo2 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy", 2)
             let listAddressInfo3 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy", 3)
@@ -124,7 +114,7 @@ describe('AIRDROP', () => {
                 listAddressInfo4, listAddressInfo5, listAddressInfo6
             ]
 
-            // Send ticks to have some tick1 and tick2 holders
+            // indices 0-3 get tick1; indices 4-5 get tick2
             for (let nextAddressInfoIndex in listAddressesInfo){
                 if (nextAddressInfoIndex <= 3){
                     await sendHelper.sendSendV0(
@@ -141,12 +131,10 @@ describe('AIRDROP', () => {
                 }
             }
 
-            // Create the list using the ticks
             let listResult = await listHelper.sendListV0(airdropAddressInfo, 1, [airdropTicks[0], airdropTicks[1]])
             assert(listResult.list, "Ticker list should exist in DB")
             let airdropTicksListActionIndex = Number(listResult.list["action_index"])
 
-            // Create the airdrop
             let result = await airdropHelper.sendAirdropV0(
                 airdropAddressInfo, airdropTicks[2], 1, airdropTicksListActionIndex, "AIRDROP TICKS TEST V0"
             )

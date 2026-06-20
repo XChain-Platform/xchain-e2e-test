@@ -110,11 +110,9 @@ module.exports = {
             stakers.push({ addressInfo: addr, pubkey: pubkeys[i] })
         }
 
-        // Activation window, then settle.
         await regtestMinerConnector.generateBlocks(7)
         await _settleStack()
 
-        // Fund + deploy the request contract.
         owner = await cryptoHelper.getNewFundedAddress(
             'llm-mvh-owner', COIN, NETWORK, null, 'legacy', 0, 0.02
         )
@@ -187,7 +185,6 @@ module.exports = {
         })
         assert(fulfilled, 'request_status should be fulfilled')
 
-        // Callback fired with the model's answer.
         assert(response.callback_execute_action_index, 'callback_execute_action_index should be set')
         const cbStatus  = await indexerDatabase.getContractState(contractIndex, 'callback_status')
         const cbPayload = await indexerDatabase.getContractState(contractIndex, 'callback_payload')

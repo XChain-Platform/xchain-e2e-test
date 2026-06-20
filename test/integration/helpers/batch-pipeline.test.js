@@ -71,20 +71,17 @@ describe('Batch Helper → DB Assertion Pipeline', function () {
 
             const result = await batchHelper.sendBatchV0(addressInfo, commands)
 
-            // Verify message: BATCH|0|cmd1;cmd2
             const message = createTxStub.firstCall.args[1]
             assert.strictEqual(
                 message,
                 'BATCH|0|SEND|0|MYTOKEN|100|destAddr|memo1;SEND|0|OTHER|50|destAddr2|memo2'
             )
 
-            // Verify waitForBatch filters
             assert(waitForBatchArgs, 'waitForBatch should have been called')
             assert.strictEqual(waitForBatchArgs.txHash, 'txhash_batch')
             assert.strictEqual(waitForBatchArgs.source, addressInfo.address)
             assert.strictEqual(waitForBatchArgs.status, 'valid')
 
-            // Verify return
             assert.strictEqual(result.txHash, 'txhash_batch')
             assert(result.batch, 'batch row should be present')
         })

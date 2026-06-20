@@ -32,7 +32,6 @@ describe('Chaos Experiment 4: Malformed Encoder Response @P1', function () {
     let broadcastStub
 
     before(function () {
-        // Generate a real key pair for PSBT signing path
         const keyPair = ECPair.makeRandom({ network: bitcoin.networks.regtest })
         const { address } = bitcoin.payments.p2pkh({
             pubkey: keyPair.publicKey,

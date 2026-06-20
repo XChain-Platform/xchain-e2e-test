@@ -79,25 +79,20 @@ describe('Funding Flow: cryptoHelper.getNewFundedAddress', function () {
                 'FUNDING.TEST', 'bitcoin', 'regtest', null, 'legacy', 0, 1, false
             )
 
-            // Returns a valid address info object
             assert(result.mnemonic, 'should have a mnemonic')
             assert(result.privateKey, 'should have a private key')
             assert(result.publicKey, 'should have a public key')
             assert(result.address, 'should have an address')
             assert(typeof result.address === 'string', 'address is a string')
 
-            // sendFunds was called with the generated address and requested amount
             assert(sendFundsCalled, 'regtestMinerConnector.sendFunds should have been called')
             assert.strictEqual(sendFundsCalled.address, result.address)
             assert.strictEqual(sendFundsCalled.amount, 1)
 
-            // waitForTx was called with the funding txid
             assert.strictEqual(waitForTxCalled, fundingTxId)
 
-            // waitForUtxos was called with the generated address
             assert.strictEqual(waitForUtxosCalled, result.address)
 
-            // Wallet is cached globally
             assert(global.wallets['FUNDING.TEST'], 'wallet should be cached')
             assert.strictEqual(global.wallets['FUNDING.TEST'].mnemonic, result.mnemonic)
         })
@@ -146,8 +141,6 @@ describe('Funding Flow: cryptoHelper.getNewFundedAddress', function () {
             const addr1 = await cryptoHelper.getNewAddress('CACHE.TEST', 'bitcoin', 'regtest', null, 'legacy', 0)
             const addr2 = await cryptoHelper.getNewAddress('CACHE.TEST', 'bitcoin', 'regtest', null, 'legacy', 1)
 
-            // The wallet stores the mnemonic; getNewAddress reports wallet.mnemonic,
-            // so both addr1 and addr2 carry the same mnemonic in their result objects.
             const wallet = global.wallets['CACHE.TEST']
             assert.strictEqual(wallet.mnemonic, addr1.mnemonic, 'wallet stores first mnemonic')
             assert.notStrictEqual(addr1.address, addr2.address, 'different addresses for different indices')

@@ -136,7 +136,6 @@ describe('MultiValidatorHub: cross-chain DEX match to indexer CROSS_SETTLE e2e (
         });
         pubkeys = mvh.getPubkeys().map((p) => String(p).toLowerCase());
 
-        // Drive one real DEX round → finalized cross_chain_matches row.
         book.setBook('shared', { network: NETWORK, latestBlockIndex: 200, ordersByCoin: crossingPair({ ltcIdx: 10, dogeIdx: 20 }) });
         const dexes = mvh.getCrossChainDexes();
         const events = [];

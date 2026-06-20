@@ -17,13 +17,10 @@
 const assert = require('assert')
 const sinon = require('sinon')
 
-// Inject mock mariadb before requiring db.js
 const mockMariadb = require('../integration/fixtures/mockMariadb')
 const Database = require('../../src/db')
 const BlockchainConnector = require('../../src/BlockchainConnector')
 const XChainUtxoTrackerConnector = require('../../src/XChainUtxoTrackerConnector')
-
-// ── Helpers ──────────────────────────────────────────────────────
 
 function makeMockConnection(queryResult) {
     return {
@@ -47,8 +44,6 @@ describe('Boundary: Polling Timeouts', function () {
         sinon.restore()
         mockMariadb.createPool.resetHistory()
     })
-
-    // ── PT-01: timeMax = 0 ───────────────────────────────────────
 
     describe('PT-01: waitForIssue with timeMax = 0', function () {
 
@@ -95,8 +90,6 @@ describe('Boundary: Polling Timeouts', function () {
         })
     })
 
-    // ── PT-02: timeMax = 1 (1 ms) ───────────────────────────────
-
     describe('PT-02: waitForIssue with timeMax = 1', function () {
 
         it('returns null and does not run indefinitely', async function () {
@@ -108,8 +101,6 @@ describe('Boundary: Polling Timeouts', function () {
             // but the loop must terminate (not hang)
         })
     })
-
-    // ── PT-03: timeMax = -1 (negative) ──────────────────────────
 
     describe('PT-03: waitForIssue with timeMax = -1', function () {
 
@@ -133,8 +124,6 @@ describe('Boundary: Polling Timeouts', function () {
         })
     })
 
-    // ── PT-04: record found on last possible iteration ──────────
-
     describe('PT-04: waitForIssue returns record found just before timeout', function () {
 
         it('returns the row when found within the time window', async function () {
@@ -151,8 +140,6 @@ describe('Boundary: Polling Timeouts', function () {
         })
     })
 
-    // ── PT-07: timeMax = Number.MAX_SAFE_INTEGER ────────────────
-
     describe('PT-07: waitForIssue with very large timeMax', function () {
 
         it('does not overflow and exits correctly when record is found on first check', async function () {
@@ -168,8 +155,6 @@ describe('Boundary: Polling Timeouts', function () {
         })
     })
 
-    // ── PT-08: timeMax equals sleep interval ────────────────────
-
     describe('PT-08: waitForIssue with timeMax = 1000 (equals sleep interval)', function () {
 
         it('terminates and returns null, does not hang', async function () {
@@ -184,8 +169,6 @@ describe('Boundary: Polling Timeouts', function () {
             assert(mockConn.query.callCount >= 1, 'should execute at least one query')
         })
     })
-
-    // ── BlockchainConnector.waitForTx boundary tests ────────────
 
     describe('PT-05: BlockchainConnector.waitForTx with timeMax = 0', function () {
 
@@ -229,8 +212,6 @@ describe('Boundary: Polling Timeouts', function () {
             assert.strictEqual(connector.sleep.callCount, 0)
         })
     })
-
-    // ── UtxoTracker.waitForUtxos boundary tests ─────────────────
 
     describe('PT-06: UtxoTracker.waitForUtxos with timeMax = 0', function () {
 
@@ -276,8 +257,6 @@ describe('Boundary: Polling Timeouts', function () {
             assert.strictEqual(tracker.sleep.callCount, 0)
         })
     })
-
-    // ── PT-09: combined, error during zero-timeout poll ─────────
 
     describe('PT-09: waitForIssue with error and timeMax = 0', function () {
 

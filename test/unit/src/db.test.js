@@ -1,27 +1,16 @@
-/*********************************************************************
- *
- * Copyright © 2025–2026 Dankest, LLC
- * Based on XChain Platform by Dankest, LLC – https://dankest.llc
- *
- * SPDX-License-Identifier: AGPL-3.0-or-later
- *
- * This file is part of XChain Platform. Licensed under the GNU Affero
- * General Public License v3.0 or later; see LICENSE.md. A commercial
- * license (without AGPL source-disclosure terms) is available -
- * contact legal@dankest.llc.
- *
- **********************************************************************
- *
- * Unit tests for Database class (src/db.js)
- *
- * Uses: Mocha, sinon, Node built-in assert
- *
- * Mocking strategy: mariadb is an ESM package that cannot be require()'d
- * directly. We inject a synthetic CJS module into require.cache at the
- * resolved mariadb path before requiring db.js so that db.js picks up our
- * mock instead of the real ESM module.
- *
- ********************************************************************/
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+
+// mariadb is an ESM package that cannot be require()'d directly. We inject a
+// synthetic CJS module into require.cache at the resolved mariadb path before
+// requiring db.js so that db.js picks up our mock instead of the real ESM module.
 
 'use strict'
 
@@ -30,25 +19,18 @@ const sinon   = require('sinon')
 const path    = require('path')
 const Module  = require('module')
 
-// ── Inject mock mariadb into require.cache ────────────────────────
-
 const mariadbPath = require.resolve('mariadb')
 
 const mockMariadb = {
     createPool: sinon.stub()
 }
 
-// Manually place a CJS module wrapper in the cache
 const mariadbModule = new Module(mariadbPath, module)
 mariadbModule.exports = mockMariadb
 mariadbModule.loaded  = true
 require.cache[mariadbPath] = mariadbModule
 
-// Now it is safe to require Database. It will call require('mariadb')
-// and get our mock.
 const Database = require('../../../src/db')
-
-// ── Shared mock state ─────────────────────────────────────────────
 
 let mockPool
 let mockConnection
@@ -65,8 +47,6 @@ function countPlaceholders(sql) {
     return (sql.match(/\?/g) || []).length
 }
 
-// ── Suite setup ───────────────────────────────────────────────────
-
 beforeEach(function () {
     mockConnection = makeMockConnection([{ id: 1 }])
     mockPool = { getConnection: sinon.stub().resolves(mockConnection) }
@@ -76,18 +56,12 @@ beforeEach(function () {
     mockMariadb.createPool.returns(mockPool)
 
     db = new Database('localhost', 3306, 'testdb', 'user', 'pass')
-    // Stub sleep so polling tests resolve immediately
     db.sleep = sinon.stub().resolves()
 })
 
 afterEach(function () {
     sinon.restore()
-    // Restore the sleep stub (sinon.restore covers it)
 })
-
-// ─────────────────────────────────────────────────────────────────
-// 1. isNullOrNullString
-// ─────────────────────────────────────────────────────────────────
 
 describe('isNullOrNullString()', function () {
     it('returns true for null', function () {
@@ -119,10 +93,6 @@ describe('isNullOrNullString()', function () {
     })
 })
 
-// ─────────────────────────────────────────────────────────────────
-// 2. getConnection()
-// ─────────────────────────────────────────────────────────────────
-
 describe('getConnection()', function () {
     it('returns transactionConnection when set', async function () {
         const fakeTxConn = { query: sinon.stub(), release: sinon.stub() }
@@ -152,10 +122,6 @@ describe('getConnection()', function () {
     })
 })
 
-// ─────────────────────────────────────────────────────────────────
-// 3. ping()
-// ─────────────────────────────────────────────────────────────────
-
 describe('ping()', function () {
     it('returns true when query returns rows', async function () {
         mockConnection.query.resolves([{ '1 + 1': 2 }])
@@ -182,12 +148,6 @@ describe('ping()', function () {
         assert.ok(mockConnection.release.calledOnce)
     })
 })
-
-// ─────────────────────────────────────────────────────────────────
-// 4. check* query builder methods
-// ─────────────────────────────────────────────────────────────────
-
-// ── checkIssue ────────────────────────────────────────────────────
 
 describe('checkIssue()', function () {
     it('all-fields: builds SQL with 9 ? placeholders and correct column aliases', async function () {
@@ -222,8 +182,6 @@ describe('checkIssue()', function () {
     })
 })
 
-// ── checkSend ─────────────────────────────────────────────────────
-
 describe('checkSend()', function () {
     it('all-fields: 7 placeholders with correct aliases', async function () {
         await db.checkSend({
@@ -253,8 +211,6 @@ describe('checkSend()', function () {
         assert.strictEqual(result, null)
     })
 })
-
-// ── checkCredit ───────────────────────────────────────────────────
 
 describe('checkCredit()', function () {
     it('all-fields: 5 placeholders including block_index and amount', async function () {
@@ -286,8 +242,6 @@ describe('checkCredit()', function () {
     })
 })
 
-// ── checkDebit ────────────────────────────────────────────────────
-
 describe('checkDebit()', function () {
     it('all-fields: 5 placeholders with block_index', async function () {
         await db.checkDebit({
@@ -315,8 +269,6 @@ describe('checkDebit()', function () {
         assert.strictEqual(result, null)
     })
 })
-
-// ── checkMint ─────────────────────────────────────────────────────
 
 describe('checkMint()', function () {
     it('all-fields with non-empty memo: 7 placeholders', async function () {
@@ -347,8 +299,6 @@ describe('checkMint()', function () {
         assert.strictEqual(result, null)
     })
 })
-
-// ── checkBroadcast ────────────────────────────────────────────────
 
 describe('checkBroadcast()', function () {
     it('all-fields: 9 placeholders with correct aliases', async function () {
@@ -381,8 +331,6 @@ describe('checkBroadcast()', function () {
     })
 })
 
-// ── checkAirdrop ──────────────────────────────────────────────────
-
 describe('checkAirdrop()', function () {
     it('all-fields: 8 placeholders with list_action_index', async function () {
         await db.checkAirdrop({
@@ -412,8 +360,6 @@ describe('checkAirdrop()', function () {
         assert.strictEqual(result, null)
     })
 })
-
-// ── checkDispenser ────────────────────────────────────────────────
 
 describe('checkDispenser()', function () {
     it('getAddress non-null: adds get_ia.address = ? placeholder (uses isNullOrNullString)', async function () {
@@ -449,8 +395,6 @@ describe('checkDispenser()', function () {
     })
 })
 
-// ── checkDispense ─────────────────────────────────────────────────
-
 describe('checkDispense()', function () {
     it('all-fields: 11 placeholders using isNullOrNullString', async function () {
         await db.checkDispense({
@@ -474,8 +418,7 @@ describe('checkDispense()', function () {
         // Only txHash should produce a placeholder; source='' is excluded
         assert.strictEqual(countPlaceholders(sql), 1)
         assert.strictEqual(params.length, 1)
-        // WHERE clause should not contain the ias.address condition
-        // (it still appears in SELECT, so we check the WHERE portion)
+        // ias.address still appears in SELECT; check only the WHERE portion
         const wherePart = sql.split('WHERE')[1] || ''
         assert.ok(!wherePart.includes('ias.address'))
     })
@@ -486,8 +429,6 @@ describe('checkDispense()', function () {
         assert.strictEqual(result, null)
     })
 })
-
-// ── checkDispenserStatus ──────────────────────────────────────────
 
 describe('checkDispenserStatus()', function () {
     it('returns null immediately when no params provided (w.length === 0)', async function () {
@@ -511,8 +452,6 @@ describe('checkDispenserStatus()', function () {
         assert.strictEqual(result, null)
     })
 })
-
-// ── checkAddressOption ────────────────────────────────────────────
 
 describe('checkAddressOption()', function () {
     it('all-fields: 5 placeholders with fee_preference and require_memo', async function () {
@@ -541,8 +480,6 @@ describe('checkAddressOption()', function () {
         assert.strictEqual(result, null)
     })
 })
-
-// ── checkDestroy ──────────────────────────────────────────────────
 
 describe('checkDestroy()', function () {
     it('all-fields: 6 placeholders with tick, amount, memo, status', async function () {
@@ -573,8 +510,6 @@ describe('checkDestroy()', function () {
     })
 })
 
-// ── checkBatch ────────────────────────────────────────────────────
-
 describe('checkBatch()', function () {
     it('all-fields: 3 placeholders', async function () {
         await db.checkBatch({ txHash: 'hash1', source: 'addr1', status: 'valid' })
@@ -599,8 +534,6 @@ describe('checkBatch()', function () {
         assert.strictEqual(result, null)
     })
 })
-
-// ── checkLink ─────────────────────────────────────────────────────
 
 describe('checkLink()', function () {
     it('all-fields: 7 placeholders with coin1/coin2 aliases', async function () {
@@ -632,8 +565,6 @@ describe('checkLink()', function () {
     })
 })
 
-// ── checkContract ─────────────────────────────────────────────────
-
 describe('checkContract()', function () {
     it('returns null immediately when no params provided (w.length === 0)', async function () {
         const result = await db.checkContract({})
@@ -658,8 +589,6 @@ describe('checkContract()', function () {
         assert.strictEqual(result, null)
     })
 })
-
-// ── checkList ─────────────────────────────────────────────────────
 
 describe('checkList()', function () {
     it('returns the list row when items match for type=2 (address)', async function () {
@@ -738,10 +667,6 @@ describe('checkList()', function () {
     })
 })
 
-// ─────────────────────────────────────────────────────────────────
-// 5. _waitFor()
-// ─────────────────────────────────────────────────────────────────
-
 describe('_waitFor()', function () {
     it('returns immediately when checkFn returns a row on first call', async function () {
         const row     = { id: 1 }
@@ -797,10 +722,6 @@ describe('_waitFor()', function () {
         assert.ok(db.sleep.calledOnce)
     })
 })
-
-// ─────────────────────────────────────────────────────────────────
-// 6. waitFor* delegation
-// ─────────────────────────────────────────────────────────────────
 
 describe('waitForDestroy() delegation to _waitFor', function () {
     it('delegates to _waitFor with checkDestroy function reference', async function () {
@@ -873,8 +794,6 @@ describe('waitForAddressOption() delegation to _waitFor', function () {
         assert.deepStrictEqual(stub.firstCall.args[1], params)
     })
 })
-
-// ─── Old-style waitFor* with inline polling ───────────────────────
 
 describe('waitForIssue() inline polling', function () {
     it('returns row when checkIssue resolves immediately', async function () {

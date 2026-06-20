@@ -124,7 +124,6 @@ describe('Chaos Experiment 11: Concurrent Wallet Access @P2', function () {
             assert.strictEqual(global.wallets['CHAOS.LABEL_B'].addresses.length, 1)
             assert.strictEqual(global.wallets['CHAOS.LABEL_C'].addresses.length, 1)
 
-            // Mnemonics should differ (each wallet generates its own)
             const mnemonicA = global.wallets['CHAOS.LABEL_A'].mnemonic
             const mnemonicB = global.wallets['CHAOS.LABEL_B'].mnemonic
             assert.notStrictEqual(mnemonicA, mnemonicB, 'different labels should have different mnemonics')

@@ -166,8 +166,8 @@ class MultiValidatorHub {
             throw new Error('MultiValidatorHub: identities provided (' + this.presetIdentities.length + ') < count (' + this.count + ')');
         }
 
-        // Generate keypairs (or use pre-supplied ones) + pick ports + name DBs up front so
-        // the SEED_NODES list can cross-reference (each hub points at every other's P2P_PORT).
+        // Keypairs, ports, and DB names are resolved up front so SEED_NODES can
+        // cross-reference before any hub starts.
         for (let i = 0; i < this.count; i++) {
             this.identities.push(this.presetIdentities
                 ? { pubkeyHex: this.presetIdentities[i].pubkeyHex, privkeyHex: this.presetIdentities[i].privkeyHex }
@@ -183,8 +183,7 @@ class MultiValidatorHub {
         this._savedIndexerUrl = process.env.BTC_INDEXER_API_URL;
         process.env.BTC_INDEXER_API_URL = this.btcIndexerApiUrl;
 
-        // Start each hub. Sequential start (rather than Promise.all) so the
-        // logs interleave cleanly and DB creation doesn't race.
+        // Sequential start so logs interleave cleanly and DB creation doesn't race.
         for (let i = 0; i < this.count; i++) {
             const port  = this.ports[i];
             const peers = this.ports
@@ -332,10 +331,8 @@ class MultiValidatorHub {
     }
 
     async _stopOne(hub){
-        // Stop attestation subsystems first (their poll timers + message
-        // handlers reference peerManager; clearing first avoids hits after close).
-        // Stop the DEX engine first (its poll/flush timers + the consensus
-        // message handler reference peerManager; clear before the WS force-close).
+        // Stop subsystems whose poll timers + message handlers reference peerManager
+        // before the WS force-close, to avoid callbacks firing after the socket is gone.
         if (hub.getCrossChainDex && hub.getCrossChainDex() && typeof hub.getCrossChainDex().stop === 'function') await _withTimeout(hub.getCrossChainDex().stop(), 3000, 'crossChainDex.stop');
 
         if (hub.attestationSpotChecker && typeof hub.attestationSpotChecker.stop === 'function') await _withTimeout(hub.attestationSpotChecker.stop(), 3000, 'attestationSpotChecker.stop');
@@ -344,8 +341,8 @@ class MultiValidatorHub {
         if (hub.attestationPublisher   && typeof hub.attestationPublisher.stop   === 'function') await _withTimeout(hub.attestationPublisher.stop(),   3000, 'attestationPublisher.stop');
         if (hub.getFullNodeChallenge   && hub.getFullNodeChallenge() && typeof hub.getFullNodeChallenge().stop === 'function') await _withTimeout(hub.getFullNodeChallenge().stop(), 3000, 'fullNodeChallenge.stop');
 
-        // Force-close WS server + connections so peerManager.stop() ->
-        // httpServer.close() doesn't wait for a graceful drain.
+        // Force-close WS connections before peerManager.stop() so httpServer.close()
+        // doesn't block waiting for a graceful drain.
         const pm = hub.peerManager;
         if (pm) {
             try {

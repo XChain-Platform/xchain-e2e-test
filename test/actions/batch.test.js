@@ -20,21 +20,17 @@ describe('BATCH', () => {
             let address = addr["address"]
             let tick = "BATCHv0"+address.substring(address.length-8)
 
-            // Create a token
             await issueHelper.sendIssueV0(addr, tick, 100, 50, 0, "Batch test token", 50)
 
-            // Create destination addresses
             let dest1 = await cryptoHelper.getNewAddress("BATCH.V0", COIN, NETWORK, null, "legacy", 1)
             let dest2 = await cryptoHelper.getNewAddress("BATCH.V0", COIN, NETWORK, null, "legacy", 2)
 
-            // Batch: two SENDs
             let result = await batchHelper.sendBatchV0(addr, [
                 "SEND|0|"+tick+"|1|"+dest1["address"]+"|Batch send 1",
                 "SEND|0|"+tick+"|2|"+dest2["address"]+"|Batch send 2"
             ])
             assert(result.batch, "Batch v0 should exist in DB")
 
-            // Verify the individual sends were processed
             let send1 = await indexerDatabase.waitForSend({
                 source: address,
                 destination: dest1["address"],

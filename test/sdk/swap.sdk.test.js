@@ -41,14 +41,11 @@
 const { expect } = require('chai');
 const { makeSdk, submit, fundedGasAddress, mine, submitOpts, uniqueTick } = require('./sdkHelper');
 
-// SWAP create returns the offer's own action_index (used as SWAP_ACTION_INDEX
-// by edit/cancel and as the give/get key in a match).
 function swapIndexOf(indexed) {
     const a = indexed && Array.isArray(indexed.actions) ? indexed.actions[0] : null;
     return a ? a.action_index : null;
 }
 
-// Find a swap row (by action_index) in an sdk.getSwaps result.
 function findSwap(result, actionIndex) {
     const rows = (result && result.data) || [];
     return rows.find(r => Number(r.action_index) === Number(actionIndex));
@@ -115,7 +112,6 @@ describe('[sdk] SWAP (atomic token exchange)', function () {
         const swapIndex = swapIndexOf(res.indexed);
         expect(swapIndex, 'swap action_index').to.not.equal(null);
 
-        // Read the offer back through the SDK: swap_status must reflect 'open'.
         await mine(1);
         const viaSdk = await sdk.getSwaps(addr1.address, 'address');
         const row = findSwap(viaSdk, swapIndex);
@@ -124,7 +120,6 @@ describe('[sdk] SWAP (atomic token exchange)', function () {
         expect(row.get_tick).to.equal(getTick);
         expect(row.swap_status, 'new offer should be open').to.equal('open');
 
-        // Hand off to the edit/cancel test.
         this.test.parent.ctx.swap = { swapIndex, giveTick, getTick };
     });
 
@@ -149,7 +144,6 @@ describe('[sdk] SWAP (atomic token exchange)', function () {
         expect(res.version, 'should select SWAP v2').to.equal(2);
         expect(res.indexed.status).to.equal('valid');
 
-        // Still an open offer after the edit.
         await mine(1);
         const row = findSwap(await sdk.getSwaps(addr1.address, 'address'), s.swapIndex);
         expect(row, 'offer still present after edit').to.exist;
@@ -169,13 +163,11 @@ describe('[sdk] SWAP (atomic token exchange)', function () {
         expect(res.version, 'should select SWAP v1').to.equal(1);
         expect(res.indexed.status).to.equal('valid');
 
-        // Indexer flips swap_status to cancelled (authoritative DB wait).
         const cancelled = await global.indexerDatabase.waitForSwap({
             source: addr1.address, giveTick: s.giveTick, swapStatus: 'cancelled'
         }, 30000);
         expect(cancelled, 'swap should be cancelled in the DB').to.exist;
 
-        // And the SDK read reflects it.
         await mine(1);
         const row = findSwap(await sdk.getSwaps(addr1.address, 'address'), s.swapIndex);
         expect(row, 'cancelled offer still listed').to.exist;
@@ -186,7 +178,6 @@ describe('[sdk] SWAP (atomic token exchange)', function () {
         const tokenA = uniqueTick('SWMA');
         const tokenB = uniqueTick('SWMB');
 
-        // addr1 issues both tokens, then funds addr2 with tokenB so it can offer it.
         await issueToken(addr1, tokenA);
         await issueToken(addr1, tokenB);
         const sendRes = await submit(sdk,
@@ -198,7 +189,6 @@ describe('[sdk] SWAP (atomic token exchange)', function () {
 
         const expiration = ninetyDaysOut();
 
-        // addr1: GIVE 10 tokenA, GET 5 tokenB
         const swap1 = await submit(sdk,
             {
                 action: 'SWAP',
@@ -215,7 +205,6 @@ describe('[sdk] SWAP (atomic token exchange)', function () {
         expect(swap1.indexed.status).to.equal('valid');
         const swap1Index = swapIndexOf(swap1.indexed);
 
-        // addr2: GIVE 5 tokenB, GET 10 tokenA (exact counter-swap)
         const swap2 = await submit(sdk,
             {
                 action: 'SWAP',
@@ -232,13 +221,11 @@ describe('[sdk] SWAP (atomic token exchange)', function () {
         expect(swap2.indexed.status).to.equal('valid');
         const swap2Index = swapIndexOf(swap2.indexed);
 
-        // The matching engine created a valid match (authoritative DB wait).
         const match = await global.indexerDatabase.waitForSwapMatch({
             giveActionIndex: swap1Index, getActionIndex: swap2Index, status: 'valid'
         }, 45000);
         expect(match, 'swap match should exist').to.exist;
 
-        // Both offers settle to complete, observed through the SDK.
         await mine(1);
         const row1 = findSwap(await sdk.getSwaps(addr1.address, 'address'), swap1Index);
         const row2 = findSwap(await sdk.getSwaps(addr2.address, 'address'), swap2Index);
@@ -247,7 +234,6 @@ describe('[sdk] SWAP (atomic token exchange)', function () {
         expect(row1.swap_status, 'swap1 complete').to.equal('complete');
         expect(row2.swap_status, 'swap2 complete').to.equal('complete');
 
-        // The match is also readable via the SDK (keyed by block).
         const matchBlock = row1.block_index || row2.block_index;
         if (matchBlock != null) {
             const matches = await sdk.getSwapMatches(matchBlock, 'block');

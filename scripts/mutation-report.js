@@ -141,7 +141,6 @@ function run() {
     return a.file.localeCompare(b.file) || a.line - b.line
   })
 
-  // Build markdown
   const lines = []
   const now = new Date().toISOString().slice(0, 10)
 
@@ -198,7 +197,6 @@ function run() {
 
   const md = lines.join('\n')
 
-  // Write to reports/mutation/
   const outDir = path.join('reports', 'mutation')
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true })
 

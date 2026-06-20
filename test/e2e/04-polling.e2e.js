@@ -23,11 +23,9 @@ describe('E2E: Polling & UTXO Tracker Reliability', () => {
             const tick = 'E2EPOLL' + addr.address.substring(addr.address.length - 7)
             const message = 'ISSUE|0|' + tick + '|100|10|0|poll latency test|10||||||||||||||||'
 
-            // Broadcast the transaction
             const txHash = await transactionHelper.createAndSendTransaction(addr, message)
             assert(txHash, 'Transaction should be broadcast successfully')
 
-            // Poll with timing instrumentation
             const pollStart = Date.now()
             const issueRow = await indexerDatabase.waitForIssue({
                 txHash: txHash,
@@ -72,7 +70,6 @@ describe('E2E: Polling & UTXO Tracker Reliability', () => {
             const trackerUtxo = utxoResult.utxos.find(u => u.confirmations > 0)
             assert(trackerUtxo, 'Should have at least one confirmed UTXO')
 
-            // Verify data shape
             assert(typeof trackerUtxo.txid === 'string' && trackerUtxo.txid.length === 64,
                 'UTXO txid should be a 64-char hex string')
             assert(typeof trackerUtxo.vout === 'number', 'UTXO vout should be a number')
@@ -80,7 +77,6 @@ describe('E2E: Polling & UTXO Tracker Reliability', () => {
                 'UTXO scriptPubKey should be a non-empty string')
             assert(trackerUtxo.confirmations > 0, 'UTXO confirmations should be > 0')
 
-            // Cross-verify with the blockchain node: the txid should exist on chain
             const rawTxHex = await nodeConnector.getTransactionHex(trackerUtxo.txid)
             assert(rawTxHex, 'The UTXO txid should exist on the blockchain node')
             assert(typeof rawTxHex === 'string' && rawTxHex.length > 0,
@@ -90,15 +86,12 @@ describe('E2E: Polling & UTXO Tracker Reliability', () => {
         it('should confirm that waitForUtxos returns true after funding a new address', async () => {
             const addr = await cryptoHelper.getNewAddress('E2E.UTXO.WAIT', COIN, NETWORK, null, 'legacy', 0)
 
-            // Fund the address
             const txId = await regtestMinerConnector.sendFunds(addr.address, 1)
             assert(txId, 'sendFunds should return a transaction ID')
 
-            // Confirm the tx is mined
             const txExists = await nodeConnector.waitForTx(txId, 60000)
             assert(txExists, 'Funded transaction should appear in the blockchain')
 
-            // Poll the UTXO tracker
             const waitStart = Date.now()
             const didAppear = await utxoTrackerConnector.waitForUtxos(addr.address, 60000)
             const waitDuration = Date.now() - waitStart
@@ -107,7 +100,6 @@ describe('E2E: Polling & UTXO Tracker Reliability', () => {
             assert(waitDuration < 60000, 'UTXO should appear before timeout')
             console.log('E2E-POLL-003: UTXO tracker sync latency = ' + waitDuration + ' ms')
 
-            // Verify the funded txid appears in the UTXO set
             const utxoSet = await utxoTrackerConnector.getUtxosFromAddress(addr.address)
             const matchingUtxo = utxoSet.utxos.find(u => u.txid === txId)
             assert(matchingUtxo, 'The miner funding txid should appear in the UTXO tracker data')

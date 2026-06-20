@@ -126,7 +126,6 @@ async function main() {
     });
     console.log('[dex-doge-setup] prices seeded (DOGE/USD, XCHAIN/USD) at chain time ' + blockTime);
 
-    // ── 2. SDK + funded maker.
     const sdk = new XChainSDK({
         network:     'dogecoin-regtest',
         encoderUrl:  'localhost',

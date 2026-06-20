@@ -160,13 +160,11 @@ describe('[sdk] cross-contract calls (emit.execute)', function () {
         expect(res.indexed.status).to.equal('valid');
         await mine(1);
 
-        // B ran, and saw A's derived address as its caller
         expect(String(await readState(sdk, indexB, 'pings'))).to.equal('1');
         const lastCaller = await readState(sdk, indexB, 'lastCaller');
         expect(String(lastCaller)).to.match(new RegExp(':' + indexA + '$'),
             'B must see C:<CHAIN>:' + indexA + ' as its caller');
 
-        // ...and B's callback into A ran too (depth 2)
         expect(String(await readState(sdk, indexA, 'acks'))).to.equal('1');
     });
 
@@ -181,9 +179,7 @@ describe('[sdk] cross-contract calls (emit.execute)', function () {
         expect(actionStatusOf(res.indexed)).to.equal('failed');
         await mine(1);
 
-        // A's own pre-call state write must NOT survive
         expect(await readState(sdk, indexA, 'marker')).to.equal(null);
-        // B was not pinged again
         expect(String(await readState(sdk, indexB, 'pings'))).to.equal('1');
     });
 

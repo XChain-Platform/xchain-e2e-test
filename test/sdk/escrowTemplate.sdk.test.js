@@ -152,13 +152,11 @@ describe('[sdk] template:escrow (on-chain custody)', function () {
         }
         sdk = makeSdk();
 
-        // Buyer deploys, funds, and releases (needs native coin + gas).
         buyer = await fundedGasAddress(sdk, 1);
         // Seller + arbiter only need to exist on-chain as destinations / roles.
         seller  = newAddress(sdk);
         arbiter = newAddress(sdk);
 
-        // Buyer issues the escrowed token and mints itself the full amount.
         tick = uniqueTick('ESC');
         const issue = await submit(sdk,
             { action: 'ISSUE', params: { tick, maxSupply: 1000000, maxMint: 100000, decimals: 0, description: 'escrow asset', mintSupply: AMOUNT } },

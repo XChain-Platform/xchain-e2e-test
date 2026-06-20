@@ -59,8 +59,6 @@ const mariadb = require('mariadb');
 const cryptoHelper = require('../cryptoHelper');
 const { makeSdk, submit, fundedGasAddress, mine, submitOpts } = require('./sdkHelper');
 
-// Caller contract on BTC: emits one crossExecute to the DOGE target and stores
-// the call_id. Identical shape to the target-reorg drill's caller.
 const CONTRACT_A = `
     module.exports = {
         crossCallable: [],
@@ -261,16 +259,13 @@ describe('[sdk] XCALL source-chain reorg retraction (pre-execution)', function (
                 expect(hubStatus, 'hub dispatch row marked retracted').to.equal('retracted');
             }
 
-            // Source-chain indexer: the XCALL v0 row is gone and its mirror is gone.
             expect(await btcCount('SELECT COUNT(*) n FROM xcalls WHERE call_id = ?', [callId]),
                 'source xcalls row removed by rollback').to.equal(0);
             expect(btcMirror, 'source cross_chain_calls mirror deleted').to.equal(0);
 
-            // No callback was ever delivered on the source chain.
             expect(await btcCount('SELECT COUNT(*) n FROM cross_chain_call_callbacks WHERE call_id = ?', [callId]),
                 'no callback on the source chain').to.equal(0);
 
-            // Target chain: mirror gone and the call NEVER executed.
             const dogeMirror = await dogeIdx(async (c) => Number((await c.query(
                 'SELECT COUNT(*) n FROM cross_chain_calls WHERE call_id = ?', [callId]))[0].n));
             const dogeExec = await dogeIdx(async (c) => Number((await c.query(

@@ -23,11 +23,9 @@ describe('ORDER', () => {
             let giveTick = "ORDGIVEv0"+address.substring(address.length-8)
             let getTick = "ORDGETv0"+address.substring(address.length-8)
 
-            // Create give and get tokens
             await issueHelper.sendIssueV0(addr, giveTick, 100, 50, 0, "Order give token", 50)
             await issueHelper.sendIssueV0(addr, getTick, 100, 50, 0, "Order get token", 50)
 
-            // Mint gas for fee
             await gasHelper.mintGas(addr, 100)
 
             let expirationDate = new Date()
@@ -60,7 +58,6 @@ describe('ORDER', () => {
             let expirationDate = new Date()
             expirationDate.setMonth(expirationDate.getMonth() + 3)
 
-            // Create order
             let createResult = await orderHelper.sendOrderV0(
                 addr,
                 COIN_CODE, giveTick, 10,
@@ -73,11 +70,9 @@ describe('ORDER', () => {
             assert(createResult.order, "Order should be created")
             let orderActionIndex = Number(createResult.order["action_index"])
 
-            // Cancel the order
             let cancelResult = await orderHelper.sendOrderCancelV1(addr, orderActionIndex, "Cancelling order")
             assert(cancelResult.txHash, "Order cancel tx should have been sent")
 
-            // Verify original order is no longer 'open'
             let closedOrder = await indexerDatabase.waitForOrder({
                 source: address,
                 giveTick: giveTick,
@@ -97,20 +92,17 @@ describe('ORDER', () => {
             let tokenA = "ORDMA"+address1.substring(address1.length-8)
             let tokenB = "ORDMB"+address1.substring(address1.length-8)
 
-            // addr1 creates both tokens
             await issueHelper.sendIssueV0(addr1, tokenA, 100, 50, 0, "Match token A", 50)
             await issueHelper.sendIssueV0(addr1, tokenB, 100, 50, 0, "Match token B", 50)
 
-            // addr1 sends tokenB to addr2 so addr2 can offer it
+            // give addr2 some tokenB so it can offer it
             await sendHelper.sendSendV0(addr1, tokenB, 20, address2, "Fund addr2 with tokenB")
 
-            // Both need gas for order fees
             await gasHelper.mintGas(addr1, 100)
             await gasHelper.mintGas(addr2, 100)
 
             let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90 // 90 days
 
-            // addr1: GIVE 10 tokenA, GET 5 tokenB
             let order1 = await orderHelper.sendOrderV0(
                 addr1,
                 COIN_CODE, tokenA, 10,
@@ -121,7 +113,7 @@ describe('ORDER', () => {
             assert(order1.order, "Order 1 should exist in DB")
             let order1ActionIndex = Number(order1.order["action_index"])
 
-            // addr2: GIVE 5 tokenB, GET 10 tokenA (exact counter-order)
+            // exact counter-order
             let order2 = await orderHelper.sendOrderV0(
                 addr2,
                 COIN_CODE, tokenB, 5,
@@ -132,7 +124,6 @@ describe('ORDER', () => {
             assert(order2.order, "Order 2 should exist in DB")
             let order2ActionIndex = Number(order2.order["action_index"])
 
-            // Verify the match was created
             let match = await indexerDatabase.waitForOrderMatch({
                 giveActionIndex: order1ActionIndex,
                 getActionIndex: order2ActionIndex,
@@ -140,7 +131,6 @@ describe('ORDER', () => {
             }, 30000)
             assert(match, "Order match should exist in DB")
 
-            // Verify both orders are now complete
             let completedOrder1 = await indexerDatabase.waitForOrder({
                 source: address1,
                 giveTick: tokenA,
@@ -176,7 +166,6 @@ describe('ORDER', () => {
 
             let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
 
-            // addr1: GIVE 1 tokenA, GET 3 tokenB (price = 3/1 = 3.0)
             let order1 = await orderHelper.sendOrderV0(
                 addr1,
                 COIN_CODE, tokenA, 1,
@@ -187,7 +176,6 @@ describe('ORDER', () => {
             assert(order1.order, "Order 1 should exist")
             let order1AI = Number(order1.order["action_index"])
 
-            // addr2: GIVE 3 tokenB, GET 1 tokenA (price = 1/3 = 0.333...)
             let order2 = await orderHelper.sendOrderV0(
                 addr2,
                 COIN_CODE, tokenB, 3,
@@ -235,7 +223,6 @@ describe('ORDER', () => {
 
             let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
 
-            // Large order: GIVE 100 tokenA, GET 70 tokenB
             let bigOrder = await orderHelper.sendOrderV0(
                 addr1,
                 COIN_CODE, tokenA, 100,
@@ -246,7 +233,6 @@ describe('ORDER', () => {
             assert(bigOrder.order, "Big order should exist")
             let bigOrderAI = Number(bigOrder.order["action_index"])
 
-            // Small counter: GIVE 7 tokenB, GET 10 tokenA
             let smallOrder = await orderHelper.sendOrderV0(
                 addr2,
                 COIN_CODE, tokenB, 7,
@@ -256,20 +242,17 @@ describe('ORDER', () => {
             )
             assert(smallOrder.order, "Small order should exist")
 
-            // The match should happen
             let match = await indexerDatabase.waitForOrderMatch({
                 giveActionIndex: bigOrderAI,
                 status: "valid"
             }, 30000)
             assert(match, "Partial fill match should exist")
 
-            // Small order should be complete (fully filled)
             let completedSmall = await indexerDatabase.waitForOrder({
                 source: address2, giveTick: tokenB, orderStatus: "complete"
             }, 30000)
             assert(completedSmall, "Small order should be complete")
 
-            // Big order should still be open (only partially filled)
             let openBig = await indexerDatabase.waitForOrder({
                 source: address1, giveTick: tokenA, orderStatus: "open"
             }, 30000)
@@ -297,7 +280,6 @@ describe('ORDER', () => {
 
             let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
 
-            // addr1: GIVE 0.00000003 tokenA, GET 1.23456789 tokenB
             let order1 = await orderHelper.sendOrderV0(
                 addr1,
                 COIN_CODE, tokenA, "0.00000003",
@@ -308,7 +290,6 @@ describe('ORDER', () => {
             assert(order1.order, "HP order 1 should exist")
             let order1AI = Number(order1.order["action_index"])
 
-            // addr2: GIVE 1.23456789 tokenB, GET 0.00000003 tokenA
             let order2 = await orderHelper.sendOrderV0(
                 addr2,
                 COIN_CODE, tokenB, "1.23456789",
@@ -350,7 +331,6 @@ describe('ORDER', () => {
             let expirationDate = new Date()
             expirationDate.setMonth(expirationDate.getMonth() + 3)
 
-            // Create order
             let createResult = await orderHelper.sendOrderV0(
                 addr,
                 COIN_CODE, giveTick, 10,
@@ -363,7 +343,6 @@ describe('ORDER', () => {
             assert(createResult.order, "Order should be created")
             let orderActionIndex = Number(createResult.order["action_index"])
 
-            // Edit: extend expiration
             let newExpiration = new Date()
             newExpiration.setMonth(newExpiration.getMonth() + 6)
 

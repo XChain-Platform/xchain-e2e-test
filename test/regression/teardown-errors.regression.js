@@ -14,14 +14,11 @@ const assert = require('assert')
 const sinon  = require('sinon')
 const axios  = require('axios')
 
-// Inject mock mariadb before requiring Database
 const mockMariadb = require('../integration/fixtures/mockMariadb')
 const Database    = require('../../src/db')
 const RegtestMinerConnector  = require('../../src/RegtestMinerConnector')
 const XChainEncoderConnector = require('../../src/XChainEncoderConnector')
 const BlockchainConnector    = require('../../src/BlockchainConnector')
-
-// ── Helpers ──────────────────────────────────────────────────────────────
 
 function makeMockConnection(queryResult) {
     return {
@@ -46,17 +43,11 @@ function createDb(queryResult) {
     return { db, pool, conn }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// P1: Teardown & Error Handling Regression Tests
-// ═══════════════════════════════════════════════════════════════════════════
-
 describe('[regression:p1] Teardown & Cleanup', function () {
 
     afterEach(function () {
         sinon.restore()
     })
-
-    // ── R-TEAR-001 ───────────────────────────────────────────────────────
 
     it('[regression:p1] R-TEAR-001: setDefaultMiningTime calls correct RPC method', async function () {
         const stub = sinon.stub(axios, 'post').resolves({
@@ -68,15 +59,11 @@ describe('[regression:p1] Teardown & Cleanup', function () {
         assert.strictEqual(stub.firstCall.args[1].method, 'set_default_mining_time')
     })
 
-    // ── R-TEAR-002 ───────────────────────────────────────────────────────
-
     it('[regression:p1] R-TEAR-002: pool.end() closes the connection pool', async function () {
         const { db, pool } = createDb()
         await pool.end()
         assert.ok(pool.end.calledOnce)
     })
-
-    // ── R-TEAR-003 ───────────────────────────────────────────────────────
 
     it('[regression:p1] R-TEAR-003: wallet seed buffers can be zeroed', function () {
         const seed = Buffer.from('abcdef1234567890abcdef1234567890', 'hex')
@@ -89,7 +76,6 @@ describe('[regression:p1] Teardown & Cleanup', function () {
             }
         }
 
-        // Replicate teardown logic
         for (const label of Object.keys(wallets)) {
             const w = wallets[label]
             if (w.seed && Buffer.isBuffer(w.seed)) w.seed.fill(0)
@@ -104,25 +90,20 @@ describe('[regression:p1] Teardown & Cleanup', function () {
         assert.ok(privKey.every(b => b === 0), 'privateKey should be zeroed')
     })
 
-    // ── R-TEAR-004 ───────────────────────────────────────────────────────
-
     it('[regression:p1] R-TEAR-004: teardown completes even if miner is unavailable', async function () {
         sinon.stub(axios, 'post').rejects(new Error('ECONNREFUSED'))
         const miner = new RegtestMinerConnector('localhost', 3033)
 
-        // Replicate teardown error handling
         let teardownCompleted = false
         try {
             await miner.setDefaultMiningTime()
         } catch (err) {
-            // swallowed, same as initialCheck.test.js afterAll
+            // swallowed in afterAll
         }
         teardownCompleted = true
 
         assert.ok(teardownCompleted, 'teardown should complete despite miner error')
     })
-
-    // ── R-TEAR-005 ───────────────────────────────────────────────────────
 
     it('[regression:p1] R-TEAR-005: pool.end() error does not crash teardown', async function () {
         const { db, pool } = createDb()
@@ -140,17 +121,11 @@ describe('[regression:p1] Teardown & Cleanup', function () {
     })
 })
 
-// ═══════════════════════════════════════════════════════════════════════════
-// P1: Error Propagation & Resilience Regression Tests
-// ═══════════════════════════════════════════════════════════════════════════
-
 describe('[regression:p1] Error Propagation & Resilience', function () {
 
     afterEach(function () {
         sinon.restore()
     })
-
-    // ── R-ERR-001 ────────────────────────────────────────────────────────
 
     it('[regression:p1] R-ERR-001: connector timeout produces descriptive error', async function () {
         sinon.stub(axios, 'post').rejects(new Error('ETIMEDOUT'))
@@ -161,8 +136,6 @@ describe('[regression:p1] Error Propagation & Resilience', function () {
             /Error trying to create a tx/
         )
     })
-
-    // ── R-ERR-002 ────────────────────────────────────────────────────────
 
     it('[regression:p1] R-ERR-002: db polling survives query error and continues', async function () {
         const conn = makeMockConnection()
@@ -179,12 +152,9 @@ describe('[regression:p1] Error Propagation & Resilience', function () {
         assert.ok(result, 'should recover and return the row')
     })
 
-    // ── R-ERR-003 ────────────────────────────────────────────────────────
-
     it('[regression:p1] R-ERR-003: broadcastTx produces error with node error detail', async function () {
         const node = new BlockchainConnector('localhost', 18443, 'u', 'p')
-        // Stub broadcastTx to simulate the error path where the node returns an error object
-        // The real implementation throws: 'Error sending transaction to the node: {"code":-26,"message":"dust"}'
+        // Real impl throws: 'Error sending transaction to the node: {"code":-26,"message":"dust"}'
         sinon.stub(node, 'broadcastTx').rejects(
             new Error('Error sending transaction to the node: {"code":-26,"message":"dust"}')
         )
@@ -193,8 +163,6 @@ describe('[regression:p1] Error Propagation & Resilience', function () {
             /Error sending transaction.*dust/
         )
     })
-
-    // ── R-ERR-005 ────────────────────────────────────────────────────────
 
     it('[regression:p1] R-ERR-005: encoder createTx throws descriptive error on failure', async function () {
         sinon.stub(axios, 'post').resolves({
@@ -207,8 +175,6 @@ describe('[regression:p1] Error Propagation & Resilience', function () {
             /Error trying to create a tx/
         )
     })
-
-    // ── R-ERR-006 ────────────────────────────────────────────────────────
 
     it('[regression:p1] R-ERR-006: hub _call returns null when all endpoints fail', async function () {
         sinon.stub(axios, 'post').rejects(new Error('ECONNREFUSED'))

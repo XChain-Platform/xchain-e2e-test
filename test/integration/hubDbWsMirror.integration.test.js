@@ -82,17 +82,16 @@ describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration
         repPool = mariadb.createPool({ ...base, database: REP });
         for (const t of Object.keys(SQL)) { const ddl = readDDL(SQL[t]); await srcPool.query(ddl); await repPool.query(ddl); }
 
-        // Seed BOOTSTRAP rows into SRC *before* the indexer starts (these must arrive via REST).
+        // Pre-existing rows must arrive via REST snapshot (not WS) on HubDbSync.start().
         await srcPool.query(
             "INSERT INTO price_snapshots (id,round_number,coin_pair,price,reference_block,validator_count,consensus_proof,status) " +
             "VALUES (1,100,'BTC/USD','61000.00000000',100,4,'proof-boot','finalized')");
         await srcPool.query(
             "INSERT INTO capability_snapshots (id,snapshot_block,capability,signing_pubkey,amount) VALUES (1,100,'cross_chain','" + 'a'.repeat(64) + "','6000')");
 
-        // REAL broadcaster (reads SRC for the ready-message max_ids).
         broadcaster = new HubDbBroadcaster({}, { doQuery: (sql, p) => srcPool.query(sql, p) });
 
-        // Minimal hub HTTP surface: REST snapshot (mirrors xchain-hub api.js:677) + WS subscribe.
+        // Minimal hub HTTP surface: mirrors xchain-hub api.js REST snapshot + WS subscribe.
         server = http.createServer(async (req, res) => {
             const u = urlMod.parse(req.url, true);
             const m = u.pathname.match(/^\/hub-db\/snapshot\/([a-z_]+)$/);
@@ -112,7 +111,6 @@ describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration
         await new Promise(r => server.listen(0, '127.0.0.1', r));
         port = server.address().port;
 
-        // REAL indexer-side sync client -> REP, pointed at our hub surface.
         sync = new HubDbSync({ doQuery: (sql, p) => repPool.query(sql, p) }, { hubUrl: 'http://127.0.0.1:' + port });
         assert.strictEqual(sync.enabled, true, 'sync must be enabled (hubUrl + hubDb present)');
         await sync.start();

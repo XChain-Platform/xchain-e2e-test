@@ -58,7 +58,6 @@ describe('Error Propagation: Negative Test Assertions', function () {
         it('waitForSend can filter by invalid status', async function () {
             global.indexerDatabase = {
                 waitForSend: async function (obj) {
-                    // Simulate indexer recording a rejected send
                     if (obj.status === 'invalid: insufficient funds') {
                         return dbRows.sendRow({ status: 'invalid: insufficient funds' })
                     }
@@ -68,8 +67,6 @@ describe('Error Propagation: Negative Test Assertions', function () {
                 waitForDebit: async () => null,
             }
 
-            // The send helper always filters with status: "valid"
-            // For negative tests, the test file calls waitForSend directly
             const row = await global.indexerDatabase.waitForSend({
                 source: addressInfo.address,
                 txHash: 'txhash_neg',

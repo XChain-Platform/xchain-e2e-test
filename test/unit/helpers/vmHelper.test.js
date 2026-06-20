@@ -55,7 +55,6 @@ describe('vmHelper', () => {
 
         it('should pass P2SH as the encoding arg to createAndSendTransaction', async () => {
             await helper.sendDeployV0(addressInfo, 'x', '100')
-            // signature: createAndSendTransaction(addressInfo, msg, null, [], 'P2SH')
             assert.strictEqual(createTxStub.firstCall.args[4], 'P2SH')
         })
 

@@ -23,7 +23,6 @@ describe('DIVIDEND', () => {
             let holderTick = "DIVHOLDv0"+address.substring(address.length-8)
             let dividendTick = "DIVPAYv0"+address.substring(address.length-8)
 
-            // Create the holder tick and send to some addresses to create holders
             await issueHelper.sendIssueV0(addr, holderTick, 100, 10, 0, "Dividend holder token", 10)
 
             let holder1 = await cryptoHelper.getNewAddress("DIVIDEND.V0", COIN, NETWORK, null, "legacy", 1)
@@ -32,13 +31,10 @@ describe('DIVIDEND', () => {
             await sendHelper.sendSendV0(addr, holderTick, 2, holder1["address"], "Dividend holder 1")
             await sendHelper.sendSendV0(addr, holderTick, 3, holder2["address"], "Dividend holder 2")
 
-            // Create the dividend tick (what to distribute)
             await issueHelper.sendIssueV0(addr, dividendTick, 1000, 100, 0, "Dividend payout token", 100)
 
-            // Mint gas for fee
             await gasHelper.mintGas(addr, 100)
 
-            // Pay dividend
             let result = await dividendHelper.sendDividendV0(
                 addr, holderTick, dividendTick, 1, "Dividend test v0"
             )
@@ -53,7 +49,6 @@ describe('DIVIDEND', () => {
             let holderTick = "DVBALHv0"+address.substring(address.length-8)
             let dividendTick = "DVBALPv0"+address.substring(address.length-8)
 
-            // Issue holder token: 10 supply, send to 2 holders
             // addr keeps 5, holder1 gets 2, holder2 gets 3
             await issueHelper.sendIssueV0(addr, holderTick, 100, 10, 0, "Dividend balance holder", 10)
 
@@ -63,10 +58,7 @@ describe('DIVIDEND', () => {
             await sendHelper.sendSendV0(addr, holderTick, 2, holder1["address"], "Holder 1")
             await sendHelper.sendSendV0(addr, holderTick, 3, holder2["address"], "Holder 2")
 
-            // Issue dividend token and pay 10 per unit held
-            // holder1 has 2 units -> should get 20
-            // holder2 has 3 units -> should get 30
-            // addr has 5 units -> should get 50
+            // 10 per unit held: holder1(2)->20, holder2(3)->30, addr(5)->50
             await issueHelper.sendIssueV0(addr, dividendTick, 1000, 100, 0, "Dividend balance payout", 100)
 
             await gasHelper.mintGas(addr, 100)
@@ -76,7 +68,6 @@ describe('DIVIDEND', () => {
             )
             assert(result.dividend, "Dividend should exist in DB")
 
-            // Verify credits to holders
             let credit1 = await indexerDatabase.waitForCredit({
                 address: holder1["address"],
                 tick: dividendTick,
@@ -91,7 +82,6 @@ describe('DIVIDEND', () => {
             }, 30000)
             assert(credit2, "Holder2 (3 units) should receive 30 dividend tokens")
 
-            // Verify source was debited (only external holders: 2*10 + 3*10 = 50)
             let debit = await indexerDatabase.waitForDebit({
                 address: address,
                 tick: dividendTick,

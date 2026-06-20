@@ -44,11 +44,9 @@ describe('VM: Smart Contracts', function () {
     let deployerAddr = null
 
     before(async function () {
-        // Fund a deployer address with BTC and XCHAIN (for gas fees)
         deployerAddr = await cryptoHelper.getNewFundedAddress(
             "vm-deployer", COIN, NETWORK, null, "legacy", 0, 1
         )
-        // Ensure deployer has XCHAIN for gas
         await gasHelper.ensureGasBalance(deployerAddr, '100')
     })
 
@@ -64,7 +62,6 @@ describe('VM: Smart Contracts', function () {
         let contractIndex = null
 
         before(async function () {
-            // Deploy a fresh contract
             let deploy = await vmHelper.sendDeployV0(deployerAddr, COUNTER_CONTRACT, 200000)
             assert(deploy.contract, 'Deploy should succeed')
             contractIndex = deploy.contract.action_index

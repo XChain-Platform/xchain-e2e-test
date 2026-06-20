@@ -17,11 +17,8 @@
 const assert = require('assert')
 const sinon = require('sinon')
 
-// Inject mock mariadb before requiring db.js
 const mockMariadb = require('../integration/fixtures/mockMariadb')
 const Database = require('../../src/db')
-
-// ── Helpers ──────────────────────────────────────────────────────
 
 function makeMockConnection(queryResult) {
     return {
@@ -50,14 +47,12 @@ describe('Boundary: WHERE Clause Construction', function () {
         mockMariadb.createPool.resetHistory()
     })
 
-    // ── WC-01: checkIssue with all null fields ──────────────────
-
     describe('WC-01: checkIssue with all filter fields null/undefined', function () {
 
         it('produces an empty WHERE clause that causes a SQL error, caught gracefully', async function () {
             const { db, mockConn } = createDb()
-            // When all fields are null, whereClauses is empty, so JOIN produces "WHERE "
-            // which is invalid SQL. The method should catch the error and return null.
+            // When all fields are null, whereClauses is empty, producing "WHERE " (invalid SQL).
+            // The method catches the SQL error and returns null.
             mockConn.query.rejects(new Error('SQL syntax error near WHERE'))
 
             const result = await db.checkIssue({
@@ -70,8 +65,6 @@ describe('Boundary: WHERE Clause Construction', function () {
             assert(mockConn.release.calledOnce, 'connection should be released')
         })
     })
-
-    // ── WC-02: checkIssue with single field ─────────────────────
 
     describe('WC-02: checkIssue with only tick filter', function () {
 
@@ -89,8 +82,6 @@ describe('Boundary: WHERE Clause Construction', function () {
             assert.deepStrictEqual(params, ['MYTOKEN'])
         })
     })
-
-    // ── WC-03: checkIssue with all fields populated ─────────────
 
     describe('WC-03: checkIssue with many fields populated', function () {
 
@@ -127,8 +118,6 @@ describe('Boundary: WHERE Clause Construction', function () {
         })
     })
 
-    // ── WC-04: checkIssue with empty string values ──────────────
-
     describe('WC-04: checkIssue with empty string filter values', function () {
 
         it('includes empty strings as valid filter values (not treated as null)', async function () {
@@ -146,8 +135,6 @@ describe('Boundary: WHERE Clause Construction', function () {
         })
     })
 
-    // ── WC-05: checkIssue with very long string values ──────────
-
     describe('WC-05: checkIssue with very long filter values', function () {
 
         it('passes long strings as parameterized values without truncation', async function () {
@@ -162,8 +149,6 @@ describe('Boundary: WHERE Clause Construction', function () {
             assert.strictEqual(params[0].length, 10000)
         })
     })
-
-    // ── WC-06: checkIssue with special characters (SQL injection safe) ──
 
     describe('WC-06: checkIssue with SQL-special characters in values', function () {
 
@@ -181,8 +166,6 @@ describe('Boundary: WHERE Clause Construction', function () {
         })
     })
 
-    // ── WC-07: checkSend with all null fields ───────────────────
-
     describe('WC-07: checkSend with all filter fields null', function () {
 
         it('returns null gracefully on empty WHERE', async function () {
@@ -198,8 +181,6 @@ describe('Boundary: WHERE Clause Construction', function () {
             assert(mockConn.release.calledOnce)
         })
     })
-
-    // ── WC-08: checkSend with all fields populated ──────────────
 
     describe('WC-08: checkSend with all fields populated', function () {
 
@@ -232,8 +213,6 @@ describe('Boundary: WHERE Clause Construction', function () {
         })
     })
 
-    // ── WC-09: checkSend omits null fields, keeps non-null ──────
-
     describe('WC-09: checkSend mixed null and non-null fields', function () {
 
         it('includes only non-null fields in WHERE', async function () {
@@ -253,8 +232,6 @@ describe('Boundary: WHERE Clause Construction', function () {
             assert.deepStrictEqual(params, ['addr1', 'TOK'])
         })
     })
-
-    // ── WC-10: checkCredit with all fields populated ────────────
 
     describe('WC-10: checkCredit with all fields', function () {
 
@@ -276,8 +253,6 @@ describe('Boundary: WHERE Clause Construction', function () {
         })
     })
 
-    // ── WC-11: checkDebit with all fields populated ─────────────
-
     describe('WC-11: checkDebit with all fields', function () {
 
         it('builds correct WHERE for debit filters', async function () {
@@ -297,8 +272,6 @@ describe('Boundary: WHERE Clause Construction', function () {
             assert.deepStrictEqual(params, [200, 'hash789', 'TOK', 'addr2', 300])
         })
     })
-
-    // ── WC-12: Numeric zero is a valid filter (not null) ────────
 
     describe('WC-12: Numeric zero treated as valid filter value', function () {
 
@@ -336,8 +309,6 @@ describe('Boundary: WHERE Clause Construction', function () {
             assert.deepStrictEqual(params, [0])
         })
     })
-
-    // ── WC-13: Placeholder count matches parameter count ────────
 
     describe('WC-13: Parameterized query safety - placeholder/value count match', function () {
 

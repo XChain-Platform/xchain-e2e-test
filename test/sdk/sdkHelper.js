@@ -34,8 +34,6 @@
  *
  ********************************************************************/
 
-// Resolve xchain-sdk from a sibling checkout (host runs) or node_modules
-// (CI / container runs where it's installed as a dependency).
 function loadSDK() {
     const candidates = [
         'xchain-sdk',
@@ -55,9 +53,8 @@ function loadSDK() {
 
 const { XChainSDK } = loadSDK();
 
-// Resolve the SDK network string ("bitcoin-regtest") from the same env
-// initialCheck consumes. global.COIN / global.NETWORK are set by the
-// initialCheck beforeAll hook; fall back to raw env for standalone use.
+// global.COIN / global.NETWORK are set by the initialCheck beforeAll hook;
+// fall back to raw env for standalone use.
 function resolveNetwork() {
     let coin = (typeof global.COIN !== 'undefined' && global.COIN) || process.env.COIN || 'bitcoin';
     let net  = (typeof global.NETWORK !== 'undefined' && global.NETWORK) || process.env.NETWORK || 'regtest';
@@ -67,9 +64,6 @@ function resolveNetwork() {
     return coin + '-' + net;
 }
 
-// Build a real SDK instance pointed at the live regtest stack. Endpoints
-// come from env (the e2e .env) with host-port-mapping fallbacks so a
-// freshly-cloned checkout works against the default xchain-node layout.
 function makeSdk(overrides = {}) {
     const sdk = new XChainSDK({
         network:      resolveNetwork(),
@@ -84,10 +78,8 @@ function makeSdk(overrides = {}) {
     return sdk;
 }
 
-// Generate a fresh keypair via the SDK and fund its address on regtest,
-// reusing the proven funding path from cryptoHelper (miner sendFunds +
-// utxo-tracker wait, with block-nudging on stall). Returns
-// { wif, privateKey, publicKey, publicKeyHex, compressed, address }.
+// Mirrors cryptoHelper funding: sendFunds + utxo-tracker wait with block-nudging on stall.
+// Returns { wif, privateKey, publicKey, publicKeyHex, compressed, address }.
 async function fundedSdkAddress(sdk, amountToFund = 1, addressType = 'p2pkh') {
     if (!global.regtestMinerConnector || !global.utxoTrackerConnector || !global.nodeConnector) {
         throw new Error('Global connectors not initialised. Run via "npm run test:sdk" (which --requires initialCheck).');
@@ -123,28 +115,19 @@ function isTransientStackError(err) {
     return /missingorspent|missing\s*or\s*spent|missing\s+inputs|bad-txns-inputs|no utxos|Cannot read propert(y|ies).*txid|Internal encoder error|txn-mempool-conflict|too-long-mempool-chain|insufficient priority|min relay fee/i.test(msg);
 }
 
-// Submit an action through the SDK with a quiesce+retry barrier around
-// transient stack races, so sequential actions from one address don't flake
-// under regtest load. Mirrors transactionHelper.createAndSendTransaction.
+// Submit through the SDK with a quiesce+retry barrier around transient stack races.
+// Mirrors transactionHelper.createAndSendTransaction.
 async function submit(sdk, actionData, encoderOpts, opts, attempts = 6) {
-    // Default to confirmed-only UTXOs (like the connector suite): submitAction
-    // waits for indexer confirmation, so each action's change is mined before the
-    // next runs. Spending unconfirmed UTXOs invites the tracker's stale mempool
-    // view -> bad-txns-inputs-missingorspent. Caller can override.
+    // Default to confirmed-only UTXOs: submitAction waits for indexer confirmation,
+    // so each action's change is mined before the next runs. Spending unconfirmed
+    // UTXOs invites the tracker's stale mempool view -> bad-txns-inputs-missingorspent.
     const eo = Object.assign({ unconfirmed: false }, encoderOpts);
     // Keep oracle prices fresh for USD-pegged fee validation (throttled; a no-op
-    // when the last seed is still fresh). Gas-mode BTC contract actions
-    // (DEPLOY/EXECUTE) index `no current oracle price for BTC/USD` once the seed
-    // ages out, so the SDK path refreshes here just as the actions-suite path
-    // does via nativeFeeHelper.getNativeFeeOutput. Per-action (not a background
-    // timer) so it never clobbers dispenser.test.js's latestBlockTime()-60
-    // reverse-match seed (that DISPENSE payment uses createSimpleTransaction).
+    // when the last seed is still fresh). Per-action rather than a background timer
+    // so it never clobbers dispenser.test.js's latestBlockTime()-60 reverse-match seed.
     try { await require('../helpers/nativeFeeHelper').seedGlobalPrices(false); } catch (e) { /* best effort */ }
     let lastErr;
     for (let i = 1; i <= attempts; i++) {
-        // Settle the stack BEFORE building so the encoder + tracker see a
-        // consistent, fully-confirmed UTXO set (including the previous action's
-        // change). quiesce mines any pending mempool and waits tracker==node.
         try {
             await global.utxoTrackerConnector.quiesce({ timeoutMs: 20000, pollMs: 250, regtestMiner: global.regtestMinerConnector });
         } catch (e) { /* best effort */ }
@@ -161,17 +144,12 @@ async function submit(sdk, actionData, encoderOpts, opts, attempts = 6) {
 
 const GAS_TICK = 'XCHAIN';
 
-// The faucet genesis (initialCheck gas-token-check) issues XCHAIN with
-// MAX_MINT=100000 per transaction. A seed above that is indexed
-// 'invalid: AMOUNT > MAX_MINT' and kills every suite's before-hook on a
-// fresh chain, so the default seed IS the cap (== passes; > fails).
+// Cap matches the genesis XCHAIN MAX_MINT: a seed above it indexes
+// 'invalid: AMOUNT > MAX_MINT' and kills the before-hook on a fresh chain.
 const GAS_FAUCET_MAX_MINT = 100000;
 
-// Mint XCHAIN gas to an address through the SDK. MINT charges no protocol
-// fee, and on regtest any address may mint the gas token, so this is the
-// bootstrap primitive a real user uses to acquire gas. Required before any
-// action that pays the protocol fee in XCHAIN (ISSUE of a new token, ORDER,
-// SWAP, DISPENSER, CALLBACK, EXECUTE, ...). Also exercises MINT via the SDK.
+// Bootstrap primitive for acquiring gas before any fee-paying action
+// (ISSUE, ORDER, SWAP, DISPENSER, CALLBACK, EXECUTE, ...).
 async function mintGas(sdk, addr, amount = GAS_FAUCET_MAX_MINT) {
     return submit(
         sdk,
@@ -181,22 +159,17 @@ async function mintGas(sdk, addr, amount = GAS_FAUCET_MAX_MINT) {
     );
 }
 
-// Fund an address with native coin AND seed it with XCHAIN gas in one call.
 async function fundedGasAddress(sdk, amountToFund = 1, gasAmount = GAS_FAUCET_MAX_MINT, addressType = 'p2pkh') {
     const addr = await fundedSdkAddress(sdk, amountToFund, addressType);
     await mintGas(sdk, addr, gasAmount);
     return addr;
 }
 
-// Force the regtest miner to confirm whatever is in the mempool, so an
-// action that has been broadcast gets mined + indexed. The miner
-// auto-mines (~1s) once initialCheck calls setMiningTime, but nudging
-// keeps two-phase (P2SH/P2WSH) flows snappy and deterministic.
+// Nudge the miner to keep two-phase (P2SH/P2WSH) flows snappy and deterministic.
 async function mine(blocks = 1) {
     try { await global.regtestMinerConnector.generateBlocks(blocks); } catch (e) {}
 }
 
-// Unique, protocol-valid ticker for a test token (uppercase alnum).
 let _tickSeq = 0;
 function uniqueTick(prefix = 'SDK') {
     _tickSeq += 1;
@@ -204,7 +177,6 @@ function uniqueTick(prefix = 'SDK') {
     return (prefix + stamp + _tickSeq).slice(0, 12);
 }
 
-// Default submit options for harness flows.
 function submitOpts(extra = {}) {
     return { waitForIndexer: true, timeout: 120000, pollInterval: 1500, ...extra };
 }

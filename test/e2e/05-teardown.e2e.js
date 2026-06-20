@@ -20,8 +20,6 @@ const cryptoHelper = require('../cryptoHelper')
 describe('E2E: Teardown & Resource Cleanup', () => {
     describe('E2E-TEAR-001: Mining time configuration round-trip', () => {
         it('should confirm mining is active by successfully funding an address', async () => {
-            // The beforeAll already called setMiningTime(1000, 1000)
-            // Verify the effect: funding succeeds (which requires a mined block)
             const start = Date.now()
             const addr = await cryptoHelper.getNewFundedAddress('E2E.TEAR.MINE', COIN, NETWORK, null, 'legacy', 0, 1)
             const elapsed = Date.now() - start
@@ -31,7 +29,6 @@ describe('E2E: Teardown & Resource Cleanup', () => {
         })
 
         it('should successfully call setDefaultMiningTime and then re-apply test config', async () => {
-            // Test the teardown path: setDefaultMiningTime should not throw
             const resetResult = await regtestMinerConnector.setDefaultMiningTime()
             assert(resetResult !== undefined, 'setDefaultMiningTime should return without error')
 
@@ -53,7 +50,6 @@ describe('E2E: Teardown & Resource Cleanup', () => {
 
     describe('Database connection pool health across test lifetime', () => {
         it('should successfully query the database at the end of the test run', async () => {
-            // Validates the pool is not exhausted after all prior tests consumed connections
             const ping = await indexerDatabase.ping()
             assert(ping, 'Database ping should succeed at end of test run')
 

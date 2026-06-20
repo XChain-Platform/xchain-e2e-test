@@ -274,7 +274,6 @@ module.exports = {
             spentHex = spentTx.toHex()
         }
         
-        //let txHex = tx.toHex()
         console.log("Sending the transaction... (hex length: "+txHex.length+")")
         txHash = await nodeConnector.broadcastTx(txHex)
         let spentTxHash = null
@@ -283,7 +282,6 @@ module.exports = {
             console.log("Sending the second transaction... (hex length: "+spentHex.length+")")
             spentTxHash = await nodeConnector.broadcastTx(spentHex)
         }
-        //wait for the transaction to be confirmed
         console.log("Waiting for the transaction ("+txHash+") to be confirmed...")
         let txExists = await nodeConnector.waitForTx(txHash, 60000)
 
@@ -355,7 +353,6 @@ module.exports = {
             throw new Error("couldn't find any utxos for address "+addressInfo["address"])
         }
         
-        //Remove duplicated utxos
         let utxoIndex = 0
         while (utxoIndex < utxosList.length){
             let nextUtxo = utxosList[utxoIndex]
@@ -374,7 +371,6 @@ module.exports = {
             utxoIndex = utxoIndex+1
         }
 
-        //Order the utxosList from the biggest value to the smallest
         utxosList.sort((a,b)=> b.value - a.value)
         
         let estimatedFee = NETWORK_OBJECT.dustThreshold
@@ -429,10 +425,6 @@ module.exports = {
             })
         }
         
-        //
-        //SIGNING THE TRANSACTION
-        //
-        
         var ECPair = ECPairFactory(ecc);
         let keyToSign = ECPair.fromPrivateKey(addressInfo["privateKey"], { NETWORK_OBJECT });
 
@@ -447,10 +439,8 @@ module.exports = {
         let txHash = tx.getId()
         let txHex = tx.toHex()
         
-        //let txHex = tx.toHex()
         console.log("Sending a simple transaction... (hex length: "+txHex.length+")")
         txHash = await nodeConnector.broadcastTx(txHex)
-        //wait for the transaction to be confirmed
         console.log("Waiting for the simple transaction ("+txHash+") to be confirmed...")
         let txExists = await nodeConnector.waitForTx(txHash, 60000)
 

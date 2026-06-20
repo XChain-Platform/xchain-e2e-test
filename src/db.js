@@ -18,20 +18,17 @@
  *
  ********************************************************************/
 
-// Load required libraries
 const mariadb = require('mariadb');
 
 class Database {
     constructor(host, port, dbName, user, pass){
         this.sqlPath  = __dirname+'/sql';
-        // Database connection information
         this.host   = host;
         this.port   = port;
         this.dbName = dbName;
         this.user   = user;
         this.pass   = pass;
         const DUPLICATED_TRANSACTION = 1
-        // Database connection parameters
         this.connectionParams = {
             host:     this.host,
             user:     this.user,
@@ -39,14 +36,12 @@ class Database {
             database: this.dbName,
             port:     this.port
         };
-        // Database pool connection parameters
         this.connectionPoolParams = {
             host:     this.host,
             user:     this.user,
             password: this.pass,
             database: this.dbName,
             port:     this.port,
-            // Connection options
             connectionLimit:  10,
             //connectTimeout: 0,
             insertIdAsNumber: true,
@@ -56,7 +51,6 @@ class Database {
             // it made consensusHashConformance falsely RED on every block with such columns.
             bigIntAsNumber:   true
         };
-        // Setup pool of connections
         this.pool = mariadb.createPool(this.connectionPoolParams);
         this.transactionConnection = null;
     }
@@ -78,7 +72,6 @@ class Database {
         }
     }
 
-    // Handle getting a database Connection    
     async getConnection(){
         if(this.transactionConnection)
             return this.transactionConnection;
@@ -802,7 +795,6 @@ class Database {
                     break
             }
 
-            //Check the list's items
             const queryItems = "SELECT "+field+
                 " FROM list_items li "+leftJoin+
                 " WHERE li.action_index = ?"
@@ -874,8 +866,6 @@ class Database {
     
     async getListAddresses(listActionIndex){
         let listType = null
-            
-        //Check the type of the list
         const queryList = "SELECT type FROM lists WHERE action_index = ?"
         
         let connection = await this.getConnection()
@@ -911,12 +901,8 @@ class Database {
                         FROM debits
                         GROUP BY address_id, tick_id
                     )
-                    SELECT 
+                    SELECT
                         DISTINCT(ia.id) AS address `+
-                        //, 
-                        //ia.address, 
-                        //it.id, 
-                        //COALESCE(tc.total, 0) - COALESCE(td.total, 0) AS balance
                     `FROM index_addresses ia 
                     LEFT JOIN index_tickers it ON it.id IN (SELECT item_id FROM list_items WHERE action_index = ?)
                     LEFT JOIN totalCredits tc ON tc.tick_id = it.id AND tc.address_id = ia.id

@@ -53,7 +53,6 @@ describe('CryptoNetworks', () => {
             assert.strictEqual(CryptoNetworks.getBitcoinJsNetwork(null), undefined)
         })
 
-        // Verify specific network values
         it('should return correct pubKeyHash for bitcoin-mainnet', () => {
             const config = CryptoNetworks.getBitcoinJsNetwork('bitcoin-mainnet')
             assert.strictEqual(config.pubKeyHash, 0x00)

@@ -76,8 +76,6 @@ async function attachOracle(mvh) {
     return { stop() { stops.forEach((s) => { try { s(); } catch (_) {} }); } };
 }
 
-// Inject the SAME submission set into every hub so each aggregates the identical
-// canonical and the leader's proposal verifies on every follower.
 function injectSubmissions(mvh) {
     const addrs = mvh.hubs.map((h) => h.getPeerManager().validatorAddr);
     for (const hub of mvh.hubs) {
@@ -123,7 +121,6 @@ function seedEqual(mvh) {
 describe('MultiValidatorHub: oracle-PBFT byzantine fault tolerance (C.2)', function () {
     this.timeout(240_000);
 
-    // LIVENESS: one silenced oracle validator does not stall the round
     describe('LIVENESS (f=1): a silent oracle validator does not stall finalization', function () {
         let db, mvh, seed, oracle, restore;
 
@@ -169,7 +166,6 @@ describe('MultiValidatorHub: oracle-PBFT byzantine fault tolerance (C.2)', funct
         });
     });
 
-    // SAFETY: two silenced validators → quorum unreachable → no finalization
     describe('SAFETY (2-of-4 down): quorum is unreachable, nothing finalizes', function () {
         let db, mvh, seed, oracle, restores = [];
 

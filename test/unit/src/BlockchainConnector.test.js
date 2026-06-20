@@ -14,20 +14,12 @@ const assert = require('assert');
 const sinon = require('sinon');
 const axios = require('axios');
 
-// ── axios injection ─────────────────────────────────────────────────────────
-// BlockchainConnector issues its JSON-RPC calls via axios.post. We stub
-// axios.post directly (the connector resolves it at call time off the shared
-// axios object), matching the pattern used by the other connector unit tests.
-
 const BlockchainConnector = require('../../../src/BlockchainConnector');
-
-// ── helpers ───────────────────────────────────────────────────────────────
 
 function makeResponse(body) {
     return { status: 200, data: body };
 }
 
-// Axios rejects on non-2xx with an Error carrying a `.response`.
 function makeHttpError(status, data = {}) {
     const err = new Error(`Request failed with status code ${status}`);
     err.response = { status, statusText: 'Error', data };
@@ -37,8 +29,6 @@ function makeHttpError(status, data = {}) {
 function expectedAuth(user, pass) {
     return 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64');
 }
-
-// ── tests ─────────────────────────────────────────────────────────────────
 
 describe('BlockchainConnector', function () {
 
@@ -59,8 +49,6 @@ describe('BlockchainConnector', function () {
         sinon.restore();
     });
 
-    // ── constructor ──────────────────────────────────────────────────────
-
     describe('constructor', function () {
         it('builds the URL as http://{url}:{port}', function () {
             assert.strictEqual(connector.url, `http://${URL}:${PORT}`);
@@ -71,8 +59,6 @@ describe('BlockchainConnector', function () {
             assert.strictEqual(connector.rpcPassword, PASS);
         });
     });
-
-    // ── getNetworkInfo ────────────────────────────────────────────────────
 
     describe('getNetworkInfo', function () {
         it('sends the correct JSON-RPC payload with method getnetworkinfo', async function () {
@@ -121,8 +107,6 @@ describe('BlockchainConnector', function () {
         });
     });
 
-    // ── getTransactionHex ─────────────────────────────────────────────────
-
     describe('getTransactionHex', function () {
         const TXID = 'abc123';
         const HEX  = 'deadbeef';
@@ -160,8 +144,6 @@ describe('BlockchainConnector', function () {
         });
     });
 
-    // ── broadcastTx ───────────────────────────────────────────────────────
-
     describe('broadcastTx', function () {
         const TX_HEX  = 'cafebabe';
         const TX_HASH = 'txhash999';
@@ -183,7 +165,6 @@ describe('BlockchainConnector', function () {
         });
 
         it('surfaces the node error body when the HTTP request fails', async function () {
-            // Core returns the JSON-RPC error body even on HTTP 500.
             axiosPostStub.rejects(makeHttpError(500, { error: { code: -26, message: 'dust' } }));
             await assert.rejects(
                 () => connector.broadcastTx(TX_HEX),
@@ -209,8 +190,6 @@ describe('BlockchainConnector', function () {
         });
     });
 
-    // ── waitForTx ─────────────────────────────────────────────────────────
-
     describe('waitForTx', function () {
         const TXID = 'txid-abc';
 
@@ -226,7 +205,6 @@ describe('BlockchainConnector', function () {
             sinon.stub(connector, 'getTransactionHex').rejects(new Error('not found'));
             sinon.stub(connector, 'sleep').resolves();
 
-            // Use a very short timeout (1 ms) to trigger immediate expiry
             const now = Date.now();
             const dateStub = sinon.stub(Date, 'now');
             // First call: start time; subsequent calls: past the deadline
@@ -241,8 +219,6 @@ describe('BlockchainConnector', function () {
             }
         });
     });
-
-    // ── getFeePerKilobyte ─────────────────────────────────────────────────
 
     describe('getFeePerKilobyte', function () {
         it('returns feerate when present in response', async function () {

@@ -18,7 +18,6 @@ const sinon = require('sinon')
 
 const CryptoNetworks = require('../../src/CryptoNetworks')
 
-// Set up required globals before requiring cryptoHelper
 global.wallets = {}
 global.regtestMinerConnector = { sendFunds: async () => 'txid-stub' }
 global.nodeConnector = { waitForTx: async () => true }
@@ -36,8 +35,6 @@ describe('Boundary: Identifiers & Strings', function () {
         sinon.restore()
         global.wallets = {}
     })
-
-    // ── IS-01: Empty wallet label ───────────────────────────────
 
     describe('IS-01: getWallet with empty string label', function () {
 
@@ -58,8 +55,6 @@ describe('Boundary: Identifiers & Strings', function () {
         })
     })
 
-    // ── IS-02: Duplicate wallet label (idempotency) ──────────────
-
     describe('IS-02: getWallet idempotency', function () {
 
         it('returns the same object for the same label', async function () {
@@ -73,8 +68,6 @@ describe('Boundary: Identifiers & Strings', function () {
             assert.strictEqual(first, second)
         })
     })
-
-    // ── IS-03: Wallet label with special characters ─────────────
 
     describe('IS-03: getWallet with special characters in label', function () {
 
@@ -103,8 +96,6 @@ describe('Boundary: Identifiers & Strings', function () {
         })
     })
 
-    // ── IS-04: Very long wallet label ───────────────────────────
-
     describe('IS-04: getWallet with very long label', function () {
 
         it('handles 10000-character label without error', async function () {
@@ -116,8 +107,6 @@ describe('Boundary: Identifiers & Strings', function () {
             assert.strictEqual(wallet.mnemonic, null)
         })
     })
-
-    // ── IS-05: Multiple distinct labels create separate wallets ──
 
     describe('IS-05: Similar labels do not collide', function () {
 
@@ -136,8 +125,6 @@ describe('Boundary: Identifiers & Strings', function () {
         })
     })
 
-    // ── IS-11: addressIndex = 0 ─────────────────────────────────
-
     describe('IS-11: getNewAddress with addressIndex = 0', function () {
 
         it('derives a valid address at index 0', async function () {
@@ -149,8 +136,6 @@ describe('Boundary: Identifiers & Strings', function () {
             assert.ok(Buffer.isBuffer(result.publicKey))
         })
     })
-
-    // ── IS-12: addressIndex at large values ─────────────────────
 
     describe('IS-12: getNewAddress with large addressIndex', function () {
 
@@ -170,8 +155,6 @@ describe('Boundary: Identifiers & Strings', function () {
         })
     })
 
-    // ── IS-13: addressIndex consistency ──────────────────────────
-
     describe('IS-13: Same mnemonic + same index = same address', function () {
 
         it('produces deterministic addresses', async function () {
@@ -183,8 +166,6 @@ describe('Boundary: Identifiers & Strings', function () {
         })
     })
 
-    // ── IS-14: getNewAddress appends to wallet.addresses array ───
-
     describe('IS-14: Multiple addresses accumulate in wallet', function () {
 
         it('appends each new address to the same wallet', async function () {
@@ -195,14 +176,11 @@ describe('Boundary: Identifiers & Strings', function () {
             const wallet = global.wallets['multi']
             assert.strictEqual(wallet.addresses.length, 3)
 
-            // All addresses should be distinct
             const addrs = wallet.addresses.map(a => a.address)
             const unique = new Set(addrs)
             assert.strictEqual(unique.size, 3, 'all 3 addresses should be unique')
         })
     })
-
-    // ── IS-15: getNewAddress across different networks ───────────
 
     describe('IS-15: Address format varies by network', function () {
 

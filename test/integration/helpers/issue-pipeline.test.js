@@ -57,7 +57,6 @@ describe('Issue Helper → DB Assertion Pipeline', function () {
         }
         global.NETWORK_OBJECT = { ...bitcoin.networks.regtest, dustThreshold: 546 }
 
-        // Stub transactionHelper at a higher level so we can focus on helper→DB interaction
         createTxStub = sinon.stub(transactionHelper, 'createAndSendTransaction').resolves('txhash_issue')
     })
 
@@ -90,11 +89,9 @@ describe('Issue Helper → DB Assertion Pipeline', function () {
                 addressInfo, 'MYTOKEN', 1000, 100, 8, 'Test token', 50
             )
 
-            // Verify message sent to transactionHelper
             const message = createTxStub.firstCall.args[1]
             assert(message.startsWith('ISSUE|0|MYTOKEN|1000|100|8|Test token|50'))
 
-            // Verify waitForIssue received correct filter object
             assert(waitForIssueArgs, 'waitForIssue should have been called')
             assert.strictEqual(waitForIssueArgs.source, addressInfo.address)
             assert.strictEqual(waitForIssueArgs.tick, 'MYTOKEN')
@@ -106,14 +103,12 @@ describe('Issue Helper → DB Assertion Pipeline', function () {
             assert.strictEqual(waitForIssueArgs.mintSupply, 50)
             assert.strictEqual(waitForIssueArgs.status, 'valid')
 
-            // Verify waitForCredit received correct filter object
             assert(waitForCreditArgs, 'waitForCredit should have been called')
             assert.strictEqual(waitForCreditArgs.address, addressInfo.address)
             assert.strictEqual(waitForCreditArgs.tick, 'MYTOKEN')
             assert.strictEqual(waitForCreditArgs.txHash, 'txhash_issue')
             assert.strictEqual(waitForCreditArgs.amount, 50)
 
-            // Verify return value
             assert.strictEqual(result.txHash, 'txhash_issue')
             assert.deepStrictEqual(result.issue, mockIssueRow)
             assert.deepStrictEqual(result.credit, mockCreditRow)
@@ -138,7 +133,6 @@ describe('Issue Helper → DB Assertion Pipeline', function () {
         })
 
         it('does not throw; caller can assert on null result', function () {
-            // This confirms the pattern: helpers return null, tests use assert(result.issue)
             const result = { txHash: 'abc', issue: null, credit: null }
             assert.throws(
                 () => assert(result.issue, 'Issue should exist in DB'),

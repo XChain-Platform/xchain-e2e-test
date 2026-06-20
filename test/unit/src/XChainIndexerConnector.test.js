@@ -33,8 +33,6 @@ describe('XChainIndexerConnector', function () {
         sinon.restore();
     });
 
-    // ── constructor ──────────────────────────────────────────────────────
-
     describe('constructor', function () {
         it('builds the URL as http://{url}:{port}', function () {
             assert.strictEqual(connector.url, `http://${URL}:${PORT}`);
@@ -44,8 +42,6 @@ describe('XChainIndexerConnector', function () {
             assert.strictEqual(connector.port, PORT);
         });
     });
-
-    // ── ping ─────────────────────────────────────────────────────────────
 
     describe('ping', function () {
         it('returns true when response.data.result is truthy', async function () {

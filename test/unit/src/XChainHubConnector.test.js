@@ -45,8 +45,6 @@ describe('XChainHubConnector', function () {
         delete process.env.HUB_PORT;
     });
 
-    // ── _call ─────────────────────────────────────────────────────────────
-
     describe('_call', function () {
         it('returns result when axios succeeds', async function () {
             const conn = new XChainHubConnector(['http://hub1:10000']);
@@ -95,8 +93,6 @@ describe('XChainHubConnector', function () {
         });
     });
 
-    // ── ping ─────────────────────────────────────────────────────────────
-
     describe('ping', function () {
         it('returns true when _call returns a non-null value', async function () {
             const conn = new XChainHubConnector(['http://hub1:10000']);
@@ -135,8 +131,6 @@ describe('XChainHubConnector', function () {
             assert.strictEqual(data.id, 1);
         });
     });
-
-    // ── getAllConfig ──────────────────────────────────────────────────────
 
     describe('getAllConfig', function () {
         it('calls _call with method getallconfigs and empty params array', async function () {
@@ -194,8 +188,6 @@ describe('XChainHubConnector', function () {
             assert.strictEqual(result, null);
         });
     });
-
-    // ── parseEndpoints ────────────────────────────────────────────────────
 
     describe('parseEndpoints (static)', function () {
         it('splits HUB_VALIDATORS by comma and returns an array of URLs', function () {

@@ -96,7 +96,6 @@ async function driveRound(mvh, settleMs = SETTLE_MS) {
 describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM cross-chain DEX match (WI-1 Suite A4, L2)', function () {
     this.timeout(240_000);
 
-    // NEGATIVE: count-majority / stake-minority of live hubs cannot settle
     describe('a stake-minority (count-majority) of live hubs cannot finalize a match', function () {
         let db, mvh, seed, book;
 
@@ -146,7 +145,6 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM cross-chain DEX match (WI-1 S
         });
     });
 
-    // POSITIVE: a healthy weighted federation finalizes the match
     describe('a healthy weighted federation finalizes the match on every hub', function () {
         let db, mvh, seed, book;
 

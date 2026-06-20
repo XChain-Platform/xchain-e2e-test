@@ -96,7 +96,6 @@ describe('[sdk] divisible-token amount precision (18 decimals, on-chain)', funct
             { pubkey: issuer.address, change: issuer.address },
             submitOpts({ wif: issuer.wif }));
         expect(res.indexed.status, 'ISSUE(18-decimal) indexed').to.equal('valid');
-        // Issuer holds the full minted supply, to the last 1e-18 unit.
         expect(normAmt(rawBalance(await sdk.getBalances(issuer.address), tick)), 'issuer holds exact mintSupply')
             .to.equal(normAmt(MINT));
     });

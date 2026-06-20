@@ -14,27 +14,17 @@ const assert = require('assert');
 const sinon  = require('sinon');
 const axios  = require('axios');
 
-// ── axios injection ─────────────────────────────────────────────────────────
-// XChainUtxoTrackerConnector issues its JSON-RPC calls via axios.post, like the
-// other connectors. We stub axios.post directly (resolved at call time off the
-// shared axios object).
-
 const UtxoTracker = require('../../../src/XChainUtxoTrackerConnector');
-
-// ── helpers ───────────────────────────────────────────────────────────────
 
 function makeResponse(body) {
     return { status: 200, data: body };
 }
 
-// Axios rejects on non-2xx with an Error carrying a `.response`.
 function makeHttpError(status) {
     const err = new Error(`Request failed with status code ${status}`);
     err.response = { status, statusText: 'Error', data: {} };
     return err;
 }
-
-// ── tests ─────────────────────────────────────────────────────────────────
 
 describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
 
@@ -53,8 +43,6 @@ describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
         sinon.restore();
     });
 
-    // ── constructor ──────────────────────────────────────────────────────
-
     describe('constructor', function () {
         it('builds the URL as http://{url}:{port}', function () {
             assert.strictEqual(tracker.url, `http://${URL}:${PORT}`);
@@ -64,8 +52,6 @@ describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
             assert.strictEqual(tracker.port, PORT);
         });
     });
-
-    // ── ping ─────────────────────────────────────────────────────────────
 
     describe('ping', function () {
         it('returns true when responseData.result is truthy', async function () {
@@ -108,8 +94,6 @@ describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
         });
     });
 
-    // ── getUtxosFromAddress ───────────────────────────────────────────────
-
     describe('getUtxosFromAddress', function () {
         const ADDRESS = 'bcrt1qtest';
         const fakeResult = { utxos: [{ txid: 'abc', vout: 0, value: 5000 }] };
@@ -147,8 +131,6 @@ describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
             );
         });
     });
-
-    // ── waitForUtxos ──────────────────────────────────────────────────────
 
     describe('waitForUtxos', function () {
         const ADDRESS = 'bcrt1qwait';

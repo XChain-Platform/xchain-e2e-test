@@ -16,8 +16,6 @@ const bitcoin = require('bitcoinjs-lib')
 
 const transactionHelper = require('../transactionHelper')
 
-// ── Helpers ──────────────────────────────────────────────────────────────
-
 function resetGlobals() {
     global.NETWORK_OBJECT       = { ...bitcoin.networks.regtest, dustThreshold: 546 }
     global.encoderConnector     = { createTx: async () => {} }
@@ -60,10 +58,6 @@ function stubDateNowExpired() {
     })
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// P0 : Transaction Pipeline Regression Tests
-// ═══════════════════════════════════════════════════════════════════════════
-
 describe('[regression:p0] Transaction Pipeline', function () {
 
     beforeEach(function () {
@@ -73,8 +67,6 @@ describe('[regression:p0] Transaction Pipeline', function () {
     afterEach(function () {
         sinon.restore()
     })
-
-    // ── isSegwitUTXO ─────────────────────────────────────────────────────
 
     describe('isSegwitUTXO', function () {
 
@@ -110,8 +102,6 @@ describe('[regression:p0] Transaction Pipeline', function () {
             assert.strictEqual(transactionHelper.isSegwitUTXO({ scriptPubKey: null }), false)
         })
     })
-
-    // ── createAndSendTransaction ─────────────────────────────────────────
 
     describe('createAndSendTransaction', function () {
 
@@ -180,16 +170,12 @@ describe('[regression:p0] Transaction Pipeline', function () {
         })
     })
 
-    // ── createSimpleTransaction ──────────────────────────────────────────
-
     describe('createSimpleTransaction', function () {
 
         it('[regression:p0] R-TX-007 : function exists and is callable', function () {
             assert.strictEqual(typeof transactionHelper.createSimpleTransaction, 'function')
         })
     })
-
-    // ── R-TX-008 : boundary: no UTXOs ────────────────────────────────────
 
     describe('boundary conditions', function () {
 

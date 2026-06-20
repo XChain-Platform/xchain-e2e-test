@@ -85,7 +85,6 @@ describe('[sdk] BatchBuilder multi-action (on-chain)', function () {
             submitOpts({ wif: issuer.wif }));
         expect(res.indexed.status, 'BATCH indexed').to.equal('valid');
 
-        // Every sub-action must have applied: both recipients credited, issuer debited the total.
         expect(balanceFor(await sdk.getBalances(r1.address), tick), 'r1 received 100').to.equal(100);
         expect(balanceFor(await sdk.getBalances(r2.address), tick), 'r2 received 200').to.equal(200);
         expect(balanceFor(await sdk.getBalances(issuer.address), tick), 'issuer debited 300 (1000-300)').to.equal(700);

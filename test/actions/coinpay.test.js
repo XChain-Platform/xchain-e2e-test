@@ -19,23 +19,20 @@ describe('COINPAY', function () {
 
     describe('v0: Happy path: Token-for-Coin settlement', function () {
         it('should create matching native coin orders, send COINPAY, and settle', async function () {
-            // 1. Create seller address and fund it
             let sellerAddr = await cryptoHelper.getNewFundedAddress(
                 "COINPAY.SELLER", COIN, NETWORK, null, "legacy", 0, 1
             )
 
-            // 2. Create buyer address and fund it (needs enough for order fee + coinpay payment)
+            // buyer needs enough for order fee + coinpay payment
             let buyerAddr = await cryptoHelper.getNewFundedAddress(
                 "COINPAY.BUYER", COIN, NETWORK, null, "legacy", 0, 2
             )
 
-            // 3. Issue a token to the seller, fully minting maxSupply at issue time
-            //    (the 7th arg `mintSupply` already credits 1000 to the seller;
-            //    a separate MINT would exceed maxSupply).
+            // mintSupply arg already credits 1000 to the seller; a separate MINT would exceed maxSupply
             let tick = "CP" + sellerAddr["address"].substring(5, 12).toUpperCase()
             await issueHelper.sendIssueV0(sellerAddr, tick, "1000", "1000", "8", "COINPay test token", "1000")
 
-            // 5. Seller creates ORDER: sell 100 tokens for 0.001 native coin
+            // seller: sell 100 tokens for 0.001 native coin
             let expiration = Math.floor(Date.now() / 1000) + 86400 // 24 hours from now
             let sellerOrder = await orderHelper.sendOrderV0(
                 sellerAddr, COIN_CODE, tick, "100.00000000",
@@ -44,7 +41,7 @@ describe('COINPAY', function () {
             )
             assert(sellerOrder.order, "Seller ORDER should exist in DB")
 
-            // 6. Buyer creates matching ORDER: buy tokens with 0.001 native coin
+            // buyer: buy tokens with 0.001 native coin
             let buyerOrder = await orderHelper.sendOrderV0(
                 buyerAddr, COIN_CODE, "", "0.00100000",
                 COIN_CODE, tick, "100.00000000",
@@ -52,11 +49,9 @@ describe('COINPAY', function () {
             )
             assert(buyerOrder.order, "Buyer ORDER should exist in DB")
 
-            // 7. Wait for ORDER_MATCH with pending_coinpay status. Filter by the
-            // specific orders this test created so we don't pick up a leftover
-            // pending obligation from a previous run. The matcher records the
-            // newer order (buyer) on the get side and the existing order (seller)
-            // on the give side (see indexer/db.js createOrderMatch).
+            // Filter by the specific orders this test created so we don't pick up a leftover
+            // pending obligation from a previous run. The matcher records the newer order (buyer)
+            // on the get side and the existing order (seller) on the give side (see indexer/db.js createOrderMatch).
             let orderMatch = await indexerDatabase.waitForOrderMatch({
                 giveActionIndex: Number(sellerOrder.order["action_index"]),
                 getActionIndex:  Number(buyerOrder.order["action_index"]),
@@ -64,14 +59,12 @@ describe('COINPAY', function () {
             }, 30000)
             assert(orderMatch, "ORDER_MATCH with pending_coinpay should exist")
 
-            // 8. Wait for COINPay obligation
             let obligation = await indexerDatabase.waitForCoinpayObligation({
                 actionIndex: Number(orderMatch.action_index),
                 coinpayStatus: 'pending_coinpay'
             }, 30000)
             assert(obligation, "COINPay obligation should exist")
 
-            // 9. Buyer sends COINPAY with payment to seller
             let coinpayResult = await coinpayHelper.sendCoinpayV0(
                 buyerAddr,
                 Number(orderMatch.action_index),
@@ -80,14 +73,12 @@ describe('COINPAY', function () {
             )
             assert(coinpayResult.coinpay, "COINPAY should be valid in DB")
 
-            // 10. Verify obligation is fulfilled
             let fulfilledObligation = await indexerDatabase.waitForCoinpayObligation({
                 actionIndex: Number(orderMatch.action_index),
                 coinpayStatus: 'fulfilled'
             }, 30000)
             assert(fulfilledObligation, "COINPay obligation should be fulfilled")
 
-            // 11. Verify buyer received tokens (check credit)
             let credit = await indexerDatabase.waitForCredit({
                 address: buyerAddr["address"],
                 tick: tick

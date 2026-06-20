@@ -37,7 +37,6 @@ describe('issueHelper', () => {
             )
 
             const msg = createTxStub.firstCall.args[1]
-            // 17 optional params all default to '' → 17 trailing pipes after mintSupply
             assert.strictEqual(msg, 'ISSUE|0|MYTOKEN|1000|100|8|My Token|50|||||||||||||||||')
             assert.strictEqual(result.txHash, 'abc123')
             assert.deepStrictEqual(result.issue, { id: 1 })
@@ -99,7 +98,6 @@ describe('issueHelper', () => {
             await helper.sendIssueV2(addressInfo, 'TOK', '100', '50', null, null, null, null, null)
 
             const msg = createTxStub.firstCall.args[1]
-            // transferSupply, mintAddressMax, mintStartBlock, mintStopBlock, memo all null→""
             assert.strictEqual(msg, 'ISSUE|2|TOK|100|50|||||')
         })
     })
@@ -118,7 +116,6 @@ describe('issueHelper', () => {
             await helper.sendIssueV3(addressInfo, 'TOK', null, null, null, null, null, null, null, null)
 
             const msg = createTxStub.firstCall.args[1]
-            // 8 optional params (lockMaxSupply..lockMintSupply + memo) all null→""
             assert.strictEqual(msg, 'ISSUE|3|TOK||||||||')
         })
     })

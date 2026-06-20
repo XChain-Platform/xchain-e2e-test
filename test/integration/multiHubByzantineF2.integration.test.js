@@ -86,8 +86,6 @@ function alignSeqs(mvh) {
     for (const h of mvh.hubs) if (h.consensus) h.consensus.seq = maxSeq;
 }
 
-// Build a byzantine suite for a given scale. quorum = 2·⌊(count-1)/3⌋+1 and
-// faults = ⌊(count-1)/3⌋ (the exact BFT tolerance). honest-at-tolerance = quorum.
 function byzantineScaleSuite({ count, quorum, faults, basePort, peerWaitMs }) {
     const APPLY_WAIT_MS = 8000;
     const STALL_WAIT_MS = 8000;
@@ -142,7 +140,6 @@ function byzantineScaleSuite({ count, quorum, faults, basePort, peerWaitMs }) {
             const leader = findLeader(mvh);
             assert.ok(leader, 'no leader identified');
 
-            // Crash exactly `faults` NON-leader followers. `quorum` honest remain.
             const victims = mvh.hubs.filter((h) => h !== leader).slice(0, faults);
             const restores = victims.map((v) => silenceValidator(v));
             try {
@@ -179,7 +176,6 @@ function byzantineScaleSuite({ count, quorum, faults, basePort, peerWaitMs }) {
             const leader = findLeader(mvh);
             assert.ok(leader, 'no leader identified');
 
-            // Crash faults+1 non-leader followers. Live set = count-(faults+1) = quorum-1 < quorum.
             const victims = mvh.hubs.filter((h) => h !== leader).slice(0, faults + 1);
             const restores = victims.map((v) => silenceValidator(v));
             try {
@@ -256,8 +252,5 @@ function byzantineScaleSuite({ count, quorum, faults, basePort, peerWaitMs }) {
     });
 }
 
-// f=2 at the minimal N that supports it, then f=3 at N=10 (its true tolerance,
-// filling the N=10 byzantine matrix cell). Distinct basePorts; sequential describes
-// free their ports between runs.
 byzantineScaleSuite({ count: 7,  quorum: 5, faults: 2, basePort: 31000, peerWaitMs: 12000 });
 byzantineScaleSuite({ count: 10, quorum: 7, faults: 3, basePort: 30000, peerWaitMs: 14000 });

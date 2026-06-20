@@ -30,7 +30,6 @@ function writeResults(outputDir, results) {
     return outFile
 }
 
-// Safe wrapper that catches errors (what the reporter should do)
 function writeResultsSafe(outputDir, results) {
     try {
         return writeResults(outputDir, results)
@@ -60,7 +59,6 @@ describe('Chaos Experiment 9: Performance Reporter Write Failure @P2', function 
             const outFile = writeResultsSafe('/readonly/dir', { tests: testResults })
 
             assert.strictEqual(outFile, null, 'should return null when write fails')
-            // Verify results are still intact in memory
             assert.strictEqual(testResults.length, 2)
             assert.strictEqual(testResults[0].title, 'test1')
             assert.strictEqual(testResults[1].title, 'test2')

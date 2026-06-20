@@ -35,10 +35,6 @@ const transactionHelper = require('../transactionHelper')
 const issueHelper       = require('../helpers/issueHelper')
 const sendHelper        = require('../helpers/sendHelper')
 
-// ═══════════════════════════════════════════════════════════════════════════
-// P1: Action Helper Regression Tests
-// ═══════════════════════════════════════════════════════════════════════════
-
 describe('[regression:p1] Action Helpers', function () {
 
     let createTxStub
@@ -46,7 +42,6 @@ describe('[regression:p1] Action Helpers', function () {
     beforeEach(function () {
         createTxStub = sinon.stub(transactionHelper, 'createAndSendTransaction').resolves('txhash-test')
 
-        // Reset waitFor stubs
         global.indexerDatabase.waitForIssue  = sinon.stub().resolves({ tick: 'TOK', status: 'valid' })
         global.indexerDatabase.waitForSend   = sinon.stub().resolves({ tick: 'TOK', status: 'valid' })
         global.indexerDatabase.waitForCredit = sinon.stub().resolves({ tick: 'TOK', amount: '100' })
@@ -59,8 +54,6 @@ describe('[regression:p1] Action Helpers', function () {
     })
 
     const fakeAddr = { address: 'addr1', privateKey: Buffer.alloc(32, 1), publicKey: Buffer.alloc(33, 2) }
-
-    // R-ACT-001: ISSUE message construction
 
     describe('issueHelper', function () {
 
@@ -115,8 +108,6 @@ describe('[regression:p1] Action Helpers', function () {
         })
     })
 
-    // R-ACT-002: SEND message construction
-
     describe('sendHelper', function () {
 
         it('[regression:p1] R-ACT-002: sendSendV0 constructs correct pipe-delimited message', async function () {
@@ -134,11 +125,9 @@ describe('[regression:p1] Action Helpers', function () {
             assert.ok(global.indexerDatabase.waitForCredit.calledOnce)
             assert.ok(global.indexerDatabase.waitForDebit.calledOnce)
 
-            // Credit goes to destination
             const creditFilter = global.indexerDatabase.waitForCredit.firstCall.args[0]
             assert.strictEqual(creditFilter.address, 'dest1')
 
-            // Debit comes from source
             const debitFilter = global.indexerDatabase.waitForDebit.firstCall.args[0]
             assert.strictEqual(debitFilter.address, 'addr1')
         })
@@ -159,8 +148,6 @@ describe('[regression:p1] Action Helpers', function () {
             assert.strictEqual(global.indexerDatabase.waitForCredit.callCount, 2)
         })
     })
-
-    // R-ACT-007: error handling
 
     describe('error handling', function () {
 

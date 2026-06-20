@@ -87,7 +87,6 @@ describe('Chaos Experiment 10: Unhandled Promise Rejection @P2', function () {
         }
         process.on('unhandledRejection', handler)
 
-        // Simulate a connector method that rejects without being awaited
         const fakeConnector = {
             ping: async () => { throw connError }
         }

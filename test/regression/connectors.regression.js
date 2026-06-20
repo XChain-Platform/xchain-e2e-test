@@ -21,27 +21,17 @@ const XChainIndexerConnector       = require('../../src/XChainIndexerConnector')
 const XChainHubConnector           = require('../../src/XChainHubConnector')
 const RegtestMinerConnector        = require('../../src/RegtestMinerConnector')
 
-// ── Helpers ──────────────────────────────────────────────────────────────
-
 function mockAxiosPost(result) {
     return sinon.stub(axios, 'post').resolves({
         data: { jsonrpc: '2.0', result, id: 1 }
     })
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// P0 : Connector Regression Tests
-// ═══════════════════════════════════════════════════════════════════════════
-
 describe('[regression:p0] Service Connectors', function () {
 
     afterEach(function () {
         sinon.restore()
     })
-
-    // ── BlockchainConnector ──────────────────────────────────────────────
-    // BlockchainConnector uses axios. These cases stub the connector's own
-    // methods directly (no network), so the HTTP client is not exercised here.
 
     describe('BlockchainConnector', function () {
 
@@ -100,8 +90,6 @@ describe('[regression:p0] Service Connectors', function () {
         })
     })
 
-    // ── XChainUtxoTrackerConnector ───────────────────────────────────────
-
     describe('XChainUtxoTrackerConnector', function () {
 
         it('[regression:p0] R-CONN-004 : getUtxosFromAddress returns UTXO array', async function () {
@@ -145,8 +133,6 @@ describe('[regression:p0] Service Connectors', function () {
             assert.strictEqual(tracker.port, 3030)
         })
     })
-
-    // ── XChainEncoderConnector ───────────────────────────────────────────
 
     describe('XChainEncoderConnector', function () {
 
@@ -206,8 +192,6 @@ describe('[regression:p0] Service Connectors', function () {
         })
     })
 
-    // ── XChainIndexerConnector ───────────────────────────────────────────
-
     describe('XChainIndexerConnector', function () {
 
         it('[regression:p0] R-CONN-007 : ping verifies indexer is reachable', async function () {
@@ -232,8 +216,6 @@ describe('[regression:p0] Service Connectors', function () {
             }
         })
     })
-
-    // ── XChainHubConnector ───────────────────────────────────────────────
 
     describe('XChainHubConnector', function () {
 
@@ -315,8 +297,6 @@ describe('[regression:p0] Service Connectors', function () {
         })
     })
 
-    // ── RegtestMinerConnector ────────────────────────────────────────────
-
     describe('RegtestMinerConnector', function () {
 
         it('[regression:p0] R-CONN-010 : sendFunds returns funding txid', async function () {
@@ -372,8 +352,6 @@ describe('[regression:p0] Service Connectors', function () {
             }
         })
     })
-
-    // ── Constructor URL Building ─────────────────────────────────────────
 
     describe('Constructor URL building', function () {
 

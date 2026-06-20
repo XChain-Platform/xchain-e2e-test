@@ -18,7 +18,6 @@
 const assert = require('assert')
 const sinon = require('sinon')
 
-// Inject mock mariadb before requiring db.js
 const mockMariadb = require('../fixtures/mockMariadb')
 const Database = require('../../../src/db')
 
@@ -121,7 +120,6 @@ describe('Database Polling Integration', function () {
 
             await db.waitForIssue({ tick: 'TOK' }, 30000)
 
-            // Each checkIssue call acquires and releases a connection
             assert(mockConn.release.callCount >= 2, 'connection released on each iteration')
         })
     })

@@ -17,7 +17,6 @@ const assert = require('assert')
 const sinon = require('sinon')
 const bitcoin = require('bitcoinjs-lib')
 
-// Set up required globals
 global.wallets = {}
 global.NETWORK_OBJECT = { ...bitcoin.networks.regtest, dustThreshold: 546 }
 global.regtestMinerConnector = { sendFunds: async () => 'txid-stub' }
@@ -36,7 +35,6 @@ global.encoderConnector = { createTx: async () => {} }
 const cryptoHelper = require('../cryptoHelper')
 const transactionHelper = require('../transactionHelper')
 
-// Inject mock mariadb
 const mockMariadb = require('../integration/fixtures/mockMariadb')
 const Database = require('../../src/db')
 
@@ -70,8 +68,6 @@ describe('Boundary: Error Propagation', function () {
         mockMariadb.createPool.resetHistory()
     })
 
-    // ── EP-01: sendFunds returns null ───────────────────────────
-
     describe('EP-01: regtestMinerConnector.sendFunds returns null', function () {
 
         it('getNewFundedAddress throws when sendFunds returns null (no txId)', async function () {
@@ -86,8 +82,6 @@ describe('Boundary: Error Propagation', function () {
         })
     })
 
-    // ── EP-02: sendFunds throws ─────────────────────────────────
-
     describe('EP-02: regtestMinerConnector.sendFunds throws', function () {
 
         it('getNewFundedAddress propagates the error', async function () {
@@ -99,8 +93,6 @@ describe('Boundary: Error Propagation', function () {
             )
         })
     })
-
-    // ── EP-03: nodeConnector.waitForTx returns false ────────────
 
     describe('EP-03: waitForTx returns false', function () {
 
@@ -116,8 +108,6 @@ describe('Boundary: Error Propagation', function () {
         })
     })
 
-    // ── EP-04: nodeConnector.waitForTx throws ───────────────────
-
     describe('EP-04: waitForTx throws an error', function () {
 
         it('getNewFundedAddress wraps and re-throws', async function () {
@@ -131,8 +121,6 @@ describe('Boundary: Error Propagation', function () {
             )
         })
     })
-
-    // ── EP-05: utxoTrackerConnector.waitForUtxos returns false ──
 
     describe('EP-05: waitForUtxos returns false', function () {
 
@@ -148,8 +136,6 @@ describe('Boundary: Error Propagation', function () {
         })
     })
 
-    // ── EP-06: utxoTrackerConnector.waitForUtxos throws ─────────
-
     describe('EP-06: waitForUtxos throws', function () {
 
         it('getNewFundedAddress wraps and re-throws', async function () {
@@ -163,8 +149,6 @@ describe('Boundary: Error Propagation', function () {
             )
         })
     })
-
-    // ── EP-07: Database check* returns null on SQL error ────────
 
     describe('EP-07: Database check* SQL errors return null', function () {
 
@@ -201,8 +185,6 @@ describe('Boundary: Error Propagation', function () {
         })
     })
 
-    // ── EP-08: waitFor* returns null when check* always returns null ──
-
     describe('EP-08: waitFor* times out when check* never finds a row', function () {
 
         it('waitForIssue returns null after timeout', async function () {
@@ -238,8 +220,6 @@ describe('Boundary: Error Propagation', function () {
         })
     })
 
-    // ── EP-09: waitFor* recovers from intermittent errors ───────
-
     describe('EP-09: waitFor* continues polling after intermittent check* errors', function () {
 
         it('waitForIssue succeeds after transient DB errors', async function () {
@@ -269,8 +249,6 @@ describe('Boundary: Error Propagation', function () {
         })
     })
 
-    // ── EP-10: Combined: error + zero timeout ──────────────────
-
     describe('EP-10: Error conditions combined with zero timeout', function () {
 
         it('waitForIssue with timeMax=0 and failing query returns null without entering loop', async function () {
@@ -283,8 +261,6 @@ describe('Boundary: Error Propagation', function () {
             assert.strictEqual(mockConn.query.callCount, 0, 'loop body never entered with timeMax=0')
         })
     })
-
-    // ── EP-11: getNewFundedAddress error does not corrupt wallet cache ──
 
     describe('EP-11: Failed funding does not corrupt wallet cache', function () {
 
@@ -316,7 +292,6 @@ describe('Boundary: Error Propagation', function () {
                 // Expected first failure
             }
 
-            // Second call with same label; wallet is cached, mnemonic reused
             const result = await cryptoHelper.getNewFundedAddress('retry-fund', 'bitcoin', 'regtest', null, 'legacy', 1, 1.0)
 
             assert.ok(result.address, 'second call should succeed')

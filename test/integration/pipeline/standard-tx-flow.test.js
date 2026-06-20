@@ -33,7 +33,6 @@ describe('Transaction Pipeline: standard OP_RETURN flow', function () {
     let addressInfo
 
     before(function () {
-        // Generate a real key pair for PSBT signing
         testKeyPair = ECPair.makeRandom({ network: bitcoin.networks.regtest })
         const { address } = bitcoin.payments.p2pkh({
             pubkey: testKeyPair.publicKey,
@@ -66,7 +65,6 @@ describe('Transaction Pipeline: standard OP_RETURN flow', function () {
     function buildMockPsbt() {
         const psbt = new bitcoin.Psbt({ network: bitcoin.networks.regtest })
 
-        // Create a funding transaction (the "previous tx")
         const fundingTx = new bitcoin.Transaction()
         fundingTx.version = 2
         fundingTx.addInput(Buffer.alloc(32, 0), 0)
@@ -84,12 +82,10 @@ describe('Transaction Pipeline: standard OP_RETURN flow', function () {
             nonWitnessUtxo: fundingTx.toBuffer(),
         })
 
-        // OP_RETURN output with XChain data
         const data = Buffer.from('ISSUE|0|TEST', 'utf8')
         const opReturnScript = bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, data])
         psbt.addOutput({ script: opReturnScript, value: 0 })
 
-        // Change output
         psbt.addOutput({ address: testAddress, value: 90000 })
 
         return psbt.toHex()
@@ -128,22 +124,18 @@ describe('Transaction Pipeline: standard OP_RETURN flow', function () {
                 addressInfo, 'ISSUE|0|TEST|1000|100|8|desc|50'
             )
 
-            // Encoder received the correct arguments
             assert(encoderCallArgs, 'encoderConnector.createTx should have been called')
             assert.strictEqual(encoderCallArgs[1], testAddress, 'encoder received correct address')
             assert.strictEqual(encoderCallArgs[3], 'ISSUE|0|TEST|1000|100|8|desc|50', 'encoder received correct data')
 
-            // Broadcast received a signed transaction hex
             assert(broadcastCallHex, 'nodeConnector.broadcastTx should have been called')
             assert(typeof broadcastCallHex === 'string', 'broadcast received hex string')
             assert(broadcastCallHex.length > 0, 'broadcast hex is non-empty')
 
-            // Returns the broadcast txid
             assert.strictEqual(txHash, expectedTxId)
         })
 
         it('passes empty utxo list to encoder on first call (no cache)', async function () {
-            // Use a fresh address to avoid picking up cached UTXOs from prior tests
             const freshKeyPair = ECPair.makeRandom({ network: bitcoin.networks.regtest })
             const { address: freshAddress } = bitcoin.payments.p2pkh({
                 pubkey: freshKeyPair.publicKey,
@@ -155,7 +147,6 @@ describe('Transaction Pipeline: standard OP_RETURN flow', function () {
                 publicKey: freshKeyPair.publicKey
             }
 
-            // Build a PSBT matching the fresh key
             const psbt = new bitcoin.Psbt({ network: bitcoin.networks.regtest })
             const fundTx = new bitcoin.Transaction()
             fundTx.version = 2
@@ -220,10 +211,8 @@ describe('Transaction Pipeline: standard OP_RETURN flow', function () {
                 getUtxosFromAddress: async () => ({ utxos: confirmedUtxos })
             }
 
-            // First call: should send empty utxos, then cache confirmed UTXOs
             await transactionHelper.createAndSendTransaction(addressInfo, 'ISSUE|0|TEST')
 
-            // Second call: should use cached UTXOs
             await transactionHelper.createAndSendTransaction(addressInfo, 'SEND|0|TEST|100')
 
             assert.strictEqual(encoderCalls.length, 2)
@@ -250,7 +239,6 @@ describe('Transaction Pipeline: standard OP_RETURN flow', function () {
                 publicKey: keyPair2.publicKey
             }
 
-            // Build PSBTs that match each key for valid signing
             function buildPsbtFor(kp, addr) {
                 const psbt = new bitcoin.Psbt({ network: bitcoin.networks.regtest })
                 const fundTx = new bitcoin.Transaction()
@@ -289,10 +277,8 @@ describe('Transaction Pipeline: standard OP_RETURN flow', function () {
                 })
             }
 
-            // Call with addressInfo (caches UTXOs for testAddress)
             await transactionHelper.createAndSendTransaction(addressInfo, 'ISSUE|0|TEST')
 
-            // Call with addressInfo2 (different address, should NOT use cached UTXOs)
             await transactionHelper.createAndSendTransaction(addressInfo2, 'SEND|0|TEST|50')
 
             assert.strictEqual(encoderCalls.length, 2)

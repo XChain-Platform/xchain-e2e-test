@@ -18,7 +18,6 @@
  *
  ********************************************************************/
 
-// Load required libraries
 const axios = require('axios');
 
 class XChainDecoderConnector {
@@ -38,7 +37,6 @@ class XChainDecoderConnector {
             id: 1
         }
 
-        // Make the request to the node
         var response = null
         try {
             response = await axios.post(this.url, data)
@@ -47,7 +45,6 @@ class XChainDecoderConnector {
             return false
         }
 
-        // Verify if there is a result and return it
         if (response.data && response.data.result) {
             return true;
         } else {
@@ -64,7 +61,6 @@ class XChainDecoderConnector {
             id: 1
         }
 
-        // Make the request to the node
         var response = null
         try {
             response = await axios.post(this.url, data)
@@ -73,7 +69,6 @@ class XChainDecoderConnector {
             return null
         }
 
-        // Verify if there is a result and return it
         if (response.data && response.data.result) {
             return response.data.result;
         } else {

@@ -50,9 +50,6 @@ const attestationHelper = require('../helpers/attestationHelper');
 // the top-level AttestationHelpers builders (also exposed as sdk.attestation).
 const { AttestationHelpers } = loadSDK();
 
-// Contract that emits attestation requests and records each callback's
-// inputs into contract state. Mirrors test/actions/attestation.test.js so
-// the SDK path is validated against the same proven contract.
 const CONTRACT_CODE = `
 module.exports = {
     askOracle: function(xchain) {
@@ -245,7 +242,6 @@ describe('[sdk] External Attestation Framework (request -> response -> callback)
     });
 
     it('EXECUTE emits ATTEST v0 (request), stored pending and readable via sdk.getAttestations', async function () {
-        // A dapp pre-validates the URL with the SDK builder before submitting.
         const url = AttestationHelpers.httpGet('https://example.com/v1/score/123');
 
         const exec = await submit(sdk,
@@ -256,7 +252,6 @@ describe('[sdk] External Attestation Framework (request -> response -> callback)
         console.log('    [sdk] EXECUTE askOracle status=' + exec.indexed.status);
         expect(exec.indexed.status).to.equal('valid');
 
-        // Indexer created a pending attestation request.
         const request = await global.indexerDatabase.waitForAttestationRequest({
             txHash:        exec.txid,
             requestStatus: 'pending'
@@ -266,7 +261,6 @@ describe('[sdk] External Attestation Framework (request -> response -> callback)
         expect(request.callback_method).to.equal('handleResponse');
         expect(Number(request.redundancy)).to.equal(1);
 
-        // The dapp reads its request back through the SDK explorer client.
         await mine(1);
         const viaSdk = await sdk.getAttestations(contractIndex, 'contract');
         const row = findAttestation(viaSdk, request.request_id);
@@ -294,7 +288,6 @@ describe('[sdk] External Attestation Framework (request -> response -> callback)
             validators:      [validator]
         });
 
-        // Response row lands valid.
         const response = await global.indexerDatabase.waitForAttestationResponse({
             requestId:      requestId,
             responseStatus: 'ok',
@@ -302,19 +295,16 @@ describe('[sdk] External Attestation Framework (request -> response -> callback)
         });
         expect(response, 'attestation_responses row should be valid').to.exist;
 
-        // Exactly one verified signature, from our staked validator.
         const sigs = await global.indexerDatabase.getAttestationValidatorSignatures(response.action_index);
         expect(sigs.length).to.equal(1);
         expect(String(sigs[0].validator_pubkey).toLowerCase()).to.equal(validator.pubkey.toLowerCase());
 
-        // Request flips to fulfilled, observed through the SDK.
         await mine(1);
         const viaSdk = await sdk.getAttestations(contractIndex, 'contract');
         const row = findAttestation(viaSdk, requestId);
         expect(row, 'request row via SDK').to.exist;
         expect(row.request_status).to.equal('fulfilled');
 
-        // Callback EXECUTE was injected + ran: contract state via the SDK.
         const stStatus  = await sdk.getContractState(contractIndex, 'callback_status');
         const stPayload = await sdk.getContractState(contractIndex, 'callback_payload');
         const stContext = await sdk.getContractState(contractIndex, 'callback_context');
@@ -352,7 +342,6 @@ describe('[sdk] External Attestation Framework (request -> response -> callback)
         }, 30000);
         expect(expired, 'request should auto-expire past DEADLINE_BLOCK').to.exist;
 
-        // Callback fired with status=expired, read via the SDK.
         const getVal = (st, key) => {
             const r = ((st && st.data) || []).find(x => x.state_key === key);
             return r ? JSON.parse(r.state_value) : undefined;
@@ -413,7 +402,6 @@ describe('[sdk] External Attestation Framework (request -> response -> callback)
     it('a paid request escrows the fee from the caller, fulfillment credits validator_rewards, COLLECT pays the staker', async function () {
         const escrowBefore = await xchainEscrowSum(operator.address);
 
-        // EXECUTE emits ATTEST v0 carrying FEE_TICK=XCHAIN, FEE_AMOUNT=0.5.
         const url = AttestationHelpers.httpGet('https://example.com/v1/paid/100');
         const exec = await submit(sdk,
             { action: 'EXECUTE', params: { contractActionIndex: contractIndex, method: 'askOraclePaid', params: [url] } },
@@ -428,7 +416,6 @@ describe('[sdk] External Attestation Framework (request -> response -> callback)
         expect(request, 'paid request should be pending').to.exist;
         expect(String(request.fee_amount), 'fee_amount persisted on the request').to.equal('2');
 
-        // The 0.5 fee is escrowed from the caller while the request is pending.
         await mine(1);
         const escrowPending = await xchainEscrowSum(operator.address);
         expect(escrowPending - escrowBefore, 'fee should be escrowed from the caller').to.be.closeTo(2, 1e-9);
@@ -459,11 +446,9 @@ describe('[sdk] External Attestation Framework (request -> response -> callback)
         expect(rewardForThis, 'attest_fee validator_rewards row for this request').to.exist;
         expect(String(rewardForThis.amount), 'N=1, so the full fee accrues to the one validator').to.equal('2');
 
-        // Escrow released on fulfillment: caller's escrow returns to baseline.
         const escrowAfter = await xchainEscrowSum(operator.address);
         expect(escrowAfter - escrowBefore, 'fulfillment releases the escrow').to.be.closeTo(0, 1e-9);
 
-        // COLLECT pays the accrued reward(s) to the staker.
         const collect = await submit(sdk,
             { action: 'COLLECT', params: { version: 0 } },
             { pubkey: operator.address, change: operator.address },

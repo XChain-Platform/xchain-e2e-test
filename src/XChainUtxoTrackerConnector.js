@@ -18,7 +18,6 @@
  *
  ********************************************************************/
 
-// Load required libraries
 const axios = require('axios')
 
 class UtxoTracker {
@@ -39,16 +38,12 @@ class UtxoTracker {
         }
 
         try {
-            // Make the request to the node. axios throws on non-2xx, which the
-            // catch below turns into `false`; ping() is a boolean reachability
-            // probe, matching every other connector in the suite.
             const response = await axios.post(this.url, data, {
                 headers: { 'Content-Type': 'application/json' }
             });
 
             const responseData = response.data;
 
-            // Verify if there is a result and return it
             if (responseData.result) {
                 return true;
             } else {
@@ -144,14 +139,12 @@ class UtxoTracker {
                 id: 1
             };
 
-            // Make the request to the node (axios throws automatically on non-2xx)
             const response = await axios.post(this.url, data, {
                 headers: { 'Content-Type': 'application/json' }
             });
 
             const responseData = response.data;
 
-            // Verify if there is a result and return it
             if (responseData.result) {
                 return responseData.result;
             } else {

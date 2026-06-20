@@ -81,8 +81,7 @@ class MockCrossChainOfferBook {
     urlFor(name, coin){ return 'http://127.0.0.1:' + this.port + '/book/' + name + '/' + coin; }
 
     _handle(req, res){
-        // Path: /book/<name>/<COIN>. Method is always POST JSON-RPC; we only serve
-        // getopencrosschainorders (the sole method the engine calls on these URLs).
+        // Only serves getopencrosschainorders (the sole method the engine calls on these URLs).
         let m = /^\/book\/([^/]+)\/([^/]+)\/?$/.exec(req.url || '');
         let chunks = [];
         req.on('data', (c) => chunks.push(c));

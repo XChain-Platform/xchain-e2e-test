@@ -34,7 +34,6 @@ describe('Chaos Experiment 2: Pool Exhaustion @P0', function () {
             const { db, mockPool } = createDb()
             const successConn = makeMockConnection([{ id: 1 }])
 
-            // Fail 5 times then succeed
             for (let i = 0; i < 5; i++) {
                 mockPool.getConnection.onCall(i).rejects(new Error('Pool exhausted'))
             }
@@ -68,7 +67,6 @@ describe('Chaos Experiment 2: Pool Exhaustion @P0', function () {
 
         it('returns null when pool never provides a connection (times out via timeMax)', async function () {
             const { db, mockPool, mockConn } = createDb()
-            // Connection is acquired but query always returns empty
             mockConn.query.resolves([])
 
             const result = await db.waitForIssue({ tick: 'EXHAUSTED' }, 100)

@@ -113,7 +113,6 @@ async function snapshotRows(hub) {
 describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM price PBFT round (WI-1 Suite A3, L2)', function () {
     this.timeout(240_000);
 
-    // NEGATIVE: count-majority / stake-minority of live hubs cannot finalize
     describe('a stake-minority (count-majority) of live hubs cannot finalize a price round', function () {
         let db, mvh, seed, oracle;
 
@@ -155,7 +154,6 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM price PBFT round (WI-1 Suite 
         });
     });
 
-    // POSITIVE: a healthy weighted federation finalizes the price round
     describe('a healthy weighted federation finalizes the price on every hub', function () {
         let db, mvh, seed, oracle;
 

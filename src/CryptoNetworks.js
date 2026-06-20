@@ -10,15 +10,8 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
- * XChain End-to-End Test Suite - Crypto Networks Class
- * 
- * This file handles getting a bitcoinJS config for a specific network
- * 
  ********************************************************************/
 
-// Load required libraries
 const bitcoin = require('bitcoinjs-lib');
 
 class CryptoNetworks {

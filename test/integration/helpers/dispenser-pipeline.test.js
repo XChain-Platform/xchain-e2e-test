@@ -89,7 +89,6 @@ describe('Dispenser Helper → DB Assertion Pipeline', function () {
             const message = createTxStub.firstCall.args[1]
             assert(message.startsWith('DISPENSER|0|BTC|MYTOKEN|10||100||OTHERTOKEN|5|getAddr123|USD|1.50||999999|allowAddr1|blockAddr1|test dispenser'))
 
-            // Verify waitForDispenser received all filter parameters
             assert(waitForDispenserArgs, 'waitForDispenser should have been called')
             assert.strictEqual(waitForDispenserArgs.source, addressInfo.address)
             assert.strictEqual(waitForDispenserArgs.txHash, 'txhash_disp')
@@ -109,7 +108,6 @@ describe('Dispenser Helper → DB Assertion Pipeline', function () {
             assert.strictEqual(waitForDispenserArgs.memo, 'test dispenser')
             assert.strictEqual(waitForDispenserArgs.status, 'valid')
 
-            // Verify return value
             assert.strictEqual(result.txHash, 'txhash_disp')
             assert(result.dispenser, 'dispenser row should be present')
         })
@@ -139,8 +137,6 @@ describe('Dispenser Helper → DB Assertion Pipeline', function () {
             )
 
             const message = createTxStub.firstCall.args[1]
-            // Null fields coerced to empty strings: giveCoin,giveTick → "",""
-            // Format: DISPENSER|0|GIVE_COIN|GIVE_TICK|GIVE_AMOUNT|GIVE_OWNERSHIP|GIVE_ESCROW|GET_COIN|GET_TICK|GET_AMOUNT|GET_ADDRESS|FIAT_CODE|FIAT_AMOUNT|ORACLE_ADDRESS|EXPIRATION|ALLOW_LIST|BLOCK_LIST|MEMO
             assert.strictEqual(message, 'DISPENSER|0|||10||100|||5|addr|||||||memo')
         })
     })

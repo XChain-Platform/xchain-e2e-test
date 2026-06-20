@@ -53,7 +53,6 @@ describe(`x402 agent payments: SDK driven (${COIN})`, function () {
         ({ X402Gateway, X402Client } = require('xchain-sdk'));
         stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'x402-e2e-'));
 
-        // Seller + buyer with native funding and gas; buyer also gets the payment token.
         seller = await fundedGasAddress(sdk, 1);
         buyer  = await fundedGasAddress(sdk, 1);
         tick   = uniqueTick('PAY');
@@ -217,7 +216,6 @@ describe(`x402 agent payments: SDK driven (${COIN})`, function () {
             expect(challenge.accepts[0]).to.include({ scheme: 'xchain-dispenser', holdTick: accessTick });
             expect(challenge.accepts[0].dispenserIndex).to.equal(dispenserIndex);
 
-            // Holder unlocks
             await submit(sdk, { action: 'SEND', params: { tick: accessTick, amount: '1', destination: buyer.address } },
                 { pubkey: seller.address, change: seller.address }, submitOpts({ wif: seller.wif }));
             const proof = Buffer.from(JSON.stringify({

@@ -54,7 +54,6 @@ describe('Chaos Experiment 5: Database Mid-Query Disconnect @P1', function () {
             const { db, mockConn } = createDb()
             const mockRow = { tick: 'CHAOS', status: 'valid' }
 
-            // First poll: disconnect. Second poll: empty. Third poll: success.
             mockConn.query.onFirstCall().rejects(new Error('ER_CONNECTION_LOST'))
             mockConn.query.onSecondCall().resolves([])
             mockConn.query.onThirdCall().resolves([mockRow])
@@ -85,7 +84,6 @@ describe('Chaos Experiment 5: Database Mid-Query Disconnect @P1', function () {
 
             await db.waitForIssue({ tick: 'CHAOS' }, 30000)
 
-            // Each checkIssue call should release its connection
             assert(mockConn.release.callCount >= 3, 'every poll should release its connection')
         })
     })

@@ -86,9 +86,6 @@ describe('[sdk] Project registry (TICK + tick-LIST + owner-validated LINK)', fun
         other = await fundedGasAddress(sdk, 1);
         console.log('    [sdk] owner=' + owner.address + ' other=' + other.address);
 
-        // The project tick (the registry anchor) + two member tokens issued by
-        // the community member ("other") under their own names; the curated
-        // directory model.
         projectTick = uniqueTick('PROJ');
         memberA     = uniqueTick('MEMA');
         memberB     = uniqueTick('MEMB');
@@ -123,13 +120,11 @@ describe('[sdk] Project registry (TICK + tick-LIST + owner-validated LINK)', fun
         expect(statusOf(list), 'roster LIST').to.equal('valid');
         expect(statusOf(link), 'roster LINK (owner attestation)').to.equal('valid');
 
-        // The explorer resolves the current roster from chain state
         const project = await sdk.getProject(projectTick);
         expect(project.total, 'roster size').to.equal(2);
         const ticks = project.members.map((m) => m.tick).sort();
         expect(ticks).to.deep.equal([memberA, memberB].sort());
 
-        // Member token pages carry the membership (the green-banner data)
         const member = await sdk.getToken(memberA);
         expect(member.projects.map((p) => p.project)).to.include(projectTick);
     });
@@ -172,7 +167,6 @@ describe('[sdk] Project registry (TICK + tick-LIST + owner-validated LINK)', fun
         expect(project.total, 'roster size after removal').to.equal(1);
         expect(project.members.map((m) => m.tick)).to.deep.equal([memberA]);
 
-        // The dropped member no longer carries the membership
         const dropped = await sdk.getToken(memberB);
         expect(dropped.projects.map((p) => p.project)).to.not.include(projectTick);
     });

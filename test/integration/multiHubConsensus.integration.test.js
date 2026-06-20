@@ -103,8 +103,6 @@ describe('MultiValidatorHub: config-change PBFT (L2)', function () {
         const COIN = 'BTC', NET = 'regtest', MODULE = 'node', VALUE = '424242';
         const config = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: VALUE } } } };
 
-        // All hubs share the same sorted validator set + seq, so exactly one is
-        // the leader for the next sequence.
         const leader = mvh.hubs.find((h) => {
             const l = h.consensus._getLeader(h.consensus.seq + 1);
             return l && l.addr === h.consensus.peerManager.validatorAddr;

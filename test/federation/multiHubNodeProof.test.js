@@ -101,7 +101,6 @@ async function _idxQuery(sql, args) {
     finally { await conn.release() }
 }
 
-// Poll a query until it returns rows (or timeout). Returns the rows.
 async function _waitForRows(sql, args, timeoutMs = 120000, label = 'rows') {
     const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {

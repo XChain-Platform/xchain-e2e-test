@@ -63,10 +63,7 @@ module.exports = {
         console.log("Creating and sending ORDER CANCEL V1 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, orderMessage)
 
-        // After cancel, the original order status should change
-        // Wait for the order to no longer be 'open'
         console.log("Waiting for ORDER cancel to be indexed...")
-        // Give the indexer time to process
         await new Promise(r => setTimeout(r, 5000))
 
         return { txHash }

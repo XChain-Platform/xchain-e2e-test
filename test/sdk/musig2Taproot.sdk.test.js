@@ -44,7 +44,6 @@ const crypto = require('crypto');
 const { expect } = require('chai');
 const { loadSDK } = require('./sdkHelper');
 
-// bitcoinjs-lib + tiny-secp256k1 ship in this repo's node_modules.
 const bitcoin = require('bitcoinjs-lib');
 const ecc     = require('tiny-secp256k1');
 bitcoin.initEccLib(ecc);

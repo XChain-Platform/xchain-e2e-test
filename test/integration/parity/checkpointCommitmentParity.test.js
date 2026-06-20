@@ -116,7 +116,6 @@ describe('SPV Phase 2: CHECKPOINT_COMMITMENT cross-service parity', function () 
         const idxC = anchorCanonicalV3(d);
         assert.strictEqual(hubC, sdkC, 'hub vs SDK checkpoint canonical drift');
         assert.strictEqual(hubC, idxC, 'hub vs indexer ANCHOR v3 canonical drift');
-        // The root suffix must genuinely be in the signed bytes.
         assert.ok(hubC.includes('|' + STATE_ROOT + '|1|' + BLOCK_MERKLE + '|1'),
             'post-flag-day canonical must commit the root suffix; got ' + hubC);
     });
@@ -163,7 +162,6 @@ describe('SPV Phase 2: CHECKPOINT_COMMITMENT cross-service parity', function () 
         assert.strictEqual(hubNull, sdkNull, 'hub vs SDK null-root canonical drift');
         assert.ok(!hubNull.includes(withRoots.STATE_ROOT) && !hubNull.includes(withRoots.BLOCK_MERKLE),
             'null-root canonical must not append a root suffix');
-        // And it must DIFFER from the same checkpoint signed WITH roots (the suffix is real).
         assert.notStrictEqual(hubNull, StateCheckpointEngine.canonicalCheckpoint(withRoots.cp),
             'a null-root and a rooted checkpoint must not share a canonical');
     });

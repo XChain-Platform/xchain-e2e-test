@@ -25,10 +25,8 @@
 const assert  = require('assert')
 const bitcoin = require('bitcoinjs-lib')
 
-// Canonical source of truth.
 const protocol = require('../../../xchain-documentation/protocol/constants.js')
 
-// Each service's local declaration.
 const encoderValidator = require('../../../xchain-encoder/src/validator.js')
 const XChainDecoder     = require('../../../xchain-decoder/src/XChainDecoder.js')
 const sdkValidator      = require('../../../xchain-sdk/src/validator.js')

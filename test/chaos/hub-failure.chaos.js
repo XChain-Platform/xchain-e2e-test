@@ -35,7 +35,6 @@ describe('Chaos Experiment 3: Hub Auto-Discovery Total Failure @P1', function ()
     })
 
     afterEach(function () {
-        // Restore env vars
         for (const [k, v] of Object.entries(savedEnv)) {
             if (v === undefined) delete process.env[k]
             else process.env[k] = v

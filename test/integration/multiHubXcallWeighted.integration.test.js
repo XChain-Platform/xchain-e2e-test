@@ -111,7 +111,6 @@ async function driveDispatch(mvh, validators, seedBase, requireLiveLeader) {
 describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM XCALL dispatch relay (C.2)', function () {
     this.timeout(240_000);
 
-    // NEGATIVE: stake-minority of live hubs cannot finalize a dispatch
     describe('a stake-minority (count-majority) of live hubs cannot finalize an XCALL dispatch', function () {
         let db, mvh, seed, validators;
 
@@ -150,7 +149,6 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM XCALL dispatch relay (C.2)', 
         });
     });
 
-    // POSITIVE: a healthy weighted federation finalizes the dispatch
     describe('a healthy weighted federation finalizes the XCALL dispatch on every hub', function () {
         let db, mvh, seed, validators;
 

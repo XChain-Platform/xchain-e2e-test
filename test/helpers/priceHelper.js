@@ -16,9 +16,8 @@ const transactionHelper = require('../transactionHelper')
 // returns the row regardless of validation outcome; the caller asserts the
 // expected validation_status.
 module.exports = {
-    // Build + broadcast a PRICE v1 action, then wait for its `prices` row.
-    // `expected` defaults to a valid quote; pass validationStatus to poll for
-    // the invalid record on a negative case.
+    // `validationStatus` defaults to 'valid'; pass a different value to poll for
+    // the expected-invalid record on a negative-path test.
     async sendPriceV1(addressInfo, { coin, tick, fiat, value, fee = '0', memo = '' }, validationStatus = 'valid'){
         let address = addressInfo['address']
         let priceMessage = 'PRICE|1|' + coin + '|' + tick + '|' + fiat + '|' + value + '|' + fee + '|' + memo

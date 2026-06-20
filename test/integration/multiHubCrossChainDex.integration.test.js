@@ -148,7 +148,6 @@ describe('MultiValidatorHub: cross-chain DEX match PBFT (L2)', function () {
         return events;
     }
 
-    // Distinct verifying signatures over a finalize event's canonical match.
     function verifyingPubkeys(ev){
         const dex = mvh.getCrossChainDexes()[ev.hubIndex];
         const canonical = dex._canonicalMatch(ev.row);

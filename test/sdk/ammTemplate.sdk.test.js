@@ -194,7 +194,6 @@ describe('[sdk] template:amm (LP-as-real-tick round trip)', function () {
         expect(contractIndex, 'contract action_index').to.not.equal(null);
 
         await mine(1);
-        // Constructor-emitted ISSUE: the LP tick now exists and the contract owns it.
         const info = (typeof sdk.getTokenInfo === 'function')
             ? await sdk.getTokenInfo(lpTick).catch(() => null)
             : null;
@@ -220,7 +219,6 @@ describe('[sdk] template:amm (LP-as-real-tick round trip)', function () {
         await mine(1);
         expect(Number(await readState(sdk, contractIndex, 'reserveA')), 'reserveA').to.equal(LIQ);
         expect(Number(await readState(sdk, contractIndex, 'reserveB')), 'reserveB').to.equal(LIQ);
-        // First provider: shares = sqrt(LIQ*LIQ) = LIQ.
         const shares = Number(await readState(sdk, contractIndex, 'totalShares'));
         expect(shares, 'totalShares = sqrt(depA*depB)').to.equal(LIQ);
         // The LP tick is a real tick credited to the provider.
@@ -248,7 +246,6 @@ describe('[sdk] template:amm (LP-as-real-tick round trip)', function () {
         const kAfter = rA * rB;
         console.log('    [amm] k before=' + kBefore + ' after=' + kAfter + ' (delta=' + (kAfter - kBefore) + ')');
         expect(kAfter, 'k is non-decreasing across the swap').to.be.greaterThan(kBefore - 1e-6);
-        // Swapper received tokenB.
         expect(balanceFor(await sdk.getBalances(lp.address), tokenB), 'swapper received tokenB').to.be.greaterThan(0);
     });
 
@@ -269,7 +266,6 @@ describe('[sdk] template:amm (LP-as-real-tick round trip)', function () {
 
         await mine(1);
         expect(Number(await readState(sdk, contractIndex, 'totalShares')), 'all shares burned').to.equal(0);
-        // LP shares were destroyed (provider no longer holds any).
         expect(balanceFor(await sdk.getBalances(lp.address), lpTick), 'LP shares burned').to.equal(0);
         // Provider got the full pool back: reserveA went in at LIQ + the swap's SWAP_IN.
         expect(balanceFor(await sdk.getBalances(lp.address), tokenA), 'provider redeemed tokenA').to.equal(LIQ + SWAP_IN);

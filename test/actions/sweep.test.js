@@ -21,11 +21,9 @@ describe('SWEEP', () => {
             let destAddr = await cryptoHelper.getNewAddress("SWEEP.V0.DEST", COIN, NETWORK, null, "legacy", 0)
             let tick = "SWEEPv0"+sourceAddr["address"].substring(sourceAddr["address"].length-8)
 
-            // Create a token and mint some gas for fees
             await issueHelper.sendIssueV0(sourceAddr, tick, 100, 50, 0, "Sweep v0 test token", 50)
             await gasHelper.mintGas(sourceAddr, 100)
 
-            // Sweep balances only (no ownerships / orders / swaps / dispensers)
             let result = await sweepHelper.sendSweepV0(
                 sourceAddr,
                 destAddr["address"],

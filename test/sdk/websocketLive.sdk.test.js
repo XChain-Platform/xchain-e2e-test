@@ -61,11 +61,9 @@ describe('[sdk] websocket live action events', function () {
     before(async function () {
         if (!haveConnectors()) this.skip();
         sdk = makeSdk();
-        // Connect the real WS (resolves on the explorer's WELCOME frame).
         await sdk.connectWs();
         events = [];
         unsub = sdk.onAction((msg) => { events.push(msg); });
-        // Fund + gas an issuer so we can submit a fee-paying ISSUE.
         issuer = await fundedGasAddress(sdk, 1);
     });
 

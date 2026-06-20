@@ -20,7 +20,6 @@ const assert = require('assert')
 const sinon = require('sinon')
 const axios = require('axios')
 
-// Inject mock mariadb before requiring anything that depends on it
 require('../fixtures/mockMariadb')
 
 const XChainHubConnector = require('../../../src/XChainHubConnector')
@@ -112,7 +111,6 @@ describe('Bootstrap: hub discovery fallback', function () {
     describe('Scenario 3.1.2: Hub provides all service endpoints', function () {
 
         it('initializes connectors from hub config', async function () {
-            // Hub responds to ping and getallconfigs
             axiosStub.onFirstCall().resolves({ data: { jsonrpc: '2.0', result: true, id: 1 } })
             axiosStub.onSecondCall().resolves({ data: { jsonrpc: '2.0', result: { configs: hubFixtures.validConfig, seq: 0, watermark: 0 }, id: 1 } })
 
@@ -121,7 +119,6 @@ describe('Bootstrap: hub discovery fallback', function () {
 
             await bootstrapFromHub('bitcoin', 'regtest')
 
-            // All connectors use localhost (Docker convention from initialCheck.js)
             assert.strictEqual(global.nodeConnector.url, 'http://localhost:18443')
             assert.strictEqual(global.nodeConnector.rpcUser, 'rpcuser')
             assert.strictEqual(global.nodeConnector.rpcPassword, 'rpcpass')
@@ -161,7 +158,6 @@ describe('Bootstrap: hub discovery fallback', function () {
         })
 
         it('throws when hub returns null config', async function () {
-            // Ping succeeds but getAllConfig returns null
             axiosStub.onFirstCall().resolves({ data: { jsonrpc: '2.0', result: true, id: 1 } })
             axiosStub.onSecondCall().resolves({ data: { jsonrpc: '2.0', result: null, id: 1 } })
 
@@ -171,7 +167,6 @@ describe('Bootstrap: hub discovery fallback', function () {
             await assert.rejects(
                 () => bootstrapFromHub('bitcoin', 'regtest'),
                 (err) => {
-                    // getAllConfig returns null → hubConfigs is null → thrown
                     assert(err.message.includes('error') || err instanceof TypeError)
                     return true
                 }

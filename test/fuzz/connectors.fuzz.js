@@ -34,8 +34,6 @@ describe('Fuzz: Connector URL Construction', function () {
         sinon.restore()
     })
 
-    // BlockchainConnector
-
     describe('BlockchainConnector constructor', function () {
 
         it('never crashes with fuzzed host and port', function () {
@@ -58,8 +56,6 @@ describe('Fuzz: Connector URL Construction', function () {
         })
     })
 
-    // XChainUtxoTrackerConnector
-
     describe('XChainUtxoTrackerConnector constructor', function () {
 
         it('never crashes with fuzzed host and port', function () {
@@ -70,8 +66,6 @@ describe('Fuzz: Connector URL Construction', function () {
             }), FC_PARAMS)
         })
     })
-
-    // XChainEncoderConnector
 
     describe('XChainEncoderConnector constructor', function () {
 
@@ -84,8 +78,6 @@ describe('Fuzz: Connector URL Construction', function () {
         })
     })
 
-    // XChainIndexerConnector
-
     describe('XChainIndexerConnector constructor', function () {
 
         it('never crashes with fuzzed host and port', function () {
@@ -97,8 +89,6 @@ describe('Fuzz: Connector URL Construction', function () {
         })
     })
 
-    // RegtestMinerConnector
-
     describe('RegtestMinerConnector constructor', function () {
 
         it('never crashes with fuzzed host and port', function () {
@@ -109,8 +99,6 @@ describe('Fuzz: Connector URL Construction', function () {
             }), FC_PARAMS)
         })
     })
-
-    // XChainHubConnector
 
     describe('XChainHubConnector constructor', function () {
 

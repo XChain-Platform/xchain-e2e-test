@@ -67,7 +67,6 @@ function formatMb(bytes) {
 function run() {
     const args = parseArgs(process.argv.slice(2))
 
-    // Load thresholds
     let thresholds = { ...DEFAULT_THRESHOLDS }
     if (args.config) {
         try {
@@ -79,7 +78,6 @@ function run() {
         }
     }
 
-    // Find results file
     const resultsDir = path.resolve(__dirname, '..', 'perf-results')
     const filePath = args.file
         ? path.resolve(args.file)
@@ -102,7 +100,6 @@ function run() {
 
     const breaches = []
 
-    // Check total suite time
     const totalMs = data.mochaStats.duration || 0
     if (totalMs > thresholds.totalSuiteMaxMs) {
         breaches.push({
@@ -112,7 +109,6 @@ function run() {
         })
     }
 
-    // Check individual test times
     const slowTests = (data.tests || []).filter(t => t.durationMs > thresholds.singleTestMaxMs)
     for (const t of slowTests) {
         breaches.push({
@@ -122,7 +118,6 @@ function run() {
         })
     }
 
-    // Check peak memory
     const peakRss = Math.max(0, ...(data.tests || []).map(t => t.memEndRss || 0))
     const peakRssMb = peakRss / 1048576
     if (peakRssMb > thresholds.peakMemoryRssMb) {
@@ -133,7 +128,6 @@ function run() {
         })
     }
 
-    // Check poll overhead ratio
     const totalPollMs = (data.pollMetrics || []).reduce((sum, p) => sum + (p.durationMs || 0), 0)
     const pollRatio = totalMs > 0 ? totalPollMs / totalMs : 0
     if (pollRatio > thresholds.pollOverheadRatioMax) {
@@ -144,7 +138,6 @@ function run() {
         })
     }
 
-    // Check unresolved polls
     const unresolvedPolls = (data.pollMetrics || []).filter(p => !p.resolved).length
     if (unresolvedPolls > thresholds.maxUnresolvedPolls) {
         breaches.push({
@@ -154,7 +147,6 @@ function run() {
         })
     }
 
-    // Print summary
     console.log('')
     console.log('  Performance Gate Results')
     console.log('  ========================')

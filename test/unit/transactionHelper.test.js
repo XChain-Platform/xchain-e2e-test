@@ -15,11 +15,8 @@ const sinon  = require('sinon');
 
 const bitcoin = require('bitcoinjs-lib');
 
-// transactionHelper.js references globals at call-time (not module-load time).
-// We must set them up BEFORE each test because other test files in this mocha
-// run (e.g. cryptoHelper.test.js) also assign to these globals and may clobber
-// them after our module-level assignments.
-
+// transactionHelper.js references globals at call-time, not module-load time.
+// Reset before each test: other files in this mocha run may clobber them.
 const transactionHelper = require('../../test/transactionHelper');
 
 function resetGlobals() {
@@ -47,8 +44,6 @@ describe('transactionHelper', function () {
         sinon.restore();
     });
 
-    // ── isSegwitUTXO ──────────────────────────────────────────────────────
-    //
     // isSegwitUTXO decompiles utxo.scriptPubKey (hex) and checks whether the
     // first opcode is 0x00 (OP_0), which is the witness version for P2WPKH
     // and P2WSH outputs.
@@ -91,13 +86,9 @@ describe('transactionHelper', function () {
         });
     });
 
-    // ── createAndSendTransaction / createSimpleTransaction ───────────────
-    //
-    // Both functions create real bitcoinjs-lib PSBTs from hex data returned by
-    // the encoder, sign them with a real ECPair, and call nodeConnector.broadcastTx.
-    // End-to-end testing requires a live encoder returning valid PSBT hex.
-    // The unit tests below verify the connector call contract only, using stubs
-    // that return a minimal pre-built PSBT hex for a known key pair.
+    // These unit tests verify the connector call contract only, using stubs that
+    // return a minimal pre-built PSBT hex for a known key pair. Full pipeline
+    // testing (live encoder + real PSBT signing) belongs in the e2e suite.
 
     describe('createAndSendTransaction (connector call contract)', function () {
 
@@ -122,23 +113,13 @@ describe('transactionHelper', function () {
             return { psbt: psbt.toHex(), encoding: 'OP_RETURN' };
         }
 
-        // createAndSendTransaction contains a `while (Date.now() < trackerEnd)`
-        // polling loop that runs for up to 20 seconds.  We stub Date.now so the
-        // loop exits on its first iteration, and stub setTimeout via the global
-        // Promise constructor to avoid real waiting.
-
+        // Stub Date.now so the `while (Date.now() < trackerEnd)` polling loop
+        // exits on its first iteration rather than waiting up to 20 seconds.
         function stubDateNowExpired() {
-            // Always return a timestamp far in the past so that any
-            // `while (Date.now() < endTime)` loop computed as
-            // `endTime = Date.now() + someTimeout` exits after one iteration.
-            // We make the value increase each call so that the first call
-            // produces an endTime that is immediately exceeded by the next call.
             let callCount = 0;
             const BASE = 1_000_000;
             const stub = sinon.stub(Date, 'now').callsFake(() => {
                 callCount++;
-                // First call: return BASE (sets endTime = BASE + timeout)
-                // All subsequent calls: return BASE + large number (exceeds endTime)
                 return callCount === 1 ? BASE : BASE + 999_999_999;
             });
             return stub;
@@ -211,20 +192,13 @@ describe('transactionHelper', function () {
         });
     });
 
-    // createSimpleTransaction builds PSBTs inline without calling the encoder.
-    // Because it fetches UTXOs at runtime and constructs full PSBT inputs
-    // (including nonWitnessUtxo from nodeConnector.getTransactionHex), it is
-    // deeply coupled to the live pipeline.  Integration testing is the
-    // appropriate level for end-to-end verification of this function.
+    // createSimpleTransaction fetches UTXOs at runtime and builds full PSBT inputs
+    // including nonWitnessUtxo from nodeConnector.getTransactionHex. Mocking the
+    // full PSBT construction cycle would reproduce production code; use the e2e
+    // suite against a regtest node for full coverage.
 
     describe('createSimpleTransaction', function () {
         it('is documented as requiring integration testing for full coverage', function () {
-            // createSimpleTransaction builds and signs a real PSBT from UTXOs
-            // fetched at runtime.  The PSBT must include real scriptPubKey data
-            // from a live (or fake) coin node.  Mocking the full PSBT construction
-            // cycle inline would reproduce the production code, which provides no
-            // testing value.  Use the e2e test suite against a regtest node for
-            // full coverage.
             assert.strictEqual(typeof transactionHelper.createSimpleTransaction, 'function');
         });
     });

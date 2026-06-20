@@ -39,7 +39,6 @@ const COUNTER_CONTRACT = `
     };
 `;
 
-// The contract is identified by the DEPLOY action's action_index.
 function contractIndexOf(indexed) {
     const a = indexed && Array.isArray(indexed.actions) ? indexed.actions[0] : null;
     return a ? a.action_index : null;

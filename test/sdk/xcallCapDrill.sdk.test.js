@@ -263,7 +263,6 @@ describe('[sdk] XCALL per-block injection cap (25 + carry-forward)', function ()
         expect(mirrored, 'all dispatches mirrored to the DOGE indexer before release').to.equal(BURST);
         console.log('    [xcall-cap] all ' + BURST + ' dispatches mirrored locally; releasing DOGE block-by-block');
 
-        // release DOGE mining block-by-block until everything executed
         const deadline = Date.now() + 240000;
         let rows = [];
         while (Date.now() < deadline) {
@@ -276,7 +275,6 @@ describe('[sdk] XCALL per-block injection cap (25 + carry-forward)', function ()
         }
         expect(rows.length, 'all calls executed (none dropped)').to.equal(BURST);
 
-        // group by execution block
         const byBlock = new Map();
         for (const r of rows) {
             const b = Number(r.block_index);

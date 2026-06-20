@@ -126,7 +126,6 @@ describe('MultiValidatorHub: governance capability MIN_STAKE pin (#4352)', funct
             'propose() must reject a pinned CAPABILITY_*_MIN_STAKE change'
         );
 
-        // No proposal row exists on ANY hub (proposer never inserted, never broadcast).
         for (const hub of mvh.hubs) {
             const rows = await hub.db.doQuery(
                 'SELECT proposal_id FROM governance_proposals WHERE parameter = ?',
@@ -155,8 +154,6 @@ describe('MultiValidatorHub: governance capability MIN_STAKE pin (#4352)', funct
             activationBlock: null
         });
         await sleep(2500); // let the gossip reach every follower + _handlePropose run
-
-        // Every honest hub dropped it: no row recorded anywhere.
         for (const hub of mvh.hubs) {
             const rows = await hub.db.doQuery(
                 'SELECT proposal_id FROM governance_proposals WHERE proposal_id = ? OR parameter = ?',
@@ -165,7 +162,6 @@ describe('MultiValidatorHub: governance capability MIN_STAKE pin (#4352)', funct
                 'follower must drop the inbound CAPABILITY_*_MIN_STAKE proposal (no row recorded)');
         }
 
-        // Threshold unchanged on every hub: the federation stayed pinned.
         const stakes = mvh.hubs.map(h => String(h.capabilityRegistry.getMinStake('price')));
         assert.ok(stakes.every(s => s === OLD_MIN_STAKE),
             'every hub must still serve the pinned MIN_STAKE ' + OLD_MIN_STAKE + ', got ' + stakes.join(','));

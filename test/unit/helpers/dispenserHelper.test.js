@@ -17,7 +17,6 @@ const helper = require('../../helpers/dispenserHelper')
 
 const addressInfo = { address: 'addr1', privateKey: Buffer.alloc(32), publicKey: Buffer.alloc(33) }
 
-// Replace setTimeout globally so the 5-second sleep resolves immediately
 function stubTimeout() {
     return sinon.stub(global, 'setTimeout').callsFake((fn) => { fn(); return 0 })
 }
@@ -60,7 +59,6 @@ describe('dispenserHelper', () => {
             )
 
             const msg = createTxStub.firstCall.args[1]
-            // giveCoin, giveTick, getCoin, getTick null→""; fiatCode, fiatAmount, expiration, allowList, blockList null→""
             assert.strictEqual(msg, 'DISPENSER|0|||100|50|||200|getAddr||||||memo')
         })
 
@@ -111,7 +109,6 @@ describe('dispenserHelper', () => {
             )
 
             const msg = createTxStub.firstCall.args[1]
-            // giveEscrow, expiration, allowList, blockList all null→"" → 4 empty → 5 pipes before memo
             assert.strictEqual(msg, 'DISPENSER|2|10|||||memo')
         })
     })

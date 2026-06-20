@@ -126,7 +126,6 @@ describe('[sdk] chunked DEPLOY reorg drill (orphaned chunk -> assembled contract
     });
 
     it('chunk-deploys a large contract and runs it (live + seeded + executed state)', async function () {
-        // Upload each base64 slice as its own confirmed DEPLOY v4 carrier block.
         for (let i = 0; i < plan.parts.length; i++) {
             const res = await submit(sdk,
                 { action: 'DEPLOY', params: { version: '4', codeHash, chunkIndex: i, totalChunks: plan.totalChunks, codePart: plan.parts[i] } },
@@ -136,7 +135,6 @@ describe('[sdk] chunked DEPLOY reorg drill (orphaned chunk -> assembled contract
             await mine(1);
         }
 
-        // Assemble via DEPLOY v2 (CODE_HASH) + run the constructor.
         const asm = await submit(sdk,
             { action: 'DEPLOY', params: { version: '2', codeHash, gasLimit: GAS_LIMIT, constructorParams: [String(START)] } },
             { pubkey: deployer.address, change: deployer.address },
@@ -154,7 +152,6 @@ describe('[sdk] chunked DEPLOY reorg drill (orphaned chunk -> assembled contract
         expect(exec.indexed.status, 'EXECUTE increment indexed').to.equal('valid');
         await mine(1);
 
-        // Byte-exact reassembly + execution confirmed.
         expect(await readState(sdk, contractIndex, 'padlen'), 'padlen matches the reassembled source').to.equal(String(PAD.length));
         expect(await readState(sdk, contractIndex, 'count'), 'increment ran on the assembled contract').to.equal(String(START + 1));
 

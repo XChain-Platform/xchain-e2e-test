@@ -203,7 +203,6 @@ describe(`MCP server write path: stdio submit_action (${MCP_COIN})`, function ()
         expect(res.body.policy.action).to.equal('ISSUE');
         expect(res.body.policy.windowUsage).to.be.an('object');
 
-        // Indexed and publicly readable: the token exists with our issuer.
         let token = null;
         for (let i = 0; i < 30 && !token; i++) {
             try {

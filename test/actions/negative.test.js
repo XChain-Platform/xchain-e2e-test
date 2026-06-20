@@ -21,12 +21,11 @@ describe('NEGATIVE', () => {
             let address = addr["address"]
             let tick = "NEGSENDbal"+address.substring(address.length-8)
 
-            // Create token with only 10 supply
+            // mintSupply=10; the SEND below tries 50
             await issueHelper.sendIssueV0(addr, tick, 100, 50, 0, "Neg send test", 10)
 
             let dest = await cryptoHelper.getNewAddress("NEG.SEND.DEST", COIN, NETWORK, null, "legacy", 0)
 
-            // Try to send 50 when we only have 10
             let sendMessage = "SEND|0|"+tick+"|50|"+dest["address"]+"|insufficient test"
             let txHash = await transactionHelper.createAndSendTransaction(addr, sendMessage)
 
@@ -45,10 +44,9 @@ describe('NEGATIVE', () => {
             let other = await cryptoHelper.getNewFundedAddress("NEG.ISSUE.OTHER", COIN, NETWORK, null, "legacy", 0, 1)
             let tick = "NEGISSown"+owner["address"].substring(owner["address"].length-8)
 
-            // Owner creates the token
             await issueHelper.sendIssueV0(owner, tick, 100, 50, 0, "Neg issue owner test", 50)
 
-            // Non-owner tries to edit description (ISSUE v1)
+            // ISSUE v1 edit from a different address must be rejected
             let issueMessage = "ISSUE|1|"+tick+"|Hijacked description"
             let txHash = await transactionHelper.createAndSendTransaction(other, issueMessage)
 
@@ -84,12 +82,11 @@ describe('NEGATIVE', () => {
             let address = addr["address"]
             let tick = "NEGSNDamt"+address.substring(address.length-8)
 
-            // Create token with 0 decimals (indivisible)
+            // decimals=0 (indivisible); the SEND below uses a fractional amount
             await issueHelper.sendIssueV0(addr, tick, 100, 50, 0, "Neg amount test", 50)
 
             let dest = await cryptoHelper.getNewAddress("NEG.SEND.AMT.DEST", COIN, NETWORK, null, "legacy", 0)
 
-            // Try to send 1.5 of an indivisible token
             let sendMessage = "SEND|0|"+tick+"|1.5|"+dest["address"]+"|bad amount test"
             let txHash = await transactionHelper.createAndSendTransaction(addr, sendMessage)
 

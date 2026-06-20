@@ -62,7 +62,6 @@ function findLeader(mvh) {
 describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM config-change PBFT (WI-1, L2)', function () {
     this.timeout(240_000);
 
-    // ── NEGATIVE: count-majority / stake-minority cannot finalize ────────────
     describe('a stake-minority (count-majority) of live hubs cannot apply a config', function () {
         let db, mvh, seed;
 
@@ -118,7 +117,6 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM config-change PBFT (WI-1, L2)
         });
     });
 
-    // ── POSITIVE: a healthy weighted federation applies the change ───────────
     describe('a healthy weighted federation (whale online) applies the config on every hub', function () {
         let db, mvh, seed;
 

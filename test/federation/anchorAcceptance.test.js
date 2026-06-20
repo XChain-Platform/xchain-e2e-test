@@ -198,7 +198,6 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
     });
 
     it('checkpoints REAL indexer state and lands quorum-signed ANCHOR v0+v1 on the DOGE chain', async function () {
-        // 1. Checkpoint round against the LIVE indexer's getblockhashes.
         await hub.stateCheckpoints._tick();
         let cps = await hub.db.doQuery(
             "SELECT * FROM state_checkpoints WHERE chain = 'DOGE' AND network = 'regtest' ORDER BY checkpoint_seq DESC LIMIT 1");
@@ -262,8 +261,6 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
             'INSERT IGNORE INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount) VALUES (?, ?, ?, ?)',
             [snapBlock, 'cross_chain', identity.getPubkeyHex().toLowerCase(), '1']);
 
-        // 2. Flush -> REAL on-chain publication (v0 checkpoint + v1 archive)
-        // through the production signer pipeline.
         let summary = await hub.stateAnchorPublisher.flush();
         assert.ok(broadcasts.length >= 2, 'expected v0 + v1 broadcasts, got ' + broadcasts.length);
         let v0 = broadcasts.find(b => b.payload.split('|')[1] === '0');
@@ -284,8 +281,8 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
         assert.strictEqual(summary.archive, 'published');
         console.log('    on-chain: v0 ' + v0.txid + ' / v1 ' + v1.txid + ' (phase-1: ' + v0.phase1_txid + ' / ' + v1.phase1_txid + ')');
 
-        // 3. Confirm + let decoder/indexer catch up, then assert OUR parsed rows
-        // (a dirty chain may carry anchors from prior runs; match on content).
+        // Confirm + let decoder/indexer catch up. A dirty chain may carry anchors
+        // from prior runs, so match on content rather than position.
         await regtestMinerConnector.generateBlocks(3);
         let r0 = null, r1 = null;
         for (let i = 0; i < 60 && (!r0 || !r1); i++) {

@@ -76,12 +76,10 @@ function run() {
 
     function emit(line) { lines.push(line === undefined ? '' : line) }
 
-    // Header
     const runDate = data.runAt ? data.runAt.replace('T', ' ').replace(/\.\d+Z$/, ' UTC') : 'unknown'
     emit(`# Performance Report: ${runDate}`)
     emit()
 
-    // Run metadata
     emit('## Run Metadata')
     emit()
     emit(`| Field | Value |`)
@@ -92,7 +90,6 @@ function run() {
     emit(`| Platform | ${data.meta.platform || 'N/A'} |`)
     emit()
 
-    // Suite summary
     const stats = data.mochaStats || {}
     emit('## Suite Summary')
     emit()
@@ -105,7 +102,6 @@ function run() {
     emit(`| Pending | ${stats.pending || 0} |`)
     emit()
 
-    // Bootstrap breakdown
     if (data.bootstrapPhases && data.bootstrapPhases.length > 0) {
         emit('## Bootstrap Phases')
         emit()
@@ -120,7 +116,6 @@ function run() {
         emit()
     }
 
-    // Top 10 slowest tests
     const tests = data.tests || []
     if (tests.length > 0) {
         const sorted = [...tests].sort((a, b) => b.durationMs - a.durationMs)
@@ -134,7 +129,6 @@ function run() {
         })
         emit()
 
-        // Test timing distribution
         const buckets = { '<1s': 0, '1-5s': 0, '5-15s': 0, '15-30s': 0, '30-60s': 0, '>60s': 0 }
         for (const t of tests) {
             const ms = t.durationMs
@@ -155,7 +149,6 @@ function run() {
         emit()
     }
 
-    // Poll analysis
     const polls = data.pollMetrics || []
     if (polls.length > 0) {
         emit('## Poll Analysis')
@@ -177,7 +170,6 @@ function run() {
         emit(`| Avg polls per call | ${avgPolls.toFixed(1)} |`)
         emit()
 
-        // Breakdown by method
         const byMethod = {}
         for (const p of polls) {
             if (!byMethod[p.method]) byMethod[p.method] = { calls: 0, totalMs: 0, totalPolls: 0, resolved: 0 }
@@ -198,7 +190,6 @@ function run() {
         emit()
     }
 
-    // Memory trend
     if (tests.length > 0) {
         emit('## Memory Trend')
         emit()
@@ -216,7 +207,6 @@ function run() {
         }
         emit()
 
-        // Memory delta
         const firstRss = tests[0].memEndRss
         const lastRss = tests[tests.length - 1].memEndRss
         const peakRss = Math.max(...tests.map(t => t.memEndRss))

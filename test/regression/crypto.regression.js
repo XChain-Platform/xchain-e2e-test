@@ -13,7 +13,7 @@
 const assert = require('assert')
 const sinon  = require('sinon')
 
-// Set up globals before requiring cryptoHelper (it references them at module load)
+// globals required before cryptoHelper load (it reads them at module scope)
 global.wallets               = {}
 global.regtestMinerConnector = { sendFunds: async () => 'txid-stub' }
 global.nodeConnector         = { waitForTx: async () => true }
@@ -21,10 +21,6 @@ global.utxoTrackerConnector  = { waitForUtxos: async () => true }
 
 const cryptoHelper  = require('../cryptoHelper')
 const CryptoNetworks = require('../../src/CryptoNetworks')
-
-// ═══════════════════════════════════════════════════════════════════════════
-// P0: Crypto & Wallet Management Regression Tests
-// ═══════════════════════════════════════════════════════════════════════════
 
 describe('[regression:p0] Crypto & Wallet Management', function () {
 
@@ -37,8 +33,6 @@ describe('[regression:p0] Crypto & Wallet Management', function () {
         global.wallets = {}
     })
 
-    // ── R-CRYP-001 ──────────────────────────────────────────────────────
-
     it('[regression:p0] R-CRYP-001: getWallet creates new wallet with valid structure', async function () {
         const wallet = await cryptoHelper.getWallet('test-label')
         assert.strictEqual(wallet.mnemonic, null)
@@ -48,15 +42,11 @@ describe('[regression:p0] Crypto & Wallet Management', function () {
         assert.deepStrictEqual(wallet.addresses, [])
     })
 
-    // ── R-CRYP-002 ──────────────────────────────────────────────────────
-
     it('[regression:p0] R-CRYP-002: getWallet returns cached wallet on subsequent calls', async function () {
         const first  = await cryptoHelper.getWallet('alice')
         const second = await cryptoHelper.getWallet('alice')
         assert.strictEqual(first, second, 'same object reference expected')
     })
-
-    // ── R-CRYP-003 ──────────────────────────────────────────────────────
 
     it('[regression:p0] R-CRYP-003: getNewAddress derives valid BIP32 address for BTC regtest', async function () {
         const result = await cryptoHelper.getNewAddress('alice', 'bitcoin', 'regtest')
@@ -66,12 +56,9 @@ describe('[regression:p0] Crypto & Wallet Management', function () {
         assert.ok(typeof result.address === 'string', 'address should be a string')
         assert.ok(result.address.length > 0, 'address should not be empty')
 
-        // Validate BIP39 mnemonic
         const bip39 = require('bip39')
         assert.ok(bip39.validateMnemonic(result.mnemonic), 'should be valid BIP39 mnemonic')
     })
-
-    // ── R-CRYP-004 ──────────────────────────────────────────────────────
 
     it('[regression:p0] R-CRYP-004a: getNewAddress derives address for LTC regtest', async function () {
         const result = await cryptoHelper.getNewAddress('ltc-test', 'litecoin', 'regtest')
@@ -84,8 +71,6 @@ describe('[regression:p0] Crypto & Wallet Management', function () {
         assert.ok(typeof result.address === 'string')
         assert.ok(result.address.length > 0)
     })
-
-    // ── R-CRYP-005 ──────────────────────────────────────────────────────
 
     it('[regression:p0] R-CRYP-005: getNewFundedAddress calls sendFunds, waitForTx, waitForUtxos', async function () {
         const MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
@@ -106,8 +91,6 @@ describe('[regression:p0] Crypto & Wallet Management', function () {
         assert.ok(typeof result.address === 'string')
     })
 
-    // ── R-CRYP-006 ──────────────────────────────────────────────────────
-
     it('[regression:p0] R-CRYP-006: different labels produce different wallets', async function () {
         const a = await cryptoHelper.getWallet('label-A')
         const b = await cryptoHelper.getWallet('label-B')
@@ -116,13 +99,10 @@ describe('[regression:p0] Crypto & Wallet Management', function () {
         assert.ok('label-B' in global.wallets)
     })
 
-    // ── R-CRYP-007 (wallet teardown) ────────────────────────────────────
-
     it('[regression:p0] R-CRYP-007: wallet seeds can be zeroed from memory', async function () {
         const result = await cryptoHelper.getNewAddress('teardown-test', 'bitcoin', 'regtest')
         const wallet = global.wallets['teardown-test']
 
-        // Simulate the teardown logic from initialCheck.test.js afterAll
         if (wallet.seed && Buffer.isBuffer(wallet.seed)) wallet.seed.fill(0)
         for (const addr of wallet.addresses) {
             if (addr.privateKey && Buffer.isBuffer(addr.privateKey)) addr.privateKey.fill(0)
@@ -132,8 +112,6 @@ describe('[regression:p0] Crypto & Wallet Management', function () {
         assert.ok(wallet.seed.every(b => b === 0), 'seed should be zeroed')
         assert.ok(wallet.addresses[0].privateKey.every(b => b === 0), 'privateKey should be zeroed')
     })
-
-    // ── Additional wallet caching regression tests ──────────────────────
 
     it('[regression:p0] R-CRYP-003b: same mnemonic is preserved on second getNewAddress call', async function () {
         const first = await cryptoHelper.getNewAddress('persist-test', 'bitcoin', 'regtest')

@@ -97,11 +97,9 @@ async function withConn(host, port, database, user, password, fn) {
     const conn = await mariadb.createConnection({ host, port, database, user, password });
     try { return await fn(conn); } finally { await conn.end().catch(() => {}); }
 }
-// hubDb polls the relay hub's finalized cross_chain_matches (its own host/port/db).
 async function hubDb(fn)   { return withConn(HUB_DB_HOST, HUB_DB_PORT, HUB_DB_NAME, process.env.HUB_DB_USER, process.env.HUB_DB_PASS, fn); }
 async function dogeIdx(fn) { return withConn(DB_HOST, DB_PORT, 'XChain_DOGE_Regtest_Indexer', process.env.DOGE_IDX_DB_USER, process.env.DOGE_IDX_DB_PASS, fn); }
 
-// Source (BTC) indexer DB - the global indexerDatabase initialCheck stands up.
 async function btcIdx(sql, params) {
     const db = global.indexerDatabase;
     const conn = await db.getConnection();
@@ -146,8 +144,6 @@ describe('[sdk] cross-chain DEX LIVE escrow-release settlement (#10)', function 
         );
         expect(iss.indexed.status, 'ISSUE ' + BTC_TICK).to.equal('valid');
 
-        // The DOGE maker's BTC payout address should hold 0 of BTC_TICK before
-        // settlement (it is a fresh cross-chain receive address).
         btcTokenBalanceBefore = await btcCount(
             'SELECT COUNT(*) n FROM balances b JOIN index_addresses a ON a.id=b.address_id ' +
             'JOIN index_tickers t ON t.id=b.tick_id WHERE a.address=? AND t.tick=? AND CAST(b.amount AS DECIMAL(60,0)) > 0',
@@ -221,12 +217,7 @@ describe('[sdk] cross-chain DEX LIVE escrow-release settlement (#10)', function 
             if (settlements >= 1 && payoutAmt && payoutAmt !== '0') break;
         }
 
-        // PRIMARY: cross_settle recorded a settlement row for this BTC ORDER leg
-        // (the indexer applied + escrow-released this leg).
         expect(settlements, 'cross_chain_settlements row recorded for the BTC ORDER leg').to.be.greaterThan(0);
-
-        // PRIMARY (the real escrow release): the DOGE maker's BTC payout address is
-        // credited the matched 100 BTC/<DEX_BTC_TICK> the BTC maker had escrowed.
         expect(payoutAmt, 'DOGE maker BTC payout address credited the released escrow').to.be.a('string');
         expect(payoutAmt, 'released escrow amount = matched 100').to.equal('100');
 

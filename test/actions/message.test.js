@@ -18,7 +18,6 @@ describe('MESSAGE', () => {
             let senderAddr = await cryptoHelper.getNewFundedAddress("MESSAGE.V0", COIN, NETWORK, null, "legacy", 0, 1)
             let destAddr = await cryptoHelper.getNewAddress("MESSAGE.V0.DEST", COIN, NETWORK, null, "legacy", 0)
 
-            // Use the sender's public key (hex) for ECDH key exchange
             let result = await messageHelper.sendMessageV0(
                 senderAddr,
                 destAddr["address"],
@@ -34,7 +33,6 @@ describe('MESSAGE', () => {
             let senderAddr = await cryptoHelper.getNewFundedAddress("MESSAGE.V1.SENDER", COIN, NETWORK, null, "legacy", 0, 1)
             let receiverAddr = await cryptoHelper.getNewFundedAddress("MESSAGE.V1.RECEIVER", COIN, NETWORK, null, "legacy", 0, 1)
 
-            // Sender initiates key exchange
             let v0Result = await messageHelper.sendMessageV0(
                 senderAddr,
                 receiverAddr["address"],
@@ -43,7 +41,6 @@ describe('MESSAGE', () => {
             )
             assert(v0Result.message, "Message v0 should exist in DB")
 
-            // Receiver responds with their key
             let v1Result = await messageHelper.sendMessageV1(
                 receiverAddr,
                 senderAddr["address"],
@@ -59,7 +56,6 @@ describe('MESSAGE', () => {
             let senderAddr = await cryptoHelper.getNewFundedAddress("MESSAGE.V2.SENDER", COIN, NETWORK, null, "legacy", 0, 1)
             let receiverAddr = await cryptoHelper.getNewFundedAddress("MESSAGE.V2.RECEIVER", COIN, NETWORK, null, "legacy", 0, 1)
 
-            // Key exchange first
             await messageHelper.sendMessageV0(
                 senderAddr,
                 receiverAddr["address"],
@@ -73,7 +69,6 @@ describe('MESSAGE', () => {
                 receiverAddr["publicKey"].toString('hex')
             )
 
-            // Send encrypted message (simulated encrypted content)
             let result = await messageHelper.sendMessageV2(
                 senderAddr,
                 receiverAddr["address"],

@@ -104,7 +104,6 @@ async function attachEngines(mvh) {
     return { stop() { stops.forEach((s) => { try { s(); } catch (_) {} }); } };
 }
 
-// Identical price submissions (≥ minSubmissions=2) into every hub's round buffer.
 function injectSubmissions(mvh) {
     const subAddrs = mvh.hubs.length >= 2
         ? mvh.hubs.map((h) => h.getPeerManager().validatorAddr)
@@ -153,7 +152,6 @@ async function checkpointFinalized(hub) {
 describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM R-1 degenerate uniformity (WI-1 Suite C, L2)', function () {
     this.timeout(300_000);
 
-    // C1 (N=1): every engine finalizes on the sole staker's own signature.
     describe('C1 (N=1): every engine finalizes on the single staker', function () {
         let db, mvh, seed, engines;
 
@@ -197,7 +195,6 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM R-1 degenerate uniformity (WI
         });
     });
 
-    // C2 (S=0): no engine finalizes under zero total stake (≥2 validators).
     describe('C2 (S=0): no engine finalizes under zero total stake', function () {
         let db, mvh, seed, engines;
 

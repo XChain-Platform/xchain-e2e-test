@@ -22,7 +22,6 @@ describe('gasHelper', () => {
     let mintStub
 
     beforeEach(() => {
-        // gasHelper delegates to mintHelper.sendMintV0, so stub that
         mintStub = sinon.stub(mintHelper, 'sendMintV0').resolves({
             txHash: 'abc123',
             mint: { id: 200 },

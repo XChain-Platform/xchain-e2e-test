@@ -54,7 +54,6 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
-// --- Resolve the indexer checkout (env override, then monorepo sibling). ---
 const INDEXER_PATH = process.env.XCHAIN_INDEXER_PATH
     || path.resolve(__dirname, '../../../xchain-indexer');
 const HAVE_INDEXER = fs.existsSync(path.join(INDEXER_PATH, 'src/actions.js'));
@@ -62,11 +61,6 @@ const HAVE_INDEXER = fs.existsSync(path.join(INDEXER_PATH, 'src/actions.js'));
 const GOLDEN_PATH = path.join(__dirname, 'fixtures', 'field-golden-vectors.json');
 const GEN = process.env.GEN_FIELD_GOLDEN === '1';
 
-// ---------------------------------------------------------------------------
-// Discovery: extract the parser's own format tables from the indexer source.
-// ---------------------------------------------------------------------------
-
-/** All `this.formats[N] = '...'` declarations in one action file. */
 function extractFormats(source) {
     const formats = {};
     const re = /this\.formats\[(\d+)\]\s*=\s*'([^']+)'/g;
@@ -75,7 +69,6 @@ function extractFormats(source) {
     return formats;
 }
 
-/** Map of ACTION name -> { version -> format string }, from src/actions/*.js. */
 function discoverActions() {
     const dir = path.join(INDEXER_PATH, 'src/actions');
     const actions = {};
@@ -87,7 +80,6 @@ function discoverActions() {
     return actions;
 }
 
-/** The alias table (`this.actionAliases['X'] = 'Y'`) from src/actions.js. */
 function discoverAliases() {
     const source = fs.readFileSync(path.join(INDEXER_PATH, 'src/actions.js'), 'utf8');
     const aliases = {};
@@ -97,11 +89,6 @@ function discoverAliases() {
     return aliases;
 }
 
-// ---------------------------------------------------------------------------
-// The system under test: the indexer's REAL ingestion steps, in order.
-// ---------------------------------------------------------------------------
-
-/** Mirror processTransaction's param pipeline up to the parsed field map. */
 function ingest(util, actionString, formatsByAction, aliases) {
     const params = String(actionString).split('|');
     params.forEach((v, i) => { params[i] = String(v).trim(); });
@@ -116,12 +103,9 @@ function ingest(util, actionString, formatsByAction, aliases) {
     return { action, version, data };
 }
 
-// ---------------------------------------------------------------------------
 // Deterministic value generation, classed by field name. Values are opaque
 // strings to the parser. Classes exist so golden vectors read like real
 // actions and so numeric fields exercise precision-shaped strings.
-// ---------------------------------------------------------------------------
-
 function mulberry32(seed) {
     return function () {
         seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
@@ -176,8 +160,6 @@ function buildVector(action, version, format, seed, sparse) {
     fields.forEach((f, i) => { expected[f] = values[i] === '' ? null : values[i]; });
     return { string: action + '|' + values.join('|'), expected };
 }
-
-// ---------------------------------------------------------------------------
 
 (HAVE_INDEXER ? describe : describe.skip)('Codec field-format round-trip (P1a) @regression @tier1', function () {
 
@@ -266,8 +248,6 @@ function buildVector(action, version, format, seed, sparse) {
             missing.join(', ') + '. Pin intended additions with GEN_FIELD_GOLDEN=1');
     });
 
-    // --- Pinned edge semantics of the ingestion pipeline itself. ---
-
     it('trailing holes and missing params both canonicalize to null', function () {
         const out = ingest(util, 'MINT|0|FLDTOK|600||', actions, aliases);
         assert.ok(!out.error);
@@ -285,7 +265,6 @@ function buildVector(action, version, format, seed, sparse) {
     });
 
     it('params beyond the format are ignored (forward-tolerant parse)', function () {
-        // Fill EVERY field of MINT v0, then append surplus params past the format.
         const vec   = buildVector('MINT', 0, actions['MINT'][0], 4242, false);
         const base  = ingest(util, vec.string, actions, aliases);
         const extra = ingest(util, vec.string + '|surplus|fields', actions, aliases);
@@ -298,7 +277,6 @@ function buildVector(action, version, format, seed, sparse) {
         for (const [alias, canonical] of Object.entries(aliases)) {
             assert.ok(actions[canonical], `alias ${alias} -> ${canonical} which has no formats`);
             const fmtFields = actions[canonical][0].split('|');
-            // Build a minimal v0 string under the alias; it must parse via the target's formats.
             const values = fmtFields.map(f => valueFor(mulberry32(42), f, 0));
             const out = ingest(util, alias + '|' + values.join('|'), actions, aliases);
             assert.strictEqual(out.action, canonical);

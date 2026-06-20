@@ -40,12 +40,6 @@ const PerfCollector = {
         this._runMeta.network = process.env.NETWORK || null
     },
 
-    /**
-     * Time a named bootstrap phase.
-     * @param {string} name - Phase identifier (e.g. 'env-resolution', 'service-pings')
-     * @param {Function} asyncFn - Async function to execute and measure
-     * @returns {*} The return value of asyncFn
-     */
     async phase(name, asyncFn) {
         const start = process.hrtime.bigint()
         const startMs = Date.now()
@@ -62,15 +56,6 @@ const PerfCollector = {
         }
     },
 
-    /**
-     * Record a completed polling cycle from a waitFor* method.
-     * @param {Object} entry
-     * @param {string} entry.method - Name of the check method (e.g. 'checkIssue')
-     * @param {number} entry.startMs - Date.now() when polling began
-     * @param {number} entry.endMs - Date.now() when polling ended
-     * @param {number} entry.polls - Number of poll iterations executed
-     * @param {boolean} entry.resolved - Whether the record was found before timeout
-     */
     recordPoll({ method, startMs, endMs, polls, resolved }) {
         this.pollMetrics.push({
             method,
@@ -82,9 +67,6 @@ const PerfCollector = {
         })
     },
 
-    /**
-     * Reset all collected metrics (useful for multi-run scenarios).
-     */
     reset() {
         this.bootstrapPhases = []
         this.pollMetrics = []

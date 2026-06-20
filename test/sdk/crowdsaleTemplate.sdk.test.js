@@ -177,7 +177,6 @@ describe('[sdk] template:crowdsale (on-chain custody)', function () {
         await mine(1);
         expect(await readState(sdk, contractIndex, 'status'), 'status SUCCESS').to.equal('SUCCESS');
 
-        // claim(): buyer mints saleTick = paid * rate.
         const claim = await submit(sdk,
             { action: 'EXECUTE', params: { contractActionIndex: contractIndex, method: 'claim', params: [] } },
             { pubkey: owner.address, change: owner.address }, submitOpts({ wif: owner.wif }));
@@ -185,7 +184,6 @@ describe('[sdk] template:crowdsale (on-chain custody)', function () {
         await mine(1);
         expect(balanceFor(await sdk.getBalances(owner.address), saleTick), 'buyer minted paid*rate').to.equal(PAY_IN * RATE);
 
-        // withdraw(): owner takes the proceeds (payTick).
         const wd = await submit(sdk,
             { action: 'EXECUTE', params: { contractActionIndex: contractIndex, method: 'withdraw', params: [] } },
             { pubkey: owner.address, change: owner.address }, submitOpts({ wif: owner.wif }));

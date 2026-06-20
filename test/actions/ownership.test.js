@@ -22,15 +22,10 @@ const sweepHelper = require('../helpers/sweepHelper')
 // suite once those helpers are ownership-aware.
 describe('OWNERSHIP', () => {
 
-    // ──────────────────────────────────────────────────────────────────
     // Scenario 1: Ownership ORDER instant settle (token-for-token)
-    //
-    // addr1 creates jdog (ownership) and a settlement-token bag held by
-    // addr2. addr1 lists JDOG ownership for X SETTLE; addr2 posts the
-    // matching counter-order with GET_OWNERSHIP=1. The match should be
-    // single-fill (ownership is indivisible) and the JDOG owner should
-    // become addr2 after settlement.
-    // ──────────────────────────────────────────────────────────────────
+    // addr1 lists JDOG ownership for X SETTLE; addr2 posts the matching
+    // counter-order with GET_OWNERSHIP=1. The match should be single-fill
+    // (ownership is indivisible) and the JDOG owner should become addr2.
     describe('ORDER - ownership for token (instant match)', () => {
         it('should transfer ownership atomically when a counter-order matches', async () => {
             let addr1 = await cryptoHelper.getNewFundedAddress("OWN.OM1", COIN, NETWORK, null, "legacy", 0, 1)
@@ -96,13 +91,9 @@ describe('OWNERSHIP', () => {
         })
     })
 
-    // ──────────────────────────────────────────────────────────────────
     // Scenario 2: Ownership ORDER cancel returns ownership
-    //
-    // Seller lists ownership then cancels. The order status becomes
-    // 'cancelled' and the tick's ownership escrow gate is released;
+    // Seller lists ownership then cancels; the escrow gate is released and
     // owner_id stays with the seller (it never moved).
-    // ──────────────────────────────────────────────────────────────────
     describe('ORDER - ownership cancel returns the gate', () => {
         it('should release the ownership escrow when an ownership order is cancelled', async () => {
             let addr = await cryptoHelper.getNewFundedAddress("OWN.OC", COIN, NETWORK, null, "legacy", 0, 1)
@@ -151,12 +142,9 @@ describe('OWNERSHIP', () => {
         })
     })
 
-    // ──────────────────────────────────────────────────────────────────
     // Scenario 3: Multiple owner-only actions rejected while escrowed
-    //
-    // Covers the cross-handler guard surface (ISSUE / CALLBACK / SLEEP /
-    // child-ISSUE). Confirms isOwnershipEscrowed() is wired in each.
-    // ──────────────────────────────────────────────────────────────────
+    // Covers ISSUE / child-ISSUE guard surface; confirms isOwnershipEscrowed()
+    // is wired in each handler.
     describe('Owner-only actions during ownership escrow', () => {
         it('should reject ISSUE-edit and child-ISSUE while ownership is escrowed', async () => {
             let addr = await cryptoHelper.getNewFundedAddress("OWN.GUARD", COIN, NETWORK, null, "legacy", 0, 1)
@@ -198,13 +186,9 @@ describe('OWNERSHIP', () => {
         })
     })
 
-    // ──────────────────────────────────────────────────────────────────
     // Scenario 4: SWEEP with ORDERS=1 routes ownership to DESTINATION
-    //
-    // Seller has an open ownership ORDER, then SWEEPs from their address
-    // with ORDERS=1. The open order is cancelled and the JDOG ownership
-    // transfers to the SWEEP DESTINATION instead of returning to seller.
-    // ──────────────────────────────────────────────────────────────────
+    // The open order is cancelled and the JDOG ownership transfers to the
+    // SWEEP DESTINATION instead of returning to seller.
     describe('SWEEP - ownership routes to DESTINATION', () => {
         it('should transfer escrowed ownership to the sweep destination', async () => {
             let sourceAddr = await cryptoHelper.getNewFundedAddress("OWN.SW.SRC", COIN, NETWORK, null, "legacy", 0, 1)

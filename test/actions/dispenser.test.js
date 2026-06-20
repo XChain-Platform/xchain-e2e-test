@@ -98,12 +98,10 @@ describe('DISPENSER', () => {
             )
             assert(dispenserResult.dispenser, "Dispenser should exist in DB")
 
-            // Get a dispense
             let txHash = await transactionHelper.createSimpleTransaction(
                 dispenseAddressInfo, dispenserAddress, 5000000
             )
 
-            // Check if the dispense exists
             console.log("Waiting for DISPENSE in the database (txHash: "+txHash+")...")
             let dispenseRow = await indexerDatabase.waitForDispense({
                 txHash: txHash,
@@ -136,12 +134,12 @@ describe('DISPENSER', () => {
             let buyerAddress = buyerAddr["address"]
             let tick = "DISPBALv0"+dispenserAddress.substring(dispenserAddress.length-8)
 
-            // Issue token with 4 decimals, escrow 50 units in dispenser
+            // 4 decimal places; 50 units escrowed
             await issueHelper.sendIssueV0(dispenserAddr, tick, 100, 100, 4, "Dispenser balance test", 100)
 
             let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
 
-            // Dispenser: give 2.5000 tokens per 0.001 BTC (100000 sats)
+            // 2.5000 tokens per 0.001 BTC; buyer sends 0.002 BTC -> 5.0000 tokens
             let dispenserResult = await dispenserHelper.sendDispenserV0(
                 dispenserAddr,
                 COIN_CODE, tick, "2.5", 50,
@@ -151,7 +149,6 @@ describe('DISPENSER', () => {
             )
             assert(dispenserResult.dispenser, "Dispenser should be created")
 
-            // Buyer sends 0.002 BTC (200000 sats) -> should get 2 * 2.5 = 5.0000 tokens
             let txHash = await transactionHelper.createSimpleTransaction(
                 buyerAddr, dispenserAddress, 200000
             )
@@ -165,7 +162,6 @@ describe('DISPENSER', () => {
             }, 60000)
             assert(dispenseRow, "Dispense should exist in DB")
 
-            // Verify buyer received credit
             let credit = await indexerDatabase.waitForCredit({
                 address: buyerAddress,
                 tick: tick,
@@ -173,7 +169,6 @@ describe('DISPENSER', () => {
             }, 30000)
             assert(credit, "Buyer should be credited 5 tokens")
 
-            // Verify escrow debit happened at dispenser creation (50 tokens escrowed)
             let debit = await indexerDatabase.waitForDebit({
                 address: dispenserAddress,
                 tick: tick,
@@ -204,7 +199,6 @@ describe('DISPENSER', () => {
             let buyerAddress     = buyerAddr["address"]
             let tick = "DISPFIAT"+dispenserAddress.substring(dispenserAddress.length-8)
 
-            // 0-decimal token; escrow 50 units in the dispenser.
             await issueHelper.sendIssueV0(dispenserAddr, tick, 100, 100, 0, "FIAT dispenser test", 100)
 
             let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
@@ -290,7 +284,6 @@ describe('DISPENSER', () => {
             assert(createResult.dispenser, "Dispenser should be created")
             let dispenserActionIndex = Number(createResult.dispenser["action_index"])
 
-            // Cancel
             let cancelResult = await dispenserHelper.sendDispenserCancelV1(addr, dispenserActionIndex, "Cancelling dispenser")
             assert(cancelResult.txHash, "Cancel tx should have been sent")
 
@@ -325,7 +318,6 @@ describe('DISPENSER', () => {
             assert(createResult.dispenser, "Dispenser should be created")
             let dispenserActionIndex = Number(createResult.dispenser["action_index"])
 
-            // Edit: add more escrow
             let newExpiration = new Date()
             newExpiration.setMonth(newExpiration.getMonth() + 6)
 

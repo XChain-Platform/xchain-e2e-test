@@ -20,13 +20,11 @@ const assert = require('assert')
 const sinon = require('sinon')
 const hubFixtures = require('../integration/fixtures/hub')
 
-// The required service keys that the bootstrap reads from hub config
 const REQUIRED_KEYS = [
     'node', 'database', 'xchain-utxo-tracker', 'xchain-encoder',
     'xchain-indexer', 'xchain-regtest-miner'
 ]
 
-// Replicate the hub config validation that bootstrap should perform
 function validateHubConfig(hubConfigs, coin, network) {
     if (!hubConfigs || !hubConfigs[coin]) {
         throw new Error(`Hub config missing coin: ${coin}`)

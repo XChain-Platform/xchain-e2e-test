@@ -19,7 +19,6 @@ describe('LIST', () => {
             let listAddress = await cryptoHelper.getNewFundedAddress("LIST.V0.TICKERS", COIN, NETWORK, null, "legacy", 0, 1)
             let addr = listAddress["address"]
 
-            // Create two tickers to put in the list
             let tick1 = "LISTV0T1"+addr.substring(addr.length-8)
             let tick2 = "LISTV0T2"+addr.substring(addr.length-8)
             await issueHelper.sendIssueV0(listAddress, tick1, 100, 2, 0, "List v0 tick 1", 10)
@@ -56,7 +55,6 @@ describe('LIST', () => {
             let listAddress5 = await cryptoHelper.getNewAddress("LIST.V1", COIN, NETWORK, null, "legacy", 5)
             let listAddress6 = await cryptoHelper.getNewAddress("LIST.V1", COIN, NETWORK, null, "legacy", 6)
 
-            // Create initial list v0
             let v0Result = await listHelper.sendListV0(listAddress0, 2, [
                 listAddress1["address"],
                 listAddress2["address"],
@@ -65,7 +63,6 @@ describe('LIST', () => {
             assert(v0Result.list, "Initial list v0 should exist in DB")
             let addressListV0ActionIndex = Number(v0Result.list["action_index"])
 
-            // Edit: ADD addresses
             let v1AddResult = await listHelper.sendListV1(
                 listAddress0, 1, addressListV0ActionIndex,
                 [listAddress4["address"], listAddress5["address"], listAddress6["address"]],
@@ -78,7 +75,6 @@ describe('LIST', () => {
             assert(v1AddResult.list, "List v1 ADD should exist in DB")
             let addressListV1ActionIndex = Number(v1AddResult.list["action_index"])
 
-            // Edit: REMOVE an address
             let v1RemoveResult = await listHelper.sendListV1(
                 listAddress0, 2, addressListV1ActionIndex,
                 [listAddress4["address"]],

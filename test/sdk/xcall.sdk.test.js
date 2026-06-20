@@ -35,8 +35,6 @@ const { expect } = require('chai');
 const axios = require('axios');
 const { makeSdk, submit, fundedGasAddress, mine, submitOpts } = require('./sdkHelper');
 
-// Source-side contract (BTC): fires a cross-chain call and records both the
-// returned call_id and the eventual callback delivery in state.
 const CONTRACT_A = `
     module.exports = {
         crossCallable: [],

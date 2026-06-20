@@ -25,8 +25,6 @@ describe('Boundary: Global State & Service Discovery', function () {
         sinon.restore()
     })
 
-    // ── CryptoNetworks boundary tests ───────────────────────────
-
     describe('CryptoNetworks.getBitcoinJsNetwork', function () {
 
         it('returns network with dustThreshold for bitcoin-regtest', function () {
@@ -125,8 +123,6 @@ describe('Boundary: Global State & Service Discovery', function () {
         })
     })
 
-    // ── CryptoNetworks.getFirstBlock ────────────────────────────
-
     describe('CryptoNetworks.getFirstBlock', function () {
 
         it('returns 844000 for bitcoin-mainnet', function () {
@@ -150,11 +146,8 @@ describe('Boundary: Global State & Service Discovery', function () {
         })
     })
 
-    // ── Wallet cache global state boundaries ────────────────────
-
     describe('Wallet cache global state', function () {
 
-        // Set up required globals before requiring cryptoHelper
         let cryptoHelper
 
         before(function () {
@@ -174,12 +167,10 @@ describe('Boundary: Global State & Service Discovery', function () {
         })
 
         it('GS-06: second getWallet call ignores different parameters (returns cached)', async function () {
-            // Create wallet with one label
             const wallet1 = await cryptoHelper.getWallet('test')
             wallet1.coin = 'bitcoin'
             wallet1.network = { name: 'regtest' }
 
-            // Get same label: should return cached wallet, not create new
             const wallet2 = await cryptoHelper.getWallet('test')
 
             assert.strictEqual(wallet2, wallet1)
@@ -197,7 +188,6 @@ describe('Boundary: Global State & Service Discovery', function () {
             assert.strictEqual(wallets.length, 100)
             assert.strictEqual(Object.keys(global.wallets).length, 100)
 
-            // All should be unique objects
             const unique = new Set(wallets)
             assert.strictEqual(unique.size, 100, 'all 100 wallets should be distinct objects')
         })
@@ -213,8 +203,6 @@ describe('Boundary: Global State & Service Discovery', function () {
             assert.ok('charlie' in global.wallets)
         })
     })
-
-    // ── Hub connector _call boundary: all endpoints fail ───────
 
     describe('Hub multi-endpoint fallback boundaries', function () {
 
@@ -257,11 +245,8 @@ describe('Boundary: Global State & Service Discovery', function () {
         })
     })
 
-    // ── Database isNullOrNullString boundaries ──────────────────
-
     describe('Database.isNullOrNullString boundary values', function () {
 
-        // Inject mock mariadb for Database
         const mockMariadb = require('../integration/fixtures/mockMariadb')
         const Database = require('../../src/db')
 

@@ -89,17 +89,13 @@ describe('State Management: UTXO Cache', function () {
                 })
             }
 
-            // Call 1: empty utxos → caches confirmed UTXOs
             await transactionHelper.createAndSendTransaction(addrInfo, 'TEST')
-            // Call 2: uses cached UTXOs → cache consumed
             await transactionHelper.createAndSendTransaction(addrInfo, 'TEST2')
-            // Call 3: cache was consumed by call 2 → but tracker provides UTXOs again → new cache
             await transactionHelper.createAndSendTransaction(addrInfo, 'TEST3')
 
             assert.strictEqual(encoderCalls.length, 3)
             assert.deepStrictEqual(encoderCalls[0], [], 'call 1: empty utxo list')
             assert.strictEqual(encoderCalls[1].length, 1, 'call 2: cached utxo')
-            // Call 3 gets cached from call 2's post-broadcast wait loop
             assert.strictEqual(encoderCalls[2].length, 1, 'call 3: re-cached from call 2')
         })
     })
@@ -134,12 +130,8 @@ describe('State Management: UTXO Cache', function () {
                 })
             }
 
-            // Call with addr1 → caches for addr1
             await transactionHelper.createAndSendTransaction(addr1, 'TEST1')
-            // Call with addr2 → addr1's cache is not used
             await transactionHelper.createAndSendTransaction(addr2, 'TEST2')
-            // Call with addr1 → addr1's cache was NOT consumed by addr2's call
-            //   but it WAS overwritten by addr2's post-broadcast loop
             await transactionHelper.createAndSendTransaction(addr1, 'TEST3')
 
             assert.strictEqual(encoderCalls[0].utxos.length, 0, 'addr1 call 1: no cache')

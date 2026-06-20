@@ -10,29 +10,13 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// initialCheck.test.js
-//
-// initialCheck.js has deep side effects at require-time:
-//   • reads process.env.COIN / process.env.NETWORK
-//   • calls CryptoNetworks.getBitcoinJsNetwork()
-//   • sets global.COIN, global.NETWORK, global.NETWORK_OBJECT, global.COIN_CODE
-//   • requires Database, all Connector classes, cryptoHelper, issueHelper
-//
-// Because those side effects depend on live service connections (MariaDB, coin
-// nodes, etc.), requiring initialCheck.js in a pure unit-test context will fail
-// unless all env vars and services are present.
-//
-// Strategy
-// ────────
-// 1.  Test the COIN_CODE_MAP logic and the unknown-coin fallback directly,
-//     without requiring initialCheck.js.  The logic is a pure two-liner.
-// 2.  Verify the same logic is consistent with the source.
-// 3.  Document why mochaHooks.beforeAll / afterAll need integration tests.
+// initialCheck.js has deep side effects at require-time (MariaDB, coin nodes,
+// connector classes) that require live services. These tests verify the pure
+// COIN_CODE_MAP logic and NETWORK-splitting inline, without requiring the module.
 
 const assert = require('assert');
 
 // Inline the exact logic from initialCheck.js so we can test it in isolation.
-// (The source is a two-liner starting at line 28.)
 const COIN_CODE_MAP = { bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' };
 function getCoinCode(coin) {
     return COIN_CODE_MAP[coin] || coin.toUpperCase().slice(0, 3);
@@ -73,8 +57,6 @@ describe('initialCheck: COIN_CODE_MAP logic', function () {
         });
     });
 
-    // ── NETWORK splitting logic ───────────────────────────────────────────
-    //
     // When COIN is not set, initialCheck.js splits NETWORK on "-":
     //   let networkSplit = NETWORK.split("-")
     //   global.COIN = networkSplit[0]
@@ -104,8 +86,6 @@ describe('initialCheck: COIN_CODE_MAP logic', function () {
             assert.strictEqual(r.network, 'testnet');
         });
     });
-
-    // ── Integration-test boundary note ───────────────────────────────────
 
     describe('mochaHooks.beforeAll / afterAll', function () {
         it('cannot be unit-tested without live services (integration-test boundary)', function () {

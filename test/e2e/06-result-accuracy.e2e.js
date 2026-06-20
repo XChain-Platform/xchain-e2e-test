@@ -25,7 +25,6 @@ describe('E2E: Result Accuracy & Reporting Fidelity', () => {
             const dest = await cryptoHelper.getNewAddress('E2E.REPORT.DEST', COIN, NETWORK, null, 'legacy', 0)
             const tick = 'E2ERPT' + addr.address.substring(addr.address.length - 8)
 
-            // ISSUE
             const issueResult = await issueHelper.sendIssueV0(addr, tick, 100, 10, 0, 'report accuracy test', 10)
             assert(issueResult.issue, 'Issue DB record must be truthy')
             assert(issueResult.credit, 'Issue credit DB record must be truthy')
@@ -39,7 +38,6 @@ describe('E2E: Result Accuracy & Reporting Fidelity', () => {
             assert.strictEqual(Number(issueResult.credit.amount), 10, 'Credit amount must match mintSupply')
             assert.strictEqual(issueResult.credit.address, addr.address, 'Credit address must be issuer')
 
-            // SEND
             const sendResult = await sendHelper.sendSendV0(addr, tick, 3, dest.address, 'report test send')
             assert(sendResult.send, 'Send DB record must be truthy')
             assert(sendResult.credit, 'Send credit must be truthy')
@@ -59,10 +57,8 @@ describe('E2E: Result Accuracy & Reporting Fidelity', () => {
             const mintDest = await cryptoHelper.getNewAddress('E2E.REPORT.MINT.DEST', COIN, NETWORK, null, 'legacy', 0)
             const tick = 'E2EMRPT' + issuerAddr.address.substring(issuerAddr.address.length - 6)
 
-            // Create token with mintable supply
             await issueHelper.sendIssueV0(issuerAddr, tick, 200, 20, 0, 'mint report test', 10)
 
-            // Mint to the destination address (not the issuer)
             const mintResult = await mintHelper.sendMintV0(issuerAddr, tick, 20, mintDest.address, 'e2e mint report')
             assert(mintResult.mint, 'Mint DB record must be truthy')
             assert.strictEqual(mintResult.mint.status, 'valid', 'Mint status must be valid')
@@ -82,7 +78,7 @@ describe('E2E: Result Accuracy & Reporting Fidelity', () => {
 
             assert.strictEqual(result, null, 'waitForIssue should return null for non-existent tick')
 
-            // Prove that assert(null) would throw (no silent pass path is possible)
+            // assert(null) must throw, proving no silent pass path exists
             let assertionThrew = false
             try {
                 assert(result, 'Should not be truthy')

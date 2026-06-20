@@ -16,11 +16,8 @@
 const assert = require('assert')
 const sinon = require('sinon')
 
-// Inject mock mariadb before requiring db.js
 const mockMariadb = require('../integration/fixtures/mockMariadb')
 const Database = require('../../src/db')
-
-// ── Helpers ──────────────────────────────────────────────────────
 
 function makeMockConnection(queryResult) {
     return {
@@ -45,18 +42,14 @@ describe('Boundary: Connection Pool', function () {
         mockMariadb.createPool.resetHistory()
     })
 
-    // ── CP-01: Pool exhaustion (many concurrent getConnection calls) ────
-
     describe('CP-01: Concurrent getConnection calls', function () {
 
         it('handles 10+ concurrent getConnection calls without crashing', async function () {
             const { db, mockPool } = createDb()
             const connections = []
 
-            // Each call returns a fresh mock connection
             mockPool.getConnection.callsFake(async () => makeMockConnection())
 
-            // Fire 15 concurrent getConnection calls
             const promises = []
             for (let i = 0; i < 15; i++) {
                 promises.push(db.getConnection())
@@ -73,15 +66,12 @@ describe('Boundary: Connection Pool', function () {
         })
     })
 
-    // ── CP-02: getConnection retry with multiple consecutive failures ───
-
     describe('CP-02: getConnection retries on consecutive failures', function () {
 
         it('retries multiple times and succeeds when pool recovers', async function () {
             const { db, mockPool } = createDb()
             const successConn = makeMockConnection([{ id: 1 }])
 
-            // Fail 5 times, then succeed
             mockPool.getConnection.onCall(0).rejects(new Error('ECONNREFUSED'))
             mockPool.getConnection.onCall(1).rejects(new Error('ECONNREFUSED'))
             mockPool.getConnection.onCall(2).rejects(new Error('ECONNREFUSED'))
@@ -100,8 +90,6 @@ describe('Boundary: Connection Pool', function () {
         })
     })
 
-    // ── CP-03: Connection drop during waitFor* poll ─────────────────────
-
     describe('CP-03: Connection failure mid-poll recovers', function () {
 
         it('waitForIssue continues polling after getConnection failure', async function () {
@@ -113,21 +101,16 @@ describe('Boundary: Connection Pool', function () {
 
             const successConn = makeMockConnection([mockRow])
 
-            // First getConnection returns a connection that will fail on query,
-            // second returns a working connection
             mockPool.getConnection.onFirstCall().resolves(failConn)
             mockPool.getConnection.onSecondCall().resolves(successConn)
 
             const result = await db.waitForIssue({ tick: 'TOK' }, 30000)
 
             assert.deepStrictEqual(result, mockRow)
-            // Both connections should have been released
             assert(failConn.release.calledOnce, 'failed connection released')
             assert(successConn.release.calledOnce, 'success connection released')
         })
     })
-
-    // ── CP-04: Connection release on all check* methods ─────────────────
 
     describe('CP-04: Connection always released regardless of query outcome', function () {
 
@@ -195,8 +178,6 @@ describe('Boundary: Connection Pool', function () {
         })
     })
 
-    // ── CP-05: transactionConnection bypass ─────────────────────────────
-
     describe('CP-05: transactionConnection takes precedence over pool', function () {
 
         it('returns transactionConnection without calling pool.getConnection', async function () {
@@ -210,8 +191,6 @@ describe('Boundary: Connection Pool', function () {
             assert(mockPool.getConnection.notCalled, 'pool should not be used when txConn is set')
         })
     })
-
-    // ── CP-06: Pool created with correct parameters ─────────────────────
 
     describe('CP-06: Database constructor passes correct pool params', function () {
 
@@ -228,8 +207,6 @@ describe('Boundary: Connection Pool', function () {
             assert.strictEqual(poolParams.password, 'pass')
         })
     })
-
-    // ── CP-07: Ping releases connection on both success and failure ─────
 
     describe('CP-07: ping boundary, connection management', function () {
 

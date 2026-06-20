@@ -23,7 +23,6 @@ describe('CALLBACK', () => {
             let callbackTick = "CBTICKv0"+address.substring(address.length-8)
             let mainTick = "CBMAINv0"+address.substring(address.length-8)
 
-            // Create the callback tick (what holders will receive)
             let callbackIssueResult = await issueHelper.sendIssueV0(
                 addr, callbackTick, 1000, 100, 0, "Callback payout token", 100
             )
@@ -38,16 +37,13 @@ describe('CALLBACK', () => {
                 1  // callbackAmount per unit
             )
 
-            // Send mainTick to create holders
             let holder1 = await cryptoHelper.getNewAddress("CALLBACK.V0", COIN, NETWORK, null, "legacy", 1)
             let holder2 = await cryptoHelper.getNewAddress("CALLBACK.V0", COIN, NETWORK, null, "legacy", 2)
             await sendHelper.sendSendV0(addr, mainTick, 2, holder1["address"], "Callback holder 1")
             await sendHelper.sendSendV0(addr, mainTick, 3, holder2["address"], "Callback holder 2")
 
-            // Mint gas for fee
             await gasHelper.mintGas(addr, 100)
 
-            // Perform callback
             let result = await callbackHelper.sendCallbackV0(addr, mainTick, "Callback test v0")
             assert(result.callback, "Callback v0 should exist in DB")
         })

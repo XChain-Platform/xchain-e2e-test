@@ -10,15 +10,8 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
- * XChain End-to-End Test Suite - RegTest Miner Connector
- * 
- * This file handles connecting to XChain regtest miner instances
- * 
  ********************************************************************/
 
-// Load required libraries
 const axios = require('axios');
 
 class RegtestMinerConnector {

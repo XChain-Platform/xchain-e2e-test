@@ -57,7 +57,6 @@ describe('[sdk] token-gated FILE (BATCH FILE + MESSAGE v2)', function () {
     });
 
     it('publishes a gated FILE with a paired MESSAGE v2', async function () {
-        // Encrypt the content through the SDK's gated-file helper.
         const { ciphertext, keyHash } = sdk.gatedFile.encryptFileBytes(Buffer.from('top secret payload'));
 
         // Build the two sub-actions through the SDK so they serialize correctly

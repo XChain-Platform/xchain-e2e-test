@@ -16,7 +16,6 @@ const assert = require('assert')
 const sinon = require('sinon')
 const bitcoin = require('bitcoinjs-lib')
 
-// Inject mock mariadb before requiring anything that depends on it
 require('../fixtures/mockMariadb')
 
 const CryptoNetworks = require('../../../src/CryptoNetworks')

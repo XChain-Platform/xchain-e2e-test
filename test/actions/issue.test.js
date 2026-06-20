@@ -57,10 +57,8 @@ describe('ISSUE', () => {
             let address = addr["address"]
             let tick = "ISSUEv2"+address.substring(address.length-8)
 
-            // Create token first
             await issueHelper.sendIssueV0(addr, tick, 1000, 10, 0, "Issue v2 test", 50)
 
-            // Edit mint params: increase max_mint to 20
             let result = await issueHelper.sendIssueV2(addr, tick, 20, 0, null, null, null, null, "Updating max_mint")
             assert(result.issue, "Issue v2 should exist in DB")
         })
@@ -79,7 +77,6 @@ describe('ISSUE', () => {
                 '', '', '', '', 0, 0)
             assert(issueResult.issue, "Initial issue v0 should exist in DB")
 
-            // Lock description and sleep
             let result = await issueHelper.sendIssueV3(addr, tick, null, null, 1, 1, null, null, null, "Locking description and sleep")
             assert(result.issue, "Issue v3 should exist in DB")
         })
@@ -92,11 +89,9 @@ describe('ISSUE', () => {
             let tick = "ISSUEv4"+address.substring(address.length-8)
             let callbackTick = "ISSUEv4CB"+address.substring(address.length-8)
 
-            // Create both tokens
             await issueHelper.sendIssueV0(addr, tick, 1000, 10, 0, "Issue v4 test", 50)
             await issueHelper.sendIssueV0(addr, callbackTick, 1000, 10, 0, "Callback tick", 100)
 
-            // Set callback params
             let result = await issueHelper.sendIssueV4(addr, tick, 999999, callbackTick, 1, "Setting callback")
             assert(result.issue, "Issue v4 should exist in DB")
         })
@@ -108,16 +103,13 @@ describe('ISSUE', () => {
             let address = addr["address"]
             let tick = "ISSUEv5"+address.substring(address.length-8)
 
-            // Create token
             await issueHelper.sendIssueV0(addr, tick, 1000, 10, 0, "Issue v5 test", 50)
 
-            // Create an allow list
             let allowAddr = await cryptoHelper.getNewAddress("ISSUE.V5.ALLOW", COIN, NETWORK, null, "legacy", 0)
             let listResult = await listHelper.sendListV0(addr, 2, [allowAddr["address"]])
             assert(listResult.list, "List should be created")
             let allowListActionIndex = Number(listResult.list["action_index"])
 
-            // Set allow list on token
             let result = await issueHelper.sendIssueV5(addr, tick, allowListActionIndex, null, "Setting allow list")
             assert(result.issue, "Issue v5 should exist in DB")
         })
