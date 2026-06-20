@@ -11,27 +11,33 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * E2E integration: capability config hot-reload across a hub federation
+ * E2E integration: CAPABILITY_*_MIN_STAKE governance pin (#4352)
  *
- * Boots N=3 in-process XChainHub validators and drives a governance
- * parameter change end-to-end:
- *   - one hub PROPOSEs CAPABILITY_PRICE_MIN_STAKE (1000 → 1200)
- *   - all three hubs VOTE approve
- *   - the deterministic tally leader tallies and broadcasts GOV_RESULT
- *   - every hub processes the result and hot-reloads its capability config
+ * Boots N=3 in-process XChainHub validators and asserts the pre-launch
+ * pin holds across a real hub federation: governance can NOT move a
+ * capability MIN_STAKE threshold.
  *
- * Regression guard: tallying is single-leader, so only the leader runs
- * _tallyProposal() and emits proposal:finalized directly. Followers learn
- * the outcome solely via the GOV_RESULT broadcast (Governance._handleResult).
- * If _handleResult does not emit proposal:finalized on a passed proposal,
- * follower hubs update the DB row but never hot-reload capConfig, so they
- * keep serving the OLD MIN_STAKE while the leader serves the new one. Since
- * each hub feeds its own getMinStake() to the indexer when locking the
- * quorum validator set, that split makes the federation compute different
- * qualified sets for the same block and breaks PBFT agreement.
+ * Background: the indexer re-derives the qualified validator set from a
+ * FROZEN configs/<COIN>.js consensus constant, so a hub-side governance
+ * MIN_STAKE change would fork the federation from the chain. #4352 pins
+ * the parameter off governance pre-launch; thresholds move only via a
+ * coordinated fleet upgrade of configs/<COIN>.js + HUB_CAPABILITY_CONFIG.
  *
- * This test asserts ALL hubs (not just the leader) converge on the new
- * getMinStake('price') after the proposal passes.
+ * Two enforcement points, both exercised here at federation scale:
+ *   1. propose() refuses to CREATE a CAPABILITY_*_MIN_STAKE proposal
+ *      (Governance.js #4352 guard), so an honest proposer can't even
+ *      start a round.
+ *   2. _handlePropose() DROPS an inbound CAPABILITY_*_MIN_STAKE proposal
+ *      gossiped by a malicious or pre-#4352 peer, so no honest hub records
+ *      a row. With no local row a later GOV_RESULT UPDATE matches 0 rows
+ *      and never emits proposal:finalized, so every hub's getMinStake()
+ *      stays pinned and the federation can't split.
+ *
+ * (Historical note: this suite previously drove a CAPABILITY_PRICE_MIN_STAKE
+ * change end-to-end and asserted all hubs hot-reloaded capConfig. #4352
+ * removed that governance path; the follower-applies-GOV_RESULT regression
+ * it guarded is now covered at unit scale in xchain-hub Governance.test.js
+ * `_handleResult()` using a still-governable parameter.)
  *
  * Skips when HUB_DB_USER/HUB_DB_PASS are unset (same gate as multiHub).
  ********************************************************************/
@@ -51,7 +57,7 @@ const COUNT = 3;
 const PEER_WAIT_MS = 8000;
 
 const OLD_MIN_STAKE = '1000.00000000';
-const NEW_MIN_STAKE = '1200.00000000'; // +20%, within Governance MAX_INCREASE (50%)
+const NEW_MIN_STAKE = '1200.00000000'; // the (rejected) target a proposer/peer would try to set
 
 const CAPS = {
     CAPABILITIES: {
@@ -67,36 +73,25 @@ const CAPS = {
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-describe('MultiValidatorHub: governance capability hot-reload', function () {
+describe('MultiValidatorHub: governance capability MIN_STAKE pin (#4352)', function () {
     this.timeout(180_000);
 
     let mvh;
     let capsPath;
-    let savedVotingPeriod;
-    let savedTallyInterval;
 
     before(async function () {
         if (!process.env.HUB_DB_USER || !process.env.HUB_DB_PASS) {
-            console.log('Skipping governance hot-reload test: HUB_DB_USER/HUB_DB_PASS not set');
+            console.log('Skipping governance MIN_STAKE pin test: HUB_DB_USER/HUB_DB_PASS not set');
             this.skip();
         }
         capsPath = path.join(os.tmpdir(), 'mvh_gov_caps_' + process.pid + '.json');
         fs.writeFileSync(capsPath, JSON.stringify(CAPS));
 
-        // Comfortable voting window (votes must be cast before voting_end); the
-        // proposal is force-expired in the DB before the manual tally so the test
-        // never waits real-world voting time. Stretch the auto-tally timer well
-        // past the run so it can't race the deterministic manual trigger.
-        savedVotingPeriod  = process.env.GOV_VOTING_PERIOD;
-        savedTallyInterval = process.env.GOVERNANCE_TALLY_INTERVAL;
-        process.env.GOV_VOTING_PERIOD        = '60000';
-        process.env.GOVERNANCE_TALLY_INTERVAL = '3600000';
-
         mvh = new MultiValidatorHub({ count: COUNT, basePort: 30200, startAttestation: false });
         await mvh.start();
 
         // Production wiring order: governance must exist before startAttestation,
-        // which registers the proposal:finalized → capability hot-reload listener.
+        // which registers the proposal:finalized -> capability hot-reload listener.
         // capabilityRegistry (read by that listener) is seeded by startCapabilities.
         for (const hub of mvh.hubs) {
             await hub.startGovernance();
@@ -113,10 +108,6 @@ describe('MultiValidatorHub: governance capability hot-reload', function () {
     after(async function () {
         if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
         if (capsPath) { try { fs.unlinkSync(capsPath); } catch (_) {} }
-        if (savedVotingPeriod === undefined) delete process.env.GOV_VOTING_PERIOD;
-        else                                 process.env.GOV_VOTING_PERIOD = savedVotingPeriod;
-        if (savedTallyInterval === undefined) delete process.env.GOVERNANCE_TALLY_INTERVAL;
-        else                                  process.env.GOVERNANCE_TALLY_INTERVAL = savedTallyInterval;
     });
 
     it('seeds every hub with the same starting MIN_STAKE', function () {
@@ -125,52 +116,58 @@ describe('MultiValidatorHub: governance capability hot-reload', function () {
             'all hubs should start at ' + OLD_MIN_STAKE + ', got ' + stakes.join(','));
     });
 
-    it('hot-reloads capConfig on EVERY hub (not just the tally leader) after a passed proposal', async function () {
+    it('refuses to CREATE a CAPABILITY_*_MIN_STAKE proposal on the proposer (#4352)', async function () {
         const proposer = mvh.hubs[0];
 
-        // 1) Propose the parameter change and let the GOV_PROPOSE broadcast land
-        //    on the followers so they have a row to vote on.
-        const { proposalId } = await proposer.propose(
-            'CAPABILITY_PRICE_MIN_STAKE', OLD_MIN_STAKE, NEW_MIN_STAKE, 'raise price min stake');
-        assert.ok(proposalId, 'propose should return a proposalId');
-        await sleep(1500);
-
-        // 2) Every hub votes approve (each vote is gossiped to the leader).
-        for (const hub of mvh.hubs) {
-            await hub.vote(proposalId, 'approve');
-        }
-        await sleep(2500); // let votes propagate to the tally leader's DB
-
-        // 3) Find the deterministic tally leader for this proposal. All hubs share
-        //    the same validator set, so exactly one matches.
-        const leader = mvh.hubs.find(h => h.governance._isTallyLeader(proposalId));
-        assert.ok(leader, 'a deterministic tally leader should exist for the proposal');
-
-        // 4) Force-expire the proposal on the leader so its tally pass picks it up
-        //    immediately, then trigger the tally. The leader applies + broadcasts
-        //    GOV_RESULT; followers learn the outcome only via that broadcast.
-        await leader.db.doQuery(
-            "UPDATE governance_proposals SET voting_end = DATE_SUB(NOW(), INTERVAL 1 HOUR) WHERE proposal_id = ?",
-            [proposalId]
+        // propose() must reject before any row is written or gossiped.
+        await assert.rejects(
+            () => proposer.propose('CAPABILITY_PRICE_MIN_STAKE', OLD_MIN_STAKE, NEW_MIN_STAKE, 'raise price min stake'),
+            /#4352/,
+            'propose() must reject a pinned CAPABILITY_*_MIN_STAKE change'
         );
-        await leader.governance._checkExpiredProposals();
 
-        // 5) Let GOV_RESULT reach the followers + _handleResult emit + hot-reload.
-        await sleep(2500);
+        // No proposal row exists on ANY hub (proposer never inserted, never broadcast).
+        for (const hub of mvh.hubs) {
+            const rows = await hub.db.doQuery(
+                'SELECT proposal_id FROM governance_proposals WHERE parameter = ?',
+                ['CAPABILITY_PRICE_MIN_STAKE']);
+            assert.strictEqual(rows.length, 0,
+                'no CAPABILITY_*_MIN_STAKE proposal row should exist after a refused propose()');
+        }
+    });
 
-        // The proposal must actually have PASSED (quorum + 2/3 approval).
-        const leaderRow = (await leader.db.doQuery(
-            "SELECT status FROM governance_proposals WHERE proposal_id = ? LIMIT 1", [proposalId]))[0];
-        assert.strictEqual(leaderRow && leaderRow.status, 'passed',
-            'proposal should pass with 3/3 approvals');
+    it('every follower DROPS an inbound CAPABILITY_*_MIN_STAKE proposal; threshold stays pinned', async function () {
+        const proposer = mvh.hubs[0];
+        const proposerPubkey = proposer.getIdentity().getPubkeyHex();
 
-        // 6) Every hub (leader AND followers) must serve the NEW threshold.
+        // Simulate a malicious or pre-#4352 peer that bypasses propose()'s guard
+        // and gossips a CAPABILITY_*_MIN_STAKE proposal directly onto the mesh.
+        // GOV_PROPOSE is the governance proposal message type (Governance.js).
+        const rogueId = 'gov:CAPABILITY_PRICE_MIN_STAKE:rogue-' + Date.now();
+        proposer.peerManager.broadcast('GOV_PROPOSE', {
+            proposalId:      rogueId,
+            parameter:       'CAPABILITY_PRICE_MIN_STAKE',
+            currentValue:    OLD_MIN_STAKE,
+            proposedValue:   NEW_MIN_STAKE,
+            rationale:       'rogue inbound proposal',
+            proposerPubkey,
+            votingEnd:       new Date(Date.now() + 60_000).toISOString(),
+            activationBlock: null
+        });
+        await sleep(2500); // let the gossip reach every follower + _handlePropose run
+
+        // Every honest hub dropped it: no row recorded anywhere.
+        for (const hub of mvh.hubs) {
+            const rows = await hub.db.doQuery(
+                'SELECT proposal_id FROM governance_proposals WHERE proposal_id = ? OR parameter = ?',
+                [rogueId, 'CAPABILITY_PRICE_MIN_STAKE']);
+            assert.strictEqual(rows.length, 0,
+                'follower must drop the inbound CAPABILITY_*_MIN_STAKE proposal (no row recorded)');
+        }
+
+        // Threshold unchanged on every hub: the federation stayed pinned.
         const stakes = mvh.hubs.map(h => String(h.capabilityRegistry.getMinStake('price')));
-        assert.ok(stakes.every(s => s === stakes[0]),
-            'all hubs must converge on a single MIN_STAKE, got ' + stakes.join(','));
-        assert.notStrictEqual(stakes[0], OLD_MIN_STAKE,
-            'MIN_STAKE must have moved off its startup value on every hub (followers stayed stale)');
-        assert.strictEqual(stakes[0], NEW_MIN_STAKE,
-            'every hub should serve the governance-approved threshold ' + NEW_MIN_STAKE);
+        assert.ok(stakes.every(s => s === OLD_MIN_STAKE),
+            'every hub must still serve the pinned MIN_STAKE ' + OLD_MIN_STAKE + ', got ' + stakes.join(','));
     });
 });

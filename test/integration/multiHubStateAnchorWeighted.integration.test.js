@@ -68,8 +68,17 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const TIP = {
     coin: 'BTC', network: 'regtest', block_index: 500, block_time: 1700000000,
     block_hash: 'c0'.repeat(32), ledger_hash: 'a1'.repeat(32),
-    actions_hash: 'b2'.repeat(32), contract_hash: 'c3'.repeat(32)
+    actions_hash: 'b2'.repeat(32), contract_hash: 'c3'.repeat(32),
+    // SPV Phase 2 (xchain-hub 08228c8): post-flag-day the checkpoint canonical signs
+    // the indexer light-client roots; StateCheckpointEngine refuses to finalize without
+    // them. regtest's commitment flag-day is genesis, so the stub must carry them.
+    state_root: 'd4'.repeat(32), state_root_version: 1,
+    block_merkle_root: 'e5'.repeat(32), block_merkle_version: 1
 };
+
+// Mirror StateCheckpointEngine._checkpointRootSuffix (post-flag-day SPV root suffix).
+const ROOT_SUFFIX = '|' + [TIP.state_root.toLowerCase(), String(TIP.state_root_version),
+                           TIP.block_merkle_root.toLowerCase(), String(TIP.block_merkle_version)].join('|');
 
 // Per-hub: pin the snapshot/election block, scope to BTC, stub the indexer view to
 // the shared TIP, and (critical) set the engine's cached network so the weighted
@@ -191,7 +200,7 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM oracle_publish checkpoint (WI
             // in the uniform header (TAG=XCHECKPOINT, VIEW=0); gate keys on snapshot_block.
             const raw = ['XCHECKPOINT', 'BTC', 'regtest', String(TIP.block_index), TIP.block_hash,
                          TIP.ledger_hash, TIP.actions_hash, TIP.contract_hash,
-                         String(rows[0].checkpoint_seq), String(BLOCK_INDEX)].join('|');
+                         String(rows[0].checkpoint_seq), String(BLOCK_INDEX)].join('|') + ROOT_SUFFIX;
             const canonical = eq.isEquivHeaderActive(BLOCK_INDEX, 'regtest')
                 ? eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT,
                     'BTC|regtest|' + TIP.block_index + '|' + rows[0].checkpoint_seq, 0, raw)

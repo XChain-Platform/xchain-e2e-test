@@ -50,6 +50,7 @@ const assert = require('assert');
 const zlib   = require('zlib');
 const { MultiValidatorHub, ValidatorIdentity } = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
+const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
 const { seedStakeSnapshot }    = require('../helpers/seededStakeSnapshot');
 const { MockCrossChainOfferBook, makeOrder } = require('../helpers/mockCrossChainOfferBook');
 const eq = require('../../../xchain-hub/src/equivocation_header.js');
@@ -66,8 +67,19 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const TIP = {
     coin: 'BTC', network: 'regtest', block_index: 500, block_time: 1700000000,
     block_hash: 'c0'.repeat(32), ledger_hash: 'a1'.repeat(32),
-    actions_hash: 'b2'.repeat(32), contract_hash: 'c3'.repeat(32)
+    actions_hash: 'b2'.repeat(32), contract_hash: 'c3'.repeat(32),
+    // SPV Phase 2 (xchain-hub 08228c8): post-flag-day the checkpoint canonical signs
+    // the indexer's light-client roots, and StateCheckpointEngine refuses to finalize
+    // a checkpoint whose getblockhashes response lacks them. regtest's commitment
+    // flag-day is genesis (block 0), so the stubbed indexer view must carry them.
+    state_root: 'd4'.repeat(32), state_root_version: 1,
+    block_merkle_root: 'e5'.repeat(32), block_merkle_version: 1
 };
+
+// Mirror StateCheckpointEngine._checkpointRootSuffix: the post-flag-day SPV root
+// suffix appended to the raw v0 checkpoint canonical BEFORE the EQUIV wrap.
+const ROOT_SUFFIX = '|' + [TIP.state_root.toLowerCase(), String(TIP.state_root_version),
+                           TIP.block_merkle_root.toLowerCase(), String(TIP.block_merkle_version)].join('|');
 
 function crossingPair({ ltcIdx, dogeIdx }){
     return {
@@ -91,7 +103,7 @@ function crossingPair({ ltcIdx, dogeIdx }){
 describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function () {
     this.timeout(180_000);
 
-    let db, mvh, seed, book;
+    let db, mvh, seed, seedCount, book;
     let published = [];          // [{ hubIndex, payload }] captured "on-chain" anchors
 
     before(async function () {
@@ -120,7 +132,18 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
         await sleep(PEER_WAIT_MS);
 
         // Deterministic oracle_publish/cross_chain sets + BTC anchor block.
-        seed = seedStakeSnapshot(mvh, { blockIndex: BLOCK_INDEX });
+        // Weighted (source-keyed) snapshot: regtest activates STAKE_WEIGHTED_QUORUM
+        // at genesis, so the count-mode seed leaves each round with a single leader
+        // self-sign (1 sig < 2f+1) and nothing finalizes. seedWeightSnapshot stubs
+        // the weighted path (getActiveWeightSnapshot/getWeightSnapshot) the engine
+        // actually consults; default is one source per booted hub, equal weight.
+        seed = seedWeightSnapshot(mvh, { blockIndex: BLOCK_INDEX });
+        // The anchor publisher elects its leader from the oracle_publish MEMBER set
+        // via capabilitySnapshot.getSnapshot('oracle_publish') (count method, the
+        // eligible set for hash-order election), which seedWeightSnapshot does not
+        // stub. Without it the election sees an empty set and fails closed (#543b720),
+        // so also seed the count snapshot. The two stub disjoint methods.
+        seedCount = seedStakeSnapshot(mvh, { blockIndex: BLOCK_INDEX });
 
         // Per hub: pin the BTC tip (election + snapshot block), stub the
         // checkpoint engine's indexer view to the SHARED state, scope to BTC,
@@ -128,6 +151,7 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
         mvh.hubs.forEach((hub, i) => {
             hub._resolveBtcLatestBlock = async () => BLOCK_INDEX;
             let cps = hub.stateCheckpoints;
+            cps.network = 'regtest';   // engine cached '' at construction (pre-seed)
             cps.chains = ['BTC'];
             cps.confirmations = 0;
             cps.indexers.BTC = { url: 'http://stubbed', key: '' };
@@ -141,6 +165,7 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
 
     after(async function () {
         if (seed) seed.restore();
+        if (seedCount) seedCount.restore();
         if (book) await book.stop();
         if (mvh)  { await mvh.stop(); await mvh.dropDatabases(); }
         if (db)   { await db.stop(); }
@@ -168,7 +193,7 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
         // VIEW=0); below it, the bare raw bytes. Gate keys on the snapshot_block.
         let raw = ['XCHECKPOINT', 'BTC', 'regtest', String(TIP.block_index), TIP.block_hash,
                    TIP.ledger_hash, TIP.actions_hash, TIP.contract_hash,
-                   String(rows[0].checkpoint_seq), String(BLOCK_INDEX)].join('|');
+                   String(rows[0].checkpoint_seq), String(BLOCK_INDEX)].join('|') + ROOT_SUFFIX;
         let canonical = eq.isEquivHeaderActive(BLOCK_INDEX, 'regtest')
             ? eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT,
                 'BTC|regtest|' + TIP.block_index + '|' + rows[0].checkpoint_seq, 0, raw)
@@ -199,9 +224,13 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
         // verify the proposed archive against their own DB and co-sign over P2P.
         published.length = 0;
         await Promise.all(mvh.hubs.map(h => h.stateAnchorPublisher.flush()));
-        await sleep(SETTLE_MS);
-        // The archive round finalizes asynchronously (quorum gathers over P2P);
-        // the publish happens inside _checkArchiveQuorum on the leader.
+        // The archive round finalizes asynchronously: the leader gathers a co-sign
+        // quorum over P2P before publishing inside _checkArchiveQuorum, which can
+        // exceed a single SETTLE_MS. Poll for the v1 archive publish rather than
+        // assuming a fixed settle (a 6s window raced the quorum round and saw 0).
+        for (let waited = 0; waited < 30000 && !published.some(p => p.payload.split('|')[1] === '1'); waited += 500)
+            await sleep(500);
+        await sleep(500); // let the v0 anchor + back-fill that ride the same round land too
 
         let publishers = new Set(published.map(p => p.hubIndex));
         assert.strictEqual(publishers.size, 1, 'exactly one elected publisher broadcasts');
