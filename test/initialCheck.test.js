@@ -278,11 +278,14 @@ exports.mochaHooks = {
         })
 
         await phase('native-fee-price-seed', async () => {
-            // LTC/DOGE require a native-coin fee output on fee-bearing actions,
-            // valued by the indexer against oracle prices. Seed XCHAIN/USD +
-            // {COIN}/USD up front (no-op on BTC) so the very first ISSUE (incl.
-            // the GAS-token bootstrap below) can be priced. transactionHelper
-            // refreshes these during long runs. See helpers/nativeFeeHelper.js.
+            // Seed XCHAIN/USD + {COIN}/USD up front on EVERY chain. LTC/DOGE
+            // value the native-coin fee output against these; gas-mode BTC needs
+            // a fresh {COIN}/USD for USD-pegged contract-fee validation. Seeding
+            // here lets the very first ISSUE (incl. the GAS-token bootstrap
+            // below) and any contract action be priced. The per-action paths
+            // refresh during long runs (transactionHelper -> getNativeFeeOutput
+            // for the actions suite, sdkHelper.submit for the SDK suite), so a
+            // run past ORACLE_MAX_PRICE_AGE never ages out. See nativeFeeHelper.js.
             const nativeFeeHelper = require('./helpers/nativeFeeHelper')
             await nativeFeeHelper.seedGlobalPrices(true)
         })

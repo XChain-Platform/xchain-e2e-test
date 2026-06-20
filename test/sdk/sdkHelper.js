@@ -132,6 +132,14 @@ async function submit(sdk, actionData, encoderOpts, opts, attempts = 6) {
     // next runs. Spending unconfirmed UTXOs invites the tracker's stale mempool
     // view -> bad-txns-inputs-missingorspent. Caller can override.
     const eo = Object.assign({ unconfirmed: false }, encoderOpts);
+    // Keep oracle prices fresh for USD-pegged fee validation (throttled; a no-op
+    // when the last seed is still fresh). Gas-mode BTC contract actions
+    // (DEPLOY/EXECUTE) index `no current oracle price for BTC/USD` once the seed
+    // ages out, so the SDK path refreshes here just as the actions-suite path
+    // does via nativeFeeHelper.getNativeFeeOutput. Per-action (not a background
+    // timer) so it never clobbers dispenser.test.js's latestBlockTime()-60
+    // reverse-match seed (that DISPENSE payment uses createSimpleTransaction).
+    try { await require('../helpers/nativeFeeHelper').seedGlobalPrices(false); } catch (e) { /* best effort */ }
     let lastErr;
     for (let i = 1; i <= attempts; i++) {
         // Settle the stack BEFORE building so the encoder + tracker see a

@@ -66,10 +66,14 @@ function resolveFeeDestination(){
     return (a && a !== PLACEHOLDER) ? a : null
 }
 
-// Seed XCHAIN/USD + {COIN}/USD so the indexer can value native-coin fees.
-// No-op on BTC and when the last seed is still fresh (unless force=true).
+// Seed XCHAIN/USD + {COIN}/USD so the indexer can value fees. Runs on EVERY
+// chain: native-fee chains (LTC/DOGE) value the injected fee output against
+// these, and gas-mode BTC still needs a fresh {COIN}/USD because USD-pegged
+// contract-fee validation looks one up for every DEPLOY/EXECUTE (without a
+// current snapshot the action indexes `invalid: no current oracle price for
+// BTC/USD`, a false red/green by timing on runs past ORACLE_MAX_PRICE_AGE).
+// No-op only when the last seed is still fresh (unless force=true).
 async function seedGlobalPrices(force){
-    if (!isFeeChain()) return
     const now = Date.now()
     if (!force && (now - _lastSeedMs) < SEED_REFRESH_MS) return
 
@@ -152,12 +156,16 @@ async function discoverFeeMode(){
 // enabled but no destination is resolvable. Throwing loudly is far better than
 // a silent skip that hangs the suite. Refreshes prices first so a long run never ages out.
 async function getNativeFeeOutput(){
+    // Refresh oracle prices for EVERY chain first (throttled). Gas-mode BTC
+    // returns null just below, but its contract actions still need a fresh
+    // BTC/USD for USD-pegged fee validation, so the seed must run BEFORE the
+    // gas-mode early return (this is the BTC contract-suite staleness fix).
+    await seedGlobalPrices(false)
     const mode = await discoverFeeMode()
     if (!mode.enabled) return null
     if (!mode.destination)
         throw new Error('native fee enabled on ' + global.COIN_CODE +
             ' but no FEE_DESTINATION resolvable (set FEE_DESTINATION or check indexer feeschedule)')
-    await seedGlobalPrices(false)
     return { address: mode.destination, value: FLAT_FEE_SATS }
 }
 
