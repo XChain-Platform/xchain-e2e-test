@@ -101,4 +101,30 @@ describe('CryptoNetworks', () => {
             assert.strictEqual(CryptoNetworks.getFirstBlock('unknown'), 0)
         })
     })
+
+    // Cross-repo drift guard. CryptoNetworks.getBitcoinJsNetwork is hand-copied into
+    // several services; the per-network params it returns (address prefixes, dust
+    // thresholds, relay-policy flags) MUST be identical across every copy or encode and
+    // decode disagree. This compares each sibling copy's output to this one for every
+    // network. getFirstBlock is intentionally NOT compared (start heights are pinned per
+    // service). Any sibling repo not checked out is skipped.
+    describe('cross-repo getBitcoinJsNetwork parity @regression', () => {
+        const path = require('path'), fs = require('fs')
+        const SIBLINGS = ['xchain-encoder', 'xchain-decoder', 'xchain-utxo-tracker', 'xchain-regtest-miner']
+        const NETS = ['bitcoin-mainnet', 'bitcoin-testnet', 'bitcoin-regtest',
+                      'dogecoin-mainnet', 'dogecoin-testnet', 'dogecoin-regtest',
+                      'litecoin-mainnet', 'litecoin-testnet', 'litecoin-regtest']
+        SIBLINGS.forEach((repo) => {
+            it(`${repo} getBitcoinJsNetwork matches this copy for every network`, function () {
+                const p = path.resolve(__dirname, '../../../../' + repo + '/src/CryptoNetworks.js')
+                if (!fs.existsSync(p)) return this.skip()
+                const Sib = require(p)
+                for (const net of NETS) {
+                    assert.deepStrictEqual(
+                        Sib.getBitcoinJsNetwork(net), CryptoNetworks.getBitcoinJsNetwork(net),
+                        `${repo} CryptoNetworks.getBitcoinJsNetwork('${net}') has drifted; keep the per-network params identical across every copy`)
+                }
+            })
+        })
+    })
 })
