@@ -4,14 +4,14 @@
 # XChain Platform End-to-End Test Suite
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.3.3-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.3.8-blue" alt="Version">
   <img src="https://img.shields.io/badge/tests-953%2B%20passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/node-%3E%3D22-green" alt="Node">
-  <img src="https://img.shields.io/badge/license-Dankest%20Community-orange" alt="License">
+  <img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue" alt="License">
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/coverage-unit%20%7C%20integration%20%7C%20e2e%20%7C%20fuzz%20%7C%20chaos%20%7C%20mutation%20%7C%20boundary%20%7C%20smoke%20%7C%20regression-brightgreen" alt="Coverage">
+  <img src="https://img.shields.io/badge/coverage-actions%20%7C%20unit%20%7C%20integration%20%7C%20e2e%20%7C%20federation%20%7C%20sdk%20%7C%20smoke%20%7C%20boundary%20%7C%20fuzz%20%7C%20chaos%20%7C%20regression%20%7C%20security%20%7C%20mutation%20%7C%20performance-brightgreen" alt="Coverage">
 </p>
 
 End-to-end Mocha test suite for the XChain Platform. Exercises the full platform stack (encoder, decoder, indexer, explorer, hub, UTXO tracker, and regtest miner) against a live regtest deployment. Tests are not mocked; they broadcast real transactions to a regtest coin node and verify that the platform processes them correctly end to end.
@@ -28,8 +28,13 @@ End-to-end Mocha test suite for the XChain Platform. Exercises the full platform
 - **UTXO verification cache:** tracks confirmed UTXOs between transactions to avoid stale mempool entries
 - **Wallet memory cleanup:** seed and private key buffers are zeroed during teardown
 - **Performance instrumentation:** bootstrap phase timing, per-poll metrics, custom Mocha reporter writing JSON to `perf-results/`
-- **Mutation testing:** Stryker Mutator with two-phase config (unit-only and unit+integration)
-- **953+ tests:** unit, integration, e2e, smoke, boundary, fuzz, chaos, regression, mutation, and performance
+- **Federation and attestation tests:** multi-hub PBFT round-trip suites (multiHubAttestation, llmAttestation, nodeProof) exercising quorum, consensus state buffering, and LLM/http_get attestation providers
+- **SDK-driven tests:** action lifecycle tests via the bundled `xchain-sdk` local package, including chunked DEPLOY, x402, MCP, and ticker-ID equivalence
+- **Security tests:** VM sandbox escape, policy enforcement, and input validation suites against the live regtest stack
+- **Codec unit tests:** standalone encoder/decoder wire-format tests with no services required
+- **Multi-chain parity tests:** cross-chain ledger-hash and state consistency checks across Bitcoin, Litecoin, and Dogecoin
+- **Mutation testing:** Stryker Mutator with two-phase config (Phase 1: unit only; Phase 2: unit + integration)
+- **953+ tests:** actions, unit, integration, e2e, federation, sdk, smoke, boundary, fuzz, chaos, regression, security, codec, parity, mutation, and performance
 
 ## Documentation
 
@@ -175,14 +180,3 @@ with a commercial license available for proprietary use.
 You may use, modify, and distribute this material under the terms of the License.
 See [LICENSE](./LICENSE.md) and [NOTICE](./NOTICE.md) for full terms.
 See the [licensing overview](https://docs.xchain.io/legal/licensing).
-
-## License
-
-XChain Platform is **open source**, dual-licensed under:
-
-- the **[GNU Affero General Public License v3.0](./LICENSE.md)** (`AGPL-3.0-or-later`), free for everyone, and
-- a **[commercial license](https://docs.xchain.io/legal/commercial-license)** for companies that need to keep modifications private.
-
-See the **[licensing overview](https://docs.xchain.io/legal/licensing)** for which one applies to you. "XChain" is a trademark of Dankest, LLC. See the **[Trademark Policy](https://docs.xchain.io/legal/trademark)**.
-
-Copyright © 2025-2026 Dankest, LLC.
