@@ -70,8 +70,8 @@ describe('[regression:p2] Configuration & Cross-Chain', function () {
         assert.strictEqual(CryptoNetworks.getFirstBlock('bitcoin-regtest'), 0)
     })
 
-    it('[regression:p2] R-CFG-005b: getFirstBlock returns 844000 for bitcoin-mainnet', function () {
-        assert.strictEqual(CryptoNetworks.getFirstBlock('bitcoin-mainnet'), 844000)
+    it('[regression:p2] R-CFG-005b: getFirstBlock returns 950000 for bitcoin-mainnet', function () {
+        assert.strictEqual(CryptoNetworks.getFirstBlock('bitcoin-mainnet'), 950000)
     })
 
     it('[regression:p2] R-CFG-005c: getFirstBlock returns 0 for unknown networks', function () {

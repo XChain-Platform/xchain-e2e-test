@@ -120,17 +120,30 @@ class CryptoNetworks {
     }
     
     static getFirstBlock(networkName){
-        //TODO: this should get a config file from a server
+        // Kept in sync with xchain-decoder / xchain-encoder (the canonical start
+        // heights). These are the indexing boundary only, not part of any consensus
+        // hash. Re-pinned near tip pre-launch (2026-06-19); dogecoin-mainnet sits just
+        // below its first live anchor (6,243,921) so anchors are kept. e2e runs on
+        // regtest, where all networks return 0 via the default.
         switch(networkName){
             case "bitcoin-mainnet":
-                return 900000
+                return 950000
             case "bitcoin-testnet":
-                return 0
-            case "bitcoin-regtest":
+                return 138000
+            case "litecoin-mainnet":
+                return 3120000
+            case "litecoin-testnet":
+                return 4765000
+            case "dogecoin-mainnet":
+                return 6240000
+            case "dogecoin-testnet":
+                // DOGE testnet mints min-difficulty blocks ~every 20s and runs tens of
+                // millions of blocks ahead of the other networks; anchored near tip.
+                return 64800000
+            // All regtest networks start parsing at block 0
+            default:
                 return 0
         }
-        
-        return 0
     }
 }
 

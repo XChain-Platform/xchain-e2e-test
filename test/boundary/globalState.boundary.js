@@ -125,12 +125,12 @@ describe('Boundary: Global State & Service Discovery', function () {
 
     describe('CryptoNetworks.getFirstBlock', function () {
 
-        it('returns 844000 for bitcoin-mainnet', function () {
-            assert.strictEqual(CryptoNetworks.getFirstBlock('bitcoin-mainnet'), 844000)
+        it('returns 950000 for bitcoin-mainnet', function () {
+            assert.strictEqual(CryptoNetworks.getFirstBlock('bitcoin-mainnet'), 950000)
         })
 
-        it('returns 0 for bitcoin-testnet', function () {
-            assert.strictEqual(CryptoNetworks.getFirstBlock('bitcoin-testnet'), 0)
+        it('returns 138000 for bitcoin-testnet', function () {
+            assert.strictEqual(CryptoNetworks.getFirstBlock('bitcoin-testnet'), 138000)
         })
 
         it('returns 0 for bitcoin-regtest', function () {

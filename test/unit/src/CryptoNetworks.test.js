@@ -84,20 +84,26 @@ describe('CryptoNetworks', () => {
     })
 
     describe('getFirstBlock', () => {
-        it('should return 844000 for bitcoin-mainnet', () => {
-            assert.strictEqual(CryptoNetworks.getFirstBlock('bitcoin-mainnet'), 844000)
+        it('should return the canonical mainnet start heights', () => {
+            assert.strictEqual(CryptoNetworks.getFirstBlock('bitcoin-mainnet'), 950000)
+            assert.strictEqual(CryptoNetworks.getFirstBlock('litecoin-mainnet'), 3120000)
+            assert.strictEqual(CryptoNetworks.getFirstBlock('dogecoin-mainnet'), 6240000)
         })
 
-        it('should return 0 for bitcoin-testnet', () => {
-            assert.strictEqual(CryptoNetworks.getFirstBlock('bitcoin-testnet'), 0)
+        it('should return the canonical testnet start heights', () => {
+            assert.strictEqual(CryptoNetworks.getFirstBlock('bitcoin-testnet'), 138000)
+            assert.strictEqual(CryptoNetworks.getFirstBlock('litecoin-testnet'), 4765000)
+            assert.strictEqual(CryptoNetworks.getFirstBlock('dogecoin-testnet'), 64800000)
         })
 
-        it('should return 0 for bitcoin-regtest', () => {
+        it('should return 0 for regtest networks', () => {
             assert.strictEqual(CryptoNetworks.getFirstBlock('bitcoin-regtest'), 0)
+            assert.strictEqual(CryptoNetworks.getFirstBlock('litecoin-regtest'), 0)
+            assert.strictEqual(CryptoNetworks.getFirstBlock('dogecoin-regtest'), 0)
         })
 
         it('should return 0 as default for unknown networks', () => {
-            assert.strictEqual(CryptoNetworks.getFirstBlock('dogecoin-mainnet'), 0)
+            assert.strictEqual(CryptoNetworks.getFirstBlock('ethereum-mainnet'), 0)
             assert.strictEqual(CryptoNetworks.getFirstBlock('unknown'), 0)
         })
     })
