@@ -29,7 +29,9 @@
  *   3. Anchor flush (StateAnchorPublisher: XANC_SIGN_REQ → XANC_SIGN →
  *      XANC_FINALIZED): the elected publisher proposes the match archive,
  *      followers verify it against their OWN cross_chain_matches before
- *      co-signing, and the leader "publishes" ANCHOR v0 + v1 payloads via
+ *      co-signing, and the leader "publishes" the checkpoint anchor (ANCHOR
+ *      v3 post-flag-day, carrying the signed SPV light-client roots; v0 is the
+ *      legacy rootless form) + the v1 archive payload via
  *      a captured broadcast hook (no chain in this harness; the on-chain
  *      leg is the regtest e2e's job). Back-fill propagates to every hub.
  *
@@ -210,7 +212,7 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
         assert.strictEqual(distinct.size, 1, 'all hubs hold the identical checkpoint');
     });
 
-    it('anchor flush: leader publishes v0 + quorum-signed v1 archive; back-fill reaches every hub', async function () {
+    it('anchor flush: leader publishes v3 checkpoint anchor + quorum-signed v1 archive; back-fill reaches every hub', async function () {
         // A finalized cross-chain match gives the archive something to carry.
         let dexes = mvh.getCrossChainDexes();
         await Promise.all(dexes.map(d => d._discoverAndMatch().catch(() => {})));
@@ -230,14 +232,23 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
         // assuming a fixed settle (a 6s window raced the quorum round and saw 0).
         for (let waited = 0; waited < 30000 && !published.some(p => p.payload.split('|')[1] === '1'); waited += 500)
             await sleep(500);
-        await sleep(500); // let the v0 anchor + back-fill that ride the same round land too
+        await sleep(500); // let the checkpoint anchor + back-fill that ride the same round land too
 
-        let publishers = new Set(published.map(p => p.hubIndex));
-        assert.strictEqual(publishers.size, 1, 'exactly one elected publisher broadcasts');
-
-        let v0s = published.filter(p => p.payload.split('|')[1] === '0');
+        // SPV Phase 2 (xchain-hub 08228c8): the checkpoint anchor is published as
+        // ANCHOR v3 (not legacy v0) whenever the checkpoint carries the signed
+        // light-client roots. TIP seeds those roots and regtest's commitment
+        // flag-day is genesis, so every post-flag-day checkpoint here is v3.
+        let v3s = published.filter(p => p.payload.split('|')[1] === '3');
         let v1s = published.filter(p => p.payload.split('|')[1] === '1');
-        assert.ok(v0s.length >= 1, 'a v0 checkpoint anchor publishes');
+        // The safety invariant is PER-ARTIFACT, not "one hub does everything": the
+        // checkpoint anchor (v3, elected per checkpoint row via _v0ElectionKey) and
+        // the archive (v1, elected per election block via _archiveElectionKey) run
+        // INDEPENDENT hash-order elections, so they are routinely paid by two
+        // DIFFERENT hubs (distributed DOGE cost, not a double-anchor). What must
+        // hold is that each artifact publishes exactly once. (A prior
+        // `publishers.size === 1` assumed a single publisher for both and flaked
+        // ~half the time, whenever the two elections landed on different hubs.)
+        assert.strictEqual(v3s.length, 1, 'exactly one v3 checkpoint anchor publishes (SPV roots present, no double-anchor)');
         assert.strictEqual(v1s.length, 1, 'exactly one v1 archive publishes');
 
         // v1: quorum sigs over the extended canonical; archive decompresses to the match.
