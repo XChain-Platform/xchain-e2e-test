@@ -41,6 +41,7 @@ const assert = require('assert');
 const { MultiValidatorHub }   = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedStakeSnapshot }    = require('../helpers/seededStakeSnapshot');
+const { forceCountModeQuorum } = require('../helpers/forceCountModeQuorum');
 
 // N=10 → quorum 2·⌊9/3⌋+1 = 7, tolerating f=3 faults.
 const COUNT         = 10;
@@ -52,7 +53,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 describe('MultiValidatorHub: N=10 config-change PBFT scale probe (C.2)', function () {
     this.timeout(300_000);
 
-    let db, mvh, seed;
+    let db, mvh, seed, countMode;
 
     before(async function () {
         db = await startDisposableHubDb();
@@ -60,6 +61,9 @@ describe('MultiValidatorHub: N=10 config-change PBFT scale probe (C.2)', functio
             console.log('Skipping N=10 scale probe: no env DB and Docker unavailable');
             this.skip();
         }
+        // Count-only snapshot: pin legacy count quorum (regtest is weighted at
+        // genesis, which would stall a count-only round at a 1-sig self-sign).
+        countMode = forceCountModeQuorum();
         // All 10 validators share 127.0.0.1 in-process; raise the per-IP inbound
         // cap (PeerManager default 3) so the full 9-peer mesh forms without
         // connection-limit rejections. (Production validators have distinct IPs.)
@@ -74,6 +78,7 @@ describe('MultiValidatorHub: N=10 config-change PBFT scale probe (C.2)', functio
 
     after(async function () {
         if (seed) seed.restore();
+        if (countMode) countMode.restore();
         if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
         if (db)  { await db.stop(); }
     });

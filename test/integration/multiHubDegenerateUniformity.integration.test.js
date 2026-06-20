@@ -71,7 +71,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const TIP = {
     coin: 'BTC', network: 'regtest', block_index: 500, block_time: BLOCK_TIME,
     block_hash: 'c0'.repeat(32), ledger_hash: 'a1'.repeat(32),
-    actions_hash: 'b2'.repeat(32), contract_hash: 'c3'.repeat(32)
+    actions_hash: 'b2'.repeat(32), contract_hash: 'c3'.repeat(32),
+    // SPV Phase 2 (xchain-hub 08228c8): post-flag-day the checkpoint canonical
+    // signs the indexer light-client roots and StateCheckpointEngine fails closed
+    // without them; regtest's commitment flag-day is genesis, so the stubbed
+    // indexer view must carry them or every _tick throws (0 checkpoint rows).
+    state_root: 'd4'.repeat(32), state_root_version: 1,
+    block_merkle_root: 'e5'.repeat(32), block_merkle_version: 1
 };
 
 // Attach a real OracleConsensus per hub (P2P handlers via start(); no price-fetch

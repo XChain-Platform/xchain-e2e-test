@@ -51,6 +51,7 @@ const assert = require('assert');
 const { MultiValidatorHub, ValidatorIdentity } = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedStakeSnapshot }    = require('../helpers/seededStakeSnapshot');
+const { forceCountModeQuorum } = require('../helpers/forceCountModeQuorum');
 const { silenceDexValidator }  = require('../helpers/byzantineFaults');
 const { MockCrossChainOfferBook, makeOrder } = require('../helpers/mockCrossChainOfferBook');
 
@@ -88,7 +89,7 @@ function crossingPair({ ltcIdx, dogeIdx, ltcGive = '90', dogeGive = '40' }){
 describe('MultiValidatorHub: cross-chain DEX match PBFT (L2)', function () {
     this.timeout(180_000);
 
-    let db, mvh, seed, book;
+    let db, mvh, seed, book, countMode;
 
     before(async function () {
         db = await startDisposableHubDb();
@@ -96,6 +97,9 @@ describe('MultiValidatorHub: cross-chain DEX match PBFT (L2)', function () {
             console.log('Skipping cross-chain DEX federation L2: no env DB and Docker unavailable');
             this.skip();
         }
+        // Count-only snapshot: pin legacy count quorum (regtest is weighted at
+        // genesis, which would stall a count-only round at a 1-sig self-sign).
+        countMode = forceCountModeQuorum();
 
         // Offer-book mock first, so its URLs exist when the hubs' DEX engines start.
         book = new MockCrossChainOfferBook();
@@ -121,6 +125,7 @@ describe('MultiValidatorHub: cross-chain DEX match PBFT (L2)', function () {
 
     after(async function () {
         if (seed) seed.restore();
+        if (countMode) countMode.restore();
         if (book) await book.stop();
         if (mvh)  { await mvh.stop(); await mvh.dropDatabases(); }
         if (db)   { await db.stop(); }

@@ -49,6 +49,7 @@ const assert = require('assert');
 const { MultiValidatorHub }    = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedStakeSnapshot }    = require('../helpers/seededStakeSnapshot');
+const { forceCountModeQuorum } = require('../helpers/forceCountModeQuorum');
 const { silenceValidator, forgedPrePrepare } = require('../helpers/byzantineFaults');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -94,11 +95,14 @@ function byzantineScaleSuite({ count, quorum, faults, basePort, peerWaitMs }) {
     describe('MultiValidatorHub: byzantine fault tolerance at f=' + faults + ' (N=' + count + ', C.2)', function () {
         this.timeout(360_000);
 
-        let db, mvh, seed;
+        let db, mvh, seed, countMode;
 
         before(async function () {
             db = await startDisposableHubDb();
             if (!db) { console.log('Skipping byzantine N=' + count + ': no env DB and Docker unavailable'); this.skip(); }
+            // Count-only snapshot: pin legacy count quorum (regtest is weighted at
+            // genesis, which would stall a count-only round at a 1-sig self-sign).
+            countMode = forceCountModeQuorum();
             // All hubs share 127.0.0.1 in-process; raise the per-IP inbound cap
             // (PeerManager default 3) so the full mesh forms. (Prod validators have
             // distinct IPs.)
@@ -111,6 +115,7 @@ function byzantineScaleSuite({ count, quorum, faults, basePort, peerWaitMs }) {
 
         after(async function () {
             if (seed) seed.restore();
+            if (countMode) countMode.restore();
             if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
             if (db)  { await db.stop(); }
         });

@@ -39,6 +39,7 @@ const assert = require('assert');
 const { MultiValidatorHub }   = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedStakeSnapshot }    = require('../helpers/seededStakeSnapshot');
+const { forceCountModeQuorum } = require('../helpers/forceCountModeQuorum');
 
 // 4 validators → quorum 2·⌊3/3⌋+1 = 3 (a real BFT quorum tolerating 1 fault).
 // 3 would give quorum 1 (degenerate single-node), which can't prove propagation.
@@ -51,7 +52,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 describe('MultiValidatorHub: config-change PBFT (L2)', function () {
     this.timeout(180_000);
 
-    let db, mvh, seed;
+    let db, mvh, seed, countMode;
 
     before(async function () {
         db = await startDisposableHubDb();
@@ -59,6 +60,10 @@ describe('MultiValidatorHub: config-change PBFT (L2)', function () {
             console.log('Skipping config-PBFT L2: no env DB and Docker unavailable');
             this.skip();
         }
+        // This suite seeds the COUNT snapshot only, so it must run under legacy
+        // count quorum; regtest activates stake-weighted quorum at genesis, which
+        // would stall a count-only round at a 1-sig leader self-sign.
+        countMode = forceCountModeQuorum();
         mvh = new MultiValidatorHub({ count: COUNT, basePort: 31000 });
         await mvh.start();
         await sleep(PEER_WAIT_MS);   // mesh forms before we propose
@@ -69,6 +74,7 @@ describe('MultiValidatorHub: config-change PBFT (L2)', function () {
 
     after(async function () {
         if (seed) seed.restore();
+        if (countMode) countMode.restore();
         if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
         if (db)  { await db.stop(); }
     });

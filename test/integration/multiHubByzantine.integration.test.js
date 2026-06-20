@@ -39,6 +39,7 @@ const assert = require('assert');
 const { MultiValidatorHub }    = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedStakeSnapshot }    = require('../helpers/seededStakeSnapshot');
+const { forceCountModeQuorum } = require('../helpers/forceCountModeQuorum');
 const { silenceValidator, forgedPrePrepare } = require('../helpers/byzantineFaults');
 
 const COUNT         = 4;       // quorum 3 → tolerates exactly 1 byzantine/silent fault
@@ -58,11 +59,14 @@ function findLeader(mvh) {
 describe('MultiValidatorHub: byzantine fault tolerance (L5)', function () {
     this.timeout(180_000);
 
-    let db, mvh, seed;
+    let db, mvh, seed, countMode;
 
     before(async function () {
         db = await startDisposableHubDb();
         if (!db) { console.log('Skipping byzantine L5: no env DB and Docker unavailable'); this.skip(); }
+        // Count-only snapshot: pin legacy count quorum (regtest is weighted at
+        // genesis, which would stall a count-only round at a 1-sig self-sign).
+        countMode = forceCountModeQuorum();
         mvh = new MultiValidatorHub({ count: COUNT, basePort: 32000 });
         await mvh.start();
         await sleep(PEER_WAIT_MS);
@@ -71,6 +75,7 @@ describe('MultiValidatorHub: byzantine fault tolerance (L5)', function () {
 
     after(async function () {
         if (seed) seed.restore();
+        if (countMode) countMode.restore();
         if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
         if (db)  { await db.stop(); }
     });
