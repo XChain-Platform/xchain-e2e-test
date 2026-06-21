@@ -41,6 +41,15 @@ if (COIN === null || COIN === undefined){
     global.NETWORK = networkSplit[1]
 }
 
+// NETWORK can arrive in combined coin-network form (e.g. "bitcoin-regtest") when COIN is
+// injected separately by xchain-node. Strip the coin prefix so it is the bare network
+// ("regtest") everywhere: otherwise COIN+"-"+NETWORK doubles the coin
+// ("bitcoin-bitcoin-regtest"), getBitcoinJsNetwork misses, and bitcoinjs falls back to
+// MAINNET ("1..." addresses) which a regtest node rejects, so funding never confirms.
+if (COIN && NETWORK && NETWORK.indexOf(COIN + "-") === 0){
+    global.NETWORK = NETWORK.substring((COIN + "-").length)
+}
+
 global.NETWORK_OBJECT = CryptoNetworks.getBitcoinJsNetwork(COIN+"-"+NETWORK)
 
 const COIN_CODE_MAP = { bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' }
