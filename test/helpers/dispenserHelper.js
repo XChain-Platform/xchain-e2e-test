@@ -31,6 +31,7 @@ module.exports = {
         if (expiration == null) expiration = ""
         if (allowList == null) allowList = ""
         if (blockList == null) blockList = ""
+        if (memo == null) memo = ""
         if (giveOwnership == null) giveOwnership = ""
         // Wire-format: ownership dispenser carries empty GIVE_AMOUNT and GIVE_ESCROW.
         // The DB stores NULL for those, so waitFor must query with null (not "").
