@@ -13,6 +13,20 @@
     }
   },
   {
+    "action": "ADDRESS",
+    "version": 1,
+    "format": "VERSION|CONTROLLER|ACTION_CLASS|COOLDOWN_BLOCKS|UNBIND|MEMO",
+    "string": "ADDRESS|1|VGB6FR0|V3KW1VK|100|V1DX8GT|field round trip 238576",
+    "fields": {
+      "VERSION": "1",
+      "CONTROLLER": "VGB6FR0",
+      "ACTION_CLASS": "V3KW1VK",
+      "COOLDOWN_BLOCKS": "100",
+      "UNBIND": "V1DX8GT",
+      "MEMO": "field round trip 238576"
+    }
+  },
+  {
     "action": "AIRDROP",
     "version": 0,
     "format": "VERSION|TICK|AMOUNT|LIST_ACTION_INDEX|MEMO",
@@ -127,10 +141,36 @@
     }
   },
   {
+    "action": "ANCHOR",
+    "version": 3,
+    "format": "VERSION|CHAIN|NETWORK|BLOCK_INDEX|BLOCK_HASH|LEDGER_HASH|ACTIONS_HASH|CONTRACT_HASH|CHECKPOINT_SEQ|SNAPSHOT_BLOCK|STATE_ROOT|STATE_ROOT_VERSION|BLOCK_MERKLE_ROOT|BLOCK_MERKLE_VERSION|SIG_COUNT|PUBKEY|SIG|...",
+    "string": "ANCHOR|3|V27Q0EU|VDNQVSX|4761388|9a1171d806283bdf|a56bb96acec48cc2|40351abf8d8e5395|cac73afe47368404|V30AIW9|1|V9BDOSB|V9FIM00|0|100|c8b698ec2aad43b6|02abababababababababababababababababababababababababababababababab|2df57105d44ba84e|VEC5YGI",
+    "fields": {
+      "VERSION": "3",
+      "CHAIN": "V27Q0EU",
+      "NETWORK": "VDNQVSX",
+      "BLOCK_INDEX": "4761388",
+      "BLOCK_HASH": "9a1171d806283bdf",
+      "LEDGER_HASH": "a56bb96acec48cc2",
+      "ACTIONS_HASH": "40351abf8d8e5395",
+      "CONTRACT_HASH": "cac73afe47368404",
+      "CHECKPOINT_SEQ": "V30AIW9",
+      "SNAPSHOT_BLOCK": "1",
+      "STATE_ROOT": "V9BDOSB",
+      "STATE_ROOT_VERSION": "V9FIM00",
+      "BLOCK_MERKLE_ROOT": "0",
+      "BLOCK_MERKLE_VERSION": "100",
+      "SIG_COUNT": "c8b698ec2aad43b6",
+      "PUBKEY": "02abababababababababababababababababababababababababababababababab",
+      "SIG": "2df57105d44ba84e",
+      "...": "VEC5YGI"
+    }
+  },
+  {
     "action": "ATTEST",
     "version": 0,
-    "format": "VERSION|REQUEST_ID|PROVIDER_ID|REQUEST_PAYLOAD|CALLBACK_METHOD|CALLBACK_PARAMS_JSON|REDUNDANCY|DEADLINE_BLOCKS",
-    "string": "ATTEST|0|VD5FSBE|VDOS82X|be0641cba2d88035|V9E8VSG|VDIZZYM|V49UGUH|1",
+    "format": "VERSION|REQUEST_ID|PROVIDER_ID|REQUEST_PAYLOAD|CALLBACK_METHOD|CALLBACK_PARAMS_JSON|REDUNDANCY|DEADLINE_BLOCKS|FEE_TICK|FEE_AMOUNT",
+    "string": "ATTEST|0|VD5FSBE|VDOS82X|be0641cba2d88035|V9E8VSG|VDIZZYM|V49UGUH|1|A1B2C3|1",
     "fields": {
       "VERSION": "0",
       "REQUEST_ID": "VD5FSBE",
@@ -139,7 +179,9 @@
       "CALLBACK_METHOD": "V9E8VSG",
       "CALLBACK_PARAMS_JSON": "VDIZZYM",
       "REDUNDANCY": "V49UGUH",
-      "DEADLINE_BLOCKS": "1"
+      "DEADLINE_BLOCKS": "1",
+      "FEE_TICK": "A1B2C3",
+      "FEE_AMOUNT": "1"
     }
   },
   {
@@ -326,6 +368,45 @@
       "CONSTRUCTOR_PARAMS": "V4FU22F",
       "COOLDOWN_BLOCKS": "0",
       "SLASH_DESTINATION": "n4nbVcRRR5sEHyp2VYuLUvCyDmQmBoonoK"
+    }
+  },
+  {
+    "action": "DEPLOY",
+    "version": 2,
+    "format": "VERSION|CODE_HASH|GAS_LIMIT|CONSTRUCTOR_PARAMS",
+    "string": "DEPLOY|2|b522bb7765511b06|0|V9M57KX",
+    "fields": {
+      "VERSION": "2",
+      "CODE_HASH": "b522bb7765511b06",
+      "GAS_LIMIT": "0",
+      "CONSTRUCTOR_PARAMS": "V9M57KX"
+    }
+  },
+  {
+    "action": "DEPLOY",
+    "version": 3,
+    "format": "VERSION|CODE_HASH|GAS_LIMIT|CONSTRUCTOR_PARAMS|COOLDOWN_BLOCKS|SLASH_DESTINATION",
+    "string": "DEPLOY|3|2de9a1171d806283|100|VDS66I7|4761388|n4nbVcRRR5sEHyp2VYuLUvCyDmQmBoonoK",
+    "fields": {
+      "VERSION": "3",
+      "CODE_HASH": "2de9a1171d806283",
+      "GAS_LIMIT": "100",
+      "CONSTRUCTOR_PARAMS": "VDS66I7",
+      "COOLDOWN_BLOCKS": "4761388",
+      "SLASH_DESTINATION": "n4nbVcRRR5sEHyp2VYuLUvCyDmQmBoonoK"
+    }
+  },
+  {
+    "action": "DEPLOY",
+    "version": 4,
+    "format": "VERSION|CODE_HASH|CHUNK_INDEX|TOTAL_CHUNKS|CODE_PART",
+    "string": "DEPLOY|4|07e405bb63817019|1|V4N78PL|7759ca65d3ab7bbd",
+    "fields": {
+      "VERSION": "4",
+      "CODE_HASH": "07e405bb63817019",
+      "CHUNK_INDEX": "1",
+      "TOTAL_CHUNKS": "V4N78PL",
+      "CODE_PART": "7759ca65d3ab7bbd"
     }
   },
   {
@@ -576,6 +657,21 @@
     }
   },
   {
+    "action": "ISSUE",
+    "version": 6,
+    "format": "VERSION|TICK|CONTROLLER|ACTION_CLASS|COOLDOWN_BLOCKS|UNBIND|MEMO",
+    "string": "ISSUE|6|A1B2C3|VB6KC78|VAFQD0L|1|V9A85QX|field round trip 999131",
+    "fields": {
+      "VERSION": "6",
+      "TICK": "A1B2C3",
+      "CONTROLLER": "VB6KC78",
+      "ACTION_CLASS": "VAFQD0L",
+      "COOLDOWN_BLOCKS": "1",
+      "UNBIND": "V9A85QX",
+      "MEMO": "field round trip 999131"
+    }
+  },
+  {
     "action": "LINK",
     "version": 0,
     "format": "VERSION|COIN1|COIN1_ACTION_INDEX|COIN2|COIN2_ACTION_INDEX|MEMO",
@@ -673,6 +769,23 @@
       "AMOUNT": "12345678901234567890",
       "DESTINATION": "mvuKWKvgzrkxh8QgNZ91vMBZUKN5BFYmo3",
       "MEMO": "field round trip 880575"
+    }
+  },
+  {
+    "action": "NODEPROOF",
+    "version": 0,
+    "format": "VERSION|CHALLENGE_ID|EPOCH_HEIGHT|PASS_COUNT|PASS_PK...|SIG_COUNT|PUBKEY|SIG|...",
+    "string": "NODEPROOF|0|VD5FSBE|VDOS82X|100|VEK9S6M|0641cba2d880359d|02abababababababababababababababababababababababababababababababab|45c4223cdb7f6eb2|V5T8X0G",
+    "fields": {
+      "VERSION": "0",
+      "CHALLENGE_ID": "VD5FSBE",
+      "EPOCH_HEIGHT": "VDOS82X",
+      "PASS_COUNT": "100",
+      "PASS_PK...": "VEK9S6M",
+      "SIG_COUNT": "0641cba2d880359d",
+      "PUBKEY": "02abababababababababababababababababababababababababababababababab",
+      "SIG": "45c4223cdb7f6eb2",
+      "...": "V5T8X0G"
     }
   },
   {
@@ -801,6 +914,21 @@
       "AMOUNT": "0",
       "DESTINATION": "msK1rsgNVFPM4cR3X5rngczTKa6EtT4WKD",
       "MEMO": "field round trip 491863"
+    }
+  },
+  {
+    "action": "SLASH",
+    "version": 0,
+    "format": "VERSION|CAPABILITY|OFFENDER_PUBKEY|MSG_A|SIG_A|MSG_B|SIG_B",
+    "string": "SLASH|0|VD5FSBE|02abababababababababababababababababababababababababababababababab|VDOS82X|be0641cba2d88035|V9E8VSG|d45c4223cdb7f6eb",
+    "fields": {
+      "VERSION": "0",
+      "CAPABILITY": "VD5FSBE",
+      "OFFENDER_PUBKEY": "02abababababababababababababababababababababababababababababababab",
+      "MSG_A": "VDOS82X",
+      "SIG_A": "be0641cba2d88035",
+      "MSG_B": "V9E8VSG",
+      "SIG_B": "d45c4223cdb7f6eb"
     }
   },
   {
@@ -956,6 +1084,35 @@
       "CONTRACT_ACTION_INDEX": "4761388",
       "TICK": "A1B2C3",
       "QUANTITY": "VBFPL8P"
+    }
+  },
+  {
+    "action": "XCALL",
+    "version": 0,
+    "format": "VERSION|CALL_ID|TARGET_CHAIN|TARGET_CONTRACT_INDEX|METHOD|PARAMS_JSON|GAS_LIMIT|CALLBACK_METHOD|CALLBACK_PARAMS_JSON|DEADLINE_BLOCKS|CROSS_HOPS",
+    "string": "XCALL|0|VD5FSBE|VDOS82X|100|VEK9S6M|VALO9S|1|V4YYYSJ|V1TW9WW|4761388|VBL1IMN",
+    "fields": {
+      "VERSION": "0",
+      "CALL_ID": "VD5FSBE",
+      "TARGET_CHAIN": "VDOS82X",
+      "TARGET_CONTRACT_INDEX": "100",
+      "METHOD": "VEK9S6M",
+      "PARAMS_JSON": "VALO9S",
+      "GAS_LIMIT": "1",
+      "CALLBACK_METHOD": "V4YYYSJ",
+      "CALLBACK_PARAMS_JSON": "V1TW9WW",
+      "DEADLINE_BLOCKS": "4761388",
+      "CROSS_HOPS": "VBL1IMN"
+    }
+  },
+  {
+    "action": "XCALL",
+    "version": 2,
+    "format": "VERSION|CALL_ID",
+    "string": "XCALL|2|VC8HVHS",
+    "fields": {
+      "VERSION": "2",
+      "CALL_ID": "VC8HVHS"
     }
   }
 ]
