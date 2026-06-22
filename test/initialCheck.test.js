@@ -293,9 +293,9 @@ exports.mochaHooks = {
                 throw new Error("Can't connect to the XChain Indexer Database")
             }
 
-            let pingRegtestMiner = await regtestMinerConnector.ping()
+            let pingRegtestMiner = await regtestMinerConnector.waitForReady()
             if (!pingRegtestMiner){
-                throw new Error("Can't connect to the XChain Regtest Miner module")
+                throw new Error("Can't connect to the XChain Regtest Miner module (not ready after wait)")
             } else {
                 await regtestMinerConnector.setMiningTime(1000, 1000)
             }

@@ -41,16 +41,32 @@ class RegtestMinerConnector {
 
         // Gate on result.ready, not just result truthiness. The miner runs
         // prepareWallet() detached on startup so the port may listen before the
-        // wallet address is set. Returning false until ready=true lets the
-        // bootstrap ping loop withhold clearance until the miner can fund
-        // addresses, closing the cold-start "Invalid address" race (see df6a8f7).
+        // wallet address is set. ping() is single-shot; callers that must tolerate
+        // a cold start / post-reset use waitForReady() below to poll until
+        // ready=true, closing the "Invalid address" race (see df6a8f7).
         if (response.data && response.data.result && response.data.result.ready) {
             return true;
         } else {
             return false
         }
     }
-    
+
+    // Poll ping() until the miner reports ready=true or the timeout elapses. The
+    // miner runs prepareWallet() detached on startup, so on a cold start / post-reset
+    // the port can listen (and ping resolve) before the wallet can fund addresses.
+    // A single ping() is therefore a race that can return false once and abort
+    // bootstrap; waitForReady withholds clearance by retrying, which is what the
+    // df6a8f7 ready-gate intended. Returns true once ready, false if still not ready
+    // at the deadline (the caller treats false as a hard failure).
+    async waitForReady(timeoutMs = 30000, intervalMs = 1000){
+        const deadline = Date.now() + timeoutMs;
+        while (true) {
+            if (await this.ping()) return true;
+            if (Date.now() >= deadline) return false;
+            await this.sleep(intervalMs);
+        }
+    }
+
     async sendFunds(address, amount){
         const data = {
             jsonrpc: '2.0',
