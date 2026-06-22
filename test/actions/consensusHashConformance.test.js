@@ -100,6 +100,14 @@ describe('consensus hash conformance: sync BlockHasher == indexer committed hash
     });
 });
 
+// Load the protocol special-address map from xchain-sync (same frozen set used by
+// the follower's getBlockLeafRows canonicalization). Used below to build the SQL
+// IN-list that proves at least one canonicalized ledger row appeared during the run.
+let ROLE_BY_ADDRESS;
+try {
+    ({ ROLE_BY_ADDRESS } = require(path.join(__dirname, '../../../xchain-sync/src/protocolAddressRoles.js')));
+} catch (e) { /* handled in before() alongside the other sync guards */ }
+
 // Light-client state-commitment conformance (SPV spec sec.4-5). The follower
 // recomputes block_merkle_root from src/stateCommitment.js + db.getBlockLeafRows
 // (a copy of BlockHasher's 10 content queries) and HALTs if it disagrees with the
@@ -158,5 +166,38 @@ describe('state commitment conformance: sync block_merkle_root == indexer commit
             'sync block_merkle_root diverged from indexer committed roots (block-content conformance pair drifted). ' +
             'Update BOTH xchain-sync/src/db.js getBlockLeafRows / stateCommitment.js and the indexer side, then ' +
             'regenerate the golden:\n' + JSON.stringify(mismatches.slice(0, 10), null, 2));
+    });
+
+    // Guard that the canonicalization path was actually exercised. Without at least
+    // one special-address ledger row (BURN/GAS/DONATE/REWARD) in the indexed blocks,
+    // the recompute loop above can pass while never touching the canonicalization code
+    // that the consensus fix introduced. This assertion makes the guard fail-meaningful
+    // rather than vacuously green on a run that never credited a protocol address.
+    // The e2e suite's ISSUE/SEND/etc. actions generate protocol fees credited to
+    // DONATE1/DONATE2; the MINT gas bootstrap credits GAS. Both paths are exercised
+    // before this test file runs, so skipping here is a signal worth surfacing.
+    it('at least one indexed block credits a protocol special address (canonicalization was exercised)', async function () {
+        if (!rootRows || !rootRows.length) this.skip();
+        if (!ROLE_BY_ADDRESS) {
+            console.log('protocolAddressRoles not available; skipping special-address coverage check');
+            this.skip();
+        }
+        const specialAddresses = Object.keys(ROLE_BY_ADDRESS);
+        // Build a parameterized IN-list so no address is hardcoded here.
+        const placeholders = specialAddresses.map(() => '?').join(', ');
+        const creditsRows = await dbAdapter.doQuery(
+            'SELECT address FROM credits WHERE address IN (' + placeholders + ') LIMIT 1',
+            specialAddresses
+        );
+        const debitsRows  = creditsRows.length ? creditsRows : await dbAdapter.doQuery(
+            'SELECT address FROM debits WHERE address IN (' + placeholders + ') LIMIT 1',
+            specialAddresses
+        );
+        assert.ok(
+            creditsRows.length > 0 || debitsRows.length > 0,
+            'no protocol special-address ledger row found in credits or debits; the suite ran without ' +
+            'exercising special-address canonicalization. Ensure at least one ISSUE/SEND/fee-paying ' +
+            'action precedes this test so the block_merkle_root conformance check is not vacuously green.'
+        );
     });
 });

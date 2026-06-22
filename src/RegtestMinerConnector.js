@@ -30,7 +30,7 @@ class RegtestMinerConnector {
             method: 'ping',
             id: 1
         }
-        
+
         // Make the request to the node
         var response = null
         try {
@@ -39,8 +39,12 @@ class RegtestMinerConnector {
             return false
         }
 
-        // Verify if there is a result and return it
-        if (response.data && response.data.result) {
+        // Gate on result.ready, not just result truthiness. The miner runs
+        // prepareWallet() detached on startup so the port may listen before the
+        // wallet address is set. Returning false until ready=true lets the
+        // bootstrap ping loop withhold clearance until the miner can fund
+        // addresses, closing the cold-start "Invalid address" race (see df6a8f7).
+        if (response.data && response.data.result && response.data.result.ready) {
             return true;
         } else {
             return false

@@ -11,6 +11,28 @@
 const dotenv = require('dotenv')
 dotenv.config()
 
+const fs   = require('fs')
+const path = require('path')
+
+// Vendor-bundle pre-flight: warn loudly when the gitignored ./xchain-sdk or
+// ./xchain-hub directories are absent. These are staged by `xchain-node install`
+// (via LIBRARY_BUNDLES) and are not part of the repo. When missing, `npm install`
+// creates a dangling symlink in node_modules rather than failing, so SDK suites
+// crash at require() time with a cryptic MODULE_NOT_FOUND. Surface the cause here
+// so the operator knows to run `xchain-node install xchain-e2e-test` (or copy the
+// sibling directories in manually) before attempting the SDK test suites.
+const VENDOR_LIBS = ['xchain-sdk', 'xchain-hub'];
+for (const lib of VENDOR_LIBS) {
+    const libPath = path.join(__dirname, '..', lib);
+    if (!fs.existsSync(libPath)) {
+        console.warn(
+            '[e2e setup] WARNING: vendored library directory ./' + lib + ' is absent. ' +
+            'Run `xchain-node install xchain-e2e-test` (or `xchain-node update xchain-e2e-test`) ' +
+            'to stage it. The `npm run test:sdk` suites will fail at require() until it is present.'
+        );
+    }
+}
+
 const BlockchainConnector = require('../src/BlockchainConnector.js')
 const XChainUtxoTrackerConnector = require('../src/XChainUtxoTrackerConnector.js')
 const XChainEncoderConnector = require('../src/XChainEncoderConnector.js')
