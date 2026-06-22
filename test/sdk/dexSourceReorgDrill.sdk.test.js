@@ -62,6 +62,14 @@ const { makeSdk, submit, fundedGasAddress, mine, submitOpts, XChainSDK } = requi
 const DB_HOST = process.env.XCALL_DB_HOST || '127.0.0.1';
 const DB_PORT = parseInt(process.env.XCALL_DB_PORT || '13306', 10);
 
+// Hub DB connection, split from the indexer-DB connection so a distributed venue
+// (isolated relay hub on its own DB) can be addressed separately; mirrors the same
+// HUB_DB_* knobs dexDogeSetup.js already uses. Defaults preserve the co-located
+// single-MariaDB behavior (XChain_Hub on XCALL_DB_*).
+const HUB_DB_HOST = process.env.HUB_DB_HOST || DB_HOST;
+const HUB_DB_PORT = parseInt(process.env.HUB_DB_PORT || String(DB_PORT), 10);
+const HUB_DB_NAME = process.env.HUB_DB_NAME || 'XChain_Hub';
+
 const BTC_TICK  = String(process.env.DEX_BTC_TICK || '').trim();
 const DOGE_TICK = String(process.env.DEX_DOGE_TICK || '').trim();
 
@@ -69,7 +77,10 @@ async function withConn(database, user, password, fn) {
     const conn = await mariadb.createConnection({ host: DB_HOST, port: DB_PORT, database, user, password });
     try { return await fn(conn); } finally { await conn.end().catch(() => {}); }
 }
-async function hubDb(fn)   { return withConn('XChain_Hub', process.env.HUB_DB_USER, process.env.HUB_DB_PASS, fn); }
+async function hubDb(fn) {
+    const conn = await mariadb.createConnection({ host: HUB_DB_HOST, port: HUB_DB_PORT, database: HUB_DB_NAME, user: process.env.HUB_DB_USER, password: process.env.HUB_DB_PASS });
+    try { return await fn(conn); } finally { await conn.end().catch(() => {}); }
+}
 async function dogeIdx(fn) { return withConn('XChain_DOGE_Regtest_Indexer', process.env.DOGE_IDX_DB_USER, process.env.DOGE_IDX_DB_PASS, fn); }
 
 async function btcIdx(sql, params) {
