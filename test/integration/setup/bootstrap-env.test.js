@@ -96,7 +96,7 @@ describe('Bootstrap: environment variable path', function () {
             envVars.INDEXER_DB_NAME, envVars.INDEXER_DB_USER, envVars.INDEXER_DB_PASS
         )
         global.regtestMinerConnector = new RegtestMinerConnector(
-            envVars.REGTEST_MINER_URL, envVars.REGTEST_MINER_API_PORT
+            envVars.REGTEST_MINER_URL, envVars.REGTEST_MINER_API_PORT, process.env.MINER_API_KEY || null
         )
 
         return { COIN, NETWORK, NETWORK_OBJECT, COIN_CODE }

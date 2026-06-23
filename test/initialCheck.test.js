@@ -249,7 +249,7 @@ exports.mochaHooks = {
             global.indexerConnector = new XChainIndexerConnector(INDEXER_URL, INDEXER_PORT, process.env.INDEXER_API_KEY || null)
             global.explorerConnector = new XChainExplorerConnector(EXPLORER_URL, EXPLORER_PORT)
             global.indexerDatabase = new Database(DATABASE_URL, DATABASE_PORT, INDEXER_DATABASE_NAME, INDEXER_DATABASE_USER, INDEXER_DATABASE_PASS)
-            global.regtestMinerConnector = new RegtestMinerConnector(REGTEST_MINER_URL, REGTEST_MINER_PORT)
+            global.regtestMinerConnector = new RegtestMinerConnector(REGTEST_MINER_URL, REGTEST_MINER_PORT, process.env.MINER_API_KEY || null)
         })
 
         await phase('service-pings', async () => {

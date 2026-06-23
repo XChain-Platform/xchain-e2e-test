@@ -41,11 +41,29 @@ describe('RegtestMinerConnector', function () {
         it('stores port', function () {
             assert.strictEqual(connector.port, PORT);
         });
+
+        it('sends no auth header by default (two-arg construction unchanged)', async function () {
+            assert.deepStrictEqual(connector.reqConfig, {});
+            axiosPostStub.resolves({ data: { result: 'pong' } });
+            await connector.sendFunds('addr', 1);
+            assert.deepStrictEqual(axiosPostStub.firstCall.args[2], {});
+        });
+
+        it('attaches the x-api-key header to every request when a key is configured', async function () {
+            const keyed = new RegtestMinerConnector(URL, PORT, 'secret-key');
+            assert.deepStrictEqual(keyed.reqConfig, { headers: { 'x-api-key': 'secret-key' } });
+            axiosPostStub.resolves({ data: { result: 'ok' } });
+            await keyed.generateBlocks(1);
+            assert.deepStrictEqual(axiosPostStub.firstCall.args[2], { headers: { 'x-api-key': 'secret-key' } });
+        });
     });
 
     describe('ping', function () {
-        it('returns true when response.data.result is truthy', async function () {
-            axiosPostStub.resolves({ data: { result: 'pong' } });
+        it('returns true when response.data.result.ready is true', async function () {
+            // ping() gates on result.ready (the df6a8f7 readiness gate), not bare
+            // result truthiness, so a cold-start miner whose port listens before the
+            // wallet is funded is not reported ready.
+            axiosPostStub.resolves({ data: { result: { ready: true } } });
             const result = await connector.ping();
             assert.strictEqual(result, true);
         });

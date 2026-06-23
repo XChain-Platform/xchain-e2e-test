@@ -15,9 +15,15 @@
 const axios = require('axios');
 
 class RegtestMinerConnector {
-    constructor(url, port) {
+    constructor(url, port, apiKey = null) {
         this.url = "http://"+url+":"+port
         this.port = port
+        this.apiKey = apiKey || null
+        // Mirror the regtest-miner's opt-in MINER_API_KEY (x-api-key header, 401 on
+        // mismatch): when a key is configured, attach it to every request so an
+        // authenticated miner does not 401 the e2e harness. No key -> no header,
+        // byte-identical request to before, so existing two-arg callers are unaffected.
+        this.reqConfig = this.apiKey ? { headers: { 'x-api-key': this.apiKey } } : {}
     }
 
     async sleep(ms) {
@@ -34,7 +40,7 @@ class RegtestMinerConnector {
         // Make the request to the node
         var response = null
         try {
-            response = await axios.post(this.url, data)
+            response = await axios.post(this.url, data, this.reqConfig)
         } catch (err) {
             return false
         }
@@ -76,7 +82,7 @@ class RegtestMinerConnector {
         }
         
         // Make the request to the node
-        const response = await axios.post(this.url, data)
+        const response = await axios.post(this.url, data, this.reqConfig)
 
         // Verify if there is a result and return it
         if (response.data && response.data.result) {
@@ -95,7 +101,7 @@ class RegtestMinerConnector {
         }
         
         // Make the request to the node
-        const response = await axios.post(this.url, data)
+        const response = await axios.post(this.url, data, this.reqConfig)
 
         // Verify if there is a result and return it
         if (response.data && response.data.result) {
@@ -114,7 +120,7 @@ class RegtestMinerConnector {
         }
 
         // Make the request to the node
-        const response = await axios.post(this.url, data)
+        const response = await axios.post(this.url, data, this.reqConfig)
 
         // Verify if there is a result and return it
         if (response.data && response.data.result) {
@@ -136,7 +142,7 @@ class RegtestMinerConnector {
             id: 1
         }
 
-        const response = await axios.post(this.url, data)
+        const response = await axios.post(this.url, data, this.reqConfig)
 
         if (response.data && response.data.result) {
             return response.data.result
@@ -154,7 +160,7 @@ class RegtestMinerConnector {
             id: 1
         }
 
-        const response = await axios.post(this.url, data)
+        const response = await axios.post(this.url, data, this.reqConfig)
 
         if (response.data && response.data.result) {
             return response.data.result
@@ -175,7 +181,7 @@ class RegtestMinerConnector {
             id: 1
         }
 
-        const response = await axios.post(this.url, data)
+        const response = await axios.post(this.url, data, this.reqConfig)
 
         if (response.data && response.data.result) {
             return response.data.result

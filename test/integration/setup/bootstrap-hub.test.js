@@ -105,7 +105,7 @@ describe('Bootstrap: hub discovery fallback', function () {
         global.encoderConnector = new XChainEncoderConnector(ENCODER_URL, ENCODER_PORT)
         global.indexerConnector = new XChainIndexerConnector(INDEXER_URL, INDEXER_PORT)
         global.indexerDatabase = new Database(DATABASE_URL, DATABASE_PORT, INDEXER_DATABASE_NAME, INDEXER_DATABASE_USER, INDEXER_DATABASE_PASS)
-        global.regtestMinerConnector = new RegtestMinerConnector(REGTEST_MINER_URL, REGTEST_MINER_PORT)
+        global.regtestMinerConnector = new RegtestMinerConnector(REGTEST_MINER_URL, REGTEST_MINER_PORT, process.env.MINER_API_KEY || null)
     }
 
     describe('Scenario 3.1.2: Hub provides all service endpoints', function () {
