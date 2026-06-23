@@ -181,4 +181,31 @@ describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration
         await sleep(400);
         assert.strictEqual(await count(repPool, 'price_snapshots', 'id=2'), 1, 're-broadcast must not duplicate');
     });
+
+    // A DEFERRED retraction (hub-blip path) replays a CLOSED range [from,last]. If the new
+    // canonical chain re-published a row at A' > last before the deferred drain fires, the bounded
+    // delete must NOT wipe it (item 5296). Proven end-to-end over the real WS mirror.
+    it('CLOSED-RANGE RETRACTION: a bounded retraction over the WS leaves a re-published row above the ceiling intact', async function () {
+        const ins = (id, sai, round, pair) => srcPool.query(
+            "INSERT INTO price_snapshots (id,round_number,coin_pair,price,reference_block,validator_count,consensus_proof,status,source_chain,source_action_index) " +
+            "VALUES (?,?,?,'1.00000000',1,4,'proof-retr','finalized','BTC',?)", [id, round, pair, sai]);
+
+        // Orphaned row inside the rolled-back range (source_action_index = 50), mirrored to REP.
+        await ins(300, 50, 300, 'RETR-A/USD');
+        broadcaster.broadcastRow({ table: 'price_snapshots', row: { id: 300, source_chain: 'BTC', source_action_index: 50 } });
+        assert.ok(await waitFor(async () => (await count(repPool, 'price_snapshots', 'id=300')) === 1), 'orphan row never mirrored');
+
+        // Deferred retraction drains as a CLOSED range [50,75] (hub already applied it; mirror it here).
+        broadcaster.broadcastDeletion({ table: 'price_snapshots', source_chain: 'BTC', from_action_index: 50, to_action_index: 75 });
+        assert.ok(await waitFor(async () => (await count(repPool, 'price_snapshots', 'id=300')) === 0), 'bounded retraction never removed the orphan on the replica');
+
+        // The new chain re-published at A' = 80 (> 75). It must survive the bounded retraction.
+        await ins(301, 80, 301, 'RETR-B/USD');
+        broadcaster.broadcastRow({ table: 'price_snapshots', row: { id: 301, source_chain: 'BTC', source_action_index: 80 } });
+        assert.ok(await waitFor(async () => (await count(repPool, 'price_snapshots', 'id=301')) === 1), 're-published row above the ceiling never mirrored');
+
+        await sleep(300); // settle: confirm the bounded delete did not retroactively touch id=301
+        assert.strictEqual(await count(repPool, 'price_snapshots', 'id=301'), 1, 're-published row A\'=80 must survive a [50,75] retraction');
+        assert.strictEqual(await count(repPool, 'price_snapshots', 'id=300'), 0, 'orphan row in [50,75] must stay deleted');
+    });
 });
