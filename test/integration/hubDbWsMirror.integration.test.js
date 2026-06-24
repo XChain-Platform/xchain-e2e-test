@@ -45,6 +45,7 @@ const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const SQL = {
     price_snapshots:      '../../../xchain-hub/src/sql/price_snapshots.sql',
     oracle_prices:        '../../../xchain-hub/src/sql/oracle_prices.sql',
+    cross_chain_calls:    '../../../xchain-indexer/src/sql/cross_chain_calls.sql',
     cross_chain_matches:  '../../../xchain-indexer/src/sql/cross_chain_matches.sql',
     capability_snapshots: '../../../xchain-indexer/src/sql/capability_snapshots.sql',
 };
@@ -80,7 +81,12 @@ describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration
         await admin.end();
         srcPool = mariadb.createPool({ ...base, database: SRC });
         repPool = mariadb.createPool({ ...base, database: REP });
-        for (const t of Object.keys(SQL)) { const ddl = readDDL(SQL[t]); await srcPool.query(ddl); await repPool.query(ddl); }
+        // Some shipped DDLs (cross_chain_calls) carry separate CREATE INDEX statements after the
+        // CREATE TABLE; the pools don't enable multipleStatements, so split and run each in order.
+        for (const t of Object.keys(SQL)) {
+            const stmts = readDDL(SQL[t]).split(';').map(s => s.trim()).filter(Boolean);
+            for (const s of stmts) { await srcPool.query(s); await repPool.query(s); }
+        }
 
         // Pre-existing rows must arrive via REST snapshot (not WS) on HubDbSync.start().
         await srcPool.query(
@@ -207,5 +213,81 @@ describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration
         await sleep(300); // settle: confirm the bounded delete did not retroactively touch id=301
         assert.strictEqual(await count(repPool, 'price_snapshots', 'id=301'), 1, 're-published row A\'=80 must survive a [50,75] retraction');
         assert.strictEqual(await count(repPool, 'price_snapshots', 'id=300'), 0, 'orphan row in [50,75] must stay deleted');
+    });
+
+    // ── Item 5308: push-generation reorg fence over the WS mirror ────────────────
+    // The HARD case the closed-range bound (5296) cannot solve: action_index RECYCLES after a
+    // rollback (MAX+1 restarts at `first`), so the new canonical chain re-publishes a DISTINCT row
+    // at the SAME action_index that is inside the deferred retraction's [first,last]. A range-only
+    // delete wipes both the orphan AND the re-publish. The fence stamps each row with the source
+    // chain's push_generation and carries the rollback's PRE-bump generation on the retraction, so
+    // only rows with push_generation <= it are deleted. The re-published row (higher generation)
+    // survives even at the recycled index. Each case below would FAIL on pre-fence code (the
+    // re-published row would be deleted); it passes only because _applyRetraction now fences by
+    // generation. Mirrors the same row:deleted{retraction_generation} the hub broadcasts live.
+    const bcastWait = async (rows, table, whereSurvive) => {
+        for (const r of rows) broadcaster.broadcastRow({ table, row: r });
+        return waitFor(async () => (await count(repPool, table, whereSurvive)) === rows.length);
+    };
+
+    it('GEN FENCE (price_snapshots): a re-published row at a RECYCLED action_index survives a gen-fenced retraction', async function () {
+        // Orphan (gen 5) and re-publish (gen 6) at the SAME source_action_index = 50. Distinct
+        // round_number keeps the (round_number, coin_pair) unique key happy; only the generation
+        // distinguishes stale from fresh.
+        const orphan = { id: 600, round_number: 600, coin_pair: 'GENP/USD', source_chain: 'BTC', source_action_index: 50, push_generation: 5 };
+        const repub  = { id: 601, round_number: 601, coin_pair: 'GENP/USD', source_chain: 'BTC', source_action_index: 50, push_generation: 6 };
+        assert.ok(await bcastWait([orphan, repub], 'price_snapshots', 'id IN (600,601)'), 'recycle rows never mirrored');
+
+        broadcaster.broadcastDeletion({ table: 'price_snapshots', source_chain: 'BTC', from_action_index: 50, to_action_index: 75, retraction_generation: 5 });
+        assert.ok(await waitFor(async () => (await count(repPool, 'price_snapshots', 'id=600')) === 0), 'gen-5 orphan at recycled index never removed');
+        await sleep(300);
+        assert.strictEqual(await count(repPool, 'price_snapshots', 'id=601'), 1, 'gen-6 re-publish at the SAME recycled index must survive a gen-5 retraction');
+        assert.strictEqual(await count(repPool, 'price_snapshots', 'id=600'), 0, 'gen-5 orphan must stay deleted');
+    });
+
+    it('GEN FENCE (oracle_prices): a higher-gen row at a recycled index survives; a stale in-range row still deletes', async function () {
+        // oracle_prices carries UNIQUE (source_chain, action_index), so two rows can't share index 50;
+        // the recycled-index row REPLACES the orphan. Survivor = the gen-6 row now at index 50; the
+        // gen-5 orphan at index 60 (also inside [50,75]) proves deletion still fires under the fence.
+        const survivor = { id: 610, source_address: 'oGenNew', source_chain: 'BTC', coin: 'BTC', tick: 'T', fiat: 'USD', value: '1', block_time: 1, effective_at: 1, action_index: 50, push_generation: 6 };
+        const orphan   = { id: 611, source_address: 'oGenOld', source_chain: 'BTC', coin: 'BTC', tick: 'T', fiat: 'USD', value: '1', block_time: 1, effective_at: 1, action_index: 60, push_generation: 5 };
+        assert.ok(await bcastWait([survivor, orphan], 'oracle_prices', 'id IN (610,611)'), 'oracle recycle rows never mirrored');
+
+        broadcaster.broadcastDeletion({ table: 'oracle_prices', source_chain: 'BTC', from_action_index: 50, to_action_index: 75, retraction_generation: 5 });
+        assert.ok(await waitFor(async () => (await count(repPool, 'oracle_prices', 'id=611')) === 0), 'gen-5 oracle orphan never removed');
+        await sleep(300);
+        assert.strictEqual(await count(repPool, 'oracle_prices', 'id=610'), 1, 'gen-6 oracle row at recycled index must survive a gen-5 retraction');
+        assert.strictEqual(await count(repPool, 'oracle_prices', 'id=611'), 0, 'gen-5 oracle orphan must stay deleted');
+    });
+
+    it('GEN FENCE (cross_chain_calls, single column): a re-finalized relay row at a recycled source index survives', async function () {
+        // XCALL relay rows fence on the single push_generation column (source-keyed retraction).
+        // Orphan + re-finalize at the SAME source_action_index = 50, distinct call_id (unique key).
+        const base = { phase: 'dispatch', snapshot_block: 100, network: 'regtest', source_chain: 'BTC', source_contract_index: 1, target_chain: 'LTC', target_contract_index: 1, method: 'm', params_json: '[]', gas_limit: 1000, cross_hops: 0, effective_time: 1, validator_signatures: '[]', status: 'finalized' };
+        const orphan = { ...base, id: 620, call_id: 'gen-call-orphan', source_action_index: 50, push_generation: 5 };
+        const repub  = { ...base, id: 621, call_id: 'gen-call-repub',  source_action_index: 50, push_generation: 6 };
+        assert.ok(await bcastWait([orphan, repub], 'cross_chain_calls', "call_id IN ('gen-call-orphan','gen-call-repub')"), 'call recycle rows never mirrored');
+
+        broadcaster.broadcastDeletion({ table: 'cross_chain_calls', source_chain: 'BTC', from_action_index: 50, to_action_index: 75, retraction_generation: 5 });
+        assert.ok(await waitFor(async () => (await count(repPool, 'cross_chain_calls', "call_id='gen-call-orphan'")) === 0), 'gen-5 call orphan never removed');
+        await sleep(300);
+        assert.strictEqual(await count(repPool, 'cross_chain_calls', "call_id='gen-call-repub'"), 1, 'gen-6 relay row at the recycled source index must survive a gen-5 retraction');
+        assert.strictEqual(await count(repPool, 'cross_chain_calls', "call_id='gen-call-orphan'"), 0, 'gen-5 call orphan must stay deleted');
+    });
+
+    it('GEN FENCE (cross_chain_matches, PER-LEG): the reorged leg fences by its own generation', async function () {
+        // A match has two legs on different chains, each with its own a_/b_push_generation. A BTC
+        // source reorg fences ONLY the a-leg (here on BTC) by a_push_generation. Orphan + re-publish
+        // share a_action_index = 50 on BTC; only a_push_generation distinguishes them.
+        const base = { snapshot_block: 100, network: 'regtest', a_chain: 'BTC', a_kind: 'order', a_tick: 'A', a_amount: '1', a_filled_before: '0', a_ownership: 0, a_payout_addr: 'x', b_chain: 'LTC', b_action_index: 9, b_kind: 'order', b_tick: 'B', b_amount: '1', b_filled_before: '0', b_ownership: 0, b_payout_addr: 'y', effective_time: 1, validator_signatures: '[]', status: 'finalized', b_push_generation: 0 };
+        const orphan = { ...base, id: 630, match_id: 'gen-match-orphan', a_action_index: 50, a_push_generation: 5 };
+        const repub  = { ...base, id: 631, match_id: 'gen-match-repub',  a_action_index: 50, a_push_generation: 6 };
+        assert.ok(await bcastWait([orphan, repub], 'cross_chain_matches', "match_id IN ('gen-match-orphan','gen-match-repub')"), 'match recycle rows never mirrored');
+
+        broadcaster.broadcastDeletion({ table: 'cross_chain_matches', source_chain: 'BTC', from_action_index: 50, to_action_index: 75, retraction_generation: 5 });
+        assert.ok(await waitFor(async () => (await count(repPool, 'cross_chain_matches', "match_id='gen-match-orphan'")) === 0), 'gen-5 match orphan (a-leg) never removed');
+        await sleep(300);
+        assert.strictEqual(await count(repPool, 'cross_chain_matches', "match_id='gen-match-repub'"), 1, 'gen-6 a-leg match at the recycled index must survive a gen-5 retraction');
+        assert.strictEqual(await count(repPool, 'cross_chain_matches', "match_id='gen-match-orphan'"), 0, 'gen-5 match orphan must stay deleted');
     });
 });
