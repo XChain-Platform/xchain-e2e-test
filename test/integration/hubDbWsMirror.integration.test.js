@@ -51,10 +51,14 @@ const SQL = {
 };
 
 // Read a shipped DDL file and reduce it to its bare CREATE TABLE statement:
-// strip the /* license */ block + `-- ` line comments so the driver gets one statement.
+// strip the /* license */ block + `--` line comments so the driver gets one statement.
+// Inline `--` comments are stripped too (not just full-line ones): a comment may carry
+// a ';' (e.g. "bumped each rollback; a retraction deletes ..."), which would otherwise
+// split the CREATE TABLE mid-statement on the `;` below. Mirrors the hub's own
+// stripSqlLineComments in db.js. The shipped DDL has no `--` inside string literals.
 function readDDL(rel) {
     let sql = fs.readFileSync(path.resolve(__dirname, rel), 'utf8');
-    sql = sql.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*--.*$/gm, '');
+    sql = sql.replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\n\r]*/g, '');
     return sql.trim().replace(/;\s*$/, '');
 }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
