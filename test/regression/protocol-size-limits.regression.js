@@ -31,6 +31,7 @@ const encoderValidator = require('../../../xchain-encoder/src/validator.js')
 const XChainDecoder     = require('../../../xchain-decoder/src/XChainDecoder.js')
 const sdkValidator      = require('../../../xchain-sdk/src/validator.js')
 const indexerDeploy     = require('../../../xchain-indexer/src/actions/deploy.js')
+const indexerXcall      = require('../../../xchain-indexer/src/actions/xcall.js')
 const XChainVM          = require('../../../xchain-vm/src/index.js')
 
 describe('Protocol size-limit drift guard', () => {
@@ -107,6 +108,42 @@ describe('Protocol size-limit drift guard', () => {
                 protocol.MAX_CODE_SIZE,
                 'VM isolate code-size limit drifted from the canonical protocol constant'
             )
+        })
+    })
+
+    describe('FIAT_CODE allow-list (PRICE actions)', () => {
+
+        it('[regression:p0] SDK VALID_FIAT_CODES === canonical', () => {
+            // The indexer's config.FIATS keys are the on-chain arbiter for PRICE
+            // FIAT_CODE; the canonical list mirrors them. The SDK validator must be a
+            // byte-equal allow-list or it silently refuses a FIAT the chain accepts
+            // (it drifted once, missing EUR and KRW). This guard makes that recur loudly.
+            assert.deepStrictEqual(
+                sdkValidator.VALID_FIAT_CODES,
+                protocol.VALID_FIAT_CODES,
+                'SDK VALID_FIAT_CODES drifted from the canonical FIAT allow-list (indexer config.FIATS is the arbiter)'
+            )
+        })
+    })
+
+    describe('XCALL consensus bounds (indexer is the arbiter)', () => {
+
+        // The indexer xcall.js values gate cross-chain calls on chain. They are
+        // literal-copied into the canonical module; assert they have not drifted.
+        // (VM_MAX_CALL_DEPTH is omitted until the VM exports MAX_CALL_DEPTH; tracked
+        // as remaining Stage-2 work.)
+        const XCALL_FIELDS = [
+            'XCALL_MIN_GAS', 'XCALL_MAX_GAS', 'XCALL_MAX_HOPS',
+            'XCALL_MIN_DEADLINE_BLOCKS', 'XCALL_MAX_DEADLINE_BLOCKS', 'XCALL_MAX_CALLS_PER_BLOCK',
+        ]
+        XCALL_FIELDS.forEach((field) => {
+            it('[regression:p0] indexer ' + field + ' === canonical', () => {
+                assert.strictEqual(
+                    indexerXcall[field],
+                    protocol[field],
+                    'indexer ' + field + ' drifted from the canonical protocol constant'
+                )
+            })
         })
     })
 
