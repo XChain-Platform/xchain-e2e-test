@@ -77,7 +77,12 @@ describe('Issuance fee: VM-emitted ISSUE from a constructor is fee-exempt', func
 
         // Constructor (the deploy-time `initialize` method) emits an ISSUE to the
         // contract's own derived address. The tick is embedded in the source so the
-        // deploy is self-contained and does not depend on constructor-param plumbing.
+        // deploy does not depend on constructor-ARGUMENT plumbing, but a param must
+        // still be sent: per the DEPLOY spec, `initialize` only runs when
+        // CONSTRUCTOR_PARAMS is present on the wire. Omitting it (as this test
+        // originally did) deploys a valid contract whose constructor never executes,
+        // so no token appears and the fee-exemption path is silently untested
+        // (audit finding F-14).
         const CTOR_MINTER = `
             module.exports = {
                 initialize: function() {
@@ -92,7 +97,7 @@ describe('Issuance fee: VM-emitted ISSUE from a constructor is fee-exempt', func
         // sendDeployV0 waits for a status='valid' contract row. On a pre-exemption
         // (or un-gated) indexer the constructor reverts on the issuance fee and no
         // valid contract row is ever written, so this call fails the regression.
-        const dep = await vmHelper.sendDeployV0(deployer, CTOR_MINTER, 300000)
+        const dep = await vmHelper.sendDeployV0(deployer, CTOR_MINTER, 300000, 'init')
         assert(dep.contract, 'a contract row should exist for the constructor-emit deploy')
         assert.strictEqual(dep.contract.status, 'valid',
             `DEPLOY must succeed; a charged issuance fee would revert the constructor (status: ${dep.contract.status})`)

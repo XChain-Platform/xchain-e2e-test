@@ -20,8 +20,10 @@ const GAS_TICK = 'XCHAIN'
  * Phase 5 ACCEPTANCE GATE for the deterministic index-id fix
  * (plan: address `^id` compaction + deterministic index-id consensus fix).
  *
- * This is the INVERSE of tickIdReorgDivergence.test.js (the Phase 1 gate, which
- * proved the OLD AUTO_INCREMENT behaviour forked). With the fix in place
+ * This is the INVERSE of the retired tickIdReorgDivergence.test.js (the Phase 1
+ * gate, which proved the OLD AUTO_INCREMENT behaviour forked; retired 2026-07-03
+ * once the fix shipped, because its assertions encode the broken behaviour and
+ * its failure was the fix working). With the fix in place
  * (index_tickers/index_addresses ids assigned by an explicit dense counter,
  * stamped with block_index, ROLLED BACK on reorg, and NOT resurrected by the
  * rollback refresh phase) the same scenario must NO LONGER diverge: the orphaned
