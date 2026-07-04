@@ -93,7 +93,10 @@ describe('[sdk] VOTE Phase 3 (weight modes + delegation)', function () {
     let sdk, issuer, A, B, C;
 
     before(async function () {
-        sdk = makeSdk();
+        // compactAddresses off: the SDK's ^id destination compaction is ahead of the
+        // indexer's wire acceptance (P4 arming / F3 gate open) and can invalidate the
+        // setup SENDs; these suites test VOTE semantics, not address compaction.
+        sdk = makeSdk({ compactAddresses: false });
         // Modest per-address funding (change returns to each address, so the
         // issuer's many txs stay covered); keeps the suite within a lean faucet.
         const FUND = 0.08;

@@ -127,7 +127,10 @@ describe('[sdk] VOTE creation deposit', function () {
         // BTC funding is only for tiny regtest tx fees (the deposit is paid in gas,
         // which the gas faucet mints), and the cosigner_test faucet runs lean at this
         // height (subsidy is long since halved to dust). Keep each address small.
-        sdk = makeSdk();
+        // compactAddresses off: the SDK's ^id destination compaction is ahead of the
+        // indexer's wire acceptance (P4 arming / F3 gate open) and can invalidate the
+        // setup SENDs; these suites test VOTE semantics, not address compaction.
+        sdk = makeSdk({ compactAddresses: false });
         issuer = await fundedGasAddress(sdk, 0.015);
         voterA = await fundedGasAddress(sdk, 0.012);
         voterB = await fundedGasAddress(sdk, 0.012);

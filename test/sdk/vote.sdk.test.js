@@ -75,7 +75,10 @@ describe('[sdk] VOTE token-weighted governance', function () {
     let sdk, issuer, voterA, voterB, voterC, outsider, tick;
 
     before(async function () {
-        sdk = makeSdk();
+        // compactAddresses off: the SDK's ^id destination compaction is ahead of the
+        // indexer's wire acceptance (P4 arming / F3 gate open) and can invalidate the
+        // setup SENDs; these suites test VOTE semantics, not address compaction.
+        sdk = makeSdk({ compactAddresses: false });
 
         // Issuer holds gas + mints the governance token; each voter is funded,
         // gets gas to pay their own ballot fees, and is sent a TICK stake. The

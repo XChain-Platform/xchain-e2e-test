@@ -107,7 +107,10 @@ describe('[sdk] VOTE v2 finalization', function () {
     let sdk, issuer, voterA, voterB;
 
     before(async function () {
-        sdk = makeSdk();
+        // compactAddresses off: the SDK's ^id destination compaction is ahead of the
+        // indexer's wire acceptance (P4 arming / F3 gate open) and can invalidate the
+        // setup SENDs; these suites test VOTE semantics, not address compaction.
+        sdk = makeSdk({ compactAddresses: false });
         issuer = await fundedGasAddress(sdk, 0.2);
         voterA = await fundedGasAddress(sdk, 0.2);
         voterB = await fundedGasAddress(sdk, 0.2);

@@ -25,6 +25,7 @@
     "test:sdk": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/sdk/**/*.sdk.test.js'",
     "test:sdk:chunked": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/sdk/chunkedDeploy.sdk.test.js",
     "test:sdk:chunked-reorg": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/sdk/chunkedDeployReorgDrill.sdk.test.js",
+    "test:sdk:vote-reorg": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/sdk/voteReorgDrill.sdk.test.js",
     "test:sdk:x402": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/sdk/x402.sdk.test.js",
     "test:sdk:mcp": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/sdk/mcp.sdk.test.js",
     "test:sdk:tickerid": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/sdk/ticker-id-equivalence.sdk.test.js",
