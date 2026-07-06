@@ -240,7 +240,14 @@ module.exports = {
             let spentTxPsbtHex = await encoderConnector.createTx(
                 [], //utxoList - the encoder will find the utxos
                 addressInfo["address"], //pubkey
-                [], //customOutputs - None
+                // customOutputs must ride the REVEAL tx (the tx the indexer treats as
+                // the action): the encoder folds their value into the funding output on
+                // tx1 and emits them only when passed again here, so passing the same
+                // list to both phases pays them exactly once (mirrors the SDK's
+                // lifecycleManager). Passing [] here silently dropped the native-fee
+                // output on every P2SH/P2WSH action, failing all long-payload
+                // fee-bearing tests on LTC/DOGE ('insufficient fee').
+                customOutputs,
                 data,
                 rawData, //rawData
                 null, //TEST_FEE, //exact_fee

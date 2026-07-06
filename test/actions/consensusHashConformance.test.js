@@ -185,12 +185,19 @@ describe('state commitment conformance: sync block_merkle_root == indexer commit
         const specialAddresses = Object.keys(ROLE_BY_ADDRESS);
         // Build a parameterized IN-list so no address is hardcoded here.
         const placeholders = specialAddresses.map(() => '?').join(', ');
+        // credits/debits store the address as a normalized integer FK
+        // (address_id -> index_addresses.id), not a raw `address` column, so the
+        // coverage probe must join through index_addresses. ROLE_BY_ADDRESS is
+        // all-chain (it carries the LTC/DOGE regtest forms too), so the IN-list
+        // matches whichever coin/network this DB belongs to.
         const creditsRows = await dbAdapter.doQuery(
-            'SELECT address FROM credits WHERE address IN (' + placeholders + ') LIMIT 1',
+            'SELECT ia.address FROM credits c JOIN index_addresses ia ON ia.id = c.address_id ' +
+            'WHERE ia.address IN (' + placeholders + ') LIMIT 1',
             specialAddresses
         );
         const debitsRows  = creditsRows.length ? creditsRows : await dbAdapter.doQuery(
-            'SELECT address FROM debits WHERE address IN (' + placeholders + ') LIMIT 1',
+            'SELECT ia.address FROM debits d JOIN index_addresses ia ON ia.id = d.address_id ' +
+            'WHERE ia.address IN (' + placeholders + ') LIMIT 1',
             specialAddresses
         );
         assert.ok(
