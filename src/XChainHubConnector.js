@@ -51,9 +51,13 @@ class XChainHubConnector {
         // trying the remaining endpoints in case one is fully healthy.
         let degraded = null;
         this.lastFailures = [];
+        // Attach x-api-key when HUB_API_KEY is configured (keyed venues): the
+        // hub gates writes AND getallconfigs behind it; other reads ignore it.
+        let headers = {};
+        if(process.env.HUB_API_KEY) headers['x-api-key'] = process.env.HUB_API_KEY;
         for(let url of this.urls){
             try {
-                let response = await axios.post(url, data, { timeout });
+                let response = await axios.post(url, data, { timeout, headers });
                 if(response.data && response.data.result !== undefined)
                     return response.data.result;
             } catch(err){

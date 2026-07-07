@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Hub connector sends `x-api-key` from `HUB_API_KEY` when set, so suites run against keyed hubs.
+
 ### Fixed
 - Regenerate the field-level golden vectors (`test/codec/fixtures/field-golden-vectors.json`): re-pin ATTEST v0 to its current 10-field form (`+FEE_TICK|FEE_AMOUNT`) and add the 10 previously-unpinned formats (ADDRESS v1, ANCHOR v3, DEPLOY v2/v3/v4, ISSUE v6, NODEPROOF v0, SLASH v0, XCALL v0/v2), re-arming the wire-format tripwire.
 
