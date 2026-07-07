@@ -111,8 +111,11 @@ async function main() {
         return rows.length ? Number(rows[0].block_time) : Math.floor(Date.now() / 1000);
     });
 
-    // Seed the prices the DOGE native-fee path reads (hub DB, anchored to the DOGE
-    // chain clock so the staleness gate passes deterministically; wall-clock races).
+    // Seed the prices the DOGE native-fee path reads (hub DB). Anchor to the NEWER of
+    // the chain clock and wall-clock: freshness is judged against the block_time of the
+    // block the ISSUE lands in, and on a chain that sat idle the old tip time is stale
+    // beyond the 1800s gate while the newly mined block gets wall-clock time.
+    const seedTime = Math.max(blockTime, Math.floor(Date.now() / 1000));
     await hubConn(async (c) => {
         for (const [pair, price, round] of [['DOGE/USD', '0.10000000', 990001], ['XCHAIN/USD', '1.00000000', 990002]]) {
             await c.query(
@@ -121,10 +124,10 @@ async function main() {
                      block_timestamp, validator_count, consensus_round, consensus_proof, status)
                  VALUES (?, ?, ?, 0, 'BTC', ?, 1, 1, '[]', 'finalized')
                  ON DUPLICATE KEY UPDATE price = VALUES(price), block_timestamp = VALUES(block_timestamp), status = 'finalized'`,
-                [round, pair, price, blockTime]);
+                [round, pair, price, seedTime]);
         }
     });
-    console.log('[dex-doge-setup] prices seeded (DOGE/USD, XCHAIN/USD) at chain time ' + blockTime);
+    console.log('[dex-doge-setup] prices seeded (DOGE/USD, XCHAIN/USD) at time ' + seedTime);
 
     const sdk = new XChainSDK({
         network:     'dogecoin-regtest',

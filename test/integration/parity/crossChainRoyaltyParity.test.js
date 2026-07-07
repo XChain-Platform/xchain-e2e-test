@@ -18,9 +18,11 @@
  *   hub StateAnchorPublisher._matchCanonical  (archive verification)
  *   indexer cross_settle._canonical           (settlement verification)
  *   indexer recovery._matchCanonical          (full-parse recovery)
- * The activation gate itself is a 2-repo twin module (like anchor_reward_activation);
- * this suite pins twin byte-identity, verdict agreement, and canonical parity with
- * legs present, legs absent, and below the flag-day (legacy bytes, regression-safe).
+ * The activation gate itself is a 2-repo twin module (like anchor_reward_activation)
+ * whose map is registered in the canonical xchain-documentation/protocol/constants.js;
+ * this suite pins twin byte-identity, map equality against the canonical SoT, verdict
+ * agreement, and canonical parity with legs present, legs absent, and below the
+ * flag-day (legacy bytes, regression-safe).
  *
  * Design: claude/reports/2026-07-07_cross-chain-royalty-design.md
  ********************************************************************/
@@ -33,6 +35,7 @@ const path   = require('path');
 
 const ROOT = path.resolve(__dirname, '../../../..');
 
+const protocolConstants = require(path.join(ROOT, 'xchain-documentation/protocol/constants.js'));
 const hubCcr = require(path.join(ROOT, 'xchain-hub/src/cross_chain_royalty_activation.js'));
 const idxCcr = require(path.join(ROOT, 'xchain-indexer/src/cross_chain_royalty_activation.js'));
 
@@ -73,6 +76,15 @@ describe('cross-chain royalty: CROSS_CHAIN_ROYALTY cross-service parity', functi
         const idx = fs.readFileSync(path.join(ROOT, 'xchain-indexer/src/cross_chain_royalty_activation.js'), 'utf8');
         assert.strictEqual(hub, idx,
             'cross_chain_royalty_activation.js drifted between hub and indexer; re-copy the twin');
+    });
+
+    it('the flag-day map is byte-equal across the twins and the canonical SoT', function () {
+        const map = protocolConstants.CROSS_CHAIN_ROYALTY_ACTIVATION;
+        assert.ok(map, 'documentation/protocol/constants.js must export CROSS_CHAIN_ROYALTY_ACTIVATION');
+        for (const [name, mod] of [['hub', hubCcr], ['indexer', idxCcr]]) {
+            assert.deepStrictEqual(mod.CROSS_CHAIN_ROYALTY_ACTIVATION, map,
+                name + ' CROSS_CHAIN_ROYALTY_ACTIVATION drifted from the canonical protocol constant');
+        }
     });
 
     it('every local isCrossChainRoyaltyActive agrees on the verdict for the same input', function () {

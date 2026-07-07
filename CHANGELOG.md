@@ -8,9 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `test/sdk/dexCrossRoyaltyLive.sdk.test.js`: live multi-hub royalty drill asserting the guard legs ride the signed match and the proceeds leg settles the 75/25 split.
+- Cross-chain royalty parity suite pins the twin `CROSS_CHAIN_ROYALTY_ACTIVATION` maps against the new canonical in `xchain-documentation/protocol/constants.js`.
 - Hub connector sends `x-api-key` from `HUB_API_KEY` when set, so suites run against keyed hubs.
 
 ### Fixed
+- `test/sdk/dexDogeSetup.js`: anchor oracle price seeding to `max(chain tip time, wall clock)` so seeds pass the 1800s freshness gate on a chain that sat idle.
 - Regenerate the field-level golden vectors (`test/codec/fixtures/field-golden-vectors.json`): re-pin ATTEST v0 to its current 10-field form (`+FEE_TICK|FEE_AMOUNT`) and add the 10 previously-unpinned formats (ADDRESS v1, ANCHOR v3, DEPLOY v2/v3/v4, ISSUE v6, NODEPROOF v0, SLASH v0, XCALL v0/v2), re-arming the wire-format tripwire.
 
 ## [0.3.8] - 2026-06-20
