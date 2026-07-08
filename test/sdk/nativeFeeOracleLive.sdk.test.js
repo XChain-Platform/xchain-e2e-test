@@ -162,14 +162,18 @@ describe('native-coin fee against a LIVE price oracle feed (DOGE)', function () 
 
     before(async function () {
         // 1) The XCHAIN/USD sidecar in the HUB DB (mirrors to the indexer via the
-        //    real HubDbSync channel). Anchor block_timestamp forward so it stays
-        //    inside the staleness guard for the whole drill. DOGE/USD is NOT seeded
-        //    here - it must come from the live oracle round.
+        //    real HubDbSync channel). Stamp block_timestamp at the DOGE tip's block
+        //    time: the H-3 time gate (NATIVE_FEE_PRICE_TIME_GATE, armed 2026-07-07)
+        //    only selects rounds stamped at-or-before the evaluated block's time, so
+        //    a future-anchored stamp is never selectable; tip-time is selectable
+        //    immediately and stays inside the staleness guard because block times
+        //    only move forward. DOGE/USD is NOT seeded here - it must come from the
+        //    live oracle round.
         const dogeBlockTime = await dogeIdx(async (c) => {
             const rows = await c.query('SELECT block_time FROM blocks ORDER BY block_index DESC LIMIT 1');
             return rows.length ? Number(rows[0].block_time) : Math.floor(Date.now() / 1000);
         });
-        const sidecarTs = Math.max(dogeBlockTime, Math.floor(Date.now() / 1000)) + 3600;
+        const sidecarTs = dogeBlockTime;
         await hubDb((c) => c.query(
             `INSERT INTO price_snapshots
                 (round_number, coin_pair, price, reference_block, reference_chain,
