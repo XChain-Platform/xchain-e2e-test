@@ -1,4 +1,4 @@
-# NODEPROOF federation e2e — `multiHubNodeProof.test.js`
+# NODEPROOF federation e2e - `multiHubNodeProof.test.js`
 
 End-to-end proof of the verified-full-node tier (`NODEPROOF.md`) on a live
 regtest federation: two FULL validators (each with a coin node) get verified by
@@ -14,10 +14,10 @@ excluded + slash-proposed.
 The standard federation prerequisites (same as `test:federation`):
 - regtest stack up: bitcoind + xchain-decoder + xchain-indexer + MariaDB
 - `E2E_REQUIRE_FEDERATION=1` and the federation env (`HUB_DB_*`,
-  `BTC_INDEXER_API_URL`, indexer DB vars) — see `test/initialCheck.test.js`
+  `BTC_INDEXER_API_URL`, indexer DB vars) - see `test/initialCheck.test.js`
 
 Plus **one NODEPROOF-specific var**:
-- `FULLNODE_BTC_RPC_URL` — the regtest **bitcoind JSON-RPC** endpoint *with
+- `FULLNODE_BTC_RPC_URL` - the regtest **bitcoind JSON-RPC** endpoint *with
   credentials*, e.g. `http://user:pass@127.0.0.1:18443`. The two full hubs use
   it to compute the possession answer (`getblockhash` + `getblock <hash> 2`).
   Absent ⇒ the test skips.
@@ -37,7 +37,7 @@ FULLNODE_BTC_RPC_URL='http://user:pass@127.0.0.1:18443' npm run test:federation:
 2. Stakes all 3 pubkeys at `2500` XCHAIN (≥ `full_node` MIN_STAKE 2000), so all
    three are capability claimants; advances past activation.
 3. Wires a shared publisher as the NODEPROOF verdict broadcast hook.
-4. Mines across a challenge epoch (cadence 5 blocks, depth 2 — regtest-tuned via
+4. Mines across a challenge epoch (cadence 5 blocks, depth 2 - regtest-tuned via
    the helper's `fullnode` config). The `FullNodeChallengeRound` on each full hub
    derives the challenge, answers it, runs the sign round, and the leader posts
    the `NODEPROOF` verdict on-chain.
@@ -65,5 +65,5 @@ FULLNODE_BTC_RPC_URL='http://user:pass@127.0.0.1:18443' npm run test:federation:
   must agree on that threshold, or signature verification fails. Ensure the chain
   is past the threshold (or that both copies use the same value) before asserting.
 - **Harness support is additive**: `multiValidatorHubHelper.js` gained
-  `opts.fullnode`, `opts.coinRpcUrls`, and `setNodeProofBroadcastHook()` — no
+  `opts.fullnode`, `opts.coinRpcUrls`, and `setNodeProofBroadcastHook()` - no
   behavior change for existing federation tests when unused.

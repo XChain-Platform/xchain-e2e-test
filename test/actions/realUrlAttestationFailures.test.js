@@ -10,19 +10,19 @@
  * REAL-URL attestation FAILURE paths with a 3-validator quorum.
  *
  * Sibling of test/actions/realUrlAttestation.test.js (the happy `ok` path).
- * Same orchestration — 3 staked MockAttestationValidators sign over the real
- * http_get provider (xchain-hub/src/providers/http_get.js) — but here we cover
+ * Same orchestration - 3 staked MockAttestationValidators sign over the real
+ * http_get provider (xchain-hub/src/providers/http_get.js) - but here we cover
  * the two NON-`ok` terminal/retry paths the happy-path test does not:
  *
- *   1. EXPIRED   — the federation never lands a response before DEADLINE_BLOCK.
+ *   1. EXPIRED   - the federation never lands a response before DEADLINE_BLOCK.
  *                  The indexer auto-expires the request and fires the callback
  *                  with status='expired', payload='' (spec §4.3). To make it a
  *                  true real-URL test we still perform the live GET (the bytes
  *                  the federation WOULD have signed) and log them, then simply
- *                  never broadcast the ATTEST v1 — modelling lost/late response
- *                  txs — and mine past the deadline.
+ *                  never broadcast the ATTEST v1 - modelling lost/late response
+ *                  txs - and mine past the deadline.
  *
- *   2. NO_QUORUM — a non-deterministic live endpoint cannot satisfy
+ *   2. NO_QUORUM - a non-deterministic live endpoint cannot satisfy
  *                  byte-equality consensus, so the federation signs a `no_quorum`
  *                  ATTEST v1 instead of `ok`. We DEMONSTRATE the divergence with
  *                  two real fetches (their bodies differ), then broadcast a
@@ -72,7 +72,7 @@ const http_get = require(_hubBase + '/src/providers/http_get.js')
 const REAL_URL = 'https://jsonplaceholder.typicode.com/todos/1'
 
 // Non-deterministic public endpoint: returns a fresh random UUID on every call,
-// so two live fetches differ and byte-equality consensus is unreachable — the
+// so two live fetches differ and byte-equality consensus is unreachable - the
 // exact condition under which a real federation emits `no_quorum`.
 const NONDET_URL = 'https://httpbin.org/uuid'
 
@@ -151,7 +151,7 @@ describe('REAL-URL attestation FAILURE paths: expired + no_quorum over a 3-valid
 
         // Stake exactly three source-distinct validators. On a clean chain these are
         // the only attestation-capable keys, so the responsible set for any request is
-        // all three — our signatures meet a redundancy=3 quorum.
+        // all three - our signatures meet a redundancy=3 quorum.
         for (let i = 0; i < 3; i++) {
             await stakeValidatorFromOwnSource(new attestationHelper.MockAttestationValidator())
         }
@@ -177,7 +177,7 @@ describe('REAL-URL attestation FAILURE paths: expired + no_quorum over a 3-valid
         assert.strictEqual(request.payload, REAL_URL, 'the real URL should be stored as the request payload')
         const expiringRequestId = request.request_id
 
-        // 2. REAL fetch through the production http_get provider — the bytes the
+        // 2. REAL fetch through the production http_get provider - the bytes the
         //    federation WOULD have signed. We deliberately do NOT broadcast the
         //    ATTEST v1 (modelling a lost/late response tx), so the deadline lapses.
         try {
@@ -185,7 +185,7 @@ describe('REAL-URL attestation FAILURE paths: expired + no_quorum over a 3-valid
             console.log('LIVE FETCH (will be dropped) status=' + String(fetched.meta) +
                 '  bytes=' + Buffer.byteLength(fetched.body.toString('utf8'), 'utf8'))
         } catch (e) {
-            console.log('Live fetch unavailable (' + e.message + '); irrelevant — the expiry path needs no response')
+            console.log('Live fetch unavailable (' + e.message + '); irrelevant - the expiry path needs no response')
         }
 
         // 3. Advance past DEADLINE_BLOCK. deadlineBlocks=2 + margin so the per-block
@@ -233,7 +233,7 @@ describe('REAL-URL attestation FAILURE paths: expired + no_quorum over a 3-valid
         // 2. DEMONSTRATE why quorum is unreachable: two live fetches of the
         //    non-deterministic endpoint return different bodies, so byte-equality
         //    consensus is impossible and the federation must report no_quorum.
-        //    Best-effort — the core assertions below exercise the indexer's
+        //    Best-effort - the core assertions below exercise the indexer's
         //    handling of the no_quorum SIGNAL and don't depend on the fetch.
         try {
             const a = await http_get.fetch(NONDET_URL, { maxResponseBytes: 8192, timeoutMs: 10000 })
@@ -253,7 +253,7 @@ describe('REAL-URL attestation FAILURE paths: expired + no_quorum over a 3-valid
 
         // 3. The federation signs a no_quorum ATTEST v1 (empty payload) with the
         //    request's responsible set (all 3 on a clean chain). The signatures are
-        //    valid, so the RESPONSE row lands status='valid' — this is precisely the
+        //    valid, so the RESPONSE row lands status='valid' - this is precisely the
         //    retryable case: a valid response that must NOT close the request.
         const signers = attestationHelper.computeResponsibleSigners(requestId, 3, stakedValidators)
         assert.strictEqual(signers.length, 3, 'expected 3 responsible signers on a clean chain')

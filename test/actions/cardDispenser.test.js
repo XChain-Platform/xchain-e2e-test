@@ -10,7 +10,7 @@
 
 // Card Dispenser (on-chain): a contract that holds an inventory of card tokens
 // and, on a paid EXECUTE, sends the buyer ONE random in-stock card (weighted by
-// copies held) — NO mint, pure emit.send of its own deposited tokens.
+// copies held) - NO mint, pure emit.send of its own deposited tokens.
 //
 //   DEPLOY cardDispenser(payTick, price, unit, card1, card2, card3)
 //   operator DEPOSITs card tokens into the contract (the prize pool)

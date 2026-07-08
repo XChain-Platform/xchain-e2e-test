@@ -6,9 +6,9 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 #######################################################################
-# P3(b) — LIVE multi-chain parity sweep orchestrator.
+# P3(b) - LIVE multi-chain parity sweep orchestrator.
 #
-# Brings up ONE coin's regtest stack at a time (memory-safe — the VM cannot
+# Brings up ONE coin's regtest stack at a time (memory-safe - the VM cannot
 # hold three concurrent stacks), drives the parity corpus through the full
 # live pipeline, captures a per-chain digest, tears the stack down, and
 # repeats for the next coin. Finally compares the three digests with
@@ -19,7 +19,7 @@
 # (see the staged-tree recipe in memory vm-parallels-share-dead-2026-06-11).
 # Run this from the staged tree's xchain-e2e-test/test/parity directory.
 #
-# This is a SCAFFOLD calibrated against the documented stack gotchas — expect
+# This is a SCAFFOLD calibrated against the documented stack gotchas - expect
 # to tune the install/teardown invocations live (the e2e venue recipes vary by
 # box). Each command's rationale is the cited memory.
 #
@@ -64,7 +64,7 @@ run_node() { ( cd "$XCHAIN_NODE_DIR" && node src/index.js "$@" ); }
 for COIN in "${COINS[@]}"; do
   PKG="$(coin_pkg "$COIN")"
   echo "==================================================================="
-  echo "[parity] $COIN  ($PKG-regtest) — bringing up stack"
+  echo "[parity] $COIN  ($PKG-regtest) - bringing up stack"
   echo "==================================================================="
 
   # Clean any prior stack for this coin so the chain starts at genesis
@@ -80,7 +80,7 @@ for COIN in "${COINS[@]}"; do
   # Give the decoder/indexer a moment to begin following the fresh chain.
   sleep 10
 
-  echo "[parity] $COIN — driving corpus + capturing digest"
+  echo "[parity] $COIN - driving corpus + capturing digest"
   # initialCheck discovers the live service endpoints from the hub config
   # [e2e-host-run-gotchas]; the parity suite needs only miner/tracker/node +
   # the indexer DB pool, all set up there.
@@ -91,7 +91,7 @@ for COIN in "${COINS[@]}"; do
       --require ./test/initialCheck.test.js \
       test/parity/multichain-parity.test.js )
 
-  echo "[parity] $COIN — tearing down"
+  echo "[parity] $COIN - tearing down"
   run_node remove master "$PKG" regtest || true
 done
 

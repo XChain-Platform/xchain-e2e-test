@@ -126,7 +126,7 @@ describe('REAL-URL attestation: 3-validator quorum over a live https GET', funct
 
         // Stake exactly three validators. On a clean chain these are the only
         // attestation-capable keys, so the responsible set for any request is
-        // all three — our signatures meet the redundancy=3 quorum.
+        // all three - our signatures meet the redundancy=3 quorum.
         for (let i = 0; i < 3; i++) {
             await stakeValidatorFromOwnSource(new attestationHelper.MockAttestationValidator())
         }
@@ -153,7 +153,7 @@ describe('REAL-URL attestation: 3-validator quorum over a live https GET', funct
         const requestId = request.request_id
 
         // 2. REAL fetch through the production http_get provider. This is the
-        //    actual outbound HTTPS GET — no mock, no local server.
+        //    actual outbound HTTPS GET - no mock, no local server.
         const fetched = await http_get.fetch(REAL_URL, { maxResponseBytes: 32768, timeoutMs: 10000 })
         const realBody = fetched.body.toString('utf8')
         const realMeta = String(fetched.meta)   // HTTP status code, part of the signing message

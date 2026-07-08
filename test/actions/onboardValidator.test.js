@@ -8,7 +8,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// Validator onboarding ("step 2") — the on-chain half of bringing a real hub
+// Validator onboarding ("step 2") - the on-chain half of bringing a real hub
 // online as a capability validator:
 //
 //   `xchain-node validator init`  (offline) prints the hub's Ed25519 signing
@@ -28,7 +28,7 @@ const cryptoHelper = require('../cryptoHelper')
 const stakeHelper = require('../helpers/stakeHelper')
 const gasHelper = require('../helpers/gasHelper')
 
-describe('Validator onboarding — STAKE the hub signing pubkey into the active capability set', function () {
+describe('Validator onboarding - STAKE the hub signing pubkey into the active capability set', function () {
 
     // Hub Ed25519 signing pubkey (32-byte / 64-hex), from `xchain-node validator status`.
     const VALIDATOR_PUBKEY = (process.env.VALIDATOR_PUBKEY || '').trim().toLowerCase()
@@ -38,7 +38,7 @@ describe('Validator onboarding — STAKE the hub signing pubkey into the active 
     const STAKE_AMOUNT = '2500.00000000'
 
     // getcapabilityvalidators honours the caller-supplied threshold over the
-    // venue's local MIN_STAKE config — assert against each documented minimum.
+    // venue's local MIN_STAKE config - assert against each documented minimum.
     const CAPABILITIES = [
         { name: 'price',          minStake: '1000' },
         { name: 'cross_chain',    minStake: '1000' },
@@ -63,12 +63,12 @@ describe('Validator onboarding — STAKE the hub signing pubkey into the active 
         // STAKE / capability staking is BTC-only by protocol design (the indexer
         // action handlers reject COIN !== 'BTC').
         if (COIN_CODE !== 'BTC') {
-            console.log('Validator staking is BTC-only — skipping onboarding on ' + COIN_CODE)
+            console.log('Validator staking is BTC-only - skipping onboarding on ' + COIN_CODE)
             this.skip()
             return
         }
         if (!VALIDATOR_PUBKEY) {
-            console.log('VALIDATOR_PUBKEY not set — skipping validator onboarding. Get it with ' +
+            console.log('VALIDATOR_PUBKEY not set - skipping validator onboarding. Get it with ' +
                 '`xchain-node validator status`, then add VALIDATOR_PUBKEY=<hex> to the ' +
                 'bitcoin-regtest config file so it reaches the e2e container.')
             this.skip()
@@ -98,7 +98,7 @@ describe('Validator onboarding — STAKE the hub signing pubkey into the active 
         assert(stakeBlock !== null, 'previous step must have indexed the STAKE')
 
         // Mine past ACTIVATION_DELAY_BLOCKS (BTC = 6) and wait for the indexer to
-        // reach that height — effective-set reads are block-scoped, so reading
+        // reach that height - effective-set reads are block-scoped, so reading
         // before the activation block is indexed would assert against the old set.
         await regtestMinerConnector.generateBlocks(7)
         const ok = await indexerConnector.waitForIndexedBlock(stakeBlock + 7, 90000)

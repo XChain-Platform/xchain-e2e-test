@@ -36,22 +36,22 @@ COPY ./xchain-contracts /XChainE2ETest/xchain-contracts
 # source directly (test/helpers/attestationHelper.js, test/integration/**,
 # test/integration/parity/**, test/regression/**). Those requires use
 # '../../../xchain-indexer/src/...' (and path.join(ROOT,'xchain-indexer/...')) which
-# resolve to the MONOREPO ROOT locally but to the IMAGE ROOT here — because the test
+# resolve to the MONOREPO ROOT locally but to the IMAGE ROOT here - because the test
 # tree lives under /XChainE2ETest, three levels up from test/helpers lands at /.
 # So the COPY target MUST be /xchain-indexer (image root), NOT /XChainE2ETest/xchain-indexer.
-# Plain JS source (its npm deps that the loaded files need — e.g. mathjs@15.2.0 for
-# stake_weighted_quorum.js — are already satisfied by xchain-hub/xchain-sdk's pinned
+# Plain JS source (its npm deps that the loaded files need - e.g. mathjs@15.2.0 for
+# stake_weighted_quorum.js - are already satisfied by xchain-hub/xchain-sdk's pinned
 # deps via npm ci), so it lands after npm ci to avoid invalidating the dependency cache.
 COPY ./xchain-indexer /xchain-indexer
 
 # Node resolves a module's OWN `require('pkg')` by walking node_modules up from the
-# requiring FILE's directory — for /xchain-indexer/src/*.js that's /xchain-indexer/
+# requiring FILE's directory - for /xchain-indexer/src/*.js that's /xchain-indexer/
 # node_modules then /node_modules, NEVER /XChainE2ETest/node_modules where npm ci
 # installed the deps. So the bundled indexer can't see mathjs (which stake_weighted_
 # quorum.js requires) without help. Symlink its node_modules to the image's installed
 # tree: mathjs@15.2.0 is present there (via xchain-hub/xchain-sdk's pinned deps), so
 # the consensus-primitive files the e2e suites load resolve. Indexer files that need
-# deps absent here (xchain-vm, express, ws) still fail if loaded — none are on the
+# deps absent here (xchain-vm, express, ws) still fail if loaded - none are on the
 # default attestation path, and they were already unreachable before this change.
 RUN ln -s /XChainE2ETest/node_modules /xchain-indexer/node_modules
 

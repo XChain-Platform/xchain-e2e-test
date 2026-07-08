@@ -2,14 +2,14 @@
 node_modules/
 .DS_Store
 perf-results/
-# Staged at build time by xchain-node (LIBRARY_BUNDLES) — not part of the repo
+# Staged at build time by xchain-node (LIBRARY_BUNDLES) - not part of the repo
 /xchain-hub/
 /xchain-sdk/
 
-# Coverage output (c8/nyc) — generated, not source
+# Coverage output (c8/nyc) - generated, not source
 coverage/
 .nyc_output/
 
-# Stryker mutation-report build artifacts — generated, embed absolute paths (curated .md reports are kept)
+# Stryker mutation-report build artifacts - generated, embed absolute paths (curated .md reports are kept)
 reports/mutation/*.html
 reports/mutation/*.json

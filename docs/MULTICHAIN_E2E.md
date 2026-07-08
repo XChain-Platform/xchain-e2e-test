@@ -10,19 +10,19 @@ being BTC-only, and chain-specific node quirks).
 `test/initialCheck.test.js` resolves the target chain from the environment:
 
 - `COIN` + `NETWORK` set explicitly (e.g. `COIN=litecoin NETWORK=regtest`), **or**
-- `NETWORK` in `<coin>-<network>` form (e.g. `NETWORK=litecoin-regtest`) — when `COIN` is unset,
+- `NETWORK` in `<coin>-<network>` form (e.g. `NETWORK=litecoin-regtest`) - when `COIN` is unset,
   it is split into `COIN` + `NETWORK`.
 
 `xchain-node` provisions each stack with `NETWORK=<coin>-regtest` (see
 `xchain-node/config/<coin>-regtest`) and leaves `COIN` unset, so the split path drives the suite.
 `global.NETWORK_OBJECT` then comes from `CryptoNetworks.getBitcoinJsNetwork(COIN+"-"+NETWORK)`.
 
-> Do **not** also inject `COIN` from xchain-node — with `COIN` set, the split is skipped and
+> Do **not** also inject `COIN` from xchain-node - with `COIN` set, the split is skipped and
 > `NETWORK` stays in `<coin>-regtest` form, producing an invalid `getBitcoinJsNetwork()` lookup.
 
 The per-coin regtest node configs already carry the needed tuning:
 `xchain-node/crypto_nodes/dogecoin/dogecoin-regtest.conf` (mempool: `minrelaytxfee`,
-`limitfreerelay`, `acceptnonstdtxn` — dogecoind v1.14 priority workaround) and
+`limitfreerelay`, `acceptnonstdtxn` - dogecoind v1.14 priority workaround) and
 `crypto_nodes/litecoin/litecoin-regtest.conf` (MWEB BIP9 disabled).
 
 ## Running
@@ -56,7 +56,7 @@ script parses the printed line to determine pass/fail. **Recommended fix:** chan
 Run one job per coin (they are independent full-stack runs; do not share a stack):
 
 ```yaml
-# illustrative — no CI is wired in-repo yet
+# illustrative - no CI is wired in-repo yet
 strategy:
   matrix:
     coin: [bitcoin, litecoin, dogecoin]
@@ -69,7 +69,7 @@ steps:
 ## Prerequisites (local regtest)
 
 - Start `xchain-node-database` before the first install.
-- Use a native ext4 data dir via `XCHAIN_NODE_DATA_DIR` — the Parallels share is not safe for
+- Use a native ext4 data dir via `XCHAIN_NODE_DATA_DIR` - the Parallels share is not safe for
   bitcoind/litecoind/dogecoind data files.
 - `install` before `e2etest`; `docker rm -f` before reinstalling; remove stale `modules/<repo>`
   clones to refresh local source.
