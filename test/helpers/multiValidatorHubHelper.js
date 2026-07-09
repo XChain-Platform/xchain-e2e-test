@@ -148,6 +148,12 @@ class MultiValidatorHub {
         this.fullnode    = opts.fullnode || null;
         this.coinRpcUrls = opts.coinRpcUrls || null;
 
+        // Extra p2pConfig keys merged into every hub's config (last-wins). Lets a
+        // suite tighten subsystem timing (e.g. ATTESTATION_POLL_MS,
+        // ATTESTATION_ROUND_TIMEOUT_MS for the outage/rotation drills) without
+        // widening the constructor per knob.
+        this.extraP2pConfig = opts.extraP2pConfig || null;
+
         this.hubs         = [];
         this.identities   = [];    // [{pubkeyHex, privkeyHex}]
         this.dbNames      = [];
@@ -218,6 +224,8 @@ class MultiValidatorHub {
                 // deterministically, not on a 15s wall clock.
                 XDEX_POLL_MS:           600000,
             };
+
+            if (this.extraP2pConfig) Object.assign(p2pConfig, this.extraP2pConfig);
 
             // Full-node tier: inject the FULLNODE block + this hub's coin RPC (per
             // index). A hub with no coinRpcUrls entry is a light validator.

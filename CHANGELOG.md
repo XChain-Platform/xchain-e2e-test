@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `test/federation/multiHubLlmOutage.test.js`: Phase-4 llm outage drills (throttled provider_error publication + expiry refund, mid-window recovery, wedged-leader rotation, governance model ladder, hard-kill backstop); MultiValidatorHub accepts `extraP2pConfig`.
 - `test/sdk/dexCrossRoyaltyLive.sdk.test.js`: live multi-hub royalty drill asserting the guard legs ride the signed match and the proceeds leg settles the 75/25 split.
 - Cross-chain royalty parity suite pins the twin `CROSS_CHAIN_ROYALTY_ACTIVATION` maps against the new canonical in `xchain-documentation/protocol/constants.js`.
 - Hub connector sends `x-api-key` from `HUB_API_KEY` when set, so suites run against keyed hubs.
