@@ -83,7 +83,11 @@ describe('consensus hash conformance: sync BlockHasher == indexer committed hash
     it('every indexed block recomputes to its committed ledger/actions/contract hash', async function () {
         const mismatches = [];
         for (const idx of blockIndexes) {
-            const computed = await hasher.computeBlockHashes(idx);
+            // network/coin drive the state_key collation flag-day; the e2e stack is
+            // regtest (armed from genesis), so the follower must gate like the source
+            // indexer did when it committed the hashes. The bare 'regtest' activation
+            // key applies to every coin, so the coin arg may stay null here.
+            const computed = await hasher.computeBlockHashes(idx, 'regtest', null);
             const rows = await dbAdapter.doQuery(COMMITTED_HASH_SQL, [idx]);
             const committed = rows[0] || {};
             for (const f of ['ledger_hash', 'actions_hash', 'contract_hash']) {
@@ -157,7 +161,9 @@ describe('state commitment conformance: sync block_merkle_root == indexer commit
         if (!rootRows || !rootRows.length) this.skip();
         const mismatches = [];
         for (const r of rootRows) {
-            const computed = await SyncStateCommitment.computeBlockMerkleRoot(dbAdapter, Number(r.block_index));
+            // 'regtest'/null: same state_key collation gating note as the
+            // computeBlockHashes conformance loop above.
+            const computed = await SyncStateCommitment.computeBlockMerkleRoot(dbAdapter, Number(r.block_index), 'regtest', null);
             if (computed !== r.block_merkle_root) {
                 mismatches.push({ block: Number(r.block_index), computed, committed: r.block_merkle_root });
             }

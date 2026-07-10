@@ -27,11 +27,8 @@
 const { expect } = require('chai');
 const { makeSdk, submit, fundedGasAddress, uniqueTick, submitOpts } = require('./sdkHelper');
 
-// OP_RETURN + P2SH + P2WSH pass end-to-end through the SDK.
-// PENDING (documented open bug, un-skip when fixed):
-//   - MULTISIGN: encoder rejects the fake-pubkey outputs as "dust".
+// OP_RETURN + MULTISIGN + P2SH + P2WSH all pass end-to-end through the SDK.
 const ENCODINGS = ['OP_RETURN', 'MULTISIGN', 'P2SH', 'P2WSH'];
-const PENDING_ENCODINGS = [];
 
 describe('[sdk] encoding methods via submitAction', function () {
     this.timeout(0);
@@ -73,9 +70,5 @@ describe('[sdk] encoding methods via submitAction', function () {
             expect(res.indexed, 'indexed action').to.be.an('object');
             expect(res.indexed.status).to.equal('valid');
         });
-    }
-
-    for (const encoding of PENDING_ENCODINGS) {
-        it.skip('issues a token with ' + encoding + ' encoding (open bug, see header)', function () {});
     }
 });

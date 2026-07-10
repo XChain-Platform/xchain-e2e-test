@@ -152,6 +152,18 @@ describe('RegtestMinerConnector', function () {
             const result = await connector.setMiningTime(1000, 500);
             assert.strictEqual(result, null);
         });
+
+        it('throws when the controller returns an {error} body instead of "ok" (uuid:24c35056)', async function () {
+            // The regtest-miner controller reports rejected input as
+            // {error: "..."} rather than throwing an HTTP error; that body is
+            // truthy, so a plain truthiness check would previously read it as
+            // success. The connector must inspect it and throw.
+            axiosPostStub.resolves({ data: { result: { error: 'Mining times too small. Minimum is 1000ms.' } } });
+            await assert.rejects(
+                () => connector.setMiningTime(500, 500),
+                /Mining times too small/
+            );
+        });
     });
 
     describe('setDefaultMiningTime', function () {

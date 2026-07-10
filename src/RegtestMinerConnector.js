@@ -99,13 +99,23 @@ class RegtestMinerConnector {
             params: {"max_time":maxTime, "tx_added_time":txAddedTime},
             id: 1
         }
-        
+
         // Make the request to the node
         const response = await axios.post(this.url, data, this.reqConfig)
+        const result = response.data && response.data.result
+
+        // The controller returns the bare string "ok" on success and an
+        // {error: "..."} body on rejected input (uuid:24c35056). Both are
+        // truthy, so a plain truthiness check would read a rejected input as
+        // success; throw instead so callers stop believing the cadence
+        // changed when it did not.
+        if (result && typeof result === 'object' && result.error) {
+            throw new Error(result.error)
+        }
 
         // Verify if there is a result and return it
-        if (response.data && response.data.result) {
-            return response.data.result
+        if (result) {
+            return result
         } else {
             return null
         }

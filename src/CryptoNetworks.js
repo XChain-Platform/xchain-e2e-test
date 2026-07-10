@@ -35,7 +35,7 @@ class CryptoNetworks {
                     "wif": 0x9e,
                     "dustThreshold": 100000,
                     "supportsSegwit": false,
-                    "singleOpReturnPolicy": false
+                    "singleOpReturnPolicy": true
                 }
             case "dogecoin-testnet":
                 return {
@@ -49,7 +49,7 @@ class CryptoNetworks {
                     "wif": 0xf1,
                     "dustThreshold": 100000,
                     "supportsSegwit": false,
-                    "singleOpReturnPolicy": false
+                    "singleOpReturnPolicy": true
                 }
             case "dogecoin-regtest":
                 // Dogecoin v1.14.x regtest reuses Bitcoin-testnet-style address
@@ -69,7 +69,7 @@ class CryptoNetworks {
                     "wif": 0xef,
                     "dustThreshold": 100000,
                     "supportsSegwit": false,
-                    "singleOpReturnPolicy": false
+                    "singleOpReturnPolicy": true
                 }
             case "litecoin-mainnet":
                 return {
@@ -84,7 +84,7 @@ class CryptoNetworks {
                     "wif": 0xb0,
                     "dustThreshold": 5460,
                     "minStandardTxNonWitnessSize": 85,
-                    "singleOpReturnPolicy": false
+                    "singleOpReturnPolicy": true
                 }
             case "litecoin-testnet":
                 return {
@@ -99,7 +99,7 @@ class CryptoNetworks {
                     "wif": 0xef,
                     "dustThreshold": 5460,
                     "minStandardTxNonWitnessSize": 85,
-                    "singleOpReturnPolicy": false
+                    "singleOpReturnPolicy": true
                 }
             case "litecoin-regtest":
                 return {
@@ -114,7 +114,7 @@ class CryptoNetworks {
                     "wif": 0xef,
                     "dustThreshold": 5460,
                     "minStandardTxNonWitnessSize": 85,
-                    "singleOpReturnPolicy": false
+                    "singleOpReturnPolicy": true
                 }   
         }
     }

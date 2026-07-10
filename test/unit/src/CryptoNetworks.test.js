@@ -119,14 +119,33 @@ describe('CryptoNetworks', () => {
     // several services; the per-network params it returns (address prefixes, dust
     // thresholds, relay-policy flags) MUST be identical across every copy or encode and
     // decode disagree. This compares each sibling copy's output to this one for every
-    // network. getFirstBlock is intentionally NOT compared (start heights are pinned per
-    // service). Any sibling repo not checked out is skipped.
-    describe('cross-repo getBitcoinJsNetwork parity @regression', () => {
+    // network, AND anchors this local copy against the canonical coins registry
+    // (xchain-encoder/src/coins) so two legacy copies drifting the same way from
+    // canonical can no longer mutually agree and slip through. getFirstBlock is
+    // compared too, against both the sibling copies and the canonical registry's
+    // firstBlock field, for the siblings that vendor it (encoder/decoder; utxo-tracker
+    // and regtest-miner never needed indexing start heights). Any sibling repo not
+    // checked out is skipped.
+    describe('cross-repo getBitcoinJsNetwork parity', () => {
         const path = require('path'), fs = require('fs')
         const SIBLINGS = ['xchain-encoder', 'xchain-decoder', 'xchain-utxo-tracker', 'xchain-regtest-miner']
+        const FIRST_BLOCK_SIBLINGS = ['xchain-encoder', 'xchain-decoder']
         const NETS = ['bitcoin-mainnet', 'bitcoin-testnet', 'bitcoin-regtest',
                       'dogecoin-mainnet', 'dogecoin-testnet', 'dogecoin-regtest',
                       'litecoin-mainnet', 'litecoin-testnet', 'litecoin-regtest']
+        // net key -> canonical (tick, network) pair, per xchain-encoder/src/coins/index.js
+        const NET_MAP = {
+            'bitcoin-mainnet':  { tick: 'BTC',  network: 'mainnet' },
+            'bitcoin-testnet':  { tick: 'BTC',  network: 'testnet' },
+            'bitcoin-regtest':  { tick: 'BTC',  network: 'regtest' },
+            'dogecoin-mainnet': { tick: 'DOGE', network: 'mainnet' },
+            'dogecoin-testnet': { tick: 'DOGE', network: 'testnet' },
+            'dogecoin-regtest': { tick: 'DOGE', network: 'regtest' },
+            'litecoin-mainnet': { tick: 'LTC',  network: 'mainnet' },
+            'litecoin-testnet': { tick: 'LTC',  network: 'testnet' },
+            'litecoin-regtest': { tick: 'LTC',  network: 'regtest' },
+        }
+
         SIBLINGS.forEach((repo) => {
             it(`${repo} getBitcoinJsNetwork matches this copy for every network`, function () {
                 const p = path.resolve(__dirname, '../../../../' + repo + '/src/CryptoNetworks.js')
@@ -138,6 +157,35 @@ describe('CryptoNetworks', () => {
                         `${repo} CryptoNetworks.getBitcoinJsNetwork('${net}') has drifted; keep the per-network params identical across every copy`)
                 }
             })
+        })
+
+        FIRST_BLOCK_SIBLINGS.forEach((repo) => {
+            it(`${repo} getFirstBlock matches this copy for every network`, function () {
+                const p = path.resolve(__dirname, '../../../../' + repo + '/src/CryptoNetworks.js')
+                if (!fs.existsSync(p)) return this.skip()
+                const Sib = require(p)
+                for (const net of NETS) {
+                    assert.strictEqual(
+                        Sib.getFirstBlock(net), CryptoNetworks.getFirstBlock(net),
+                        `${repo} CryptoNetworks.getFirstBlock('${net}') has drifted from this copy's start height`)
+                }
+            })
+        })
+
+        it('getBitcoinJsNetwork and getFirstBlock match the canonical coins registry for every network', function () {
+            const p = path.resolve(__dirname, '../../../../xchain-encoder/src/coins/index.js')
+            if (!fs.existsSync(p)) return this.skip()
+            const canonical = require(p)
+            for (const net of NETS) {
+                const { tick, network } = NET_MAP[net]
+                const config = canonical.getCoinConfig(tick, network)
+                assert.deepStrictEqual(
+                    CryptoNetworks.getBitcoinJsNetwork(net), config.net,
+                    `CryptoNetworks.getBitcoinJsNetwork('${net}') has drifted from the canonical coins registry`)
+                assert.strictEqual(
+                    CryptoNetworks.getFirstBlock(net), config.firstBlock,
+                    `CryptoNetworks.getFirstBlock('${net}') has drifted from the canonical coins registry`)
+            }
         })
     })
 })

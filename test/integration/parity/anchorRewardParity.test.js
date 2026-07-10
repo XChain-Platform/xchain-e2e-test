@@ -41,6 +41,7 @@
 'use strict';
 
 const assert = require('assert');
+const fs     = require('fs');
 const path   = require('path');
 
 const ROOT = path.resolve(__dirname, '../../../..');
@@ -83,6 +84,24 @@ describe('#5311: ANCHOR_REWARD (XANCPUB) cross-service parity', function () {
             assert.strictEqual(mod.ANCHOR_REWARD_AMOUNT, amt,
                 name + ' ANCHOR_REWARD_AMOUNT drifted from the canonical protocol constant');
         }
+    });
+
+    it('anchor_reward_activation.js executable code is byte-identical between the hub and indexer twins', function () {
+        // This file's own header claims "Byte-identical twin lives in ..." but nothing
+        // enforced it (uuid:38212dff); anchorRewardParity.test.js has no readFileSync at
+        // all today. The map + amount + verdict + canonical checks in this suite are a
+        // real net, but they don't catch a change that preserves those while altering
+        // unprobed code.
+        //
+        // Each copy's header comment names the OTHER repo reciprocally, so the header
+        // itself is not byte-identical across copies by construction; compare the
+        // executable region only (from the activation map down), same convention as
+        // equivGateInputParity.test.js's codeOnly() helper.
+        const codeOnly = (s) => s.slice(s.indexOf('const ANCHOR_REWARD_ACTIVATION'));
+        const hubCode = codeOnly(fs.readFileSync(path.join(ROOT, 'xchain-hub/src/anchor_reward_activation.js'), 'utf8'));
+        const idxCode = codeOnly(fs.readFileSync(path.join(ROOT, 'xchain-indexer/src/anchor_reward_activation.js'), 'utf8'));
+        assert.strictEqual(hubCode, idxCode,
+            'hub/anchor_reward_activation.js executable code drifted from the indexer copy');
     });
 
     it('every local isAnchorRewardActive agrees on the verdict for the same input', function () {

@@ -23,6 +23,8 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 const assert  = require('assert')
+const fs      = require('fs')
+const path    = require('path')
 const bitcoin = require('bitcoinjs-lib')
 
 const protocol = require('../../../xchain-documentation/protocol/constants.js')
@@ -32,7 +34,22 @@ const XChainDecoder     = require('../../../xchain-decoder/src/XChainDecoder.js'
 const sdkValidator      = require('../../../xchain-sdk/src/validator.js')
 const indexerDeploy     = require('../../../xchain-indexer/src/actions/deploy.js')
 const indexerXcall      = require('../../../xchain-indexer/src/actions/xcall.js')
+const indexerXexec      = require('../../../xchain-indexer/src/actions/xexec.js')
+const hubConstants      = require('../../../xchain-hub/src/constants.js')
 const XChainVM          = require('../../../xchain-vm/src/index.js')
+
+// The indexer's execute.js re-validates VM_MAX_CALL_DEPTH/VM_MIN_CALL_GAS host-side
+// as literal `const`s, not module exports, so pull the declared values by scanning
+// the source text (mirrors how a drift guard must read an un-exported copy).
+function readIndexerExecuteCallCaps() {
+    const src = fs.readFileSync(
+        path.join(__dirname, '../../../xchain-indexer/src/actions/execute.js'), 'utf8')
+    const depthMatch = src.match(/const\s+MAX_CALL_DEPTH\s*=\s*(\d+)/)
+    const gasMatch   = src.match(/const\s+MIN_CALL_GAS\s*=\s*(\d+)/)
+    assert.ok(depthMatch, 'could not find indexer execute.js MAX_CALL_DEPTH declaration')
+    assert.ok(gasMatch, 'could not find indexer execute.js MIN_CALL_GAS declaration')
+    return { MAX_CALL_DEPTH: Number(depthMatch[1]), MIN_CALL_GAS: Number(gasMatch[1]) }
+}
 
 describe('Protocol size-limit drift guard', () => {
 
@@ -157,8 +174,6 @@ describe('Protocol size-limit drift guard', () => {
 
         // The indexer xcall.js values gate cross-chain calls on chain. They are
         // literal-copied into the canonical module; assert they have not drifted.
-        // (VM_MAX_CALL_DEPTH is omitted until the VM exports MAX_CALL_DEPTH; tracked
-        // as remaining Stage-2 work.)
         const XCALL_FIELDS = [
             'XCALL_MIN_GAS', 'XCALL_MAX_GAS', 'XCALL_MAX_HOPS',
             'XCALL_MIN_DEADLINE_BLOCKS', 'XCALL_MAX_DEADLINE_BLOCKS', 'XCALL_MAX_CALLS_PER_BLOCK',
@@ -171,6 +186,65 @@ describe('Protocol size-limit drift guard', () => {
                     'indexer ' + field + ' drifted from the canonical protocol constant'
                 )
             })
+        })
+
+        // The hub keeps its own defense-in-depth copy (CrossChainCallEngine.js
+        // rejects any relay whose cross_hops exceeds it before ever reaching the
+        // indexer arbiter). If the hub relaxed while the indexer stayed strict, the
+        // hub would PBFT-sign a relay row the indexer then rejects (wasted round).
+        it('[regression:p0] hub XCALL_MAX_HOPS === canonical (uuid 74e6/332)', () => {
+            assert.strictEqual(
+                hubConstants.XCALL_MAX_HOPS,
+                protocol.XCALL_MAX_HOPS,
+                'hub XCALL_MAX_HOPS drifted from the canonical protocol constant'
+            )
+        })
+
+        // XCALL_MAX_RETURN_BYTES is enforced in a different indexer module
+        // (xexec.js, not xcall.js): an oversize return becomes status
+        // 'payload_too_large' with an empty payload. Asserted separately since it
+        // does not live on indexerXcall (uuid 333).
+        it('[regression:p0] indexer xexec XCALL_MAX_RETURN_BYTES === canonical (uuid 333)', () => {
+            assert.strictEqual(
+                indexerXexec.XCALL_MAX_RETURN_BYTES,
+                protocol.XCALL_MAX_RETURN_BYTES,
+                'indexer xexec.js XCALL_MAX_RETURN_BYTES drifted from the canonical protocol constant'
+            )
+        })
+    })
+
+    describe('VM call-depth / call-gas consensus bounds (VM emit-time vs indexer re-validation)', () => {
+
+        // VM_MAX_CALL_DEPTH / VM_MIN_CALL_GAS are literal-copied into the VM
+        // (emit-time enforcement, now exported) and the indexer's host-side
+        // re-validation copy (inline consts in execute.js, read via source scan
+        // since they are not exported). A drift between VM emit-time and indexer
+        // re-validation would fork execution outcomes (uuid 334).
+        it('[regression:p0] VM MAX_CALL_DEPTH / MIN_CALL_GAS === canonical', () => {
+            assert.strictEqual(
+                XChainVM.MAX_CALL_DEPTH,
+                protocol.VM_MAX_CALL_DEPTH,
+                'VM MAX_CALL_DEPTH drifted from the canonical VM_MAX_CALL_DEPTH protocol constant'
+            )
+            assert.strictEqual(
+                XChainVM.MIN_CALL_GAS,
+                protocol.VM_MIN_CALL_GAS,
+                'VM MIN_CALL_GAS drifted from the canonical VM_MIN_CALL_GAS protocol constant'
+            )
+        })
+
+        it('[regression:p0] indexer execute.js re-validation MAX_CALL_DEPTH / MIN_CALL_GAS === canonical', () => {
+            const indexerCaps = readIndexerExecuteCallCaps()
+            assert.strictEqual(
+                indexerCaps.MAX_CALL_DEPTH,
+                protocol.VM_MAX_CALL_DEPTH,
+                'indexer execute.js MAX_CALL_DEPTH drifted from the canonical VM_MAX_CALL_DEPTH protocol constant'
+            )
+            assert.strictEqual(
+                indexerCaps.MIN_CALL_GAS,
+                protocol.VM_MIN_CALL_GAS,
+                'indexer execute.js MIN_CALL_GAS drifted from the canonical VM_MIN_CALL_GAS protocol constant'
+            )
         })
     })
 
