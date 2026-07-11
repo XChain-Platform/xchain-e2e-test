@@ -44,12 +44,11 @@ xchain-node/scripts/run-multichain-e2e.sh litecoin dogecoin
 
 Per-coin logs: `xchain-node/data/e2e-logs/<coin>-regtest-<timestamp>.log`.
 
-### Exit-code caveat
+### Exit code
 
-`xchain-node e2etest` prints `E2E tests finished with exit code N` but the CLI process itself
-currently always exits `0` (`src/cli.js` e2etest action calls `process.exit(0)`). The runner
-script parses the printed line to determine pass/fail. **Recommended fix:** change that line to
-`process.exit(exitCode)` so the CLI propagates failure natively (CI can then gate on `$?`).
+`xchain-node e2etest` prints `E2E tests finished with exit code N` and the CLI process exits with
+that same code (`src/cli.js` e2etest action calls `return process.exit(exitCode)`). CI and the
+runner script can gate on `$?` natively; scraping the printed line is no longer necessary.
 
 ## CI matrix
 
@@ -63,7 +62,7 @@ strategy:
 steps:
   - run: xchain-node install master node ${{ matrix.coin }} regtest   # bring up the stack
   - run: xchain-node e2etest ${{ matrix.coin }}
-  # gate on the parsed exit code (see caveat) or on process.exit(exitCode) once fixed
+  # e2etest propagates the suite's real exit code, so a nonzero run fails the step via $?
 ```
 
 ## Prerequisites (local regtest)

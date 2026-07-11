@@ -41,7 +41,7 @@ class RegtestMinerConnector {
         if (result && typeof result === 'object' && result.error) {
             throw new Error(result.error)
         }
-        return result || null
+        return result === undefined ? null : result
     }
 
     async ping(){

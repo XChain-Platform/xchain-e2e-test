@@ -37,6 +37,7 @@ const indexerXcall      = require('../../../xchain-indexer/src/actions/xcall.js'
 const indexerXexec      = require('../../../xchain-indexer/src/actions/xexec.js')
 const hubConstants      = require('../../../xchain-hub/src/constants.js')
 const XChainVM          = require('../../../xchain-vm/src/index.js')
+const explorerVmQuery   = require('../../../xchain-explorer/src/vm-query.js')
 
 // The indexer's execute.js re-validates VM_MAX_CALL_DEPTH/VM_MIN_CALL_GAS host-side
 // as literal `const`s, not module exports, so pull the declared values by scanning
@@ -126,6 +127,18 @@ describe('Protocol size-limit drift guard', () => {
                 'VM isolate code-size limit drifted from the canonical protocol constant'
             )
         })
+
+        // Previously only asserted by the explorer's own unit test
+        // (xchain-explorer/test/unit/vm-query.test.js), not this central
+        // tripwire; a skipped explorer suite in the cross-service CI lane
+        // could let this copy drift unnoticed (uuid 269217d2).
+        it('[regression:p0] explorer vm-query MAX_CODE_SIZE === canonical', () => {
+            assert.strictEqual(
+                explorerVmQuery.MAX_CODE_SIZE,
+                protocol.MAX_CODE_SIZE,
+                'explorer vm-query MAX_CODE_SIZE drifted from the canonical protocol constant; the read-only query isolate would reject (or over-accept) contract code the chain itself indexed'
+            )
+        })
     })
 
     describe('FIAT_CODE allow-list (PRICE actions)', () => {
@@ -170,6 +183,32 @@ describe('Protocol size-limit drift guard', () => {
         })
     })
 
+    describe('Oracle federation bounds (hub is the arbiter)', () => {
+
+        // PRICE_MAX and ORACLE_DEVIATION_THRESHOLD are declared only in
+        // xchain-hub/src/constants.js, which exports all three (with
+        // XCALL_MAX_HOPS) together. Mirrors the XCALL_MAX_HOPS parity check
+        // above: assert the hub copies against the canonical documentation
+        // twin so a hub-side edit or a future consumer re-declaring either
+        // literal has a cross-repo tripwire (uuid 2e3ecb5b).
+
+        it('[regression:p0] hub PRICE_MAX === canonical', () => {
+            assert.strictEqual(
+                hubConstants.PRICE_MAX,
+                protocol.PRICE_MAX,
+                'hub PRICE_MAX drifted from the canonical protocol constant'
+            )
+        })
+
+        it('[regression:p0] hub ORACLE_DEVIATION_THRESHOLD === canonical', () => {
+            assert.strictEqual(
+                hubConstants.ORACLE_DEVIATION_THRESHOLD,
+                protocol.ORACLE_DEVIATION_THRESHOLD,
+                'hub ORACLE_DEVIATION_THRESHOLD drifted from the canonical protocol constant'
+            )
+        })
+    })
+
     describe('XCALL consensus bounds (indexer is the arbiter)', () => {
 
         // The indexer xcall.js values gate cross-chain calls on chain. They are
@@ -209,6 +248,18 @@ describe('Protocol size-limit drift guard', () => {
                 indexerXexec.XCALL_MAX_RETURN_BYTES,
                 protocol.XCALL_MAX_RETURN_BYTES,
                 'indexer xexec.js XCALL_MAX_RETURN_BYTES drifted from the canonical protocol constant'
+            )
+        })
+
+        // The VM ships an exported copy of XCALL_MAX_RETURN_BYTES too (index.js
+        // declares and exports it for parity). It is informational rather than an
+        // enforcement gate today, but an exported copy can drift silently, so
+        // assert it against canonical alongside the indexer xexec copy (uuid a27c).
+        it('[regression:p0] VM XCALL_MAX_RETURN_BYTES === canonical (uuid a27c)', () => {
+            assert.strictEqual(
+                XChainVM.XCALL_MAX_RETURN_BYTES,
+                protocol.XCALL_MAX_RETURN_BYTES,
+                'VM XCALL_MAX_RETURN_BYTES drifted from the canonical protocol constant'
             )
         })
 
@@ -298,6 +349,18 @@ describe('Protocol size-limit drift guard', () => {
                 encoderValidator.MAX_COMPILED_ACTION_DATA_LENGTH - encoderValidator.MAX_DATA_BYTES,
                 protocol.OP_RETURN_PUSH_OVERHEAD,
                 'encoder PUSHDATA2 overhead (MAX_COMPILED_ACTION_DATA_LENGTH - MAX_DATA_BYTES) drifted from the canonical protocol constant')
+        })
+
+        it('[regression:p0] MAX_ACTION_DATA_LENGTH === canonical across SDK chunkHelper + co-signer', () => {
+            // chunkHelper's copy drives fitsSingleDeploy() (single-tx vs chunked DEPLOY) and is
+            // re-exported by the co-signer psbtActionDecode OVERSIZED gate. The decoder copy is
+            // guarded above; without this the SDK/co-signer copy could drift so the co-signer
+            // refuses PSBTs the decoder accepts and the chunker splits contracts that fit one tx.
+            const psbtActionDecode = require('../../../xchain-sdk/src/cosigner/psbtActionDecode.js')
+            assert.strictEqual(chunkHelper.MAX_ACTION_DATA_LENGTH, protocol.MAX_ACTION_DATA_LENGTH,
+                'SDK chunkHelper MAX_ACTION_DATA_LENGTH drifted from the canonical protocol constant')
+            assert.strictEqual(psbtActionDecode.MAX_ACTION_DATA_LENGTH, protocol.MAX_ACTION_DATA_LENGTH,
+                'co-signer psbtActionDecode MAX_ACTION_DATA_LENGTH drifted from the canonical protocol constant')
         })
 
         it('[regression:p0] a max-size v4-carrier part + action overhead fits the compiled cap', () => {

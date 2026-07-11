@@ -39,21 +39,23 @@ describe('[regression:p0] Service Connectors', function () {
             const node = new BlockchainConnector('localhost', 18443, 'rpcuser', 'rpcpass')
             const networkInfo = { version: 250000, subversion: '/Satoshi:25.0.0/' }
 
-            sinon.stub(node, 'getNetworkInfo').resolves(networkInfo)
+            const stub = mockAxiosPost(networkInfo)
             const result = await node.getNetworkInfo()
             assert.strictEqual(result.version, 250000)
             assert.strictEqual(result.subversion, '/Satoshi:25.0.0/')
+            assert.strictEqual(stub.firstCall.args[0], 'http://localhost:18443')
+            assert.strictEqual(stub.firstCall.args[1].method, 'getnetworkinfo')
+            assert.ok(stub.firstCall.args[2].headers.Authorization.startsWith('Basic '))
         })
 
         it('[regression:p0] R-CONN-002 : broadcastTx sends raw hex and returns txid', async function () {
             const node = new BlockchainConnector('localhost', 18443, 'rpcuser', 'rpcpass')
 
-            sinon.stub(node, 'broadcastTx').callsFake(async (txHex) => {
-                assert.strictEqual(txHex, 'deadbeef', 'should receive the raw hex')
-                return 'abc123def456'
-            })
+            const stub = mockAxiosPost('abc123def456')
             const result = await node.broadcastTx('deadbeef')
             assert.strictEqual(result, 'abc123def456')
+            assert.strictEqual(stub.firstCall.args[1].method, 'sendrawtransaction')
+            assert.deepStrictEqual(stub.firstCall.args[1].params, ['deadbeef'])
         })
 
         it('[regression:p0] R-CONN-003 : waitForTx polls until transaction is confirmed', async function () {
@@ -96,9 +98,11 @@ describe('[regression:p0] Service Connectors', function () {
             const tracker = new XChainUtxoTrackerConnector('localhost', 3030)
             const utxos = [{ txid: 'aabb', vout: 0, value: 100000 }]
 
-            sinon.stub(tracker, 'getUtxosFromAddress').resolves({ utxos })
+            const stub = mockAxiosPost({ utxos })
             const result = await tracker.getUtxosFromAddress('addr1')
             assert.deepStrictEqual(result.utxos, utxos)
+            assert.strictEqual(stub.firstCall.args[1].method, 'get_utxos')
+            assert.strictEqual(stub.firstCall.args[1].params.address, 'addr1')
         })
 
         it('[regression:p0] R-CONN-005 : waitForUtxos polls until UTXOs appear', async function () {
@@ -421,6 +425,33 @@ describe('[regression:p0] Service Connectors', function () {
         it('[regression:p0] R-CONN-011e : HubConnector accepts host+port for backward compat', function () {
             const hub = new XChainHubConnector('myhost', 9999)
             assert.deepStrictEqual(hub.urls, ['http://myhost:9999'])
+        })
+    })
+    describe('RPC unwrap falsy passthrough (uuid:d944b084)', function () {
+        afterEach(function () { sinon.restore() })
+
+        it('[regression:p1] R-CONN-012a : miner _unwrap preserves falsy success payloads', async function () {
+            const miner = new RegtestMinerConnector('localhost', 5678)
+            for (const falsy of [0, '', false]) {
+                sinon.restore()
+                mockAxiosPost(falsy)
+                assert.strictEqual(await miner.sendFunds('addr', 1), falsy)
+            }
+        })
+
+        it('[regression:p1] R-CONN-012b : miner _unwrap maps only undefined result to null', async function () {
+            const miner = new RegtestMinerConnector('localhost', 5678)
+            mockAxiosPost(undefined)
+            assert.strictEqual(await miner.sendFunds('addr', 1), null)
+        })
+
+        it('[regression:p1] R-CONN-012c : tracker status unwraps preserve falsy results', async function () {
+            const tracker = new XChainUtxoTrackerConnector('localhost', 2345)
+            mockAxiosPost(false)
+            assert.strictEqual(await tracker.getQuiescentStatus(), false)
+            sinon.restore()
+            mockAxiosPost(0)
+            assert.strictEqual(await tracker.getSyncStatus(), 0)
         })
     })
 })

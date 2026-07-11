@@ -154,10 +154,12 @@ describe('[regression:p1] Error Propagation & Resilience', function () {
 
     it('[regression:p1] R-ERR-003: broadcastTx produces error with node error detail', async function () {
         const node = new BlockchainConnector('localhost', 18443, 'u', 'p')
-        // Real impl throws: 'Error sending transaction to the node: {"code":-26,"message":"dust"}'
-        sinon.stub(node, 'broadcastTx').rejects(
-            new Error('Error sending transaction to the node: {"code":-26,"message":"dust"}')
-        )
+        // Exercise the real _sendRaw error path: node returns a JSON-RPC error
+        // envelope, and broadcastTx rethrows it (the 'dust' message does not match
+        // the regtest maxfeerate retry condition, so no retry fires).
+        sinon.stub(axios, 'post').resolves({
+            data: { jsonrpc: '2.0', result: null, error: { code: -26, message: 'dust' }, id: 1 }
+        })
         await assert.rejects(
             () => node.broadcastTx('deadbeef'),
             /Error sending transaction.*dust/

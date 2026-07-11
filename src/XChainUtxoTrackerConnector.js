@@ -65,7 +65,7 @@ class UtxoTracker {
                 headers: { 'Content-Type': 'application/json' }
             });
             const responseData = response.data;
-            return responseData.result || null;
+            return responseData.result === undefined ? null : responseData.result;
         } catch (error) {
             return null;
         }
@@ -80,7 +80,7 @@ class UtxoTracker {
                 headers: { 'Content-Type': 'application/json' }
             });
             const responseData = response.data;
-            return responseData.result || null;
+            return responseData.result === undefined ? null : responseData.result;
         } catch (error) {
             return null;
         }
