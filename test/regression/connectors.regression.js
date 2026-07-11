@@ -351,6 +351,50 @@ describe('[regression:p0] Service Connectors', function () {
                 stub.restore()
             }
         })
+
+        // The miner controller signals failure by returning a truthy `{error}`
+        // object as `result`, never via an HTTP error. `{error}` is truthy, so
+        // a plain truthiness check would hand the caller the error object as a
+        // fake success payload (e.g. sendFunds() returning it in place of a
+        // txid string, or generateBlocks() reporting success while mining
+        // zero blocks). Every method must throw instead.
+        it('[regression:p0] R-CONN-010d : sendFunds throws on an {error} envelope instead of returning it', async function () {
+            const stub = mockAxiosPost({ error: 'There was a problem sending funds: boom' })
+            try {
+                const miner = new RegtestMinerConnector('localhost', 3033)
+                await assert.rejects(
+                    () => miner.sendFunds('addr1', 1.0),
+                    /There was a problem sending funds: boom/
+                )
+            } finally {
+                stub.restore()
+            }
+        })
+
+        it('[regression:p0] R-CONN-010e : generateBlocks throws on an {error} envelope instead of returning it', async function () {
+            const stub = mockAxiosPost({ error: 'There was a problem generating blocks: boom' })
+            try {
+                const miner = new RegtestMinerConnector('localhost', 3033)
+                await assert.rejects(
+                    () => miner.generateBlocks(2),
+                    /There was a problem generating blocks: boom/
+                )
+            } finally {
+                stub.restore()
+            }
+        })
+
+        it('[regression:p0] R-CONN-010f : setDefaultMiningTime/pauseMining/resumeMining throw on an {error} envelope', async function () {
+            const stub = mockAxiosPost({ error: 'boom' })
+            try {
+                const miner = new RegtestMinerConnector('localhost', 3033)
+                await assert.rejects(() => miner.setDefaultMiningTime(), /boom/)
+                await assert.rejects(() => miner.pauseMining(), /boom/)
+                await assert.rejects(() => miner.resumeMining(), /boom/)
+            } finally {
+                stub.restore()
+            }
+        })
     })
 
     describe('Constructor URL building', function () {

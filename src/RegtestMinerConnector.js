@@ -30,6 +30,20 @@ class RegtestMinerConnector {
         return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
+    // The regtest-miner's JSON-RPC controller signals failure by returning a
+    // truthy `{error: "..."}` object as `result`, never via an HTTP error (see
+    // the setMiningTime comment below, uuid:24c35056). `{error}` is truthy, so
+    // a plain truthiness check on `result` would hand the caller the error
+    // object as if it were the success payload. Every result-returning method
+    // routes through this helper so that contract is enforced uniformly.
+    _unwrap(response) {
+        const result = response.data && response.data.result
+        if (result && typeof result === 'object' && result.error) {
+            throw new Error(result.error)
+        }
+        return result || null
+    }
+
     async ping(){
         const data = {
             jsonrpc: '2.0',
@@ -84,14 +98,10 @@ class RegtestMinerConnector {
         // Make the request to the node
         const response = await axios.post(this.url, data, this.reqConfig)
 
-        // Verify if there is a result and return it
-        if (response.data && response.data.result) {
-            return response.data.result
-        } else {
-            return null
-        }
+        // Verify if there is a result and return it (throws on an {error} envelope)
+        return this._unwrap(response)
     }
-    
+
     async setMiningTime(maxTime, txAddedTime){
         const data = {
             jsonrpc: '2.0',
@@ -102,26 +112,16 @@ class RegtestMinerConnector {
 
         // Make the request to the node
         const response = await axios.post(this.url, data, this.reqConfig)
-        const result = response.data && response.data.result
 
         // The controller returns the bare string "ok" on success and an
         // {error: "..."} body on rejected input (uuid:24c35056). Both are
         // truthy, so a plain truthiness check would read a rejected input as
-        // success; throw instead so callers stop believing the cadence
-        // changed when it did not.
-        if (result && typeof result === 'object' && result.error) {
-            throw new Error(result.error)
-        }
-
-        // Verify if there is a result and return it
-        if (result) {
-            return result
-        } else {
-            return null
-        }
+        // success; _unwrap() throws instead so callers stop believing the
+        // cadence changed when it did not.
+        return this._unwrap(response)
     }
-	
-	async setDefaultMiningTime(){
+
+    async setDefaultMiningTime(){
         const data = {
             jsonrpc: '2.0',
             method: 'set_default_mining_time',
@@ -132,12 +132,8 @@ class RegtestMinerConnector {
         // Make the request to the node
         const response = await axios.post(this.url, data, this.reqConfig)
 
-        // Verify if there is a result and return it
-        if (response.data && response.data.result) {
-            return response.data.result
-        } else {
-            return null
-        }
+        // Verify if there is a result and return it (throws on an {error} envelope)
+        return this._unwrap(response)
     }
 
     // Pause the regtest miner's adaptive auto-mine loop. Call before a
@@ -154,11 +150,7 @@ class RegtestMinerConnector {
 
         const response = await axios.post(this.url, data, this.reqConfig)
 
-        if (response.data && response.data.result) {
-            return response.data.result
-        } else {
-            return null
-        }
+        return this._unwrap(response)
     }
 
     // Resume the adaptive auto-mine loop after a pauseMining() call.
@@ -172,11 +164,7 @@ class RegtestMinerConnector {
 
         const response = await axios.post(this.url, data, this.reqConfig)
 
-        if (response.data && response.data.result) {
-            return response.data.result
-        } else {
-            return null
-        }
+        return this._unwrap(response)
     }
 
     // Mine `count` empty blocks via the regtest miner's generatetoaddress.
@@ -193,11 +181,7 @@ class RegtestMinerConnector {
 
         const response = await axios.post(this.url, data, this.reqConfig)
 
-        if (response.data && response.data.result) {
-            return response.data.result
-        } else {
-            return null
-        }
+        return this._unwrap(response)
     }
 }
 
