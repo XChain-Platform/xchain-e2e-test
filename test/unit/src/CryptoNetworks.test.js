@@ -172,6 +172,49 @@ describe('CryptoNetworks', () => {
             })
         })
 
+        // Unknown-network error-path contract guard. The parity checks above iterate
+        // only the 9 valid keys, so the unknown/empty/null path was never asserted even
+        // though the copies DISAGREE on it: the legacy switch here, xchain-utxo-tracker
+        // and xchain-regtest-miner return `undefined` (falsy, so consumers using the
+        // `getBitcoinJsNetwork(x) || fallback` idiom keep working), while
+        // xchain-encoder and xchain-decoder `throw new TypeError`. Standardizing that
+        // contract fleet-wide is an open operator decision (touches encoder/decoder
+        // production code); until it is made, lock each copy's CURRENT contract so any
+        // future drift on the error path is caught instead of slipping through as it
+        // does today. `undefined` copies are also asserted not to throw.
+        const UNKNOWN_INPUTS = ['ethereum-mainnet', '', null]
+        // repo -> current unknown-network contract: 'undefined' or 'throws'.
+        const UNKNOWN_CONTRACT = {
+            'xchain-utxo-tracker': 'undefined',
+            'xchain-regtest-miner': 'undefined',
+            'xchain-encoder': 'throws',
+            'xchain-decoder': 'throws',
+        }
+
+        it('this (legacy) copy returns undefined for unknown/empty/null network', function () {
+            for (const bad of UNKNOWN_INPUTS) {
+                assert.strictEqual(CryptoNetworks.getBitcoinJsNetwork(bad), undefined,
+                    `legacy getBitcoinJsNetwork(${JSON.stringify(bad)}) must stay undefined`)
+            }
+        })
+
+        Object.entries(UNKNOWN_CONTRACT).forEach(([repo, contract]) => {
+            it(`${repo} getBitcoinJsNetwork honors its unknown-network contract (${contract})`, function () {
+                const p = path.resolve(__dirname, '../../../../' + repo + '/src/CryptoNetworks.js')
+                if (!fs.existsSync(p)) return this.skip()
+                const Sib = require(p)
+                for (const bad of UNKNOWN_INPUTS) {
+                    if (contract === 'undefined') {
+                        assert.strictEqual(Sib.getBitcoinJsNetwork(bad), undefined,
+                            `${repo} getBitcoinJsNetwork(${JSON.stringify(bad)}) drifted; expected undefined (falsy-fallback contract)`)
+                    } else {
+                        assert.throws(() => Sib.getBitcoinJsNetwork(bad), TypeError,
+                            `${repo} getBitcoinJsNetwork(${JSON.stringify(bad)}) drifted; expected a thrown TypeError`)
+                    }
+                }
+            })
+        })
+
         it('getBitcoinJsNetwork and getFirstBlock match the canonical coins registry for every network', function () {
             const p = path.resolve(__dirname, '../../../../xchain-encoder/src/coins/index.js')
             if (!fs.existsSync(p)) return this.skip()

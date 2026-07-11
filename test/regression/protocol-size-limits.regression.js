@@ -211,6 +211,23 @@ describe('Protocol size-limit drift guard', () => {
                 'indexer xexec.js XCALL_MAX_RETURN_BYTES drifted from the canonical protocol constant'
             )
         })
+
+        // The VM is the emit-time arbiter for cross-chain calls (gateway-emit.js
+        // crossExecute enforces these bounds before the indexer ever sees the
+        // call); the indexer re-validates the same bounds host-side. If the VM's
+        // copy drifted from canonical, the VM would emit a crossExecute the
+        // indexer then rejects (or vice-versa), forking cross-chain execution
+        // with no failing test. This was the last unguarded copy of the XCALL
+        // bound family (uuid 922e2a57).
+        XCALL_FIELDS.filter((field) => field !== 'XCALL_MAX_CALLS_PER_BLOCK').forEach((field) => {
+            it('[regression:p0] VM ' + field + ' === canonical', () => {
+                assert.strictEqual(
+                    XChainVM[field],
+                    protocol[field],
+                    'VM ' + field + ' drifted from the canonical protocol constant'
+                )
+            })
+        })
     })
 
     describe('VM call-depth / call-gas consensus bounds (VM emit-time vs indexer re-validation)', () => {
@@ -267,6 +284,20 @@ describe('Protocol size-limit drift guard', () => {
                 'SDK chunkHelper MAX_DEPLOYCHUNK_PART_BYTES drifted from the canonical protocol constant')
             assert.strictEqual(indexerDeployChunk.MAX_DEPLOYCHUNK_PART_BYTES, protocol.MAX_DEPLOYCHUNK_PART_BYTES,
                 'indexer v4-carrier MAX_DEPLOYCHUNK_PART_BYTES drifted from the canonical protocol constant')
+        })
+
+        it('[regression:p0] OP_RETURN_PUSH_OVERHEAD === canonical across SDK + encoder', () => {
+            // Every service that fits payloads into a single OP_RETURN push carries its own
+            // copy of the PUSHDATA2 overhead. The SDK chunkHelper exports it directly; the
+            // encoder folds it into MAX_DATA_BYTES = MAX_COMPILED_ACTION_DATA_LENGTH - overhead,
+            // so its copy is the difference. Both must equal the canonical constant or the
+            // single-tx-fit decision (SDK) and the compiled-data cap (encoder) silently diverge.
+            assert.strictEqual(chunkHelper.OP_RETURN_PUSH_OVERHEAD, protocol.OP_RETURN_PUSH_OVERHEAD,
+                'SDK chunkHelper OP_RETURN_PUSH_OVERHEAD drifted from the canonical protocol constant')
+            assert.strictEqual(
+                encoderValidator.MAX_COMPILED_ACTION_DATA_LENGTH - encoderValidator.MAX_DATA_BYTES,
+                protocol.OP_RETURN_PUSH_OVERHEAD,
+                'encoder PUSHDATA2 overhead (MAX_COMPILED_ACTION_DATA_LENGTH - MAX_DATA_BYTES) drifted from the canonical protocol constant')
         })
 
         it('[regression:p0] a max-size v4-carrier part + action overhead fits the compiled cap', () => {
