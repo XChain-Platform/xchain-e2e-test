@@ -142,11 +142,13 @@ describe('[regression:p0] Bootstrap Orchestration', function () {
         })
 
         it('[regression:p0] R-BOOT-008b: all 9 coin/network combos return valid configs', function () {
-            // Litecoin's dust relay fee is 10× Bitcoin's → 5460 litoshi floor
+            // Litecoin's dust relay fee is 10× Bitcoin's → 5460 litoshi floor;
+            // Dogecoin Core's dust floor is 100000 koinu (matches the canonical
+            // coin bundle, the miner's CryptoNetworks, and the unit suite).
             const combos = {
                 'bitcoin-mainnet': 546, 'bitcoin-testnet': 546, 'bitcoin-regtest': 546,
                 'litecoin-mainnet': 5460, 'litecoin-testnet': 5460, 'litecoin-regtest': 5460,
-                'dogecoin-mainnet': 546, 'dogecoin-testnet': 546, 'dogecoin-regtest': 546
+                'dogecoin-mainnet': 100000, 'dogecoin-testnet': 100000, 'dogecoin-regtest': 100000
             }
             for (const [combo, dust] of Object.entries(combos)) {
                 const network = CryptoNetworks.getBitcoinJsNetwork(combo)

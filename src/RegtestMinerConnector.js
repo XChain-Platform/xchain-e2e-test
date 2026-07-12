@@ -37,6 +37,17 @@ class RegtestMinerConnector {
     // object as if it were the success payload. Every result-returning method
     // routes through this helper so that contract is enforced uniformly.
     _unwrap(response) {
+        // Top-level JSON-RPC error member: express-json-rpc-router emits
+        // response.data.error (not result) when the method is unknown (version
+        // skew), a handler throws outside its own try/catch, or the body was
+        // malformed. In all of those response.data.result is undefined, so
+        // without this guard the caller would read a rejected/failed RPC as a
+        // null success. Throw before touching result so transport-level
+        // failures never read as green.
+        if (response.data && response.data.error) {
+            const err = response.data.error
+            throw new Error(typeof err === 'object' ? (err.message || JSON.stringify(err)) : err)
+        }
         const result = response.data && response.data.result
         if (result && typeof result === 'object' && result.error) {
             throw new Error(result.error)

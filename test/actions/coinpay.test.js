@@ -88,12 +88,13 @@ describe('COINPAY', function () {
     })
 
     describe('v0: COINPay obligation expires', function () {
-        it('should expire unfulfilled obligation and release escrowed tokens', async function () {
-            // This test requires the COINPAY_EXPIRATION to elapse.
-            // In regtest, we can mine blocks with future timestamps to trigger expiration.
-            // For now, this is a placeholder. The full test requires mining control
-            // to advance block_time past the obligation's expiration timestamp.
-            console.log("    (COINPay expiration test requires block time advancement; skipping in basic suite)")
+        // Pending (not implemented): asserting escrow release on obligation expiry
+        // needs mining control to advance block_time past the obligation's
+        // expiration timestamp. Marked it.skip so the suite reports it as pending
+        // rather than green-with-no-assertion (tracked as ). Implement by
+        // mining regtest blocks with future timestamps, then asserting the escrowed
+        // tokens are credited back to the payer and the obligation is closed.
+        it.skip('should expire unfulfilled obligation and release escrowed tokens', async function () {
         })
     })
 })

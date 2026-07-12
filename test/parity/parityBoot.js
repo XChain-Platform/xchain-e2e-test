@@ -99,13 +99,13 @@ exports.mochaHooks = {
         }
         console.log('[parityBoot] indexer DB: ' + dbName);
 
-        global.regtestMinerConnector = new RegtestMinerConnector('localhost', minerPort);
+        global.regtestMinerConnector = new RegtestMinerConnector('localhost', minerPort, process.env.MINER_API_KEY || null);
         global.utxoTrackerConnector = new XChainUtxoTrackerConnector('localhost', trackerPort);
         global.indexerDatabase = new Database(dbHost, dbPort, dbName, dbUser, dbPass);
 
         // Ping ONLY the services the driver uses; never the node or explorer.
         if (!(await global.utxoTrackerConnector.ping())) throw new Error('[parityBoot] utxo-tracker unreachable');
-        if (!(await global.regtestMinerConnector.ping())) throw new Error('[parityBoot] regtest-miner unreachable');
+        if (!(await global.regtestMinerConnector.waitForReady(60000, 1000))) throw new Error('[parityBoot] regtest-miner not ready after 60s');
         if (!(await global.indexerDatabase.ping())) throw new Error('[parityBoot] indexer DB unreachable');
 
         console.log('[parityBoot] ready: miner/tracker/indexer-DB connected; NO node-ping, NO gas-genesis');
