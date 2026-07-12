@@ -12,138 +12,40 @@
  *
  ********************************************************************/
 
-const bitcoin = require('bitcoinjs-lib');
+// Thin adapter over the canonical coin registry (src/coins, vendored from
+// xchain-hub via bin/sync-coins.sh). The bitcoinjs network object and the
+// indexing start height come from the single source of truth instead of an
+// in-file switch, matching the pattern already used by xchain-decoder /
+// xchain-encoder / xchain-utxo-tracker. Unlike those repos, this legacy
+// contract returns `undefined` / `0` for an unrecognized network instead of
+// throwing (preserved so existing `getBitcoinJsNetwork(x) || fallback`
+// call sites keep working).
+
+const coins = require('./coins');
+
+// Split a "<fullname>-<network>" key (e.g. "bitcoin-mainnet") into a canonical
+// {tick, net} pair, or null when it names no known coin/network.
+function parseNetworkName(networkName){
+    const s = String(networkName == null ? '' : networkName);
+    const i = s.lastIndexOf('-');
+    if(i < 0) return null;
+    const tick = coins.FULL_NAME_TO_TICK[s.slice(0, i)];
+    const net  = s.slice(i + 1);
+    if(!tick || !coins.NETWORKS.includes(net)) return null;
+    return { tick, net };
+}
 
 class CryptoNetworks {
+    // bitcoinjs-lib network object (+ XChain relay overlays) for a network key.
     static getBitcoinJsNetwork(networkName){
-        switch(networkName){
-            case "bitcoin-mainnet":
-                return { ...bitcoin.networks.bitcoin, dustThreshold: 546, minStandardTxNonWitnessSize: 65, singleOpReturnPolicy: true }
-            case "bitcoin-testnet":
-                return { ...bitcoin.networks.testnet, dustThreshold: 546, minStandardTxNonWitnessSize: 65, singleOpReturnPolicy: true }
-            case "bitcoin-regtest":
-                return { ...bitcoin.networks.regtest, dustThreshold: 546, minStandardTxNonWitnessSize: 65, singleOpReturnPolicy: true }
-            case "dogecoin-mainnet":
-                return {
-                    "messagePrefix": '\x19Dogecoin Signed Message:\n',
-                    "bip32": {
-                       "public": 0x02facafd,
-                       "private": 0x02fac398
-                    },
-                    "pubKeyHash": 0x1e,
-                    "scriptHash": 0x16,
-                    "wif": 0x9e,
-                    "dustThreshold": 100000,
-                    "supportsSegwit": false,
-                    "singleOpReturnPolicy": true
-                }
-            case "dogecoin-testnet":
-                return {
-                    "messagePrefix": '\x19Dogecoin Signed Message:\n',
-                    "bip32": {
-                       "public": 0x0432a9a8,
-                       "private": 0x0432a243
-                    },
-                    "pubKeyHash": 0x71,
-                    "scriptHash": 0xc4,
-                    "wif": 0xf1,
-                    "dustThreshold": 100000,
-                    "supportsSegwit": false,
-                    "singleOpReturnPolicy": true
-                }
-            case "dogecoin-regtest":
-                // Dogecoin v1.14.x regtest reuses Bitcoin-testnet-style address
-                // prefixes (pubKeyHash 0x6f → 'm'/'n', WIF 0xef → 'c'). It does
-                // NOT use the Dogecoin testnet prefix (0x71 → 'n' starts but
-                // different checksum space). Generating addresses with 0x71
-                // here produces strings that dogecoind regards as "Invalid
-                // Dogecoin address" and rejects any sendtoaddress against.
-                return {
-                    "messagePrefix": '\x19Dogecoin Signed Message:\n',
-                    "bip32": {
-                       "public": 0x043587cf,
-                       "private": 0x04358394
-                    },
-                    "pubKeyHash": 0x6f,
-                    "scriptHash": 0xc4,
-                    "wif": 0xef,
-                    "dustThreshold": 100000,
-                    "supportsSegwit": false,
-                    "singleOpReturnPolicy": true
-                }
-            case "litecoin-mainnet":
-                return {
-                    "messagePrefix": '\x19Litecoin Signed Message:\n',
-                    "bech32": 'ltc',
-                    "bip32": {
-                       "public": 0x019da462,
-                       "private": 0x019d9cfe 
-                    },
-                    "pubKeyHash": 0x30,
-                    "scriptHash": 0x32,
-                    "wif": 0xb0,
-                    "dustThreshold": 5460,
-                    "minStandardTxNonWitnessSize": 85,
-                    "singleOpReturnPolicy": true
-                }
-            case "litecoin-testnet":
-                return {
-                    "messagePrefix": '\x19Litecoin Signed Message:\n',
-                    "bech32": 'tltc',
-                    "bip32": {
-                       "public": 0x0436f6e1,
-                       "private": 0x0436ef7d 
-                    },
-                    "pubKeyHash": 0x6f,
-                    "scriptHash": 0xc4,
-                    "wif": 0xef,
-                    "dustThreshold": 5460,
-                    "minStandardTxNonWitnessSize": 85,
-                    "singleOpReturnPolicy": true
-                }
-            case "litecoin-regtest":
-                return {
-                    "messagePrefix": '\x19Litecoin Signed Message:\n',
-                    "bech32": 'rltc',
-                    "bip32": {
-                       "public": 0x0436f6e1,
-                       "private": 0x0436ef7d 
-                    },
-                    "pubKeyHash": 0x6f,
-                    "scriptHash": 0xc4,
-                    "wif": 0xef,
-                    "dustThreshold": 5460,
-                    "minStandardTxNonWitnessSize": 85,
-                    "singleOpReturnPolicy": true
-                }   
-        }
+        const p = parseNetworkName(networkName);
+        return p ? coins.getCoinConfig(p.tick, p.net).net : undefined;
     }
-    
+
+    // Indexing start height (not part of any consensus hash). Unknown/regtest -> 0.
     static getFirstBlock(networkName){
-        // Kept in sync with xchain-decoder / xchain-encoder (the canonical start
-        // heights). These are the indexing boundary only, not part of any consensus
-        // hash. Re-pinned near tip pre-launch (2026-06-19); dogecoin-mainnet sits just
-        // below its first live anchor (6,243,921) so anchors are kept. e2e runs on
-        // regtest, where all networks return 0 via the default.
-        switch(networkName){
-            case "bitcoin-mainnet":
-                return 950000
-            case "bitcoin-testnet":
-                return 138000
-            case "litecoin-mainnet":
-                return 3120000
-            case "litecoin-testnet":
-                return 4765000
-            case "dogecoin-mainnet":
-                return 6240000
-            case "dogecoin-testnet":
-                // DOGE testnet mints min-difficulty blocks ~every 20s and runs tens of
-                // millions of blocks ahead of the other networks; anchored near tip.
-                return 64800000
-            // All regtest networks start parsing at block 0
-            default:
-                return 0
-        }
+        const p = parseNetworkName(networkName);
+        return p ? coins.getCoinConfig(p.tick, p.net).firstBlock : 0;
     }
 }
 
