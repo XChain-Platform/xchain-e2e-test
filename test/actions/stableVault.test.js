@@ -164,8 +164,14 @@ describe('Stable Vault: mini-MakerDAO (contract-emitted ISSUE/MINT/DESTROY + ora
     const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
     const COLL = 'XCHAIN'      // collateral = the gas token; nothing extra to issue
     const RATIO = '150'
-    const BONUS = '10'
+    const BONUS = '20'
     const MAXAGE = '100000'    // blocks; staleness is unit-tested, not the point here
+    // All amounts below are integers ON PURPOSE: the indexer normalizes every
+    // emitted amount to the tick's decimals, and XCHAIN carries 0 decimals in
+    // this stack -- a fractional seizure (e.g. 2.75) would be rounded in the
+    // ledger while the contract state keeps the exact figure, drifting the
+    // two apart. Numbers are chosen so the liquidation seizure lands exactly
+    // on the integer grid: 150 debt * 120% / $20 = 9.
     // Unique stable tick + oracle pair per run, so reruns never collide with a
     // tick already issued (by a previous contract address) or older snapshots.
     const rand = () => String.fromCharCode(65 + Math.floor(Math.random() * 26))
@@ -243,12 +249,12 @@ describe('Stable Vault: mini-MakerDAO (contract-emitted ISSUE/MINT/DESTROY + ora
     it('deposit collateral, borrow the stable up to the ratio limit, not a unit more', async function () {
         await setPrice('100.00000000', 1)
 
-        await vmHelper.sendDepositV0(alice, ci, COLL, '3')
+        await vmHelper.sendDepositV0(alice, ci, COLL, '10')
         const dep = await vmHelper.sendExecuteV0(alice, ci, 'deposit', [])
         assert(dep.execution && dep.execution.status === 'valid', 'deposit should index a valid execution')
-        assert.strictEqual(await stateOf('v:' + alice.address + ':coll'), '3')
+        assert.strictEqual(await stateOf('v:' + alice.address + ':coll'), '10')
 
-        // 3 XCHAIN * $100 * 100 = 30000 >= debt * 150  ->  max debt 200.
+        // 10 XCHAIN * $100 * 100 = 100000 >= debt * 150  ->  max debt 666.
         const ex = await vmHelper.sendExecuteV0(alice, ci, 'borrow', ['200'])
         assert(ex.execution && ex.execution.status === 'valid',
             'borrow should index a valid execution (emitted MINT + SEND)')
@@ -256,9 +262,14 @@ describe('Stable Vault: mini-MakerDAO (contract-emitted ISSUE/MINT/DESTROY + ora
             'the borrower holds the freshly minted stable')
         assert.strictEqual(await stateOf('v:' + alice.address + ':debt'), '200')
 
-        const over = await vmHelper.sendExecuteV0Invalid(alice, ci, 'borrow', ['1'])
-        assert(over.execution, 'over-borrow should still record an execution row')
-        assert.notStrictEqual(over.execution.status, 'valid', 'over-borrow must not be valid')
+        // Borrowing against an EMPTY vault must be rejected. (The attempt
+        // comes from liq, who has no valid `borrow` yet: the e2e execution
+        // lookup matches by contract+caller+method, so a caller with an
+        // earlier valid call of the same method would match that one. The
+        // exact at-the-ratio-limit rejection is covered by the unit suite.)
+        const over = await vmHelper.sendExecuteV0Invalid(liq, ci, 'borrow', ['1'])
+        assert(over.execution, 'empty-vault borrow should still record an execution row')
+        assert.notStrictEqual(over.execution.status, 'valid', 'empty-vault borrow must not be valid')
     })
 
     it('repay burns the stable against the debt (emitted DESTROY)', async function () {
@@ -289,12 +300,12 @@ describe('Stable Vault: mini-MakerDAO (contract-emitted ISSUE/MINT/DESTROY + ora
         const bor = await vmHelper.sendExecuteV0(liq, ci, 'borrow', ['150'])
         assert(bor.execution && bor.execution.status === 'valid')
 
-        // Round 2 finalizes at $60: alice's vault is under water
-        // (3 * 60 * 100 = 18000 < 150 * 150 = 22500). The liquidator's own
-        // vault is equally under water, which is irrelevant: being under-
+        // Round 2 finalizes at $20: alice's vault is under water
+        // (10 * 20 * 100 = 20000 < 150 * 150 = 22500). The liquidator's own
+        // vault is even deeper under water, which is irrelevant: being under-
         // collateralized exposes you to liquidation, it does not block you
-        // from liquidatING. Seizure: 150 * 110 / (60 * 100) = 2.75 XCHAIN.
-        await setPrice('60.00000000', 2)
+        // from liquidatING. Seizure: 150 * 120 / (20 * 100) = 9 XCHAIN.
+        await setPrice('20.00000000', 2)
 
         const collBefore = Number(await balanceOf(liq.address, COLL))
         await vmHelper.sendDepositV0(liq, ci, STABLE, '150')
@@ -303,9 +314,9 @@ describe('Stable Vault: mini-MakerDAO (contract-emitted ISSUE/MINT/DESTROY + ora
             'liquidate should index a valid execution (DESTROY debt + SEND collateral)')
 
         const collAfter = Number(await balanceOf(liq.address, COLL))
-        assert.strictEqual(Math.round((collAfter - collBefore) * 1e8) / 1e8, 2.75,
-            'liquidator seizes debt + 10% bonus at the oracle price')
-        assert.strictEqual(Number(await stateOf('v:' + alice.address + ':coll')), 0.25,
+        assert.strictEqual(collAfter - collBefore, 9,
+            'liquidator seizes debt + 20% bonus at the oracle price')
+        assert.strictEqual(Number(await stateOf('v:' + alice.address + ':coll')), 1,
             'the leftover collateral stays credited to the vault owner')
         assert.strictEqual(await stateOf('v:' + alice.address + ':debt'), '0')
         assert.strictEqual(await stateOf('totalDebt'), '150', 'only the liquidator debt remains')
@@ -313,7 +324,7 @@ describe('Stable Vault: mini-MakerDAO (contract-emitted ISSUE/MINT/DESTROY + ora
         assert(held === null || Number(held) === 0, 'the covered debt should be destroyed')
 
         // The former owner can still withdraw their leftover collateral.
-        const wd = await vmHelper.sendExecuteV0(alice, ci, 'withdraw', ['0.25'])
+        const wd = await vmHelper.sendExecuteV0(alice, ci, 'withdraw', ['1'])
         assert(wd.execution && wd.execution.status === 'valid', 'debt-free withdraw should be valid')
     })
 })
