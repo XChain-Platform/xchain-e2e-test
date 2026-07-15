@@ -179,7 +179,7 @@ describe('[sdk] VOTE binding polls + contract actors', function () {
         const endBlock = (await height()) + 8;
         const pollIndex = await createPoll(sdk, issuer, {
             tick, endBlock, options: 'YES,NO', maxSelections: 1, tallyMode: 'approval',
-            weightMode: 'balance', question: 'Binding pass?',
+            weightMode: 'balance', quorum: '0.05', minVoters: 1, question: 'Binding pass?',
             callbackContract: target, callbackMethod: 'onPoll', callbackOn: 'pass'
         });
         await castBallot(sdk, voterA, pollIndex, '1'); // NO 300
@@ -204,7 +204,7 @@ describe('[sdk] VOTE binding polls + contract actors', function () {
         const endBlock = (await height()) + 8;
         const pollIndex = await createPoll(sdk, issuer, {
             tick, endBlock, options: 'YES,NO', maxSelections: 1, tallyMode: 'approval',
-            weightMode: 'balance', minVoters: 5, question: 'Binding always',
+            weightMode: 'balance', quorum: '0.05', minVoters: 5, question: 'Binding always',
             callbackContract: target, callbackMethod: 'onPoll', callbackOn: 'always'
         });
         await castBallot(sdk, voterA, pollIndex, '0');
@@ -226,7 +226,7 @@ describe('[sdk] VOTE binding polls + contract actors', function () {
         const endBlock = (await height()) + 8;
         const pollIndex = await createPoll(sdk, issuer, {
             tick, endBlock, options: 'YES,NO', maxSelections: 1, tallyMode: 'approval',
-            weightMode: 'balance', minVoters: 5, question: 'Binding pass-fail',
+            weightMode: 'balance', quorum: '0.05', minVoters: 5, question: 'Binding pass-fail',
             callbackContract: target, callbackMethod: 'onPoll', callbackOn: 'pass'
         });
         await castBallot(sdk, voterA, pollIndex, '0');
