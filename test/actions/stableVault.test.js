@@ -61,7 +61,7 @@ const STABLE_VAULT = `module.exports = {
         x.state.set('trackedColl', '0');
         x.state.set('trackedStable', '0');
         x.state.set('totalDebt', '0');
-        x.emit.issue({ tick: st });
+        x.emit.issue({ tick: st, maxSupply: '1000000000' });
     },
     deposit: function (x) {
         var a = x.getSourceAddress();
