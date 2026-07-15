@@ -37,141 +37,126 @@ const vmHelper = require('../helpers/vmHelper')
 const gasHelper = require('../helpers/gasHelper')
 const priceSnapshotHelper = require('../helpers/priceSnapshotHelper')
 
+// NOTE: aggressively minified (one-letter helpers, terse messages) because a
+// DEPLOY payload is capped at 8192 bytes by the encoder; the readable
+// canonical source lives in xchain-contracts/stableVault/stableVault.js.
 const STABLE_VAULT = `module.exports = {
-    initialize: function (xchain) {
-        var collateralTick = xchain.getInputParam(0), stableTick = xchain.getInputParam(1),
-            coinPair = xchain.getInputParam(2), minRatioPct = xchain.getInputParam(3),
-            liqBonusPct = xchain.getInputParam(4), maxSnapshotAge = xchain.getInputParam(5);
-        xchain.require(collateralTick, 'collateralTick required');
-        xchain.require(stableTick, 'stableTick required');
-        xchain.require(collateralTick !== stableTick, 'collateral and stable must differ');
-        xchain.require(coinPair, 'coinPair required');
-        xchain.require(minRatioPct && xchain.math.gt(minRatioPct, '100'), 'minRatioPct must exceed 100');
-        xchain.require(liqBonusPct && xchain.math.gte(liqBonusPct, '0'), 'liqBonusPct must be >= 0');
-        var maxAge = parseInt(maxSnapshotAge);
-        xchain.require(maxAge > 0, 'maxSnapshotAge must be a positive integer');
-        xchain.state.set('collateralTick', collateralTick);
-        xchain.state.set('stableTick', stableTick);
-        xchain.state.set('coinPair', coinPair);
-        xchain.state.set('minRatioPct', minRatioPct);
-        xchain.state.set('liqBonusPct', liqBonusPct);
-        xchain.state.set('maxSnapshotAge', String(maxAge));
-        xchain.state.set('trackedColl', '0');
-        xchain.state.set('trackedStable', '0');
-        xchain.state.set('totalDebt', '0');
-        xchain.emit.issue({ tick: stableTick });
+    initialize: function (x) {
+        var ct = x.getInputParam(0), st = x.getInputParam(1), cp = x.getInputParam(2),
+            mr = x.getInputParam(3), lb = x.getInputParam(4), ma = x.getInputParam(5);
+        x.require(ct, 'collateralTick required');
+        x.require(st, 'stableTick required');
+        x.require(ct !== st, 'ticks must differ');
+        x.require(cp, 'coinPair required');
+        x.require(mr && x.math.gt(mr, '100'), 'minRatioPct must exceed 100');
+        x.require(lb && x.math.gte(lb, '0'), 'liqBonusPct must be >= 0');
+        var mx = parseInt(ma);
+        x.require(mx > 0, 'maxSnapshotAge must be positive');
+        x.state.set('collateralTick', ct);
+        x.state.set('stableTick', st);
+        x.state.set('coinPair', cp);
+        x.state.set('minRatioPct', mr);
+        x.state.set('liqBonusPct', lb);
+        x.state.set('maxSnapshotAge', String(mx));
+        x.state.set('trackedColl', '0');
+        x.state.set('trackedStable', '0');
+        x.state.set('totalDebt', '0');
+        x.emit.issue({ tick: st });
     },
-    deposit: function (xchain) {
-        var addr = xchain.getSourceAddress();
-        var delta = collDelta(xchain);
-        xchain.require(xchain.math.gt(delta, '0'), 'no collateral received');
-        setVault(xchain, addr, 'coll', xchain.math.add(getVault(xchain, addr, 'coll'), delta));
-        xchain.state.set('trackedColl', xchain.math.add(xchain.state.get('trackedColl'), delta));
+    deposit: function (x) {
+        var a = x.getSourceAddress();
+        var d = cd(x);
+        x.require(x.math.gt(d, '0'), 'no collateral received');
+        sv(x, a, 'coll', x.math.add(gv(x, a, 'coll'), d));
+        x.state.set('trackedColl', x.math.add(x.state.get('trackedColl'), d));
     },
-    borrow: function (xchain) {
-        var addr = xchain.getSourceAddress();
-        var amount = xchain.getInputParam(0);
-        xchain.require(amount && xchain.math.gt(amount, '0'), 'amount must be positive');
-        var price = freshPrice(xchain);
-        var coll = getVault(xchain, addr, 'coll');
-        var newDebt = xchain.math.add(getVault(xchain, addr, 'debt'), amount);
-        xchain.require(ratioOk(xchain, coll, newDebt, price), 'vault would be under-collateralized');
-        setVault(xchain, addr, 'debt', newDebt);
-        xchain.state.set('totalDebt', xchain.math.add(xchain.state.get('totalDebt'), amount));
-        xchain.emit.mint({ tick: xchain.state.get('stableTick'), quantity: amount });
-        xchain.emit.send({ destination: addr, tick: xchain.state.get('stableTick'), quantity: amount });
+    borrow: function (x) {
+        var a = x.getSourceAddress();
+        var m = x.getInputParam(0);
+        x.require(m && x.math.gt(m, '0'), 'amount must be positive');
+        var p = fp(x);
+        var nd = x.math.add(gv(x, a, 'debt'), m);
+        x.require(ok(x, gv(x, a, 'coll'), nd, p), 'under-collateralized');
+        sv(x, a, 'debt', nd);
+        x.state.set('totalDebt', x.math.add(x.state.get('totalDebt'), m));
+        x.emit.mint({ tick: x.state.get('stableTick'), quantity: m });
+        x.emit.send({ destination: a, tick: x.state.get('stableTick'), quantity: m });
     },
-    repay: function (xchain) {
-        var addr = xchain.getSourceAddress();
-        var received = stableDelta(xchain);
-        xchain.require(xchain.math.gt(received, '0'), 'no stable received');
-        var debt = getVault(xchain, addr, 'debt');
-        var burned = xchain.math.min(received, debt);
-        var excess = xchain.math.subtract(received, burned);
-        setVault(xchain, addr, 'debt', xchain.math.subtract(debt, burned));
-        xchain.state.set('totalDebt', xchain.math.subtract(xchain.state.get('totalDebt'), burned));
-        if (xchain.math.gt(burned, '0')) {
-            xchain.emit.destroy({ tick: xchain.state.get('stableTick'), quantity: burned });
-        }
-        if (xchain.math.gt(excess, '0')) {
-            xchain.emit.send({ destination: addr, tick: xchain.state.get('stableTick'), quantity: excess });
-        }
+    repay: function (x) {
+        var a = x.getSourceAddress();
+        var r = sd(x);
+        x.require(x.math.gt(r, '0'), 'no stable received');
+        var d = gv(x, a, 'debt');
+        var b = x.math.min(r, d);
+        var e = x.math.subtract(r, b);
+        sv(x, a, 'debt', x.math.subtract(d, b));
+        x.state.set('totalDebt', x.math.subtract(x.state.get('totalDebt'), b));
+        if (x.math.gt(b, '0')) x.emit.destroy({ tick: x.state.get('stableTick'), quantity: b });
+        if (x.math.gt(e, '0')) x.emit.send({ destination: a, tick: x.state.get('stableTick'), quantity: e });
     },
-    withdraw: function (xchain) {
-        var addr = xchain.getSourceAddress();
-        var amount = xchain.getInputParam(0);
-        xchain.require(amount && xchain.math.gt(amount, '0'), 'amount must be positive');
-        var coll = getVault(xchain, addr, 'coll');
-        xchain.require(xchain.math.gte(coll, amount), 'insufficient collateral');
-        var left = xchain.math.subtract(coll, amount);
-        var debt = getVault(xchain, addr, 'debt');
-        if (xchain.math.gt(debt, '0')) {
-            var price = freshPrice(xchain);
-            xchain.require(ratioOk(xchain, left, debt, price), 'vault would be under-collateralized');
-        }
-        setVault(xchain, addr, 'coll', left);
-        xchain.state.set('trackedColl', xchain.math.subtract(xchain.state.get('trackedColl'), amount));
-        xchain.emit.send({ destination: addr, tick: xchain.state.get('collateralTick'), quantity: amount });
+    withdraw: function (x) {
+        var a = x.getSourceAddress();
+        var m = x.getInputParam(0);
+        x.require(m && x.math.gt(m, '0'), 'amount must be positive');
+        var c = gv(x, a, 'coll');
+        x.require(x.math.gte(c, m), 'insufficient collateral');
+        var l = x.math.subtract(c, m);
+        var d = gv(x, a, 'debt');
+        if (x.math.gt(d, '0')) x.require(ok(x, l, d, fp(x)), 'under-collateralized');
+        sv(x, a, 'coll', l);
+        x.state.set('trackedColl', x.math.subtract(x.state.get('trackedColl'), m));
+        x.emit.send({ destination: a, tick: x.state.get('collateralTick'), quantity: m });
     },
-    liquidate: function (xchain) {
-        var liquidator = xchain.getSourceAddress();
-        var owner = xchain.getInputParam(0);
-        xchain.require(owner, 'vaultOwner required');
-        xchain.require(liquidator !== owner, 'cannot liquidate your own vault');
-        var debt = getVault(xchain, owner, 'debt');
-        xchain.require(xchain.math.gt(debt, '0'), 'vault has no debt');
-        var price = freshPrice(xchain);
-        var coll = getVault(xchain, owner, 'coll');
-        xchain.require(!ratioOk(xchain, coll, debt, price), 'vault is healthy');
-        var received = stableDelta(xchain);
-        xchain.require(xchain.math.gte(received, debt), 'must cover the full debt');
-        var excess = xchain.math.subtract(received, debt);
-        var owed = xchain.math.divide(
-            xchain.math.multiply(debt, xchain.math.add('100', xchain.state.get('liqBonusPct'))),
-            xchain.math.multiply(price, '100')
-        );
-        var seize = xchain.math.min(owed, coll);
-        setVault(xchain, owner, 'debt', '0');
-        setVault(xchain, owner, 'coll', xchain.math.subtract(coll, seize));
-        xchain.state.set('totalDebt', xchain.math.subtract(xchain.state.get('totalDebt'), debt));
-        xchain.state.set('trackedColl', xchain.math.subtract(xchain.state.get('trackedColl'), seize));
-        xchain.emit.destroy({ tick: xchain.state.get('stableTick'), quantity: debt });
-        xchain.emit.send({ destination: liquidator, tick: xchain.state.get('collateralTick'), quantity: seize });
-        if (xchain.math.gt(excess, '0')) {
-            xchain.emit.send({ destination: liquidator, tick: xchain.state.get('stableTick'), quantity: excess });
-        }
+    liquidate: function (x) {
+        var q = x.getSourceAddress();
+        var o = x.getInputParam(0);
+        x.require(o, 'vaultOwner required');
+        x.require(q !== o, 'own vault');
+        var d = gv(x, o, 'debt');
+        x.require(x.math.gt(d, '0'), 'no debt');
+        var p = fp(x);
+        var c = gv(x, o, 'coll');
+        x.require(!ok(x, c, d, p), 'vault is healthy');
+        var r = sd(x);
+        x.require(x.math.gte(r, d), 'must cover the full debt');
+        var e = x.math.subtract(r, d);
+        var w = x.math.divide(
+            x.math.multiply(d, x.math.add('100', x.state.get('liqBonusPct'))),
+            x.math.multiply(p, '100'));
+        var z = x.math.min(w, c);
+        sv(x, o, 'debt', '0');
+        sv(x, o, 'coll', x.math.subtract(c, z));
+        x.state.set('totalDebt', x.math.subtract(x.state.get('totalDebt'), d));
+        x.state.set('trackedColl', x.math.subtract(x.state.get('trackedColl'), z));
+        x.emit.destroy({ tick: x.state.get('stableTick'), quantity: d });
+        x.emit.send({ destination: q, tick: x.state.get('collateralTick'), quantity: z });
+        if (x.math.gt(e, '0')) x.emit.send({ destination: q, tick: x.state.get('stableTick'), quantity: e });
     }
 };
-function getVault(xchain, addr, field) {
-    return xchain.state.get('v:' + addr + ':' + field) || '0';
+function gv(x, a, f) { return x.state.get('v:' + a + ':' + f) || '0'; }
+function sv(x, a, f, v) { x.state.set('v:' + a + ':' + f, v); }
+function cd(x) {
+    var h = x.getBalance(x.getContractAddress(), x.state.get('collateralTick')) || '0';
+    return x.math.subtract(h, x.state.get('trackedColl'));
 }
-function setVault(xchain, addr, field, value) {
-    xchain.state.set('v:' + addr + ':' + field, value);
+function sd(x) {
+    var h = x.getBalance(x.getContractAddress(), x.state.get('stableTick')) || '0';
+    return x.math.subtract(h, x.state.get('trackedStable'));
 }
-function collDelta(xchain) {
-    var held = xchain.getBalance(xchain.getContractAddress(), xchain.state.get('collateralTick')) || '0';
-    return xchain.math.subtract(held, xchain.state.get('trackedColl'));
+function fp(x) {
+    x.require(x.oracle.getSnapshotAge() <= parseInt(x.state.get('maxSnapshotAge')), 'stale oracle');
+    var r = x.oracle.getPrice(x.state.get('coinPair'));
+    x.require(r !== null && r !== undefined, 'no price');
+    var p = (typeof r === 'object') ? r.price : r;
+    x.require(p !== null && p !== undefined, 'no price');
+    p = String(p);
+    x.require(x.math.gt(p, '0'), 'bad price');
+    return p;
 }
-function stableDelta(xchain) {
-    var held = xchain.getBalance(xchain.getContractAddress(), xchain.state.get('stableTick')) || '0';
-    return xchain.math.subtract(held, xchain.state.get('trackedStable'));
-}
-function freshPrice(xchain) {
-    var age = xchain.oracle.getSnapshotAge();
-    xchain.require(age <= parseInt(xchain.state.get('maxSnapshotAge')), 'oracle price is stale');
-    var r = xchain.oracle.getPrice(xchain.state.get('coinPair'));
-    xchain.require(r !== null && r !== undefined, 'no oracle price for pair');
-    var price = (typeof r === 'object') ? r.price : r;
-    xchain.require(price !== null && price !== undefined, 'no oracle price for pair');
-    price = String(price);
-    xchain.require(xchain.math.gt(price, '0'), 'oracle price must be positive');
-    return price;
-}
-function ratioOk(xchain, coll, debt, price) {
-    if (!xchain.math.gt(debt, '0')) return true;
-    var lhs = xchain.math.multiply(xchain.math.multiply(coll, price), '100');
-    var rhs = xchain.math.multiply(debt, xchain.state.get('minRatioPct'));
-    return xchain.math.gte(lhs, rhs);
+function ok(x, c, d, p) {
+    if (!x.math.gt(d, '0')) return true;
+    return x.math.gte(x.math.multiply(x.math.multiply(c, p), '100'),
+        x.math.multiply(d, x.state.get('minRatioPct')));
 }`
 
 describe('Stable Vault: mini-MakerDAO (contract-emitted ISSUE/MINT/DESTROY + oracle getPrice)', function () {
