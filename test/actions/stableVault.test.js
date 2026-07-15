@@ -199,11 +199,16 @@ describe('Stable Vault: mini-MakerDAO (contract-emitted ISSUE/MINT/DESTROY + ora
         return v
     }
     async function setPrice(price, round) {
+        // referenceBlock at the tip keeps getSnapshotAge() small: the vault's
+        // freshness guard (borrow/withdraw/liquidate) measures blocks since
+        // the last finalized snapshot's reference_block.
+        const tip = await q(`SELECT MAX(block_index) AS b FROM blocks`)
         await priceSnapshotHelper.seedSnapshot({
             coinPair: PAIR,
             price: price,
             blockTimestamp: await priceSnapshotHelper.latestBlockTime(),
-            roundNumber: round
+            roundNumber: round,
+            referenceBlock: Number(tip[0].b) || 0
         })
     }
 
@@ -225,11 +230,14 @@ describe('Stable Vault: mini-MakerDAO (contract-emitted ISSUE/MINT/DESTROY + ora
         assert.strictEqual(await stateOf('totalDebt'), '0')
 
         // The emitted ISSUE must have registered the stable with the CONTRACT
-        // as its issuer.
+        // as its owner.
         const issued = await q(
-            `SELECT source FROM issues WHERE tick=? ORDER BY id DESC LIMIT 1`, [STABLE])
-        assert(issued.length, 'contract-emitted ISSUE should land in the issues table')
-        assert.strictEqual(String(issued[0].source), contractAddr, 'the contract is the issuer')
+            `SELECT ia.address FROM tokens tk
+             JOIN index_tickers it ON it.id=tk.tick_id
+             JOIN index_addresses ia ON ia.id=tk.owner_id
+             WHERE it.tick=?`, [STABLE])
+        assert(issued.length, 'contract-emitted ISSUE should register the token')
+        assert.strictEqual(String(issued[0].address), contractAddr, 'the contract owns the stable')
     })
 
     it('deposit collateral, borrow the stable up to the ratio limit, not a unit more', async function () {

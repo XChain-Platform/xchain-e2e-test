@@ -104,19 +104,26 @@ module.exports = {
     //   blockTimestamp unix seconds; must be <= the payment tx block_time and
     //                  within the indexer's 24h reverse-match window
     //   roundNumber    synthetic sentinel; UNIQUE (round_number, coin_pair)
-    async seedSnapshot({ coinPair, price, blockTimestamp, roundNumber }){
+    //   referenceBlock optional; the VM's getSnapshotAge() is computed as
+    //                  (current block - MAX(reference_block) of finalized
+    //                  snapshots), and 0/NULL makes that age infinite. Pass
+    //                  the current tip when the contract under test checks
+    //                  oracle freshness (getPrice consumers); getPriceAtRound
+    //                  consumers can leave it 0 (no staleness filter there).
+    async seedSnapshot({ coinPair, price, blockTimestamp, roundNumber, referenceBlock }){
         let params = resolveParams()
         let conn = await mariadb.createConnection(params)
         try {
             let query = `INSERT INTO price_snapshots
                 (round_number, coin_pair, price, reference_block, reference_chain,
                  block_timestamp, validator_count, consensus_round, consensus_proof, status)
-                VALUES (?, ?, ?, 0, 'BTC', ?, 1, 1, '[]', 'finalized')
+                VALUES (?, ?, ?, ?, 'BTC', ?, 1, 1, '[]', 'finalized')
                 ON DUPLICATE KEY UPDATE
                  price = VALUES(price),
+                 reference_block = VALUES(reference_block),
                  block_timestamp = VALUES(block_timestamp),
                  status = 'finalized'`
-            await conn.query(query, [roundNumber, coinPair, price, blockTimestamp])
+            await conn.query(query, [roundNumber, coinPair, price, referenceBlock || 0, blockTimestamp])
         } finally {
             await conn.end().catch(() => {})
         }
