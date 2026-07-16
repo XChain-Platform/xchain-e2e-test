@@ -142,3 +142,76 @@ describe('#5311: ANCHOR_REWARD (XANCPUB) cross-service parity', function () {
         assert.ok(!hubC.startsWith('EQUIV|'), 'pre-flag-day canonical must carry no EQUIV prefix');
     });
 });
+
+// : the ARCHIVE leg of the same contract. The archive XANCPUB canonical is built
+// inline in the hub producer (_archiveAttestationCanonical) and the indexer verifier
+// (_rewardCanonical, FORMAT 6); the ARCHIVE_REWARD map + frozen amount live in the same
+// twin modules + the canonical SoT. Same fork argument, same guards.
+describe(': ARCHIVE_REWARD (archive XANCPUB) cross-service parity', function () {
+
+    function hubArchXancpub(cp, batchSeq, publisher) {
+        return StateAnchorPublisher.prototype._archiveAttestationCanonical.call({}, cp, batchSeq, publisher);
+    }
+    function archiveFixtures(net, snapshotBlock) {
+        const PUBLISHER = '07'.repeat(32);
+        const cp = { chain: 'BTC', network: net, checkpoint_seq: 7, snapshot_block: snapshotBlock };
+        const d  = { FORMAT: 6, CHAIN: 'BTC', NETWORK: net, CHECKPOINT_SEQ: 7,
+                     SNAPSHOT_BLOCK: snapshotBlock, MATCH_BATCH_SEQ: 3, PUBLISHER };
+        return { cp, d, PUBLISHER };
+    }
+
+    it('the archive flag-day map + frozen amount are byte-equal across the twins and the canonical SoT', function () {
+        const map = protocolConstants.ARCHIVE_REWARD_ACTIVATION;
+        const amt = protocolConstants.ARCHIVE_REWARD_AMOUNT;
+        assert.ok(map, 'documentation/protocol/constants.js must export ARCHIVE_REWARD_ACTIVATION');
+        assert.ok(amt, 'documentation/protocol/constants.js must export ARCHIVE_REWARD_AMOUNT');
+        for (const [name, mod] of [['hub', hubAr], ['indexer', idxAr]]) {
+            assert.deepStrictEqual(mod.ARCHIVE_REWARD_ACTIVATION, map,
+                name + ' ARCHIVE_REWARD_ACTIVATION drifted from the canonical protocol constant');
+            assert.strictEqual(mod.ARCHIVE_REWARD_AMOUNT, amt,
+                name + ' ARCHIVE_REWARD_AMOUNT drifted from the canonical protocol constant');
+        }
+    });
+
+    it('every local isArchiveRewardActive agrees on the verdict for the same input', function () {
+        for (const net of ['mainnet', 'testnet', 'regtest', 'unknownnet']) {
+            for (const sb of [0, 100, 1000, 982999, 983000, 1000000000]) {
+                const verdicts = [hubAr, idxAr].map(m => m.isArchiveRewardActive(sb, net));
+                assert.ok(verdicts.every(v => v === verdicts[0]),
+                    'archive gate verdict disagreement for ' + net + '@' + sb + ': ' + JSON.stringify(verdicts));
+            }
+        }
+    });
+
+    it('post-flag-day: hub == indexer archive XANCPUB canonical (EQUIV-wrapped, frozen ARCHIVE amount, archive round-id family)', function () {
+        const { cp, d, PUBLISHER } = archiveFixtures('regtest', 100);
+        const hubC = hubArchXancpub(cp, 3, PUBLISHER);
+        const idxC = idxXancpub(d);
+        assert.strictEqual(hubC, idxC, 'hub vs indexer archive XANCPUB canonical drift');
+        assert.strictEqual(hubC,
+            'EQUIV|XCHECKPOINT|XANCPUB|archive|regtest|3|100|0||XANCPUB|anchor_archive|3|100|' +
+            PUBLISHER + '|' + protocolConstants.ARCHIVE_REWARD_AMOUNT,
+            'archive XANCPUB canonical drifted from the documented format');
+    });
+
+    it('pre-flag-day: hub == indexer archive XANCPUB canonical (header-less, EQUIV dormant)', function () {
+        const { cp, d, PUBLISHER } = archiveFixtures('mainnet', 1000);
+        const hubC = hubArchXancpub(cp, 3, PUBLISHER);
+        const idxC = idxXancpub(d);
+        assert.strictEqual(hubC, idxC, 'hub vs indexer pre-flag-day archive XANCPUB canonical drift');
+        assert.strictEqual(hubC,
+            'XANCPUB|anchor_archive|3|1000|' + PUBLISHER + '|' + protocolConstants.ARCHIVE_REWARD_AMOUNT,
+            'pre-flag-day archive canonical must be the bare XANCPUB string');
+    });
+
+    it('the archive and per-chain XANCPUB round-id families are disjoint (no equivocation collision)', function () {
+        // Same seq/batch, same snapshot: the two canonicals must live in DIFFERENT
+        // EQUIV round-id families, or signing both would look like an equivocation.
+        const { cp, PUBLISHER } = archiveFixtures('regtest', 100);
+        const perChain = hubXancpub(Object.assign({}, cp, { checkpoint_seq: 3 }), PUBLISHER);
+        const archive  = hubArchXancpub(cp, 3, PUBLISHER);
+        const roundIdOf = (s) => s.split('||')[0];
+        assert.notStrictEqual(roundIdOf(perChain), roundIdOf(archive),
+            'archive round id must not collide with the per-chain XANCPUB round id');
+    });
+});
