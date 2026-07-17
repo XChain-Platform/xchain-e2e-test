@@ -43,7 +43,11 @@ const FLAT_FEE_SATS = 50000
 // Re-seed at most this often. Must stay well under ORACLE_MAX_PRICE_AGE_SECONDS
 // (1800s): a >30-minute run would otherwise let the seeded snapshot age out and
 // the validator would reject every fee as stale. Re-anchored to the chain clock.
-const SEED_REFRESH_MS = 10 * 60 * 1000
+// Lowered to 2min: at 10min a long full-suite run (or a test that perturbs the
+// pair, e.g. the FIAT dispenser) could leave the global snapshot stale for up to
+// 10min before the next fee action restored it, hanging a mid-run fee-bearing
+// action (observed on the LTC full ACTION sweep, ).
+const SEED_REFRESH_MS = 2 * 60 * 1000
 
 // Synthetic round numbers for the seeded snapshots, kept clear of the values
 // nativeFeeLive (999200001+) / nativeFeeDispenser use, so the two never collide.
@@ -114,6 +118,15 @@ async function seedGlobalPrices(force){
         ' ' + global.COIN_CODE + '/USD=' + COIN_USD + ' (block_time=' + blockTimestamp + ')')
 }
 
+// Feeschedule-readiness retry budget for fee chains . On a freshly
+// reset stack the first suite's beforeAll can outrun the indexer: `feeschedule`
+// answers `{error: 'indexer not ready'}` (or refuses the connection) for a few
+// seconds until indexerDb/actions are wired, and the old single-shot discovery
+// turned that startup race into a false beforeAll failure ("cannot determine
+// native-fee mode"). Read at call time so tests can shrink them via env.
+function discoveryTimeoutMs(){ return parseInt(process.env.NATIVE_FEE_DISCOVERY_TIMEOUT_MS, 10) || 90000 }
+function discoveryPollMs(){ return parseInt(process.env.NATIVE_FEE_DISCOVERY_POLL_MS, 10) || 2000 }
+
 // Discover the stack's ACTUAL native-fee mode. Env is an override (matches the
 // container's XCHAIN_FEE_DESTINATION_<CODE>_<NET> / FEE_DESTINATION); otherwise
 // ask the live indexer's `feeschedule` JSON-RPC (the source of truth, since the
@@ -121,27 +134,48 @@ async function seedGlobalPrices(force){
 // any env the e2e runner happens to export. This is the fix for the LTC/DOGE
 // action-suite hang: resolveFeeDestination() was env-only, returned null in the
 // e2e env, the fee output was never injected, and every fee-bearing action was
-// rejected (tick never created -> TICK-unknown poll hang). Returns
-// { enabled, destination }; cached after first resolution.
+// rejected (tick never created -> TICK-unknown poll hang). On fee chains a
+// failing feeschedule is retried with backoff until the readiness budget above
+// is spent (post-reset the indexer needs a moment to populate it); non-fee
+// chains keep the single-shot probe since they fall back to gas mode anyway.
+// Returns { enabled, destination }; cached after first resolution.
 let _feeMode = null
 async function discoverFeeMode(){
     if (_feeMode) return _feeMode
     const envDest = resolveFeeDestination()
     if (envDest) { _feeMode = { enabled: true, destination: envDest }; return _feeMode }
     if (global.indexerConnector && typeof global.indexerConnector.call === 'function') {
-        try {
-            const sched = await global.indexerConnector.call('feeschedule', {})
-            if (sched && !sched.error) {
-                _feeMode = { enabled: !!sched.nativeFeeEnabled, destination: sched.feeDestination || null }
-                return _feeMode
+        const deadline = Date.now() + discoveryTimeoutMs()
+        let lastError = null
+        let attempts = 0
+        for (;;) {
+            attempts++
+            try {
+                const sched = await global.indexerConnector.call('feeschedule', {})
+                if (sched && !sched.error) {
+                    if (attempts > 1)
+                        console.log('nativeFeeHelper: feeschedule became ready after ' + attempts + ' attempts')
+                    _feeMode = { enabled: !!sched.nativeFeeEnabled, destination: sched.feeDestination || null }
+                    return _feeMode
+                }
+                lastError = (sched && sched.error) ? String(sched.error) : 'empty feeschedule response'
+            } catch (e) {
+                lastError = 'indexer feeschedule unreachable: ' + (e && e.message)
             }
-        } catch (e) {
-            // On a fee chain an unreachable feeschedule is NOT a safe "skip":
-            // it would silently drop the fee output and hang. Surface it.
-            if (isFeeChain())
-                throw new Error('native-fee discovery failed on ' + global.COIN_CODE +
-                    ' (indexer feeschedule unreachable: ' + (e && e.message) + ')')
+            // Non-fee chains (BTC) fall through to gas mode below; only fee
+            // chains keep polling, and only while the readiness budget lasts.
+            if (!isFeeChain() || Date.now() >= deadline) break
+            if (attempts === 1)
+                console.log('nativeFeeHelper: waiting for indexer feeschedule on ' + global.COIN_CODE +
+                    ' (' + lastError + ')')
+            await new Promise(resolve => setTimeout(resolve, discoveryPollMs()))
         }
+        // On a fee chain an unresolved feeschedule is NOT a safe "skip": it
+        // would silently drop the fee output and hang. Surface it.
+        if (isFeeChain())
+            throw new Error('native-fee discovery failed on ' + global.COIN_CODE +
+                ' (feeschedule not ready after ' + attempts + ' attempts over ' +
+                discoveryTimeoutMs() + 'ms: ' + lastError + ')')
     }
     // No env + no API signal: only safe on non-fee chains (BTC = gas mode).
     if (isFeeChain())

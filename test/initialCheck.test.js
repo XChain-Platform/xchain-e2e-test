@@ -320,7 +320,11 @@ exports.mochaHooks = {
             const gasTokenExists = await indexerDatabase.checkIssue({ tick: GAS_TICK, status: 'valid' })
             if (!gasTokenExists) {
                 console.log("GAS token not found, creating it...")
-                let gasAddressInfo = await cryptoHelper.getNewFundedAddress("GAS.TOKEN", COIN, NETWORK, null, "legacy", 0, 1)
+                // seedGas=false: this is the address that ISSUEs XCHAIN itself. On a
+                // genesis-fresh chain the gas token does not exist yet, so the default
+                // gas-seeding MINT would reject as invalid:TICK(unknown) and hang the
+                // bootstrap. Seed gas only after XCHAIN is issued below.
+                let gasAddressInfo = await cryptoHelper.getNewFundedAddress("GAS.TOKEN", COIN, NETWORK, null, "legacy", 0, 1, false)
                 // XCHAIN is an open-mint GAS faucet on testnet/regtest: anyone MINTs it (no owner
                 // check, no fee) to grab gas to play. Genesis therefore mints NO initial supply
                 // (mintSupply=0) and leaves minting unlocked + open from genesis (lockMint unset,

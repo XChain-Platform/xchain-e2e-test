@@ -13,6 +13,7 @@ const cryptoHelper = require('../cryptoHelper')
 const transactionHelper = require('../transactionHelper')
 const issueHelper = require('../helpers/issueHelper')
 const gasHelper = require('../helpers/gasHelper')
+const nativeFeeHelper = require('../helpers/nativeFeeHelper')
 
 // Live-stack proof of native-coin USD-pegged fee payment, using the DISPENSER expiration fee
 // (which, unlike the ISSUE issuance fee, is NOT gated behind the mainnet activation height
@@ -23,15 +24,10 @@ const gasHelper = require('../helpers/gasHelper')
 // and assert the indexer records payment_mode=1 (native) with the oracle-derived amount.
 //
 // Single-host stack: the indexer reads price_snapshots from its OWN db, so we seed via
-// global.indexerDatabase (the db getLatestPrice reads). FEE_DESTINATION comes from the env the
-// decoder/indexer were configured with.
-const PLACEHOLDER = 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'
-
-function feeDestination(){
-    let a = process.env.FEE_DESTINATION
-        || process.env['XCHAIN_FEE_DESTINATION_' + COIN_CODE + '_' + NETWORK.toUpperCase()] || null
-    return (a && a !== PLACEHOLDER) ? a : null
-}
+// global.indexerDatabase (the db getLatestPrice reads). FEE_DESTINATION is resolved via
+// nativeFeeHelper.discoverFeeMode() (env override, then the indexer's feeschedule RPC);
+// the old env-only reader permanently skipped this suite on normal LTC/DOGE stacks .
+let FEE_DEST = null
 
 async function q(sql, args){
     let conn = await indexerDatabase.getConnection()
@@ -40,9 +36,11 @@ async function q(sql, args){
 
 async function seedPrice(coinPair, price, referenceBlock, roundNumber){
     await q("DELETE FROM price_snapshots WHERE coin_pair = ?", [coinPair])
-    // Chain-clock anchor (not Date.now); see nativeFeeLive.seedPrice.
+    // max(chain tip, wall clock) anchor; see nativeFeeLive.seedPrice (idle-chain
+    // tip lag made a tip-only anchor stale beyond the 1800s cap, ).
     let rows = await q("SELECT block_time FROM blocks ORDER BY block_index DESC LIMIT 1")
-    let chainNow = rows.length ? Number(rows[0].block_time) : Math.floor(Date.now() / 1000)
+    let nowSec = Math.floor(Date.now() / 1000)
+    let chainNow = rows.length ? Math.max(Number(rows[0].block_time), nowSec) : nowSec
     await q(`INSERT INTO price_snapshots
                (round_number, coin_pair, price, reference_block, reference_chain,
                 block_timestamp, validator_count, consensus_round, consensus_proof, status)
@@ -63,10 +61,15 @@ async function feeAndActions(txHash){
 }
 
 describe('Native-coin fee payment via DISPENSER expiration fee (live stack)', function () {
-    before(function () { if (!feeDestination()) this.skip() })
+    before(async function () {
+        // Throws on LTC/DOGE when unresolvable; skips only on gas-mode stacks.
+        const mode = await nativeFeeHelper.discoverFeeMode()
+        if (!mode.enabled) this.skip()
+        assert(mode.destination, 'native fees enabled but no FEE_DESTINATION resolvable')
+        FEE_DEST = mode.destination
+    })
 
     it('charges the expiration fee in native coin (payment_mode=1), no XCHAIN balance', async function () {
-        const FEE_DEST = feeDestination()
         let tip = Number((await q("SELECT MAX(block_index) AS h FROM blocks"))[0].h || 0)
         // XCHAIN $1.00; coin priced high so the native fee is a small sat amount.
         await seedPrice('XCHAIN/USD', '1.00000000', tip, 999300001)

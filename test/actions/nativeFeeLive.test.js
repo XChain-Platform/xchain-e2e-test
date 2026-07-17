@@ -11,6 +11,7 @@
 const assert = require('assert')
 const cryptoHelper = require('../cryptoHelper')
 const transactionHelper = require('../transactionHelper')
+const nativeFeeHelper = require('../helpers/nativeFeeHelper')
 
 // Live-stack proof of native-coin USD-pegged fee payment.
 //
@@ -18,15 +19,15 @@ const transactionHelper = require('../transactionHelper')
 // its OWN database (the one global.indexerDatabase connects to). We therefore seed prices directly
 // through indexerDatabase (the exact DB getLatestPrice reads) rather than the hub-DB helper.
 //
-// The fee destination must match what the decoder/indexer were configured with
-// (XCHAIN_FEE_DESTINATION_<COIN>_<NETWORK> / FEE_DESTINATION). Read from the env; skip if absent.
-const PLACEHOLDER = 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'
-
-function feeDestination(){
-    let a = process.env['XCHAIN_FEE_DESTINATION_' + COIN + '_' + NETWORK.toUpperCase()]
-        || process.env.FEE_DESTINATION || null
-    return (a && a !== PLACEHOLDER) ? a : null
-}
+// The fee destination must match what the decoder/indexer were configured with.
+// Resolved via nativeFeeHelper.discoverFeeMode(): env override first
+// (XCHAIN_FEE_DESTINATION_<CODE>_<NET> / FEE_DESTINATION), then the live
+// indexer's `feeschedule` RPC. The old env-only reader (which also built the
+// key from the lowercase COIN name) returned null on every normal LTC/DOGE
+// stack and permanently skipped this suite ; discovery throws loudly
+// on a fee chain it can't resolve, so a skip now only happens on genuinely
+// gas-mode stacks (BTC without native fees).
+let FEE_DEST = null
 
 async function q(sql, args){
     let conn = await indexerDatabase.getConnection()
@@ -37,11 +38,15 @@ async function seedPrice(coinPair, price, referenceBlock, roundNumber){
     let conn = await indexerDatabase.getConnection()
     try {
         await conn.query("DELETE FROM price_snapshots WHERE coin_pair = ?", [coinPair])
-        // Anchor block_timestamp to the CHAIN's clock, not Date.now(): the
-        // staleness cap and price matching compare against block times, and
-        // regtest block timestamps drift from wall time under sustained mining.
+        // Anchor block_timestamp to max(chain tip, wall clock), mirroring
+        // nativeFeeHelper.seedGlobalPrices: under sustained mining the tip can
+        // drift AHEAD of wall time (tip wins), but on an IDLE chain the tip
+        // lags wall clock and the action mines into a block timestamped ~now,
+        // so a tip-only anchor is instantly stale beyond the 1800s cap (this
+        // was the first-run "no current oracle price" failure, ).
         let rows = await conn.query("SELECT block_time FROM blocks ORDER BY block_index DESC LIMIT 1")
-        let chainNow = rows.length ? Number(rows[0].block_time) : Math.floor(Date.now() / 1000)
+        let nowSec = Math.floor(Date.now() / 1000)
+        let chainNow = rows.length ? Math.max(Number(rows[0].block_time), nowSec) : nowSec
         await conn.query(
             `INSERT INTO price_snapshots
                (round_number, coin_pair, price, reference_block, reference_chain,
@@ -83,12 +88,16 @@ function issueMessage(tick){
 }
 
 describe('Native-coin fee payment (live stack)', function () {
-    before(function () {
-        if (!feeDestination()) this.skip()
+    before(async function () {
+        // Throws on LTC/DOGE when unresolvable (loud failure beats a silent
+        // permanent skip on the very chains this suite targets).
+        const mode = await nativeFeeHelper.discoverFeeMode()
+        if (!mode.enabled) this.skip()
+        assert(mode.destination, 'native fees enabled but no FEE_DESTINATION resolvable')
+        FEE_DEST = mode.destination
     })
 
     it('accepts an ISSUE whose fee is paid in native coin, with NO XCHAIN balance', async function () {
-        const FEE_DEST = feeDestination()
         // Seed XCHAIN $1.00 and a high coin price so the native fee is a tiny sat amount.
         // reference_block is the current indexer tip; the ISSUE lands in a later block.
         let tip = Number((await (async () => {
