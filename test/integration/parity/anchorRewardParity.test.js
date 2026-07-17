@@ -175,7 +175,7 @@ describe(': ARCHIVE_REWARD (archive XANCPUB) cross-service parity', function () 
 
     it('every local isArchiveRewardActive agrees on the verdict for the same input', function () {
         for (const net of ['mainnet', 'testnet', 'regtest', 'unknownnet']) {
-            for (const sb of [0, 100, 1000, 982999, 983000, 1000000000]) {
+            for (const sb of [0, 100, 1000, 969499, 969500, 1000000000]) {
                 const verdicts = [hubAr, idxAr].map(m => m.isArchiveRewardActive(sb, net));
                 assert.ok(verdicts.every(v => v === verdicts[0]),
                     'archive gate verdict disagreement for ' + net + '@' + sb + ': ' + JSON.stringify(verdicts));

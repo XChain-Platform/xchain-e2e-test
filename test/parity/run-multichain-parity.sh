@@ -38,6 +38,8 @@
 # Env knobs:
 #   PARITY_OUT_DIR   where digests are written (default ~/parity-out)
 #   PARITY_BASELINE  pinned baseline height (default 1000; raise if asserted)
+#   LTC_NODE_VERSION_PIN  litecoind version pin; MUST track the deployed
+#                    LTC fleet image (bump-with-fleet rule, see below)
 #   XCHAIN_NODE_DIR  path to the staged xchain-node checkout
 #   E2E_DIR          path to the staged xchain-e2e-test checkout (this repo)
 #######################################################################
@@ -46,6 +48,17 @@ set -euo pipefail
 COINS=("${@:-BTC LTC DOGE}")
 # shellcheck disable=SC2206
 COINS=(${COINS[@]})
+
+# LTC daemon version pin. MUST equal the litecoind version the
+# DEPLOYED LTC node fleet runs (node-host-b mainnet node container), NOT the
+# latest upstream release. Parity results are only meaningful against the
+# consensus rules the fleet actually enforces, so this pin drifts only with
+# the fleet: whenever the LTC node fleet upgrades litecoind, bump this pin
+# in the SAME change (bump-with-fleet rule). xchain-node's install path
+# honors the pin via XCHAIN_NODE_NODE_VERSION_LITECOIN and fails loudly if
+# a cached local daemon mismatches it.
+LTC_NODE_VERSION_PIN="${LTC_NODE_VERSION_PIN:-v0.21.4}"
+export XCHAIN_NODE_NODE_VERSION_LITECOIN="$LTC_NODE_VERSION_PIN"
 
 PARITY_OUT_DIR="${PARITY_OUT_DIR:-$HOME/parity-out}"
 PARITY_BASELINE="${PARITY_BASELINE:-1000}"
