@@ -154,6 +154,18 @@ class MultiValidatorHub {
         // widening the constructor per knob.
         this.extraP2pConfig = opts.extraP2pConfig || null;
 
+        // Per-IP inbound connection cap. In-process meshes put every validator on
+        // 127.0.0.1, so PeerManager's production default (3) throttles the mesh at
+        // N>4 (symptom: 1 sig, no quorum). Bake a sane default that scales with the
+        // mesh size instead of requiring callers to export P2P_MAX_CONNECTIONS_PER_IP;
+        // opts and env still override for scale runs.
+        this.p2pMaxConnectionsPerIp =
+            opts.p2pMaxConnectionsPerIp
+            || (parseInt(process.env.P2P_MAX_CONNECTIONS_PER_IP, 10) > 0
+                    ? parseInt(process.env.P2P_MAX_CONNECTIONS_PER_IP, 10)
+                    : null)
+            || Math.max(64, this.count * 4);
+
         this.hubs         = [];
         this.identities   = [];    // [{pubkeyHex, privkeyHex}]
         this.dbNames      = [];
@@ -207,12 +219,9 @@ class MultiValidatorHub {
                 P2P_RECONNECT_MAX:      60000,
                 P2P_MSG_DEDUP_TTL:      60000,
                 P2P_MAX_PAYLOAD:        1048576,
-                // In-process tests put every validator on 127.0.0.1, so the
-                // per-IP inbound cap (PeerManager default 3) throttles the mesh
-                // at N>4. Honour an env override so N=10 scale runs can raise it;
-                // unset -> undefined -> PeerManager keeps its production default 3
-                // (existing N<=4 suites unaffected).
-                P2P_MAX_CONNECTIONS_PER_IP: process.env.P2P_MAX_CONNECTIONS_PER_IP,
+                // Baked per-IP cap default (see constructor): all validators share
+                // 127.0.0.1 in-process, so the production default (3) starves N>4 meshes.
+                P2P_MAX_CONNECTIONS_PER_IP: this.p2pMaxConnectionsPerIp,
                 // Names the deployment network for consensus gating + canonical
                 // derivation (e.g. NODEPROOF's challenge_id binds NETWORK). MUST
                 // match the indexers this hub federates with, or signatures over
