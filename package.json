@@ -20,7 +20,7 @@
     "xchain-sdk": "file:./xchain-sdk"
   },
   "scripts": {
-    "ci": "mocha --no-config --timeout 30000 --exit 'test/unit/coins-conformance.test.js' 'test/integration/parity/**/*.test.js'",
+    "ci": "mocha --no-config --timeout 30000 --exit 'test/unit/coins-conformance.test.js' 'test/integration/parity/**/*.test.js' 'test/integration/multiHubActivationBoundary.integration.test.js'",
     "test": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/actions/**/*.test.js'",
     "test:contracts": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/contracts/**/*.test.js'",
     "test:codec": "mocha --no-config --timeout 30000 --exit 'test/codec/**/*.test.js'",

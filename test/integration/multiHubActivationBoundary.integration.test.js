@@ -41,11 +41,13 @@
  *     on its own signature in BOTH modes (the quorum===0 fast path; weighted S=
  *     its own stake gives 3S>2S). Assert immediate apply below AND above.
  *
- * REQUIRES a non-zero regtest activation height in xchain-hub/src/
- * stake_weighted_quorum.js (regtest is 0 by default = always weighted, so the
- * COUNT side cannot be reached). Set regtest to e.g. 120 in all three swq copies
- * for the run, then revert (plan §B). The suite SKIPS with a clear message when
- * the height is still 0 so it never silently passes as a weighted-only test.
+ * REQUIRES a non-zero regtest activation height (regtest is 0 by default =
+ * always weighted, so the COUNT side cannot be reached). The suite is STANDING
+ * : when the shipped regtest height is <2 it overrides the in-process
+ * hub swq map (the SAME module instance Consensus.js reads, resolved via the
+ * MultiValidatorHub helper) to SWQ_BOUNDARY_REGTEST_ACTIVATION (default 120)
+ * for the duration of the run and restores it afterward. Regtest-only, runtime
+ * only; no source edit, so the byte-identity conformance gate is untouched.
  *
  * Spec: claude/reports/2026-06-14_cross-chain-quorum-security-spec.md §3.4, §3.6,
  * §10.4; plan §B.
@@ -57,11 +59,19 @@ const dotenv = require('dotenv');
 dotenv.config();
 
 const assert = require('assert');
-const { MultiValidatorHub }   = require('../helpers/multiValidatorHubHelper');
+const { MultiValidatorHub, loadHubModule } = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
-const swq = require('../../../xchain-hub/src/stake_weighted_quorum.js');
+// Load swq through the SAME resolver the hub harness uses, so this module
+// instance is the one Consensus.js reads and a runtime override reaches it.
+const swq = loadHubModule('src/stake_weighted_quorum.js');
 
-const ACT = parseInt(swq.STAKE_WEIGHTED_QUORUM_ACTIVATION.regtest);
+// Effective activation height for this run: the shipped regtest height when it
+// already reaches the COUNT side (>=2, the hand-armed case), otherwise the env
+// override SWQ_BOUNDARY_REGTEST_ACTIVATION (default 120), installed into the
+// in-process swq map by the root before() below and restored in after().
+const FILE_ACT = parseInt(swq.STAKE_WEIGHTED_QUORUM_ACTIVATION.regtest);
+const ENV_ACT  = parseInt(process.env.SWQ_BOUNDARY_REGTEST_ACTIVATION || '120');
+const ACT = (Number.isFinite(FILE_ACT) && FILE_ACT >= 2) ? FILE_ACT : ENV_ACT;
 
 const PEER_WAIT_MS  = 8000;
 const APPLY_WAIT_MS = 4000;   // COMMIT propagation + follower _applyConfig
@@ -123,12 +133,20 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM activation boundary (WI-1 Sui
 
     before(function () {
         if (!Number.isFinite(ACT) || ACT < 2) {
-            console.log(
-                'Skipping WI-1 activation-boundary suite: regtest STAKE_WEIGHTED_QUORUM_ACTIVATION is ' +
-                ACT + ' (must be ≥2 to reach the COUNT side). Set regtest to e.g. 120 in all three ' +
-                'stake_weighted_quorum.js copies + constants.js for this run, then revert (plan §B).');
-            this.skip();
+            // Only reachable via a bad SWQ_BOUNDARY_REGTEST_ACTIVATION value.
+            throw new Error(
+                'WI-1 activation-boundary suite: effective regtest activation height is ' + ACT +
+                ' (must be >=2 to reach the COUNT side). Fix SWQ_BOUNDARY_REGTEST_ACTIVATION.');
         }
+        if (FILE_ACT !== ACT) {
+            // Runtime-only, regtest-only override of the in-process hub swq map so
+            // the COUNT side is reachable on a normal run . Restored below.
+            swq.STAKE_WEIGHTED_QUORUM_ACTIVATION.regtest = ACT;
+        }
+    });
+
+    after(function () {
+        if (FILE_ACT !== ACT) swq.STAKE_WEIGHTED_QUORUM_ACTIVATION.regtest = FILE_ACT;
     });
 
     // B1: boundary parity. Same fixture, decision flips with the rule.
