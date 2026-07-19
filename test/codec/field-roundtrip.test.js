@@ -208,7 +208,7 @@ function buildVector(action, version, format, seed, sparse) {
     });
 
     it('matches the committed golden vectors (field-level wire-format tripwire)', function () {
-        if (GEN || !fs.existsSync(GOLDEN_PATH)) {
+        if (GEN) {
             const golden = [];
             for (const [action, formats] of Object.entries(actions)) {
                 for (const v of Object.keys(formats).map(Number).sort((a, b) => a - b)) {
@@ -220,6 +220,11 @@ function buildVector(action, version, format, seed, sparse) {
             fs.mkdirSync(path.dirname(GOLDEN_PATH), { recursive: true });
             fs.writeFileSync(GOLDEN_PATH, JSON.stringify(golden, null, 2) + '\n');
             console.log(`[field-roundtrip] wrote ${golden.length} golden vectors: ${GOLDEN_PATH}`);
+        } else if (!fs.existsSync(GOLDEN_PATH)) {
+            assert.fail(
+                `committed golden vectors missing at ${GOLDEN_PATH}; a lost golden file must not pass tautologically. ` +
+                `Regenerate deliberately with GEN_FIELD_GOLDEN=1 and review the diff before committing it.`
+            );
         }
 
         const golden = JSON.parse(fs.readFileSync(GOLDEN_PATH, 'utf8'));
