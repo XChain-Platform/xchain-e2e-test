@@ -147,6 +147,27 @@ class RegtestMinerConnector {
         return this._unwrap(response)
     }
 
+    // Pin the coin node's clock to `timestamp` (unix seconds) through the miner,
+    // so the NEXT generateBlocks stamps its block at that time; pass 0 to release
+    // the mock clock. The parity driver is node-RPC-free by design (some installs
+    // don't publish the node), so it reaches setmocktime through the miner, which
+    // owns the node connection. Refused on mainnet by the miner.
+    async setMockTime(timestamp){
+        const data = {
+            jsonrpc: '2.0',
+            method: 'set_mock_time',
+            params: {"timestamp": timestamp},
+            id: 1
+        }
+
+        const response = await axios.post(this.url, data, this.reqConfig)
+
+        // "ok" on success, {error:"..."} on refusal (mainnet / bad input); both
+        // truthy, so _unwrap throws on the error envelope rather than reporting a
+        // clock pin that never happened.
+        return this._unwrap(response)
+    }
+
     // Pause the regtest miner's adaptive auto-mine loop. Call before a
     // height-deterministic generateBlocks section so a stray mempool tx
     // cannot cause the miner to fire an extra block concurrently. Always

@@ -48,15 +48,20 @@ function silenceDexValidator(hub) {
 }
 
 // As silenceValidator, but for the oracle PBFT engine (a separate consensus
-// instance attached per hub by the test's attachOracle() helper as hub._wtOracle).
-// OracleConsensus.start() registers an arrow listener that calls `this._handleMessage`
-// at call time, so replacing it on the instance mutes the node's oracle votes
-// (ORACLE_PROPOSE/PREPARE/COMMIT) while leaving its config/DEX consensus untouched.
+// instance from the config Consensus). OracleConsensus.start() registers an arrow
+// listener that calls `this._handleMessage` at call time, so replacing it on the
+// instance mutes the node's oracle votes (ORACLE_PROPOSE/PREPARE/COMMIT) while
+// leaving its config/DEX consensus untouched.
+//
+// Resolves the oracle consensus from either bring-up path: a test's attachOracle()
+// helper (hub._wtOracle) or the harness's startOracle: true toggle , which
+// leaves it on hub.oracleConsensus.
 function silenceOracleValidator(hub) {
-    if (!hub._wtOracle) throw new Error('silenceOracleValidator: hub has no attached _wtOracle; call attachOracle() first');
-    const orig = hub._wtOracle._handleMessage;
-    hub._wtOracle._handleMessage = () => {};
-    return () => { hub._wtOracle._handleMessage = orig; };
+    const oc = hub._wtOracle || hub.oracleConsensus;
+    if (!oc) throw new Error('silenceOracleValidator: hub has no oracle consensus; attachOracle() or start the harness with startOracle: true first');
+    const orig = oc._handleMessage;
+    oc._handleMessage = () => {};
+    return () => { oc._handleMessage = orig; };
 }
 
 // Build a PRE_PREPARE envelope with a deliberately WRONG digest for its config

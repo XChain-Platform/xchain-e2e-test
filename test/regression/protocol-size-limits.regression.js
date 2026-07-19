@@ -40,17 +40,33 @@ const XChainVM          = require('../../../xchain-vm/src/index.js')
 const explorerVmQuery   = require('../../../xchain-explorer/src/vm-query.js')
 
 // The indexer's execute.js re-validates VM_MAX_CALL_DEPTH/VM_MIN_CALL_GAS host-side
-// as literal `const`s, not module exports, so pull the declared values by scanning
-// the source text (mirrors how a drift guard must read an un-exported copy).
+// as un-exported `const`s. Since  those consts derive from the vendored
+// ../protocol/constants.js rather than bare literals, so assert the source is
+// wired to the vendored module (no bare literal can re-enter) and read the effective
+// values from that same vendored copy. Byte-identity of the vendored copy to the
+// canonical source is asserted separately below.
 function readIndexerExecuteCallCaps() {
     const src = fs.readFileSync(
         path.join(__dirname, '../../../xchain-indexer/src/actions/execute.js'), 'utf8')
-    const depthMatch = src.match(/const\s+MAX_CALL_DEPTH\s*=\s*(\d+)/)
-    const gasMatch   = src.match(/const\s+MIN_CALL_GAS\s*=\s*(\d+)/)
-    assert.ok(depthMatch, 'could not find indexer execute.js MAX_CALL_DEPTH declaration')
-    assert.ok(gasMatch, 'could not find indexer execute.js MIN_CALL_GAS declaration')
-    return { MAX_CALL_DEPTH: Number(depthMatch[1]), MIN_CALL_GAS: Number(gasMatch[1]) }
+    assert.ok(/require\((['"])\.\.\/protocol\/constants(?:\.js)?\1\)/.test(src),
+        'indexer execute.js no longer requires the vendored ../protocol/constants module')
+    assert.ok(/MAX_CALL_DEPTH\s*=\s*[A-Za-z_$][\w$]*\.VM_MAX_CALL_DEPTH/.test(src),
+        'indexer execute.js MAX_CALL_DEPTH is not derived from the vendored VM_MAX_CALL_DEPTH constant')
+    assert.ok(/MIN_CALL_GAS\s*=\s*[A-Za-z_$][\w$]*\.VM_MIN_CALL_GAS/.test(src),
+        'indexer execute.js MIN_CALL_GAS is not derived from the vendored VM_MIN_CALL_GAS constant')
+    const vendored = require('../../../xchain-indexer/src/protocol/constants.js')
+    return { MAX_CALL_DEPTH: vendored.VM_MAX_CALL_DEPTH, MIN_CALL_GAS: vendored.VM_MIN_CALL_GAS }
 }
+
+// Vendored protocol-constants byte-identity guard . Each service that
+// consumes the shared protocol constants keeps a byte-identical vendored copy in
+// its own src/protocol/constants.js (services ship as independent containers with
+// no shared node_modules tree), and requires that copy instead of bare literals.
+// Assert every vendored copy is byte-for-byte the canonical source, so an edit to
+// one copy that was not propagated fails here.
+const VENDORED_CONSTANTS_SERVICES = [
+    'xchain-vm', 'xchain-indexer', 'xchain-sdk', 'xchain-decoder', 'xchain-explorer',
+]
 
 describe('Protocol size-limit drift guard', () => {
 
@@ -370,6 +386,34 @@ describe('Protocol size-limit drift guard', () => {
             const worst = 'DEPLOY|4|' + 'f'.repeat(64) + '|15|16|' + 'A'.repeat(protocol.MAX_DEPLOYCHUNK_PART_BYTES)
             assert.ok(Buffer.byteLength(worst, 'utf8') + protocol.OP_RETURN_PUSH_OVERHEAD <= protocol.MAX_ACTION_DATA_LENGTH,
                 'a max-size DEPLOY v4 carrier part + overhead exceeds MAX_ACTION_DATA_LENGTH')
+        })
+    })
+
+    describe('Vendored protocol-constants byte-identity ', () => {
+
+        // Each consuming service now requires a byte-identical vendored copy of the
+        // canonical protocol constants (src/protocol/constants.js) instead of bare
+        // literals, so a drift is impossible by construction rather than by
+        // discipline. Assert every vendored copy equals the canonical source AND
+        // that the module actually loads and re-exports the guarded values.
+        const canonSrc = fs.readFileSync(
+            path.join(__dirname, '../../../xchain-documentation/protocol/constants.js'), 'utf8')
+
+        VENDORED_CONSTANTS_SERVICES.forEach((svc) => {
+            it('[regression:p0] ' + svc + ' src/protocol/constants.js is byte-identical to canonical', () => {
+                const vendoredPath = path.join(
+                    __dirname, '../../../', svc, 'src/protocol/constants.js')
+                assert.ok(fs.existsSync(vendoredPath),
+                    svc + ' is missing its vendored src/protocol/constants.js copy')
+                const vendoredSrc = fs.readFileSync(vendoredPath, 'utf8')
+                assert.strictEqual(vendoredSrc, canonSrc,
+                    svc + '/src/protocol/constants.js has drifted from the canonical ' +
+                    'xchain-documentation/protocol/constants.js; edit the canonical file and re-vendor all copies')
+                // Sanity: the vendored module loads and carries the size-limit anchor.
+                const mod = require(vendoredPath)
+                assert.strictEqual(mod.MAX_ACTION_DATA_LENGTH, protocol.MAX_ACTION_DATA_LENGTH,
+                    svc + ' vendored constants module failed to load or export MAX_ACTION_DATA_LENGTH')
+            })
         })
     })
 })

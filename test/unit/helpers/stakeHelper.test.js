@@ -27,6 +27,7 @@ describe('stakeHelper', () => {
             waitForUnstake: sinon.stub().resolves({ id: 221 }),
             waitForDelegation: sinon.stub().resolves({ id: 222 }),
             waitForRewardClaim: sinon.stub().resolves({ id: 223 }),
+            checkRewardClaim: sinon.stub().resolves({ id: 224, status: 'invalid: no active stake' }),
         }
     })
 
@@ -127,6 +128,29 @@ describe('stakeHelper', () => {
             assert(global.indexerDatabase.waitForRewardClaim.calledOnce)
             const waitArg = global.indexerDatabase.waitForRewardClaim.firstCall.args[0]
             assert.strictEqual(waitArg.source, 'addr1')
+        })
+    })
+
+    describe('sendCollectInvalid (expected-invalid COLLECT)', () => {
+        it('should build the same COLLECT|0 message', async () => {
+            const result = await helper.sendCollectInvalid(addressInfo)
+
+            const msg = createTxStub.firstCall.args[1]
+            assert.strictEqual(msg, 'COLLECT|0')
+            assert.strictEqual(result.txHash, 'abc123')
+        })
+
+        it('should poll reward_claims status-agnostically by source + txHash', async () => {
+            const result = await helper.sendCollectInvalid(addressInfo)
+
+            // Reads the row back via checkRewardClaim (any status), NOT the
+            // valid-only waitForRewardClaim, so a rejected claim is observable.
+            assert(global.indexerDatabase.checkRewardClaim.called)
+            assert(global.indexerDatabase.waitForRewardClaim.notCalled)
+            const arg = global.indexerDatabase.checkRewardClaim.firstCall.args[0]
+            assert.strictEqual(arg.source, 'addr1')
+            assert.strictEqual(arg.txHash, 'abc123')
+            assert.deepStrictEqual(result.claim, { id: 224, status: 'invalid: no active stake' })
         })
     })
 })

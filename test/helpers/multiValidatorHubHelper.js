@@ -128,6 +128,29 @@ class MultiValidatorHub {
         // can skip attestation to stay lean. At least one must be on to be useful.
         this.startAttestationSubsystem = opts.startAttestation !== false;
         this.startCrossChainSubsystem  = opts.startCrossChain === true;
+        // Consensus-subsystem toggles . Off by default so attestation-only and
+        // DEX runs stay lean; opt in to drive the oracle price round, cross-chain reorg
+        // handler, or on-chain governance through the same in-process mesh. Each maps
+        // 1:1 onto the hub's own start method and follows the canonical boot order from
+        // api.js (oracle -> crossChain -> reorgHandler -> governance -> attestation), so
+        // governance is live before startAttestation wires its proposal:finalized
+        // hot-reload hook (that hook no-ops when governance is absent).
+        this.startOracleSubsystem       = opts.startOracle === true;
+        this.startReorgHandlerSubsystem = opts.startReorgHandler === true;
+        this.startGovernanceSubsystem   = opts.startGovernance === true;
+        // Capability registry (self-tests + indexer stake poll + qualification). Opt-in
+        // because it needs a config path and polls the indexer; `capabilitiesConfig` is
+        // the JSON path passed straight to hub.startCapabilities() (null uses defaults).
+        this.startCapabilitiesSubsystem = opts.startCapabilities === true;
+        this.capabilitiesConfigPath     = opts.capabilitiesConfig || null;
+
+        // Hub construction seam. Defaults to the real XChainHub; a unit test can inject
+        // a fake factory to assert the start-orchestration order without a live MariaDB.
+        // Signature matches the XChainHub constructor:
+        //   (dbHost, dbPort, dbName, dbUser, dbPass, p2pConfig) -> hub
+        this.hubFactory = opts.hubFactory
+            || ((dbHost, dbPort, dbName, dbUser, dbPass, p2pConfig) =>
+                    new XChainHub(dbHost, dbPort, dbName, dbUser, dbPass, p2pConfig));
         // Per-coin cross-chain indexer URLs the DEX engine polls for the offer book.
         // { LTC: '<url>', DOGE: '<url>', BTC: '<url>' } wired onto each hub's engine
         // AFTER startCrossChain (the engine reads indexers at construction, so we
@@ -243,7 +266,7 @@ class MultiValidatorHub {
                 if (this.coinRpcUrls && this.coinRpcUrls[i]) p2pConfig.FULLNODE.BTC_RPC = this.coinRpcUrls[i];
             }
 
-            const hub = new XChainHub(
+            const hub = this.hubFactory(
                 this.dbHost, this.dbPort, this.dbNames[i],
                 this.dbUser, this.dbPass,
                 p2pConfig
@@ -251,7 +274,13 @@ class MultiValidatorHub {
             await hub.start();
             await hub.startP2P();
             await hub.startConsensus();
-            // startOracle, startReorgHandler, startGovernance intentionally skipped.
+            // Consensus subsystems, opt-in, in canonical api.js boot order .
+            // Oracle stands up first so its slash/reward wiring exists before the other
+            // rounds; governance goes up before attestation so the attestation
+            // hot-reload hook can bind to governance's proposal:finalized event.
+            if(this.startOracleSubsystem){
+                await hub.startOracle();
+            }
             if(this.startCrossChainSubsystem){
                 await hub.startCrossChain();
                 // The engine resolved its (empty) per-coin indexer map at construction;
@@ -266,8 +295,17 @@ class MultiValidatorHub {
                     }
                 }
             }
+            if(this.startReorgHandlerSubsystem){
+                await hub.startReorgHandler();
+            }
+            if(this.startGovernanceSubsystem){
+                await hub.startGovernance();
+            }
             if(this.startAttestationSubsystem){
                 await hub.startAttestation();
+            }
+            if(this.startCapabilitiesSubsystem){
+                await hub.startCapabilities(this.capabilitiesConfigPath);
             }
             this.hubs.push(hub);
         }
@@ -294,6 +332,19 @@ class MultiValidatorHub {
     // CrossChainDexEngine instances, in hub index order (null per hub when the
     // DEX subsystem wasn't started). Used by DEX-federation tests to drive rounds.
     getCrossChainDexes(){ return this.hubs.map(h => (h.getCrossChainDex && h.getCrossChainDex()) || null); }
+
+    // OracleRound instances, in hub index order (null per hub when the oracle
+    // subsystem wasn't started via startOracle: true). L2 oracle/determinism tests
+    // drive rounds through these.
+    getOracles(){ return this.hubs.map(h => (h.getOracle && h.getOracle()) || null); }
+
+    // Governance instances, in hub index order (null per hub when startGovernance
+    // wasn't set). No getter on the hub, so read the public field directly.
+    getGovernances(){ return this.hubs.map(h => h.governance || null); }
+
+    // ReorgHandler instances, in hub index order (null per hub when
+    // startReorgHandler wasn't set).
+    getReorgHandlers(){ return this.hubs.map(h => h.reorgHandler || null); }
 
     // Wire a broadcast hook into each hub's AttestationPublisher. Only the
     // round leader actually invokes it (others no-op per request), so a

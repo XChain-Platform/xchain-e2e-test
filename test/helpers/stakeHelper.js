@@ -42,12 +42,27 @@ async function waitForAnyDelegation({source, txHash}, timeMax = 60000){
     return null
 }
 
+// Poll until a reward_claims row with the given txHash appears (any status).
+// COLLECT writes a reward_claims row even when it is rejected (createRewardClaim
+// runs unconditionally in xchain-indexer/src/actions/collect.js), so negative-path
+// tests read the row back status-agnostically and assert the rejection reason.
+async function waitForAnyRewardClaim({source, txHash}, timeMax = 60000){
+    const startMs = Date.now(), endTime = startMs + timeMax
+    while(Date.now() < endTime){
+        let row = await indexerDatabase.checkRewardClaim({source, txHash}).catch(() => null)
+        if(row) return row
+        await new Promise(r => setTimeout(r, 1000))
+    }
+    return null
+}
+
 module.exports = {
     // Negative-path helpers: return the row regardless of status so the
     // test can assert against the specific rejection reason.
     waitForAnyStake,
     waitForAnyUnstake,
     waitForAnyDelegation,
+    waitForAnyRewardClaim,
     // STAKE v1: create a new stake (capability model: capabilities auto-qualify by amount).
     // See claude/reports/specs/2026-05-24_capability-staking-model.md
     async sendStakeV1(addressInfo, amount, signingPubkey){
@@ -193,6 +208,24 @@ module.exports = {
         })
 
         return { txHash, claim: claimRow }
+    },
+
+    // COLLECT v0 expected to be REJECTED. The valid-only waitForRewardClaim can never
+    // observe an intentionally-invalid claim, so broadcast and poll the reward_claims
+    // row status-agnostically (a rejected COLLECT still writes its row, carrying the
+    // rejection status; see xchain-indexer collect.js, which calls createRewardClaim
+    // unconditionally). Filters on (source, txHash) so the test asserts the reason.
+    async sendCollectInvalid(addressInfo){
+        let address = addressInfo["address"]
+        let msg = "COLLECT|0"
+
+        console.log("Creating and sending (expected-invalid) COLLECT V0 tx...")
+        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
+
+        console.log("Waiting for the recorded reward_claims row in the database...")
+        let row = await waitForAnyRewardClaim({ source: address, txHash: txHash })
+
+        return { txHash, claim: row }
     },
 
     // STAKE v3: contract-targeted stake (any tick). The contract must have been

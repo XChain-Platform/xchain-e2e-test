@@ -37,7 +37,7 @@
 const path = require('path');
 const { expect } = require('chai');
 const { makeSdk, GAS_TICK, submitOpts } = require('../sdk/sdkHelper');
-const { buildRoles, corpus, resolveParams } = require('./parityCorpus');
+const { buildRoles, corpus, resolveParams, PIN_T0 } = require('./parityCorpus');
 const { captureLiveDigest, writeDigest } = require('./digest');
 
 // Baseline height every chain is mined to before the pinned corpus. Must be
@@ -125,6 +125,15 @@ describe('P3(b) multi-chain parity: live driver + digest capture', function () {
         // Key off the TRUE node tip (tip() settles first), so the action lands
         // at a deterministic absolute height identical across chains.
         const before = await tip();
+        // Pin the block timestamp when the step carries one (the corpus phase).
+        // Set the node's mock clock (through the miner: the driver is node-RPC-
+        // free) to the step's FIXED time so the block this step mines is stamped
+        // at exactly that value on every chain. The step times increase by
+        // PIN_STEP, always above the tip's median-time-past, so bitcoind stamps
+        // the block at the requested time verbatim. This is what makes the
+        // time-based ORDER_EXPIRE fire at an identical absolute block_index
+        // cross-chain; block_time itself is excluded from the Tier-2 diff.
+        if (step.time != null) await global.regtestMinerConnector.setMockTime(step.time);
         await sdk.submitAction(
             { action: step.action, params, version: step.version },
             { pubkey: role.address, change: role.address, unconfirmed: false,
@@ -202,6 +211,18 @@ describe('P3(b) multi-chain parity: live driver + digest capture', function () {
         nh = await tip();
         expect(nh, 'baseline overshoot: node tip past baseline').to.equal(BASELINE_HEIGHT);
 
+        // Staleness guard for the pinned-time schedule: the corpus mines its
+        // blocks at PIN_T0 + i*PIN_STEP, a forward jump off the real-time
+        // baseline. If wall-clock has caught up to PIN_T0 the jump would no longer
+        // be forward (bitcoind would reject the non-increasing timestamp), so fail
+        // loudly here with the fix (bump PIN_T0/FAR_FUTURE in parityCorpus.js)
+        // rather than deadlock later inside driveAction.
+        const baseRow = await pool.query('SELECT block_time AS t FROM blocks WHERE block_index = ?', [BASELINE_HEIGHT]);
+        const baseTime = baseRow[0] && baseRow[0].t != null ? Number(baseRow[0].t) : 0;
+        expect(PIN_T0, 'pinned-time base PIN_T0 has fallen at/below real wall-clock (' + baseTime +
+            '): bump PIN_T0 and FAR_FUTURE in parityCorpus.js and re-run all chains')
+            .to.be.greaterThan(baseTime);
+
         // 3a. Genesis: role A ISSUEs the XCHAIN gas token. This is the
         // fee-EXEMPT gas bootstrap (issue.js gasBootstrap), and regtest lets
         // any address issue GAS, so it is deterministic and chain-agnostic.
@@ -217,6 +238,28 @@ describe('P3(b) multi-chain parity: live driver + digest capture', function () {
         }
         // 3c. The corpus, one action per block.
         for (const step of corpus(coin)) await driveAction(step);
+    });
+
+    after(async function () {
+        // Release the node's mock clock and restore the normal mine cadence so
+        // the shared regtest node is not left time-frozen. Best-effort: a failed
+        // run must not mask its own error with a teardown throw. Guarded because
+        // a before()-hook failure can leave the miner connector unset.
+        try { if (global.regtestMinerConnector) await global.regtestMinerConnector.setMockTime(0); } catch (e) { /* best effort */ }
+        try { if (global.regtestMinerConnector) await global.regtestMinerConnector.setDefaultMiningTime(); } catch (e) { /* best effort */ }
+    });
+
+    it('emitted a deterministic ORDER_EXPIRE from the pinned time-based expiry', async function () {
+        // The unmatchable order (corpus step 8) must have expired at the MINT
+        // block (step 10) whose pinned block_time crossed ORDER_EXPIRE_AT. Assert
+        // the ORDER_EXPIRE action exists so the time-based coverage is not vacuous
+        // (mirrors scenario 14's guard). Its identical block_index cross-chain is
+        // what compare.js's Tier-1 hash chain proves.
+        const rows = await pid().query(
+            "SELECT COUNT(*) AS n FROM actions a " +
+            "JOIN index_actions ia ON ia.id = a.action_id " +
+            "WHERE ia.action = 'ORDER_EXPIRE'");
+        expect(Number(rows[0].n), 'the pinned unmatchable order never produced exactly one ORDER_EXPIRE').to.equal(1);
     });
 
     it('drove the corpus deterministically and the indexer is consistent', async function () {
