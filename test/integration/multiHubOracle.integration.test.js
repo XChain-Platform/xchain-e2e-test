@@ -40,6 +40,7 @@ const assert = require('assert');
 const { MultiValidatorHub }    = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedStakeSnapshot }    = require('../helpers/seededStakeSnapshot');
+const { forceCountModeQuorum } = require('../helpers/forceCountModeQuorum');
 
 function hubRequire(rel) { return require(path.resolve(__dirname, '../../../xchain-hub', rel)); }
 const OracleConsensus  = hubRequire('src/OracleConsensus.js');
@@ -74,11 +75,16 @@ const priceMap = (results) => Object.fromEntries(results.map((p) => [p.coinPair,
 describe('MultiValidatorHub - oracle determinism (L2)', function () {
     this.timeout(180_000);
 
-    let db, mvh, seed;
+    let db, mvh, seed, countMode;
 
     before(async function () {
         db = await startDisposableHubDb();
         if (!db) { console.log('Skipping oracle L2 - no env DB and Docker unavailable'); this.skip(); }
+        // This suite seeds the COUNT snapshot only (seedStakeSnapshot, no weight
+        // snapshot), so it must run under legacy count quorum; regtest activates
+        // stake-weighted quorum at genesis, which would stall a count-only round
+        // at a 1-sig leader self-sign. Lift the activation height for the run.
+        countMode = forceCountModeQuorum();
         mvh = new MultiValidatorHub({ count: COUNT, basePort: 33000 });
         await mvh.start();
         await sleep(PEER_WAIT_MS);
@@ -92,6 +98,7 @@ describe('MultiValidatorHub - oracle determinism (L2)', function () {
 
     after(async function () {
         if (seed) seed.restore();
+        if (countMode) countMode.restore();
         if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
         if (db)  { await db.stop(); }
     });

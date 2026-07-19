@@ -220,6 +220,53 @@ describe('BlockchainConnector', function () {
         });
     });
 
+    describe('setMockTime', function () {
+        it('sends setmocktime with the numeric timestamp', async function () {
+            axiosPostStub.resolves(makeResponse({ result: null }));
+
+            await connector.setMockTime(1893456000);
+
+            const data = axiosPostStub.firstCall.args[1];
+            assert.strictEqual(data.method, 'setmocktime');
+            assert.deepStrictEqual(data.params, [1893456000]);
+        });
+
+        it('coerces a string timestamp to a number', async function () {
+            axiosPostStub.resolves(makeResponse({ result: null }));
+
+            await connector.setMockTime('1893456000');
+
+            const data = axiosPostStub.firstCall.args[1];
+            assert.deepStrictEqual(data.params, [1893456000]);
+        });
+
+        it('sends 0 to release the mock clock', async function () {
+            axiosPostStub.resolves(makeResponse({ result: null }));
+
+            await connector.setMockTime(0);
+
+            const data = axiosPostStub.firstCall.args[1];
+            assert.deepStrictEqual(data.params, [0]);
+        });
+
+        it('sends a valid Basic auth header', async function () {
+            axiosPostStub.resolves(makeResponse({ result: null }));
+
+            await connector.setMockTime(0);
+
+            const opts = axiosPostStub.firstCall.args[2];
+            assert.strictEqual(opts.headers['Authorization'], expectedAuth(USER, PASS));
+        });
+
+        it('throws when the node returns an error body', async function () {
+            axiosPostStub.resolves(makeResponse({ error: { code: -8, message: 'bad time' } }));
+            await assert.rejects(
+                () => connector.setMockTime(-1),
+                /setmocktime RPC error/
+            );
+        });
+    });
+
     describe('getFeePerKilobyte', function () {
         it('returns feerate when present in response', async function () {
             const feerate = 0.00012345;

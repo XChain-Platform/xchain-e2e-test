@@ -227,6 +227,13 @@ class BlockchainConnector {
     // what lets a reorg DROP an orphaned tx: after invalidateBlock, mine empty blocks to build
     // a longer competing chain that excludes the mempool tx. (Bitcoin Core 0.19+ `generateblock`.)
     async generateBlock(address, txs = []){ return await this._rpc('generateblock', [address, txs]); }
+    // Freeze the node's clock at `timestamp` (unix seconds) so blocks mined afterwards
+    // carry a chosen block_time. Used by the COINPay obligation-expiry e2e to jump
+    // block_time past COINPAY_EXPIRATION (a time-based, not height-based, deadline)
+    // without waiting two real hours. Pass 0 to release the mock and return the node
+    // to wall-clock time. Always reset to 0 in a finally so the shared regtest node
+    // does not stay time-frozen for other tests.
+    async setMockTime(timestamp){ return await this._rpc('setmocktime', [Number(timestamp)]); }
 }
 
 module.exports = BlockchainConnector
