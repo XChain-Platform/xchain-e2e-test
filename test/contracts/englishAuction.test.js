@@ -105,7 +105,14 @@ describe('English Auction: ascending bids with instant outbid refunds, deadline 
     const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
     const BID = 'XCHAIN' // gas token doubles as the bidding currency; 0 decimals in this stack
     const MIN_BID = '50'
-    const DEADLINE = '5'
+    // Generous on purpose: real regtest confirmation overhead between fund()
+    // and the first bid() (each DEPOSIT/EXECUTE is its own mined block) can
+    // already burn several blocks before a bid is ever placed - a tight window
+    // (e.g. 5) closes the auction before the happy path even runs. The exact
+    // boundary check is unit-tested (xchain-contracts/englishAuction); this
+    // e2e only needs "clearly open" vs "clearly closed", forced deterministically
+    // via generateBlocks() below.
+    const DEADLINE = '200'
     const randTick = (p) => { let s = p; for (let i = 0; i < 5; i++) s += String.fromCharCode(65 + Math.floor(Math.random() * 26)); return s }
 
     async function q(sql, params) {
