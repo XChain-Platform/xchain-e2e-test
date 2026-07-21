@@ -186,10 +186,16 @@ describe('Escrow Delivery: custody + a REAL delivery attestation driving on-chai
 
     // Deploys a fresh escrow, funds it, and asks the network to check REAL_URL
     // against `marker`. Returns { ci, contractAddr, requestId, buyer, seller, arbiter }.
-    async function deployFundAndRequest(marker) {
-        const buyer   = await cryptoHelper.getNewFundedAddress('esc-del-buyer', COIN, NETWORK, null, 'legacy', 0, 0.02)
-        const seller  = await cryptoHelper.getNewFundedAddress('esc-del-seller', COIN, NETWORK, null, 'legacy', 0, 0.02)
-        const arbiter = await cryptoHelper.getNewFundedAddress('esc-del-arbiter', COIN, NETWORK, null, 'legacy', 0, 0.02)
+    //
+    // `run` must be distinct per call: getNewFundedAddress derives addresses
+    // deterministically from (label, addressIndex) via a cached per-label HD
+    // wallet, so reusing the same label+index across two deployFundAndRequest
+    // calls would hand both escrows the SAME buyer/seller/arbiter addresses -
+    // their balances would then bleed into each other across tests.
+    async function deployFundAndRequest(marker, run) {
+        const buyer   = await cryptoHelper.getNewFundedAddress('esc-del-buyer', COIN, NETWORK, null, 'legacy', run, 0.02)
+        const seller  = await cryptoHelper.getNewFundedAddress('esc-del-seller', COIN, NETWORK, null, 'legacy', run, 0.02)
+        const arbiter = await cryptoHelper.getNewFundedAddress('esc-del-arbiter', COIN, NETWORK, null, 'legacy', run, 0.02)
         await gasHelper.ensureGasBalance(buyer, '2000')
 
         const params = [buyer.address, seller.address, arbiter.address, TICK, AMOUNT, '144', marker].join('|')
@@ -251,7 +257,10 @@ describe('Escrow Delivery: custody + a REAL delivery attestation driving on-chai
     })
 
     it('a matching delivery body auto-releases the escrow to the seller - no release() call', async function () {
-        const { ci, contractAddr, requestId, buyer, seller } = await deployFundAndRequest(MARKER_MATCH)
+        // addressIndex 10/11 (not 0/1): the previous, buggy run of this suite
+        // already funded indices 0/1 under these labels with contaminated
+        // balances before the per-run addressIndex fix landed.
+        const { ci, contractAddr, requestId, buyer, seller } = await deployFundAndRequest(MARKER_MATCH, 10)
 
         await fetchSignAndBroadcast(buyer, requestId)
 
@@ -273,7 +282,7 @@ describe('Escrow Delivery: custody + a REAL delivery attestation driving on-chai
     })
 
     it('a non-matching delivery body is a no-op; the arbiter then settles the dispute manually', async function () {
-        const { ci, contractAddr, requestId, arbiter, buyer } = await deployFundAndRequest(MARKER_NO_MATCH)
+        const { ci, contractAddr, requestId, arbiter, buyer } = await deployFundAndRequest(MARKER_NO_MATCH, 11)
 
         await fetchSignAndBroadcast(buyer, requestId)
 
