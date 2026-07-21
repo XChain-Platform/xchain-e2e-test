@@ -257,10 +257,10 @@ describe('Escrow Delivery: custody + a REAL delivery attestation driving on-chai
     })
 
     it('a matching delivery body auto-releases the escrow to the seller - no release() call', async function () {
-        // addressIndex 10/11 (not 0/1): the previous, buggy run of this suite
-        // already funded indices 0/1 under these labels with contaminated
-        // balances before the per-run addressIndex fix landed.
-        const { ci, contractAddr, requestId, buyer, seller } = await deployFundAndRequest(MARKER_MATCH, 10)
+        const { ci, contractAddr, requestId, buyer, seller } = await deployFundAndRequest(MARKER_MATCH, 0)
+        // getNewFundedAddress auto-seeds every fresh address with 100 XCHAIN
+        // gas, so the seller's balance isn't 0 going in - measure the delta.
+        const sellerBefore = Number(await balanceOf(seller.address, TICK)) || 0
 
         await fetchSignAndBroadcast(buyer, requestId)
 
@@ -276,13 +276,14 @@ describe('Escrow Delivery: custody + a REAL delivery attestation driving on-chai
         assert.strictEqual(cbStatus, 'DELIVERED', 'onDelivery callback should auto-settle the escrow')
         assert.strictEqual(await stateOf(ci, 'pending'), null, 'pending should be cleared')
 
-        assert.strictEqual(await balanceOf(seller.address, TICK), AMOUNT, 'seller receives the full escrowed amount')
+        const sellerAfter = Number(await balanceOf(seller.address, TICK)) || 0
+        assert.strictEqual(sellerAfter - sellerBefore, Number(AMOUNT), 'seller receives the full escrowed amount')
         const held = await balanceOf(contractAddr, TICK)
         assert(held === null || Number(held) === 0, 'the contract holds nothing after auto-settlement')
     })
 
     it('a non-matching delivery body is a no-op; the arbiter then settles the dispute manually', async function () {
-        const { ci, contractAddr, requestId, arbiter, buyer } = await deployFundAndRequest(MARKER_NO_MATCH, 11)
+        const { ci, contractAddr, requestId, arbiter, buyer } = await deployFundAndRequest(MARKER_NO_MATCH, 1)
 
         await fetchSignAndBroadcast(buyer, requestId)
 
@@ -298,12 +299,17 @@ describe('Escrow Delivery: custody + a REAL delivery attestation driving on-chai
         assert.strictEqual(await stateOf(ci, 'status'), 'FUNDED', 'no auto-release on a non-matching body')
         assert.strictEqual(await balanceOf(contractAddr, TICK), AMOUNT, 'funds are untouched')
 
+        // getNewFundedAddress auto-seeds every fresh address with 100 XCHAIN
+        // gas, so the seller's balance isn't 0 going in - measure the delta.
+        const sellerAddr = await stateOf(ci, 'seller')
+        const sellerBefore = Number(await balanceOf(sellerAddr, TICK)) || 0
+
         // Automation isn't the only settlement path: the arbiter resolves it.
         const rel = await vmHelper.sendExecuteV0(arbiter, ci, 'release', [])
         assert(rel.execution && rel.execution.status === 'valid', 'arbiter release should index a valid execution')
         assert.strictEqual(await stateOf(ci, 'status'), 'RELEASED')
 
-        const sellerAddr = await stateOf(ci, 'seller')
-        assert.strictEqual(await balanceOf(sellerAddr, TICK), AMOUNT, 'manual release still pays the seller in full')
+        const sellerAfter = Number(await balanceOf(sellerAddr, TICK)) || 0
+        assert.strictEqual(sellerAfter - sellerBefore, Number(AMOUNT), 'manual release still pays the seller in full')
     })
 })
