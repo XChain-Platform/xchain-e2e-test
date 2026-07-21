@@ -111,8 +111,12 @@ describe('English Auction: ascending bids with instant outbid refunds, deadline 
     // (e.g. 5) closes the auction before the happy path even runs. The exact
     // boundary check is unit-tested (xchain-contracts/englishAuction); this
     // e2e only needs "clearly open" vs "clearly closed", forced deterministically
-    // via generateBlocks() below.
-    const DEADLINE = '200'
+    // via generateBlocks() below. Kept in the tens, not the hundreds: a single
+    // generateBlocks() burst large enough to clear the deadline also has to be
+    // fully decoded/indexed within sendExecuteV0's ~60s poll window, and a
+    // 200+ block burst was observed to outrun that (the settle() execution
+    // never got indexed in time, failing the test - not a contract revert).
+    const DEADLINE = '30'
     const randTick = (p) => { let s = p; for (let i = 0; i < 5; i++) s += String.fromCharCode(65 + Math.floor(Math.random() * 26)); return s }
 
     async function q(sql, params) {
@@ -187,7 +191,7 @@ describe('English Auction: ascending bids with instant outbid refunds, deadline 
         const aliceAfterOutbid = await balanceOf(alice.address, BID)
         assert.strictEqual(aliceAfterOutbid - aliceBeforeOutbid, 50, 'alice should be refunded her full 50 the instant bob outbids her')
 
-        await regtestMinerConnector.generateBlocks(Number(DEADLINE) + 3)
+        await regtestMinerConnector.generateBlocks(Number(DEADLINE) + 10)
 
         const sellerBefore = await balanceOf(seller.address, BID)
         const settle = await vmHelper.sendExecuteV0(bob, ci, 'settle', [])
@@ -203,7 +207,7 @@ describe('English Auction: ascending bids with instant outbid refunds, deadline 
     it('no bids: settle() returns the item to the seller (UNSOLD)', async function () {
         const { ci, contractAddr, itemTick, seller } = await deployAndFund('7')
 
-        await regtestMinerConnector.generateBlocks(Number(DEADLINE) + 3)
+        await regtestMinerConnector.generateBlocks(Number(DEADLINE) + 10)
 
         const sellerItemBefore = await balanceOf(seller.address, itemTick)
         const settle = await vmHelper.sendExecuteV0(seller, ci, 'settle', [])
