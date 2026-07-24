@@ -114,7 +114,7 @@ describe('Address ^id reorg DETERMINISTIC (Phase 5 gate): orphaned index_address
         assert(addrABlock, 'addrA introduction block (index_addresses.block_index) resolved')
 
         // 2. Pause auto-mining so the orphaned MINT cannot be re-mined from the mempool.
-        await regtestMinerConnector.setMiningTime(3600000, 3600000)
+        await regtestMinerConnector.pauseMining()
         try {
             const tipBefore = await nodeConnector.getBlockCount()
             const orphanHash = await nodeConnector.getBlockHash(addrABlock)
@@ -173,7 +173,7 @@ describe('Address ^id reorg DETERMINISTIC (Phase 5 gate): orphaned index_address
             console.log('    [addrid-det] CONFIRMED FIX: orphaned index_addresses id ' + idA + ' was reclaimed by rollback (not resurrected); ' +
                 'a DIFFERENT canonical address took ' + idB + ' (== idA). Wire ^' + idA + ' resolves identically everywhere.')
         } finally {
-            await regtestMinerConnector.setDefaultMiningTime()
+            await regtestMinerConnector.resumeMining()
         }
     })
 })

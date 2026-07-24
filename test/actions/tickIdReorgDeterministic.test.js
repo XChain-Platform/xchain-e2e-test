@@ -117,7 +117,7 @@ describe('Tick ^id reorg DETERMINISTIC (Phase 5 gate): orphaned index_tickers id
         assert(issueABlock, 'TOKENA ISSUE block height resolved')
 
         // 2. Pause auto-mining so the orphaned ISSUE cannot be re-mined from the mempool.
-        await regtestMinerConnector.setMiningTime(3600000, 3600000)
+        await regtestMinerConnector.pauseMining()
         try {
             const tipBefore = await nodeConnector.getBlockCount()
             const issueHash = await nodeConnector.getBlockHash(issueABlock)
@@ -177,7 +177,7 @@ describe('Tick ^id reorg DETERMINISTIC (Phase 5 gate): orphaned index_tickers id
             console.log('    [tickid-det] CONFIRMED FIX: orphaned id ' + idA + ' was reclaimed by rollback (not resurrected); ' +
                 'a DIFFERENT canonical token TOKENB took ' + idB + ' (== idA). Wire ^' + idA + ' resolves identically everywhere.')
         } finally {
-            await regtestMinerConnector.setDefaultMiningTime()
+            await regtestMinerConnector.resumeMining()
         }
     })
 })

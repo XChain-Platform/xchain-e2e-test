@@ -175,7 +175,7 @@ describe('[sdk] chunked DEPLOY reorg drill (orphaned chunk -> assembled contract
 
         // Hold auto-mining so the orphaned txs are NOT re-mined yet, then build an EMPTY
         // competing chain longer than the original tip (generateBlock(addr, [])).
-        await miner.setMiningTime(3600000, 3600000);
+        await miner.pauseMining();
         try {
             const tipBefore = await node.getBlockCount();
             const chunkHash = await node.getBlockHash(firstChunkBlock);
@@ -207,7 +207,7 @@ describe('[sdk] chunked DEPLOY reorg drill (orphaned chunk -> assembled contract
             console.log('    [chunk-reorg] rollback clean: chunks, contract, and state all gone on the orphan branch');
         } finally {
             // Leave auto-mining ON for the re-injection phase (mempool drains naturally).
-            await miner.setDefaultMiningTime();
+            await miner.resumeMining();
         }
     });
 

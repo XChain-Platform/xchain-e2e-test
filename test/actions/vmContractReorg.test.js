@@ -91,7 +91,7 @@ describe('VM Contract Reorg: EXECUTE state rolls back across an on-chain reorg',
 
         // Pause the auto-miner BEFORE we touch the chain, so it can't re-mine the orphaned EXECUTE
         // from the mempool while we build the competing chain.
-        await regtestMinerConnector.setMiningTime(3600000, 3600000)
+        await regtestMinerConnector.pauseMining()
         try {
             const tipBefore = await nodeConnector.getBlockCount()
             const executeHash = await nodeConnector.getBlockHash(executeBlock)
@@ -121,7 +121,7 @@ describe('VM Contract Reorg: EXECUTE state rolls back across an on-chain reorg',
             assert.strictEqual(await contractExists(ci), true, 'the contract (deployed in a surviving block) should remain')
         } finally {
             // Restore normal auto-mining so the stack is left healthy for later suites.
-            await regtestMinerConnector.setDefaultMiningTime()
+            await regtestMinerConnector.resumeMining()
         }
     })
 })

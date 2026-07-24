@@ -30,6 +30,8 @@
     "test:sdk:chunked-reorg": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/sdk/chunkedDeployReorgDrill.sdk.test.js",
     "test:sdk:vote": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/sdk/vote.sdk.test.js' 'test/sdk/voteAdvanced.sdk.test.js' 'test/sdk/voteBinding.sdk.test.js' 'test/sdk/voteDeposit.sdk.test.js' 'test/sdk/voteFinalize.sdk.test.js' 'test/sdk/votePollResult.sdk.test.js'",
     "test:sdk:vote-reorg": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/sdk/voteReorgDrill.sdk.test.js",
+    "test:sdk:dex-reorg": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/sdk/dexSourceReorgDrill.sdk.test.js",
+    "test:sdk:xcall-reorg": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/sdk/xcallSourceReorgDrill.sdk.test.js",
     "test:sdk:x402": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/sdk/x402.sdk.test.js",
     "test:sdk:mcp": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/sdk/mcp.sdk.test.js",
     "test:sdk:tickerid": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/sdk/ticker-id-equivalence.sdk.test.js",

@@ -138,7 +138,7 @@ describe('Gated Content Reorg: a gated FILE (and its SEND-gating) rolls back acr
         console.log('   bare SEND denied pre-reorg: gated-SEND rule active')
 
         // ── Reorg out the gated FILE block ──
-        await regtestMinerConnector.setMiningTime(3600000, 3600000)
+        await regtestMinerConnector.pauseMining()
         try {
             const tipBefore = await nodeConnector.getBlockCount()
             const fileHash = await nodeConnector.getBlockHash(fileBlock)
@@ -170,7 +170,7 @@ describe('Gated Content Reorg: a gated FILE (and its SEND-gating) rolls back acr
             // this 7 [=12]. Either way a bare SEND now credits, which is the proof; assert
             // >= 7 rather than an exact amount to tolerate the re-included orphan.)
             const recvBefore2 = Number(await balanceOf(recipient.address, tick))
-            await regtestMinerConnector.setDefaultMiningTime()
+            await regtestMinerConnector.resumeMining()
             await transactionHelper.createAndSendTransaction(issuer, `SEND|0|${tick}|7|${recipient.address}|bare-post`)
             await mine(1)
             let credited = recvBefore2
@@ -184,7 +184,7 @@ describe('Gated Content Reorg: a gated FILE (and its SEND-gating) rolls back acr
                 `bare SEND of the now-ungated token lands valid (gating rule rolled back): recipient +${credited - recvBefore2}`)
             console.log('   bare SEND valid post-reorg (recipient now ' + credited + '): gated-SEND rule rolled back with gated_files')
         } finally {
-            await regtestMinerConnector.setDefaultMiningTime()
+            await regtestMinerConnector.resumeMining()
         }
     })
 })

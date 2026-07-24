@@ -140,7 +140,7 @@ describe('Controller Reorg: a token binding rolls back across an on-chain reorg'
         console.log('   SEND denied by active transfer binding (binding has teeth)')
 
         // ── Reorg out the BIND block ──
-        await regtestMinerConnector.setMiningTime(3600000, 3600000)
+        await regtestMinerConnector.pauseMining()
         try {
             const tipBefore = await nodeConnector.getBlockCount()
             const bindHash = await nodeConnector.getBlockHash(bindBlock)
@@ -172,7 +172,7 @@ describe('Controller Reorg: a token binding rolls back across an on-chain reorg'
             assert.strictEqual(await contractExists(ctrl), true, 'the guard contract (earlier block) survives')
             console.log('   ISSUE + DEPLOY survived; only the BIND rolled back (isolation OK)')
         } finally {
-            await regtestMinerConnector.setDefaultMiningTime()
+            await regtestMinerConnector.resumeMining()
         }
     })
 })

@@ -116,7 +116,7 @@ describe('COINPAY Reorg: a native-coin settlement rolls back across an on-chain 
         console.log('   indexer tip', await tip(), 'node tip', await nodeConnector.getBlockCount())
 
         // ----- Reorg out the COINPAY block -----
-        await regtestMinerConnector.setMiningTime(3600000, 3600000)
+        await regtestMinerConnector.pauseMining()
         try {
             const tipBefore = await nodeConnector.getBlockCount()
             const coinpayHash = await nodeConnector.getBlockHash(coinpayBlock)
@@ -147,7 +147,7 @@ describe('COINPAY Reorg: a native-coin settlement rolls back across an on-chain 
             assert.strictEqual(await obligationExists(obligationIndex), true, 'the obligation (earlier block) survives, open again')
             console.log('   COINPAY settlement rolled back; obligation survives (pending again). Isolation OK')
         } finally {
-            await regtestMinerConnector.setDefaultMiningTime()
+            await regtestMinerConnector.resumeMining()
         }
     })
 })

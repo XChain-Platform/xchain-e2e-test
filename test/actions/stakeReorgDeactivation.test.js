@@ -114,7 +114,7 @@ describe('Stake Reorg: UNSTAKE rolls back, deactivation_block re-NULLs on the su
         assert(unstakeBlock, 'UNSTAKE block height resolved')
 
         // Pause the auto-miner so it cannot re-mine the orphaned UNSTAKE from the mempool.
-        await regtestMinerConnector.setMiningTime(3600000, 3600000)
+        await regtestMinerConnector.pauseMining()
         try {
             const tipBefore   = await nodeConnector.getBlockCount()
             const unstakeHash = await nodeConnector.getBlockHash(unstakeBlock)
@@ -147,7 +147,7 @@ describe('Stake Reorg: UNSTAKE rolls back, deactivation_block re-NULLs on the su
             assert.strictEqual(after.status, 'valid', 'surviving stake must remain valid')
         } finally {
             // Restore normal auto-mining so the stack is healthy for later suites.
-            await regtestMinerConnector.setDefaultMiningTime()
+            await regtestMinerConnector.resumeMining()
         }
     })
 })

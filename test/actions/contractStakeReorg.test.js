@@ -116,7 +116,7 @@ describe('Contract Staking Reorg: a STAKE v3 row rolls back when its block is or
         console.log('   indexer tip', await tip(), 'node tip', await nodeConnector.getBlockCount())
 
         // ── Reorg out the STAKE block ──
-        await regtestMinerConnector.setMiningTime(3600000, 3600000)
+        await regtestMinerConnector.pauseMining()
         try {
             const tipBefore = await nodeConnector.getBlockCount()
             const stakeHash = await nodeConnector.getBlockHash(stakeBlock)
@@ -142,7 +142,7 @@ describe('Contract Staking Reorg: a STAKE v3 row rolls back when its block is or
             assert.strictEqual(await contractExists(ci), true, 'the contract (earlier surviving block) remains')
             console.log('   DEPLOY survived; only the STAKE rolled back (isolation OK)')
         } finally {
-            await regtestMinerConnector.setDefaultMiningTime()
+            await regtestMinerConnector.resumeMining()
         }
     })
 })

@@ -101,7 +101,7 @@ describe('NFT Reorg: a collection child issuance rolls back across an on-chain r
         console.log('   indexer tip', await tip(), 'node tip', await nodeConnector.getBlockCount())
 
         // ── Reorg out the CHILD block ──
-        await regtestMinerConnector.setMiningTime(3600000, 3600000)
+        await regtestMinerConnector.pauseMining()
         try {
             const tipBefore = await nodeConnector.getBlockCount()
             const childHash = await nodeConnector.getBlockHash(childBlock)
@@ -131,7 +131,7 @@ describe('NFT Reorg: a collection child issuance rolls back across an on-chain r
             assert.strictEqual(await balanceOf(owner.address, parent), '100', 'parent supply intact')
             console.log('   parent survived; only the CHILD rolled back: isolation OK')
         } finally {
-            await regtestMinerConnector.setDefaultMiningTime()
+            await regtestMinerConnector.resumeMining()
         }
     })
 })
