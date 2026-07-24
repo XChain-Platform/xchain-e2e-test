@@ -255,6 +255,12 @@ class MultiValidatorHub {
                 // test's manual _discoverAndMatch() triggers. Rounds are driven
                 // deterministically, not on a 15s wall clock.
                 XDEX_POLL_MS:           600000,
+                // Pin the DEX give-side escrow confirmation floor to 1 for in-process
+                // regtest venues. Hub 2e37969 raised the unset default to per-coin
+                // depths (BTC 6 / LTC 12 / DOGE 60); these tests were written against
+                // the prior flat-1 default and would otherwise stall at match time.
+                // A drill that needs real depths overrides via extraP2pConfig below.
+                XDEX_MIN_CONFIRMATIONS: '1',
             };
 
             if (this.extraP2pConfig) Object.assign(p2pConfig, this.extraP2pConfig);
