@@ -102,10 +102,13 @@ module.exports = {
         return { txHash, stake: stakeRow }
     },
 
-    // UNSTAKE v0: begin cooldown for a stake identified by pubkey
-    async sendUnstakeV0(addressInfo, signingPubkey){
+    // UNSTAKE v0: begin cooldown for a stake identified by pubkey.
+    // Optional trailing `amount` ( partial unstake): omitted = full sweep.
+    async sendUnstakeV0(addressInfo, signingPubkey, amount){
         let address = addressInfo["address"]
         let msg = "UNSTAKE|0|" + signingPubkey
+        if(amount !== undefined && amount !== null)
+            msg += "|" + amount
 
         console.log("Creating and sending UNSTAKE V0 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
@@ -193,9 +196,13 @@ module.exports = {
         return { txHash, delegation: row }
     },
 
-    async sendCollectV0(addressInfo){
+    // COLLECT v0: claim accrued validator rewards.
+    // Optional trailing `amount` ( partial claim): omitted = claim the full total.
+    async sendCollectV0(addressInfo, amount){
         let address = addressInfo["address"]
         let msg = "COLLECT|0"
+        if(amount !== undefined && amount !== null)
+            msg += "|" + amount
 
         console.log("Creating and sending COLLECT V0 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
@@ -215,9 +222,11 @@ module.exports = {
     // row status-agnostically (a rejected COLLECT still writes its row, carrying the
     // rejection status; see xchain-indexer collect.js, which calls createRewardClaim
     // unconditionally). Filters on (source, txHash) so the test asserts the reason.
-    async sendCollectInvalid(addressInfo){
+    async sendCollectInvalid(addressInfo, amount){
         let address = addressInfo["address"]
         let msg = "COLLECT|0"
+        if(amount !== undefined && amount !== null)
+            msg += "|" + amount
 
         console.log("Creating and sending (expected-invalid) COLLECT V0 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
@@ -281,9 +290,12 @@ module.exports = {
     },
 
     // UNSTAKE v1: begin cooldown for a contract-targeted stake
-    async sendUnstakeV1(addressInfo, signingPubkey, contractIndex, tick){
+    // Optional trailing `amount` ( partial unstake): omitted = full sweep.
+    async sendUnstakeV1(addressInfo, signingPubkey, contractIndex, tick, amount){
         let address = addressInfo["address"]
         let msg = "UNSTAKE|1|" + signingPubkey + "|" + contractIndex + "|" + tick
+        if(amount !== undefined && amount !== null)
+            msg += "|" + amount
 
         console.log("Creating and sending UNSTAKE V1 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
