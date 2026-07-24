@@ -1,4 +1,18 @@
 #!/usr/bin/env bash
+#*********************************************************************
+#
+# Copyright © 2025-2026 Dankest, LLC
+# Based on XChain Platform by Dankest, LLC - https://dankest.llc
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# This file is part of XChain Platform. Licensed under the GNU Affero
+# General Public License v3.0 or later; see LICENSE.md. A commercial
+# license (without AGPL source-disclosure terms) is available -
+# contact legal@dankest.llc.
+#
+#*********************************************************************
+
 # Background block-nudger for test-host BTC-regtest: mines 1 block every few
 # seconds so SDK submitAction txs confirm (the stack's auto-miner is idle).
 # Reuses a single mining address. Node creds sourced from the container env at
