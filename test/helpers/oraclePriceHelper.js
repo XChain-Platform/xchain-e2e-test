@@ -15,6 +15,13 @@ const mariadb = require('mariadb')
 // set) can be exercised end-to-end. Sibling of priceSnapshotHelper, which does
 // the same job for the validator PRICE v0 snapshots Mode 1 consumes.
 //
+// LIMIT OF THIS APPROACH: a seeded row is written already-effective, which
+// bypasses the 24-hour activation delay every real PRICE v1 publish carries
+// (xchain-hub PriceAggregator applies block_time + 86400 unconditionally, first
+// publish included; verified live). So these tests exercise SETTLEMENT
+// faithfully but say nothing about activation timing. A test that published for
+// real would have to advance 24h of chain time (mock-time driver territory).
+//
 // WHY SEED RATHER THAN PUBLISH ON-CHAIN: a PRICE v1 tx is recorded by the
 // indexer into its local `prices` table and pushed to the hub, which aggregates
 // it into `oracle_prices`; hub_db_sync then mirrors that table back. Both legs
