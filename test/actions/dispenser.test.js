@@ -14,6 +14,7 @@ const transactionHelper = require('../transactionHelper')
 const issueHelper = require('../helpers/issueHelper')
 const dispenserHelper = require('../helpers/dispenserHelper')
 const priceSnapshotHelper = require('../helpers/priceSnapshotHelper')
+const oraclePriceHelper = require('../helpers/oraclePriceHelper')
 const gasHelper = require('../helpers/gasHelper')
 
 describe('DISPENSER', () => {
@@ -259,6 +260,143 @@ describe('DISPENSER', () => {
                 amount: expectedCredit
             }, 30000)
             assert(credit, "Buyer should be credited "+expectedCredit+" tokens (FIAT Mode 1 reverse-match)")
+        })
+    })
+
+    describe('v0 - FIAT (Mode 2: user oracle, PRICE v1)', () => {
+        it('should dispense priced from a user oracle quote cross-converted via the validator snapshot', async function() {
+            // Mode 2 sets ORACLE_ADDRESS and leaves FIAT_AMOUNT empty: the user
+            // oracle prices the TOKEN in fiat and the validator snapshot prices
+            // the COIN in the same fiat, so the two combine to a coin->token
+            // rate (reverseOraclePriceMatch). This is the only settlement path
+            // that reads BOTH price tables, and until now nothing drove it on a
+            // live stack.
+            if (!(await priceSnapshotHelper.isAvailable()) || !(await oraclePriceHelper.isAvailable())) {
+                console.log('Price tables not reachable; skipping Mode 2 FIAT dispenser test')
+                this.skip()
+                return
+            }
+
+            let dispenserAddr = await cryptoHelper.getNewFundedAddress("DISPENSER.ORACLE", COIN, NETWORK, null, "legacy", 0, 1)
+            let buyerAddr     = await cryptoHelper.getNewFundedAddress("DISPENSER.ORACLE.BUYER", COIN, NETWORK, null, "legacy", 0, 1)
+            let oracleAddr    = await cryptoHelper.getNewFundedAddress("DISPENSER.ORACLE.SRC", COIN, NETWORK, null, "legacy", 0, 1)
+            let dispenserAddress = dispenserAddr["address"]
+            let buyerAddress     = buyerAddr["address"]
+            let oracleAddress    = oracleAddr["address"]
+            let tick = "DISPORCL"+dispenserAddress.substring(dispenserAddress.length-8)
+
+            await issueHelper.sendIssueV0(dispenserAddr, tick, 100, 100, 0, "Oracle dispenser test", 100)
+
+            let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
+
+            // FIAT_AMOUNT is empty: the oracle supplies the price.
+            let dispenserResult = await dispenserHelper.sendDispenserV0(
+                dispenserAddr,
+                COIN_CODE, tick, 1, 50,
+                COIN_CODE, null, 0, dispenserAddr["address"],
+                "USD", null, oracleAddress, expiration,
+                null, null, 'FIAT Mode 2 oracle dispenser'
+            )
+            assert(dispenserResult.dispenser, "Mode 2 FIAT dispenser should be created")
+
+            // Seed both legs, anchored to the CHAIN clock. The validator snapshot
+            // must be at or before the oracle quote's effective_at: the matcher
+            // fetches the coin price as of the QUOTE's effective time, not as of
+            // the payment block, so the two prices are contemporaneous.
+            let pair        = COIN_CODE + "/USD"
+            let coinPrice   = 50000     // 1 coin = 50,000 USD  (validator)
+            let tokenPrice  = 100       // 1 token = 100 USD    (user oracle)
+            let chainNow    = await priceSnapshotHelper.latestBlockTime()
+
+            await priceSnapshotHelper.clearPair(pair)
+            await priceSnapshotHelper.seedSnapshot({
+                coinPair: pair,
+                price: coinPrice.toFixed(8),
+                blockTimestamp: chainNow - 120,
+                roundNumber: 999000002
+            })
+            await oraclePriceHelper.clearQuotes({
+                sourceAddress: oracleAddress, coin: COIN_CODE, tick: tick, fiat: 'USD'
+            })
+            await oraclePriceHelper.seedQuote({
+                sourceAddress: oracleAddress, sourceChain: COIN_CODE,
+                coin: COIN_CODE, tick: tick, fiat: 'USD',
+                value: tokenPrice.toFixed(8), fee: '0',
+                effectiveAt: chainNow - 60, actionIndex: 999000002
+            })
+
+            // Buyer pays 0.011 coin:
+            //   tokens = (0.011 * 50000) / 100 = 5.5 => floor => 5
+            let paySats = 1100000
+            let txHash = await transactionHelper.createSimpleTransaction(
+                buyerAddr, dispenserAddress, paySats
+            )
+
+            let coinAmount     = paySats / 1e8                                       // 0.011
+            let expectedUnits  = Math.floor((coinAmount * coinPrice) / tokenPrice)   // 5
+            let expectedCredit = String(expectedUnits)                               // GIVE_AMOUNT = 1
+
+            console.log("Waiting for Mode 2 FIAT DISPENSE in the database (txHash: "+txHash+")...")
+            let dispenseRow = await indexerDatabase.waitForDispense({
+                txHash: txHash,
+                source: buyerAddress,
+                giveTick: tick,
+                status: "valid"
+            }, 60000)
+            assert(dispenseRow, "Mode 2 FIAT dispense should exist in DB and be valid")
+
+            let credit = await indexerDatabase.waitForCredit({
+                address: buyerAddress,
+                tick: tick,
+                amount: expectedCredit
+            }, 30000)
+            assert(credit, "Buyer should be credited "+expectedCredit+" tokens (Mode 2 oracle cross-conversion)")
+        })
+
+        it('should reject a dispense when the user oracle has published nothing in the window', async function() {
+            // No quote for this (oracle, coin, tick, fiat) => reverseOraclePriceMatch
+            // returns null and the dispense is recorded invalid rather than
+            // falling back to any other price source.
+            if (!(await priceSnapshotHelper.isAvailable()) || !(await oraclePriceHelper.isAvailable())) {
+                console.log('Price tables not reachable; skipping Mode 2 no-quote test')
+                this.skip()
+                return
+            }
+
+            let dispenserAddr = await cryptoHelper.getNewFundedAddress("DISPENSER.ORACLE.NQ", COIN, NETWORK, null, "legacy", 0, 1)
+            let buyerAddr     = await cryptoHelper.getNewFundedAddress("DISPENSER.ORACLE.NQ.BUYER", COIN, NETWORK, null, "legacy", 0, 1)
+            let oracleAddr    = await cryptoHelper.getNewFundedAddress("DISPENSER.ORACLE.NQ.SRC", COIN, NETWORK, null, "legacy", 0, 1)
+            let dispenserAddress = dispenserAddr["address"]
+            let buyerAddress     = buyerAddr["address"]
+            let tick = "DISPNOQ"+dispenserAddress.substring(dispenserAddress.length-8)
+
+            await issueHelper.sendIssueV0(dispenserAddr, tick, 100, 100, 0, "Oracle dispenser no-quote test", 100)
+
+            let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
+            let dispenserResult = await dispenserHelper.sendDispenserV0(
+                dispenserAddr,
+                COIN_CODE, tick, 1, 50,
+                COIN_CODE, null, 0, dispenserAddr["address"],
+                "USD", null, oracleAddr["address"], expiration,
+                null, null, 'FIAT Mode 2 no-quote dispenser'
+            )
+            assert(dispenserResult.dispenser, "Mode 2 dispenser should be created")
+
+            await oraclePriceHelper.clearQuotes({
+                sourceAddress: oracleAddr["address"], coin: COIN_CODE, tick: tick, fiat: 'USD'
+            })
+
+            let txHash = await transactionHelper.createSimpleTransaction(
+                buyerAddr, dispenserAddress, 1100000
+            )
+
+            let dispenseRow = await indexerDatabase.waitForDispense({
+                txHash: txHash,
+                source: buyerAddress,
+                giveTick: tick,
+                status: "invalid: no matching oracle price"
+            }, 60000)
+            assert(dispenseRow, "dispense should be recorded invalid with no matching oracle price")
         })
     })
 
