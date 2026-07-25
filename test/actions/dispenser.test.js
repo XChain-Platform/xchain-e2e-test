@@ -289,20 +289,12 @@ describe('DISPENSER', () => {
 
             let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
 
-            // FIAT_AMOUNT is empty: the oracle supplies the price.
-            let dispenserResult = await dispenserHelper.sendDispenserV0(
-                dispenserAddr,
-                COIN_CODE, tick, 1, 50,
-                COIN_CODE, null, 0, dispenserAddr["address"],
-                "USD", null, oracleAddress, expiration,
-                null, null, 'FIAT Mode 2 oracle dispenser'
-            )
-            assert(dispenserResult.dispenser, "Mode 2 FIAT dispenser should be created")
-
-            // Seed both legs, anchored to the CHAIN clock. The validator snapshot
-            // must be at or before the oracle quote's effective_at: the matcher
-            // fetches the coin price as of the QUOTE's effective time, not as of
-            // the payment block, so the two prices are contemporaneous.
+            // Seed both legs BEFORE creating the dispenser. Order matters since :
+            // a Mode 2 create is rejected unless its oracle already has an effective
+            // price, so seeding afterwards makes the create invalid. Anchored to the
+            // CHAIN clock, and the validator snapshot must be at or before the oracle
+            // quote's effective_at because the matcher fetches the coin price as of the
+            // QUOTE's effective time, not as of the payment block.
             let pair        = COIN_CODE + "/USD"
             let coinPrice   = 50000     // 1 coin = 50,000 USD  (validator)
             let tokenPrice  = 100       // 1 token = 100 USD    (user oracle)
@@ -324,6 +316,16 @@ describe('DISPENSER', () => {
                 value: tokenPrice.toFixed(8), fee: '0',
                 effectiveAt: chainNow - 60, actionIndex: 999000002
             })
+
+            // Now the oracle has an effective price, so the create is accepted.
+            let dispenserResult = await dispenserHelper.sendDispenserV0(
+                dispenserAddr,
+                COIN_CODE, tick, 1, 50,
+                COIN_CODE, null, 0, dispenserAddr["address"],
+                "USD", null, oracleAddress, expiration,
+                null, null, 'FIAT Mode 2 oracle dispenser'
+            )
+            assert(dispenserResult.dispenser, "Mode 2 FIAT dispenser should be created")
 
             // Buyer pays 0.011 coin:
             //   tokens = (0.011 * 50000) / 100 = 5.5 => floor => 5
@@ -353,10 +355,98 @@ describe('DISPENSER', () => {
             assert(credit, "Buyer should be credited "+expectedCredit+" tokens (Mode 2 oracle cross-conversion)")
         })
 
+        it('should reject a Mode 2 create with no oracle fee output, and accept one that pays', async function() {
+            // , Counterparty parity: when the referenced oracle charges a FEE, the
+            // address OPENING the dispenser must pay it up front as a real native-coin
+            // output. This is the leg that cannot be proven by unit tests: it needs the
+            // encoder to actually place the output and the indexer to actually see it in
+            // TX_OUTPUTS.
+            // BLOCKED on the decoder: XChainDecoder.js:1825 persists an output to
+            // transaction_outputs ONLY when it pays the protocol FEE_DESTINATION (or the tx
+            // is a COINPAY). An output paying a dispenser's ORACLE_ADDRESS is dropped, so it
+            // never reaches the indexer's data['TX_OUTPUTS'] and the paying create is
+            // rejected exactly like the non-paying one. This test found that; it stays
+            // skipped until the decoder captures oracle-fee outputs .
+            console.log('Skipping: decoder does not yet persist oracle-fee outputs ')
+            this.skip()
+            return
+
+            if (!(await priceSnapshotHelper.isAvailable()) || !(await oraclePriceHelper.isAvailable())) {
+                console.log('Price tables not reachable; skipping oracle-fee test')
+                this.skip()
+                return
+            }
+
+            let dispenserAddr = await cryptoHelper.getNewFundedAddress("DISPENSER.OFEE", COIN, NETWORK, null, "legacy", 0, 1)
+            let oracleAddr    = await cryptoHelper.getNewFundedAddress("DISPENSER.OFEE.SRC", COIN, NETWORK, null, "legacy", 0, 1)
+            let dispenserAddress = dispenserAddr["address"]
+            let oracleAddress    = oracleAddr["address"]
+            let tick = "DISPOFEE"+dispenserAddress.substring(dispenserAddress.length-8)
+
+            await issueHelper.sendIssueV0(dispenserAddr, tick, 1000, 1000, 0, "Oracle fee test", 1000)
+
+            let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
+            let chainNow   = await priceSnapshotHelper.latestBlockTime()
+            let coinPrice  = 50000     // validator: 1 coin = $50,000
+            let tokenPrice = 0.05      // oracle: 1 token = $0.05
+            let feeFrac    = 0.01      // oracle charges 1%
+            let escrow     = 1000
+
+            await priceSnapshotHelper.clearPair(COIN_CODE + "/USD")
+            await priceSnapshotHelper.seedSnapshot({
+                coinPair: COIN_CODE + "/USD", price: coinPrice.toFixed(8),
+                blockTimestamp: chainNow - 120, roundNumber: 999000003
+            })
+            await oraclePriceHelper.clearQuotes({
+                sourceAddress: oracleAddress, coin: COIN_CODE, tick: tick, fiat: 'USD'
+            })
+            await oraclePriceHelper.seedQuote({
+                sourceAddress: oracleAddress, sourceChain: COIN_CODE,
+                coin: COIN_CODE, tick: tick, fiat: 'USD',
+                value: tokenPrice.toFixed(8), fee: String(feeFrac),
+                effectiveAt: chainNow - 60, actionIndex: 999000003
+            })
+
+            // fee = FEE x (oracle_price x GIVE_ESCROW) / coin_price
+            let expectedFee  = (feeFrac * (tokenPrice * escrow)) / coinPrice   // 0.00001
+            let expectedSats = Math.round(expectedFee * 1e8)                   // 1000
+
+            // 1. No output: the create must be rejected.
+            let noPay = await dispenserHelper.sendDispenserV0(
+                dispenserAddr, COIN_CODE, tick, 1, escrow,
+                COIN_CODE, null, 0, dispenserAddr["address"],
+                "USD", null, oracleAddress, expiration,
+                null, null, 'oracle fee unpaid', null, [],
+                'invalid: ORACLE_ADDRESS (missing oracle fee output)'
+            )
+            assert(noPay.dispenser, "the attempt should still be recorded")
+            assert.strictEqual(noPay.dispenser.status, 'invalid: ORACLE_ADDRESS (missing oracle fee output)',
+                "a Mode 2 create must be rejected when the oracle fee output is absent")
+
+            // 2. Paying the oracle: the create must be accepted.
+            let paid = await dispenserHelper.sendDispenserV0(
+                dispenserAddr, COIN_CODE, tick, 1, escrow,
+                COIN_CODE, null, 0, dispenserAddr["address"],
+                "USD", null, oracleAddress, expiration,
+                null, null, 'oracle fee paid', null,
+                [{ address: oracleAddress, value: expectedSats }]
+            )
+            assert(paid.dispenser, "the paying create should exist")
+            assert.strictEqual(paid.dispenser.status, 'valid',
+                "a Mode 2 create paying the oracle fee must be accepted")
+        })
+
         it('should reject a dispense when the user oracle has published nothing in the window', async function() {
-            // No quote for this (oracle, coin, tick, fiat) => reverseOraclePriceMatch
-            // returns null and the dispense is recorded invalid rather than
-            // falling back to any other price source.
+            // No quote at settlement time => reverseOraclePriceMatch returns null and
+            // the dispense is recorded invalid rather than falling back to any other
+            // price source.
+            //
+            // The quote is seeded and then REMOVED before the payment, rather than never
+            // existing: since  a Mode 2 create is rejected outright unless its
+            // oracle already has an effective price, so a never-priced oracle cannot get
+            // as far as a dispense. Removing it afterwards models the reachable case, a
+            // source-chain reorg retracting the oracle row out from under a live
+            // dispenser.
             if (!(await priceSnapshotHelper.isAvailable()) || !(await oraclePriceHelper.isAvailable())) {
                 console.log('Price tables not reachable; skipping Mode 2 no-quote test')
                 this.skip()
@@ -373,6 +463,16 @@ describe('DISPENSER', () => {
             await issueHelper.sendIssueV0(dispenserAddr, tick, 100, 100, 0, "Oracle dispenser no-quote test", 100)
 
             let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
+            let chainNow   = await priceSnapshotHelper.latestBlockTime()
+
+            // Seed a quote so the create is accepted...
+            await oraclePriceHelper.seedQuote({
+                sourceAddress: oracleAddr["address"], sourceChain: COIN_CODE,
+                coin: COIN_CODE, tick: tick, fiat: 'USD',
+                value: '100.00000000', fee: '0',
+                effectiveAt: chainNow - 60, actionIndex: 999000004
+            })
+
             let dispenserResult = await dispenserHelper.sendDispenserV0(
                 dispenserAddr,
                 COIN_CODE, tick, 1, 50,
@@ -382,6 +482,7 @@ describe('DISPENSER', () => {
             )
             assert(dispenserResult.dispenser, "Mode 2 dispenser should be created")
 
+            // ...then retract it before the buyer pays.
             await oraclePriceHelper.clearQuotes({
                 sourceAddress: oracleAddr["address"], coin: COIN_CODE, tick: tick, fiat: 'USD'
             })
