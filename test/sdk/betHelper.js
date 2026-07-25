@@ -161,6 +161,61 @@ async function jumpTo(timestamp, blocks = 2) {
     await global.regtestMinerConnector.generateBlocks(blocks);
 }
 
+// Median time past: the median block_time of the last 11 blocks, which is the
+// floor bitcoind enforces on the next block's timestamp (BIP113).
+async function medianTimePast() {
+    // Sync first. A stale view here is worse than useless: it under-reports MTP,
+    // so a backdate that bitcoind will actually reject as too low looks safe, and
+    // the block silently lands at MTP+1 instead of the requested timestamp.
+    await blockTime();
+    const rows = await dbQuery('SELECT block_time FROM blocks ORDER BY block_index DESC LIMIT 11', []);
+    if (!rows.length) throw new Error('betHelper.medianTimePast: no blocks indexed');
+    const times = rows.map(r => Number(r.block_time)).sort((a, b) => a - b);
+    return times[Math.floor(times.length / 2)];
+}
+
+// The highest block timestamp the chain carries. After a backdated block the
+// TIP's own time is no longer the maximum, so anything that needs to keep the
+// clock legal has to look at the max, not the tip.
+async function maxBlockTime() {
+    const rows = await dbQuery('SELECT MAX(block_time) AS mx FROM blocks', []);
+    return rows.length && rows[0].mx != null ? Number(rows[0].mx) : 0;
+}
+
+// Deliberately move the clock BACKWARDS, for the backdating drill only.
+//
+// This is the one place a rewind is the point rather than a bug: E11 has to mine
+// a block whose timestamp predates the DEADLINE a previous block already
+// crossed. It is only safe while the target still clears median-time-past --
+// otherwise bitcoind would be forced to stamp the block at MTP+1, which can sit
+// hours beyond the node's rewound clock and wedge block production exactly as
+// releaseClock's comment describes. So this REFUSES rather than risking the
+// shared stack, and the caller skips the drill.
+async function backdateTo(timestamp) {
+    const target = Math.floor(timestamp);
+    const mtp = await medianTimePast();
+    if (target <= mtp)
+        return { ok: false, reason: `target ${target} is not above median-time-past ${mtp}` };
+    await global.regtestMinerConnector.setMiningTime(3600000, 3600000);
+    await global.regtestMinerConnector.setMockTime(target);
+    return { ok: true, mtp };
+}
+
+// Move the clock WITHOUT mining, and park the auto-miner so nothing slips in.
+//
+// This is what the boundary drills need: to observe a user tx competing with the
+// end-of-block pass in the SAME block, the tx has to reach the mempool while the
+// clock already reads past the boundary but no block has been sealed yet. jumpTo
+// mines immediately, which lets the pass fire before the tx is ever broadcast.
+async function setClock(timestamp) {
+    const tip = await blockTime();
+    const target = Math.floor(timestamp);
+    if (target < tip)
+        throw new Error(`betHelper.setClock: refusing to rewind the chain clock from ${tip} to ${target}`);
+    await global.regtestMinerConnector.setMiningTime(3600000, 3600000);
+    await global.regtestMinerConnector.setMockTime(target);
+}
+
 // Mine further blocks while the clock stays frozen (the system passes are
 // per-block, so a deferred feed needs additional blocks at the same time).
 async function mineAtFrozenClock(blocks = 1) {
@@ -191,11 +246,29 @@ async function resumeMiningAtFrozenClock() {
 // close the gap on its own.
 async function releaseClock() {
     try {
-        const tip = await blockTime();
+        // MAX(block_time), not the tip's: the backdating drill leaves a tip whose
+        // timestamp is lower than blocks beneath it, and pinning to that would
+        // put the clock under median-time-past and wedge mining anyway.
+        const tip = await maxBlockTime();
         const now = Math.floor(Date.now() / 1000);
         await global.regtestMinerConnector.setMockTime(tip > now ? tip + 5 : 0);
     } catch (e) { /* best effort */ }
     try { await global.regtestMinerConnector.setDefaultMiningTime(); } catch (e) { /* best effort */ }
+}
+
+// Wait for a feed status WITHOUT mining. The mining variant below adds a block
+// per poll, which is usually what drives the pass along, but every one of those
+// blocks carries the frozen timestamp and so drags median-time-past up with it.
+// The backdating drill needs MTP to stay low, so once the crossing block is
+// already mined it must wait, not mine.
+async function waitFeedStatusNoMine(feedIndex, wanted, timeoutMs = 90000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        const feed = await getFeed(feedIndex);
+        if (feed && (wanted ? feed.feed_status === wanted : feed.feed_status !== 'open')) return feed;
+        await new Promise(r => setTimeout(r, 1500));
+    }
+    return await getFeed(feedIndex);
 }
 
 // Poll the indexer until the feed reaches `wanted` (or any terminal status when
@@ -258,10 +331,15 @@ module.exports = {
     actionIndexOf,
     blockTime,
     jumpTo,
+    setClock,
+    medianTimePast,
+    maxBlockTime,
+    backdateTo,
     mineAtFrozenClock,
     resumeMiningAtFrozenClock,
     releaseClock,
     waitFeedStatus,
+    waitFeedStatusNoMine,
     issueWagerToken,
     submitBet
 };
