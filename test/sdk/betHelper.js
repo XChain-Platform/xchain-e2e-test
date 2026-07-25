@@ -116,6 +116,20 @@ function actionIndexOf(res) {
 // jump drove the clock BACKWARDS and wedged the miner. There is no sane default
 // here, so this throws rather than guesses.
 async function blockTime() {
+    // Let the indexer catch up to the node first. Right after a clock jump the
+    // node's tip carries the new time while the indexer is still a block or two
+    // behind, so reading the indexer alone hands back a PRE-jump timestamp.
+    // A deadline computed from that is already in the chain's past, and the
+    // follow-up jump then looks like a rewind. Observed exactly that on E12.
+    const settleBy = Date.now() + 60000;
+    while (Date.now() < settleBy) {
+        let nodeHeight = null;
+        try { nodeHeight = await global.nodeConnector.getBlockCount(); } catch (e) { break; }
+        const tip = await dbQuery('SELECT MAX(block_index) AS tip FROM blocks', []);
+        if (tip.length && tip[0].tip != null && Number(tip[0].tip) >= Number(nodeHeight)) break;
+        await new Promise(r => setTimeout(r, 1500));
+    }
+
     const rows = await dbQuery('SELECT block_time FROM blocks ORDER BY block_index DESC LIMIT 1', []);
     if (!rows.length || rows[0].block_time == null)
         throw new Error('betHelper.blockTime: the indexer has no blocks; is the stack up?');
