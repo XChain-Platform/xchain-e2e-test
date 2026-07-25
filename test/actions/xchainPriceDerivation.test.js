@@ -163,9 +163,13 @@ describe('XCHAIN price derivation from real fills ( step 7)', function () {
             // red is to seed the pair and move on, which silently resurrects the
             // original bug: a green run that proves nothing about production. Keep the
             // guard next to the temptation.
+            // Match CALL syntax (`helper.seedSnapshot(`), not the bare names: a
+            // scan for the names alone matches this very line and fails the guard
+            // on itself, which is the same self-match trap a source-scanning
+            // assertion always sets for its author.
             const self = fs.readFileSync(__filename, 'utf8')
             const seeds = self.split('\n').filter(line =>
-                /seedSnapshot|seedGlobalPrices/.test(line) && !/^\s*\/\//.test(line))
+                /\.(seedSnapshot|seedGlobalPrices)\s*\(/.test(line) && !/^\s*\/\//.test(line))
             assert.deepStrictEqual(seeds, [],
                 'this proof must derive XCHAIN/USD from real fills, never seed it')
         })
