@@ -435,6 +435,189 @@ describe('DISPENSER', () => {
                 "a Mode 2 create paying the oracle fee must be accepted")
         })
 
+        it('should settle a payment confirming ~20h after the quote, and refuse one past the 24h window', async function() {
+            // The 24-hour FIAT_DISPENSER_PRICE_WINDOW is what makes a bare payment
+            // survive congestion: the buyer decided how much to send against a price
+            // that may be most of a day old by the time the payment confirms. Every
+            // other live test seeds a quote seconds old, so the window itself has only
+            // ever been exercised at zero distance.
+            //
+            // Expressed by BACK-DATING effective_at rather than by advancing chain time
+            // with a mock-time driver: reverse matching walks back from the payment
+            // block's own time, so a quote effective 20h earlier and a payment confirming
+            // now IS the long-gap case, deterministically and in one block.
+            if (!(await priceSnapshotHelper.isAvailable()) || !(await oraclePriceHelper.isAvailable())) {
+                console.log('Price tables not reachable; skipping the window-distance test')
+                this.skip()
+                return
+            }
+
+            let dispenserAddr = await cryptoHelper.getNewFundedAddress("DISPENSER.WINDOW", COIN, NETWORK, null, "legacy", 0, 1)
+            let buyerAddr     = await cryptoHelper.getNewFundedAddress("DISPENSER.WINDOW.BUYER", COIN, NETWORK, null, "legacy", 0, 1)
+            let oracleAddr    = await cryptoHelper.getNewFundedAddress("DISPENSER.WINDOW.SRC", COIN, NETWORK, null, "legacy", 0, 1)
+            let dispenserAddress = dispenserAddr["address"]
+            let buyerAddress     = buyerAddr["address"]
+            let oracleAddress    = oracleAddr["address"]
+            let tick = "DISPWIN"+dispenserAddress.substring(dispenserAddress.length-8)
+
+            await issueHelper.sendIssueV0(dispenserAddr, tick, 200, 200, 0, "Window distance test", 200)
+
+            let pair       = COIN_CODE + "/USD"
+            let coinPrice  = 50000
+            let tokenPrice = 100
+            let chainNow   = await priceSnapshotHelper.latestBlockTime()
+            let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
+
+            // Quote 20h old: inside the 24h window with 4h of margin, so block-time
+            // drift while the suite runs cannot flip the verdict.
+            let inWindowAt = chainNow - (20 * 3600)
+            await priceSnapshotHelper.clearPair(pair)
+            await priceSnapshotHelper.seedSnapshot({
+                coinPair: pair, price: coinPrice.toFixed(8),
+                blockTimestamp: inWindowAt - 120, roundNumber: 999000004
+            })
+            await oraclePriceHelper.clearQuotes({
+                sourceAddress: oracleAddress, coin: COIN_CODE, tick: tick, fiat: 'USD'
+            })
+            await oraclePriceHelper.seedQuote({
+                sourceAddress: oracleAddress, sourceChain: COIN_CODE,
+                coin: COIN_CODE, tick: tick, fiat: 'USD',
+                value: tokenPrice.toFixed(8), fee: '0',
+                effectiveAt: inWindowAt, actionIndex: 999000004
+            })
+
+            let dispenserResult = await dispenserHelper.sendDispenserV0(
+                dispenserAddr, COIN_CODE, tick, 1, 100,
+                COIN_CODE, null, 0, dispenserAddr["address"],
+                "USD", null, oracleAddress, expiration,
+                null, null, 'FIAT window-distance dispenser'
+            )
+            assert(dispenserResult.dispenser, "dispenser should be created against the 20h-old quote")
+
+            // tokens = (0.011 * 50000) / 100 = 5.5 -> floor -> 5
+            let paySats = 1100000
+            let payTx = await transactionHelper.createSimpleTransaction(buyerAddr, dispenserAddress, paySats)
+
+            let dispenseRow = await indexerDatabase.waitForDispense({
+                txHash: payTx, source: buyerAddress, giveTick: tick, status: "valid"
+            }, 60000)
+            assert(dispenseRow, "a payment 20h after the quote must still settle inside the window")
+
+            let credit = await indexerDatabase.waitForCredit({
+                address: buyerAddress, tick: tick, amount: "5"
+            }, 30000)
+            assert(credit, "the 20h-old quote must price the dispense (5 tokens)")
+
+            // Now push the ONLY quote past the window (25h back, an hour beyond the
+            // 24h bound) and seed a contemporaneous validator snapshot for it, so the
+            // refusal can only be the window bound and not a missing coin price.
+            let pastWindowAt = chainNow - (25 * 3600)
+            await priceSnapshotHelper.seedSnapshot({
+                coinPair: pair, price: coinPrice.toFixed(8),
+                blockTimestamp: pastWindowAt - 120, roundNumber: 999000005
+            })
+            await oraclePriceHelper.clearQuotes({
+                sourceAddress: oracleAddress, coin: COIN_CODE, tick: tick, fiat: 'USD'
+            })
+            await oraclePriceHelper.seedQuote({
+                sourceAddress: oracleAddress, sourceChain: COIN_CODE,
+                coin: COIN_CODE, tick: tick, fiat: 'USD',
+                value: tokenPrice.toFixed(8), fee: '0',
+                effectiveAt: pastWindowAt, actionIndex: 999000005
+            })
+
+            let stalePayTx = await transactionHelper.createSimpleTransaction(buyerAddr, dispenserAddress, paySats)
+            let staleRow = await indexerDatabase.waitForDispense({
+                txHash: stalePayTx, source: buyerAddress, giveTick: tick,
+                status: "invalid: no matching oracle price"
+            }, 60000)
+            assert(staleRow, "a quote older than the 24h window must not price a dispense")
+        })
+
+        it('should settle at the price in effect, never at a newer quote whose effective time has not arrived', async function() {
+            // The anti-front-running rule end to end (§5.4): every PRICE v1 publish is
+            // effective block_time + 86400, so an oracle operator who sees a payment
+            // arrive cannot rush a new price out to change the rate under it. Both
+            // matchers also cap their reads at the processing block's own time, so a
+            // not-yet-effective quote is invisible by construction.
+            //
+            // Driven by seeding the "update" with a FUTURE effective_at, which is
+            // exactly the state the hub's unconditional +86400 produces the moment an
+            // update is published; no mock-time driver is needed to reach it.
+            if (!(await priceSnapshotHelper.isAvailable()) || !(await oraclePriceHelper.isAvailable())) {
+                console.log('Price tables not reachable; skipping the update-delay test')
+                this.skip()
+                return
+            }
+
+            let dispenserAddr = await cryptoHelper.getNewFundedAddress("DISPENSER.DELAY", COIN, NETWORK, null, "legacy", 0, 1)
+            let buyerAddr     = await cryptoHelper.getNewFundedAddress("DISPENSER.DELAY.BUYER", COIN, NETWORK, null, "legacy", 0, 1)
+            let oracleAddr    = await cryptoHelper.getNewFundedAddress("DISPENSER.DELAY.SRC", COIN, NETWORK, null, "legacy", 0, 1)
+            let dispenserAddress = dispenserAddr["address"]
+            let buyerAddress     = buyerAddr["address"]
+            let oracleAddress    = oracleAddr["address"]
+            let tick = "DISPDLY"+dispenserAddress.substring(dispenserAddress.length-8)
+
+            await issueHelper.sendIssueV0(dispenserAddr, tick, 200, 200, 0, "Update delay test", 200)
+
+            let pair        = COIN_CODE + "/USD"
+            let coinPrice   = 50000
+            let oldPrice    = 100     // in effect now
+            let newPrice    = 10      // the "update": 10x cheaper, effective in 2h
+            let chainNow    = await priceSnapshotHelper.latestBlockTime()
+            let expiration  = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
+            let effectiveAt = chainNow - (2 * 3600)
+
+            await priceSnapshotHelper.clearPair(pair)
+            await priceSnapshotHelper.seedSnapshot({
+                coinPair: pair, price: coinPrice.toFixed(8),
+                blockTimestamp: effectiveAt - 120, roundNumber: 999000006
+            })
+            await oraclePriceHelper.clearQuotes({
+                sourceAddress: oracleAddress, coin: COIN_CODE, tick: tick, fiat: 'USD'
+            })
+            await oraclePriceHelper.seedQuote({
+                sourceAddress: oracleAddress, sourceChain: COIN_CODE,
+                coin: COIN_CODE, tick: tick, fiat: 'USD',
+                value: oldPrice.toFixed(8), fee: '0',
+                effectiveAt: effectiveAt, actionIndex: 999000006
+            })
+            // The update, published "now" and therefore effective 2h from now. It is
+            // the NEWEST row for this feed, so a matcher that ignored effective_at
+            // would select it first and credit 10x too much.
+            await oraclePriceHelper.seedQuote({
+                sourceAddress: oracleAddress, sourceChain: COIN_CODE,
+                coin: COIN_CODE, tick: tick, fiat: 'USD',
+                value: newPrice.toFixed(8), fee: '0',
+                effectiveAt: chainNow + (2 * 3600), actionIndex: 999000007
+            })
+
+            let dispenserResult = await dispenserHelper.sendDispenserV0(
+                dispenserAddr, COIN_CODE, tick, 1, 100,
+                COIN_CODE, null, 0, dispenserAddr["address"],
+                "USD", null, oracleAddress, expiration,
+                null, null, 'FIAT update-delay dispenser'
+            )
+            assert(dispenserResult.dispenser, "dispenser should be created against the in-effect quote")
+
+            // At the OLD price:  (0.011 * 50000) / 100 = 5.5  -> 5 tokens
+            // At the NEW price:  (0.011 * 50000) / 10  = 55   -> 55 tokens
+            // Escrow is 100, so 55 would fit: a wrong verdict shows up as a credit,
+            // not as a capacity clamp.
+            let paySats = 1100000
+            let payTx = await transactionHelper.createSimpleTransaction(buyerAddr, dispenserAddress, paySats)
+
+            let dispenseRow = await indexerDatabase.waitForDispense({
+                txHash: payTx, source: buyerAddress, giveTick: tick, status: "valid"
+            }, 60000)
+            assert(dispenseRow, "the payment should settle against the quote already in effect")
+
+            let credit = await indexerDatabase.waitForCredit({
+                address: buyerAddress, tick: tick, amount: "5"
+            }, 30000)
+            assert(credit, "must credit 5 (old price); 55 would mean the not-yet-effective update priced it")
+        })
+
         it('should reject a dispense when the user oracle has published nothing in the window', async function() {
             // No quote at settlement time => reverseOraclePriceMatch returns null and
             // the dispense is recorded invalid rather than falling back to any other
