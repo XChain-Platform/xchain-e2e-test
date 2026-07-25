@@ -361,16 +361,15 @@ describe('DISPENSER', () => {
             // output. This is the leg that cannot be proven by unit tests: it needs the
             // encoder to actually place the output and the indexer to actually see it in
             // TX_OUTPUTS.
-            // BLOCKED on the decoder: XChainDecoder.js:1825 persists an output to
-            // transaction_outputs ONLY when it pays the protocol FEE_DESTINATION (or the tx
-            // is a COINPAY). An output paying a dispenser's ORACLE_ADDRESS is dropped, so it
-            // never reaches the indexer's data['TX_OUTPUTS'] and the paying create is
-            // rejected exactly like the non-paying one. This test found that; it stays
-            // skipped until the decoder captures oracle-fee outputs .
-            console.log('Skipping: decoder does not yet persist oracle-fee outputs ')
-            this.skip()
-            return
-
+            // This test FOUND the decoder gap it now proves closed: XChainDecoder.js used to
+            // persist an output to transaction_outputs only when it paid the protocol
+            // FEE_DESTINATION (or the tx was a COINPAY), so an output paying a dispenser's
+            // ORACLE_ADDRESS never reached the indexer's data['TX_OUTPUTS'] and the paying
+            // create was rejected exactly like the non-paying one. Closed by : the
+            // decoder reads ORACLE_ADDRESS out of the DISPENSER payload it already parses
+            // and captures any output paying it (genesis-on for regtest/testnet; mainnet
+            // rides the FIX_OUTPUT_FANOUT flag-day). The SDK also stopped compacting
+            // ORACLE_ADDRESS to ^<id>, which the decoder cannot resolve.
             if (!(await priceSnapshotHelper.isAvailable()) || !(await oraclePriceHelper.isAvailable())) {
                 console.log('Price tables not reachable; skipping oracle-fee test')
                 this.skip()
