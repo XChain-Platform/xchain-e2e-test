@@ -25,6 +25,8 @@ const path = require('path')
 const cryptoHelper = require('../cryptoHelper')
 const transactionHelper = require('../transactionHelper')
 const dispenserHelper = require('../helpers/dispenserHelper')
+const orderHelper = require('../helpers/orderHelper')
+const coinpayHelper = require('../helpers/coinpayHelper')
 const gasHelper = require('../helpers/gasHelper')
 
 // The derivation lives in xchain-indexer and is vendored byte-identically into
@@ -154,6 +156,123 @@ describe('XCHAIN price derivation from real fills ( step 7)', function () {
             // 0.00000005: whole-coin decimals, exactly as the schema stores them.
             assert.strictEqual(derived.rate, '0.05000000',
                 'derived XCHAIN/' + COIN_CODE + ' must equal the realized dispense rate')
+        })
+    })
+
+    describe('DEX venue (coinpay)', function () {
+        it('selects a settled coinpay fill and dates it by its PAYMENT block', async function () {
+            this.timeout(300000)
+
+            // This leg exists for the two §3 corrections that came out of building the
+            // predicate. Both were live-verified at the SQL level; neither had ever
+            // been exercised by a trade the test itself created, which is the gap.
+            const sellerInfo = await cryptoHelper.getNewFundedAddress(
+                'XCPRICE.DEX.SELLER', COIN, NETWORK, null, 'legacy', 0, 2)
+            const buyerInfo = await cryptoHelper.getNewFundedAddress(
+                'XCPRICE.DEX.BUYER', COIN, NETWORK, null, 'legacy', 0, 2)
+            await gasHelper.mintGas(sellerInfo, '200')
+
+            const db = queryAdapter(indexerDatabase)
+
+            // Expiration comes from the CHAIN's clock, not the wall clock. A regtest
+            // chain that has been through a setmocktime drill can sit many hours
+            // ahead of real time (measured at +24.35h while writing this), and the
+            // indexer validates EXPIRATION against block time - so a wall-clock
+            // "+24h" lands in the past and the order dies with
+            // `invalid: EXPIRATION (past)` for reasons that have nothing to do with
+            // what is under test.
+            const clock = await db.doQuery('SELECT MAX(block_time) AS t FROM blocks')
+            const chainNow = Number(clock[0].t)
+            assert(Number.isFinite(chainNow) && chainNow > 0, 'chain block time must be readable')
+            const expiration = chainNow + 86400
+
+            // 100 XCHAIN for 0.001 coin = 0.00001 coin per XCHAIN.
+            const sellerOrder = await orderHelper.sendOrderV0(
+                sellerInfo, COIN_CODE, GAS_TICK, '100',
+                COIN_CODE, '', '0.001',
+                sellerInfo['address'], expiration, '', '', ' sell XCHAIN for coin')
+            assert(sellerOrder.order, 'seller ORDER should exist in DB')
+
+            const buyerOrder = await orderHelper.sendOrderV0(
+                buyerInfo, COIN_CODE, '', '0.001',
+                COIN_CODE, GAS_TICK, '100',
+                buyerInfo['address'], expiration, '', '', ' buy XCHAIN with coin')
+            assert(buyerOrder.order, 'buyer ORDER should exist in DB')
+
+            const orderMatch = await indexerDatabase.waitForOrderMatch({
+                giveActionIndex: Number(sellerOrder.order['action_index']),
+                getActionIndex: Number(buyerOrder.order['action_index']),
+                status: 'pending_coinpay'
+            }, 60000)
+            assert(orderMatch, 'ORDER_MATCH should exist')
+
+            // Before payment the trade has NOT happened. It must not be selectable:
+            // counting an unpaid obligation as a realized trade would be a free price
+            // print, which is what selecting on 'pending_coinpay' would have done.
+            const tipBefore = Number((await db.doQuery('SELECT MAX(block_index) AS h FROM actions'))[0].h)
+            const beforePay = await derivation.query.getWindowFills(db, {
+                referenceHeight: tipBefore, confirmationBuffer: 0, windowLength: 100000,
+                gasTick: GAS_TICK, coin: COIN_CODE
+            })
+            assert.strictEqual(beforePay.ok, true, 'selection must succeed: ' + beforePay.error)
+            assert.strictEqual(
+                beforePay.fills.filter(f => f.actionIndex === Number(orderMatch.action_index)).length, 0,
+                'an UNPAID coinpay obligation must not be selected as a realized trade')
+
+            await coinpayHelper.sendCoinpayV0(
+                buyerInfo, Number(orderMatch.action_index), sellerInfo['address'], 100000)
+            const fulfilled = await indexerDatabase.waitForCoinpayObligation({
+                actionIndex: Number(orderMatch.action_index), coinpayStatus: 'fulfilled'
+            }, 60000)
+            assert(fulfilled, 'COINPay obligation should be fulfilled')
+
+            const tipAfter = Number((await db.doQuery('SELECT MAX(block_index) AS h FROM actions'))[0].h)
+            const afterPay = await derivation.query.getWindowFills(db, {
+                referenceHeight: tipAfter, confirmationBuffer: 0, windowLength: 100000,
+                gasTick: GAS_TICK, coin: COIN_CODE
+            })
+            assert.strictEqual(afterPay.ok, true, 'selection must succeed: ' + afterPay.error)
+
+            const fill = afterPay.fills.find(f => f.actionIndex === Number(orderMatch.action_index))
+
+            // CORRECTION 1: the match's OWN status is still 'pending_coinpay' right
+            // now and will stay that way forever - nothing updates it. The fill is
+            // selected anyway, because settlement is proven by the coinpays row. A
+            // predicate keyed on the match status selects zero rows on every chain.
+            assert(fill, 'a SETTLED coinpay fill must be selected despite its match status')
+            const matchStatus = await db.doQuery(
+                `SELECT s.status, a.block_index FROM order_matches m
+                   JOIN index_statuses s ON s.id = m.status_id
+                   JOIN actions a ON a.action_index = m.action_index
+                  WHERE m.action_index = ?`, [Number(orderMatch.action_index)])
+            assert.strictEqual(String(matchStatus[0].status), 'pending_coinpay',
+                'the match row is expected to still read pending after full payment')
+
+            // CORRECTION 2: the fill is dated by the COINPAY's block, not the match's.
+            // Windowing on the match block makes a historical window mutable, which
+            // forks the pair between validators computing before and after payment.
+            const coinpayRow = await db.doQuery(
+                'SELECT block_index FROM coinpays WHERE obligation_action_index = ?',
+                [Number(orderMatch.action_index)])
+            assert.strictEqual(fill.blockIndex, Number(coinpayRow[0].block_index),
+                'the fill must be dated by its payment block')
+            assert(fill.blockIndex >= Number(matchStatus[0].block_index),
+                'the payment block cannot precede the match block')
+
+            // Both orientations reduce to the same rate; the mapper reads the amounts
+            // by which side holds the tick id, never from fixed columns.
+            // Compared as a NUMBER, not a string. XCHAIN rejects a padded
+            // GIVE_AMOUNT ('100.00000000' is `invalid: GIVE_AMOUNT (format)`) while
+            // the coin side stores padded, so both conventions coexist across a
+            // single trade - which is exactly why the derivation hands every amount
+            // to bcmath and never string-compares.
+            assert(bcmath.bcgt(fill.xchainAmount, '99.99999999') &&
+                   bcmath.bclt(fill.xchainAmount, '100.00000001'),
+                'the XCHAIN leg must be 100, got ' + fill.xchainAmount)
+            const derived = derivation.price.deriveXchainRate(bcmath, [fill], '0.00001')
+            assert(derived, 'derivation must produce a rate')
+            assert.strictEqual(derived.rate, '0.00001000',
+                'derived XCHAIN/' + COIN_CODE + ' must equal the realized DEX rate')
         })
     })
 
