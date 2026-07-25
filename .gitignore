@@ -1,4 +1,9 @@
 .env
+# Backups and variants of the env file carry the SAME credentials as .env
+# itself (node RPC password, indexer + hub DB passwords), and a bare `.env`
+# rule does not cover them. A .env.bak-* sitting in this repo was one
+# `git add -A` away from being committed.
+.env.*
 node_modules/
 .DS_Store
 perf-results/
