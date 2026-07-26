@@ -10,88 +10,75 @@
 
 const mariadb = require('mariadb')
 
-// Helper to seed deterministic validator price snapshots into the hub DB so
-// FIAT dispensers (Mode 1) can be exercised end-to-end without a live oracle.
+// Helper to seed deterministic validator price snapshots so FIAT dispensers
+// (Mode 1) can be exercised end-to-end without a live validator federation.
 //
-// Slice 1 reads price_snapshots through the indexer's HUB_DB_* connection
-// (the "shared-DB shortcut"). This helper writes to that same table. It
-// resolves the connection from HUB_DB_* env vars, falling back to the same
-// MariaDB the e2e suite already uses (global.indexerDatabase) with the
-// database name overridden to the hub DB, which is exactly the shared-DB
-// shortcut topology.
+// Where it writes, where it waits, and why those can be two different databases
+// is all decided by hubMirrorTopology; read that file first. The one thing worth
+// repeating here: seeding does NOT always write where settlement reads. Once the
+// indexer has a hubDb, that connection is the read side, and once hub_db_sync is
+// filling it the fixture has to seed the hub upstream instead and wait for the
+// row to arrive.
 
-function resolveParams(){
-    // Mirror the INDEXER's own resolution exactly: it reads hub-owned price
-    // tables from the hub DB only when BOTH HUB_DB_HOST and HUB_DB_NAME are
-    // configured, otherwise from its LOCAL indexer DB (it logs a warning to
-    // that effect at boot). Seeding must write wherever the indexer reads:
-    // HUB_DB_HOST alone is injected into the e2e container for the federation
-    // suites, so keying on it seeded XChain_Hub while the indexer matched
-    // against its local table: deterministic "no matching price snapshot".
-    if (process.env.HUB_DB_HOST && process.env.HUB_DB_NAME){
-        return {
-            host:     process.env.HUB_DB_HOST,
-            port:     parseInt(process.env.HUB_DB_PORT) || 3306,
-            database: process.env.HUB_DB_NAME,
-            user:     process.env.HUB_DB_USER,
-            password: process.env.HUB_DB_PASS
-        }
-    }
-    // Single-host topology: the indexer reads its own DB; seed there.
-    let idb = global.indexerDatabase
-    if (!idb) return null
-    return {
-        host:     idb.host,
-        port:     idb.port,
-        database: idb.dbName,
-        user:     idb.user,
-        password: idb.pass
-    }
-}
+const topology = require('./hubMirrorTopology')
 
-// Where the INDEXER keeps its own copy, which is what settlement reads once
-// hub_db_sync is mirroring. Distinct from resolveParams() above, which is where
-// seeding WRITES: the same DB on the single-host stack, different DBs as soon as
-// HUB_DB_* is configured.
-function indexerLocalParams(){
-    let idb = global.indexerDatabase
-    if (!idb) return null
-    return {
-        host:     idb.host,
-        port:     idb.port,
-        database: idb.dbName,
-        user:     idb.user,
-        password: idb.pass
-    }
-}
+// Which database this fixture WRITES to: always the one settlement reads, never
+// the hub upstream of it, which is the opposite of what oraclePriceHelper does.
+//
+// The asymmetry is forced and worth stating plainly. A fixture can only seed
+// upstream if the hub has a write path that BROADCASTS, because an out-of-band
+// row never replicates (HubDbBroadcaster fires only from the hub's own writers).
+// oracle_prices has one, reachable over `pushoracleprice`. price_snapshots does
+// not: it is broadcast solely from OracleConsensus, meaning a validator
+// federation finalizing rounds, and no regtest stack has a federation. So the
+// validator leg is seeded straight into the copy settlement reads.
+//
+// The cost of that, recorded rather than hidden: with the mirror on, this row
+// lives only in the mirror, and price_snapshots is in hub_db_sync's
+// FULL_REPAGE_TABLES, so a re-bootstrap (reconnect, indexer restart) re-pages the
+// table from the hub and deletes it. Within a run there is no reconnect, so it
+// holds; across one it does not. Proving Mode A's replication for real needs a
+// regtest federation, which is tracked on  and deliberately not faked here.
+const resolveParams = topology.readParams
 
-// True when seeding writes somewhere OTHER than the indexer's own DB, so a
-// seeded row must be replicated down before the indexer can price against it.
+// Which database the indexer's settlement path READS from. Note this is NOT
+// necessarily the indexer's own DB: once HUB_DB_NAME is set the indexer opens a
+// separate hubDb connection and every price lookup goes through it, so a wait
+// against the local DB would watch a table that never receives the row.
+const indexerReadParams = topology.readParams
+
+// This helper's OWN seed-vs-read question, deliberately not the shared
+// topology.seedsThroughMirror(). Since resolveParams is readParams above, this is
+// false in every topology and the wait below is always a no-op. It is computed
+// rather than hard-coded so that pointing the seed somewhere else (a regtest
+// federation arriving, say) re-arms the wait instead of silently racing.
 function seedsThroughMirror(){
-    let seed  = resolveParams()
-    let local = indexerLocalParams()
-    if (!seed || !local) return false
-    return seed.host !== local.host
-        || seed.port !== local.port
-        || seed.database !== local.database
+    return !topology.sameTarget(resolveParams(), indexerReadParams())
 }
 
 module.exports = {
     seedsThroughMirror,
 
-    // . Block until a seeded snapshot has been MIRRORED into the indexer's
-    // own price_snapshots, the copy reverse-matching reads. See the twin in
-    // oraclePriceHelper for the full reasoning; in short, this is a no-op on the
-    // single-host stack (seeding already wrote where the indexer reads) and is
-    // what stops a test racing hub_db_sync once the mirror is switched on.
+    // Exposed for tests: which database this helper writes to and which one
+    // settlement reads. They must be equal in every topology (see resolveParams).
+    seedTarget: resolveParams,
+    readTarget: indexerReadParams,
+
+    // . Block until a seeded snapshot has been MIRRORED into the copy
+    // reverse-matching actually reads, which is the indexer's hubDb once one is
+    // configured and its own DB otherwise. See the twin in oraclePriceHelper for
+    // the full reasoning; in short, this is a no-op on the single-host stack
+    // (seeding already wrote where the indexer reads) and is what stops a test
+    // racing hub_db_sync once the mirror is switched on.
     //
     // Keyed on (round_number, coin_pair), which is the table's own unique key,
     // so this waits for THIS seed rather than any row for the pair: a stale row
     // left by an earlier run would otherwise satisfy the wait immediately and
     // reintroduce exactly the race it exists to remove.
     async waitForMirror({ coinPair, roundNumber, timeoutMs = 30000, pollMs = 500 }){
+        topology.assertCoherent()
         if (!seedsThroughMirror()) return { mirrored: true, waitedMs: 0, skipped: true }
-        let params = indexerLocalParams()
+        let params = indexerReadParams()
         if (!params) throw new Error('priceSnapshotHelper.waitForMirror: no indexer database configured')
         let started = Date.now()
         let conn = null
@@ -115,26 +102,44 @@ module.exports = {
         }
     },
 
-    // Returns true if the hub DB (price_snapshots table) is reachable.
-    // Used to skip the FIAT dispenser test when no hub DB is configured.
+    // Returns true if price_snapshots is reachable everywhere the suite needs it:
+    // the database it seeds into AND the one settlement reads from. Probing only
+    // the seed target would report available on a mirror topology whose read side
+    // is unreachable, and every FIAT case would then fail rather than skip.
     async isAvailable(){
-        let params = resolveParams()
-        if (!params) return false
-        let conn = null
-        try {
-            conn = await mariadb.createConnection(params)
-            await conn.query("SELECT 1 FROM price_snapshots LIMIT 1")
-            return true
-        } catch (err){
-            console.log("priceSnapshotHelper: hub DB not available -", err.message)
-            return false
-        } finally {
-            if (conn) await conn.end().catch(() => {})
+        // This helper's own targets only, which collapse to one database. Probing
+        // the hub as well would let an unrelated gap there (no price_snapshots on
+        // a federation-less hub) skip every Mode A case for no reason.
+        let targets = []
+        for (let p of [resolveParams(), indexerReadParams()]){
+            if (p && !targets.some(q => topology.sameTarget(q, p))) targets.push(p)
         }
+        if (!targets.length) return false
+        for (let params of targets){
+            let conn = null
+            try {
+                conn = await mariadb.createConnection(params)
+                await conn.query("SELECT 1 FROM price_snapshots LIMIT 1")
+            } catch (err){
+                console.log("priceSnapshotHelper: price_snapshots not available in "
+                    + params.database + " -", err.message)
+                return false
+            } finally {
+                if (conn) await conn.end().catch(() => {})
+            }
+        }
+        return true
     },
 
     // Delete every snapshot for a coin_pair so a freshly seeded row is the
     // only finalized snapshot the indexer can reverse-match against.
+    //
+    // Scoped deliberately to THIS helper's target (the copy settlement reads),
+    // not to every database in the topology. Since seeding never goes upstream
+    // (see resolveParams), the hub's own price_snapshots holds nothing this suite
+    // put there, and deleting a coin_pair from it would destroy real validator
+    // rounds on any venue that has a federation. Clearing the read side is both
+    // sufficient and the smaller blast radius.
     async clearPair(coinPair){
         let params = resolveParams()
         let conn = await mariadb.createConnection(params)
