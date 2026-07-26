@@ -1114,6 +1114,10 @@ class Database {
         let deadline   = startMs + timeMax
         let extensions = 0
         let polls      = 0
+        // Retained for the give-up report below: the last lag the probe returned
+        // (null means it could not answer) and whether it was ever consulted.
+        let lastLag    = null
+        let lagProbes  = 0
         while (Date.now() < deadline){
             polls++
             try {
@@ -1132,16 +1136,42 @@ class Database {
             // their behalf costs more than it can ever save.
             if (Date.now() >= deadline && timeMax >= this.WAIT_MIN_FOR_EXTENSION
                 && extensions < this.WAIT_MAX_EXTENSIONS){
-                let lag = await this._indexerLagBlocks()
-                if (lag !== null && lag > this.WAIT_LAG_BLOCKS){
+                lastLag = await this._indexerLagBlocks()
+                lagProbes++
+                if (lastLag !== null && lastLag > this.WAIT_LAG_BLOCKS){
                     extensions++
                     deadline = Date.now() + timeMax
-                    console.log(label + ': indexer is ' + lag + ' blocks behind the chain tip; '
+                    console.log(label + ': indexer is ' + lastLag + ' blocks behind the chain tip; '
                         + 'extending the wait (' + extensions + '/' + this.WAIT_MAX_EXTENSIONS + ')')
                 }
             }
         }
         this._recordPerfPoll(label, startMs, polls, false)
+        // : a timed-out wait must say WHY it gave up, because the diagnosis
+        // this feeds turns on a distinction the old code could not express.
+        //
+        // Extensions were logged only when GRANTED, so the "no extension was
+        // granted" case emitted nothing at all, and the ledger's own next step
+        // ("if this recurs with extensions=0, change the SIGNAL, not the budget")
+        // was unfalsifiable: zero lines is what a never-eligible wait, a
+        // zero-lag wait and an unreachable probe all look like. Silence read as
+        // evidence when it was the absence of evidence.
+        //
+        // The three states are now distinguishable by name:
+        //   lag 0        the indexer kept pace with the chain and was still slow to
+        //                write the row, which is the case the current signal cannot
+        //                see and the reason a SIGNAL change is what is owed
+        //   lag null     the probe could not answer, so the fixed deadline stood
+        //   not eligible timeMax below the extension floor
+        console.log(label + ': GAVE UP after ' + (Date.now() - startMs) + 'ms'
+            + ' (' + polls + ' polls, ' + extensions + '/' + this.WAIT_MAX_EXTENSIONS + ' extensions, '
+            + 'timeMax ' + timeMax + 'ms, '
+            + (timeMax < this.WAIT_MIN_FOR_EXTENSION
+                ? 'not eligible for extension'
+                : lagProbes === 0
+                    ? 'extension never probed'
+                    : 'last indexer lag ' + (lastLag === null ? 'unknown (probe failed)' : lastLag + ' blocks'))
+            + ')')
         return null
     }
 

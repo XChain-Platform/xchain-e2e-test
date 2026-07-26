@@ -159,4 +159,53 @@ describe(' adaptive wait deadline', function () {
             if (saved === undefined) delete global.nodeConnector; else global.nodeConnector = saved
         }
     })
+
+    //  diagnosability. Extensions were logged only when GRANTED, so a wait
+    // that gave up without one emitted nothing, and this item's own next step
+    // ("if this recurs with extensions=0, change the SIGNAL, not the budget") could
+    // not be evaluated from a run's output: zero lines is what a never-eligible
+    // wait, a zero-lag wait and a dead probe all look like. These pin the three
+    // apart by name, so the next failing run says which case it was.
+    describe('give-up diagnostics', () => {
+        function captureLog(fn){
+            const lines = []
+            const orig = console.log
+            console.log = (...a) => lines.push(a.join(' '))
+            return Promise.resolve(fn()).finally(() => { console.log = orig }).then(() => lines)
+        }
+
+        it('reports zero lag distinctly, which is the case the current signal cannot see', async () => {
+            const db = makeDb({ lag: 0 })
+            const lines = await captureLog(() => db._waitFor(checkThing, {}, TIMEMAX))
+            const gaveUp = lines.find(l => l.includes('GAVE UP'))
+            assert(gaveUp, 'a timed-out wait must report why it gave up')
+            assert(/checkThing/.test(gaveUp), 'the report names the wait')
+            assert(/0\/3 extensions/.test(gaveUp), 'the report carries the extension count')
+            assert(/last indexer lag 0 blocks/.test(gaveUp),
+                'zero lag must be stated, not implied by silence: ' + gaveUp)
+        })
+
+        it('distinguishes a probe that could not answer from a zero-lag probe', async () => {
+            const db = makeDb({ lag: null })
+            const lines = await captureLog(() => db._waitFor(checkThing, {}, TIMEMAX))
+            const gaveUp = lines.find(l => l.includes('GAVE UP'))
+            assert(/probe failed/.test(gaveUp), 'an unanswerable probe must say so: ' + gaveUp)
+        })
+
+        it('says when the wait was too short to ever qualify for an extension', async () => {
+            const db = makeDb({ lag: 0 })
+            db.WAIT_MIN_FOR_EXTENSION = 10000   // far above TIMEMAX
+            const lines = await captureLog(() => db._waitFor(checkThing, {}, TIMEMAX))
+            const gaveUp = lines.find(l => l.includes('GAVE UP'))
+            assert(/not eligible for extension/.test(gaveUp),
+                'an ineligible wait must not be reported as a zero-lag one: ' + gaveUp)
+        })
+
+        it('stays silent on the success path, so the log only grows when something went wrong', async () => {
+            const db = makeDb({ lag: 0 })
+            const lines = await captureLog(() =>
+                db._waitFor(function checkThing(){ return { id: 1 } }, {}, TIMEMAX))
+            assert.strictEqual(lines.filter(l => l.includes('GAVE UP')).length, 0)
+        })
+    })
 })
