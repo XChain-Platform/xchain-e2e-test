@@ -49,7 +49,72 @@ function resolveParams(){
     }
 }
 
+// Where the INDEXER keeps its own copy, which is what settlement reads once
+// hub_db_sync is mirroring. Distinct from resolveParams() above, which is where
+// seeding WRITES: the same DB on the single-host stack, different DBs as soon as
+// HUB_DB_* is configured.
+function indexerLocalParams(){
+    let idb = global.indexerDatabase
+    if (!idb) return null
+    return {
+        host:     idb.host,
+        port:     idb.port,
+        database: idb.dbName,
+        user:     idb.user,
+        password: idb.pass
+    }
+}
+
+// True when seeding writes somewhere OTHER than the indexer's own DB, so a
+// seeded row must be replicated down before the indexer can price against it.
+function seedsThroughMirror(){
+    let seed  = resolveParams()
+    let local = indexerLocalParams()
+    if (!seed || !local) return false
+    return seed.host !== local.host
+        || seed.port !== local.port
+        || seed.database !== local.database
+}
+
 module.exports = {
+    seedsThroughMirror,
+
+    // . Block until a seeded snapshot has been MIRRORED into the indexer's
+    // own price_snapshots, the copy reverse-matching reads. See the twin in
+    // oraclePriceHelper for the full reasoning; in short, this is a no-op on the
+    // single-host stack (seeding already wrote where the indexer reads) and is
+    // what stops a test racing hub_db_sync once the mirror is switched on.
+    //
+    // Keyed on (round_number, coin_pair), which is the table's own unique key,
+    // so this waits for THIS seed rather than any row for the pair: a stale row
+    // left by an earlier run would otherwise satisfy the wait immediately and
+    // reintroduce exactly the race it exists to remove.
+    async waitForMirror({ coinPair, roundNumber, timeoutMs = 30000, pollMs = 500 }){
+        if (!seedsThroughMirror()) return { mirrored: true, waitedMs: 0, skipped: true }
+        let params = indexerLocalParams()
+        if (!params) throw new Error('priceSnapshotHelper.waitForMirror: no indexer database configured')
+        let started = Date.now()
+        let conn = null
+        try {
+            conn = await mariadb.createConnection(params)
+            for (;;){
+                let rows = await conn.query(
+                    "SELECT 1 FROM price_snapshots WHERE coin_pair = ? AND round_number = ? AND status = 'finalized' LIMIT 1",
+                    [coinPair, roundNumber])
+                if (rows && rows.length) return { mirrored: true, waitedMs: Date.now() - started, skipped: false }
+                if (Date.now() - started > timeoutMs){
+                    throw new Error(
+                        `priceSnapshotHelper.waitForMirror: round ${roundNumber} for ${coinPair} did not reach `
+                        + `the indexer's price_snapshots within ${timeoutMs}ms. hub_db_sync is behind or not `
+                        + `running (check HUB_API_URL + HUB_DB_SYNC_ENABLED).`)
+                }
+                await new Promise(r => setTimeout(r, pollMs))
+            }
+        } finally {
+            if (conn) await conn.end().catch(() => {})
+        }
+    },
+
     // Returns true if the hub DB (price_snapshots table) is reachable.
     // Used to skip the FIAT dispenser test when no hub DB is configured.
     async isAvailable(){
@@ -127,5 +192,12 @@ module.exports = {
         } finally {
             await conn.end().catch(() => {})
         }
+        // : the seed is not usable until the indexer can SEE it. On the
+        // single-host stack that is already true and this returns at once; with
+        // the mirror on it waits for hub_db_sync to carry the row down. Done
+        // here rather than at the ~13 call sites so every existing and future
+        // caller gets it, and so the helper's contract is the one callers
+        // already assume: when seeding returns, settlement can match it.
+        await module.exports.waitForMirror({ coinPair, roundNumber })
     }
 }

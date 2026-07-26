@@ -56,7 +56,84 @@ function resolveParams(){
     }
 }
 
+// Where the INDEXER keeps its own copy, which is what settlement actually reads
+// once hub_db_sync is mirroring. Distinct from resolveParams() above, which is
+// where seeding WRITES. The two are the same DB on the single-host stack and
+// different DBs the moment HUB_DB_* is configured.
+function indexerLocalParams(){
+    let idb = global.indexerDatabase
+    if (!idb) return null
+    return {
+        host:     idb.host,
+        port:     idb.port,
+        database: idb.dbName,
+        user:     idb.user,
+        password: idb.pass
+    }
+}
+
+// True when seeding writes somewhere OTHER than the indexer's own DB, i.e. the
+// mirror leg is in play and a seeded row has to be replicated down before the
+// indexer can settle against it.
+function seedsThroughMirror(){
+    let seed  = resolveParams()
+    let local = indexerLocalParams()
+    if (!seed || !local) return false
+    return seed.host !== local.host
+        || seed.port !== local.port
+        || seed.database !== local.database
+}
+
 module.exports = {
+    seedsThroughMirror,
+
+    // . Block until a seeded quote has been MIRRORED into the indexer's
+    // own oracle_prices, which is the copy reverse-matching reads.
+    //
+    // On the single-host stack this returns immediately: seeding wrote straight
+    // into the indexer's DB, so there is nothing to replicate and the check is a
+    // no-op. It earns its keep only once HUB_DB_NAME + HUB_DB_SYNC_ENABLED are
+    // set, where the seed lands in the HUB's table and hub_db_sync carries it
+    // down on its own schedule. Without this wait a test would broadcast its
+    // payment the instant the seed returned and race the sync, settling
+    // 'invalid: no matching oracle price' intermittently: the exact flake the
+    //  recipe warns about, and one that would look like a product bug
+    // rather than a harness one.
+    //
+    // Polls rather than sleeps a fixed interval, so it costs nothing when the
+    // mirror is prompt and still reports honestly when it is not.
+    async waitForMirror({ sourceAddress, coin, tick, fiat, actionIndex, timeoutMs = 30000, pollMs = 500 }){
+        if (!seedsThroughMirror()) return { mirrored: true, waitedMs: 0, skipped: true }
+        let params = indexerLocalParams()
+        if (!params) throw new Error('oraclePriceHelper.waitForMirror: no indexer database configured')
+        let started = Date.now()
+        let conn = null
+        try {
+            conn = await mariadb.createConnection(params)
+            for (;;){
+                let rows = await conn.query(
+                    "SELECT 1 FROM oracle_prices WHERE source_address = ? AND coin = ? AND tick = ? AND fiat = ?"
+                    + (actionIndex === undefined ? "" : " AND action_index = ?") + " LIMIT 1",
+                    actionIndex === undefined
+                        ? [sourceAddress, coin, tick, fiat]
+                        : [sourceAddress, coin, tick, fiat, actionIndex])
+                if (rows && rows.length) return { mirrored: true, waitedMs: Date.now() - started, skipped: false }
+                if (Date.now() - started > timeoutMs){
+                    // Fail loud and specific. A silent give-up here would surface
+                    // downstream as a dispense settling 'invalid', which reads as
+                    // a consensus bug rather than an un-replicated fixture.
+                    throw new Error(
+                        `oraclePriceHelper.waitForMirror: quote ${coin}/${tick}/${fiat} for ${sourceAddress} `
+                        + `did not reach the indexer's oracle_prices within ${timeoutMs}ms. `
+                        + `hub_db_sync is behind or not running (check HUB_API_URL + HUB_DB_SYNC_ENABLED).`)
+                }
+                await new Promise(r => setTimeout(r, pollMs))
+            }
+        } finally {
+            if (conn) await conn.end().catch(() => {})
+        }
+    },
+
     // True when the oracle_prices table is reachable where the indexer reads it.
     async isAvailable(){
         let params = resolveParams()
@@ -127,5 +204,9 @@ module.exports = {
         } finally {
             await conn.end().catch(() => {})
         }
+        // : see the twin in priceSnapshotHelper. A no-op on the single-host
+        // stack; with the mirror on it waits for hub_db_sync rather than letting
+        // the caller broadcast its payment into a race.
+        await module.exports.waitForMirror({ sourceAddress, coin, tick, fiat, actionIndex })
     }
 }
