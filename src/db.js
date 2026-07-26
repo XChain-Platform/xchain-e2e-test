@@ -23,6 +23,13 @@ const mariadb = require('mariadb');
 class Database {
     constructor(host, port, dbName, user, pass){
         this.sqlPath  = __dirname+'/sql';
+        //  adaptive-wait tunables. Extensions are bounded so a wedged stack
+        // still fails; the lag threshold is above zero so ordinary one-block skew
+        // between the RPC tip and the indexer does not count as "behind".
+        this.WAIT_MAX_EXTENSIONS = parseInt(process.env.E2E_WAIT_MAX_EXTENSIONS) || 3;
+        this.WAIT_LAG_BLOCKS     = parseInt(process.env.E2E_WAIT_LAG_BLOCKS) || 2;
+        this.WAIT_LAG_PROBE_MS   = parseInt(process.env.E2E_WAIT_LAG_PROBE_MS) || 2000;
+        this.WAIT_MIN_FOR_EXTENSION = parseInt(process.env.E2E_WAIT_MIN_FOR_EXTENSION) || 5000;
         this.host   = host;
         this.port   = port;
         this.dbName = dbName;
@@ -111,31 +118,7 @@ class Database {
         }
     }
 
-    async waitForIssue(issueObject, timeMax = 60000){
-        const startMs = Date.now()
-        const endTime = startMs + timeMax
-        let polls = 0
-
-        while (Date.now() < endTime){
-            polls++
-            try {
-                let row = await this.checkIssue(issueObject)
-
-                if (row){
-                    this._recordPerfPoll('checkIssue', startMs, polls, true)
-                    return row
-                }
-
-                await this.sleep(1000)
-            } catch(err) {
-                console.log(err)
-                await this.sleep(1000)
-            }
-        }
-
-        this._recordPerfPoll('checkIssue', startMs, polls, false)
-        return null
-    }
+    async waitForIssue(issueObject, timeMax = 60000){ return this._waitFor(this.checkIssue, issueObject, timeMax) }
 
     async checkIssue({source, tick, txHash, maxSupply, maxMint, decimals, description, 
             mintSupply, transferAddress, transferMintSupplyAddress, 
@@ -216,31 +199,7 @@ class Database {
         }
     }
     
-    async waitForSend(sendObject, timeMax = 60000){
-        const startMs = Date.now()
-        const endTime = startMs + timeMax
-        let polls = 0
-
-        while (Date.now() < endTime){
-            polls++
-            try {
-                let row = await this.checkSend(sendObject)
-
-                if (row){
-                    this._recordPerfPoll('checkSend', startMs, polls, true)
-                    return row
-                }
-
-                await this.sleep(1000)
-            } catch(err) {
-                console.log(err)
-                await this.sleep(1000)
-            }
-        }
-
-        this._recordPerfPoll('checkSend', startMs, polls, false)
-        return null
-    }
+    async waitForSend(sendObject, timeMax = 60000){ return this._waitFor(this.checkSend, sendObject, timeMax) }
     
     async checkSend({source,destination,tick,amount,txHash,memo,status}){
     
@@ -312,31 +271,7 @@ class Database {
         }
     }
     
-    async waitForCredit(creditObject, timeMax = 60000){
-        const startMs = Date.now()
-        const endTime = startMs + timeMax
-        let polls = 0
-
-        while (Date.now() < endTime){
-            polls++
-            try {
-                let row = await this.checkCredit(creditObject)
-
-                if (row){
-                    this._recordPerfPoll('checkCredit', startMs, polls, true)
-                    return row
-                }
-
-                await this.sleep(1000)
-            } catch(err) {
-                console.log(err)
-                await this.sleep(1000)
-            }
-        }
-
-        this._recordPerfPoll('checkCredit', startMs, polls, false)
-        return null
-    }
+    async waitForCredit(creditObject, timeMax = 60000){ return this._waitFor(this.checkCredit, creditObject, timeMax) }
     
     async checkCredit({blockIndex,txHash,tick,address,amount}){
         let whereClauses = []
@@ -396,32 +331,7 @@ class Database {
         }
     }
     
-    async waitForDebit(debitObject, timeMax = 60000){
-        const startMs = Date.now()
-        const endTime = startMs + timeMax
-        let polls = 0
-
-        while (Date.now() < endTime){
-            polls++
-            try {
-                let row = await this.checkDebit(debitObject)
-
-                if (row){
-                    this._recordPerfPoll('checkDebit', startMs, polls, true)
-                    return row
-                }
-
-                await this.sleep(1000)
-            } catch(err) {
-                console.log(err)
-                await this.sleep(1000)
-            }
-        }
-
-        this._recordPerfPoll('checkDebit', startMs, polls, false)
-
-        return null
-    }
+    async waitForDebit(debitObject, timeMax = 60000){ return this._waitFor(this.checkDebit, debitObject, timeMax) }
     
     async checkDebit({blockIndex,txHash,tick,address,amount}){
         let whereClauses = []
@@ -481,31 +391,7 @@ class Database {
         }
     }
     
-    async waitForMint(mintObject, timeMax = 60000){
-        const startMs = Date.now()
-        const endTime = startMs + timeMax
-        let polls = 0
-
-        while (Date.now() < endTime){
-            polls++
-            try {
-                let row = await this.checkMint(mintObject)
-
-                if (row){
-                    this._recordPerfPoll('checkMint', startMs, polls, true)
-                    return row
-                }
-
-                await this.sleep(1000)
-            } catch(err) {
-                console.log(err)
-                await this.sleep(1000)
-            }
-        }
-
-        this._recordPerfPoll('checkMint', startMs, polls, false)
-        return null
-    }
+    async waitForMint(mintObject, timeMax = 60000){ return this._waitFor(this.checkMint, mintObject, timeMax) }
     
     async checkMint({blockIndex,txHash,tick,destination,amount,memo,status}){
         let whereClauses = []
@@ -581,32 +467,7 @@ class Database {
         }
     }
     
-    async waitForBroadcast(broadcastObject, timeMax = 60000){
-        const startMs = Date.now()
-        const endTime = startMs + timeMax
-        let polls = 0
-
-        while (Date.now() < endTime){
-            polls++
-            try {
-                let row = await this.checkBroadcast(broadcastObject)
-
-                if (row){
-                    this._recordPerfPoll('checkBroadcast', startMs, polls, true)
-                    return row
-                }
-
-                await this.sleep(1000)
-            } catch(err) {
-                console.log(err)
-                await this.sleep(1000)
-            }
-        }
-
-        this._recordPerfPoll('checkBroadcast', startMs, polls, false)
-
-        return null
-    }
+    async waitForBroadcast(broadcastObject, timeMax = 60000){ return this._waitFor(this.checkBroadcast, broadcastObject, timeMax) }
     
     async checkBroadcast({blockIndex,txHash,source,message,value,fee,memo,broadcastActionIndex,status}){
         let whereClauses = []
@@ -687,31 +548,7 @@ class Database {
         }
     }
 
-    async waitForList(listObject, timeMax = 60000){
-        const startMs = Date.now()
-        const endTime = startMs + timeMax
-        let polls = 0
-
-        while (Date.now() < endTime){
-            polls++
-            try {
-                let row = await this.checkList(listObject)
-
-                if (row){
-                    this._recordPerfPoll('checkList', startMs, polls, true)
-                    return row
-                }
-
-                await this.sleep(1000)
-            } catch(err) {
-                console.log(err)
-                await this.sleep(1000)
-            }
-        }
-
-        this._recordPerfPoll('checkList', startMs, polls, false)
-        return null
-    }
+    async waitForList(listObject, timeMax = 60000){ return this._waitFor(this.checkList, listObject, timeMax) }
     
     async checkList({blockIndex,txHash,source,type,edit,listActionIndex,status,items}){
         let whereClauses = []
@@ -838,31 +675,7 @@ class Database {
         }
     }
     
-    async waitForAirdrop(airdropObject, timeMax = 60000){
-        const startMs = Date.now()
-        const endTime = startMs + timeMax
-        let polls = 0
-
-        while (Date.now() < endTime){
-            polls++
-            try {
-                let row = await this.checkAirdrop(airdropObject)
-
-                if (row){
-                    this._recordPerfPoll('checkAirdrop', startMs, polls, true)
-                    return row
-                }
-
-                await this.sleep(1000)
-            } catch(err) {
-                console.log(err)
-                await this.sleep(1000)
-            }
-        }
-
-        this._recordPerfPoll('checkAirdrop', startMs, polls, false)
-        return null
-    }
+    async waitForAirdrop(airdropObject, timeMax = 60000){ return this._waitFor(this.checkAirdrop, airdropObject, timeMax) }
     
     async getListAddresses(listActionIndex){
         let listType = null
@@ -1017,31 +830,7 @@ class Database {
         }
     }
     
-    async waitForDispenser(dispenserObject, timeMax = 60000){
-        const startMs = Date.now()
-        const endTime = startMs + timeMax
-        let polls = 0
-
-        while (Date.now() < endTime){
-            polls++
-            try {
-                let row = await this.checkDispenser(dispenserObject)
-
-                if (row){
-                    this._recordPerfPoll('checkDispenser', startMs, polls, true)
-                    return row
-                }
-
-                await this.sleep(1000)
-            } catch(err) {
-                console.log(err)
-                await this.sleep(1000)
-            }
-        }
-
-        this._recordPerfPoll('checkDispenser', startMs, polls, false)
-        return null
-    }
+    async waitForDispenser(dispenserObject, timeMax = 60000){ return this._waitFor(this.checkDispenser, dispenserObject, timeMax) }
     
     async checkDispenser({blockIndex, txHash, source, giveCoin, giveTick, giveAmount, giveEscrow, 
       getCoin, getTick, getAmount, getAddress, fiatCode, fiatAmount,
@@ -1171,31 +960,7 @@ class Database {
         }
     }
     
-    async waitForDispense(dispenseObject, timeMax = 60000){
-        const startMs = Date.now()
-        const endTime = startMs + timeMax
-        let polls = 0
-
-        while (Date.now() < endTime){
-            polls++
-            try {
-                let row = await this.checkDispense(dispenseObject)
-
-                if (row){
-                    this._recordPerfPoll('checkDispense', startMs, polls, true)
-                    return row
-                }
-
-                await this.sleep(1000)
-            } catch(err) {
-                console.log(err)
-                await this.sleep(1000)
-            }
-        }
-
-        this._recordPerfPoll('checkDispense', startMs, polls, false)
-        return null
-    }
+    async waitForDispense(dispenseObject, timeMax = 60000){ return this._waitFor(this.checkDispense, dispenseObject, timeMax) }
     
     async checkDispense({blockIndex, txHash, source, giveCoin,
       giveTick, giveAmount, getCoin, getTick, getAmount,
@@ -1323,26 +1088,90 @@ class Database {
     // sometimes needs >30s to write an ORDER row (match-scan + balance/token
     // updates fan out per insert). 60s absorbs that without masking real
     // assertion failures, which surface as null on a row that was never written.
+    // . Every waitForX in this file routes through here, so this is the one
+    // place that decides how long a suite is willing to wait for a row.
+    //
+    // A fixed deadline silently assumes a quiet machine. Under concurrent load the
+    // indexer falls behind the chain and a row that WILL arrive gets reported
+    // missing purely because the indexer had not reached its block yet. That is
+    // what made the dispenser suite fail a DIFFERENT case on every full run while
+    // each one passed in isolation, and it reads like a product defect rather than
+    // a slow venue: the action is later found in the database, correct.
+    //
+    // The tempting signal, "the chain is still advancing", is WRONG here: the
+    // regtest miner mines continuously, so it is always true and the wait would
+    // never end. Indexer LAG is the right signal because it falls to zero exactly
+    // when waiting longer stops being useful. If the indexer has caught up to the
+    // chain and the row still is not there, the row is genuinely absent and the
+    // original deadline should stand.
+    //
+    // Extensions are capped so a wedged stack still fails a suite instead of
+    // hanging it forever, and each one is logged so a slow run stays diagnosable
+    // after the fact.
     async _waitFor(checkFn, params, timeMax = 60000){
         const startMs = Date.now()
-        const endTime = startMs + timeMax
-        let polls = 0
-        while (Date.now() < endTime){
+        const label   = checkFn.name || 'unknown'
+        let deadline   = startMs + timeMax
+        let extensions = 0
+        let polls      = 0
+        while (Date.now() < deadline){
             polls++
             try {
                 let row = await checkFn.call(this, params)
                 if (row) {
-                    this._recordPerfPoll(checkFn.name || 'unknown', startMs, polls, true)
+                    this._recordPerfPoll(label, startMs, polls, true)
                     return row
                 }
-                await this.sleep(1000)
             } catch(err) {
                 console.log(err)
-                await this.sleep(1000)
+            }
+            await this.sleep(1000)
+
+            // Only waits that were meant to be long can be extended. Short waits are
+            // callers polling for something that should be immediate, and probing on
+            // their behalf costs more than it can ever save.
+            if (Date.now() >= deadline && timeMax >= this.WAIT_MIN_FOR_EXTENSION
+                && extensions < this.WAIT_MAX_EXTENSIONS){
+                let lag = await this._indexerLagBlocks()
+                if (lag !== null && lag > this.WAIT_LAG_BLOCKS){
+                    extensions++
+                    deadline = Date.now() + timeMax
+                    console.log(label + ': indexer is ' + lag + ' blocks behind the chain tip; '
+                        + 'extending the wait (' + extensions + '/' + this.WAIT_MAX_EXTENSIONS + ')')
+                }
             }
         }
-        this._recordPerfPoll(checkFn.name || 'unknown', startMs, polls, false)
+        this._recordPerfPoll(label, startMs, polls, false)
         return null
+    }
+
+    // Blocks the indexer still has to process before it can possibly see our row.
+    // Returns null when the chain tip is not observable (no node connector wired,
+    // RPC down, empty blocks table), and null deliberately disables the extension
+    // so the fixed deadline stands: without a progress signal, waiting longer is
+    // indistinguishable from hanging.
+    async _indexerLagBlocks(){
+        if (!global.nodeConnector || typeof global.nodeConnector.getBlockCount !== 'function') return null
+        if (!this.pool) return null
+        // The probe is an optimisation, never a reason to block. If it cannot answer
+        // promptly the fixed deadline stands, so a probe that hangs costs one timeout
+        // rather than stalling the suite. Learned the hard way: the first cut called
+        // this.getConnection(), which retries until a connection appears.
+        let capped = new Promise(resolve => setTimeout(() => resolve(null), this.WAIT_LAG_PROBE_MS))
+        return Promise.race([this._probeIndexerLag().catch(() => null), capped])
+    }
+
+    async _probeIndexerLag(){
+        let chainTip = Number(await global.nodeConnector.getBlockCount())
+        if (!Number.isFinite(chainTip)) return null
+        let conn = await this.pool.getConnection()
+        try {
+            let rows = await conn.query('SELECT MAX(block_index) AS tip FROM blocks')
+            if (!rows || !rows.length || rows[0].tip === null || rows[0].tip === undefined) return null
+            return chainTip - Number(rows[0].tip)
+        } finally {
+            await conn.release().catch(() => {})
+        }
     }
 
     // ─── ADDRESS ───────────────────────────────────────────────────────
@@ -1980,21 +1809,7 @@ class Database {
 
     // ── VM / Contract Methods ──
 
-    async waitForContract(params, timeMax = 60000){
-        const startMs = Date.now()
-        const endTime = startMs + timeMax
-        let polls = 0
-        while(Date.now() < endTime){
-            polls++
-            try {
-                let row = await this.checkContract(params)
-                if(row) { this._recordPerfPoll('checkContract', startMs, polls, true); return row }
-                await this.sleep(1000)
-            } catch(err){ await this.sleep(1000) }
-        }
-        this._recordPerfPoll('checkContract', startMs, polls, false)
-        return null
-    }
+    async waitForContract(params, timeMax = 60000){ return this._waitFor(this.checkContract, params, timeMax) }
 
     async checkContract({source, txHash, status}){
         let w = [], v = []
@@ -2017,21 +1832,7 @@ class Database {
         } catch(err){ return null } finally { await connection.release() }
     }
 
-    async waitForExecution(params, timeMax = 60000){
-        const startMs = Date.now()
-        const endTime = startMs + timeMax
-        let polls = 0
-        while(Date.now() < endTime){
-            polls++
-            try {
-                let row = await this.checkExecution(params)
-                if(row) { this._recordPerfPoll('checkExecution', startMs, polls, true); return row }
-                await this.sleep(1000)
-            } catch(err){ await this.sleep(1000) }
-        }
-        this._recordPerfPoll('checkExecution', startMs, polls, false)
-        return null
-    }
+    async waitForExecution(params, timeMax = 60000){ return this._waitFor(this.checkExecution, params, timeMax) }
 
     async checkExecution({contractIndex, caller, methodName, txHash, status}){
         let w = [], v = []
@@ -2056,21 +1857,7 @@ class Database {
         } catch(err){ return null } finally { await connection.release() }
     }
 
-    async waitForDeposit(params, timeMax = 60000){
-        const startMs = Date.now()
-        const endTime = startMs + timeMax
-        let polls = 0
-        while(Date.now() < endTime){
-            polls++
-            try {
-                let row = await this.checkDeposit(params)
-                if(row) { this._recordPerfPoll('checkDeposit', startMs, polls, true); return row }
-                await this.sleep(1000)
-            } catch(err){ await this.sleep(1000) }
-        }
-        this._recordPerfPoll('checkDeposit', startMs, polls, false)
-        return null
-    }
+    async waitForDeposit(params, timeMax = 60000){ return this._waitFor(this.checkDeposit, params, timeMax) }
 
     async checkDeposit({source, contractIndex, tick, amount, txHash, status}){
         let w = [], v = []
@@ -2097,21 +1884,7 @@ class Database {
         } catch(err){ return null } finally { await connection.release() }
     }
 
-    async waitForWithdrawal(params, timeMax = 60000){
-        const startMs = Date.now()
-        const endTime = startMs + timeMax
-        let polls = 0
-        while(Date.now() < endTime){
-            polls++
-            try {
-                let row = await this.checkWithdrawal(params)
-                if(row) { this._recordPerfPoll('checkWithdrawal', startMs, polls, true); return row }
-                await this.sleep(1000)
-            } catch(err){ await this.sleep(1000) }
-        }
-        this._recordPerfPoll('checkWithdrawal', startMs, polls, false)
-        return null
-    }
+    async waitForWithdrawal(params, timeMax = 60000){ return this._waitFor(this.checkWithdrawal, params, timeMax) }
 
     async checkWithdrawal({source, contractIndex, tick, amount, txHash, status}){
         let w = [], v = []
@@ -2140,21 +1913,7 @@ class Database {
 
     // ── Staking Methods ──
 
-    async waitForStake(params, timeMax = 60000){
-        const startMs = Date.now()
-        const endTime = startMs + timeMax
-        let polls = 0
-        while(Date.now() < endTime){
-            polls++
-            try {
-                let row = await this.checkStake(params)
-                if(row) { this._recordPerfPoll('checkStake', startMs, polls, true); return row }
-                await this.sleep(1000)
-            } catch(err){ await this.sleep(1000) }
-        }
-        this._recordPerfPoll('checkStake', startMs, polls, false)
-        return null
-    }
+    async waitForStake(params, timeMax = 60000){ return this._waitFor(this.checkStake, params, timeMax) }
 
     async checkStake({source, signingPubkey, txHash, status}){
         let w = [], v = []
@@ -2197,21 +1956,7 @@ class Database {
         } finally { await connection.release() }
     }
 
-    async waitForUnstake(params, timeMax = 60000){
-        const startMs = Date.now()
-        const endTime = startMs + timeMax
-        let polls = 0
-        while(Date.now() < endTime){
-            polls++
-            try {
-                let row = await this.checkUnstake(params)
-                if(row) { this._recordPerfPoll('checkUnstake', startMs, polls, true); return row }
-                await this.sleep(1000)
-            } catch(err){ await this.sleep(1000) }
-        }
-        this._recordPerfPoll('checkUnstake', startMs, polls, false)
-        return null
-    }
+    async waitForUnstake(params, timeMax = 60000){ return this._waitFor(this.checkUnstake, params, timeMax) }
 
     async checkUnstake({source, signingPubkey, txHash, status}){
         let w = [], v = []
@@ -2238,21 +1983,7 @@ class Database {
 
     // ── Attestation Methods ──
 
-    async waitForAttestationRequest(params, timeMax = 60000){
-        const startMs = Date.now()
-        const endTime = startMs + timeMax
-        let polls = 0
-        while(Date.now() < endTime){
-            polls++
-            try {
-                let row = await this.checkAttestationRequest(params)
-                if(row) { this._recordPerfPoll('checkAttestationRequest', startMs, polls, true); return row }
-                await this.sleep(1000)
-            } catch(err){ await this.sleep(1000) }
-        }
-        this._recordPerfPoll('checkAttestationRequest', startMs, polls, false)
-        return null
-    }
+    async waitForAttestationRequest(params, timeMax = 60000){ return this._waitFor(this.checkAttestationRequest, params, timeMax) }
 
     async checkAttestationRequest({requestId, txHash, requestStatus}){
         let w = [], v = []
@@ -2276,21 +2007,7 @@ class Database {
         } catch(err){ this._warnOnSchemaError('checkAttestationRequest', err); return null } finally { await connection.release() }
     }
 
-    async waitForAttestationResponse(params, timeMax = 60000){
-        const startMs = Date.now()
-        const endTime = startMs + timeMax
-        let polls = 0
-        while(Date.now() < endTime){
-            polls++
-            try {
-                let row = await this.checkAttestationResponse(params)
-                if(row) { this._recordPerfPoll('checkAttestationResponse', startMs, polls, true); return row }
-                await this.sleep(1000)
-            } catch(err){ await this.sleep(1000) }
-        }
-        this._recordPerfPoll('checkAttestationResponse', startMs, polls, false)
-        return null
-    }
+    async waitForAttestationResponse(params, timeMax = 60000){ return this._waitFor(this.checkAttestationResponse, params, timeMax) }
 
     async checkAttestationResponse({requestId, txHash, responseStatus, status}){
         let w = [], v = []
@@ -2352,21 +2069,7 @@ class Database {
         } catch(err){ return null } finally { await connection.release() }
     }
 
-    async waitForDelegation(params, timeMax = 60000){
-        const startMs = Date.now()
-        const endTime = startMs + timeMax
-        let polls = 0
-        while(Date.now() < endTime){
-            polls++
-            try {
-                let row = await this.checkDelegation(params)
-                if(row) { this._recordPerfPoll('checkDelegation', startMs, polls, true); return row }
-                await this.sleep(1000)
-            } catch(err){ await this.sleep(1000) }
-        }
-        this._recordPerfPoll('checkDelegation', startMs, polls, false)
-        return null
-    }
+    async waitForDelegation(params, timeMax = 60000){ return this._waitFor(this.checkDelegation, params, timeMax) }
 
     async checkDelegation({source, txHash, status}){
         let w = [], v = []
@@ -2394,21 +2097,7 @@ class Database {
     // row would read as an active delegation and re-add the key to the
     // effective signer set), so they are invisible to checkDelegation.
 
-    async waitForStakeKeyRevocation(params, timeMax = 60000){
-        const startMs = Date.now()
-        const endTime = startMs + timeMax
-        let polls = 0
-        while(Date.now() < endTime){
-            polls++
-            try {
-                let row = await this.checkStakeKeyRevocation(params)
-                if(row) { this._recordPerfPoll('checkStakeKeyRevocation', startMs, polls, true); return row }
-                await this.sleep(1000)
-            } catch(err){ await this.sleep(1000) }
-        }
-        this._recordPerfPoll('checkStakeKeyRevocation', startMs, polls, false)
-        return null
-    }
+    async waitForStakeKeyRevocation(params, timeMax = 60000){ return this._waitFor(this.checkStakeKeyRevocation, params, timeMax) }
 
     async checkStakeKeyRevocation({source, signingPubkey, txHash, status}){
         let w = [], v = []
@@ -2435,20 +2124,7 @@ class Database {
 
     // ── Contract-targeted staking (STAKE v3 / UNSTAKE v1 / DELEGATE v1) ──
 
-    async waitForContractStake(params, timeMax = 60000){
-        const startMs = Date.now(), endTime = startMs + timeMax
-        let polls = 0
-        while(Date.now() < endTime){
-            polls++
-            try {
-                let row = await this.checkContractStake(params)
-                if(row){ this._recordPerfPoll('checkContractStake', startMs, polls, true); return row }
-                await this.sleep(1000)
-            } catch(err){ await this.sleep(1000) }
-        }
-        this._recordPerfPoll('checkContractStake', startMs, polls, false)
-        return null
-    }
+    async waitForContractStake(params, timeMax = 60000){ return this._waitFor(this.checkContractStake, params, timeMax) }
 
     async checkContractStake({source, signingPubkey, contractIndex, tick, txHash, status}){
         let w = [], v = []
@@ -2477,20 +2153,7 @@ class Database {
         } catch(err){ return null } finally { await connection.release() }
     }
 
-    async waitForContractUnstake(params, timeMax = 60000){
-        const startMs = Date.now(), endTime = startMs + timeMax
-        let polls = 0
-        while(Date.now() < endTime){
-            polls++
-            try {
-                let row = await this.checkContractUnstake(params)
-                if(row){ this._recordPerfPoll('checkContractUnstake', startMs, polls, true); return row }
-                await this.sleep(1000)
-            } catch(err){ await this.sleep(1000) }
-        }
-        this._recordPerfPoll('checkContractUnstake', startMs, polls, false)
-        return null
-    }
+    async waitForContractUnstake(params, timeMax = 60000){ return this._waitFor(this.checkContractUnstake, params, timeMax) }
 
     async checkContractUnstake({source, signingPubkey, contractIndex, tick, txHash, status}){
         let w = [], v = []
@@ -2519,20 +2182,7 @@ class Database {
         } catch(err){ return null } finally { await connection.release() }
     }
 
-    async waitForContractDelegation(params, timeMax = 60000){
-        const startMs = Date.now(), endTime = startMs + timeMax
-        let polls = 0
-        while(Date.now() < endTime){
-            polls++
-            try {
-                let row = await this.checkContractDelegation(params)
-                if(row){ this._recordPerfPoll('checkContractDelegation', startMs, polls, true); return row }
-                await this.sleep(1000)
-            } catch(err){ await this.sleep(1000) }
-        }
-        this._recordPerfPoll('checkContractDelegation', startMs, polls, false)
-        return null
-    }
+    async waitForContractDelegation(params, timeMax = 60000){ return this._waitFor(this.checkContractDelegation, params, timeMax) }
 
     async checkContractDelegation({source, contractIndex, tick, txHash, status}){
         let w = [], v = []
@@ -2558,20 +2208,7 @@ class Database {
         } catch(err){ return null } finally { await connection.release() }
     }
 
-    async waitForSlashEvent(params, timeMax = 60000){
-        const startMs = Date.now(), endTime = startMs + timeMax
-        let polls = 0
-        while(Date.now() < endTime){
-            polls++
-            try {
-                let row = await this.checkSlashEvent(params)
-                if(row){ this._recordPerfPoll('checkSlashEvent', startMs, polls, true); return row }
-                await this.sleep(1000)
-            } catch(err){ await this.sleep(1000) }
-        }
-        this._recordPerfPoll('checkSlashEvent', startMs, polls, false)
-        return null
-    }
+    async waitForSlashEvent(params, timeMax = 60000){ return this._waitFor(this.checkSlashEvent, params, timeMax) }
 
     async checkSlashEvent({contractIndex, signingPubkey, tick, executionIndex}){
         let w = [], v = []
@@ -2593,21 +2230,7 @@ class Database {
         } catch(err){ return null } finally { await connection.release() }
     }
 
-    async waitForRewardClaim(params, timeMax = 60000){
-        const startMs = Date.now()
-        const endTime = startMs + timeMax
-        let polls = 0
-        while(Date.now() < endTime){
-            polls++
-            try {
-                let row = await this.checkRewardClaim(params)
-                if(row) { this._recordPerfPoll('checkRewardClaim', startMs, polls, true); return row }
-                await this.sleep(1000)
-            } catch(err){ await this.sleep(1000) }
-        }
-        this._recordPerfPoll('checkRewardClaim', startMs, polls, false)
-        return null
-    }
+    async waitForRewardClaim(params, timeMax = 60000){ return this._waitFor(this.checkRewardClaim, params, timeMax) }
 
     async checkRewardClaim({source, txHash, status}){
         let w = [], v = []

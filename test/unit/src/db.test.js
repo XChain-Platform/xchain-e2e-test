@@ -30,6 +30,14 @@ mariadbModule.exports = mockMariadb
 mariadbModule.loaded  = true
 require.cache[mariadbPath] = mariadbModule
 
+// Drop any cached copy of db.js so it is re-evaluated against the mock above.
+// The injection only takes effect at db.js's LOAD time, so this file used to
+// depend on being the first in the run to require it. Any test file sorting
+// earlier (mocha loads alphabetically) left db.js already bound to the real
+// mariadb, so every `new Database()` here opened a REAL pool against a dead host
+// and the suite failed on timeouts that pointed nowhere near the cause.
+delete require.cache[require.resolve('../../../src/db')]
+
 const Database = require('../../../src/db')
 
 let mockPool
