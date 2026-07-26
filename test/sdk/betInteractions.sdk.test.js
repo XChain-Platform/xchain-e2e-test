@@ -159,21 +159,7 @@ describe('[sdk] BET interaction with SWEEP and DIVIDEND (§12 E13/E14)', functio
         expect(rows.find(r => r.source === bettorX.address).bet_status, 'bettorX won').to.equal('won');
     });
 
-    // SKIPPED because it is WRITTEN BUT NEVER VERIFIED, not because it is known
-    // to fail. The venue broke underneath it: the explorer lost its credentials
-    // for the BTC regtest indexer DB mid-session (repeating
-    // `Access denied for user 'xchain_indexer_bitcoin_regtest'`, errno 1045),
-    // and the e2e harness needs the explorer both for its beforeAll ping and for
-    // the SDK's action waiter. The indexer itself is healthy and still carries
-    // the P4 code, so this is an environment problem rather than a BET one.
-    //
-    // The first attempt failed as `Timed out waiting for transaction ... to be
-    // indexed` even though that DIVIDEND tx was confirmed on-chain with 9
-    // confirmations, which is exactly what a blind action-waiter looks like.
-    //
-    // DO NOT trust this drill until it has been seen green. Un-skip and run it
-    // once the explorer can reach the indexer DB again.
-    it.skip('E14: a dividend skips escrowed stakes entirely', async function () {
+    it('E14: a dividend skips escrowed stakes entirely', async function () {
         const { feedIndex, deadline } = await openMarket(oracleD, tickDiv, 'E14 dividend');
 
         // bettorW stakes their whole balance; holderY simply holds an identical
