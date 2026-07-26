@@ -251,6 +251,65 @@ describe('[sdk] pre-flight false-block invariant @preflight', function () {
         });
     });
 
+    // The MIRROR of class (c). Class (c) catches a client check that fires when
+    // it should not; this catches one that CANNOT fire at all.
+    //
+    // A check reading a field name the explorer does not serve returns null,
+    // skips, and reports nothing - which is indistinguishable from a clean pass.
+    // That is how MINT_OVER_MAX, SUPPLY_EXCEEDED, AMOUNT_FORMAT_INVALID and
+    // NOT_OWNER came to be dead against the live API for as long as they
+    // existed: the token document is nested (info/mints/supply/locks) and every
+    // one of them was reading a flat top-level name.
+    //
+    // Nothing else in the suite could see it, because Tier 1's dry-run catches
+    // these same cases and the report looks correct. So each assertion here
+    // requires a finding whose `source` is 'client' - the dry-run agreeing is
+    // not evidence that the client tier works, and in 'local' mode or against a
+    // dead explorer the client tier is all there is.
+    describe('class (d): certified client checks must actually FIRE', function () {
+        let capTick;
+
+        before(async function () {
+            capTick = uniqueTick('PFM');
+            const iss = await submit(sdk,
+                { action: 'ISSUE', params: { tick: capTick, maxSupply: 1000, maxMint: 100, decimals: 0, mintSupply: 0 } },
+                { pubkey: issuer.address, change: issuer.address }, submitOpts({ wif: issuer.wif }));
+            expect(iss.indexed.status, 'ISSUE with known caps indexed valid').to.equal('valid');
+        });
+
+        const clientFinding = (report, code) =>
+            report.findings.find(f => f.code === code && f.source === 'client');
+
+        it('MINT_OVER_MAX fires from the CLIENT tier against the real token document', async function () {
+            const report = await sdk.preflight(`MINT|0|${capTick}|1000`,
+                { source: issuer.address, chain: sdk.config.network, preflight: 'report' });
+            const f = clientFinding(report, 'MINT_OVER_MAX');
+            expect(f, 'the per-tx cap check must fire client-side, not only via the dry-run').to.not.equal(undefined);
+        });
+
+        it('SUPPLY_EXCEEDED fires from the CLIENT tier', async function () {
+            const report = await sdk.preflight(`MINT|0|${capTick}|100000`,
+                { source: issuer.address, chain: sdk.config.network, preflight: 'report' });
+            const f = clientFinding(report, 'SUPPLY_EXCEEDED');
+            expect(f, 'the supply-headroom check must fire client-side').to.not.equal(undefined);
+        });
+
+        it('NOT_OWNER fires from the CLIENT tier for a non-owner ISSUE edit', async function () {
+            const stranger = await fundedSdkAddress(sdk, 1);
+            const report = await sdk.preflight(`ISSUE|1|${capTick}|hijacked`,
+                { source: stranger.address, chain: sdk.config.network, preflight: 'report' });
+            const f = clientFinding(report, 'NOT_OWNER');
+            expect(f, 'the ownership check must fire client-side').to.not.equal(undefined);
+        });
+
+        it('a legal mint draws no client error', async function () {
+            const report = await sdk.preflight(`MINT|0|${capTick}|10`,
+                { source: issuer.address, chain: sdk.config.network, preflight: 'report' });
+            expect(report.findings.filter(f => f.severity === 'error' && f.source === 'client')
+                .map(f => f.code), 'a mint inside both caps must not be flagged').to.deep.equal([]);
+        });
+    });
+
     describe('class (b): intra-BATCH sequential projection', function () {
         it('MINT-then-SEND-the-minted is accepted AND the SEND leg is not hard-blocked', async function () {
             const recipient = await fundedSdkAddress(sdk, 1);
