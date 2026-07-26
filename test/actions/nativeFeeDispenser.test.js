@@ -14,6 +14,7 @@ const transactionHelper = require('../transactionHelper')
 const issueHelper = require('../helpers/issueHelper')
 const gasHelper = require('../helpers/gasHelper')
 const nativeFeeHelper = require('../helpers/nativeFeeHelper')
+const { BOOTSTRAP_XCHAIN_USD } = require('../helpers/xchainPriceConstants')
 
 // Live-stack proof of native-coin USD-pegged fee payment, using the DISPENSER expiration fee
 // (which, unlike the ISSUE issuance fee, is NOT gated behind the mainnet activation height
@@ -72,7 +73,7 @@ describe('Native-coin fee payment via DISPENSER expiration fee (live stack)', fu
     it('charges the expiration fee in native coin (payment_mode=1), no XCHAIN balance', async function () {
         let tip = Number((await q("SELECT MAX(block_index) AS h FROM blocks"))[0].h || 0)
         // XCHAIN $1.00; coin priced high so the native fee is a small sat amount.
-        await seedPrice('XCHAIN/USD', '1.00000000', tip, 999300001)
+        await seedPrice('XCHAIN/USD', BOOTSTRAP_XCHAIN_USD, tip, 999300001)
         await seedPrice(COIN_CODE + '/USD', '100000.00000000', tip, 999300002)
 
         // Fresh address: zero XCHAIN. Issuance is free at this height, so it gets the token but no GAS.

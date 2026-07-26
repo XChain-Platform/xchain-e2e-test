@@ -36,6 +36,13 @@
 const axios   = require('axios');
 const mariadb = require('mariadb');
 const { XChainSDK } = require('./sdkHelper');
+const { BOOTSTRAP_XCHAIN_USD, BOOTSTRAP_XCHAIN_USD_NUM } = require('../helpers/xchainPriceConstants');
+
+// Seeded fee-oracle prices. XCHAIN comes from the shared bootstrap constant (the
+// value a real hub publishes); DOGE is a venue fiction chosen for round arithmetic.
+// Both are declared once and used for BOTH the seed and the fee sizing below.
+const DOGE_USD_SEED = '0.10000000';
+const DOGE_USD_NUM  = 0.10;
 
 const MINER_URL = process.env.XCALL_DOGE_MINER_URL || 'http://localhost:3125';
 const DB_HOST   = process.env.XCALL_DB_HOST || '127.0.0.1';
@@ -116,7 +123,7 @@ async function main() {
         return rows.length ? Number(rows[0].block_time) : Math.floor(Date.now() / 1000);
     });
     await withConn('XChain_Hub', process.env.HUB_DB_USER, process.env.HUB_DB_PASS, async (c) => {
-        for (const [pair, price, round] of [['DOGE/USD', '0.10000000', 990001], ['XCHAIN/USD', '1.00000000', 990002]]) {
+        for (const [pair, price, round] of [['DOGE/USD', DOGE_USD_SEED, 990001], ['XCHAIN/USD', BOOTSTRAP_XCHAIN_USD, 990002]]) {
             await c.query(
                 `INSERT INTO price_snapshots
                     (round_number, coin_pair, price, reference_block, reference_chain,
@@ -175,7 +182,11 @@ async function main() {
     // fee output from the consensus formula directly:
     //   gasCost        = VM_DEPLOY_BASE(100000) + codeBytes x VM_DEPLOY_PER_BYTE(10)
     //   feeXchain      = gasCost x GAS_PRICE(0.00001)
-    //   expectedNative = feeXchain x (XCHAIN/USD / DOGE/USD)  [seeded 1.0 / 0.1]
+    //   expectedNative = feeXchain x (XCHAIN/USD / DOGE/USD)
+    // The two prices are read from the SAME constants the seeding above used, so the
+    // sizing cannot drift from what was actually seeded. It silently could before
+    //  step 8: the ratio was the literal (1.0 / 0.1) sitting a hundred lines
+    // from the seed, and moving the seed alone would have underpaid every fee.
     // paid to the chain's FEE_DESTINATION, mid-band of the 0.95-1.10 tolerance.
     const FEE_DESTINATION = 'mfees5pa2HwNBonk5vG23aDWkN9fuDJib4';
 
@@ -183,7 +194,7 @@ async function main() {
         const codeBytes  = Buffer.byteLength(code, 'utf8');
         const gasCost    = 100000 + codeBytes * 10;
         const feeXchain  = gasCost * 0.00001;
-        const nativeDoge = feeXchain * (1.0 / 0.1);
+        const nativeDoge = feeXchain * (BOOTSTRAP_XCHAIN_USD_NUM / DOGE_USD_NUM);
         const feeSats    = Math.round(nativeDoge * 1e8);
         console.log('[doge-setup] ' + label + ' fee sizing: codeBytes=' + codeBytes + ' gasCost=' + gasCost +
                     ' feeXCHAIN=' + feeXchain + ' nativeDOGE=' + nativeDoge);

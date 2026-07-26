@@ -32,6 +32,7 @@
  ********************************************************************/
 
 const priceSnapshotHelper = require('../helpers/priceSnapshotHelper')
+const { BOOTSTRAP_XCHAIN_USD } = require('../helpers/xchainPriceConstants')
 
 describe('_ctlseed: force-seed fresh oracle prices (venue preamble)', function () {
     this.timeout(0)
@@ -52,7 +53,7 @@ describe('_ctlseed: force-seed fresh oracle prices (venue preamble)', function (
         const anchor = Math.max(tip, now) + 7200
         const seeds = [
             { coinPair: `${COIN_CODE}/USD`, price: '100000.00000000', roundNumber: 990001 },
-            { coinPair: 'XCHAIN/USD',       price: '1.00000000',      roundNumber: 990002 },
+            { coinPair: 'XCHAIN/USD',       price: BOOTSTRAP_XCHAIN_USD,      roundNumber: 990002 },
         ]
         for (const s of seeds) {
             await priceSnapshotHelper.clearPair(s.coinPair)

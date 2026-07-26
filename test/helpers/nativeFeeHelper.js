@@ -29,15 +29,25 @@ const priceSnapshotHelper = require('./priceSnapshotHelper')
 const PLACEHOLDER = 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'
 
 // Seeded oracle prices. Identical to nativeFeeLive.test.js so the global seed
-// here and that suite's inline re-seed never disagree: XCHAIN $1, coin $100,000.
-const XCHAIN_USD = '1.00000000'
+// here and that suite's inline re-seed never disagree: XCHAIN at the production
+// bootstrap ($2, see xchainPriceConstants), coin $100,000.
+//
+//  step 8: this was 1.00 for the whole pre-derivation era, which is a value no
+// producer has ever emitted or ever will. Seeding the bootstrap instead means these
+// suites assert against what a real hub publishes today.
+const { BOOTSTRAP_XCHAIN_USD } = require('./xchainPriceConstants')
+const XCHAIN_USD = BOOTSTRAP_XCHAIN_USD
 const COIN_USD   = '100000.00000000'
 
 // Flat native fee output (satoshis). With the prices above, the indexer's
-// minAcceptable for an action costing X XCHAIN is 0.95 * X / 100000 coin;
-// 50000 sats (0.0005 coin) clears the min for any action up to ~52 XCHAIN,
-// far above any e2e action, and matches nativeFeeLive's proven output. It is
-// negligible against the ~1-coin fundings cryptoHelper uses.
+// minAcceptable for an action costing X XCHAIN is 0.95 * X * 2 / 100000 coin;
+// 50000 sats (0.0005 coin) clears the min for any action up to ~26 XCHAIN.
+// (That headroom halved when  step 8 moved the seed from the 1.00-era value
+// to the $2 bootstrap. The largest action any e2e composes is a full-size contract
+// deploy at well under 2 XCHAIN, so 26 is still an order of magnitude of slack; if
+// a future action approaches it, raise this rather than lowering the price.)
+// Matches nativeFeeLive's proven output and is negligible against the ~1-coin
+// fundings cryptoHelper uses.
 const FLAT_FEE_SATS = 50000
 
 // Re-seed at most this often. Must stay well under ORACLE_MAX_PRICE_AGE_SECONDS

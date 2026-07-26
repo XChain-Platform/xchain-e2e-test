@@ -85,10 +85,14 @@ const HUB_DB_PORT = parseInt(process.env.HUB_DB_PORT || String(DB_PORT), 10);
 const HUB_DB_NAME = process.env.HUB_DB_NAME || 'XChain_Hub';
 
 // XCHAIN/USD has no pre-launch market, so it is a configured sidecar in the hub
-// DB. price=1.00 keeps the math readable; the value is not asserted, only the
-// path. round 990001 is the agreed sidecar round; the test asserts the action's
+// DB. The value is not asserted here, only the path, but it is taken from the
+// shared bootstrap constant anyway ( step 8): a suite seeding a price no
+// producer emits is how the missing-pair bug stayed invisible, and "the value does
+// not matter here" is exactly the reasoning that let 1.00 spread across the suite.
+// round 990001 is the agreed sidecar round; the test asserts the action's
 // oracle_round is NOT a seed sentinel (so it must be the live DOGE/USD round).
-const XCHAIN_USD_PRICE   = '1.00000000';
+const { BOOTSTRAP_XCHAIN_USD } = require('../helpers/xchainPriceConstants');
+const XCHAIN_USD_PRICE   = BOOTSTRAP_XCHAIN_USD;
 const XCHAIN_SIDECAR_RND = 990001;
 
 // Known out-of-band seed round numbers across the suite (nativeFeeHelper,
