@@ -126,6 +126,21 @@ async function submit(sdk, actionData, encoderOpts, opts, attempts = 6) {
     // when the last seed is still fresh). Per-action rather than a background timer
     // so it never clobbers dispenser.test.js's latestBlockTime()-60 reverse-match seed.
     try { await require('../helpers/nativeFeeHelper').seedGlobalPrices(false); } catch (e) { /* best effort */ }
+
+    // Native-coin protocol fee (LTC/DOGE). `detectFeePaymentMode` returns
+    // 'rejected' on those chains for a tx with no output paying FEE_DESTINATION,
+    // so without this every fee-charging action indexes
+    // `invalid: insufficient fee (native coin output required)` and the suite
+    // dies in its before-hook. The general connector lane got this at the
+    // transactionHelper chokepoint; the SDK lane never did, which is why
+    // test/sdk/** was BTC-only in practice. sdk.submitAction threads
+    // customOutputs but does not act on `payFeeInNativeCoin` (that lives in
+    // estimateFees), so the output is attached here, from the same helper the
+    // other lane uses. No-op on gas-mode BTC, where getNativeFeeOutput is null.
+    if (eo.customOutputs === undefined) {
+        const feeOutput = await require('../helpers/nativeFeeHelper').getNativeFeeOutput();
+        if (feeOutput) eo.customOutputs = [feeOutput];
+    }
     let lastErr;
     for (let i = 1; i <= attempts; i++) {
         try {
