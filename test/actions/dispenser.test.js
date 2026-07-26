@@ -179,6 +179,39 @@ describe('DISPENSER', () => {
         })
     })
 
+    // . Every FIAT case below prices in its OWN fiat, so no two of them, and
+    // nothing outside this file, ever share a coin_pair.
+    //
+    // `price_snapshots` is global fixture state keyed only by coin_pair, and
+    // {COIN}/USD has three writers that each DELETE the whole pair before reseeding
+    // it: `_ctlseed.test.js`, the FIAT cases themselves, and
+    // `nativeFeeHelper.seedGlobalPrices()`. The last one is the dangerous one: it
+    // runs from getNativeFeeOutput(), which EVERY action tx passes through, and it
+    // reseeds at a present-day timestamp and a different price (100000, not the
+    // 50000 these cases assert). So any action tx sent between a case's seed and
+    // its payment could silently replace that seed.
+    //
+    // Its 2-minute throttle is what made this a FLAKE rather than a hard failure:
+    // run in isolation the reseed fires before the case seeds and stays suppressed
+    // through it; in a full-file run the earlier cases burn the throttle so the
+    // boundary lands mid-case.
+    //
+    // The Mode 2 cases are the fragile ones, because reverseOraclePriceMatch reads
+    // the validator price as of the QUOTE's effective_at, not the payment's block
+    // time: a reseed dated "now" falls outside that window entirely and the dispense
+    // settles `invalid: no matching oracle price`, i.e. a fixture race that reads
+    // exactly like a consensus bug. The back-dated cases (20h, 25h) cannot survive
+    // it at all.
+    //
+    // Namespacing by fiat is the whole fix: FIAT_CODE is free to vary across the 12
+    // configured fiats and nothing else in the tree seeds a non-USD pair.
+    const FIAT_MODE1  = 'EUR'   // validator-snapshot dispenser
+    const FIAT_MODE2  = 'GBP'   // user-oracle cross-conversion
+    const FIAT_OFEE   = 'JPY'   // oracle usage fee 
+    const FIAT_WINDOW = 'CHF'   // 24h window distance
+    const FIAT_DELAY  = 'CAD'   // publish-activation delay
+    const FIAT_NOQ    = 'AUD'   // retracted quote
+
     describe('v0 - FIAT (Mode 1: validator price oracle)', () => {
         it('should dispense priced from a seeded FIAT price snapshot', async function() {
             // Mode 1 derives the coin price from FIAT_AMOUNT and a finalized
@@ -204,25 +237,25 @@ describe('DISPENSER', () => {
 
             let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
 
-            // FIAT dispenser: priced at 100.00 USD per 1 token. GET_AMOUNT is
+            // FIAT dispenser: priced at 100.00 (FIAT_MODE1) per 1 token. GET_AMOUNT is
             // ignored for FIAT dispensers (pass 0).
             let dispenserResult = await dispenserHelper.sendDispenserV0(
                 dispenserAddr,
                 COIN_CODE, tick, 1, 50,
                 COIN_CODE, null, 0, dispenserAddr["address"],
-                "USD", "100.00", null, expiration,
+                FIAT_MODE1, "100.00", null, expiration,
                 null, null, 'FIAT Mode 1 dispenser'
             )
             assert(dispenserResult.dispenser, "FIAT dispenser should be created")
 
-            // Seed a deterministic price: 1 coin = 50000 USD.
+            // Seed a deterministic price: 1 coin = 50000 (FIAT_MODE1).
             //   coin_per_token = FIAT_AMOUNT / price = 100 / 50000 = 0.002 coin
             // Anchor the seed to the CHAIN's clock (latest block_time), 60s in
             // its past: reversePriceMatch bounds on the payment tx's BLOCK_TIME
             // and the staleness cap (ORACLE_MAX_PRICE_AGE_SECONDS = 1800s)
             // measures age vs the processed block; wall-clock seeds raced both
             // rules depending on how far regtest block timestamps drift.
-            let pair  = COIN_CODE + "/USD"
+            let pair  = COIN_CODE + "/" + FIAT_MODE1
             let price  = 50000
             let fiatAmount = 100
             await priceSnapshotHelper.clearPair(pair)
@@ -295,9 +328,9 @@ describe('DISPENSER', () => {
             // CHAIN clock, and the validator snapshot must be at or before the oracle
             // quote's effective_at because the matcher fetches the coin price as of the
             // QUOTE's effective time, not as of the payment block.
-            let pair        = COIN_CODE + "/USD"
-            let coinPrice   = 50000     // 1 coin = 50,000 USD  (validator)
-            let tokenPrice  = 100       // 1 token = 100 USD    (user oracle)
+            let pair        = COIN_CODE + "/" + FIAT_MODE2
+            let coinPrice   = 50000     // 1 coin = 50,000 fiat  (validator)
+            let tokenPrice  = 100       // 1 token = 100 fiat    (user oracle)
             let chainNow    = await priceSnapshotHelper.latestBlockTime()
 
             await priceSnapshotHelper.clearPair(pair)
@@ -308,11 +341,11 @@ describe('DISPENSER', () => {
                 roundNumber: 999000002
             })
             await oraclePriceHelper.clearQuotes({
-                sourceAddress: oracleAddress, coin: COIN_CODE, tick: tick, fiat: 'USD'
+                sourceAddress: oracleAddress, coin: COIN_CODE, tick: tick, fiat: FIAT_MODE2
             })
             await oraclePriceHelper.seedQuote({
                 sourceAddress: oracleAddress, sourceChain: COIN_CODE,
-                coin: COIN_CODE, tick: tick, fiat: 'USD',
+                coin: COIN_CODE, tick: tick, fiat: FIAT_MODE2,
                 value: tokenPrice.toFixed(8), fee: '0',
                 effectiveAt: chainNow - 60, actionIndex: 999000002
             })
@@ -322,7 +355,7 @@ describe('DISPENSER', () => {
                 dispenserAddr,
                 COIN_CODE, tick, 1, 50,
                 COIN_CODE, null, 0, dispenserAddr["address"],
-                "USD", null, oracleAddress, expiration,
+                FIAT_MODE2, null, oracleAddress, expiration,
                 null, null, 'FIAT Mode 2 oracle dispenser'
             )
             assert(dispenserResult.dispenser, "Mode 2 FIAT dispenser should be created")
@@ -391,17 +424,17 @@ describe('DISPENSER', () => {
             let feeFrac    = 0.01      // oracle charges 1%
             let escrow     = 1000
 
-            await priceSnapshotHelper.clearPair(COIN_CODE + "/USD")
+            await priceSnapshotHelper.clearPair(COIN_CODE + "/" + FIAT_OFEE)
             await priceSnapshotHelper.seedSnapshot({
-                coinPair: COIN_CODE + "/USD", price: coinPrice.toFixed(8),
+                coinPair: COIN_CODE + "/" + FIAT_OFEE, price: coinPrice.toFixed(8),
                 blockTimestamp: chainNow - 120, roundNumber: 999000003
             })
             await oraclePriceHelper.clearQuotes({
-                sourceAddress: oracleAddress, coin: COIN_CODE, tick: tick, fiat: 'USD'
+                sourceAddress: oracleAddress, coin: COIN_CODE, tick: tick, fiat: FIAT_OFEE
             })
             await oraclePriceHelper.seedQuote({
                 sourceAddress: oracleAddress, sourceChain: COIN_CODE,
-                coin: COIN_CODE, tick: tick, fiat: 'USD',
+                coin: COIN_CODE, tick: tick, fiat: FIAT_OFEE,
                 value: tokenPrice.toFixed(8), fee: String(feeFrac),
                 effectiveAt: chainNow - 60, actionIndex: 999000003
             })
@@ -414,7 +447,7 @@ describe('DISPENSER', () => {
             let noPay = await dispenserHelper.sendDispenserV0(
                 dispenserAddr, COIN_CODE, tick, 1, escrow,
                 COIN_CODE, null, 0, dispenserAddr["address"],
-                "USD", null, oracleAddress, expiration,
+                FIAT_OFEE, null, oracleAddress, expiration,
                 null, null, 'oracle fee unpaid', null, [],
                 'invalid: ORACLE_ADDRESS (missing oracle fee output)'
             )
@@ -426,7 +459,7 @@ describe('DISPENSER', () => {
             let paid = await dispenserHelper.sendDispenserV0(
                 dispenserAddr, COIN_CODE, tick, 1, escrow,
                 COIN_CODE, null, 0, dispenserAddr["address"],
-                "USD", null, oracleAddress, expiration,
+                FIAT_OFEE, null, oracleAddress, expiration,
                 null, null, 'oracle fee paid', null,
                 [{ address: oracleAddress, value: expectedSats }]
             )
@@ -462,7 +495,7 @@ describe('DISPENSER', () => {
 
             await issueHelper.sendIssueV0(dispenserAddr, tick, 200, 200, 0, "Window distance test", 200)
 
-            let pair       = COIN_CODE + "/USD"
+            let pair       = COIN_CODE + "/" + FIAT_WINDOW
             let coinPrice  = 50000
             let tokenPrice = 100
             let chainNow   = await priceSnapshotHelper.latestBlockTime()
@@ -477,11 +510,11 @@ describe('DISPENSER', () => {
                 blockTimestamp: inWindowAt - 120, roundNumber: 999000004
             })
             await oraclePriceHelper.clearQuotes({
-                sourceAddress: oracleAddress, coin: COIN_CODE, tick: tick, fiat: 'USD'
+                sourceAddress: oracleAddress, coin: COIN_CODE, tick: tick, fiat: FIAT_WINDOW
             })
             await oraclePriceHelper.seedQuote({
                 sourceAddress: oracleAddress, sourceChain: COIN_CODE,
-                coin: COIN_CODE, tick: tick, fiat: 'USD',
+                coin: COIN_CODE, tick: tick, fiat: FIAT_WINDOW,
                 value: tokenPrice.toFixed(8), fee: '0',
                 effectiveAt: inWindowAt, actionIndex: 999000004
             })
@@ -489,7 +522,7 @@ describe('DISPENSER', () => {
             let dispenserResult = await dispenserHelper.sendDispenserV0(
                 dispenserAddr, COIN_CODE, tick, 1, 100,
                 COIN_CODE, null, 0, dispenserAddr["address"],
-                "USD", null, oracleAddress, expiration,
+                FIAT_WINDOW, null, oracleAddress, expiration,
                 null, null, 'FIAT window-distance dispenser'
             )
             assert(dispenserResult.dispenser, "dispenser should be created against the 20h-old quote")
@@ -517,11 +550,11 @@ describe('DISPENSER', () => {
                 blockTimestamp: pastWindowAt - 120, roundNumber: 999000005
             })
             await oraclePriceHelper.clearQuotes({
-                sourceAddress: oracleAddress, coin: COIN_CODE, tick: tick, fiat: 'USD'
+                sourceAddress: oracleAddress, coin: COIN_CODE, tick: tick, fiat: FIAT_WINDOW
             })
             await oraclePriceHelper.seedQuote({
                 sourceAddress: oracleAddress, sourceChain: COIN_CODE,
-                coin: COIN_CODE, tick: tick, fiat: 'USD',
+                coin: COIN_CODE, tick: tick, fiat: FIAT_WINDOW,
                 value: tokenPrice.toFixed(8), fee: '0',
                 effectiveAt: pastWindowAt, actionIndex: 999000005
             })
@@ -560,7 +593,7 @@ describe('DISPENSER', () => {
 
             await issueHelper.sendIssueV0(dispenserAddr, tick, 200, 200, 0, "Update delay test", 200)
 
-            let pair        = COIN_CODE + "/USD"
+            let pair        = COIN_CODE + "/" + FIAT_DELAY
             let coinPrice   = 50000
             let oldPrice    = 100     // in effect now
             let newPrice    = 10      // the "update": 10x cheaper, effective in 2h
@@ -574,11 +607,11 @@ describe('DISPENSER', () => {
                 blockTimestamp: effectiveAt - 120, roundNumber: 999000006
             })
             await oraclePriceHelper.clearQuotes({
-                sourceAddress: oracleAddress, coin: COIN_CODE, tick: tick, fiat: 'USD'
+                sourceAddress: oracleAddress, coin: COIN_CODE, tick: tick, fiat: FIAT_DELAY
             })
             await oraclePriceHelper.seedQuote({
                 sourceAddress: oracleAddress, sourceChain: COIN_CODE,
-                coin: COIN_CODE, tick: tick, fiat: 'USD',
+                coin: COIN_CODE, tick: tick, fiat: FIAT_DELAY,
                 value: oldPrice.toFixed(8), fee: '0',
                 effectiveAt: effectiveAt, actionIndex: 999000006
             })
@@ -587,7 +620,7 @@ describe('DISPENSER', () => {
             // would select it first and credit 10x too much.
             await oraclePriceHelper.seedQuote({
                 sourceAddress: oracleAddress, sourceChain: COIN_CODE,
-                coin: COIN_CODE, tick: tick, fiat: 'USD',
+                coin: COIN_CODE, tick: tick, fiat: FIAT_DELAY,
                 value: newPrice.toFixed(8), fee: '0',
                 effectiveAt: chainNow + (2 * 3600), actionIndex: 999000007
             })
@@ -595,7 +628,7 @@ describe('DISPENSER', () => {
             let dispenserResult = await dispenserHelper.sendDispenserV0(
                 dispenserAddr, COIN_CODE, tick, 1, 100,
                 COIN_CODE, null, 0, dispenserAddr["address"],
-                "USD", null, oracleAddress, expiration,
+                FIAT_DELAY, null, oracleAddress, expiration,
                 null, null, 'FIAT update-delay dispenser'
             )
             assert(dispenserResult.dispenser, "dispenser should be created against the in-effect quote")
@@ -650,7 +683,7 @@ describe('DISPENSER', () => {
             // Seed a quote so the create is accepted...
             await oraclePriceHelper.seedQuote({
                 sourceAddress: oracleAddr["address"], sourceChain: COIN_CODE,
-                coin: COIN_CODE, tick: tick, fiat: 'USD',
+                coin: COIN_CODE, tick: tick, fiat: FIAT_NOQ,
                 value: '100.00000000', fee: '0',
                 effectiveAt: chainNow - 60, actionIndex: 999000004
             })
@@ -659,14 +692,14 @@ describe('DISPENSER', () => {
                 dispenserAddr,
                 COIN_CODE, tick, 1, 50,
                 COIN_CODE, null, 0, dispenserAddr["address"],
-                "USD", null, oracleAddr["address"], expiration,
+                FIAT_NOQ, null, oracleAddr["address"], expiration,
                 null, null, 'FIAT Mode 2 no-quote dispenser'
             )
             assert(dispenserResult.dispenser, "Mode 2 dispenser should be created")
 
             // ...then retract it before the buyer pays.
             await oraclePriceHelper.clearQuotes({
-                sourceAddress: oracleAddr["address"], coin: COIN_CODE, tick: tick, fiat: 'USD'
+                sourceAddress: oracleAddr["address"], coin: COIN_CODE, tick: tick, fiat: FIAT_NOQ
             })
 
             let txHash = await transactionHelper.createSimpleTransaction(

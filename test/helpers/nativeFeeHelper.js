@@ -98,13 +98,23 @@ async function seedGlobalPrices(force){
     //     fresh. (This was C4 Bug 2.)
     //   - sustained mining: regtest block timestamps can drift AHEAD of wall
     //     clock, so the tip leads `now`; anchoring to the tip tracks it.
-    // max() satisfies both. Safe for the FIAT dispenser reverse-match (which
-    // needs snapshot <= payment block_time): dispenser.test.js re-clears and
-    // re-seeds {COIN}/USD at latestBlockTime()-60 right before its DISPENSE, and
-    // that DISPENSE payment (createSimpleTransaction) never re-seeds, so this
-    // forward anchor can never clobber the dispenser's row.
+    // max() satisfies both.
     // clearPair first so exactly one finalized row exists per pair (no ambiguity
     // for getLatestPrice).
+    //
+    // , and read this before pointing any new test at {COIN}/USD: the clear
+    // below DELETES the whole pair, and this runs from getNativeFeeOutput(), which
+    // every ACTION tx passes through. So it fires between an arbitrary test's seed
+    // and that test's later assertions, throttled to once per SEED_REFRESH_MS,
+    // which turns any collision into a timing flake rather than a hard failure.
+    // An earlier version of this comment claimed the FIAT dispenser cases were
+    // safe because they re-seed right before a DISPENSE and the bare payment never
+    // re-seeds. That held only for the original Mode 1 case: the Mode 2 cases added
+    // later seed FIRST and then send a dispenser-create action tx, and they
+    // back-date their snapshots by up to 25h, so a reseed anchored at "now" both
+    // removed their row and replaced it with a different price (COIN_USD, not the
+    // 50000 they assert). Those cases now price in their own fiats and no longer
+    // share this pair; keep it that way.
     const blockTimestamp = Math.max(
         await priceSnapshotHelper.latestBlockTime(),
         Math.floor(Date.now() / 1000)
