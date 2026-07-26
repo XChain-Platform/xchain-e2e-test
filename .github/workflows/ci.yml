@@ -17,8 +17,24 @@ name: CI
 # all. The full `npm run ci` gate additionally needs xchain-documentation,
 # xchain-explorer, xchain-indexer, xchain-sdk and xchain-sync as siblings (each
 # for a vendored consensus-constant parity check), which is five more deploy-key
-# secrets. The unit tier deliberately needs ONLY xchain-hub, whose key already
-# exists here, so this job adds no new secret dependency.
+# secrets.
+#
+# SECRETS, corrected 2026-07-26. An earlier revision of this comment said the
+# unit tier needed no new secret because XCHAIN_HUB_DEPLOY_KEY "already exists".
+# It did not: this repo had NO Actions secrets at all, while the drift-guards
+# job below had referenced that name since it was written. Secrets in this org
+# are per-repo, not org-wide (xchain-indexer carries its own DECODER/HUB/SDK
+# keys), so nothing was inherited. Both keys are now provisioned as dedicated
+# read-only deploy keys, one per consumer rather than a shared pair, and both
+# were verified by cloning with them directly:
+#   XCHAIN_HUB_DEPLOY_KEY       -> xchain-hub, read-only
+#   XCHAIN_INDEXER_DEPLOY_KEY   -> xchain-indexer, read-only
+#
+# None of this has been proven through Actions, and cannot be yet: every run on
+# this repo currently fails in 3-5s with "The job was not started because recent
+# account payments have failed", so the jobs never start and no step executes.
+# That is an account-level billing block, not a defect in these workflows, and
+# it means a red result here says nothing about the code until billing clears.
 on:
   push:
     branches: [master]
@@ -83,11 +99,12 @@ jobs:
   # off, bootstrap still green, the streaming cases failing for a reason nothing
   # in the output names.)
   #
-  # PREREQUISITE, and this job fails loudly until it is met: XCHAIN_INDEXER_DEPLOY_KEY
-  # must be provisioned, the way XCHAIN_HUB_DEPLOY_KEY already is. Failing loudly
-  # is deliberate. A job that skipped itself when a dependency was missing would
-  # reproduce the exact defect this item exists to fix, which is a suite that
-  # reports success while proving nothing.
+  # XCHAIN_INDEXER_DEPLOY_KEY is provisioned (2026-07-26) as a dedicated
+  # read-only deploy key, verified by cloning xchain-indexer with it. Should it
+  # ever go missing this job fails loudly rather than skipping, which is
+  # deliberate: a job that skipped itself on a missing dependency would
+  # reproduce the exact defect this item exists to fix, a suite that reports
+  # success while proving nothing.
   #
   # Verified end to end on devhost against genuinely bare clones of all three
   # repos plus npm ci in each: 10 passing, 0 failing, 9s.
