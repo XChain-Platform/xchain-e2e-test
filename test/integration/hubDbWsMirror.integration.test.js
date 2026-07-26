@@ -42,12 +42,21 @@ const HubDbBroadcaster = require('../../../xchain-hub/src/HubDbBroadcaster');
 const HubDbSync        = require('../../../xchain-indexer/src/hub_db_sync');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 
+// Every table HubDbSync bootstraps must be here, not merely the ones a case
+// asserts on. A missing DDL does not fail loudly: the bootstrap logs "not ready
+// ... will retry", _bootstrapDrained stays false, and the run silently never
+// reaches the drained state where the stream watermark advances and the
+// heartbeat gate opens. state_checkpoints and anchor_reward_attestations were
+// absent for exactly that reason, so this suite proved per-row mirroring while
+// leaving the completeness barrier the consensus path depends on uncovered.
 const SQL = {
     price_snapshots:      '../../../xchain-hub/src/sql/price_snapshots.sql',
     oracle_prices:        '../../../xchain-hub/src/sql/oracle_prices.sql',
     cross_chain_calls:    '../../../xchain-indexer/src/sql/cross_chain_calls.sql',
     cross_chain_matches:  '../../../xchain-indexer/src/sql/cross_chain_matches.sql',
     capability_snapshots: '../../../xchain-indexer/src/sql/capability_snapshots.sql',
+    state_checkpoints:    '../../../xchain-indexer/src/sql/state_checkpoints.sql',
+    anchor_reward_attestations: '../../../xchain-indexer/src/sql/anchor_reward_attestations.sql',
 };
 
 // Read a shipped DDL file and reduce it to its bare CREATE TABLE statement:
