@@ -143,7 +143,14 @@ describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration
 
     it('BOOTSTRAP: pulls pre-existing SRC rows into REP via the REST snapshot', async function () {
         assert.strictEqual(await count(repPool, 'price_snapshots', 'id=1'), 1, 'price_snapshots bootstrap row missing');
-        assert.strictEqual(await count(repPool, 'capability_snapshots', 'id=1'), 1, 'capability_snapshots bootstrap row missing');
+        // Keyed on the NATURAL key, never on id: _applyRow strips id for
+        // capability_snapshots so local AUTO_INCREMENT assigns it (#2270, the hub's
+        // ids are hub-local and a wire id can collide with a locally-assigned PK).
+        // Asserting id=1 here passed only by coincidence, this being the first row
+        // inserted into a fresh replica, and would break the moment the fixture
+        // seeded a second row or seeded them in another order.
+        assert.strictEqual(await count(repPool, 'capability_snapshots',
+            "snapshot_block=100 AND capability='cross_chain'"), 1, 'capability_snapshots bootstrap row missing');
         const r = await repPool.query("SELECT price FROM price_snapshots WHERE id=1");
         assert.strictEqual(r[0].price, '61000.00000000', 'bootstrapped value mismatch');
     });
@@ -180,7 +187,14 @@ describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration
 
         assert.ok(await waitFor(async () => (await count(repPool, 'cross_chain_matches', "match_id='wsmirror-match-1'")) === 1),
             'live cross_chain_matches row never arrived');
-        assert.ok(await waitFor(async () => (await count(repPool, 'capability_snapshots', 'id=50')) === 1),
+        // Natural key again, for the reason given on the bootstrap case. This
+        // assertion read id=50 and had been RED since xchain-indexer 521edf2
+        // (2026-07-16) made capability_snapshots a natural-key mirror: the wire id
+        // is dropped, so the row arrives correctly and under a different id, and
+        // the test reported a mirror hole that was not there. It went unnoticed
+        // because test:integration:live is not part of the `ci` script.
+        assert.ok(await waitFor(async () => (await count(repPool, 'capability_snapshots',
+            "snapshot_block=200 AND capability='cross_chain'")) === 1),
             'live capability_snapshots row never arrived');
     });
 
