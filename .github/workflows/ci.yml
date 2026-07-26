@@ -68,6 +68,72 @@ jobs:
         working-directory: xchain-e2e-test
         run: npm run test:unit
 
+  # The hub-DB WS mirror suite: the cheapest live tier to admit, and the one that
+  # motivated  by sitting red for ten days after xchain-indexer 521edf2
+  # changed capability_snapshots to a natural-key mirror.
+  #
+  # It self-provisions a throwaway MariaDB through Docker, which ubuntu-latest
+  # supplies, so it needs no service container and no credentials. What it does
+  # need is TWO sibling checkouts WITH THEIR DEPENDENCIES INSTALLED, and the
+  # second half of that is not obvious: xchain-hub's HubDbBroadcaster requires
+  # `ws` OUTSIDE a try/catch, and Node resolves that from the requiring file's
+  # own tree, never from xchain-e2e-test/node_modules. A bare checkout therefore
+  # dies at module load with "Cannot find module 'ws'". (hub_db_sync's own `ws`
+  # require IS optional, which would have degraded silently instead: live updates
+  # off, bootstrap still green, the streaming cases failing for a reason nothing
+  # in the output names.)
+  #
+  # PREREQUISITE, and this job fails loudly until it is met: XCHAIN_INDEXER_DEPLOY_KEY
+  # must be provisioned, the way XCHAIN_HUB_DEPLOY_KEY already is. Failing loudly
+  # is deliberate. A job that skipped itself when a dependency was missing would
+  # reproduce the exact defect this item exists to fix, which is a suite that
+  # reports success while proving nothing.
+  #
+  # Verified end to end on devhost against genuinely bare clones of all three
+  # repos plus npm ci in each: 10 passing, 0 failing, 9s.
+  hub-db-mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: xchain-e2e-test
+
+      - name: Check out xchain-hub (broadcaster side of the mirror)
+        uses: actions/checkout@v4
+        with:
+          repository: XChain-Platform/xchain-hub
+          ssh-key: ${{ secrets.XCHAIN_HUB_DEPLOY_KEY }}
+          path: xchain-hub
+
+      - name: Check out xchain-indexer (sync side of the mirror)
+        uses: actions/checkout@v4
+        with:
+          repository: XChain-Platform/xchain-indexer
+          ssh-key: ${{ secrets.XCHAIN_INDEXER_DEPLOY_KEY }}
+          path: xchain-indexer
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # All three, not just the suite's own repo. See the `ws` note above.
+      - name: Install dependencies (all three trees)
+        run: |
+          for d in xchain-e2e-test xchain-hub xchain-indexer; do
+            ( cd "$d" && if [ -f package-lock.json ]; then npm ci; else npm install; fi )
+          done
+
+      # HUB_DB_* is unset on purpose: with those present the fixture reuses a
+      # pre-provisioned database, and here we want the Docker self-provisioning
+      # path that needs no credentials.
+      - name: Hub-DB WS mirror integration suite
+        working-directory: xchain-e2e-test
+        run: >
+          env -u HUB_DB_HOST -u HUB_DB_USER -u HUB_DB_PASS -u HUB_DB_NAME -u HUB_DB_PORT
+          npx mocha --no-config --timeout 300000 --exit
+          test/integration/hubDbWsMirror.integration.test.js
+
   # Cross-repo drift guards (SD-1 / ): this repo vendors the canonical
   # coin registry from xchain-hub, and per-repo CI cannot see sibling repos, so
   # a drifted vendored copy previously shipped green (the byte-identity checks
