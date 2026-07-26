@@ -36,14 +36,16 @@
  * opposite facts for a market page. So the drill asserts `data.action_format` is
  * present and correct, not merely that some event arrived.
  *
- * KNOWN GAP, deliberately asserted as absent rather than skipped: the `closed`
- * latch produces NO event on this channel. §11.1 lists "closed latch" among the
- * channel's events, but the ChangeDetector's cursor polls the `actions` table and
- * the latch has no action by design (it is a direct status write in the
- * end-of-block pass, spec §6). A market page therefore learns that betting closed
- * only on its next fetch. Registered as its own ledger item; the drill records the
- * behaviour so nobody "fixes" a passing test when the event is later added, and
- * so the gap cannot be quietly forgotten.
+ * THE LATCH LEG (, closed 2026-07-26). This drill originally asserted the
+ * ABSENCE of a close event: the latch is a direct status write in the end-of-block
+ * pass with no action row (spec §6), so the ChangeDetector's `actions` cursor had
+ * nothing to see and a market page learned that betting had closed only on its next
+ * fetch. The explorer now runs a SECOND cursor over `bet_feeds.closed_block` and
+ * emits BET_CLOSED, so the assertion is inverted to demand the event. It stays an
+ * e2e rather than a unit case because the two halves are structurally blind to each
+ * other: the cursor's unit tests stub the query, and only a real latch on a real
+ * chain proves the column is stamped, polled, routed to the parent market and
+ * accepted by the subscribe filter in one piece.
  *
  *     COIN=bitcoin NETWORK=regtest npm run test:sdk:bet-ws
  *
@@ -183,27 +185,43 @@ describe('[sdk] BET live websocket channel (§11.1 P7)', function () {
         expect(evt.data.source, 'resolve comes from the oracle').to.equal(oracle.address);
     });
 
-    it('records the known gap: the deadline latch pushes NO event', async function () {
-        // The latch happened in the previous test (waitFeedStatus saw `closed`), so
-        // if the channel emitted anything for it, it is already in `events`.
-        //
-        // This asserts CURRENT behaviour on purpose. The latch is a direct status
-        // write with no action row (spec §6), and the ChangeDetector's cursor polls
-        // the `actions` table, so there is nothing for it to pick up. Closing this
-        // needs a second cursor over `bet_feeds.closed_block`, which is a feature,
-        // not a bug fix. When that lands, this test fails and is replaced by a
-        // positive assertion; until then it stops the gap being forgotten and stops
-        // anyone reading §11.1 as already satisfied.
-        const latchish = events.filter((e) => e && e.data
-            && Number(e.data.feed_action_index) === Number(feedIndex)
-            && (e.type === 'BET_CLOSED' || e.type === 'BET_LATCHED'));
-        expect(latchish.map((e) => e.type),
-            'no latch event today: the pass writes no action for the cursor to see')
-            .to.deep.equal([]);
+    it('pushes the deadline latch, the one transition with no action behind it', async function () {
+        // The latch happened during the resolve test (waitFeedStatus saw `closed`),
+        // so if the channel emitted it, it is already in `events`. Given the
+        // subscribe in test 1 the whole lifecycle has been collected, and the poll
+        // interval is seconds, so a short wait covers a latch observed just now.
+        const evt = await waitFor(() => events.find((e) =>
+            e && e.type === 'BET_CLOSED' && e.data
+            && Number(e.data.feed_action_index) === Number(feedIndex)), 30000);
 
-        // And the state itself IS observable, just by fetching rather than pushing.
+        if (!evt) {
+            const seen = events.map((e) => e && e.type).filter(Boolean);
+            throw new Error(
+                'The market latched closed but no BET_CLOSED arrived on the bet_feed '
+                + 'channel. The latch writes no action row, so this event comes from the '
+                + 'explorer ChangeDetector\'s second cursor over bet_feeds.closed_block: '
+                + 'check that cursor, its VALID_TYPES entry, and the parent routing. '
+                + 'Events seen: [' + seen.join(', ') + ']');
+        }
+
         const feed = await getFeed(feedIndex);
+        // The event must name the block the latch was STAMPED in. A cursor that
+        // reported its own poll height instead would still deliver an event, and a
+        // page rendering "closed at block N" would quietly show the wrong block.
         expect(Number(feed.closed_block), 'the latch is readable on the feed row')
             .to.be.greaterThan(0);
+        expect(Number(evt.data.block_index), 'the event names the latch block, not the poll')
+            .to.equal(Number(feed.closed_block));
+        // No causing action, by design: this is what separates it from every other
+        // event on the channel and why the second cursor had to exist at all.
+        expect(evt.data.tx_hash, 'the latch has no causing transaction').to.equal(null);
+        expect(evt.data.synthetic, 'flagged as actionless, matching the REST timeline').to.equal(true);
+        // The TRANSITION, not the live status: by the time this asserts, the feed has
+        // already been resolved by the previous test.
+        expect(evt.data.status, 'reports the close itself').to.equal('closed');
+
+        const latches = events.filter((e) => e && e.type === 'BET_CLOSED' && e.data
+            && Number(e.data.feed_action_index) === Number(feedIndex));
+        expect(latches.length, 'the latch is one-way and must push exactly once').to.equal(1);
     });
 });
