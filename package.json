@@ -8,7 +8,7 @@
     "url": "https://github.com/XChain-platform/xchain-e2e-test.git"
   },
   "dependencies": {
-    "axios": "^1.16.0",
+    "axios": "^1.18.1",
     "bip32": "4.0.0",
     "bip39": "^3.1.0",
     "bitcoinjs-lib": "6.1.7",
@@ -20,7 +20,7 @@
     "xchain-sdk": "file:./xchain-sdk"
   },
   "scripts": {
-    "ci": "mocha --no-config --timeout 30000 --exit 'test/unit/coins-conformance.test.js' 'test/integration/parity/**/*.test.js' 'test/integration/multiHubActivationBoundary.integration.test.js'",
+    "ci": "mocha --no-config --timeout 30000 --exit 'test/unit/coins-conformance.test.js' 'test/unit/security/configuration/dependency-advisories.test.js' 'test/integration/parity/**/*.test.js' 'test/integration/multiHubActivationBoundary.integration.test.js'",
     "test": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/actions/**/*.test.js'",
     "test:contracts": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/contracts/**/*.test.js'",
     "test:auctions": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/contracts/englishAuction.test.js test/contracts/dutchAuction.test.js",
@@ -86,12 +86,18 @@
     "sinon": "^21.0.3"
   },
   "overrides": {
-    "tmp": "^0.2.3",
+    "brace-expansion": "^5.0.8",
+    "minimatch": "^10.2.5",
+    "fast-uri": "^3.1.4",
+    "tmp": "^0.2.7",
     "qs": "^6.15.2",
     "mocha": {
-      "diff": "^8.0.4",
-      "serialize-javascript": "^7.0.5"
-    }
+      "diff": "^8.0.4"
+    },
+    "js-yaml": "^4.3.0",
+    "form-data": "^4.0.6",
+    "shell-quote": "^1.9.0",
+    "serialize-javascript": "^7.0.5"
   },
   "engines": {
     "node": ">=22.0.0"
