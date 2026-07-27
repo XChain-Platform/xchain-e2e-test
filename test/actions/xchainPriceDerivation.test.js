@@ -28,6 +28,9 @@ const dispenserHelper = require('../helpers/dispenserHelper')
 const orderHelper = require('../helpers/orderHelper')
 const coinpayHelper = require('../helpers/coinpayHelper')
 const gasHelper = require('../helpers/gasHelper')
+const sendHelper = require('../helpers/sendHelper')
+const issueHelper = require('../helpers/issueHelper')
+const stakeHelper = require('../helpers/stakeHelper')
 
 // The derivation lives in xchain-indexer and is vendored byte-identically into
 // xchain-hub. Require it from the sibling checkout rather than copying it here:
@@ -41,6 +44,71 @@ const PRICE_PATH = path.join(INDEXER_DIR, 'src', 'xchainPrice.js')
 const HAVE_DERIVATION = fs.existsSync(QUERY_PATH) && fs.existsSync(PRICE_PATH)
 
 const GAS_TICK = 'XCHAIN'
+
+// The hub-published half of the proof needs a live price-capability VALIDATOR
+// hub and a miner API on the same venue (both reachable over the operator's SSH
+// tunnels). Both legs skip cleanly when the venue is not built that way, exactly
+// like the sibling-checkout guard above.
+const HUB_API_URL   = process.env.HUB_API_URL   || 'http://127.0.0.1:10000'
+const MINER_API_URL = process.env.MINER_API_URL || 'http://127.0.0.1:3025'
+
+// Production window constants (constants.js on both sides of the vendoring).
+// The venue must run the hub with these UNSET so the drill proves the shipped
+// values; if an override is ever set on the venue the equality assertion below
+// fails loudly rather than silently proving a different window.
+const WINDOW_BLOCKS = 1000
+const CONFIRMATION_BUFFER = 6
+
+async function hubPriceSnapshots() {
+    const res = await fetch(HUB_API_URL + '/hub-db/snapshot/price_snapshots?since_id=0&limit=5000')
+    if (!res.ok) throw new Error('hub snapshot endpoint HTTP ' + res.status)
+    const body = await res.json()
+    return (body.rows || []).filter(r => r.status === 'finalized')
+}
+
+// Finalized rows for a pair, ascending by round. The reference reads mirror the
+// hub's _lastFinalized: the newest finalized row STRICTLY BELOW a round.
+function pairRows(rows, pair) {
+    return rows.filter(r => r.coin_pair === pair)
+        .sort((a, b) => Number(a.round_number) - Number(b.round_number))
+}
+function lastBelow(rows, pair, round) {
+    const below = pairRows(rows, pair).filter(r => Number(r.round_number) < Number(round))
+    return below.length ? below[below.length - 1] : null
+}
+
+async function minerRpc(method, params) {
+    const res = await fetch(MINER_API_URL + '/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: method, params: params || {} })
+    })
+    const body = await res.json()
+    if (body.error) throw new Error('miner ' + method + ' failed: ' + JSON.stringify(body.error))
+    return body.result
+}
+
+// Advance the chain by `count` blocks and wait for the indexer to catch up.
+// This venue's miner mines on tx arrival only (no idle blocks), which is what
+// makes the derivation window deterministic enough to reproduce exactly: the
+// tip moves precisely when this test says so.
+async function mineAndIndex(db, count, timeoutMs) {
+    const start = Number((await db.doQuery('SELECT MAX(block_index) AS h FROM blocks'))[0].h)
+    let remaining = count
+    while (remaining > 0) {
+        const n = Math.min(200, remaining)
+        await minerRpc('generate_blocks', { count: n })
+        remaining -= n
+    }
+    const target = start + count
+    const deadline = Date.now() + (timeoutMs || 300000)
+    for (;;) {
+        const h = Number((await db.doQuery('SELECT MAX(block_index) AS h FROM blocks'))[0].h)
+        if (h >= target) return h
+        if (Date.now() > deadline) throw new Error('indexer stuck at ' + h + ' waiting for ' + target)
+        await new Promise(r => setTimeout(r, 2000))
+    }
+}
 
 // Adapt the e2e Database to the one method the query module needs. The module was
 // built to require nothing else precisely so it can run here, in the indexer and
@@ -90,6 +158,12 @@ describe('XCHAIN price derivation from real fills ( step 7)', function () {
     })
 
     describe('dispenser venue', function () {
+        before(function () {
+            // XCHAIN is BTC-only as a balance-bearing token; these legs make
+            // XCHAIN trades and can only run on a BTC venue.
+            if (COIN_CODE !== 'BTC') this.skip()
+        })
+
         it('prices a real XCHAIN dispense at its realized rate', async function () {
             this.timeout(300000)
 
@@ -160,6 +234,12 @@ describe('XCHAIN price derivation from real fills ( step 7)', function () {
     })
 
     describe('DEX venue (coinpay)', function () {
+        before(function () {
+            // XCHAIN is BTC-only as a balance-bearing token; these legs make
+            // XCHAIN trades and can only run on a BTC venue.
+            if (COIN_CODE !== 'BTC') this.skip()
+        })
+
         it('selects a settled coinpay fill and dates it by its PAYMENT block', async function () {
             this.timeout(300000)
 
@@ -273,6 +353,333 @@ describe('XCHAIN price derivation from real fills ( step 7)', function () {
             assert(derived, 'derivation must produce a rate')
             assert.strictEqual(derived.rate, '0.00001000',
                 'derived XCHAIN/' + COIN_CODE + ' must equal the realized DEX rate')
+        })
+    })
+
+    describe('hub-published pair (live validator venue)', function () {
+
+        let venueReady = false
+
+        before(async function () {
+            if (COIN_CODE !== 'BTC') { this.skip(); return }
+            // Venue probe, not a failure: a stack whose hub is not a
+            // price-capability validator has no XCHAIN/USD snapshots and cannot
+            // run this half of the proof.
+            try {
+                const rows = await hubPriceSnapshots()
+                venueReady = pairRows(rows, 'XCHAIN/USD').length > 0
+            } catch (e) {
+                venueReady = false
+            }
+            if (!venueReady) {
+                console.log('xchainPriceDerivation: hub is not publishing XCHAIN/USD on this venue; skipping hub-published legs')
+                this.skip()
+            }
+        })
+
+        it('restores the validator stake when the chain has lost it (env-gated venue op)', async function () {
+            this.timeout(300000)
+            // A destructive regtest reset wipes the chain but not the hub's
+            // signing identity, so the stake that qualifies the price capability
+            // must be re-created on the new chain. Pubkey comes from the operator
+            // env because it is venue state, not repo state.
+            const pubkey = process.env.XCHAIN_VALIDATOR_PUBKEY
+            if (!pubkey) this.skip()
+
+            const existing = await indexerDatabase.waitForStake({
+                signingPubkey: pubkey, status: 'valid'
+            }, 5000).catch(() => null)
+            if (existing) {
+                console.log('validator stake already on-chain; nothing to restore')
+                return
+            }
+
+            const staker = await cryptoHelper.getNewFundedAddress(
+                'XCPRICE.VALSTAKE', COIN, NETWORK, null, 'legacy', 0, 1)
+            // MAX_MINT caps a single MINT at 100000; mint once at the cap and
+            // stake well above the price capability MIN_STAKE.
+            await gasHelper.mintGas(staker, '100000')
+            const res = await stakeHelper.sendStakeV1(staker, '50000', pubkey)
+            assert(res.stake, 'validator stake should be re-created on the fresh chain')
+        })
+
+        it('supersedes the carry-forward with the exact volume-weighted value', async function () {
+            this.timeout(900000)
+            const db = queryAdapter(indexerDatabase)
+
+            // 1. Age every pre-existing fill out of the derivation window, so the
+            //    value under assertion is composed ONLY of the trades this test
+            //    creates. This also proves the quiet-market branch on the way: an
+            //    empty window must publish the carry-forward, unchanged, round
+            //    after round. Mine only what burial actually needs, so a rerun on
+            //    an already-buried venue costs seconds, not a thousand blocks.
+            // The indexer may still be digesting blocks a previous run mined; a
+            // tip read mid-digest under-counts and would over-mine. Blocks on
+            // this venue appear only when something transacts, so a tip that
+            // holds still across samples IS the chain tip.
+            let tipNow = Number((await db.doQuery('SELECT MAX(block_index) AS h FROM blocks'))[0].h)
+            for (;;) {
+                await new Promise(r => setTimeout(r, 8000))
+                const again = Number((await db.doQuery('SELECT MAX(block_index) AS h FROM blocks'))[0].h)
+                if (again === tipNow) break
+                tipNow = again
+            }
+            const lookback = await derivation.query.getWindowFills(db, {
+                referenceHeight: tipNow, confirmationBuffer: 0, windowLength: tipNow,
+                gasTick: GAS_TICK, coin: COIN_CODE
+            })
+            assert.strictEqual(lookback.ok, true, 'burial look-back must succeed: ' + lookback.error)
+            const newestFill = lookback.fills.reduce((m, f) => Math.max(m, f.blockIndex), 0)
+            const burialDeficit = (newestFill + WINDOW_BLOCKS + CONFIRMATION_BUFFER + 1) - tipNow
+            if (burialDeficit > 0) await mineAndIndex(db, burialDeficit + 1, 900000)
+
+            // 2. Wait for two consecutive finalized rounds with the same value:
+            //    that is the stabilized carry-forward CF.
+            let cf = null
+            let cfRound = null
+            for (let tries = 0; tries < 12; tries++) {
+                const rows = pairRows(await hubPriceSnapshots(), 'XCHAIN/USD')
+                if (rows.length >= 2) {
+                    const a = rows[rows.length - 2], b = rows[rows.length - 1]
+                    if (a.price === b.price) { cf = b.price; cfRound = Number(b.round_number); break }
+                }
+                await new Promise(r => setTimeout(r, 15000))
+            }
+            assert(cf, 'the empty window must stabilize on a carry-forward value')
+            console.log('carry-forward stabilized at ' + cf + ' (round ' + cfRound + ')')
+
+            // 3. Price the drill trades IN BAND: within the winsorization band
+            //    (2x either side of the reference) AND inside the 10%/round
+            //    per-pair clamp, so the published value must equal the exact
+            //    VWAP - a clamped or winsorized echo would fail the equality.
+            const allRows = await hubPriceSnapshots()
+            const btcUsdNow = pairRows(allRows, 'BTC/USD').slice(-1)[0]
+            assert(btcUsdNow, 'venue must publish BTC/USD')
+            const rate1Btc = bcmath.bcdiv(bcmath.bcmul(cf, '1.04', 16), btcUsdNow.price, 8)
+            const rate2Btc = bcmath.bcdiv(bcmath.bcmul(cf, '0.97', 16), btcUsdNow.price, 8)
+            assert(bcmath.bcgt(rate1Btc, '0') && bcmath.bcgt(rate2Btc, '0'),
+                'drill rates must be representable at 8dp; CF too small vs BTC/USD would be a venue defect')
+
+            // 4a. Dispense leg: 30 XCHAIN realized at rate1Btc coin per XCHAIN.
+            const seller = await cryptoHelper.getNewFundedAddress(
+                'XCPRICE.SUP.DISP.SELLER', COIN, NETWORK, null, 'legacy', 0, 1)
+            await gasHelper.mintGas(seller, '200')
+            const disp = await dispenserHelper.sendDispenserV0(
+                seller, COIN_CODE, GAS_TICK, 1, 30,
+                COIN_CODE, null, Number(rate1Btc), seller['address'],
+                null, null, null, null,
+                null, null, ' supersession drill dispense')
+            assert(disp.dispenser, 'drill dispenser should exist')
+
+            const dispBuyer = await cryptoHelper.getNewFundedAddress(
+                'XCPRICE.SUP.DISP.BUYER', COIN, NETWORK, null, 'legacy', 0, 1)
+            const paySats = Number(bcmath.bcmul(rate1Btc, '30', 8)) * 1e8
+            const dispTx = await transactionHelper.createSimpleTransaction(
+                dispBuyer, seller['address'], Math.round(paySats))
+            const dispRow = await indexerDatabase.waitForDispense({
+                txHash: dispTx, giveCoin: COIN_CODE, giveTick: GAS_TICK,
+                getCoin: COIN_CODE, status: 'valid'
+            }, 120000)
+            assert(dispRow, 'drill dispense should index valid')
+
+            // 4b. DEX leg in the OPPOSITE orientation from the first DEX proof
+            //     above: the coin-giving order is placed FIRST and its owner pays
+            //     the COINPAY, so the match row holds the tick on the other side.
+            //     50 XCHAIN realized at rate2Btc coin per XCHAIN.
+            const dexBuyer = await cryptoHelper.getNewFundedAddress(
+                'XCPRICE.SUP.DEX.BUYER', COIN, NETWORK, null, 'legacy', 0, 2)
+            const dexSeller = await cryptoHelper.getNewFundedAddress(
+                'XCPRICE.SUP.DEX.SELLER', COIN, NETWORK, null, 'legacy', 0, 2)
+            await gasHelper.mintGas(dexSeller, '200')
+
+            const clock = await db.doQuery('SELECT MAX(block_time) AS t FROM blocks')
+            const expiration = Number(clock[0].t) + 86400
+            const coinTotal = bcmath.bcmul(rate2Btc, '50', 8)
+
+            const buyOrder = await orderHelper.sendOrderV0(
+                dexBuyer, COIN_CODE, '', coinTotal,
+                COIN_CODE, GAS_TICK, '50',
+                dexBuyer['address'], expiration, '', '', ' buy XCHAIN, coin side first')
+            assert(buyOrder.order, 'coin-side ORDER should exist')
+
+            const sellOrder = await orderHelper.sendOrderV0(
+                dexSeller, COIN_CODE, GAS_TICK, '50',
+                COIN_CODE, '', coinTotal,
+                dexSeller['address'], expiration, '', '', ' sell XCHAIN, matching second')
+            assert(sellOrder.order, 'XCHAIN-side ORDER should exist')
+
+            const match = await indexerDatabase.waitForOrderMatch({
+                giveActionIndex: Number(buyOrder.order['action_index']),
+                getActionIndex: Number(sellOrder.order['action_index']),
+                status: 'pending_coinpay'
+            }, 60000)
+            assert(match, 'opposite-orientation ORDER_MATCH should exist')
+
+            await coinpayHelper.sendCoinpayV0(
+                dexBuyer, Number(match.action_index), dexSeller['address'],
+                Math.round(Number(coinTotal) * 1e8))
+            const paid = await indexerDatabase.waitForCoinpayObligation({
+                actionIndex: Number(match.action_index), coinpayStatus: 'fulfilled'
+            }, 60000)
+            assert(paid, 'opposite-orientation COINPAY should fulfill')
+
+            // 5. Clear the confirmation buffer, then freeze the tip. From here to
+            //    the assertion no transactions are made, so no blocks are mined
+            //    and every subsequent round derives over the identical window.
+            const tip = await mineAndIndex(db, CONFIRMATION_BUFFER + 1, 120000)
+
+            // 6. The frozen window must contain exactly the two drill fills, and
+            //    the reproduction over them must not be winsorized (they were
+            //    priced in band by construction).
+            const selection = await derivation.query.getWindowFills(db, {
+                referenceHeight: tip,
+                confirmationBuffer: CONFIRMATION_BUFFER,
+                windowLength: WINDOW_BLOCKS,
+                gasTick: GAS_TICK,
+                coin: COIN_CODE
+            })
+            assert.strictEqual(selection.ok, true, 'reproduction selection must succeed: ' + selection.error)
+            assert.strictEqual(selection.fills.length, 2,
+                'the frozen window must contain exactly the two drill fills, got ' + selection.fills.length)
+
+            // 7. Assert per round, not on a stabilized value: BTC/USD is live and
+            //    moves a little every round, so the published USD value never
+            //    freezes - but every round must equal the reproduction of ITS OWN
+            //    round from the hub's snapshot rows plus the production formula
+            //    over the live DB. The first fresh round after the tip settles can
+            //    legitimately disagree (the hub may have composed it against a
+            //    tip the indexer had not finished serving), so keep evaluating
+            //    rounds until one matches exactly.
+            let matched = null
+            let attempts = []
+            const deadline = Date.now() + 420000
+            while (!matched && Date.now() < deadline) {
+                const rows = await hubPriceSnapshots()
+                const fresh = pairRows(rows, 'XCHAIN/USD')
+                    .filter(r => Number(r.round_number) > cfRound && r.price !== cf)
+                for (const cand of fresh) {
+                    const R = Number(cand.round_number)
+                    if (attempts.some(a => a.round === R)) continue
+                    const btcUsdR = pairRows(rows, 'BTC/USD').find(r => Number(r.round_number) === R)
+                    const refXchain = lastBelow(rows, 'XCHAIN/USD', R)
+                    const refBtc    = lastBelow(rows, 'BTC/USD', R)
+                    if (!btcUsdR || !refXchain || !refBtc) continue
+                    const refRate = derivation.price.referenceRateFromUsd(bcmath, refXchain.price, refBtc.price)
+                    const derived = derivation.price.deriveXchainRate(bcmath, selection.fills, refRate)
+                    if (!derived) continue
+                    const expected = derivation.price.toUsd(bcmath, derived.rate, btcUsdR.price)
+                    attempts.push({ round: R, published: cand.price, expected: expected,
+                                    clamped: derived.clampedCount })
+                    if (cand.price === expected && derived.clampedCount === 0) matched = attempts[attempts.length - 1]
+                }
+                if (!matched) await new Promise(r => setTimeout(r, 15000))
+            }
+            assert(matched,
+                'no fresh round matched its own reproduction exactly; rounds seen: ' + JSON.stringify(attempts))
+            console.log('supersession proven at round ' + matched.round + ': ' + cf + ' -> '
+                + matched.published + ' == reproduction ' + matched.expected + ' (clamped=0)')
+            assert.notStrictEqual(matched.published, cf,
+                'supersession must move the pair off the carry-forward')
+        })
+
+        it('excludes a token-for-token dispense from the derivation', async function () {
+            this.timeout(300000)
+            const db = queryAdapter(indexerDatabase)
+
+            // An XCHAIN dispenser PRICED IN A TOKEN is a real trade with no coin
+            // leg, so it carries no price information for XCHAIN/BTC and must
+            // never be selected. Until now this exclusion was held by
+            // predicate-text assertions alone (spec step 1 residual).
+            const seller = await cryptoHelper.getNewFundedAddress(
+                'XCPRICE.T4T.SELLER', COIN, NETWORK, null, 'legacy', 0, 1)
+            const buyer = await cryptoHelper.getNewFundedAddress(
+                'XCPRICE.T4T.BUYER', COIN, NETWORK, null, 'legacy', 0, 1)
+            await gasHelper.mintGas(seller, '200')
+            await gasHelper.ensureGasBalance(buyer, '100')
+
+            const payTick = 'XCPT4T' + seller['address'].substring(seller['address'].length - 6).toUpperCase()
+            await issueHelper.sendIssueV0(buyer, payTick, 1000, 1000, 0, ' token-for-token pay tick', 100)
+
+            const disp = await dispenserHelper.sendDispenserV0(
+                seller, COIN_CODE, GAS_TICK, 1, 5,
+                COIN_CODE, payTick, 10, seller['address'],
+                null, null, null, null,
+                null, null, ' token-for-token dispense')
+            assert(disp.dispenser, 'token-priced dispenser should exist')
+
+            const sendRes = await sendHelper.sendSendV0(buyer, payTick, 10, seller['address'], '')
+            const dispense = await indexerDatabase.waitForDispense({
+                giveCoin: COIN_CODE, giveTick: GAS_TICK,
+                getCoin: COIN_CODE, getTick: payTick, status: 'valid'
+            }, 120000)
+            assert(dispense, 'token-for-token dispense should index valid: ' + JSON.stringify(sendRes || null))
+
+            const tip = Number((await db.doQuery('SELECT MAX(block_index) AS h FROM actions'))[0].h)
+            const selection = await derivation.query.getWindowFills(db, {
+                referenceHeight: tip, confirmationBuffer: 0, windowLength: WINDOW_BLOCKS,
+                gasTick: GAS_TICK, coin: COIN_CODE
+            })
+            assert.strictEqual(selection.ok, true, 'selection must succeed: ' + selection.error)
+            assert.strictEqual(
+                selection.fills.filter(f => f.actionIndex === Number(dispense.action_index)).length, 0,
+                'a token-for-token dispense must never be selected as a price fill')
+        })
+    })
+
+    describe('native-fee validation from the mirrored derived pair (non-BTC venue)', function () {
+
+        before(function () {
+            // This is the consumer end of : only LTC/DOGE pay fees in
+            // native coin, so only they can prove the pair actually prices a fee.
+            if (COIN_CODE === 'BTC') this.skip()
+        })
+
+        it('prices and validates a fee-bearing action with NO seeded pair', async function () {
+            this.timeout(300000)
+            const db = queryAdapter(indexerDatabase)
+
+            // Provenance first: the XCHAIN/USD this venue prices from must be a
+            // MIRRORED finalized hub round (HubDbSync), not a seed. This leg
+            // never calls the seeding helpers, and the transaction below opts out
+            // of the harness's automatic fee injection because that path seeds.
+            const mirrored = await db.doQuery(
+                `SELECT round_number, price FROM price_snapshots
+                  WHERE coin_pair = 'XCHAIN/USD' AND status = 'finalized'
+                  ORDER BY round_number DESC LIMIT 1`)
+            assert(mirrored.length, 'the indexer must hold a mirrored finalized XCHAIN/USD snapshot')
+            console.log('mirrored XCHAIN/USD round ' + mirrored[0].round_number + ' = ' + mirrored[0].price)
+
+            const source = await cryptoHelper.getNewFundedAddress(
+                'XCPRICE.NATFEE', COIN, NETWORK, null, 'legacy', 0, 2)
+            const tick = 'XCPNF' + source['address'].substring(source['address'].length - 6).toUpperCase()
+            const issueTail = '0|' + tick + '|1000|1000|0| native fee proof|100'
+
+            // Quote through the production dry-run: the REAL handler priced at
+            // the CURRENT mirrored oracle rows.
+            const quote = await global.indexerConnector.call('feequote', {
+                action: 'ISSUE',
+                params: issueTail.split('|'),
+                source: source['address']
+            })
+            assert(!quote.error, 'feequote must not error: ' + JSON.stringify(quote.error || null))
+            assert(quote.feeDestination, 'feequote must name the fee destination')
+            assert(Number(quote.requiredFeeSats) > 0,
+                'an ISSUE on a native-fee chain must price a positive fee, got ' + JSON.stringify(quote))
+
+            // Send the real action carrying exactly the quoted fee output, with
+            // the harness's (seeding) auto-injection disabled.
+            const txHash = await transactionHelper.createAndSendTransaction(
+                source, 'ISSUE|' + issueTail, null,
+                [{ address: quote.feeDestination, value: Number(quote.requiredFeeSats) }],
+                null, null, true)
+
+            const issueRow = await indexerDatabase.waitForIssue({
+                txHash: txHash, tick: tick, status: 'valid'
+            }, 120000)
+            assert(issueRow,
+                'the fee-bearing ISSUE must validate on-chain against the mirrored derived pair')
+            console.log('native-fee ISSUE valid: tick ' + tick + ', fee ' + quote.requiredFeeNative
+                + ' ' + COIN_CODE + ' priced from mirrored XCHAIN/USD ' + mirrored[0].price)
         })
     })
 
