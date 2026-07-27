@@ -215,6 +215,26 @@ class RegtestMinerConnector {
 
         return this._unwrap(response)
     }
+
+    // Turn the miner's mine-empty heartbeat on (ms) or off (0). The miner is
+    // mempool-driven, so an idle chain gains no height and a test that WAITS OUT
+    // a height window (stake ACTIVATION_DELAY_BLOCKS, confirmation depth) hangs
+    // with nothing in flight to make a block. generateBlocks jumps such a window;
+    // this lets the chain advance on its own while the test observes .
+    // Always pair an enable with a disable, or the extra blocks perturb
+    // depth/reorg assertions later in the run.
+    async setIdleMineInterval(intervalMs){
+        const data = {
+            jsonrpc: '2.0',
+            method: 'set_idle_mine_interval',
+            params: {interval_ms: intervalMs},
+            id: 1
+        }
+
+        const response = await axios.post(this.url, data, this.reqConfig)
+
+        return this._unwrap(response)
+    }
 }
 
 module.exports = RegtestMinerConnector

@@ -54,6 +54,7 @@ const cryptoHelper   = require('../cryptoHelper');
 const CryptoNetworks = require('../../src/CryptoNetworks');
 const { makeSdk }    = require('../sdk/sdkHelper');
 const { MultiValidatorHub, ValidatorIdentity, loadHubModule } = require('../helpers/multiValidatorHubHelper');
+const anchorVersions = require('../helpers/anchorVersionHelper');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const N = 4;
@@ -313,7 +314,12 @@ describe('ANCHOR election live: multi-validator per-chain publishers (DOGE regte
         await regtestMinerConnector.generateBlocks(3);
         await waitForTip(block + 3);
         await mvh.hubs[order[1]].stateAnchorPublisher.flush();
-        const pubs = published.slice(before).filter(p => p.payload.split('|')[1] === '0');
+        // Checkpoint-leg versions come from the flag-days at this row's
+        // snapshot_block, not a hardcoded v0: the attestation leg legitimately
+        // emits v4/v5 on a venue past the reward thresholds .
+        const cpVersions = anchorVersions.expectedCheckpointAnchor(row).accepted;
+        const pubs = published.slice(before)
+            .filter(p => cpVersions.includes(anchorVersions.anchorPayloadVersion(p.payload)));
         assert.strictEqual(pubs.length, 1, 'rank 1 published the failover anchor');
         assert.strictEqual(pubs[0].hub, order[1]);
         assert.strictEqual(pubs[0].from, wallets[order[1]].address, 'failover paid from rank 1\'s wallet');
@@ -384,14 +390,18 @@ describe('ANCHOR election live: multi-validator per-chain publishers (DOGE regte
             'leader started the round (got ' + sLead.archive + ')');
         await sleep(3000);                                     // SIGN round + publish + FINALIZED
 
-        const v1s = published.filter(p => p.payload.split('|')[1] === '1');
-        assert.strictEqual(v1s.length, 1, 'exactly one v1 archive published');
+        // Archive-leg versions from the flag-days at the checkpoint's
+        // snapshot_block (v1, or v6 once archive-reward derivation is armed);
+        // v6 is v1 plus a publisher tail, so the field layout below is shared.
+        const arcVersions = anchorVersions.expectedArchiveAnchor(cpRow).accepted;
+        const v1s = published.filter(p => arcVersions.includes(anchorVersions.anchorPayloadVersion(p.payload)));
+        assert.strictEqual(v1s.length, 1, 'exactly one archive anchor published');
         assert.strictEqual(v1s[0].hub, leader, 'published by the elected archive leader');
         assert.strictEqual(v1s[0].from, wallets[leader].address, 'paid from the leader\'s wallet');
 
         const f = v1s[0].payload.split('|');
         const sigCount = Number(f[16]);
-        assert.ok(sigCount >= 3, 'v1 carries 2f+1 live co-signatures (got ' + sigCount + ')');
+        assert.ok(sigCount >= 3, 'the archive anchor carries 2f+1 live co-signatures (got ' + sigCount + ')');
 
         assert.ok(rewards.some(r => r.hub === leader && r.type === 'anchor_archive'),
             'archive reward credited to the leader');

@@ -15,10 +15,18 @@
  *
  * The on-chain leg the L2 federation test can't cover: a real hub
  * (in-process, single validator via the XDEX_SEED_LOCAL_VALIDATOR seam)
- * checkpoints the REAL DOGE indexer state (getblockhashes RPC), publishes
- * ANCHOR v0 + a v1 match archive as REAL DOGE transactions through the
+ * checkpoints the REAL DOGE indexer state (getblockhashes RPC), publishes a
+ * checkpoint anchor + a match archive as REAL DOGE transactions through the
  * encoder's P2SH two-tx pipeline, the regtest miner mines them, the decoder
  * parses them, and the indexer's ANCHOR handler verifies + stores them.
+ *
+ * The ANCHOR VERSIONS are not fixed: the publisher picks them from the
+ * flag-days active at the snapshot_block the hub resolves at tick time
+ * (v0/v3/v4/v5 for the checkpoint leg, v1/v6 for the archive leg). This suite
+ * derives the legal set from the hub's own frozen flag-day modules via
+ * test/helpers/anchorVersionHelper.js, so a venue whose BTC tip sits past an
+ * armed threshold passes on the version it is SUPPOSED to emit instead of
+ * false-failing on a hardcoded v0 (, from the  A2 drill).
  *
  * Pre-requisites (driven by the operator/runner, NOT this file):
  *   - dogecoin-regtest stack up (node, utxo-tracker, encoder, decoder,
@@ -61,6 +69,7 @@ const { encode: wifEncode } = require('wif');
 const cryptoHelper      = require('../cryptoHelper');
 const CryptoNetworks    = require('../../src/CryptoNetworks');
 const { MultiValidatorHub, ValidatorIdentity, loadHubModule, resolveHubFile } = require('../helpers/multiValidatorHubHelper');
+const anchorVersions    = require('../helpers/anchorVersionHelper');
 
 const SNAPSHOT_BLOCK = 100;            // deterministic regtest anchor (XDEX_SNAPSHOT_BLOCK)
 
@@ -165,10 +174,14 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
         // reject seqs at-or-below the on-chain max, and this driver's hub DB is
         // fresh (seqs restart at 0). Seed the hub's counters past whatever a
         // prior run already anchored.
+        // Version lists cover the WHOLE family on each leg (checkpoint 0/3/4/5,
+        // archive 1/6): a post-flag-day venue's prior run anchored v5/v6 rows,
+        // and a (0,1)-only scan would miss them and restart the seqs low enough
+        // for the indexer's replay guard to reject this run's anchors.
         let prior = await indexerQuery(
             `SELECT MAX(checkpoint_seq) AS max_cp,
-                    (SELECT MAX(match_batch_seq) FROM anchor_actions WHERE version = 1) AS max_batch
-             FROM anchor_actions WHERE version IN (0, 1)`);
+                    (SELECT MAX(match_batch_seq) FROM anchor_actions WHERE version IN (1, 6)) AS max_batch
+             FROM anchor_actions WHERE version IN (0, 1, 3, 4, 5, 6)`);
         let maxCp    = (prior.length && prior[0].max_cp    != null) ? Number(prior[0].max_cp)    : null;
         let maxBatch = (prior.length && prior[0].max_batch != null) ? Number(prior[0].max_batch) : null;
         if (maxCp !== null) {
@@ -197,7 +210,7 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
         delete process.env.HUB_SIGNER_MODULE;
     });
 
-    it('checkpoints REAL indexer state and lands quorum-signed ANCHOR v0+v1 on the DOGE chain', async function () {
+    it('checkpoints REAL indexer state and lands a quorum-signed checkpoint + archive ANCHOR on the DOGE chain', async function () {
         await hub.stateCheckpoints._tick();
         let cps = await hub.db.doQuery(
             "SELECT * FROM state_checkpoints WHERE chain = 'DOGE' AND network = 'regtest' ORDER BY checkpoint_seq DESC LIMIT 1");
@@ -261,12 +274,24 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
             'INSERT IGNORE INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount) VALUES (?, ?, ?, ?)',
             [snapBlock, 'cross_chain', identity.getPubkeyHex().toLowerCase(), '1']);
 
+        // Which ANCHOR versions this venue is SUPPOSED to emit, read off the
+        // hub's own flag-day modules at the snapshot_block the hub resolved.
+        // Never pinned: a venue past an armed threshold correctly emits the
+        // attested version, and the publisher's liveness-safe fallback to the
+        // legacy version is equally legal, so both are accepted.
+        let cpExpect  = anchorVersions.expectedCheckpointAnchor(cp);
+        let arcExpect = anchorVersions.expectedArchiveAnchor(cp);
+        console.log('    expecting ' + cpExpect.describe + ' + ' + arcExpect.describe);
+
         let summary = await hub.stateAnchorPublisher.flush();
-        assert.ok(broadcasts.length >= 2, 'expected v0 + v1 broadcasts, got ' + broadcasts.length);
-        let v0 = broadcasts.find(b => b.payload.split('|')[1] === '0');
-        let v1 = broadcasts.find(b => b.payload.split('|')[1] === '1');
-        assert.ok(v0 && v0.txid, 'v0 published with a real txid');
-        assert.ok(v1 && v1.txid, 'v1 published with a real txid');
+        assert.ok(broadcasts.length >= 2,
+            'expected a checkpoint + archive broadcast, got ' + broadcasts.length);
+        let v0 = anchorVersions.findAnchorBroadcast(broadcasts, cpExpect.accepted);
+        let v1 = anchorVersions.findAnchorBroadcast(broadcasts, arcExpect.accepted);
+        assert.ok(v0 && v0.txid, cpExpect.describe + ' published with a real txid; saw versions ' +
+            JSON.stringify(broadcasts.map(b => anchorVersions.anchorPayloadVersion(b.payload))));
+        assert.ok(v1 && v1.txid, arcExpect.describe + ' published with a real txid; saw versions ' +
+            JSON.stringify(broadcasts.map(b => anchorVersions.anchorPayloadVersion(b.payload))));
         // The two-phase property the walletSign-only gap used to hide: each
         // publish must produce a DISTINCT phase-1 funding tx and phase-2
         // reveal tx (the decodable one). A single-tx publish here means the
@@ -276,10 +301,15 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
             assert.notStrictEqual(b.phase1_txid, b.txid, 'phase-2 reveal txid differs from phase-1');
         }
         // The flush summary reports the same publication (anchorflush RPC surface).
-        assert.strictEqual(summary.anchored.length, 1, 'flush summary reports the v0 anchor');
+        // `anchored` is version-agnostic: it names the checkpoint anchor whatever
+        // version the flag-days selected.
+        assert.strictEqual(summary.anchored.length, 1, 'flush summary reports the checkpoint anchor');
         assert.strictEqual(summary.anchored[0].txid, v0.txid);
         assert.strictEqual(summary.archive, 'published');
-        console.log('    on-chain: v0 ' + v0.txid + ' / v1 ' + v1.txid + ' (phase-1: ' + v0.phase1_txid + ' / ' + v1.phase1_txid + ')');
+        let cpVersion  = anchorVersions.anchorPayloadVersion(v0.payload);
+        let arcVersion = anchorVersions.anchorPayloadVersion(v1.payload);
+        console.log('    on-chain: checkpoint v' + cpVersion + ' ' + v0.txid + ' / archive v' + arcVersion +
+                    ' ' + v1.txid + ' (phase-1: ' + v0.phase1_txid + ' / ' + v1.phase1_txid + ')');
 
         // Confirm + let decoder/indexer catch up. A dirty chain may carry anchors
         // from prior runs, so match on content rather than position.
@@ -290,30 +320,34 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
                 `SELECT a.*, s.status FROM anchor_actions a
                  LEFT JOIN index_statuses s ON s.id = a.status_id
                  ORDER BY a.action_index ASC`);
-            // Both rows wrap OUR checkpoint (the flush anchors the latest one).
-            r0 = rows.find(r => Number(r.version) === 0 && String(r.ledger_hash) === String(cp.ledger_hash));
-            r1 = rows.find(r => Number(r.version) === 1 && String(r.ledger_hash) === String(cp.ledger_hash));
+            // Both rows wrap OUR checkpoint (the flush anchors the latest one),
+            // at the version this run actually published.
+            r0 = anchorVersions.findAnchorRow(rows, [cpVersion],  cp.ledger_hash);
+            r1 = anchorVersions.findAnchorRow(rows, [arcVersion], cp.ledger_hash);
             if (!r0 || !r1) await sleep(2000);
         }
-        assert.ok(r0, 'v0 row for our checkpoint present');
-        assert.ok(r1, 'v1 row for our archive present');
+        assert.ok(r0, 'checkpoint v' + cpVersion + ' row for our checkpoint present');
+        assert.ok(r1, 'archive v' + arcVersion + ' row for our archive present');
 
-        // v0: the on-chain checkpoint equals what the hub signed over the REAL
-        // indexer hashes (the full circle: indexer -> hub -> chain -> indexer).
-        assert.strictEqual(String(r0.status), 'valid', 'v0 verified against the mirrored oracle_publish set');
+        // Checkpoint leg: the on-chain checkpoint equals what the hub signed over
+        // the REAL indexer hashes (the full circle: indexer -> hub -> chain -> indexer).
+        assert.strictEqual(String(r0.status), 'valid',
+            'checkpoint v' + cpVersion + ' verified against the mirrored oracle_publish set');
         assert.strictEqual(String(r0.chain), 'DOGE');
         assert.strictEqual(Number(r0.block_index), Number(cp.block_index));
         assert.strictEqual(String(r0.ledger_hash), String(cp.ledger_hash));
         assert.strictEqual(String(r0.actions_hash), String(cp.actions_hash));
         assert.strictEqual(String(r0.contract_hash), String(cp.contract_hash));
 
-        // v1: archive decompresses to the synthetic match + both capability sets.
-        assert.strictEqual(String(r1.status), 'valid', 'v1 verified against the mirrored oracle_publish set');
+        // Archive leg: decompresses to the synthetic match + both capability sets.
+        assert.strictEqual(String(r1.status), 'valid',
+            'archive v' + arcVersion + ' verified against the mirrored oracle_publish set');
         let archive = JSON.parse(zlib.gunzipSync(Buffer.from(String(r1.archive_b64), 'base64url')).toString('utf8'));
         assert.strictEqual(archive.matches.length, 1);
         assert.strictEqual(archive.matches[0].match_id, matchId);
         assert.ok(archive.capability_snapshots.some(s => s.capability === 'cross_chain'));
         assert.ok(archive.capability_snapshots.some(s => s.capability === 'oracle_publish'));
-        console.log('    parsed: v0+v1 valid, archive carries match ' + matchId.slice(0, 16) + '...');
+        console.log('    parsed: checkpoint v' + cpVersion + ' + archive v' + arcVersion +
+                    ' valid, archive carries match ' + matchId.slice(0, 16) + '...');
     });
 });
