@@ -100,7 +100,8 @@ const XCHAIN_SIDECAR_RND = 990001;
 // oracle_round must be NONE of these - i.e. it came from the live oracle.
 const SEED_SENTINELS = new Set([
     990001, 990002,          // dexDogeSetup + this sidecar
-    888100001, 888100002,    // nativeFeeHelper XCHAIN_ROUND / COIN_ROUND
+    888100001, 888100002,    // nativeFeeHelper XCHAIN_ROUND / COIN_ROUND (chain-time anchor)
+    888100011, 888100012,    // nativeFeeHelper *_ROUND_NOW (wall-clock anchor, seeded when the chain clock trails)
     999200001, 999200002,    // nativeFeeLive band
 ]);
 

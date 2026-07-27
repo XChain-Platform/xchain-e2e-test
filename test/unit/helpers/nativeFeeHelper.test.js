@@ -123,3 +123,100 @@ describe('nativeFeeHelper.discoverFeeMode', () => {
         assert.strictEqual(calls, 1)
     })
 })
+
+// seedGlobalPrices anchoring. A seeded snapshot at S is usable by a block at
+// time B only inside S <= B <= S + 1800: the upper bound is the indexer's
+// staleness guard, the LOWER bound is the H-3 selection gate on LTC/DOGE
+// (getLatestPrice's `block_timestamp <= ?`). The old single max(tip, now) anchor
+// honoured only the upper bound, so a chain whose clock trails wall time - which
+// is how every clock drill leaves it - had its prices silently invisible and
+// every fee-bearing action rejected `no current oracle price`.
+describe('nativeFeeHelper.seedGlobalPrices anchoring', () => {
+    const SNAPSHOT_PATH = require.resolve('../../helpers/priceSnapshotHelper')
+    let savedSnapshotModule, savedCoin, savedIndexerDb
+    let seeded, cleared, chainTime
+
+    // Stub priceSnapshotHelper through require.cache so the helper's own
+    // module-level require picks it up on the fresh require below.
+    function stubSnapshots(){
+        seeded = []
+        cleared = []
+        require.cache[SNAPSHOT_PATH] = { id: SNAPSHOT_PATH, filename: SNAPSHOT_PATH, loaded: true, exports: {
+            isAvailable: async () => true,
+            latestBlockTime: async () => chainTime,
+            clearPair: async (pair) => { cleared.push(pair) },
+            seedSnapshot: async (row) => { seeded.push(row) }
+        }}
+    }
+
+    beforeEach(() => {
+        savedSnapshotModule = require.cache[SNAPSHOT_PATH]
+        savedCoin = global.COIN_CODE
+        savedIndexerDb = global.indexerDatabase
+        global.COIN_CODE = 'LTC'
+        stubSnapshots()
+    })
+
+    afterEach(() => {
+        if (savedSnapshotModule) require.cache[SNAPSHOT_PATH] = savedSnapshotModule
+        else delete require.cache[SNAPSHOT_PATH]
+        global.COIN_CODE = savedCoin
+        global.indexerDatabase = savedIndexerDb
+        delete require.cache[HELPER_PATH]
+    })
+
+    function anchorsFor(pair){
+        return seeded.filter(r => r.coinPair === pair).map(r => r.blockTimestamp)
+    }
+
+    it('seeds BOTH the chain-clock and wall-clock anchors when the chain trails', async () => {
+        const wall = Math.floor(Date.now() / 1000)
+        chainTime = wall - 2547                    // the LTC stack as found: pinned in the past
+        await freshHelper().seedGlobalPrices(true)
+        for (const pair of ['XCHAIN/USD', 'LTC/USD']) {
+            const anchors = anchorsFor(pair)
+            assert.strictEqual(anchors.length, 2, pair + ' needs a chain anchor AND a wall anchor')
+            assert.strictEqual(anchors[0], chainTime, pair + ' must carry a row the frozen chain can see')
+            assert(anchors[1] >= wall, pair + ' must also carry a row that stays fresh once the clock is released')
+        }
+        // The wall-clock row must WIN where both are visible, and getLatestPrice
+        // orders by round_number, so the later anchor needs the higher round.
+        const rows = seeded.filter(r => r.coinPair === 'LTC/USD')
+        assert(rows[1].roundNumber > rows[0].roundNumber, 'the fresher anchor must carry the higher round')
+    })
+
+    it('seeds ONE chain-anchored row when the chain leads wall time (post-jump)', async () => {
+        chainTime = Math.floor(Date.now() / 1000) + 3600
+        await freshHelper().seedGlobalPrices(true)
+        for (const pair of ['XCHAIN/USD', 'LTC/USD'])
+            assert.deepStrictEqual(anchorsFor(pair), [chainTime], pair + ' must anchor on the chain, not the wall clock')
+    })
+
+    it('re-seeds inside the wall-clock throttle once the CHAIN clock jumps', async () => {
+        chainTime = Math.floor(Date.now() / 1000) + 60
+        const helper = freshHelper()
+        await helper.seedGlobalPrices(true)
+        const afterFirst = seeded.length
+
+        // Same wall-clock instant, so the throttle would suppress this on its own.
+        await helper.seedGlobalPrices()
+        assert.strictEqual(seeded.length, afterFirst, 'an unmoved chain clock must not re-seed')
+
+        // A drill jump of an hour ages the snapshot straight out of the 1800s window.
+        chainTime += 3600
+        await helper.seedGlobalPrices()
+        assert(seeded.length > afterFirst, 'a jumped chain clock must re-seed despite the throttle')
+    })
+
+    it('re-seeds when the chain clock moves BACKWARDS, however slightly', async () => {
+        chainTime = Math.floor(Date.now() / 1000) + 60
+        const helper = freshHelper()
+        await helper.seedGlobalPrices(true)
+        const afterFirst = seeded.length
+        // One second below the anchor is already fatal: the H-3 gate excludes a
+        // snapshot the block cannot see, so this is not a small version of drift.
+        chainTime -= 1
+        await helper.seedGlobalPrices()
+        assert(seeded.length > afterFirst, 'a rewound chain clock must re-seed')
+    })
+})

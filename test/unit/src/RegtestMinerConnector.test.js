@@ -190,4 +190,49 @@ describe('RegtestMinerConnector', function () {
             assert.strictEqual(result, null);
         });
     });
+// setmocktime is a NODE-level control that the connector normally reaches
+    // through the miner, because some installs do not publish the node RPC port.
+    // Miner sidecars older than set_mock_time answer "Method not found", and a
+    // long-lived venue routinely runs one chain's miner behind another's, which
+    // would silently make every clock-driven drill family single-chain.
+    describe('setMockTime node fallback', function () {
+
+        it('uses the miner when it implements set_mock_time', async function () {
+            axiosPostStub.resolves({ data: { result: 'ok' } });
+            let nodeCalls = 0;
+            global.nodeConnector = { _rpc: async () => { nodeCalls++; return null } };
+            const result = await connector.setMockTime(1785126915);
+            assert.strictEqual(result, 'ok');
+            assert.strictEqual(nodeCalls, 0, 'a capable miner must not be bypassed');
+            assert.strictEqual(axiosPostStub.firstCall.args[1].method, 'set_mock_time');
+            delete global.nodeConnector;
+        });
+
+        it('falls back to the node RPC when the miner has no set_mock_time', async function () {
+            axiosPostStub.resolves({ data: { error: 'Method not found - set_mock_time' } });
+            const seen = [];
+            global.nodeConnector = { _rpc: async (m, a) => { seen.push([m, a]); return null } };
+            await connector.setMockTime('1785126915');
+            assert.deepStrictEqual(seen, [['setmocktime', [1785126915]]],
+                'the timestamp must reach the node as a NUMBER, whatever the caller passed');
+            delete global.nodeConnector;
+        });
+
+        it('rethrows a miner REFUSAL rather than routing around it', async function () {
+            // Mainnet refusal, bad input: the miner understood the call and said no.
+            // Falling back here would drive a node the miner deliberately protected.
+            axiosPostStub.resolves({ data: { error: 'refused: mainnet' } });
+            let nodeCalls = 0;
+            global.nodeConnector = { _rpc: async () => { nodeCalls++; return null } };
+            await assert.rejects(() => connector.setMockTime(1), /refused: mainnet/);
+            assert.strictEqual(nodeCalls, 0);
+            delete global.nodeConnector;
+        });
+
+        it('keeps the miner error when no node connector is available', async function () {
+            axiosPostStub.resolves({ data: { error: 'Method not found - set_mock_time' } });
+            delete global.nodeConnector;
+            await assert.rejects(() => connector.setMockTime(1), /Method not found/);
+        });
+    });
 });

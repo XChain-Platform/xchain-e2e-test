@@ -160,12 +160,38 @@ class RegtestMinerConnector {
             id: 1
         }
 
-        const response = await axios.post(this.url, data, this.reqConfig)
+        let response
+        try {
+            response = await axios.post(this.url, data, this.reqConfig)
 
-        // "ok" on success, {error:"..."} on refusal (mainnet / bad input); both
-        // truthy, so _unwrap throws on the error envelope rather than reporting a
-        // clock pin that never happened.
-        return this._unwrap(response)
+            // "ok" on success, {error:"..."} on refusal (mainnet / bad input); both
+            // truthy, so _unwrap throws on the error envelope rather than reporting a
+            // clock pin that never happened.
+            return this._unwrap(response)
+        } catch (e) {
+            // Miner sidecars predating set_mock_time answer "Method not found", and a
+            // long-lived venue routinely runs one chain's miner older than another's
+            // (the devhost LTC/DOGE miners lagged BTC's by days). Every clock-driven
+            // drill family would then be BTC-only for a reason that has nothing to do
+            // with the chain. setmocktime is a node-level control, so going straight to
+            // the node produces the identical effect where its RPC port is published;
+            // where it is not, the original miner error stands.
+            if (!this._isMissingMethod(e) || !global.nodeConnector)
+                throw e
+            if (!RegtestMinerConnector._mockTimeFallbackAnnounced) {
+                RegtestMinerConnector._mockTimeFallbackAnnounced = true
+                console.log('RegtestMinerConnector: miner has no set_mock_time; ' +
+                    'driving setmocktime through the node RPC instead')
+            }
+            return await global.nodeConnector._rpc('setmocktime', [Number(timestamp)])
+        }
+    }
+
+    // A miner that does not implement the method, as opposed to one that refused the
+    // call. Matched on the JSON-RPC message because the sidecar answers "Method not
+    // found - set_mock_time" with a 200, so there is no status code to key on.
+    _isMissingMethod(e){
+        return /method not found/i.test(String(e && e.message))
     }
 
     // Pause the regtest miner's adaptive auto-mine loop. Call before a
