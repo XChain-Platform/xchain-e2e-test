@@ -17,12 +17,19 @@
 //
 // The path of least resistance for a future test author who needs the pair is to
 // paste another seed with another convenient number, which silently recreates
-// exactly that condition. So: seeding is still allowed (the venue whose hub runs as
-// a price-capability oracle validator does not exist yet), but the seeded VALUE must
-// be the shared bootstrap constant - the value a real hub publishes today.
+// exactly that condition. So, two rules, layered as the venues allow:
 //
-// When the validator venue lands, this guard tightens from "seed the right value" to
-// "do not seed at all".
+//   1. Where seeding is allowed (a venue whose hub does NOT publish the pair),
+//      the seeded VALUE must be the shared bootstrap constant - the value a real
+//      hub publishes.
+//   2. TIGHTENED 2026-07-27, now that the validator venue exists (devhost BTC
+//      regtest since 2026-07-26): every seed site must be SUPPRESSIBLE via
+//      XCHAIN_E2E_NO_PRICE_SEED, because on a publishing venue one unsuppressed
+//      seed outranks every derived round (getLatestPrice takes the highest
+//      round_number and seeds use synthetic rounds in the 990000+ space) - the
+//      run stays green while testing a fixture, the original bug's exact shape.
+//      Fixture-priced suites skip under the flag; the sdk venue setups, whose fee
+//      arithmetic comes FROM the fixture, refuse loudly (refuseSeedIfSuppressed).
 
 'use strict'
 
@@ -80,6 +87,32 @@ describe('XCHAIN/USD seed guard ( step 8)', function () {
             'XCHAIN/USD must be seeded at the bootstrap constant (' + BOOTSTRAP_XCHAIN_USD +
             '), which is what a real hub publishes. Import BOOTSTRAP_XCHAIN_USD from ' +
             'test/helpers/xchainPriceConstants instead of pasting a literal:\n  ' +
+            offenders.join('\n  '))
+    })
+
+    it('keeps every XCHAIN/USD seed site suppressible on a publishing venue', function () {
+        // A seed site is a file that either pairs 'XCHAIN/USD' with a decimal
+        // literal or the bootstrap constant on one line, or names both the pair and
+        // the constant anywhere (the oracle-live suite splits them across lines).
+        // Such a file must reference the suppression - the NO_PRICE_SEED flag or
+        // the refuseSeedIfSuppressed helper - so that a validator-venue run can
+        // turn every seed off. A seed that cannot be turned off shadows every
+        // derived round there and the run stays green against a fixture.
+        const offenders = []
+        for (const file of files) {
+            const body = fs.readFileSync(file, 'utf8')
+            const lines = body.split('\n')
+            const lineHit = lines.some(l => l.includes('XCHAIN/USD') &&
+                (l.includes('BOOTSTRAP_XCHAIN_USD') || /'[0-9]+\.[0-9]+'/.test(l)))
+            const fileHit = body.includes('XCHAIN/USD') && body.includes('BOOTSTRAP_XCHAIN_USD')
+            if (!lineHit && !fileHit) continue
+            if (body.includes('NO_PRICE_SEED') || body.includes('refuseSeedIfSuppressed')) continue
+            offenders.push(path.relative(TEST_ROOT, file))
+        }
+        assert.deepStrictEqual(offenders, [],
+            'these files seed XCHAIN/USD but cannot be suppressed on a venue whose hub ' +
+            'publishes the pair; gate them on NO_PRICE_SEED (skip) or ' +
+            'refuseSeedIfSuppressed (setup refusal), both from test/helpers/xchainPriceConstants:\n  ' +
             offenders.join('\n  '))
     })
 

@@ -53,7 +53,7 @@
 const axios   = require('axios');
 const mariadb = require('mariadb');
 const { XChainSDK } = require('./sdkHelper');
-const { BOOTSTRAP_XCHAIN_USD, BOOTSTRAP_XCHAIN_USD_NUM } = require('../helpers/xchainPriceConstants');
+const { BOOTSTRAP_XCHAIN_USD, BOOTSTRAP_XCHAIN_USD_NUM, refuseSeedIfSuppressed } = require('../helpers/xchainPriceConstants');
 
 const MINER_URL = process.env.XCALL_DOGE_MINER_URL || 'http://localhost:3125';
 const INDEXER_URL = process.env.XCALL_DOGE_INDEXER_URL || 'http://127.0.0.1:3124';
@@ -121,6 +121,7 @@ async function main() {
     // block the ISSUE lands in, and on a chain that sat idle the old tip time is stale
     // beyond the 1800s gate while the newly mined block gets wall-clock time.
     const seedTime = Math.max(blockTime, Math.floor(Date.now() / 1000));
+    refuseSeedIfSuppressed('dexDogeSetup');
     await hubConn(async (c) => {
         for (const [pair, price, round] of [['DOGE/USD', DOGE_USD_SEED, 990001], ['XCHAIN/USD', BOOTSTRAP_XCHAIN_USD, 990002]]) {
             await c.query(

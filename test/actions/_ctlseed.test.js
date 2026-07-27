@@ -32,12 +32,20 @@
  ********************************************************************/
 
 const priceSnapshotHelper = require('../helpers/priceSnapshotHelper')
-const { BOOTSTRAP_XCHAIN_USD } = require('../helpers/xchainPriceConstants')
+const { BOOTSTRAP_XCHAIN_USD, NO_PRICE_SEED } = require('../helpers/xchainPriceConstants')
 
 describe('_ctlseed: force-seed fresh oracle prices (venue preamble)', function () {
     this.timeout(0)
 
     it('seeds fresh finalized BTC/USD + XCHAIN/USD anchored ahead of the chain tip', async function () {
+        //  step 8: this preamble CLEARS the pair and re-seeds it, which on a
+        // venue whose hub publishes prices would delete real finalized rounds and
+        // shadow the rest. Hard-skip there.
+        if (NO_PRICE_SEED) {
+            console.log('   XCHAIN_E2E_NO_PRICE_SEED=1; venue publishes its own prices, not seeding')
+            this.skip()
+            return
+        }
         if (!(await priceSnapshotHelper.isAvailable())) {
             console.log('   price_snapshots not reachable; skipping seed (non-fee venue)')
             this.skip()

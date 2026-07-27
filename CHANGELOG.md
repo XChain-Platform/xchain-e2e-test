@@ -8,7 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- `test/actions/xchainPriceDerivation.test.js`: render drill prices through `bcformat` so the ORDER wait predicate gets strings, not Decimal objects the DB driver cannot bind.
+- `test/actions/xchainPriceDerivation.test.js`: page the hub price-snapshot endpoint to exhaustion, so the newest rounds stay visible on a venue publishing 37 pairs a minute.
 - Added a CI workflow with the coin-registry drift-guard job (repo previously had no CI at all).
+
+### Added
+- Every XCHAIN/USD seed site is now suppressible via `XCHAIN_E2E_NO_PRICE_SEED`, enforced by `test/unit/xchainPriceSeedGuard.test.js` ( step 8).
 
 ### Added
 - `test/federation/multiHubLlmOutage.test.js`: Phase-4 llm outage drills (throttled provider_error publication + expiry refund, mid-window recovery, wedged-leader rotation, governance model ladder, hard-kill backstop); MultiValidatorHub accepts `extraP2pConfig`.

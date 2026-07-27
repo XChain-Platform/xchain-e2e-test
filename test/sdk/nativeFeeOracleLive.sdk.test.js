@@ -91,7 +91,7 @@ const HUB_DB_NAME = process.env.HUB_DB_NAME || 'XChain_Hub';
 // not matter here" is exactly the reasoning that let 1.00 spread across the suite.
 // round 990001 is the agreed sidecar round; the test asserts the action's
 // oracle_round is NOT a seed sentinel (so it must be the live DOGE/USD round).
-const { BOOTSTRAP_XCHAIN_USD } = require('../helpers/xchainPriceConstants');
+const { BOOTSTRAP_XCHAIN_USD, NO_PRICE_SEED } = require('../helpers/xchainPriceConstants');
 const XCHAIN_USD_PRICE   = BOOTSTRAP_XCHAIN_USD;
 const XCHAIN_SIDECAR_RND = 990001;
 
@@ -165,6 +165,11 @@ describe('native-coin fee against a LIVE price oracle feed (DOGE)', function () 
     let liveDogeBlock;    // DOGE block index the headline ISSUE was in
 
     before(async function () {
+        //  step 8: the XCHAIN/USD sidecar below is a hand-seed into the hub
+        // DB; on a venue whose hub derives the pair it would shadow every real
+        // round. This suite's point is the LIVE DOGE/USD half, so on a publishing
+        // venue the derivation suite covers the whole path instead.
+        if (NO_PRICE_SEED) this.skip()
         // 1) The XCHAIN/USD sidecar in the HUB DB (mirrors to the indexer via the
         //    real HubDbSync channel). Stamp block_timestamp at the DOGE tip's block
         //    time: the H-3 time gate (NATIVE_FEE_PRICE_TIME_GATE, armed 2026-07-07)

@@ -14,7 +14,7 @@ const transactionHelper = require('../transactionHelper')
 const issueHelper = require('../helpers/issueHelper')
 const gasHelper = require('../helpers/gasHelper')
 const nativeFeeHelper = require('../helpers/nativeFeeHelper')
-const { BOOTSTRAP_XCHAIN_USD } = require('../helpers/xchainPriceConstants')
+const { BOOTSTRAP_XCHAIN_USD, NO_PRICE_SEED } = require('../helpers/xchainPriceConstants')
 
 // Live-stack proof of native-coin USD-pegged fee payment, using the DISPENSER expiration fee
 // (which, unlike the ISSUE issuance fee, is NOT gated behind the mainnet activation height
@@ -63,6 +63,9 @@ async function feeAndActions(txHash){
 
 describe('Native-coin fee payment via DISPENSER expiration fee (live stack)', function () {
     before(async function () {
+        //  step 8: fixture-priced suite; unrunnable where the hub publishes
+        // the pair (the seed would shadow every derived round).
+        if (NO_PRICE_SEED) this.skip()
         // Throws on LTC/DOGE when unresolvable; skips only on gas-mode stacks.
         const mode = await nativeFeeHelper.discoverFeeMode()
         if (!mode.enabled) this.skip()

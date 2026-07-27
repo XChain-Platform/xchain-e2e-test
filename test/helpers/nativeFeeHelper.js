@@ -35,7 +35,7 @@ const PLACEHOLDER = 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'
 //  step 8: this was 1.00 for the whole pre-derivation era, which is a value no
 // producer has ever emitted or ever will. Seeding the bootstrap instead means these
 // suites assert against what a real hub publishes today.
-const { BOOTSTRAP_XCHAIN_USD } = require('./xchainPriceConstants')
+const { BOOTSTRAP_XCHAIN_USD, NO_PRICE_SEED } = require('./xchainPriceConstants')
 const XCHAIN_USD = BOOTSTRAP_XCHAIN_USD
 const COIN_USD   = '100000.00000000'
 
@@ -67,7 +67,8 @@ const COIN_ROUND   = 888100002
 let _lastSeedMs = 0
 
 // See seedGlobalPrices: opt-in suppression for a venue that derives XCHAIN/USD.
-const NO_PRICE_SEED = process.env.XCHAIN_E2E_NO_PRICE_SEED === '1'
+// The flag has ONE definition for the whole tree (xchainPriceConstants, imported
+// above), enforced per seed site by the guard test.
 let _noSeedAnnounced = false
 
 // Only LTC/DOGE mandate a native fee output; BTC uses the XCHAIN-gas fallback.

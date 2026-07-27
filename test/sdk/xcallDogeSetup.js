@@ -36,7 +36,7 @@
 const axios   = require('axios');
 const mariadb = require('mariadb');
 const { XChainSDK } = require('./sdkHelper');
-const { BOOTSTRAP_XCHAIN_USD, BOOTSTRAP_XCHAIN_USD_NUM } = require('../helpers/xchainPriceConstants');
+const { BOOTSTRAP_XCHAIN_USD, BOOTSTRAP_XCHAIN_USD_NUM, refuseSeedIfSuppressed } = require('../helpers/xchainPriceConstants');
 
 // Seeded fee-oracle prices. XCHAIN comes from the shared bootstrap constant (the
 // value a real hub publishes); DOGE is a venue fiction chosen for round arithmetic.
@@ -122,6 +122,7 @@ async function main() {
         const rows = await c.query('SELECT block_time FROM blocks ORDER BY block_index DESC LIMIT 1');
         return rows.length ? Number(rows[0].block_time) : Math.floor(Date.now() / 1000);
     });
+    refuseSeedIfSuppressed('xcallDogeSetup');
     await withConn('XChain_Hub', process.env.HUB_DB_USER, process.env.HUB_DB_PASS, async (c) => {
         for (const [pair, price, round] of [['DOGE/USD', DOGE_USD_SEED, 990001], ['XCHAIN/USD', BOOTSTRAP_XCHAIN_USD, 990002]]) {
             await c.query(

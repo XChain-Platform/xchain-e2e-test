@@ -51,6 +51,10 @@ const GAS_TICK = 'XCHAIN'
 // like the sibling-checkout guard above.
 const HUB_API_URL   = process.env.HUB_API_URL   || 'http://127.0.0.1:10000'
 const MINER_API_URL = process.env.MINER_API_URL || 'http://127.0.0.1:3025'
+// The indexer's HTTP health view (chain lag), beside its JSON-RPC port.
+const INDEXER_STATUS_URL = process.env.INDEXER_STATUS_URL ||
+    ('http://' + (process.env.INDEXER_URL || '127.0.0.1') + ':' +
+     (process.env.INDEXER_API_PORT || '3024') + '/status')
 
 // Production window constants (constants.js on both sides of the vendoring).
 // The venue must run the hub with these UNSET so the drill proves the shipped
@@ -66,11 +70,23 @@ const CONFIRMATION_BUFFER = 6
 // at a ten-minute cadence to reach six digits.
 const SEED_ROUND_FLOOR = 990000
 
+// Page to exhaustion: this venue finalizes 37 pairs a minute, so a single
+// since_id=0 fetch stops covering the NEWEST rounds within hours of venue
+// uptime, and every consumer below reasons about the newest rounds.
 async function hubPriceSnapshots() {
-    const res = await fetch(HUB_API_URL + '/hub-db/snapshot/price_snapshots?since_id=0&limit=5000')
-    if (!res.ok) throw new Error('hub snapshot endpoint HTTP ' + res.status)
-    const body = await res.json()
-    return (body.rows || []).filter(r => r.status === 'finalized')
+    const all = []
+    let since = 0
+    for (;;) {
+        const res = await fetch(HUB_API_URL + '/hub-db/snapshot/price_snapshots?since_id=' + since + '&limit=5000')
+        if (!res.ok) throw new Error('hub snapshot endpoint HTTP ' + res.status)
+        const body = await res.json()
+        const rows = body.rows || []
+        if (!rows.length) break
+        all.push(...rows)
+        since = rows[rows.length - 1].id
+        if (rows.length < 5000) break
+    }
+    return all.filter(r => r.status === 'finalized')
 }
 
 // Finalized rows for a pair, ascending by round. The reference reads mirror the
@@ -99,21 +115,39 @@ async function minerRpc(method, params) {
 // This venue's miner mines on tx arrival only (no idle blocks), which is what
 // makes the derivation window deterministic enough to reproduce exactly: the
 // tip moves precisely when this test says so.
+// The indexer's own view of how far behind the CHAIN it is. `blocks` only says
+// what the indexer has parsed, so a target of "the height I saw plus what I
+// mined" is satisfied while the chain is still hundreds of blocks ahead - and
+// every wait after that (waitForOrder, waitForDispense) then times out against
+// actions sitting in blocks the indexer has not reached. Ask the service.
+async function indexerLag() {
+    const res = await fetch(INDEXER_STATUS_URL)
+    if (!res.ok) throw new Error('indexer /status HTTP ' + res.status)
+    const body = await res.json()
+    return { lag: Number(body.lag), indexerBlock: Number(body.indexerBlock),
+             decoderBlock: Number(body.decoderBlock) }
+}
+
 async function mineAndIndex(db, count, timeoutMs) {
-    const start = Number((await db.doQuery('SELECT MAX(block_index) AS h FROM blocks'))[0].h)
     let remaining = count
     while (remaining > 0) {
         const n = Math.min(200, remaining)
         await minerRpc('generate_blocks', { count: n })
         remaining -= n
     }
-    const target = start + count
+    // Wait for the indexer to reach the CHAIN, not a height arithmetic says it
+    // should have reached: a thousand-block burial takes minutes to parse, and
+    // returning early is what turns this leg's later waits into timeouts that
+    // read like protocol failures.
     const deadline = Date.now() + (timeoutMs || 300000)
+    let last = null
     for (;;) {
-        const h = Number((await db.doQuery('SELECT MAX(block_index) AS h FROM blocks'))[0].h)
-        if (h >= target) return h
-        if (Date.now() > deadline) throw new Error('indexer stuck at ' + h + ' waiting for ' + target)
-        await new Promise(r => setTimeout(r, 2000))
+        last = await indexerLag()
+        if (Number.isFinite(last.lag) && last.lag <= 0) return last.indexerBlock
+        if (Date.now() > deadline)
+            throw new Error('indexer still ' + last.lag + ' blocks behind the chain (' +
+                last.indexerBlock + '/' + last.decoderBlock + ') after mining ' + count)
+        await new Promise(r => setTimeout(r, 5000))
     }
 }
 
@@ -419,7 +453,13 @@ describe('XCHAIN price derivation from real fills ( step 7)', function () {
         })
 
         it('supersedes the carry-forward with the exact volume-weighted value', async function () {
-            this.timeout(900000)
+            // Budgeted for the burial, not for the assertions. Ageing a fill out of
+            // a 1000-block window means mining ~1000 blocks AND waiting for the
+            // indexer to parse them, and this venue parses at a couple of seconds a
+            // block, so the burial alone can run past half an hour on a chain that
+            // has not been buried before. A rerun on an already-buried venue skips
+            // it entirely and the whole leg costs a few minutes.
+            this.timeout(3600000)
             const db = queryAdapter(indexerDatabase)
 
             // 1. Age every pre-existing fill out of the derivation window, so the
@@ -446,7 +486,10 @@ describe('XCHAIN price derivation from real fills ( step 7)', function () {
             assert.strictEqual(lookback.ok, true, 'burial look-back must succeed: ' + lookback.error)
             const newestFill = lookback.fills.reduce((m, f) => Math.max(m, f.blockIndex), 0)
             const burialDeficit = (newestFill + WINDOW_BLOCKS + CONFIRMATION_BUFFER + 1) - tipNow
-            if (burialDeficit > 0) await mineAndIndex(db, burialDeficit + 1, 900000)
+            // 3000s covers ~1000 blocks at this venue's parse rate with slack; the
+            // wait is on the indexer reaching the chain, so a shorter budget just
+            // returns early and moves the failure to an unrelated later assertion.
+            if (burialDeficit > 0) await mineAndIndex(db, burialDeficit + 1, 3000000)
 
             // 2. Wait for two consecutive finalized rounds with the same value:
             //    that is the stabilized carry-forward CF.
@@ -470,8 +513,13 @@ describe('XCHAIN price derivation from real fills ( step 7)', function () {
             const allRows = await hubPriceSnapshots()
             const btcUsdNow = pairRows(allRows, 'BTC/USD').slice(-1)[0]
             assert(btcUsdNow, 'venue must publish BTC/USD')
-            const rate1Btc = bcmath.bcdiv(bcmath.bcmul(cf, '1.04', 16), btcUsdNow.price, 8)
-            const rate2Btc = bcmath.bcdiv(bcmath.bcmul(cf, '0.97', 16), btcUsdNow.price, 8)
+            // bcmath helpers return Decimal OBJECTS (spec §4). Everything below
+            // hands these to string concatenation (the wire message) and to the
+            // mariadb driver (the waitFor predicates), and the driver cannot
+            // parameterize a Decimal - the coin-side ORDER wait times out against
+            // a row that indexed valid. Render to fixed 8dp strings HERE, once.
+            const rate1Btc = bcmath.bcformat(bcmath.bcdiv(bcmath.bcmul(cf, '1.04', 16), btcUsdNow.price, 8), 8)
+            const rate2Btc = bcmath.bcformat(bcmath.bcdiv(bcmath.bcmul(cf, '0.97', 16), btcUsdNow.price, 8), 8)
             assert(bcmath.bcgt(rate1Btc, '0') && bcmath.bcgt(rate2Btc, '0'),
                 'drill rates must be representable at 8dp; CF too small vs BTC/USD would be a venue defect')
 
@@ -509,7 +557,7 @@ describe('XCHAIN price derivation from real fills ( step 7)', function () {
 
             const clock = await db.doQuery('SELECT MAX(block_time) AS t FROM blocks')
             const expiration = Number(clock[0].t) + 86400
-            const coinTotal = bcmath.bcmul(rate2Btc, '50', 8)
+            const coinTotal = bcmath.bcformat(bcmath.bcmul(rate2Btc, '50', 8), 8)
 
             const buyOrder = await orderHelper.sendOrderV0(
                 dexBuyer, COIN_CODE, '', coinTotal,
@@ -609,8 +657,20 @@ describe('XCHAIN price derivation from real fills ( step 7)', function () {
     // SELECTION, so they run on any venue with the sibling checkouts.
     describe('selection exclusions', function () {
 
+        before(function () {
+            // Same gate as the trade legs above: both exclusions need XCHAIN
+            // trades to exclude, and XCHAIN is BTC-only as a balance-bearing token.
+            if (COIN_CODE !== 'BTC') this.skip()
+        })
+
         it('excludes a token-for-token dispense from the derivation', async function () {
-            this.timeout(300000)
+            // Five minutes is not enough when this file's own supersession leg has
+            // just mined a thousand burial blocks: these legs then wait on actions
+            // sitting in blocks the indexer has not parsed yet, and the harness's
+            // own "indexer is N blocks behind" extensions run out first. The
+            // failure that produces is a bare mocha timeout that says nothing about
+            // the exclusion under test.
+            this.timeout(900000)
             const db = queryAdapter(indexerDatabase)
 
             // An XCHAIN dispenser PRICED IN A TOKEN is a real trade with no coin
@@ -653,7 +713,7 @@ describe('XCHAIN price derivation from real fills ( step 7)', function () {
         })
 
         it('excludes cross-chain trades, at both layers that can carry one', async function () {
-            this.timeout(300000)
+            this.timeout(900000)
             const db = queryAdapter(indexerDatabase)
 
             // The §11 cross-chain exclusion is `give_coin_id = get_coin_id = <this

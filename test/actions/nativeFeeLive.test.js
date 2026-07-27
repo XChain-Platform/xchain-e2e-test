@@ -12,7 +12,7 @@ const assert = require('assert')
 const cryptoHelper = require('../cryptoHelper')
 const transactionHelper = require('../transactionHelper')
 const nativeFeeHelper = require('../helpers/nativeFeeHelper')
-const { BOOTSTRAP_XCHAIN_USD } = require('../helpers/xchainPriceConstants')
+const { BOOTSTRAP_XCHAIN_USD, NO_PRICE_SEED } = require('../helpers/xchainPriceConstants')
 
 // Live-stack proof of native-coin USD-pegged fee payment.
 //
@@ -90,6 +90,11 @@ function issueMessage(tick){
 
 describe('Native-coin fee payment (live stack)', function () {
     before(async function () {
+        //  step 8: this suite seeds the pair and computes its expected fees
+        // FROM the fixture prices, so on a venue whose hub publishes the pair the
+        // seed would shadow every derived round. Not runnable there; the
+        // derivation suite owns native-fee proof on publishing venues.
+        if (NO_PRICE_SEED) this.skip()
         // Throws on LTC/DOGE when unresolvable (loud failure beats a silent
         // permanent skip on the very chains this suite targets).
         const mode = await nativeFeeHelper.discoverFeeMode()

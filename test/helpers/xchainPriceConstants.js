@@ -27,13 +27,34 @@
 // This is NOT a licence to keep hand-seeding forever. The end state (§10 step 8) is
 // a venue whose hub runs as a price-capability oracle validator and publishes the
 // pair itself, at which point the seeding goes away and the suites read what the
-// federation produced. That venue does not exist yet, so until it does the suites
-// seed the value the federation WOULD have produced rather than a 1.00-era fiction.
+// federation produced. The devhost BTC regtest venue IS that venue since
+// 2026-07-26; NO_PRICE_SEED below is how a run declares it.
 
 'use strict'
 
 const fs   = require('fs')
 const path = require('path')
+
+//  step 8, the validator-venue tightening. XCHAIN_E2E_NO_PRICE_SEED=1
+// declares "this venue's hub publishes prices itself". Every seeding site in the
+// tree must honor it, because a seeded row carries a synthetic round number far
+// above any round a hub reaches, getLatestPrice takes the HIGHEST round, and so
+// ONE unsuppressed seed silently shadows every derived round on the venue - the
+// exact condition that let the original bug survive. The guard test enforces
+// that every seed site references this flag. Opt-in, because on every venue
+// whose hub does NOT publish the pair the seed is what makes LTC/DOGE payable.
+const NO_PRICE_SEED = process.env.XCHAIN_E2E_NO_PRICE_SEED === '1'
+
+// For the sdk venue SETUPS, whose fee sizing is computed FROM the fixture prices:
+// suppressing their seed would not adapt them to live prices, it would misprice
+// every fee they compose. On a publishing venue they are not runnable at all, and
+// that must fail loudly at the seed site rather than as a fee rejection later.
+function refuseSeedIfSuppressed(site) {
+    if (!NO_PRICE_SEED) return
+    throw new Error(site + ': XCHAIN_E2E_NO_PRICE_SEED=1 but this setup prices its fees ' +
+        'from the fixture it seeds; it cannot run against a venue whose hub publishes ' +
+        'the pair. Unset the flag (non-validator venue) or use the derivation suite.')
+}
 
 // D2, DECIDED 2026-07-25 (operator): anchored on a token issuance costing $2.00.
 // GAS_PRICE 0.00001 XCHAIN/gas x ISSUE 100,000 gas is exactly 1.0 XCHAIN, so the
@@ -57,4 +78,5 @@ function hubBootstrapConstant() {
     return m ? m[1] : null
 }
 
-module.exports = { BOOTSTRAP_XCHAIN_USD, BOOTSTRAP_XCHAIN_USD_NUM, hubBootstrapConstant }
+module.exports = { BOOTSTRAP_XCHAIN_USD, BOOTSTRAP_XCHAIN_USD_NUM, hubBootstrapConstant,
+                   NO_PRICE_SEED, refuseSeedIfSuppressed }
