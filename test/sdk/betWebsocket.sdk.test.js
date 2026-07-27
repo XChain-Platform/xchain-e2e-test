@@ -56,7 +56,7 @@
 const { expect } = require('chai');
 const { makeSdk, fundedGasAddress } = require('./sdkHelper');
 const {
-    MIN_REFUND_WINDOW, getFeed, blockTime, jumpTo, releaseClock,
+    MIN_REFUND_WINDOW, getFeed, blockTime, jumpTo, releaseClock, resumeMiningAtFrozenClock,
     waitFeedStatus, issueWagerToken, submitBet, actionIndexOf
 } = require('./betHelper');
 
@@ -159,6 +159,16 @@ describe('[sdk] BET live websocket channel (§11.1 P7)', function () {
         await jumpTo(Number(feed.deadline) + 120, 2);
         const latched = await waitFeedStatus(feedIndex, 'closed');
         expect(latched.feed_status, 'feed latched closed').to.equal('closed');
+
+        // jumpTo parks the auto-miner for an hour so no block can slip in below the
+        // target timestamp, and the resolve below is broadcast rather than mined by
+        // this drill, so without this the tx sits in the mempool until the after()
+        // hook unparks the miner and the SDK's index wait expires first. Every other
+        // clock-driven family already pairs the two (betExpiry, betTerminal). This
+        // drill passed on BTC only because some other suite had left that venue's
+        // miner in default mode; on LTC it failed the same way twice, which is what
+        // a drill relying on venue luck looks like when the luck runs out.
+        await resumeMiningAtFrozenClock();
 
         const res = await submitBet(sdk, oracle, sdk.betting.resolveMarketParams({
             feedActionIndex: feedIndex, outcome: 0 }));
