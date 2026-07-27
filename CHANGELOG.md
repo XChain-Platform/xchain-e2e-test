@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a CI workflow with the coin-registry drift-guard job (repo previously had no CI at all).
 
 ### Added
+- `test/actions/xchainPriceDerivation.test.js`: prove a native fee priced off the derived XCHAIN/USD via the on-chain consensus path, bypassing the wall-clock-anchored `feequote` pre-flight .
 - Every XCHAIN/USD seed site is now suppressible via `XCHAIN_E2E_NO_PRICE_SEED`, enforced by `test/unit/xchainPriceSeedGuard.test.js` ( step 8).
 
 ### Added

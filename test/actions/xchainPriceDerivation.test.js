@@ -879,6 +879,97 @@ describe('XCHAIN price derivation from real fills ( step 7)', function () {
             console.log('native-fee ISSUE valid: tick ' + tick + ', fee ' + quote.requiredFeeNative
                 + ' ' + COIN_CODE + ' priced from mirrored XCHAIN/USD ' + mirrored[0].price)
         })
+
+        // The case above goes through `feequote`, which is the ADVISORY path and
+        // anchors staleness on WALL CLOCK (`_priceFeeQuote` passes refTime =
+        // nowEpoch, deliberately: a pre-flight is not tied to a future block).
+        // That makes it unrunnable on any venue whose chain clock runs ahead of
+        // real time - every hub round is then stamped in the future and the
+        // time-keyed selection `block_timestamp <= nowEpoch` matches nothing,
+        // which is  and cost a session to diagnose.
+        //
+        // This case proves the same thing through the path that actually GATES
+        // THE CHAIN: on-chain fee validation, anchored on the evaluated BLOCK's
+        // time. It sizes the fee itself from the mirrored rows, so it holds on a
+        // mock-time venue, and its real assertion is which round CONSENSUS used.
+        it('validates a native fee priced off the derived pair via the CONSENSUS path (no feequote)', async function () {
+            this.timeout(600000)
+            const db = queryAdapter(indexerDatabase)
+
+            // Newest finalized round per pair, and both must be real hub rounds.
+            const rows = await db.doQuery(
+                `SELECT coin_pair, round_number, price FROM price_snapshots
+                  WHERE status = 'finalized' AND coin_pair IN (?, ?)
+                    AND (coin_pair, round_number) IN (
+                        SELECT coin_pair, MAX(round_number) FROM price_snapshots
+                         WHERE status = 'finalized' GROUP BY coin_pair)`,
+                ['XCHAIN/USD', COIN_CODE + '/USD'])
+            assert.strictEqual(rows.length, 2, 'both pairs must be mirrored, got ' + JSON.stringify(rows))
+
+            let xchainUsd = null, coinUsd = null, derivedRound = null
+            for (const r of rows) {
+                assert(Number(r.round_number) < SEED_ROUND_FLOOR,
+                    r.coin_pair + ' newest round ' + r.round_number + ' is a SEEDED fixture, so this ' +
+                    'proof would price off a fixture and mean nothing ')
+                if (r.coin_pair === 'XCHAIN/USD') { xchainUsd = String(r.price); derivedRound = Number(r.round_number) }
+                else                              { coinUsd   = String(r.price) }
+            }
+
+            // ISSUE is 100,000 gas x GAS_PRICE 0.00001 = exactly 1.0 XCHAIN (§9 D2),
+            // so expected native = XCHAIN/USD / COIN/USD. Pay 1.02x: the chain
+            // rejects underpayment, and 2% clears 8dp rounding while staying well
+            // inside the 1.10 tolerance ceiling.
+            const expectedNative = Number(bcmath.bcformat(
+                bcmath.bcdiv(xchainUsd, coinUsd, 8), 8))
+            const feeSats = Math.round(expectedNative * 1.02 * 1e8)
+            assert(feeSats > 0, 'the derived pair must price a positive fee, got ' + feeSats)
+
+            const source = await cryptoHelper.getNewFundedAddress(
+                'XCPRICE.CONSENSUSFEE', COIN, NETWORK, null, 'legacy', 0, 2)
+            const tick = 'XCCF' + source['address'].substring(source['address'].length - 6).toUpperCase()
+            // Same wire shape the other native-fee suites use, which is proven to
+            // index on a fee chain.
+            const message = 'ISSUE|0|' + tick + '|1000|1000|0| consensus fee proof|1000' +
+                            '||||||||||||||||||'
+
+            // discoverFeeMode reads the stack's real fee mode (env or the indexer
+            // feeschedule) and does NOT seed; the seeding lives in
+            // seedGlobalPrices/getNativeFeeOutput, which this file never calls.
+            const mode = await require('../helpers/nativeFeeHelper').discoverFeeMode()
+            assert(mode.enabled, 'this venue must be a native-fee chain to run this case')
+            const feeDest = mode.destination
+            assert(feeDest, 'a FEE_DESTINATION must be resolvable on a native-fee venue')
+
+            const txHash = await transactionHelper.createAndSendTransaction(
+                source, message, null, [{ address: feeDest, value: feeSats }],
+                null, null, true)
+
+            const issueRow = await indexerDatabase.waitForIssue({
+                source: source['address'], tick: tick, txHash: txHash, status: 'valid'
+            }, 180000)
+            assert(issueRow, 'an ISSUE paid in native coin, priced off the mirrored derived pair, must be VALID')
+
+            // The assertion that makes this airtight: consensus must have priced the
+            // fee off a real hub round. A seed row would satisfy every assertion
+            // above while proving nothing.
+            const fee = await db.doQuery(
+                `SELECT f.payment_mode, f.native_coin_amount, f.oracle_round
+                   FROM fees f
+                   JOIN actions a             ON a.action_index = f.action_index
+                   JOIN transactions t        ON t.tx_index = a.tx_index
+                   JOIN index_transactions it ON it.id = t.tx_hash_id
+                  WHERE it.hash = ? LIMIT 1`, [txHash])
+            assert(fee.length, 'the indexer must have written a fees row')
+            assert.strictEqual(Number(fee[0].payment_mode), 1,
+                'the fee must be recorded as native-coin (payment_mode=1)')
+            assert(Number(fee[0].oracle_round) < SEED_ROUND_FLOOR,
+                'consensus priced the fee off round ' + fee[0].oracle_round + ', a SEEDED fixture: the ' +
+                'derived pair is shadowed and this proves nothing ')
+            console.log('CONSENSUS PROOF: payment_mode=' + fee[0].payment_mode +
+                        ' native_coin_amount=' + fee[0].native_coin_amount +
+                        ' oracle_round=' + fee[0].oracle_round +
+                        ' (derived round ' + derivedRound + ' = ' + xchainUsd + ' USD)')
+        })
     })
 
     describe('the anti-reseed guard (spec step 8)', function () {
