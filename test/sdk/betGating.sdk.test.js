@@ -116,12 +116,12 @@ describe('[sdk] BET feed gating (§12 E15)', function () {
             [dualD.address,     '10.00000000']
         ], 1000000, 'B15');
 
-        // Every list below is built from its CREATE items only. LIST edits are
-        // deliberately NOT used to compose fixtures: see , an edit's items
-        // land under the EDIT's own action_index and the parent list is never
-        // updated, so any list resolved by its create index (which is what a feed
-        // pins) never sees the edit. Composing a fixture with an edit would make
-        // these drills pass or fail for reasons unrelated to gating.
+        // Every list below is built from its CREATE items only, and stays that way
+        // now that  has landed: composing a fixture out of edits would let a
+        // gating drill pass or fail for reasons unrelated to gating (it did once,
+        // when an address believed to be on both lists was on neither). The
+        // mid-market case below is the one that exercises edits, deliberately on
+        // its own list state.
         allowList  = await createAddressList(oracle, memberA.address);
         blockList  = await createAddressList(oracle, blockedC.address);
         // dualD is on BOTH of these, each by creation, which is the precedence case.
@@ -187,22 +187,15 @@ describe('[sdk] BET feed gating (§12 E15)', function () {
             /not authorized|SOURCE/i, 'an address on BOTH lists (block must win)');
     });
 
-    // SKIPPED pending , a pre-existing LIST defect this drill uncovered.
-    //
-    // A LIST edit writes its resulting items under the EDIT's own action_index and
-    // never updates the parent list's rows, so a list resolved by its CREATE index
-    // -- which is exactly what a feed pins in bet_feeds.allow_list -- never sees
-    // the edit. Verified directly against the chain: after a valid REMOVE, the
-    // removed address is still the only row under the create index, and the edit
-    // index has no rows at all.
-    //
-    // The consequence for betting is that a members-only market cannot revoke
-    // membership (nor grant it after create). The failure is NOT in BET's gating,
-    // which reads the list correctly; it is in the shared list machinery, so it
-    // equally affects every other consumer that pins a list by its create index.
-    // Un-skip when  lands: the assertions below are the spec behaviour and
-    // should then pass unchanged.
-    it.skip('removing a member mid-market rejects new bets but still settles the placed one', async function () {
+    // This drill uncovered  and is un-skipped unchanged now that it has
+    // landed. A LIST edit used to write its resulting items under the EDIT's own
+    // action_index and never touch the parent's rows, so a list resolved by its
+    // CREATE index -- exactly what a feed pins in bet_feeds.allow_list -- never
+    // saw the edit and a members-only market could neither revoke nor grant
+    // membership. getList now resolves a reference to the head of the list's edit
+    // chain (indexer list_edit_resolution_activation.js, armed from genesis on
+    // regtest), so the assertions below are the spec behaviour end to end.
+    it('removing a member mid-market rejects new bets but still settles the placed one', async function () {
         const { feedIndex, deadline } = await openMarket('E15 mid-market removal', { allowList });
 
         // memberA bets while still a member.
@@ -245,7 +238,19 @@ describe('[sdk] BET feed gating (§12 E15)', function () {
         const label = 'E15 unknown list ref';
         // A syntactically fine action index that names no LIST at all. The SDK
         // cannot know it is bogus, so the INDEXER is what must reject it.
-        await openMarket(label, { allowList: 999999999 });
+        //
+        // The throw is caught for the same reason expectPlaceRejected catches:
+        // the chain's record is the authority. It became load-bearing with the
+        //  actionWaiter hardening, which stopped reading an empty action
+        // set as 'valid' and so now waits long enough to see the rejection and
+        // raise ACTION_REJECTED. Before that this create returned normally with
+        // an ASSUMED valid, which is the weaker outcome, not the better one.
+        try {
+            await openMarket(label, { allowList: 999999999 });
+        } catch (e) {
+            expect(String(e && e.message), 'the SDK surfaced the indexer rejection')
+                .to.match(/ALLOW_LIST|invalid/i);
+        }
 
         const rows = await dbQuery(
             `SELECT f.action_index, s.status AS parse_status
