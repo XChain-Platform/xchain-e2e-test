@@ -267,6 +267,82 @@ describe('BlockchainConnector', function () {
         });
     });
 
+    // Reorg-drill primitives: enumerate a block's transactions, put an orphaned
+    // transaction back, and tell "in the mempool" apart from "already re-mined".
+    describe('getBlock', function () {
+        it('sends getblock with the hash and default verbosity 1', async function () {
+            axiosPostStub.resolves(makeResponse({ result: { tx: ['a', 'b'] } }));
+
+            const block = await connector.getBlock('deadbeef');
+
+            const data = axiosPostStub.firstCall.args[1];
+            assert.strictEqual(data.method, 'getblock');
+            assert.deepStrictEqual(data.params, ['deadbeef', 1]);
+            assert.deepStrictEqual(block.tx, ['a', 'b']);
+        });
+
+        it('coerces the verbosity to a number', async function () {
+            axiosPostStub.resolves(makeResponse({ result: {} }));
+
+            await connector.getBlock('deadbeef', '2');
+
+            assert.deepStrictEqual(axiosPostStub.firstCall.args[1].params, ['deadbeef', 2]);
+        });
+
+        it('throws when the node returns an error body', async function () {
+            axiosPostStub.resolves(makeResponse({ error: { code: -5, message: 'Block not found' } }));
+            await assert.rejects(() => connector.getBlock('nope'), /getblock RPC error/);
+        });
+    });
+
+    describe('sendRawTransaction', function () {
+        it('sends sendrawtransaction with the raw hex and returns the txid', async function () {
+            axiosPostStub.resolves(makeResponse({ result: 'txid-1' }));
+
+            const txid = await connector.sendRawTransaction('0100beef');
+
+            const data = axiosPostStub.firstCall.args[1];
+            assert.strictEqual(data.method, 'sendrawtransaction');
+            assert.deepStrictEqual(data.params, ['0100beef']);
+            assert.strictEqual(txid, 'txid-1');
+        });
+
+        // The reorg drill re-broadcasts a whole orphaned chain and has to read the
+        // reject reason to tell "parent not back yet" from a real failure.
+        it('surfaces the node reject reason', async function () {
+            axiosPostStub.resolves(makeResponse({ error: { code: -25, message: 'bad-txns-inputs-missingorspent' } }));
+            await assert.rejects(
+                () => connector.sendRawTransaction('0100beef'),
+                /sendrawtransaction RPC error.*missingorspent/
+            );
+        });
+    });
+
+    describe('getTransaction', function () {
+        it('sends getrawtransaction verbose and returns the object', async function () {
+            axiosPostStub.resolves(makeResponse({ result: { txid: 'txid-1', confirmations: 3 } }));
+
+            const tx = await connector.getTransaction('txid-1');
+
+            const data = axiosPostStub.firstCall.args[1];
+            assert.strictEqual(data.method, 'getrawtransaction');
+            assert.deepStrictEqual(data.params, ['txid-1', true]);
+            assert.strictEqual(tx.confirmations, 3);
+        });
+
+        // An unknown txid is an expected state during a reorg (the tx is gone from the
+        // node entirely), so it must read as null rather than throw.
+        it('returns null when the node has never seen the txid', async function () {
+            axiosPostStub.resolves(makeResponse({ error: { code: -5, message: 'No such mempool transaction' } }));
+            assert.strictEqual(await connector.getTransaction('missing'), null);
+        });
+
+        it('returns null when the request itself fails', async function () {
+            axiosPostStub.rejects(makeHttpError(500));
+            assert.strictEqual(await connector.getTransaction('boom'), null);
+        });
+    });
+
     describe('getFeePerKilobyte', function () {
         it('returns feerate when present in response', async function () {
             const feerate = 0.00012345;
