@@ -66,6 +66,10 @@ const COIN_ROUND   = 888100002
 
 let _lastSeedMs = 0
 
+// See seedGlobalPrices: opt-in suppression for a venue that derives XCHAIN/USD.
+const NO_PRICE_SEED = process.env.XCHAIN_E2E_NO_PRICE_SEED === '1'
+let _noSeedAnnounced = false
+
 // Only LTC/DOGE mandate a native fee output; BTC uses the XCHAIN-gas fallback.
 function isFeeChain(){
     return global.COIN_CODE === 'LTC' || global.COIN_CODE === 'DOGE'
@@ -86,8 +90,30 @@ function resolveFeeDestination(){
 // contract-fee validation looks one up for every DEPLOY/EXECUTE (without a
 // current snapshot the action indexes `invalid: no current oracle price for
 // BTC/USD`, a false red/green by timing on runs past ORACLE_MAX_PRICE_AGE).
-// No-op only when the last seed is still fresh (unless force=true).
+// No-op only when the last seed is still fresh (unless force=true), or when the
+// venue derives the pair itself (NO_PRICE_SEED below).
 async function seedGlobalPrices(force){
+    //  step 8, the full de-seed. On a venue whose own hub publishes
+    // XCHAIN/USD (a price-capability oracle validator), seeding it is the defect
+    // this item exists to remove rather than a convenience: the seed carries a
+    // synthetic round number far above any the hub will ever reach, and
+    // getLatestPrice picks the highest round, so ONE seeded row silently
+    // shadows every derived round and a broken derivation still reads green.
+    // Force does not override this - a forced re-seed is still a seed.
+    //
+    // Deliberately opt-IN. Everywhere else the seed is what makes LTC/DOGE
+    // payable at all, so defaulting this on would red every native-fee suite on
+    // every venue whose hub does not derive the pair, which today is all of them
+    // but one.
+    if (NO_PRICE_SEED) {
+        if (!_noSeedAnnounced) {
+            _noSeedAnnounced = true
+            console.log('nativeFeeHelper: XCHAIN_E2E_NO_PRICE_SEED=1; not seeding oracle prices ' +
+                '(the venue is expected to publish them itself)')
+        }
+        return
+    }
+
     const now = Date.now()
     if (!force && (now - _lastSeedMs) < SEED_REFRESH_MS) return
 

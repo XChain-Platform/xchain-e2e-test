@@ -59,6 +59,13 @@ const MINER_API_URL = process.env.MINER_API_URL || 'http://127.0.0.1:3025'
 const WINDOW_BLOCKS = 1000
 const CONFIRMATION_BUFFER = 6
 
+// Lowest synthetic round number any seeding helper in this repo writes
+// (nativeFeeHelper 888100001, nativeFeeLive 999200001, nativeFeeDispenser
+// 999300001, the DOGE setups 990001). A price_snapshots row at or above it is a
+// fixture; a hub's round counter is a small monotonic integer that needs decades
+// at a ten-minute cadence to reach six digits.
+const SEED_ROUND_FLOOR = 990000
+
 async function hubPriceSnapshots() {
     const res = await fetch(HUB_API_URL + '/hub-db/snapshot/price_snapshots?since_id=0&limit=5000')
     if (!res.ok) throw new Error('hub snapshot endpoint HTTP ' + res.status)
@@ -217,8 +224,16 @@ describe('XCHAIN price derivation from real fills ( step 7)', function () {
             assert.strictEqual(selection.ok, true, 'selection must succeed: ' + selection.error)
             assert(selection.fills.length >= 1, 'the dispense must be selected as a fill')
 
-            const mine = selection.fills.filter(f => f.venue === 'dispense')
-            assert(mine.length >= 1, 'at least one dispense fill must be present')
+            // THIS dispense, by action index - not "every dispense fill in the
+            // window". A 100000-block window on a venue that has run this suite
+            // before also holds the earlier runs' dispenses at their own rates, so
+            // the venue-wide filter made the assertion below pass only on a chain
+            // this test had never touched, and fail on every rerun with a
+            // clamped-VWAP number that looks like a derivation bug and is not.
+            const mine = selection.fills.filter(f =>
+                f.venue === 'dispense' && f.actionIndex === Number(dispenseRow['action_index']))
+            assert.strictEqual(mine.length, 1,
+                'exactly this dispense must be selected as a fill, got ' + mine.length)
 
             // Anchor the band on the rate itself so nothing is winsorized; the clamp
             // is unit-tested separately and would only obscure the units question here.
@@ -582,6 +597,18 @@ describe('XCHAIN price derivation from real fills ( step 7)', function () {
                 'supersession must move the pair off the carry-forward')
         })
 
+    })
+
+    // The two selection shapes the unit suite could only pin by asserting on the
+    // text of the SQL, because regtest held zero rows of either (spec §10 step 1
+    // residual, step 7 closes it). An exclusion nothing has ever exercised is the
+    // kind that turns out to be inverted, and inverted here means pricing every
+    // LTC/DOGE fee off trades that carry no XCHAIN/coin information at all.
+    //
+    // Neither of these needs the validator hub: they are properties of the
+    // SELECTION, so they run on any venue with the sibling checkouts.
+    describe('selection exclusions', function () {
+
         it('excludes a token-for-token dispense from the derivation', async function () {
             this.timeout(300000)
             const db = queryAdapter(indexerDatabase)
@@ -624,6 +651,98 @@ describe('XCHAIN price derivation from real fills ( step 7)', function () {
                 selection.fills.filter(f => f.actionIndex === Number(dispense.action_index)).length, 0,
                 'a token-for-token dispense must never be selected as a price fill')
         })
+
+        it('excludes cross-chain trades, at both layers that can carry one', async function () {
+            this.timeout(300000)
+            const db = queryAdapter(indexerDatabase)
+
+            // The §11 cross-chain exclusion is `give_coin_id = get_coin_id = <this
+            // chain>` on BOTH predicates. Unlike token-for-token there is no way to
+            // make a cross-chain FILL row on a single-chain venue, and that is not a
+            // gap in the venue - it is a property of the chain, which this leg
+            // asserts rather than assumes:
+            //
+            //   dispensers: refused outright. A cross-chain dispenser is not wired
+            //     (dispenser.js, `GET_COIN (network)`), so no cross-chain dispense
+            //     row can exist on any chain today.
+            //   orders: accepted. A cross-chain ORDER escrows locally and is matched
+            //     and settled by the validator federation, so the local chain holds a
+            //     real order row naming a FOREIGN coin - which is the row this test
+            //     creates, and the closest a single-chain venue gets to the shape the
+            //     exclusion is written against.
+            const otherCoin = (COIN_CODE === 'BTC') ? 'LTC' : 'BTC'
+
+            const seller = await cryptoHelper.getNewFundedAddress(
+                'XCPRICE.XCHAIN.SELLER', COIN, NETWORK, null, 'legacy', 0, 2)
+            await gasHelper.mintGas(seller, '200')
+
+            // (a) The dispenser layer: refused, so the exclusion has nothing to
+            //     exclude there. Asserted as a REJECTED create rather than skipped,
+            //     because "no rows of that shape exist" is only reassuring while the
+            //     reason holds - if cross-chain dispensers are ever wired, this fails
+            //     and the derivation's dispense predicate has to be re-examined
+            //     before that ships.
+            const rejected = await dispenserHelper.sendDispenserV0(
+                seller, COIN_CODE, GAS_TICK, 1, 5,
+                otherCoin, null, 0.05, seller['address'],
+                null, null, null, null,
+                null, null, ' cross-chain dispenser (must be refused)',
+                null, null, 'invalid: GET_COIN (network)')
+            assert(rejected.dispenser,
+                'a cross-chain dispenser create must index, as INVALID')
+
+            // (b) The order layer: a genuine cross-chain ORDER. It gives XCHAIN on
+            //     this chain and asks for the OTHER chain's native coin, so its
+            //     get_coin_id is a foreign coin id in this indexer's index_coins.
+            const clock = await db.doQuery('SELECT MAX(block_time) AS t FROM blocks')
+            const expiration = Number(clock[0].t) + 86400
+            const crossOrder = await orderHelper.sendOrderV0(
+                seller, COIN_CODE, GAS_TICK, '25',
+                otherCoin, '', '0.001',
+                seller['address'], expiration, '', '', ' cross-chain order')
+            assert(crossOrder.order, 'the cross-chain ORDER must index valid')
+
+            const coinIds = await db.doQuery(
+                `SELECT o.give_coin_id, o.get_coin_id, gc.coin AS give_coin, tc.coin AS get_coin
+                   FROM orders o
+                   JOIN index_coins gc ON gc.id = o.give_coin_id
+                   JOIN index_coins tc ON tc.id = o.get_coin_id
+                  WHERE o.action_index = ?`, [Number(crossOrder.order['action_index'])])
+            assert.strictEqual(coinIds.length, 1, 'the cross-chain order row must resolve both coins')
+            assert.strictEqual(String(coinIds[0].give_coin), COIN_CODE, 'give side is this chain')
+            assert.strictEqual(String(coinIds[0].get_coin), otherCoin, 'get side is the foreign chain')
+            assert.notStrictEqual(Number(coinIds[0].give_coin_id), Number(coinIds[0].get_coin_id),
+                'a cross-chain row must carry two DIFFERENT coin ids, or the predicate has nothing to exclude')
+
+            // The selection resolves ONE coin id and binds both sides of both
+            // predicates to it, so a row whose two coin ids differ cannot satisfy
+            // either. Assert the resolved id is this chain's and that nothing from
+            // the cross-chain order reached the fills.
+            const tip = Number((await db.doQuery('SELECT MAX(block_index) AS h FROM actions'))[0].h)
+            const selection = await derivation.query.getWindowFills(db, {
+                referenceHeight: tip, confirmationBuffer: 0, windowLength: WINDOW_BLOCKS,
+                gasTick: GAS_TICK, coin: COIN_CODE
+            })
+            assert.strictEqual(selection.ok, true, 'selection must succeed: ' + selection.error)
+            assert.strictEqual(Number(selection.coinId), Number(coinIds[0].give_coin_id),
+                'the derivation must resolve THIS chain\'s coin id')
+            assert.strictEqual(
+                selection.fills.filter(f => f.actionIndex === Number(crossOrder.order['action_index'])).length, 0,
+                'nothing from a cross-chain order may be selected as a price fill')
+
+            // And the general shape, over the live rows rather than this one order:
+            // no selected fill may come from a row whose two coin ids differ.
+            const crossMatches = await db.doQuery(
+                `SELECT action_index FROM order_matches WHERE give_coin_id <> get_coin_id`)
+            const crossDispenses = await db.doQuery(
+                `SELECT action_index FROM dispenses WHERE give_coin_id <> get_coin_id`)
+            const crossIndexes = new Set(
+                crossMatches.concat(crossDispenses).map(r => Number(r.action_index)))
+            assert.strictEqual(selection.fills.filter(f => crossIndexes.has(f.actionIndex)).length, 0,
+                'no cross-chain row may appear among the selected fills')
+            console.log('cross-chain exclusion: ' + crossMatches.length + ' cross matches / ' +
+                crossDispenses.length + ' cross dispenses on this chain, 0 selected')
+        })
     })
 
     describe('native-fee validation from the mirrored derived pair (non-BTC venue)', function () {
@@ -647,6 +766,25 @@ describe('XCHAIN price derivation from real fills ( step 7)', function () {
                   WHERE coin_pair = 'XCHAIN/USD' AND status = 'finalized'
                   ORDER BY round_number DESC LIMIT 1`)
             assert(mirrored.length, 'the indexer must hold a mirrored finalized XCHAIN/USD snapshot')
+
+            // ...and it must be a HUB round, not a leftover seed. This is the
+            // assertion that decides whether this leg proves anything: every
+            // seeding helper in this repo writes a synthetic round number in the
+            // 990000+ / 888100000+ space, getLatestPrice picks the HIGHEST
+            // round_number, and a hub's counter is a small monotonic integer. So
+            // one stale seed row from any earlier suite on the same venue outranks
+            // every round the hub will ever publish, and the fee below would then
+            // be priced off a fixture while the test reported success. Real rounds
+            // sit far below the floor; anything at or above it is a fixture.
+            //
+            // Suppress the harness's own seeding for this venue with
+            // XCHAIN_E2E_NO_PRICE_SEED=1 (nativeFeeHelper): it re-seeds from
+            // getNativeFeeOutput() on a throttle, so even a leg that opts out of
+            // fee injection can be overtaken mid-run by another action's seed.
+            assert(Number(mirrored[0].round_number) < SEED_ROUND_FLOOR,
+                'XCHAIN/USD newest round ' + mirrored[0].round_number + ' is a seeded fixture, not a hub ' +
+                'round: the derived pair is shadowed, so this leg would prove nothing. Clear the seeded ' +
+                'rows and re-run with XCHAIN_E2E_NO_PRICE_SEED=1')
             console.log('mirrored XCHAIN/USD round ' + mirrored[0].round_number + ' = ' + mirrored[0].price)
 
             const source = await cryptoHelper.getNewFundedAddress(
