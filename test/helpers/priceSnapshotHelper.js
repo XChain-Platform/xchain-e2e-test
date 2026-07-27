@@ -21,6 +21,7 @@ const mariadb = require('mariadb')
 // row to arrive.
 
 const topology = require('./hubMirrorTopology')
+const { SEED_SENTINEL_ROUNDS } = require('./xchainPriceConstants')
 
 // Which database this fixture WRITES to: always the one settlement reads, never
 // the hub upstream of it, which is the opposite of what oraclePriceHelper does.
@@ -145,6 +146,36 @@ module.exports = {
         let conn = await mariadb.createConnection(params)
         try {
             await conn.query("DELETE FROM price_snapshots WHERE coin_pair = ?", [coinPair])
+        } finally {
+            await conn.end().catch(() => {})
+        }
+    },
+
+    // . Delete ONLY the suite's synthetic seed rows, leaving every derived
+    // round untouched. clearPair above is too blunt for a venue whose own hub
+    // publishes the pair: there, the real rows are the point and wiping them
+    // would destroy what the run is meant to read.
+    //
+    // Needed because suppressing new seeds (XCHAIN_E2E_NO_PRICE_SEED) cannot
+    // retract rows an EARLIER run already wrote, and those carry round numbers
+    // far above anything a hub reaches, so getLatestPrice's ORDER BY
+    // round_number DESC keeps returning the fixture forever. Observed on BTC
+    // regtest answering feequote from round 888100002 at $2.00 while the hub had
+    // derived ~1948 at ~12.90 - every fee proof on that venue was silently
+    // pricing off a fixture, so a green run proved nothing.
+    //
+    // Returns the number of rows removed so a caller can say what it cleaned.
+    async clearSeedSentinels(coinPair){
+        if (!SEED_SENTINEL_ROUNDS.length) return 0
+        let params = resolveParams()
+        let conn = await mariadb.createConnection(params)
+        try {
+            let placeholders = SEED_SENTINEL_ROUNDS.map(() => '?').join(',')
+            let sql = "DELETE FROM price_snapshots WHERE round_number IN (" + placeholders + ")"
+            let args = SEED_SENTINEL_ROUNDS.slice()
+            if (coinPair) { sql += " AND coin_pair = ?"; args.push(coinPair) }
+            let res = await conn.query(sql, args)
+            return Number(res && res.affectedRows ? res.affectedRows : 0)
         } finally {
             await conn.end().catch(() => {})
         }

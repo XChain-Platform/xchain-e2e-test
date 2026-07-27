@@ -64,7 +64,9 @@ const SEED_REFRESH_MS = 2 * 60 * 1000
 // The _NOW pair carries the HIGHER round deliberately: getLatestPrice picks the
 // highest round among the rows a block is allowed to see, so where both rows are
 // visible the wall-clock one (the fresher of the two) wins. See seedGlobalPrices.
-// Any new sentinel here must also join SEED_SENTINELS in nativeFeeOracleLive.
+// Any new sentinel here must also join SEED_SENTINEL_ROUNDS in
+// xchainPriceConstants, which is both what nativeFeeOracleLive asserts against
+// and what clearSeedSentinels retracts on a publishing venue .
 const XCHAIN_ROUND     = 888100001
 const COIN_ROUND       = 888100002
 const XCHAIN_ROUND_NOW = 888100011
@@ -127,6 +129,23 @@ async function seedGlobalPrices(force){
             _noSeedAnnounced = true
             console.log('nativeFeeHelper: XCHAIN_E2E_NO_PRICE_SEED=1; not seeding oracle prices ' +
                 '(the venue is expected to publish them itself)')
+            // . Suppressing the seed is necessary but NOT sufficient: rows a
+            // pre-flag run already wrote carry sentinel round numbers far above any
+            // the hub reaches, and getLatestPrice orders by round DESC, so they go
+            // on shadowing every derived round and the venue keeps pricing off a
+            // fixture while looking green. Retract exactly those rows, once per
+            // process, leaving derived rounds untouched. Non-fatal: a venue whose
+            // DB this process cannot write is still readable, and the assertions
+            // downstream will catch a shadowed price anyway.
+            try {
+                const removed = await priceSnapshotHelper.clearSeedSentinels()
+                if (removed > 0)
+                    console.log('nativeFeeHelper: cleared ' + removed + ' leftover seed-sentinel ' +
+                        'price_snapshots row(s) that would have shadowed the derived rounds ')
+            } catch (e) {
+                console.log('nativeFeeHelper: WARN could not clear leftover seed-sentinel rows : ' +
+                    (e && e.message ? e.message : e))
+            }
         }
         return
     }

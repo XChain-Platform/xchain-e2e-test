@@ -78,5 +78,25 @@ function hubBootstrapConstant() {
     return m ? m[1] : null
 }
 
+// . Every synthetic round number any seeding site in the tree writes, in
+// ONE place. These used to be declared twice - the values in nativeFeeHelper and
+// a hand-maintained copy in nativeFeeOracleLive's SEED_SENTINELS - with a comment
+// asking future editors to keep them in lockstep, which is exactly the kind of
+// duplication that goes stale silently.
+//
+// They all sit far above any round a hub will ever reach, deliberately: a seeded
+// row must win getLatestPrice's `ORDER BY round_number DESC` on a venue that has
+// no oracle. The cost is that on a venue that DOES derive the pair, one leftover
+// row from an earlier run outranks every real round forever, and suppressing new
+// seeds cannot retract rows already written (, observed shadowing BTC
+// regtest at round 888100002 / $2.00 while the hub derived ~1948 at ~12.90).
+// That is what clearSeedSentinels exists to undo.
+const SEED_SENTINEL_ROUNDS = Object.freeze([
+    990001, 990002,          // dexDogeSetup + the nativeFeeOracleLive sidecar
+    888100001, 888100002,    // nativeFeeHelper XCHAIN_ROUND / COIN_ROUND (chain-time anchor)
+    888100011, 888100012,    // nativeFeeHelper *_ROUND_NOW (wall-clock anchor, seeded when the chain clock trails)
+    999200001, 999200002,    // nativeFeeLive band
+])
+
 module.exports = { BOOTSTRAP_XCHAIN_USD, BOOTSTRAP_XCHAIN_USD_NUM, hubBootstrapConstant,
-                   NO_PRICE_SEED, refuseSeedIfSuppressed }
+                   NO_PRICE_SEED, refuseSeedIfSuppressed, SEED_SENTINEL_ROUNDS }
