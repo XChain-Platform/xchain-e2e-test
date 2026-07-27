@@ -73,7 +73,9 @@
     "test:parity": "mocha --timeout 0 --exit --require ./test/parity/parityBoot.js test/parity/multichain-parity.test.js",
     "test:sdk:bet-expiry": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/sdk/betExpiry.sdk.test.js test/sdk/betBackdate.sdk.test.js",
     "test:sdk:bet-latch": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/sdk/betLatchAtomicity.sdk.test.js",
-    "test:sdk:bet-ws": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/sdk/betWebsocket.sdk.test.js"
+    "test:sdk:bet-ws": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/sdk/betWebsocket.sdk.test.js",
+    "test:sdk:bet-parity": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/sdk/betParity.sdk.test.js",
+    "test:sdk:multileg": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/sdk/multiLegSend.sdk.test.js"
   },
   "devDependencies": {
     "@stryker-mutator/core": "^8.7.1",
