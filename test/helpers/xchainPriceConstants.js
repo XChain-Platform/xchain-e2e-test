@@ -91,11 +91,27 @@ function hubBootstrapConstant() {
 // seeds cannot retract rows already written (, observed shadowing BTC
 // regtest at round 888100002 / $2.00 while the hub derived ~1948 at ~12.90).
 // That is what clearSeedSentinels exists to undo.
+//
+// The list must name EVERY synthetic round the tree writes, not just the
+// native-fee ones. A round that seeds but is absent here is worse than no clear
+// at all: the flagged run reports "cleared N rows" and looks finished while that
+// round keeps shadowing its pair. The first six entries below were exactly that
+// case, found still live on the BTC regtest venue after the LTC clear (
+// round 3): 999000001-6 and 999000708 were sitting above the hub's derived
+// rounds for BTC/EUR, BTC/GBP, BTC/JPY, BTC/CHF and BTC/CAD at a flat 50000.00.
+// seedSentinelCoverage.test.js now derives this set from the seed sites, so the
+// list cannot drift behind them again by hand.
 const SEED_SENTINEL_ROUNDS = Object.freeze([
-    990001, 990002,          // dexDogeSetup + the nativeFeeOracleLive sidecar
+    990001, 990002,          // dexDogeSetup + xcallDogeSetup + _ctlseed + the nativeFeeOracleLive sidecar
     888100001, 888100002,    // nativeFeeHelper XCHAIN_ROUND / COIN_ROUND (chain-time anchor)
     888100011, 888100012,    // nativeFeeHelper *_ROUND_NOW (wall-clock anchor, seeded when the chain clock trails)
-    999200001, 999200002,    // nativeFeeLive band
+    999000001, 999000002,    // dispenser FIAT Mode 1 / Mode 2 (the pair is COIN/<fiat>, not COIN/USD)
+    999000003, 999000004,
+    999000005, 999000006,
+    999000708,               // oracleMirror's validator leg
+    999200001, 999200002,    // nativeFeeLive band (chain-time anchor)
+    999200011, 999200012,    // nativeFeeLive band (wall-clock anchor)
+    999300001, 999300002,    // nativeFeeDispenser band
 ])
 
 module.exports = { BOOTSTRAP_XCHAIN_USD, BOOTSTRAP_XCHAIN_USD_NUM, hubBootstrapConstant,

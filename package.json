@@ -20,7 +20,7 @@
     "xchain-sdk": "file:./xchain-sdk"
   },
   "scripts": {
-    "ci": "mocha --no-config --timeout 30000 --exit 'test/unit/coins-conformance.test.js' 'test/unit/security/configuration/dependency-advisories.test.js' 'test/integration/parity/**/*.test.js' 'test/integration/multiHubActivationBoundary.integration.test.js'",
+    "ci": "mocha --no-config --timeout 30000 --exit 'test/unit/coins-conformance.test.js' 'test/unit/security/configuration/dependency-advisories.test.js' 'test/unit/security/configuration/sibling-tree-advisories.test.js' 'test/integration/parity/**/*.test.js' 'test/integration/multiHubActivationBoundary.integration.test.js'",
     "test": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/actions/**/*.test.js'",
     "test:contracts": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/contracts/**/*.test.js'",
     "test:auctions": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/contracts/englishAuction.test.js test/contracts/dutchAuction.test.js",
@@ -66,6 +66,7 @@
     "test:perf:budget": "mocha --timeout 120000 --exit --require ./test/initialCheck.test.js 'test/perf/**/*.perf.test.js'",
     "perf:gate": "node scripts/perf-gate.js",
     "perf:report": "node scripts/perf-report.js",
+    "venue:clear-sentinels": "node scripts/clear-seed-sentinels.js",
     "test:mutate": "npx stryker run",
     "test:mutate:integration": "npx stryker run stryker.phase2.config.mjs",
     "test:mutate:dry-run": "npx stryker run --dryRunOnly",
@@ -79,8 +80,8 @@
     "test:sdk:multileg": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/sdk/multiLegSend.sdk.test.js"
   },
   "devDependencies": {
-    "@stryker-mutator/core": "^8.7.1",
-    "@stryker-mutator/mocha-runner": "^8.7.1",
+    "@stryker-mutator/core": "^9.6.1",
+    "@stryker-mutator/mocha-runner": "^9.6.1",
     "chai": "^4.5.0",
     "fast-check": "^4.8.0",
     "mocha": "^11.7.5",
