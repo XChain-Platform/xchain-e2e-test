@@ -24,6 +24,17 @@ const { ECPairFactory } = require('ecpair')
 const psbtutils = require('bitcoinjs-lib/src/psbt/psbtutils')
 const axios = require('axios')
 const mariadb = require('mariadb')
+require('dotenv').config()
+
+// Credentials come from the environment, never from this file. A committed
+// literal is a launch-gate blocker  even for regtest, because these
+// repos go public. Fail closed rather than defaulting, so a missing variable
+// is an obvious error instead of a silent connection to the wrong database.
+function requiredEnv(name){
+    const v = process.env[name]
+    if(!v) throw new Error(name + " is not set; export it or add it to xchain-e2e-test/.env")
+    return v
+}
 const { BIP32Factory } = require('bip32')
 const bip32 = BIP32Factory(ecc)
 bitcoin.initEccLib(ecc)
@@ -38,13 +49,13 @@ const BTC_DB_CFG = {
     host:'127.0.0.1', port:13306,
     database:'XChain_BTC_Regtest_Decoder',
     user:'xchain_decoder_bitcoin_regtest',
-    password:'xchain-password', connectionLimit:2
+    password: requiredEnv('TP01_BTC_DECODER_DB_PASS'), connectionLimit:2
 }
 const DOGE_DB_CFG = {
     host:'127.0.0.1', port:13306,
     database:'XChain_DOGE_Regtest_Decoder',
     user:'xchain_decoder_dogecoin_regtest',
-    password:'xchain-password', connectionLimit:2
+    password: requiredEnv('TP01_DOGE_DECODER_DB_PASS'), connectionLimit:2
 }
 
 // fixed key so results are reproducible

@@ -4,3 +4,7 @@ xchain-hub
 xchain-indexer
 xchain-sdk
 xchain-sync
+xchain-contracts
+xchain-decoder
+xchain-encoder
+xchain-vm
