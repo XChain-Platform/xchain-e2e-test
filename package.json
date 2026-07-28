@@ -37,6 +37,7 @@
     "test:sdk:x402": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/sdk/x402.sdk.test.js",
     "test:sdk:mcp": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/sdk/mcp.sdk.test.js",
     "test:sdk:tickerid": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/sdk/ticker-id-equivalence.sdk.test.js",
+    "test:sdk:decoder": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/sdk/decoderRoundtrip.sdk.test.js",
     "test:compaction": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/actions/compactionFixLive.test.js",
     "test:federation": "E2E_REQUIRE_FEDERATION=1 mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/federation/multiHubAttestation.test.js'",
     "test:federation:nodeproof": "E2E_REQUIRE_FEDERATION=1 mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/federation/multiHubNodeProof.test.js'",
