@@ -18,7 +18,17 @@
  *
  ********************************************************************/
 
-const mariadb = require('mariadb');
+// : the driver is resolved when a pool is created, NOT when this module is
+// loaded. Tests mock mariadb by injecting a synthetic module into require.cache,
+// and a module-level binding froze whichever driver happened to be cached the
+// first time anything in the mocha process required this file. A new test file
+// sorting alphabetically earlier than the injecting one left db.js bound to the
+// REAL driver, so every `new Database()` opened a real pool against a dead host:
+// 55 failures across unrelated describes, all timeouts pointing nowhere near the
+// cause, and the injecting file still passed alone. require() re-reads
+// require.cache on every call, so looking the driver up here makes injection
+// order-independent: it only has to happen before the first `new Database()`.
+function mariadbDriver(){ return require('mariadb'); }
 
 class Database {
     constructor(host, port, dbName, user, pass){
@@ -30,6 +40,14 @@ class Database {
         this.WAIT_LAG_BLOCKS     = parseInt(process.env.E2E_WAIT_LAG_BLOCKS) || 2;
         this.WAIT_LAG_PROBE_MS   = parseInt(process.env.E2E_WAIT_LAG_PROBE_MS) || 2000;
         this.WAIT_MIN_FOR_EXTENSION = parseInt(process.env.E2E_WAIT_MIN_FOR_EXTENSION) || 5000;
+        // The second progress signal (see _waitFor): how often a long wait samples
+        // pipeline progress, and how recently action rows must have landed for the
+        // indexer to count as "still writing". The sample interval is floored so a
+        // wait cannot spend its budget probing, and the idle window is at least two
+        // intervals so two samples taken moments apart cannot read as a stall.
+        this.WAIT_PROBE_INTERVAL_MS = parseInt(process.env.E2E_WAIT_PROBE_INTERVAL_MS) || 10000;
+        this.WAIT_PROBE_MIN_MS      = parseInt(process.env.E2E_WAIT_PROBE_MIN_MS) || 1000;
+        this.WAIT_WRITE_IDLE_MS     = parseInt(process.env.E2E_WAIT_WRITE_IDLE_MS) || 20000;
         this.host   = host;
         this.port   = port;
         this.dbName = dbName;
@@ -58,7 +76,7 @@ class Database {
             // it made consensusHashConformance falsely RED on every block with such columns.
             bigIntAsNumber:   true
         };
-        this.pool = mariadb.createPool(this.connectionPoolParams);
+        this.pool = mariadbDriver().createPool(this.connectionPoolParams);
         this.transactionConnection = null;
     }
     
@@ -1100,10 +1118,28 @@ class Database {
     //
     // The tempting signal, "the chain is still advancing", is WRONG here: the
     // regtest miner mines continuously, so it is always true and the wait would
-    // never end. Indexer LAG is the right signal because it falls to zero exactly
-    // when waiting longer stops being useful. If the indexer has caught up to the
-    // chain and the row still is not there, the row is genuinely absent and the
-    // original deadline should stand.
+    // never end. Two signals ARE safe, because each one goes quiet exactly when
+    // waiting longer stops being useful:
+    //
+    //   1. indexer LAG. The indexer has not reached the block our row would be in,
+    //      so the row cannot exist yet. Falls to zero when the indexer catches up.
+    //   2. action-row WRITES. MAX(action_index) is still climbing, so the indexer
+    //      is chewing through real work and our row may be in the queue behind it.
+    //      This is the signal lag cannot see, and the one the observed failures
+    //      needed: every one of them was a wait for a ROW while the indexer kept
+    //      pace with blocks, so lag read zero and bought no time. Crucially this is
+    //      NOT the rejected "chain is advancing" signal: the miner's empty regtest
+    //      blocks carry no actions, so an idle stack does not move this mark and a
+    //      genuinely absent row still fails on the original deadline.
+    //
+    // Neither signal can be sampled once at the deadline: "still writing" is a
+    // comparison, so the wait samples progress periodically while it runs and asks
+    // at the deadline whether rows landed recently.
+    //
+    // Considered and rejected as a third signal: a non-empty mempool (the
+    // confirmation-latency case). A single stuck transaction would hold it true
+    // forever and inflate every genuine failure to the full extension budget, and
+    // unlike the other two it never goes quiet on its own.
     //
     // Extensions are capped so a wedged stack still fails a suite instead of
     // hanging it forever, and each one is logged so a slow run stays diagnosable
@@ -1114,10 +1150,23 @@ class Database {
         let deadline   = startMs + timeMax
         let extensions = 0
         let polls      = 0
-        // Retained for the give-up report below: the last lag the probe returned
+        // Retained for the give-up report below: the last answers the probe gave
         // (null means it could not answer) and whether it was ever consulted.
         let lastLag    = null
-        let lagProbes  = 0
+        let probes     = 0
+        let writeMark  = null   // highest action_index the indexer has written
+        let writeMoved = null   // when that mark last advanced
+        // Only waits that were meant to be long can be extended. Short waits are
+        // callers polling for something that should be immediate, and probing on
+        // their behalf costs more than it can ever save.
+        const eligible = timeMax >= this.WAIT_MIN_FOR_EXTENSION
+        // Sample often enough that even a short eligible wait gets two samples to
+        // compare, since one sample carries no write signal at all.
+        const probeEvery = Math.max(this.WAIT_PROBE_MIN_MS,
+                                    Math.min(this.WAIT_PROBE_INTERVAL_MS, Math.floor(timeMax / 3)))
+        const writeIdleMs = Math.max(this.WAIT_WRITE_IDLE_MS, probeEvery * 2)
+        let nextProbeAt = startMs + probeEvery
+
         while (Date.now() < deadline){
             polls++
             try {
@@ -1131,19 +1180,33 @@ class Database {
             }
             await this.sleep(1000)
 
-            // Only waits that were meant to be long can be extended. Short waits are
-            // callers polling for something that should be immediate, and probing on
-            // their behalf costs more than it can ever save.
-            if (Date.now() >= deadline && timeMax >= this.WAIT_MIN_FOR_EXTENSION
-                && extensions < this.WAIT_MAX_EXTENSIONS){
-                lastLag = await this._indexerLagBlocks()
-                lagProbes++
-                if (lastLag !== null && lastLag > this.WAIT_LAG_BLOCKS){
-                    extensions++
-                    deadline = Date.now() + timeMax
-                    console.log(label + ': indexer is ' + lastLag + ' blocks behind the chain tip; '
-                        + 'extending the wait (' + extensions + '/' + this.WAIT_MAX_EXTENSIONS + ')')
-                }
+            if (!eligible) continue
+            const expired = Date.now() >= deadline
+            // Budget spent: stop probing and let the loop end, so a wedged stack
+            // fails on time instead of paying for advice it can no longer act on.
+            if (expired && extensions >= this.WAIT_MAX_EXTENSIONS) continue
+            if (!expired && Date.now() < nextProbeAt) continue
+
+            const progress = await this._pipelineProgress()
+            probes++
+            nextProbeAt = Date.now() + probeEvery
+            lastLag = progress.lag
+            if (progress.writes !== null){
+                if (writeMark !== null && progress.writes > writeMark) writeMoved = Date.now()
+                if (writeMark === null || progress.writes > writeMark) writeMark = progress.writes
+            }
+            if (!expired) continue
+
+            const behind  = lastLag !== null && lastLag > this.WAIT_LAG_BLOCKS
+            const writing = writeMoved !== null && (Date.now() - writeMoved) <= writeIdleMs
+            if (behind || writing){
+                extensions++
+                deadline = Date.now() + timeMax
+                console.log(label + ': '
+                    + (behind
+                        ? 'indexer is ' + lastLag + ' blocks behind the chain tip'
+                        : 'indexer is still writing action rows (index ' + writeMark + ')')
+                    + '; extending the wait (' + extensions + '/' + this.WAIT_MAX_EXTENSIONS + ')')
             }
         }
         this._recordPerfPoll(label, startMs, polls, false)
@@ -1157,51 +1220,98 @@ class Database {
         // zero-lag wait and an unreachable probe all look like. Silence read as
         // evidence when it was the absence of evidence.
         //
-        // The three states are now distinguishable by name:
-        //   lag 0        the indexer kept pace with the chain and was still slow to
-        //                write the row, which is the case the current signal cannot
-        //                see and the reason a SIGNAL change is what is owed
+        // The states are distinguishable by name:
+        //   lag N > 0    the indexer had not reached the row's block
+        //   lag 0        the indexer kept pace with the chain, so the write signal
+        //                below is the one that decided this wait
         //   lag null     the probe could not answer, so the fixed deadline stood
         //   not eligible timeMax below the extension floor
+        // and the write signal says whether rows were still landing at give-up time,
+        // which separates "the stack is busy and we ran out of budget" from "the
+        // stack was idle and the row is genuinely absent".
         console.log(label + ': GAVE UP after ' + (Date.now() - startMs) + 'ms'
             + ' (' + polls + ' polls, ' + extensions + '/' + this.WAIT_MAX_EXTENSIONS + ' extensions, '
             + 'timeMax ' + timeMax + 'ms, '
-            + (timeMax < this.WAIT_MIN_FOR_EXTENSION
+            + (!eligible
                 ? 'not eligible for extension'
-                : lagProbes === 0
+                : probes === 0
                     ? 'extension never probed'
-                    : 'last indexer lag ' + (lastLag === null ? 'unknown (probe failed)' : lastLag + ' blocks'))
+                    : 'last indexer lag ' + (lastLag === null ? 'unknown (probe failed)' : lastLag + ' blocks')
+                      + ', action writes ' + (writeMark === null
+                            ? 'unknown'
+                            : writeMoved === null
+                                ? 'idle at index ' + writeMark
+                                : 'last advanced ' + (Date.now() - writeMoved) + 'ms ago (index ' + writeMark + ')'))
             + ')')
         return null
     }
 
-    // Blocks the indexer still has to process before it can possibly see our row.
-    // Returns null when the chain tip is not observable (no node connector wired,
-    // RPC down, empty blocks table), and null deliberately disables the extension
-    // so the fixed deadline stands: without a progress signal, waiting longer is
+    // One sample of how far along the pipeline is, for the two signals _waitFor
+    // extends on:
+    //   lag    blocks the indexer still has to process before it could see our row
+    //   writes the highest action_index it has written, whose movement between
+    //          samples is what "the indexer is busy but not behind" looks like
+    // Either field is null when it is not observable (no node connector wired, RPC
+    // down, empty table, probe timed out), and null deliberately disables that
+    // signal so the fixed deadline stands: without progress, waiting longer is
     // indistinguishable from hanging.
-    async _indexerLagBlocks(){
-        if (!global.nodeConnector || typeof global.nodeConnector.getBlockCount !== 'function') return null
-        if (!this.pool) return null
+    async _pipelineProgress(){
+        if (!this.pool) return { lag: null, writes: null }
         // The probe is an optimisation, never a reason to block. If it cannot answer
         // promptly the fixed deadline stands, so a probe that hangs costs one timeout
         // rather than stalling the suite. Learned the hard way: the first cut called
         // this.getConnection(), which retries until a connection appears.
-        let capped = new Promise(resolve => setTimeout(() => resolve(null), this.WAIT_LAG_PROBE_MS))
-        return Promise.race([this._probeIndexerLag().catch(() => null), capped])
+        const blind  = { lag: null, writes: null }
+        const capped = new Promise(resolve => setTimeout(() => resolve(blind), this.WAIT_LAG_PROBE_MS))
+        return Promise.race([this._probePipeline().catch(err => { this._warnProbeFailed(err); return blind }), capped])
     }
 
-    async _probeIndexerLag(){
-        let chainTip = Number(await global.nodeConnector.getBlockCount())
-        if (!Number.isFinite(chainTip)) return null
+    // A probe that can never answer degrades every wait back to a fixed deadline
+    // and says nothing about it, which is how this item's mechanism went unproven
+    // for a week. Say it once per Database, not once per poll: a wait polls every
+    // second and the point is a visible cause, not a flooded log.
+    _warnProbeFailed(err){
+        if (this._probeWarned) return
+        this._probeWarned = true
+        console.log('_pipelineProgress: probe unavailable (' + (err && err.message ? err.message : err) + '); '
+            + 'waits fall back to the fixed deadline')
+    }
+
+    async _probePipeline(){
+        let chainTip = null
+        if (global.nodeConnector && typeof global.nodeConnector.getBlockCount === 'function'){
+            const count = Number(await global.nodeConnector.getBlockCount())
+            if (Number.isFinite(count)) chainTip = count
+        }
         let conn = await this.pool.getConnection()
         try {
-            let rows = await conn.query('SELECT MAX(block_index) AS tip FROM blocks')
-            if (!rows || !rows.length || rows[0].tip === null || rows[0].tip === undefined) return null
-            return chainTip - Number(rows[0].tip)
+            // Both marks in one round trip: each is an index-only MAX, and a wait
+            // that samples twice as often must not cost twice as much.
+            let rows = await conn.query('SELECT (SELECT MAX(block_index) FROM blocks) AS tip, '
+                + '(SELECT MAX(action_index) FROM actions) AS writes')
+            const row    = rows && rows.length ? rows[0] : null
+            const tip    = this._finiteOrNull(row ? row.tip : null)
+            const writes = this._finiteOrNull(row ? row.writes : null)
+            return {
+                lag:    (chainTip !== null && tip !== null) ? chainTip - tip : null,
+                writes: writes
+            }
         } finally {
             await conn.release().catch(() => {})
         }
+    }
+
+    _finiteOrNull(value){
+        if (value === null || value === undefined) return null
+        const n = Number(value)
+        return Number.isFinite(n) ? n : null
+    }
+
+    // Kept as the named single-signal view: callers and tests that only care how far
+    // behind the indexer is should not have to know the probe carries two marks.
+    async _indexerLagBlocks(){
+        const progress = await this._pipelineProgress()
+        return progress ? progress.lag : null
     }
 
     // ─── ADDRESS ───────────────────────────────────────────────────────
