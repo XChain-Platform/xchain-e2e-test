@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `bin/seed-contract-state.js` + `bin/contracts/spvSeed.js`: seed a live chain with real contract state ahead of its armed `contract_state_root` height .
+- `test/unit/spvSeedContract.test.js`: run the seed contract under the real VM and BTC gas schedule .
+
 ### Fixed
 - `test/actions/xchainPriceDerivation.test.js`: render drill prices through `bcformat` so the ORDER wait predicate gets strings, not Decimal objects the DB driver cannot bind.
 - `test/actions/xchainPriceDerivation.test.js`: page the hub price-snapshot endpoint to exhaustion, so the newest rounds stay visible on a venue publishing 37 pairs a minute.

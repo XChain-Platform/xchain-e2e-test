@@ -18,3 +18,7 @@ coverage/
 # Stryker mutation-report build artifacts - generated, embed absolute paths (curated .md reports are kept)
 reports/mutation/*.html
 reports/mutation/*.json
+
+# seed-contract-state.js resume files. Public facts only (contract index, txids),
+# but they are per-run per-chain state, not source.
+.seed-*.json
