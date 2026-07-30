@@ -225,7 +225,10 @@ function armedHeight(chain, network) {
     return undefined;   // gate not resolvable, distinct from "not armed"
 }
 
-(async () => {
+// Only run when invoked as a CLI. Required as a module (by the unit test) this
+// is a library of pure helpers, and the parsing helpers are exactly where this
+// tool has had its defects, so they need to be reachable from a test.
+async function main() {
     const opts  = parseArgs();
     const state = readState(opts.state);
     const { XChainSDK } = loadSDK();
@@ -536,7 +539,28 @@ function armedHeight(chain, network) {
         );
         requireValid(res, 'DEPLOY');
         contractIndex = contractIndexOf(res.indexed);
-        if (!contractIndex) { log('  ! deploy indexed valid but no contract action_index was returned'); process.exit(1); }
+        if (!contractIndex) {
+            log('  ! DEPLOY indexed valid but no contract action_index could be read from the result.');
+            log('    The contract IS deployed and paid for; this is a parse failure, not a chain failure.');
+            log('    Find its action_index (explorer /{COIN}/api/contracts) and put it in ' + opts.state +
+                ' as {"contractIndex": N} to resume without redeploying.');
+            process.exit(1);
+        }
+        // VERIFY the index rather than trust the parse. Three settle shapes reach
+        // contractIndexOf, and adopting a wrong one would point every later
+        // EXECUTE at somebody else's contract. One read makes it a checked fact.
+        try {
+            const c = await sdk.explorer.getContract(contractIndex);
+            const row = (c && (c.data || c)) || {};
+            const kind = Array.isArray(row) ? (row[0] || {}) : row;
+            if (kind && kind.action && kind.action !== 'DEPLOY')
+                throw new Error('action_index ' + contractIndex + ' is a ' + kind.action + ', not a DEPLOY');
+            log('  verified: action_index ' + contractIndex + ' reads back as a contract');
+        } catch (e) {
+            log('  ! could not verify action_index ' + contractIndex + ' as a contract: ' + e.message);
+            log('    Refusing to record it; re-run once the explorer has caught up.');
+            process.exit(1);
+        }
         state.contractIndex = contractIndex;
         state.deployTxid    = res.txid;
         writeState(opts.state, state);
@@ -631,10 +655,16 @@ function armedHeight(chain, network) {
         ' --network ' + opts.network);
     process.exit(0);
 
-})().catch(err => {
-    process.stderr.write('FAILED: ' + (err && err.message ? err.message : String(err)) + '\n');
-    process.exit(1);
-});
+}
+
+if (require.main === module) {
+    main().catch(err => {
+        process.stderr.write('FAILED: ' + (err && err.message ? err.message : String(err)) + '\n');
+        process.exit(1);
+    });
+}
+
+module.exports = { contractIndexOf, coinPrefix, countLiveKeys, loadChunkHelper };
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -668,10 +698,35 @@ function addressOf(sdk, wif) {
     return sdk.deriveAddress(kp.publicKey, { type: 'p2pkh' });
 }
 
+// The contract's action_index out of a settled submitAction result.
+//
+// There is no single shape to match, which is why the first draft of this (a
+// chain of top-level `||` guesses) returned null for ALL of them and would have
+// aborted the run after a paid DEPLOY. `actionWaiter` settles from three places:
+//   - the POLL path, with the full action set as `actions[]`;
+//   - the WebSocket NEW_ACTION path, with ONE action row;
+//   - `explorer.getAction`, likewise one row.
+// Only the first carries `actions`, and none carries a top-level
+// `contract_action_index`.
+//
+// In the array case find the DEPLOY EXPLICITLY rather than taking actions[0]:
+// a constructor that emits (emit.issue and friends) lands siblings in the same
+// transaction and they can sort first. spvSeed's initialize emits nothing, so
+// this is defensive here, but the helper should not be the thing that breaks
+// when someone changes the contract.
 function contractIndexOf(indexed) {
     if (!indexed) return null;
-    return indexed.contract_action_index || indexed.contractActionIndex ||
-           indexed.action_index || indexed.actionIndex || null;
+    if (Array.isArray(indexed.actions)) {
+        const d = indexed.actions.find(a => a && a.action === 'DEPLOY') || indexed.actions[0] || null;
+        return (d && d.action_index != null) ? d.action_index : null;
+    }
+    if (indexed.action_index != null) {
+        // A single row that is demonstrably NOT the DEPLOY is worse than nothing:
+        // adopting it would point every later EXECUTE at the wrong contract.
+        if (indexed.action && indexed.action !== 'DEPLOY') return null;
+        return indexed.action_index;
+    }
+    return null;
 }
 
 // LIVE keys, which is what the arming build pays for.
