@@ -133,6 +133,21 @@ function loadSDK() {
     throw new Error('cannot resolve xchain-sdk: ' + (lastErr && lastErr.message));
 }
 
+// chunkHelper via the SAME candidate paths loadSDK uses. require.resolve is not
+// equivalent here: this tool is run from staged copies that carry no node_modules
+// link for xchain-sdk, and there the resolve throws and the budget check silently
+// degrades to "unchecked" on exactly the runs that matter.
+function loadChunkHelper() {
+    for (const c of ['xchain-sdk/src/chunkHelper.js',
+                     '../../xchain-sdk/src/chunkHelper.js',
+                     '../../../xchain-sdk/src/chunkHelper.js']) {
+        try {
+            return c.startsWith('.') ? require(path.resolve(__dirname, c)) : require(c);
+        } catch (e) { /* next */ }
+    }
+    return null;
+}
+
 function parseArgs() {
     const a = process.argv.slice(2);
     const o = {
@@ -363,6 +378,27 @@ function armedHeight(chain, network) {
         log('  ! balance lookup failed: ' + e.message);
     }
 
+    // THE CONTRACT MUST FIT ONE INLINE DEPLOY, checked here rather than
+    // discovered at the DEPLOY step. The source is base64'd into a single action
+    // capped at MAX_ACTION_DATA_LENGTH (8192), which is about 6132 source bytes;
+    // past that the SDK's chunked path (N carrier DEPLOY v4 actions plus an
+    // assembling v2/v3) is required, and this tool does not implement it. The
+    // first draft of spvSeed.js was 6549 bytes and would have failed here, after
+    // the gas ISSUE and MINT had already been broadcast and paid for. Comments in
+    // that file are on-chain bytes, so it is one careless paragraph from
+    // regressing; the check is cheap and belongs in the preflight.
+    const seedCodePath = path.join(__dirname, 'contracts', 'spvSeed.js');
+    const seedCode     = fs.readFileSync(seedCodePath, 'utf8');
+    let fitsInline = null;
+    const ch = loadChunkHelper();
+    if (ch) {
+        fitsInline = ch.fitsSingleDeploy(seedCode);
+        log('  contract source:   ' + Buffer.byteLength(seedCode) + ' bytes, single inline DEPLOY: ' +
+            (fitsInline ? 'yes' : 'NO'));
+    } else {
+        log('  ! could not resolve the SDK chunkHelper; inline DEPLOY budget UNCHECKED');
+    }
+
     // Contract, if a previous run deployed one.
     let contractIndex = state.contractIndex || null;
     let liveKeys = 0;
@@ -398,6 +434,10 @@ function armedHeight(chain, network) {
         'this step cannot be done with the working key.');
     if (utxoTotal === 0) blockers.push(
         'the working address holds no confirmed funding utxos. Fund ' + address + ' before broadcasting.');
+    if (fitsInline === false && !contractIndex) blockers.push(
+        'bin/contracts/spvSeed.js is ' + Buffer.byteLength(seedCode) + ' bytes and does NOT fit a single ' +
+        'inline DEPLOY (~6132 source bytes). Trim it, or implement the SDK chunked deploy path; ' +
+        'this tool does not. Comments in that file are on-chain bytes.');
     if (blockers.length) {
         log('');
         log('  BLOCKED:');
@@ -444,8 +484,14 @@ function armedHeight(chain, network) {
         const gasAddress = addressOf(sdk, gasWif);
         log('  from GAS address ' + gasAddress);
         const res = await sdk.submitAction(
+            // No AMOUNT: ISSUE has no such field (format 0 is
+            // VERSION|TICK|MAX_SUPPLY|MAX_MINT|DECIMALS|DESCRIPTION|MINT_SUPPLY|...),
+            // and the pre-mint is MINT_SUPPLY, which is deliberately omitted so the
+            // token is created with SUPPLY 0 exactly as the mainnet genesis injection
+            // does. An earlier draft passed `amount: 0` and the SDK's own validator
+            // rejected it ("AMOUNT must be a positive number") before any broadcast.
             { action: 'ISSUE', params: {
-                tick: gasTick, amount: 0,
+                tick: gasTick,
                 decimals:       opts.gasDecimals,
                 maxSupply:      opts.gasMaxSupply,
                 maxMint:        opts.gasMaxMint,
