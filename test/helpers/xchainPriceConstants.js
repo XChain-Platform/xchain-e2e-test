@@ -103,6 +103,7 @@ function hubBootstrapConstant() {
 // list cannot drift behind them again by hand.
 const SEED_SENTINEL_ROUNDS = Object.freeze([
     990001, 990002,          // dexDogeSetup + xcallDogeSetup + _ctlseed + the nativeFeeOracleLive sidecar
+    990011, 990012,          // _ctlseed's wall-clock anchor (written only when the chain trails)
     888100001, 888100002,    // nativeFeeHelper XCHAIN_ROUND / COIN_ROUND (chain-time anchor)
     888100011, 888100012,    // nativeFeeHelper *_ROUND_NOW (wall-clock anchor, seeded when the chain clock trails)
     999000001, 999000002,    // dispenser FIAT Mode 1 / Mode 2 (the pair is COIN/<fiat>, not COIN/USD)

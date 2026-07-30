@@ -25,19 +25,33 @@
  * contract DEPLOY indexes "invalid: no current oracle price for {COIN}/USD".
  * (Known harness flake; see claude/reports/launch/test-campaign/smart-contracts.md.)
  *
- * Anchor to max(latestBlockTime, now) + buffer: the contract-fee staleness guard
- * (getLatestPrice) is one-sided (rejects only too-OLD), so future-dating is safe
- * and buys headroom as the suite mines blocks forward. controllerPolicy exercises
- * no FIAT reverse-price-match, so the 24h-window upper bound is irrelevant here.
+ * Anchoring: priceSnapshotHelper.usableSeedAnchors(). This preamble used to seed
+ * max(tip, now) + 7200 on the theory that the staleness guard is one-sided, so
+ * future-dating bought headroom. That stopped being true when H-3 landed: on every
+ * chain but BTC, getLatestPrice SELECTS with `block_timestamp <= <block time>`, so
+ * a future-dated row is not fresh for longer, it is invisible, and this preamble
+ * silently seeded nothing on exactly the LTC/DOGE fee chains it exists to unblock
+ * (measured on LTC regtest 2026-07-28, ). Headroom now comes from re-seeding
+ * as the chain advances, which is what nativeFeeHelper does per SEED_REFRESH_MS.
  ********************************************************************/
 
 const priceSnapshotHelper = require('../helpers/priceSnapshotHelper')
 const { BOOTSTRAP_XCHAIN_USD, NO_PRICE_SEED } = require('../helpers/xchainPriceConstants')
 
+// One round per (pair, anchor). Spelled out as file-local consts, and passed to
+// seedSnapshot as `roundNumber: <const>`, because the  coverage guard walks
+// this file for that exact shape to prove every round it writes is one
+// clearSeedSentinels can retract. An indirection here (rounds[i]) reads fine and
+// silently drops the file from that guard.
+const CHAIN_ROUND_COIN   = 990001
+const CHAIN_ROUND_XCHAIN = 990002
+const WALL_ROUND_COIN    = 990011
+const WALL_ROUND_XCHAIN  = 990012
+
 describe('_ctlseed: force-seed fresh oracle prices (venue preamble)', function () {
     this.timeout(0)
 
-    it('seeds fresh finalized BTC/USD + XCHAIN/USD anchored ahead of the chain tip', async function () {
+    it('seeds fresh finalized COIN/USD + XCHAIN/USD inside the usable anchor window', async function () {
         //  step 8: this preamble CLEARS the pair and re-seeds it, which on a
         // venue whose hub publishes prices would delete real finalized rounds and
         // shadow the rest. Hard-skip there.
@@ -51,22 +65,37 @@ describe('_ctlseed: force-seed fresh oracle prices (venue preamble)', function (
             this.skip()
             return
         }
-        const tip = await priceSnapshotHelper.latestBlockTime()
-        const now = Math.floor(Date.now() / 1000)
-        // Large forward headroom: the contract-fee staleness guard is one-sided
-        // (rejects only too-OLD), so a far-future snapshot never goes stale no matter
-        // how fast block_time advances during the run. A stuck-then-unblocked
-        // BTC stack can advance block_time by thousands of seconds mid-run. (controllerPolicy
-        // exercises no FIAT reverse-price-match, so the 24h-window upper bound is irrelevant.)
-        const anchor = Math.max(tip, now) + 7200
+        // Both legal anchors, oldest-first, so the ascending round numbers below give
+        // the wall-clock row the higher round. See usableSeedAnchors for why that
+        // pairing is the one that survives all three regtest clock regimes.
+        const { chainTime, wallTime, anchors } = await priceSnapshotHelper.usableSeedAnchors()
+        const COIN_PAIR = `${COIN_CODE}/USD`
+        const COIN_USD  = '100000.00000000'
+
+        // `anchor` indexes usableSeedAnchors().anchors; index 1 exists only when the
+        // chain trails wall clock, and those rows are skipped otherwise.
         const seeds = [
-            { coinPair: `${COIN_CODE}/USD`, price: '100000.00000000', roundNumber: 990001 },
-            { coinPair: 'XCHAIN/USD',       price: BOOTSTRAP_XCHAIN_USD,      roundNumber: 990002 },
+            { coinPair: COIN_PAIR,    price: COIN_USD,             anchor: 0, roundNumber: CHAIN_ROUND_COIN },
+            { coinPair: 'XCHAIN/USD', price: BOOTSTRAP_XCHAIN_USD, anchor: 0, roundNumber: CHAIN_ROUND_XCHAIN },
+            { coinPair: COIN_PAIR,    price: COIN_USD,             anchor: 1, roundNumber: WALL_ROUND_COIN },
+            { coinPair: 'XCHAIN/USD', price: BOOTSTRAP_XCHAIN_USD, anchor: 1, roundNumber: WALL_ROUND_XCHAIN },
         ]
+
+        for (const pair of [COIN_PAIR, 'XCHAIN/USD']) {
+            const removed = await priceSnapshotHelper.clearPair(pair)
+            console.log(`   cleared ${removed} existing ${pair} snapshot(s)`)
+        }
         for (const s of seeds) {
-            await priceSnapshotHelper.clearPair(s.coinPair)
-            await priceSnapshotHelper.seedSnapshot({ ...s, blockTimestamp: anchor })
-            console.log(`   seeded ${s.coinPair}=${s.price} @ block_timestamp ${anchor} (tip=${tip} now=${now})`)
+            const blockTimestamp = anchors[s.anchor]
+            if (blockTimestamp === undefined) continue
+            await priceSnapshotHelper.seedSnapshot({
+                coinPair:       s.coinPair,
+                price:          s.price,
+                roundNumber:    s.roundNumber,
+                blockTimestamp: blockTimestamp,
+            })
+            console.log(`   seeded ${s.coinPair}=${s.price} @ block_timestamp ${blockTimestamp} `
+                + `round ${s.roundNumber} (tip=${chainTime} now=${wallTime})`)
         }
     })
 })

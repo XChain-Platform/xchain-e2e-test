@@ -141,11 +141,17 @@ module.exports = {
     // put there, and deleting a coin_pair from it would destroy real validator
     // rounds on any venue that has a federation. Clearing the read side is both
     // sufficient and the smaller blast radius.
+    // Returns the number of rows removed. It used to return undefined, which made
+    // it useless as evidence: a caller (or an operator debugging a venue that
+    // prices at zero) could not tell "deleted the 124 rows that were shadowing
+    // selection" from "matched nothing and the real problem is elsewhere". Every
+    // other delete in this file already reports its count; this one now does too.
     async clearPair(coinPair){
         let params = resolveParams()
         let conn = await mariadb.createConnection(params)
         try {
-            await conn.query("DELETE FROM price_snapshots WHERE coin_pair = ?", [coinPair])
+            let res = await conn.query("DELETE FROM price_snapshots WHERE coin_pair = ?", [coinPair])
+            return Number(res && res.affectedRows ? res.affectedRows : 0)
         } finally {
             await conn.end().catch(() => {})
         }
@@ -197,6 +203,45 @@ module.exports = {
         } finally {
             await conn.release().catch(() => {})
         }
+    },
+
+    // . The timestamps a seed may use, given that the usable window is
+    // bounded on BOTH sides. Anchoring is the single thing every seed site gets
+    // wrong, so the rule lives here once instead of in each site's comments.
+    //
+    // A snapshot stamped S is readable by a block at time B only inside
+    //     S <= B <= S + ORACLE_MAX_PRICE_AGE_SECONDS
+    // The upper bound is db.getLatestPrice's staleness guard. The LOWER bound is
+    // the H-3 selection gate: on every chain but BTC, getLatestPrice selects with
+    // `block_timestamp <= ?` against the block's own time, so a snapshot stamped
+    // in the chain's future is not "fresh for longer", it is invisible.
+    //
+    // Future-dating therefore buys no headroom on a native-fee chain, which is the
+    // opposite of what it did before H-3 landed, and the reason a venue can look
+    // permanently dead ("no current oracle price") with a perfectly good row in the
+    // table. Headroom comes from RE-SEEDING as the chain advances, never from a
+    // larger anchor.
+    //
+    // B is the tip's time or later, so the tip is the newest anchor that is always
+    // legal. Wall clock is added only when the chain trails it, which is the idle
+    // regime where new blocks are stamped ~now and a tip-anchored row is already
+    // stale; there the two rows cover both regimes and the wall row must win.
+    //
+    // Anchors come back OLDEST-first, because selection is `ORDER BY round_number
+    // DESC` and the guard runs AFTER selection. A caller assigning ascending round
+    // numbers in this order gives the wall row the higher round, so the idle regime
+    // takes it on precedence while the frozen regime (where the wall row fails the
+    // time gate outright) falls through to the tip row. Reverse the pairing and the
+    // frozen regime selects a row it must then reject, which is the shadowing trap:
+    // ONE high round with a bad timestamp makes a pair look permanently dead no
+    // matter how many correct lower rounds sit behind it.
+    //
+    // See nativeFeeHelper for the same rule applied to the native-fee pairs.
+    async usableSeedAnchors(){
+        let chainTime = await module.exports.latestBlockTime()
+        let wallTime  = Math.floor(Date.now() / 1000)
+        let anchors   = wallTime > chainTime ? [chainTime, wallTime] : [chainTime]
+        return { chainTime, wallTime, anchors }
     },
 
     // Insert (or upsert) a single finalized price snapshot.
