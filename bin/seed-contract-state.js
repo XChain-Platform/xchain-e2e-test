@@ -550,7 +550,22 @@ function armedHeight(chain, network) {
     let start = state.fillNext || 0;
     if (liveKeys < opts.keys) {
         step(6, 'EXECUTE fill to ' + opts.keys + ' keys');
+        // TWO INDEPENDENT BRAKES, because this is the only loop here that
+        // broadcasts, and its condition depends on a number read back over HTTP.
+        // A miscount (pagination, a changed response shape, an explorer behind
+        // the indexer) must not become an unbounded stream of paid transactions.
+        //   - a hard iteration ceiling derived from the request itself; and
+        //   - a no-progress detector, which catches ANY counting fault rather
+        //     than the one already known about.
+        const maxRounds = Math.ceil(opts.keys / opts.batch) + 3;
+        let rounds = 0;
         while (liveKeys < opts.keys) {
+            if (++rounds > maxRounds) {
+                log('  STOPPING: ' + maxRounds + ' fill rounds ran and the live key count is still ' +
+                    liveKeys + ' of ' + opts.keys + '. Something is miscounting rather than under-filling; ' +
+                    'refusing to keep broadcasting. Check the explorer contract-state read.');
+                process.exit(1);
+            }
             const batch = Math.min(opts.batch, opts.keys - liveKeys);
             // Gas: VM_EXECUTE_BASE + VM_STATE_WRITE per key, with headroom for
             // the seed/count write and the metering the VM adds around it.
@@ -570,6 +585,12 @@ function armedHeight(chain, network) {
             const before = liveKeys;
             liveKeys = await countLiveKeys(sdk, contractIndex);
             log('  +' + batch + ' keys (live ' + before + ' -> ' + liveKeys + '), txid ' + res.txid);
+            if (liveKeys <= before) {
+                log('  STOPPING: that EXECUTE indexed valid but the live key count did not rise (' +
+                    before + ' -> ' + liveKeys + '). Either the count is wrong or the writes are not ' +
+                    'landing; both mean the next round would be broadcast blind.');
+                process.exit(1);
+            }
         }
     }
 
@@ -653,13 +674,20 @@ function contractIndexOf(indexed) {
            indexed.action_index || indexed.actionIndex || null;
 }
 
-// LIVE keys, which is what the arming build pays for: rows whose latest value is
-// not a tombstone. The explorer's contract-state read already filters tombstones
-// out (it reconstructs live state the way the VM sees it), so its row count IS
-// the live count and no second rule is applied here.
+// LIVE keys, which is what the arming build pays for.
+//
+// READ `total`, NOT `rows.length`. The explorer's contract-state query is
+// PAGINATED (`... LIMIT sql.limit`, defaulting to a per-method cap) and returns
+// the true count separately as `total`. Counting the returned array saturates at
+// the page size, and this number drives a `while (liveKeys < target)` loop, so a
+// target above the page size would have meant broadcasting EXECUTEs forever
+// against a count that could never rise. On a public chain that is real money
+// and real spam, which is why the loop below ALSO refuses to trust this function.
 async function countLiveKeys(sdk, contractIndex) {
     try {
         const st = await sdk.explorer.getContractState(contractIndex);
+        if (st && st.total !== undefined && Number.isFinite(Number(st.total)))
+            return Number(st.total);
         const rows = (st && (st.data || st.state || st)) || [];
         if (Array.isArray(rows)) return rows.length;
         if (rows && typeof rows === 'object') return Object.keys(rows).length;
