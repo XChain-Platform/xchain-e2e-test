@@ -72,8 +72,13 @@
  *   XC_SEED_WIF=... node bin/seed-contract-state.js --chain BTC --network testnet \
  *       --keys 250 --broadcast
  *
+ * BTC ONLY, deliberately. LTC and DOGE pay the protocol fee in the native coin
+ * and this tool attaches no FEE_DESTINATION output, so its actions would be
+ * mined and THEN rejected. It refuses those chains up front rather than
+ * discovering it a block later; see the guard in main for the full reasoning.
+ *
  * OPTIONS
- *   --chain <COIN>            default BTC
+ *   --chain <COIN>            default BTC (the only supported value, see above)
  *   --network <net>           default testnet
  *   --keys <n>                target LIVE key count, default 250
  *   --batch <n>               keys per EXECUTE, default 100
@@ -220,6 +225,26 @@ function armedHeight(chain, network) {
 
     const chainName = { BTC: 'bitcoin', LTC: 'litecoin', DOGE: 'dogecoin' }[opts.chain];
     if (!chainName) fail64('unsupported --chain ' + opts.chain);
+
+    // GAS-MODE CHAINS ONLY, and this is a refusal rather than a caveat. On LTC
+    // and DOGE the protocol fee is paid in the native coin: `detectFeePaymentMode`
+    // returns 'rejected' for a top-level fee-paying action carrying no output to
+    // FEE_DESTINATION, so every MINT / DEPLOY / EXECUTE this tool builds would be
+    // BROADCAST, MINED, and then indexed `invalid: insufficient fee (native coin
+    // output required)`. That is the worst possible failure shape for a seeding
+    // run: it costs real coin, it looks like it worked until the indexer verdict
+    // comes back, and on a chain with twenty-minute blocks the operator finds out
+    // an hour later. Attaching the output needs the native-fee oracle path
+    // (getNativeFeeOutput, live prices, a non-frozen chain clock), which is a
+    // different piece of work from seeding; until it exists, say so up front.
+    if (opts.chain !== 'BTC') {
+        process.stderr.write(
+            opts.chain + ' pays its protocol fee in the native coin, and this tool does not attach a\n' +
+            'FEE_DESTINATION output, so every action it builds would index as\n' +
+            '"invalid: insufficient fee (native coin output required)" AFTER being paid for and mined.\n' +
+            'Only BTC (gas-mode, fees in ' + GAS_TICK + ') is supported. Refusing rather than wasting coin.\n');
+        process.exit(2);
+    }
 
     const sdk = new XChainSDK({
         network:      chainName + '-' + opts.network,

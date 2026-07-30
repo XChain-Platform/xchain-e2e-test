@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `bin/seed-contract-state.js`: refuse LTC/DOGE up front; they pay the protocol fee in the native coin and the tool attaches no FEE_DESTINATION output, so its actions would be mined and then rejected .
+
 ### Added
 - `bin/seed-contract-state.js` + `bin/contracts/spvSeed.js`: seed a live chain with real contract state ahead of its armed `contract_state_root` height .
 - `test/unit/spvSeedContract.test.js`: run the seed contract under the real VM and BTC gas schedule .
