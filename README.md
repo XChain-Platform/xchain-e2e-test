@@ -5,13 +5,13 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/version-0.3.8-blue" alt="Version">
-  <img src="https://img.shields.io/badge/tests-953%2B%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1777%2B%20passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/node-%3E%3D22-green" alt="Node">
   <img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue" alt="License">
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/coverage-actions%20%7C%20unit%20%7C%20integration%20%7C%20e2e%20%7C%20federation%20%7C%20sdk%20%7C%20smoke%20%7C%20boundary%20%7C%20fuzz%20%7C%20chaos%20%7C%20regression%20%7C%20security%20%7C%20mutation%20%7C%20performance-brightgreen" alt="Coverage">
+  <img src="https://img.shields.io/badge/coverage-actions%20%7C%20unit%20%7C%20integration%20%7C%20e2e%20%7C%20federation%20%7C%20sdk%20%7C%20smoke%20%7C%20boundary%20%7C%20fuzz%20%7C%20chaos%20%7C%20regression%20%7C%20security%20%7C%20codec%20%7C%20parity%20%7C%20mutation%20%7C%20performance-brightgreen" alt="Coverage">
 </p>
 
 End-to-end Mocha test suite for the XChain Platform. Exercises the full platform stack (encoder, decoder, indexer, explorer, hub, UTXO tracker, and regtest miner) against a live regtest deployment. Tests are not mocked; they broadcast real transactions to a regtest coin node and verify that the platform processes them correctly end to end.
@@ -34,7 +34,7 @@ End-to-end Mocha test suite for the XChain Platform. Exercises the full platform
 - **Codec unit tests:** standalone encoder/decoder wire-format tests with no services required
 - **Multi-chain parity tests:** cross-chain ledger-hash and state consistency checks across Bitcoin, Litecoin, and Dogecoin
 - **Mutation testing:** Stryker Mutator with two-phase config (Phase 1: unit only; Phase 2: unit + integration)
-- **953+ tests:** actions, unit, integration, e2e, federation, sdk, smoke, boundary, fuzz, chaos, regression, security, codec, parity, mutation, and performance
+- **1777+ tests:** actions, unit, integration, e2e, federation, sdk, smoke, boundary, fuzz, chaos, regression, security, codec, parity, mutation, and performance
 
 ## Documentation
 
@@ -43,9 +43,9 @@ Full documentation is available in the [xchain-documentation](https://github.com
 | Document | Description |
 |---|---|
 | [README](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/e2e-test/README.md) | Overview, architecture, test lifecycle, service connectors |
-| [Architecture](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/e2e-test/ARCHITECTURE.md) | Data flow, connector classes, bootstrap sequence, polling pattern |
-| [Configuration](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/e2e-test/CONFIGURATION.md) | Environment variables, hub discovery fallback, Docker setup |
-| [Operations](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/e2e-test/OPERATIONS.md) | Running tests, Docker execution, troubleshooting, CI integration |
+| [Architecture](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/e2e-test/architecture.md) | Data flow, connector classes, bootstrap sequence, polling pattern |
+| [Configuration](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/e2e-test/configuration.md) | Environment variables, hub discovery fallback, Docker setup |
+| [Operations](https://github.com/XChain-Platform/xchain-documentation/blob/master/components/e2e-test/operations.md) | Running tests, Docker execution, troubleshooting, CI integration |
 
 ## Quick Start
 
@@ -97,18 +97,18 @@ npm run test:regression:p0
 | Command | Description |
 |---|---|
 | `npm test` | Full action test suite (27 ACTION types, `--timeout 0`, requires live stack) |
-| `npm run test:unit` | Unit tests (360 tests, no services required) |
-| `npm run test:integration` | Integration tests (72 tests, stubbed I/O) |
-| `npm run test:e2e` | E2E meta-tests (37 tests, validates suite against live services) |
-| `npm run test:smoke` | Smoke tests (16 tests, quick bootstrap and connectivity checks) |
+| `npm run test:unit` | Unit tests (553 tests, no services required) |
+| `npm run test:integration` | Integration tests (188 tests: 109 stubbed I/O + 79 live) |
+| `npm run test:e2e` | E2E meta-tests (38 tests, validates suite against live services) |
+| `npm run test:smoke` | Smoke tests (18 tests, quick bootstrap and connectivity checks) |
 | `npm run test:boundary` | Boundary tests (144 tests, edge cases and limits) |
 | `npm run test:fuzz` | Fuzz tests (53 tests, property-based via fast-check) |
 | `npm run test:fuzz:quick` | Quick fuzz (30s timeout) |
-| `npm run test:chaos` | Chaos engineering tests (77 tests, failure injection) |
+| `npm run test:chaos` | Chaos engineering tests (80 tests, failure injection) |
 | `npm run test:chaos:quick` | P0 chaos only |
-| `npm run test:regression` | Full regression suite (114 tests, P0+P1+P2) |
-| `npm run test:regression:p0` | Regression P0: critical gate (74 tests, < 500ms) |
-| `npm run test:regression:p0p1` | Regression P0+P1: merge gate (94 tests, < 500ms) |
+| `npm run test:regression` | Full regression suite (147 tests, P0+P1+P2) |
+| `npm run test:regression:p0` | Regression P0: critical gate (101 tests, < 500ms) |
+| `npm run test:regression:p0p1` | Regression P0+P1: merge gate (124 tests, < 500ms) |
 | `npm run test:perf` | Performance tests with custom reporter |
 | `npm run test:perf:actions` | Performance-instrumented action tests |
 | `npm run test:perf:e2e` | Performance-instrumented E2E tests |
@@ -122,18 +122,23 @@ npm run test:regression:p0
 
 | Type | Tests | Description |
 |---|---|---|
-| Unit | ~360 | Connector methods, cryptoHelper, transactionHelper, action helpers, initialCheck logic, perfCollector |
-| Integration | ~72 | Bootstrap flow, pipeline wiring, database polling, error propagation, wallet/UTXO cache |
-| E2E | ~37 | Full lifecycle validation against live services (bootstrap, transaction pipeline, polling, teardown) |
-| Smoke | ~16 | Bootstrap env vars, connector pings, database connectivity, crypto wallet, mining, gas token |
+| Unit | ~553 | Connector methods, cryptoHelper, transactionHelper, action helpers, initialCheck logic, perfCollector |
+| Integration | ~188 | Bootstrap flow, pipeline wiring, database polling, error propagation, wallet/UTXO cache (stubbed + live) |
+| E2E | ~38 | Full lifecycle validation against live services (bootstrap, transaction pipeline, polling, teardown) |
+| Smoke | ~18 | Bootstrap env vars, connector pings, database connectivity, crypto wallet, mining, gas token |
 | Boundary | ~144 | WHERE clause construction, connector URL building, polling timeouts, connection pool exhaustion, global state |
 | Fuzz | ~53 | Action message mutation, config parsing, connector inputs, crypto inputs, DB filters, type confusion |
-| Chaos | ~77 | Bad PSBT, connector timeouts, DB disconnect, gas bootstrap failure, teardown failure, UTXO/wallet races |
-| Regression | ~114 | Tagged cross-suite subset: P0 (74), P1 (20), P2 (20) |
+| Chaos | ~80 | Bad PSBT, connector timeouts, DB disconnect, gas bootstrap failure, teardown failure, UTXO/wallet races |
+| Regression | ~147 | Tagged cross-suite subset: P0 (101), P1 (23), P2 (20) |
+| Security | ~13 | VM sandbox escape, policy enforcement, input validation against the live regtest stack |
+| Federation | ~16 | Multi-hub PBFT round-trip: quorum, consensus state buffering, LLM/http_get attestation providers |
+| SDK | ~279 | Action lifecycle via the bundled `xchain-sdk` package: chunked DEPLOY, x402, MCP, ticker-ID equivalence |
+| Codec | ~19 | Standalone encoder/decoder wire-format tests, no services required |
+| Parity | ~3 | Cross-chain ledger-hash and state consistency across Bitcoin, Litecoin, and Dogecoin |
 | Mutation | 2 phases | Stryker Mutator: Phase 1 (unit), Phase 2 (unit + integration) |
 | Performance | 3 modes | Custom Mocha reporter, bootstrap timing, poll instrumentation |
-| Actions | ~80 | Full action tests against live regtest (ISSUE, SEND, MINT, etc.) |
-| **Total** | **~953+** | |
+| Actions | ~226 | Full action tests against live regtest (ISSUE, SEND, MINT, etc.) |
+| **Total** | **~1777+** | |
 
 ## Dependencies
 
@@ -162,11 +167,11 @@ npm run test:regression:p0
 
 ## Related
 
-- [Regtest Development Guide](https://github.com/XChain-Platform/xchain-documentation/blob/master/developer-guide/REGTEST_DEVELOPMENT.md): setting up a local regtest environment
+- [Regtest Development Guide](https://github.com/XChain-Platform/xchain-documentation/blob/master/developer-guide/regtest-development.md): setting up a local regtest environment
 - [Regtest Miner](https://github.com/XChain-Platform/xchain-regtest-miner): auto-mining service the E2E suite depends on
 - [Encoder](https://github.com/XChain-Platform/xchain-encoder): constructs XChain transactions tested by this suite
 - [Indexer](https://github.com/XChain-Platform/xchain-indexer): processes transactions and maintains token state verified by this suite
-- [Testing Guide](https://github.com/XChain-Platform/xchain-documentation/blob/master/developer-guide/TESTING.md): platform-wide testing philosophy and coverage
+- [Testing Guide](https://github.com/XChain-Platform/xchain-documentation/blob/master/developer-guide/testing.md): platform-wide testing philosophy and coverage
 
 ---
 
@@ -179,4 +184,4 @@ with a commercial license available for proprietary use.
 
 You may use, modify, and distribute this material under the terms of the License.
 See [LICENSE](./LICENSE.md) and [NOTICE](./NOTICE.md) for full terms.
-See the [licensing overview](https://docs.xchain.io/legal/LICENSING.html).
+See the [licensing overview](https://docs.xchain.io/legal/licensing).
