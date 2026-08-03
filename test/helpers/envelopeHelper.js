@@ -103,23 +103,54 @@ module.exports = {
     // fee-optimal thing to do and lands them in one block; a caller that needs the
     // halves SEPARATED in time (the §3.7 reorg drill, or proving that a confirmed
     // commit alone produces no action) has to hold them itself.
-    async buildEnvelopePair(addressInfo, { name, type, title, memo, rawData, compress = null }){
+    // `action` overrides the FILE composition for callers driving a different action
+    // through the envelope (the §3.5 fee-lifecycle drill carries a fee-bearing ISSUE,
+    // which FILE can never be: FILE has no protocol fee at all). `customOutputs`
+    // likewise overrides the discovered native fee output, including with [] for the
+    // negative case where the commit deliberately carries none.
+    async buildEnvelopePair(addressInfo, { name, type, title, memo, rawData, compress = null,
+                                           action: actionOverride = null, customOutputs = null }){
         const bitcoin = require('bitcoinjs-lib')
-        const action = "FILE|0|"+name+"|"+type+"|"+title+"|"+memo
-        const payload = Buffer.isBuffer(rawData) ? rawData : Buffer.from(rawData)
+        const action = actionOverride || ("FILE|0|"+name+"|"+type+"|"+title+"|"+memo)
+        const payload = (rawData === null || rawData === undefined)
+            ? null
+            : (Buffer.isBuffer(rawData) ? rawData : Buffer.from(rawData))
 
         // The commit carries any native fee-destination outputs (§3.5), the same way
         // the funding transaction does in the chunk lanes, so the fee output has to be
         // discovered and passed here rather than left to the reveal.
         const nativeFeeHelper = require('./nativeFeeHelper')
-        const feeOutput = await nativeFeeHelper.getNativeFeeOutput()
-        const outputs = feeOutput ? [feeOutput] : []
+        let outputs = customOutputs
+        if (outputs === null){
+            const feeOutput = await nativeFeeHelper.getNativeFeeOutput()
+            outputs = feeOutput ? [feeOutput] : []
+        }
 
-        const built = await encoderConnector.createTx(
-            [], addressInfo["address"], outputs, action, payload.toString('binary'),
-            null, false, "TAPROOT", addressInfo["address"], null, null,
-            Buffer.from(addressInfo["publicKey"]).toString('hex'), false, compress
-        )
+        // No UTXO list is passed, so the encoder asks the tracker; on a busy stack the
+        // tracker can still be behind the funding transaction that cryptoHelper just
+        // waited for, and the encoder answers "no utxos found on the blockchain".
+        // transactionHelper retries that class of transient at its own chokepoint;
+        // this path calls the encoder directly, so it needs the same patience.
+        let built = null
+        let lastErr = null
+        for (let attempt = 1; attempt <= 5; attempt++){
+            try {
+                await utxoTrackerConnector.quiesce({ timeoutMs: 20000, pollMs: 250, regtestMiner: regtestMinerConnector })
+            } catch (e) { /* best effort */ }
+            try {
+                built = await encoderConnector.createTx(
+                    [], addressInfo["address"], outputs, action, payload ? payload.toString('binary') : null,
+                    null, false, "TAPROOT", addressInfo["address"], null, null,
+                    Buffer.from(addressInfo["publicKey"]).toString('hex'), false, compress
+                )
+                break
+            } catch (err){
+                lastErr = err
+                if (attempt === 5 || !/no utxos|missingorspent|missing inputs/i.test(err.message)) throw err
+                await new Promise(r => setTimeout(r, 3000))
+            }
+        }
+        if (!built) throw lastErr
 
         const transactionHelper = require('../transactionHelper')
         const commitPsbt = bitcoin.Psbt.fromHex(built["psbt"])
