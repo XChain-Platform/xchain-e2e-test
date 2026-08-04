@@ -168,6 +168,94 @@ describe('seed-contract-state submitChecked: the timeout is not evidence', funct
         assert.strictEqual(res.txid, TXID);
     });
 
+    // The in-flight ledger. A chain read cannot see a transaction that is
+    // broadcast but not yet mined, so the step that made it reads as "not done"
+    // and a re-run duplicates it. The txid is recorded at the broadcast
+    // boundary and cleared only once the chain has settled the question.
+    describe('the in-flight ledger', function () {
+
+        function ledgerSpy() {
+            const seen = { remembered: [], forgotten: [] };
+            return {
+                seen,
+                rememberPending: (l, t) => seen.remembered.push([l, t]),
+                forgetPending:   (l)    => seen.forgotten.push(l)
+            };
+        }
+
+        // A stub that fires the SDK's own progress('waiting', {txid}) callback
+        // before settling, which is what the real lifecycleManager does.
+        function broadcastingSdk(outcome, txDoc) {
+            const calls = { getTransaction: 0 };
+            return {
+                calls,
+                submitAction: async (a, io, opts) => {
+                    if (opts && opts.onProgress) opts.onProgress('waiting', { txid: TXID });
+                    if (outcome instanceof Error) throw outcome;
+                    return outcome;
+                },
+                explorer: {
+                    getTransaction: async () => { calls.getTransaction++; return txDoc; }
+                }
+            };
+        }
+
+        it('records the txid at BROADCAST, before the outcome is known', async function () {
+            const L = ledgerSpy();
+            const sdk = broadcastingSdk({ txid: TXID, indexed: { status: 'valid' } });
+            await makeSubmitChecked(sdk, quiet, L)({}, {}, {}, 'MINT');
+            assert.deepStrictEqual(L.seen.remembered, [['MINT', TXID]]);
+        });
+
+        it('clears it once the submit succeeds', async function () {
+            const L = ledgerSpy();
+            const sdk = broadcastingSdk({ txid: TXID, indexed: { status: 'valid' } });
+            await makeSubmitChecked(sdk, quiet, L)({}, {}, {}, 'MINT');
+            assert.deepStrictEqual(L.seen.forgotten, ['MINT']);
+        });
+
+        it('clears it when a timeout is RECOVERED, so the next run does not report a phantom in-flight', async function () {
+            const L = ledgerSpy();
+            const sdk = broadcastingSdk(timeoutErr(), {
+                tx_hash: TXID, block_index: 3, actions: [{ action: 'MINT', status: 'valid' }]
+            });
+            const res = await makeSubmitChecked(sdk, quiet, L)({}, {}, {}, 'MINT');
+            assert.strictEqual(res.recheckedAfterTimeout, true);
+            assert.deepStrictEqual(L.seen.forgotten, ['MINT']);
+        });
+
+        it('KEEPS it when the timeout is real, which is the whole point', async function () {
+            const L = ledgerSpy();
+            const sdk = broadcastingSdk(timeoutErr(), null);
+            await assert.rejects(() => makeSubmitChecked(sdk, quiet, L)({}, {}, {}, 'MINT'));
+            assert.deepStrictEqual(L.seen.remembered, [['MINT', TXID]]);
+            assert.deepStrictEqual(L.seen.forgotten, [], 'an unsettled broadcast must stay recorded');
+        });
+
+        it('KEEPS it when the transaction is indexed but invalid', async function () {
+            const L = ledgerSpy();
+            const sdk = broadcastingSdk(timeoutErr(), {
+                tx_hash: TXID, block_index: 3, actions: [{ status: 'invalid: insufficient funds (FEE)' }]
+            });
+            await assert.rejects(() => makeSubmitChecked(sdk, quiet, L)({}, {}, {}, 'MINT'));
+            assert.deepStrictEqual(L.seen.forgotten, []);
+        });
+
+        it('still passes a caller-supplied onProgress through', async function () {
+            const L = ledgerSpy();
+            const steps = [];
+            const sdk = broadcastingSdk({ txid: TXID, indexed: { status: 'valid' } });
+            await makeSubmitChecked(sdk, quiet, L)({}, {}, { onProgress: (s) => steps.push(s) }, 'MINT');
+            assert.deepStrictEqual(steps, ['waiting'], 'the ledger hook must not swallow the caller hook');
+        });
+
+        it('works with no ledger at all, so the wrapper stays usable standalone', async function () {
+            const sdk = broadcastingSdk({ txid: TXID, indexed: { status: 'valid' } });
+            const res = await makeSubmitChecked(sdk, quiet)({}, {}, {}, 'MINT');
+            assert.strictEqual(res.txid, TXID);
+        });
+    });
+
     it('fails rather than guessing when no txid can be recovered at all', async function () {
         const err = new Error('Timed out waiting for transaction  to be indexed');
         err.code = 'CONFIRMATION_TIMEOUT';

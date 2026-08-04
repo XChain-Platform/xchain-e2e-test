@@ -192,6 +192,11 @@ function parseArgs() {
             case '--state':            o.state = a[++i]; break;
             case '--broadcast':        o.broadcast = true; break;
             case '--force':            o.force = true; break;
+            // Escape hatch for a recorded transaction the chain never took (a
+            // mempool eviction, a replaced fee). Without it a dropped broadcast
+            // wedges every later run forever, since the guard cannot tell
+            // "still pending" from "gone" by reading the chain alone.
+            case '--clear-pending':    o.clearPending = true; break;
             case '--confirm-gas-issue': o.confirmGasIssue = true; break;
             case '--gas-decimals':     o.gasDecimals = parseInt(a[++i], 10); break;
             case '--gas-max-supply':   o.gasMaxSupply = parseInt(a[++i], 10); break;
@@ -304,9 +309,35 @@ async function main() {
     // seed run needs.
     const address    = addressOf(sdk, wif);
     const gasTick    = GAS_TICK;
+    // RECORD THE TXID AT BROADCAST, NOT AT SUCCESS. Every step below skips
+    // itself by asking the CHAIN, which is what makes this tool resumable, but
+    // a transaction sitting in the mempool is not chain state yet: inside that
+    // window a re-run sees "not done" and broadcasts a SECOND one. That is not
+    // hypothetical, it is how a duplicate ISSUE went out on BTC:testnet on
+    // 2026-08-04 after the first run was killed mid-wait.
+    //
+    // The SDK fires progress('waiting', {txid}) immediately after the broadcast
+    // and before the index wait, which is the only moment the txid exists and
+    // the outcome does not. Persist it there, keyed by step label, and clear it
+    // once the chain has settled the question. The state file is the tool's
+    // memory of what it has already put on the wire; the chain is still the
+    // authority on what happened to it.
+    const rememberPending = (label, txid) => {
+        if (!txid) return;
+        state.pending = state.pending || {};
+        state.pending[label] = txid;
+        writeState(opts.state, state);
+    };
+    const forgetPending = (label) => {
+        if (!state.pending || !state.pending[label]) return;
+        delete state.pending[label];
+        if (!Object.keys(state.pending).length) delete state.pending;
+        writeState(opts.state, state);
+    };
+
     const submitOpts = { wif, waitForIndexer: true, timeout: 1800000, pollInterval: 15000 };
 
-    const submitChecked = makeSubmitChecked(sdk, log);
+    const submitChecked = makeSubmitChecked(sdk, log, { rememberPending, forgetPending });
 
     log('# seed contract state on ' + opts.chain + '/' + opts.network);
     log('# mode: ' + (opts.broadcast ? 'BROADCAST' : 'PLAN ONLY (no transaction is sent)'));
@@ -315,6 +346,67 @@ async function main() {
     // 1. PREFLIGHT
     // -----------------------------------------------------------------------
     step(1, 'preflight');
+
+    // SETTLE ANYTHING LEFT IN FLIGHT BEFORE PLANNING ANYTHING NEW.
+    //
+    // Every step below decides whether to run by asking the chain. That is the
+    // right instinct and it is what makes this tool resumable, but it has one
+    // blind spot: a transaction that has been broadcast and not yet mined is
+    // invisible to a chain read, so the step reads as "not done" and a re-run
+    // broadcasts a duplicate. The state file closes that gap by remembering
+    // what went on the wire; this block is where the chain is asked to settle
+    // each one, ONCE, before any decision depends on it.
+    //
+    // The three outcomes are deliberately different:
+    //   indexed and valid   -> it happened; forget it and let the chain reads below see it
+    //   indexed and invalid -> it failed on chain; forget it so the step retries
+    //   not found at all    -> UNKNOWN, and unknown is the dangerous one, so stop
+    // Refusing on "not found" is the whole point. Guessing "gone, re-broadcast"
+    // is what put a duplicate ISSUE on BTC:testnet.
+    if (state.pending && Object.keys(state.pending).length) {
+        const pending = Object.entries(state.pending);
+        log('  in flight:         ' + pending.length + ' transaction(s) recorded as broadcast by an earlier run');
+        if (opts.clearPending) {
+            for (const [label, txid] of pending) {
+                log('    ' + label + ' ' + txid + ' -> DISCARDED (--clear-pending)');
+                forgetPending(label);
+            }
+        } else {
+            let unresolved = 0;
+            for (const [label, txid] of pending) {
+                let tx = null;
+                try { tx = await sdk.explorer.getTransaction(txid, 'tx_hash'); } catch (e) { tx = null; }
+                const hash = explorerField(tx, 'tx_hash');
+                if (!hash.found) {
+                    log('    ' + label + ' ' + txid + ' -> NOT ON CHAIN YET');
+                    unresolved++;
+                    continue;
+                }
+                const acts = Array.isArray(explorerField(tx, 'actions').value)
+                    ? explorerField(tx, 'actions').value : [];
+                const bad = acts.filter(a => !/^valid\b/i.test(String((explorerField(a, 'status').value) || '')));
+                if (!acts.length || bad.length) {
+                    log('    ' + label + ' ' + txid + ' -> indexed but NOT valid (' +
+                        (acts.length ? acts.map(a => explorerField(a, 'status').value).join(', ') : 'no actions') +
+                        '); the step will be retried');
+                } else {
+                    log('    ' + label + ' ' + txid + ' -> settled valid at block ' +
+                        explorerField(tx, 'block_index').value);
+                }
+                forgetPending(label);
+            }
+            if (unresolved) {
+                log('');
+                log('  REFUSING to plan while ' + unresolved + ' broadcast transaction(s) are still unconfirmed.');
+                log('  Re-running now would broadcast a DUPLICATE of work already paid for, because');
+                log('  every step here decides by reading the chain and the mempool is not the chain.');
+                log('  Wait for them to confirm and re-run; this is idempotent once they land.');
+                log('  If one was genuinely dropped (mempool eviction, fee replacement), discard it');
+                log('  deliberately with --clear-pending.');
+                process.exit(3);
+            }
+        }
+    }
 
     const H = armedHeight(opts.chain, opts.network);
     if (H === undefined)
@@ -808,10 +900,25 @@ async function main() {
 // between a real failure and a run that continues, and a top-level guess here
 // would fail in the "absent" direction, which is the failure class this tool
 // has already paid for twice (see explorerField's header).
-function makeSubmitChecked(sdk, log) {
+function makeSubmitChecked(sdk, log, ledger) {
+    const remember = (ledger && ledger.rememberPending) || (() => {});
+    const forget   = (ledger && ledger.forgetPending)   || (() => {});
     return async function submitChecked(action, io, sopts, label) {
+        // progress('waiting') is the broadcast boundary: the transaction is on
+        // the wire and its fate is not yet known. Record it THERE, because that
+        // is the only moment the txid exists and the outcome does not. A kill or
+        // a timeout after this point leaves a trace the next run can resolve
+        // instead of re-broadcasting blind.
+        const withProgress = Object.assign({}, sopts, {
+            onProgress: (step, data) => {
+                if (step === 'waiting' && data && data.txid) remember(label, data.txid);
+                if (sopts && typeof sopts.onProgress === 'function') sopts.onProgress(step, data);
+            }
+        });
         try {
-            return await sdk.submitAction(action, io, sopts);
+            const res = await sdk.submitAction(action, io, withProgress);
+            forget(label);
+            return res;
         } catch (err) {
             if (!err || err.code !== 'CONFIRMATION_TIMEOUT') throw err;
             const txid = (err.details && err.details.txid) ||
@@ -840,6 +947,10 @@ function makeSubmitChecked(sdk, log) {
             }
             const blockIndex = blockRead.found ? blockRead.value : undefined;
             log('  ok, it was indexed after all at block ' + blockIndex + ' (the timeout was the clock, not the chain)');
+            // The chain has answered, so this is no longer in flight. Leaving it
+            // recorded would make the NEXT run open with a spurious "in flight"
+            // line for a transaction already known to have settled.
+            forget(label);
             // Shaped as the SDK's own settled result, because the callers read
             // `res.indexed.status` (requireValid) and `res.indexed.actions`
             // (contractIndexOf). A bare `{ txid, actions }` would satisfy neither
