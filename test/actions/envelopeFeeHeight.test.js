@@ -12,7 +12,7 @@
  *
  **********************************************************************
  * TAPROOT ENVELOPE FEE LIFECYCLE ( §3.5)
- * spec: claude/specs/taproot-envelope-and-payload-compression.md
+ * spec: claude/specs/resolved/taproot-envelope-and-payload-compression.md
  *
  * §3.5 makes two claims about money that no other envelope test can reach:
  *

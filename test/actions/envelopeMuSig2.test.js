@@ -12,7 +12,7 @@
  *
  **********************************************************************
  * TAPROOT ENVELOPE UNDER MUSIG2 CO-SIGNING ( §3.9)
- * spec: claude/specs/taproot-envelope-and-payload-compression.md
+ * spec: claude/specs/resolved/taproot-envelope-and-payload-compression.md
  *
  * §3.9 calls MuSig2 composition "work, not free" and names three deltas the
  * envelope needed from the shipped co-signer interface: a script-path sighash

@@ -9,7 +9,7 @@
 // contact legal@dankest.llc.
 //
 // TAPROOT ENVELOPE + PAYLOAD COMPRESSION 
-// spec: claude/specs/taproot-envelope-and-payload-compression.md
+// spec: claude/specs/resolved/taproot-envelope-and-payload-compression.md
 //
 // The envelope was proven end to end during the build (BTC and LTC regtest,
 // testnet4, mainnet arming) by one-off scripts under claude/bin. Those scripts

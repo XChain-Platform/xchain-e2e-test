@@ -9,7 +9,7 @@
 // contact legal@dankest.llc.
 //
 // Taproot envelope + payload compression (,
-// claude/specs/taproot-envelope-and-payload-compression.md).
+// claude/specs/resolved/taproot-envelope-and-payload-compression.md).
 //
 // Everything here reads the envelope back out of the bytes that were actually
 // broadcast rather than out of what the encoder said it built: the grammar is

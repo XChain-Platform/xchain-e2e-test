@@ -12,7 +12,7 @@
  *
  **********************************************************************
  * TAPROOT ENVELOPE REORG ( §3.7)
- * spec: claude/specs/taproot-envelope-and-payload-compression.md
+ * spec: claude/specs/resolved/taproot-envelope-and-payload-compression.md
  *
  * envelope.test.js publishes the pair the fee-optimal way, both halves in one
  * block. This file drives the case the spec calls out separately and that the
