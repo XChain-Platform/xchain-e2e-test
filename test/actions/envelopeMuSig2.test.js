@@ -59,6 +59,7 @@ bitcoin.initEccLib(ecc)
 
 const envelopeHelper = require('../helpers/envelopeHelper')
 const nativeFeeHelper = require('../helpers/nativeFeeHelper')
+const addressHelper = require('../helpers/addressHelper')
 
 // The SDK is a sibling checkout, resolved the way test/sdk/sdkHelper.js resolves
 // it. These are internal modules rather than package entry points, so they are
@@ -88,7 +89,10 @@ async function fundAggregate(address, amount){
     try { await regtestMinerConnector.generateBlocks(1) } catch (e) { /* the miner auto-mines anyway */ }
 
     const raw = await nodeConnector._rpc('getrawtransaction', [txid, true])
-    const out = raw.vout.find(v => v.scriptPubKey && v.scriptPubKey.address === address)
+    // Both vout shapes, because litecoind still reports the pre-Core-22
+    // `addresses` array; matching only `address` made this test structurally
+    // unable to pass on LTC (see addressHelper.findVoutPayingAddress).
+    const out = addressHelper.findVoutPayingAddress(raw, address)
     assert(out, 'the funding tx should pay the aggregate account')
     return {
         txid,
