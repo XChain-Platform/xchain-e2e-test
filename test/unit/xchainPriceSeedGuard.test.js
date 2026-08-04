@@ -37,7 +37,8 @@ const assert = require('assert')
 const fs     = require('fs')
 const path   = require('path')
 
-const { BOOTSTRAP_XCHAIN_USD, hubBootstrapConstant } = require('../helpers/xchainPriceConstants')
+const { BOOTSTRAP_XCHAIN_USD, hubBootstrapConstant,
+        HUB_BOOTSTRAP_SATS, HUB_CONSTANT_MISSING } = require('../helpers/xchainPriceConstants')
 
 const TEST_ROOT = path.join(__dirname, '..')
 
@@ -123,8 +124,18 @@ describe('XCHAIN/USD seed guard ( step 8)', function () {
         // absent, matching the convention the vendor-parity guards use.
         const hubValue = hubBootstrapConstant()
         if (hubValue === null) return this.skip()
-        assert.strictEqual(BOOTSTRAP_XCHAIN_USD, hubValue,
-            'e2e bootstrap constant has drifted from xchain-hub XCHAIN_PRICE_BOOTSTRAP_USD')
+
+        // A present-but-unfindable constant is a FAILURE, never a skip. The previous
+        // form of this guard collapsed 'sibling absent' and 'constant renamed' into the
+        // same null and skipped both, so the 2026-08-03 rename of
+        // XCHAIN_PRICE_BOOTSTRAP_USD -> _SATS sailed past it silently. A pin that
+        // cannot tell those apart is not a pin.
+        assert.notStrictEqual(hubValue, HUB_CONSTANT_MISSING,
+            'xchain-hub/src/constants.js exists but declares no XCHAIN_PRICE_BOOTSTRAP_SATS; ' +
+            'it was renamed or removed, and this pin must be repointed rather than skipped')
+
+        assert.strictEqual(HUB_BOOTSTRAP_SATS, hubValue,
+            'e2e bootstrap pin has drifted from xchain-hub XCHAIN_PRICE_BOOTSTRAP_SATS')
     })
 
     it('keeps the derivation proof carrying its own inline no-seed guard', function () {

@@ -56,9 +56,19 @@ function refuseSeedIfSuppressed(site) {
         'the pair. Unset the flag (non-validator venue) or use the derivation suite.')
 }
 
-// D2, DECIDED 2026-07-25 (operator): anchored on a token issuance costing $2.00.
-// GAS_PRICE 0.00001 XCHAIN/gas x ISSUE 100,000 gas is exactly 1.0 XCHAIN, so the
-// bootstrap price equals the target issuance cost 1:1.
+// The USD price this repo SEEDS on venues that have no hub publishing the pair.
+//
+// DECOUPLED from the hub's bootstrap on 2026-08-03. It used to be the same number,
+// pinned byte-equal, because the hub's bootstrap was itself a USD constant. D2 was
+// then redecided to denominate the bootstrap in SATOSHIS, so there is no longer a
+// single USD figure on the hub side to be equal to: the hub's USD value is only
+// resolved at round time, by converting 1000 sat with that round's consensus BTC/USD.
+//
+// This stays 2.00 deliberately. It is a venue fixture whose only job is to make the
+// native-fee arithmetic in 28 call sites predictable, and re-basing it would churn
+// every one of those expectations for no gain in fidelity. What DOES still need
+// pinning cross-repo is the hub's satoshi constant, which HUB_BOOTSTRAP_SATS below
+// does.
 const BOOTSTRAP_XCHAIN_USD = '2.00000000'
 
 // Numeric form, for the setups that compute an expected native fee from the ratio
@@ -68,15 +78,33 @@ const BOOTSTRAP_XCHAIN_USD_NUM = 2.00
 // The hub's own constant, or null when the sibling checkout is absent. Read from
 // source rather than required, because the e2e repo does not depend on the hub and
 // requiring it would drag in its whole module graph for one string.
+// The hub's satoshi bootstrap, as a decimal string.
+//
+// Three outcomes, and keeping them distinct is the whole point: null means the
+// sibling checkout is absent (the caller skips, matching the vendor-parity
+// convention), MISSING means the file is right there but the constant is not in it,
+// and a string is the value.
+//
+// MISSING exists because the old form of this function could not tell a RENAME from
+// an absent checkout: both produced null, the caller skipped, and the cross-repo pin
+// went quietly vacuous at exactly the moment it was supposed to fire. That is not
+// hypothetical - renaming XCHAIN_PRICE_BOOTSTRAP_USD to _SATS on 2026-08-03 did
+// precisely that, and the skip hid it.
+const HUB_CONSTANT_MISSING = Symbol('hub bootstrap constant not found')
+
 function hubBootstrapConstant() {
     const hubDir = process.env.XCHAIN_HUB_DIR ||
         path.join(__dirname, '..', '..', '..', 'xchain-hub')
     const file = path.join(hubDir, 'src', 'constants.js')
     if (!fs.existsSync(file)) return null
     const m = fs.readFileSync(file, 'utf8')
-        .match(/const\s+XCHAIN_PRICE_BOOTSTRAP_USD\s*=\s*'([^']+)'/)
-    return m ? m[1] : null
+        .match(/const\s+XCHAIN_PRICE_BOOTSTRAP_SATS\s*=\s*(\d+)/)
+    return m ? m[1] : HUB_CONSTANT_MISSING
 }
+
+// D2, REDECIDED 2026-08-03 (operator): the hub's bootstrap, in satoshis. Pinned here
+// so a retune on the hub side cannot land without this repo noticing.
+const HUB_BOOTSTRAP_SATS = '1000'
 
 // . Every synthetic round number any seeding site in the tree writes, in
 // ONE place. These used to be declared twice - the values in nativeFeeHelper and
@@ -119,4 +147,5 @@ const SEED_SENTINEL_ROUNDS = Object.freeze([
 ])
 
 module.exports = { BOOTSTRAP_XCHAIN_USD, BOOTSTRAP_XCHAIN_USD_NUM, hubBootstrapConstant,
+                   HUB_BOOTSTRAP_SATS, HUB_CONSTANT_MISSING,
                    NO_PRICE_SEED, refuseSeedIfSuppressed, SEED_SENTINEL_ROUNDS }
