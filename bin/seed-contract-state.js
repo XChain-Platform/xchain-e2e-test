@@ -106,8 +106,9 @@
 
 'use strict';
 
-const fs   = require('fs');
-const path = require('path');
+const fs     = require('fs');
+const path   = require('path');
+const crypto = require('crypto');
 
 // ---------------------------------------------------------------------------
 // Measured constants from spec §7 step 4. These are figures somebody paid for
@@ -598,15 +599,42 @@ async function main() {
         log('  ! could not resolve the SDK chunkHelper; inline DEPLOY budget UNCHECKED');
     }
 
-    // Contract, if a previous run deployed one.
+    // Contract, if a previous run deployed one. The state file is a CACHE and
+    // never the authority: a run that dies between the DEPLOY broadcast and the
+    // writeState that records the action_index leaves a confirmed, paid-for
+    // contract on chain that the file has never heard of, and the next run
+    // deploys a second one. That is not hypothetical. On BTC:testnet the
+    // 2026-08-04 run timed out waiting for its DEPLOY to index (the clock, not
+    // the chain, exactly as the submitChecked wrapper describes), died before
+    // line 783, and the 2026-08-05 resume printed "not deployed yet" against a
+    // contract sitting valid at action_index 6 and broadcast a duplicate.
+    //
+    // Every other step in this tool resumes by asking the CHAIN. This one now
+    // does too, and by content hash rather than by bookkeeping.
     let contractIndex = state.contractIndex || null;
     let liveKeys = 0;
     if (contractIndex) {
         log('  contract:          action_index ' + contractIndex + ' (from ' + opts.state + ')');
+    } else {
+        try {
+            contractIndex = await findDeployedContract(sdk, seedCode, address);
+        } catch (e) {
+            log('  ! ' + e.message);
+            log('    Treating that as "not deployed" would risk a duplicate DEPLOY, so this run');
+            log('    refuses to plan. Re-run once the explorer answers.');
+            process.exit(4);
+        }
+        if (contractIndex) {
+            log('  contract:          action_index ' + contractIndex + ' (found ON CHAIN by code_hash)');
+            state.contractIndex = contractIndex;
+            writeState(opts.state, state);
+        } else {
+            log('  contract:          not deployed yet');
+        }
+    }
+    if (contractIndex) {
         liveKeys = await countLiveKeys(sdk, contractIndex);
         log('  live state keys:   ' + liveKeys);
-    } else {
-        log('  contract:          not deployed yet');
     }
 
     // -----------------------------------------------------------------------
@@ -775,6 +803,15 @@ async function main() {
             if (kind && kind.action && kind.action !== 'DEPLOY')
                 throw new Error('action_index ' + contractIndex + ' is a ' + kind.action + ', not a DEPLOY');
             log('  verified: action_index ' + contractIndex + ' reads back as a contract');
+            // The resume path above finds this contract again by matching the
+            // explorer's code_hash to the local file's sha256. If that ever
+            // stops holding, the failure is silent and expensive (another
+            // duplicate DEPLOY), so say so at the one moment both values are
+            // in hand rather than discovering it on the next resume.
+            const wantHash = codeHashOf(code);
+            if (kind && kind.code_hash && String(kind.code_hash) !== wantHash)
+                log('  ! WARNING: explorer code_hash ' + kind.code_hash + ' != sha256(source) ' + wantHash +
+                    '; the chain-side resume lookup will NOT find this contract.');
         } catch (e) {
             log('  ! could not verify action_index ' + contractIndex + ' as a contract: ' + e.message);
             log('    Refusing to record it; re-run once the explorer has caught up.');
@@ -810,13 +847,18 @@ async function main() {
                 process.exit(1);
             }
             const batch = Math.min(opts.batch, opts.keys - liveKeys);
-            // Gas: VM_EXECUTE_BASE + VM_STATE_WRITE per key, with headroom for
-            // the seed/count write and the metering the VM adds around it.
-            const gasLimit = 20000 + batch * 400;
+            // NO gasLimit HERE, and it is not an oversight. EXECUTE has exactly one
+            // wire format, `VERSION|CONTRACT_ACTION_INDEX|METHOD|...PARAMS`, with no
+            // GAS_LIMIT slot; only DEPLOY carries one. Passing it does not get
+            // ignored, it makes the action UNENCODABLE: the SDK's format selector
+            // finds no version that can represent the field set and throws
+            // NO_MATCHING_FORMAT. That is what killed the first fill to reach this
+            // line, on BTC:testnet 2026-08-06, after the DEPLOY had already been
+            // paid for. Execution gas is the protocol's business, not the caller's.
             const res = await submitChecked(
                 { action: 'EXECUTE', params: {
                     contractActionIndex: contractIndex, method: 'fill',
-                    params: ['seed/bulk/', String(start), String(batch)], gasLimit
+                    params: ['seed/bulk/', String(start), String(batch)]
                 } },
                 { pubkey: address, change: address },
                 submitOpts,
@@ -846,7 +888,7 @@ async function main() {
         const res = await submitChecked(
             { action: 'EXECUTE', params: {
                 contractActionIndex: contractIndex, method: 'remove',
-                params: ['seed/doomed'], gasLimit: 20000
+                params: ['seed/doomed']   // no gasLimit: EXECUTE has no GAS_LIMIT slot, see step 6
             } },
             { pubkey: address, change: address },
             submitOpts,
@@ -974,6 +1016,7 @@ if (require.main === module) {
 module.exports = {
     contractIndexOf, coinPrefix, countLiveKeys, loadChunkHelper, makeSubmitChecked,
     explorerField, isExplorerError, EXPLORER_ENVELOPES,
+    codeHashOf, findDeployedContract,
     // requireValid is exported for the tests: "the run continues" after a
     // timeout recovery means the NEXT thing every step does with the result
     // does not throw, and that thing is this.
@@ -1146,6 +1189,58 @@ function contractIndexOf(indexed) {
         return indexed.action_index;
     }
     return null;
+}
+
+// The sha256 the explorer publishes as a contract's `code_hash`, computed from
+// the local source. Measured against BTC:testnet action_index 6 rather than
+// assumed: sha256(bin/contracts/spvSeed.js) is f304ab58... and so is the
+// explorer's code_hash for the DEPLOY that carried it.
+function codeHashOf(code) {
+    return crypto.createHash('sha256').update(code, 'utf8').digest('hex');
+}
+
+// Resolve an ALREADY-DEPLOYED spvSeed contract from the chain, so the local
+// state file cannot be the only thing standing between a resume and a duplicate
+// DEPLOY.
+//
+// Matched by CONTENT, not by bookkeeping: the deploying address is queried
+// (`/contracts/{address}/source`, an exact query with no pagination to get
+// wrong on the small address this tool spends from) and the rows are filtered
+// to valid DEPLOYs whose `code_hash` equals this file's own sha256. The address
+// alone would not do, because it is free to deploy other contracts, and matching
+// those would point every later EXECUTE at somebody else's code.
+//
+// Returns the LOWEST matching action_index so a chain that already carries
+// duplicates resolves to the same contract on every subsequent run rather than
+// drifting between them. Returns null when nothing matches, which is the honest
+// "deploy it" answer; it never guesses.
+async function findDeployedContract(sdk, code, address) {
+    const want = codeHashOf(code);
+    // A lookup that FAILS is not a lookup that found nothing. Swallowing the
+    // error here would make an explorer blip indistinguishable from "no contract
+    // yet" and produce exactly the duplicate DEPLOY this function exists to
+    // prevent, so it throws and the caller refuses to plan.
+    let rows;
+    try {
+        const res = await sdk.explorer.getContracts(address, 'source');
+        rows = (res && (res.data || res)) || [];
+    } catch (e) {
+        const err = new Error('contract lookup by source address failed: ' + e.message);
+        err.code = 'CONTRACT_LOOKUP_FAILED';
+        throw err;
+    }
+    if (!Array.isArray(rows)) return null;
+    const matches = rows
+        .filter(r => r && String(r.status) === 'valid' && String(r.action) === 'DEPLOY')
+        .filter(r => String(r.code_hash || '') === want)
+        .map(r => Number(r.action_index))
+        .filter(n => Number.isFinite(n))
+        .sort((a, b) => a - b);
+    if (!matches.length) return null;
+    if (matches.length > 1)
+        log('  ! this chain carries ' + matches.length + ' contracts with identical code: ' +
+            matches.join(', ') + '. Using the first.');
+    return matches[0];
 }
 
 // LIVE keys, which is what the arming build pays for.
