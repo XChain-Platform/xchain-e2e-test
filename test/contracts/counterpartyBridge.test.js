@@ -207,7 +207,7 @@ describe('Counterparty Bridge: a REAL tokenscan.io balance check driving a mint 
 
         const response = await indexerDatabase.waitForAttestationResponse({
             requestId: requestId, responseStatus: 'ok', status: 'valid'
-        }, 120000)
+        }, 240000)
         assert(response, 'attestation response row should land status=ok / valid')
         assert.strictEqual(response.response_payload, realBody, 'on-chain response_payload should be the live body')
         return realBody

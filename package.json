@@ -24,6 +24,7 @@
     "test": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/actions/**/*.test.js'",
     "test:contracts": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/contracts/**/*.test.js'",
     "test:auctions": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/contracts/englishAuction.test.js test/contracts/dutchAuction.test.js",
+    "test:cpbridge": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/contracts/counterpartyBridge.test.js",
     "test:codec": "mocha --no-config --timeout 30000 --exit 'test/codec/**/*.test.js'",
     "test:sdk": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/sdk/**/*.sdk.test.js'",
     "test:sdk:chunked": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/sdk/chunkedDeploy.sdk.test.js",
