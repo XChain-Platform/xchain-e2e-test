@@ -134,6 +134,15 @@ const GAS_TICK = 'XCHAIN';
 // long before the mint opens.
 const MINT_START_LEAD = 2;
 
+// Keys spvSeed.js initialize() writes before any fill: owner, seed/version,
+// seed/purpose, seed/count, seed/doomed, and the two seed/prefix/... keys.
+// Subtracting these from the live key count is how a resume works out where the
+// bulk fill got to WITHOUT trusting local bookkeeping (see step 6). Pinned by
+// test/unit/seedFillResumesFromChain.test.js, which counts the state.set calls
+// in the contract source, so adding a base key without updating this constant
+// fails there rather than silently rewriting a hundred paid-for keys.
+const SEED_BASE_KEYS = 7;
+
 // Where the explorer nests the payload of a document. Used by explorerField
 // (see its header, below the helpers banner) for every field this tool reads
 // out of an explorer response.
@@ -827,8 +836,39 @@ async function main() {
     // -----------------------------------------------------------------------
     // 6. FILL to the target key count
     // -----------------------------------------------------------------------
-    let start = state.fillNext || 0;
+    // WHERE THE FILL RESUMES FROM. `state.fillNext` is a CACHE and cannot be the
+    // authority, for exactly the reason the DEPLOY step could not trust the state
+    // file either: it is written AFTER the submit returns, so a run that
+    // broadcasts a fill and then dies in the index wait - the NORMAL outcome on
+    // testnet4, not an edge case - never records it, and the next run restarts at
+    // 0 and rewrites the same keys with the same values.
+    //
+    // Measured on BTC:testnet 2026-08-06 rather than reasoned about: contract 6
+    // carried 209 rows for 107 DISTINCT keys, with seed/bulk/0..99 written twice
+    // and `seed/count` written three times, because two consecutive resumes both
+    // started at 0. The live key count never moved, so the fill could never
+    // finish; it would have run to the no-progress brake, paying for every round.
+    //
+    // The chain knows the answer, but not readably: the contract maintains
+    // `seed/count` (= start + count, exactly the next start), and that key cannot
+    // be fetched back - the explorer's state listing is paginated at 100 (total
+    // 107, returned 100, `seed/count` not in the page) and a slash in a key
+    // breaks the per-key route. What IS reliable is the live key count, which
+    // countLiveKeys reads from `total` rather than from a page.
+    //
+    // So resume from the greater of the chain-derived position and the cache.
+    // The max is the safe merge in both directions: the chain-derived value
+    // prevents rewriting keys that already exist, and the cache covers the one
+    // case where the chain-derived value is legitimately LOW - after step 7
+    // tombstones a base key, live keys drop by one and the arithmetic would
+    // otherwise walk backwards over keys already written. Overshooting only ever
+    // writes new keys; undershooting rewrites paid-for ones.
+    const chainDerivedStart = Math.max(0, liveKeys - SEED_BASE_KEYS);
+    let start = Math.max(chainDerivedStart, Number(state.fillNext || 0));
     if (liveKeys < opts.keys) {
+        if (start !== Number(state.fillNext || 0))
+            log('  fill resumes at ' + start + ' (derived from the chain; the state file said ' +
+                (state.fillNext === undefined ? 'nothing' : state.fillNext) + ')');
         step(6, 'EXECUTE fill to ' + opts.keys + ' keys');
         // TWO INDEPENDENT BRAKES, because this is the only loop here that
         // broadcasts, and its condition depends on a number read back over HTTP.
