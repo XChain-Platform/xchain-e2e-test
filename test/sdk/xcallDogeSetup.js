@@ -28,6 +28,8 @@
  *   XCALL_DB_HOST=127.0.0.1 XCALL_DB_PORT=13306
  *   HUB_DB_USER/HUB_DB_PASS        (XChain_Hub: price seeding)
  *   DOGE_IDX_DB_USER/DOGE_IDX_DB_PASS (XChain_DOGE_Regtest_Indexer: reads)
+ *   HUB_DB_NAME / DOGE_IDX_DB_NAME (schema overrides for an isolated venue or
+ *                                   a mirror-local HubDbSync topology)
  *
  * Usage: node test/sdk/xcallDogeSetup.js
  *
@@ -47,6 +49,13 @@ const DOGE_USD_NUM  = 0.10;
 const MINER_URL = process.env.XCALL_DOGE_MINER_URL || 'http://localhost:3125';
 const DB_HOST   = process.env.XCALL_DB_HOST || '127.0.0.1';
 const DB_PORT   = parseInt(process.env.XCALL_DB_PORT || '13306', 10);
+// Schema names are overridable so this driver also runs against an ISOLATED
+// venue (its own MariaDB, its own DB names) and against a mirror-local
+// HubDbSync topology, where the price snapshots the fee path reads live in the
+// DOGE indexer's OWN schema rather than in a co-located hub schema. Defaults
+// reproduce the shared local regtest stack exactly.
+const DOGE_IDX_DB = process.env.DOGE_IDX_DB_NAME || 'XChain_DOGE_Regtest_Indexer';
+const HUB_DB      = process.env.HUB_DB_NAME      || 'XChain_Hub';
 
 const CONTRACT_B = `
     module.exports = {
@@ -111,7 +120,7 @@ async function withConn(database, user, password, fn) {
 }
 
 async function dogeIdx(fn) {
-    return withConn('XChain_DOGE_Regtest_Indexer', process.env.DOGE_IDX_DB_USER, process.env.DOGE_IDX_DB_PASS, fn);
+    return withConn(DOGE_IDX_DB, process.env.DOGE_IDX_DB_USER, process.env.DOGE_IDX_DB_PASS, fn);
 }
 
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -123,7 +132,7 @@ async function main() {
         return rows.length ? Number(rows[0].block_time) : Math.floor(Date.now() / 1000);
     });
     refuseSeedIfSuppressed('xcallDogeSetup');
-    await withConn('XChain_Hub', process.env.HUB_DB_USER, process.env.HUB_DB_PASS, async (c) => {
+    await withConn(HUB_DB, process.env.HUB_DB_USER, process.env.HUB_DB_PASS, async (c) => {
         for (const [pair, price, round] of [['DOGE/USD', DOGE_USD_SEED, 990001], ['XCHAIN/USD', BOOTSTRAP_XCHAIN_USD, 990002]]) {
             await c.query(
                 `INSERT INTO price_snapshots

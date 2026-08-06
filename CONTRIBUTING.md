@@ -88,6 +88,10 @@ Run the no-stack tiers (`test:unit`, `test:boundary`, `test:regression:p0`) befo
 
 New tests that introduce `.env`-like fixtures must not commit any real credentials. Use placeholder values and document the required env vars in the test file's top comment.
 
+**Wait on a condition, never on a duration.** A standalone `await sleep(2500)` before an assertion passes or fails on how busy the venue is, and ~100 of them survive here from before this rule. Use `src/db.js`'s `_waitFor(checkFn, criteria, timeMax)` or one of its `waitForX` wrappers, or the poll helpers in `test/helpers/stakeHelper.js`, and carry the old sleep duration over as the timeout budget. For a negative expectation ("assert it was rejected"), do not poll for absence: wait on a positive signal proving the indexer has processed past the relevant point, then assert the negative. A `sleep()` that is the pause between iterations of a loop re-checking a condition is already deterministic and needs no change.
+
+`npm run lint:sleep-flake` (chained into `npm run ci`) counts the standalone fixed-duration sleeps against `scripts/sleep-flake-baseline.json` and fails when the count rises. Converting one to a condition wait puts the count below the baseline; re-run with `--write-baseline` to lower it. The baseline only ever goes down.
+
 ---
 
 ## Coding style

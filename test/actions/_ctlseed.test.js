@@ -35,6 +35,8 @@
  * as the chain advances, which is what nativeFeeHelper does per SEED_REFRESH_MS.
  ********************************************************************/
 
+const assert = require('assert')
+
 const priceSnapshotHelper = require('../helpers/priceSnapshotHelper')
 const { BOOTSTRAP_XCHAIN_USD, NO_PRICE_SEED } = require('../helpers/xchainPriceConstants')
 
@@ -85,6 +87,7 @@ describe('_ctlseed: force-seed fresh oracle prices (venue preamble)', function (
             const removed = await priceSnapshotHelper.clearPair(pair)
             console.log(`   cleared ${removed} existing ${pair} snapshot(s)`)
         }
+        const written = { [COIN_PAIR]: 0, 'XCHAIN/USD': 0 }
         for (const s of seeds) {
             const blockTimestamp = anchors[s.anchor]
             if (blockTimestamp === undefined) continue
@@ -94,8 +97,23 @@ describe('_ctlseed: force-seed fresh oracle prices (venue preamble)', function (
                 roundNumber:    s.roundNumber,
                 blockTimestamp: blockTimestamp,
             })
+            written[s.coinPair]++
             console.log(`   seeded ${s.coinPair}=${s.price} @ block_timestamp ${blockTimestamp} `
                 + `round ${s.roundNumber} (tip=${chainTime} now=${wallTime})`)
         }
+
+        // The failure this preamble has actually had is seeding NOTHING while
+        // reporting success: on LTC/DOGE regtest it wrote only future-dated rows,
+        // which getLatestPrice cannot see, and every downstream contract DEPLOY
+        // then failed with "no current oracle price" hundreds of lines later
+        // . Contract fee validation needs BOTH pairs, so assert both got
+        // at least one row rather than trusting the loop ran. Structural, not
+        // timing-dependent: it reads only what this run just wrote.
+        assert.ok(anchors.length >= 1,
+            'usableSeedAnchors returned no anchor; nothing could be seeded')
+        assert.ok(written[COIN_PAIR] >= 1,
+            `seeded no ${COIN_PAIR} snapshot; contract fee validation will fail with "no current oracle price"`)
+        assert.ok(written['XCHAIN/USD'] >= 1,
+            'seeded no XCHAIN/USD snapshot; contract fee validation will fail with "no current oracle price"')
     })
 })

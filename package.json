@@ -20,7 +20,8 @@
     "xchain-sdk": "file:./xchain-sdk"
   },
   "scripts": {
-    "ci": "mocha --no-config --timeout 30000 --exit 'test/unit/coins-conformance.test.js' 'test/unit/security/configuration/dependency-advisories.test.js' 'test/unit/security/configuration/sibling-tree-advisories.test.js' 'test/unit/security/configuration/history-path-leak.test.js' 'test/integration/parity/**/*.test.js' 'test/integration/multiHubActivationBoundary.integration.test.js'",
+    "lint:sleep-flake": "node scripts/check-sleep-flake.js",
+    "ci": "npm run lint:sleep-flake && mocha --no-config --timeout 30000 --exit 'test/unit/coins-conformance.test.js' 'test/unit/security/configuration/dependency-advisories.test.js' 'test/unit/security/configuration/sibling-tree-advisories.test.js' 'test/unit/security/configuration/history-path-leak.test.js' 'test/integration/parity/**/*.test.js' 'test/integration/multiHubActivationBoundary.integration.test.js'",
     "test": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/actions/**/*.test.js'",
     "test:contracts": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/contracts/**/*.test.js'",
     "test:auctions": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/contracts/englishAuction.test.js test/contracts/dutchAuction.test.js",
