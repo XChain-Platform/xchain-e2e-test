@@ -126,7 +126,7 @@ module.exports = {
         return r;
     },
     onClaim: function (x) {
-        var r = x.getInputParam(0), a = x.getInputParam(1);
+        var r = x.getInputParam(0), a = x.getInputParam(4);
         x.require(r === x.state.get('pending:'+a),'not the outstanding claim request for this address');
         if (x.state.get('claimed:'+a)) { x.state.delete('pending:'+a); return 'ignored'; }
         var p = x.attestation.getResponse(r);
@@ -260,7 +260,7 @@ describe('Counterparty Bridge: a REAL tokenscan.io balance check driving a mint 
         // onClaim fires automatically as the attestation callback - nobody
         // EXECUTEs a claim confirmation.
         let cleared = false
-        const end = Date.now() + 60000
+        const end = Date.now() + 180000
         while (Date.now() < end) {
             if ((await stateOf(ci, 'pending:' + claimer.address)) === null) { cleared = true; break }
             await new Promise(r => setTimeout(r, 1000))
