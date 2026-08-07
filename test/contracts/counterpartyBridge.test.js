@@ -8,49 +8,52 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// Counterparty Bridge (on-chain): a REAL tokenscan.io balance check driving
+// Counterparty Bridge (on-chain): a REAL tokenscan.io burn check driving
 // either a mint or a safe no-op.
 //
 //   DEPLOY counterpartyBridge(cpAsset, xchainTick, maxSupply, decimals)
 //     -> initialize emits ISSUE(xchainTick): the contract is the issuer.
 //   anyone: EXECUTE "requestClaim"
 //              -> ATTEST v0 http_get request against the REAL tokenscan.io
-//                 balances API for the CALLER'S OWN address (self-serve:
-//                 https://cp20.tokenscan.io/api/balances/{address}/1/500)
+//                 sends API for BURN_ADDRESS (a well-known, unspendable
+//                 Bitcoin/Counterparty address - self-serve at execute
+//                 time, but the LIST is shared, not per-caller:
+//                 https://cp20.tokenscan.io/api/sends/{BURN_ADDRESS}/1/500)
 //           (off-chain: 3 staked validators fetch the REAL URL through the
 //            production http_get provider and sign the live body, exactly
 //            like test/actions/realUrlAttestation.test.js)
 //           -> indexer verifies 3/3, fulfills, fires onClaim(request_id,
 //              address) automatically as the attestation callback
-//   if the live body's `data` array contains cpAsset with a positive
-//   quantity: onClaim mints that amount and marks the address claimed.
-//   Otherwise (as here - see below): no-op, safely retryable.
+//   onClaim sums every settled Send in that list whose `source` is the
+//   caller and whose `asset` is cpAsset, not already credited, and mints
+//   the total. Otherwise (as here - see below): no-op, safely retryable.
 //
 // WHY THIS TEST ONLY EXERCISES THE NO-OP PATH ON-CHAIN: requestClaim() is
-// deliberately self-serve - it always queries and mints to
-// xchain.getSourceAddress(), never a caller-suppliable destination. A
-// regtest address minted by this test harness has never existed on
-// Counterparty mainnet, so a REAL GET against it is guaranteed - and was
-// independently verified via curl before writing this test - to return
-// `{"data":[],"total":0}` (200 OK, empty holdings), never a positive
-// balance. There is no way to drive the MINT branch through the contract
-// itself without controlling the private key of a real Counterparty
-// holder's address, which is out of scope for an automated e2e run.
+// self-serve (mints only to xchain.getSourceAddress()), and onClaim only
+// credits Sends whose `source` is that same address. A regtest address
+// minted by this test harness has never sent anything to BURN_ADDRESS on
+// Counterparty mainnet, so a REAL GET against BURN_ADDRESS's send history -
+// which does contain real, unrelated burns from other holders and other
+// assets - is guaranteed to contain zero rows with our claimer as `source`.
+// There is no way to drive the MINT branch through the contract itself
+// without controlling the private key of an address that has actually
+// burned `cpAsset` on Counterparty, which is out of scope for an automated
+// e2e run.
 //
-// To still validate the POSITIVE-balance parsing path against live data
-// (the thing most worth confirming - does the real body still match the
-// documented shape?), the second test fetches tokenscan.io's own published
-// example address directly (outside the contract, the same way
+// To still validate the extraction/parsing path against live data (the
+// thing most worth confirming - does the real body still match the
+// documented shape?), the second test fetches BURN_ADDRESS's real send
+// history directly (outside the contract, the same way
 // realUrlAttestation.test.js validates a live body's shape) and re-runs the
-// exact extraction logic the contract uses against it.
+// exact extraction logic the contract uses against a real row in it.
 //
 // The contract source below is a compacted copy of the canonical template
 // at xchain-contracts/counterpartyBridge/counterpartyBridge.js (kept inline
 // so the test is self-contained inside the e2e container, same convention
 // as escrowDelivery.test.js / stableVault.test.js). Behaviour is identical;
 // the VM unit test (counterpartyBridge.test.js in xchain-contracts) covers
-// the full matrix including the adversarial paths (replay, double-claim,
-// cap enforcement).
+// the full matrix including the adversarial paths (replay, double-crediting
+// a burn, cap enforcement, multi-burn summing).
 
 const assert = require('assert')
 const _path = require('path')
@@ -76,34 +79,38 @@ const _hubBase = (function () {
 })()
 const http_get = require(_hubBase + '/src/providers/http_get.js')
 
-// tokenscan.io's own published example address (https://tokenscan.io/api#balances)
-// - a real wallet with real holdings, used ONLY for the standalone shape check
-// in the second test (never as an on-chain caller: we don't control its key).
-const REAL_HOLDER_ADDRESS = '1Donatet2LrNpuWByAnH8gc9Wh9zSzZuLC'
+// A widely-recognized, industry-standard Bitcoin "burn" address: valid
+// checksum, no known private key. Must match BA in the inline contract copy
+// below and BURN_ADDRESS in the canonical template.
+const BURN_ADDRESS = '1BitcoinEaterAddressDontSendf59kuE'
 
-// Same extraction logic as counterpartyBridge.js's extractAssetQuantity(),
+// Same extraction logic as counterpartyBridge.js's extractBurnSends(),
 // duplicated here (not required from the contract, which only exists as an
 // inline VM string) to independently re-verify the parsing assumption
-// against a live, positive-balance body.
-function extractAssetQuantity(payload, asset) {
+// against a live body.
+function extractBurnSends(payload, asset, source) {
     var parsed
-    try { parsed = JSON.parse(payload) } catch (e) { return null }
-    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.data)) return null
+    try { parsed = JSON.parse(payload) } catch (e) { return [] }
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.data)) return []
+    var out = []
     for (var i = 0; i < parsed.data.length; i++) {
         var row = parsed.data[i]
-        if (row && row.asset === asset && row.quantity !== undefined && row.quantity !== null) {
-            return String(row.quantity)
+        if (row && row.asset === asset && row.source === source && row.status === 'valid'
+            && typeof row.tx_hash === 'string' && row.tx_hash.length > 0
+            && row.quantity !== undefined && row.quantity !== null) {
+            out.push({ txHash: row.tx_hash, quantity: String(row.quantity) })
         }
     }
-    return null
+    return out
 }
 
 // NOTE: minified (short var names, terse messages) to stay well under the
 // DEPLOY payload cap; the readable canonical source lives in
 // xchain-contracts/counterpartyBridge/counterpartyBridge.js. Behaviour is
 // identical.
-const COUNTERPARTY_BRIDGE = `function fD(v,d){var s=String(v),n=s.charAt(0)==='-';if(n)s=s.substring(1);var i=s.indexOf('.');if(i<0)return v;var f=s.substring(i+1);if(f.length<=d)return v;var k=d>0?'.'+f.substring(0,d):'';var o=s.substring(0,i)+k;return n?'-'+o:o;}
-function eA(p,a){var j;try{j=JSON.parse(p);}catch(e){return null;}if(!j||typeof j!=='object'||!Array.isArray(j.data))return null;for(var i=0;i<j.data.length;i++){var r=j.data[i];if(r&&r.asset===a&&r.quantity!==undefined&&r.quantity!==null)return String(r.quantity);}return null;}
+const COUNTERPARTY_BRIDGE = `var BA='1BitcoinEaterAddressDontSendf59kuE';
+function fD(v,d){var s=String(v),n=s.charAt(0)==='-';if(n)s=s.substring(1);var i=s.indexOf('.');if(i<0)return v;var f=s.substring(i+1);if(f.length<=d)return v;var k=d>0?'.'+f.substring(0,d):'';var o=s.substring(0,i)+k;return n?'-'+o:o;}
+function eB(p,a,c){var j;try{j=JSON.parse(p);}catch(e){return [];}if(!j||typeof j!=='object'||!Array.isArray(j.data))return [];var o=[];for(var i=0;i<j.data.length;i++){var r=j.data[i];if(r&&r.asset===a&&r.source===c&&r.status==='valid'&&typeof r.tx_hash==='string'&&r.tx_hash.length>0&&r.quantity!==undefined&&r.quantity!==null)o.push({h:r.tx_hash,q:String(r.quantity)});}return o;}
 module.exports = {
     initialize: function (x) {
         var ca=x.getInputParam(0), xt=x.getInputParam(1), ms=x.getInputParam(2), dc=x.getInputParam(3)||'8';
@@ -114,13 +121,12 @@ module.exports = {
         x.require(String(di)===String(dc)&&di>=0&&di<=18,'decimals must be an integer 0-18');
         x.state.set('cpAsset',ca); x.state.set('xchainTick',xt); x.state.set('maxSupply',ms);
         x.state.set('decimals',dc); x.state.set('totalClaimed','0');
-        x.emit.issue({ tick: xt, maxSupply: ms, maxMint: ms, decimals: dc, description: 'bridge of '+ca });
+        x.emit.issue({ tick: xt, maxSupply: ms, maxMint: ms, decimals: dc, description: 'burn bridge of '+ca });
     },
     requestClaim: function (x) {
         var c = x.getSourceAddress();
-        x.require(!x.state.get('claimed:'+c),'already claimed');
         x.require(!x.state.get('pending:'+c),'a claim check is already pending for this address');
-        var u = 'https://cp20.tokenscan.io/api/balances/'+c+'/1/500';
+        var u = 'https://cp20.tokenscan.io/api/sends/'+BA+'/1/500';
         var r = x.attestation.request('http_get', u, 'onClaim', [c], { redundancy: 3, deadlineBlocks: 20 });
         x.state.set('pending:'+c, r);
         return r;
@@ -128,34 +134,40 @@ module.exports = {
     onClaim: function (x) {
         var r = x.getInputParam(0), a = x.getInputParam(4);
         x.require(r === x.state.get('pending:'+a),'not the outstanding claim request for this address');
-        if (x.state.get('claimed:'+a)) { x.state.delete('pending:'+a); return 'ignored'; }
         var p = x.attestation.getResponse(r);
         x.require(p !== null, 'no response yet');
         if (p.status !== 'ok') { x.state.delete('pending:'+a); return 'not confirmed'; }
-        var b = eA(p.payload, x.state.get('cpAsset'));
-        if (b === null || !x.math.gt(b,'0')) { x.state.delete('pending:'+a); return 'no balance to claim'; }
+        var ca = x.state.get('cpAsset');
+        var sends = eB(p.payload, ca, a);
         var dc = parseInt(x.state.get('decimals'));
-        var am = fD(b, dc);
-        x.require(x.math.gt(am,'0'), 'balance below one token unit');
-        var tc = x.math.add(x.state.get('totalClaimed'), am);
-        x.require(x.math.lte(tc, x.state.get('maxSupply')), 'bridge maxSupply exhausted');
-        x.state.set('claimed:'+a, am);
-        x.state.set('totalClaimed', tc);
+        var tn = '0', hs = [];
+        for (var i=0;i<sends.length;i++){ var s=sends[i]; if (x.state.get('burned:'+s.h)) continue; var am = fD(s.q, dc); if (!x.math.gt(am,'0')) continue; tn = x.math.add(tn, am); hs.push(s.h); }
         x.state.delete('pending:'+a);
-        x.emit.mint({ tick: x.state.get('xchainTick'), quantity: am, destination: a });
-        return am;
+        if (!x.math.gt(tn,'0')) return 'no burns to claim';
+        var ntc = x.math.add(x.state.get('totalClaimed'), tn);
+        x.require(x.math.lte(ntc, x.state.get('maxSupply')), 'bridge maxSupply exhausted');
+        for (var j=0;j<hs.length;j++) x.state.set('burned:'+hs[j], true);
+        x.state.set('totalClaimed', ntc);
+        x.state.set('claimedTotal:'+a, x.math.add(x.state.get('claimedTotal:'+a)||'0', tn));
+        x.emit.mint({ tick: x.state.get('xchainTick'), quantity: tn, destination: a });
+        return tn;
     },
-    claimed: function (x) {
+    claimedTotal: function (x) {
         var a = x.getInputParam(0);
         x.require(typeof a==='string'&&a.length>0,'address required');
-        return x.state.get('claimed:'+a) || '0';
+        return x.state.get('claimedTotal:'+a) || '0';
+    },
+    burned: function (x) {
+        var h = x.getInputParam(0);
+        x.require(typeof h==='string'&&h.length>0,'tx_hash required');
+        return !!x.state.get('burned:'+h);
     },
     info: function (x) {
-        return JSON.stringify({ cpAsset:x.state.get('cpAsset'), xchainTick:x.state.get('xchainTick'), decimals:x.state.get('decimals'), maxSupply:x.state.get('maxSupply'), totalClaimed:x.state.get('totalClaimed') });
+        return JSON.stringify({ cpAsset:x.state.get('cpAsset'), xchainTick:x.state.get('xchainTick'), decimals:x.state.get('decimals'), maxSupply:x.state.get('maxSupply'), totalClaimed:x.state.get('totalClaimed'), burnAddress: BA });
     }
 };`
 
-describe('Counterparty Bridge: a REAL tokenscan.io balance check driving a mint or a safe no-op', function () {
+describe('Counterparty Bridge: a REAL tokenscan.io burn check driving a mint or a safe no-op', function () {
     this.timeout(10 * 60 * 1000)
 
     const rand = () => String.fromCharCode(65 + Math.floor(Math.random() * 26))
@@ -225,7 +237,7 @@ describe('Counterparty Bridge: a REAL tokenscan.io balance check driving a mint 
         await regtestMinerConnector.generateBlocks(7)
     })
 
-    it('a fresh regtest address settles a REAL tokenscan.io check and is a harmless no-op (no real Counterparty history)', async function () {
+    it('a fresh regtest address settles a REAL tokenscan.io burn-history check and is a harmless no-op (never burned anything)', async function () {
         const claimer = await cryptoHelper.getNewFundedAddress('cpbridge-claimer', COIN, NETWORK, null, 'legacy', 0, 0.02)
         await gasHelper.ensureGasBalance(claimer, '5000')
 
@@ -235,7 +247,7 @@ describe('Counterparty Bridge: a REAL tokenscan.io balance check driving a mint 
         const ci = dep.contract.action_index
         assert.strictEqual(await stateOf(ci, 'totalClaimed'), '0')
 
-        const expectedUrl = 'https://cp20.tokenscan.io/api/balances/' + claimer.address + '/1/500'
+        const expectedUrl = 'https://cp20.tokenscan.io/api/sends/' + BURN_ADDRESS + '/1/500'
         const req = await vmHelper.sendExecuteV0(claimer, ci, 'requestClaim', [])
         assert(req.execution && req.execution.status === 'valid', 'requestClaim should index a valid execution')
 
@@ -244,18 +256,20 @@ describe('Counterparty Bridge: a REAL tokenscan.io balance check driving a mint 
         })
         assert(request, 'pending attestation request row should exist')
         assert.strictEqual(request.provider_id, 'http_get')
-        assert.strictEqual(request.payload, expectedUrl, 'the real per-address tokenscan.io URL should be the request payload')
+        assert.strictEqual(request.payload, expectedUrl, 'the real burn-address tokenscan.io URL should be the request payload')
 
         const realBody = await fetchSignAndBroadcast(claimer, request.request_id, expectedUrl)
 
-        // A brand-new regtest address has no real Counterparty history: the
-        // live response's data array must not contain our cpAsset. (Verified
-        // independently via curl before writing this test: tokenscan.io
-        // returns {"data":[],"total":0} - 200 OK, empty holdings - for
-        // addresses it has never seen.)
+        // BURN_ADDRESS is a real, shared, actively-used Counterparty burn
+        // address - the live body's data array is NOT expected to be empty
+        // (other holders' unrelated burns land there constantly). What must
+        // hold is that a freshly-minted regtest address, which has never
+        // sent anything to BURN_ADDRESS on Counterparty mainnet, has no rows
+        // reporting IT as the source.
         const parsed = JSON.parse(realBody)
         assert(Array.isArray(parsed.data), 'live body should have a data array (documented shape)')
-        assert(parsed.data.every(row => row.asset !== CP_ASSET), 'a fresh regtest address should not hold our test asset')
+        assert(parsed.data.every(row => row.source !== claimer.address),
+            'a fresh regtest address should never appear as the source of a real burn')
 
         // onClaim fires automatically as the attestation callback - nobody
         // EXECUTEs a claim confirmation.
@@ -265,33 +279,36 @@ describe('Counterparty Bridge: a REAL tokenscan.io balance check driving a mint 
             if ((await stateOf(ci, 'pending:' + claimer.address)) === null) { cleared = true; break }
             await new Promise(r => setTimeout(r, 1000))
         }
-        assert(cleared, 'pending should clear once onClaim runs, even on a no-balance response')
-        assert.strictEqual(await stateOf(ci, 'claimed:' + claimer.address), null, 'no mint should have happened')
+        assert(cleared, 'pending should clear once onClaim runs, even when no burns match')
+        assert.strictEqual(await stateOf(ci, 'claimedTotal:' + claimer.address), null, 'no mint should have happened')
         assert.strictEqual(await stateOf(ci, 'totalClaimed'), '0', 'totalClaimed stays at zero')
     })
 
-    it('the live balances API still matches the documented shape for a wallet that actually holds assets', async function () {
-        // Standalone real GET (not through the contract - requestClaim() is
-        // self-serve and we don't control this address's private key) against
-        // tokenscan.io's own published example address, re-running the exact
-        // extraction logic the contract uses.
-        const url = 'https://cp20.tokenscan.io/api/balances/' + REAL_HOLDER_ADDRESS + '/1/500'
+    it('the live sends API still matches the documented shape for a real burn on BURN_ADDRESS', async function () {
+        // Standalone real GET (not through the contract - we don't control
+        // the private key of whoever really burned to BURN_ADDRESS) against
+        // the shared burn address's real send history, re-running the exact
+        // extraction logic the contract uses against a real row in it.
+        const url = 'https://cp20.tokenscan.io/api/sends/' + BURN_ADDRESS + '/1/50'
         const fetched = await http_get.fetch(url, { maxResponseBytes: 65536, timeoutMs: 10000 })
         assert.strictEqual(String(fetched.meta), '200', 'expected HTTP 200 from the live tokenscan.io endpoint')
         const body = fetched.body.toString('utf8')
 
         const parsed = JSON.parse(body)
-        assert.strictEqual(parsed.address, REAL_HOLDER_ADDRESS)
-        assert(Array.isArray(parsed.data) && parsed.data.length > 0, 'a real known holder should have a non-empty data array')
+        assert(Array.isArray(parsed.data) && parsed.data.length > 0,
+            'BURN_ADDRESS is a real, actively-used burn address - its send history should not be empty')
 
-        const first = parsed.data[0]
+        const first = parsed.data.find(row => row.status === 'valid' && row.tx_hash)
+        assert(first, 'expected at least one valid, tx_hash-bearing send in the live history')
+        assert.strictEqual(first.destination, BURN_ADDRESS, 'every row in this feed should be destined for BURN_ADDRESS')
         assert.strictEqual(typeof first.asset, 'string')
+        assert.strictEqual(typeof first.source, 'string')
         assert.strictEqual(typeof first.quantity, 'string')
 
-        // The contract's extraction logic, run against this live positive-
-        // balance body, must find that exact quantity for that exact asset.
-        const extracted = extractAssetQuantity(body, first.asset)
-        assert.strictEqual(extracted, first.quantity, 'extractAssetQuantity should read the real quantity straight out of the live body')
-        assert(Number(extracted) > 0, 'a real holding should be a positive quantity')
+        // The contract's extraction logic, run against this live body for
+        // that exact (asset, source) pair, must find that exact burn.
+        const extracted = extractBurnSends(body, first.asset, first.source)
+        assert(extracted.some(row => row.txHash === first.tx_hash && row.quantity === first.quantity),
+            'extractBurnSends should find the real burn among the live rows for its own (asset, source)')
     })
 })
