@@ -126,7 +126,7 @@ module.exports = {
     requestClaim: function (x) {
         var c = x.getSourceAddress();
         x.require(!x.state.get('pending:'+c),'a claim check is already pending for this address');
-        var u = 'https://cp20.tokenscan.io/api/sends/'+BA+'/1/500';
+        var u = 'https://cp20.tokenscan.io/api/sends/'+BA+'/1/15';
         var r = x.attestation.request('http_get', u, 'onClaim', [c], { redundancy: 3, deadlineBlocks: 20 });
         x.state.set('pending:'+c, r);
         return r;
@@ -247,7 +247,7 @@ describe('Counterparty Bridge: a REAL tokenscan.io burn check driving a mint or 
         const ci = dep.contract.action_index
         assert.strictEqual(await stateOf(ci, 'totalClaimed'), '0')
 
-        const expectedUrl = 'https://cp20.tokenscan.io/api/sends/' + BURN_ADDRESS + '/1/500'
+        const expectedUrl = 'https://cp20.tokenscan.io/api/sends/' + BURN_ADDRESS + '/1/15'
         const req = await vmHelper.sendExecuteV0(claimer, ci, 'requestClaim', [])
         assert(req.execution && req.execution.status === 'valid', 'requestClaim should index a valid execution')
 
