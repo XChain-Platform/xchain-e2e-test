@@ -141,6 +141,15 @@ module.exports = {
         return { txHash, delegation: delegationRow }
     },
 
+    // DELEGATE v2 against an ACTIVE DELEGATION: revoke the delegated key.
+    //
+    // Under DEL-1 (DELEGATE_REVOKE_NO_REINSERT, armed from genesis on regtest) this
+    // writes NO row of its own; it only stamps deactivation_block on the PARENT
+    // delegations row. The legacy path inserted a fresh status=valid,
+    // activation_block=0 row, which is exactly what DEL-1 removed, so waiting on the
+    // revoke's own txHash waits for a row that is never written . The
+    // observable is the parent going deactivated, and `deactivation_block` on it is
+    // the height the key actually leaves the effective set.
     async sendRevokeDelegationV0(addressInfo, signingPubkey){
         let address = addressInfo["address"]
         // Capability revoke is now DELEGATE v2 (wire); same single-param shape
@@ -149,14 +158,26 @@ module.exports = {
         console.log("Creating and sending DELEGATE v2 (capability revoke) tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
-        console.log("Waiting for revocation in the database...")
+        console.log("Waiting for the parent delegation to go deactivated...")
         let revocationRow = await indexerDatabase.waitForDelegation({
-            source: address,
-            txHash: txHash,
-            status: "valid"
+            source:        address,
+            signingPubkey: signingPubkey,
+            status:        "valid",
+            deactivated:   true
         })
 
         return { txHash, revocation: revocationRow }
+    },
+
+    // The delegations row for (source, pubkey), newest first, whatever its state.
+    // Lets a negative-path test assert that a REFUSED revoke changed nothing,
+    // which is the only observable it has: a refused DELEGATE v2 writes no row at
+    // all under DEL-1, so there is no rejection status to read back .
+    async readDelegation(addressInfo, signingPubkey){
+        return indexerDatabase.checkDelegation({
+            source:        addressInfo["address"],
+            signingPubkey: signingPubkey
+        }).catch(() => null)
     },
 
     // DELEGATE v2 against the source's ORIGINAL stake signing key:
@@ -180,9 +201,11 @@ module.exports = {
         return { txHash, revocation: revocationRow }
     },
 
-    // DELEGATE expected to be REJECTED (any version that records its rejection
-    // in the delegations table: v0 collisions, v2 double-revokes). Broadcasts
-    // and polls the row status-agnostically so the test can assert the reason.
+    // DELEGATE expected to be REJECTED, for the versions that still record their
+    // rejection in the delegations table: v0 collisions. Broadcasts and polls the
+    // row status-agnostically so the test can assert the reason. NOT usable for a
+    // v2 revoke: under DEL-1 a refused revoke writes no row anywhere, so there is
+    // nothing to poll for and the test must assert the no-op instead .
     async sendDelegateInvalid(addressInfo, version, signingPubkey){
         let address = addressInfo["address"]
         let msg = "DELEGATE|" + version + "|" + signingPubkey

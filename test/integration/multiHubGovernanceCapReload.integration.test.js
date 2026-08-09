@@ -52,6 +52,7 @@ const fs     = require('fs');
 const os     = require('os');
 const path   = require('path');
 const { MultiValidatorHub } = require('../helpers/multiValidatorHubHelper');
+const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 
 const COUNT = 3;
 const PEER_WAIT_MS = 8000;
@@ -78,12 +79,16 @@ describe('MultiValidatorHub: governance capability MIN_STAKE pin (#4352)', funct
 
     let mvh;
     let capsPath;
+    let db;
 
+    // Was gated on HUB_DB_USER/HUB_DB_PASS being set, which nothing in CI sets,
+    // so this suite skipped itself on every venue and the live tier reported it
+    // as covered . startDisposableHubDb self-provisions a throwaway
+    // MariaDB in Docker exactly as the rest of the L2 suites do, so the only
+    // remaining skip is a host with no Docker at all.
     before(async function () {
-        if (!process.env.HUB_DB_USER || !process.env.HUB_DB_PASS) {
-            console.log('Skipping governance MIN_STAKE pin test: HUB_DB_USER/HUB_DB_PASS not set');
-            this.skip();
-        }
+        db = await startDisposableHubDb();
+        if (!db) { console.log('Skipping governance MIN_STAKE pin test: no env DB and Docker unavailable'); this.skip(); }
         capsPath = path.join(os.tmpdir(), 'mvh_gov_caps_' + process.pid + '.json');
         fs.writeFileSync(capsPath, JSON.stringify(CAPS));
 
@@ -108,6 +113,7 @@ describe('MultiValidatorHub: governance capability MIN_STAKE pin (#4352)', funct
     after(async function () {
         if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
         if (capsPath) { try { fs.unlinkSync(capsPath); } catch (_) {} }
+        if (db) await db.stop();
     });
 
     it('seeds every hub with the same starting MIN_STAKE', function () {

@@ -19,7 +19,7 @@
 // Plus the collision guards that keep the effective set single-resolving:
 //   - DELEGATE v0 of an already-delegated pubkey rejects (F9)
 //   - STAKE v1 of an actively-delegated pubkey rejects (mirror collision)
-//   - DELEGATE v2 double-revoke of the same stake key rejects
+//   - DELEGATE v2 double-revoke of the same stake key is refused, recording nothing
 //   - revoking a DELEGATED key frees the pubkey for re-delegation
 //
 // Membership is observed through the indexer's `getcapabilityvalidators`
@@ -172,13 +172,38 @@ describe('DELEGATE rotation: additive effective signer set (F8) + collision guar
         assert(set.includes(K2), 'delegated key K2 must remain effective')
     })
 
-    it('a second revoke of the same stake key is rejected (already revoked)', async function () {
-        let result = await stakeHelper.sendDelegateInvalid(ownerAddr, 2, K1)
-        assert(result.delegation, 'rejected revoke row should still be recorded')
-        assert.notStrictEqual(result.delegation.status, 'valid',
-            'double-revoke should be rejected; got status=' + result.delegation.status)
-        assert.match(result.delegation.status, /already revoked/i,
-            'rejection reason should mention "already revoked"; got: ' + result.delegation.status)
+    // A refused DELEGATE v2 leaves NO row to read a rejection status off. The
+    // stake-key branch is not taken (that needs an UNrevoked stake key) and the
+    // delegation branch inserts nothing under DEL-1 (DELEGATE_REVOKE_NO_REINSERT,
+    // armed from genesis on regtest). So the assertion is on what must NOT change:
+    // a repeat revoke that recorded anything would be the signer-lifetime extension
+    // DEL-1 exists to prevent .
+    it('a second revoke of the same stake key is refused and records nothing (already revoked)', async function () {
+        let before = await indexerDatabase.checkStakeKeyRevocation({
+            source: ownerAddr.address, signingPubkey: K1, status: 'valid'
+        })
+        assert(before, 'the first revocation must be on record before this leg runs')
+
+        let txHash = await transactionHelper.createAndSendTransaction(ownerAddr, "DELEGATE|2|" + K1)
+        assert(txHash, 'the repeat revoke should broadcast')
+
+        // Nothing lands, so wait the indexer past the revoke's block rather than on a row.
+        let health = await indexerConnector.health()
+        await syncPast(Number(health.lastIndexedBlock) + 1)
+
+        let after = await indexerDatabase.checkStakeKeyRevocation({
+            source: ownerAddr.address, signingPubkey: K1, status: 'valid'
+        })
+        assert(after, 'the original revocation must survive the refused repeat')
+        assert.strictEqual(String(after.tx_hash), String(before.tx_hash),
+            'the refused repeat must not record a second revocation')
+        assert.strictEqual(String(after.deactivation_block), String(before.deactivation_block),
+            'the refused repeat must not move the revoked key\'s deactivation height')
+        assert.strictEqual(await stakeHelper.readDelegation(ownerAddr, K1), null,
+            'a refused stake-key revoke must not write a delegations row either')
+
+        let set = await effectivePubkeys()
+        assert(!set.includes(K1), 'K1 must stay out of the effective set')
     })
 
     it('STAKE v2 re-stake of the revoked key restores it to the effective set', async function () {
@@ -197,11 +222,13 @@ describe('DELEGATE rotation: additive effective signer set (F8) + collision guar
 
     it('revoking a DELEGATED key removes it and frees the pubkey for re-delegation', async function () {
         let revoke = await stakeHelper.sendRevokeDelegationV0(ownerAddr, K2)
-        assert(revoke.revocation, 'delegation revoke record should exist')
+        assert(revoke.revocation, 'the parent delegation should be stamped deactivated')
         assert.strictEqual(revoke.revocation.status, 'valid')
 
-        // Deactivation lands ACTIVATION_DELAY_BLOCKS after the revoke block.
-        await syncPast(Number(revoke.revocation.block_index) + 7)
+        // Under DEL-1 the revoke writes no row of its own, so the height to sync past
+        // is the deactivation_block it stamped on the parent, not a revoke row's own
+        // block_index (the parent's block_index is the DELEGATE v0 that created it).
+        await syncPast(Number(revoke.revocation.deactivation_block))
         let set = await effectivePubkeys()
         assert(!set.includes(K2), 'revoked delegated key K2 must leave the effective set')
 

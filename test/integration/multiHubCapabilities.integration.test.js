@@ -25,7 +25,8 @@
  *   - self-tests failing "config missing" with no config source
  *   - qualification defaulting to a 0 threshold instead of failing closed
  *
- * Skips when HUB_DB_USER/HUB_DB_PASS are unset (same gate as multiHub).
+ * Self-provisions its MariaDB (startDisposableHubDb), so it skips only where
+ * Docker is absent (same gate as the rest of the L2 suites).
  ********************************************************************/
 
 'use strict';
@@ -38,6 +39,7 @@ const fs     = require('fs');
 const os     = require('os');
 const path   = require('path');
 const { MultiValidatorHub } = require('../helpers/multiValidatorHubHelper');
+const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 
 const COUNT = 3;
 const PEER_WAIT_MS = 8000;
@@ -60,12 +62,16 @@ describe('MultiValidatorHub: capability staking', function () {
 
     let mvh;
     let capsPath;
+    let db;
 
-    before(function () {
-        if (!process.env.HUB_DB_USER || !process.env.HUB_DB_PASS) {
-            console.log('Skipping capability staking test: HUB_DB_USER/HUB_DB_PASS not set');
-            this.skip();
-        }
+    // Was gated on HUB_DB_USER/HUB_DB_PASS being set, which nothing in CI sets,
+    // so this suite skipped itself on every venue and the live tier reported it
+    // as covered . startDisposableHubDb self-provisions a throwaway
+    // MariaDB in Docker exactly as the rest of the L2 suites do, so the only
+    // remaining skip is a host with no Docker at all.
+    before(async function () {
+        db = await startDisposableHubDb();
+        if (!db) { console.log('Skipping capability staking test: no env DB and Docker unavailable'); this.skip(); }
         capsPath = path.join(os.tmpdir(), 'mvh_caps_' + process.pid + '.json');
         fs.writeFileSync(capsPath, JSON.stringify(CAPS));
     });
@@ -73,6 +79,7 @@ describe('MultiValidatorHub: capability staking', function () {
     after(async function () {
         if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
         if (capsPath) { try { fs.unlinkSync(capsPath); } catch (_) {} }
+        if (db) await db.stop();
     });
 
     it('boots ' + COUNT + ' validators that peer-connect', async function () {

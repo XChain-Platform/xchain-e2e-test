@@ -84,9 +84,20 @@ jobs:
         working-directory: xchain-e2e-test
         run: npm run test:unit
 
-  # The hub-DB WS mirror suite: the cheapest live tier to admit, and the one that
-  # motivated  by sitting red for ten days after xchain-indexer 521edf2
-  # changed capability_snapshots to a natural-key mirror.
+  # THE LIVE TIER, as `npm run ci:live` -> scripts/run-live-tier.js over the
+  # roster in test/integration/live-tier.json. That is the same lane the venue
+  # pre-push gate runs, so the two cannot drift apart about what "the live tier"
+  # means. This job used to name ONE suite on its command line, which was the
+  # right first step and the wrong permanent shape: a hardcoded filename is a
+  # roster of one that nothing keeps current, i.e.  one level up.
+  #
+  # The runner also fails a suite that ran nothing, which matters most here:
+  # these suites skip themselves when a service is missing, so a runner without
+  # Docker would otherwise report a green tier having proved nothing.
+  #
+  # The suite that motivated  is still in that roster: hubDbWsMirror sat red
+  # for ten days after xchain-indexer 521edf2 changed capability_snapshots to a
+  # natural-key mirror, with no lane anywhere to notice.
   #
   # It self-provisions a throwaway MariaDB through Docker, which ubuntu-latest
   # supplies, so it needs no service container and no credentials. What it does
@@ -106,9 +117,9 @@ jobs:
   # reproduce the exact defect this item exists to fix, a suite that reports
   # success while proving nothing.
   #
-  # Verified end to end on devhost against genuinely bare clones of all three
-  # repos plus npm ci in each: 10 passing, 0 failing, 9s.
-  hub-db-mirror:
+  # Verified end to end on test-host 2026-08-09 against genuinely bare clones of all
+  # three repos plus npm ci in each: 20 suites, 62 passing, 0 failing, ~19 min.
+  live-tier:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -144,12 +155,11 @@ jobs:
       # HUB_DB_* is unset on purpose: with those present the fixture reuses a
       # pre-provisioned database, and here we want the Docker self-provisioning
       # path that needs no credentials.
-      - name: Hub-DB WS mirror integration suite
+      - name: Live integration tier
         working-directory: xchain-e2e-test
         run: >
           env -u HUB_DB_HOST -u HUB_DB_USER -u HUB_DB_PASS -u HUB_DB_NAME -u HUB_DB_PORT
-          npx mocha --no-config --timeout 300000 --exit
-          test/integration/hubDbWsMirror.integration.test.js
+          npm run ci:live
 
   # Cross-repo drift guards (SD-1 / ): this repo vendors the canonical
   # coin registry from xchain-hub, and per-repo CI cannot see sibling repos, so

@@ -76,14 +76,46 @@ function _portFree(port) {
     });
 }
 
+// The kernel's ephemeral port range, i.e. the ports it hands out to OUTBOUND
+// connections. Linux publishes it; elsewhere fall back to the common default.
+function _ephemeralRange() {
+    try {
+        const [lo, hi] = fs.readFileSync('/proc/sys/net/ipv4/ip_local_port_range', 'utf8')
+            .trim().split(/\s+/).map(Number);
+        if (Number.isInteger(lo) && Number.isInteger(hi) && lo < hi) return { lo, hi };
+    } catch (_) { /* not Linux, or a locked-down /proc */ }
+    return { lo: 32768, hi: 60999 };
+}
+
+// Probe upward from `base` for `count` free P2P ports, NEVER handing back one
+// inside the ephemeral range.
+//
+// A port in that range is free when probed and taken a moment later by an
+// outbound socket some other part of the run opened - a hub dialling a peer, an
+// axios call to the indexer - and the hub then dies on `listen EADDRINUSE`. The
+// suites hard-code their own basePort and several sit above 32768, so this was a
+// timing lottery that only shows up in a long serial run: multiHubOracle
+// (basePort 33000) lost it on 33002 on test-host 2026-08-09 while passing solo.
+// multiHubConsensusN10 already documents the hazard on its own basePort choice;
+// enforcing it here covers every suite instead of the ones that remembered.
+//
+// A base inside the range jumps ABOVE it rather than below: below is where the
+// suites' own hand-assigned bases live, and landing on one of those would trade
+// a rare kernel collision for a certain harness collision.
 async function _pickFreePorts(count, base) {
+    const eph = _ephemeralRange();
+    const start = (base >= eph.lo && base <= eph.hi) ? eph.hi + 1 : base;
+    let p = start;
     const picked = [];
-    let p = base;
-    while (picked.length < count && p < base + 1000) {
+    // Budget probes, not port numbers: a base just under the range walks into it
+    // and gets bounced above, and a window measured in port numbers would then
+    // read as exhausted after a single skip.
+    for (let tries = 0; picked.length < count && tries < 1000 && p < 65535; tries++) {
+        if (p >= eph.lo && p <= eph.hi) { p = eph.hi + 1; continue; }
         if (await _portFree(p)) picked.push(p);
         p++;
     }
-    if (picked.length < count) throw new Error('MultiValidatorHub: not enough free ports near ' + base);
+    if (picked.length < count) throw new Error('MultiValidatorHub: not enough free ports near ' + start);
     return picked;
 }
 
@@ -457,4 +489,9 @@ class MultiValidatorHub {
     }
 }
 
-module.exports = { MultiValidatorHub, ValidatorIdentity, loadHubModule: _loadHubModule, resolveHubFile: _resolveHubFile };
+// pickFreePorts / ephemeralRange are exported for the port-allocation unit test
+// only: the rule they encode (never hand back an ephemeral port) is invisible in
+// a passing integration run and only shows itself as a rare EADDRINUSE, so it is
+// pinned directly (test/unit/helpers/multiValidatorHubPorts.test.js).
+module.exports = { MultiValidatorHub, ValidatorIdentity, loadHubModule: _loadHubModule, resolveHubFile: _resolveHubFile,
+    pickFreePorts: _pickFreePorts, ephemeralRange: _ephemeralRange };

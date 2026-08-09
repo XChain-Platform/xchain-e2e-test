@@ -2211,20 +2211,30 @@ class Database {
 
     async waitForDelegation(params, timeMax = 60000){ return this._waitFor(this.checkDelegation, params, timeMax) }
 
-    async checkDelegation({source, txHash, status}){
+    // `signingPubkey` and `deactivated` exist for the DEL-1 revoke shape :
+    // at/after DELEGATE_REVOKE_NO_REINSERT (armed from genesis on regtest) a revoke
+    // writes NO row of its own, it only stamps deactivation_block on the PARENT
+    // delegation, so the only way to observe one is to look the parent up by
+    // (source, pubkey) and read that column. A txHash filter can never see it: the
+    // parent row carries the DELEGATE v0 transaction, not the revoke's.
+    async checkDelegation({source, signingPubkey, txHash, status, deactivated}){
         let w = [], v = []
         if(source){ w.push("ia.address = ?"); v.push(source); }
+        if(signingPubkey){ w.push("ip.pubkey = ?"); v.push(String(signingPubkey).toLowerCase()); }
         if(txHash){ w.push("itx.hash = ?"); v.push(txHash); }
         if(status){ w.push("ist.status = ?"); v.push(status); }
+        if(deactivated === true)  w.push("d.deactivation_block IS NOT NULL")
+        if(deactivated === false) w.push("d.deactivation_block IS NULL")
         if(w.length === 0) return null
-        let query = `SELECT d.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status
+        let query = `SELECT d.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status, ip.pubkey AS signing_pubkey
             FROM delegations d
             LEFT JOIN actions act ON act.action_index = d.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
             LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
             LEFT JOIN index_addresses ia ON ia.id = d.source_id
             LEFT JOIN index_statuses ist ON ist.id = d.status_id
-            WHERE ` + w.join(" AND ")
+            LEFT JOIN index_pubkeys ip ON ip.id = d.signing_pubkey_id
+            WHERE ` + w.join(" AND ") + ` ORDER BY d.action_index DESC`
         let connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
