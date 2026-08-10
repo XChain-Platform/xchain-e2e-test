@@ -111,7 +111,7 @@ describe('DEX Reorg: an open ORDER (and its escrow) rolls back across an on-chai
         console.log('   indexer tip', await tip(), 'node tip', await nodeConnector.getBlockCount())
 
         // ── Reorg out the ORDER block ──
-        await regtestMinerConnector.setMiningTime(3600000, 3600000)
+        await regtestMinerConnector.pauseMining()
         try {
             const tipBefore = await nodeConnector.getBlockCount()
             const orderHash = await nodeConnector.getBlockHash(orderBlock)
@@ -139,7 +139,7 @@ describe('DEX Reorg: an open ORDER (and its escrow) rolls back across an on-chai
             assert.strictEqual(bal, '100', 'escrow released: maker balance restored to the full mint')
             console.log('   ORDER rolled back + escrow released (balance 70 -> 100): isolation OK')
         } finally {
-            await regtestMinerConnector.setDefaultMiningTime()
+            await regtestMinerConnector.resumeMining()
         }
     })
 })

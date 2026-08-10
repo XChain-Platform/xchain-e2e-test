@@ -172,6 +172,110 @@ describe('Staking: STAKE, UNSTAKE, DELEGATE (capability model)', function () {
         })
     })
 
+    describe('UNSTAKE v0: partial unstake ', function () {
+        // Self-contained staker so run order in the outer suite cannot disturb
+        // the partial-unstake lifecycle asserted here.
+        let partialAddr = null
+        let partialPubkey = null
+
+        before(async function () {
+            partialAddr = await cryptoHelper.getNewFundedAddress(
+                'partial-staker', COIN, NETWORK, null, 'legacy', 0, 1
+            )
+            await gasHelper.ensureGasBalance(partialAddr, '2000')
+
+            let { publicKey } = crypto.generateKeyPairSync('ed25519')
+            partialPubkey = publicKey.export({ format: 'der', type: 'spki' })
+                .subarray(12).toString('hex')
+
+            let stakeResult = await stakeHelper.sendStakeV1(partialAddr, '1000.00000000', partialPubkey)
+            assert.strictEqual(stakeResult.stake.status, 'valid', 'setup stake should be valid')
+
+            // Activate the stake. Pause the auto-miner around the deterministic
+            // height advance. #3851
+            await regtestMinerConnector.pauseMining()
+            try {
+                await regtestMinerConnector.generateBlocks(7)
+            } finally {
+                await regtestMinerConnector.resumeMining()
+            }
+        })
+
+        it('moves only the requested amount into cooldown', async function () {
+            let result = await stakeHelper.sendUnstakeV0(partialAddr, partialPubkey, '400')
+            assert(result.unstake, 'partial unstake record should exist in DB')
+            assert.strictEqual(result.unstake.status, 'valid', 'partial unstake should be valid')
+            assert.strictEqual(Number(result.unstake.amount), 400,
+                'unstake amount should be the requested partial, got ' + result.unstake.amount)
+            assert(result.unstake.cooldown_end_block > 0, 'cooldown end block should be set')
+        })
+
+        it('rejects a second UNSTAKE during the residual\'s activation handoff window', async function () {
+            // The residual re-stake activates when the swept rows deactivate
+            // (block + 6); until then the pubkey has no unstakeable rows.
+            let msg = 'UNSTAKE|0|' + partialPubkey
+            let txHash = await transactionHelper.createAndSendTransaction(partialAddr, msg)
+            let row = await stakeHelper.waitForAnyUnstake({
+                source:        partialAddr.address,
+                signingPubkey: partialPubkey,
+                txHash:        txHash
+            })
+            assert(row, 'the rejected unstake row should be recorded')
+            assert.notStrictEqual(row.status, 'valid',
+                'UNSTAKE inside the handoff window should be rejected; got status=' + row.status)
+            assert.match(row.status, /no active stake|in progress/i,
+                'rejection reason should mention the re-unstake guard; got: ' + row.status)
+        })
+
+        it('after the handoff the residual is unstakeable in full', async function () {
+            // Advance past the residual row's activation_block. Pause the
+            // auto-miner around the deterministic height advance. #3851
+            await regtestMinerConnector.pauseMining()
+            try {
+                await regtestMinerConnector.generateBlocks(7)
+            } finally {
+                await regtestMinerConnector.resumeMining()
+            }
+
+            let result = await stakeHelper.sendUnstakeV0(partialAddr, partialPubkey)
+            assert.strictEqual(result.unstake.status, 'valid', 'residual unstake should be valid')
+            assert.strictEqual(Number(result.unstake.amount), 600,
+                'residual sweep should be the un-unstaked remainder, got ' + result.unstake.amount)
+        })
+
+        it('rejects an over-ask instead of clamping', async function () {
+            // Fresh staker: everything above is already unstaking.
+            let overAddr = await cryptoHelper.getNewFundedAddress(
+                'overask-staker', COIN, NETWORK, null, 'legacy', 0, 1
+            )
+            await gasHelper.ensureGasBalance(overAddr, '2000')
+            let { publicKey } = crypto.generateKeyPairSync('ed25519')
+            let overPubkey = publicKey.export({ format: 'der', type: 'spki' })
+                .subarray(12).toString('hex')
+            let stakeResult = await stakeHelper.sendStakeV1(overAddr, '1000.00000000', overPubkey)
+            assert.strictEqual(stakeResult.stake.status, 'valid', 'setup stake should be valid')
+            await regtestMinerConnector.pauseMining()
+            try {
+                await regtestMinerConnector.generateBlocks(7)
+            } finally {
+                await regtestMinerConnector.resumeMining()
+            }
+
+            let msg = 'UNSTAKE|0|' + overPubkey + '|1000.00000001'
+            let txHash = await transactionHelper.createAndSendTransaction(overAddr, msg)
+            let row = await stakeHelper.waitForAnyUnstake({
+                source:        overAddr.address,
+                signingPubkey: overPubkey,
+                txHash:        txHash
+            })
+            assert(row, 'the rejected unstake row should be recorded')
+            assert.notStrictEqual(row.status, 'valid',
+                'over-ask should be rejected, never clamped; got status=' + row.status)
+            assert.match(row.status, /AMOUNT/i,
+                'rejection reason should mention AMOUNT; got: ' + row.status)
+        })
+    })
+
     describe('DELEGATE v0: Rotate signing key', function () {
         let delegateAddr = null
         let delegatePubkey = null
@@ -206,6 +310,111 @@ describe('Staking: STAKE, UNSTAKE, DELEGATE (capability model)', function () {
             let result = await stakeHelper.sendDelegateV0(delegateAddr, newPubkey)
             assert(result.delegation, 'Delegation record should exist in DB')
             assert.strictEqual(result.delegation.status, 'valid', 'Delegation status should be valid')
+        })
+    })
+
+    describe('STAKE v1: Input validation rejections', function () {
+        // Re-land of the four malformed-input cases reverted in f8bbb2e
+        // : AMOUNT=0, AMOUNT with more than 8 decimals, a
+        // malformed SIGNING_PUBKEY, and a stake larger than the source's
+        // XCHAIN balance. Each maps to one reject string in
+        // xchain-indexer/src/actions/stake.js.
+        //
+        // Deliberately last in the file: every case uses its own funded
+        // address and its own fresh pubkey, and none of them mines, so
+        // this block cannot disturb the activation-window ordering the
+        // v2/UNSTAKE blocks above depend on. Keep it last.
+        //
+        // The indexer writes a stakes row for a rejected STAKE too
+        // (createStake runs unconditionally, after the status is decided),
+        // so each case reads the row back status-agnostically by txHash and
+        // asserts the specific rejection reason. Rows are matched on
+        // source + txHash rather than pubkey, because a malformed pubkey is
+        // stored lowercased and truncated to 64 chars by getOrCreatePubkeyId.
+        let badInputAddr = null
+
+        before(async function () {
+            badInputAddr = await cryptoHelper.getNewFundedAddress(
+                'malformed-staker', COIN, NETWORK, null, 'legacy', 0, 1
+            )
+            await gasHelper.ensureGasBalance(badInputAddr, '2000')
+        })
+
+        // Fresh Ed25519 pubkey so no case can collide with an existing stake
+        // and get rejected for the wrong reason ("already in use").
+        function freshPubkey () {
+            let { publicKey } = crypto.generateKeyPairSync('ed25519')
+            return publicKey.export({ format: 'der', type: 'spki' })
+                .subarray(12).toString('hex')
+        }
+
+        it('should reject a v1 stake with AMOUNT = 0', async function () {
+            let msg = 'STAKE|1|0.00000000|' + freshPubkey()
+            let txHash = await transactionHelper.createAndSendTransaction(badInputAddr, msg)
+            let row = await stakeHelper.waitForAnyStake({
+                source: badInputAddr.address,
+                txHash: txHash
+            })
+            assert(row, 'the rejected stake row should be recorded')
+            assert.notStrictEqual(row.status, 'valid',
+                'a zero-amount stake should be rejected; got status=' + row.status)
+            assert.match(row.status, /AMOUNT \(must be greater than 0\)/i,
+                'rejection reason should be the greater-than-zero guard; got: ' + row.status)
+        })
+
+        it('should reject a v1 stake with AMOUNT carrying more than 8 decimals', async function () {
+            // 9 decimal places: past XCHAIN's 8dp, so the AMOUNT format
+            // regex rejects it before any balance lookup.
+            let msg = 'STAKE|1|1000.123456789|' + freshPubkey()
+            let txHash = await transactionHelper.createAndSendTransaction(badInputAddr, msg)
+            let row = await stakeHelper.waitForAnyStake({
+                source: badInputAddr.address,
+                txHash: txHash
+            })
+            assert(row, 'the rejected stake row should be recorded')
+            assert.notStrictEqual(row.status, 'valid',
+                'an over-precision amount should be rejected; got status=' + row.status)
+            assert.match(row.status, /AMOUNT \(format\)/i,
+                'rejection reason should be the AMOUNT format guard; got: ' + row.status)
+        })
+
+        it('should reject a v1 stake with a malformed SIGNING_PUBKEY', async function () {
+            // 64 characters so length alone passes, but the leading 'zz'
+            // is not hex, so the Ed25519 pubkey pattern rejects it.
+            let malformedPubkey = 'zz' + 'a'.repeat(62)
+            let msg = 'STAKE|1|1000.00000000|' + malformedPubkey
+            let txHash = await transactionHelper.createAndSendTransaction(badInputAddr, msg)
+            let row = await stakeHelper.waitForAnyStake({
+                source: badInputAddr.address,
+                txHash: txHash
+            })
+            assert(row, 'the rejected stake row should be recorded')
+            assert.notStrictEqual(row.status, 'valid',
+                'a malformed pubkey should be rejected; got status=' + row.status)
+            assert.match(row.status, /SIGNING_PUBKEY \(format\)/i,
+                'rejection reason should be the pubkey format guard; got: ' + row.status)
+        })
+
+        it('should reject a v1 stake larger than the source XCHAIN balance', async function () {
+            // Its own address, funded with far less XCHAIN than it stakes.
+            // A separate address keeps the shortfall independent of what the
+            // other cases in this block spent.
+            let poorAddr = await cryptoHelper.getNewFundedAddress(
+                'poor-staker', COIN, NETWORK, null, 'legacy', 0, 1
+            )
+            await gasHelper.ensureGasBalance(poorAddr, '10')
+
+            let msg = 'STAKE|1|1000.00000000|' + freshPubkey()
+            let txHash = await transactionHelper.createAndSendTransaction(poorAddr, msg)
+            let row = await stakeHelper.waitForAnyStake({
+                source: poorAddr.address,
+                txHash: txHash
+            })
+            assert(row, 'the rejected stake row should be recorded')
+            assert.notStrictEqual(row.status, 'valid',
+                'a stake beyond the balance should be rejected; got status=' + row.status)
+            assert.match(row.status, /insufficient funds \(STAKE\)/i,
+                'rejection reason should cite insufficient funds; got: ' + row.status)
         })
     })
 })

@@ -12,6 +12,7 @@ const assert = require('assert')
 const cryptoHelper = require('../cryptoHelper')
 const transactionHelper = require('../transactionHelper')
 const nativeFeeHelper = require('../helpers/nativeFeeHelper')
+const { BOOTSTRAP_XCHAIN_USD, NO_PRICE_SEED } = require('../helpers/xchainPriceConstants')
 
 // Live-stack proof of native-coin USD-pegged fee payment.
 //
@@ -89,6 +90,11 @@ function issueMessage(tick){
 
 describe('Native-coin fee payment (live stack)', function () {
     before(async function () {
+        //  step 8: this suite seeds the pair and computes its expected fees
+        // FROM the fixture prices, so on a venue whose hub publishes the pair the
+        // seed would shadow every derived round. Not runnable there; the
+        // derivation suite owns native-fee proof on publishing venues.
+        if (NO_PRICE_SEED) this.skip()
         // Throws on LTC/DOGE when unresolvable (loud failure beats a silent
         // permanent skip on the very chains this suite targets).
         const mode = await nativeFeeHelper.discoverFeeMode()
@@ -104,7 +110,7 @@ describe('Native-coin fee payment (live stack)', function () {
             let c = await indexerDatabase.getConnection()
             try { let r = await c.query("SELECT MAX(block_index) AS h FROM blocks"); return (r[0].h || 0) } finally { await c.release() }
         })()))
-        await seedPrice('XCHAIN/USD', '1.00000000', tip, 999200001)
+        await seedPrice('XCHAIN/USD', BOOTSTRAP_XCHAIN_USD, tip, 999200001)
         await seedPrice(COIN_CODE + '/USD', '100000.00000000', tip, 999200002)
 
         // Fresh address: ZERO XCHAIN, so the ISSUE can ONLY be valid via native-coin fee detection.
@@ -137,7 +143,7 @@ describe('Native-coin fee payment (live stack)', function () {
 
     it('rejects an ISSUE with NO fee output and NO XCHAIN balance (fee unpaid)', async function () {
         let tip = Number((await q("SELECT MAX(block_index) AS h FROM blocks"))[0].h || 0)
-        await seedPrice('XCHAIN/USD', '1.00000000', tip, 999200011)
+        await seedPrice('XCHAIN/USD', BOOTSTRAP_XCHAIN_USD, tip, 999200011)
         await seedPrice(COIN_CODE + '/USD', '100000.00000000', tip, 999200012)
 
         // seedGas=false: this case asserts the no-fee-output, no-XCHAIN-balance path.

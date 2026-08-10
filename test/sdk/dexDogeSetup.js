@@ -53,6 +53,7 @@
 const axios   = require('axios');
 const mariadb = require('mariadb');
 const { XChainSDK } = require('./sdkHelper');
+const { BOOTSTRAP_XCHAIN_USD, BOOTSTRAP_XCHAIN_USD_NUM, refuseSeedIfSuppressed } = require('../helpers/xchainPriceConstants');
 
 const MINER_URL = process.env.XCALL_DOGE_MINER_URL || 'http://localhost:3125';
 const INDEXER_URL = process.env.XCALL_DOGE_INDEXER_URL || 'http://127.0.0.1:3124';
@@ -67,7 +68,11 @@ const HUB_DB_PORT = parseInt(process.env.HUB_DB_PORT || String(DB_PORT), 10);
 const HUB_DB_NAME = process.env.HUB_DB_NAME || 'XChain_Hub';
 const FEE_DESTINATION = process.env.DEX_DOGE_FEE_DESTINATION || 'moArBUdgbkU3THWXnnPSBwfaPgL5c9tMqN';
 // Seeded oracle prices and the UNIFIED_FEES ISSUE gas (GAS_SCHEDULE.ISSUE x GAS_PRICE).
-const DOGE_USD = 0.10, XCHAIN_USD = 1.00;
+// XCHAIN at the production bootstrap ( step 8): the pair is derived from
+// platform fills and, with D2 supersession disabled, a real hub publishes exactly
+// this every round. DOGE is a venue fiction chosen for round arithmetic.
+const DOGE_USD = 0.10, XCHAIN_USD = BOOTSTRAP_XCHAIN_USD_NUM;
+const DOGE_USD_SEED = '0.10000000';
 const ISSUE_FEE_XCHAIN = 100000 * 0.00001; // 1.0 XCHAIN
 
 const DOGE_TICK = String(process.env.DEX_DOGE_TICK || '').trim();
@@ -116,8 +121,9 @@ async function main() {
     // block the ISSUE lands in, and on a chain that sat idle the old tip time is stale
     // beyond the 1800s gate while the newly mined block gets wall-clock time.
     const seedTime = Math.max(blockTime, Math.floor(Date.now() / 1000));
+    refuseSeedIfSuppressed('dexDogeSetup');
     await hubConn(async (c) => {
-        for (const [pair, price, round] of [['DOGE/USD', '0.10000000', 990001], ['XCHAIN/USD', '1.00000000', 990002]]) {
+        for (const [pair, price, round] of [['DOGE/USD', DOGE_USD_SEED, 990001], ['XCHAIN/USD', BOOTSTRAP_XCHAIN_USD, 990002]]) {
             await c.query(
                 `INSERT INTO price_snapshots
                     (round_number, coin_pair, price, reference_block, reference_chain,

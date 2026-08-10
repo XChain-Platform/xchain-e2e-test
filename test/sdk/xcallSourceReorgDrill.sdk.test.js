@@ -216,7 +216,7 @@ describe('[sdk] XCALL source-chain reorg retraction (pre-execution)', function (
         // Pause auto-mining so the orphaned XCALL tx cannot be re-mined from the
         // mempool, then build an EMPTY competing chain (generateBlock(addr, []))
         // longer than the original tip (same mechanism as reorgBalances.test.js).
-        await miner.setMiningTime(3600000, 3600000);
+        await miner.pauseMining();
         try {
             const tipBefore = await node.getBlockCount();
             const srcHash   = await node.getBlockHash(srcBlock);
@@ -275,7 +275,7 @@ describe('[sdk] XCALL source-chain reorg retraction (pre-execution)', function (
 
             console.log('    [xcall-srcreorg] retracted cleanly: hub=retracted, mirrors gone, no exec, no callback');
         } finally {
-            await miner.setDefaultMiningTime();
+            await miner.resumeMining();
         }
     });
 });

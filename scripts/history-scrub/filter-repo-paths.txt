@@ -1,0 +1,23 @@
+# Paths purged from ALL history, passed to git-filter-repo as
+# --paths-from-file together with --invert-paths (keep everything EXCEPT these).
+#
+# Hand-maintained, unlike the filter-repo-replace-*.txt spec files.
+#
+# Only put a path here when the file is a GENERATED artifact that should never
+# have been tracked. A file that is still live gets its content rewritten by
+# --replace-text instead: purging its path would delete the whole file's history
+# including the versions that are perfectly fine.
+#
+# reports/mutation/phase1.{html,json} are Stryker output. They were tracked
+# before the reports/mutation/*.html + *.json ignore rules landed, and 379912d
+# untracked them going forward without touching the blobs already in history.
+# Between them they are ~3MB of generated HTML/JSON that embeds the absolute
+# build path of the machine that produced them. Nothing reads them; the curated
+# reports/mutation/report-2026-04-07.md is the artifact that is meant to be kept,
+# and it is deliberately NOT listed here.
+#
+# Purging these two paths is expected to leave 379912d with an empty diff, so
+# filter-repo's default --prune-empty=auto drops that commit entirely. That is
+# intended: its commit message is itself one of the four leak sites.
+reports/mutation/phase1.html
+reports/mutation/phase1.json

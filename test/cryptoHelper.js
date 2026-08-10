@@ -58,10 +58,20 @@ module.exports = {
         var address = account.derive(0).derive(addressIndex) // no change -> address index
         
         var testAddress = null
-        switch (addressType){ 
+        switch (addressType){
             case "legacy":
                 testAddress = bitcoin.payments.p2pkh({ pubkey: address.publicKey, network }).address
                 break
+            case "segwit":
+                // Native segwit (P2WPKH). Required by the Taproot envelope: its commit
+                // inputs must all be segwit ( spec §3.5) because a legacy input's
+                // txid still moves when it is signed, and the reveal is pre-built
+                // against the UNSIGNED commit's txid.
+                testAddress = bitcoin.payments.p2wpkh({ pubkey: address.publicKey, network }).address
+                break
+        }
+        if (testAddress == null){
+            throw new Error("unsupported addressType \""+addressType+"\" (supported: legacy, segwit)")
         }
         wallet["addresses"].push({privateKey: address.privateKey, publicKey: address.publicKey, address:testAddress})
         return {mnemonic: wallet.mnemonic, privateKey: address.privateKey, publicKey: address.publicKey, address:testAddress}

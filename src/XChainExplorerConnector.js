@@ -51,6 +51,28 @@ class XChainExplorerConnector {
             return false
         }
     }
+
+    // The bytes of a FILE as the explorer serves them, plus the headers that say
+    // what it did to get there. A compressed FILE ( spec §5.1) is inflated
+    // transparently, so `body` is the ORIGINAL payload and X-XChain-Stored-Length
+    // reports the smaller on-chain footprint; if inflation fails or the ratio guard
+    // trips, the explorer serves the stored bytes and says so in X-XChain-Stored-Form
+    // rather than serving partial output (§5.5, fail-closed).
+    //
+    // Kept as a raw response rather than a boolean: a caller asserting a byte-exact
+    // round trip needs the bytes, the status and the headers together.
+    async getFileRaw(coinPrefix, actionIndex){
+        const url = this.url+"/"+coinPrefix+"/api/file/"+actionIndex+"/raw"
+        const response = await axios.get(url, {
+            responseType: 'arraybuffer',
+            validateStatus: () => true
+        })
+        return {
+            status: response.status,
+            headers: response.headers || {},
+            body: Buffer.from(response.data || [])
+        }
+    }
 }
 
 module.exports = XChainExplorerConnector

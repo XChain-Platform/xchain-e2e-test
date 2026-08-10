@@ -87,7 +87,7 @@ describe('PRICE v1 Reorg: a published oracle quote rolls back across an on-chain
         console.log('   indexer tip', await tip(), 'node tip', await nodeConnector.getBlockCount())
 
         // -- Reorg out the PRICE block --
-        await regtestMinerConnector.setMiningTime(3600000, 3600000)
+        await regtestMinerConnector.pauseMining()
         try {
             const tipBefore = await nodeConnector.getBlockCount()
             const priceHash = await nodeConnector.getBlockHash(priceBlock)
@@ -113,7 +113,7 @@ describe('PRICE v1 Reorg: a published oracle quote rolls back across an on-chain
             assert.strictEqual(await priceCount(tick), 0, 'no price row remains for the tick')
             console.log('   PRICE v1 rolled back on reorg: isolation OK')
         } finally {
-            await regtestMinerConnector.setDefaultMiningTime()
+            await regtestMinerConnector.resumeMining()
         }
     })
 })

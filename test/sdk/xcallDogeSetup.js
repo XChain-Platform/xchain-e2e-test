@@ -28,6 +28,8 @@
  *   XCALL_DB_HOST=127.0.0.1 XCALL_DB_PORT=13306
  *   HUB_DB_USER/HUB_DB_PASS        (XChain_Hub: price seeding)
  *   DOGE_IDX_DB_USER/DOGE_IDX_DB_PASS (XChain_DOGE_Regtest_Indexer: reads)
+ *   HUB_DB_NAME / DOGE_IDX_DB_NAME (schema overrides for an isolated venue or
+ *                                   a mirror-local HubDbSync topology)
  *
  * Usage: node test/sdk/xcallDogeSetup.js
  *
@@ -36,10 +38,24 @@
 const axios   = require('axios');
 const mariadb = require('mariadb');
 const { XChainSDK } = require('./sdkHelper');
+const { BOOTSTRAP_XCHAIN_USD, BOOTSTRAP_XCHAIN_USD_NUM, refuseSeedIfSuppressed } = require('../helpers/xchainPriceConstants');
+
+// Seeded fee-oracle prices. XCHAIN comes from the shared bootstrap constant (the
+// value a real hub publishes); DOGE is a venue fiction chosen for round arithmetic.
+// Both are declared once and used for BOTH the seed and the fee sizing below.
+const DOGE_USD_SEED = '0.10000000';
+const DOGE_USD_NUM  = 0.10;
 
 const MINER_URL = process.env.XCALL_DOGE_MINER_URL || 'http://localhost:3125';
 const DB_HOST   = process.env.XCALL_DB_HOST || '127.0.0.1';
 const DB_PORT   = parseInt(process.env.XCALL_DB_PORT || '13306', 10);
+// Schema names are overridable so this driver also runs against an ISOLATED
+// venue (its own MariaDB, its own DB names) and against a mirror-local
+// HubDbSync topology, where the price snapshots the fee path reads live in the
+// DOGE indexer's OWN schema rather than in a co-located hub schema. Defaults
+// reproduce the shared local regtest stack exactly.
+const DOGE_IDX_DB = process.env.DOGE_IDX_DB_NAME || 'XChain_DOGE_Regtest_Indexer';
+const HUB_DB      = process.env.HUB_DB_NAME      || 'XChain_Hub';
 
 const CONTRACT_B = `
     module.exports = {
@@ -104,7 +120,7 @@ async function withConn(database, user, password, fn) {
 }
 
 async function dogeIdx(fn) {
-    return withConn('XChain_DOGE_Regtest_Indexer', process.env.DOGE_IDX_DB_USER, process.env.DOGE_IDX_DB_PASS, fn);
+    return withConn(DOGE_IDX_DB, process.env.DOGE_IDX_DB_USER, process.env.DOGE_IDX_DB_PASS, fn);
 }
 
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -115,8 +131,9 @@ async function main() {
         const rows = await c.query('SELECT block_time FROM blocks ORDER BY block_index DESC LIMIT 1');
         return rows.length ? Number(rows[0].block_time) : Math.floor(Date.now() / 1000);
     });
-    await withConn('XChain_Hub', process.env.HUB_DB_USER, process.env.HUB_DB_PASS, async (c) => {
-        for (const [pair, price, round] of [['DOGE/USD', '0.10000000', 990001], ['XCHAIN/USD', '1.00000000', 990002]]) {
+    refuseSeedIfSuppressed('xcallDogeSetup');
+    await withConn(HUB_DB, process.env.HUB_DB_USER, process.env.HUB_DB_PASS, async (c) => {
+        for (const [pair, price, round] of [['DOGE/USD', DOGE_USD_SEED, 990001], ['XCHAIN/USD', BOOTSTRAP_XCHAIN_USD, 990002]]) {
             await c.query(
                 `INSERT INTO price_snapshots
                     (round_number, coin_pair, price, reference_block, reference_chain,
@@ -175,7 +192,11 @@ async function main() {
     // fee output from the consensus formula directly:
     //   gasCost        = VM_DEPLOY_BASE(100000) + codeBytes x VM_DEPLOY_PER_BYTE(10)
     //   feeXchain      = gasCost x GAS_PRICE(0.00001)
-    //   expectedNative = feeXchain x (XCHAIN/USD / DOGE/USD)  [seeded 1.0 / 0.1]
+    //   expectedNative = feeXchain x (XCHAIN/USD / DOGE/USD)
+    // The two prices are read from the SAME constants the seeding above used, so the
+    // sizing cannot drift from what was actually seeded. It silently could before
+    //  step 8: the ratio was the literal (1.0 / 0.1) sitting a hundred lines
+    // from the seed, and moving the seed alone would have underpaid every fee.
     // paid to the chain's FEE_DESTINATION, mid-band of the 0.95-1.10 tolerance.
     const FEE_DESTINATION = 'mfees5pa2HwNBonk5vG23aDWkN9fuDJib4';
 
@@ -183,7 +204,7 @@ async function main() {
         const codeBytes  = Buffer.byteLength(code, 'utf8');
         const gasCost    = 100000 + codeBytes * 10;
         const feeXchain  = gasCost * 0.00001;
-        const nativeDoge = feeXchain * (1.0 / 0.1);
+        const nativeDoge = feeXchain * (BOOTSTRAP_XCHAIN_USD_NUM / DOGE_USD_NUM);
         const feeSats    = Math.round(nativeDoge * 1e8);
         console.log('[doge-setup] ' + label + ' fee sizing: codeBytes=' + codeBytes + ' gasCost=' + gasCost +
                     ' feeXCHAIN=' + feeXchain + ' nativeDOGE=' + nativeDoge);

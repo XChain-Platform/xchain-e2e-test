@@ -196,7 +196,7 @@ describe('[sdk] cross-chain DEX match source-chain reorg retraction (pre-settlem
         // Pause auto-mining so the orphaned ORDER tx cannot be re-mined from the
         // mempool, then build an EMPTY competing chain longer than the original
         // tip (same mechanism as reorgBalances.test.js / the XCALL src-reorg drill).
-        await miner.setMiningTime(3600000, 3600000);
+        await miner.pauseMining();
         try {
             const tipBefore = await node.getBlockCount();
             const srcHash   = await node.getBlockHash(srcBlock);
@@ -246,7 +246,7 @@ describe('[sdk] cross-chain DEX match source-chain reorg retraction (pre-settlem
                     ? ' (mirrors deleted: BTC=' + (btcMirror === 0) + ' DOGE=' + (dogeMirror === 0) + ')'
                     : ' (indexer mirrors n/a: HubDbSync off)'));
         } finally {
-            await miner.setDefaultMiningTime();
+            await miner.resumeMining();
         }
     });
 });

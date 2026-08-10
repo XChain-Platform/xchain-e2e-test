@@ -162,6 +162,11 @@ describe('transactionHelper', function () {
             assert.strictEqual(args[1], address,          'pubkey arg');
             assert.deepStrictEqual(args[3], { action: 'ISSUE' }, 'data arg');
             assert.strictEqual(args[8], address,          'changeAddress arg');
+            // : `compress` is tri-state and MUST default to null, leaving the
+            // encoder's own default in force. A default of true or false here would
+            // silently change what every existing action in this suite writes on
+            // chain, which is exactly the kind of change nothing else would catch.
+            assert.strictEqual(args[13], null,            'compress arg defaults to null (encoder decides)');
         });
 
         it('calls nodeConnector.broadcastTx after building the signed transaction', async function () {
@@ -205,6 +210,49 @@ describe('transactionHelper', function () {
     describe('createSimpleTransaction', function () {
         it('is documented as requiring integration testing for full coverage', function () {
             assert.strictEqual(typeof transactionHelper.createSimpleTransaction, 'function');
+        });
+    });
+
+    //  §3.5. The envelope reveal is pre-built against the UNSIGNED commit's
+    // txid, which is only stable because commit inputs are segwit-only. If that
+    // txid ever drifts, the reveal spends nothing while the commit's value sits in
+    // a one-time P2TR output no other transaction references: funds stranded, no
+    // error, no action. The guard is cheap to keep and expensive to lose, so it is
+    // pinned here rather than left to the regtest run that happens to notice.
+    describe('signEnvelopeReveal (envelope pair binding)', function () {
+        const bitcoin = require('bitcoinjs-lib');
+        const ecc     = require('tiny-secp256k1');
+        const { ECPairFactory } = require('ecpair');
+
+        function revealPsbtSpending(prevoutTxid) {
+            const network = global.NETWORK_OBJECT;
+            const keyPair = ECPairFactory(ecc).fromPrivateKey(Buffer.alloc(32, 0x07), { network });
+            const p2wpkh  = bitcoin.payments.p2wpkh({ pubkey: keyPair.publicKey, network });
+            const psbt    = new bitcoin.Psbt({ network });
+            psbt.addInput({ hash: prevoutTxid, index: 0, witnessUtxo: { script: p2wpkh.output, value: 50000 } });
+            psbt.addOutput({ address: p2wpkh.address, value: 40000 });
+            return psbt.toHex();
+        }
+
+        it('refuses a reveal whose input 0 is not the signed commit', function () {
+            const wrongPrevout = 'b'.repeat(64);
+            assert.throws(
+                () => transactionHelper.signEnvelopeReveal(
+                    { publicKey: Buffer.alloc(33, 0x02), privateKey: Buffer.alloc(32, 0x07) },
+                    revealPsbtSpending(wrongPrevout),
+                    'c'.repeat(64)
+                ),
+                /does not spend the signed commit/,
+                'a drifted commit txid must fail loudly, before anything is signed or broadcast'
+            );
+        });
+
+        it('refuses a TAPROOT response that carries no reveal at all', function () {
+            assert.throws(
+                () => transactionHelper.signEnvelopeReveal({ publicKey: Buffer.alloc(33, 0x02) }, null, 'c'.repeat(64)),
+                /without a revealPsbt/,
+                'half a pair is never publishable; it must not be mistaken for a single-tx lane'
+            );
         });
     });
 });

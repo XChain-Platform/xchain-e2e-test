@@ -89,6 +89,20 @@ async function blockOfAction(actionIndex) {
 async function tip() { const r = await q(`SELECT MAX(block_index) h FROM blocks`, []); return Number(r[0].h) }
 async function mine(n) { await regtestMinerConnector.generateBlocks(n) }
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
+
+// The indexer trails the node, so any assertion about what IS or IS NOT indexed has to
+// be made from a position where the two agree, or it is a race against venue load
+// (mirrors envelopeReorg.test.js). Pass an explicit targetHeight when the auto-miner is
+// running: the live node tip is a moving target and the wait may never see equality.
+async function waitForIndexerToCatchUp(targetHeight = null, timeoutMs = 180000) {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+        const target = targetHeight === null ? await nodeConnector.getBlockCount() : targetHeight
+        if ((await tip()) >= target) return true
+        await sleep(2000)
+    }
+    return false
+}
 function randTick(p) { let s = p; for (let i = 0; i < 6; i++) s += String.fromCharCode(65 + Math.floor(Math.random() * 26)); return s }
 
 describe('Gated Content Reorg: a gated FILE (and its SEND-gating) rolls back across a reorg', function () {
@@ -130,15 +144,14 @@ describe('Gated Content Reorg: a gated FILE (and its SEND-gating) rolls back acr
         const recvBefore = await balanceOf(recipient.address, tick)
         await transactionHelper.createAndSendTransaction(issuer, `SEND|0|${tick}|5|${recipient.address}|bare-pre`)
         await mine(1)
-        let s0 = 0
-        while ((await tip()) < (await nodeConnector.getBlockCount()) && s0++ < 60) { await sleep(1000) }
+        await waitForIndexerToCatchUp(null, 60000)
         await sleep(1500)
         assert.strictEqual(await balanceOf(recipient.address, tick), recvBefore,
             'bare SEND of the gated token denied pre-reorg (gated-SEND rule has teeth)')
         console.log('   bare SEND denied pre-reorg: gated-SEND rule active')
 
         // ── Reorg out the gated FILE block ──
-        await regtestMinerConnector.setMiningTime(3600000, 3600000)
+        await regtestMinerConnector.pauseMining()
         try {
             const tipBefore = await nodeConnector.getBlockCount()
             const fileHash = await nodeConnector.getBlockHash(fileBlock)
@@ -170,9 +183,20 @@ describe('Gated Content Reorg: a gated FILE (and its SEND-gating) rolls back acr
             // this 7 [=12]. Either way a bare SEND now credits, which is the proof; assert
             // >= 7 rather than an exact amount to tolerate the re-included orphan.)
             const recvBefore2 = Number(await balanceOf(recipient.address, tick))
-            await regtestMinerConnector.setDefaultMiningTime()
+            await regtestMinerConnector.resumeMining()
             await transactionHelper.createAndSendTransaction(issuer, `SEND|0|${tick}|7|${recipient.address}|bare-post`)
             await mine(1)
+
+            // Gate on the indexer before the credit poll below. Without it the 120s budget
+            // is spent waiting out indexer lag, so the test reports on venue load rather
+            // than on the rolled-back gating rule (; envelopeReorg gates the same
+            // way, which is why it survived the load that made this one fail).
+            // The auto-miner is running again, so pin the target to the SEND's block: the
+            // live node tip keeps moving and an equality wait against it need never settle.
+            const sendTip = await nodeConnector.getBlockCount()
+            assert(await waitForIndexerToCatchUp(sendTip),
+                `indexer caught up to block ${sendTip} before the post-reorg balance poll`)
+
             let credited = recvBefore2
             const d2 = Date.now() + 120000
             while (Date.now() < d2) {
@@ -184,7 +208,7 @@ describe('Gated Content Reorg: a gated FILE (and its SEND-gating) rolls back acr
                 `bare SEND of the now-ungated token lands valid (gating rule rolled back): recipient +${credited - recvBefore2}`)
             console.log('   bare SEND valid post-reorg (recipient now ' + credited + '): gated-SEND rule rolled back with gated_files')
         } finally {
-            await regtestMinerConnector.setDefaultMiningTime()
+            await regtestMinerConnector.resumeMining()
         }
     })
 })

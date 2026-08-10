@@ -49,9 +49,9 @@ module.exports = {
     // utxo-tracker) to pick their parse path: 'default' = plain bitcoinjs, 'mweb' =
     // strip Litecoin HogEx/MWEB marker+flag, 'auxpow' = merge-mined header stripped
     // before the tx count. Declared here so onboarding a chain picks its wire shape
-    // in one place instead of a hardcoded coin-name list in each consumer. NOT part
-    // of the consensus hash (mirrors the pre-existing decoder-local constant it
-    // replaces); arming it into the pin would be a separate coordinated bump.
+    // in one place instead of a hardcoded coin-name list in each consumer. IS part of
+    // the consensus subset/hash (folded by consensusSubset() in index.js, ,
+    // pin regenerated 2026-07-28), so changing it is a coordinated one-wave flag-day.
     wireFormat: 'default',
 
     // Address roles excluded from the consensus subset/hash (display-only; not read
@@ -76,10 +76,22 @@ module.exports = {
                 scriptHash:                  0x05,
                 wif:                         0x80,
                 dustThreshold:               546,
-                minStandardTxNonWitnessSize: 65,
+                // RELAY POLICY floor, not the consensus one . Bitcoin
+                // Core rejects "tx-size-small" below MIN_STANDARD_TX_NONWITNESS_SIZE
+                // = 82; the 65 that stood here until 2026-07-31 is the CONSENSUS
+                // MIN_TRANSACTION_NON_WITNESS_SIZE guarding the 64-byte-transaction
+                // CVE, which no relay ever enforces on its own. At 65 the encoder's
+                // reveal floor-pad never fired on Bitcoin, so any P2WSH reveal
+                // spending a single data chunk (71 stripped bytes) was rejected by
+                // every node and stranded its funding output. Measured live on BTC
+                // regtest: 71 rejected, 82 accepted.
+                minStandardTxNonWitnessSize: 82,
                 singleOpReturnPolicy:        true,
             },
-            // Indexing start boundary only; NOT part of any consensus hash.
+            // Indexing start boundary, and IS part of the consensus subset/hash
+            // (folded by consensusSubset() in index.js, , pin regenerated
+            // 2026-08-06): it decides which block the action history begins at, so
+            // changing it is a coordinated one-wave flag-day, not a local knob.
             firstBlock: 950000,
             // Canonical protocol address roles (UPPERCASE). Consumer adapters
             // alias these (explorer uses lowercase protocol/community/explorer).
@@ -114,10 +126,24 @@ module.exports = {
                 scriptHash:                  0xc4,
                 wif:                         0xef,
                 dustThreshold:               546,
-                minStandardTxNonWitnessSize: 65,
+                // RELAY POLICY floor, not the consensus one . Bitcoin
+                // Core rejects "tx-size-small" below MIN_STANDARD_TX_NONWITNESS_SIZE
+                // = 82; the 65 that stood here until 2026-07-31 is the CONSENSUS
+                // MIN_TRANSACTION_NON_WITNESS_SIZE guarding the 64-byte-transaction
+                // CVE, which no relay ever enforces on its own. At 65 the encoder's
+                // reveal floor-pad never fired on Bitcoin, so any P2WSH reveal
+                // spending a single data chunk (71 stripped bytes) was rejected by
+                // every node and stranded its funding output. Measured live on BTC
+                // regtest: 71 rejected, 82 accepted.
+                minStandardTxNonWitnessSize: 82,
                 singleOpReturnPolicy:        true,
             },
-            firstBlock: 138000,
+            // Fresh testnet genesis 2026-08-10 (operator): was 138000. Raised to
+            // just under the live tip (147799 at the decision) so the chain starts
+            // effectively empty and replays in seconds. Consensus input (folded
+            // into consensusSubset), so it moves the BTC testnet pin and ships in
+            // one wave with every other vendoring service.
+            firstBlock: 147500,
             addresses: {
                 BURN:            'mxchainburnaddressXXXXXXXXXXa8EAfp',
                 GAS:             'mgassdEpzH2AuKGK9W5FZh8drWYKrpXk6D',
@@ -140,7 +166,16 @@ module.exports = {
                 scriptHash:                  0xc4,
                 wif:                         0xef,
                 dustThreshold:               546,
-                minStandardTxNonWitnessSize: 65,
+                // RELAY POLICY floor, not the consensus one . Bitcoin
+                // Core rejects "tx-size-small" below MIN_STANDARD_TX_NONWITNESS_SIZE
+                // = 82; the 65 that stood here until 2026-07-31 is the CONSENSUS
+                // MIN_TRANSACTION_NON_WITNESS_SIZE guarding the 64-byte-transaction
+                // CVE, which no relay ever enforces on its own. At 65 the encoder's
+                // reveal floor-pad never fired on Bitcoin, so any P2WSH reveal
+                // spending a single data chunk (71 stripped bytes) was rejected by
+                // every node and stranded its funding output. Measured live on BTC
+                // regtest: 71 rejected, 82 accepted.
+                minStandardTxNonWitnessSize: 82,
                 singleOpReturnPolicy:        true,
             },
             firstBlock: 0,
@@ -194,6 +229,14 @@ module.exports = {
         OWNERSHIP_ESCROW:      50000,
         AIRDROP_PER_RECIPIENT: 100,
         DIVIDEND_PER_RECIPIENT: 100,
+        // BET (parimutuel betting, spec decision F): feed creation is duration-
+        // metered like ORDER/SWAP/DISPENSER expiration (same free window via
+        // UNIFIED_EXPIRATION_FEE_FREE_DAYS) but under its OWN per-day key so the
+        // two families can be re-priced independently; BET_PER_CREDIT pre-funds
+        // each bet's single terminal credit at place time (AIRDROP/DIVIDEND
+        // per-recipient parity). Resolve and cancel are free by design.
+        BET_FEED_PER_DAY:      550,
+        BET_PER_CREDIT:        100,
         VM_EXECUTE_BASE:       1000,
         VM_DEPLOY_BASE:        100000,
         VM_DEPLOY_PER_BYTE:    10,
@@ -240,6 +283,13 @@ module.exports = {
         REWARD_SHARE:                 '0',
         REWARD_PASS_WINDOW_BLOCKS:   1008,
         MIN_PASS_RATE_BPS:           7000,
+        // Collection closes when the tip reaches epoch + this many blocks. Anchored to
+        // chain height so every hub closes on the same block and the leader has the same
+        // answer set before proposing the PASS list. That makes it a consensus input:
+        // hubs disagreeing on it propose different PASS lists. It lived only as an env
+        // var with a '3' literal in FullNodeChallengeRound (), outside the pin;
+        // it is pinned here so a divergent value is caught by pin verification.
+        COLLECT_DEPTH_BLOCKS:            3,
         GENESIS_VERIFIERS:            [],
         $regtestSidecar:   'fullnode.regtest.json',
         $regtestEnvOverrides: {
@@ -250,6 +300,7 @@ module.exports = {
             REWARD_PASS_WINDOW_BLOCKS:    { env: 'FULLNODE_REWARD_PASS_WINDOW_BLOCKS',    type: 'int' },
             MIN_PASS_RATE_BPS:            { env: 'FULLNODE_MIN_PASS_RATE_BPS',            type: 'int' },
             REWARD_SHARE:                 { env: 'FULLNODE_REWARD_SHARE',                 type: 'str' },
+            COLLECT_DEPTH_BLOCKS:         { env: 'FULLNODE_COLLECT_DEPTH_BLOCKS',         type: 'int' },
             GENESIS_VERIFIERS:            { env: 'FULLNODE_GENESIS_VERIFIERS',            type: 'csv_lower' },
         },
     },

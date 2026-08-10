@@ -43,6 +43,7 @@
 const crypto = require('crypto');
 const { expect } = require('chai');
 const { loadSDK } = require('./sdkHelper');
+const addressHelper = require('../helpers/addressHelper');
 
 const bitcoin = require('bitcoinjs-lib');
 const ecc     = require('tiny-secp256k1');
@@ -79,7 +80,9 @@ async function fundUtxo(address, amountBtc = 0.002) {
     if (!seen) throw new Error('funding tx ' + txid + ' never appeared on-chain');
     try { await global.regtestMinerConnector.generateBlocks(1); } catch (e) { /* miner auto-mines anyway */ }
     const raw = await global.nodeConnector._rpc('getrawtransaction', [txid, true]);
-    const out = raw.vout.find((v) => v.scriptPubKey && v.scriptPubKey.address === address);
+    // Both vout shapes: litecoind still reports the pre-Core-22 `addresses`
+    // array, so matching only `address` cannot pass on LTC.
+    const out = addressHelper.findVoutPayingAddress(raw, address);
     if (!out) throw new Error('no funding vout paying ' + address);
     return { txid, vout: out.n, valueSats: Math.round(out.value * 1e8), spk: Buffer.from(out.scriptPubKey.hex, 'hex') };
 }

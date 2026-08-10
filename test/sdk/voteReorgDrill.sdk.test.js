@@ -150,7 +150,7 @@ describe('[sdk] VOTE re-ballot reorg drill (orphaned re-vote restores the prior 
         const node  = global.nodeConnector;
         const miner = global.regtestMinerConnector;
 
-        await miner.setMiningTime(3600000, 3600000);
+        await miner.pauseMining();
         try {
             const tipBefore = await node.getBlockCount();
             const bHash     = await node.getBlockHash(ballotBBlock);
@@ -184,7 +184,7 @@ describe('[sdk] VOTE re-ballot reorg drill (orphaned re-vote restores the prior 
             expect(Number(current[0].choice), 'tally reverts to YES').to.equal(0);
             console.log('    [vote-reorg] rollback clean: ballot B gone, ballot A restored as current');
         } finally {
-            await miner.setDefaultMiningTime();
+            await miner.resumeMining();
         }
     });
 

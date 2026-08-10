@@ -14,6 +14,11 @@ const {ECPairFactory} = require('ecpair')
 const psbtutils = require('bitcoinjs-lib/src/psbt/psbtutils')
 const CryptoNetworks = require('../src/CryptoNetworks')
 
+// Taproot needs the ECC backend registered before any p2tr payment is built or
+// any script-path input is finalized; without it bitcoinjs-lib throws
+// "ecc library invalid" from inside finalizeAllInputs on the envelope reveal.
+bitcoin.initEccLib(ecc)
+
 const TEST_FEE = 5460
 
 // Verified confirmed UTXOs from the last tx wait loop, keyed by address.
@@ -102,7 +107,13 @@ module.exports = {
     // references inputs the bitcoind has already spent, and broadcast would die
     // with `bad-txns-inputs-missingorspent`. Drop the cache and wait briefly so
     // the tracker can catch up, then rebuild from scratch.
-    async createAndSendTransaction(addressInfo, data, rawData = null, customOutputs = [], outputType = null, compressedPubKey = null, skipNativeFeeInjection = false){
+    // `opts` (all optional):
+    //   compress  tri-state passed straight through to the encoder (null = its default)
+    //   capture   an object this helper fills in with the encoder's build metadata
+    //             (encoding, compression report, envelope recovery record, commit and
+    //             reveal txids). Tests that assert on HOW the action was carried need
+    //             it, because the return value is only ever the action's txid.
+    async createAndSendTransaction(addressInfo, data, rawData = null, customOutputs = [], outputType = null, compressedPubKey = null, skipNativeFeeInjection = false, opts = {}){
         // Native-coin fee injection for LTC/DOGE (no-op on BTC). The general
         // action builder is gas-mode, but LTC/DOGE reject a fee-bearing action
         // that carries no native fee output. Inject the fee output ONCE here,
@@ -139,7 +150,7 @@ module.exports = {
         let lastErr
         for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             try {
-                return await this._doCreateAndSendTransaction(addressInfo, data, rawData, outputs, outputType, compressedPubKey)
+                return await this._doCreateAndSendTransaction(addressInfo, data, rawData, outputs, outputType, compressedPubKey, opts)
             } catch (err) {
                 if (attempt < MAX_ATTEMPTS && _isStaleUtxoError(err)) {
                     // TRAP LOG: capture tracker's view of this address at the
@@ -180,11 +191,46 @@ module.exports = {
         throw lastErr
     },
 
-    async _doCreateAndSendTransaction(addressInfo, data, rawData = null, customOutputs = [], outputType = null, compressedPubKey = null){
+    // Sign an envelope reveal . Input 0 is a script-path spend of the
+    // envelope leaf, so it takes a Schnorr signature under the internal key rather
+    // than the ECDSA signature every other lane uses.
+    //
+    // `expectedCommitTxid` is not optional in spirit: the reveal is pre-built
+    // against the UNSIGNED commit's txid (§3.5), and if that txid drifted the reveal
+    // spends nothing while the commit's value sits in a one-time P2TR output no
+    // other transaction references. That is a stranded-funds bug, so it is checked
+    // here, before either half can be broadcast, rather than discovered on chain.
+    signEnvelopeReveal(addressInfo, revealPsbtHex, expectedCommitTxid){
+        if (!revealPsbtHex){
+            throw new Error("encoder returned TAPROOT without a revealPsbt; the pair cannot be completed")
+        }
+        const revealPsbt = bitcoin.Psbt.fromHex(revealPsbtHex, { network: NETWORK_OBJECT })
+
+        // Checked BEFORE signing, not after: there is nothing to salvage from a
+        // signature over the wrong outpoint, and failing here keeps the guard true of
+        // the pre-built reveal rather than of something we just produced.
+        const revealPrevout = Buffer.from(revealPsbt.txInputs[0].hash).reverse().toString('hex')
+        if (revealPrevout !== expectedCommitTxid){
+            throw new Error("the reveal does not spend the signed commit (reveal prevout "+revealPrevout+" vs commit "+expectedCommitTxid+")")
+        }
+
+        const envelopePubKey = Buffer.from(addressInfo["publicKey"])
+        const envelopePrivKey = Buffer.from(addressInfo["privateKey"])
+        revealPsbt.signInput(0, {
+            publicKey: envelopePubKey,
+            signSchnorr: (hash) => Buffer.from(ecc.signSchnorr(hash, envelopePrivKey))
+        })
+        revealPsbt.finalizeAllInputs()
+        revealPsbt.setMaximumFeeRate(100000)
+        return revealPsbt.extractTransaction()
+    },
+
+    async _doCreateAndSendTransaction(addressInfo, data, rawData = null, customOutputs = [], outputType = null, compressedPubKey = null, opts = {}){
         console.log("Creating the transaction...")
         const utxoListForEncoder = (_verifiedUtxosAddress === addressInfo["address"] && _verifiedUtxos) ? _verifiedUtxos : []
         _verifiedUtxos = null
         _verifiedUtxosAddress = null
+        const capture = opts && opts.capture ? opts.capture : null
         let txPsbtHex = await encoderConnector.createTx(
             utxoListForEncoder, //utxoList - use cached confirmed UTXOs if available
             addressInfo["address"], //pubkey
@@ -204,12 +250,20 @@ module.exports = {
             // the tracker's mempool DB carrying stale entries (a node-side
             // dropped tx that the tracker's 60s mempool poll hasn't yet
             // reconciled; see STALE-UTXO TRAP log).
-            false
+            false,
+            (opts && opts.compress !== undefined) ? opts.compress : null
         )
-        
+
+        let built = txPsbtHex
         let encodeType = txPsbtHex["encoding"]
         txPsbtHex = txPsbtHex["psbt"]
-        
+        if (capture){
+            capture.encoding = encodeType
+            capture.compression = built["compression"] || null
+            capture.envelope = built["envelope"] || null
+            capture.carrierScripts = built["carrierScripts"] || null
+        }
+
         let psbtToSign = bitcoin.Psbt.fromHex(txPsbtHex)
         var ECPair = ECPairFactory(ecc);
         let keyToSign = ECPair.fromPrivateKey(addressInfo["privateKey"], { NETWORK_OBJECT });
@@ -227,6 +281,19 @@ module.exports = {
         
         let spentTx = null
         let spentHex = null
+        // TAPROOT  is also a two-transaction scheme, but ONE create_tx call
+        // returns both halves (spec §6): the reveal is pre-built against the unsigned
+        // commit's txid, which only holds because every commit input is segwit (§3.5).
+        // There is no second encoder call and no funding-tx hash to hand back, so this
+        // branch signs the reveal the encoder already gave us. Input 0 is the commit
+        // outpoint by construction (§3.5) and is a script-path spend of the envelope
+        // leaf, so it takes a Schnorr signature rather than the ECDSA one every other
+        // lane uses.
+        if (encodeType == "TAPROOT"){
+            console.log("Signing the envelope reveal (the encode type TAPROOT was chosen)...")
+            spentTx = this.signEnvelopeReveal(addressInfo, built["revealPsbt"], txHash)
+            spentHex = spentTx.toHex()
+        }
         // P2SH and P2WSH are both two-transaction schemes: tx1 creates the
         // data-bearing outputs (P2SH redeem scripts / P2WSH witness scripts),
         // tx2 spends them to reveal the payload chunks on-chain. The encoder
@@ -257,7 +324,13 @@ module.exports = {
                 txHash,
                 txHex,
                 null,
-                false  // unconfirmed=false; see comment above
+                false,  // unconfirmed=false; see comment above
+                // The SAME compression choice as the funding call, and not the
+                // encoder's default: the chunk lane commits to the payload in the
+                // funding tx's redeem/witness scripts and reproduces it here, so a
+                // reveal that compressed when the funding tx did not would hash to
+                // different scripts and be unspendable.
+                (opts && opts.compress !== undefined) ? opts.compress : null
             )
             
             spentTxPsbtHex = spentTxPsbtHex["psbt"]
@@ -288,6 +361,11 @@ module.exports = {
         if (spentHex != null){
             console.log("Sending the second transaction... (hex length: "+spentHex.length+")")
             spentTxHash = await nodeConnector.broadcastTx(spentHex)
+        }
+        if (capture){
+            capture.fundingTxHash = txHash
+            capture.revealTxHash = spentTxHash
+            capture.revealWeight = spentTx ? spentTx.weight() : null
         }
         console.log("Waiting for the transaction ("+txHash+") to be confirmed...")
         let txExists = await nodeConnector.waitForTx(txHash, 60000)

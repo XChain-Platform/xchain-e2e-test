@@ -86,13 +86,19 @@ module.exports = {
                 messagePrefix:        '\x19Dogecoin Signed Message:\n',
                 bip32:                { public: 0x0432a9a8, private: 0x0432a243 },
                 pubKeyHash:           0x71,
-                scriptHash:           0xc4,
+                scriptHash:           0xc4, // Dogecoin testnet SCRIPT_ADDRESS=196, same byte as Bitcoin testnet (upstream, intentional)
                 wif:                  0xf1,
                 dustThreshold:        100000,
                 supportsSegwit:       false,
                 singleOpReturnPolicy: true,
             },
-            firstBlock: 64800000,
+            // Fresh testnet genesis 2026-08-10 (operator): was 64800000, which is
+            // ~3.02M blocks behind the tip and ~21 hours of replay - the single
+            // reason this genesis is worth doing. Raised to just under the live
+            // tip (67819590 at the decision) so replay is minutes. Consensus input
+            // (folded into consensusSubset), so it moves the DOGE testnet pin and
+            // ships in one wave with every other vendoring service.
+            firstBlock: 67815000,
             addresses: {
                 BURN:            'nchainburnaddressXXXXXXXXXXXYKgF7W',
                 GAS:             'ngasn6zHFzJ72zpk3DBKmXhD2XtszujSDW',
@@ -164,6 +170,14 @@ module.exports = {
         OWNERSHIP_ESCROW:      50000,
         AIRDROP_PER_RECIPIENT: 100,
         DIVIDEND_PER_RECIPIENT: 100,
+        // BET (parimutuel betting, spec decision F): feed creation is duration-
+        // metered like ORDER/SWAP/DISPENSER expiration (same free window via
+        // UNIFIED_EXPIRATION_FEE_FREE_DAYS) but under its OWN per-day key so the
+        // two families can be re-priced independently; BET_PER_CREDIT pre-funds
+        // each bet's single terminal credit at place time (AIRDROP/DIVIDEND
+        // per-recipient parity). Resolve and cancel are free by design.
+        BET_FEED_PER_DAY:      550,
+        BET_PER_CREDIT:        100,
         VM_EXECUTE_BASE:       1000,
         VM_DEPLOY_BASE:        100000,
         VM_DEPLOY_PER_BYTE:    10,

@@ -85,20 +85,22 @@ const HUB_DB_PORT = parseInt(process.env.HUB_DB_PORT || String(DB_PORT), 10);
 const HUB_DB_NAME = process.env.HUB_DB_NAME || 'XChain_Hub';
 
 // XCHAIN/USD has no pre-launch market, so it is a configured sidecar in the hub
-// DB. price=1.00 keeps the math readable; the value is not asserted, only the
-// path. round 990001 is the agreed sidecar round; the test asserts the action's
+// DB. The value is not asserted here, only the path, but it is taken from the
+// shared bootstrap constant anyway ( step 8): a suite seeding a price no
+// producer emits is how the missing-pair bug stayed invisible, and "the value does
+// not matter here" is exactly the reasoning that let 1.00 spread across the suite.
+// round 990001 is the agreed sidecar round; the test asserts the action's
 // oracle_round is NOT a seed sentinel (so it must be the live DOGE/USD round).
-const XCHAIN_USD_PRICE   = '1.00000000';
+const { BOOTSTRAP_XCHAIN_USD, NO_PRICE_SEED, SEED_SENTINEL_ROUNDS } = require('../helpers/xchainPriceConstants');
+const XCHAIN_USD_PRICE   = BOOTSTRAP_XCHAIN_USD;
 const XCHAIN_SIDECAR_RND = 990001;
 
 // Known out-of-band seed round numbers across the suite (nativeFeeHelper,
 // dexDogeSetup, nativeFeeLive, nativeFeeDispenser). The validated action's
 // oracle_round must be NONE of these - i.e. it came from the live oracle.
-const SEED_SENTINELS = new Set([
-    990001, 990002,          // dexDogeSetup + this sidecar
-    888100001, 888100002,    // nativeFeeHelper XCHAIN_ROUND / COIN_ROUND
-    999200001, 999200002,    // nativeFeeLive band
-]);
+// : the list itself now lives in xchainPriceConstants, so this assertion
+// and the code that clears the rows cannot drift apart.
+const SEED_SENTINELS = new Set(SEED_SENTINEL_ROUNDS);
 
 const FEE_TOL_MIN = 0.95, FEE_TOL_MAX = 1.10;   // matches indexer FEE_TOLERANCE_MIN/MAX defaults
 
@@ -161,6 +163,11 @@ describe('native-coin fee against a LIVE price oracle feed (DOGE)', function () 
     let liveDogeBlock;    // DOGE block index the headline ISSUE was in
 
     before(async function () {
+        //  step 8: the XCHAIN/USD sidecar below is a hand-seed into the hub
+        // DB; on a venue whose hub derives the pair it would shadow every real
+        // round. This suite's point is the LIVE DOGE/USD half, so on a publishing
+        // venue the derivation suite covers the whole path instead.
+        if (NO_PRICE_SEED) this.skip()
         // 1) The XCHAIN/USD sidecar in the HUB DB (mirrors to the indexer via the
         //    real HubDbSync channel). Stamp block_timestamp at the DOGE tip's block
         //    time: the H-3 time gate (NATIVE_FEE_PRICE_TIME_GATE, armed 2026-07-07)

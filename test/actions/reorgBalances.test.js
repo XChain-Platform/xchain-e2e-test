@@ -98,7 +98,7 @@ describe('Money Reorg: SEND rolls back, balances + supply converge across an on-
         assert(sendBlock, 'SEND block height resolved')
 
         // Pause the auto-miner so it cannot re-mine the orphaned SEND from the mempool.
-        await regtestMinerConnector.setMiningTime(3600000, 3600000)
+        await regtestMinerConnector.pauseMining()
         try {
             const tipBefore = await nodeConnector.getBlockCount()
             const sendHash  = await nodeConnector.getBlockHash(sendBlock)
@@ -129,7 +129,7 @@ describe('Money Reorg: SEND rolls back, balances + supply converge across an on-
             assert.strictEqual(await supplyOf(tick), issueSupply, 'token supply must be conserved across the reorg')
         } finally {
             // Restore normal auto-mining so the stack is healthy for later suites.
-            await regtestMinerConnector.setDefaultMiningTime()
+            await regtestMinerConnector.resumeMining()
         }
     })
 })

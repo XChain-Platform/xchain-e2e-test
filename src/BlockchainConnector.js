@@ -223,6 +223,18 @@ class BlockchainConnector {
     async invalidateBlock(hash){ return await this._rpc('invalidateblock', [hash]); }
     async reconsiderBlock(hash){ return await this._rpc('reconsiderblock', [hash]); }
     async getRawMempool(){ return await this._rpc('getrawmempool'); }
+    // Block contents by hash. verbosity 1 returns the header fields plus `tx` (txid array),
+    // which is what a reorg drill needs to enumerate the transactions it is about to orphan.
+    async getBlock(hash, verbosity = 1){ return await this._rpc('getblock', [hash, Number(verbosity)]); }
+    // Push a raw transaction straight at the node, bypassing the encoder. Used to RE-INJECT
+    // transactions the node dropped during a deep reorg (see below): Bitcoin Core only
+    // resurrects disconnected transactions for the first 10 blocks it disconnects, so a drill
+    // that orphans more than that must put them back itself. Returns the txid; throws with the
+    // node's reject reason (the caller decides which reasons are benign).
+    async sendRawTransaction(txHex){ return await this._rpc('sendrawtransaction', [txHex]); }
+    // Verbose transaction lookup (needs txindex, which the regtest nodes run). Returns null
+    // when the node has never seen the txid; `confirmations` is 0 while it sits in the mempool.
+    async getTransaction(txid){ try { return await this._rpc('getrawtransaction', [txid, true]); } catch (e) { return null; } }
     // Mine a block containing EXACTLY `txs` (default: none), ignoring the mempool. This is
     // what lets a reorg DROP an orphaned tx: after invalidateBlock, mine empty blocks to build
     // a longer competing chain that excludes the mempool tx. (Bitcoin Core 0.19+ `generateblock`.)

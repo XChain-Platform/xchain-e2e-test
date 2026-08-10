@@ -29,15 +29,25 @@ const priceSnapshotHelper = require('./priceSnapshotHelper')
 const PLACEHOLDER = 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'
 
 // Seeded oracle prices. Identical to nativeFeeLive.test.js so the global seed
-// here and that suite's inline re-seed never disagree: XCHAIN $1, coin $100,000.
-const XCHAIN_USD = '1.00000000'
+// here and that suite's inline re-seed never disagree: XCHAIN at the production
+// bootstrap ($2, see xchainPriceConstants), coin $100,000.
+//
+//  step 8: this was 1.00 for the whole pre-derivation era, which is a value no
+// producer has ever emitted or ever will. Seeding the bootstrap instead means these
+// suites assert against what a real hub publishes today.
+const { BOOTSTRAP_XCHAIN_USD, NO_PRICE_SEED } = require('./xchainPriceConstants')
+const XCHAIN_USD = BOOTSTRAP_XCHAIN_USD
 const COIN_USD   = '100000.00000000'
 
 // Flat native fee output (satoshis). With the prices above, the indexer's
-// minAcceptable for an action costing X XCHAIN is 0.95 * X / 100000 coin;
-// 50000 sats (0.0005 coin) clears the min for any action up to ~52 XCHAIN,
-// far above any e2e action, and matches nativeFeeLive's proven output. It is
-// negligible against the ~1-coin fundings cryptoHelper uses.
+// minAcceptable for an action costing X XCHAIN is 0.95 * X * 2 / 100000 coin;
+// 50000 sats (0.0005 coin) clears the min for any action up to ~26 XCHAIN.
+// (That headroom halved when  step 8 moved the seed from the 1.00-era value
+// to the $2 bootstrap. The largest action any e2e composes is a full-size contract
+// deploy at well under 2 XCHAIN, so 26 is still an order of magnitude of slack; if
+// a future action approaches it, raise this rather than lowering the price.)
+// Matches nativeFeeLive's proven output and is negligible against the ~1-coin
+// fundings cryptoHelper uses.
 const FLAT_FEE_SATS = 50000
 
 // Re-seed at most this often. Must stay well under ORACLE_MAX_PRICE_AGE_SECONDS
@@ -51,10 +61,33 @@ const SEED_REFRESH_MS = 2 * 60 * 1000
 
 // Synthetic round numbers for the seeded snapshots, kept clear of the values
 // nativeFeeLive (999200001+) / nativeFeeDispenser use, so the two never collide.
-const XCHAIN_ROUND = 888100001
-const COIN_ROUND   = 888100002
+// The _NOW pair carries the HIGHER round deliberately: getLatestPrice picks the
+// highest round among the rows a block is allowed to see, so where both rows are
+// visible the wall-clock one (the fresher of the two) wins. See seedGlobalPrices.
+// Any new sentinel here must also join SEED_SENTINEL_ROUNDS in
+// xchainPriceConstants, which is both what nativeFeeOracleLive asserts against
+// and what clearSeedSentinels retracts on a publishing venue .
+const XCHAIN_ROUND     = 888100001
+const COIN_ROUND       = 888100002
+const XCHAIN_ROUND_NOW = 888100011
+const COIN_ROUND_NOW   = 888100012
+
+// Re-seed once the CHAIN clock has moved this far past the last seed's anchor,
+// independent of the wall-clock throttle above. A clock-drill family (BET, and
+// every expiry drill) jumps block time by an hour or more in one step, which ages
+// the snapshot out of the 1800s window instantly while `_lastSeedMs` still reads
+// fresh, so a purely wall-clock throttle leaves the next fee-bearing action
+// rejected for up to SEED_REFRESH_MS. Half the budget keeps a margin for the
+// blocks mined between this check and the action's own block.
+const SEED_CHAIN_DRIFT_SECONDS = 900
 
 let _lastSeedMs = 0
+let _lastSeedAnchor = 0
+
+// See seedGlobalPrices: opt-in suppression for a venue that derives XCHAIN/USD.
+// The flag has ONE definition for the whole tree (xchainPriceConstants, imported
+// above), enforced per seed site by the guard test.
+let _noSeedAnnounced = false
 
 // Only LTC/DOGE mandate a native fee output; BTC uses the XCHAIN-gas fallback.
 function isFeeChain(){
@@ -76,10 +109,63 @@ function resolveFeeDestination(){
 // contract-fee validation looks one up for every DEPLOY/EXECUTE (without a
 // current snapshot the action indexes `invalid: no current oracle price for
 // BTC/USD`, a false red/green by timing on runs past ORACLE_MAX_PRICE_AGE).
-// No-op only when the last seed is still fresh (unless force=true).
+// No-op only when the last seed is still fresh (unless force=true), or when the
+// venue derives the pair itself (NO_PRICE_SEED below).
 async function seedGlobalPrices(force){
+    //  step 8, the full de-seed. On a venue whose own hub publishes
+    // XCHAIN/USD (a price-capability oracle validator), seeding it is the defect
+    // this item exists to remove rather than a convenience: the seed carries a
+    // synthetic round number far above any the hub will ever reach, and
+    // getLatestPrice picks the highest round, so ONE seeded row silently
+    // shadows every derived round and a broken derivation still reads green.
+    // Force does not override this - a forced re-seed is still a seed.
+    //
+    // Deliberately opt-IN. Everywhere else the seed is what makes LTC/DOGE
+    // payable at all, so defaulting this on would red every native-fee suite on
+    // every venue whose hub does not derive the pair, which today is all of them
+    // but one.
+    if (NO_PRICE_SEED) {
+        if (!_noSeedAnnounced) {
+            _noSeedAnnounced = true
+            console.log('nativeFeeHelper: XCHAIN_E2E_NO_PRICE_SEED=1; not seeding oracle prices ' +
+                '(the venue is expected to publish them itself)')
+            // . Suppressing the seed is necessary but NOT sufficient: rows a
+            // pre-flag run already wrote carry sentinel round numbers far above any
+            // the hub reaches, and getLatestPrice orders by round DESC, so they go
+            // on shadowing every derived round and the venue keeps pricing off a
+            // fixture while looking green. Retract exactly those rows, once per
+            // process, leaving derived rounds untouched. Non-fatal: a venue whose
+            // DB this process cannot write is still readable, and the assertions
+            // downstream will catch a shadowed price anyway.
+            try {
+                const removed = await priceSnapshotHelper.clearSeedSentinels()
+                if (removed > 0)
+                    console.log('nativeFeeHelper: cleared ' + removed + ' leftover seed-sentinel ' +
+                        'price_snapshots row(s) that would have shadowed the derived rounds ')
+            } catch (e) {
+                console.log('nativeFeeHelper: WARN could not clear leftover seed-sentinel rows : ' +
+                    (e && e.message ? e.message : e))
+            }
+        }
+        return
+    }
+
     const now = Date.now()
-    if (!force && (now - _lastSeedMs) < SEED_REFRESH_MS) return
+    const throttled = !force && (now - _lastSeedMs) < SEED_REFRESH_MS
+    // The chain clock, not the wall clock, is what ages a snapshot out. Read it
+    // even while throttled so a clock jump re-seeds immediately (the read is one
+    // indexed query on the suite's existing pool).
+    if (throttled) {
+        if (!_lastSeedAnchor) return
+        let chainNow = 0
+        try { chainNow = await priceSnapshotHelper.latestBlockTime() } catch (e) { return }
+        const drift = chainNow - _lastSeedAnchor
+        // Forward drift inside the budget is the only case that needs no work. A
+        // NEGATIVE drift is not a smaller version of the same thing: it puts the
+        // anchor in the future of the blocks now being mined, which the H-3 gate
+        // reads as no price at all, so re-seed however small it is.
+        if (drift >= 0 && drift < SEED_CHAIN_DRIFT_SECONDS) return
+    }
 
     const available = await priceSnapshotHelper.isAvailable()
     if (!available) {
@@ -87,35 +173,68 @@ async function seedGlobalPrices(force){
         return
     }
 
-    // Anchor to max(chain tip block_time, wall-clock now). The staleness guard
-    // (db.getLatestPrice) is ONE-SIDED: it rejects only when the snapshot is
-    // OLDER than the processed block by > ORACLE_MAX_PRICE_AGE_SECONDS (1800s);
-    // a future-dated snapshot is accepted. Two regtest regimes must both stay
-    // fresh, and a tip-only anchor fails the first:
-    //   - idle chain: the tip block_time lags wall clock (test-host's DOGE tip ran
-    //     ~6300s behind), yet new actions mine into blocks timestamped ~now, so
-    //     a tip-anchored seed is instantly stale against them. `now` keeps it
-    //     fresh. (This was C4 Bug 2.)
-    //   - sustained mining: regtest block timestamps can drift AHEAD of wall
-    //     clock, so the tip leads `now`; anchoring to the tip tracks it.
-    // max() satisfies both. Safe for the FIAT dispenser reverse-match (which
-    // needs snapshot <= payment block_time): dispenser.test.js re-clears and
-    // re-seeds {COIN}/USD at latestBlockTime()-60 right before its DISPENSE, and
-    // that DISPENSE payment (createSimpleTransaction) never re-seeds, so this
-    // forward anchor can never clobber the dispenser's row.
-    // clearPair first so exactly one finalized row exists per pair (no ambiguity
-    // for getLatestPrice).
-    const blockTimestamp = Math.max(
-        await priceSnapshotHelper.latestBlockTime(),
-        Math.floor(Date.now() / 1000)
-    )
+    // TWO anchors per pair, because no single timestamp survives all three regtest
+    // clock regimes. A snapshot at S is usable by a block at time B only inside
+    // S <= B <= S + ORACLE_MAX_PRICE_AGE_SECONDS: the upper bound is the staleness
+    // guard, and the LOWER bound is the H-3 selection gate (getLatestPrice's
+    // `block_timestamp <= ?` on LTC/DOGE, where the reference_block gate is
+    // vacuous). The old max(tip, now) anchor honoured only the upper bound, which
+    // an earlier comment here described as one-sided; that stopped being true when
+    // H-3 landed, and on a native-fee chain the consequence is total:
+    //   - chain clock PINNED BEHIND wall time (every clock drill ends this way -
+    //     betHelper.releaseClock pins tip+5 rather than releasing to 0, since
+    //     releasing with the tip ahead wedges the miner). Wall time then walks
+    //     past the pin while blocks stay frozen at it, so a now-anchored snapshot
+    //     sits in the FUTURE of every block and is excluded outright: each action
+    //     rejects `no current oracle price`, permanently, until someone moves the
+    //     node's clock. Found wedging the whole LTC stack this way (blocks 354s
+    //     behind wall clock), which is what kept the BET family BTC-only.
+    //   - idle chain: the tip lags wall clock (test-host's DOGE tip ran ~6300s
+    //     behind) but the miner is NOT pinned, so new actions land in blocks
+    //     stamped ~now and a tip-anchored snapshot is instantly stale. (C4 Bug 2.)
+    //   - sustained mining / post-jump: block timestamps lead wall clock, so the
+    //     tip is the only usable anchor.
+    // Seeding BOTH the tip time and wall-clock now covers all three: the frozen
+    // regime sees only the tip row (the now row fails the gate), the idle regime
+    // sees both and takes the now row on round precedence, and an ahead-of-clock
+    // chain has tip >= now so the single tip row is written.
+    // clearPair first so the only finalized rows for the pair are the ones below.
+    //
+    // , and read this before pointing any new test at {COIN}/USD: the clear
+    // below DELETES the whole pair, and this runs from getNativeFeeOutput(), which
+    // every ACTION tx passes through. So it fires between an arbitrary test's seed
+    // and that test's later assertions, throttled to once per SEED_REFRESH_MS,
+    // which turns any collision into a timing flake rather than a hard failure.
+    // An earlier version of this comment claimed the FIAT dispenser cases were
+    // safe because they re-seed right before a DISPENSE and the bare payment never
+    // re-seeds. That held only for the original Mode 1 case: the Mode 2 cases added
+    // later seed FIRST and then send a dispenser-create action tx, and they
+    // back-date their snapshots by up to 25h, so a reseed anchored at "now" both
+    // removed their row and replaced it with a different price (COIN_USD, not the
+    // 50000 they assert). Those cases now price in their own fiats and no longer
+    // share this pair; keep it that way.
+    const chainTime = await priceSnapshotHelper.latestBlockTime()
+    const wallTime  = Math.floor(Date.now() / 1000)
+
+    // Both pairs stay spelled out at the call sites rather than hoisted into a
+    // variable: the  isolation guard scans this file for the clearPair set
+    // to prove the seed's blast radius is still these two pairs, and it cannot
+    // resolve an indirection.
     await priceSnapshotHelper.clearPair('XCHAIN/USD')
     await priceSnapshotHelper.clearPair(global.COIN_CODE + '/USD')
-    await priceSnapshotHelper.seedSnapshot({ coinPair: 'XCHAIN/USD', price: XCHAIN_USD, blockTimestamp, roundNumber: XCHAIN_ROUND })
-    await priceSnapshotHelper.seedSnapshot({ coinPair: global.COIN_CODE + '/USD', price: COIN_USD, blockTimestamp, roundNumber: COIN_ROUND })
+    await priceSnapshotHelper.seedSnapshot({ coinPair: 'XCHAIN/USD', price: XCHAIN_USD, blockTimestamp: chainTime, roundNumber: XCHAIN_ROUND })
+    await priceSnapshotHelper.seedSnapshot({ coinPair: global.COIN_CODE + '/USD', price: COIN_USD, blockTimestamp: chainTime, roundNumber: COIN_ROUND })
+    if (wallTime > chainTime) {
+        await priceSnapshotHelper.seedSnapshot({ coinPair: 'XCHAIN/USD', price: XCHAIN_USD, blockTimestamp: wallTime, roundNumber: XCHAIN_ROUND_NOW })
+        await priceSnapshotHelper.seedSnapshot({ coinPair: global.COIN_CODE + '/USD', price: COIN_USD, blockTimestamp: wallTime, roundNumber: COIN_ROUND_NOW })
+    }
     _lastSeedMs = now
+    // The CHAIN anchor is what the drift check compares against: it is the row a
+    // frozen or jumped chain actually reads.
+    _lastSeedAnchor = chainTime
     console.log('nativeFeeHelper: seeded oracle prices XCHAIN/USD=' + XCHAIN_USD +
-        ' ' + global.COIN_CODE + '/USD=' + COIN_USD + ' (block_time=' + blockTimestamp + ')')
+        ' ' + global.COIN_CODE + '/USD=' + COIN_USD + ' (chain_time=' + chainTime +
+        (wallTime > chainTime ? ', wall_time=' + wallTime : '') + ')')
 }
 
 // Feeschedule-readiness retry budget for fee chains . On a freshly

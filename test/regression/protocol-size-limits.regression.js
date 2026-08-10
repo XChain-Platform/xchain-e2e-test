@@ -389,6 +389,184 @@ describe('Protocol size-limit drift guard', () => {
         })
     })
 
+    describe('Family-B constant parity (copies the byte-identity guard does not reach)', () => {
+
+        // The  byte-identity block below compares whole vendored modules
+        // against the canonical file. It cannot see two other shapes of copy:
+        // a service that re-declares a canonical value as a bare literal without
+        // vendoring anything (the encoder, the explorer compression reader, both
+        // price-pair activation gates, the wallet gated-send guard), and a
+        // vendored copy whose VALUE for one constant drifted while the file as a
+        // whole was already being compared as one blob. These tests pin the value
+        // per constant, naming the exact surface that would drift.
+
+        const vendoredConstants = {
+            'xchain-vm':       require('../../../xchain-vm/src/protocol/constants.js'),
+            'xchain-indexer':  require('../../../xchain-indexer/src/protocol/constants.js'),
+            'xchain-explorer': require('../../../xchain-explorer/src/protocol/constants.js'),
+            'xchain-sdk':      require('../../../xchain-sdk/src/protocol/constants.js'),
+            'xchain-decoder':  require('../../../xchain-decoder/src/protocol/constants.js'),
+        }
+
+        // Assert the named constant equals canonical in each listed vendored copy.
+        function assertVendored(name, services) {
+            services.forEach((svc) => {
+                assert.strictEqual(
+                    vendoredConstants[svc][name],
+                    protocol[name],
+                    svc + ' vendored ' + name + ' drifted from the canonical protocol constant'
+                )
+            })
+        }
+
+        // ATTEST_MAX_EXPIRIES_PER_BLOCK bounds how many attestation requests one
+        // block may expire; the indexer reads it as the default limit of
+        // db.getExpiredAttestationRequests, so it is a consensus-visible sweep cap.
+        // Four services vendor it and none asserted its value here (uuid 6448/3407).
+        it('[regression:p0] ATTEST_MAX_EXPIRIES_PER_BLOCK === canonical in every vendored copy', () => {
+            assertVendored('ATTEST_MAX_EXPIRIES_PER_BLOCK',
+                ['xchain-indexer', 'xchain-explorer', 'xchain-sdk', 'xchain-decoder'])
+        })
+
+        // THRESHOLD_SCALE is the fixed BigInt fractional scale both sides of the
+        // GATE_MIN_AMOUNT comparison use. The wallet declares its own bare literal
+        // and its only guard is a skip-if-absent unit test that compares against
+        // the SDK vendored copy, never against canonical, so a wallet-only checkout
+        // passes silently. Same failure shape the explorer vm-query note above
+        // records, hence the same remedy: assert it centrally (uuid 3408).
+        it('[regression:p0] THRESHOLD_SCALE === canonical across vendored copies + wallet gated-send guard', () => {
+            assertVendored('THRESHOLD_SCALE',
+                ['xchain-indexer', 'xchain-explorer', 'xchain-sdk', 'xchain-decoder'])
+            const guardPath = path.join(
+                __dirname, '../../../xchain-wallet/packages/core/src/flows/gatedSendGuard.js')
+            assert.ok(fs.existsSync(guardPath),
+                'xchain-wallet gatedSendGuard.js is missing; this tripwire needs the full sibling tree')
+            // Read the wallet copy from source: it is a module-private const in an
+            // ESM package this CommonJS suite cannot require.
+            const walletScale = /^const THRESHOLD_SCALE = (\d+);$/m.exec(
+                fs.readFileSync(guardPath, 'utf8'))
+            assert.ok(walletScale,
+                'wallet gatedSendGuard.js no longer declares THRESHOLD_SCALE as a literal const; re-point this guard')
+            assert.strictEqual(Number(walletScale[1]), protocol.THRESHOLD_SCALE,
+                'wallet gatedSendGuard THRESHOLD_SCALE drifted from the canonical protocol constant; the wallet and the indexer would disagree on the last digit of a threshold neither considers malformed')
+        })
+
+        // PRICE_PAIR_TICKER_MAX_LEGACY / _WIDE bound the ticker side of a PRICE v0
+        // pair either side of the  widening flag day. The indexer is the
+        // on-chain arbiter and the hub keeps a verbatim copy of the same module;
+        // both declare bare literals and vendor nothing, so neither the byte-identity
+        // guard nor any other test compared them to canonical (uuids 3409, 3410).
+        // A one-sided edit forks the fleet on the first round naming a 6-char ticker.
+        it('[regression:p0] PRICE_PAIR_TICKER_MAX_LEGACY / _WIDE === canonical across indexer + hub', () => {
+            const indexerPricePair = require('../../../xchain-indexer/src/price_pair_activation.js')
+            const hubPricePair     = require('../../../xchain-hub/src/price_pair_activation.js')
+            const bounds = ['PRICE_PAIR_TICKER_MAX_LEGACY', 'PRICE_PAIR_TICKER_MAX_WIDE']
+            bounds.forEach((name) => {
+                assert.strictEqual(indexerPricePair[name], protocol[name],
+                    'indexer price_pair_activation ' + name + ' drifted from the canonical protocol constant')
+                assert.strictEqual(hubPricePair[name], protocol[name],
+                    'hub price_pair_activation ' + name + ' drifted from the canonical protocol constant (the hub would sign a round the indexer rejects, or refuse one it accepts)')
+            })
+            // The widened bound must stay above the legacy one, or the flag day
+            // narrows the ticker side instead of widening it.
+            assert.ok(protocol.PRICE_PAIR_TICKER_MAX_WIDE > protocol.PRICE_PAIR_TICKER_MAX_LEGACY,
+                'the widened ticker bound is not wider than the legacy bound')
+        })
+
+        // ENVELOPE_MAX_PAYLOAD is the Taproot-envelope payload ceiling, derived
+        // from MAX_STANDARD_TX_WEIGHT rather than chosen.  is exactly the
+        // incident this guards: the old value built a 402,789 WU reveal that the
+        // encoder produced, the validator accepted and no node relayed. The encoder
+        // still declares its own bare literal (src/validator.js), which nothing here
+        // compared to canonical (uuid 3497).
+        it('[regression:p0] ENVELOPE_MAX_PAYLOAD === canonical across encoder + decoder + vendored copies', () => {
+            assert.strictEqual(
+                encoderValidator.ENVELOPE_MAX_PAYLOAD,
+                protocol.ENVELOPE_MAX_PAYLOAD,
+                'encoder validator ENVELOPE_MAX_PAYLOAD drifted from the canonical protocol constant; the encoder would mint an envelope reveal the decoder or the network rejects'
+            )
+            assert.strictEqual(
+                XChainDecoder.ENVELOPE_MAX_PAYLOAD,
+                protocol.ENVELOPE_MAX_PAYLOAD,
+                'decoder ENVELOPE_MAX_PAYLOAD drifted from the canonical protocol constant'
+            )
+            assertVendored('ENVELOPE_MAX_PAYLOAD', ['xchain-sdk', 'xchain-decoder'])
+            // What the encoder will build must equal what the decoder will accept,
+            // the same invariant the ACTION data cap block asserts for legacy lanes.
+            assert.strictEqual(
+                encoderValidator.ENVELOPE_MAX_PAYLOAD,
+                XChainDecoder.ENVELOPE_MAX_PAYLOAD,
+                'encoder and decoder disagree on the envelope payload ceiling; payloads in the gap would be built and then dropped'
+            )
+        })
+
+        // XCALL_RESULT_ORPHAN_GRACE_SECONDS is the age-out clock for an XCALL
+        // result row with no local request . It decides when a row is
+        // pruned rather than left starving the XCALL_MAX_CALLS_PER_BLOCK delivery
+        // slice, so a drift changes which results get delivered (uuid 3498).
+        it('[regression:p0] XCALL_RESULT_ORPHAN_GRACE_SECONDS === canonical across indexer xcall + vendored copy', () => {
+            assert.strictEqual(
+                indexerXcall.XCALL_RESULT_ORPHAN_GRACE_SECONDS,
+                protocol.XCALL_RESULT_ORPHAN_GRACE_SECONDS,
+                'indexer xcall.js XCALL_RESULT_ORPHAN_GRACE_SECONDS drifted from the canonical protocol constant'
+            )
+            assertVendored('XCALL_RESULT_ORPHAN_GRACE_SECONDS', ['xchain-indexer'])
+        })
+
+        // COMPRESSION_MAX_RATIO is the inflation bound that makes a compressed
+        // payload safe to stream: a decompressor that stops later than the encoder
+        // planned is a zip-bomb surface. The encoder (src/validator.js) and the
+        // explorer compression reader (src/compression.js) each declare a bare
+        // literal; the explorer's only guard compared itself to the encoder, so the
+        // pair could drift from canonical together and stay green (uuid 3499).
+        it('[regression:p0] COMPRESSION_MAX_RATIO === canonical across encoder + explorer + sdk', () => {
+            const explorerCompression = require('../../../xchain-explorer/src/compression.js')
+            const sdkCompression      = require('../../../xchain-sdk/src/compression.js')
+            assert.strictEqual(
+                encoderValidator.COMPRESSION_MAX_RATIO,
+                protocol.COMPRESSION_MAX_RATIO,
+                'encoder validator COMPRESSION_MAX_RATIO drifted from the canonical protocol constant'
+            )
+            assert.strictEqual(
+                explorerCompression.COMPRESSION_MAX_RATIO,
+                protocol.COMPRESSION_MAX_RATIO,
+                'explorer compression COMPRESSION_MAX_RATIO drifted from the canonical protocol constant; the explorer would inflate past what the encoder was willing to produce'
+            )
+            assert.strictEqual(
+                sdkCompression.COMPRESSION_MAX_RATIO,
+                protocol.COMPRESSION_MAX_RATIO,
+                'SDK compression COMPRESSION_MAX_RATIO drifted from the canonical protocol constant'
+            )
+            assertVendored('COMPRESSION_MAX_RATIO', ['xchain-sdk'])
+        })
+
+        // The oracle-band block above pins the HUB copies of PRICE_MAX and
+        // ORACLE_DEVIATION_THRESHOLD, and the hub is the arbiter, but all five
+        // vendored consumers re-declare both and nothing bound those copies: the
+        // off-disk cross-repo freeze gate (xchain-indexer
+        // test/unit/xcall-constants-cross-repo.test.js) gates only MAX_CODE_SIZE
+        // and three XCALL bounds, and its participating repo list is vm, indexer
+        // and sdk, so the decoder and explorer copies sit outside it entirely.
+        // xchain-hub test/unit/constants-conformance.test.js records the missing
+        // twin as pending coordinated work; this is that twin, on the side that
+        // can see every sibling at once (uuid ae66b1df).
+        it('[regression:p0] PRICE_MAX / ORACLE_DEVIATION_THRESHOLD === canonical in every vendored copy', () => {
+            const services = ['xchain-vm', 'xchain-indexer', 'xchain-explorer', 'xchain-sdk', 'xchain-decoder']
+            assertVendored('PRICE_MAX', services)
+            assertVendored('ORACLE_DEVIATION_THRESHOLD', services)
+            // The hub arm exists above; assert the hub and the consumers agree too,
+            // so a coordinated bump that misses the hub cannot pass on canonical alone.
+            services.forEach((svc) => {
+                assert.strictEqual(vendoredConstants[svc].PRICE_MAX, hubConstants.PRICE_MAX,
+                    svc + ' vendored PRICE_MAX disagrees with the hub, which is the arbiter for the oracle band')
+                assert.strictEqual(
+                    vendoredConstants[svc].ORACLE_DEVIATION_THRESHOLD,
+                    hubConstants.ORACLE_DEVIATION_THRESHOLD,
+                    svc + ' vendored ORACLE_DEVIATION_THRESHOLD disagrees with the hub, which is the arbiter for the oracle band')
+            })
+        })
+    })
+
     describe('Vendored protocol-constants byte-identity ', () => {
 
         // Each consuming service now requires a byte-identical vendored copy of the

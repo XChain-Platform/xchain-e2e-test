@@ -17,7 +17,8 @@ module.exports = {
     // ownership of GIVE_TICK as a single-shot transfer (GIVE_AMOUNT and GIVE_ESCROW must be empty).
     async sendDispenserV0(addressInfo, giveCoin, giveTick, giveAmount,
       giveEscrow, getCoin, getTick, getAmount, getAddress, fiatCode,
-      fiatAmount, oracleAddress, expiration, allowList, blockList, memo, giveOwnership
+      fiatAmount, oracleAddress, expiration, allowList, blockList, memo, giveOwnership,
+      customOutputs, expectedStatus
     ){
         let address = addressInfo["address"]
 
@@ -47,7 +48,10 @@ module.exports = {
             +"|"+expiration+"|"+allowList+"|"+blockList+"|"+memo
 
         console.log("Creating and sending DISPENSER V0 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, dispenserMessage)
+        // customOutputs carries the  oracle usage fee output when the dispenser
+        // names an ORACLE_ADDRESS whose operator charges a fee.
+        let txHash = await transactionHelper.createAndSendTransaction(
+            addressInfo, dispenserMessage, null, Array.isArray(customOutputs) ? customOutputs : [])
 
         let dispenserRow = await indexerDatabase.waitForDispenser({
             source: address, txHash: txHash,
@@ -58,7 +62,9 @@ module.exports = {
             fiatCode: fiatCode, fiatAmount: fiatAmount,
             expiration: expiration, allowList: allowList,
             blockList: blockList, memo: memo,
-            status: "valid"
+            // expectedStatus lets a caller wait for a REJECTED create ( oracle
+            // fee): waiting on "valid" would just time out.
+            status: expectedStatus || "valid"
         })
 
         return { txHash, dispenser: dispenserRow }

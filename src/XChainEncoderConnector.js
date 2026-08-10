@@ -52,11 +52,43 @@ class XChainEncoderConnector {
         }
     }
 
-    async createTx(utxosList, pubkey, customOutputs, data, rawData, exactFee, rbf, outputType, changeAddress, p2shHash, p2shHex, compressedPubKey, unconfirmed){
+    // Rebuild the key-path cancel of an unrevealed envelope commit ( §3.5)
+    // from the persisted recovery record alone: {commit outpoint, value, internal
+    // key, tapleaf hash} plus where the funds should go. The encoder holds no state
+    // between calls, so this genuinely reconstructs the BIP341 tweak from the record
+    // rather than from anything left over from the build; losing that record is what
+    // strands the commit's value in an address the wallet cannot re-derive.
+    async createEnvelopeCancelTx({ commitTxid, commitVout, commitValue, internalPubkey, tapleafHash, destination, feePerKb = null }){
+        const dataToSend = {
+            jsonrpc: '2.0',
+            method: 'create_envelope_cancel_tx',
+            params: { commitTxid, commitVout, commitValue, internalPubkey, tapleafHash, destination, feePerKb },
+            id: 1
+        }
+
+        let response = null
+        try {
+            response = await axios.post(this.url, dataToSend)
+        } catch (err){
+            throw new Error('Error trying to create an envelope cancel tx: ' + (err && err.message))
+        }
+
+        if (response.data.result) return response.data.result
+        const rpcErr = response.data && response.data.error
+        throw new Error('Error trying to create an envelope cancel tx: ' +
+            (rpcErr ? (rpcErr.message || JSON.stringify(rpcErr)) : 'no result and no error returned'))
+    }
+
+    // `compress` is TRI-STATE and deliberately last: null/undefined leaves the
+    // encoder's own default in force (XCHAIN_COMPRESSION_DEFAULT, on unless the
+    // deploy sets it off), while true/false are the caller's explicit choice.
+    // Every existing caller omits it and keeps the shipped behaviour.
+    async createTx(utxosList, pubkey, customOutputs, data, rawData, exactFee, rbf, outputType, changeAddress, p2shHash, p2shHex, compressedPubKey, unconfirmed, compress = null){
         const dataToSend = {
             jsonrpc: '2.0',
             method: 'create_tx',
             params: {
+                compress:compress,
                 utxos:utxosList,
                 pubkey:pubkey,
                 customOutputs:customOutputs,

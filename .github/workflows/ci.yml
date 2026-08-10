@@ -1,0 +1,203 @@
+name: CI
+
+# xchain-e2e-test vendors the canonical coin registry from xchain-hub but had
+# no CI workflow, so its copy was never drift-checked (SD-1 / ). This
+# workflow enforces that cross-repo byte-identity, and runs the repo's hermetic
+# unit tier.
+#
+# : until 2026-07-26 this workflow ran NO tests at all, only the drift
+# guards, so 461 unit cases never executed on a push and a consensus-adjacent
+# integration suite sat red for ten days with nothing to report it. The unit tier
+# below closes the larger half of that.
+#
+# The live tier (test:integration:live) is still not run here, and the reason is
+# concrete rather than "needs services": test/helpers/multiValidatorHubHelper.js
+# resolves xchain-hub SOURCE at require time and THROWS at module load if it is
+# absent, so the sibling checkout below is what makes any of this runnable at
+# all. The full `npm run ci` gate additionally needs xchain-documentation,
+# xchain-explorer, xchain-indexer, xchain-sdk and xchain-sync as siblings (each
+# for a vendored consensus-constant parity check), which is five more deploy-key
+# secrets.
+#
+# SECRETS, corrected 2026-07-26. An earlier revision of this comment said the
+# unit tier needed no new secret because XCHAIN_HUB_DEPLOY_KEY "already exists".
+# It did not: this repo had NO Actions secrets at all, while the drift-guards
+# job below had referenced that name since it was written. Secrets in this org
+# are per-repo, not org-wide (xchain-indexer carries its own DECODER/HUB/SDK
+# keys), so nothing was inherited. Both keys are now provisioned as dedicated
+# read-only deploy keys, one per consumer rather than a shared pair, and both
+# were verified by cloning with them directly:
+#   XCHAIN_HUB_DEPLOY_KEY       -> xchain-hub, read-only
+#   XCHAIN_INDEXER_DEPLOY_KEY   -> xchain-indexer, read-only
+#
+# None of this has been proven through Actions, and cannot be yet: every run on
+# this repo currently fails in 3-5s with "The job was not started because recent
+# account payments have failed", so the jobs never start and no step executes.
+# That is an account-level billing block, not a defect in these workflows, and
+# it means a red result here says nothing about the code until billing clears.
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The hermetic unit tier. Verified against a pristine clone with exactly this
+  # layout (clean checkout + xchain-hub as a sibling + npm ci): 461 passing,
+  # 11 pending, exit 0. The 11 skip for want of a .env, which CI does not have
+  # either, so that count is expected rather than a gap opening up.
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: xchain-e2e-test
+
+      # Sibling, NOT nested: multiValidatorHubHelper tries <repo>/xchain-hub
+      # first and the checkout parent second, and the second is what resolves.
+      # The canonical repo is private pre-launch, so this uses the same
+      # read-only deploy key the drift-guards job already relies on; drop the
+      # ssh-key line when the repos flip public at launch.
+      - name: Check out xchain-hub (required at require time by the hub helper)
+        uses: actions/checkout@v4
+        with:
+          repository: XChain-Platform/xchain-hub
+          ssh-key: ${{ secrets.XCHAIN_HUB_DEPLOY_KEY }}
+          path: xchain-hub
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # Every suite in this repo requires exactly Node 22; 18 and 24 fail, and
+      # some of those failures are silent skips rather than errors.
+      - name: Install dependencies
+        working-directory: xchain-e2e-test
+        run: if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      - name: Unit tier
+        working-directory: xchain-e2e-test
+        run: npm run test:unit
+
+  # THE LIVE TIER, as `npm run ci:live` -> scripts/run-live-tier.js over the
+  # roster in test/integration/live-tier.json. That is the same lane the venue
+  # pre-push gate runs, so the two cannot drift apart about what "the live tier"
+  # means. This job used to name ONE suite on its command line, which was the
+  # right first step and the wrong permanent shape: a hardcoded filename is a
+  # roster of one that nothing keeps current, i.e.  one level up.
+  #
+  # The runner also fails a suite that ran nothing, which matters most here:
+  # these suites skip themselves when a service is missing, so a runner without
+  # Docker would otherwise report a green tier having proved nothing.
+  #
+  # The suite that motivated  is still in that roster: hubDbWsMirror sat red
+  # for ten days after xchain-indexer 521edf2 changed capability_snapshots to a
+  # natural-key mirror, with no lane anywhere to notice.
+  #
+  # It self-provisions a throwaway MariaDB through Docker, which ubuntu-latest
+  # supplies, so it needs no service container and no credentials. What it does
+  # need is TWO sibling checkouts WITH THEIR DEPENDENCIES INSTALLED, and the
+  # second half of that is not obvious: xchain-hub's HubDbBroadcaster requires
+  # `ws` OUTSIDE a try/catch, and Node resolves that from the requiring file's
+  # own tree, never from xchain-e2e-test/node_modules. A bare checkout therefore
+  # dies at module load with "Cannot find module 'ws'". (hub_db_sync's own `ws`
+  # require IS optional, which would have degraded silently instead: live updates
+  # off, bootstrap still green, the streaming cases failing for a reason nothing
+  # in the output names.)
+  #
+  # XCHAIN_INDEXER_DEPLOY_KEY is provisioned (2026-07-26) as a dedicated
+  # read-only deploy key, verified by cloning xchain-indexer with it. Should it
+  # ever go missing this job fails loudly rather than skipping, which is
+  # deliberate: a job that skipped itself on a missing dependency would
+  # reproduce the exact defect this item exists to fix, a suite that reports
+  # success while proving nothing.
+  #
+  # Verified end to end on test-host 2026-08-09 against genuinely bare clones of all
+  # three repos plus npm ci in each: 20 suites, 62 passing, 0 failing, ~19 min.
+  live-tier:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: xchain-e2e-test
+
+      - name: Check out xchain-hub (broadcaster side of the mirror)
+        uses: actions/checkout@v4
+        with:
+          repository: XChain-Platform/xchain-hub
+          ssh-key: ${{ secrets.XCHAIN_HUB_DEPLOY_KEY }}
+          path: xchain-hub
+
+      - name: Check out xchain-indexer (sync side of the mirror)
+        uses: actions/checkout@v4
+        with:
+          repository: XChain-Platform/xchain-indexer
+          ssh-key: ${{ secrets.XCHAIN_INDEXER_DEPLOY_KEY }}
+          path: xchain-indexer
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # All three, not just the suite's own repo. See the `ws` note above.
+      - name: Install dependencies (all three trees)
+        run: |
+          for d in xchain-e2e-test xchain-hub xchain-indexer; do
+            ( cd "$d" && if [ -f package-lock.json ]; then npm ci; else npm install; fi )
+          done
+
+      # HUB_DB_* is unset on purpose: with those present the fixture reuses a
+      # pre-provisioned database, and here we want the Docker self-provisioning
+      # path that needs no credentials.
+      - name: Live integration tier
+        working-directory: xchain-e2e-test
+        run: >
+          env -u HUB_DB_HOST -u HUB_DB_USER -u HUB_DB_PASS -u HUB_DB_NAME -u HUB_DB_PORT
+          npm run ci:live
+
+  # Cross-repo drift guards (SD-1 / ): this repo vendors the canonical
+  # coin registry from xchain-hub, and per-repo CI cannot see sibling repos, so
+  # a drifted vendored copy previously shipped green (the byte-identity checks
+  # ran only in the monorepo's manual bin/ci-all.sh). This job recreates the
+  # sibling layout (self + canonical side by side) and runs the same checks.
+  # The canonical repo is private pre-launch, so its checkout uses a read-only
+  # deploy key; drop the ssh-key line when the repos flip public at launch.
+  drift-guards:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: xchain-e2e-test
+
+      - name: Check out the canonical coin registry (xchain-hub)
+        uses: actions/checkout@v4
+        with:
+          repository: XChain-Platform/xchain-hub
+          ssh-key: ${{ secrets.XCHAIN_HUB_DEPLOY_KEY }}
+          path: xchain-hub
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Coin-registry byte-identity vs canonical
+        run: xchain-hub/bin/sync-coins.sh --check --only xchain-e2e-test
+
+      - name: Coin consensus-pin conformance (own vendored bundle)
+        working-directory: xchain-e2e-test
+        run: |
+          node -e '
+            const coins = require("./src/coins");
+            for (const net of ["testnet", "regtest"]) {
+              const res = coins.verifyConsensusPin(net);
+              if (res && res.skipped) throw new Error("consensus pin unexpectedly unarmed for " + net);
+            }
+            console.log("consensus pin conformance OK (testnet, regtest)");
+          '

@@ -88,6 +88,16 @@ describe('COLLECT v0 (claim accrued validator rewards)', function () {
                 'COLLECT with no accrued rewards must not be valid; got status=' + result.claim.status)
             assert.match(result.claim.status, /no unclaimed rewards/i,
                 'rejection reason should mention "no unclaimed rewards"; got: ' + result.claim.status)
+
+            //  partial claim: a trailing AMOUNT decodes cleanly and still
+            // reaches the same deterministic rejection (the reward-total check
+            // precedes amount validation). Reward ACCRUAL is federation-driven and
+            // not exercisable on this pipeline, so the partial happy path is
+            // covered by the indexer unit suite instead.
+            let partial = await stakeHelper.sendCollectInvalid(addr, '5')
+            assert(partial.claim, 'a rejected partial COLLECT should still record a reward_claims row')
+            assert.match(partial.claim.status, /no unclaimed rewards/i,
+                'partial COLLECT with no rewards should reject identically; got: ' + partial.claim.status)
         })
     })
 })

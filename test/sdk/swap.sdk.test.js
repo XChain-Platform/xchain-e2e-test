@@ -30,7 +30,10 @@
  * cross-coin match needs a live multi-chain stack (the hub coordinates the
  * two ledgers). This suite exercises the same-chain path (GIVE_COIN ==
  * GET_COIN == this chain, different ticks): a complete on-ledger swap that
- * the SDK fully drives. The cross-coin variant is Phase 4 (LTC/DOGE).
+ * the SDK fully drives. The cross-coin variant is no longer deferred: it
+ * lives in swapCrossSettleLive.sdk.test.js (BTC<->DOGE, driven by
+ * swapCrossDogeSetup.js), which skips unless the multi-chain venue env is
+ * present. See .
  *
  * SWAP settlement rides on the indexer's matching engine; this suite runs on
  * BTC regtest (skips elsewhere, keeping parity with the connector suite, which

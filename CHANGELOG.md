@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `bin/seed-contract-state.js`: read the deployed contract's index from all three `actionWaiter` settle shapes and verify it against the explorer before recording it .
+- `bin/seed-contract-state.js`: count live contract keys from the paginated read's `total`, not the returned page, and give the fill loop an iteration ceiling plus a no-progress brake so a miscount cannot broadcast without bound .
+- `bin/seed-contract-state.js`: drop the non-existent AMOUNT field from the gas ISSUE, and refuse in preflight when the seed contract exceeds the single inline DEPLOY budget .
+- `bin/contracts/spvSeed.js`: trimmed 6549 -> 3928 source bytes so it fits one inline DEPLOY; contract comments are on-chain bytes .
+- `bin/seed-contract-state.js`: refuse LTC/DOGE up front; they pay the protocol fee in the native coin and the tool attaches no FEE_DESTINATION output, so its actions would be mined and then rejected .
+
+### Added
+- `test/unit/seedContractStateHelpers.test.js`: pin the seed tool's parsing helpers against the real settle shapes .
+- `bin/seed-contract-state.js` + `bin/contracts/spvSeed.js`: seed a live chain with real contract state ahead of its armed `contract_state_root` height .
+- `test/unit/spvSeedContract.test.js`: run the seed contract under the real VM and BTC gas schedule .
+
+### Fixed
+- `test/actions/xchainPriceDerivation.test.js`: render drill prices through `bcformat` so the ORDER wait predicate gets strings, not Decimal objects the DB driver cannot bind.
+- `test/actions/xchainPriceDerivation.test.js`: page the hub price-snapshot endpoint to exhaustion, so the newest rounds stay visible on a venue publishing 37 pairs a minute.
+- Added a CI workflow with the coin-registry drift-guard job (repo previously had no CI at all).
+
+### Added
+- `test/actions/xchainPriceDerivation.test.js`: prove a native fee priced off the derived XCHAIN/USD via the on-chain consensus path, bypassing the wall-clock-anchored `feequote` pre-flight .
+- Every XCHAIN/USD seed site is now suppressible via `XCHAIN_E2E_NO_PRICE_SEED`, enforced by `test/unit/xchainPriceSeedGuard.test.js` ( step 8).
+
 ### Added
 - `test/federation/multiHubLlmOutage.test.js`: Phase-4 llm outage drills (throttled provider_error publication + expiry refund, mid-window recovery, wedged-leader rotation, governance model ladder, hard-kill backstop); MultiValidatorHub accepts `extraP2pConfig`.
 - `test/sdk/dexCrossRoyaltyLive.sdk.test.js`: live multi-hub royalty drill asserting the guard legs ride the signed match and the proceeds leg settles the 75/25 split.

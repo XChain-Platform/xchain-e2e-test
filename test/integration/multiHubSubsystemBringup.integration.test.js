@@ -32,6 +32,7 @@ dotenv.config();
 
 const assert = require('assert');
 const { MultiValidatorHub } = require('../helpers/multiValidatorHubHelper');
+const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 
 const COUNT = 3;
 
@@ -40,13 +41,16 @@ describe('MultiValidatorHub consensus-subsystem bring-up ', function () {
     // reorg start each add tables/timers; teardown drops the DBs. Generous budget.
     this.timeout(180_000);
 
-    let mvh;
+    let mvh, db;
 
-    before(function () {
-        if (!process.env.HUB_DB_USER || !process.env.HUB_DB_PASS) {
-            console.log('Skipping subsystem bring-up L2 (HUB_DB_USER/HUB_DB_PASS not set)');
-            this.skip();
-        }
+    // Was gated on HUB_DB_USER/HUB_DB_PASS being set, which nothing in CI sets,
+    // so this suite skipped itself on every venue and the live tier reported it
+    // as covered . startDisposableHubDb self-provisions a throwaway
+    // MariaDB in Docker exactly as the rest of the L2 suites do, so the only
+    // remaining skip is a host with no Docker at all.
+    before(async function () {
+        db = await startDisposableHubDb();
+        if (!db) { console.log('Skipping subsystem bring-up L2: no env DB and Docker unavailable'); this.skip(); }
     });
 
     after(async function () {
@@ -54,6 +58,7 @@ describe('MultiValidatorHub consensus-subsystem bring-up ', function () {
             await mvh.stop();
             await mvh.dropDatabases();
         }
+        if (db) await db.stop();
     });
 
     it('brings up oracle + reorg + governance on every hub, reachable via getters', async function () {

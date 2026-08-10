@@ -1,0 +1,72 @@
+{
+  "_comment": [
+    "The live integration tier's roster . scripts/run-live-tier.js runs the",
+    "run:true suites; test/unit/scripts/liveTierRoster.test.js fails the hermetic unit",
+    "tier when this file stops matching test/integration/, so a new *.integration.test.js",
+    "cannot join the tier without somebody deciding whether a venue can actually run it.",
+    "Every run:false entry states why in prose, and the runner prints them on green runs",
+    "too: an exclusion nobody reads is the rot coming back behind a config file.",
+    "Roster set from measured runs on test-host 2026-08-09 against bare checkouts of",
+    "xchain-e2e-test + xchain-hub + xchain-indexer with Docker. All 27 suites as one",
+    "glob: 84 cases, 61 pass, 13 pending, 10 fail, 926s. This roster as the lane:",
+    "20 suites, 64 pass, 0 fail, 0 pending, 703s. Re-measure before changing a verdict."
+  ],
+  "timeoutMs": 300000,
+  "suites": [
+    {
+      "file": "test/integration/equivHeaderActivationBoundary.integration.test.js",
+      "run": false,
+      "why": "Needs EQUIV_HEADER_ACTIVATION raised above 1 in all five vendored copies (documentation constants.js + hub + indexer + sdk + explorer) for the run and reverted after; regtest ships it at 0, so the suite skips itself. A lane must not edit a consensus constant to make itself green."
+    },
+    { "file": "test/integration/hubDbWsMirror.integration.test.js", "run": true },
+    { "file": "test/integration/multiHub.integration.test.js", "run": true },
+    { "file": "test/integration/multiHubActivationBoundary.integration.test.js", "run": true },
+    { "file": "test/integration/multiHubAttestationWeighted.integration.test.js", "run": true },
+    { "file": "test/integration/multiHubByzantine.integration.test.js", "run": true },
+    { "file": "test/integration/multiHubByzantineF2.integration.test.js", "run": true },
+    { "file": "test/integration/multiHubCapabilities.integration.test.js", "run": true },
+    { "file": "test/integration/multiHubConsensus.integration.test.js", "run": true },
+    { "file": "test/integration/multiHubConsensusN10.integration.test.js", "run": true },
+    { "file": "test/integration/multiHubConsensusWeighted.integration.test.js", "run": true },
+    {
+      "file": "test/integration/multiHubCrossChainDex.integration.test.js",
+      "run": false,
+      "why": "RED on a bare venue checkout: the cross-chain DEX PBFT round finalizes on 0 of 4 hubs (expected 4). Measured test-host 2026-08-09 and reproduced solo, so it is not sweep contention. The hubs log CONSENSUS-INPUT FETCH FAILED for getcapabilityvalidators against a BTC indexer at 127.0.0.1:12001 and fail closed, while this suite's seedStakeSnapshot was written to remove exactly that dependency; whether the seed has fallen behind a new fetch path or the suite now needs a live indexer is its own item. Wiring a known-red suite into the gate would block every push in this repo and train the bypass."
+    },
+    {
+      "file": "test/integration/multiHubCrossChainDexWeighted.integration.test.js",
+      "run": false,
+      "why": "RED on a bare venue checkout, same cause as multiHubCrossChainDex: the weighted cross-chain match finalizes on 0 of 4 hubs. Admit it to the lane with that suite, not before."
+    },
+    {
+      "file": "test/integration/multiHubCrossSettleE2E.integration.test.js",
+      "run": false,
+      "why": "RED on a bare venue checkout and downstream of the same defect: its before() cannot produce a finalized cross_chain_matches row, so all three cases fail. It re-greens when the cross-chain DEX round does."
+    },
+    { "file": "test/integration/multiHubDegenerateUniformity.integration.test.js", "run": true },
+    {
+      "file": "test/integration/multiHubFeaturesN10.integration.test.js",
+      "run": false,
+      "why": "RED on a bare venue checkout in its DEX and XCALL legs (0 of 10 hubs finalize); its other case passes. Same root as multiHubCrossChainDex, and splitting a suite to salvage one case would hide the other two."
+    },
+    { "file": "test/integration/multiHubFiatOracle.integration.test.js", "run": true },
+    { "file": "test/integration/multiHubGovernanceCapReload.integration.test.js", "run": true },
+    { "file": "test/integration/multiHubOracle.integration.test.js", "run": true },
+    { "file": "test/integration/multiHubOracleByzantine.integration.test.js", "run": true },
+    { "file": "test/integration/multiHubOracleWeighted.integration.test.js", "run": true },
+    { "file": "test/integration/multiHubRewards.integration.test.js", "run": true },
+    {
+      "file": "test/integration/multiHubStateAnchor.integration.test.js",
+      "run": false,
+      "why": "RED on a bare venue checkout: the anchor flush case requires every hub to hold a finalized cross-chain match first, which is the same round that no longer finalizes. Its sibling case passes; it returns with the DEX fix."
+    },
+    { "file": "test/integration/multiHubStateAnchorN10.integration.test.js", "run": true },
+    { "file": "test/integration/multiHubStateAnchorWeighted.integration.test.js", "run": true },
+    { "file": "test/integration/multiHubSubsystemBringup.integration.test.js", "run": true },
+    {
+      "file": "test/integration/multiHubXcallWeighted.integration.test.js",
+      "run": false,
+      "why": "RED on a bare venue checkout: the weighted XCALL dispatch finalizes on no hub. Reproduced solo on an idle venue, so it is a real verdict rather than load, and it shows the same fail-closed consensus-input fetch as multiHubCrossChainDex."
+    }
+  ]
+}
