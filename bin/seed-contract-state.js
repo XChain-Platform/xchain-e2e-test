@@ -207,6 +207,7 @@ function parseArgs() {
             // wedges every later run forever, since the guard cannot tell
             // "still pending" from "gone" by reading the chain alone.
             case '--clear-pending':    o.clearPending = true; break;
+            case '--fee-per-kb':       o.feePerKb = parseInt(a[++i], 10); break;
             case '--confirm-gas-issue': o.confirmGasIssue = true; break;
             case '--gas-decimals':     o.gasDecimals = parseInt(a[++i], 10); break;
             case '--gas-max-supply':   o.gasMaxSupply = parseInt(a[++i], 10); break;
@@ -230,6 +231,60 @@ function parseArgs() {
 }
 
 function fail64(msg) { process.stderr.write(msg + '\n'); process.exit(64); }
+
+// Report the fee rate this run will build at, and flag an estimator that has
+// clearly come loose. SANITY_CEILING is not a claim about what a fee SHOULD be;
+// it is the line past which a testnet estimate is more likely broken than real,
+// and crossing it is reported rather than enforced, because a genuinely
+// congested chain is allowed to be expensive.
+// PIN THE FEE RATE; DO NOT MERELY REPORT IT.
+//
+// create_tx, left to itself on a non-regtest chain, uses the node's
+// estimatesmartfee VERBATIM with no sanity ceiling (xchain-encoder
+// BlockchainConnector.getFeePerKilobyte - the regtest branch has such a guard,
+// testnet and mainnet do not). On BTC:testnet 2026-08-11 that read 0.00361714
+// BTC/kB, ~362 sat/vB, against a network actually at 6.
+//
+// A data-bearing action pays that rate TWICE: once in the fee, and again in
+// every carrier output, because dust is derived from the fee rate. The same
+// DEPLOY of the same 3928-byte contract that cost "outputs 30639 + fee 2360" on
+// 2026-08-04 was refused at "outputs 2940202 + fee 293610". Driving the encoder
+// across rates confirmed it is exactly linear: 47,285 at 6 sat/vB, 157,608 at
+// 20, and scaling 47,285 by the node's estimate predicts 2,850,608 against the
+// 2,850,665 it actually refused on.
+//
+// AND THE ENCODER DISAGREES WITH ITSELF, which is why this pins rather than
+// warns. getFeeTiers answered ~10 sat/vB for this chain in the same minute
+// create_tx was charging ~362, because the tiers endpoint and create_tx do not
+// resolve the rate the same way. A check that read the tiers and shouted only
+// when THEY looked wrong would have stayed silent through the whole incident.
+// So the tiers value is not used as a warning threshold; it is used as the rate,
+// passed explicitly, so the pathological path is never taken silently.
+const FEE_FALLBACK_SAT_VB = 6;
+async function resolveFeeRate(sdk, opts, log) {
+    if (opts.feePerKb) {
+        log('  fee rate:          ' + (opts.feePerKb / 1000).toFixed(2) +
+            ' sat/vB  (explicit, --fee-per-kb ' + opts.feePerKb + ')');
+        return;
+    }
+    let tiers = null;
+    try { tiers = await sdk.getFeeTiers(); } catch (e) { tiers = null; }
+    const pick = tiers && [tiers.medium, tiers.med, tiers.high, tiers.low]
+        .map(Number).find(n => Number.isFinite(n) && n > 0);
+    if (pick) {
+        opts.feePerKb = Math.ceil(pick * 1000);
+        log('  fee rate:          ' + pick.toFixed(2) + ' sat/vB, PINNED from the encoder fee tiers');
+        log('                     (left unpinned, create_tx uses the node estimatesmartfee unchecked,');
+        log('                     which measured ~362 sat/vB on this chain on 2026-08-11)');
+        return;
+    }
+    opts.feePerKb = FEE_FALLBACK_SAT_VB * 1000;
+    log('  fee rate:          the encoder would not quote tiers; PINNED to ' +
+        FEE_FALLBACK_SAT_VB + ' sat/vB rather than');
+    log('                     letting create_tx fall through to the node estimate, which is');
+    log('                     unguarded off regtest. Override with --fee-per-kb.');
+}
+
 
 function log(msg)  { process.stdout.write(msg + '\n'); }
 function step(n, msg) { log(''); log('== ' + n + '. ' + msg); }
@@ -346,6 +401,35 @@ async function main() {
     };
 
     const submitOpts = { wif, waitForIndexer: true, timeout: 1800000, pollInterval: 15000 };
+
+    // THE FEE RATE IS AN INPUT, NOT A FACT, AND ON TESTNET IT IS ROUTINELY WRONG.
+    // Every action below is built by the encoder, which on a non-regtest chain
+    // takes the node's estimatesmartfee VERBATIM with no sanity ceiling
+    // (xchain-encoder BlockchainConnector.getFeePerKilobyte; the regtest branch
+    // has such a guard and testnet/mainnet do not). That matters far more than a
+    // fee line usually would, because the carrier outputs of a data-bearing
+    // transaction must each clear the DUST threshold and dust is DERIVED from the
+    // fee rate: the cost of the outputs scales linearly with it.
+    //
+    // Measured on BTC:testnet 2026-08-11 rather than reasoned about. The node
+    // answered estimatesmartfee(1) = 0.00361714 BTC/kB (~362 sat/vB) while the
+    // network was actually at 6 sat/vB, a 60x overestimate, and the same DEPLOY
+    // of the same 3928-byte contract that cost "outputs 30639 + fee 2360" on
+    // 2026-08-04 was refused at "outputs 2940202 + fee 293610". Nothing about the
+    // contract, the encoding or the protocol had changed; only the estimator had
+    // moved. Driving the encoder across fee rates confirmed the mechanism exactly:
+    // outputs came back 47,285 at 6 sat/vB and 157,608 at 20 sat/vB, linear, and
+    // scaling 47,285 by the measured estimate predicts 2,850,608 against the
+    // 2,850,665 it actually refused on.
+    //
+    // So the rate is passed EXPLICITLY here. It goes in the encoderOpts argument
+    // (submitAction's SECOND parameter), not in submitOpts, which is where the
+    // SDK threads it down to create_tx.
+    const txIo = (addr) => {
+        const io = { pubkey: addr, change: addr };
+        if (opts.feePerKb) io.feePerKb = opts.feePerKb;
+        return io;
+    };
 
     const submitChecked = makeSubmitChecked(sdk, log, { rememberPending, forgetPending });
 
@@ -587,6 +671,13 @@ async function main() {
         }
     }
 
+    // WHAT THE ENCODER WOULD CHARGE, surfaced BEFORE anything is broadcast.
+    // A preflight that reports funds without reporting the rate those funds are
+    // measured against answers the wrong question: on 2026-08-11 the working
+    // address held 230,903 sats, which reads as "funded" and was in fact 7% of
+    // what the node's fee estimate implied a single DEPLOY would cost.
+    await resolveFeeRate(sdk, opts, log);
+
     // THE CONTRACT MUST FIT ONE INLINE DEPLOY, checked here rather than
     // discovered at the DEPLOY step. The source is base64'd into a single action
     // capped at MAX_ACTION_DATA_LENGTH (8192), which is about 6132 source bytes;
@@ -743,7 +834,7 @@ async function main() {
                 mintStartBlock: opts.gasMintStart,
                 description:    'XChain gas token'
             } },
-            { pubkey: gasAddress, change: gasAddress },
+            txIo(gasAddress),
             Object.assign({}, submitOpts, { wif: gasWif }),
             'ISSUE ' + gasTick
         );
@@ -760,7 +851,7 @@ async function main() {
         step(4, 'MINT ' + gasTick);
         const res = await submitChecked(
             { action: 'MINT', params: { tick: gasTick, amount: 100000, destination: address } },
-            { pubkey: address, change: address },
+            txIo(address),
             submitOpts,
             'MINT ' + gasTick
         );
@@ -778,7 +869,7 @@ async function main() {
         const code = fs.readFileSync(path.join(__dirname, 'contracts', 'spvSeed.js'), 'utf8');
         const res = await submitChecked(
             { action: 'DEPLOY', params: { code, gasLimit: 500000 } },
-            { pubkey: address, change: address },
+            txIo(address),
             submitOpts,
             'DEPLOY'
         );
@@ -889,7 +980,7 @@ async function main() {
                     contractActionIndex: contractIndex, method: 'fill',
                     params: ['seed/bulk/', String(start), String(batch)]
                 } },
-                { pubkey: address, change: address },
+                txIo(address),
                 submitOpts,
                 'EXECUTE fill'
             );
@@ -919,7 +1010,7 @@ async function main() {
                 contractActionIndex: contractIndex, method: 'remove',
                 params: ['seed/doomed']   // no gasLimit: EXECUTE has no GAS_LIMIT slot, see step 6
             } },
-            { pubkey: address, change: address },
+            txIo(address),
             submitOpts,
             'EXECUTE remove'
         );
@@ -1049,7 +1140,10 @@ module.exports = {
     // requireValid is exported for the tests: "the run continues" after a
     // timeout recovery means the NEXT thing every step does with the result
     // does not throw, and that thing is this.
-    requireValid
+    requireValid,
+    // Exported so seed-escrow-state.js pins the fee rate through the SAME
+    // resolver rather than a copy that can drift out of agreement with it.
+    resolveFeeRate
 };
 
 // ---------------------------------------------------------------------------

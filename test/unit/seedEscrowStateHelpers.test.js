@@ -27,12 +27,19 @@
  *                  must not count toward its target, and must not be disturbed.
  *
  *   escrowLeafGate the gate that decides whether escrow_leaf_journal is written
- *                  at ALL. Measured 2026-08-11: ESCROW_LOCKED_LEAF_ACTIVATION is
- *                  { 'BTC:regtest': 11200 } and ESCROW_LOCKED_LEAF_SHADOW is
- *                  empty, so on BTC:testnet a perfect seed produces an empty
- *                  journal and an empty XCHAIN_ESC leaf. The tool has to SAY so;
- *                  a gate read that quietly returned "armed" would turn that
- *                  into a silent wait for something that is never coming.
+ *                  at ALL, and the one whose answer CHANGED under this suite on
+ *                  the day it was written. Measured on the morning of
+ *                  2026-08-11: ESCROW_LOCKED_LEAF_ACTIVATION was
+ *                  { 'BTC:regtest': 11200 } and ESCROW_LOCKED_LEAF_SHADOW was
+ *                  EMPTY, so on BTC:testnet a perfect seed produced an empty
+ *                  journal and an empty XCHAIN_ESC leaf, and the tool had to SAY
+ *                  so rather than let it read as a silent wait for something
+ *                  that was never coming. That afternoon the §7 shadow window
+ *                  was opened at BTC:testnet 148000, which starts the journal
+ *                  writer while committing nothing, and the assertion below
+ *                  flipped with it. Both halves still matter: shadowing decides
+ *                  whether the journal is written, and NOT-armed decides whether
+ *                  anything is committed or any proof is served.
  */
 
 const assert = require('assert');
@@ -130,11 +137,19 @@ describe('seed-escrow-state helpers', function () {
             assert.strictEqual(g.armed, 11200);
         });
 
-        it('reports BTC:testnet as NOT armed and NOT shadowing, which is the fact the tool warns on', function () {
+        it('reports BTC:testnet as SHADOWING but NOT armed, which is what decides whether the journal is written', function () {
+            // This assertion is the opposite of what it was when first written,
+            // and the change is the point rather than a correction: on
+            // 2026-08-11 this chain had neither an armed height nor a window, so
+            // seeding escrows produced an empty journal, and the tool said so.
+            // The §7 shadow window was then opened at 148000, which is what
+            // starts the journal writer without committing anything.
             const g = escrowLeafGate('BTC', 'testnet');
             assert.strictEqual(g.resolved, true);
-            assert.strictEqual(g.armed, null);
-            assert.strictEqual(g.shadow, null);
+            assert.strictEqual(g.shadow, 148000, 'the §7 shadow window opened on this chain');
+            // Still NOT armed, and that is the half that must not drift: a shadow
+            // commits nothing, so locked-balance proofs stay refused here.
+            assert.strictEqual(g.armed, null, 'a shadow window must never read as an arming');
         });
 
         it('distinguishes an unarmed chain from an unresolvable gate', function () {

@@ -117,6 +117,10 @@ const path = require('path');
 // here runs nothing.
 const SEED = require('./seed-contract-state.js');
 const { makeSubmitChecked, explorerField, isExplorerError, requireValid } = SEED;
+// The fee-rate resolver is shared for the same reason the pending ledger is:
+// create_tx's unguarded use of the node estimate hits an ORDER exactly as it
+// hits a DEPLOY, and a second copy is a second thing to forget to pin.
+const { resolveFeeRate } = SEED;
 
 // The protocol gas token, named here for the same reason seed-contract-state.js
 // names it: the SDK carries no copy and reading it from a service risks reading
@@ -191,6 +195,7 @@ function parseArgs() {
             case '--broadcast':        o.broadcast = true; break;
             case '--force':            o.force = true; break;
             case '--clear-pending':    o.clearPending = true; break;
+            case '--fee-per-kb':       o.feePerKb = parseInt(a[++i], 10); break;
             case '--help': case '-h':
                 process.stdout.write(fs.readFileSync(__filename, 'utf8').split('*/')[0] + '\n');
                 process.exit(0);
@@ -322,6 +327,18 @@ async function main() {
     };
 
     const submitOpts    = { wif, waitForIndexer: true, timeout: 1800000, pollInterval: 15000 };
+
+    // Same reasoning as seed-contract-state.js: the encoder takes the node's
+    // estimatesmartfee verbatim off a non-regtest chain, and an ORDER's carrier
+    // outputs clear a dust threshold derived from that rate. An ORDER is a much
+    // smaller payload than a DEPLOY, so a bad estimate is less likely to make it
+    // unaffordable outright - which is exactly why it needs saying: it would
+    // quietly overpay instead of failing, and this tool posts several.
+    const txIo = (addr) => {
+        const io = { pubkey: addr, change: addr };
+        if (opts.feePerKb) io.feePerKb = opts.feePerKb;
+        return io;
+    };
     const submitChecked = makeSubmitChecked(sdk, log, { rememberPending, forgetPending });
 
     log('# seed escrow state on ' + opts.chain + '/' + opts.network);
@@ -446,6 +463,7 @@ async function main() {
         ? 'exists (read at `' + gasTickRead.at + '`)'
         : 'DOES NOT EXIST on this chain'));
 
+    await resolveFeeRate(sdk, opts, log);
     log('  working address:   ' + (address || '(could not derive from XC_SEED_WIF)'));
     let utxoTotal = 0;
     try {
@@ -602,7 +620,7 @@ async function main() {
                     getAddress: address,
                     expiration: expiration,
                 } },
-                { pubkey: address, change: address },
+                txIo(address),
                 submitOpts,
                 'ORDER ' + (have + 1) + '/' + opts.orders
             );
