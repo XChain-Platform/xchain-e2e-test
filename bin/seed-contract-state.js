@@ -609,38 +609,27 @@ async function main() {
     }
 
     // Contract, if a previous run deployed one. The state file is a CACHE and
-    // never the authority: a run that dies between the DEPLOY broadcast and the
-    // writeState that records the action_index leaves a confirmed, paid-for
-    // contract on chain that the file has never heard of, and the next run
-    // deploys a second one. That is not hypothetical. On BTC:testnet the
-    // 2026-08-04 run timed out waiting for its DEPLOY to index (the clock, not
-    // the chain, exactly as the submitChecked wrapper describes), died before
-    // line 783, and the 2026-08-05 resume printed "not deployed yet" against a
-    // contract sitting valid at action_index 6 and broadcast a duplicate.
-    //
-    // Every other step in this tool resumes by asking the CHAIN. This one now
-    // does too, and by content hash rather than by bookkeeping.
-    let contractIndex = state.contractIndex || null;
-    let liveKeys = 0;
-    if (contractIndex) {
-        log('  contract:          action_index ' + contractIndex + ' (from ' + opts.state + ')');
-    } else {
-        try {
-            contractIndex = await findDeployedContract(sdk, seedCode, address);
-        } catch (e) {
-            log('  ! ' + e.message);
-            log('    Treating that as "not deployed" would risk a duplicate DEPLOY, so this run');
-            log('    refuses to plan. Re-run once the explorer answers.');
-            process.exit(4);
-        }
-        if (contractIndex) {
-            log('  contract:          action_index ' + contractIndex + ' (found ON CHAIN by code_hash)');
-            state.contractIndex = contractIndex;
-            writeState(opts.state, state);
-        } else {
-            log('  contract:          not deployed yet');
-        }
+    // never the authority, in either direction: it can be missing a contract the
+    // chain carries (the 2026-08-04 run died inside its DEPLOY index-wait, and
+    // the resume the next day printed "not deployed yet" at a contract sitting
+    // valid at action_index 6 and broadcast a duplicate), and it can carry one
+    // the chain does not (the 2026-08-10 testnet re-genesis). resolveContractIndex
+    // asks the chain unconditionally and explains whichever disagreement it finds.
+    let contractIndex;
+    try {
+        contractIndex = await resolveContractIndex(sdk, seedCode, address, state, log, opts.state);
+    } catch (e) {
+        log('  ! ' + e.message);
+        log('    Treating that as "not deployed" would risk a duplicate DEPLOY, so this run');
+        log('    refuses to plan. Re-run once the explorer answers.');
+        process.exit(4);
     }
+    const priorIndex = state.contractIndex || null;
+    if (contractIndex !== priorIndex) {
+        state.contractIndex = contractIndex;
+        writeState(opts.state, state);
+    }
+    let liveKeys = 0;
     if (contractIndex) {
         liveKeys = await countLiveKeys(sdk, contractIndex);
         log('  live state keys:   ' + liveKeys);
@@ -1056,7 +1045,7 @@ if (require.main === module) {
 module.exports = {
     contractIndexOf, coinPrefix, countLiveKeys, loadChunkHelper, makeSubmitChecked,
     explorerField, isExplorerError, EXPLORER_ENVELOPES,
-    codeHashOf, findDeployedContract,
+    codeHashOf, findDeployedContract, resolveContractIndex,
     // requireValid is exported for the tests: "the run continues" after a
     // timeout recovery means the NEXT thing every step does with the result
     // does not throw, and that thing is this.
@@ -1254,6 +1243,46 @@ function codeHashOf(code) {
 // duplicates resolves to the same contract on every subsequent run rather than
 // drifting between them. Returns null when nothing matches, which is the honest
 // "deploy it" answer; it never guesses.
+// The state file is a cache in BOTH directions, and only one of them used to be
+// handled. A cached index that the chain has never heard of is just as wrong as
+// a missing one, and it is what a re-genesised chain produces: on 2026-08-10
+// BTC:testnet's firstBlock moved from 138000 to 147500, so the contract this
+// file remembered at action_index 6 (deployed in block 147007) stopped existing
+// as far as the indexer is concerned. Trusting the file then produced a plan of
+// ISSUE, MINT, three EXECUTE fills and a tombstone with NO DEPLOY in it, aimed
+// at an index the chain does not carry: every one of those EXECUTEs would have
+// been broadcast and paid for and none could have taken effect.
+//
+// So the chain is asked unconditionally and the file only ever contributes a
+// hint worth reporting. A lookup that ERRORS still throws rather than reading as
+// "not deployed", because that distinction is what stops a duplicate DEPLOY.
+async function resolveContractIndex(sdk, code, address, state, log, statePath) {
+    const cached = state && state.contractIndex ? Number(state.contractIndex) : null;
+    const onChain = await findDeployedContract(sdk, code, address);
+
+    if (onChain && cached && onChain !== cached) {
+        log('  contract:          action_index ' + onChain + ' (found ON CHAIN by code_hash)');
+        log('  ! ' + statePath + ' remembered action_index ' + cached + ', which is NOT what the');
+        log('    chain carries. The chain wins; the file is being corrected.');
+        return onChain;
+    }
+    if (onChain) {
+        log('  contract:          action_index ' + onChain + ' (found ON CHAIN by code_hash' +
+            (cached ? ', confirming ' + statePath : '') + ')');
+        return onChain;
+    }
+    if (cached) {
+        log('  contract:          not deployed on this chain');
+        log('  ! ' + statePath + ' remembered action_index ' + cached + ' and the chain does not');
+        log('    carry it, so that record is STALE and is being discarded. A re-genesis or a');
+        log('    reindex below the deploy height does exactly this. The plan below therefore');
+        log('    includes a fresh DEPLOY rather than executing against an index that is gone.');
+        return null;
+    }
+    log('  contract:          not deployed yet');
+    return null;
+}
+
 async function findDeployedContract(sdk, code, address) {
     const want = codeHashOf(code);
     // A lookup that FAILS is not a lookup that found nothing. Swallowing the
