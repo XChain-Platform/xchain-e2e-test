@@ -98,9 +98,13 @@ describe('CryptoNetworks', () => {
         })
 
         it('should return the canonical testnet start heights', () => {
-            assert.strictEqual(CryptoNetworks.getFirstBlock('bitcoin-testnet'), 138000)
-            assert.strictEqual(CryptoNetworks.getFirstBlock('litecoin-testnet'), 4765000)
-            assert.strictEqual(CryptoNetworks.getFirstBlock('dogecoin-testnet'), 64800000)
+            // Repinned 2026-08-10 by the testnet re-genesis (xchain-decoder 1073d36,
+            // vendored here as 5c41cec): each testnet chain now starts just under its
+            // live tip. The vendored registry moved in that commit and this assertion
+            // did not, so the suite has been red since it landed.
+            assert.strictEqual(CryptoNetworks.getFirstBlock('bitcoin-testnet'), 147500)
+            assert.strictEqual(CryptoNetworks.getFirstBlock('litecoin-testnet'), 4855000)
+            assert.strictEqual(CryptoNetworks.getFirstBlock('dogecoin-testnet'), 67815000)
         })
 
         it('should return 0 for regtest networks', () => {
