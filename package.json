@@ -21,7 +21,8 @@
   },
   "scripts": {
     "lint:sleep-flake": "node scripts/check-sleep-flake.js",
-    "ci": "npm run lint:sleep-flake && mocha --no-config --timeout 30000 --exit 'test/unit/coins-conformance.test.js' 'test/unit/scripts/liveTierRoster.test.js' 'test/unit/helpers/multiValidatorHubPorts.test.js' 'test/unit/security/configuration/dependency-advisories.test.js' 'test/unit/security/configuration/sibling-tree-advisories.test.js' 'test/unit/security/configuration/history-path-leak.test.js' 'test/integration/parity/**/*.test.js' && npm run ci:live",
+    "count:actions": "node scripts/count-action-suites.js",
+    "ci": "npm run lint:sleep-flake && mocha --no-config --timeout 30000 --exit 'test/unit/coins-conformance.test.js' 'test/unit/scripts/liveTierRoster.test.js' 'test/unit/scripts/actionSuiteCount.test.js' 'test/unit/helpers/multiValidatorHubPorts.test.js' 'test/unit/security/configuration/dependency-advisories.test.js' 'test/unit/security/configuration/sibling-tree-advisories.test.js' 'test/unit/security/configuration/history-path-leak.test.js' 'test/integration/parity/**/*.test.js' && npm run ci:live",
     "ci:live": "node scripts/run-live-tier.js",
     "test": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/actions/**/*.test.js'",
     "test:contracts": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/contracts/**/*.test.js'",

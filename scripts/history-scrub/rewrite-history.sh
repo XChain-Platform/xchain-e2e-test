@@ -146,8 +146,13 @@ BEFORE_COMMITS="$(git -C "${MIRROR}" rev-list --all --count)"
 BEFORE_SIZE="$(du -sk "${MIRROR}" | awk '{print $1}')"
 
 say "scanning BEFORE"
+# --all-refs here, unlike the standing gate. The gate scans published history
+# because it runs in clones (CI venues) that hold scratch refs the project never
+# published. This mirror is the artifact about to be force-pushed over the real
+# remote, so every ref it carries IS about to become published history, and the
+# right question is the paranoid one.
 set +e
-node "${SCANNER}" "${MIRROR}" | tee "${OUT}/scan-before.txt"
+node "${SCANNER}" --all-refs "${MIRROR}" | tee "${OUT}/scan-before.txt"
 BEFORE_STATUS=$?
 set -e
 if [ "${BEFORE_STATUS}" -eq 2 ]; then die "scanner errored on the source mirror"; fi
@@ -182,7 +187,7 @@ AFTER_SIZE="$(du -sk "${MIRROR}" | awk '{print $1}')"
 # --- after ------------------------------------------------------------------
 say "scanning AFTER"
 set +e
-node "${SCANNER}" "${MIRROR}" | tee "${OUT}/scan-after.txt"
+node "${SCANNER}" --all-refs "${MIRROR}" | tee "${OUT}/scan-after.txt"
 AFTER_STATUS=$?
 set -e
 
