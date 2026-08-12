@@ -20,7 +20,7 @@
 // The distinction this exists to enforce: `git grep` and a plain working-tree
 // scan look at ONE tree, so they go green the moment a bad file is untracked,
 // while the blob is still sitting in history and still served by every clone
-// and by GitHub's raw-blob endpoint.  is exactly that failure: 379912d
+// and by GitHub's raw-blob endpoint. That is exactly the failure here: 379912d
 // untracked two artifacts and the scrub was recorded as remediated.
 //
 // So this walks OBJECTS, not the tree, and it walks them across every ref that
@@ -29,13 +29,13 @@
 //   - every commit message
 //   - every annotated-tag message
 //
-// "Published", not "--all", and that distinction is . A scan whose ref
+// "Published", not "--all", and that distinction matters. A scan whose ref
 // set is `--all` reports whatever objects the clone it runs in happens to hold,
 // and a reused CI clone holds far more than the project's history: the venue
 // gate fetches `+refs/*:refs/remotes/origin/*` from a bare repo that gains a
 // per-commit `ci-<short>` branch on every push and never loses one, so a commit
 // that was rebuilt away locally stays reachable on that venue forever. Measured
-// 2026-08-10 on test-host: 38 refs, all of them `ci-*`, one of them (ci-74665416)
+// 2026-08-10 on a CI venue: 38 refs, all of them `ci-*`, one of them (ci-74665416)
 // holding a blob that `git rev-list --objects origin/master` on the real repo
 // does not contain. The gate failed the commit being pushed for a leak that
 // belonged to an abandoned commit on a scratch ref, was not reproducible
@@ -55,7 +55,7 @@ const { findMatches }      = require('./leak-patterns');
  * safe reason to skip a ref is knowing that something else creates it.
  *
  * Skipping is not free: a rule that swallowed a real branch would turn this
- * detector green while the repo leaked, which is the exact failure  is.
+ * detector green while the repo leaked, which is the exact failure this catches.
  * Two things keep that honest: the excluded refs are named in the report rather
  * than dropped silently, and scanRepo() refuses to run at all if the rules
  * leave it with nothing to scan.

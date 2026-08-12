@@ -22,7 +22,7 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..');
 const patterns              = require(path.join(SCRUB_DIR, 'leak-patterns'));
 const { scanRepo, leakCount, selectRevisions } = require(path.join(SCRUB_DIR, 'scan-history'));
 
-// . The scrub of 2026-06-20 untracked two generated artifacts and was
+// The scrub of 2026-06-20 untracked two generated artifacts and was
 // recorded as remediated, but untracking removes a file from the TREE and
 // leaves the blob in HISTORY, where every clone and every raw-blob URL still
 // serves it. These tests cover the tooling that closes that gap:
@@ -50,7 +50,7 @@ const FIXTURE_PSF  = seg('media', 'psf', 'Sites', 'Fixture');
 const FIXTURE_HOME = seg('home', 'fixtureuser', '.fixture-data');
 const FIXTURE_MAC  = seg('Users', 'fixtureuser', 'Sites', 'Fixture');
 
-// The leak sites in this repo's history as of , by object id. Object ids
+// The known leak sites in this repo's history, by object id. Object ids
 // are safe to write down; they are not paths.
 //
 // The assertion built on this list is deliberately "found is a SUBSET of
@@ -98,7 +98,7 @@ function findFilterRepo() {
     return null;
 }
 
-describe('Security: no developer-machine paths in git history  @regression @tier4', function () {
+describe('Security: no developer-machine paths in git history @regression @tier4', function () {
     this.timeout(180000);
 
     describe('leak patterns', function () {
@@ -259,7 +259,7 @@ describe('Security: no developer-machine paths in git history  @regression @tier
             result = await scanRepo(REPO_ROOT);
         });
 
-        it('has no leak outside the four sites  documents', function () {
+        it('has no leak outside the four documented sites', function () {
             const newBlobs = result.blobs
                 .filter((b) => !KNOWN_BLOB_LEAKS.has(b.sha))
                 .map((b) => `${b.sha} (${b.paths.join(', ')})`);
@@ -282,13 +282,13 @@ describe('Security: no developer-machine paths in git history  @regression @tier
 
         it('scanned the whole object graph, not just the working tree', function () {
             // Guards the scan going quietly vacuous. A detector that walks zero
-            // blobs reports CLEAN, which is exactly the false negative  is.
+            // blobs reports CLEAN, which is exactly the false negative this catches.
             assert.ok(result.counts.blobs > 100,
                 `only ${result.counts.blobs} blobs scanned; the scan is not reaching history`);
         });
 
         it('names every ref it chose not to scan', function () {
-            // The cost of scanning published refs instead of --all  is
+            // The cost of scanning published refs instead of --all is
             // that something is being skipped. Skipping silently would be a way
             // to go green by looking away, so each skipped ref must arrive with
             // the rule that claimed it and that rule must be a known one.
@@ -299,7 +299,7 @@ describe('Security: no developer-machine paths in git history  @regression @tier
         });
     });
 
-    // . The gate failed on a CI venue and nowhere else, naming a blob
+    // The gate once failed on a CI venue and nowhere else, naming a blob
     // that `git rev-list --objects` over the published refs of the real
     // repository does not contain. Cause, measured on the venue: ci-dispatch.sh
     // ships each pushed commit to the venue's bare repo as refs/heads/ci-<short>
@@ -312,7 +312,7 @@ describe('Security: no developer-machine paths in git history  @regression @tier
     //
     // These tests pin the two halves of the fix: what is skipped, and, more
     // importantly, that skipping it did not blind the detector.
-    describe('scans published history, not a clone leftovers ', function () {
+    describe('scans published history, not a clone leftovers', function () {
         let work;
 
         before(function () {
@@ -520,7 +520,7 @@ describe('Security: no developer-machine paths in git history  @regression @tier
             assert.ok(before.tags.length >= 1, 'annotated tag leak not detected');
             assert.ok(before.commits.length >= 1, 'commit message leak not detected');
 
-            // The false negative  is made of: the live file's tip is clean
+            // The false negative this guards against: the live file's tip is clean
             // and the artifact is untracked, so the tree looks scrubbed.
             const tip = git(fx.src, ['show', `master:${fx.live}`]);
             assert.ok(!patterns.hasLeak(tip), 'fixture tip should already look clean');

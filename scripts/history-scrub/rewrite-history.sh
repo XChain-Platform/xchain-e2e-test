@@ -11,7 +11,7 @@
 # contact legal@dankest.llc.
 #
 # ---------------------------------------------------------------------------
-# : purge leaked developer-machine paths from git history, pre-flip.
+# Purge leaked developer-machine paths from git history, pre-flip.
 #
 # This script REHEARSES the rewrite. It never pushes, and it never rewrites a
 # repository you already have: it mirror-clones the source into a throwaway
@@ -131,7 +131,7 @@ mkdir -p "${OUT}"
 MIRROR="${OUT}/scrubbed.git"
 if [ -e "${MIRROR}" ]; then die "already exists: ${MIRROR}"; fi
 
-say " history scrub rehearsal"
+say "history scrub rehearsal"
 echo "source:  ${SOURCE}"
 echo "workdir: ${OUT}"
 echo "filter:  ${FILTER_REPO}"
@@ -158,7 +158,7 @@ set -e
 if [ "${BEFORE_STATUS}" -eq 2 ]; then die "scanner errored on the source mirror"; fi
 if [ "${BEFORE_STATUS}" -eq 0 ]; then
     say "source is ALREADY CLEAN"
-    echo "Nothing to rewrite. If this is the pre-flip check,  is done."
+    echo "Nothing to rewrite. If this is the pre-flip check, the scrub is done."
     [ "${KEEP}" -eq 1 ] || rm -rf "${OUT}"
     exit 0
 fi
