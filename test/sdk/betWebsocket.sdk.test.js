@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - BET live WebSocket channel (spec §11.1, P7 verify line)
  *
  * P7 built the `bet_feed:{index}` entity channel and its unit coverage; this is
@@ -36,7 +34,7 @@
  * opposite facts for a market page. So the drill asserts `data.action_format` is
  * present and correct, not merely that some event arrived.
  *
- * THE LATCH LEG (, closed 2026-07-26). This drill originally asserted the
+ * THE LATCH LEG (closed 2026-07-26). This drill originally asserted the
  * ABSENCE of a close event: the latch is a direct status write in the end-of-block
  * pass with no action row (spec §6), so the ChangeDetector's `actions` cursor had
  * nothing to see and a market page learned that betting had closed only on its next

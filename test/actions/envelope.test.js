@@ -8,12 +8,11 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 //
-// TAPROOT ENVELOPE + PAYLOAD COMPRESSION 
-// spec: claude/specs/resolved/taproot-envelope-and-payload-compression.md
+// TAPROOT ENVELOPE + PAYLOAD COMPRESSION
 //
 // The envelope was proven end to end during the build (BTC and LTC regtest,
-// testnet4, mainnet arming) by one-off scripts under claude/bin. Those scripts
-// prove a moment; this file is the standing regression, so a later change to the
+// testnet4, mainnet arming) by one-off scripts run during development. Those
+// scripts prove a moment; this file is the standing regression, so a later change to the
 // encoder, the decoder's recognition rules or the explorer's serve path cannot
 // quietly un-prove it.
 //
@@ -41,7 +40,7 @@ const TEXT_BODY = Buffer.from(
 function incompressibleBody(bytes){
     const crypto = require('crypto')
     const out = []
-    let block = Buffer.from('xc990-incompressible-seed')
+    let block = Buffer.from('envelope-incompressible-seed')
     while (out.reduce((n, b) => n + b.length, 0) < bytes){
         block = crypto.createHash('sha256').update(block).digest()
         out.push(block)
@@ -49,7 +48,7 @@ function incompressibleBody(bytes){
     return Buffer.concat(out).subarray(0, bytes)
 }
 
-describe('TAPROOT ENVELOPE ', () => {
+describe('TAPROOT ENVELOPE', () => {
     // BTC and LTC have Taproot; DOGE has no segwit at all, so the envelope is
     // unavailable there by network definition rather than by policy (§3.6).
     before(function(){ if (!envelopeHelper.envelopeSupported()) this.skip() })
@@ -73,9 +72,9 @@ describe('TAPROOT ENVELOPE ', () => {
             await regtestMinerConnector.setMiningTime(30000, 30000)
             try {
                 sent = await envelopeHelper.sendFileViaEnvelope(addr, {
-                    name: "xc990-envelope.txt",
+                    name: "envelope-test.txt",
                     type: "text/plain",
-                    title: " envelope FILE",
+                    title: "Envelope FILE",
                     memo: "carried by one tapscript reveal",
                     rawData: TEXT_BODY,
                     compress: true
@@ -192,9 +191,9 @@ describe('TAPROOT ENVELOPE ', () => {
             const addr = await cryptoHelper.getNewFundedAddress("ENVELOPE.RAW", COIN, NETWORK, null, "segwit", 0, 1)
 
             const sent = await envelopeHelper.sendFileViaEnvelope(addr, {
-                name: "xc990-incompressible.bin",
+                name: "envelope-incompressible.bin",
                 type: "application/octet-stream",
-                title: " envelope raw payload",
+                title: "Envelope raw payload",
                 memo: "already-random bytes gain nothing from deflate",
                 rawData: body,
                 compress: true      // asked for, and correctly declined
@@ -227,9 +226,9 @@ describe('TAPROOT ENVELOPE ', () => {
             const addr = await cryptoHelper.getNewFundedAddress("ENVELOPE.PARITY", COIN, NETWORK, null, "segwit", 0, 2)
 
             const viaEnvelope = await envelopeHelper.sendFileViaEnvelope(addr, {
-                name: "xc990-parity-envelope.txt",
+                name: "envelope-parity-envelope.txt",
                 type: "text/plain",
-                title: " parity via envelope",
+                title: "Envelope parity via envelope",
                 memo: "one reveal",
                 rawData: TEXT_BODY,
                 compress: true
@@ -238,7 +237,7 @@ describe('TAPROOT ENVELOPE ', () => {
             // The same bytes down the lane the platform shipped before this work:
             // uncompressed, fanned across P2WSH chunk outputs.
             const parityCapture = {}
-            const parityAction = "FILE|0|xc990-parity-p2wsh.txt|text/plain| parity via P2WSH|chunk lane"
+            const parityAction = "FILE|0|envelope-parity-p2wsh.txt|text/plain|Envelope parity via P2WSH|chunk lane"
             const parityTxHash = await transactionHelper.createAndSendTransaction(
                 addr,
                 parityAction,
@@ -252,8 +251,8 @@ describe('TAPROOT ENVELOPE ', () => {
             const parityRow = await indexerDatabase.waitForFile({
                 txHash: parityTxHash,
                 source: addr["address"],
-                name: "xc990-parity-p2wsh.txt",
-                title: " parity via P2WSH",
+                name: "envelope-parity-p2wsh.txt",
+                title: "Envelope parity via P2WSH",
                 status: "valid"
             }, 180000)
             assert(parityRow, "the P2WSH-carried FILE should be indexed")
@@ -277,7 +276,7 @@ describe('TAPROOT ENVELOPE ', () => {
     })
 })
 
-describe('PAYLOAD COMPRESSION WITHOUT THE ENVELOPE ( Part B)', () => {
+describe('PAYLOAD COMPRESSION WITHOUT THE ENVELOPE (Part B)', () => {
     // DOGE cannot take the envelope (no segwit), and compression is the half of
     // this work it CAN receive; §1 calls that out explicitly. The negative half of
     // the same story, that the encoder refuses to build an envelope there rather
@@ -302,10 +301,10 @@ describe('PAYLOAD COMPRESSION WITHOUT THE ENVELOPE ( Part B)', () => {
 
     it('still compresses the payload on the lane DOGE does have (§1 Part B)', async () => {
         const addr = await cryptoHelper.getNewFundedAddress("COMPRESSION.DOGE", COIN, NETWORK, null, "legacy", 0, 1)
-        const body = Buffer.from(('Compression is the half of  that every chain receives. ').repeat(30))
+        const body = Buffer.from(('Compression is the half of this work that every chain receives. ').repeat(30))
 
         const capture = {}
-        const action = "FILE|0|xc990-doge-compressed.txt|text/plain| compression on DOGE|no envelope needed"
+        const action = "FILE|0|envelope-doge-compressed.txt|text/plain|Compression on DOGE|no envelope needed"
         const txHash = await transactionHelper.createAndSendTransaction(
             addr, action, body.toString('binary'), [], null, null, false,
             { compress: true, capture }
@@ -318,8 +317,8 @@ describe('PAYLOAD COMPRESSION WITHOUT THE ENVELOPE ( Part B)', () => {
         const row = await indexerDatabase.waitForFile({
             txHash: txHash,
             source: addr["address"],
-            name: "xc990-doge-compressed.txt",
-            title: " compression on DOGE",
+            name: "envelope-doge-compressed.txt",
+            title: "Compression on DOGE",
             status: "valid"
         }, 180000)
         assert(row, "the compressed FILE should be indexed on DOGE")

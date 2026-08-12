@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - BET TWO-NODE parity drill (spec §12 E8, second half)
  *
  * E8 asks for two things. `betReorgDrill.sdk.test.js` covers the first: one

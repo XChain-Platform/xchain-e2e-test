@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - Chunked DEPLOY reorg drill
  *
  * Proves the chunked-DEPLOY reorg-safety property the handler relies on
@@ -37,7 +35,7 @@
  *      byte-identical constructor state) and still runs - proving an
  *      order-preserving reorg cannot corrupt a chunk-assembled contract.
  *
- * REORG CONTRACT . Leg 3 used to hang for 240s with the contract never
+ * REORG CONTRACT. Leg 3 used to hang for 240s with the contract never
  * reappearing. Four assumptions were wrong; all four are now enforced here:
  *
  *   a) DEPTH. A reorg is not free: the utxo-tracker aborts and HALTS (fail-closed)
@@ -55,8 +53,8 @@
  *      The carriers and the assembler are funded from separate UTXOs of the deployer,
  *      not chained parent-to-child, so consensus imposes NO order between them; when
  *      the auto-miner drained the resurrected mempool it packed all three actions into
- *      one block by ancestor-feerate and put the ASSEMBLER FIRST. Measured on the BTC
- *      regtest venue : after the reorg the carriers re-indexed valid at
+ *      one block by ancestor-feerate and put the ASSEMBLER FIRST. Measured on a BTC
+ *      regtest venue: after the reorg the carriers re-indexed valid at
  *      action_index 450/451 (chunk 1 before chunk 0) with the assembler ahead of both
  *      at 449 - it assembled against zero carriers, went invalid, and is never retried,
  *      so the contract simply never came back and leg 3 burned its whole 240s. The node

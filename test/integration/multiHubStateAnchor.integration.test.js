@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * L2 integration: state checkpoints + ANCHOR archive across a real
  * multi-validator hub federation.
  *

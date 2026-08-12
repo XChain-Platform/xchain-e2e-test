@@ -8,9 +8,7 @@
  * This file is part of XChain Platform. Licensed under the GNU Affero
  * General Public License v3.0 or later; see LICENSE.md.
  *
- **********************************************************************
- *
- * : the ANCHOR acceptance suite must key its expected version off the
+ * The ANCHOR acceptance suite must key its expected version off the
  * flag-days active at the resolved snapshot_block, never a hardcoded v0. These
  * exercise the derivation table with injected predicates, so no hub checkout,
  * no DB and no chain are needed.
@@ -38,7 +36,7 @@ const ROOTED_CP   = {
     block_merkle_root: 'b'.repeat(64), block_merkle_version: 1
 };
 
-describe('anchorVersionHelper ', function () {
+describe('anchorVersionHelper', function () {
 
     describe('anchorPayloadVersion', function () {
         it('reads the version byte off an ANCHOR payload', function () {
@@ -96,7 +94,7 @@ describe('anchorVersionHelper ', function () {
         });
 
         it('both flag-days active with roots: v5 preferred with the v3 liveness fallback', function () {
-            // This is the  A2 drill shape: the hardcoded v0 assert
+            // This is the A2 drill shape: the hardcoded v0 assert
             // false-failed here while the on-chain v5 anchor was valid.
             let e = av.expectedCheckpointAnchor(ROOTED_CP,
                 { flagDays: flags({ roots: true, anchorReward: true }) });
@@ -173,7 +171,7 @@ describe('anchorVersionHelper ', function () {
             assert.strictEqual(fd.isArchiveRewardActive(218, 'regtest'), true);
         });
 
-        it('reproduces the  A2 drill verdict off the REAL flag-days', function () {
+        it('reproduces the A2 drill verdict off the REAL flag-days', function () {
             // No injected predicates: the same modules the publisher branches on,
             // the drill's row (regtest, snapshot_block 218, roots present). The
             // suite must expect v5/v6 here, which is exactly what landed on chain

@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * Track C.2: byzantine fault tolerance at f>1 (config-PBFT).
  *
  * The N=4 byzantine suite (multiHubByzantine) proves the BFT floor: quorum 3,

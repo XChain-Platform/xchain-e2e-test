@@ -51,7 +51,7 @@ module.exports = {
     seedTarget: resolveParams,
     readTarget: indexerReadParams,
 
-    // . Block until a seeded quote has been MIRRORED into the copy
+    // Block until a seeded quote has been MIRRORED into the copy
     // reverse-matching actually reads, which is the indexer's hubDb once one is
     // configured and its own DB otherwise.
     //
@@ -61,9 +61,9 @@ module.exports = {
     // set, where the seed lands in the HUB's table and hub_db_sync carries it
     // down on its own schedule. Without this wait a test would broadcast its
     // payment the instant the seed returned and race the sync, settling
-    // 'invalid: no matching oracle price' intermittently: the exact flake the
-    //  recipe warns about, and one that would look like a product bug
-    // rather than a harness one.
+    // 'invalid: no matching oracle price' intermittently: the exact flake a
+    // mirror-topology fixture must guard against, and one that would look
+    // like a product bug rather than a harness one.
     //
     // Polls rather than sleeps a fixed interval, so it costs nothing when the
     // mirror is prompt and still reports honestly when it is not.
@@ -143,7 +143,7 @@ module.exports = {
         }
     },
 
-    // . Publish a quote through the HUB'S OWN write path instead of writing
+    // Publish a quote through the HUB'S OWN write path instead of writing
     // a row, which is the only way a fixture can reach a mirror.
     //
     // A raw INSERT into the hub's database does not replicate: HubDbBroadcaster
@@ -291,7 +291,7 @@ module.exports = {
     //                reverse-matched against a quote for a stale dispenser and
     //                settled 'invalid: no matching oracle price'.
     async seedQuote({ sourceAddress, sourceChain, coin, tick, fiat, value, fee, effectiveAt, actionIndex, memo }){
-        // : the CONTRACT here is "when this returns, settlement can match
+        // The CONTRACT here is "when this returns, settlement can match
         // the quote". How that is achieved depends on whether a mirror sits
         // between the fixture and the reader, so the mechanism is chosen here
         // rather than at the ~13 call sites.
@@ -336,7 +336,7 @@ module.exports = {
         } finally {
             await conn.end().catch(() => {})
         }
-        // : see the twin in priceSnapshotHelper. A no-op on the single-host
+        // See the twin in priceSnapshotHelper. A no-op on the single-host
         // stack; with the mirror on it waits for hub_db_sync rather than letting
         // the caller broadcast its payment into a race.
         await module.exports.waitForMirror({ sourceAddress, coin, tick, fiat, actionIndex })

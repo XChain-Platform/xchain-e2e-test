@@ -8,7 +8,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// . Every waitForX in src/db.js routes through _waitFor, so these pin the
+// Every waitForX in src/db.js routes through _waitFor, so these pin the
 // one place that decides how long a suite waits for a row.
 //
 // The defect being fixed: a fixed deadline assumes a quiet machine. Under
@@ -59,7 +59,7 @@ function makeDb({ lag = null, writes = null, maxExtensions = 3, probeEvery } = {
 // Named so _waitFor's perf label (checkFn.name) is exercised too.
 function checkThing() { return null }
 
-describe(' adaptive wait deadline', function () {
+describe('adaptive wait deadline', function () {
     this.timeout(10000)
 
     it('returns the row as soon as the check succeeds', async () => {
@@ -131,7 +131,7 @@ describe(' adaptive wait deadline', function () {
         assert.deepStrictEqual(row, { id: 3 }, 'a transient error must not abort the wait')
     })
 
-    //  signal change. Every observed failure was a wait for a ROW while the
+    // Signal change. Every observed failure was a wait for a ROW while the
     // indexer kept pace with blocks, so lag read zero, no extension was granted and
     // the case failed on a row that turned up in the database moments later. Lag
     // alone cannot see a stack that is busy but not behind; action-row writes can.
@@ -329,8 +329,8 @@ describe(' adaptive wait deadline', function () {
         })
     })
 
-    //  diagnosability. Extensions were logged only when GRANTED, so a wait
-    // that gave up without one emitted nothing, and this item's own next step
+    // Diagnosability. Extensions were logged only when GRANTED, so a wait
+    // that gave up without one emitted nothing, and the guidance
     // ("if this recurs with extensions=0, change the SIGNAL, not the budget") could
     // not be evaluated from a run's output: zero lines is what a never-eligible
     // wait, a zero-lag wait and a dead probe all look like. These pin the three

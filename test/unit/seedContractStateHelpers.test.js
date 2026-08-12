@@ -8,9 +8,7 @@
  * This file is part of XChain Platform. Licensed under the GNU Affero
  * General Public License v3.0 or later; see LICENSE.md.
  *
- **********************************************************************
- *
- * Parsing helpers of bin/seed-contract-state.js .
+ * Parsing helpers of bin/seed-contract-state.js.
  *
  * WHY THIS EXISTS. Every defect that tool has had lived in one of these two
  * functions, and none of them was visible by re-reading the code:
@@ -46,7 +44,7 @@ const DEPLOY_ROW = {
     block_index: '10771', status: 'valid'
 };
 
-describe('seed-contract-state helpers ', function () {
+describe('seed-contract-state helpers', function () {
 
     describe('contractIndexOf: all three actionWaiter settle shapes', function () {
 

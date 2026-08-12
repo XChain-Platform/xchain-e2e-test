@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * E2E acceptance: ANCHOR on a LIVE DOGE regtest chain.
  *
  * The on-chain leg the L2 federation test can't cover: a real hub
@@ -26,7 +25,7 @@
  * derives the legal set from the hub's own frozen flag-day modules via
  * test/helpers/anchorVersionHelper.js, so a venue whose BTC tip sits past an
  * armed threshold passes on the version it is SUPPOSED to emit instead of
- * false-failing on a hardcoded v0 (, from the  A2 drill).
+ * false-failing on a hardcoded v0.
  *
  * Pre-requisites (driven by the operator/runner, NOT this file):
  *   - dogecoin-regtest stack up (node, utxo-tracker, encoder, decoder,

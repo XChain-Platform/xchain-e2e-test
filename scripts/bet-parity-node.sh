@@ -8,7 +8,7 @@
 # Provision the SECOND indexer node the BET two-node parity drill needs
 # (xchain-e2e-test/test/sdk/betParity.sdk.test.js, spec sec.12 E8).
 #
-# Runs ON the venue host (devhost), not on the Mac: it drives docker and the
+# Runs ON the venue host, not the development machine: it drives docker and the
 # stack's own MariaDB container.
 #
 #   bash scripts/bet-parity-node.sh up      # clone-forward + launch node B

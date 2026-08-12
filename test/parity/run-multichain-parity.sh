@@ -14,23 +14,23 @@
 # repeats for the next coin. Finally compares the three digests with
 # compare.js (Tier 1 hash-chain identity + Tier 2 structural parity).
 #
-# VENUE: the Ubuntu runtime VM (Docker + native ext4 for bitcoind data). The
-# the shared filesystem is unavailable, so the code is rsync-staged
-# (see the staged-tree recipe in memory vm-parallels-share-dead-2026-06-11).
-# Run this from the staged tree's xchain-e2e-test/test/parity directory.
+# VENUE: the Ubuntu runtime VM (Docker + native ext4 for bitcoind data). Its
+# shared filesystem is unavailable, so the code is rsync-staged to a local
+# checkout first. Run this from the staged tree's xchain-e2e-test/test/parity
+# directory.
 #
 # This is a SCAFFOLD calibrated against the documented stack gotchas - expect
 # to tune the install/teardown invocations live (the e2e venue recipes vary by
-# box). Each command's rationale is the cited memory.
+# box).
 #
-# Prereqs on the VM (all documented in memory):
-#   - Node 22 exactly (mariadb ESM; isolated-vm).            [platform-unit-suites-need-node22]
-#   - bitcoind data on native ext4, NOT the share:           [local-regtest-stack-gotchas #1]
+# Prereqs on the VM:
+#   - Node 22 exactly (mariadb ESM; isolated-vm).
+#   - bitcoind data on native ext4, NOT the share:
 #       export XCHAIN_NODE_DATA_DIR=$HOME/.xchain-node-data
-#   - the xchain-node DB container started first:            [local-regtest-stack-gotchas #2]
+#   - the xchain-node DB container started first:
 #       docker start xchain-node-database
-#   - DOGE regtest needs v1.14 mempool flags:                [dogecoin-v114-regtest-mempool-priority]
-#   - install BEFORE the run; rm stale module clones.        [xchain-node-e2e-workflow-gotchas]
+#   - DOGE regtest needs v1.14 mempool flags.
+#   - install BEFORE the run; rm stale module clones.
 #
 # Usage:
 #   ./run-multichain-parity.sh [BTC LTC DOGE]      # default: all three
@@ -50,8 +50,7 @@ COINS=("${@:-BTC LTC DOGE}")
 COINS=(${COINS[@]})
 
 # LTC daemon version pin. MUST equal the litecoind version the
-# DEPLOYED LTC node fleet runs (node-host-b mainnet node container), NOT the
-# latest upstream release. Parity results are only meaningful against the
+# deployed LTC node fleet runs, NOT the latest upstream release. Parity results are only meaningful against the
 # consensus rules the fleet actually enforces, so this pin drifts only with
 # the fleet: whenever the LTC node fleet upgrades litecoind, bump this pin
 # in the SAME change (bump-with-fleet rule). xchain-node's install path
@@ -86,7 +85,7 @@ for COIN in "${COINS[@]}"; do
   run_node remove master "$PKG" regtest || true
 
   # Install the stack. --no-explorer: the shared explorer crashes COIN=undefined
-  # on a fresh empty hub [local-regtest-stack-gotchas #3]; the parity suite reads
+  # on a fresh empty hub; the parity suite reads
   # the indexer DB directly and drives via the encoder, so no explorer is needed.
   run_node install master "$PKG" regtest --no-explorer --no-bootstrap
 
@@ -94,8 +93,8 @@ for COIN in "${COINS[@]}"; do
   sleep 10
 
   echo "[parity] $COIN - driving corpus + capturing digest"
-  # initialCheck discovers the live service endpoints from the hub config
-  # [e2e-host-run-gotchas]; the parity suite needs only miner/tracker/node +
+  # initialCheck discovers the live service endpoints from the hub config;
+  # the parity suite needs only miner/tracker/node +
   # the indexer DB pool, all set up there.
   ( cd "$E2E_DIR" && \
     PARITY_OUT_DIR="$PARITY_OUT_DIR" PARITY_BASELINE="$PARITY_BASELINE" \

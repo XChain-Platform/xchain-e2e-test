@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * E2E test: full-node tier (NODEPROOF) live possession proof
  *
  * Stands up three real in-process xchain-hub validators against the regtest

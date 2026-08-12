@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * Track C.2: STAKE_WEIGHTED_QUORUM for XCALL relay dispatch (cross_chain).
  *
  * XCALL result-delivery quorum was unit-tested (stubbed) but never driven through

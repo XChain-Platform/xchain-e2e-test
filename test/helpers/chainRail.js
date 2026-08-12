@@ -12,7 +12,7 @@
  *
  **********************************************************************
  * MULTI-CHAIN RAIL: run the single-chain e2e helpers against a SECOND coin
- * inside one process .
+ * inside one process.
  *
  * Every helper in this suite (cryptoHelper, transactionHelper, gasHelper,
  * stakeHelper, vmHelper, attestationHelper, nativeFeeHelper) reaches its stack

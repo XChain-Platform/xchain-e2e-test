@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - BET timestamp backdating (spec §12 E11)
  *
  * This drill is the reason the `closed` latch is STORED rather than recomputed

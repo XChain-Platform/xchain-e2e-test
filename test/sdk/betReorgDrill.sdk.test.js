@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - BET reorg drill (spec §12 E8)
  *
  * E8 is the sharp one. The pass-4 review found a FORK CLASS in the betting

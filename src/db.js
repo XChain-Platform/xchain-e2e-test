@@ -18,7 +18,7 @@
  *
  ********************************************************************/
 
-// : the driver is resolved when a pool is created, NOT when this module is
+// The driver is resolved when a pool is created, NOT when this module is
 // loaded. Tests mock mariadb by injecting a synthetic module into require.cache,
 // and a module-level binding froze whichever driver happened to be cached the
 // first time anything in the mocha process required this file. A new test file
@@ -33,7 +33,7 @@ function mariadbDriver(){ return require('mariadb'); }
 class Database {
     constructor(host, port, dbName, user, pass){
         this.sqlPath  = __dirname+'/sql';
-        //  adaptive-wait tunables. Extensions are bounded so a wedged stack
+        // Adaptive-wait tunables. Extensions are bounded so a wedged stack
         // still fails; the lag threshold is above zero so ordinary one-block skew
         // between the RPC tip and the indexer does not count as "behind".
         this.WAIT_MAX_EXTENSIONS = parseInt(process.env.E2E_WAIT_MAX_EXTENSIONS) || 3;
@@ -1106,7 +1106,7 @@ class Database {
     // sometimes needs >30s to write an ORDER row (match-scan + balance/token
     // updates fan out per insert). 60s absorbs that without masking real
     // assertion failures, which surface as null on a row that was never written.
-    // . Every waitForX in this file routes through here, so this is the one
+    // Every waitForX in this file routes through here, so this is the one
     // place that decides how long a suite is willing to wait for a row.
     //
     // A fixed deadline silently assumes a quiet machine. Under concurrent load the
@@ -1210,7 +1210,7 @@ class Database {
             }
         }
         this._recordPerfPoll(label, startMs, polls, false)
-        // : a timed-out wait must say WHY it gave up, because the diagnosis
+        // A timed-out wait must say WHY it gave up, because the diagnosis
         // this feeds turns on a distinction the old code could not express.
         //
         // Extensions were logged only when GRANTED, so the "no extension was
@@ -2211,7 +2211,7 @@ class Database {
 
     async waitForDelegation(params, timeMax = 60000){ return this._waitFor(this.checkDelegation, params, timeMax) }
 
-    // `signingPubkey` and `deactivated` exist for the DEL-1 revoke shape :
+    // `signingPubkey` and `deactivated` exist for the DEL-1 revoke shape:
     // at/after DELEGATE_REVOKE_NO_REINSERT (armed from genesis on regtest) a revoke
     // writes NO row of its own, it only stamps deactivation_block on the PARENT
     // delegation, so the only way to observe one is to look the parent up by

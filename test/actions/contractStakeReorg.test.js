@@ -115,7 +115,6 @@ describe('Contract Staking Reorg: a STAKE v3 row rolls back when its block is or
         while ((await tip()) < (await nodeConnector.getBlockCount()) && settle++ < 60) { await sleep(1000) }
         console.log('   indexer tip', await tip(), 'node tip', await nodeConnector.getBlockCount())
 
-        // ── Reorg out the STAKE block ──
         await regtestMinerConnector.pauseMining()
         try {
             const tipBefore = await nodeConnector.getBlockCount()

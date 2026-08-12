@@ -201,7 +201,7 @@ class RegtestMinerConnector {
         } catch (e) {
             // Miner sidecars predating set_mock_time answer "Method not found", and a
             // long-lived venue routinely runs one chain's miner older than another's
-            // (the devhost LTC/DOGE miners lagged BTC's by days). Every clock-driven
+            // (one venue's LTC/DOGE miners lagged BTC's by days). Every clock-driven
             // drill family would then be BTC-only for a reason that has nothing to do
             // with the chain. setmocktime is a node-level control, so going straight to
             // the node produces the identical effect where its RPC port is published;
@@ -276,7 +276,7 @@ class RegtestMinerConnector {
     // mempool-driven, so an idle chain gains no height and a test that WAITS OUT
     // a height window (stake ACTIVATION_DELAY_BLOCKS, confirmation depth) hangs
     // with nothing in flight to make a block. generateBlocks jumps such a window;
-    // this lets the chain advance on its own while the test observes .
+    // this lets the chain advance on its own while the test observes.
     // Always pair an enable with a disable, or the extra blocks perturb
     // depth/reorg assertions later in the run.
     async setIdleMineInterval(intervalMs){

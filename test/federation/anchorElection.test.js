@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * E2E: per-chain ANCHOR publisher ELECTION on a LIVE DOGE regtest chain.
  *
  * The multi-validator paths the single-validator mainnet deployment never
@@ -316,7 +315,7 @@ describe('ANCHOR election live: multi-validator per-chain publishers (DOGE regte
         await mvh.hubs[order[1]].stateAnchorPublisher.flush();
         // Checkpoint-leg versions come from the flag-days at this row's
         // snapshot_block, not a hardcoded v0: the attestation leg legitimately
-        // emits v4/v5 on a venue past the reward thresholds .
+        // emits v4/v5 on a venue past the reward thresholds.
         const cpVersions = anchorVersions.expectedCheckpointAnchor(row).accepted;
         const pubs = published.slice(before)
             .filter(p => cpVersions.includes(anchorVersions.anchorPayloadVersion(p.payload)));

@@ -8,8 +8,6 @@
  * This file is part of XChain Platform. Licensed under the GNU Affero
  * General Public License v3.0 or later; see LICENSE.md.
  *
- **********************************************************************
- *
  * SPV Phase 5: stakes_root validator-set commitment parity (indexer <-> sync).
  *
  * The validator-set proof (spec §7) needs the stakes_root to commit, per member,

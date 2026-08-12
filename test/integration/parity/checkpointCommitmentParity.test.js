@@ -8,8 +8,6 @@
  * This file is part of XChain Platform. Licensed under the GNU Affero
  * General Public License v3.0 or later; see LICENSE.md.
  *
- **********************************************************************
- *
  * SPV light-client Phase 2: cross-service CHECKPOINT-COMMITMENT parity.
  *
  * Phase 2 makes the quorum-signed checkpoint canonical (and the on-chain ANCHOR v3)
@@ -37,7 +35,7 @@
  * The explorer's inline copy is exercised against the SDK in the explorer's own unit
  * suite (explorer.checkpoints.test.js); here we cover the three callable builders.
  *
- * Spec: claude/reports/SPV-LIGHT-CLIENT-SPEC.md s6; Phase 2 handover.
+ * Spec: SPV light-client spec s6; Phase 2 handover.
  ********************************************************************/
 
 'use strict';

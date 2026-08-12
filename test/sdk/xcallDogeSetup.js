@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XCALL e2e: DOGE-side target setup driver (standalone, not a mocha suite).
  *
  * Stands up the TARGET side of the cross-chain call campaign on a DOGE
@@ -194,8 +192,8 @@ async function main() {
     //   feeXchain      = gasCost x GAS_PRICE(0.00001)
     //   expectedNative = feeXchain x (XCHAIN/USD / DOGE/USD)
     // The two prices are read from the SAME constants the seeding above used, so the
-    // sizing cannot drift from what was actually seeded. It silently could before
-    //  step 8: the ratio was the literal (1.0 / 0.1) sitting a hundred lines
+    // sizing cannot drift from what was actually seeded. It silently could before:
+    // the ratio was the literal (1.0 / 0.1) sitting a hundred lines
     // from the seed, and moving the seed alone would have underpaid every fee.
     // paid to the chain's FEE_DESTINATION, mid-band of the 0.95-1.10 tolerance.
     const FEE_DESTINATION = 'mfees5pa2HwNBonk5vG23aDWkN9fuDJib4';

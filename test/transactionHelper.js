@@ -191,7 +191,7 @@ module.exports = {
         throw lastErr
     },
 
-    // Sign an envelope reveal . Input 0 is a script-path spend of the
+    // Sign a Taproot envelope reveal. Input 0 is a script-path spend of the
     // envelope leaf, so it takes a Schnorr signature under the internal key rather
     // than the ECDSA signature every other lane uses.
     //
@@ -281,7 +281,7 @@ module.exports = {
         
         let spentTx = null
         let spentHex = null
-        // TAPROOT  is also a two-transaction scheme, but ONE create_tx call
+        // TAPROOT is also a two-transaction scheme, but ONE create_tx call
         // returns both halves (spec §6): the reveal is pre-built against the unsigned
         // commit's txid, which only holds because every commit input is segwit (§3.5).
         // There is no second encoder call and no funding-tx hash to hand back, so this

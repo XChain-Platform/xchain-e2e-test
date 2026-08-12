@@ -73,7 +73,7 @@ describe('stakeHelper', () => {
             assert.deepStrictEqual(result.unstake, { id: 221 })
         })
 
-        it('should append the optional partial amount ', async () => {
+        it('should append the optional partial amount', async () => {
             await helper.sendUnstakeV0(addressInfo, 'pubkey789', '250.5')
             const msg = createTxStub.firstCall.args[1]
             assert.strictEqual(msg, 'UNSTAKE|0|pubkey789|250.5')
@@ -129,7 +129,7 @@ describe('stakeHelper', () => {
             assert.deepStrictEqual(result.claim, { id: 223 })
         })
 
-        it('should append the optional partial amount ', async () => {
+        it('should append the optional partial amount', async () => {
             await helper.sendCollectV0(addressInfo, '10')
             const msg = createTxStub.firstCall.args[1]
             assert.strictEqual(msg, 'COLLECT|0|10')

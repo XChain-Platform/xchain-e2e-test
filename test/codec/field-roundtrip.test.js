@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * Phase 1a: Field-format round-trip (cross-component property test).
  *
  * The carrier layer (roundtrip.test.js) proves the on-chain envelope is

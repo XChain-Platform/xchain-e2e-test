@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - SDK-driven token-gated content (FILE)
  *
  * Recent feature: a gated FILE (AES-256-GCM ciphertext + GATE_TICKER +

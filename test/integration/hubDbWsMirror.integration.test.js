@@ -5,7 +5,6 @@
  *
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
- **********************************************************************
  * Integration: distributed Hub-DB WS mirror (HubDbBroadcaster <-> HubDbSync)
  *
  * Proves the cross-host hub-DB replication channel LIVE end-to-end, not just via
@@ -153,7 +152,7 @@ describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration
     it('BOOTSTRAP: pulls pre-existing SRC rows into REP via the REST snapshot', async function () {
         assert.strictEqual(await count(repPool, 'price_snapshots', 'id=1'), 1, 'price_snapshots bootstrap row missing');
         // Keyed on the NATURAL key, never on id: _applyRow strips id for
-        // capability_snapshots so local AUTO_INCREMENT assigns it (#2270, the hub's
+        // capability_snapshots so local AUTO_INCREMENT assigns it (the hub's
         // ids are hub-local and a wire id can collide with a locally-assigned PK).
         // Asserting id=1 here passed only by coincidence, this being the first row
         // inserted into a fresh replica, and would break the moment the fixture
@@ -217,7 +216,7 @@ describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration
 
     // A DEFERRED retraction (hub-blip path) replays a CLOSED range [from,last]. If the new
     // canonical chain re-published a row at A' > last before the deferred drain fires, the bounded
-    // delete must NOT wipe it (item 5296). Proven end-to-end over the real WS mirror.
+    // delete must NOT wipe it. Proven end-to-end over the real WS mirror.
     it('CLOSED-RANGE RETRACTION: a bounded retraction over the WS leaves a re-published row above the ceiling intact', async function () {
         const ins = (id, sai, round, pair) => srcPool.query(
             "INSERT INTO price_snapshots (id,round_number,coin_pair,price,reference_block,validator_count,consensus_proof,status,source_chain,source_action_index) " +
@@ -242,8 +241,8 @@ describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration
         assert.strictEqual(await count(repPool, 'price_snapshots', 'id=300'), 0, 'orphan row in [50,75] must stay deleted');
     });
 
-    // ── Item 5308: push-generation reorg fence over the WS mirror ────────────────
-    // The HARD case the closed-range bound (5296) cannot solve: action_index RECYCLES after a
+    // Push-generation reorg fence over the WS mirror.
+    // The HARD case the closed-range bound alone cannot solve: action_index RECYCLES after a
     // rollback (MAX+1 restarts at `first`), so the new canonical chain re-publishes a DISTINCT row
     // at the SAME action_index that is inside the deferred retraction's [first,last]. A range-only
     // delete wipes both the orphan AND the re-publish. The fence stamps each row with the source

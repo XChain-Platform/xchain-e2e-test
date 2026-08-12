@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - XCALL per-block injection cap drill
  *
  * One BTC EXECUTE bursts 28 crossExecutes at the DOGE target (28 × 32,500

@@ -26,7 +26,7 @@ const gasHelper = require('../helpers/gasHelper')
 // indexes as `failed` (the prior ORDER emission succeeds), so getAddressEscrows(SOURCE) has no
 // contract-facing path. Likely the SWEEP handler's fee-payment validation has no valid mode in an
 // emission context. Un-skip once that's resolved, or reframe as a rejection assertion if contract
-// SWEEP is intentionally unsupported. See claude/reports/2026-05-31_e2e-vm-testing-buildout.md (Finding B).
+// SWEEP is intentionally unsupported.
 describe('VM Contract SWEEP: a contract sweeps its own order escrow', function () {
 
     const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'

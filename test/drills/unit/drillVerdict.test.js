@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * Unit tests for the drill verdict engine.
  *
  * The property under test throughout: a drill result may be PASS, FAIL or

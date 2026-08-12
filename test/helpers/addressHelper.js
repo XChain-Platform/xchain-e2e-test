@@ -18,13 +18,13 @@ module.exports = {
      * WHY THIS IS NOT A ONE-LINER. Bitcoin Core 22 replaced the per-vout
      * `scriptPubKey.addresses` array (plus `reqSigs`) with a single
      * `scriptPubKey.address` string. The regtest venue is multi-chain and its
-     * nodes are NOT all on the same generation: measured 2026-08-03 on
-     * devhost, bitcoind reports `address` and litecoind still reports
-     * `addresses`. So `v.scriptPubKey.address === addr` is not merely fragile,
-     * it is ALWAYS undefined on Litecoin, which makes any test using it pass on
-     * BTC and be structurally incapable of passing on LTC. That is exactly what
-     * had happened to the envelope's MuSig2 coverage ( §3.9): it read as
-     * multi-chain and had never once run on the second chain.
+     * nodes are NOT all on the same generation: measured 2026-08-03, bitcoind
+     * reports `address` and litecoind still reports `addresses`. So
+     * `v.scriptPubKey.address === addr` is not merely fragile, it is ALWAYS
+     * undefined on Litecoin, which makes any test using it pass on BTC and be
+     * structurally incapable of passing on LTC. That is exactly what had
+     * happened to the envelope's MuSig2 coverage: it read as multi-chain and
+     * had never once run on the second chain.
      *
      * Matching both shapes is also the honest way round, because a suite that
      * points at whichever node the venue has should not care which generation

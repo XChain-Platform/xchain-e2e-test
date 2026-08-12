@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// . `price_snapshots` is global fixture state keyed only by coin_pair, and
+// `price_snapshots` is global fixture state keyed only by coin_pair, and
 // every writer of a pair CLEARS it first. nativeFeeHelper.seedGlobalPrices() is
 // the one that bites: it clears {COIN}/USD + XCHAIN/USD from getNativeFeeOutput(),
 // which every ACTION tx passes through, throttled to once per SEED_REFRESH_MS. A
@@ -41,7 +41,7 @@ const DISPENSER_SUITE = process.env.XC693_SUITE_SRC
 const NATIVE_FEE_HELPER = process.env.XC693_HELPER_SRC
     || path.join(__dirname, '..', 'helpers', 'nativeFeeHelper.js')
 
-describe(' FIAT dispenser price_snapshots pair isolation', () => {
+describe('FIAT dispenser price_snapshots pair isolation', () => {
     let suiteSrc, helperSrc
 
     before(() => {
@@ -80,7 +80,7 @@ describe(' FIAT dispenser price_snapshots pair isolation', () => {
         for (const [name, code] of Object.entries(fiats)){
             assert.notStrictEqual(code, 'USD',
                 name + " is back on USD, the pair nativeFeeHelper.seedGlobalPrices() "
-                + 'deletes from every action tx. That is the  flake.')
+                + 'deletes from every action tx. That is the known flake.')
         }
     })
 
@@ -110,7 +110,7 @@ describe(' FIAT dispenser price_snapshots pair isolation', () => {
         // XCHAIN/USD. If it gains another pair, the FIAT cases must move again.
         const cleared = [...helperSrc.matchAll(/clearPair\(([^)]*)\)/g)].map(m => m[1].trim())
         assert.deepStrictEqual(cleared, ["'XCHAIN/USD'", "global.COIN_CODE + '/USD'"],
-            'nativeFeeHelper.clearPair call set changed; re-check  pair isolation. Found: '
+            'nativeFeeHelper.clearPair call set changed; re-check pair isolation. Found: '
             + JSON.stringify(cleared))
     })
 })

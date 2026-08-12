@@ -142,7 +142,6 @@ describe('VM Emissions: emitted action variety', function () {
         return v
     }
     async function fundedContract(code, tick, depositAmt) {
-        // Issue tick to deployer, deploy the contract, deposit `tick` into it.
         await issueHelper.sendIssueV0(deployer, tick, '1000', '1000', '0', 'vm emit', '1000')
         const dep = await vmHelper.sendDeployV0(deployer, code, 250000)
         const ci = dep.contract.action_index

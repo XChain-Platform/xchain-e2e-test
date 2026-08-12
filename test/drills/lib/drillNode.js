@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * ONE validator, one OS process. The unit of the physical multi-box drill.
  *
  * Run directly (`node drillNode.js`), configured entirely by environment, and

@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * L2 integration: validator reward distribution against a real DB
  *
  * Boots in-process XChainHub validators on a disposable MariaDB and exercises

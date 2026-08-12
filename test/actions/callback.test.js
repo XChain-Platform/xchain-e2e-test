@@ -27,8 +27,6 @@ describe('CALLBACK', () => {
                 addr, callbackTick, 1000, 100, 0, "Callback payout token", 100
             )
 
-            // Create the main tick WITH callback params
-            // callbackBlock=1 (already passed), callbackTick, callbackAmount=1
             let mainIssueResult = await issueHelper.sendIssueV0(
                 addr, mainTick, 100, 10, 0, "Callback main token", 10,
                 '', '', '', '', '', '', '', // transfer through lockCallback

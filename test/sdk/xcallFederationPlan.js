@@ -10,15 +10,13 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XCALL drill support: plan a QUORUM DROP over a live relay federation.
  *
  * A drill that needs "the relay cannot dispatch" used to express that as
  * `docker stop <the hub>`. On a single-hub stack that is the same thing; on a
  * federation it is not, and the difference is silent: the surviving hubs still
  * hold quorum, the call dispatches, and the drill either times out or (worse)
- * reports a green it never earned. .
+ * reports a green it never earned.
  *
  * This module turns "drop below quorum" into an explicit, checkable plan:
  * given the live cross_chain stake-weight snapshot (the source indexer's
@@ -97,7 +95,7 @@ function meetsStakeThreshold(surviving, total) {
  * contributes nothing the plan can reason about, so it is reported as
  * unattributed rather than silently counted.
  *
- * Members that CANNOT be stopped (test-host runs relay hub 1 as a host process,
+ * Members that CANNOT be stopped (some venues run relay hub 1 as a host process,
  * not a container) are simply absent from this list: the planner learns they
  * exist from the snapshot and treats their stake as permanently surviving.
  *

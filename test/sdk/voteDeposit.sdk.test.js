@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - VOTE creation deposit (Phase 4, Section 15)
  *
  * A poll creator may escrow a GAS deposit at v0 (anti-spam). VOTE v2 finalize

@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * Harness self-test: the control plane, exercised against REAL child
  * processes running lib/drillNode.js in its no-hub mode.
  *

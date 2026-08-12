@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * x402 agent-payment e2e: full HTTP 402 -> pay on-chain -> retry loops
  * against a LIVE regtest stack, with the reference storefront running
  * in-process. Proves, end to end:

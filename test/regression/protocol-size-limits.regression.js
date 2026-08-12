@@ -10,7 +10,6 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// ═══════════════════════════════════════════════════════════════════════════
 // Protocol size-limit drift guard
 //
 // Several services independently declare the same protocol-level size caps.
@@ -20,7 +19,6 @@
 // once permitted but the decoder always dropped). These tests assert every
 // service's local copy matches the canonical protocol constant, so the limits
 // can never silently diverge again.
-// ═══════════════════════════════════════════════════════════════════════════
 
 const assert  = require('assert')
 const fs      = require('fs')
@@ -40,7 +38,7 @@ const XChainVM          = require('../../../xchain-vm/src/index.js')
 const explorerVmQuery   = require('../../../xchain-explorer/src/vm-query.js')
 
 // The indexer's execute.js re-validates VM_MAX_CALL_DEPTH/VM_MIN_CALL_GAS host-side
-// as un-exported `const`s. Since  those consts derive from the vendored
+// as un-exported `const`s. Those consts derive from the vendored
 // ../protocol/constants.js rather than bare literals, so assert the source is
 // wired to the vendored module (no bare literal can re-enter) and read the effective
 // values from that same vendored copy. Byte-identity of the vendored copy to the
@@ -58,7 +56,7 @@ function readIndexerExecuteCallCaps() {
     return { MAX_CALL_DEPTH: vendored.VM_MAX_CALL_DEPTH, MIN_CALL_GAS: vendored.VM_MIN_CALL_GAS }
 }
 
-// Vendored protocol-constants byte-identity guard . Each service that
+// Vendored protocol-constants byte-identity guard. Each service that
 // consumes the shared protocol constants keeps a byte-identical vendored copy in
 // its own src/protocol/constants.js (services ship as independent containers with
 // no shared node_modules tree), and requires that copy instead of bare literals.
@@ -83,7 +81,7 @@ describe('Protocol size-limit drift guard', () => {
                 protocol.MAX_ACTION_DATA_LENGTH,
                 'decoder MAX_ACTION_DATA_LENGTH drifted from the canonical protocol constant'
             )
-            // The invariant that #804 was about: what the encoder is willing to
+            // The invariant this guards: what the encoder is willing to
             // produce must equal what the decoder is willing to accept.
             assert.strictEqual(
                 encoderValidator.MAX_COMPILED_ACTION_DATA_LENGTH,
@@ -391,7 +389,7 @@ describe('Protocol size-limit drift guard', () => {
 
     describe('Family-B constant parity (copies the byte-identity guard does not reach)', () => {
 
-        // The  byte-identity block below compares whole vendored modules
+        // The byte-identity block below compares whole vendored modules
         // against the canonical file. It cannot see two other shapes of copy:
         // a service that re-declares a canonical value as a bare literal without
         // vendoring anything (the encoder, the explorer compression reader, both
@@ -452,7 +450,7 @@ describe('Protocol size-limit drift guard', () => {
         })
 
         // PRICE_PAIR_TICKER_MAX_LEGACY / _WIDE bound the ticker side of a PRICE v0
-        // pair either side of the  widening flag day. The indexer is the
+        // pair either side of the widening flag day. The indexer is the
         // on-chain arbiter and the hub keeps a verbatim copy of the same module;
         // both declare bare literals and vendor nothing, so neither the byte-identity
         // guard nor any other test compared them to canonical (uuids 3409, 3410).
@@ -474,8 +472,8 @@ describe('Protocol size-limit drift guard', () => {
         })
 
         // ENVELOPE_MAX_PAYLOAD is the Taproot-envelope payload ceiling, derived
-        // from MAX_STANDARD_TX_WEIGHT rather than chosen.  is exactly the
-        // incident this guards: the old value built a 402,789 WU reveal that the
+        // from MAX_STANDARD_TX_WEIGHT rather than chosen. This guards exactly the
+        // incident that motivated it: the old value built a 402,789 WU reveal that the
         // encoder produced, the validator accepted and no node relayed. The encoder
         // still declares its own bare literal (src/validator.js), which nothing here
         // compared to canonical (uuid 3497).
@@ -501,7 +499,7 @@ describe('Protocol size-limit drift guard', () => {
         })
 
         // XCALL_RESULT_ORPHAN_GRACE_SECONDS is the age-out clock for an XCALL
-        // result row with no local request . It decides when a row is
+        // result row with no local request. It decides when a row is
         // pruned rather than left starving the XCALL_MAX_CALLS_PER_BLOCK delivery
         // slice, so a drift changes which results get delivered (uuid 3498).
         it('[regression:p0] XCALL_RESULT_ORPHAN_GRACE_SECONDS === canonical across indexer xcall + vendored copy', () => {
@@ -567,7 +565,7 @@ describe('Protocol size-limit drift guard', () => {
         })
     })
 
-    describe('Vendored protocol-constants byte-identity ', () => {
+    describe('Vendored protocol-constants byte-identity', () => {
 
         // Each consuming service now requires a byte-identical vendored copy of the
         // canonical protocol constants (src/protocol/constants.js) instead of bare

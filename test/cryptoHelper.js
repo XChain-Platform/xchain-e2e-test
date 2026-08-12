@@ -64,7 +64,7 @@ module.exports = {
                 break
             case "segwit":
                 // Native segwit (P2WPKH). Required by the Taproot envelope: its commit
-                // inputs must all be segwit ( spec §3.5) because a legacy input's
+                // inputs must all be segwit (envelope spec §3.5) because a legacy input's
                 // txid still moves when it is signed, and the reveal is pre-built
                 // against the UNSIGNED commit's txid.
                 testAddress = bitcoin.payments.p2wpkh({ pubkey: address.publicKey, network }).address

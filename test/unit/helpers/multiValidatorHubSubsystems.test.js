@@ -10,8 +10,7 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- * Unit: MultiValidatorHub consensus-subsystem bring-up 
+ * Unit: MultiValidatorHub consensus-subsystem bring-up
  *
  * The federation harness gained opt-in startOracle / startReorgHandler /
  * startGovernance / startCapabilities toggles so L2 can drive every consensus
@@ -67,7 +66,7 @@ function makeFakeHubFactory(calls) {
 // colliding with any live mesh in a parallel run.
 const BASE_PORT = 41000;
 
-describe('MultiValidatorHub consensus-subsystem bring-up ', function () {
+describe('MultiValidatorHub consensus-subsystem bring-up', function () {
 
     it('defaults every consensus subsystem OFF and attestation ON', function () {
         const mvh = new MultiValidatorHub({ dbUser: 'u', dbPass: 'p' });

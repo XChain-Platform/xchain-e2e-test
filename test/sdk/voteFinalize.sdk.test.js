@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - VOTE v2 finalization (Phase 2)
  *
  * Exercises the system-injected VOTE v2 finalize on the live regtest stack:

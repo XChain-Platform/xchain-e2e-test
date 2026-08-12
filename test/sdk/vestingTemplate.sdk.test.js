@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - Contract Template Library: VESTING (on-chain)
  *
  * Drives the REAL vesting template through the live regtest pipeline:

@@ -179,7 +179,7 @@ describe('DISPENSER', () => {
         })
     })
 
-    // . Every FIAT case below prices in its OWN fiat, so no two of them, and
+    // Every FIAT case below prices in its OWN fiat, so no two of them, and
     // nothing outside this file, ever share a coin_pair.
     //
     // `price_snapshots` is global fixture state keyed only by coin_pair, and
@@ -207,7 +207,7 @@ describe('DISPENSER', () => {
     // configured fiats and nothing else in the tree seeds a non-USD pair.
     const FIAT_MODE1  = 'EUR'   // validator-snapshot dispenser
     const FIAT_MODE2  = 'GBP'   // user-oracle cross-conversion
-    const FIAT_OFEE   = 'JPY'   // oracle usage fee 
+    const FIAT_OFEE   = 'JPY'   // oracle usage fee
     const FIAT_WINDOW = 'CHF'   // 24h window distance
     const FIAT_DELAY  = 'CAD'   // publish-activation delay
     const FIAT_NOQ    = 'AUD'   // retracted quote
@@ -322,8 +322,8 @@ describe('DISPENSER', () => {
 
             let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
 
-            // Seed both legs BEFORE creating the dispenser. Order matters since :
-            // a Mode 2 create is rejected unless its oracle already has an effective
+            // Seed both legs BEFORE creating the dispenser. Order matters: a Mode 2
+            // create is rejected unless its oracle already has an effective
             // price, so seeding afterwards makes the create invalid. Anchored to the
             // CHAIN clock, and the validator snapshot must be at or before the oracle
             // quote's effective_at because the matcher fetches the coin price as of the
@@ -389,7 +389,7 @@ describe('DISPENSER', () => {
         })
 
         it('should reject a Mode 2 create with no oracle fee output, and accept one that pays', async function() {
-            // , Counterparty parity: when the referenced oracle charges a FEE, the
+            // Counterparty parity: when the referenced oracle charges a FEE, the
             // address OPENING the dispenser must pay it up front as a real native-coin
             // output. This is the leg that cannot be proven by unit tests: it needs the
             // encoder to actually place the output and the indexer to actually see it in
@@ -398,7 +398,7 @@ describe('DISPENSER', () => {
             // persist an output to transaction_outputs only when it paid the protocol
             // FEE_DESTINATION (or the tx was a COINPAY), so an output paying a dispenser's
             // ORACLE_ADDRESS never reached the indexer's data['TX_OUTPUTS'] and the paying
-            // create was rejected exactly like the non-paying one. Closed by : the
+            // create was rejected exactly like the non-paying one. Closed by a decoder fix: the
             // decoder reads ORACLE_ADDRESS out of the DISPENSER payload it already parses
             // and captures any output paying it (genesis-on for regtest/testnet; mainnet
             // rides the FIX_OUTPUT_FANOUT flag-day). The SDK also stopped compacting
@@ -657,7 +657,7 @@ describe('DISPENSER', () => {
             // price source.
             //
             // The quote is seeded and then REMOVED before the payment, rather than never
-            // existing: since  a Mode 2 create is rejected outright unless its
+            // existing: since a Mode 2 create is rejected outright unless its
             // oracle already has an effective price, so a never-priced oracle cannot get
             // as far as a dispense. Removing it afterwards models the reachable case, a
             // source-chain reorg retracting the oracle row out from under a live

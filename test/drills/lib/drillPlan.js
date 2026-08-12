@@ -10,8 +10,7 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- * Topology planner for the PHYSICAL multi-box byzantine drill .
+ * Topology planner for the PHYSICAL multi-box byzantine drill.
  *
  * The in-process suite (test/integration/multiHubByzantineF2) already proves
  * f=2 at N=7 and f=3 at N=10, but every validator there shares one process,
@@ -42,7 +41,7 @@ function quorumFor(count) {
     return 2 * faultBudgetFor(count) + 1;
 }
 
-// Accept a host as either a bare string ('jdog@test-host.dankest.io', or an
+// Accept a host as either a bare string ('user@host', or an
 // address for a local run) or a descriptor. `advertise` is what the OTHER
 // boxes dial, so it must be routable from them: a loopback alias is only ever
 // valid on a single-host shakedown, which is why the multi-host guard below

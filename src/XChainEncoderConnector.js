@@ -52,7 +52,7 @@ class XChainEncoderConnector {
         }
     }
 
-    // Rebuild the key-path cancel of an unrevealed envelope commit ( §3.5)
+    // Rebuild the key-path cancel of an unrevealed envelope commit (spec §3.5)
     // from the persisted recovery record alone: {commit outpoint, value, internal
     // key, tapleaf hash} plus where the funds should go. The encoder holds no state
     // between calls, so this genuinely reconstructs the BIP341 tweak from the record

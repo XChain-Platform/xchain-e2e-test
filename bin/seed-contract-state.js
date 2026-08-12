@@ -12,7 +12,7 @@
  **********************************************************************
  *
  * Seed a live chain with real contract state ahead of its armed
- * `contract_state_root` height (, spec claude/specs/spv-state-subtree-extension.md).
+ * `contract_state_root` height (see the SPV state-subtree extension spec).
  *
  * WHY THIS EXISTS. The spec names this prerequisite and puts it on no checklist:
  *
@@ -1164,7 +1164,7 @@ function requireValid(res, what) {
 
 // ---------------------------------------------------------------------------
 // THE EXPLORER RETURNS DOCUMENTS, NOT SCALARS, AND A TOP-LEVEL GUESS READS AS
-// "ABSENT" RATHER THAN FAILING .
+// "ABSENT" RATHER THAN FAILING.
 //
 // This tool has now paid for that mistake twice, in two different fields:
 //

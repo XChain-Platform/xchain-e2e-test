@@ -89,7 +89,6 @@ describe('Contract Staking: STAKE v3 / UNSTAKE v1 / DELEGATE v1 + slashing', fun
         let pubkey = null
 
         before(async function () {
-            // Deploy a fresh stakeable contract for this lifecycle test
             let deployer = await cryptoHelper.getNewFundedAddress(
                 "lifecycle-deployer", COIN, NETWORK, null, "legacy", 0, 1
             )
@@ -98,7 +97,6 @@ describe('Contract Staking: STAKE v3 / UNSTAKE v1 / DELEGATE v1 + slashing', fun
             assert(deploy.contract && deploy.contract.status === 'valid', 'lifecycle: contract must deploy clean')
             contractIndex = deploy.contract.action_index
 
-            // Fund a staker with BTC + XCHAIN
             staker = await cryptoHelper.getNewFundedAddress(
                 "contract-staker", COIN, NETWORK, null, "legacy", 0, 1
             )

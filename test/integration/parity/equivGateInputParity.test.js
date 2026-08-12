@@ -8,9 +8,7 @@
  * This file is part of XChain Platform. Licensed under the GNU Affero
  * General Public License v3.0 or later; see LICENSE.md.
  *
- **********************************************************************
- *
- * Cross-service regression #4196 - per-engine EQUIV anti-equivocation
+ * Cross-service regression: per-engine EQUIV anti-equivocation
  * GATE-INPUT parity between xchain-hub and xchain-indexer.
  *
  * WHAT THIS GUARDS (and how it differs from the existing boundary test):
@@ -27,7 +25,7 @@
  * height and the other feeds something that is NOT that height (e.g. a round
  * counter), the two services disagree about whether the header is present at
  * the flag-day for the same action -> divergent signed bytes -> a cross-
- * service fork. That is exactly #4232.
+ * service fork. That is exactly the hazard this guards against.
  *
  * GATE-INPUT MAP (first arg to isEquivHeaderActive on each side; source
  * verified by reading the callers, see the per-engine entries below):
@@ -40,14 +38,14 @@
  *   dex         r.snapshot_block             m.snapshot_block            HEIGHT
  *   xcall       r.snapshot_block             c.snapshot_block           HEIGHT
  *   nodeproof   epoch (=epoch HEIGHT)        snapshotBlock=epochHeight   HEIGHT
- *   oracle      round (OracleRound counter)  round (= block height?)     *** MISMATCH (#4232)
+ *   oracle      round (OracleRound counter)  round (= block height?)     *** MISMATCH
  *
  * For ORACLE the hub feeds `round`, which OracleRound derives as a WALL-CLOCK
  * counter: `Math.floor((Date.now()-epochStart)/roundInterval)`, kept DISTINCT
  * from `currentBtcBlockHeight` (the BTC tip; they coincide only in the
  * degraded fallback). So the oracle gate input is a round counter, not the
  * BTC height every other engine (and the indexer's own comment) treats it as.
- * That non-height gate input is the #4232 cross-service-fork hazard.
+ * That non-height gate input is the cross-service-fork hazard this guards against.
  *
  * APPROACH (mock / contract level, no DB, Node 24):
  * A full cross-service round-trip per engine needs a live federation + DB, so
@@ -57,11 +55,11 @@
  * gate input through BOTH copies and assert they produce the IDENTICAL active/
  * inactive verdict for the same logical action at the same height, AND that the
  * gate input each side uses is a BTC block HEIGHT (not a counter). The oracle
- * case is marked PENDING and tied to #4232 so it does not red CI, while the
- * other six engines assert green. Flip the oracle `xit` to `it` once #4232 is
- * fixed (hub oracle gate fed the BTC block height instead of the round counter).
+ * case is marked PENDING so it does not red CI, while the
+ * other six engines assert green. Flip the oracle `xit` to `it` once the oracle
+ * gate feeds the BTC block height instead of the round counter.
  *
- * Spec: claude/reports/2026-06-14_cross-chain-quorum-security-spec.md s4.1.1.
+ * Spec: cross-chain quorum security spec s4.1.1.
  ********************************************************************/
 
 'use strict';
@@ -94,7 +92,7 @@ function gateInputArg(source, anchorRegex) {
     return null;
 }
 
-describe('#4196 EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', function () {
+describe('EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', function () {
 
     // Pre-req: the gate function must be byte-equal on both sides; a divergence here
     // forks the chain regardless of inputs. The cross-service suite also enforces this;
@@ -182,7 +180,7 @@ describe('#4196 EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', functi
             // = request ? request.block_index : data.BLOCK_INDEX (same source).
             //
             // IT IS `declaredBlock` AND NOT `snapshotBlock`, and the distinction is
-            // the whole assertion. split the two: `snapshotBlock` is now
+            // the whole assertion. A prior change split the two: `snapshotBlock` is now
             // the BURIED height (declared minus CANONICAL_REORG_BUFFER) that the
             // validator set resolves at, while the EQUIV gate stayed on the DECLARED
             // height because that is what the hub gates on. Re-pointing this at the
@@ -228,18 +226,18 @@ describe('#4196 EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', functi
         });
     });
 
-    // ---- ORACLE: the #4232 fix. The hub now feeds the round's BTC block HEIGHT
+    // ORACLE: the fix. The hub now feeds the round's BTC block HEIGHT
     //      (btcBlockHeight) into the gate, not the OracleRound wall-clock counter, and
     //      the height rides in the signed payload + the on-chain PRICE v0 wire so the
     //      indexer gates on the IDENTICAL value. The previously-PENDING guard is now
     //      live (xit -> it). ----
-    describe('ORACLE gate input (#4232 fix: gate on the BTC block height)', function () {
+    describe('ORACLE gate input (fix: gate on the BTC block height)', function () {
 
-        it('the hub ORACLE gate now feeds the BTC block height, distinct from the round counter (#4232)', function () {
+        it('the hub ORACLE gate now feeds the BTC block height, distinct from the round counter', function () {
             const hubArg = gateInputArg(srcOf('xchain-hub/src/OracleConsensus.js'),
                 /isEquivHeaderActive\(btcBlockHeight/);
             assert.ok(hubArg, 'hub ORACLE gate input not found');
-            assert.match(hubArg, /^btcBlockHeight$/, 'hub ORACLE gate input must be btcBlockHeight after #4232');
+            assert.match(hubArg, /^btcBlockHeight$/, 'hub ORACLE gate input must be btcBlockHeight');
 
             const roundSrc = srcOf('xchain-hub/src/OracleRound.js');
             // currentRound is wall-clock derived...
@@ -252,11 +250,11 @@ describe('#4196 EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', functi
                 'the real BTC height lives in currentBtcBlockHeight, distinct from the round counter');
         });
 
-        it('hub ORACLE gate input is a BTC block height, matching every other engine (#4232 fixed)', function () {
+        it('hub ORACLE gate input is a BTC block height, matching every other engine', function () {
             const hubArg = gateInputArg(srcOf('xchain-hub/src/OracleConsensus.js'),
                 /isEquivHeaderActive\(/);
             assert.match(hubArg, /(btcBlockHeight|referenceBlock|blockHeight|snapshot_block)/,
-                'hub ORACLE gate input must be a BTC block height after #4232; got `' + hubArg + '`');
+                'hub ORACLE gate input must be a BTC block height; got `' + hubArg + '`');
 
             // Hub re-verify (PriceAggregator) gates on the pushed btc_block_height.
             const aggArg = gateInputArg(srcOf('xchain-hub/src/PriceAggregator.js'),

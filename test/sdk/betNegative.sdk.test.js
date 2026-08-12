@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - BET cancel + rejection matrix (spec §12 E5, E6)
  *
  *   E5 feed cancel: every open bet refunded in full, NO oracle fee, feed

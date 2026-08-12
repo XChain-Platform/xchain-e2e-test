@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - CROSS_CHAIN_ROYALTY create-gate DENY drill
  * (the single-node counterpart of dexCrossRoyaltyLive.sdk.test.js).
  *

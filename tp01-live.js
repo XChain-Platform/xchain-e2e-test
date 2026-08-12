@@ -27,7 +27,7 @@ const mariadb = require('mariadb')
 require('dotenv').config()
 
 // Credentials come from the environment, never from this file. A committed
-// literal is a launch-gate blocker  even for regtest, because these
+// literal is a launch-gate blocker even for regtest, because these
 // repos go public. Fail closed rather than defaulting, so a missing variable
 // is an obvious error instead of a silent connection to the wrong database.
 function requiredEnv(name){

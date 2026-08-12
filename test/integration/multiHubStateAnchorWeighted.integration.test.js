@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * L2 integration: STAKE_WEIGHTED_QUORUM (WI-1) for the oracle_publish
  * capability: state-checkpoint finalization (Suite A5 of the regtest e2e plan).
  *
@@ -41,8 +40,7 @@
  * MariaDB; skips when neither an env DB nor Docker is available. Runs with regtest
  * activation = 0 (always weighted), no constant edit needed.
  *
- * Spec: claude/reports/2026-06-14_cross-chain-quorum-security-spec.md §3.7, §10;
- * plan §A5.
+ * Spec: the cross-chain quorum security spec §3.7, §10; plan §A5.
  ********************************************************************/
 
 'use strict';

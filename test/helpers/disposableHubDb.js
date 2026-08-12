@@ -20,7 +20,6 @@
  * Rather than gate every consensus test on a privileged platform grant (which
  * makes them silently SKIP, reading as "covered" when they aren't), this spins
  * a throwaway root MariaDB in Docker that any test can use anywhere.
- * Ref: claude/reports/2026-05-30_validator-testing-handover.md §4.
  *
  * Usage:
  *   const { startDisposableHubDb } = require('../helpers/disposableHubDb');

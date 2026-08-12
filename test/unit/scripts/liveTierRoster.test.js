@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// . The live integration tier ran in no CI lane, so a product change in a
+// The live integration tier ran in no CI lane, so a product change in a
 // sibling repo turned one of its suites red for ten days unheard. The lane is
 // scripts/run-live-tier.js; these are the guards that keep the lane honest, and
 // they live in the HERMETIC unit tier on purpose - the roster check needs no
@@ -31,7 +31,7 @@ const fs     = require('fs')
 const path   = require('path')
 const lane   = require('../../../scripts/run-live-tier')
 
-describe('live integration tier roster ', () => {
+describe('live integration tier roster', () => {
 
     describe('the committed roster describes the committed tree', () => {
 
@@ -56,7 +56,7 @@ describe('live integration tier roster ', () => {
 
         it('is valid JSON with a timeout the slowest declared suite can survive', () => {
             const roster = lane.readRoster()
-            // The mirror suite alone measured 54s on test-host (2026-08-09), most
+            // The mirror suite alone measured 54s on one venue (2026-08-09), most
             // of it the disposable MariaDB container coming up, so a per-test
             // budget under a minute would fail the venue rather than the code.
             assert.ok(roster.timeoutMs >= 120000, 'timeoutMs is too small for a live suite')
@@ -129,7 +129,7 @@ describe('live integration tier roster ', () => {
 
         it('fails a suite that reported nothing at all', () => {
             // The shape a root-hook this.skip() produces: mocha exits 0 and the
-            // file contributes no test of any kind. Measured on test-host for three
+            // file contributes no test of any kind. Measured for three
             // suites in this tier on 2026-08-09.
             const [p] = lane.classify([FILE], new Map())
             assert.strictEqual(p.kind, 'ran-nothing')
@@ -203,7 +203,7 @@ describe('live integration tier roster ', () => {
         it('npm run ci calls the live lane', () => {
             assert.match(pkg.scripts.ci, /ci:live/,
                 'the `ci` script is what every venue gate, ci-all.sh sweep and workflow runs;'
-                + ' a live tier outside it is a tier in no lane ')
+                + ' a live tier outside it is a tier in no lane')
         })
 
         it('ci:live runs this runner rather than a bare glob', () => {

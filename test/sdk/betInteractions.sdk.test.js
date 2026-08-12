@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - BET interaction with SWEEP and DIVIDEND (§12 E13, E14)
  *
  * E13 SWEEP (v0 rule, §5). Bets are a FOURTH escrow category, and the

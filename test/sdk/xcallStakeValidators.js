@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XCALL e2e: stake additional federation validators (standalone driver).
  *
  * For each Ed25519 pubkey passed as an argv, funds a FRESH address and

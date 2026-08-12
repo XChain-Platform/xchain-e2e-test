@@ -91,7 +91,7 @@ describe('VM Extended: on-chain capabilities', function () {
 
     let deployer = null
 
-    // --- raw indexer-DB helpers (no waitFor* exists for these tables) ---
+    // Raw indexer-DB helpers (no waitFor* exists for these tables).
     async function q(sql, params) {
         const conn = await indexerDatabase.getConnection()
         try { return await conn.query(sql, params) }

@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - SDK WebSocket live action events (on-chain)
  *
  * xchain-sdk/src/websocket.js is the real-time client the wallet uses

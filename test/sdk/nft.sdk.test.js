@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - SDK-driven NFT pattern
  *
  * NFTs on XChain are a composition of existing primitives, not a new

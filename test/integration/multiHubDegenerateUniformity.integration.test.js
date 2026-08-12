@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * L2 integration: STAKE_WEIGHTED_QUORUM (WI-1) R-1 degenerate-case uniformity
  * (Suite C of the regtest e2e plan).
  *
@@ -38,8 +37,7 @@
  * No chain; disposable Docker MariaDB; skips when neither an env DB nor Docker is
  * available. regtest activation = 0 (always weighted).
  *
- * Spec: claude/reports/2026-06-14_cross-chain-quorum-security-spec.md §3.6, §3.7,
- * §10.4; plan §C.
+ * Spec: the cross-chain quorum security spec §3.6, §3.7, §10.4; plan §C.
  ********************************************************************/
 
 'use strict';

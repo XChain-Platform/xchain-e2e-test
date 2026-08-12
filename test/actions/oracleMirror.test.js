@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * : the hub -> indexer MIRROR leg for PRICE v1 oracle quotes.
+ * The hub -> indexer MIRROR leg for PRICE v1 oracle quotes.
  *
  * Everything else in the FIAT dispenser suite proves SETTLEMENT: given a quote
  * the indexer can see, does reverseOraclePriceMatch credit the right amount.
@@ -31,7 +31,7 @@
  * such a path, reachable over `pushoracleprice`. price_snapshots is broadcast
  * solely from OracleConsensus, i.e. a validator federation finalizing rounds,
  * which no regtest stack has. So Mode A's mirror leg needs a regtest federation
- * and is deliberately left unproven rather than faked; see .
+ * and is deliberately left unproven rather than faked.
  *
  * REQUIRES the mirror to actually be configured (HUB_DB_NAME +
  * HUB_DB_SYNC_ENABLED on the indexer, HUB_SOURCE_DB_NAME for the suite). On the
@@ -48,10 +48,10 @@ const transactionHelper = require('../transactionHelper')
 const priceSnapshotHelper = require('../helpers/priceSnapshotHelper')
 const oraclePriceHelper   = require('../helpers/oraclePriceHelper')
 
-describe('PRICE v1 hub -> indexer mirror ', function () {
+describe('PRICE v1 hub -> indexer mirror', function () {
     this.timeout(0)
 
-    // Its own fiat, per : every FIAT case prices in a currency no other
+    // Its own fiat: every FIAT case prices in a currency no other
     // case or helper touches, so none of them can clear or reseed a pair another
     // is mid-way through using. MXN is unused elsewhere in the tree.
     const FIAT_MIRROR = 'MXN'
@@ -61,7 +61,7 @@ describe('PRICE v1 hub -> indexer mirror ', function () {
     async function requireMirror(ctx){
         if (!oraclePriceHelper.seedsThroughMirror()){
             console.log('hub_db_sync mirror not configured (no HUB_SOURCE_DB_NAME + HUB_DB_NAME); '
-                + 'skipping the  mirror leg. This is the expected state on a single-host stack.')
+                + 'skipping the mirror leg. This is the expected state on a single-host stack.')
             ctx.skip()
             return false
         }
@@ -87,7 +87,7 @@ describe('PRICE v1 hub -> indexer mirror ', function () {
             // what matters here is only that a VALID row exists to be pushed.
             const res = await priceHelper.sendPriceV1(addr, {
                 coin: COIN_CODE, tick: tick, fiat: FIAT_MIRROR,
-                value: '2.50000000', fee: '0', memo: ' mirror leg'
+                value: '2.50000000', fee: '0', memo: 'oracle mirror leg'
             })
             assert(res.price, 'PRICE v1 row should exist in the indexer')
             assert.strictEqual(res.price.validation_status, 'valid',
@@ -109,7 +109,7 @@ describe('PRICE v1 hub -> indexer mirror ', function () {
             assert.strictEqual(Number(hubRow.effective_at) - Number(hubRow.block_time), 86400,
                 'every publish is effective exactly 24h after its block_time')
 
-            // Leg 3, hub -> mirror. The leg  exists for, and the one nothing
+            // Leg 3, hub -> mirror. The leg this suite exists for, and the one nothing
             // in this repo drove before.
             const mirrored = await oraclePriceHelper.waitForMirror({
                 sourceAddress: oracleAddress, coin: COIN_CODE, tick: tick, fiat: FIAT_MIRROR
@@ -117,7 +117,7 @@ describe('PRICE v1 hub -> indexer mirror ', function () {
             assert.strictEqual(mirrored.skipped, false,
                 'the wait must have actually polled; a skip here means the topology reported no mirror')
             assert.strictEqual(mirrored.mirrored, true, 'the quote should reach the indexer mirror')
-            console.log(': quote mirrored in ' + mirrored.waitedMs + 'ms')
+            console.log('oracle mirror: quote mirrored in ' + mirrored.waitedMs + 'ms')
         })
     })
 
@@ -138,7 +138,7 @@ describe('PRICE v1 hub -> indexer mirror ', function () {
             const oracleAddress    = oracleAddr['address']
             const tick = 'DISPMIR' + dispenserAddress.substring(dispenserAddress.length - 7)
 
-            await issueHelper.sendIssueV0(dispenserAddr, tick, 100, 100, 0, ' mirror dispenser', 100)
+            await issueHelper.sendIssueV0(dispenserAddr, tick, 100, 100, 0, 'oracle mirror dispenser', 100)
 
             const expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
             const pair       = COIN_CODE + '/' + FIAT_MIRROR
@@ -183,7 +183,7 @@ describe('PRICE v1 hub -> indexer mirror ', function () {
                 COIN_CODE, tick, 1, 50,
                 COIN_CODE, null, 0, dispenserAddress,
                 FIAT_MIRROR, null, oracleAddress, expiration,
-                null, null, ' mirrored oracle dispenser'
+                null, null, 'mirrored oracle dispenser'
             )
             assert(dispenserResult.dispenser, 'the Mode 2 dispenser should be created')
 

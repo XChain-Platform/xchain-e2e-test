@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - Cross-chain DEX MATCH source-chain reorg retraction
  *
  * The DEX twin of xcallSourceReorgDrill.sdk.test.js. Where the XCALL drill

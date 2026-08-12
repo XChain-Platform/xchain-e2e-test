@@ -139,7 +139,6 @@ describe('Controller Reorg: a token binding rolls back across an on-chain reorg'
         assert.strictEqual(await balanceOf(bob.address, tick), bobBefore, 'SEND denied by the active binding pre-reorg')
         console.log('   SEND denied by active transfer binding (binding has teeth)')
 
-        // ── Reorg out the BIND block ──
         await regtestMinerConnector.pauseMining()
         try {
             const tipBefore = await nodeConnector.getBlockCount()

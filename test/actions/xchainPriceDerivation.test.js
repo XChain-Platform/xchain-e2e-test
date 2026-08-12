@@ -8,7 +8,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 //
-// XCHAIN price derivation, live proof (, spec §10 step 7).
+// XCHAIN price derivation, live proof (spec §10 step 7).
 //
 // Every other suite that touches native-coin fees seeds XCHAIN/USD by hand
 // (nativeFeeHelper.seedGlobalPrices), which is exactly why the missing-pair bug
@@ -175,7 +175,7 @@ function loadBcmath() {
     return fs.existsSync(hubBc) ? require(hubBc) : null
 }
 
-describe('XCHAIN price derivation from real fills ( step 7)', function () {
+describe('XCHAIN price derivation from real fills (spec step 7)', function () {
 
     let derivation = null
     let bcmath = null
@@ -223,7 +223,7 @@ describe('XCHAIN price derivation from real fills ( step 7)', function () {
                 COIN_CODE, GAS_TICK, 1, 10,
                 COIN_CODE, null, 0.05, sellerInfo['address'],
                 null, null, null, null,
-                null, null, ' derived-price proof'
+                null, null, 'derived-price proof'
             )
             assert(dispenserResult.dispenser, 'XCHAIN dispenser should exist in DB')
 
@@ -319,13 +319,13 @@ describe('XCHAIN price derivation from real fills ( step 7)', function () {
             const sellerOrder = await orderHelper.sendOrderV0(
                 sellerInfo, COIN_CODE, GAS_TICK, '100',
                 COIN_CODE, '', '0.001',
-                sellerInfo['address'], expiration, '', '', ' sell XCHAIN for coin')
+                sellerInfo['address'], expiration, '', '', 'sell XCHAIN for coin')
             assert(sellerOrder.order, 'seller ORDER should exist in DB')
 
             const buyerOrder = await orderHelper.sendOrderV0(
                 buyerInfo, COIN_CODE, '', '0.001',
                 COIN_CODE, GAS_TICK, '100',
-                buyerInfo['address'], expiration, '', '', ' buy XCHAIN with coin')
+                buyerInfo['address'], expiration, '', '', 'buy XCHAIN with coin')
             assert(buyerOrder.order, 'buyer ORDER should exist in DB')
 
             const orderMatch = await indexerDatabase.waitForOrderMatch({
@@ -531,7 +531,7 @@ describe('XCHAIN price derivation from real fills ( step 7)', function () {
                 seller, COIN_CODE, GAS_TICK, 1, 30,
                 COIN_CODE, null, Number(rate1Btc), seller['address'],
                 null, null, null, null,
-                null, null, ' supersession drill dispense')
+                null, null, 'supersession drill dispense')
             assert(disp.dispenser, 'drill dispenser should exist')
 
             const dispBuyer = await cryptoHelper.getNewFundedAddress(
@@ -562,13 +562,13 @@ describe('XCHAIN price derivation from real fills ( step 7)', function () {
             const buyOrder = await orderHelper.sendOrderV0(
                 dexBuyer, COIN_CODE, '', coinTotal,
                 COIN_CODE, GAS_TICK, '50',
-                dexBuyer['address'], expiration, '', '', ' buy XCHAIN, coin side first')
+                dexBuyer['address'], expiration, '', '', 'buy XCHAIN, coin side first')
             assert(buyOrder.order, 'coin-side ORDER should exist')
 
             const sellOrder = await orderHelper.sendOrderV0(
                 dexSeller, COIN_CODE, GAS_TICK, '50',
                 COIN_CODE, '', coinTotal,
-                dexSeller['address'], expiration, '', '', ' sell XCHAIN, matching second')
+                dexSeller['address'], expiration, '', '', 'sell XCHAIN, matching second')
             assert(sellOrder.order, 'XCHAIN-side ORDER should exist')
 
             const match = await indexerDatabase.waitForOrderMatch({
@@ -685,13 +685,13 @@ describe('XCHAIN price derivation from real fills ( step 7)', function () {
             await gasHelper.ensureGasBalance(buyer, '100')
 
             const payTick = 'XCPT4T' + seller['address'].substring(seller['address'].length - 6).toUpperCase()
-            await issueHelper.sendIssueV0(buyer, payTick, 1000, 1000, 0, ' token-for-token pay tick', 100)
+            await issueHelper.sendIssueV0(buyer, payTick, 1000, 1000, 0, 'token-for-token pay tick', 100)
 
             const disp = await dispenserHelper.sendDispenserV0(
                 seller, COIN_CODE, GAS_TICK, 1, 5,
                 COIN_CODE, payTick, 10, seller['address'],
                 null, null, null, null,
-                null, null, ' token-for-token dispense')
+                null, null, 'token-for-token dispense')
             assert(disp.dispenser, 'token-priced dispenser should exist')
 
             const sendRes = await sendHelper.sendSendV0(buyer, payTick, 10, seller['address'], '')
@@ -746,7 +746,7 @@ describe('XCHAIN price derivation from real fills ( step 7)', function () {
                 seller, COIN_CODE, GAS_TICK, 1, 5,
                 otherCoin, null, 0.05, seller['address'],
                 null, null, null, null,
-                null, null, ' cross-chain dispenser (must be refused)',
+                null, null, 'cross-chain dispenser (must be refused)',
                 null, null, 'invalid: GET_COIN (network)')
             assert(rejected.dispenser,
                 'a cross-chain dispenser create must index, as INVALID')
@@ -759,7 +759,7 @@ describe('XCHAIN price derivation from real fills ( step 7)', function () {
             const crossOrder = await orderHelper.sendOrderV0(
                 seller, COIN_CODE, GAS_TICK, '25',
                 otherCoin, '', '0.001',
-                seller['address'], expiration, '', '', ' cross-chain order')
+                seller['address'], expiration, '', '', 'cross-chain order')
             assert(crossOrder.order, 'the cross-chain ORDER must index valid')
 
             const coinIds = await db.doQuery(
@@ -808,7 +808,7 @@ describe('XCHAIN price derivation from real fills ( step 7)', function () {
     describe('native-fee validation from the mirrored derived pair (non-BTC venue)', function () {
 
         before(function () {
-            // This is the consumer end of : only LTC/DOGE pay fees in
+            // This is the consumer end of the derivation: only LTC/DOGE pay fees in
             // native coin, so only they can prove the pair actually prices a fee.
             if (COIN_CODE === 'BTC') this.skip()
         })
@@ -850,7 +850,7 @@ describe('XCHAIN price derivation from real fills ( step 7)', function () {
             const source = await cryptoHelper.getNewFundedAddress(
                 'XCPRICE.NATFEE', COIN, NETWORK, null, 'legacy', 0, 2)
             const tick = 'XCPNF' + source['address'].substring(source['address'].length - 6).toUpperCase()
-            const issueTail = '0|' + tick + '|1000|1000|0| native fee proof|100'
+            const issueTail = '0|' + tick + '|1000|1000|0|native fee proof|100'
 
             // Quote through the production dry-run: the REAL handler priced at
             // the CURRENT mirrored oracle rows.
@@ -886,7 +886,7 @@ describe('XCHAIN price derivation from real fills ( step 7)', function () {
         // That makes it unrunnable on any venue whose chain clock runs ahead of
         // real time - every hub round is then stamped in the future and the
         // time-keyed selection `block_timestamp <= nowEpoch` matches nothing,
-        // which is  and cost a session to diagnose.
+        // which cost a session to diagnose.
         //
         // This case proves the same thing through the path that actually GATES
         // THE CHAIN: on-chain fee validation, anchored on the evaluated BLOCK's
@@ -910,7 +910,7 @@ describe('XCHAIN price derivation from real fills ( step 7)', function () {
             for (const r of rows) {
                 assert(Number(r.round_number) < SEED_ROUND_FLOOR,
                     r.coin_pair + ' newest round ' + r.round_number + ' is a SEEDED fixture, so this ' +
-                    'proof would price off a fixture and mean nothing ')
+                    'proof would price off a fixture and mean nothing')
                 if (r.coin_pair === 'XCHAIN/USD') { xchainUsd = String(r.price); derivedRound = Number(r.round_number) }
                 else                              { coinUsd   = String(r.price) }
             }
@@ -929,7 +929,7 @@ describe('XCHAIN price derivation from real fills ( step 7)', function () {
             const tick = 'XCCF' + source['address'].substring(source['address'].length - 6).toUpperCase()
             // Same wire shape the other native-fee suites use, which is proven to
             // index on a fee chain.
-            const message = 'ISSUE|0|' + tick + '|1000|1000|0| consensus fee proof|1000' +
+            const message = 'ISSUE|0|' + tick + '|1000|1000|0|consensus fee proof|1000' +
                             '||||||||||||||||||'
 
             // discoverFeeMode reads the stack's real fee mode (env or the indexer
@@ -964,7 +964,7 @@ describe('XCHAIN price derivation from real fills ( step 7)', function () {
                 'the fee must be recorded as native-coin (payment_mode=1)')
             assert(Number(fee[0].oracle_round) < SEED_ROUND_FLOOR,
                 'consensus priced the fee off round ' + fee[0].oracle_round + ', a SEEDED fixture: the ' +
-                'derived pair is shadowed and this proves nothing ')
+                'derived pair is shadowed and this proves nothing')
             console.log('CONSENSUS PROOF: payment_mode=' + fee[0].payment_mode +
                         ' native_coin_amount=' + fee[0].native_coin_amount +
                         ' oracle_round=' + fee[0].oracle_round +

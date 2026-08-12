@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - SDK-driven foundation actions
  *
  * Drives the bread-and-butter ACTIONs through sdk.submitAction() on a

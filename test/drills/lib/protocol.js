@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * Wire protocol between the drill harness and a remote drill validator.
  *
  * One newline-delimited JSON object per line, each tagged with a sentinel.

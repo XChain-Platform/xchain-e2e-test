@@ -29,8 +29,6 @@ const attestationHelper = require('../helpers/attestationHelper')
  *      signature against the real `attestation` capability check, marks the
  *      request fulfilled, and injects a system EXECUTE that runs the callback.
  *   5. Assert callback executed and wrote the expected values to contract state.
- *
- * Spec: claude/reports/specs/2026-05-24_external-attestation-framework.md
  */
 
 describe('Attestation framework: round-trip request → response → callback', function () {
@@ -413,7 +411,6 @@ module.exports = {
         assert(stillPending, 'request should remain pending after under-quorum response')
     })
 
-    // ─────────────────────────────────────────────────────────────────────────
     // Non-`ok` response statuses (retryable).
     //
     // ATTEST v1 carries one of ['ok','timeout','no_quorum','provider_error',
@@ -425,7 +422,6 @@ module.exports = {
     // fires the callback. These tests exercise the RETRYABLE_STATUSES branch of
     // _parseResponse across the full hub-to-indexer wire, guarding the
     // no-callback / no-status-flip invariant against regression.
-    // ─────────────────────────────────────────────────────────────────────────
     const RETRYABLE_STATUSES = ['no_quorum', 'timeout', 'provider_error']
 
     RETRYABLE_STATUSES.forEach(function (retryStatus) {

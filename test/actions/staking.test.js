@@ -30,7 +30,6 @@ describe('Staking: STAKE, UNSTAKE, DELEGATE (capability model)', function () {
             this.skip()
             return
         }
-        // Fund a staker address with BTC and XCHAIN
         stakerAddr = await cryptoHelper.getNewFundedAddress(
             "staker", COIN, NETWORK, null, "legacy", 0, 1
         )
@@ -63,7 +62,7 @@ describe('Staking: STAKE, UNSTAKE, DELEGATE (capability model)', function () {
     describe('STAKE v2: Top up an existing stake', function () {
         it('should accept a top-up to the same pubkey from the same source', async function () {
             // Advance past the activation window so the v1 stake is observable as active for the v2 top-up check.
-            // Pause the auto-miner so no stray mempool tx can add an extra block during the deterministic advance. #3851
+            // Pause the auto-miner so no stray mempool tx can add an extra block during the deterministic advance.
             await regtestMinerConnector.pauseMining()
             try {
                 await regtestMinerConnector.generateBlocks(7)
@@ -79,7 +78,7 @@ describe('Staking: STAKE, UNSTAKE, DELEGATE (capability model)', function () {
 
     describe('UNSTAKE v0: Begin unstaking by pubkey', function () {
         it('should create an unstake record with cooldown', async function () {
-            // Pause the auto-miner around this deterministic height advance. #3851
+            // Pause the auto-miner around this deterministic height advance.
             await regtestMinerConnector.pauseMining()
             try {
                 await regtestMinerConnector.generateBlocks(7)
@@ -172,7 +171,7 @@ describe('Staking: STAKE, UNSTAKE, DELEGATE (capability model)', function () {
         })
     })
 
-    describe('UNSTAKE v0: partial unstake ', function () {
+    describe('UNSTAKE v0: partial unstake', function () {
         // Self-contained staker so run order in the outer suite cannot disturb
         // the partial-unstake lifecycle asserted here.
         let partialAddr = null
@@ -192,7 +191,7 @@ describe('Staking: STAKE, UNSTAKE, DELEGATE (capability model)', function () {
             assert.strictEqual(stakeResult.stake.status, 'valid', 'setup stake should be valid')
 
             // Activate the stake. Pause the auto-miner around the deterministic
-            // height advance. #3851
+            // height advance.
             await regtestMinerConnector.pauseMining()
             try {
                 await regtestMinerConnector.generateBlocks(7)
@@ -229,7 +228,7 @@ describe('Staking: STAKE, UNSTAKE, DELEGATE (capability model)', function () {
 
         it('after the handoff the residual is unstakeable in full', async function () {
             // Advance past the residual row's activation_block. Pause the
-            // auto-miner around the deterministic height advance. #3851
+            // auto-miner around the deterministic height advance.
             await regtestMinerConnector.pauseMining()
             try {
                 await regtestMinerConnector.generateBlocks(7)
@@ -293,7 +292,7 @@ describe('Staking: STAKE, UNSTAKE, DELEGATE (capability model)', function () {
             // Stake first
             await stakeHelper.sendStakeV1(delegateAddr, '1000.00000000', delegatePubkey)
             // Advance past ACTIVATION_DELAY_BLOCKS so DELEGATE sees an active stake.
-            // Pause the auto-miner around this deterministic height advance. #3851
+            // Pause the auto-miner around this deterministic height advance.
             await regtestMinerConnector.pauseMining()
             try {
                 await regtestMinerConnector.generateBlocks(7)
@@ -314,9 +313,8 @@ describe('Staking: STAKE, UNSTAKE, DELEGATE (capability model)', function () {
     })
 
     describe('STAKE v1: Input validation rejections', function () {
-        // Re-land of the four malformed-input cases reverted in f8bbb2e
-        // : AMOUNT=0, AMOUNT with more than 8 decimals, a
-        // malformed SIGNING_PUBKEY, and a stake larger than the source's
+        // Re-land of the four malformed-input cases: AMOUNT=0, AMOUNT with
+        // more than 8 decimals, a malformed SIGNING_PUBKEY, and a stake larger than the source's
         // XCHAIN balance. Each maps to one reject string in
         // xchain-indexer/src/actions/stake.js.
         //

@@ -10,8 +10,7 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- * : PHYSICAL multi-box byzantine drill at N=7/f=2 and N=10/f=3.
+ * PHYSICAL multi-box byzantine drill at N=7/f=2 and N=10/f=3.
  *
  * The in-process suite (test/integration/multiHubByzantineF2) proves the same
  * two scales, but every validator there shares a process, an event loop, a
@@ -177,7 +176,7 @@ function drillScale(spec) {
     const STALL_WAIT_MS = parseInt(process.env.XCHAIN_DRILL_STALL_WAIT_MS, 10) || 20000;
     const PEER_WAIT_MS  = parseInt(process.env.XCHAIN_DRILL_PEER_WAIT_MS, 10)  || 20000;
 
-    describe('PHYSICAL byzantine drill N=' + spec.count + ' f=' + spec.faults + ' ', function () {
+    describe('PHYSICAL byzantine drill N=' + spec.count + ' f=' + spec.faults, function () {
         this.timeout(30 * 60 * 1000);
 
         let plan, mesh, verdicts, logStream, logPath;

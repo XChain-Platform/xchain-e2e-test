@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - cross-chain call HOP ROUND TRIP (X→Y→X)
  *
  * BTC contract A calls the DOGE bouncer (deployed by xcallDogeSetup.js,

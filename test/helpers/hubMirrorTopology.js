@@ -8,7 +8,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// Shared database-role resolution for the FIAT price fixtures .
+// Shared database-role resolution for the FIAT price fixtures.
 //
 // Three databases can be in play when priceSnapshotHelper / oraclePriceHelper
 // run, and conflating any two of them produces a failure that reads as a
@@ -103,7 +103,7 @@ function sameTarget(a, b){
 }
 
 // True when a seeded row has to be replicated before settlement can see it.
-// Compares SEED against READ. The pre- version compared SEED against LOCAL,
+// Compares SEED against READ. The previous version compared SEED against LOCAL,
 // which is the same comparison only while no hub DB is configured, and reports the
 // mirror as "in play" on the shared-DB shortcut where no sync runs at all.
 function seedsThroughMirror(){

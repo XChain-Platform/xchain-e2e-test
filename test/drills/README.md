@@ -1,11 +1,11 @@
-# Physical multi-box byzantine drill 
+# Physical multi-box byzantine drill
 
 The in-process suite `test/integration/multiHubByzantineF2.integration.test.js`
 already proves f=2 at N=7 and f=3 at N=10. Every validator in it shares one
 process, one event loop, one `127.0.0.1` and one connection pool, and every
 fault is injected by reaching into the victim's memory from the test file. An
-auditor is entitled to discount that, and `claude/reports/launch/PROTOCOL-THREAT-MODEL.md`
-records the gap: *"Run at least one physical multi-box byzantine drill (current
+auditor is entitled to discount that, and the platform's threat model records
+the gap: *"Run at least one physical multi-box byzantine drill (current
 N=7/f=2, N=10/f=3 results are in-process)."*
 
 This directory closes the harness half of that gap. It runs the same two scales
@@ -47,8 +47,7 @@ adversary than one that keeps voting garbage; E proves the federation survives
 the stronger one, and F proves the forged votes were genuinely discarded rather
 than accepted (if they were being counted, F would commit exactly like E). This
 is the config-PBFT analogue of the signature-set divergence that graded the N=3
-relay-mesh result recorded in `claude/reports/launch/c2-residuals-handover.md`;
-`evaluateSignatureExclusion` in `lib/drillVerdict.js` is that older rule, kept
+relay-mesh result; `evaluateSignatureExclusion` in `lib/drillVerdict.js` is that older rule, kept
 for the cross-chain relay variant where the signer set is stored per round.
 
 ## Running the unit tests
@@ -115,8 +114,7 @@ it in view.
 ## Venue
 
 A true multi-box run needs at least two boxes that can dial each other's P2P
-ports. The one non-production test box currently reachable is
-`test-host.dankest.io`; `test-host.dankest.io` and the `xchain.io` production hosts
-are off limits. Until a second drill box exists, the honest options are a
-single-box shakedown (labelled as such) or an operator decision to provision
-one.
+ports. Only one non-production test box is currently reachable, and the
+`xchain.io` production hosts are off limits. Until a second drill box exists,
+the honest options are a single-box shakedown (labelled as such) or an
+operator decision to provision one.

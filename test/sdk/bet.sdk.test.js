@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - BET settlement drills (spec §12 E1, E2, E3, E10)
  *
  *   E1  happy path: the §7 worked example, asserted to the base unit

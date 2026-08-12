@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - contract reads a finalized VOTE poll (xchain.getPollResult)
  *
  * Proves the VM host function end to end on the live regtest stack: a poll is

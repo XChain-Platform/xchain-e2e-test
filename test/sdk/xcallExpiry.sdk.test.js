@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - cross-chain call DEADLINE EXPIRY under a QUORUM DROP
  *
  * Fires a short-deadline (minimum: 10 blocks) crossExecute while the relay
@@ -22,7 +20,7 @@
  * terminal expiry must hold (exactly-once interlock: no late dispatch, no
  * second callback).
  *
- * : this drill used to stop ONE named container and call that "the hub
+ * This drill used to stop ONE named container and call that "the hub
  * down". On a single-hub stack the two are the same; against a federation they
  * are not, and the gap is silent - the surviving hubs still hold quorum, the
  * call dispatches, and the run either times out or reports a green it never
@@ -39,7 +37,7 @@
  * into is as small as the protocol allows.
  *
  * VENUE: expects to manage the hub containers directly via docker (runs on the
- * stack host). Federation members that are NOT containers (test-host runs relay
+ * stack host). Federation members that are NOT containers (some venues run relay
  * hub 1 as a host process) are simply left undeclared: the planner learns they
  * exist from the stake snapshot and treats their stake as surviving.
  *
@@ -309,7 +307,8 @@ describe('[sdk] cross-chain call deadline expiry (federation below quorum)', fun
         for (const name of restored) dockerStart(name);
         // Assert the restore before asserting what a restored federation did NOT
         // do: against a still-dead federation this whole test is vacuous, which
-        // is the same shape of unearned green  was filed for.
+        // is the same shape of unearned green result a container-name-only check
+        // used to produce.
         for (const name of restored) expect(dockerRunning(name), name + ' back up').to.equal(true);
         console.log('    [xcall-exp] ' + restored.length + ' member(s) restarted, quorum '
             + drop.countQuorum + '/' + drop.n + ' reachable again');

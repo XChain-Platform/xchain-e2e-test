@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * Unit tests for the in-process-of-the-VICTIM byzantine injectors.
  *
  * Driven against duck-typed stand-ins for the hub, so the rules that decide

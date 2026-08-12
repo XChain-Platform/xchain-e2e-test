@@ -8,7 +8,7 @@
 // This file is part of XChain Platform. Licensed under the GNU Affero
 // General Public License v3.0 or later; see LICENSE.md.
 //
-// : the miner is mempool-driven, so an idle chain gains no height and a
+// The miner is mempool-driven, so an idle chain gains no height and a
 // test that WAITS OUT a height window (stake ACTIVATION_DELAY_BLOCKS,
 // confirmation depth) hangs with nothing in flight. The connector wrapper for
 // the miner's mine-empty heartbeat is pinned here because a typo in the method
@@ -21,7 +21,7 @@ const axios  = require('axios');
 
 const RegtestMinerConnector = require('../../../src/RegtestMinerConnector');
 
-describe('RegtestMinerConnector.setIdleMineInterval ', function () {
+describe('RegtestMinerConnector.setIdleMineInterval', function () {
 
     let connector, axiosPostStub;
 

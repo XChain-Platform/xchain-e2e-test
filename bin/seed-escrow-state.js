@@ -12,7 +12,7 @@
  **********************************************************************
  *
  * Seed a live chain with real LOCKED BALANCES ahead of its armed escrow-leaf
- * height (, spec claude/specs/spv-state-subtree-extension.md §3 Stage B).
+ * height (see the SPV state-subtree extension spec, §3 Stage B).
  *
  * WHY THIS EXISTS. This is Stage B's counterpart to seed-contract-state.js, and
  * the reasoning is the same one §3 gives for Stage A: a chain whose lockers hold

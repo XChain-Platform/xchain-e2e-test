@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * Phase 1a: Codec carrier round-trip (cross-component property test).
  *
  * Property under test: the on-chain CARRIER is losslessly reversible. Anything

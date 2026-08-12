@@ -11,8 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * TAPROOT ENVELOPE REORG ( §3.7)
- * spec: claude/specs/resolved/taproot-envelope-and-payload-compression.md
+ * TAPROOT ENVELOPE REORG (§3.7)
  *
  * envelope.test.js publishes the pair the fee-optimal way, both halves in one
  * block. This file drives the case the spec calls out separately and that the
@@ -74,7 +73,7 @@ async function waitForIndexerToCatchUp(timeoutMs = 180000) {
     return false
 }
 
-describe('Taproot Envelope Reorg: a split pair, and a reveal orphaned off a live commit ( §3.7)', function () {
+describe('Taproot Envelope Reorg: a split pair, and a reveal orphaned off a live commit (§3.7)', function () {
     this.timeout(0)
 
     before(async function () {
@@ -83,13 +82,13 @@ describe('Taproot Envelope Reorg: a split pair, and a reveal orphaned off a live
     })
 
     it('rolls the action back with its reveal, then re-indexes it exactly once', async function () {
-        const fileName = 'xc990-reorg-' + Date.now().toString().slice(-6) + '.txt'
+        const fileName = 'envelope-reorg-' + Date.now().toString().slice(-6) + '.txt'
         const addr = await cryptoHelper.getNewFundedAddress('envreorg', COIN, NETWORK, null, 'segwit', 0, 1)
 
         const pair = await envelopeHelper.buildEnvelopePair(addr, {
             name: fileName,
             type: 'text/plain',
-            title: ' envelope reorg',
+            title: 'Envelope reorg',
             memo: 'split across blocks, then orphaned',
             rawData: BODY,
             compress: true
@@ -103,7 +102,7 @@ describe('Taproot Envelope Reorg: a split pair, and a reveal orphaned off a live
         try {
             const miner = (await cryptoHelper.getNewAddress('envreorg-miner', COIN, NETWORK, null, 'legacy', 0)).address
 
-            // ── 1. Commit alone, confirmed. No action may exist. ──
+            // 1. Commit alone, confirmed. No action may exist.
             await nodeConnector.broadcastTx(pair.commitHex)
             await nodeConnector.generateBlock(miner, [pair.commitTxid])
             const commitBlock = await nodeConnector.getBlockCount()
@@ -113,7 +112,7 @@ describe('Taproot Envelope Reorg: a split pair, and a reveal orphaned off a live
                 'a confirmed commit with no reveal must produce NO action: it is only a P2TR output')
             console.log('   commit confirmed alone at', commitBlock, '- no action, as §3.7 requires')
 
-            // ── 2. Reveal in the NEXT block: the split pair. ──
+            // 2. Reveal in the NEXT block: the split pair.
             await nodeConnector.broadcastTx(pair.revealHex)
             await nodeConnector.generateBlock(miner, [pair.revealTxid])
             const revealBlock = await nodeConnector.getBlockCount()
@@ -136,7 +135,7 @@ describe('Taproot Envelope Reorg: a split pair, and a reveal orphaned off a live
             assert.strictEqual(envelopeHelper.sha256(servedBefore.body), envelopeHelper.sha256(BODY),
                 'the payload serves byte-exactly before the reorg')
 
-            // ── 3. Orphan the reveal's block, leaving the commit confirmed. ──
+            // 3. Orphan the reveal's block, leaving the commit confirmed.
             const tipBefore = await nodeConnector.getBlockCount()
             const revealHash = await nodeConnector.getBlockHash(revealBlock)
             await nodeConnector.invalidateBlock(revealHash)
@@ -165,7 +164,7 @@ describe('Taproot Envelope Reorg: a split pair, and a reveal orphaned off a live
             assert(commitStill && commitStill.blockhash, 'the commit is still confirmed on the surviving chain')
             console.log('   reveal orphaned, action gone, commit still confirmed at', commitBlock)
 
-            // ── 4. Let the reveal re-enter from the mempool. ──
+            // 4. Let the reveal re-enter from the mempool.
             await regtestMinerConnector.resumeMining()
             const reBroadcast = async () => {
                 // invalidateblock returns the orphan to the mempool, but a node that

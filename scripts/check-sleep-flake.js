@@ -48,8 +48,8 @@ const SCAN_DIR     = path.join(ROOT, 'test')
 const BASELINE_REL = path.join('scripts', 'sleep-flake-baseline.json')
 const BASELINE     = path.join(ROOT, BASELINE_REL)
 
-// Only test/ is scanned. claude/scratch/ is tracked but no npm script runs it,
-// so ratcheting one-off drill scripts would tax throwaway work for no CI gain.
+// Only test/ is scanned. One-off drill scripts tracked outside it have no npm
+// script running them, so ratcheting them would tax throwaway work for no CI gain.
 const WAIT_CALL = /\b(?:sleep|delay)\s*\(/
 
 // Blank out comments, strings and template literals so brace counting and call

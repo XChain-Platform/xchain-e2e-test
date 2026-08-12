@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - SDK-driven test harness helper
  *
  * These suites exercise the platform exactly the way a developer (and

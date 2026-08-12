@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * Track C.2: MULTI-HUB fiat oracle round → FIAT-dispenser consumption.
  *
  * C3 chained a SINGLE-validator fiat round → finalized BTC/USD row → the

@@ -116,12 +116,12 @@ describe('Delegated reward SOURCE RESOLUTION on real on-chain data (d0abcfd / 82
         },
         // stake-source.js resolves through apiView() so federation READS draw an
         // independent pooled connection and never adopt an open block transaction
-        // ( / H2). This adapter already has that property by construction:
+        // (H2). This adapter already has that property by construction:
         // every doQuery takes a fresh connection from the pool and releases it, so
         // it is never inside anyone's transaction. Returning `this` is therefore the
         // honest view here, not a stub that papers over the isolation the real
         // apiView provides. Without it the drill dies on
-        // `indexer.indexerDb.apiView is not a function` .
+        // `indexer.indexerDb.apiView is not a function`.
         apiView() { return this }
     }
     const indexerLike = { indexerDb: idxDb }

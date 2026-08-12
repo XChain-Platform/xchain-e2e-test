@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - SDK-driven External Attestation Framework
  *
  * Drives the attestation round-trip the way a real dapp does, through
@@ -38,8 +36,6 @@
  *
  * Attestation rides on STAKE + EXECUTE, which are BTC-only protocol
  * features. This suite skips on non-BTC chains.
- *
- * Spec: claude/reports/specs/2026-05-24_external-attestation-framework.md
  *
  ********************************************************************/
 

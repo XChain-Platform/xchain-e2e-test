@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - VOTE binding polls + contracts as poll actors (Phase 4,
  * Sections 14 + 16)
  *

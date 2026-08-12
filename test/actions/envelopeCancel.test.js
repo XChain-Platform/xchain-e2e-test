@@ -11,8 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * ENVELOPE CANCEL FROM PERSISTED STATE ( §3.5)
- * spec: claude/specs/resolved/taproot-envelope-and-payload-compression.md
+ * ENVELOPE CANCEL FROM PERSISTED STATE (§3.5)
  *
  * The commit output is a P2TR whose tweak commits to the envelope leaf. Spending
  * it back out by the key path needs the internal key AND the tapleaf hash to
@@ -84,7 +83,7 @@ async function waitForIndexerToCatchUp(timeoutMs = 180000) {
     return false
 }
 
-describe('Envelope Cancel: recovering an unrevealed commit from persisted state alone ( §3.5)', function () {
+describe('Envelope Cancel: recovering an unrevealed commit from persisted state alone (§3.5)', function () {
     this.timeout(0)
 
     before(async function () {
@@ -92,14 +91,14 @@ describe('Envelope Cancel: recovering an unrevealed commit from persisted state 
     })
 
     it('spends the commit back by the key path, and the reveal can no longer be broadcast', async function () {
-        const fileName = 'xc990-cancelled-' + Date.now().toString().slice(-6) + '.txt'
+        const fileName = 'envelope-cancelled-' + Date.now().toString().slice(-6) + '.txt'
         const addr = await cryptoHelper.getNewFundedAddress('envcancel', COIN, NETWORK, null, 'segwit', 0, 1)
         const recovery = (await cryptoHelper.getNewAddress('envcancel-recovery', COIN, NETWORK, null, 'legacy', 0)).address
 
         const pair = await envelopeHelper.buildEnvelopePair(addr, {
             name: fileName,
             type: 'text/plain',
-            title: ' cancelled envelope',
+            title: 'Cancelled envelope',
             memo: 'the reveal never happens',
             rawData: BODY,
             compress: true
@@ -121,13 +120,13 @@ describe('Envelope Cancel: recovering an unrevealed commit from persisted state 
         }
         const revealHex = pair.revealHex          // kept only to prove it is dead below
 
-        // ── The commit is broadcast; the reveal never is. ──
+        // The commit is broadcast; the reveal never is.
         await nodeConnector.broadcastTx(pair.commitHex)
         await regtestMinerConnector.generateBlocks(1)
         const confirmedCommit = await nodeConnector.getTransaction(record.commitTxid)
         assert(confirmedCommit && confirmedCommit.blockhash, 'the commit confirmed')
 
-        // ── Everything else about the build is now gone. Rebuild from the record. ──
+        // Everything else about the build is now gone. Rebuild from the record.
         const cancel = await encoderConnector.createEnvelopeCancelTx({
             commitTxid: record.commitTxid,
             commitVout: record.commitVout,
@@ -160,7 +159,7 @@ describe('Envelope Cancel: recovering an unrevealed commit from persisted state 
             'the node accepted the cancel, which is the chain asserting the tweak was rebuilt correctly')
         await regtestMinerConnector.generateBlocks(1)
 
-        // ── The commit output is spent, and its value came home. ──
+        // The commit output is spent, and its value came home.
         const spent = await nodeConnector.getTransaction(cancelTxid)
         assert(spent && spent.blockhash, 'the cancel confirmed')
         const paidToRecovery = spent.vout.some(o =>
@@ -168,13 +167,13 @@ describe('Envelope Cancel: recovering an unrevealed commit from persisted state 
                 (o.scriptPubKey.addresses || []).includes(recovery)))
         assert(paidToRecovery, 'the commit value landed at the recovery destination')
 
-        // ── The reveal is now a double spend: cancel conflicts with it by construction. ──
+        // The reveal is now a double spend: cancel conflicts with it by construction.
         let revealRejected = null
         try { await nodeConnector.broadcastTx(revealHex) } catch (err) { revealRejected = err }
         assert(revealRejected,
             'the reveal must be unbroadcastable once the commit is spent; both outstanding would mean the wallet could publish an action it believed it had cancelled')
 
-        // ── And no action ever existed. ──
+        // And no action ever existed.
         assert(await waitForIndexerToCatchUp(),
             'the indexer must reach the commit and cancel blocks before their emptiness means anything')
         assert.strictEqual(await fileCountByName(fileName), 0,

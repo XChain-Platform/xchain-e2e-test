@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * Track C.2: per-feature validator-scale at N=10 (the federated decision engines).
  *
  * The N=10 column already has config-PBFT (multiHubConsensusN10) and consensus +

@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - Cross-chain DEX LIVE escrow-release settlement
  * (TEST-CAMPAIGN #10, the live escrow-release leg).
  *
@@ -55,13 +53,10 @@
  *     finalized cross_chain_matches row + capability_snapshots reach the indexer
  *     and cross_settle fires. WITHOUT this mirror, step 4 never happens and this
  *     drill times out at the settlement wait (that is the known live gap this
- *     drill is built to close once the repoint lands). See
- *     claude/reports/launch/test-campaign/federation-live-venue-handover.md.
+ *     drill is built to close once the repoint lands).
  *
- * NOTE: a concurrent session's handover also lists "author the #10 settlement
- * driver" - this may be a parallel implementation to reconcile. It is authored
- * here as a ready-to-run artifact; it has NOT been run (the live relay+repoint
- * venue was owned by that session at authoring time).
+ * This is authored as a ready-to-run artifact; it has NOT been run (the live
+ * relay+repoint venue was unavailable at authoring time).
  *
  * Env: DEX_BTC_TICK, DEX_DOGE_TICK, DEX_DOGE_ORDER_INDEX (from dexDogeSetup),
  * DEX_DOGE_MAKER_BTC_RECV (the BTC address the DOGE order's get_address used -

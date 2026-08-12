@@ -24,9 +24,6 @@
  *
  * Unlike MockAttestationValidator (which signs in-process but bypasses
  * the hub entirely), this harness exercises the full validator pipeline.
- *
- * Spec: claude/reports/specs/2026-05-24_external-attestation-framework.md §16 Phase 3
- *
  ********************************************************************/
 
 'use strict';
@@ -95,7 +92,7 @@ function _ephemeralRange() {
 // axios call to the indexer - and the hub then dies on `listen EADDRINUSE`. The
 // suites hard-code their own basePort and several sit above 32768, so this was a
 // timing lottery that only shows up in a long serial run: multiHubOracle
-// (basePort 33000) lost it on 33002 on test-host 2026-08-09 while passing solo.
+// (basePort 33000) lost it on 33002 on 2026-08-09 while passing solo.
 // multiHubConsensusN10 already documents the hazard on its own basePort choice;
 // enforcing it here covers every suite instead of the ones that remembered.
 //
@@ -160,7 +157,7 @@ class MultiValidatorHub {
         // can skip attestation to stay lean. At least one must be on to be useful.
         this.startAttestationSubsystem = opts.startAttestation !== false;
         this.startCrossChainSubsystem  = opts.startCrossChain === true;
-        // Consensus-subsystem toggles . Off by default so attestation-only and
+        // Consensus-subsystem toggles. Off by default so attestation-only and
         // DEX runs stay lean; opt in to drive the oracle price round, cross-chain reorg
         // handler, or on-chain governance through the same in-process mesh. Each maps
         // 1:1 onto the hub's own start method and follows the canonical boot order from
@@ -312,7 +309,7 @@ class MultiValidatorHub {
             await hub.start();
             await hub.startP2P();
             await hub.startConsensus();
-            // Consensus subsystems, opt-in, in canonical api.js boot order .
+            // Consensus subsystems, opt-in, in canonical api.js boot order.
             // Oracle stands up first so its slash/reward wiring exists before the other
             // rounds; governance goes up before attestation so the attestation
             // hot-reload hook can bind to governance's proposal:finalized event.

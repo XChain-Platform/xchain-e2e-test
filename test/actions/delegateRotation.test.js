@@ -177,7 +177,7 @@ describe('DELEGATE rotation: additive effective signer set (F8) + collision guar
     // delegation branch inserts nothing under DEL-1 (DELEGATE_REVOKE_NO_REINSERT,
     // armed from genesis on regtest). So the assertion is on what must NOT change:
     // a repeat revoke that recorded anything would be the signer-lifetime extension
-    // DEL-1 exists to prevent .
+    // DEL-1 exists to prevent.
     it('a second revoke of the same stake key is refused and records nothing (already revoked)', async function () {
         let before = await indexerDatabase.checkStakeKeyRevocation({
             source: ownerAddr.address, signingPubkey: K1, status: 'valid'

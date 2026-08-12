@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - BET terminal-path guards (spec §12 E16, E12)
  *
  *   E16 double-credit guard: no bet row may ever be credited twice, and no row

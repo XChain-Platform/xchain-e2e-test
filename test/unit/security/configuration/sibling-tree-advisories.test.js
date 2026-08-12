@@ -21,7 +21,7 @@ const path   = require('path');
 // This repo declares two of its dependencies as local paths (xchain-hub,
 // xchain-sdk). Those directories are gitignored and staged at build time, so
 // npm links rather than fetches them, and it installs their dependencies into a
-// node_modules INSIDE each staged directory. The trap : once a staged
+// node_modules INSIDE each staged directory. The trap: once a staged
 // directory loses its package.json, npm stops treating that nested tree as
 // something it owns, so the tree stops being reconciled and simply persists.
 // A tree installed before this repo's brace-expansion/minimatch overrides landed

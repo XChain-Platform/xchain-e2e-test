@@ -25,7 +25,7 @@ const { BOOTSTRAP_XCHAIN_USD, NO_PRICE_SEED } = require('../helpers/xchainPriceC
 // (XCHAIN_FEE_DESTINATION_<CODE>_<NET> / FEE_DESTINATION), then the live
 // indexer's `feeschedule` RPC. The old env-only reader (which also built the
 // key from the lowercase COIN name) returned null on every normal LTC/DOGE
-// stack and permanently skipped this suite ; discovery throws loudly
+// stack and permanently skipped this suite; discovery throws loudly
 // on a fee chain it can't resolve, so a skip now only happens on genuinely
 // gas-mode stacks (BTC without native fees).
 let FEE_DEST = null
@@ -44,7 +44,7 @@ async function seedPrice(coinPair, price, referenceBlock, roundNumber){
         // drift AHEAD of wall time (tip wins), but on an IDLE chain the tip
         // lags wall clock and the action mines into a block timestamped ~now,
         // so a tip-only anchor is instantly stale beyond the 1800s cap (this
-        // was the first-run "no current oracle price" failure, ).
+        // was the first-run "no current oracle price" failure).
         let rows = await conn.query("SELECT block_time FROM blocks ORDER BY block_index DESC LIMIT 1")
         let nowSec = Math.floor(Date.now() / 1000)
         let chainNow = rows.length ? Math.max(Number(rows[0].block_time), nowSec) : nowSec
@@ -90,7 +90,7 @@ function issueMessage(tick){
 
 describe('Native-coin fee payment (live stack)', function () {
     before(async function () {
-        //  step 8: this suite seeds the pair and computes its expected fees
+        // This suite seeds the pair and computes its expected fees
         // FROM the fixture prices, so on a venue whose hub publishes the pair the
         // seed would shadow every derived round. Not runnable there; the
         // derivation suite owns native-fee proof on publishing venues.

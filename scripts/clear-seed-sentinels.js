@@ -11,7 +11,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// . Retract the suite's leftover synthetic price_snapshots rows on a venue
+// Retract the suite's leftover synthetic price_snapshots rows on a venue
 // whose own hub publishes the pair, without running a suite.
 //
 // WHY A SCRIPT. The durable fix (priceSnapshotHelper.clearSeedSentinels, called
@@ -50,7 +50,7 @@ function assertPublishingVenue(env){
         'refusing to clear: XCHAIN_E2E_NO_PRICE_SEED=1 is not set. That flag is how a venue ' +
         'declares its own hub publishes XCHAIN/USD and COIN/USD. On a venue that does not, the ' +
         'sentinel rows ARE the fee lane\'s price and deleting them makes every native-fee quote ' +
-        'unpriced. Set the flag only for a publishing venue (devhost BTC regtest since 2026-07-26).')
+        'unpriced. Set the flag only for a publishing venue (a BTC regtest venue since 2026-07-26).')
 }
 
 // hubMirrorTopology.readParams() wants HUB_DB_HOST *and* HUB_DB_NAME together, or
@@ -60,7 +60,7 @@ function assertPublishingVenue(env){
 //
 // All-or-nothing on purpose. A venue env that sets some HUB_DB_* but no
 // HUB_DB_NAME is not a usable topology, it is a half-filled one, and honouring
-// those leftovers mixes identities: the devhost BTC env sets HUB_DB_USER to
+// those leftovers mixes identities: one venue's BTC env sets HUB_DB_USER to
 // the hub's account, so keeping it while resolving the INDEXER database produced
 // "Access denied for user 'xchain_hub'" against the indexer's schema. Only keys
 // the operator PINNED (already in the process environment before any env file was

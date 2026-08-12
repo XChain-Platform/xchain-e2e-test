@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - shared helpers for the BET drills (spec §12)
  *
  * Betting is time-gated on BLOCK_TIME rather than block height: a feed closes

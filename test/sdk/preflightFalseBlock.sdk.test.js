@@ -10,10 +10,8 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - pre-flight FALSE-BLOCK invariant harness
- * (spec claude/reports/confirm-decode-preflight/SPEC.md §8.2).
+ * (spec: confirm-decode-preflight §8.2).
  *
  * THE release-gating invariant: a pre-flight `error` must NEVER block
  * an action the indexer would accept. This suite proves it against the
@@ -29,13 +27,13 @@
  *       indexer accepts must not error on the SEND leg (the §4.7
  *       projected-delta rule).
  *
- *   (c) REAL on-chain references (added 2026-07-26 after ): build
- *       the dispenser / list on chain, then pre-flight an action that
- *       references it and require NO error of any severity. Classes (a)
- *       and (b) only reject non-overridable errors, which is why they
- *       stayed green through  - that bug raised
- *       DISPENSER_NOT_FOUND, a network-sourced and therefore overridable
- *       error, on every live dispenser in existence.
+ *   (c) REAL on-chain references (added 2026-07-26 after a regression that
+ *       false-blocked every live dispenser): build the dispenser / list on
+ *       chain, then pre-flight an action that references it and require NO
+ *       error of any severity. Classes (a) and (b) only reject
+ *       non-overridable errors, which is why they stayed green through that
+ *       bug - it raised DISPENSER_NOT_FOUND, a network-sourced and
+ *       therefore overridable error, on every live dispenser in existence.
  *
  * Two things class (c) made visible, worth keeping in mind when reading
  * a failure here:
@@ -60,7 +58,7 @@
  * --requires initialCheck to stand up the connectors). Skips cleanly
  * when those globals are absent. Runs on any of the three chains; first
  * green run was litecoin-regtest 2026-07-26 (the BTC decoder was in an
- * over-deep-reorg halt, ).
+ * over-deep-reorg halt).
  *
  ********************************************************************/
 
@@ -84,7 +82,7 @@ function nonOverridableErrors(report) {
 
 // The STRICTER invariant, and the one that matters for the rows below.
 //
-//  shipped a pre-flight that reported every live dispenser as
+// A prior regression shipped a pre-flight that reported every live dispenser as
 // nonexistent. The finding it raised was DISPENSER_NOT_FOUND, which is
 // network-sourced and therefore OVERRIDABLE - so the non-overridable test
 // above would have passed it, and did, for as long as the bug existed.
@@ -163,7 +161,7 @@ describe('[sdk] pre-flight false-block invariant @preflight', function () {
 
     // These are the §4.4 rows Tier 1 cannot adjudicate, which makes the client
     // tier the ONLY pre-sign protection on them - and every one was broken
-    //  while this suite was green, because this suite did not look.
+    // while this suite was green, because this suite did not look.
     // Each case builds the referenced object ON CHAIN first, so a finding of
     // "does not exist" is provably false rather than arguably so.
     describe('class (c): actions referencing REAL on-chain objects', function () {

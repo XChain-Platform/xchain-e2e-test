@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// discoverFeeMode feeschedule-readiness retry : first-file DOGE runs
+// discoverFeeMode feeschedule-readiness retry: first-file DOGE runs
 // after a fresh reset used to fail beforeAll because the single-shot
 // feeschedule probe hit the indexer's startup window ('indexer not ready').
 

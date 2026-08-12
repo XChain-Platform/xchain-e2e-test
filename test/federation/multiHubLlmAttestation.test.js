@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * Track C.2: Multi-hub LLM attestation under real PBFT (redundancy=3).
  *
  * llmAttestation.test.js covers the single-hub LLM path (redundancy=1, no PBFT;
@@ -29,10 +28,7 @@
  * Structure mirrors multiHubAttestation.test.js (staking loop, publisher hook);
  * the LLM provider + prompt mirror llmAttestation.test.js. Needs the live
  * federation stack (E2E_REQUIRE_FEDERATION=1) + HUB_CLAUDE_CONFIG_DIR (OAuth creds
- * for the spawned CLI) + the `claude` binary on PATH; Node 22 venue (test-host/02).
- *
- * Spec: claude/reports/specs/2026-05-24_llm-attestation-provider.md +
- *       2026-05-24_external-attestation-framework.md §16 Phase 3.
+ * for the spawned CLI) + the `claude` binary on PATH; Node 22 venue.
  ********************************************************************/
 
 const dotenv = require('dotenv')

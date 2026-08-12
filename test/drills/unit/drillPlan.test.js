@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * Unit tests for the physical byzantine drill's topology planner.
  *
  * The planner's guards are the only thing standing between "we ran a

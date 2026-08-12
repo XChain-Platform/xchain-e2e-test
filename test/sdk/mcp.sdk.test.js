@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * MCP write-path e2e: drives the real `xchain-mcp` stdio server (from
  * the xchain-sdk checkout this repo vendors) against a LIVE regtest
  * stack, over raw newline-delimited JSON-RPC (no MCP client library).

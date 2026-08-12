@@ -39,7 +39,7 @@ const { SEED_SENTINEL_ROUNDS } = require('./xchainPriceConstants')
 // FULL_REPAGE_TABLES, so a re-bootstrap (reconnect, indexer restart) re-pages the
 // table from the hub and deletes it. Within a run there is no reconnect, so it
 // holds; across one it does not. Proving Mode A's replication for real needs a
-// regtest federation, which is tracked on  and deliberately not faked here.
+// regtest federation, which is tracked separately and deliberately not faked here.
 const resolveParams = topology.readParams
 
 // Which database the indexer's settlement path READS from. Note this is NOT
@@ -65,7 +65,7 @@ module.exports = {
     seedTarget: resolveParams,
     readTarget: indexerReadParams,
 
-    // . Block until a seeded snapshot has been MIRRORED into the copy
+    // Block until a seeded snapshot has been MIRRORED into the copy
     // reverse-matching actually reads, which is the indexer's hubDb once one is
     // configured and its own DB otherwise. See the twin in oraclePriceHelper for
     // the full reasoning; in short, this is a no-op on the single-host stack
@@ -157,7 +157,7 @@ module.exports = {
         }
     },
 
-    // . Delete ONLY the suite's synthetic seed rows, leaving every derived
+    // Delete ONLY the suite's synthetic seed rows, leaving every derived
     // round untouched. clearPair above is too blunt for a venue whose own hub
     // publishes the pair: there, the real rows are the point and wiping them
     // would destroy what the run is meant to read.
@@ -205,7 +205,7 @@ module.exports = {
         }
     },
 
-    // . The timestamps a seed may use, given that the usable window is
+    // The timestamps a seed may use, given that the usable window is
     // bounded on BOTH sides. Anchoring is the single thing every seed site gets
     // wrong, so the rule lives here once instead of in each site's comments.
     //
@@ -273,7 +273,7 @@ module.exports = {
         } finally {
             await conn.end().catch(() => {})
         }
-        // : the seed is not usable until the indexer can SEE it. On the
+        // The seed is not usable until the indexer can SEE it. On the
         // single-host stack that is already true and this returns at once; with
         // the mirror on it waits for hub_db_sync to carry the row down. Done
         // here rather than at the ~13 call sites so every existing and future

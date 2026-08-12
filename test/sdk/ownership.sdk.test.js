@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - SDK-driven token-ownership trading
  *
  * Recent feature: ORDER/SWAP/DISPENSER can trade a token's *ownership*

@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-//  guard: the multi-chain parity harness must pin litecoind to the
+// Guard: the multi-chain parity harness must pin litecoind to the
 // version the DEPLOYED LTC node fleet runs (bump-with-fleet rule), not float
 // to the latest upstream release. This test fails if the pin is removed from
 // run-multichain-parity.sh or loses its expected shape, so a fleet upgrade
@@ -22,7 +22,7 @@ const { expect } = require('chai');
 
 const SCRIPT = path.join(__dirname, '..', 'parity', 'run-multichain-parity.sh');
 
-describe('parity harness LTC daemon pin ', function () {
+describe('parity harness LTC daemon pin', function () {
     let src;
     before(function () { src = fs.readFileSync(SCRIPT, 'utf8'); });
 

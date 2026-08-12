@@ -13,7 +13,7 @@
  *
  **********************************************************************
  *
- * Live integration tier runner .
+ * Live integration tier runner.
  *
  * `test/integration/*.integration.test.js` ran in no CI lane at all, so
  * xchain-indexer 521edf2 turned one of its suites red on 2026-07-16 and nobody
@@ -40,8 +40,8 @@
  *   design (`Skipping MultiValidatorHub smoke (HUB_DB_USER/HUB_DB_PASS not
  *   set)`, `Skipping hub-DB WS mirror: no env DB and Docker unavailable`),
  *   which is right for a laptop and lethal for a gate: the lane reports green
- *   having proved nothing. Measured on test-host 2026-08-09 against a bare
- *   three-repo checkout, three of the declared suites skipped exactly that way.
+ *   having proved nothing. Measured on a bare three-repo checkout on 2026-08-09,
+ *   three of the declared suites skipped exactly that way.
  *   So a `run: true` suite that contributes no passing test, or that leaves any
  *   case pending, FAILS the lane and says which file and why.
  *
@@ -50,7 +50,7 @@
  * back with a config file in front of it.
  *
  * COST, because it is the reason this was not wired years ago. Measured on
- * test-host 2026-08-09: the 20-suite roster is ~700s, and `npm run ci` end to end
+ * 2026-08-09: the 20-suite roster is ~700s, and `npm run ci` end to end
  * is ~12.5 min. That is longer than the ~10 min after which GitHub tends to drop
  * an idle push connection, so a pre-push gate run can outlive the push it is
  * gating. The consequence is one failed push, not a lost gate: ci-dispatch banks
@@ -65,8 +65,8 @@
  * Exit: 0 green; 1 red (roster drift, a failing case, or a suite that ran
  * nothing); 95 when the HOST cannot run the tier truthfully, which the shared
  * gate reports as "not your commit" rather than as a red one. Those three are
- * the attribution the item asks for: a lane whose failures cannot be pinned on
- * anything is the state  found.
+ * the attribution this lane exists to provide: a lane whose failures cannot be
+ * pinned on anything is worse than no lane at all.
  *
  ********************************************************************/
 
@@ -180,7 +180,7 @@ function classify(expected, tally) {
         if (t.passing === 0)
             problems.push({ file, kind: 'ran-nothing',
                 detail: 'no case ran (the suite skipped itself, or died before its first test).'
-                    + ' A lane that reports green having run nothing is the defect  exists to stop' })
+                    + ' A lane that reports green having run nothing is the defect this runner exists to stop' })
         else if (t.pending > 0)
             problems.push({ file, kind: 'pending',
                 detail: t.pending + ' case(s) skipped. Every case in a lane suite must run here,'
@@ -229,7 +229,7 @@ function liveTierBlocker(env = process.env) {
 // the next run will never reuse. The next run then dies in a before-all hook
 // with `Command failed: docker run -d --name xchain-mvh-testdb-<pid> ...` and
 // nothing in that message says the cause is a corpse from yesterday - the gate
-// reports it against the commit being pushed. Observed on test-host 2026-08-09.
+// reports it against the commit being pushed. Observed on a venue on 2026-08-09.
 //
 // Scoped twice, because the venues are shared and somebody else's hand-run suite
 // must survive this: only containers with this fixture's own name prefix, and of
@@ -279,7 +279,7 @@ function main(argv) {
 
     const drift = auditRoster(files, roster)
     if (drift.length) {
-        console.error('\nlive tier: the roster does not match test/integration/ :')
+        console.error('\nlive tier: the roster does not match test/integration/:')
         for (const d of drift) console.error('  - ' + d)
         console.error('\nlive tier: refusing to run. A lane whose roster has drifted cannot say')
         console.error('           what it covers, which is exactly how this tier rotted.\n')

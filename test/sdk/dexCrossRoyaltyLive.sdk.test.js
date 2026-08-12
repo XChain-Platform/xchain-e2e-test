@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - Cross-chain DEX LIVE royalty drill
  * (CROSS_CHAIN_ROYALTY finding B: the federation-level twin of indexer
  * integration scenario 26).
@@ -40,7 +38,7 @@
  *      100 -> 75 to the BTC maker's DOGE get_address + 25 to the royalty
  *      leg re-encoded BTC->DOGE, with a cross_chain_settlements row.
  *
- * VENUE: same as #10 (test-host 3-hub relay mesh): relay HUB1 host api.js
+ * VENUE: a 3-hub relay mesh: relay HUB1 host api.js
  * :10055 + HUB2/3 containers, BTC+DOGE regtest indexers HubDbSync-subscribed
  * to the relay, hub pubkeys staked for cross_chain on the CURRENT BTC chain.
  * Run AFTER dexDogeSetup.js. All services must run royalty-era code

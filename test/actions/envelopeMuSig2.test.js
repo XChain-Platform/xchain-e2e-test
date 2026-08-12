@@ -11,16 +11,15 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * TAPROOT ENVELOPE UNDER MUSIG2 CO-SIGNING ( §3.9)
- * spec: claude/specs/resolved/taproot-envelope-and-payload-compression.md
+ * TAPROOT ENVELOPE UNDER MUSIG2 CO-SIGNING (§3.9)
  *
  * §3.9 calls MuSig2 composition "work, not free" and names three deltas the
  * envelope needed from the shipped co-signer interface: a script-path sighash
  * over the envelope leaf for the reveal, the tap-tweaked key-path round for the
  * cancel, and the policy daemon learning to read the intended ACTION out of an
- * envelope PSBT. All three were built and proven on chain during S4, by a one-off
- * driver (claude/bin/xc990-s4-e2e.js --scenarios musig2) against a throwaway
- * venue. That driver proves a moment: nothing running on its own notices when a
+ * envelope PSBT. All three were built and proven on chain during development,
+ * by a one-off driver against a throwaway venue. That driver proves a moment:
+ * nothing running on its own notices when a
  * change to the encoder's commit builder, the co-signer's envelope role
  * classification or the decoder's attribution rule stops the composition working.
  *
@@ -103,7 +102,7 @@ async function fundAggregate(address, amount){
     }
 }
 
-describe('Taproot Envelope under MuSig2 co-signing ( §3.9)', function () {
+describe('Taproot Envelope under MuSig2 co-signing (§3.9)', function () {
     this.timeout(0)
 
     before(function (){
@@ -132,9 +131,9 @@ describe('Taproot Envelope under MuSig2 co-signing ( §3.9)', function () {
 
         const utxo = await fundAggregate(account.address, 0.05)
 
-        // ── build the pair through the deployed encoder ──────────────────────────
-        const fileName = 'xc990-musig2-' + Date.now().toString().slice(-6) + '.txt'
-        const action = 'FILE|0|' + fileName + '|text/plain| MuSig2 envelope|co-signed commit and reveal'
+        // Build the pair through the deployed encoder.
+        const fileName = 'envelope-musig2-' + Date.now().toString().slice(-6) + '.txt'
+        const action = 'FILE|0|' + fileName + '|text/plain|MuSig2 envelope|co-signed commit and reveal'
         const feeOutput = await nativeFeeHelper.getNativeFeeOutput()
 
         const built = await encoderConnector.createTx(
@@ -172,7 +171,7 @@ describe('Taproot Envelope under MuSig2 co-signing ( §3.9)', function () {
         assert(commitPsbt.txOutputs.some(o => o.script.equals(derived.output)),
             'the encoder-built commit output must be the one the co-signer derives independently')
 
-        // ── the policy daemon: real policy, real window, real fee cap ────────────
+        // The policy daemon: real policy, real window, real fee cap.
         //
         // The allow-list entry is the composition requirement §3.9 did not name, and
         // it exists because of §3.5: the native fee-destination output rides the
@@ -185,7 +184,7 @@ describe('Taproot Envelope under MuSig2 co-signing ( §3.9)', function () {
         const allowedOutputs = feeOutput ? [{ address: feeOutput.address, maxValue: feeOutput.value }] : []
         const policy = { allowedActions: new Set(['FILE']), maxPerWindow: { hours: 24, maxActions: 10 } }
 
-        const windowPath = path.join(os.tmpdir(), 'xc990-musig2-window-' + process.pid + '-' + Date.now() + '.json')
+        const windowPath = path.join(os.tmpdir(), 'envelope-musig2-window-' + process.pid + '-' + Date.now() + '.json')
         try { fs.unlinkSync(windowPath) } catch (e) { /* fresh run */ }
         const store = new WindowStore(windowPath, 24, null, { init: true })
         const daemon = new CoSigner({
@@ -238,7 +237,7 @@ describe('Taproot Envelope under MuSig2 co-signing ( §3.9)', function () {
 
         let revealTxid = null
         try {
-            // ── commit: key-path spend of the account, authorized off the leaf ───
+            // Commit: key-path spend of the account, authorized off the leaf.
             const commitRes = await client.signAll({
                 psbt: built['psbt'],
                 secretKey: agentSk,
@@ -257,7 +256,7 @@ describe('Taproot Envelope under MuSig2 co-signing ( §3.9)', function () {
             commitPsbt.setMaximumFeeRate(100000)
             const commitTx = commitPsbt.extractTransaction()
 
-            // ── reveal: script-path spend of the envelope leaf ───────────────────
+            // Reveal: script-path spend of the envelope leaf.
             const revealRes = await client.sign({
                 psbt: built['revealPsbt'],
                 secretKey: agentSk,
@@ -293,7 +292,7 @@ describe('Taproot Envelope under MuSig2 co-signing ( §3.9)', function () {
                 Buffer.from(revealPsbt.txInputs[0].hash).reverse().toString('hex'), commitTx.getId(),
                 'reveal input 0 must be the commit outpoint (§3.5)')
 
-            // ── the chain is the verifier ────────────────────────────────────────
+            // The chain is the verifier.
             await nodeConnector.broadcastTx(commitTx.toHex())
             await nodeConnector.broadcastTx(revealTx.toHex())
             console.log('   node accepted the co-signed pair: commit', commitTx.getId().slice(0, 16) + '...',
@@ -303,12 +302,12 @@ describe('Taproot Envelope under MuSig2 co-signing ( §3.9)', function () {
             try { fs.unlinkSync(windowPath) } catch (e) { /* best effort */ }
         }
 
-        // ── indexed, attributed and served ───────────────────────────────────────
+        // Indexed, attributed and served.
         const row = await indexerDatabase.waitForFile({
             txHash: revealTxid,
             source: account.address,
             name: fileName,
-            title: ' MuSig2 envelope',
+            title: 'MuSig2 envelope',
             status: 'valid'
         }, 180000)
         assert(row, 'the co-signed envelope action should be indexed')

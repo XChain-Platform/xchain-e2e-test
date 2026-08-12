@@ -27,7 +27,7 @@ const { BOOTSTRAP_XCHAIN_USD, NO_PRICE_SEED } = require('../helpers/xchainPriceC
 // Single-host stack: the indexer reads price_snapshots from its OWN db, so we seed via
 // global.indexerDatabase (the db getLatestPrice reads). FEE_DESTINATION is resolved via
 // nativeFeeHelper.discoverFeeMode() (env override, then the indexer's feeschedule RPC);
-// the old env-only reader permanently skipped this suite on normal LTC/DOGE stacks .
+// the old env-only reader permanently skipped this suite on normal LTC/DOGE stacks.
 let FEE_DEST = null
 
 async function q(sql, args){
@@ -38,7 +38,7 @@ async function q(sql, args){
 async function seedPrice(coinPair, price, referenceBlock, roundNumber){
     await q("DELETE FROM price_snapshots WHERE coin_pair = ?", [coinPair])
     // max(chain tip, wall clock) anchor; see nativeFeeLive.seedPrice (idle-chain
-    // tip lag made a tip-only anchor stale beyond the 1800s cap, ).
+    // tip lag made a tip-only anchor stale beyond the 1800s cap).
     let rows = await q("SELECT block_time FROM blocks ORDER BY block_index DESC LIMIT 1")
     let nowSec = Math.floor(Date.now() / 1000)
     let chainNow = rows.length ? Math.max(Number(rows[0].block_time), nowSec) : nowSec
@@ -63,7 +63,7 @@ async function feeAndActions(txHash){
 
 describe('Native-coin fee payment via DISPENSER expiration fee (live stack)', function () {
     before(async function () {
-        //  step 8: fixture-priced suite; unrunnable where the hub publishes
+        // Fixture-priced suite; unrunnable where the hub publishes
         // the pair (the seed would shadow every derived round).
         if (NO_PRICE_SEED) this.skip()
         // Throws on LTC/DOGE when unresolvable; skips only on gas-mode stacks.

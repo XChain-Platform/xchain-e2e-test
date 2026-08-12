@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * Phase 4 drill: LLM attestation outage resilience (regtest, 3 hubs).
  *
  * Exercises the 2026-07-09 outage-resilience slice end to end against a
@@ -48,14 +47,10 @@
  *      request must simply expire + refund. Documents the economic
  *      backstop (missed_count) rather than a liveness rescue.
  *
- * Venue: devhost BTC regtest stack, freshly reset (clean validator
- * set), run via ~/attest-drill-btc.sh. Needs HUB_CLAUDE_CONFIG_DIR (a
- * `claude login`-populated dir) + the claude CLI on PATH; the drill
- * breaks/restores creds by manipulating process.env (all three hubs run
- * in this process and resolve creds per call).
- *
- * Spec: claude/reports/specs/2026-05-24_external-attestation-framework.md §8.2 Phase 4
- * Report: claude/reports/2026-07-09_attestation-llm-outage-resilience.md
+ * Venue: a BTC regtest stack, freshly reset (clean validator set). Needs
+ * HUB_CLAUDE_CONFIG_DIR (a `claude login`-populated dir) + the claude CLI
+ * on PATH; the drill breaks/restores creds by manipulating process.env
+ * (all three hubs run in this process and resolve creds per call).
  ********************************************************************/
 
 const dotenv = require('dotenv')

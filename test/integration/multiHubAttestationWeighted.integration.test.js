@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * L2 integration: STAKE_WEIGHTED_QUORUM (WI-1) for the attestation capability:
  * responsible-set SOURCE-dedup (Suite A2 of the regtest e2e plan).
  *
@@ -56,8 +55,7 @@
  *   - NEGATIVE (weighted, 2 sources < REDUNDANCY): nothing finalizes on any hub,
  *     because dedup leaves too few distinct sources to reach the gate.
  *
- * Spec: claude/reports/2026-06-14_cross-chain-quorum-security-spec.md §3.5, §3.7,
- * §10; plan §A2.
+ * Spec: the cross-chain quorum security spec §3.5, §3.7, §10; plan §A2.
  ********************************************************************/
 
 'use strict';

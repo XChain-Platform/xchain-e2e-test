@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * E2E test: Phase B live PBFT through MultiValidatorHub
  *
  * Drives an ATTEST v0 (request)(redundancy=3) end-to-end through three
@@ -31,8 +30,6 @@
  * Unlike test/actions/attestation.test.js (which uses MockAttestationValidator
  * and broadcasts a hand-signed response, bypassing the hub), this test
  * exercises the full validator-side pipeline.
- *
- * Spec: claude/reports/specs/2026-05-24_external-attestation-framework.md §16 Phase 3
  *
  ********************************************************************/
 

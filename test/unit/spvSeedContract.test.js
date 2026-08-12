@@ -8,9 +8,7 @@
  * This file is part of XChain Platform. Licensed under the GNU Affero
  * General Public License v3.0 or later; see LICENSE.md.
  *
- **********************************************************************
- *
- * bin/contracts/spvSeed.js under the REAL VM .
+ * bin/contracts/spvSeed.js under the REAL VM.
  *
  * WHY THIS EXISTS. That contract's whole job is to put a known, shaped key set
  * onto a live chain before its armed `contract_state_root` height, so the
@@ -133,7 +131,7 @@ function applied(state, res) {
 // Skipping on a missing VM is legitimate (the isolate binary is Linux-only), but
 // skipping on a missing gas schedule would hide a broken resolve, so that is a
 // failure instead.
-(XChainVM ? describe : describe.skip)('spvSeed contract ( arming seed)', function () {
+(XChainVM ? describe : describe.skip)('spvSeed contract (arming seed)', function () {
 
     it('resolved the real BTC gas schedule', function () {
         assert.ok(GAS_SCHEDULE, 'could not resolve xchain-indexer/src/coins/BTC.js GAS_SCHEDULE');

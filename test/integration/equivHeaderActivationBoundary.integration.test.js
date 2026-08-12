@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * L2 integration: EQUIV_HEADER (WI-2 bump 2) ACTIVATION BOUNDARY.
  *
  * Phase A step A4 (the live flag-day no-fork drill) of the EQUIV signed-header
@@ -56,8 +55,8 @@
  * SKIPS with a clear message when the height is still 0 so it never silently passes
  * as a wrapped-only test.
  *
- * Spec: claude/reports/2026-06-14_cross-chain-quorum-security-spec.md §4.1.1, §5,
- * §9.1; plan ~/.claude/plans/vectorized-crunching-cascade.md Phase A / A4.
+ * Spec: the cross-chain quorum security spec §4.1.1, §5, §9.1; Phase A / A4 of
+ * the EQUIV rollout plan.
  ********************************************************************/
 
 'use strict';

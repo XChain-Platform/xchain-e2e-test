@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * L2 integration: cross-chain DEX match finalization across a real
  * multi-validator hub federation.
  *

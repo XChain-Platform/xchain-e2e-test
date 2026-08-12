@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// , round 3. SEED_SENTINEL_ROUNDS is what clearSeedSentinels deletes, so a
+// SEED_SENTINEL_ROUNDS is what clearSeedSentinels deletes, so a
 // seed site whose round is missing from it is not merely undocumented: the
 // flagged run prints "cleared N leftover rows", the operator reads that as the
 // venue being clean, and the missing round goes on outranking every derived round
@@ -95,7 +95,7 @@ function seedSites(){
         .filter(s => s.rounds.size)
 }
 
-describe('seed-sentinel coverage ', () => {
+describe('seed-sentinel coverage', () => {
 
     it('every synthetic round the suite seeds is one clearSeedSentinels deletes', () => {
         const known   = new Set(SEED_SENTINEL_ROUNDS)
@@ -123,7 +123,7 @@ describe('seed-sentinel coverage ', () => {
     })
 
     it('the six dispenser FIAT rounds found live on BTC regtest are covered', () => {
-        // Regression pin for the exact rows this round of  measured on the
+        // Regression pin for the exact rows measured on the
         // venue. Named individually because the general assertion above would go
         // green again if someone deleted the dispenser cases rather than the rows.
         for (const round of [999000001, 999000002, 999000003, 999000004, 999000005, 999000006])

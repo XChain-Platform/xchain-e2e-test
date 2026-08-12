@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - SDK-driven trading / DEX actions
  *
  * ORDER (token-for-token) and DISPENSER (token-for-native-coin) driven

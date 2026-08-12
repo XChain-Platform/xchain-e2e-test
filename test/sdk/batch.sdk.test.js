@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - SDK BatchBuilder (on-chain)
  *
  * The SDK's fluent BatchBuilder (sdk.batch().send().mint().build()) has only

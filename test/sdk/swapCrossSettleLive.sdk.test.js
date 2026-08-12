@@ -10,9 +10,7 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
- * XChain Platform E2E - CROSS-COIN SWAP live settlement .
+ * XChain Platform E2E - CROSS-COIN SWAP live settlement.
  *
  * The cross-coin variant swap.sdk.test.js defers: that suite drives the
  * same-chain SWAP path (GIVE_COIN == GET_COIN, auto-matched by the local
@@ -138,7 +136,7 @@ async function btcSwapStatus(swapActionIndex) {
 const MATCH_REF_WHERE = "((a_chain='BTC' AND a_action_index = ?) OR (b_chain='BTC' AND b_action_index = ?))";
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-describe('[sdk] cross-coin SWAP live settlement ', function () {
+describe('[sdk] cross-coin SWAP live settlement', function () {
     this.timeout(0);
 
     let sdk, maker, btcSwapIndex, dogeRecv;

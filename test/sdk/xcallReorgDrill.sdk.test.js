@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - XCALL target-chain (Y) reorg replay drill
  *
  * Reorgs DOGE below an executed XEXEC while the execution is still at

@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * P3(b): LIVE multi-chain parity: indexer-DB digest capture.
  *
  * Dumps the WHOLE live indexer database (every table, every row) plus the

@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * L2 integration - oracle determinism across a multi-validator hub set
  *
  * Boots N=4 in-process XChainHub validators on a disposable DB, gives each its
@@ -115,7 +114,7 @@ describe('MultiValidatorHub - oracle determinism (L2)', function () {
     });
 
     it('every hub signs the IDENTICAL canonical payload, and all signatures cross-verify', function () {
-        const round = 100, ts = 1700000000, btcHeight = 799000;  // #4232: height is in the signed canonical
+        const round = 100, ts = 1700000000, btcHeight = 799000;  // the BTC block height is part of the signed canonical
         const signed = mvh.hubs.map((h, i) => {
             const agg = h._oracleConsensus._aggregateAll(subsFor(ORDERS[i]));
             return {

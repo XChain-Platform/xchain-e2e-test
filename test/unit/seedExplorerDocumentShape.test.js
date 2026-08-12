@@ -8,9 +8,7 @@
  * This file is part of XChain Platform. Licensed under the GNU Affero
  * General Public License v3.0 or later; see LICENSE.md.
  *
- **********************************************************************
- *
- * seed-contract-state: the explorer returns DOCUMENTS, not scalars .
+ * seed-contract-state: the explorer returns DOCUMENTS, not scalars.
  *
  * WHY THIS EXISTS. bin/seed-contract-state.js has been bitten twice by one
  * mistake wearing two faces:
@@ -75,7 +73,7 @@ const STATUS_DOC = {
 const TXID = 'b'.repeat(64);
 const quiet = () => {};
 
-describe('seed-contract-state explorerField: documents, not scalars ', function () {
+describe('seed-contract-state explorerField: documents, not scalars', function () {
 
     describe('the token document', function () {
 
@@ -257,8 +255,7 @@ describe('seed-contract-state explorerField: documents, not scalars ', function 
         });
     });
 
-    // -----------------------------------------------------------------------
-    // The falsification the ledger asks for ( leg b), driven off a REAL
+    // The falsification this guards against, driven off a REAL
     // CONFIRMATION_TIMEOUT rather than a hand-written one.
     //
     // A hand-made error is a mock of the SDK's contract, and the recovery is

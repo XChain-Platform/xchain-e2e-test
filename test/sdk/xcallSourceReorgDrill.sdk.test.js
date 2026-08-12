@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - XCALL SOURCE-chain (X) reorg retraction drill
  *
  * Companion to xcallReorgDrill.sdk.test.js (which reorgs the TARGET chain

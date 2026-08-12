@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - cross-CHAIN contract calls (emit.crossExecute)
  *
  * Live relay pipeline against a TWO-chain stack: this suite runs under the

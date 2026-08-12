@@ -8,9 +8,9 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 //
-// Anti-reseed guard for XCHAIN/USD (, spec §10 step 8).
+// Anti-reseed guard for XCHAIN/USD (spec §10 step 8).
 //
-// THE BUG THIS EXISTS TO PREVENT IS THE ORIGINAL ONE.  was a launch blocker
+// THE BUG THIS EXISTS TO PREVENT IS THE ORIGINAL ONE: a launch blocker
 // that survived every green native-fee run because the suites hand-seeded
 // XCHAIN/USD = 1.00, a value no producer has ever emitted. The suites were testing
 // against data production does not produce, so the missing producer was invisible.
@@ -22,8 +22,8 @@
 //   1. Where seeding is allowed (a venue whose hub does NOT publish the pair),
 //      the seeded VALUE must be the shared bootstrap constant - the value a real
 //      hub publishes.
-//   2. TIGHTENED 2026-07-27, now that the validator venue exists (devhost BTC
-//      regtest since 2026-07-26): every seed site must be SUPPRESSIBLE via
+//   2. TIGHTENED 2026-07-27, now that the validator venue exists (a BTC
+//      regtest venue, live since 2026-07-26): every seed site must be SUPPRESSIBLE via
 //      XCHAIN_E2E_NO_PRICE_SEED, because on a publishing venue one unsuppressed
 //      seed outranks every derived round (getLatestPrice takes the highest
 //      round_number and seeds use synthetic rounds in the 990000+ space) - the
@@ -57,7 +57,7 @@ function walk(dir, out = []) {
     return out
 }
 
-describe('XCHAIN/USD seed guard ( step 8)', function () {
+describe('XCHAIN/USD seed guard', function () {
 
     const files = walk(TEST_ROOT)
 

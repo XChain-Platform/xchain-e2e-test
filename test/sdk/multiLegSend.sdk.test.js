@@ -10,13 +10,11 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - SDK-driven multi-leg SEND
  *
  * SEND v1/v2/v3 repeat AMOUNT|DESTINATION (v1), TICK|AMOUNT|DESTINATION
  * (v2) and TICK|AMOUNT|DESTINATION|MEMO (v3) on the wire. The SDK builds
- * these from a `legs` array; before  it walked the format list
+ * these from a `legs` array; previously it walked the format list
  * against a flat field map and every repetition echoed leg 1, producing a
  * VALID action that paid one recipient twice.
  *
@@ -49,14 +47,14 @@ function newRecipient(sdk) {
 }
 
 // Every destination segment appears exactly once in the action string: the
-// pre- serializer emitted leg 1's destination in every repetition.
+// previous serializer emitted leg 1's destination in every repetition.
 function assertDistinctLegs(actionString, addresses) {
     const segs = actionString.split('|');
     for (const address of addresses)
         expect(segs.filter(s => s === address).length, address + ' appears once in ' + actionString).to.equal(1);
 }
 
-describe('[sdk] multi-leg SEND ', function () {
+describe('[sdk] multi-leg SEND', function () {
     this.timeout(0);
 
     let sdk, issuer, tickA, tickB;

@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - VOTE Phase 3 (anti-whale weight modes + delegation)
  *
  * Drives the Phase 3 governance features end-to-end and asserts the frozen

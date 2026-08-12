@@ -8,9 +8,7 @@
  * This file is part of XChain Platform. Licensed under the GNU Affero
  * General Public License v3.0 or later; see LICENSE.md.
  *
- **********************************************************************
- *
- * Anchor-reward re-derivation (#5311): cross-service XANCPUB parity.
+ * Anchor-reward re-derivation: cross-service XANCPUB parity.
  *
  * At/above the ANCHOR_REWARD flag-day the validator anchor reward is no longer
  * pushed by the hub but DERIVED by every indexer from the on-chain ANCHOR v4/v5
@@ -35,7 +33,7 @@
  * anchor_reward_activation copies, this also catches drift in either of those.
  *
  * Spec: xchain-documentation/protocol/actions/ANCHOR.md (Publisher-attestation
- * canonical); claude/reports/2026-06-24-anchor-reward-rederivation-handover.md.
+ * canonical).
  ********************************************************************/
 
 'use strict';
@@ -71,7 +69,7 @@ function fixtures(net, snapshotBlock) {
     return { cp, d, PUBLISHER };
 }
 
-describe('#5311: ANCHOR_REWARD (XANCPUB) cross-service parity', function () {
+describe('ANCHOR_REWARD (XANCPUB) cross-service parity', function () {
 
     it('the flag-day map + frozen amount are byte-equal across the twins and the canonical SoT', function () {
         const map = protocolConstants.ANCHOR_REWARD_ACTIVATION;
@@ -143,11 +141,11 @@ describe('#5311: ANCHOR_REWARD (XANCPUB) cross-service parity', function () {
     });
 });
 
-// : the ARCHIVE leg of the same contract. The archive XANCPUB canonical is built
+// The ARCHIVE leg of the same contract. The archive XANCPUB canonical is built
 // inline in the hub producer (_archiveAttestationCanonical) and the indexer verifier
 // (_rewardCanonical, FORMAT 6); the ARCHIVE_REWARD map + frozen amount live in the same
 // twin modules + the canonical SoT. Same fork argument, same guards.
-describe(': ARCHIVE_REWARD (archive XANCPUB) cross-service parity', function () {
+describe('ARCHIVE_REWARD (archive XANCPUB) cross-service parity', function () {
 
     function hubArchXancpub(cp, batchSeq, publisher) {
         return StateAnchorPublisher.prototype._archiveAttestationCanonical.call({}, cp, batchSeq, publisher);

@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - cross-chain call RESULT SCENARIOS
  *
  * Milestone 2 of the XCALL campaign: drives a REAL crossCallable target

@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// . The component docs published an "ACTION test suites" figure that was
+// The component docs published an "ACTION test suites" figure that was
 // counted by hand once and then went stale: two actions (COLLECT and PRICE)
 // gained suites and the number never moved, and nobody could re-derive it
 // because "suite" had never been defined. The operator settled the definition
@@ -42,7 +42,7 @@ function readDocs(file) {
     return fs.readFileSync(path.join(DOCS_E2E, file), 'utf8')
 }
 
-describe('published ACTION test-suite count ', () => {
+describe('published ACTION test-suite count', () => {
 
     const recount = counter.countActionSuites()
 

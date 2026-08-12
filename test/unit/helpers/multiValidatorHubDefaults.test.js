@@ -10,8 +10,7 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- * Unit: MultiValidatorHub baked env defaults 
+ * Unit: MultiValidatorHub baked env defaults
  *
  * The federation harness previously passed P2P_MAX_CONNECTIONS_PER_IP
  * straight through from the environment; unset, PeerManager's production
@@ -25,7 +24,7 @@
 const assert = require('assert');
 const { MultiValidatorHub } = require('../../helpers/multiValidatorHubHelper.js');
 
-describe('MultiValidatorHub baked env defaults ', function () {
+describe('MultiValidatorHub baked env defaults', function () {
 
     let savedEnv;
     beforeEach(function () { savedEnv = process.env.P2P_MAX_CONNECTIONS_PER_IP; });

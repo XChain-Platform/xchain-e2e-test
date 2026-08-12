@@ -19,8 +19,6 @@
  * MockMaliciousValidator by monkey-patching individual hub instances (the same
  * technique as the seeded-snapshot fixture) rather than adding hooks to
  * PeerManager. Each injector returns a restore() that undoes the fault.
- *
- * Spec: claude/reports/specs/2026-05-30_validator-test-spec.md §6 (byzantine).
  */
 
 // Crash / partition a validator: it stops reacting to ALL consensus messages,
@@ -54,7 +52,7 @@ function silenceDexValidator(hub) {
 // leaving its config/DEX consensus untouched.
 //
 // Resolves the oracle consensus from either bring-up path: a test's attachOracle()
-// helper (hub._wtOracle) or the harness's startOracle: true toggle , which
+// helper (hub._wtOracle) or the harness's startOracle: true toggle, which
 // leaves it on hub.oracleConsensus.
 function silenceOracleValidator(hub) {
     const oc = hub._wtOracle || hub.oracleConsensus;

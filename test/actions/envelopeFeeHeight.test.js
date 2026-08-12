@@ -11,8 +11,7 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * TAPROOT ENVELOPE FEE LIFECYCLE ( §3.5)
- * spec: claude/specs/resolved/taproot-envelope-and-payload-compression.md
+ * TAPROOT ENVELOPE FEE LIFECYCLE (§3.5)
  *
  * §3.5 makes two claims about money that no other envelope test can reach:
  *
@@ -34,10 +33,10 @@
  * commit carrying no fee output must be REJECTED. Together they say the fee check
  * is live on this lane and reaches exactly where §3.5 says it reaches.
  *
- * The one-off that first proved this (claude/bin/xc990-s4-e2e.js --scenarios
- * feeheight) read the decoder's own transaction_outputs table on a throwaway
- * venue. This asserts the same rule one layer out, through the indexer's verdict
- * and its fees row, which is where a regression would actually hurt.
+ * The one-off that first proved this read the decoder's own transaction_outputs
+ * table on a throwaway venue. This asserts the same rule one layer out, through
+ * the indexer's verdict and its fees row, which is where a regression would
+ * actually hurt.
  *
  * BTC and LTC only: DOGE has no segwit, so there is no envelope to fund.
  ********************************************************************/
@@ -118,7 +117,7 @@ async function feeRowFor(txHash){
 }
 
 function issueAction(tick){
-    return 'ISSUE|0|' + tick + '|1000|1000|0| envelope fee lifecycle|1000||||||||||||||||||'
+    return 'ISSUE|0|' + tick + '|1000|1000|0|envelope fee lifecycle|1000||||||||||||||||||'
 }
 
 function freshTick(prefix, address){
@@ -150,7 +149,7 @@ async function publishSplit(pair){
     return { commitHeight, revealHeight }
 }
 
-describe('Taproot Envelope fee lifecycle across a block gap ( §3.5)', function () {
+describe('Taproot Envelope fee lifecycle across a block gap (§3.5)', function () {
     this.timeout(0)
 
     before(async function (){
@@ -267,7 +266,7 @@ describe('Taproot Envelope fee lifecycle across a block gap ( §3.5)', function 
             await regtestMinerConnector.generateBlocks(1)
             commitHeight = await nodeConnector.getBlockCount()
 
-            // ── the requirement moves, between the two halves ────────────────────
+            // The requirement moves, between the two halves.
             // Seeded as an ADDITIONAL row at a higher round rather than a replacement:
             // getLatestPrice takes the highest round a block may see, so this is a new
             // quote arriving, which is what a real price move looks like.

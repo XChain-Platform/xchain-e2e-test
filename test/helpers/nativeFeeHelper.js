@@ -32,7 +32,7 @@ const PLACEHOLDER = 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'
 // here and that suite's inline re-seed never disagree: XCHAIN at the production
 // bootstrap ($2, see xchainPriceConstants), coin $100,000.
 //
-//  step 8: this was 1.00 for the whole pre-derivation era, which is a value no
+// This was 1.00 for the whole pre-derivation era, which is a value no
 // producer has ever emitted or ever will. Seeding the bootstrap instead means these
 // suites assert against what a real hub publishes today.
 const { BOOTSTRAP_XCHAIN_USD, NO_PRICE_SEED } = require('./xchainPriceConstants')
@@ -42,8 +42,8 @@ const COIN_USD   = '100000.00000000'
 // Flat native fee output (satoshis). With the prices above, the indexer's
 // minAcceptable for an action costing X XCHAIN is 0.95 * X * 2 / 100000 coin;
 // 50000 sats (0.0005 coin) clears the min for any action up to ~26 XCHAIN.
-// (That headroom halved when  step 8 moved the seed from the 1.00-era value
-// to the $2 bootstrap. The largest action any e2e composes is a full-size contract
+// (That headroom halved when the seed moved from the 1.00-era value to the $2
+// bootstrap. The largest action any e2e composes is a full-size contract
 // deploy at well under 2 XCHAIN, so 26 is still an order of magnitude of slack; if
 // a future action approaches it, raise this rather than lowering the price.)
 // Matches nativeFeeLive's proven output and is negligible against the ~1-coin
@@ -56,7 +56,7 @@ const FLAT_FEE_SATS = 50000
 // Lowered to 2min: at 10min a long full-suite run (or a test that perturbs the
 // pair, e.g. the FIAT dispenser) could leave the global snapshot stale for up to
 // 10min before the next fee action restored it, hanging a mid-run fee-bearing
-// action (observed on the LTC full ACTION sweep, ).
+// action (observed on the LTC full ACTION sweep).
 const SEED_REFRESH_MS = 2 * 60 * 1000
 
 // Synthetic round numbers for the seeded snapshots, kept clear of the values
@@ -66,7 +66,7 @@ const SEED_REFRESH_MS = 2 * 60 * 1000
 // visible the wall-clock one (the fresher of the two) wins. See seedGlobalPrices.
 // Any new sentinel here must also join SEED_SENTINEL_ROUNDS in
 // xchainPriceConstants, which is both what nativeFeeOracleLive asserts against
-// and what clearSeedSentinels retracts on a publishing venue .
+// and what clearSeedSentinels retracts on a publishing venue.
 const XCHAIN_ROUND     = 888100001
 const COIN_ROUND       = 888100002
 const XCHAIN_ROUND_NOW = 888100011
@@ -112,13 +112,13 @@ function resolveFeeDestination(){
 // No-op only when the last seed is still fresh (unless force=true), or when the
 // venue derives the pair itself (NO_PRICE_SEED below).
 async function seedGlobalPrices(force){
-    //  step 8, the full de-seed. On a venue whose own hub publishes
-    // XCHAIN/USD (a price-capability oracle validator), seeding it is the defect
-    // this item exists to remove rather than a convenience: the seed carries a
-    // synthetic round number far above any the hub will ever reach, and
-    // getLatestPrice picks the highest round, so ONE seeded row silently
-    // shadows every derived round and a broken derivation still reads green.
-    // Force does not override this - a forced re-seed is still a seed.
+    // The full de-seed. On a venue whose own hub publishes XCHAIN/USD (a
+    // price-capability oracle validator), seeding it is a defect rather than a
+    // convenience: the seed carries a synthetic round number far above any the
+    // hub will ever reach, and getLatestPrice picks the highest round, so ONE
+    // seeded row silently shadows every derived round and a broken derivation
+    // still reads green. Force does not override this - a forced re-seed is
+    // still a seed.
     //
     // Deliberately opt-IN. Everywhere else the seed is what makes LTC/DOGE
     // payable at all, so defaulting this on would red every native-fee suite on
@@ -129,7 +129,7 @@ async function seedGlobalPrices(force){
             _noSeedAnnounced = true
             console.log('nativeFeeHelper: XCHAIN_E2E_NO_PRICE_SEED=1; not seeding oracle prices ' +
                 '(the venue is expected to publish them itself)')
-            // . Suppressing the seed is necessary but NOT sufficient: rows a
+            // Suppressing the seed is necessary but NOT sufficient: rows a
             // pre-flag run already wrote carry sentinel round numbers far above any
             // the hub reaches, and getLatestPrice orders by round DESC, so they go
             // on shadowing every derived round and the venue keeps pricing off a
@@ -141,9 +141,9 @@ async function seedGlobalPrices(force){
                 const removed = await priceSnapshotHelper.clearSeedSentinels()
                 if (removed > 0)
                     console.log('nativeFeeHelper: cleared ' + removed + ' leftover seed-sentinel ' +
-                        'price_snapshots row(s) that would have shadowed the derived rounds ')
+                        'price_snapshots row(s) that would have shadowed the derived rounds')
             } catch (e) {
-                console.log('nativeFeeHelper: WARN could not clear leftover seed-sentinel rows : ' +
+                console.log('nativeFeeHelper: WARN could not clear leftover seed-sentinel rows: ' +
                     (e && e.message ? e.message : e))
             }
         }
@@ -189,7 +189,7 @@ async function seedGlobalPrices(force){
     //     rejects `no current oracle price`, permanently, until someone moves the
     //     node's clock. Found wedging the whole LTC stack this way (blocks 354s
     //     behind wall clock), which is what kept the BET family BTC-only.
-    //   - idle chain: the tip lags wall clock (test-host's DOGE tip ran ~6300s
+    //   - idle chain: the tip lags wall clock (one DOGE venue's tip ran ~6300s
     //     behind) but the miner is NOT pinned, so new actions land in blocks
     //     stamped ~now and a tip-anchored snapshot is instantly stale. (C4 Bug 2.)
     //   - sustained mining / post-jump: block timestamps lead wall clock, so the
@@ -200,7 +200,7 @@ async function seedGlobalPrices(force){
     // chain has tip >= now so the single tip row is written.
     // clearPair first so the only finalized rows for the pair are the ones below.
     //
-    // , and read this before pointing any new test at {COIN}/USD: the clear
+    // Read this before pointing any new test at {COIN}/USD: the clear
     // below DELETES the whole pair, and this runs from getNativeFeeOutput(), which
     // every ACTION tx passes through. So it fires between an arbitrary test's seed
     // and that test's later assertions, throttled to once per SEED_REFRESH_MS,
@@ -217,8 +217,8 @@ async function seedGlobalPrices(force){
     const wallTime  = Math.floor(Date.now() / 1000)
 
     // Both pairs stay spelled out at the call sites rather than hoisted into a
-    // variable: the  isolation guard scans this file for the clearPair set
-    // to prove the seed's blast radius is still these two pairs, and it cannot
+    // variable: an isolation guard scans this file for the clearPair set to
+    // prove the seed's blast radius is still these two pairs, and it cannot
     // resolve an indirection.
     await priceSnapshotHelper.clearPair('XCHAIN/USD')
     await priceSnapshotHelper.clearPair(global.COIN_CODE + '/USD')
@@ -237,7 +237,7 @@ async function seedGlobalPrices(force){
         (wallTime > chainTime ? ', wall_time=' + wallTime : '') + ')')
 }
 
-// Feeschedule-readiness retry budget for fee chains . On a freshly
+// Feeschedule-readiness retry budget for fee chains. On a freshly
 // reset stack the first suite's beforeAll can outrun the indexer: `feeschedule`
 // answers `{error: 'indexer not ready'}` (or refuses the connection) for a few
 // seconds until indexerDb/actions are wired, and the old single-shot discovery

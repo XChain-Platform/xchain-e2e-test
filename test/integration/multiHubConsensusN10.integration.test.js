@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * Track C.2: N=10 validator-scale probe (config-change PBFT)
  *
  * The federation-sensitive engines are already proven at N=4 (the BFT floor:

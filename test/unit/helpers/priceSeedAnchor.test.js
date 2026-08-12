@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// . The usable window for a seeded price snapshot is bounded on BOTH sides:
+// The usable window for a seeded price snapshot is bounded on BOTH sides:
 //
 //     S <= B <= S + ORACLE_MAX_PRICE_AGE_SECONDS
 //
@@ -55,7 +55,7 @@ function loadHelper({ tipBlockTime, affectedRows = 0 } = {}){
     return { helper, seen }
 }
 
-describe('price seed anchoring ', () => {
+describe('price seed anchoring', () => {
 
     let savedIndexerDb
     beforeEach(() => { savedIndexerDb = global.indexerDatabase })

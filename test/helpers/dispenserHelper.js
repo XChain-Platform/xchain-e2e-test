@@ -48,7 +48,7 @@ module.exports = {
             +"|"+expiration+"|"+allowList+"|"+blockList+"|"+memo
 
         console.log("Creating and sending DISPENSER V0 tx...")
-        // customOutputs carries the  oracle usage fee output when the dispenser
+        // customOutputs carries the oracle usage fee output when the dispenser
         // names an ORACLE_ADDRESS whose operator charges a fee.
         let txHash = await transactionHelper.createAndSendTransaction(
             addressInfo, dispenserMessage, null, Array.isArray(customOutputs) ? customOutputs : [])
@@ -62,7 +62,7 @@ module.exports = {
             fiatCode: fiatCode, fiatAmount: fiatAmount,
             expiration: expiration, allowList: allowList,
             blockList: blockList, memo: memo,
-            // expectedStatus lets a caller wait for a REJECTED create ( oracle
+            // expectedStatus lets a caller wait for a REJECTED create (oracle
             // fee): waiting on "valid" would just time out.
             status: expectedStatus || "valid"
         })

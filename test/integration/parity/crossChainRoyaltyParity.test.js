@@ -8,7 +8,6 @@
  * This file is part of XChain Platform. Licensed under the GNU Affero
  * General Public License v3.0 or later; see LICENSE.md.
  *
- **********************************************************************
  * Cross-chain royalty (finding B) cross-service parity.
  *
  * The CROSS_CHAIN_ROYALTY flag-day gates whether the validator-signed XMATCH
@@ -24,7 +23,6 @@
  * agreement, and canonical parity with legs present, legs absent, and below the
  * flag-day (legacy bytes, regression-safe).
  *
- * Design: claude/reports/2026-07-07_cross-chain-royalty-design.md
  ********************************************************************/
 
 'use strict';

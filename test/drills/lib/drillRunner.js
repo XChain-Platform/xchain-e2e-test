@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * Launches and drives the drill validators.
  *
  * Local and remote are the same code path: a local node is `node drillNode.js`

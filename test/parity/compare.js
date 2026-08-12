@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * P3(b): LIVE multi-chain parity. The PURE comparison over digest.js
  * artifacts. Two tiers:
  *

@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - BET latch atomicity and idempotence (spec §12 E17)
  *
  * The `closed` latch is the one BET write that mutates a row created in an
@@ -69,7 +67,7 @@
  *      re-processed rather than skipped
  *   4. `npm run test:sdk:bet-latch`
  *
- * Two things that surprised on the first live run (devhost BTC regtest,
+ * Two things that surprised on the first live run (BTC regtest,
  * 2026-07-26) and will surprise the next operator:
  *   - A graceful `docker restart` proves NOTHING here. SIGTERM lets the in-flight
  *     block commit, so the indexer resumes at the next block and no replay

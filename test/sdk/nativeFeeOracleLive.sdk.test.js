@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - native-coin fee against a LIVE price oracle feed
  * (TEST-CAMPAIGN Track C, native-fee follow-up #3).
  *
@@ -41,9 +39,7 @@
  *      client quote, on-chain validator, and dry-run all priced off the ONE
  *      live oracle row.
  *
- * VENUE (THE HARD PART - see claude/reports/launch/test-campaign/
- * federation-live-venue-handover.md and the plan
- * ~/.claude/plans/imperative-drifting-quasar.md):
+ * VENUE (THE HARD PART):
  *   - DOGE regtest with a validator-mode relay hub running the ORACLE engine
  *     (ORACLE_MIN_SUBMISSIONS=1 single-node self-finalize, a SHORT
  *     ORACLE_ROUND_INTERVAL, BTC_INDEXER_API_URL for the chain-tip anchor) so it
@@ -86,7 +82,7 @@ const HUB_DB_NAME = process.env.HUB_DB_NAME || 'XChain_Hub';
 
 // XCHAIN/USD has no pre-launch market, so it is a configured sidecar in the hub
 // DB. The value is not asserted here, only the path, but it is taken from the
-// shared bootstrap constant anyway ( step 8): a suite seeding a price no
+// shared bootstrap constant anyway: a suite seeding a price no
 // producer emits is how the missing-pair bug stayed invisible, and "the value does
 // not matter here" is exactly the reasoning that let 1.00 spread across the suite.
 // round 990001 is the agreed sidecar round; the test asserts the action's
@@ -98,7 +94,7 @@ const XCHAIN_SIDECAR_RND = 990001;
 // Known out-of-band seed round numbers across the suite (nativeFeeHelper,
 // dexDogeSetup, nativeFeeLive, nativeFeeDispenser). The validated action's
 // oracle_round must be NONE of these - i.e. it came from the live oracle.
-// : the list itself now lives in xchainPriceConstants, so this assertion
+// The list itself now lives in xchainPriceConstants, so this assertion
 // and the code that clears the rows cannot drift apart.
 const SEED_SENTINELS = new Set(SEED_SENTINEL_ROUNDS);
 
@@ -163,7 +159,7 @@ describe('native-coin fee against a LIVE price oracle feed (DOGE)', function () 
     let liveDogeBlock;    // DOGE block index the headline ISSUE was in
 
     before(async function () {
-        //  step 8: the XCHAIN/USD sidecar below is a hand-seed into the hub
+        // The XCHAIN/USD sidecar below is a hand-seed into the hub
         // DB; on a venue whose hub derives the pair it would shadow every real
         // round. This suite's point is the LIVE DOGE/USD half, so on a publishing
         // venue the derivation suite covers the whole path instead.

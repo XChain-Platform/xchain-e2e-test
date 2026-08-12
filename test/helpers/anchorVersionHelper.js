@@ -30,8 +30,8 @@
  * On regtest both reward flag-days are live from genesis, so the SAME suite
  * legitimately emits v0/v1 on one venue and v5/v6 on another purely because the
  * hub resolved a different snapshot_block: a hardcoded v0 assert false-fails on
- * a venue whose BTC tip sits past the thresholds (the  A2 drill, where the
- * on-chain anchor was proven valid while the assert said otherwise).
+ * a venue whose BTC tip sits past the thresholds (as observed in one drill,
+ * where the on-chain anchor was proven valid while the assert said otherwise).
  *
  * The attestation legs are LIVENESS-SAFE in the publisher: a degraded round
  * (short quorum, timeout, or a hub that is not in the snapshot's oracle_publish

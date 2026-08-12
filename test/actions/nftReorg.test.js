@@ -100,7 +100,6 @@ describe('NFT Reorg: a collection child issuance rolls back across an on-chain r
         while ((await tip()) < (await nodeConnector.getBlockCount()) && settle++ < 60) { await sleep(1000) }
         console.log('   indexer tip', await tip(), 'node tip', await nodeConnector.getBlockCount())
 
-        // ── Reorg out the CHILD block ──
         await regtestMinerConnector.pauseMining()
         try {
             const tipBefore = await nodeConnector.getBlockCount()

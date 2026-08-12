@@ -8,8 +8,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 //
-// Taproot envelope + payload compression (,
-// claude/specs/resolved/taproot-envelope-and-payload-compression.md).
+// Taproot envelope + payload compression.
 //
 // Everything here reads the envelope back out of the bytes that were actually
 // broadcast rather than out of what the encoder said it built: the grammar is

@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain E2E Performance Collector
  *
  * Global singleton that collects performance metrics during test runs.

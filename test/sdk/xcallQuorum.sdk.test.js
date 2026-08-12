@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - cross-chain call 2f+1 QUORUM fault drills
  *
  * Against a standing 3-validator hub federation (N=3 → quorum 2, all three

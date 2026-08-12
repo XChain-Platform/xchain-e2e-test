@@ -10,10 +10,8 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
- * XChain Platform E2E - CROSS-CHAIN ATTESTATION RELAY LOOP ( / 
- * Phase 5, spec §12).
+ * XChain Platform E2E - CROSS-CHAIN ATTESTATION RELAY LOOP
+ * (Phase 5, spec §12).
  *
  * Drives the whole §12 relay loop on a live multi-chain regtest venue:
  *
@@ -45,7 +43,7 @@
  * verdict is the deployed indexer's.
  *
  * VENUE (a standard multi-coin `xchain-node` regtest stack):
- *   - BTC + LTC regtest, both indexers carrying the  relay code
+ *   - BTC + LTC regtest, both indexers carrying the attestation relay code
  *     (src/attest_relay_activation.js present). Both gates are genesis-active on
  *     regtest (ATTEST_RELAY_ACTIVATION regtest: 0, ATTEST_RELAY_ORIGIN regtest:
  *     0), so "gates forced active" needs no override here.

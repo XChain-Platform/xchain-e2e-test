@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - SDK-driven VOTE (token-weighted governance)
  *
  * Drives the Phase 1 VOTE action end-to-end through the live regtest

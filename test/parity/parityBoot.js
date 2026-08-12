@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * P3(b): deterministic bootstrap, a TRIMMED replacement for
  * test/initialCheck.test.js (use as the mocha --require for the parity suite).
  *

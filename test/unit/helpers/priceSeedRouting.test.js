@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// . The two price helpers seed DIFFERENTLY on purpose, and the asymmetry is
+// The two price helpers seed DIFFERENTLY on purpose, and the asymmetry is
 // easy to "tidy" back into a bug, so it is pinned here.
 //
 //   oracle_prices    seeds UPSTREAM (the hub) when a mirror is in play, because
@@ -22,7 +22,7 @@
 //                    would simply never arrive.
 //
 // These cases stub the helpers' own methods rather than injecting a fake mariadb
-// into require.cache. That injection style is what produced the  load-order
+// into require.cache. That injection style is what produced an earlier load-order
 // trap, where a suite only passed while it was the first file to require db.js.
 
 const assert = require('assert')
@@ -46,7 +46,7 @@ function enableMirror(){
     process.env.HUB_SOURCE_DB_NAME = 'XChain_Hub'
 }
 
-describe('price seed routing ', () => {
+describe('price seed routing', () => {
     const savedEnv = {}
     let savedIndexerDb, savedHubConnector
 

@@ -162,7 +162,7 @@ describe('transactionHelper', function () {
             assert.strictEqual(args[1], address,          'pubkey arg');
             assert.deepStrictEqual(args[3], { action: 'ISSUE' }, 'data arg');
             assert.strictEqual(args[8], address,          'changeAddress arg');
-            // : `compress` is tri-state and MUST default to null, leaving the
+            // `compress` is tri-state and MUST default to null, leaving the
             // encoder's own default in force. A default of true or false here would
             // silently change what every existing action in this suite writes on
             // chain, which is exactly the kind of change nothing else would catch.
@@ -213,7 +213,7 @@ describe('transactionHelper', function () {
         });
     });
 
-    //  §3.5. The envelope reveal is pre-built against the UNSIGNED commit's
+    // Spec §3.5. The envelope reveal is pre-built against the UNSIGNED commit's
     // txid, which is only stable because commit inputs are segwit-only. If that
     // txid ever drifts, the reveal spends nothing while the commit's value sits in
     // a one-time P2TR output no other transaction references: funds stranded, no

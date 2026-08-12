@@ -10,9 +10,7 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
- * XChain Platform E2E - sdk.decoder against the live chain 
+ * XChain Platform E2E - sdk.decoder against the live chain
  *
  * The SDK decoder module (sdk.decoder.parse / describe, and the PSBT
  * extraction the MuSig2 co-signer signs against) is pinned by unit
@@ -39,7 +37,7 @@
  * Read-only lane 1 is safe to run against a shared venue at any time.
  * Lane 2 broadcasts a handful of small actions on regtest.
  *
- * Run (devhost, NFS tree, Node 22):
+ * Run (NFS tree, Node 22):
  *
  *     npm run test:sdk:decoder
  *
@@ -100,7 +98,7 @@ function indexerNameMatches(rowAction, parsed) {
     return !!(derived && derived.includes(rowAction));
 }
 
-describe('[sdk] decoder.parse vs the live chain ', function () {
+describe('[sdk] decoder.parse vs the live chain', function () {
     this.timeout(0);
 
     let sdk, FORMATS;

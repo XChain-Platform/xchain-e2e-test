@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * L2 integration: STAKE_WEIGHTED_QUORUM (WI-1) for the price capability:
  * oracle PRICE-round finalization (Suite A3 of the regtest e2e plan).
  *
@@ -40,8 +39,7 @@
  * path the indexer re-verifies. No chain; disposable Docker MariaDB; skips when
  * neither an env DB nor Docker is available. regtest activation = 0 (always weighted).
  *
- * Spec: claude/reports/2026-06-14_cross-chain-quorum-security-spec.md §3.7, §10;
- * plan §A3.
+ * Spec: the cross-chain quorum security spec §3.7, §10; plan §A3.
  ********************************************************************/
 
 'use strict';

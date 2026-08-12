@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * P3(b): LIVE multi-chain parity: per-chain driver + digest capture.
  *
  * Runs against ONE live regtest stack (the coin currently installed), drives

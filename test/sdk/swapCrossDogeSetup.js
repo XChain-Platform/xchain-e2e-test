@@ -10,10 +10,8 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * Cross-coin SWAP e2e: DOGE-side maker setup driver (standalone, not a
- * mocha suite). Companion to swapCrossSettleLive.sdk.test.js .
+ * mocha suite). Companion to swapCrossSettleLive.sdk.test.js.
  *
  * The SWAP twin of dexDogeSetup.js. Where that driver places the DOGE leg of
  * a crossing cross-chain ORDER pair (Phase B, price-time book), this one
@@ -254,7 +252,7 @@ async function main() {
     console.log('[swap-doge-setup] DOGE_MAKER=' + maker.address);
     // The BTC payout address this offer names as its get_address: the BTC leg releases
     // its escrowed token here on settlement. Consumed as SWAP_DOGE_MAKER_BTC_RECV by
-    // swapCrossSettleLive.sdk.test.js .
+    // swapCrossSettleLive.sdk.test.js.
     console.log('[swap-doge-setup] DOGE_MAKER_BTC_RECV=' + btcRecv);
 }
 

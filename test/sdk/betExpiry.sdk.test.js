@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - BET expiry + the resolve/expire boundary (§12 E4, E7)
  *
  *   E4 expiry: nobody resolves, so BET_EXPIRE refunds every stake at

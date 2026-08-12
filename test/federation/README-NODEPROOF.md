@@ -9,7 +9,7 @@ excluded + slash-proposed.
 > **not yet run** (needs the regtest stack + a coin-node RPC, which the dev Mac
 > doesn't host). Expect to shake out minor fixups on first venue run.
 
-## Prerequisites (venue: test-host / regtest)
+## Prerequisites (venue: regtest)
 
 The standard federation prerequisites (same as `test:federation`):
 - regtest stack up: bitcoind + xchain-decoder + xchain-indexer + MariaDB

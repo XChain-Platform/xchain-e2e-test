@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * L2 integration: config-change PBFT across a multi-validator hub set
  *
  * Boots N=3 in-process XChainHub validators (MultiValidatorHub) and drives the
@@ -24,7 +23,7 @@
  *     the federation).
  *
  * Coverage-matrix gap this closes: PBFT(config) was L1-mocked only (REG-CON-*);
- * L2/L4 were ⬜. Spec: claude/reports/specs/2026-05-30_validator-test-spec.md §6.
+ * L2/L4 were ⬜. Spec: the validator test spec §6.
  *
  * Runs on a disposable Docker MariaDB (no platform-DB grant needed). Skips
  * cleanly only when neither an env-provisioned DB nor Docker is available.

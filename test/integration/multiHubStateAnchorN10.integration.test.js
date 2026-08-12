@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available;
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * Track C.2: state-checkpoint signing at N=10 (validator-scale matrix cell).
  *
  * The N=10 twin of multiHubStateAnchorWeighted.integration.test.js. Ten hubs

@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - SDK-driven smart contracts (VM)
  *
  * DEPLOY a contract, EXECUTE a method, and read contract state, all

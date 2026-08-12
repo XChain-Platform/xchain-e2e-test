@@ -10,9 +10,7 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
- * Guards for the XCALL quorum-drop planner .
+ * Guards for the XCALL quorum-drop planner.
  *
  * HERMETIC: pure arithmetic over fixture snapshots, no venue, no docker, no
  * database. It carries the .sdk.test.js name so the lane that runs the drills
@@ -21,8 +19,8 @@
  *
  *   npx mocha --no-config --timeout 10000 test/sdk/xcallFederationPlan.sdk.test.js
  *
- * The failure this pins is the one  records: a drill that stops "the hub"
- * on a 3-hub federation leaves quorum intact, and nothing about the run says so.
+ * The failure this pins: a drill that stops "the hub" on a 3-hub federation
+ * leaves quorum intact, and nothing about the run says so.
  *
  ********************************************************************/
 
@@ -36,7 +34,7 @@ function snapshot(specs) {
     return specs.map(s => ({ pubkey: s.pubkey, source: s.source || ('src-' + s.pubkey.slice(0, 8)), weight: s.weight || '5000.00000000' }));
 }
 
-describe('[sdk] XCALL federation quorum-drop planner ', function () {
+describe('[sdk] XCALL federation quorum-drop planner', function () {
 
     describe('count quorum mirrors the hub threshold', function () {
         it('is the majority floor, not bare 2f+1, at the sizes a drill sees', function () {
@@ -147,7 +145,7 @@ describe('[sdk] XCALL federation quorum-drop planner ', function () {
     });
 
     describe('planQuorumDrop when part of the federation cannot be stopped', function () {
-        // test-host's shape: relay hub 1 is a HOST process, hubs 2 and 3 are containers.
+        // A common venue shape: relay hub 1 is a HOST process, hubs 2 and 3 are containers.
         const snap = snapshot([
             { pubkey: PK(1), weight: '3000.00000000' },
             { pubkey: PK(2), weight: '6000.00000000' },

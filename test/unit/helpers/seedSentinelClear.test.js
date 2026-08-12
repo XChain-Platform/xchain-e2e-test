@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// . On a venue whose own hub publishes XCHAIN/USD, suppressing new seeds is
+// On a venue whose own hub publishes XCHAIN/USD, suppressing new seeds is
 // necessary but not sufficient: rows a pre-flag run already wrote carry sentinel
 // round numbers far above any round a hub reaches, and getLatestPrice orders by
 // round_number DESC, so they shadow every derived round forever. Observed on BTC
@@ -23,7 +23,7 @@
 // blunt "DELETE ... WHERE coin_pair = ?" would destroy exactly what the run reads.
 //
 // The fake driver goes in through proxyquire rather than require.cache surgery,
-// which is what produced the  load-order trap (a suite that only passed
+// which is what produced an earlier load-order trap (a suite that only passed
 // while it happened to be the first file to require db.js).
 
 const assert     = require('assert')
@@ -46,7 +46,7 @@ function loadHelper(affectedRows){
     return { helper, seen }
 }
 
-describe('seed-sentinel clearing ', () => {
+describe('seed-sentinel clearing', () => {
 
     let savedIndexerDb
     beforeEach(() => {

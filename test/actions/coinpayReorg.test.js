@@ -115,7 +115,6 @@ describe('COINPAY Reorg: a native-coin settlement rolls back across an on-chain 
         while ((await tip()) < (await nodeConnector.getBlockCount()) && settle++ < 60) { await sleep(1000) }
         console.log('   indexer tip', await tip(), 'node tip', await nodeConnector.getBlockCount())
 
-        // ----- Reorg out the COINPAY block -----
         await regtestMinerConnector.pauseMining()
         try {
             const tipBefore = await nodeConnector.getBlockCount()

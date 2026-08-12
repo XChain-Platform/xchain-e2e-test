@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - SDK-driven cross-contract calls (emit.execute)
  *
  * Deploys a caller contract (A) and a callee contract (B), then proves:

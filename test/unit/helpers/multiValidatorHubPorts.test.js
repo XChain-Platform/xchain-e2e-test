@@ -10,12 +10,12 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// . The L2 suites hard-code a basePort each, and several of those sit
+// The L2 suites hard-code a basePort each, and several of those sit
 // inside the kernel's EPHEMERAL range - the ports it hands to outbound sockets.
 // A port there probes free and is taken a moment later by a hub dialling a peer
 // or an axios call, and the next hub dies on `listen EADDRINUSE`. Solo runs pass;
 // a long serial lane loses the lottery eventually, which is what happened to
-// multiHubOracle at 33002 on test-host 2026-08-09 the first time the whole tier ran
+// multiHubOracle at 33002 on 2026-08-09 the first time the whole tier ran
 // as one lane.
 //
 // The rule is invisible in a green integration run, so it is pinned here rather
@@ -25,7 +25,7 @@ const assert = require('assert')
 const net    = require('net')
 const { pickFreePorts, ephemeralRange } = require('../../helpers/multiValidatorHubHelper')
 
-describe('MultiValidatorHub port allocation ', function () {
+describe('MultiValidatorHub port allocation', function () {
     this.timeout(20000)
 
     const eph = ephemeralRange()

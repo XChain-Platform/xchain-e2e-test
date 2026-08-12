@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - Contract Template Library: ESCROW (on-chain)
  *
  * Drives the REAL escrow template from the xchain-contracts repo through
@@ -39,8 +37,8 @@ const { expect } = require('chai');
 const { makeSdk, submit, fundedGasAddress, mintGas, uniqueTick, mine, submitOpts } = require('./sdkHelper');
 
 // Load a template's REAL source from the xchain-contracts repo. That repo is
-// a sibling of the platform monorepo (and, on test-host, a separate tree under
-// ~/xchain-modules-src), so resolve it the way sdkHelper resolves the SDK:
+// a sibling of the platform monorepo (and, on some venues, a separate tree
+// under ~/xchain-modules-src), so resolve it the way sdkHelper resolves the SDK:
 // an explicit env override first, then layout-based candidates.
 function loadTemplate(name) {
     const rel = path.join(name, name + '.js');

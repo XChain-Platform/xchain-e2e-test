@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - SDK-driven SWAP (atomic token exchange)
  *
  * Drives the SWAP lifecycle through the public xchain-sdk API:
@@ -33,7 +31,7 @@
  * the SDK fully drives. The cross-coin variant is no longer deferred: it
  * lives in swapCrossSettleLive.sdk.test.js (BTC<->DOGE, driven by
  * swapCrossDogeSetup.js), which skips unless the multi-chain venue env is
- * present. See .
+ * present.
  *
  * SWAP settlement rides on the indexer's matching engine; this suite runs on
  * BTC regtest (skips elsewhere, keeping parity with the connector suite, which

@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - ticker NAME vs TICK_ID (^id) equivalence
  *
  * Proves end-to-end, through the full stack (encoder -> broadcast ->

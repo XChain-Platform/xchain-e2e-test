@@ -23,7 +23,7 @@
  * non-force) is a no-op when a stale snapshot already exists, and a persistent
  * regtest stack's last seed expires after 1800s of block-time. Then every guard
  * contract DEPLOY indexes "invalid: no current oracle price for {COIN}/USD".
- * (Known harness flake; see claude/reports/launch/test-campaign/smart-contracts.md.)
+ * (Known harness flake.)
  *
  * Anchoring: priceSnapshotHelper.usableSeedAnchors(). This preamble used to seed
  * max(tip, now) + 7200 on the theory that the staleness guard is one-sided, so
@@ -31,7 +31,7 @@
  * chain but BTC, getLatestPrice SELECTS with `block_timestamp <= <block time>`, so
  * a future-dated row is not fresh for longer, it is invisible, and this preamble
  * silently seeded nothing on exactly the LTC/DOGE fee chains it exists to unblock
- * (measured on LTC regtest 2026-07-28, ). Headroom now comes from re-seeding
+ * (measured on LTC regtest 2026-07-28). Headroom now comes from re-seeding
  * as the chain advances, which is what nativeFeeHelper does per SEED_REFRESH_MS.
  ********************************************************************/
 
@@ -41,7 +41,7 @@ const priceSnapshotHelper = require('../helpers/priceSnapshotHelper')
 const { BOOTSTRAP_XCHAIN_USD, NO_PRICE_SEED } = require('../helpers/xchainPriceConstants')
 
 // One round per (pair, anchor). Spelled out as file-local consts, and passed to
-// seedSnapshot as `roundNumber: <const>`, because the  coverage guard walks
+// seedSnapshot as `roundNumber: <const>`, because a coverage guard walks
 // this file for that exact shape to prove every round it writes is one
 // clearSeedSentinels can retract. An indirection here (rounds[i]) reads fine and
 // silently drops the file from that guard.
@@ -54,7 +54,7 @@ describe('_ctlseed: force-seed fresh oracle prices (venue preamble)', function (
     this.timeout(0)
 
     it('seeds fresh finalized COIN/USD + XCHAIN/USD inside the usable anchor window', async function () {
-        //  step 8: this preamble CLEARS the pair and re-seeds it, which on a
+        // This preamble CLEARS the pair and re-seeds it, which on a
         // venue whose hub publishes prices would delete real finalized rounds and
         // shadow the rest. Hard-skip there.
         if (NO_PRICE_SEED) {
@@ -105,8 +105,8 @@ describe('_ctlseed: force-seed fresh oracle prices (venue preamble)', function (
         // The failure this preamble has actually had is seeding NOTHING while
         // reporting success: on LTC/DOGE regtest it wrote only future-dated rows,
         // which getLatestPrice cannot see, and every downstream contract DEPLOY
-        // then failed with "no current oracle price" hundreds of lines later
-        // . Contract fee validation needs BOTH pairs, so assert both got
+        // then failed with "no current oracle price" hundreds of lines later.
+        // Contract fee validation needs BOTH pairs, so assert both got
         // at least one row rather than trusting the loop ran. Structural, not
         // timing-dependent: it reads only what this run just wrote.
         assert.ok(anchors.length >= 1,

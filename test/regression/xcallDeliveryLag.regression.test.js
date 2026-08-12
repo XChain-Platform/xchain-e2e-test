@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * Regression: cross-chain call relay must not fork a LIVE node from a
  * REPLAYING node under hub delivery lag.
  *

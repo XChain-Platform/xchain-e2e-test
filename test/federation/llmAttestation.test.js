@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * E2E test: LLM attestation provider, redundancy=1
  *
  * Drives an ATTEST v0 (request, provider='llm', redundancy=1) through a
@@ -23,8 +22,6 @@
  *   `CLAUDE_CONFIG_DIR=<dir> claude login`. The hub's `claude-spawn`
  *   inherits that dir into the spawned CLI's env, which finds the
  *   stored OAuth token + refresh token in `.credentials.json`.
- *
- * Spec: claude/reports/specs/2026-05-24_llm-attestation-provider.md
  *
  ********************************************************************/
 

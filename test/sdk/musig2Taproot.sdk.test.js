@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - SDK MuSig2 taproot key-path spend (on-chain)
  *
  * The SDK's MuSig2 module (xchain-sdk/src/musig2.js) is the signing

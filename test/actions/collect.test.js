@@ -74,7 +74,7 @@ describe('COLLECT v0 (claim accrued validator rewards)', function () {
 
             // Advance past ACTIVATION_DELAY_BLOCKS so the stake is active. Pause the
             // auto-miner around the deterministic height advance so no stray mempool
-            // tx adds an extra block. #3851
+            // tx adds an extra block.
             await regtestMinerConnector.pauseMining()
             try {
                 await regtestMinerConnector.generateBlocks(7)
@@ -89,7 +89,7 @@ describe('COLLECT v0 (claim accrued validator rewards)', function () {
             assert.match(result.claim.status, /no unclaimed rewards/i,
                 'rejection reason should mention "no unclaimed rewards"; got: ' + result.claim.status)
 
-            //  partial claim: a trailing AMOUNT decodes cleanly and still
+            // Partial claim: a trailing AMOUNT decodes cleanly and still
             // reaches the same deterministic rejection (the reward-total check
             // precedes amount validation). Reward ACCRUAL is federation-driven and
             // not exercisable on this pipeline, so the partial happy path is

@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * Track C.2: Byzantine fault tolerance for the price-oracle PBFT engine.
  *
  * Byzantine coverage existed for config-PBFT and DEX-PBFT but the oracle round

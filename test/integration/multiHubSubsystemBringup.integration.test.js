@@ -10,8 +10,7 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- * L2 integration: MultiValidatorHub consensus-subsystem bring-up 
+ * L2 integration: MultiValidatorHub consensus-subsystem bring-up
  *
  * The harness gained opt-in startOracle / startReorgHandler / startGovernance
  * toggles so L2 can drive every consensus subsystem through the same in-process
@@ -36,7 +35,7 @@ const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 
 const COUNT = 3;
 
-describe('MultiValidatorHub consensus-subsystem bring-up ', function () {
+describe('MultiValidatorHub consensus-subsystem bring-up', function () {
     // 3 hubs × (DB init + schema migrations + P2P bind) plus oracle/governance/
     // reorg start each add tables/timers; teardown drops the DBs. Generous budget.
     this.timeout(180_000);
@@ -45,7 +44,7 @@ describe('MultiValidatorHub consensus-subsystem bring-up ', function () {
 
     // Was gated on HUB_DB_USER/HUB_DB_PASS being set, which nothing in CI sets,
     // so this suite skipped itself on every venue and the live tier reported it
-    // as covered . startDisposableHubDb self-provisions a throwaway
+    // as covered regardless. startDisposableHubDb self-provisions a throwaway
     // MariaDB in Docker exactly as the rest of the L2 suites do, so the only
     // remaining skip is a host with no Docker at all.
     before(async function () {

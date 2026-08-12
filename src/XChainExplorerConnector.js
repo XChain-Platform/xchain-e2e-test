@@ -53,7 +53,7 @@ class XChainExplorerConnector {
     }
 
     // The bytes of a FILE as the explorer serves them, plus the headers that say
-    // what it did to get there. A compressed FILE ( spec §5.1) is inflated
+    // what it did to get there. A compressed FILE (spec §5.1) is inflated
     // transparently, so `body` is the ORIGINAL payload and X-XChain-Stored-Length
     // reports the smaller on-chain footprint; if inflation fails or the ratio guard
     // trips, the explorer serves the stored bytes and says so in X-XChain-Stored-Form

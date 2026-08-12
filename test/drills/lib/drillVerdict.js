@@ -10,8 +10,7 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- * Verdict engine for the physical multi-box byzantine drill .
+ * Verdict engine for the physical multi-box byzantine drill.
  *
  * Separated from the drill so the pass/fail rules can be unit-tested without
  * hardware, and so the drill's own report is produced by code an auditor can

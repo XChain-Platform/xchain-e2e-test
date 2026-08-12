@@ -8,7 +8,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// . Tests mock mariadb by injecting a synthetic module into require.cache.
+// Tests mock mariadb by injecting a synthetic module into require.cache.
 // While db.js bound the driver at module-load time, that injection only worked if
 // the injecting file was the FIRST in the mocha process to require db.js: a new
 // test file sorting alphabetically earlier left db.js bound to the real driver, so
@@ -40,7 +40,7 @@ function fakeDriverModule(exports) {
     return mod
 }
 
-describe(' mariadb driver binding', function () {
+describe('mariadb driver binding', function () {
     let savedDriver, savedDb
 
     beforeEach(function () {

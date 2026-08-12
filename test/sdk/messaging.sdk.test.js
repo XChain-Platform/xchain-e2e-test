@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - SDK-driven messaging
  *
  * MESSAGE v3 (plaintext via submitAction) and v2 (real ECIES messaging.send())

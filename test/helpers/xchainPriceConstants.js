@@ -8,7 +8,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 //
-// The XCHAIN/USD value production actually publishes (, spec §10 step 8).
+// The XCHAIN/USD value production actually publishes (spec §10 step 8).
 //
 // WHY THIS FILE EXISTS. Every native-fee suite used to seed XCHAIN/USD = 1.00, a
 // number production has never produced and now never will: the pair is derived from
@@ -27,7 +27,7 @@
 // This is NOT a licence to keep hand-seeding forever. The end state (§10 step 8) is
 // a venue whose hub runs as a price-capability oracle validator and publishes the
 // pair itself, at which point the seeding goes away and the suites read what the
-// federation produced. The devhost BTC regtest venue IS that venue since
+// federation produced. One BTC regtest venue has been that venue since
 // 2026-07-26; NO_PRICE_SEED below is how a run declares it.
 
 'use strict'
@@ -35,7 +35,7 @@
 const fs   = require('fs')
 const path = require('path')
 
-//  step 8, the validator-venue tightening. XCHAIN_E2E_NO_PRICE_SEED=1
+// The validator-venue tightening. XCHAIN_E2E_NO_PRICE_SEED=1
 // declares "this venue's hub publishes prices itself". Every seeding site in the
 // tree must honor it, because a seeded row carries a synthetic round number far
 // above any round a hub reaches, getLatestPrice takes the HIGHEST round, and so
@@ -106,7 +106,7 @@ function hubBootstrapConstant() {
 // so a retune on the hub side cannot land without this repo noticing.
 const HUB_BOOTSTRAP_SATS = '1000'
 
-// . Every synthetic round number any seeding site in the tree writes, in
+// Every synthetic round number any seeding site in the tree writes, in
 // ONE place. These used to be declared twice - the values in nativeFeeHelper and
 // a hand-maintained copy in nativeFeeOracleLive's SEED_SENTINELS - with a comment
 // asking future editors to keep them in lockstep, which is exactly the kind of
@@ -116,7 +116,7 @@ const HUB_BOOTSTRAP_SATS = '1000'
 // row must win getLatestPrice's `ORDER BY round_number DESC` on a venue that has
 // no oracle. The cost is that on a venue that DOES derive the pair, one leftover
 // row from an earlier run outranks every real round forever, and suppressing new
-// seeds cannot retract rows already written (, observed shadowing BTC
+// seeds cannot retract rows already written (observed shadowing BTC
 // regtest at round 888100002 / $2.00 while the hub derived ~1948 at ~12.90).
 // That is what clearSeedSentinels exists to undo.
 //
@@ -124,8 +124,8 @@ const HUB_BOOTSTRAP_SATS = '1000'
 // native-fee ones. A round that seeds but is absent here is worse than no clear
 // at all: the flagged run reports "cleared N rows" and looks finished while that
 // round keeps shadowing its pair. The first six entries below were exactly that
-// case, found still live on the BTC regtest venue after the LTC clear (
-// round 3): 999000001-6 and 999000708 were sitting above the hub's derived
+// case, found still live on the BTC regtest venue after the LTC clear (round 3):
+// 999000001-6 and 999000708 were sitting above the hub's derived
 // rounds for BTC/EUR, BTC/GBP, BTC/JPY, BTC/CHF and BTC/CAD at a flat 50000.00.
 // seedSentinelCoverage.test.js now derives this set from the seed sites, so the
 // list cannot drift behind them again by hand.
@@ -143,7 +143,7 @@ const SEED_SENTINEL_ROUNDS = Object.freeze([
     999300001, 999300002,    // nativeFeeDispenser band
     999400002,               // envelopeFeeHeight: the COIN/USD drop that RAISES the
                              // fee requirement between an envelope's commit and its
-                             // reveal ( §3.5 evaluation-height rule)
+                             // reveal (§3.5 evaluation-height rule)
 ])
 
 module.exports = { BOOTSTRAP_XCHAIN_USD, BOOTSTRAP_XCHAIN_USD_NUM, hubBootstrapConstant,

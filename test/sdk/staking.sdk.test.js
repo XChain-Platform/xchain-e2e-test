@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - SDK-driven contract-targeted staking
  *
  * One of the newest primitives: DEPLOY v1 (stakeable contract with

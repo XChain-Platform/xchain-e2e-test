@@ -9,8 +9,6 @@
  * General Public License v3.0 or later; see LICENSE.md. A commercial
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
- *
- * Spec: claude/reports/specs/2026-05-24_external-attestation-framework.md
  ********************************************************************/
 
 const crypto = require('crypto');

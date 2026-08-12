@@ -1,7 +1,7 @@
 /**********************************************************************
  *
  * XChain Platform E2E - Tier-1 conformance
- * (spec claude/specs/confirm-decode-preflight-spec.md §8.3).
+ * (spec: confirm-decode-preflight §8.3).
  *
  * Tier 1 is the indexer's OWN handler run read-only in a forced-rollback
  * transaction, and §1.4 makes it authoritative: a contradicting Tier-2

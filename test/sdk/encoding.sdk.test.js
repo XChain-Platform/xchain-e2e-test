@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - SDK-driven encoding-method coverage
  *
  * Most ACTIONs exceed OP_RETURN's 76-byte limit and must ride a

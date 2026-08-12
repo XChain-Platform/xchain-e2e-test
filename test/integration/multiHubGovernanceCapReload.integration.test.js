@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * E2E integration: CAPABILITY_*_MIN_STAKE governance pin (#4352)
  *
  * Boots N=3 in-process XChainHub validators and asserts the pre-launch
@@ -83,7 +82,7 @@ describe('MultiValidatorHub: governance capability MIN_STAKE pin (#4352)', funct
 
     // Was gated on HUB_DB_USER/HUB_DB_PASS being set, which nothing in CI sets,
     // so this suite skipped itself on every venue and the live tier reported it
-    // as covered . startDisposableHubDb self-provisions a throwaway
+    // as covered. startDisposableHubDb self-provisions a throwaway
     // MariaDB in Docker exactly as the rest of the L2 suites do, so the only
     // remaining skip is a host with no Docker at all.
     before(async function () {

@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// . The script deletes rows on a live venue, so its two guards are the
+// The script deletes rows on a live venue, so its two guards are the
 // whole point and both were learned from a venue rather than a review:
 //
 //  - the flag gate, because on a NON-publishing venue the sentinel rows are the
@@ -24,7 +24,7 @@
 const assert = require('assert')
 const script = require('../../../scripts/clear-seed-sentinels')
 
-describe('clear-seed-sentinels script guards ', () => {
+describe('clear-seed-sentinels script guards', () => {
 
     describe('publishing-venue gate', () => {
         it('refuses without the venue declaration', () => {

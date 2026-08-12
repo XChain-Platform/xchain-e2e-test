@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - VOTE re-ballot reorg drill
  *
  * Proves the append-only votes design is reorg-safe end to end. The original
@@ -31,7 +29,7 @@
  *      mempool, and asserts it becomes the current ballot again under a new
  *      action_index (deterministic re-application).
  *
- *   Run (devhost/test-host pattern):
+ *   Run:
  *     COIN=bitcoin NETWORK=regtest npm run test:sdk:vote-reorg
  *
  ********************************************************************/

@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * L5 byzantine / fault-tolerance: config-PBFT under adversarial conditions
  *
  * Boots N=4 in-process XChainHub validators (quorum 3, tolerates f=1) on a
@@ -24,7 +23,7 @@
  *
  * Faults are injected by monkey-patching hub instances (test/helpers/
  * byzantineFaults.js) with no production-code changes. Coverage-matrix gap: PBFT
- * L5 was ⬜. Spec: claude/reports/specs/2026-05-30_validator-test-spec.md §6.
+ * L5 was ⬜. Spec: the validator test spec §6.
  *
  * Runs on a disposable Docker MariaDB; skips only when neither an env DB nor
  * Docker is available.

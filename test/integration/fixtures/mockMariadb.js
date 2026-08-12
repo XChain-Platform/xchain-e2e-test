@@ -17,7 +17,7 @@
 // any subsequent require('mariadb') returns our mock.
 //
 // Ordering: this must be in place before the first `new Database()`, NOT before
-// db.js is required.  moved db.js's driver lookup from module load to pool
+// db.js is required. db.js's driver lookup was moved from module load to pool
 // creation for exactly this reason: while the binding was made at load time, the
 // injection only worked if the injecting file was the first in the mocha process
 // to require db.js, and a new test file sorting alphabetically earlier left db.js

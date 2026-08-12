@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain Platform E2E - Chunked DEPLOY (large contract) on-chain
  *
  * Proves a contract whose base64 source exceeds the single-action size cap

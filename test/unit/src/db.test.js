@@ -36,7 +36,7 @@ require.cache[mariadbPath] = mariadbModule
 // test file sorting earlier (mocha loads alphabetically) left db.js already bound
 // to the real mariadb, so every `new Database()` here opened a REAL pool against a
 // dead host and the suite failed on timeouts that pointed nowhere near the cause.
-// db.js now resolves the driver when it creates a pool , so this line is
+// db.js now resolves the driver when it creates a pool, so this line is
 // belt-and-braces rather than the thing standing between here and 55 failures;
 // test/unit/src/dbDriverBinding.test.js holds that property in place.
 delete require.cache[require.resolve('../../../src/db')]

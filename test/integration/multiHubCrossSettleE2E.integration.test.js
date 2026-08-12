@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * Track C.2: Cross-chain DEX match to indexer CROSS_SETTLE end-to-end.
  *
  * The in-process DEX PBFT tests prove a match finalizes with a 2f+1 signature

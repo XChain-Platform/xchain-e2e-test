@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-//  guard: the multi-chain parity corpus must exercise time-based
+// Guard: the multi-chain parity corpus must exercise time-based
 // ORDER_EXPIRE deterministically. The live 3-chain sweep (multichain-parity.
 // test.js) needs a running regtest stack, so this pure unit test locks the
 // determinism CONTRACT the sweep relies on, catching a broken corpus without a
@@ -41,7 +41,7 @@ const Y2038_CEILING = 2147483647;
 // jump off the real-time baseline is forward. 2026-01-01 UTC.
 const WALLCLOCK_FLOOR = 1767225600;
 
-describe('parity corpus ORDER_EXPIRE determinism contract ', function () {
+describe('parity corpus ORDER_EXPIRE determinism contract', function () {
     const steps = corpus('BTC');
 
     it('pins every step to the fixed PIN_T0 + i*PIN_STEP schedule (monotonic)', function () {

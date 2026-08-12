@@ -150,7 +150,6 @@ describe('Gated Content Reorg: a gated FILE (and its SEND-gating) rolls back acr
             'bare SEND of the gated token denied pre-reorg (gated-SEND rule has teeth)')
         console.log('   bare SEND denied pre-reorg: gated-SEND rule active')
 
-        // ── Reorg out the gated FILE block ──
         await regtestMinerConnector.pauseMining()
         try {
             const tipBefore = await nodeConnector.getBlockCount()
@@ -189,7 +188,7 @@ describe('Gated Content Reorg: a gated FILE (and its SEND-gating) rolls back acr
 
             // Gate on the indexer before the credit poll below. Without it the 120s budget
             // is spent waiting out indexer lag, so the test reports on venue load rather
-            // than on the rolled-back gating rule (; envelopeReorg gates the same
+            // than on the rolled-back gating rule (envelopeReorg gates the same
             // way, which is why it survived the load that made this one fail).
             // The auto-miner is running again, so pin the target to the SEND's block: the
             // live node tip keeps moving and an equality wait against it need never settle.

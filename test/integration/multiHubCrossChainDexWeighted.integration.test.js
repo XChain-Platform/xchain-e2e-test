@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * L2 integration: STAKE_WEIGHTED_QUORUM (WI-1) for the cross_chain capability:
  * cross-chain DEX match finalization (Suite A4 of the regtest e2e plan).
  *
@@ -37,8 +36,7 @@
  * Shared in-memory offer book (no indexer, no chain); disposable Docker MariaDB;
  * skips when neither an env DB nor Docker is available. regtest activation = 0.
  *
- * Spec: claude/reports/2026-06-14_cross-chain-quorum-security-spec.md §1, §3.7,
- * §10; plan §A4.
+ * Spec: the cross-chain quorum security spec §1, §3.7, §10; plan §A4.
  ********************************************************************/
 
 'use strict';

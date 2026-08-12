@@ -10,8 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
- *
  * XChain E2E Performance Reporter
  *
  * Custom Mocha reporter that captures per-test timing, memory usage,

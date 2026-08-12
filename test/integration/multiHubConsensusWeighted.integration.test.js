@@ -10,7 +10,6 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * L2 integration: STAKE_WEIGHTED_QUORUM (WI-1) config-change PBFT.
  *
  * The weighted twin of multiHubConsensus.integration.test.js. Boots in-process
@@ -31,7 +30,7 @@
  * hub.network='regtest' (activation height 0 → weighting ON). Disposable Docker
  * MariaDB; skips cleanly when neither an env DB nor Docker is available.
  *
- * Spec: claude/reports/2026-06-14_cross-chain-quorum-security-spec.md §3.7, §10.
+ * Spec: the cross-chain quorum security spec §3.7, §10.
  ********************************************************************/
 
 'use strict';

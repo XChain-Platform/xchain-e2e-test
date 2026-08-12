@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// . The FIAT price fixtures can be pointed at three different databases,
+// The FIAT price fixtures can be pointed at three different databases,
 // and the failure mode of confusing any two of them is a dispense settling
 // 'invalid: no matching oracle price', which reads as a consensus bug rather
 // than a fixture one. These cases pin the resolution for every topology the
@@ -40,7 +40,7 @@ function freshTopology(){
     return require(TOPOLOGY_PATH)
 }
 
-describe('hubMirrorTopology ', () => {
+describe('hubMirrorTopology', () => {
     const savedEnv = {}
     let savedIndexerDb
 
@@ -58,7 +58,7 @@ describe('hubMirrorTopology ', () => {
         global.indexerDatabase = savedIndexerDb
     })
 
-    // Topology 1: the devhost regtest stack as it stands today. No hub DB is
+    // Topology 1: a regtest stack as it stands today. No hub DB is
     // configured, so the indexer reads its own tables and seeding writes there.
     // Every mirror-aware branch must be inert here, or this change would alter a
     // suite that currently passes.
@@ -112,7 +112,7 @@ describe('hubMirrorTopology ', () => {
         })
     })
 
-    // Topology 4: what  exists to enable. hub_db_sync owns the mirror, so
+    // Topology 4: what this exists to enable. hub_db_sync owns the mirror, so
     // the fixture seeds the hub's authoritative database and waits for the row
     // to arrive in the mirror.
     describe('true mirror (hub source named alongside the mirror)', () => {

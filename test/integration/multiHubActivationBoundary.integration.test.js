@@ -10,10 +10,9 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- **********************************************************************
  * L2 integration: STAKE_WEIGHTED_QUORUM (WI-1) ACTIVATION BOUNDARY.
  *
- * Suite B from claude/reports/2026-06-15_wi1-regtest-e2e-plan.md §B. Proves the
+ * Suite B of the WI-1 regtest e2e plan. Proves the
  * count→weighted transition is a clean, fork-free flag-day: the SAME federation,
  * the SAME live signer set, evaluated one block BELOW the activation height
  * (legacy COUNT rule) vs one block ABOVE (stake-WEIGHTED rule), and EVERY hub
@@ -42,15 +41,14 @@
  *     its own stake gives 3S>2S). Assert immediate apply below AND above.
  *
  * REQUIRES a non-zero regtest activation height (regtest is 0 by default =
- * always weighted, so the COUNT side cannot be reached). The suite is STANDING
- * : when the shipped regtest height is <2 it overrides the in-process
+ * always weighted, so the COUNT side cannot be reached). The suite is STANDING:
+ * when the shipped regtest height is <2 it overrides the in-process
  * hub swq map (the SAME module instance Consensus.js reads, resolved via the
  * MultiValidatorHub helper) to SWQ_BOUNDARY_REGTEST_ACTIVATION (default 120)
  * for the duration of the run and restores it afterward. Regtest-only, runtime
  * only; no source edit, so the byte-identity conformance gate is untouched.
  *
- * Spec: claude/reports/2026-06-14_cross-chain-quorum-security-spec.md §3.4, §3.6,
- * §10.4; plan §B.
+ * Spec: the cross-chain quorum security spec §3.4, §3.6, §10.4; plan §B.
  ********************************************************************/
 
 'use strict';
@@ -140,7 +138,7 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM activation boundary (WI-1 Sui
         }
         if (FILE_ACT !== ACT) {
             // Runtime-only, regtest-only override of the in-process hub swq map so
-            // the COUNT side is reachable on a normal run . Restored below.
+            // the COUNT side is reachable on a normal run. Restored below.
             swq.STAKE_WEIGHTED_QUORUM_ACTIVATION.regtest = ACT;
         }
     });
