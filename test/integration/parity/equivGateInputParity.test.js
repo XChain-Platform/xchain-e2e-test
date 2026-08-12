@@ -176,15 +176,24 @@ describe('#4196 EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', functi
             const hubArg = gateInputArg(srcOf('xchain-hub/src/AttestationConsensus.js'),
                 /isEquivHeaderActive\(requestBlock/);
             const idxArg = gateInputArg(srcOf('xchain-indexer/src/actions/attest.js'),
-                /isEquivHeaderActive\(snapshotBlock/);
+                /isEquivHeaderActive\(declaredBlock/);
             assert.ok(hubArg && idxArg, 'ATTEST gate inputs must be found on both sides');
-            // Hub: requestBlock (the REQUEST's block_index). Indexer: snapshotBlock
+            // Hub: requestBlock (the REQUEST's block_index). Indexer: declaredBlock
             // = request ? request.block_index : data.BLOCK_INDEX (same source).
+            //
+            // IT IS `declaredBlock` AND NOT `snapshotBlock`, and the distinction is
+            // the whole assertion. split the two: `snapshotBlock` is now
+            // the BURIED height (declared minus CANONICAL_REORG_BUFFER) that the
+            // validator set resolves at, while the EQUIV gate stayed on the DECLARED
+            // height because that is what the hub gates on. Re-pointing this at the
+            // new `snapshotBlock` would make the case pass while the two sides gated
+            // on heights a reorg buffer apart, which is the exact failure this file
+            // exists to catch.
             assert.match(hubArg, /requestBlock/);
-            assert.match(idxArg, /snapshotBlock/);
+            assert.match(idxArg, /declaredBlock/);
             const idxBody = srcOf('xchain-indexer/src/actions/attest.js');
-            assert.match(idxBody, /snapshotBlock\s*=\s*request\s*\?\s*Number\(request\.block_index\)/,
-                'indexer ATTEST snapshotBlock must derive from the REQUEST block_index (height)');
+            assert.match(idxBody, /declaredBlock\s*=\s*request\s*\?\s*Number\(request\.block_index\)/,
+                'indexer ATTEST declaredBlock must derive from the REQUEST block_index (height)');
             assertHeightParity('ATTEST', 500);
         });
 

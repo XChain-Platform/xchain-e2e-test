@@ -44,7 +44,7 @@ describe('Security: staged sibling trees carry no vulnerable copies @regression 
     // rather than passing silently, because ADV-6 also asserts the two lists
     // agree.
     const floors = {
-        'fast-uri':             [3, 1, 4],
+        'fast-uri':             [3, 1, 5],
         'brace-expansion':      [5, 0, 8],
         'minimatch':            [10, 2, 5],
         'axios':                [1, 18, 0],
@@ -52,7 +52,8 @@ describe('Security: staged sibling trees carry no vulnerable copies @regression 
         'serialize-javascript': [7, 0, 5],
         'shell-quote':          [1, 9, 0],
         'form-data':            [4, 0, 6],
-        'tmp':                  [0, 2, 6]
+        'tmp':                  [0, 2, 6],
+        'ip-address':           [10, 3, 1]
     };
 
     function cmp(a, b) {
