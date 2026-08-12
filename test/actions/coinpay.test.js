@@ -164,7 +164,7 @@ describe('COINPAY', function () {
 
             // Pause the auto-miner so it cannot slip a real-time block into our window
             // (a real-time block would sit below the deadline and not trigger expiry).
-            await regtestMinerConnector.setMiningTime(3600000, 3600000)
+            await regtestMinerConnector.pauseMining()
             try {
                 await nodeConnector.setMockTime(expireAt)
                 // Mine at the mocked time; two blocks gives the decoder+indexer a clear
@@ -180,7 +180,7 @@ describe('COINPAY', function () {
                 // Release the mock clock and restore the normal cadence so the shared
                 // regtest node is not left time-frozen for other tests.
                 await nodeConnector.setMockTime(0)
-                await regtestMinerConnector.setDefaultMiningTime()
+                await regtestMinerConnector.resumeMining()
             }
 
             // Escrow released: the seller's full 1000 tokens are spendable again.

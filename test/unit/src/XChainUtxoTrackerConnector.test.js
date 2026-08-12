@@ -132,6 +132,50 @@ describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
         });
     });
 
+    // The barrier used to discard a failed nudge mine outright
+    // (`catch (e) {}`), so a stack that never settled came back as a bare
+    // ready=false with no cause attached and the hooks that only awaited it
+    // let the unsettled state leak into the next test.
+    describe('quiesce', function () {
+        it('reports the settled status with a zero nudge-failure tally', async function () {
+            sinon.stub(tracker, 'getQuiescentStatus').resolves({ ready: true, mempool_size: 0 });
+            sinon.stub(tracker, 'sleep').resolves();
+
+            const status = await tracker.quiesce({ timeoutMs: 1000, pollMs: 1 });
+            assert.strictEqual(status.ready, true);
+            assert.strictEqual(status.mineErrors, 0);
+        });
+
+        it('surfaces a failed nudge mine instead of swallowing it', async function () {
+            sinon.stub(tracker, 'getQuiescentStatus').resolves({ ready: false, mempool_size: 3 });
+            sinon.stub(tracker, 'sleep').resolves();
+            const warn = sinon.stub(console, 'warn');
+            const regtestMiner = { generateBlocks: sinon.stub().rejects(new Error('miner down')) };
+
+            const status = await tracker.quiesce({ timeoutMs: 30, pollMs: 1, regtestMiner });
+
+            assert.strictEqual(status.ready, false);
+            assert.ok(status.mineErrors > 0, 'expected the failed nudge to be counted');
+            assert.strictEqual(status.lastMineError, 'miner down');
+            assert.ok(warn.called, 'expected the failed nudge to be warned about');
+        });
+
+        it('still returns the unready status rather than throwing, for retry-loop callers', async function () {
+            sinon.stub(tracker, 'getQuiescentStatus').resolves({ ready: false, mempool_size: 0 });
+            sinon.stub(tracker, 'sleep').resolves();
+
+            const status = await tracker.quiesce({ timeoutMs: 20, pollMs: 1 });
+            assert.strictEqual(status.ready, false);
+        });
+
+        it('leaves a null no-response status null', async function () {
+            sinon.stub(tracker, 'getQuiescentStatus').resolves(null);
+            sinon.stub(tracker, 'sleep').resolves();
+
+            assert.strictEqual(await tracker.quiesce({ timeoutMs: 20, pollMs: 1 }), null);
+        });
+    });
+
     describe('waitForUtxos', function () {
         const ADDRESS = 'bcrt1qwait';
 

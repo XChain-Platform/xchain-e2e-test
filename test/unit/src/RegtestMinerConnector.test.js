@@ -96,6 +96,53 @@ describe('RegtestMinerConnector', function () {
             assert.strictEqual(data.method, 'ping');
             assert.strictEqual(data.id, 1);
         });
+
+        // Without a per-request cap a miner that accepts the socket and never
+        // answers left the readiness probe pending forever, so waitForReady's
+        // advertised timeout bounded nothing and a hung miner stalled CI.
+        it('bounds the readiness probe with a request timeout', async function () {
+            axiosPostStub.resolves({ data: { result: { ready: true } } });
+            await connector.ping();
+            const cfg = axiosPostStub.firstCall.args[2];
+            assert.strictEqual(typeof cfg.timeout, 'number');
+            assert.ok(cfg.timeout > 0);
+        });
+
+        it('does not add the timeout to the shared reqConfig other methods use', async function () {
+            axiosPostStub.resolves({ data: { result: { ready: true } } });
+            await connector.ping();
+            assert.deepStrictEqual(connector.reqConfig, {});
+        });
+
+        it('keeps the api key alongside the timeout when one is configured', async function () {
+            const keyed = new RegtestMinerConnector(URL, PORT, 'secret-key');
+            axiosPostStub.resolves({ data: { result: { ready: true } } });
+            await keyed.ping();
+            const cfg = axiosPostStub.firstCall.args[2];
+            assert.deepStrictEqual(cfg.headers, { 'x-api-key': 'secret-key' });
+            assert.strictEqual(typeof cfg.timeout, 'number');
+        });
+    });
+
+    describe('waitForReady', function () {
+        it('returns true as soon as the miner reports ready', async function () {
+            sinon.stub(connector, 'ping').resolves(true);
+            assert.strictEqual(await connector.waitForReady(1000, 100), true);
+        });
+
+        // The loop used to sleep a full intervalMs after the last failed ping, so
+        // every call overshot its own deadline by up to one whole interval and the
+        // number the caller passed was never the bound it advertised.
+        it('never sleeps past the remaining budget', async function () {
+            sinon.stub(connector, 'ping').resolves(false);
+            const slept = [];
+            sinon.stub(connector, 'sleep').callsFake(async (ms) => { slept.push(ms); });
+
+            assert.strictEqual(await connector.waitForReady(50, 1000), false);
+
+            assert.ok(slept.length > 0, 'expected at least one clamped sleep');
+            assert.ok(slept.every((ms) => ms <= 50), 'slept past the 50ms budget: ' + slept.join(','));
+        });
     });
 
     describe('sendFunds', function () {
@@ -122,10 +169,12 @@ describe('RegtestMinerConnector', function () {
             assert.strictEqual(result, TX_HASH);
         });
 
-        it('returns null when result is missing', async function () {
+        // A missing result is contract failure: every controller method answers
+        // with a defined success payload, so an absent one means the miner never
+        // confirmed the operation. It used to return null and read as success.
+        it('throws when result is missing', async function () {
             axiosPostStub.resolves({ data: {} });
-            const result = await connector.sendFunds(ADDRESS, AMOUNT);
-            assert.strictEqual(result, null);
+            await assert.rejects(() => connector.sendFunds(ADDRESS, AMOUNT), /returned no result/);
         });
     });
 
@@ -147,10 +196,12 @@ describe('RegtestMinerConnector', function () {
             assert.strictEqual(result, 'ok');
         });
 
-        it('returns null when result is missing', async function () {
+        // A missing result is contract failure: every controller method answers
+        // with a defined success payload, so an absent one means the miner never
+        // confirmed the operation. It used to return null and read as success.
+        it('throws when result is missing', async function () {
             axiosPostStub.resolves({ data: {} });
-            const result = await connector.setMiningTime(1000, 500);
-            assert.strictEqual(result, null);
+            await assert.rejects(() => connector.setMiningTime(1000, 500), /returned no result/);
         });
 
         it('throws when the controller returns an {error} body instead of "ok" (uuid:24c35056)', async function () {
@@ -184,10 +235,12 @@ describe('RegtestMinerConnector', function () {
             assert.strictEqual(result, 'default');
         });
 
-        it('returns null when result is missing', async function () {
+        // A missing result is contract failure: every controller method answers
+        // with a defined success payload, so an absent one means the miner never
+        // confirmed the operation. It used to return null and read as success.
+        it('throws when result is missing', async function () {
             axiosPostStub.resolves({ data: {} });
-            const result = await connector.setDefaultMiningTime();
-            assert.strictEqual(result, null);
+            await assert.rejects(() => connector.setDefaultMiningTime(), /returned no result/);
         });
     });
 // setmocktime is a NODE-level control that the connector normally reaches

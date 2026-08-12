@@ -439,10 +439,16 @@ describe('[regression:p0] Service Connectors', function () {
             }
         })
 
-        it('[regression:p1] R-CONN-012b : miner _unwrap maps only undefined result to null', async function () {
+        // Narrowed from "maps undefined result to null". uuid:d944b084 decided only
+        // that a falsy-but-DEFINED payload must survive unwrapping (012a above); the
+        // undefined->null tail it happened to introduce was never the property under
+        // decision, and it let a miner that answered with no result at all read as a
+        // successful control op. Absent result is now a throw; falsy passthrough is
+        // unchanged, so the property 012a pins still holds.
+        it('[regression:p1] R-CONN-012b : miner _unwrap rejects an absent result rather than returning null', async function () {
             const miner = new RegtestMinerConnector('localhost', 5678)
             mockAxiosPost(undefined)
-            assert.strictEqual(await miner.sendFunds('addr', 1), null)
+            await assert.rejects(() => miner.sendFunds('addr', 1), /returned no result/)
         })
 
         it('[regression:p1] R-CONN-012c : tracker status unwraps preserve falsy results', async function () {

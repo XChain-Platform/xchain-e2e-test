@@ -154,7 +154,13 @@ async function jumpTo(timestamp, blocks = 2) {
         throw new Error(`betHelper.jumpTo: refusing to rewind the chain clock from ${tip} to ${target}`
             + ' (this wedges block production; compute deadlines from blockTime(), not Date.now())');
 
-    await global.regtestMinerConnector.setMiningTime(3600000, 3600000);
+    // Real barrier, not a cadence change. setMiningTime only assigns the two
+    // duration fields on the miner: it leaves keepMining true and does not await
+    // an in-flight generation, so a block that started just before the call could
+    // still land between here, the setMockTime and the explicit generateBlocks,
+    // breaking this drill's pinned height and pinned time. pauseMining clears
+    // keepMining AND awaits the mine queue, which is the barrier this wanted.
+    await global.regtestMinerConnector.pauseMining();
     // Reached through the miner rather than node RPC: the miner owns the node
     // connection and some installs do not publish the node's RPC port.
     await global.regtestMinerConnector.setMockTime(target);
@@ -196,7 +202,13 @@ async function backdateTo(timestamp) {
     const mtp = await medianTimePast();
     if (target <= mtp)
         return { ok: false, reason: `target ${target} is not above median-time-past ${mtp}` };
-    await global.regtestMinerConnector.setMiningTime(3600000, 3600000);
+    // Real barrier, not a cadence change. setMiningTime only assigns the two
+    // duration fields on the miner: it leaves keepMining true and does not await
+    // an in-flight generation, so a block that started just before the call could
+    // still land between here, the setMockTime and the explicit generateBlocks,
+    // breaking this drill's pinned height and pinned time. pauseMining clears
+    // keepMining AND awaits the mine queue, which is the barrier this wanted.
+    await global.regtestMinerConnector.pauseMining();
     await global.regtestMinerConnector.setMockTime(target);
     return { ok: true, mtp };
 }
@@ -212,7 +224,13 @@ async function setClock(timestamp) {
     const target = Math.floor(timestamp);
     if (target < tip)
         throw new Error(`betHelper.setClock: refusing to rewind the chain clock from ${tip} to ${target}`);
-    await global.regtestMinerConnector.setMiningTime(3600000, 3600000);
+    // Real barrier, not a cadence change. setMiningTime only assigns the two
+    // duration fields on the miner: it leaves keepMining true and does not await
+    // an in-flight generation, so a block that started just before the call could
+    // still land between here, the setMockTime and the explicit generateBlocks,
+    // breaking this drill's pinned height and pinned time. pauseMining clears
+    // keepMining AND awaits the mine queue, which is the barrier this wanted.
+    await global.regtestMinerConnector.pauseMining();
     await global.regtestMinerConnector.setMockTime(target);
 }
 
@@ -228,7 +246,10 @@ async function mineAtFrozenClock(blocks = 1) {
 // every one of them carries the frozen time. This is how a resolve tx gets
 // mined at BLOCK_TIME >= DEADLINE.
 async function resumeMiningAtFrozenClock() {
-    await global.regtestMinerConnector.setDefaultMiningTime();
+    // Un-park counterpart of the pauseMining() above. setDefaultMiningTime only
+    // restores the cadence and would leave keepMining false, stranding the shared
+    // regtest node paused for every later suite.
+    await global.regtestMinerConnector.resumeMining();
 }
 
 // Hand the shared regtest node back in a MINEABLE state.
@@ -253,7 +274,14 @@ async function releaseClock() {
         const now = Math.floor(Date.now() / 1000);
         await global.regtestMinerConnector.setMockTime(tip > now ? tip + 5 : 0);
     } catch (e) { /* best effort */ }
+    // Two knobs, not one. resumeMining (continue_mining) restores keepMining,
+    // which the pauseMining above cleared; setDefaultMiningTime restores the
+    // CADENCE, which a suite like betParity.sdk.test.js changes for its own
+    // duration (6s/4s) and hands back through this teardown. Dropping the
+    // cadence reset when the barrier moved to pauseMining leaked that 6s/4s
+    // onto the shared regtest node for every later suite.
     try { await global.regtestMinerConnector.setDefaultMiningTime(); } catch (e) { /* best effort */ }
+    try { await global.regtestMinerConnector.resumeMining(); } catch (e) { /* best effort */ }
 }
 
 // Wait for a feed status WITHOUT mining. The mining variant below adds a block

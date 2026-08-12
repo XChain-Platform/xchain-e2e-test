@@ -208,7 +208,7 @@ describe('[sdk] XCALL per-block injection cap (25 + carry-forward)', function ()
         // relay confirmation margin in one shot, then PAUSE auto-mining (same freeze
         // the reorg drills use) so the source tip stays put and every dispatch
         // finalizes at the one snapshot.
-        await miner.setMiningTime(3600000, 3600000);        // freeze: stop auto-mining empty blocks
+        await miner.pauseMining();                          // freeze: real barrier, awaits any in-flight mine
         let n = 0;
         try {
             await mine(3);                                  // explicit blocks to clear the relay margin, then no more
@@ -224,7 +224,7 @@ describe('[sdk] XCALL per-block injection cap (25 + carry-forward)', function ()
                 if (n === BURST) break;
             }
         } finally {
-            await miner.setDefaultMiningTime();             // restore auto-mining for the injection + result legs
+            await miner.resumeMining();                     // restore auto-mining for the injection + result legs
         }
         expect(n, 'finalized dispatch rows').to.equal(BURST);
 

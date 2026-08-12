@@ -14,6 +14,14 @@
 
 const axios = require('axios');
 
+// Per-request cap for the readiness probe. axios defaults to no timeout, so a
+// miner that accepts the socket and never answers left ping() pending forever
+// and waitForReady ran past its advertised deadline without ever returning:
+// a hung miner stalled CI instead of failing it. Only ping carries this cap;
+// mining calls keep the unbounded config because generatetoaddress legitimately
+// runs long.
+const PING_TIMEOUT_MS = 5000;
+
 class RegtestMinerConnector {
     constructor(url, port, apiKey = null) {
         this.url = "http://"+url+":"+port
@@ -52,7 +60,21 @@ class RegtestMinerConnector {
         if (result && typeof result === 'object' && result.error) {
             throw new Error(result.error)
         }
-        return result === undefined ? null : result
+        // A missing result is contract failure, not a success worth returning.
+        // Every controller method answers with a DEFINED value on success ("ok",
+        // a txid, {count, hashes}), so undefined/null means the miner replied
+        // without the payload its contract promises: a drifted sidecar, a handler
+        // that fell through, or an emptied body. Returning null let control ops
+        // (setMiningTime, pauseMining, generateBlocks) read that as success,
+        // because their callers only await them and discard the return.
+        //
+        // Falsy-but-DEFINED results still pass through untouched (0, "", false):
+        // that is the separate contract uuid:d944b084 pinned, and this guard keeps
+        // it by testing for undefined/null rather than for truthiness.
+        if (result === undefined || result === null) {
+            throw new Error('The regtest miner returned no result; the control operation is unconfirmed')
+        }
+        return result
     }
 
     async ping(){
@@ -65,7 +87,11 @@ class RegtestMinerConnector {
         // Make the request to the node
         var response = null
         try {
-            response = await axios.post(this.url, data, this.reqConfig)
+            // Spread rather than mutate: this.reqConfig is shared by every other
+            // method, which must stay unbounded. The catch below already turns a
+            // timed-out request into a plain false, so a hung miner reads as
+            // not-ready instead of never answering.
+            response = await axios.post(this.url, data, { ...this.reqConfig, timeout: PING_TIMEOUT_MS })
         } catch (err) {
             return false
         }
@@ -93,8 +119,12 @@ class RegtestMinerConnector {
         const deadline = Date.now() + timeoutMs;
         while (true) {
             if (await this.ping()) return true;
-            if (Date.now() >= deadline) return false;
-            await this.sleep(intervalMs);
+            // Clamp the wait to what is left of the budget: a full intervalMs at
+            // the tail overshot the advertised deadline by up to one interval on
+            // every call, so the number the caller passed was never the bound.
+            const remaining = deadline - Date.now();
+            if (remaining <= 0) return false;
+            await this.sleep(Math.min(intervalMs, remaining));
         }
     }
 

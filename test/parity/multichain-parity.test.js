@@ -46,16 +46,15 @@ const { captureLiveDigest, writeDigest } = require('./digest');
 const BASELINE_HEIGHT = parseInt(process.env.PARITY_BASELINE || '1000', 10);
 const OUT_DIR = process.env.PARITY_OUT_DIR || path.join('/tmp', 'parity');
 
-// Disable the regtest auto-miner so we control block production exactly.
-// The miner takes mining timers in MILLISECONDS and CAPS them at MAX_MINING_TIME
-// (3600000ms / 1h, see xchain-regtest-miner). A larger value (the old 10**9) is
-// REJECTED: setMiningTime errors out and the auto-miner stays ACTIVE at its
-// default 30s/5s mempool debounce, which races the explicit per-action mine and
-// scatters actions across empty/double blocks (BTC got away with it because its
-// node is fast enough to always beat the debounce; the slower DOGE stack did
-// not). Pin to the accepted maximum: 1h >> any run, so the explicit
-// generateBlocks(1) below is the ONLY block source.
-const NO_AUTO_MINE = 3600000; // ms: the miner's MAX_MINING_TIME (effectively "never").
+// This driver needs the explicit generateBlocks(1) to be the ONLY block source,
+// so before() takes the miner's real pause barrier (see the call site below).
+// It used to buy that with a mining-timer of 3600000ms instead, which was never
+// a barrier and had already misfired once: the miner CAPS timers at
+// MAX_MINING_TIME (3600000ms / 1h), so a larger value (the old 10**9) was
+// REJECTED outright and left the auto-miner ACTIVE at its default 30s/5s mempool
+// debounce, racing the explicit per-action mine and scattering actions across
+// empty/double blocks (BTC got away with it because its node always beat the
+// debounce; the slower DOGE stack did not).
 
 describe('P3(b) multi-chain parity: live driver + digest capture', function () {
     this.timeout(0);
@@ -202,7 +201,14 @@ describe('P3(b) multi-chain parity: live driver + digest capture', function () {
         // 2. Disable auto-mine, then mine every chain to the SAME baseline
         // height. Mine the EXACT deficit off the true node tip (tip()), so the
         // baseline is deterministic with no indexer-lag overshoot.
-        await global.regtestMinerConnector.setMiningTime(NO_AUTO_MINE, NO_AUTO_MINE);
+        // pauseMining, not a NO_AUTO_MINE cadence. setMiningTime only assigns the
+        // two duration fields on the miner: keepMining stays true and an already
+        // in-flight generation is not awaited, so a block started just before this
+        // call can still land and put the baseline off by one. pauseMining clears
+        // keepMining AND awaits the mine queue, which is the barrier that makes
+        // the explicit generateBlocks below the only block source. after()
+        // resumes.
+        await global.regtestMinerConnector.pauseMining();
         let nh = await tip();
         expect(nh, 'install mined past PARITY_BASELINE=' + BASELINE_HEIGHT + ': raise it and re-run all chains')
             .to.be.at.most(BASELINE_HEIGHT);
@@ -247,6 +253,11 @@ describe('P3(b) multi-chain parity: live driver + digest capture', function () {
         // a before()-hook failure can leave the miner connector unset.
         try { if (global.regtestMinerConnector) await global.regtestMinerConnector.setMockTime(0); } catch (e) { /* best effort */ }
         try { if (global.regtestMinerConnector) await global.regtestMinerConnector.setDefaultMiningTime(); } catch (e) { /* best effort */ }
+        // Un-park counterpart of the pauseMining in before(). setDefaultMiningTime
+        // above only restores the cadence; only continue_mining restores
+        // keepMining, and without it this run hands the shared regtest node to
+        // every later suite still paused.
+        try { if (global.regtestMinerConnector) await global.regtestMinerConnector.resumeMining(); } catch (e) { /* best effort */ }
     });
 
     it('emitted a deterministic ORDER_EXPIRE from the pinned time-based expiry', async function () {

@@ -353,25 +353,36 @@ exports.mochaHooks = {
     // flakes where a previous test leaves a mid-batch state that breaks the
     // next test's encoder queries with phantom "no utxos" errors.
     //
-    // Failures here are logged but never throw; we don't want to mask the
-    // actual test outcome with barrier issues. The 15s timeout is generous
-    // for regtest under load; quiescence usually lands in < 1s on a clean
-    // stack.
+    // A stack that never settled FAILS the run. This hook used to only log,
+    // reasoning that a barrier failure should not mask the real test outcome;
+    // that reasoning was the defect. A non-quiescent stack is not a barrier
+    // nuisance, it is a dirty mempool or a lagging tracker leaking into the next
+    // stateful test, which then fails for a reason that has nothing to do with
+    // what it asserts, or passes when it should not. The 15s timeout is generous
+    // for regtest under load; quiescence usually lands in < 1s on a clean stack,
+    // so reaching the throw means something is genuinely wrong. The message
+    // carries the settlement summary plus quiesce's nudge-failure tally so the
+    // failure is diagnosable rather than merely loud.
     async afterEach(){
+        let status = null
         try {
-            const status = await utxoTrackerConnector.quiesce({
+            status = await utxoTrackerConnector.quiesce({
                 timeoutMs: 15000,
                 pollMs: 250,
                 regtestMiner: regtestMinerConnector,
             })
-            if (!status || !status.ready){
-                const summary = status
-                    ? `mempool=${status.mempool_size} tracker=${status.tracker_height} node=${status.node_height} lag=${status.lag}`
-                    : 'no-response'
-                console.log(`afterEach: stack did not reach quiescence within 15s (${summary})`)
-            }
         } catch (err){
-            console.log('afterEach: quiesce failed: ' + (err && err.message))
+            throw new Error('afterEach barrier: quiesce failed: ' + (err && err.message ? err.message : err))
+        }
+
+        if (!status || !status.ready){
+            const summary = status
+                ? `mempool=${status.mempool_size} tracker=${status.tracker_height} node=${status.node_height} lag=${status.lag}`
+                : 'no-response'
+            const mines = (status && status.mineErrors)
+                ? ` nudgeMineFailures=${status.mineErrors} lastMineError=${status.lastMineError}`
+                : ''
+            throw new Error(`afterEach barrier: stack did not reach quiescence within 15s (${summary})${mines}`)
         }
     },
 
