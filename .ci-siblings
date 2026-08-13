@@ -1,10 +1,42 @@
+# Repos the e2e suite needs checked out BESIDE it on the CI venue.
+#
+# Declaring a sibling here is what makes its cross-repo guards actually run. An
+# UNdeclared sibling is not a neutral omission: every guard written against it
+# resolves with existsSync, calls this.skip(), and the gate still prints PASS,
+# so the run reports green having exercised none of them. Measured 2026-08-12,
+# that gap was 4 guards in the unit tier alone (740 passing / 14 pending against
+# a full local checkout's 744 / 10). See test/unit/sibling-coverage.test.js,
+# which reports the surface this file leaves uncovered; the same gap applies to
+# a sibling that is declared but missing.
+#
+# ci-dispatch.sh ships each of these at its origin/master (falling back to local
+# HEAD) and REFUSES the push if one is not a checkout beside this repo, so a
+# declared sibling can never be silently absent.
+
+# The action-suite roster and the anchor-reward, checkpoint and royalty parity
+# references.
 xchain-documentation
+# Checkpoint-commitment parity and the protocol size limits.
 xchain-explorer
+# Vendored coins-registry byte-identity and the multi-hub federation fixtures.
 xchain-hub
+# Field roundtrip, the parity harnesses, and the bootstrap fixtures.
 xchain-indexer
+# The SDK-facing action drills and the seed-contract shape guards.
 xchain-sdk
+# Consensus-hash conformance and the validator-set parity.
 xchain-sync
+# The escrow, vesting, crowdsale and amm template drills.
 xchain-contracts
+# Codec roundtrip, the action-suite count, and CryptoNetworks parity.
 xchain-decoder
+# The canonical coins registry behind CryptoNetworks parity and the config fixtures.
 xchain-encoder
+# The SPV seed contract and the protocol size limits.
 xchain-vm
+# CryptoNetworks getBitcoinJsNetwork parity.
+xchain-utxo-tracker
+# CryptoNetworks getBitcoinJsNetwork parity.
+xchain-regtest-miner
+# The gated-send tripwire in the protocol size-limit regression.
+xchain-wallet
