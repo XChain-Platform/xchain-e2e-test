@@ -8,7 +8,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 //
-// XC-1454 / BATCH_ISSUANCE_LIMITS_V2 acceptance suite (spec acceptance tests A1-A6).
+// XC-1454 / BATCH_ISSUANCE_LIMITS acceptance suite (spec acceptance tests A1-A6).
 //
 // Chain evidence for a consensus change, so every case here asserts the STATUS STRING
 // the indexer wrote for a real transaction, not a shape or a count alone. The unit
@@ -294,7 +294,7 @@ function feeOutput(sats){
 // Both are the invariant under test; anything else is not.
 const POOL_EXHAUSTED = /^invalid: (fee output has zero value|insufficient native coin fee)/
 
-describe('BATCH issuance limits (BATCH_ISSUANCE_LIMITS_V2)', function () {
+describe('BATCH issuance limits (BATCH_ISSUANCE_LIMITS)', function () {
 
     before(async function () {
         const mode = await nativeFeeHelper.discoverFeeMode()
