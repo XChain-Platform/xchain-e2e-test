@@ -808,11 +808,84 @@ describe('BATCH issuance limits (BATCH_ISSUANCE_LIMITS)', function () {
             console.log("A5 COINPAY txHash=" + result.txHash + " obligations=" +
                 JSON.stringify(obligations) + " statuses=" + JSON.stringify(settled))
 
+            // EXACTLY one, not "at most one". The weaker bound is satisfied by a batch
+            // that settles NOTHING, and that is precisely how this test passed before
+            // the decoder learned to capture a batched sub-command's payment output:
+            // COINPAY never saw a COIN_AMOUNT at all, so `0 <= 1` held with the ledger
+            // taking no part in it. Asserting the exact split is what makes this
+            // evidence that the CUMULATIVE ACCOUNTING enforces one-settles-one, rather
+            // than evidence that the path is inert.
             const fulfilled = settled.filter(s => s === 'fulfilled').length
-            assert(fulfilled <= 1,
-                "one payment must never settle more than one obligation (settled " + fulfilled + ")")
+            assert.strictEqual(fulfilled, 1,
+                "one payment must settle EXACTLY one obligation, not none and not both " +
+                "(settled " + fulfilled + ", statuses " + JSON.stringify(settled) + ")")
+            assert.strictEqual(settled[0], 'fulfilled',
+                "the first sub-command draws the payment: sub-commands bill in list order")
             assert.notStrictEqual(settled[1], 'fulfilled',
                 "the second obligation must not be settled by the first obligation's payment")
+        })
+
+        // The converse, and the reason the case above is not just the old structural
+        // inertness wearing a tighter assertion: when the batch really does carry a
+        // payment for each obligation, EVERY obligation settles. One test alone cannot
+        // tell "the ledger stopped the second draw" from "no draw ever happens"; the
+        // pair can.
+        it('settles BOTH obligations when each payee has its own output', async function () {
+            // Two DIFFERENT sellers, so each obligation resolves its own payment output
+            // by payee address rather than competing for one pool.
+            const sellerA = await cryptoHelper.getNewFundedAddress("BIL.A5CP2.SA", COIN, NETWORK, null, "legacy", 0, 2)
+            const sellerB = await cryptoHelper.getNewFundedAddress("BIL.A5CP2.SB", COIN, NETWORK, null, "legacy", 0, 2)
+            const buyer   = await cryptoHelper.getNewFundedAddress("BIL.A5CP2.B",  COIN, NETWORK, null, "legacy", 0, 2)
+            const bAddr   = buyer["address"]
+
+            const exp = (await chainTipTime()) + 86400
+            const obligations = []
+            const payees = []
+            for (const seller of [sellerA, sellerB]){
+                const sAddr = seller["address"]
+                const tick  = "BILC2" + sAddr.substring(sAddr.length - 8)
+                await issueHelper.sendIssueV0(seller, tick, 1000, 1000, 0, "A5 coinpay token", 1000)
+
+                const sellerOrder = await orderHelper.sendOrderV0(
+                    seller, COIN_CODE, tick, "100", COIN_CODE, "", "0.00100000",
+                    sAddr, exp, "", "", "A5 two-payee sell")
+                assert(sellerOrder.order, "seller ORDER for " + sAddr)
+                const buyerOrder = await orderHelper.sendOrderV0(
+                    buyer, COIN_CODE, "", "0.00100000", COIN_CODE, tick, "100",
+                    bAddr, exp, "", "", "A5 two-payee buy")
+                assert(buyerOrder.order, "buyer ORDER for " + sAddr)
+
+                const match = await indexerDatabase.waitForOrderMatch({
+                    giveActionIndex: Number(sellerOrder.order["action_index"]),
+                    getActionIndex:  Number(buyerOrder.order["action_index"]),
+                    status: 'pending_coinpay'
+                }, 60000)
+                assert(match, "ORDER_MATCH for " + sAddr + " should be pending_coinpay")
+                obligations.push(Number(match.action_index))
+                payees.push(sAddr)
+            }
+
+            // One output PER payee, each sized for that payee's single obligation.
+            const result = await batchHelper.sendBatch(buyer, [
+                "COINPAY|0|" + obligations[0],
+                "COINPAY|0|" + obligations[1]
+            ], { status: 'valid', skipNativeFeeInjection: true,
+                 customOutputs: [{ address: payees[0], value: 100000 },
+                                 { address: payees[1], value: 100000 }] })
+            assert(result.batch, "the BATCH itself is valid")
+
+            await new Promise(r => setTimeout(r, 20000))
+
+            const settled = []
+            for (const ai of obligations){
+                const row = await indexerDatabase.checkCoinpayObligation({ actionIndex: ai })
+                settled.push(row ? row.coinpay_status : null)
+            }
+            console.log("A5 COINPAY two-payee txHash=" + result.txHash + " obligations=" +
+                JSON.stringify(obligations) + " statuses=" + JSON.stringify(settled))
+
+            assert.deepStrictEqual(settled, ['fulfilled', 'fulfilled'],
+                "each obligation draws its OWN payee's output, so both settle")
         })
     })
 })
