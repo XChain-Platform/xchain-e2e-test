@@ -211,6 +211,7 @@ describe('DISPENSER', () => {
     const FIAT_WINDOW = 'CHF'   // 24h window distance
     const FIAT_DELAY  = 'CAD'   // publish-activation delay
     const FIAT_NOQ    = 'AUD'   // retracted quote
+    const FIAT_PERTOK = 'MXN'   // per-TOKEN oracle pricing at GIVE_AMOUNT > 1
 
     describe('v0 - FIAT (Mode 1: validator price oracle)', () => {
         it('should dispense priced from a seeded FIAT price snapshot', async function() {
@@ -386,6 +387,108 @@ describe('DISPENSER', () => {
                 amount: expectedCredit
             }, 30000)
             assert(credit, "Buyer should be credited "+expectedCredit+" tokens (Mode 2 oracle cross-conversion)")
+        })
+
+        it('should price a multi-token fill per TOKEN, not per fill (GIVE_AMOUNT > 1)', async function() {
+            // The case every earlier example and test missed. A PRICE v1 oracle
+            // publishes the price of one TOKEN, and a dispenser hands out
+            // GIVE_AMOUNT tokens at a time, so the payment buys whole FILLS at
+            // oracle_price x GIVE_AMOUNT each. At GIVE_AMOUNT 1 both readings give
+            // the same number, which is why the case above cannot see the
+            // difference and this one can.
+            //
+            // Measured pre-fix on LTC regtest 2026-07-31 (XC-993): an oracle at
+            // 1.5 USD per XCHAIN with GIVE_AMOUNT 5 sold 35 tokens for $11.10, i.e.
+            // $0.317 a token, while its operator was paid a fee computed on
+            // $1.50 a token. Settlement now divides by GIVE_AMOUNT
+            // (DISPENSER_ORACLE_PER_TOKEN_PRICE, genesis-active on regtest).
+            if (!(await priceSnapshotHelper.isAvailable()) || !(await oraclePriceHelper.isAvailable())) {
+                console.log('Price tables not reachable; skipping per-token Mode 2 test')
+                this.skip()
+                return
+            }
+
+            let dispenserAddr = await cryptoHelper.getNewFundedAddress("DISPENSER.PERTOK", COIN, NETWORK, null, "legacy", 0, 1)
+            let buyerAddr     = await cryptoHelper.getNewFundedAddress("DISPENSER.PERTOK.BUYER", COIN, NETWORK, null, "legacy", 0, 1)
+            let oracleAddr    = await cryptoHelper.getNewFundedAddress("DISPENSER.PERTOK.SRC", COIN, NETWORK, null, "legacy", 0, 1)
+            let dispenserAddress = dispenserAddr["address"]
+            let buyerAddress     = buyerAddr["address"]
+            let oracleAddress    = oracleAddr["address"]
+            let tick = "DISPPTOK"+dispenserAddress.substring(dispenserAddress.length-8)
+
+            await issueHelper.sendIssueV0(dispenserAddr, tick, 100, 100, 0, "Per-token oracle dispenser test", 100)
+
+            let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
+
+            // Same seeding order and clock anchoring as the case above: the
+            // validator snapshot must sit at or before the quote's effective_at,
+            // and the quote must be effective before the create.
+            let pair       = COIN_CODE + "/" + FIAT_PERTOK
+            let coinPrice  = 50000      // 1 coin  = 50,000 fiat (validator)
+            let tokenPrice = 100        // 1 TOKEN = 100 fiat    (user oracle)
+            let giveAmount = 5          // 5 tokens per fill, so a fill costs 500 fiat
+            let chainNow   = await priceSnapshotHelper.latestBlockTime()
+
+            await priceSnapshotHelper.clearPair(pair)
+            await priceSnapshotHelper.seedSnapshot({
+                coinPair: pair,
+                price: coinPrice.toFixed(8),
+                blockTimestamp: chainNow - 120,
+                roundNumber: 999000003
+            })
+            await oraclePriceHelper.clearQuotes({
+                sourceAddress: oracleAddress, coin: COIN_CODE, tick: tick, fiat: FIAT_PERTOK
+            })
+            await oraclePriceHelper.seedQuote({
+                sourceAddress: oracleAddress, sourceChain: COIN_CODE,
+                coin: COIN_CODE, tick: tick, fiat: FIAT_PERTOK,
+                value: tokenPrice.toFixed(8), fee: '0',
+                effectiveAt: chainNow - 60, actionIndex: 999000003
+            })
+
+            let dispenserResult = await dispenserHelper.sendDispenserV0(
+                dispenserAddr,
+                COIN_CODE, tick, giveAmount, 50,
+                COIN_CODE, null, 0, dispenserAddr["address"],
+                FIAT_PERTOK, null, oracleAddress, expiration,
+                null, null, 'FIAT Mode 2 per-token dispenser'
+            )
+            assert(dispenserResult.dispenser, "Mode 2 per-token FIAT dispenser should be created")
+
+            // Buyer pays 0.011 coin = 550 fiat:
+            //   tokens = (0.011 * 50000) / 100 = 5.5
+            //   fills  = floor(5.5 / 5)        = 1
+            //   credit = 1 * 5                 = 5 tokens
+            // Under the pre-flag-day reading this same payment credited
+            // floor(5.5) * 5 = 25 tokens, i.e. five times as many.
+            let paySats = 1100000
+            let txHash = await transactionHelper.createSimpleTransaction(
+                buyerAddr, dispenserAddress, paySats
+            )
+
+            let coinAmount     = paySats / 1e8                                  // 0.011
+            let tokensAfforded = (coinAmount * coinPrice) / tokenPrice          // 5.5
+            let expectedFills  = Math.floor(tokensAfforded / giveAmount)        // 1
+            let expectedCredit = String(expectedFills * giveAmount)             // '5'
+            let perFillReading = String(Math.floor(tokensAfforded) * giveAmount) // '25'
+            assert.notStrictEqual(expectedCredit, perFillReading,
+                "the fixture must be able to tell the two readings apart")
+
+            console.log("Waiting for per-token Mode 2 DISPENSE in the database (txHash: "+txHash+")...")
+            let dispenseRow = await indexerDatabase.waitForDispense({
+                txHash: txHash,
+                source: buyerAddress,
+                giveTick: tick,
+                status: "valid"
+            }, 60000)
+            assert(dispenseRow, "per-token Mode 2 dispense should exist in DB and be valid")
+
+            let credit = await indexerDatabase.waitForCredit({
+                address: buyerAddress,
+                tick: tick,
+                amount: expectedCredit
+            }, 30000)
+            assert(credit, "Buyer should be credited "+expectedCredit+" tokens, not the "+perFillReading+" the per-fill reading gave")
         })
 
         it('should reject a Mode 2 create with no oracle fee output, and accept one that pays', async function() {
