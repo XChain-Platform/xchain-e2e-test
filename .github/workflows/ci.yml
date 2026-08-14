@@ -80,9 +80,17 @@ jobs:
 
       # Every suite in this repo requires exactly Node 22; 18 and 24 fail, and
       # some of those failures are silent skips rather than errors.
-      - name: Install dependencies
-        working-directory: xchain-e2e-test
-        run: if [ -f package-lock.json ]; then npm ci; else npm install; fi
+      # BOTH trees, for the reason the live-tier job below spells out: the hub
+      # helper requires hub source at require time, and Node resolves that file's
+      # dependencies from the HUB's own tree, never from xchain-e2e-test's. A
+      # source-only sibling therefore dies at module load on the hub's own deps
+      # (`Cannot find module 'mariadb'`), which is not a missing dependency here
+      # and reads like one.
+      - name: Install dependencies (both trees)
+        run: |
+          for d in xchain-e2e-test xchain-hub; do
+            ( cd "$d" && if [ -f package-lock.json ]; then npm ci; else npm install; fi )
+          done
 
       - name: Unit tier
         working-directory: xchain-e2e-test
