@@ -24,6 +24,10 @@ name: CI
 #   XCHAIN_INDEXER_DEPLOY_KEY   -> xchain-indexer, read-only
 # Secrets in this org are per-repo, not org-wide, so neither key is inherited
 # from another workflow that references the same name.
+# Least privilege for the default GITHUB_TOKEN: every job here only reads the repo.
+permissions:
+  contents: read
+
 on:
   push:
     # develop is where all work lands; master only ever receives release PRs.

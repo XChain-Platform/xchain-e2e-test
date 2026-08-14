@@ -130,11 +130,13 @@ function checkAllEnvironmentalVariables(){
     return variableArray.every((variable) => variable !== null && variable !== undefined)
 }
 
+// Logs presence/shape only, never any slice of the actual secret: trailing
+// characters are still the secret, and env-resolution logs land in CI output.
 function maskSecret(value){
     if (value == null || value === undefined) return '(not set)'
-    const str = String(value)
-    if (str.length <= 4) return '****'
-    return '****' + str.slice(-4)
+    // Presence only. A length is still information about the credential, and
+    // this output lands in CI logs.
+    return '(set)'
 }
 
 function printAllEnvironmentalVariables(){

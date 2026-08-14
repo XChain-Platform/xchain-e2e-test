@@ -119,7 +119,12 @@ describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration
                         [Number(u.query.since_id || 0), Number(u.query.limit || 10000)]);
                     res.writeHead(200, { 'content-type': 'application/json' });
                     res.end(JSON.stringify({ table: m[1], rows, count: rows.length }));
-                } catch (e) { res.writeHead(500); res.end(JSON.stringify({ error: e.message })); }
+                } catch (e) {
+                    // Explicit JSON content-type: an unset one on an error body can get
+                    // content-type-sniffed as HTML, letting e.message render as markup.
+                    res.writeHead(500, { 'content-type': 'application/json' });
+                    res.end(JSON.stringify({ error: e.message }));
+                }
                 return;
             }
             res.writeHead(404); res.end();
