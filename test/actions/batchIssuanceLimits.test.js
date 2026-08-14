@@ -888,4 +888,476 @@ describe('BATCH issuance limits (BATCH_ISSUANCE_LIMITS)', function () {
                 "each obligation draws its OWN payee's output, so both settle")
         })
     })
+
+    // ─── A5 (DISPENSE half: spec frontier rows 18, 19, 20, 23 and 35) ──────────
+    //
+    // Two claims, both money-bearing, both previously proven only by unit tests.
+    //
+    //   ROW 23 - one payment funds ONE fill, with no batch anywhere in sight.
+    //     findMatchingDispensers returns EVERY open dispenser sitting behind the paid
+    //     address and the handler loops over all of them. Nothing decremented the
+    //     payment between iterations, so each dispenser priced itself against the same
+    //     untouched COIN_AMOUNT and bought a full multiplier off it. Anyone can open a
+    //     second dispenser at an address they control, so that was a live double-spend
+    //     on an ORDINARY transaction, and A5's "one payment settles one obligation,
+    //     not N" had no chain evidence for the no-batch case. Closed on both trigger
+    //     paths: a native-coin payment, and a token SEND routed through
+    //     util.processDispenserSends.
+    //
+    //   ROW 35 - a dispenser created INSIDE a batch actually dispenses.
+    //     The decoder's open-dispenser registry gated on the TOP-LEVEL action string,
+    //     so `BATCH|0|DISPENSER|0|...` never entered the open set: payments to that
+    //     address were never captured as dispenses and no DISPENSE could fire, while
+    //     the indexer had registered the dispenser perfectly well. A decoder/indexer
+    //     divergence, so this only means anything against a live pair of them.
+    //
+    // EVERY case below is a PAIR, for the same reason the COINPAY cases above are: a
+    // single "exactly one fill happened" assertion cannot tell "the ledger stopped the
+    // second draw" from "the second draw never happens at all", and this spec has
+    // already been bitten by exactly that. So each fixture is paid twice, and the
+    // second payment must reach the dispenser the first payment did NOT fund.
+    //
+    // FIXTURE SHAPE. Each dispenser escrows EXACTLY one fill (GIVE_ESCROW ==
+    // GIVE_AMOUNT), which clamps its multiplier to 1 however large the payment is.
+    // That is what makes attribution observable: a dispenser cannot absorb the whole
+    // payment by dispensing more units, so the only thing that can stop a sibling
+    // dispenser behind the same address is the value tally.
+    //
+    // LANE: every case runs everywhere. None attaches a hand-sized fee output and none
+    // needs a FEE_DESTINATION, because a DISPENSER create carrying no EXPIRATION sits
+    // inside the free window and is charged nothing, so the only transaction-level
+    // value in play is the payment itself.
+    //
+    // BELOW THE FLAG is deliberately absent here. BATCH_ISSUANCE_LIMITS is
+    // GENESIS-ACTIVE on regtest, so there is no below-flag block on this chain to send
+    // a transaction into. The replay half - one payment still fills all N below the
+    // flag, byte for byte - is pinned in
+    // xchain-indexer/test/unit/dispenserValueAccounting.test.js, which drives the
+    // handler with the gate forced off. That is the honest boundary: these are
+    // at-flag witnesses only.
+    describe('A5: one payment fills ONE dispenser (rows 19/20/23) and a batched create dispenses (row 35)', function () {
+
+        const transactionHelper = require('../transactionHelper')
+        const sendHelper        = require('../helpers/sendHelper')
+        const dispenserHelper   = require('../helpers/dispenserHelper')
+
+        // One fill's price in satoshis, per chain. Sized above each chain's dust
+        // threshold so the triggering payment is relayable, and the amount paid is
+        // EXACTLY this: the whole point is a payment that covers one fill, not two.
+        const FILL_SATS = { BTC: 100000, LTC: 100000, DOGE: 10000000 }
+
+        // Units of the GIVE token handed over per fill, and the escrow each dispenser
+        // holds. Equal on purpose: one fill of capacity each.
+        const GIVE_PER_FILL = 10
+        // Fill price when the trigger is a token SEND rather than a coin payment.
+        const PAY_PER_FILL  = 10
+
+        const INSUFFICIENT = 'invalid: GET_AMOUNT (insufficient funds)'
+
+        function fillSats(){ return FILL_SATS[COIN_CODE] || 100000 }
+        function fillCoin(){ return (fillSats() / 1e8).toFixed(8) }
+
+        // Every dispense row the indexer wrote for one triggering transaction, in the
+        // order the handler produced them (findMatchingDispensers orders by
+        // d1.action_index, so the OLDEST dispenser behind the address draws first).
+        //
+        // The join runs through `actions` because a multi-dispenser trigger writes
+        // several action rows against ONE transaction: the first dispense reuses the
+        // trigger's own action index and each later one gets a fresh index.
+        async function dispensesForTx(txHash){
+            return q(`SELECT d.action_index, d.dispenser_action_index, d.give_amount,
+                             d.get_amount, itk.tick AS give_tick, ist.status AS status
+                        FROM dispenses d
+                        JOIN actions a               ON a.action_index = d.action_index
+                        JOIN transactions t          ON t.tx_index = a.tx_index
+                        JOIN index_transactions it   ON it.id = t.tx_hash_id
+                        LEFT JOIN index_tickers itk  ON itk.id = d.give_tick_id
+                        LEFT JOIN index_statuses ist ON ist.id = d.status_id
+                       WHERE it.hash = ?
+                       ORDER BY d.action_index ASC`, [txHash])
+        }
+
+        // The dispensers a transaction created, oldest action index first.
+        async function dispensersForTx(txHash){
+            return q(`SELECT dp.action_index, dp.give_amount, dp.give_escrow, dp.get_amount,
+                             itk.tick AS give_tick, ist.status AS status
+                        FROM dispensers dp
+                        JOIN actions a               ON a.action_index = dp.action_index
+                        JOIN transactions t          ON t.tx_index = a.tx_index
+                        JOIN index_transactions it   ON it.id = t.tx_hash_id
+                        LEFT JOIN index_tickers itk  ON itk.id = dp.give_tick_id
+                        LEFT JOIN index_statuses ist ON ist.id = dp.status_id
+                       WHERE it.hash = ?
+                       ORDER BY dp.action_index ASC`, [txHash])
+        }
+
+        // Numeric balance, because every assertion below is an exact DELTA and the
+        // shared balanceOf() returns the raw column string.
+        async function tokenBalance(address, tick){
+            return Number(await balanceOf(address, tick))
+        }
+
+        async function waitForDispenses(txHash, expected, timeoutMs = 180000){
+            const deadline = Date.now() + timeoutMs
+            for (;;){
+                const rows = await dispensesForTx(txHash)
+                if (rows.length >= expected || Date.now() > deadline) break
+                await new Promise(r => setTimeout(r, 2000))
+            }
+            // Settle, then re-read. Every case asserts an EXACT row count, and
+            // returning the instant the count is MET would turn "the indexer wrote one
+            // row too many" into a passing race rather than a failure.
+            await new Promise(r => setTimeout(r, 8000))
+            return dispensesForTx(txHash)
+        }
+
+        async function waitForBalance(address, tick, expected, timeoutMs = 120000){
+            const deadline = Date.now() + timeoutMs
+            for (;;){
+                const value = await tokenBalance(address, tick)
+                if (value >= expected || Date.now() > deadline) return value
+                await new Promise(r => setTimeout(r, 2000))
+            }
+        }
+
+        // DISPENSER v0 as a BATCH sub-command. dispenserHelper builds and SENDS its own
+        // transaction, so it cannot express a create that lives inside a batch. Built
+        // from a field LIST rather than concatenated pipes on purpose: the message has
+        // sixteen fields, six of them empty and adjacent, and a miscounted separator
+        // produces a create that parses into different columns rather than one that
+        // fails loudly.
+        function dispenserCmd(giveTick, giveAmount, giveEscrow, getAmount, getAddress, memo){
+            return [
+                'DISPENSER', '0',
+                COIN_CODE,      // GIVE_COIN
+                giveTick,       // GIVE_TICK
+                giveAmount,     // GIVE_AMOUNT
+                '',             // GIVE_OWNERSHIP
+                giveEscrow,     // GIVE_ESCROW
+                COIN_CODE,      // GET_COIN
+                '',             // GET_TICK (native-coin priced)
+                getAmount,      // GET_AMOUNT
+                getAddress,     // GET_ADDRESS
+                '',             // FIAT_CODE
+                '',             // FIAT_AMOUNT
+                '',             // ORACLE_ADDRESS
+                '',             // EXPIRATION (free window, so the create is charged nothing)
+                '',             // ALLOW_LIST
+                '',             // BLOCK_LIST
+                memo || ''
+            ].join('|')
+        }
+
+        function statuses(rows){ return rows.map(r => r.status) }
+
+        // ─── Row 23, native-coin trigger ───────────────────────────────────────
+        describe('row 23: one coin payment behind THREE dispensers at one address', function () {
+
+            let host = null, hostAddress = null, buyer = null, buyerAddress = null
+            let tick = null
+            const dispenserIndexes = []
+
+            before(async function () {
+                host  = await cryptoHelper.getNewFundedAddress("BIL.D23N.H", COIN, NETWORK, null, "legacy", 0, 2)
+                buyer = await cryptoHelper.getNewFundedAddress("BIL.D23N.B", COIN, NETWORK, null, "legacy", 0, 2)
+                hostAddress  = host["address"]
+                buyerAddress = buyer["address"]
+                tick = "BILDN" + hostAddress.substring(hostAddress.length - 8)
+
+                await issueHelper.sendIssueV0(host, tick, 1000, 1000, 0, "row 23 native trigger", 1000)
+
+                // Three dispensers, all at the SAME GET_ADDRESS, each holding exactly
+                // one fill of escrow. No EXPIRATION: inside the free window, so the
+                // creates are charged nothing and no fee output is hand-sized here.
+                for (let n = 0; n < 3; n++){
+                    const created = await dispenserHelper.sendDispenserV0(
+                        host, COIN_CODE, tick, GIVE_PER_FILL, GIVE_PER_FILL,
+                        COIN_CODE, null, fillCoin(), hostAddress,
+                        null, null, null, null, null, null, 'row 23 dispenser ' + n)
+                    assert(created.dispenser, "dispenser " + n + " should be open")
+                    dispenserIndexes.push(Number(created.dispenser["action_index"]))
+                }
+                console.log("row 23 native: host=" + hostAddress + " tick=" + tick +
+                    " dispensers=" + JSON.stringify(dispenserIndexes) +
+                    " fill=" + fillSats() + " sats")
+            })
+
+            it('fills exactly ONE dispenser, and moves exactly one fill of balance', async function () {
+                const before = await tokenBalance(buyerAddress, tick)
+
+                const txHash = await transactionHelper.createSimpleTransaction(
+                    buyer, hostAddress, fillSats())
+
+                const rows  = await waitForDispenses(txHash, 3)
+                const after = await waitForBalance(buyerAddress, tick, before + GIVE_PER_FILL)
+                console.log("row 23 native ONE-FILL txHash=" + txHash +
+                    " statuses=" + JSON.stringify(statuses(rows)) +
+                    " giveAmounts=" + JSON.stringify(rows.map(r => r.give_amount)) +
+                    " getAmounts=" + JSON.stringify(rows.map(r => r.get_amount)) +
+                    " buyerBalance=" + before + "->" + after)
+
+                // Every matched dispenser gets its own record, so "one settled" is
+                // proven by the SPLIT rather than by the absence of rows.
+                assert.strictEqual(rows.length, 3,
+                    "all three dispensers behind the paid address are evaluated")
+
+                // EXACTLY one, not "at most one": a path that settles NOTHING satisfies
+                // the weaker bound, and that is the failure mode this case exists to
+                // rule out. The companion case below is the other half of the argument.
+                const valid = rows.filter(r => r.status === 'valid')
+                assert.strictEqual(valid.length, 1,
+                    "one payment must buy exactly ONE fill, not three (statuses " +
+                    JSON.stringify(statuses(rows)) + ")")
+
+                // Which one settles is deterministic across nodes: the match query
+                // orders by the dispenser's action index.
+                assert.strictEqual(Number(valid[0].dispenser_action_index), dispenserIndexes[0],
+                    "the lowest dispenser action index draws the payment")
+
+                for (const row of rows.filter(r => r.status !== 'valid'))
+                    assert.strictEqual(row.status, INSUFFICIENT,
+                        "a dispenser past the drained payment reports an empty pool")
+
+                // The money, not just the bookkeeping.
+                assert.strictEqual(after, before + GIVE_PER_FILL,
+                    "exactly one fill of " + tick + " moved to the buyer")
+                assert.strictEqual(Number(valid[0].give_amount), GIVE_PER_FILL)
+
+                // Row 18: the row records what this dispense was CHARGED. At a payment
+                // of exactly one fill the two figures coincide, so the discriminating
+                // check is in the companion case, whose payment is larger than a fill.
+                assert.strictEqual(Number(valid[0].get_amount), Number(fillCoin()),
+                    "the settled row records the fill price it was charged")
+            })
+
+            it('fills the REMAINING two when a later payment carries two fills', async function () {
+                // The same fixture, paid again. The first dispenser is exhausted and
+                // closed, so this payment meets dispensers 2 and 3 - and if the case
+                // above had passed merely because nothing ever settles, nothing would
+                // settle here either.
+                //
+                // TWO fills' worth against two dispensers that serve one fill each:
+                // both settle, and each draws ONE fill's price out of the pool rather
+                // than the whole payment. That is the row 18 record correction too.
+                const before = await tokenBalance(buyerAddress, tick)
+
+                const txHash = await transactionHelper.createSimpleTransaction(
+                    buyer, hostAddress, fillSats() * 2)
+
+                const rows  = await waitForDispenses(txHash, 2)
+                const after = await waitForBalance(buyerAddress, tick, before + GIVE_PER_FILL * 2)
+                console.log("row 23 native TWO-FILL txHash=" + txHash +
+                    " statuses=" + JSON.stringify(statuses(rows)) +
+                    " getAmounts=" + JSON.stringify(rows.map(r => r.get_amount)) +
+                    " buyerBalance=" + before + "->" + after)
+
+                assert.strictEqual(rows.length, 2,
+                    "the exhausted dispenser has closed; the other two remain open")
+                assert.deepStrictEqual(statuses(rows), ['valid', 'valid'],
+                    "two fills' worth must fund two fills")
+                assert.deepStrictEqual(
+                    rows.map(r => Number(r.dispenser_action_index)),
+                    [dispenserIndexes[1], dispenserIndexes[2]],
+                    "the two dispensers the first payment could not reach")
+                assert.strictEqual(after, before + GIVE_PER_FILL * 2,
+                    "two fills of " + tick + " moved to the buyer")
+
+                // Each row carries ONE fill's price, never the two-fill payment: the
+                // record and the amount drained from the pool are one number.
+                for (const row of rows)
+                    assert.strictEqual(Number(row.get_amount), Number(fillCoin()),
+                        "each dispense records the fill it bought, not the whole payment")
+            })
+        })
+
+        // ─── Row 23 / row 20, token-SEND trigger ───────────────────────────────
+        //
+        // The same double-spend lived on the SEND path: util.processDispenserSends
+        // builds its own data object per SEND and hands it to the same handler, so
+        // several dispensers priced in the sent token all drew on one SEND's amount.
+        describe('row 23: one token SEND behind THREE dispensers at one address', function () {
+
+            let host = null, hostAddress = null, buyer = null, buyerAddress = null
+            let giveTick = null, payTick = null
+            const dispenserIndexes = []
+
+            before(async function () {
+                host  = await cryptoHelper.getNewFundedAddress("BIL.D23S.H", COIN, NETWORK, null, "legacy", 0, 2)
+                buyer = await cryptoHelper.getNewFundedAddress("BIL.D23S.B", COIN, NETWORK, null, "legacy", 0, 2)
+                hostAddress  = host["address"]
+                buyerAddress = buyer["address"]
+                giveTick = "BILDG" + hostAddress.substring(hostAddress.length - 8)
+                payTick  = "BILDP" + hostAddress.substring(hostAddress.length - 8)
+
+                await issueHelper.sendIssueV0(host, giveTick, 1000, 1000, 0, "row 23 send give", 1000)
+                await issueHelper.sendIssueV0(host, payTick,  1000, 1000, 0, "row 23 send pay",  1000)
+                // The buyer needs the payment token before it can trigger anything.
+                await sendHelper.sendSendV0(host, payTick, PAY_PER_FILL * 4, buyerAddress, "row 23 fund buyer")
+
+                for (let n = 0; n < 3; n++){
+                    const created = await dispenserHelper.sendDispenserV0(
+                        host, COIN_CODE, giveTick, GIVE_PER_FILL, GIVE_PER_FILL,
+                        COIN_CODE, payTick, PAY_PER_FILL, hostAddress,
+                        null, null, null, null, null, null, 'row 23 send dispenser ' + n)
+                    assert(created.dispenser, "token-priced dispenser " + n + " should be open")
+                    dispenserIndexes.push(Number(created.dispenser["action_index"]))
+                }
+                console.log("row 23 send: host=" + hostAddress + " give=" + giveTick +
+                    " pay=" + payTick + " dispensers=" + JSON.stringify(dispenserIndexes))
+            })
+
+            it('fills exactly ONE dispenser from one SEND carrying one fill', async function () {
+                const before = await tokenBalance(buyerAddress, giveTick)
+
+                const sent = await sendHelper.sendSendV0(
+                    buyer, payTick, PAY_PER_FILL, hostAddress, "row 23 one fill")
+                assert(sent.send, "the triggering SEND itself is valid")
+
+                const rows  = await waitForDispenses(sent.txHash, 3)
+                const after = await waitForBalance(buyerAddress, giveTick, before + GIVE_PER_FILL)
+                console.log("row 23 send ONE-FILL txHash=" + sent.txHash +
+                    " statuses=" + JSON.stringify(statuses(rows)) +
+                    " getAmounts=" + JSON.stringify(rows.map(r => r.get_amount)) +
+                    " buyerBalance=" + before + "->" + after)
+
+                assert.strictEqual(rows.length, 3,
+                    "all three token-priced dispensers behind the address are evaluated")
+                const valid = rows.filter(r => r.status === 'valid')
+                assert.strictEqual(valid.length, 1,
+                    "one SEND must buy exactly ONE fill, not three (statuses " +
+                    JSON.stringify(statuses(rows)) + ")")
+                assert.strictEqual(Number(valid[0].dispenser_action_index), dispenserIndexes[0])
+                for (const row of rows.filter(r => r.status !== 'valid'))
+                    assert.strictEqual(row.status, INSUFFICIENT)
+                assert.strictEqual(after, before + GIVE_PER_FILL,
+                    "exactly one fill of " + giveTick + " moved to the buyer")
+            })
+
+            it('fills the REMAINING two when a later SEND carries two fills', async function () {
+                const before = await tokenBalance(buyerAddress, giveTick)
+
+                const sent = await sendHelper.sendSendV0(
+                    buyer, payTick, PAY_PER_FILL * 2, hostAddress, "row 23 two fills")
+                assert(sent.send, "the triggering SEND itself is valid")
+
+                const rows  = await waitForDispenses(sent.txHash, 2)
+                const after = await waitForBalance(buyerAddress, giveTick, before + GIVE_PER_FILL * 2)
+                console.log("row 23 send TWO-FILL txHash=" + sent.txHash +
+                    " statuses=" + JSON.stringify(statuses(rows)) +
+                    " getAmounts=" + JSON.stringify(rows.map(r => r.get_amount)) +
+                    " buyerBalance=" + before + "->" + after)
+
+                assert.strictEqual(rows.length, 2)
+                assert.deepStrictEqual(statuses(rows), ['valid', 'valid'],
+                    "two fills' worth of the payment token must fund two fills")
+                assert.deepStrictEqual(
+                    rows.map(r => Number(r.dispenser_action_index)),
+                    [dispenserIndexes[1], dispenserIndexes[2]])
+                assert.strictEqual(after, before + GIVE_PER_FILL * 2)
+                for (const row of rows)
+                    assert.strictEqual(Number(row.get_amount), PAY_PER_FILL,
+                        "each dispense records the fill it bought, not the whole SEND")
+            })
+        })
+
+        // ─── Row 35 ────────────────────────────────────────────────────────────
+        //
+        // TWO creates in ONE batch, not one: the decoder collapses a batch's creates to
+        // a single registration per operating address because its dispensers table is
+        // keyed on (tx_index, address_id), and that collapse is itself part of the fix
+        // (a second create used to collide on the primary key and be read as stored).
+        // Two creates therefore exercise the registry AND give the pair evidence - the
+        // second payment must reach the dispenser the first one did not fund.
+        describe('row 35: a dispenser created inside a BATCH dispenses on a live chain', function () {
+
+            let host = null, hostAddress = null, buyer = null, buyerAddress = null
+            let tick = null, batchTxHash = null
+            let dispenserIndexes = []
+
+            before(async function () {
+                host  = await cryptoHelper.getNewFundedAddress("BIL.D35.H", COIN, NETWORK, null, "legacy", 0, 2)
+                buyer = await cryptoHelper.getNewFundedAddress("BIL.D35.B", COIN, NETWORK, null, "legacy", 0, 2)
+                hostAddress  = host["address"]
+                buyerAddress = buyer["address"]
+                tick = "BILD5" + hostAddress.substring(hostAddress.length - 8)
+
+                await issueHelper.sendIssueV0(host, tick, 1000, 1000, 0, "row 35 batch dispensers", 1000)
+
+                const commands = [0, 1].map(n => dispenserCmd(
+                    tick, GIVE_PER_FILL, GIVE_PER_FILL, fillCoin(), hostAddress,
+                    'row 35 batched dispenser ' + n))
+
+                const result = await batchHelper.sendBatch(host, commands, { status: 'valid' })
+                assert(result.batch, "the BATCH itself is valid")
+                batchTxHash = result.txHash
+
+                // The indexer half: both creates land as open dispensers. This was never
+                // the defect - it is the DECODER that did not see them - so it is a
+                // precondition here rather than the witness.
+                const created = await dispensersForTx(batchTxHash)
+                assert.strictEqual(created.length, 2,
+                    "a batch's two DISPENSER sub-commands each create a dispenser")
+                for (const row of created)
+                    assert.strictEqual(row.status, 'valid')
+                dispenserIndexes = created.map(r => Number(r.action_index))
+                console.log("row 35 batch txHash=" + batchTxHash + " host=" + hostAddress +
+                    " tick=" + tick + " dispensers=" + JSON.stringify(dispenserIndexes))
+            })
+
+            it('captures a payment to the batch-created dispenser and dispenses', async function () {
+                const before = await tokenBalance(buyerAddress, tick)
+
+                const txHash = await transactionHelper.createSimpleTransaction(
+                    buyer, hostAddress, fillSats())
+
+                const rows  = await waitForDispenses(txHash, 2)
+                const after = await waitForBalance(buyerAddress, tick, before + GIVE_PER_FILL)
+                console.log("row 35 ONE-FILL txHash=" + txHash +
+                    " statuses=" + JSON.stringify(statuses(rows)) +
+                    " getAmounts=" + JSON.stringify(rows.map(r => r.get_amount)) +
+                    " buyerBalance=" + before + "->" + after)
+
+                // The witness itself: rows exist at all. Before the registry learned to
+                // read a batch's sub-commands this payment was not classified as a
+                // dispense trigger, so there was nothing here to have a status.
+                assert.strictEqual(rows.length, 2,
+                    "both batch-created dispensers are evaluated against the payment")
+                const valid = rows.filter(r => r.status === 'valid')
+                assert.strictEqual(valid.length, 1,
+                    "one payment buys exactly ONE fill from the batch-created pair (statuses " +
+                    JSON.stringify(statuses(rows)) + ")")
+                assert.strictEqual(Number(valid[0].dispenser_action_index), dispenserIndexes[0])
+                assert.strictEqual(rows.filter(r => r.status !== 'valid')[0].status, INSUFFICIENT)
+
+                // Balances actually move, which is the part a registry-only assertion
+                // could never prove.
+                assert.strictEqual(after, before + GIVE_PER_FILL,
+                    "one fill of " + tick + " moved out of the batch-created dispenser")
+                assert.strictEqual(Number(valid[0].give_amount), GIVE_PER_FILL)
+            })
+
+            it('dispenses from the SECOND batch-created dispenser on a second payment', async function () {
+                // Pair evidence, and the second half of row 35: the sibling create is
+                // not merely present, it is spendable. The first dispenser is exhausted
+                // and closed, so this payment reaches the one the tally stopped.
+                const before = await tokenBalance(buyerAddress, tick)
+
+                const txHash = await transactionHelper.createSimpleTransaction(
+                    buyer, hostAddress, fillSats())
+
+                const rows  = await waitForDispenses(txHash, 1)
+                const after = await waitForBalance(buyerAddress, tick, before + GIVE_PER_FILL)
+                console.log("row 35 SECOND-FILL txHash=" + txHash +
+                    " statuses=" + JSON.stringify(statuses(rows)) +
+                    " buyerBalance=" + before + "->" + after)
+
+                assert.strictEqual(rows.length, 1,
+                    "the exhausted dispenser has closed, leaving the sibling")
+                assert.deepStrictEqual(statuses(rows), ['valid'])
+                assert.strictEqual(Number(rows[0].dispenser_action_index), dispenserIndexes[1],
+                    "the SECOND create in the batch dispenses too")
+                assert.strictEqual(after, before + GIVE_PER_FILL)
+            })
+        })
+    })
 })
