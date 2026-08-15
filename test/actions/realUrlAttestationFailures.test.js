@@ -130,8 +130,11 @@ describe('REAL-URL attestation FAILURE paths: expired + no_quorum over a 3-valid
         let stakeSource = await cryptoHelper.getNewFundedAddress(
             'realurl-fail-val', COIN, NETWORK, null, 'legacy', stakedValidators.length, 0.02
         )
-        await gasHelper.ensureGasBalance(stakeSource, '2000')
-        await stakeHelper.sendStakeV1(stakeSource, '1500.00000000', v.pubkey)
+        // 15000 clears BOTH the attestation capability min_stake (1000) and the
+        // http_get PROVIDER floor (10000, XC-083), enforced on the responsible set
+        // at/above STAKE_WEIGHTED_QUORUM (armed at genesis on regtest).
+        await gasHelper.ensureGasBalance(stakeSource, '20000')
+        await stakeHelper.sendStakeV1(stakeSource, '15000.00000000', v.pubkey)
         v.source = stakeSource.address
         stakedValidators.push(v)
         return v

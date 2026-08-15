@@ -16,6 +16,7 @@ const transactionHelper = require('../transactionHelper');
 // Sibling modules: same EQUIV header + SWQ gate the indexer's verifier uses (attest.js).
 const eq  = require('../../../xchain-indexer/src/equivocation_header.js');
 const swq = require('../../../xchain-indexer/src/stake_weighted_quorum.js');
+const mathjs = require('mathjs');
 
 class MockAttestationValidator {
     constructor() {
@@ -58,13 +59,27 @@ class MockAttestationValidator {
 // at/above SWQ activation (regtest/testnet → block 0) dedupes by staking source (one
 // slot per source, lowest-hash key wins), then takes the top-REDUNDANCY.
 //
+// PROVIDER STAKE FLOOR (XC-083): at/above SWQ the indexer ALSO drops staking sources
+// whose aggregate stake is below the request provider's min_stake_xchain (http_get
+// 10000, llm 25000) before ranking. This helper reproduces that only when the caller
+// supplies both a `minStake` and per-validator `weight`s; every e2e suite instead
+// stakes each attestation validator ABOVE the relevant floor, which makes the filter a
+// no-op and keeps the mirror exact. Stake a validator below the floor without passing
+// `minStake` here and this helper will pick a signer the indexer does not consider
+// responsible, which surfaces as "insufficient valid signatures" rather than as
+// anything pointing at the stake amount.
+//
 // CONSENSUS-MIRROR: must match attest.js._computeResponsibleSet byte-for-byte, else the
 // chosen signers won't be the ones the indexer deems responsible and validSigs falls
 // short of REDUNDANCY. `validators` must be the FULL staked attestation set (the indexer
 // computes over every staked key at the block, not just the ones a given test tracks).
-function computeResponsibleSigners(requestId, redundancy, validators, snapshotBlock, network) {
+function computeResponsibleSigners(requestId, redundancy, validators, snapshotBlock, network, minStake) {
     const net = network || process.env.NETWORK || 'regtest';
     const sb  = (snapshotBlock != null) ? Number(snapshotBlock) : 0;
+    if (minStake != null && swq.isStakeWeightedQuorumActive(sb, net))
+        validators = validators.filter(v => v && v.weight != null &&
+            /^\d+(\.\d+)?$/.test(String(v.weight).trim()) &&
+            mathjs.bignumber(String(v.weight).trim()).gte(mathjs.bignumber(String(minStake).trim())));
     let withHash = validators.map(v => {
         let pk = String(v.pubkey).toLowerCase();
         let h  = crypto.createHash('sha256').update(String(requestId), 'utf8').update(pk, 'utf8').digest('hex');

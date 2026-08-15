@@ -242,9 +242,12 @@ module.exports = {
                 'outage-staker-' + i, COIN, NETWORK, null, 'legacy', 0, 0.02
             )
             await _settleStack()
-            await gasHelper.ensureGasBalance(addr, '1500')
+            // 30000 clears BOTH the attestation capability min_stake (1000) and the llm
+            // PROVIDER floor (25000, XC-083, higher than http_get's 10000), enforced on
+            // the responsible set at/above STAKE_WEIGHTED_QUORUM (armed at genesis on regtest).
+            await gasHelper.ensureGasBalance(addr, '35000')
             await _settleStack()
-            const result = await stakeHelper.sendStakeV1(addr, '1200.00000000', pubkeys[i])
+            const result = await stakeHelper.sendStakeV1(addr, '30000.00000000', pubkeys[i])
             assert.strictEqual(result.stake.status, 'valid', 'stake ' + i + ' should be valid')
         }
 
