@@ -92,16 +92,18 @@ module.exports = {
         await mvh.start()
         const pubkeys = mvh.getPubkeys()
 
-        // Stake each hub's pubkey from a separate funded source (attestation
-        // capability min_stake is 1000 XCHAIN; use 1200, mirroring A2/multiHub).
+        // Stake each hub's pubkey from a separate funded source. 30000 clears BOTH the
+        // attestation capability min_stake (1000 XCHAIN) and the llm PROVIDER floor
+        // (25000, XC-083), which the responsible-set derivation enforces at/above
+        // STAKE_WEIGHTED_QUORUM (armed at genesis on regtest).
         for (let i = 0; i < pubkeys.length; i++) {
             const addr = await cryptoHelper.getNewFundedAddress(
                 'llm-mvh-staker-' + i, COIN, NETWORK, null, 'legacy', 0, 0.02
             )
             await _settleStack()
-            await gasHelper.ensureGasBalance(addr, '1500')
+            await gasHelper.ensureGasBalance(addr, '35000')
             await _settleStack()
-            const result = await stakeHelper.sendStakeV1(addr, '1200.00000000', pubkeys[i])
+            const result = await stakeHelper.sendStakeV1(addr, '30000.00000000', pubkeys[i])
             assert.strictEqual(result.stake.status, 'valid', 'stake ' + i + ' should be valid')
             stakers.push({ addressInfo: addr, pubkey: pubkeys[i] })
         }

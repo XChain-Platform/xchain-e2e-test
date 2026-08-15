@@ -78,16 +78,25 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // hashes them, it never verifies a signature here.
 function hx(n) { return String(n).padStart(2, '0').repeat(32); }
 const VALIDATORS = [
-    { pubkey: hx(1),  source: 'whale', weight: '5000' },
-    { pubkey: hx(2),  source: 'whale', weight: '5000' },
-    { pubkey: hx(3),  source: 'whale', weight: '5000' },
-    { pubkey: hx(4),  source: 'whale', weight: '5000' },
-    { pubkey: hx(5),  source: 'whale', weight: '5000' },
-    { pubkey: hx(11), source: 'sA',    weight: '1000' },
-    { pubkey: hx(12), source: 'sB',    weight: '1000' },
-    { pubkey: hx(13), source: 'sC',    weight: '1000' },
-    { pubkey: hx(14), source: 'sD',    weight: '1000' },
-];
+    // Weights are all above the http_get PROVIDER floor of 10000 (XC-083), which the
+    // weighted responsible-set derivation applies before the source dedupe. This suite
+    // isolates the dedupe rule, so nothing here may sit under the floor or the set
+    // empties for a reason that has nothing to do with what is being asserted.
+    { pubkey: hx(1),  source: 'whale', weight: '50000' },
+    { pubkey: hx(2),  source: 'whale', weight: '50000' },
+    { pubkey: hx(3),  source: 'whale', weight: '50000' },
+    { pubkey: hx(4),  source: 'whale', weight: '50000' },
+    { pubkey: hx(5),  source: 'whale', weight: '50000' },
+    { pubkey: hx(11), source: 'sA',    weight: '10000' },
+    { pubkey: hx(12), source: 'sB',    weight: '10000' },
+    { pubkey: hx(13), source: 'sC',    weight: '10000' },
+    { pubkey: hx(14), source: 'sD',    weight: '10000' },
+]
+
+// The http_get provider stake floor (XC-083). In production AttestationRound resolves
+// this from the block-anchored provider history; here it is passed literally so the
+// ranking stays a pure function of the seeded set.
+const PROVIDER_FLOOR = '10000'
 const whaleKeys = new Set(VALIDATORS.filter(v => v.source === 'whale').map(v => v.pubkey));
 const sourcesOf = (set) => set.map(v => v.source);
 const whaleSlots = (set) => set.filter(v => whaleKeys.has(v.pubkey)).length;
@@ -115,7 +124,7 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM attestation source-dedup (WI-
     it('WEIGHTED: every responsible slot is a distinct source; a multi-key source can take at most one slot', function () {
         for (let i = 0; i < 300; i++) {
             const rid = 'req-weighted-' + i;
-            const set = ar._computeResponsibleSet(VALIDATORS, rid, REDUNDANCY, true);
+            const set = ar._computeResponsibleSet(VALIDATORS, rid, REDUNDANCY, true, PROVIDER_FLOOR);
             const srcs = sourcesOf(set);
             assert.strictEqual(new Set(srcs).size, srcs.length,
                 'rid ' + rid + ': a source occupies >1 responsible slot under weighting (' + JSON.stringify(srcs) + ')');
@@ -129,13 +138,13 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM attestation source-dedup (WI-
         let witness = null;
         for (let i = 0; i < 1000 && !witness; i++) {
             const rid = 'req-' + i;
-            const countSet = ar._computeResponsibleSet(VALIDATORS, rid, REDUNDANCY, false);
+            const countSet = ar._computeResponsibleSet(VALIDATORS, rid, REDUNDANCY, false, PROVIDER_FLOOR);
             if (whaleSlots(countSet) >= 2) witness = rid;
         }
         assert.ok(witness, 'expected some requestId where the count path gives the whale ≥2 slots (5 of 9 keys)');
 
         // Same rid, weighted: the whale collapses to exactly one slot, all sources distinct.
-        const weightedSet = ar._computeResponsibleSet(VALIDATORS, witness, REDUNDANCY, true);
+        const weightedSet = ar._computeResponsibleSet(VALIDATORS, witness, REDUNDANCY, true, PROVIDER_FLOOR);
         assert.strictEqual(whaleSlots(weightedSet), 1,
             'witness ' + witness + ': weighting must collapse the whale to exactly one slot (got ' + whaleSlots(weightedSet) + ')');
         const srcs = sourcesOf(weightedSet);
@@ -323,19 +332,23 @@ describe('MultiValidatorHub: LIVE weighted attestation source-dedup through PBFT
 
         ids          = mvh.identities.map((id) => String(id.pubkeyHex).toLowerCase());
         whalePubkeys = new Set([ids[0], ids[1], ids[2]]);
+        // Every weight clears the http_get provider floor of 10000 (XC-083): these hubs
+        // run the REAL _startRound, which filters below-floor sources out of the
+        // responsible set before deduping, and a starved set here would fail the
+        // assertions for the wrong reason.
         weightedValidators = [
-            { pubkey: ids[0], source: 'whale', weight: '5000' },
-            { pubkey: ids[1], source: 'whale', weight: '5000' },
-            { pubkey: ids[2], source: 'whale', weight: '5000' },
-            { pubkey: ids[3], source: 'sA',    weight: '1000' },
-            { pubkey: ids[4], source: 'sB',    weight: '1000' }
+            { pubkey: ids[0], source: 'whale', weight: '50000' },
+            { pubkey: ids[1], source: 'whale', weight: '50000' },
+            { pubkey: ids[2], source: 'whale', weight: '50000' },
+            { pubkey: ids[3], source: 'sA',    weight: '10000' },
+            { pubkey: ids[4], source: 'sB',    weight: '10000' }
         ];
         dedupStarvedValidators = [
-            { pubkey: ids[0], source: 'whale', weight: '5000' },
-            { pubkey: ids[1], source: 'whale', weight: '5000' },
-            { pubkey: ids[2], source: 'whale', weight: '5000' },
-            { pubkey: ids[3], source: 'whale', weight: '5000' },
-            { pubkey: ids[4], source: 'sA',    weight: '1000' }
+            { pubkey: ids[0], source: 'whale', weight: '50000' },
+            { pubkey: ids[1], source: 'whale', weight: '50000' },
+            { pubkey: ids[2], source: 'whale', weight: '50000' },
+            { pubkey: ids[3], source: 'whale', weight: '50000' },
+            { pubkey: ids[4], source: 'sA',    weight: '10000' }
         ];
         sourceOfKey = (list) => new Map(list.map((v) => [String(v.pubkey).toLowerCase(), String(v.source)]));
 
@@ -347,7 +360,7 @@ describe('MultiValidatorHub: LIVE weighted attestation source-dedup through PBFT
         const starvedOf = sourceOfKey(dedupStarvedValidators);
         for (let i = 0; i < 2000 && !starvedRid; i++) {
             const rid = crypto.createHash('sha256').update('a2-live-starved-' + i).digest('hex');
-            const set = ar._computeResponsibleSet(dedupStarvedValidators, rid, REDUNDANCY, false);
+            const set = ar._computeResponsibleSet(dedupStarvedValidators, rid, REDUNDANCY, false, PROVIDER_FLOOR);
             if (set.filter((v) => starvedOf.get(v.pubkey) === 'whale').length >= 2) starvedRid = rid;
         }
         assert.ok(starvedRid, 'no request id gave the whale >=2 count-path slots (4 of 5 keys)');

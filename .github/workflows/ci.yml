@@ -51,7 +51,8 @@ concurrency:
 
 jobs:
   # The hermetic unit tier. Verified against a pristine clone with exactly this
-  # layout (clean checkout + xchain-hub as a sibling + npm ci), exit 0. A
+  # layout (clean checkout + xchain-hub and a bare xchain-indexer as siblings
+  # + npm ci in the first two), exit 0. A
   # handful of cases skip for want of a .env, which CI does not have either,
   # so that is expected rather than a gap opening up.
   unit:
@@ -73,6 +74,23 @@ jobs:
           ssh-key: ${{ secrets.XCHAIN_HUB_DEPLOY_KEY }}
           path: xchain-hub
 
+      # The seed-escrow-state gate tests resolve
+      # ../../xchain-indexer/src/state_subtree_activation.js from bin/ and FAIL
+      # (not skip) without it: an arming-height read must never degrade
+      # silently. This sibling stays a bare checkout with NO install on
+      # purpose: everything the unit tier reads from it is pure-constant
+      # modules with zero requires, so a dependency install would only add
+      # minutes. If a future guard pulls in an indexer module with real deps,
+      # the failure mode is a loud `Cannot find module` thrown from the
+      # indexer's own tree, which is the documented cue to add it to the
+      # install loop below.
+      - name: Check out xchain-indexer (arming-height constants read by the escrow gate tests)
+        uses: actions/checkout@v4
+        with:
+          repository: XChain-Platform/xchain-indexer
+          ssh-key: ${{ secrets.XCHAIN_INDEXER_DEPLOY_KEY }}
+          path: xchain-indexer
+
       - name: Use Node.js 22
         uses: actions/setup-node@v4
         with:
@@ -80,9 +98,17 @@ jobs:
 
       # Every suite in this repo requires exactly Node 22; 18 and 24 fail, and
       # some of those failures are silent skips rather than errors.
-      - name: Install dependencies
-        working-directory: xchain-e2e-test
-        run: if [ -f package-lock.json ]; then npm ci; else npm install; fi
+      # BOTH trees, for the reason the live-tier job below spells out: the hub
+      # helper requires hub source at require time, and Node resolves that file's
+      # dependencies from the HUB's own tree, never from xchain-e2e-test's. A
+      # source-only sibling therefore dies at module load on the hub's own deps
+      # (`Cannot find module 'mariadb'`), which is not a missing dependency here
+      # and reads like one.
+      - name: Install dependencies (both trees)
+        run: |
+          for d in xchain-e2e-test xchain-hub; do
+            ( cd "$d" && if [ -f package-lock.json ]; then npm ci; else npm install; fi )
+          done
 
       - name: Unit tier
         working-directory: xchain-e2e-test

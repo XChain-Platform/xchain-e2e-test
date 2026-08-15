@@ -112,7 +112,10 @@ const DEADLINE_BLOCKS = 100;
 // XCHAIN carries a 100000 per-action MAX_MINT on these venues, so a large stake
 // is assembled from repeated mints rather than one.
 const MINT_CHUNK = 100000;
-const ATTESTATION_MIN_STAKE = '1500.00000000';
+// Clears BOTH the attestation capability min_stake (1000) and the http_get PROVIDER
+// floor (10000, XC-083), which the responsible-set derivation enforces at/above
+// STAKE_WEIGHTED_QUORUM (armed at genesis on regtest).
+const ATTESTATION_MIN_STAKE = '15000.00000000';
 const ACTIVATION_DELAY_BLOCKS = 6;
 
 // The origin contract. Deliberately the realUrlAttestation shape: one method

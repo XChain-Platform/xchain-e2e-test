@@ -90,16 +90,18 @@ module.exports = {
         await mvh.start()
         const pubkey = mvh.getPubkeys()[0]
 
-        // Stake the single hub. min_stake for the `attestation` capability is
-        // 1000 XCHAIN (see xchain-indexer/src/configs/BTC.js). Use 1200 to
-        // mirror A2's pattern.
+        // Stake the single hub. Two floors apply: the `attestation` capability
+        // min_stake is 1000 XCHAIN (see xchain-indexer/src/coins/BTC.js), and the llm
+        // PROVIDER floor is 25000 (XC-083), which the responsible-set derivation
+        // enforces at/above STAKE_WEIGHTED_QUORUM (armed at genesis on regtest).
+        // 30000 clears both.
         const staker = await cryptoHelper.getNewFundedAddress(
             'llm-staker', COIN, NETWORK, null, 'legacy', 0, 0.02
         )
         await _settleStack()
-        await gasHelper.ensureGasBalance(staker, '1500')
+        await gasHelper.ensureGasBalance(staker, '35000')
         await _settleStack()
-        const stakeResult = await stakeHelper.sendStakeV1(staker, '1200.00000000', pubkey)
+        const stakeResult = await stakeHelper.sendStakeV1(staker, '30000.00000000', pubkey)
         assert.strictEqual(stakeResult.stake.status, 'valid', 'stake should be valid')
 
         // Activation window

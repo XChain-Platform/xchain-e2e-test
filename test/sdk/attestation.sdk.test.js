@@ -187,9 +187,11 @@ describe('[sdk] External Attestation Framework (request -> response -> callback)
         validator = new attestationHelper.MockAttestationValidator();
 
         // STAKE v1 (capability staking): aggregate stake auto-qualifies the
-        // pubkey for `attestation` (default min 1000 XCHAIN). Driven via SDK.
+        // pubkey for `attestation` (default min 1000 XCHAIN). 15000 also clears the
+        // http_get PROVIDER floor (10000, XC-083), enforced on the responsible set
+        // at/above STAKE_WEIGHTED_QUORUM (armed at genesis on regtest). Driven via SDK.
         const stakeRes = await submit(sdk,
-            { action: 'STAKE', params: { version: 1, amount: '1500.00000000', signingPubkey: validator.pubkey } },
+            { action: 'STAKE', params: { version: 1, amount: '15000.00000000', signingPubkey: validator.pubkey } },
             { pubkey: operator.address, change: operator.address },
             submitOpts({ wif: operator.wif })
         );
