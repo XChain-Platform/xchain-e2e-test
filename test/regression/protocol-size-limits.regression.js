@@ -563,6 +563,110 @@ describe('Protocol size-limit drift guard', () => {
                     svc + ' vendored ORACLE_DEVIATION_THRESHOLD disagrees with the hub, which is the arbiter for the oracle band')
             })
         })
+
+        // Four fleet-agreed operational bounds with no value-level assertion here: the
+        // reorg burial depth, the anchor-reward mirror watermark, the BATCH command cap
+        // and the per-block cross-chain settlement slice. Three of them are bare
+        // literals living in a src/ module per repo, which the byte-identity block
+        // below cannot see at all. The one twin that does exist, for
+        // BATCH_COMMAND_LIMIT in xchain-documentation's protocol-constant-claims
+        // .test.js, SKIPS in its own repo's CI, which is hermetic by design (no sibling
+        // checkouts), so this suite is the only lane that sees the copies at once
+        // (uuids 96193535, 27c632bf, 500f2f11, 0fe9fc61).
+
+        it('[regression:p0] CANONICAL_REORG_BUFFER === canonical across hub + indexer + sdk (uuid 96193535)', () => {
+            // Every consumer buries exactly once, locally: the hub resolves a capability
+            // snapshot at H - CANONICAL_REORG_BUFFER, and the three verifier families that
+            // re-derive that set from on-chain state (indexer attest.js, indexer
+            // recovery.js, sdk light.js) must bury by the identical depth or they resolve
+            // a different signer set than the hub that signed the artifact. Each repo
+            // holds its own bare literal; the indexer's snapshotReorgBuffer.test.js pins
+            // its copy to the literal 6 and cross-checks the hub copy, never canonical,
+            // and the sdk copy had no guard anywhere.
+            const reorgCopies = {
+                'xchain-hub':     require('../../../xchain-hub/src/snapshot_reorg_buffer.js'),
+                'xchain-indexer': require('../../../xchain-indexer/src/snapshot_reorg_buffer.js'),
+                'xchain-sdk':     require('../../../xchain-sdk/src/snapshot_reorg_buffer.js'),
+                // The documentation repo's own reference implementation is the vector
+                // source consumers are checked against; nothing in that repo compares it
+                // to constants.js, so it drifts silently too.
+                'xchain-documentation reference-impl':
+                    require('../../../xchain-documentation/protocol/reference-impl/snapshot_reorg_buffer.js'),
+            }
+            Object.keys(reorgCopies).forEach((svc) => {
+                assert.strictEqual(
+                    reorgCopies[svc].CANONICAL_REORG_BUFFER,
+                    protocol.CANONICAL_REORG_BUFFER,
+                    svc + ' CANONICAL_REORG_BUFFER drifted from the canonical protocol constant; ' +
+                    'a verifier would resolve the capability snapshot at a different height than the hub that signed it'
+                )
+            })
+        })
+
+        // ANCHOR_REWARD_MIRROR_MATURITY decides the BTC height a COLLECT-spendable
+        // anchor reward materializes at: a mirrored attestation matures at
+        // snapshot_block + this constant. The hub writes the row and the indexer
+        // derives the reward, each from its own bare literal in
+        // src/anchor_reward_activation.js. A one-sided edit reproduces the exact defect
+        // the constant was introduced to fix, two nodes with different mirror contents
+        // deriving the same reward at different BTC heights (uuid 27c632bf).
+        it('[regression:p0] ANCHOR_REWARD_MIRROR_MATURITY === canonical across hub + indexer (uuid 27c632bf)', () => {
+            const hubAnchor     = require('../../../xchain-hub/src/anchor_reward_activation.js')
+            const indexerAnchor = require('../../../xchain-indexer/src/anchor_reward_activation.js')
+            assert.strictEqual(
+                hubAnchor.ANCHOR_REWARD_MIRROR_MATURITY,
+                protocol.ANCHOR_REWARD_MIRROR_MATURITY,
+                'hub anchor_reward_activation ANCHOR_REWARD_MIRROR_MATURITY drifted from the canonical protocol constant'
+            )
+            assert.strictEqual(
+                indexerAnchor.ANCHOR_REWARD_MIRROR_MATURITY,
+                protocol.ANCHOR_REWARD_MIRROR_MATURITY,
+                'indexer anchor_reward_activation ANCHOR_REWARD_MIRROR_MATURITY drifted from the canonical protocol constant; ' +
+                'the hub and the indexer would mature the same mirrored attestation at different BTC heights'
+            )
+        })
+
+        // BATCH_COMMAND_LIMIT caps the commands one BATCH may carry. The indexer's
+        // actions/batch.js is the on-chain arbiter and holds its copy as an instance
+        // field (`this.commandLimit`), not an export, so it is read from source the same
+        // way the execute.js call caps above are. The SDK exports its own literal from
+        // batchLimits.js, and four further SDK sites (validator, batchBuilder,
+        // decoder/parse, preflight/checks/batch) follow that one (uuid 500f2f11).
+        it('[regression:p0] BATCH_COMMAND_LIMIT === canonical across SDK batchLimits + indexer batch.js (uuid 500f2f11)', () => {
+            const sdkBatchLimits = require('../../../xchain-sdk/src/batchLimits.js')
+            assert.strictEqual(
+                sdkBatchLimits.BATCH_COMMAND_LIMIT,
+                protocol.BATCH_COMMAND_LIMIT,
+                'SDK batchLimits BATCH_COMMAND_LIMIT drifted from the canonical protocol constant; ' +
+                'the SDK would refuse a batch the chain accepts, or build one the chain rejects whole'
+            )
+            const batchPath = path.join(
+                __dirname, '../../../xchain-indexer/src/actions/batch.js')
+            assert.ok(fs.existsSync(batchPath),
+                'xchain-indexer src/actions/batch.js is missing; this tripwire needs the full sibling tree')
+            // Read the indexer copy from source: it is an instance field on the action
+            // class, and requiring that module drags in the whole indexer action tree.
+            const commandLimit = /this\.commandLimit\s*=\s*(\d+)\s*;/.exec(
+                fs.readFileSync(batchPath, 'utf8'))
+            assert.ok(commandLimit,
+                'indexer actions/batch.js no longer assigns this.commandLimit as a literal; re-point this guard')
+            assert.strictEqual(Number(commandLimit[1]), protocol.BATCH_COMMAND_LIMIT,
+                'indexer actions/batch.js this.commandLimit drifted from the canonical protocol constant; ' +
+                'the arbiter and the SDK would disagree on how many commands a BATCH may carry')
+        })
+
+        // CROSS_SETTLE_MAX_PER_BLOCK is the per-block cross-chain settlement slice the
+        // indexer applies behind the CROSS_SETTLE_PER_BLOCK_CAP flag day (utility.js
+        // processCrossChainSettlements, db.js getEffectiveUnsettledMatches), so it is
+        // consensus-visible once armed: two operators reading different values settle
+        // different prefixes at the same block. The indexer's own cap tests read the
+        // value out of the vendored copy and compare it to itself, and the byte-identity
+        // block below compares that whole file as one blob, which goes red for any
+        // unrelated re-vendoring lag and so cannot report that THIS cap is intact. Pin
+        // the value per constant, as the rest of this block does (uuid 0fe9fc61).
+        it('[regression:p0] CROSS_SETTLE_MAX_PER_BLOCK === canonical in the indexer vendored copy (uuid 0fe9fc61)', () => {
+            assertVendored('CROSS_SETTLE_MAX_PER_BLOCK', ['xchain-indexer'])
+        })
     })
 
     describe('Vendored protocol-constants byte-identity', () => {

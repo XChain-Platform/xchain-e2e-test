@@ -70,12 +70,19 @@ class BlockchainConnector {
         return false
     }
 
-    async getTransactionHex(txid, hexFormat = true) {
+    // Always requests getrawtransaction in VERBOSE form, because the only field
+    // read below is result.hex, which exists on the verbose object alone. The
+    // method used to take a hexFormat flag and forward it as that verbose
+    // parameter, which inverted it against its own name: the default true worked
+    // by accident, while hexFormat=false made the node answer with a bare hex
+    // STRING whose .hex is undefined, so a SUCCESSFUL rpc threw. No caller ever
+    // passed the flag, so the parameter is gone rather than repaired.
+    async getTransactionHex(txid) {
         try {
             const data = {
                 jsonrpc: '2.0',
                 method: 'getrawtransaction',
-                params: [txid, hexFormat],
+                params: [txid, true],
                 id: 1,
             };
 
