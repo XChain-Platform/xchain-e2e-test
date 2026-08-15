@@ -42,12 +42,28 @@ const assert = require('assert');
 const { MultiValidatorHub }   = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
+const { waitForMesh, waitForConfigEverywhere, assertNeverApplied } = require('../helpers/consensusWait');
 
-const PEER_WAIT_MS  = 8000;
-const APPLY_WAIT_MS = 4000;   // COMMIT propagation + follower _applyConfig
-const STALL_WAIT_MS = 6000;   // long enough to confirm a round does NOT finalize
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Deadlines, not settles. This suite used to sleep 8s for the mesh and 4s for the
+// followers' apply, and it went red at random on a busy venue (XC-1471: the same
+// commit failed twice and passed once, always on `hub 0 did not apply ...
+// (got {})`). Reproduced 2026-08-14 under 14 busy cores on a 10-core venue: 2 of
+// 3 runs failed with that assertion.
+//
+// The deadlines are what MADE the diagnosis, and they are not what fixed it.
+// Waiting 60s instead of 4 turned "hub 0 lagged" into "hubs 0, 1 and 2 never
+// applied at all", which is a stuck round, not a slow one: the whale leader was
+// broadcasting COMMIT before the followers had finished locking their snapshots,
+// and Consensus dropped a vote for a round it had not opened yet. The fix is the
+// early-arrival vote buffer in xchain-hub's Consensus (the config-change twin of
+// the buffers OracleConsensus and AttestationConsensus already carry). What these
+// waits still buy is that the next such stall reports which hub held what, at a
+// deadline, instead of hiding inside a settle window.
+const MESH_WAIT_MS  = 60_000;  // every hub peered with every other hub
+const APPLY_WAIT_MS = 60_000;  // COMMIT propagation + follower _applyConfig
+// The negative case has no event to wait for, so its window stays fixed; it is
+// spent polling, so a hub that finalizes fails the test at that moment.
+const STALL_WAIT_MS = 6000;    // long enough to confirm a round does NOT finalize
 
 // Find the hub that is the round leader for the next sequence (all hubs share the
 // same sorted validator set + seq, so exactly one matches).
@@ -71,7 +87,7 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM config-change PBFT (WI-1, L2)
             // (offline) so its weight is never voted.
             mvh = new MultiValidatorHub({ count: 3, basePort: 32000 });
             await mvh.start();
-            await sleep(PEER_WAIT_MS);
+            await waitForMesh(mvh, { timeoutMs: MESH_WAIT_MS });
             const ids = mvh.identities;
             seed = seedWeightSnapshot(mvh, {
                 validators: [
@@ -103,16 +119,13 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM config-change PBFT (WI-1, L2)
             assert.ok(leader, 'no round leader among the live hubs');
 
             // The round can never reach weighted quorum, so the propose promise will
-            // reject on timeout; fire-and-forget and assert the change never lands.
+            // reject on timeout; fire-and-forget and watch that the change never
+            // lands on ANY hub at any point in the window (not merely at its end).
             leader.addParametersFromJson(config).catch(() => {});
-            await sleep(STALL_WAIT_MS);
-
-            for (let i = 0; i < mvh.hubs.length; i++) {
-                const cfg = await mvh.hubs[i].db.getConfig(COIN, NET, MODULE);
-                const got = cfg ? cfg.GAS_PRICE : undefined;
-                assert.notStrictEqual(got, VALUE,
-                    'hub ' + i + ' applied a config that a STAKE minority should never finalize');
-            }
+            await assertNeverApplied(
+                mvh.hubs,
+                { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: VALUE },
+                { windowMs: STALL_WAIT_MS });
         });
     });
 
@@ -125,7 +138,7 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM config-change PBFT (WI-1, L2)
             // 4 hubs: three small + one whale, all live (uneven stake).
             mvh = new MultiValidatorHub({ count: 4, basePort: 32100 });
             await mvh.start();
-            await sleep(PEER_WAIT_MS);
+            await waitForMesh(mvh, { timeoutMs: MESH_WAIT_MS });
             const ids = mvh.identities;
             seed = seedWeightSnapshot(mvh, {
                 validators: [
@@ -150,14 +163,14 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM config-change PBFT (WI-1, L2)
             const leader = findLeader(mvh);
             assert.ok(leader, 'no round leader could be identified');
 
-            await leader.addParametersFromJson(config);   // resolves on weighted COMMIT quorum
-            await sleep(APPLY_WAIT_MS);
-
-            for (let i = 0; i < mvh.hubs.length; i++) {
-                const cfg = await mvh.hubs[i].db.getConfig(COIN, NET, MODULE);
-                assert.strictEqual(cfg.GAS_PRICE, VALUE,
-                    'hub ' + i + ' did not apply the weighted PBFT config change (got ' + JSON.stringify(cfg) + ')');
-            }
+            // Resolves on the LEADER's own weighted COMMIT quorum, which is
+            // necessarily before the followers have written their own rows, so the
+            // followers are waited on rather than slept past.
+            await leader.addParametersFromJson(config);
+            await waitForConfigEverywhere(
+                mvh.hubs,
+                { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: VALUE },
+                { timeoutMs: APPLY_WAIT_MS });
         });
     });
 });
