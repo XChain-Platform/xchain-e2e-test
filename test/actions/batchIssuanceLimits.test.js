@@ -531,6 +531,68 @@ describe('BATCH issuance limits (BATCH_ISSUANCE_LIMITS)', function () {
             assert.strictEqual(actions.length, 1, "no sub-command may execute")
             console.log("A3b txHash=" + result.txHash + " status=" + result.batch.status)
         })
+
+        // The other half of XC-1457 (F11), and the half nothing on a live chain pinned
+        // before. The wire probe is a dotted TICK whose parent was never issued, so the
+        // ISSUE is rejected at "parent unknown" - and the PARENT name is the one name a
+        // rejected ISSUE has no reason to leave behind, because nothing stores it: only
+        // TICK and CALLBACK_TICK reach an index_tickers id through createIssue.
+        //
+        // The child name IS still interned, deliberately, and this case asserts that too
+        // so the boundary is explicit rather than assumed: db.js's createIssue calls
+        // createTicker to store the rejected row at all, which is how EVERY action type
+        // records a rejected attempt. Its ticker row is inert - no token row, no supply,
+        // no balance - and moving that is a db.js/schema question, not this rule's.
+        it('interns no PARENT name for an ISSUE rejected at parent-unknown', async function () {
+            const addr    = await cryptoHelper.getNewFundedAddress("BIL.A3C", COIN, NETWORK, null, "legacy", 0, 1)
+            const address = addr["address"]
+            const parent  = "BILA3E" + address.substring(address.length - 8)
+            const child   = parent + ".1"
+
+            // Neither name may exist yet, or the test would assert on someone else's row.
+            assert.strictEqual(await tickerId(parent), null, "the parent name must be unseen at the start")
+            assert.strictEqual(await tickerId(child),  null, "the child name must be unseen at the start")
+
+            const txHash = await require('../transactionHelper').createAndSendTransaction(
+                addr, issueCmd(child, 100, 100, 1, "orphan"))
+            const row = await indexerDatabase.waitForIssue({
+                source: address, txHash: txHash, status: 'invalid: TICK (parent unknown)'
+            }, 120000)
+            assert(row, "ISSUE " + child + " must be invalid: TICK (parent unknown)")
+
+            assert.strictEqual(await tickerId(parent), null,
+                "the unknown parent name must NOT be interned: the lookup that reads it is resolve-only")
+            const childId = await tickerId(child)
+            assert(childId, "the attempted TICK is interned by the storage layer, as every rejected action's is")
+            assert.strictEqual(await tokenRow(child), null, "but no token row may exist for a rejected ISSUE")
+            console.log("A3c txHash=" + txHash + " tick=" + child + " status=" + row.status +
+                " parentInterned=false childTickerId=" + childId + " childToken=none")
+        })
+
+        // The consequence the two cases above exist to prevent, asserted over the whole
+        // venue rather than one transaction: a NULL tick_id is what a non-interned name
+        // writes, so no row that COUNTS may ever carry one. Rejected issuances are the
+        // deliberate exception - they are stored with their verdict and no ticker, which
+        // is the shape the fix produces.
+        it('leaves no valid issuance and no ledger row carrying a NULL tick_id', async function () {
+            const validNullIssues = await q(
+                `SELECT COUNT(*) AS n FROM issues i
+                   JOIN index_statuses s ON s.id = i.status_id
+                  WHERE i.tick_id IS NULL AND s.status = 'valid'`)
+            assert.strictEqual(Number(validNullIssues[0].n), 0,
+                "a valid issuance with a NULL ticker id is the XC-1457 defect landing")
+
+            for (const table of ['credits', 'debits', 'balances', 'tokens']){
+                const rows = await q('SELECT COUNT(*) AS n FROM `' + table + '` WHERE tick_id IS NULL')
+                assert.strictEqual(Number(rows[0].n), 0,
+                    table + " may not carry a NULL tick_id row: it is unattributable balance")
+            }
+
+            // createTicker hands any ^-led name to getTickerId and never inserts one, so a
+            // caret string appearing here would mean the resolve-only path had regressed.
+            const caretNames = await q("SELECT COUNT(*) AS n FROM index_tickers WHERE tick LIKE '%^%'")
+            assert.strictEqual(Number(caretNames[0].n), 0, "no caret-form name may be interned as a ticker")
+        })
     })
 
     // ─── A6 ────────────────────────────────────────────────────────────────────
