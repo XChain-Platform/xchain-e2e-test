@@ -62,9 +62,9 @@ describe('FIAT dispenser price_snapshots pair isolation', () => {
     it('declares a fiat constant for every FIAT dispenser case', () => {
         const fiats = declaredFiats()
         // One per case: Mode 1, Mode 2, oracle fee, window distance, update
-        // delay, retracted quote.
-        assert.strictEqual(Object.keys(fiats).length, 6,
-            'expected 6 FIAT_* constants, found ' + JSON.stringify(fiats))
+        // delay, retracted quote, per-token pricing.
+        assert.strictEqual(Object.keys(fiats).length, 7,
+            'expected 7 FIAT_* constants, found ' + JSON.stringify(fiats))
     })
 
     it('gives every case a DISTINCT fiat, so no two cases share a coin_pair', () => {
