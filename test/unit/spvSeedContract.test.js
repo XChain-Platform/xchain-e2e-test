@@ -35,8 +35,12 @@
  *     count past the arming budget;
  *   - the input guards reject rather than revert obscurely.
  *
- * Runs in-process (no isolated-vm), so it is portable to macOS where the
- * isolate binary is Linux-only.
+ * Runs the VM in-process (no executor subprocess), but xchain-vm still loads
+ * the isolated-vm native binding at require time, so this needs Node 22 and a
+ * binding built for the running platform. It is NOT portable to macOS, where
+ * the binary in the shared node_modules is a Linux build: there it fails, and
+ * it used to skip instead, which is the whole reason the loader below is shaped
+ * the way it is.
  *
  *********************************************************************/
 
@@ -46,15 +50,62 @@ const assert = require('assert');
 const fs     = require('fs');
 const path   = require('path');
 
-function loadVM() {
-    for (const c of ['xchain-vm', '../../../xchain-vm', '../../../../xchain-vm']) {
-        try { return require(c); } catch (e) { /* next */ }
+// This loader used to swallow EVERY require failure and hand back null, and the
+// suite below then became `describe.skip`. On macOS that reported 0 passing /
+// 8 pending / exit 0: the one contract that gets a single attempt per chain per
+// height, unverified, reported as a clean run.
+//
+// The two failure modes are not the same thing and must not share an outcome:
+//
+//   - NO xchain-vm checkout is a single-repo clone. The repo's sibling
+//     convention (test/unit/sibling-coverage.test.js) lets those skip and turns
+//     them red under XCHAIN_REQUIRE_SIBLINGS=1; this file follows it exactly.
+//
+//   - A checkout that IS present and will not LOAD is a venue that was asked to
+//     run this and silently did not. On macOS the isolated-vm binary in the
+//     shared node_modules is a Linux build and cannot dlopen, which is the
+//     reason contract work verifies on the Linux venue under Node 22 and is not
+//     a reason to call an unproven tree green. So the require is NOT wrapped:
+//     the load error surfaces as a failed hook and the run goes red.
+const VM_CANDIDATES = ['xchain-vm', '../../../xchain-vm', '../../../../xchain-vm'];
+
+function resolveVM() {
+    for (const c of VM_CANDIDATES) {
+        try { return require.resolve(c); } catch (e) { /* next candidate */ }
     }
     return null;
 }
 
-const vmModule = loadVM();
-const XChainVM = vmModule && (vmModule.XChainVM || vmModule);
+const VM_PATH = resolveVM();
+
+function loadVM() {
+    const mod = require(VM_PATH);
+    return mod.XChainVM || mod;
+}
+
+let XChainVM = null;
+
+// A raw ERR_DLOPEN_FAILED stack says the binding did not load; it does not say
+// what that costs or what to do about it. This banner does, printed from an
+// exit handler so it lands after mocha's epilogue rather than scrolling away.
+let loadAttempted = false;
+let loadSucceeded = false;
+process.on('exit', function () {
+    if (!loadAttempted || loadSucceeded) return;
+    console.error('');
+    console.error('  ================================================================');
+    console.error('  THE VM DID NOT LOAD. spvSeed WAS NOT VERIFIED BY THIS RUN.');
+    console.error('  ----------------------------------------------------------------');
+    console.error('  xchain-vm resolved to: ' + VM_PATH);
+    console.error('  It needs its own dependencies installed (isolated-vm builds');
+    console.error('  natively) and Node 22: the binding is V8-ABI-specific.');
+    console.error('');
+    console.error('  On macOS the shared node_modules holds a Linux build, so this');
+    console.error('  failure is expected here and re-running will not clear it:');
+    console.error('  verify contract work on the Linux venue under Node 22.');
+    console.error('  ================================================================');
+    console.error('');
+});
 
 const CODE = fs.readFileSync(
     path.join(__dirname, '..', '..', 'bin', 'contracts', 'spvSeed.js'), 'utf8');
@@ -128,10 +179,11 @@ function applied(state, res) {
     return next;
 }
 
-// Skipping on a missing VM is legitimate (the isolate binary is Linux-only), but
-// skipping on a missing gas schedule would hide a broken resolve, so that is a
-// failure instead.
-(XChainVM ? describe : describe.skip)('spvSeed contract (arming seed)', function () {
+// Skipping on an ABSENT xchain-vm checkout is legitimate (a single-repo clone
+// cannot run this at all). Skipping on a checkout that is present and unusable
+// is not: that is the false green this file used to produce. Skipping on a
+// missing gas schedule would hide a broken resolve, so that is a failure too.
+describe('spvSeed contract (arming seed)', function () {
 
     it('resolved the real BTC gas schedule', function () {
         assert.ok(GAS_SCHEDULE, 'could not resolve xchain-indexer/src/coins/BTC.js GAS_SCHEDULE');
@@ -140,7 +192,27 @@ function applied(state, res) {
 
     this.timeout(30000);
     let vm;
-    before(function () { vm = createVM(); });
+    before(function () {
+        if (!VM_PATH) {
+            const why = 'no xchain-vm checkout resolvable from ' + __dirname +
+                ' (tried ' + VM_CANDIDATES.join(', ') + ')';
+            // Same switch the other sibling guards honour, so a venue that is
+            // supposed to carry the full checkout proves it rather than
+            // reporting pending and exiting 0.
+            if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1') {
+                throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but ' + why);
+            }
+            console.warn('[spvSeed] SKIPPING: ' + why +
+                '. This run proves NOTHING about bin/contracts/spvSeed.js.');
+            return this.skip();
+        }
+        // Deliberately unguarded: the checkout is here, so a load failure is a
+        // red run, never a pending one.
+        loadAttempted = true;
+        XChainVM = loadVM();
+        vm = createVM();
+        loadSucceeded = true;
+    });
 
     it('initialize writes the base key set, so a DEPLOY alone leaves a non-empty tree', async function () {
         const res = await vm.execute(opts('initialize', [], {}));
