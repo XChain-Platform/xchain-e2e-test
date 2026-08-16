@@ -52,9 +52,12 @@ const os     = require('os');
 const path   = require('path');
 const { MultiValidatorHub } = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
+const { waitForMesh } = require('../helpers/consensusWait');
 
 const COUNT = 3;
-const PEER_WAIT_MS = 8000;
+// A deadline, not a settle: waitForMesh returns the moment every hub holds an open
+// socket to every other, so the bound only decides when to give up.
+const PEER_WAIT_MS = 60_000;
 
 const OLD_MIN_STAKE = '1000.00000000';
 const NEW_MIN_STAKE = '1200.00000000'; // the (rejected) target a proposer/peer would try to set
@@ -106,7 +109,7 @@ describe('MultiValidatorHub: governance capability MIN_STAKE pin (#4352)', funct
             if (hub._capabilityRecheckTimer) clearInterval(hub._capabilityRecheckTimer);
         }
 
-        await sleep(PEER_WAIT_MS); // let peers connect + gossip settle
+        await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS }); // peers ARE connected
     });
 
     after(async function () {

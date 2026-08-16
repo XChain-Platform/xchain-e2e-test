@@ -43,20 +43,24 @@ const { MultiValidatorHub }       = require('../helpers/multiValidatorHubHelper'
 const { startDisposableHubDb }    = require('../helpers/disposableHubDb');
 const { seedWeightSnapshot }      = require('../helpers/seededWeightSnapshot');
 const { silenceOracleValidator }  = require('../helpers/byzantineFaults');
+const { waitForMesh, waitFor }    = require('../helpers/consensusWait');
 
 function hubRequire(rel) { return require(path.resolve(__dirname, '../../../xchain-hub', rel)); }
 const OracleConsensus = hubRequire('src/OracleConsensus.js');
 const OracleRound     = hubRequire('src/OracleRound.js');
 
-const PEER_WAIT_MS = 8000;
+// A deadline, not a settle: waitForMesh returns on the first fully-peered poll.
+const PEER_WAIT_MS = 60_000;
+// finalizeAll's window is shared by the liveness case (which names how many hubs
+// must store a snapshot and returns the moment they have) and the safety case
+// (which expects none, can never satisfy the poll, and so still watches the whole
+// window). It therefore keeps its measured length.
 const SETTLE_MS    = 6000;
 const BLOCK_INDEX  = 100;
 const BLOCK_TIME   = 1700000000;
 const ROUND        = 100;
 const PAIR         = 'BTC/USD';
 const PRICE        = '60000';
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Attach a real OracleConsensus per hub (registers ORACLE_* P2P handlers); skip
 // OracleRound.start() so no price-fetch cadence races our manual round.
@@ -84,9 +88,21 @@ function injectSubmissions(mvh) {
     }
 }
 
-async function finalizeAll(mvh, settle) {
+// Drive the round on every hub, then poll until `expect` hubs hold a snapshot row.
+// `expect` defaults to the whole federation, which the safety case can never reach,
+// so that case spends the full window watching (the only way to prove a negative).
+async function finalizeAll(mvh, opts) {
+    opts = opts || {};
+    const expect = opts.expect === undefined ? mvh.hubs.length : opts.expect;
     await Promise.all(mvh.hubs.map((h) => h._wtOracle.finalizeRound(ROUND, BLOCK_INDEX, BLOCK_TIME).catch(() => {})));
-    await sleep(settle || SETTLE_MS);
+    await waitFor(async () => {
+        let stored = 0;
+        for (const hub of mvh.hubs) {
+            try { if ((await snapshotRows(hub)).length > 0) stored++; }
+            catch (_) { /* a hub that cannot be read has not stored it */ }
+        }
+        return { ok: stored >= expect, stored: stored };
+    }, { timeoutMs: opts.settle || SETTLE_MS });
 }
 
 async function snapshotRows(hub) {
@@ -128,7 +144,7 @@ describe('MultiValidatorHub: oracle-PBFT byzantine fault tolerance (C.2)', funct
             if (!db) { console.log('Skipping oracle-byzantine liveness: no env DB and Docker unavailable'); this.skip(); }
             mvh = new MultiValidatorHub({ count: 4, basePort: 26200, startAttestation: false });
             await mvh.start();
-            await sleep(PEER_WAIT_MS);
+            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
             seed   = seedEqual(mvh);
             oracle = await attachOracle(mvh);
             injectSubmissions(mvh);
@@ -148,7 +164,11 @@ describe('MultiValidatorHub: oracle-PBFT byzantine fault tolerance (C.2)', funct
             const victim = mvh.hubs.find((h) => h !== leader);   // silence a NON-leader
             restore = silenceOracleValidator(victim);
 
-            await finalizeAll(mvh);
+            // The honest 3 of 4 storing their snapshot IS the assertion below, so
+            // wait for exactly that count rather than for a fixed window; the
+            // silenced hub is checked after, which is when its emptiness means
+            // something.
+            await finalizeAll(mvh, { expect: mvh.hubs.length - 1 });
 
             const honest = mvh.hubs.filter((h) => h !== victim);
             const seen = [];
@@ -173,7 +193,7 @@ describe('MultiValidatorHub: oracle-PBFT byzantine fault tolerance (C.2)', funct
             if (!db) { console.log('Skipping oracle-byzantine safety: no env DB and Docker unavailable'); this.skip(); }
             mvh = new MultiValidatorHub({ count: 4, basePort: 26210, startAttestation: false });
             await mvh.start();
-            await sleep(PEER_WAIT_MS);
+            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
             seed   = seedEqual(mvh);
             oracle = await attachOracle(mvh);
             injectSubmissions(mvh);

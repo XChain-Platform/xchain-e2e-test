@@ -40,10 +40,14 @@ const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedStakeSnapshot }    = require('../helpers/seededStakeSnapshot');
 const { forceCountModeQuorum } = require('../helpers/forceCountModeQuorum');
 const { silenceValidator, forgedPrePrepare } = require('../helpers/byzantineFaults');
+const { waitForMesh, waitForConfigEverywhere } = require('../helpers/consensusWait');
 
 const COUNT         = 4;       // quorum 3 → tolerates exactly 1 byzantine/silent fault
-const PEER_WAIT_MS  = 8000;
-const APPLY_WAIT_MS = 3000;
+// Deadlines, not settles: the mesh and the honest hubs' applied rows are both
+// observable, so each wait polls its own post-condition and returns on the first
+// passing poll instead of betting on how busy the venue is.
+const PEER_WAIT_MS  = 60_000;
+const APPLY_WAIT_MS = 60_000;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -68,7 +72,7 @@ describe('MultiValidatorHub: byzantine fault tolerance (L5)', function () {
         countMode = forceCountModeQuorum();
         mvh = new MultiValidatorHub({ count: COUNT, basePort: 32000 });
         await mvh.start();
-        await sleep(PEER_WAIT_MS);
+        await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
         seed = seedStakeSnapshot(mvh);
     });
 
@@ -89,11 +93,18 @@ describe('MultiValidatorHub: byzantine fault tolerance (L5)', function () {
         // Crash one NON-leader follower.
         const victim = mvh.hubs.find((h) => h !== leader);
         const restore = silenceValidator(victim);
+        const honest = mvh.hubs.filter((h) => h !== victim);
         try {
             await leader.addParametersFromJson(config);   // needs 3 of 4 → honest majority suffices
-            await sleep(APPLY_WAIT_MS);
+            // The honest hubs' own config rows are the post-condition; waiting on
+            // them (rather than a fixed window) also means the silenced-hub check
+            // below runs strictly AFTER the change has propagated, which is the
+            // only moment at which "it stayed inert" says anything.
+            await waitForConfigEverywhere(
+                honest,
+                { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: VALUE },
+                { timeoutMs: APPLY_WAIT_MS });
 
-            const honest = mvh.hubs.filter((h) => h !== victim);
             for (const h of honest) {
                 const cfg = await h.db.getConfig(COIN, NET, MODULE);
                 assert.strictEqual(cfg.GAS_PRICE, VALUE,

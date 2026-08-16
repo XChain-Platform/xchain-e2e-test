@@ -936,7 +936,13 @@ describe('BATCH issuance limits (BATCH_ISSUANCE_LIMITS)', function () {
                                  { address: payees[1], value: 100000 }] })
             assert(result.batch, "the BATCH itself is valid")
 
-            await new Promise(r => setTimeout(r, 20000))
+            // Both obligations are expected to settle, so wait on each one reaching
+            // 'fulfilled' instead of on a fixed window. The status read below is
+            // unchanged, so a wait that gives up still reports what is really there.
+            for (const ai of obligations){
+                await indexerDatabase.waitForCoinpayObligation(
+                    { actionIndex: ai, coinpayStatus: 'fulfilled' }, 20000)
+            }
 
             const settled = []
             for (const ai of obligations){

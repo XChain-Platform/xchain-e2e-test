@@ -43,13 +43,18 @@ const crypto = require('crypto');
 const { MultiValidatorHub, ValidatorIdentity } = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
+const { waitForMesh, waitFor } = require('../helpers/consensusWait');
 
-const PEER_WAIT_MS = 8000;
+// A deadline, not a settle: waitForMesh returns on the first fully-peered poll.
+const PEER_WAIT_MS = 60_000;
+// driveDispatch's window is shared by the stake-minority negative case and the
+// healthy positive one, so it keeps its measured length and is spent POLLING: the
+// healthy federation returns as soon as every hub has PERSISTED the dispatch row,
+// while the minority case can never satisfy the poll and still watches the whole
+// window.
 const SETTLE_MS    = 6000;
 const BLOCK_INDEX  = 100;
 const NETWORK      = 'regtest';
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function callIdFrom(seed) { return crypto.createHash('sha256').update(String(seed)).digest('hex'); }
 
@@ -102,7 +107,24 @@ async function driveDispatch(mvh, validators, seedBase, requireLiveLeader) {
     // PROPOSE, and followers validate + sign. The row is identical across hubs so
     // every canonical matches.
     await Promise.all(engines.map((e) => e.consensus.propose(roundId, { row, snapshot: { validators, count: validators.length } }).catch(() => {})));
-    await sleep(SETTLE_MS);
+    // Poll the PERSISTED cross_chain_calls row, not the finalize event: the event is
+    // emitted synchronously by CrossChainDexConsensus._finalize, and the row is
+    // written by CrossChainCallEngine's un-awaited `this._writeFinalizedRow(ev)`
+    // listener on that same emit, so an event-count poll clears while the INSERT is
+    // still in flight and both cases below read the row. Keyed on (call_id, phase)
+    // exactly as they key it. The stake-minority case writes no row, so it still
+    // watches the whole window, which is what proves its negative.
+    await waitFor(async () => {
+        let held = 0;
+        for (const hub of mvh.hubs) {
+            try {
+                const r = await hub.db.doQuery(
+                    "SELECT call_id FROM cross_chain_calls WHERE call_id = ? AND phase = 'dispatch'", [callId]);
+                if (r.length >= 1) held++;
+            } catch (_) { /* a hub that cannot be read has not persisted it */ }
+        }
+        return { ok: held === mvh.hubs.length, held: held };
+    }, { timeoutMs: SETTLE_MS, intervalMs: 100 });
     engines.forEach((e, i) => e.consensus.removeListener('match:finalized', listeners[i]));
     return { events, callId, leaderIdx, row };
 }
@@ -118,7 +140,7 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM XCALL dispatch relay (C.2)', 
             if (!db) { console.log('Skipping XCALL weighted (negative): no env DB and Docker unavailable'); this.skip(); }
             mvh = new MultiValidatorHub({ count: 3, basePort: 26400, startCrossChain: true, startAttestation: false });
             await mvh.start();
-            await sleep(PEER_WAIT_MS);
+            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
             const ids = mvh.identities;
             validators = [
                 { pubkey: ids[0].pubkeyHex, source: 'sA',    weight: '1000' },
@@ -156,7 +178,7 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM XCALL dispatch relay (C.2)', 
             if (!db) { console.log('Skipping XCALL weighted (positive): no env DB and Docker unavailable'); this.skip(); }
             mvh = new MultiValidatorHub({ count: 4, basePort: 26410, startCrossChain: true, startAttestation: false });
             await mvh.start();
-            await sleep(PEER_WAIT_MS);
+            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
             const ids = mvh.identities;
             // Uneven weights, no single source >= 2/3 of S=10000 → multi-signer quorum.
             validators = [

@@ -50,19 +50,21 @@ const { MultiValidatorHub, ValidatorIdentity, loadHubModule } = require('../help
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
 const { MockCrossChainOfferBook, makeOrder } = require('../helpers/mockCrossChainOfferBook');
+const { waitForMesh, waitFor } = require('../helpers/consensusWait');
 
 const OracleConsensus = loadHubModule('src/OracleConsensus.js');
 const OracleRound     = loadHubModule('src/OracleRound.js');
 
 const COUNT        = 10;
 const QUORUM_SIGS  = 7;          // tally > 2S/3 with equal weights => >=7 of 10 sources
-const PEER_WAIT_MS = 12000;      // 10-node mesh (45 connections) needs time to form
-const SETTLE_MS    = 9000;       // COMMIT propagation across 10 hubs
+// Deadlines, not settles: every wait below polls its own post-condition (all 45
+// sockets open / all 10 hubs finalized) and returns on the first passing poll, so
+// the bound only decides when to give up rather than how long to bet.
+const PEER_WAIT_MS = 60_000;     // 10-node mesh (45 connections)
+const SETTLE_MS    = 60_000;     // COMMIT propagation across 10 hubs
 const BLOCK_INDEX  = 100;
 const BLOCK_TIME   = 1700000000;
 const NETWORK      = 'regtest';
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Equal-weight snapshot over the COUNT live hubs (S = COUNT*1000). No single
 // source >= 2/3, so finalization requires a genuine >=7-source weighted quorum.
@@ -119,7 +121,22 @@ async function driveDispatch(mvh, validators, seedBase) {
     const events = [];
     const listeners = engines.map((e, i) => { const fn = (ev) => events.push(Object.assign({ hubIndex: i }, ev)); e.consensus.on('match:finalized', fn); return fn; });
     await Promise.all(engines.map((e) => e.consensus.propose(roundId, { row, snapshot: { validators, count: validators.length } }).catch(() => {})));
-    await sleep(SETTLE_MS);
+    // The caller asserts the PERSISTED cross_chain_calls row on every hub, and the
+    // finalize event only STARTS that write: CrossChainCallEngine subscribes to
+    // 'match:finalized' with an un-awaited `this._writeFinalizedRow(ev)`, so an
+    // event-count poll clears while the INSERT is still in flight. Poll the row,
+    // keyed on (call_id, phase) exactly as the assertions key it.
+    await waitFor(async () => {
+        let held = 0;
+        for (const hub of mvh.hubs) {
+            try {
+                const r = await hub.db.doQuery(
+                    "SELECT call_id FROM cross_chain_calls WHERE call_id = ? AND phase = 'dispatch'", [callId]);
+                if (r.length >= 1) held++;
+            } catch (_) { /* a hub that cannot be read has not persisted it */ }
+        }
+        return { ok: held === mvh.hubs.length, held: held };
+    }, { timeoutMs: SETTLE_MS, intervalMs: 100 });
     engines.forEach((e, i) => e.consensus.removeListener('match:finalized', listeners[i]));
     return { events, row };
 }
@@ -138,7 +155,24 @@ async function driveDexRound(mvh) {
     const events = [];
     const listeners = dexes.map((d, i) => { const fn = (ev) => events.push(Object.assign({ hubIndex: i }, ev)); d.consensus.on('match:finalized', fn); return fn; });
     await Promise.all(dexes.map((d) => d._discoverAndMatch().catch(() => {})));
-    await sleep(SETTLE_MS);
+    // The caller asserts the PERSISTED cross_chain_matches row on every hub, and the
+    // finalize event only STARTS that write: CrossChainDexEngine subscribes to
+    // 'match:finalized' with an un-awaited `this._writeFinalizedMatch(ev)`, so an
+    // event-count poll clears while the INSERT is still in flight. Poll the row,
+    // keyed by the match_id the round finalized exactly as the assertions key it.
+    await waitFor(async () => {
+        if (!events.length) return { ok: false, held: 0 };
+        const matchId = events[0].matchId;
+        let held = 0;
+        for (const hub of mvh.hubs) {
+            try {
+                const r = await hub.db.doQuery(
+                    "SELECT match_id FROM cross_chain_matches WHERE match_id = ? AND status = 'finalized'", [matchId]);
+                if (r.length >= 1) held++;
+            } catch (_) { /* a hub that cannot be read has not persisted it */ }
+        }
+        return { ok: held === mvh.hubs.length, held: held };
+    }, { timeoutMs: SETTLE_MS, intervalMs: 100 });
     dexes.forEach((d, i) => d.consensus.removeListener('match:finalized', listeners[i]));
     return events;
 }
@@ -167,7 +201,7 @@ describe('MultiValidatorHub: per-feature weighted quorum at N=10 (C.2)', functio
             if (!db) { console.log('Skipping oracle N=10: no env DB and Docker unavailable'); this.skip(); }
             mvh = new MultiValidatorHub({ count: COUNT, basePort: 25000, startAttestation: false });
             await mvh.start();
-            await sleep(PEER_WAIT_MS);
+            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
             seed   = seedWeightSnapshot(mvh, { blockIndex: BLOCK_INDEX, validators: equalWeights(mvh) });
             oracle = await attachOracle(mvh);
             injectSubmissions(mvh);
@@ -182,7 +216,18 @@ describe('MultiValidatorHub: per-feature weighted quorum at N=10 (C.2)', functio
 
         it('the weighted quorum (>=7 of 10) finalizes the identical price snapshot on EVERY hub', async function () {
             await Promise.all(mvh.hubs.map((h) => h._wtOracle.finalizeRound(ORACLE_ROUND, BLOCK_INDEX, BLOCK_TIME).catch(() => {})));
-            await sleep(SETTLE_MS);
+            // Each hub's own price_snapshots row is the post-condition asserted below.
+            await waitFor(async () => {
+                const counts = [];
+                for (const h of mvh.hubs) {
+                    try {
+                        counts.push((await h.db.doQuery(
+                            'SELECT round_number FROM price_snapshots WHERE round_number = ? AND coin_pair = ?',
+                            [ORACLE_ROUND, PAIR])).length);
+                    } catch (_) { counts.push(0); }
+                }
+                return { ok: counts.length > 0 && counts.every((c) => c >= 1), counts: counts };
+            }, { timeoutMs: SETTLE_MS });
             const seen = [];
             for (let i = 0; i < mvh.hubs.length; i++) {
                 const rows = await mvh.hubs[i].db.doQuery(
@@ -211,7 +256,7 @@ describe('MultiValidatorHub: per-feature weighted quorum at N=10 (C.2)', functio
                 crossChainIndexerUrls: { LTC: book.urlFor('shared', 'LTC'), DOGE: book.urlFor('shared', 'DOGE') }
             });
             await mvh.start();
-            await sleep(PEER_WAIT_MS);
+            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
             seed = seedWeightSnapshot(mvh, { blockIndex: BLOCK_INDEX, validators: equalWeights(mvh) });
         });
 
@@ -252,7 +297,7 @@ describe('MultiValidatorHub: per-feature weighted quorum at N=10 (C.2)', functio
             if (!db) { console.log('Skipping XCALL N=10: no env DB and Docker unavailable'); this.skip(); }
             mvh = new MultiValidatorHub({ count: COUNT, basePort: 25200, startCrossChain: true, startAttestation: false });
             await mvh.start();
-            await sleep(PEER_WAIT_MS);
+            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
             validators = equalWeights(mvh);
             seed = seedWeightSnapshot(mvh, { blockIndex: BLOCK_INDEX, validators });
         });

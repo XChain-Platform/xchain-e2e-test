@@ -137,7 +137,11 @@ describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration
         sync = new HubDbSync({ doQuery: (sql, p) => repPool.query(sql, p) }, { hubUrl: 'http://127.0.0.1:' + port });
         assert.strictEqual(sync.enabled, true, 'sync must be enabled (hubUrl + hubDb present)');
         await sync.start();
-        await sleep(300); // let the WS subscriber finish registering
+        // The subscriber registering IS observable on the broadcaster, and the
+        // SUBSCRIBE case below asserts exactly that count, so wait on it rather
+        // than betting 300ms that the WS handshake finished.
+        assert.ok(await waitFor(() => broadcaster.getSubscriberCount() >= 1, 10000),
+            'the WS subscriber never registered on the broadcaster after sync.start()');
     });
 
     after(async function () {

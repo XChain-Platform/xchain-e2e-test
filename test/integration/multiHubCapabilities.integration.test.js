@@ -39,9 +39,14 @@ const os     = require('os');
 const path   = require('path');
 const { MultiValidatorHub } = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
+const { waitFor, meshState }   = require('../helpers/consensusWait');
 
 const COUNT = 3;
 const PEER_WAIT_MS = 8000;
+// Deadline for the capability self-test poll below: the one-shot initial poll that
+// writes self_test_ok is observable, so it is waited on rather than slept past.
+const SELF_TEST_WAIT_MS = 30_000;
+const CAP_NAMES = ['price', 'cross_chain', 'oracle_publish', 'attestation'];
 
 // MIN_STAKE thresholds used by the test config.
 const CAPS = {
@@ -84,7 +89,9 @@ describe('MultiValidatorHub: capability staking', function () {
     it('boots ' + COUNT + ' validators that peer-connect', async function () {
         mvh = new MultiValidatorHub({ count: COUNT, basePort: 30000 });
         await mvh.start();
-        await new Promise(r => setTimeout(r, PEER_WAIT_MS));
+        // PEER_WAIT_MS is this case's DEADLINE, and the mesh being formed is
+        // observable, so spend the window polling for it instead of sleeping it away.
+        await waitFor(() => meshState(mvh), { timeoutMs: PEER_WAIT_MS });
         const peerCounts = mvh.hubs.map(h => h.peerManager ? h.peerManager.peers.size : 0);
         assert.ok(peerCounts.every(c => c >= COUNT - 1),
             'each hub should see ' + (COUNT - 1) + ' peers; got ' + peerCounts.join(','));
@@ -98,11 +105,23 @@ describe('MultiValidatorHub: capability staking', function () {
             if (hub._stakePollTimer) clearInterval(hub._stakePollTimer);
             if (hub._capabilityRecheckTimer) clearInterval(hub._capabilityRecheckTimer);
         }
-        await new Promise(r => setTimeout(r, 2000)); // let the one-shot initial poll settle
-
+        // Every capability's self-test passing IS the assertion below, and each is a
+        // row the one-shot initial poll writes, so wait for them rather than betting
+        // 2s that the poll finished.
         const pubkey = mvh.getPubkeys()[0];
+        await waitFor(async () => {
+            let rows = [];
+            try { rows = await mvh.hubs[0].capabilityRegistry.getOwnState(pubkey); }
+            catch (_) { rows = []; }
+            const passing = CAP_NAMES.filter((cap) => {
+                const row = rows.find((r) => r.capability === cap);
+                return row && Number(row.self_test_ok) === 1;
+            });
+            return { ok: passing.length === CAP_NAMES.length, passing: passing };
+        }, { timeoutMs: SELF_TEST_WAIT_MS });
+
         const state = await mvh.hubs[0].capabilityRegistry.getOwnState(pubkey);
-        for (const cap of ['price', 'cross_chain', 'oracle_publish', 'attestation']) {
+        for (const cap of CAP_NAMES) {
             const row = state.find(r => r.capability === cap);
             assert.ok(row && Number(row.self_test_ok) === 1, cap + ' self-test should pass with config present');
         }

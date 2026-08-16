@@ -164,9 +164,15 @@ describe('drillRunner: teardown', function () {
         const mesh = await startMesh(localPlan(4), { identities: fakeIdentities(4), fake: true, readyTimeoutMs: 30000 });
         const children = mesh.handles.map((h) => h.child);
         await mesh.stop();
-        await new Promise((r) => setTimeout(r, 500));
+        // Wait on the condition the assertion reads (every child reaped), not on a
+        // fixed window. The assertion below is unchanged, so a survivor still fails.
+        const gone = (c) => c.exitCode !== null || c.signalCode !== null;
+        const deadline = Date.now() + 5000;
+        while (Date.now() < deadline && !children.every(gone)) {
+            await new Promise((r) => setTimeout(r, 50));
+        }
         for (const c of children) {
-            assert.ok(c.exitCode !== null || c.signalCode !== null, 'a validator survived teardown');
+            assert.ok(gone(c), 'a validator survived teardown');
         }
     });
 

@@ -40,6 +40,7 @@ const { MultiValidatorHub }    = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedStakeSnapshot }    = require('../helpers/seededStakeSnapshot');
 const { forceCountModeQuorum } = require('../helpers/forceCountModeQuorum');
+const { waitForMesh }          = require('../helpers/consensusWait');
 
 function hubRequire(rel) { return require(path.resolve(__dirname, '../../../xchain-hub', rel)); }
 const OracleConsensus  = hubRequire('src/OracleConsensus.js');
@@ -47,8 +48,9 @@ const OracleRound      = hubRequire('src/OracleRound.js');
 const ValidatorIdentity = hubRequire('src/ValidatorIdentity.js');
 
 const COUNT        = 4;
-const PEER_WAIT_MS = 8000;
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// A deadline, not a settle: waitForMesh returns the moment every hub holds an open
+// socket to every other, so the bound only decides when to give up.
+const PEER_WAIT_MS = 60_000;
 
 // Same submissions, different arrival order per hub. v6 lists its pairs
 // LTC-first so some orders build the aggregate array in a different pair order
@@ -86,7 +88,7 @@ describe('MultiValidatorHub - oracle determinism (L2)', function () {
         countMode = forceCountModeQuorum();
         mvh = new MultiValidatorHub({ count: COUNT, basePort: 33000 });
         await mvh.start();
-        await sleep(PEER_WAIT_MS);
+        await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
         seed = seedStakeSnapshot(mvh);
         // Give each booted hub its own oracle consensus engine (the harness
         // doesn't start oracle by default). Constructors start no timers.

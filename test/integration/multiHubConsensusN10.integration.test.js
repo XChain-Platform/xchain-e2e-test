@@ -41,13 +41,15 @@ const { MultiValidatorHub }   = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedStakeSnapshot }    = require('../helpers/seededStakeSnapshot');
 const { forceCountModeQuorum } = require('../helpers/forceCountModeQuorum');
+const { waitForMesh, waitForConfigEverywhere } = require('../helpers/consensusWait');
 
 // N=10 → quorum 2·⌊9/3⌋+1 = 7, tolerating f=3 faults.
 const COUNT         = 10;
-const PEER_WAIT_MS  = 12000;  // 45-connection mesh needs more time to fully form
-const APPLY_WAIT_MS = 8000;   // COMMIT propagation across 10 hubs
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Deadlines, not settles: both waits poll their own post-condition and return on
+// the first passing poll, so the 45-connection mesh and the 10-hub COMMIT fan-out
+// each cost what they cost instead of what the venue's load makes them cost.
+const PEER_WAIT_MS  = 60_000;  // every hub holds an OPEN socket to all 9 others
+const APPLY_WAIT_MS = 60_000;  // COMMIT propagation + _applyConfig across 10 hubs
 
 describe('MultiValidatorHub: N=10 config-change PBFT scale probe (C.2)', function () {
     this.timeout(300_000);
@@ -71,7 +73,7 @@ describe('MultiValidatorHub: N=10 config-change PBFT scale probe (C.2)', functio
         // ports don't race transient outbound sockets between probe and listen.
         mvh = new MultiValidatorHub({ count: COUNT, basePort: 26000 });
         await mvh.start();
-        await sleep(PEER_WAIT_MS);   // 10-node mesh forms before we propose
+        await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });   // 10-node mesh IS formed before we propose
         seed = seedStakeSnapshot(mvh);
     });
 
@@ -107,8 +109,14 @@ describe('MultiValidatorHub: N=10 config-change PBFT scale probe (C.2)', functio
         });
         assert.ok(leader, 'no round leader could be identified');
 
-        await leader.addParametersFromJson(config);   // resolves on COMMIT quorum (7 of 10)
-        await sleep(APPLY_WAIT_MS);                    // let all followers apply
+        // Resolves on the LEADER's own COMMIT tally (7 of 10), necessarily before the
+        // followers have written their rows; each follower's own DB row is the
+        // post-condition, so wait on it rather than sleeping past it.
+        await leader.addParametersFromJson(config);
+        await waitForConfigEverywhere(
+            mvh.hubs,
+            { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: VALUE },
+            { timeoutMs: APPLY_WAIT_MS });
 
         for (let i = 0; i < mvh.hubs.length; i++) {
             const cfg = await mvh.hubs[i].db.getConfig(COIN, NET, MODULE);

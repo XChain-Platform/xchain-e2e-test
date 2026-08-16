@@ -50,13 +50,18 @@ const assert = require('assert');
 const { MultiValidatorHub }    = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
+const { waitForMesh, waitFor } = require('../helpers/consensusWait');
 
 function hubRequire(rel) { return require(path.resolve(__dirname, '../../../xchain-hub', rel)); }
 const OracleConsensus = hubRequire('src/OracleConsensus.js');
 const OracleRound     = hubRequire('src/OracleRound.js');
 
-const PEER_WAIT_MS = 8000;
-const APPLY_MS     = 4000;
+// Deadlines, not settles: mesh formation and the C1 finalize are both observable,
+// so each wait polls its post-condition and returns on the first passing poll.
+const PEER_WAIT_MS = 60_000;
+const APPLY_MS     = 60_000;
+// C2 asserts non-occurrence, which has no event to wait for, so its window stays
+// a fixed observation window.
 const STALL_MS     = 6000;
 const BLOCK_INDEX  = 100;       // 100 % 2 = 0 → live checkpoint leader in the S=0 (2-hub) case
 const BLOCK_TIME   = 1700000000;
@@ -158,7 +163,7 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM R-1 degenerate uniformity (WI
             if (!db) { console.log('Skipping C1: no env DB and Docker unavailable'); this.skip(); }
             mvh = new MultiValidatorHub({ count: 1, basePort: 33900, startCrossChain: true, startAttestation: false });
             await mvh.start();
-            await sleep(PEER_WAIT_MS);
+            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
             const ids = mvh.identities;
             seed = seedWeightSnapshot(mvh, {
                 blockIndex: BLOCK_INDEX,
@@ -180,7 +185,14 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM R-1 degenerate uniformity (WI
             await driveConfig(mvh, VALUE);
             await drivePrice(mvh);
             await driveCheckpoint(mvh);
-            await sleep(APPLY_MS);
+            // All three engines finalizing on the sole staker IS the assertion below,
+            // and each is a row in the hub's own DB, so poll for all three rather than
+            // betting a fixed window that the slowest of them landed.
+            await waitFor(async () => ({
+                ok: (await configApplied(mvh.hubs[0], VALUE))
+                    && (await priceFinalized(mvh.hubs[0]))
+                    && (await checkpointFinalized(mvh.hubs[0]))
+            }), { timeoutMs: APPLY_MS });
 
             const hub = mvh.hubs[0];
             const decisions = {
@@ -203,7 +215,7 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM R-1 degenerate uniformity (WI
             // ALL weights zero so S=0 and the weighted predicate 0>0 is false.
             mvh = new MultiValidatorHub({ count: 2, basePort: 34000, startCrossChain: true, startAttestation: false });
             await mvh.start();
-            await sleep(PEER_WAIT_MS);
+            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
             const ids = mvh.identities;
             seed = seedWeightSnapshot(mvh, {
                 blockIndex: BLOCK_INDEX,

@@ -69,7 +69,7 @@ const crypto = require('crypto');
 const { MultiValidatorHub }    = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 
-const PEER_WAIT_MS = 6000;
+const PEER_WAIT_MS = 60_000;   // a deadline for the bring-up poll below, not a settle
 const REDUNDANCY   = 3;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -111,7 +111,13 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM attestation source-dedup (WI-
         if (!db) { console.log('Skipping A2: no env DB and Docker unavailable'); this.skip(); }
         mvh = new MultiValidatorHub({ count: 1, basePort: 33600 });   // startAttestation defaults on
         await mvh.start();
-        await sleep(PEER_WAIT_MS);
+        // One hub, so there is no mesh to form: what this block actually needs is the
+        // attestation round wired up, which is exactly what the next line asserts.
+        // Poll for it instead of betting PEER_WAIT_MS that startAttestation finished.
+        await waitUntil(() => {
+            const round = mvh.hubs[0] && mvh.hubs[0].attestationRound;
+            return !!(round && typeof round._computeResponsibleSet === 'function');
+        }, PEER_WAIT_MS);
         ar = mvh.hubs[0].attestationRound;
         assert.ok(ar && typeof ar._computeResponsibleSet === 'function', 'hub.attestationRound not available');
     });

@@ -268,8 +268,8 @@ describe('Controller Policy Layer: bindings, enforcement, royalty split + permis
         while ((await tip()) <= endBlock && guard++ < 90) { await mine(1); await sleep(1000) }
         console.log('   tip', await tip(), '> cooldown_end', endBlock, '(cooldown expired)')
         await submitRaw(owner, `ORDER|0|${COIN_CODE}|${tick}|50||${COIN_CODE}|XCHAIN|50||${owner.address}||||after-cooldown`)
-        await mine(1); await sleep(2500)
-        let allowed = await waitValidOrder(owner.address, tick, 20000)
+        await mine(1)
+        let allowed = await waitValidOrder(owner.address, tick, 22500)
         assert(allowed && allowed.status === 'valid', 'ORDER ACCEPTED after cooldown expiry')
         console.log('   ORDER accepted after cooldown; expiry OK. order#', allowed.action_index)
     })
@@ -309,8 +309,8 @@ describe('Controller Policy Layer: bindings, enforcement, royalty split + permis
 
         // Owner lists 1000 T for 1000 PAY (price 1:1). Guard returns payoutLegs.
         await submitRaw(owner, `ORDER|0|${COIN_CODE}|${T}|1000||${COIN_CODE}|${PAY}|1000||${owner.address}||||royalty-listing`)
-        await mine(1); await sleep(2500)
-        const ord = await waitValidOrder(owner.address, T, 20000)
+        await mine(1)
+        const ord = await waitValidOrder(owner.address, T, 22500)
         assert(ord && ord.status === 'valid', 'controlled-token ORDER accepted with payout legs')
         console.log('   order.payout_legs =', ord.payout_legs)
         assert(ord.payout_legs !== null && ord.payout_legs !== undefined,
@@ -324,16 +324,21 @@ describe('Controller Policy Layer: bindings, enforcement, royalty split + permis
             const creatorBefore    = await balanceOf(creator.address, PAY)
             const marketBefore     = await balanceOf(market.address,  PAY)
             await submitRaw(buyer, `ORDER|0|${COIN_CODE}|${PAY}|${proceeds}||${COIN_CODE}|${T}|${proceeds}||${buyer.address}||||fill-${proceeds}`)
-            await mine(1); await sleep(4000)
-            // poll until creator credited (split applied)
-            let tries = 20, creatorAfter
+            await mine(1)
+            // Poll until EVERY leg the assertions below read has moved: creator,
+            // market and seller. Breaking on the creator alone would leave the other
+            // two legs read with no settle behind them, so a half-applied split could
+            // be measured as a conservation failure.
+            let tries = 24, creatorAfter, marketAfter, ownerPayAfter
             while (tries-- > 0) {
-                creatorAfter = await balanceOf(creator.address, PAY)
-                if (creatorAfter !== creatorBefore) break
+                creatorAfter  = await balanceOf(creator.address, PAY)
+                marketAfter   = await balanceOf(market.address,  PAY)
+                ownerPayAfter = await balanceOf(owner.address,   PAY)
+                if (creatorAfter !== creatorBefore
+                    && marketAfter !== marketBefore
+                    && ownerPayAfter !== ownerPayBefore) break
                 await sleep(1000)
             }
-            const ownerPayAfter = await balanceOf(owner.address,   PAY)
-            const marketAfter   = await balanceOf(market.address,  PAY)
             const dCreator = Number(creatorAfter) - Number(creatorBefore)
             const dMarket  = Number(marketAfter)  - Number(marketBefore)
             const dOwner   = Number(ownerPayAfter)- Number(ownerPayBefore)
@@ -407,8 +412,8 @@ describe('Controller Policy Layer: bindings, enforcement, royalty split + permis
         await waitTokenController(tick, e => Number(e.is_unbind) === 0)
         const before = await tip()
         await submitRaw(owner, `ORDER|0|${COIN_CODE}|${tick}|500||${COIN_CODE}|XCHAIN|500||${owner.address}||||determinism`)
-        await mine(1); await sleep(2500)
-        const ord = await waitValidOrder(owner.address, tick, 20000)
+        await mine(1)
+        const ord = await waitValidOrder(owner.address, tick, 22500)
         assert(ord && ord.status === 'valid', 'guarded ORDER committed (deterministic accept)')
         assert((await tip()) >= before, 'ledger advanced past the guarded action')
         console.log('   guarded action deterministically committed (order#', ord.action_index, '); single-node check OK')
@@ -546,8 +551,8 @@ describe('Controller Policy Layer: bindings, enforcement, royalty split + permis
         assert(await balanceOf(eve.address, tick) === '15', 'recipient balance exact')
         // plain ORDER carries NO payout_legs
         await submitRaw(owner, `ORDER|0|${COIN_CODE}|${tick}|100||${COIN_CODE}|XCHAIN|100||${owner.address}||||plain-order`)
-        await mine(1); await sleep(2500)
-        const ord = await waitValidOrder(owner.address, tick, 20000)
+        await mine(1)
+        const ord = await waitValidOrder(owner.address, tick, 22500)
         assert(ord && ord.status === 'valid', 'uncontrolled ORDER accepted')
         assert(ord.payout_legs === null, 'uncontrolled ORDER has NULL payout_legs')
         console.log('   uncontrolled token unchanged (payout_legs NULL); OK')

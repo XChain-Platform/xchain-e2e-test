@@ -29,6 +29,7 @@ dotenv.config();
 const assert = require('assert');
 const { MultiValidatorHub } = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
+const { waitFor, meshState }   = require('../helpers/consensusWait');
 
 const COUNT = 3;
 // Allow plenty of time: first hub start triggers DB create + table init
@@ -77,8 +78,11 @@ describe('MultiValidatorHub harness: bring-up smoke', function () {
     });
 
     it('hubs peer-connect via SEED_NODES (each sees count-1 peers within ' + PEER_WAIT_MS + 'ms)', async function () {
-        // Reconnect loop is on a backoff; allow some settle time.
-        await new Promise(r => setTimeout(r, PEER_WAIT_MS));
+        // PEER_WAIT_MS is this case's DEADLINE, and the mesh being formed is
+        // observable, so spend the window polling for it: a formed mesh returns
+        // immediately and a broken one still fails at the same deadline, with the
+        // per-hub diagnostics below intact.
+        await waitFor(() => meshState(mvh), { timeoutMs: PEER_WAIT_MS });
 
         const want = COUNT - 1;
         const peerCounts = mvh.hubs.map(h => h.peerManager ? h.peerManager.peers.size : 0);

@@ -85,6 +85,46 @@ describe('ANCHOR election live: multi-validator per-chain publishers (DOGE regte
         for (const hub of mvh.hubs) await hub.db.doQuery(sql, params);
     }
 
+    // Poll until the XANC_V0_DONE back-fill has landed: every named hub's copy of
+    // every row carries anchor_txid. Waiting on the back-fill itself rather than a
+    // fixed settle costs time on a slow gossip round instead of a false failure.
+    async function waitForAnchorBackfill(rows, hubs, timeMax = 30000){
+        const deadline = Date.now() + timeMax;
+        while (Date.now() < deadline) {
+            let missing = false;
+            for (const row of rows) {
+                for (const hub of hubs) {
+                    const r = await hub.db.doQuery(
+                        'SELECT anchor_txid FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index = ?',
+                        [row.chain, row.network, row.block_index]);
+                    if (!(r.length === 1 && r[0].anchor_txid)) { missing = true; break; }
+                }
+                if (missing) break;
+            }
+            if (!missing) return true;
+            await sleep(500);
+        }
+        return false;
+    }
+
+    // Poll until XANC_FINALIZED has back-filled the archive batch metadata on every
+    // named hub, the observable end of a SIGN round plus publish plus finalize.
+    async function waitForArchiveFinalized(matchId, hubs, timeMax = 60000){
+        const deadline = Date.now() + timeMax;
+        while (Date.now() < deadline) {
+            let missing = false;
+            for (const hub of hubs) {
+                const r = await hub.db.doQuery(
+                    'SELECT batch_seq, archived_status FROM cross_chain_matches WHERE match_id = ?', [matchId]);
+                if (!(r.length === 1 && r[0].batch_seq != null
+                      && String(r[0].archived_status) === 'finalized')) { missing = true; break; }
+            }
+            if (!missing) return true;
+            await sleep(500);
+        }
+        return false;
+    }
+
     // The election clock is the indexer's committed tip; after mining, wait
     // for the decoder/indexer to catch up so failover-window math is exact.
     async function waitForTip(minBlock){
@@ -256,7 +296,9 @@ describe('ANCHOR election live: multi-validator per-chain publishers (DOGE regte
 
         // Every hub's flush timer would fire in production; fire them all.
         for (const hub of mvh.hubs) await hub.stateAnchorPublisher.flush();
-        await sleep(1500);                                     // V0_DONE propagation
+        // V0_DONE propagation: wait for the back-fill the assertions below read,
+        // not a fixed window.
+        await waitForAnchorBackfill(cpRows, mvh.hubs, 30000);
 
         for (const row of cpRows) {
             const order = rankOrder(row);
@@ -324,7 +366,9 @@ describe('ANCHOR election live: multi-validator per-chain publishers (DOGE regte
         assert.strictEqual(pubs[0].from, wallets[order[1]].address, 'failover paid from rank 1\'s wallet');
 
         // Rank 0 "comes back": its row was back-filled over P2P → no double-anchor.
-        await sleep(1000);
+        // Wait for that back-fill to reach rank 0 rather than a fixed window; a
+        // flush before it arrives is the double-anchor this asserts against.
+        await waitForAnchorBackfill([row], [mvh.hubs[order[0]]], 30000);
         const count = published.length;
         const s = await mvh.hubs[order[0]].stateAnchorPublisher.flush();
         assert.strictEqual(s.anchored.length, 0, 'returning rank 0 reports nothing pending');
@@ -387,7 +431,9 @@ describe('ANCHOR election live: multi-validator per-chain publishers (DOGE regte
         const sLead = await mvh.hubs[leader].stateAnchorPublisher.flush();
         assert.ok(sLead.archive === 'round_started' || sLead.archive === 'published',
             'leader started the round (got ' + sLead.archive + ')');
-        await sleep(3000);                                     // SIGN round + publish + FINALIZED
+        // SIGN round + publish + FINALIZED: wait for the finalized back-fill to
+        // reach every hub rather than a fixed window.
+        await waitForArchiveFinalized(m.match_id, mvh.hubs, 60000);
 
         // Archive-leg versions from the flag-days at the checkpoint's
         // snapshot_block (v1, or v6 once archive-reward derivation is armed);

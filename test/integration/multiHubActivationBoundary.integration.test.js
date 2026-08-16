@@ -59,6 +59,7 @@ dotenv.config();
 const assert = require('assert');
 const { MultiValidatorHub, loadHubModule } = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
+const { waitForMesh, waitForConfigEverywhere } = require('../helpers/consensusWait');
 // Load swq through the SAME resolver the hub harness uses, so this module
 // instance is the one Consensus.js reads and a runtime override reaches it.
 const swq = loadHubModule('src/stake_weighted_quorum.js');
@@ -71,8 +72,13 @@ const FILE_ACT = parseInt(swq.STAKE_WEIGHTED_QUORUM_ACTIVATION.regtest);
 const ENV_ACT  = parseInt(process.env.SWQ_BOUNDARY_REGTEST_ACTIVATION || '120');
 const ACT = (Number.isFinite(FILE_ACT) && FILE_ACT >= 2) ? FILE_ACT : ENV_ACT;
 
-const PEER_WAIT_MS  = 8000;
-const APPLY_WAIT_MS = 4000;   // COMMIT propagation + follower _applyConfig
+// Mesh and apply are DEADLINES, not settles: each polls its own post-condition
+// (every socket open / every hub's config row written) and returns on the first
+// passing poll, so a generous bound costs nothing and removes the venue-load bet.
+const PEER_WAIT_MS  = 60_000;
+const APPLY_WAIT_MS = 60_000;  // COMMIT propagation + follower _applyConfig
+// The stall case has no event to wait for (non-occurrence), so its window stays a
+// fixed observation window rather than a deadline.
 const STALL_WAIT_MS = 6000;   // long enough to confirm a round does NOT finalize
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -170,7 +176,7 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM activation boundary (WI-1 Sui
             if (!db) { console.log('Skipping B1a: no env DB and Docker unavailable'); this.skip(); }
             mvh = new MultiValidatorHub({ count: 3, basePort: 32200 });
             await mvh.start();
-            await sleep(PEER_WAIT_MS);
+            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
             seed = seedBoundarySnapshot(mvh, MEMBERS(mvh.identities), () => ACT - 1);
         });
         after(async function () {
@@ -187,8 +193,13 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM activation boundary (WI-1 Sui
             const leader = findLeader(mvh);
             assert.ok(leader, 'no round leader among the live hubs');
 
-            await leader.addParametersFromJson(config);   // resolves on COUNT quorum
-            await sleep(APPLY_WAIT_MS);
+            // Resolves on the LEADER's own COUNT tally, before the followers have
+            // written theirs; each follower's own config row is the post-condition.
+            await leader.addParametersFromJson(config);
+            await waitForConfigEverywhere(
+                mvh.hubs,
+                { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: VALUE },
+                { timeoutMs: APPLY_WAIT_MS });
 
             for (let i = 0; i < mvh.hubs.length; i++) {
                 const cfg = await mvh.hubs[i].db.getConfig(COIN, NET, MODULE);
@@ -205,7 +216,7 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM activation boundary (WI-1 Sui
             if (!db) { console.log('Skipping B1b: no env DB and Docker unavailable'); this.skip(); }
             mvh = new MultiValidatorHub({ count: 3, basePort: 32250 });
             await mvh.start();
-            await sleep(PEER_WAIT_MS);
+            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
             seed = seedBoundarySnapshot(mvh, MEMBERS(mvh.identities), () => ACT + 1);
         });
         after(async function () {
@@ -244,7 +255,7 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM activation boundary (WI-1 Sui
             if (!db) { console.log('Skipping B2: no env DB and Docker unavailable'); this.skip(); }
             mvh = new MultiValidatorHub({ count: 1, basePort: 32300 });
             await mvh.start();
-            await sleep(PEER_WAIT_MS);
+            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
             const ids = mvh.identities;
             const members = [{ pubkey: ids[0].pubkeyHex, source: 'solo', weight: '5000' }];
             currentBlock = ACT - 1;
@@ -263,7 +274,10 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM activation boundary (WI-1 Sui
             const COIN = 'BTC', NET = 'regtest', MODULE = 'node', VALUE = '111';
             const config = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: VALUE } } } };
             await mvh.hubs[0].addParametersFromJson(config);
-            await sleep(APPLY_WAIT_MS);
+            await waitForConfigEverywhere(
+                mvh.hubs,
+                { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: VALUE },
+                { timeoutMs: APPLY_WAIT_MS });
             const cfg = await mvh.hubs[0].db.getConfig(COIN, NET, MODULE);
             assert.strictEqual(cfg && cfg.GAS_PRICE, VALUE, 'sole operator did not finalize below the boundary');
         });
@@ -273,7 +287,10 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM activation boundary (WI-1 Sui
             const COIN = 'BTC', NET = 'regtest', MODULE = 'node', VALUE = '222';
             const config = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: VALUE } } } };
             await mvh.hubs[0].addParametersFromJson(config);
-            await sleep(APPLY_WAIT_MS);
+            await waitForConfigEverywhere(
+                mvh.hubs,
+                { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: VALUE },
+                { timeoutMs: APPLY_WAIT_MS });
             const cfg = await mvh.hubs[0].db.getConfig(COIN, NET, MODULE);
             assert.strictEqual(cfg && cfg.GAS_PRICE, VALUE, 'sole operator did not finalize above the boundary');
         });

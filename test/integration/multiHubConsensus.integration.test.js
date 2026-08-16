@@ -39,14 +39,16 @@ const { MultiValidatorHub }   = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedStakeSnapshot }    = require('../helpers/seededStakeSnapshot');
 const { forceCountModeQuorum } = require('../helpers/forceCountModeQuorum');
+const { waitForMesh, waitForConfigEverywhere } = require('../helpers/consensusWait');
 
 // 4 validators → quorum 2·⌊3/3⌋+1 = 3 (a real BFT quorum tolerating 1 fault).
 // 3 would give quorum 1 (degenerate single-node), which can't prove propagation.
 const COUNT        = 4;
-const PEER_WAIT_MS = 8000;
-const APPLY_WAIT_MS = 3000;   // let COMMIT propagate + followers _applyConfig
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Deadlines, not settles: both waits below poll their own post-condition and
+// return on the first passing poll, so a long deadline costs nothing on a quiet
+// venue and stops a busy one failing on the clock (XC-1471).
+const PEER_WAIT_MS = 60_000;   // every hub holds an OPEN socket to every other hub
+const APPLY_WAIT_MS = 60_000;  // COMMIT propagation + follower _applyConfig
 
 describe('MultiValidatorHub: config-change PBFT (L2)', function () {
     this.timeout(180_000);
@@ -65,7 +67,7 @@ describe('MultiValidatorHub: config-change PBFT (L2)', function () {
         countMode = forceCountModeQuorum();
         mvh = new MultiValidatorHub({ count: COUNT, basePort: 31000 });
         await mvh.start();
-        await sleep(PEER_WAIT_MS);   // mesh forms before we propose
+        await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });   // mesh IS formed before we propose
         // Seed a deterministic stake snapshot so the federation resolves a real
         // quorum without an indexer (otherwise quorum collapses to a single node).
         seed = seedStakeSnapshot(mvh);
@@ -108,8 +110,14 @@ describe('MultiValidatorHub: config-change PBFT (L2)', function () {
         });
         assert.ok(leader, 'no round leader could be identified');
 
-        await leader.addParametersFromJson(config);   // resolves on COMMIT quorum
-        await sleep(APPLY_WAIT_MS);                    // let followers apply too
+        // Resolves on the LEADER's own COMMIT tally, which is necessarily before the
+        // followers have written their rows, so the followers are waited on (their
+        // own DB row IS the post-condition) rather than slept past.
+        await leader.addParametersFromJson(config);
+        await waitForConfigEverywhere(
+            mvh.hubs,
+            { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: VALUE },
+            { timeoutMs: APPLY_WAIT_MS });
 
         // The change must be persisted on EVERY hub's own DB. This is proof PBFT
         // carried it across the federation, not just the proposer.

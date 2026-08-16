@@ -52,13 +52,17 @@ const assert = require('assert');
 const { MultiValidatorHub, ValidatorIdentity } = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
+const { waitForMesh, waitFor } = require('../helpers/consensusWait');
 const eq = require('../../../xchain-hub/src/equivocation_header.js');
 
-const PEER_WAIT_MS = 8000;
+// A deadline, not a settle: waitForMesh returns on the first fully-peered poll.
+const PEER_WAIT_MS = 60_000;
+// tickAll is shared by the stake-minority negative case and the healthy positive
+// one, so its window keeps its measured length and is spent POLLING: the healthy
+// federation returns as soon as every hub holds its checkpoint, while the minority
+// case can never satisfy the poll and still watches the whole window.
 const SETTLE_MS    = 6000;
 const BLOCK_INDEX  = 100;       // seeded BTC anchor (snapshot + election block); 100 % 4 = 0 -> live leader
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Identical stubbed "indexer" tip on every hub: the checkpoint engine's
 // getblockhashes view (network MUST be set, the engine refuses a network-agnostic
@@ -94,7 +98,14 @@ function wireCheckpointEngine(mvh) {
 
 async function tickAll(mvh) {
     await Promise.all(mvh.hubs.map((h) => h.stateCheckpoints._tick().catch(() => {})));
-    await sleep(SETTLE_MS);
+    await waitFor(async () => {
+        let held = 0;
+        for (const hub of mvh.hubs) {
+            try { if ((await checkpointRows(hub)).length >= 1) held++; }
+            catch (_) { /* a hub that cannot be read has not stored it */ }
+        }
+        return { ok: held === mvh.hubs.length, held: held };
+    }, { timeoutMs: SETTLE_MS });
 }
 
 async function checkpointRows(hub) {
@@ -115,7 +126,7 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM oracle_publish checkpoint (WI
             // 3 live small hubs; a 4th WHALE source is in the snapshot but offline.
             mvh = new MultiValidatorHub({ count: 3, basePort: 33200, startCrossChain: true, startAttestation: false });
             await mvh.start();
-            await sleep(PEER_WAIT_MS);
+            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
             const ids = mvh.identities;
             seed = seedWeightSnapshot(mvh, {
                 blockIndex: BLOCK_INDEX,
@@ -155,7 +166,7 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM oracle_publish checkpoint (WI
             // 4 hubs: three small + one whale, all live (uneven stake).
             mvh = new MultiValidatorHub({ count: 4, basePort: 33300, startCrossChain: true, startAttestation: false });
             await mvh.start();
-            await sleep(PEER_WAIT_MS);
+            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
             const ids = mvh.identities;
             // Uneven weights where NO single source clears 2/3 (S=10000, 2S/3~6666):
             // the weighted quorum requires >=2 distinct sources to co-sign, so this

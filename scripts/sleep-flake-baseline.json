@@ -1,5 +1,5 @@
 {
     "check": "fixed-settle sleep call sites under test/",
     "note": "Ratchet only. Lower this when sleeps are converted to condition waits; never raise it.",
-    "count": 96
+    "count": 26
 }
