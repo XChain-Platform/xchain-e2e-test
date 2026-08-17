@@ -28,14 +28,28 @@
 // xchain-contracts/priceBet/priceBet.js (kept inline so the test is
 // self-contained inside the e2e container). Behaviour is identical; the VM
 // unit test (priceBet.test.js in xchain-contracts) covers the full matrix.
+//
+// "Behaviour is identical" is a claim that rots: this copy silently missed the
+// accept() betting-window guard when it landed canonically, so the e2e was
+// exercising a strictly weaker contract than the one that ships while still
+// reporting green. The parity block at the bottom of this file now reads the
+// canonical template and fails if a guard is missing here, whenever the sibling
+// checkout is reachable. Re-compact this copy when the template changes.
 
 const assert = require('assert')
+const fs = require('fs')
+const path = require('path')
 const cryptoHelper = require('../cryptoHelper')
 const vmHelper = require('../helpers/vmHelper')
 const gasHelper = require('../helpers/gasHelper')
 const priceSnapshotHelper = require('../helpers/priceSnapshotHelper')
 
-const PRICE_BET = `module.exports = {
+const MAX_ROUND = 1000000000
+const MAX_WINDOW_BLOCKS = 1000000
+
+const PRICE_BET = `var MAX_ROUND = ${MAX_ROUND};
+var MAX_WINDOW_BLOCKS = ${MAX_WINDOW_BLOCKS};
+module.exports = {
     initialize: function (xchain) {
         var maker = xchain.getInputParam(0), coinPair = xchain.getInputParam(1),
             strike = xchain.getInputParam(2), side = xchain.getInputParam(3),
@@ -44,13 +58,15 @@ const PRICE_BET = `module.exports = {
         xchain.require(maker, 'maker required');
         xchain.require(coinPair, 'coinPair required');
         xchain.require(strike && xchain.math.gt(strike, '0'), 'strike must be positive');
+        requirePlainDecimal(xchain, strike, 'strike');
         xchain.require(side === 'OVER' || side === 'UNDER', 'side must be OVER or UNDER');
         xchain.require(tick, 'tick required');
         xchain.require(amount && xchain.math.gt(amount, '0'), 'amount must be positive');
-        var round = parseInt(settleRound);
-        xchain.require(round > 0, 'settleRound must be a positive integer');
-        var window = parseInt(deadlineBlocks);
-        xchain.require(window > 0, 'deadlineBlocks must be a positive integer');
+        requirePlainDecimal(xchain, amount, 'amount');
+        requireIntInRange(xchain, settleRound, 1, MAX_ROUND, 'settleRound');
+        requireIntInRange(xchain, deadlineBlocks, 1, MAX_WINDOW_BLOCKS, 'deadlineBlocks');
+        var round = parseInt(settleRound, 10);
+        var window = parseInt(deadlineBlocks, 10);
         xchain.state.set('maker', maker);
         xchain.state.set('coinPair', coinPair);
         xchain.state.set('strike', strike);
@@ -71,6 +87,7 @@ const PRICE_BET = `module.exports = {
         xchain.require(xchain.state.get('status') === 'OPEN', 'bet not open');
         var taker = xchain.getSourceAddress();
         xchain.require(taker !== xchain.state.get('maker'), 'maker cannot take their own bet');
+        xchain.require(roundPrice(xchain) === null, 'settle round already published');
         var needed = xchain.math.multiply(xchain.state.get('amount'), '2');
         xchain.require(xchain.math.gte(held(xchain), needed), 'insufficient deposit');
         xchain.state.set('taker', taker);
@@ -121,13 +138,63 @@ function roundPrice(xchain) {
 function held(xchain) {
     return xchain.getBalance(xchain.getContractAddress(), xchain.state.get('tick')) || '0';
 }
+function tickDecimals(xchain, tick) {
+    var info = xchain.getTokenInfo(tick);
+    xchain.require(info && info.DECIMALS !== null && info.DECIMALS !== undefined,
+        'token decimals unavailable: ' + tick);
+    return info.DECIMALS;
+}
+function floorToDecimals(value, decimals) {
+    var s = String(value);
+    var neg = s.charAt(0) === '-';
+    if (neg) s = s.substring(1);
+    var dot = s.indexOf('.');
+    if (dot < 0) return value;
+    var frac = s.substring(dot + 1);
+    if (frac.length <= decimals) return value;
+    var kept = decimals > 0 ? '.' + frac.substring(0, decimals) : '';
+    var out = s.substring(0, dot) + kept;
+    return neg ? '-' + out : out;
+}
 function refundBoth(xchain) {
-    var tick = xchain.state.get('tick'), amount = xchain.state.get('amount');
+    var tick = xchain.state.get('tick');
+    var amount = floorToDecimals(xchain.state.get('amount'), tickDecimals(xchain, tick));
     var rest = xchain.math.subtract(held(xchain), amount);
     xchain.emit.send({ destination: xchain.state.get('maker'), tick: tick, quantity: amount });
     if (xchain.math.gt(rest, '0')) {
         xchain.emit.send({ destination: xchain.state.get('taker'), tick: tick, quantity: rest });
     }
+}
+function requirePlainDecimal(xchain, value, label) {
+    var s = String(value);
+    xchain.require(s.length > 0, label + ' must be a plain decimal string');
+    var dot = -1;
+    for (var i = 0; i < s.length; i++) {
+        var c = s.charAt(i);
+        if (c === '.') {
+            xchain.require(dot < 0, label + ' must carry at most one decimal point');
+            xchain.require(i > 0 && i < s.length - 1,
+                label + ' needs digits on both sides of its decimal point');
+            dot = i;
+        } else {
+            xchain.require(c >= '0' && c <= '9',
+                label + ' must be a plain decimal: digits and one optional decimal point, ' +
+                'no exponent / sign / radix prefix (got "' + s + '")');
+        }
+    }
+}
+function requireIntInRange(xchain, v, min, max, name) {
+    var msg = name + ' must be an integer in [' + min + ', ' + max + ']';
+    var s = (typeof v === 'string') ? v : '';
+    var i = (s.charAt(0) === '-') ? 1 : 0;
+    var ok = s.length > i;
+    for (; i < s.length; i++) {
+        var ch = s.charAt(i);
+        if (ch < '0' || ch > '9') { ok = false; break; }
+    }
+    xchain.require(ok, msg);
+    var n = parseInt(s, 10);
+    xchain.require(n >= min && n <= max, msg);
 }`
 
 describe('Price Bet: binary option settled by the PRICE oracle (getPriceAtRound wiring)', function () {
@@ -238,5 +305,62 @@ describe('Price Bet: binary option settled by the PRICE oracle (getPriceAtRound 
         const again = await vmHelper.sendExecuteV0Invalid(taker, ci, 'settle', [])
         assert(again.execution, 'second settle should record a row')
         assert.notStrictEqual(again.execution.status, 'valid', 'second settle must not be valid')
+    })
+})
+
+// --- Canonical-template parity ----------------------------------------------
+//
+// PRICE_BET above is a hand-compacted copy of xchain-contracts/priceBet/priceBet.js.
+// Compaction is fine; silently dropping a guard is not, and that is exactly what
+// happened once: accept() gained a betting-window check upstream (a taker who
+// matches AFTER the settle round is published is exercising a free option on the
+// maker's stake, not taking a bet) and this copy never got it, so the e2e kept
+// certifying a weaker contract than the one that ships.
+//
+// Pin it cheaply: every guard MESSAGE the canonical template can throw must exist
+// in the copy. Messages are the observable surface of a require, so a new or
+// changed guard upstream cannot land without showing up here. This is a source
+// check, not a chain check, so it costs nothing and needs no services.
+//
+// Skips (loudly) when the sibling checkout is not mounted, e.g. inside a slim e2e
+// container. On any developer machine and on CI, where the siblings ARE checked
+// out, it runs.
+describe('Price Bet: inline copy matches the canonical template', function () {
+    const CANONICAL = path.join(__dirname, '..', '..', '..', 'xchain-contracts', 'priceBet', 'priceBet.js')
+
+    // Every single-quoted literal appearing inside an xchain.require(...) call.
+    // Concatenated messages contribute each of their fragments, which is what we
+    // want: a reworded fragment is a changed guard.
+    function requireMessages(source) {
+        const out = new Set()
+        const calls = source.match(/xchain\.require\(([\s\S]*?)\);/g) || []
+        for (const call of calls) {
+            const literals = call.match(/'((?:[^'\\]|\\.)*)'/g) || []
+            for (const lit of literals) out.add(lit.slice(1, -1))
+        }
+        return out
+    }
+
+    let canonicalSource = null
+    before(function () {
+        try { canonicalSource = fs.readFileSync(CANONICAL, 'utf8') }
+        catch (e) {
+            console.log('Skipping priceBet template parity: xchain-contracts not mounted at ' + CANONICAL)
+        }
+    })
+
+    it('carries every guard message the canonical template can throw', function () {
+        if (canonicalSource === null) return this.skip()
+        const missing = [...requireMessages(canonicalSource)].filter(m => !PRICE_BET.includes(m))
+        assert.deepStrictEqual(missing, [],
+            'inline priceBet copy is missing canonical guard(s): ' + JSON.stringify(missing) +
+            ' - re-compact PRICE_BET from ' + CANONICAL)
+    })
+
+    it('carries the accept() betting-window guard specifically', function () {
+        // The one that was actually lost. Named on its own so a regression reads
+        // as the security finding it is, not as a generic parity diff.
+        assert.ok(PRICE_BET.includes('settle round already published'),
+            'accept() must reject a taker once the settle round is public')
     })
 })
