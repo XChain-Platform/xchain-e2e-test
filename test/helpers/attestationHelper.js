@@ -59,7 +59,7 @@ class MockAttestationValidator {
 // at/above SWQ activation (regtest/testnet → block 0) dedupes by staking source (one
 // slot per source, lowest-hash key wins), then takes the top-REDUNDANCY.
 //
-// PROVIDER STAKE FLOOR (XC-083): at/above SWQ the indexer ALSO drops staking sources
+// PROVIDER STAKE FLOOR: at/above SWQ the indexer ALSO drops staking sources
 // whose aggregate stake is below the request provider's min_stake_xchain (http_get
 // 10000, llm 25000) before ranking. This helper reproduces that only when the caller
 // supplies both a `minStake` and per-validator `weight`s; every e2e suite instead

@@ -46,7 +46,7 @@ const { waitForMesh, waitForConfigEverywhere } = require('../helpers/consensusWa
 const COUNT        = 4;
 // Deadlines, not settles: both waits below poll their own post-condition and
 // return on the first passing poll, so a long deadline costs nothing on a quiet
-// venue and stops a busy one failing on the clock (XC-1471).
+// venue and stops a busy one failing on the clock.
 const PEER_WAIT_MS = 60_000;   // every hub holds an OPEN socket to every other hub
 const APPLY_WAIT_MS = 60_000;  // COMMIT propagation + follower _applyConfig
 

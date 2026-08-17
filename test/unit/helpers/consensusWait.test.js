@@ -10,11 +10,9 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// test/helpers/consensusWait.js replaced the fixed sleeps that made
-// multiHubConsensusWeighted flaky (XC-1471). Its rules are invisible in a green
-// integration run - a mesh wait that returned too early looks exactly like a
-// slow venue - so they are pinned here against fake hubs, with no MariaDB, no
-// Docker and no sockets, and run in the hermetic unit tier.
+// consensusWait.js's waits are invisible in a green integration run - a mesh
+// wait that returns too early looks exactly like a slow venue - so they are
+// pinned here against fake hubs: no MariaDB, no Docker, no sockets.
 //
 // The load-bearing rule is the one the old peers.size check got wrong: a peer
 // entry exists from the moment a DIAL STARTS, so readiness is the count of
@@ -99,7 +97,7 @@ describe('consensusWait: deterministic PBFT waits', function () {
         })
 
         it('waits for a LAGGING follower instead of asserting at a fixed instant', async () => {
-            // The XC-1471 failure shape: the leader resolved, hub 0 had not
+            // Lagging-follower shape: the leader resolved, hub 0 had not
             // written yet. A fixed settle asserts once; this waits for it.
             const lagging = fakeHub(0, 0)
             let applied = false

@@ -92,7 +92,7 @@ module.exports = {
 
         // Stake the single hub. Two floors apply: the `attestation` capability
         // min_stake is 1000 XCHAIN (see xchain-indexer/src/coins/BTC.js), and the llm
-        // PROVIDER floor is 25000 (XC-083), which the responsible-set derivation
+        // PROVIDER floor is 25000, which the responsible-set derivation
         // enforces at/above STAKE_WEIGHTED_QUORUM (armed at genesis on regtest).
         // 30000 clears both.
         const staker = await cryptoHelper.getNewFundedAddress(

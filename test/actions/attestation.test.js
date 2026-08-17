@@ -60,7 +60,7 @@ describe('Attestation framework: round-trip request → response → callback', 
         )
         // Enough XCHAIN to stake 15000 + cover the STAKE protocol fee. 15000 clears BOTH
         // the attestation capability min_stake (1000) and the http_get PROVIDER floor
-        // (10000, XC-083), which the responsible-set derivation enforces at/above
+        // (10000), which the responsible-set derivation enforces at/above
         // STAKE_WEIGHTED_QUORUM (armed at genesis on regtest).
         await gasHelper.ensureGasBalance(stakeSource, '20000')
         await stakeHelper.sendStakeV1(stakeSource, '15000.00000000', v.pubkey)

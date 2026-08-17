@@ -78,10 +78,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // hashes them, it never verifies a signature here.
 function hx(n) { return String(n).padStart(2, '0').repeat(32); }
 const VALIDATORS = [
-    // Weights are all above the http_get PROVIDER floor of 10000 (XC-083), which the
-    // weighted responsible-set derivation applies before the source dedupe. This suite
-    // isolates the dedupe rule, so nothing here may sit under the floor or the set
-    // empties for a reason that has nothing to do with what is being asserted.
+    // Weights are all above the http_get PROVIDER floor of 10000, which the weighted
+    // responsible-set derivation applies before dedupe. This suite isolates the dedupe
+    // rule, so nothing here may sit under the floor or empty the set for unrelated reasons.
     { pubkey: hx(1),  source: 'whale', weight: '50000' },
     { pubkey: hx(2),  source: 'whale', weight: '50000' },
     { pubkey: hx(3),  source: 'whale', weight: '50000' },
@@ -93,7 +92,7 @@ const VALIDATORS = [
     { pubkey: hx(14), source: 'sD',    weight: '10000' },
 ]
 
-// The http_get provider stake floor (XC-083). In production AttestationRound resolves
+// The http_get provider stake floor. In production AttestationRound resolves
 // this from the block-anchored provider history; here it is passed literally so the
 // ranking stays a pure function of the seeded set.
 const PROVIDER_FLOOR = '10000'
@@ -338,10 +337,9 @@ describe('MultiValidatorHub: LIVE weighted attestation source-dedup through PBFT
 
         ids          = mvh.identities.map((id) => String(id.pubkeyHex).toLowerCase());
         whalePubkeys = new Set([ids[0], ids[1], ids[2]]);
-        // Every weight clears the http_get provider floor of 10000 (XC-083): these hubs
-        // run the REAL _startRound, which filters below-floor sources out of the
-        // responsible set before deduping, and a starved set here would fail the
-        // assertions for the wrong reason.
+        // Every weight clears the http_get provider floor of 10000: these hubs run the
+        // REAL _startRound, which filters below-floor sources out of the responsible set
+        // before deduping; a starved set here would fail the assertions for the wrong reason.
         weightedValidators = [
             { pubkey: ids[0], source: 'whale', weight: '50000' },
             { pubkey: ids[1], source: 'whale', weight: '50000' },

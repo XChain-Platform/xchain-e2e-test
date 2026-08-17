@@ -8,7 +8,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 //
-// XC-1454 / BATCH_ISSUANCE_LIMITS acceptance suite (spec acceptance tests A1-A6).
+// BATCH_ISSUANCE_LIMITS acceptance suite (spec acceptance tests A1-A6).
 //
 // Chain evidence for a consensus change, so every case here asserts the STATUS STRING
 // the indexer wrote for a real transaction, not a shape or a count alone. The unit
@@ -532,17 +532,13 @@ describe('BATCH issuance limits (BATCH_ISSUANCE_LIMITS)', function () {
             console.log("A3b txHash=" + result.txHash + " status=" + result.batch.status)
         })
 
-        // The other half of XC-1457 (F11), and the half nothing on a live chain pinned
-        // before. The wire probe is a dotted TICK whose parent was never issued, so the
-        // ISSUE is rejected at "parent unknown" - and the PARENT name is the one name a
-        // rejected ISSUE has no reason to leave behind, because nothing stores it: only
+        // A dotted TICK whose parent was never issued rejects the ISSUE at "parent
+        // unknown"; the PARENT name is never interned since nothing stores it, only
         // TICK and CALLBACK_TICK reach an index_tickers id through createIssue.
         //
-        // The child name IS still interned, deliberately, and this case asserts that too
-        // so the boundary is explicit rather than assumed: db.js's createIssue calls
-        // createTicker to store the rejected row at all, which is how EVERY action type
-        // records a rejected attempt. Its ticker row is inert - no token row, no supply,
-        // no balance - and moving that is a db.js/schema question, not this rule's.
+        // The child name IS interned though: db.js's createIssue calls createTicker to
+        // store the rejected row, which is how EVERY action type records a rejected
+        // attempt. Its ticker row is inert - no token row, no supply, no balance.
         it('interns no PARENT name for an ISSUE rejected at parent-unknown', async function () {
             const addr    = await cryptoHelper.getNewFundedAddress("BIL.A3C", COIN, NETWORK, null, "legacy", 0, 1)
             const address = addr["address"]
@@ -580,7 +576,7 @@ describe('BATCH issuance limits (BATCH_ISSUANCE_LIMITS)', function () {
                    JOIN index_statuses s ON s.id = i.status_id
                   WHERE i.tick_id IS NULL AND s.status = 'valid'`)
             assert.strictEqual(Number(validNullIssues[0].n), 0,
-                "a valid issuance with a NULL ticker id is the XC-1457 defect landing")
+                "a valid issuance with a NULL ticker id is the NULL-tick defect landing")
 
             for (const table of ['credits', 'debits', 'balances', 'tokens']){
                 const rows = await q('SELECT COUNT(*) AS n FROM `' + table + '` WHERE tick_id IS NULL')

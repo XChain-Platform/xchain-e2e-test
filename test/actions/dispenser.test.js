@@ -397,10 +397,9 @@ describe('DISPENSER', () => {
             // the same number, which is why the case above cannot see the
             // difference and this one can.
             //
-            // Measured pre-fix on LTC regtest 2026-07-31 (XC-993): an oracle at
-            // 1.5 USD per XCHAIN with GIVE_AMOUNT 5 sold 35 tokens for $11.10, i.e.
-            // $0.317 a token, while its operator was paid a fee computed on
-            // $1.50 a token. Settlement now divides by GIVE_AMOUNT
+            // Without the per-token divide, a GIVE_AMOUNT-5 fill would sell tokens at
+            // a fifth of the oracle price while the operator's fee is still computed
+            // on the full oracle price a token. Settlement divides by GIVE_AMOUNT
             // (DISPENSER_ORACLE_PER_TOKEN_PRICE, genesis-active on regtest).
             if (!(await priceSnapshotHelper.isAvailable()) || !(await oraclePriceHelper.isAvailable())) {
                 console.log('Price tables not reachable; skipping per-token Mode 2 test')
