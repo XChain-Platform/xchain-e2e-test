@@ -29,15 +29,24 @@
 const assert = require('assert');
 const path   = require('path');
 
-// Sibling xchain-sync (monorepo layout). If it's not present (sync excluded from
-// a given checkout), skip rather than fail.
+// Sibling xchain-sync (monorepo layout). ABSENCE may skip, because a single-repo
+// checkout cannot run this. A checkout that is PRESENT but will not load must be RED:
+// swallowing that turns the drift-lock into a suite that reports green having never run.
 let BlockHasher, SyncUtility, SyncStateCommitment, SyncDatabase;
+const SYNC_SRC = path.join(__dirname, '../../../xchain-sync/src');
+let syncPresent = true;
 try {
-    BlockHasher = require(path.join(__dirname, '../../../xchain-sync/src/BlockHasher.js'));
-    SyncUtility = require(path.join(__dirname, '../../../xchain-sync/src/utility.js'));
-    SyncStateCommitment = require(path.join(__dirname, '../../../xchain-sync/src/stateCommitment.js'));
-    SyncDatabase        = require(path.join(__dirname, '../../../xchain-sync/src/db.js'));
-} catch (e) { /* handled in before() */ }
+    require.resolve(path.join(SYNC_SRC, 'BlockHasher.js'));
+} catch (e) {
+    syncPresent = false;
+    if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1') throw e;
+}
+if (syncPresent) {
+    BlockHasher         = require(path.join(SYNC_SRC, 'BlockHasher.js'));
+    SyncUtility         = require(path.join(SYNC_SRC, 'utility.js'));
+    SyncStateCommitment = require(path.join(SYNC_SRC, 'stateCommitment.js'));
+    SyncDatabase        = require(path.join(SYNC_SRC, 'db.js'));
+}
 
 const COMMITTED_HASH_SQL =
     'SELECT t1.hash AS ledger_hash, t2.hash AS actions_hash, t3.hash AS contract_hash ' +
