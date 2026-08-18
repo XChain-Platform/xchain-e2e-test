@@ -105,8 +105,11 @@
 
 'use strict';
 
-const fs   = require('fs');
-const path = require('path');
+const fs     = require('fs');
+const path   = require('path');
+// Only for identifying the activation module the gate resolved to; see
+// escrowLeafGate for why a path alone is not enough.
+const crypto = require('crypto');
 
 // SHARED WITH seed-contract-state.js BY REQUIRE, NOT BY COPY, and that is a
 // decision rather than convenience. Every one of frontier rows 14, 15, 16, 18
@@ -151,25 +154,55 @@ function loadSDK() {
 // than passed in, so this tool cannot be pointed at a height nobody armed. Both
 // halves are returned because they have different consequences and only their
 // UNION decides whether the journal is being written at all.
+//
+// IT ALSO NAMES THE FILE IT READ, AND HASHES IT, because the sibling it resolves
+// is whatever happens to sit beside the tool and that is not always what the
+// fleet runs. Measured on 2026-08-15: the production seed venue carries a FLAT
+// staged copy of xchain-indexer whose map still read `ESCROW_LOCKED_LEAF_SHADOW
+// = {}`, while the BTC:testnet indexer it was seeding had been deployed with
+// `{'BTC:testnet': 148000}` and the chain was already 500+ blocks past it. The
+// preflight therefore printed `shadow window: none` and the NOTE below it,
+// which says in as many words that the journal will stay EMPTY - the exact
+// opposite of the truth, and an argument for arming first, which is the one
+// ordering dq1 exists to prevent. Nothing was wrong with the map, the code or
+// the chain; the tool simply could not see WHICH copy answered.
+//
+// A path plus a sha256 makes that visible and hash-matchable against the
+// deployed indexer (`docker exec <indexer> sha256sum
+// /XChainIndexer/src/state_subtree_activation.js`), which is the check this
+// project already applies to every staged module. It is deliberately NOT a
+// refusal: the tool cannot reach the fleet to know the right hash, so it
+// reports what it read and leaves the comparison to the operator.
 function escrowLeafGate(chain, network) {
     const candidates = [
         '../../xchain-indexer/src/state_subtree_activation.js',
         '../../../xchain-indexer/src/state_subtree_activation.js',
     ];
     for (const c of candidates) {
+        const abs = path.resolve(__dirname, c);
         try {
-            const SUB = require(path.resolve(__dirname, c));
+            const SUB = require(abs);
             const key = chain + ':' + network;
             const armed  = SUB.ESCROW_LOCKED_LEAF_ACTIVATION[key];
             const shadow = SUB.ESCROW_LOCKED_LEAF_SHADOW[key];
+            // Hashed AFTER the require succeeds, so the hash always describes the
+            // file whose values are being reported rather than a candidate that
+            // failed to load.
+            let sha = null;
+            try {
+                sha = crypto.createHash('sha256')
+                    .update(fs.readFileSync(abs)).digest('hex');
+            } catch (e) { /* unreadable after require is not worth failing on */ }
             return {
                 resolved: true,
+                source: abs,
+                sha256: sha,
                 armed:  armed  === undefined ? null : Number(armed),
                 shadow: shadow === undefined ? null : Number(shadow),
             };
         } catch (e) { /* try the next layout */ }
     }
-    return { resolved: false, armed: null, shadow: null };
+    return { resolved: false, source: null, sha256: null, armed: null, shadow: null };
 }
 
 function parseArgs() {
@@ -404,6 +437,15 @@ async function main() {
     } else {
         log('  escrow leaf armed: ' + (gate.armed === null ? 'no' : 'from block ' + gate.armed));
         log('  shadow window:     ' + (gate.shadow === null ? 'none' : 'from block ' + gate.shadow));
+        // Printed on every run, not only when the answer looks odd: a stale
+        // sibling reads exactly like a correct one, so the only way to notice is
+        // to have the identity in front of you before you trust the two lines
+        // above. Hash-match it against the chain's own indexer.
+        log('  gate read from:    ' + gate.source);
+        log('                     sha256 ' + (gate.sha256 || '(unreadable)'));
+        log('                     hash-match this against the indexer that serves ' +
+            opts.chain + ':' + opts.network + ' before trusting the two lines above;');
+        log('                     a stale sibling checkout answers just as confidently as a current one.');
     }
     const journalWritten = gate.resolved && (gate.armed !== null || gate.shadow !== null);
     if (gate.resolved && !journalWritten) {
@@ -417,6 +459,10 @@ async function main() {
         log('  Seeding first is still the right order: the arming block - and a shadow WINDOW START -');
         log('  replays the whole escrows ledger from history, so positions opened now DO land in the');
         log('  journal at that block. Arming first is what spends the transition on an empty leaf.');
+        log('');
+        log('  CHECK THE GATE HASH ABOVE BEFORE ACTING ON THIS NOTE. It is derived from the');
+        log('  sibling checkout named above, not from the running indexer, and on 2026-08-15 a');
+        log('  stale sibling made this exact NOTE print on a chain whose window was already open.');
     }
 
     // Chain tip, read the same way seed-contract-state.js reads it: `last_block`
