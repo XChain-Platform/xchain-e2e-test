@@ -11,9 +11,12 @@
 const transactionHelper = require('../transactionHelper')
 
 module.exports = {
-    async sendListV0(addressInfo, type, items){
+    // MEMO sits BEFORE the variadic ITEM tail, so a memo-less LIST still spends an
+    // empty segment on it (LIST|0|1||JDOG|BRRR). Omit it and the first item is
+    // parsed AS the memo, silently landing a list one item short.
+    async sendListV0(addressInfo, type, items, memo = ''){
         let address = addressInfo["address"]
-        let listMessage = "LIST|0|"+type+"|"+items.join("|")
+        let listMessage = "LIST|0|"+type+"|"+memo+"|"+items.join("|")
 
         console.log("Creating and sending LIST V0 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, listMessage)
@@ -26,9 +29,11 @@ module.exports = {
         return { txHash, list: listRow }
     },
 
-    async sendListV1(addressInfo, edit, listActionIndex, items, finalTypeToCheck, finalItemsToCheck){
+    // memo is last so the existing positional callers keep working; see sendListV0
+    // for why the segment is spent even when empty.
+    async sendListV1(addressInfo, edit, listActionIndex, items, finalTypeToCheck, finalItemsToCheck, memo = ''){
         let address = addressInfo["address"]
-        let listMessage = "LIST|1|"+edit+"|"+listActionIndex+"|"+items.join("|")
+        let listMessage = "LIST|1|"+edit+"|"+listActionIndex+"|"+memo+"|"+items.join("|")
 
         console.log("Creating and sending LIST V1 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, listMessage)
