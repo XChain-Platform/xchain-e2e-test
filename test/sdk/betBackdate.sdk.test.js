@@ -108,7 +108,15 @@ describe('[sdk] BET timestamp backdating (§12 E11)', function () {
                 { pubkey: punter.address, change: punter.address },
                 submitOpts({ wif: punter.wif, waitForIndexer: false }));
             await mineAtFrozenClock(1);
-            await new Promise(r => setTimeout(r, 6000));
+            // Wait for the backdated bet to reach the bets table rather than a
+            // fixed settle: the assertions below read the row it writes, and the
+            // clock stays frozen either way.
+            const earlyIndex = Number(actionIndexOf(early));
+            for (let i = 0; i < 30; i++) {
+                const seen = await getBets(feedIndex);
+                if (seen.some(r => Number(r.action_index) !== earlyIndex)) break;
+                await new Promise(r => setTimeout(r, 1000));
+            }
 
             // Confirm the block really was backdated, or the drill proves nothing.
             const minedAt = await blockTime();

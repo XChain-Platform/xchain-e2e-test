@@ -616,7 +616,14 @@ describe('[sdk] BET two-node state-hash parity (§12 E8: the fleet leg)', functi
             // re-mined and both nodes room to roll back and replay.
             for (let i = 0; i < 4; i++) await global.nodeConnector.generateBlock(
                 (await cryptoHelper.getNewAddress('bet-parity-reorg2', global.COIN, global.NETWORK, null, 'legacy', 0)).address, []);
-            await sleep(8000);
+            // Hand the miner back only once node A's indexer has reached the
+            // competing branch tip, so the rollback and replay are observable
+            // instead of merely likely after a fixed settle.
+            const branchTip = Number(await global.nodeConnector.getBlockCount());
+            for (let i = 0; i < 30; i++) {
+                if (await tipOf(dbQuery) >= branchTip) break;
+                await sleep(1000);
+            }
         } finally {
             await miner.resumeMining();
         }

@@ -17,6 +17,14 @@ COPY ./xchain-sdk /XChainE2ETest/xchain-sdk
 COPY ./package.json /XChainE2ETest/package.json
 COPY ./package-lock.json /XChainE2ETest/package-lock.json
 WORKDIR /XChainE2ETest
+# Deliberately a bare `npm ci`, not `npm ci --omit=dev` like the service images
+# (regtest-miner, utxo-tracker). This is the test-harness image: mocha, chai,
+# stryker and the rest of the runner live in devDependencies, so omitting them
+# leaves an image with nothing to run. The consequence to keep in mind when
+# reading an audit report against this image is that dev-only advisories ARE in
+# its layers, unlike every service image on the platform. That is why the
+# dev-only pins in package.json's overrides block are held at the patched
+# versions rather than left to float.
 RUN npm ci
 
 COPY ./src /XChainE2ETest/src

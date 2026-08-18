@@ -53,14 +53,18 @@ const { seedStakeSnapshot }    = require('../helpers/seededStakeSnapshot');
 const { forceCountModeQuorum } = require('../helpers/forceCountModeQuorum');
 const { silenceDexValidator }  = require('../helpers/byzantineFaults');
 const { MockCrossChainOfferBook, makeOrder } = require('../helpers/mockCrossChainOfferBook');
+const { waitForMesh, waitFor } = require('../helpers/consensusWait');
 
 const COUNT         = 4;       // quorum 3, a real BFT majority tolerating 1 fault
-const PEER_WAIT_MS  = 8000;    // mesh forms before we drive a round
+const PEER_WAIT_MS  = 60_000;  // deadline: waitForMesh returns the moment every socket is open
+// The round window is shared by the positive cases and the sub-quorum negative
+// one, so it stays at its measured length and is spent POLLING for the persisted
+// match row: a full federation returns as soon as every hub holds it, while the
+// negative case (which can never satisfy the poll) still watches the whole window.
 const SETTLE_MS     = 6000;    // PBFT PROPOSE→PREPARE→COMMIT propagation window
 const BLOCK_INDEX   = 100;     // seeded BTC-anchor block (snapshot_block)
 const NETWORK       = 'regtest';
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // A crossing LTC⇄DOGE ORDER pair: an LTC order giving `ltcGive` TOKA for TOKB, and
 // a DOGE order giving `dogeGive` TOKB for TOKA (1:1 price, so it always crosses).
@@ -115,7 +119,7 @@ describe('MultiValidatorHub: cross-chain DEX match PBFT (L2)', function () {
             }
         });
         await mvh.start();
-        await sleep(PEER_WAIT_MS);                     // mesh forms before we propose
+        await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });   // mesh IS formed before we propose
 
         // Deterministic cross_chain validator set + BTC block, so every hub resolves
         // the same quorum 3 with no indexer / chain behind it.
@@ -142,7 +146,29 @@ describe('MultiValidatorHub: cross-chain DEX match PBFT (L2)', function () {
             return fn;
         });
         await Promise.all(dexes.map((d) => d._discoverAndMatch().catch(() => {})));
-        await sleep(settleMs);
+        // The post-condition of the positive case is the PERSISTED cross_chain_matches
+        // row on every hub, which the finalize event only STARTS: the event is emitted
+        // synchronously by CrossChainDexConsensus._finalize, and the row is written by
+        // CrossChainDexEngine's un-awaited `this._writeFinalizedMatch(ev)` listener on
+        // that same emit, so an event-count poll clears while the INSERT is still in
+        // flight. Poll the row, keyed by the match_id this round finalized exactly as
+        // the assertions key it. The cases that expect FEWER finalizes (byzantine,
+        // sub-quorum) never satisfy the poll and therefore still observe the full
+        // window, which is what proves their negative.
+        await waitFor(async () => {
+            if (!events.length) return { ok: false, held: 0 };
+            const matchId = events[0].matchId;
+            let held = 0;
+            for (const hub of mvh.hubs) {
+                try {
+                    const r = await hub.db.doQuery(
+                        "SELECT match_id FROM cross_chain_matches WHERE match_id = ? AND status = 'finalized'",
+                        [matchId]);
+                    if (r.length >= 1) held++;
+                } catch (_) { /* a hub that cannot be read has not persisted it */ }
+            }
+            return { ok: held === mvh.hubs.length, held: held };
+        }, { timeoutMs: settleMs, intervalMs: 100 });
         dexes.forEach((d, i) => d.consensus.removeListener('match:finalized', listeners[i]));
         return events;
     }

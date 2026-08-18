@@ -50,6 +50,7 @@ const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedStakeSnapshot }    = require('../helpers/seededStakeSnapshot');
 const { forceCountModeQuorum } = require('../helpers/forceCountModeQuorum');
 const { silenceValidator, forgedPrePrepare } = require('../helpers/byzantineFaults');
+const { waitForMesh, waitForConfigEverywhere } = require('../helpers/consensusWait');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -86,7 +87,11 @@ function alignSeqs(mvh) {
 }
 
 function byzantineScaleSuite({ count, quorum, faults, basePort, peerWaitMs }) {
-    const APPLY_WAIT_MS = 8000;
+    // A deadline, not a settle: the honest hubs' own config rows are observable, so
+    // the apply wait polls them and returns on the first passing poll.
+    const APPLY_WAIT_MS = 60_000;
+    // Non-occurrence has no event to wait for, so the boundary round's window stays
+    // a fixed observation window.
     const STALL_WAIT_MS = 8000;
 
     describe('MultiValidatorHub: byzantine fault tolerance at f=' + faults + ' (N=' + count + ', C.2)', function () {
@@ -106,7 +111,10 @@ function byzantineScaleSuite({ count, quorum, faults, basePort, peerWaitMs }) {
             process.env.P2P_MAX_CONNECTIONS_PER_IP = '50';
             mvh = new MultiValidatorHub({ count, basePort });
             await mvh.start();
-            await sleep(peerWaitMs);
+            // peerWaitMs was the mesh settle; as a deadline it is raised to the same
+            // 60s bound the other hub suites use (the poll returns as soon as every
+            // socket is open, so the bound only decides when to give up).
+            await waitForMesh(mvh, { timeoutMs: Math.max(peerWaitMs, 60_000) });
             seed = seedStakeSnapshot(mvh);
         });
 
@@ -141,11 +149,17 @@ function byzantineScaleSuite({ count, quorum, faults, basePort, peerWaitMs }) {
 
             const victims = mvh.hubs.filter((h) => h !== leader).slice(0, faults);
             const restores = victims.map((v) => silenceValidator(v));
+            const honest = mvh.hubs.filter((h) => !victims.includes(h));
             try {
                 await leader.addParametersFromJson(config);   // needs `quorum` of `count`
-                await sleep(APPLY_WAIT_MS);
+                // The honest hubs' own config rows are the post-condition. Waiting on
+                // them also puts the silenced-hub check below strictly AFTER the change
+                // propagated, which is the only moment "it stayed inert" proves anything.
+                await waitForConfigEverywhere(
+                    honest,
+                    { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: VALUE },
+                    { timeoutMs: APPLY_WAIT_MS });
 
-                const honest = mvh.hubs.filter((h) => !victims.includes(h));
                 assert.strictEqual(honest.length, quorum, 'expected ' + quorum + ' honest hubs');
                 for (const h of honest) {
                     const cfg = await h.db.getConfig(COIN, NET, MODULE);

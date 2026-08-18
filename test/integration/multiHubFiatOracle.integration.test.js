@@ -44,6 +44,7 @@ const assert = require('assert');
 const { MultiValidatorHub }    = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
+const { waitForMesh, waitFor } = require('../helpers/consensusWait');
 
 function hubRequire(rel) { return require(path.resolve(__dirname, '../../../xchain-hub', rel)); }
 const OracleConsensus = hubRequire('src/OracleConsensus.js');
@@ -57,15 +58,15 @@ function indexerMatcher() { return Object.create(IndexerUtility.prototype); }
 
 const FIAT_DISPENSER_PRICE_WINDOW = 86400;   // indexer default (24h)
 
-const PEER_WAIT_MS = 8000;
-const SETTLE_MS    = 6000;
+// Deadlines, not settles: mesh formation and each hub's finalized snapshot row are
+// both observable, so the waits poll and return on the first passing poll.
+const PEER_WAIT_MS = 60_000;
+const SETTLE_MS    = 60_000;
 const BLOCK_INDEX  = 100;
 const BLOCK_TIME   = 1700000000;
 const ROUND        = 100;
 const PAIR         = 'BTC/USD';
 const PRICE        = '60000';
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function attachOracle(mvh) {
     const stops = [];
@@ -91,9 +92,22 @@ function injectSubmissions(mvh) {
     }
 }
 
+// Drive the round on every hub, then wait until every hub has written its own
+// finalized snapshot row (the post-condition every case here asserts on).
 async function finalizeAll(mvh) {
     await Promise.all(mvh.hubs.map((h) => h._wtOracle.finalizeRound(ROUND, BLOCK_INDEX, BLOCK_TIME).catch(() => {})));
-    await sleep(SETTLE_MS);
+    const res = await waitFor(async () => {
+        const counts = [];
+        for (const hub of mvh.hubs) {
+            try { counts.push((await snapshotRows(hub)).length); }
+            catch (_) { counts.push(0); }
+        }
+        return { ok: counts.length > 0 && counts.every((c) => c >= 1), counts: counts };
+    }, { timeoutMs: SETTLE_MS });
+    if (!res.ok) {
+        throw new Error('not every hub finalized the fiat price round within ' + res.waitedMs
+            + 'ms: rows per hub [' + ((res.last && res.last.counts) || []).join(', ') + ']');
+    }
 }
 
 async function snapshotRows(hub) {
@@ -134,7 +148,7 @@ describe('MultiValidatorHub: multi-hub fiat oracle round → FIAT dispenser cons
         if (!db) { console.log('Skipping multi-hub fiat oracle: no env DB and Docker unavailable'); this.skip(); }
         mvh = new MultiValidatorHub({ count: 4, basePort: 26100, startAttestation: false });
         await mvh.start();
-        await sleep(PEER_WAIT_MS);
+        await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
         const ids = mvh.identities;
         // Uneven weights, no source ≥ 2/3 of S=10000 → multi-signer weighted quorum.
         seed = seedWeightSnapshot(mvh, {

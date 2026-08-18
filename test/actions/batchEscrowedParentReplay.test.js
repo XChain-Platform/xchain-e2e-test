@@ -8,7 +8,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 //
-// XC-1454 review finding F12: "ORDER escrows the parent, then child ISSUEs" in ONE batch.
+// ORDER escrows the parent, then child ISSUEs, in ONE batch.
 //
 // WHY THIS SHAPE AND NOT ANOTHER. Every other read on the child-issuance path is
 // scoped as-of the acting ACTION_INDEX (getTokenInfo takes `a1.action_index < ?`,
@@ -16,12 +16,10 @@
 // the state its predecessors left and a replay reconstructs the same view. The ONE
 // exception is issue.js's ownership-escrow guard: it calls
 // indexerDb.isOwnershipEscrowed(parent), which reads `tokens.escrow_action_index`
-// with NO action-index bound at all (xchain-indexer/src/db.js getTokenEscrow). Before
-// XC-1454 that hardly mattered, because a batch could carry at most one ISSUE and
-// therefore could not both open the escrow and issue a child in one transaction.
-// R1's dotted-TICK exemption makes that transaction composable, so the unscoped read
-// becomes reachable mid-batch and is exactly where a live run and a replay could
-// disagree.
+// with NO action-index bound at all (xchain-indexer/src/db.js getTokenEscrow). R1's
+// dotted-TICK exemption makes a batch that opens the escrow and issues a child in one
+// transaction possible, so the unscoped read becomes reachable mid-batch and is
+// exactly where a live run and a replay could disagree.
 //
 // What this suite proves on chain:
 //   1. the verdict itself: an ORDER escrowing the parent invalidates the child ISSUEs

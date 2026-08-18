@@ -43,6 +43,9 @@
  */
 
 const assert = require('assert');
+const fs     = require('fs');
+const path   = require('path');
+const crypto = require('crypto');
 const {
     listRows, holdsEscrow, isSeedOrder, escrowLeafGate, RELEASED_STATUSES,
 } = require('../../bin/seed-escrow-state.js');
@@ -150,6 +153,62 @@ describe('seed-escrow-state helpers', function () {
             // Still NOT armed, and that is the half that must not drift: a shadow
             // commits nothing, so locked-balance proofs stay refused here.
             assert.strictEqual(g.armed, null, 'a shadow window must never read as an arming');
+        });
+
+        it('names the file it read and hashes it, because a stale sibling answers just as confidently', function () {
+            // THE FAILURE THIS EXISTS FOR, measured 2026-08-15 rather than
+            // imagined. The production seed venue carries a flat staged copy of
+            // xchain-indexer beside the tool, and its map still read
+            // ESCROW_LOCKED_LEAF_SHADOW = {} while the BTC:testnet indexer being
+            // seeded had been deployed with { 'BTC:testnet': 148000 } and the
+            // chain was already past it. The preflight printed
+            // `shadow window: none` and the NOTE that says the journal will stay
+            // EMPTY - the opposite of the truth, and an argument for arming
+            // first, which is the single ordering dq1 exists to prevent.
+            //
+            // The values were right in the repo, the deploy was right on the
+            // fleet, and the tool was reading a third copy neither of them knew
+            // about. A path plus a hash is the smallest thing that makes that
+            // visible, and it is the check this project already applies to every
+            // staged module.
+            const g = escrowLeafGate('BTC', 'testnet');
+            assert.strictEqual(g.resolved, true);
+            assert.ok(g.source, 'the gate must name the file it read');
+            assert.ok(path.isAbsolute(g.source),
+                'a relative path does not identify a copy; two checkouts share it');
+            assert.strictEqual(path.basename(g.source), 'state_subtree_activation.js');
+            assert.ok(fs.existsSync(g.source), 'the named file must be the one on disk');
+            assert.match(g.sha256 || '', /^[0-9a-f]{64}$/, 'a sha256 the operator can hash-match');
+            // And it must be the hash OF THAT FILE, not of anything else: this is
+            // the half that makes the comparison against a deployed indexer mean
+            // something. A hash computed over the wrong bytes is worse than none,
+            // because it would MATCH nothing and be read as a deploy gap.
+            const onDisk = crypto.createHash('sha256')
+                .update(fs.readFileSync(g.source)).digest('hex');
+            assert.strictEqual(g.sha256, onDisk);
+        });
+
+        it('reports the gate identity even for a chain that is neither armed nor shadowing', function () {
+            // The stale-copy hazard is WORST precisely here. An unarmed answer is
+            // the one that triggers the "the journal will stay EMPTY" NOTE, so if
+            // identity were only reported alongside a positive height the one
+            // reading that mattered would go unidentified.
+            const g = escrowLeafGate('BTC', 'mainnet');
+            assert.strictEqual(g.armed, null);
+            assert.strictEqual(g.shadow, null);
+            assert.ok(g.source, 'identity is reported for a negative answer too');
+            assert.match(g.sha256 || '', /^[0-9a-f]{64}$/);
+        });
+
+        it('reports no source when nothing could be resolved, rather than a path it did not read', function () {
+            // resolved:false must not carry a plausible-looking path: an operator
+            // hash-matching a file the tool never loaded would confirm a value
+            // that had no bearing on the run.
+            const g = escrowLeafGate('BTC', 'testnet');
+            const shape = Object.keys(g).sort();
+            assert.deepStrictEqual(shape, ['armed', 'resolved', 'sha256', 'shadow', 'source'],
+                'the resolved and unresolved shapes must match field for field, ' +
+                'so a caller cannot read a missing key as absence of a gate');
         });
 
         it('distinguishes an unarmed chain from an unresolvable gate', function () {

@@ -69,7 +69,7 @@ const crypto = require('crypto');
 const { MultiValidatorHub }    = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 
-const PEER_WAIT_MS = 6000;
+const PEER_WAIT_MS = 60_000;   // a deadline for the bring-up poll below, not a settle
 const REDUNDANCY   = 3;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -78,10 +78,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // hashes them, it never verifies a signature here.
 function hx(n) { return String(n).padStart(2, '0').repeat(32); }
 const VALIDATORS = [
-    // Weights are all above the http_get PROVIDER floor of 10000 (XC-083), which the
-    // weighted responsible-set derivation applies before the source dedupe. This suite
-    // isolates the dedupe rule, so nothing here may sit under the floor or the set
-    // empties for a reason that has nothing to do with what is being asserted.
+    // Weights are all above the http_get PROVIDER floor of 10000, which the weighted
+    // responsible-set derivation applies before dedupe. This suite isolates the dedupe
+    // rule, so nothing here may sit under the floor or empty the set for unrelated reasons.
     { pubkey: hx(1),  source: 'whale', weight: '50000' },
     { pubkey: hx(2),  source: 'whale', weight: '50000' },
     { pubkey: hx(3),  source: 'whale', weight: '50000' },
@@ -93,7 +92,7 @@ const VALIDATORS = [
     { pubkey: hx(14), source: 'sD',    weight: '10000' },
 ]
 
-// The http_get provider stake floor (XC-083). In production AttestationRound resolves
+// The http_get provider stake floor. In production AttestationRound resolves
 // this from the block-anchored provider history; here it is passed literally so the
 // ranking stays a pure function of the seeded set.
 const PROVIDER_FLOOR = '10000'
@@ -111,7 +110,13 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM attestation source-dedup (WI-
         if (!db) { console.log('Skipping A2: no env DB and Docker unavailable'); this.skip(); }
         mvh = new MultiValidatorHub({ count: 1, basePort: 33600 });   // startAttestation defaults on
         await mvh.start();
-        await sleep(PEER_WAIT_MS);
+        // One hub, so there is no mesh to form: what this block actually needs is the
+        // attestation round wired up, which is exactly what the next line asserts.
+        // Poll for it instead of betting PEER_WAIT_MS that startAttestation finished.
+        await waitUntil(() => {
+            const round = mvh.hubs[0] && mvh.hubs[0].attestationRound;
+            return !!(round && typeof round._computeResponsibleSet === 'function');
+        }, PEER_WAIT_MS);
         ar = mvh.hubs[0].attestationRound;
         assert.ok(ar && typeof ar._computeResponsibleSet === 'function', 'hub.attestationRound not available');
     });
@@ -332,10 +337,9 @@ describe('MultiValidatorHub: LIVE weighted attestation source-dedup through PBFT
 
         ids          = mvh.identities.map((id) => String(id.pubkeyHex).toLowerCase());
         whalePubkeys = new Set([ids[0], ids[1], ids[2]]);
-        // Every weight clears the http_get provider floor of 10000 (XC-083): these hubs
-        // run the REAL _startRound, which filters below-floor sources out of the
-        // responsible set before deduping, and a starved set here would fail the
-        // assertions for the wrong reason.
+        // Every weight clears the http_get provider floor of 10000: these hubs run the
+        // REAL _startRound, which filters below-floor sources out of the responsible set
+        // before deduping; a starved set here would fail the assertions for the wrong reason.
         weightedValidators = [
             { pubkey: ids[0], source: 'whale', weight: '50000' },
             { pubkey: ids[1], source: 'whale', weight: '50000' },

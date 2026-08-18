@@ -94,7 +94,7 @@ module.exports = {
 
         // Stake each hub's pubkey from a separate funded source. 30000 clears BOTH the
         // attestation capability min_stake (1000 XCHAIN) and the llm PROVIDER floor
-        // (25000, XC-083), which the responsible-set derivation enforces at/above
+        // (25000), which the responsible-set derivation enforces at/above
         // STAKE_WEIGHTED_QUORUM (armed at genesis on regtest).
         for (let i = 0; i < pubkeys.length; i++) {
             const addr = await cryptoHelper.getNewFundedAddress(

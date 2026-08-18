@@ -176,10 +176,13 @@ describe('[sdk] BET reorg drill (§12 E8: in-place latch + settlement reset)', f
         try {
             await reorgPast(resolveBlock, 'bet-reorg-settle');
             expect(await waitIndexerPast(resolveBlock + 1), 'indexer followed the reorg').to.equal(true);
-            // Give the replayed resolve room to be re-mined and re-indexed.
+            // Give the replayed resolve room to be re-mined and re-indexed: wait
+            // for the indexer to reach the branch tip these blocks built, rather
+            // than a fixed settle that passes or fails on how busy the venue is.
             for (let i = 0; i < 4; i++) await global.nodeConnector.generateBlock(
                 (await cryptoHelper.getNewAddress('bet-reorg-settle2', global.COIN, global.NETWORK, null, 'legacy', 0)).address, []);
-            await sleep(8000);
+            expect(await waitIndexerPast(Number(await global.nodeConnector.getBlockCount())),
+                'indexer followed the replay to the branch tip').to.equal(true);
         } finally {
             await miner.resumeMining();
         }
@@ -266,7 +269,11 @@ describe('[sdk] BET reorg drill (§12 E8: in-place latch + settlement reset)', f
         try {
             await reorgPast(latchBlock, 'bet-reorg-latch');
             expect(await waitIndexerPast(latchBlock + 1), 'indexer followed the reorg').to.equal(true);
-            await sleep(8000);
+            // The re-latch is an end-of-block pass, so it has run for every block
+            // of the competing branch only once the indexer holds that whole
+            // branch. Wait for the tip instead of a fixed settle.
+            expect(await waitIndexerPast(Number(await global.nodeConnector.getBlockCount())),
+                'indexer reached the competing branch tip').to.equal(true);
         } finally {
             await miner.resumeMining();
         }

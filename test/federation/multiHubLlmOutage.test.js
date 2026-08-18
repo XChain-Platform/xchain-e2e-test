@@ -243,7 +243,7 @@ module.exports = {
             )
             await _settleStack()
             // 30000 clears BOTH the attestation capability min_stake (1000) and the llm
-            // PROVIDER floor (25000, XC-083, higher than http_get's 10000), enforced on
+            // PROVIDER floor (25000, higher than http_get's 10000), enforced on
             // the responsible set at/above STAKE_WEIGHTED_QUORUM (armed at genesis on regtest).
             await gasHelper.ensureGasBalance(addr, '35000')
             await _settleStack()

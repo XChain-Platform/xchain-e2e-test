@@ -49,13 +49,16 @@ const { MultiValidatorHub, ValidatorIdentity } = require('../helpers/multiValida
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
 const { MockCrossChainOfferBook, makeOrder } = require('../helpers/mockCrossChainOfferBook');
+const { waitForMesh, waitFor } = require('../helpers/consensusWait');
 
-const PEER_WAIT_MS = 8000;
+const PEER_WAIT_MS = 60_000;   // deadline: waitForMesh returns the moment every socket is open
+// Shared by the stake-minority negative case and the healthy positive one, so the
+// window keeps its measured length and is spent POLLING for the persisted match
+// row: a healthy federation returns as soon as every hub holds it, while the
+// minority case can never satisfy the poll and still watches the whole window.
 const SETTLE_MS    = 6000;
 const BLOCK_INDEX  = 100;
 const NETWORK      = 'regtest';
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // A crossing LTC/DOGE ORDER pair (1:1 price -> always crosses).
 function crossingPair({ ltcIdx, dogeIdx, ltcGive = '90', dogeGive = '40' }) {
@@ -86,7 +89,25 @@ async function driveRound(mvh, settleMs = SETTLE_MS) {
         return fn;
     });
     await Promise.all(dexes.map((d) => d._discoverAndMatch().catch(() => {})));
-    await sleep(settleMs);
+    // Poll the PERSISTED cross_chain_matches row, not the finalize event: the event is
+    // emitted synchronously by CrossChainDexConsensus._finalize, and the row is written
+    // by CrossChainDexEngine's un-awaited `this._writeFinalizedMatch(ev)` listener on
+    // that same emit, so an event-count poll clears while the INSERT is still in flight
+    // and both cases below read the row. Keyed by match_id exactly as they key it. The
+    // stake-minority case writes no row, so it still watches the whole window.
+    await waitFor(async () => {
+        if (!events.length) return { ok: false, held: 0 };
+        const matchId = events[0].matchId;
+        let held = 0;
+        for (const hub of mvh.hubs) {
+            try {
+                const r = await hub.db.doQuery(
+                    "SELECT match_id FROM cross_chain_matches WHERE match_id = ? AND status = 'finalized'", [matchId]);
+                if (r.length >= 1) held++;
+            } catch (_) { /* a hub that cannot be read has not persisted it */ }
+        }
+        return { ok: held === mvh.hubs.length, held: held };
+    }, { timeoutMs: settleMs, intervalMs: 100 });
     dexes.forEach((d, i) => d.consensus.removeListener('match:finalized', listeners[i]));
     return events;
 }
@@ -109,7 +130,7 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM cross-chain DEX match (WI-1 S
                 crossChainIndexerUrls: { LTC: book.urlFor('shared', 'LTC'), DOGE: book.urlFor('shared', 'DOGE') }
             });
             await mvh.start();
-            await sleep(PEER_WAIT_MS);
+            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
             const ids = mvh.identities;
             seed = seedWeightSnapshot(mvh, {
                 blockIndex: BLOCK_INDEX,
@@ -158,7 +179,7 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM cross-chain DEX match (WI-1 S
                 crossChainIndexerUrls: { LTC: book.urlFor('shared', 'LTC'), DOGE: book.urlFor('shared', 'DOGE') }
             });
             await mvh.start();
-            await sleep(PEER_WAIT_MS);
+            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
             const ids = mvh.identities;
             // Uneven weights, no single source >= 2/3 (S=10000) -> multi-signer quorum.
             seed = seedWeightSnapshot(mvh, {

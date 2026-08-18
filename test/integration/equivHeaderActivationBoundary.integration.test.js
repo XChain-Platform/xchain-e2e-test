@@ -68,14 +68,16 @@ const assert = require('assert');
 const { MultiValidatorHub, ValidatorIdentity } = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
+const { waitForMesh, waitFor } = require('../helpers/consensusWait');
 const eq = require('../../../xchain-hub/src/equivocation_header.js');
 
 const ACT = parseInt(eq.EQUIV_HEADER_ACTIVATION.regtest);
 
-const PEER_WAIT_MS = 8000;
-const SETTLE_MS    = 6000;
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Deadlines, not settles: the mesh and the finalized checkpoint row are both
+// observable, so each wait polls its post-condition and returns on the first
+// passing poll rather than betting a fixed window against the venue's load.
+const PEER_WAIT_MS = 60_000;
+const SETTLE_MS    = 60_000;
 
 // Identical stubbed "indexer" tip on every hub: the checkpoint's block_index +
 // ledger content. Held constant across the boundary so only the snapshot_block
@@ -103,9 +105,23 @@ function wireCheckpointEngine(mvh) {
     }
 }
 
+// Drive one cadence tick on every hub, then wait until every hub has written its
+// own finalized checkpoint row. That row IS what finalizeOnEveryHub asserts on, so
+// it is the post-condition to poll rather than a window to sleep through.
 async function tickAll(mvh) {
     await Promise.all(mvh.hubs.map((h) => h.stateCheckpoints._tick().catch(() => {})));
-    await sleep(SETTLE_MS);
+    const res = await waitFor(async () => {
+        const counts = [];
+        for (const hub of mvh.hubs) {
+            try { counts.push((await checkpointRows(hub)).length); }
+            catch (_) { counts.push(0); }
+        }
+        return { ok: counts.length > 0 && counts.every((c) => c >= 1), counts: counts };
+    }, { timeoutMs: SETTLE_MS });
+    if (!res.ok) {
+        throw new Error('not every hub finalized a checkpoint within ' + res.waitedMs
+            + 'ms: rows per hub [' + ((res.last && res.last.counts) || []).join(', ') + ']');
+    }
 }
 
 function checkpointRows(hub) {
@@ -171,7 +187,7 @@ describe('MultiValidatorHub: EQUIV_HEADER activation boundary (WI-2 bump 2 / A4,
             if (!db) { console.log('Skipping EQUIV boundary (below): no env DB and Docker unavailable'); this.skip(); }
             mvh = new MultiValidatorHub({ count: 4, basePort: 34200, startCrossChain: true, startAttestation: false });
             await mvh.start();
-            await sleep(PEER_WAIT_MS);
+            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
             seed = seedWeightSnapshot(mvh, {
                 blockIndex: ACT - 1,
                 validators: mvh.identities.map((id, i) => ({ pubkey: id.pubkeyHex, source: 's' + i, weight: WEIGHTS[i] })),
@@ -224,7 +240,7 @@ describe('MultiValidatorHub: EQUIV_HEADER activation boundary (WI-2 bump 2 / A4,
             if (!db) { console.log('Skipping EQUIV boundary (above): no env DB and Docker unavailable'); this.skip(); }
             mvh = new MultiValidatorHub({ count: 4, basePort: 34300, startCrossChain: true, startAttestation: false });
             await mvh.start();
-            await sleep(PEER_WAIT_MS);
+            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
             seed = seedWeightSnapshot(mvh, {
                 blockIndex: ACT + 1,
                 validators: mvh.identities.map((id, i) => ({ pubkey: id.pubkeyHex, source: 's' + i, weight: WEIGHTS[i] })),

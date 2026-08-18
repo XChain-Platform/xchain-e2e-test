@@ -54,11 +54,14 @@ const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
 const { seedStakeSnapshot }    = require('../helpers/seededStakeSnapshot');
 const { MockCrossChainOfferBook, makeOrder } = require('../helpers/mockCrossChainOfferBook');
+const { waitForMesh, waitFor } = require('../helpers/consensusWait');
 const eq = require('../../../xchain-hub/src/equivocation_header.js');
 
 const COUNT        = 4;        // quorum 2f+1 = 3
-const PEER_WAIT_MS = 8000;
-const SETTLE_MS    = 6000;
+// Deadlines, not settles: the mesh, the checkpoint rows and the finalized match are
+// each observable, so their waits poll and return on the first passing poll.
+const PEER_WAIT_MS = 60_000;
+const SETTLE_MS    = 60_000;
 const BLOCK_INDEX  = 100;      // seeded BTC anchor (election + snapshot block)
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -130,7 +133,7 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
             }
         });
         await mvh.start();
-        await sleep(PEER_WAIT_MS);
+        await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
 
         // Deterministic oracle_publish/cross_chain sets + BTC anchor block.
         // Weighted (source-keyed) snapshot: regtest activates STAKE_WEIGHTED_QUORUM
@@ -176,7 +179,19 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
         // Drive one cadence tick on every hub. Only the elected leader initiates;
         // followers co-sign over real P2P and adopt the XCHK_FINALIZED row.
         await Promise.all(mvh.hubs.map(h => h.stateCheckpoints._tick()));
-        await sleep(SETTLE_MS);
+        // Each hub's own state_checkpoints row is the post-condition asserted next.
+        await waitFor(async () => {
+            let held = 0;
+            for (let hub of mvh.hubs) {
+                try {
+                    let r = await hub.db.doQuery(
+                        'SELECT checkpoint_seq FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index = ?',
+                        ['BTC', 'regtest', TIP.block_index]);
+                    if (r.length >= 1) held++;
+                } catch (_) { /* a hub that cannot be read has not stored it */ }
+            }
+            return { ok: held === mvh.hubs.length, held: held };
+        }, { timeoutMs: SETTLE_MS });
 
         let rows = [];
         for (let hub of mvh.hubs) {
@@ -215,7 +230,18 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
         // A finalized cross-chain match gives the archive something to carry.
         let dexes = mvh.getCrossChainDexes();
         await Promise.all(dexes.map(d => d._discoverAndMatch().catch(() => {})));
-        await sleep(SETTLE_MS);
+        // The finalized match on every hub is the precondition the loop below
+        // asserts, so wait for it rather than for a fixed window.
+        await waitFor(async () => {
+            let held = 0;
+            for (let hub of mvh.hubs) {
+                try {
+                    let m = await hub.db.doQuery("SELECT match_id FROM cross_chain_matches WHERE status = 'finalized'");
+                    if (m.length >= 1) held++;
+                } catch (_) { /* a hub that cannot be read has not stored it */ }
+            }
+            return { ok: held === mvh.hubs.length, held: held };
+        }, { timeoutMs: SETTLE_MS });
         for (let hub of mvh.hubs) {
             let m = await hub.db.doQuery("SELECT * FROM cross_chain_matches WHERE status = 'finalized'");
             assert.ok(m.length >= 1, 'every hub must hold the finalized match before anchoring');
@@ -229,8 +255,8 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
         // quorum over P2P before publishing inside _checkArchiveQuorum, which can
         // exceed a single SETTLE_MS. Poll for the v1 archive publish rather than
         // assuming a fixed settle (a 6s window raced the quorum round and saw 0).
-        for (let waited = 0; waited < 30000 && !published.some(p => p.payload.split('|')[1] === '1'); waited += 500)
-            await sleep(500);
+        await waitFor(() => ({ ok: published.some(p => p.payload.split('|')[1] === '1') }),
+            { timeoutMs: 30000, intervalMs: 500 });
         await sleep(500); // let the checkpoint anchor + back-fill that ride the same round land too
 
         // SPV Phase 2 (xchain-hub 08228c8): the checkpoint anchor is published as

@@ -45,10 +45,10 @@ describe('Security: staged sibling trees carry no vulnerable copies @regression 
     // agree.
     const floors = {
         'fast-uri':             [3, 1, 5],
-        'brace-expansion':      [5, 0, 8],
+        'brace-expansion':      [5, 0, 9],
         'minimatch':            [10, 2, 5],
         'axios':                [1, 18, 0],
-        'js-yaml':              [4, 3, 0],
+        'js-yaml':              [4, 3, 1],
         'serialize-javascript': [7, 0, 5],
         'shell-quote':          [1, 9, 0],
         'form-data':            [4, 0, 6],

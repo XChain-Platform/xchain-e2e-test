@@ -13,14 +13,9 @@
  **********************************************************************
  * Deterministic waits for the in-process MultiValidatorHub PBFT suites.
  *
- * The multiHub* integration suites used to bracket a consensus round with two
- * fixed sleeps: ~8s "peers are probably connected by now" before proposing, and
- * ~4s "the followers have probably applied by now" before asserting. Both are
- * bets on how busy the venue is, and both lost intermittently: XC-1471 measured
- * multiHubConsensusWeighted failing twice and passing once on the SAME commit,
- * always on `hub 0 did not apply the weighted PBFT config change (got {})`.
- *
- * Neither wait needs to be a bet, because both conditions are observable:
+ * Bracketing a consensus round with fixed sleeps is a bet on how busy the
+ * venue is, and it loses intermittently. Both conditions below are directly
+ * observable, so this file polls for them instead of guessing an interval:
  *
  *   MESH. PeerManager.peers holds an entry from the moment a dial STARTS
  *   (state 'connecting', ws null), so the peers.size check the suites use is

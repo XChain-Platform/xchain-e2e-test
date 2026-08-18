@@ -40,15 +40,19 @@ const assert = require('assert');
 const { MultiValidatorHub, ValidatorIdentity } = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
+const { waitForMesh, waitFor } = require('../helpers/consensusWait');
 const eq = require('../../../xchain-hub/src/equivocation_header.js');
 
-const PEER_WAIT_MS = 12000;     // 10-node mesh (45 connections) needs time to form
+// A deadline, not a settle: waitForMesh returns on the first fully-peered poll.
+const PEER_WAIT_MS = 60_000;    // 10-node mesh (45 connections)
+// tickAll is shared by the healthy N=10 case and the 6-of-10 boundary case, so its
+// window keeps its measured length and is spent POLLING: the healthy federation
+// returns as soon as every hub holds its checkpoint, while the boundary case can
+// never satisfy the poll and still watches the whole window.
 const SETTLE_MS    = 10000;     // XCHK_SIGN propagation + finalize across 10 hubs
 const BLOCK_INDEX  = 100;       // seeded BTC anchor (snapshot + election block); 100 % 4 = 0 -> live leader
 const COUNT        = 10;
 const QUORUM_SIGS  = 7;         // 3*tally > 2*S with equal weights => >=7 of 10 sources
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Identical stubbed "indexer" tip on every hub (mirrors multiHubStateAnchorWeighted).
 const TIP = {
@@ -78,7 +82,14 @@ function wireCheckpointEngine(mvh) {
 
 async function tickAll(mvh) {
     await Promise.all(mvh.hubs.map((h) => h.stateCheckpoints._tick().catch(() => {})));
-    await sleep(SETTLE_MS);
+    await waitFor(async () => {
+        let held = 0;
+        for (const hub of mvh.hubs) {
+            try { if ((await checkpointRows(hub)).length >= 1) held++; }
+            catch (_) { /* a hub that cannot be read has not stored it */ }
+        }
+        return { ok: held === mvh.hubs.length, held: held };
+    }, { timeoutMs: SETTLE_MS });
 }
 
 async function checkpointRows(hub) {
@@ -98,7 +109,7 @@ describe('MultiValidatorHub: state-checkpoint signing at N=10 (C.2 matrix cell)'
             if (!db) { console.log('Skipping N=10 checkpoint (positive): no env DB and Docker unavailable'); this.skip(); }
             mvh = new MultiValidatorHub({ count: COUNT, basePort: 31000, startCrossChain: true, startAttestation: false });
             await mvh.start();
-            await sleep(PEER_WAIT_MS);
+            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
             const ids = mvh.identities;
             // Equal weights: S = 10*1000 = 10000; no source clears 2/3 alone, so the
             // round needs a genuine >=7-signer aggregate to pass 3*tally > 2*S.
@@ -159,7 +170,7 @@ describe('MultiValidatorHub: state-checkpoint signing at N=10 (C.2 matrix cell)'
             // toward S). 6000/10000 is one source below the >=7 quorum.
             mvh = new MultiValidatorHub({ count: 6, basePort: 31200, startCrossChain: true, startAttestation: false });
             await mvh.start();
-            await sleep(PEER_WAIT_MS);
+            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
             const ids = mvh.identities;
             const offline = ['f0', 'f1', 'f2', 'f3'].map((p) => p.repeat(32));   // distinct, never live
             const validators = ids.map((id, i) => ({ pubkey: id.pubkeyHex, source: 's' + i, weight: '1000' }))

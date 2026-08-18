@@ -125,6 +125,13 @@ function hubDb(fn) {
     return withConn(HUB_DB_HOST, HUB_DB_PORT, HUB_DB_NAME, process.env.HUB_DB_USER, process.env.HUB_DB_PASS, fn);
 }
 
+// Highest block the DOGE indexer has committed. Used to wait on indexed state
+// rather than a fixed settle after mining.
+async function dogeIndexerTip() {
+    const rows = await dogeIdx((c) => c.query('SELECT MAX(block_index) AS tip FROM blocks'));
+    return rows.length && rows[0].tip != null ? Number(rows[0].tip) : 0;
+}
+
 // expectedNative = xchainFee * xchainUsd / coinUsd; min/max = expected * tol.
 // Float math is fine for an assertion epsilon: the tolerance band (0.95-1.10)
 // dwarfs any rounding, and we compare with a relative epsilon.
@@ -215,9 +222,15 @@ describe('native-coin fee against a LIVE price oracle feed (DOGE)', function () 
         });
         const kp = sdk.generateKeyPair();
         maker = { ...kp, address: sdk.deriveAddress(kp.publicKey, { type: 'p2pkh' }) };
+        const tipBeforeFunding = await dogeIndexerTip();
         await minerRpc('send_funds', { address: maker.address, amount: 100 });
         await minerRpc('generate_blocks', { count: 2 });
-        await sleep(3000);
+        // Every test below submits against indexed state, so wait for the indexer
+        // to commit the funding blocks rather than settling for a fixed window.
+        for (let i = 0; i < 30; i++) {
+            if (await dogeIndexerTip() >= tipBeforeFunding + 2) break;
+            await sleep(1000);
+        }
     });
 
     // Submit a DOGE action with waitForIndexer:false (no DOGE explorer), mine, and

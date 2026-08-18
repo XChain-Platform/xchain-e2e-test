@@ -22,8 +22,9 @@
   "scripts": {
     "lint:sleep-flake": "node scripts/check-sleep-flake.js",
     "count:actions": "node scripts/count-action-suites.js",
-    "ci": "npm run lint:sleep-flake && mocha --no-config --timeout 30000 --exit 'test/unit/coins-conformance.test.js' 'test/unit/sibling-coverage.test.js' 'test/unit/src/CryptoNetworks.test.js' 'test/unit/scripts/liveTierRoster.test.js' 'test/unit/scripts/actionSuiteCount.test.js' 'test/unit/helpers/multiValidatorHubPorts.test.js' 'test/unit/helpers/consensusWait.test.js' 'test/unit/security/configuration/dependency-advisories.test.js' 'test/unit/security/configuration/sibling-tree-advisories.test.js' 'test/unit/security/configuration/history-path-leak.test.js' 'test/integration/parity/**/*.test.js' && npm run ci:live",
+    "ci": "npm run lint:sleep-flake && mocha --no-config --timeout 30000 --exit 'test/unit/coins-conformance.test.js' 'test/unit/sibling-coverage.test.js' 'test/unit/vmFalseGreen.test.js' 'test/unit/src/CryptoNetworks.test.js' 'test/unit/scripts/liveTierRoster.test.js' 'test/unit/scripts/actionSuiteCount.test.js' 'test/unit/helpers/multiValidatorHubPorts.test.js' 'test/unit/helpers/consensusWait.test.js' 'test/unit/security/configuration/dependency-advisories.test.js' 'test/unit/security/configuration/sibling-tree-advisories.test.js' 'test/unit/security/configuration/history-path-leak.test.js' 'test/integration/parity/**/*.test.js' && npm run ci:live",
     "ci:live": "node scripts/run-live-tier.js",
+    "ci:full": "bash bin/ci-full.sh",
     "test": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/actions/**/*.test.js'",
     "test:contracts": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/contracts/**/*.test.js'",
     "test:auctions": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/contracts/englishAuction.test.js test/contracts/dutchAuction.test.js",
@@ -96,7 +97,7 @@
     "sinon": "^21.0.3"
   },
   "overrides": {
-    "brace-expansion": "^5.0.8",
+    "brace-expansion": "^5.0.9",
     "minimatch": "^10.2.5",
     "fast-uri": "^3.1.5",
     "ip-address": "^10.3.1",
@@ -105,10 +106,11 @@
     "mocha": {
       "diff": "^8.0.4"
     },
-    "js-yaml": "^4.3.0",
+    "js-yaml": "^4.3.1",
     "form-data": "^4.0.6",
     "shell-quote": "^1.9.0",
-    "serialize-javascript": "^7.0.5"
+    "serialize-javascript": "^7.0.5",
+    "decimal.js": "10.4.3"
   },
   "engines": {
     "node": ">=22.0.0"

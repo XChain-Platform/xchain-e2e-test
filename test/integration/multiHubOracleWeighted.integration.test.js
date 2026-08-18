@@ -52,20 +52,24 @@ const assert = require('assert');
 const { MultiValidatorHub }    = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
+const { waitForMesh, waitFor } = require('../helpers/consensusWait');
 
 function hubRequire(rel) { return require(path.resolve(__dirname, '../../../xchain-hub', rel)); }
 const OracleConsensus = hubRequire('src/OracleConsensus.js');
 const OracleRound     = hubRequire('src/OracleRound.js');
 
-const PEER_WAIT_MS = 8000;
+// A deadline, not a settle: waitForMesh returns on the first fully-peered poll.
+const PEER_WAIT_MS = 60_000;
+// finalizeAll's window is shared by the stake-minority negative case and the
+// healthy positive one, so it keeps its measured length and is spent POLLING: the
+// healthy federation returns as soon as every hub has stored its snapshot, while
+// the minority case can never satisfy the poll and still watches the whole window.
 const SETTLE_MS    = 6000;
 const BLOCK_INDEX  = 100;       // BTC block boundary the round locks the snapshot at (>=0 -> weighted on regtest)
 const BLOCK_TIME   = 1700000000;
 const ROUND        = 100;
 const PAIR         = 'BTC/USD';
 const PRICE        = '60000';
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Attach a real OracleConsensus to each hub: start() registers the ORACLE_*
 // P2P handlers; we deliberately skip OracleRound.start() so no price-fetch
@@ -99,7 +103,14 @@ function injectSubmissions(mvh) {
 
 async function finalizeAll(mvh) {
     await Promise.all(mvh.hubs.map((h) => h._wtOracle.finalizeRound(ROUND, BLOCK_INDEX, BLOCK_TIME).catch(() => {})));
-    await sleep(SETTLE_MS);
+    await waitFor(async () => {
+        const counts = [];
+        for (const hub of mvh.hubs) {
+            try { counts.push((await snapshotRows(hub)).length); }
+            catch (_) { counts.push(0); }
+        }
+        return { ok: counts.length > 0 && counts.every((c) => c >= 1), counts: counts };
+    }, { timeoutMs: SETTLE_MS });
 }
 
 async function snapshotRows(hub) {
@@ -119,7 +130,7 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM price PBFT round (WI-1 Suite 
             if (!db) { console.log('Skipping A3 (negative): no env DB and Docker unavailable'); this.skip(); }
             mvh = new MultiValidatorHub({ count: 3, basePort: 33400, startAttestation: false });
             await mvh.start();
-            await sleep(PEER_WAIT_MS);
+            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
             const ids = mvh.identities;
             seed = seedWeightSnapshot(mvh, {
                 blockIndex: BLOCK_INDEX,
@@ -160,7 +171,7 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM price PBFT round (WI-1 Suite 
             if (!db) { console.log('Skipping A3 (positive): no env DB and Docker unavailable'); this.skip(); }
             mvh = new MultiValidatorHub({ count: 4, basePort: 33500, startAttestation: false });
             await mvh.start();
-            await sleep(PEER_WAIT_MS);
+            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
             const ids = mvh.identities;
             // Uneven weights, no single source >= 2/3 (S=10000, 2S/3~6666): the
             // weighted quorum needs >=2 distinct sources -> exercises the multi-signer

@@ -43,17 +43,21 @@ const { MultiValidatorHub }      = require('../helpers/multiValidatorHubHelper')
 const { startDisposableHubDb }   = require('../helpers/disposableHubDb');
 const { seedWeightSnapshot }     = require('../helpers/seededWeightSnapshot');
 const { MockCrossChainOfferBook, makeOrder } = require('../helpers/mockCrossChainOfferBook');
+const { waitForMesh, waitFor } = require('../helpers/consensusWait');
 
 const CrossSettle    = require(path.resolve(__dirname, '../../../xchain-indexer/src/actions/cross_settle.js'));
 const IndexerUtility = require(path.resolve(__dirname, '../../../xchain-indexer/src/utility.js'));
 
 const COUNT        = 4;
-const PEER_WAIT_MS = 8000;
+// Deadlines, not settles: the mesh and the federation-wide finalize are both
+// observable, so each wait polls its post-condition and returns on the first
+// passing poll instead of betting a window against how busy the venue is. The
+// settle keeps its originally measured 6000ms length: the wait below polls the
+// persisted row, so the bound only decides when to give up.
+const PEER_WAIT_MS = 60_000;
 const SETTLE_MS    = 6000;
 const BLOCK_INDEX  = 100;
 const NETWORK      = 'regtest';
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function crossingPair({ ltcIdx, dogeIdx, ltcGive = '90', dogeGive = '40' }) {
     return {
@@ -120,7 +124,7 @@ describe('MultiValidatorHub: cross-chain DEX match to indexer CROSS_SETTLE e2e (
             crossChainIndexerUrls: { LTC: book.urlFor('shared', 'LTC'), DOGE: book.urlFor('shared', 'DOGE') }
         });
         await mvh.start();
-        await sleep(PEER_WAIT_MS);
+        await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
         // regtest activates stake-weighted quorum (height 0); the DEX round needs
         // a weight snapshot. Equal weights → quorum behaves as count-3 → ≥3 sigs.
         const ids = mvh.identities;
@@ -140,7 +144,26 @@ describe('MultiValidatorHub: cross-chain DEX match to indexer CROSS_SETTLE e2e (
         const events = [];
         const listeners = dexes.map((d, i) => { const fn = (ev) => events.push(Object.assign({ hubIndex: i }, ev)); d.consensus.on('match:finalized', fn); return fn; });
         await Promise.all(dexes.map((d) => d._discoverAndMatch().catch(() => {})));
-        await sleep(SETTLE_MS);
+        // Every case below reads matchRow, a PERSISTED cross_chain_matches row, and
+        // the finalize event only STARTS that write: CrossChainDexEngine subscribes
+        // to 'match:finalized' with an un-awaited `this._writeFinalizedMatch(ev)`,
+        // so an event-count poll clears while the INSERT is still in flight and the
+        // SELECT below can miss its own row. Poll the row itself on every hub,
+        // keyed by the match_id the round finalized, exactly as matchRow is keyed.
+        await waitFor(async () => {
+            if (!events.length) return { ok: false, held: 0 };
+            const matchId = events[0].matchId;
+            let held = 0;
+            for (const hub of mvh.hubs) {
+                try {
+                    const r = await hub.db.doQuery(
+                        "SELECT match_id FROM cross_chain_matches WHERE match_id = ? AND status = 'finalized'",
+                        [matchId]);
+                    if (r.length >= 1) held++;
+                } catch (_) { /* a hub that cannot be read has not persisted it */ }
+            }
+            return { ok: held === mvh.hubs.length, held: held };
+        }, { timeoutMs: SETTLE_MS, intervalMs: 100 });
         dexes.forEach((d, i) => d.consensus.removeListener('match:finalized', listeners[i]));
 
         if (events.length) {
