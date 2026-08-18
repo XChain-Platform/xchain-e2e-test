@@ -134,27 +134,9 @@ async function tokenRow(tick){
     return rows.length ? rows[0] : null
 }
 
-// The GAS tick's decimal precision, and the rounding db.createLedgerChangeRecord
-// applies to every ledger row with it (`bcadd(amount, 0, decimals)`).
-//
-// This is load-bearing, not incidental. The regtest GAS token is issued with ZERO
-// decimals (test/initialCheck.test.js bootstraps XCHAIN that way), so ISSUE_SUBTOKEN's
-// 0.5-XCHAIN fee is RECORDED as 0.5 in the `fees` table and DEBITED as 1 in `debits`.
-// Balances derive from credits - debits, and each sub-command re-reads its balance
-// as-of its own action index, so the rounded figure is what actually meters a batch of
-// children. Expectations here are therefore computed from the venue's own precision
-// rather than from the gas schedule alone.
-async function tokenDecimals(tick){
-    const rows = await q(`SELECT tk.decimals FROM tokens tk
-                            JOIN index_tickers itk ON itk.id = tk.tick_id
-                           WHERE itk.tick = ?`, [tick])
-    return rows.length ? Number(rows[0].decimals) : 8
-}
-
-function ledgerRound(amount, decimals){
-    const factor = Math.pow(10, decimals)
-    return Math.round(amount * factor) / factor
-}
+// Gas expectations are the gas schedule EXACTLY. LEDGER_AMOUNT_PRECISION is armed on
+// regtest, so the ledger stores amounts exactly and rounds once at balance projection
+// rather than quantizing each row to the gas tick's decimals.
 
 async function feesForTx(txHash){
     return q(`SELECT f.action_index, f.gas_cost, f.amount, f.payment_mode
@@ -392,22 +374,25 @@ describe('BATCH issuance limits (BATCH_ISSUANCE_LIMITS)', function () {
                 return
             }
 
-            // The ledger side, at the venue's own GAS precision (see tokenDecimals).
-            const decimals   = await tokenDecimals(GAS_TICK)
-            const perChild   = ledgerRound(XCHAIN_PER_CHILD_ISSUE, decimals)
-            const expectedSpent = ledgerRound(XCHAIN_PER_ISSUE, decimals) + CHILDREN * perChild
+            // The ledger side, charged exactly (see the gas-expectation note above).
+            const perChild      = XCHAIN_PER_CHILD_ISSUE
+            const expectedSpent = XCHAIN_PER_ISSUE + CHILDREN * perChild
+            // Pinned so the expectation cannot silently track a change in the very fee
+            // arithmetic this test exists to hold still.
+            assert.strictEqual(expectedSpent, 26,
+                "gas schedule moved: 1 ISSUE + 50x0.5 ISSUE_SUBTOKEN should be 26 XCHAIN")
             const debits = await debitsForTx(result.txHash, GAS_TICK)
             assert.strictEqual(debits.length, 51, "one gas debit per sub-command")
             const spent = debits.reduce((s, d) => s + Number(d.amount), 0)
             assert.strictEqual(spent, expectedSpent,
-                "gas debited should be 1 ISSUE + 50 ISSUE_SUBTOKEN rounded to " + decimals +
-                " decimals = " + expectedSpent + " XCHAIN")
+                "gas debited should be 1 ISSUE + 50 ISSUE_SUBTOKEN charged exactly = " +
+                expectedSpent + " XCHAIN")
             const gasAfter = await balanceOf(address, GAS_TICK)
             assert.strictEqual(Number(gasBefore) - Number(gasAfter), expectedSpent,
                 "the source's XCHAIN balance moved by exactly the batch's gas")
             console.log("A1: 51/51 valid, gas_cost 100000 + 50x50000, " + expectedSpent +
-                " XCHAIN debited across " + debits.length + " debits (GAS decimals=" +
-                decimals + ", per-child debit " + perChild + ")")
+                " XCHAIN debited across " + debits.length + " debits (per-child debit " +
+                perChild + ")")
         })
     })
 
@@ -599,13 +584,11 @@ describe('BATCH issuance limits (BATCH_ISSUANCE_LIMITS)', function () {
             const N = 8
             const K = 6
 
-            // The budget is sized in what the LEDGER actually debits per child, which
-            // is the gas schedule rounded to the GAS tick's precision (see
-            // tokenDecimals): every sub-command re-reads its balance from the DB
-            // as-of its own action index, so the rounded figure is what meters this.
-            const decimals  = await tokenDecimals(GAS_TICK)
-            const perChild  = ledgerRound(XCHAIN_PER_CHILD_ISSUE, decimals)
-            const perParent = ledgerRound(XCHAIN_PER_ISSUE, decimals)
+            // The budget is what the LEDGER debits per child, the gas schedule EXACTLY.
+            // An over-sized budget silently buys extra children, so the K boundary this
+            // test pins stops being a boundary.
+            const perChild  = XCHAIN_PER_CHILD_ISSUE
+            const perParent = XCHAIN_PER_ISSUE
 
             // seedGas=false so the balance is exactly what this test mints, not the
             // 100 XCHAIN the funding helper hands out by default.
