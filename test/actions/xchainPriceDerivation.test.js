@@ -31,6 +31,7 @@ const gasHelper = require('../helpers/gasHelper')
 const sendHelper = require('../helpers/sendHelper')
 const issueHelper = require('../helpers/issueHelper')
 const stakeHelper = require('../helpers/stakeHelper')
+const { NO_PRICE_SEED } = require('../helpers/xchainPriceConstants')
 
 // The derivation lives in xchain-indexer and is vendored byte-identically into
 // xchain-hub. Require it from the sibling checkout rather than copying it here:
@@ -811,6 +812,25 @@ describe('XCHAIN price derivation from real fills (spec step 7)', function () {
             // This is the consumer end of the derivation: only LTC/DOGE pay fees in
             // native coin, so only they can prove the pair actually prices a fee.
             if (COIN_CODE === 'BTC') this.skip()
+
+            // ...and only a venue that does NOT seed prices can prove it. Every leg
+            // below reads the newest finalized XCHAIN/USD and requires it to be a hub
+            // round rather than a fixture; on the ordinary venue the harness seeds
+            // that pair for every fee-bearing action, at a synthetic round number
+            // that outranks any round a hub will ever publish. So the pair is
+            // shadowed before these tests start, through no fault of the code they
+            // grade, and asserting it here reddens the gate for a venue setting.
+            //
+            // Declared with XCHAIN_E2E_NO_PRICE_SEED=1, which also requires a hub
+            // publishing the pair itself, i.e. the validator venue. Skipping keeps
+            // that coverage honest rather than optional: it is real coverage that
+            // this venue cannot supply, and it is named here so it stays visible.
+            if (!NO_PRICE_SEED) {
+                console.log('xchainPriceDerivation: this venue seeds XCHAIN/USD, which shadows the ' +
+                    'derived pair these legs verify; they need a no-seed validator venue ' +
+                    '(XCHAIN_E2E_NO_PRICE_SEED=1). Skipping.')
+                this.skip()
+            }
         })
 
         it('prices and validates a fee-bearing action with NO seeded pair', async function () {
