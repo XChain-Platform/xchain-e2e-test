@@ -80,6 +80,40 @@ describe('consensus hash conformance: sync BlockHasher == indexer committed hash
             }
         };
         hasher = new BlockHasher(dbAdapter, new SyncUtility());
+
+        // Native-fee venues (LTC/DOGE) pay protocol fees as chain outputs, so a
+        // whole run can index without ONE ledger row touching a special address;
+        // both recompute loops and the coverage guard at the bottom of this file
+        // would then run without ever exercising special-address canonicalization.
+        // Give the run one deliberately: a 1 XCHAIN SEND to this chain's DONATE1
+        // treasury, indexed BEFORE the block lists are snapshotted so the loops
+        // cover the block that carries it.
+        const special = Object.keys(ROLE_BY_ADDRESS || {});
+        if (special.length) {
+            const placeholders = special.map(() => '?').join(', ');
+            const seen = await dbAdapter.doQuery(
+                'SELECT ia.address FROM credits c JOIN index_addresses ia ON ia.id = c.address_id ' +
+                'WHERE ia.address IN (' + placeholders + ') LIMIT 1', special);
+            if (!seen.length) {
+                let donate1 = null;
+                try {
+                    const { getCoinConfig } = require(path.join(__dirname, '../../../xchain-hub/src/coins'));
+                    donate1 = getCoinConfig(COIN_CODE, NETWORK).addresses.DONATE1;
+                } catch (e) {
+                    console.log('sibling xchain-hub coin bundle not loadable (' + e.message + '); ' +
+                        'cannot resolve DONATE1 - the coverage guard below will report the gap');
+                }
+                if (donate1) {
+                    console.log('no special-address ledger row on this venue yet; sending 1 XCHAIN to DONATE1 ' + donate1);
+                    const cryptoHelper = require('../cryptoHelper');
+                    const sendHelper   = require('../helpers/sendHelper');
+                    const gasTick      = (typeof GAS_TICK !== 'undefined' && GAS_TICK) ? GAS_TICK : 'XCHAIN';
+                    const addr = await cryptoHelper.getNewFundedAddress('CONF.DONATE', COIN, NETWORK, null, 'legacy', 0, 1);
+                    await sendHelper.sendSendV0(addr, gasTick, 1, donate1, 'canonicalization coverage');
+                }
+            }
+        }
+
         const rows = await dbAdapter.doQuery('SELECT block_index FROM blocks ORDER BY block_index ASC', []);
         blockIndexes = rows.map(r => Number(r.block_index));
     });

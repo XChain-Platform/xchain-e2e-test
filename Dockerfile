@@ -79,6 +79,16 @@ COPY ./xchain-sync /xchain-sync
 # drift-lock path.
 RUN ln -s /XChainE2ETest/node_modules /xchain-sync/node_modules
 
+# xchain-hub already lives in the image at /XChainE2ETest/xchain-hub (the file:
+# dep above), but suites that borrow hub source directly address it as
+# '../../../xchain-hub/...', which resolves to IMAGE ROOT here exactly like the
+# indexer/sync requires above (xchainPriceDerivation's bcmath and
+# consensusHashConformance's DONATE1 coin-bundle lookup both take this path;
+# without the link they skip rather than run). A link suffices instead of a
+# second COPY: require() follows it to the real path, so hub files resolve
+# their own npm deps via /XChainE2ETest/node_modules with no extra symlink.
+RUN ln -s /XChainE2ETest/xchain-hub /xchain-hub
+
 # .env is NOT copied into the image to avoid baking credentials into layers.
 # Pass credentials via docker run --env-file or environment variables at runtime.
 
