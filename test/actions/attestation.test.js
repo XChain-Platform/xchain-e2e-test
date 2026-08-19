@@ -147,6 +147,9 @@ module.exports = {
         await stakeValidatorFromOwnSource(validator)
         // Advance past activation delay so the stake is observable
         await regtestMinerConnector.generateBlocks(7)
+        // The encoder refuses UTXO selection while the tracker trails the node, so the
+        // next tx build races these blocks unless the tracker is caught up first.
+        await utxoTrackerConnector.waitForSync()
 
         // Deploy the test contract
         let deploy = await vmHelper.sendDeployV0(operatorAddr, CONTRACT_CODE, 500000)

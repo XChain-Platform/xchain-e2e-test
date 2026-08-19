@@ -159,6 +159,9 @@ describe('REAL-URL attestation FAILURE paths: expired + no_quorum over a 3-valid
             await stakeValidatorFromOwnSource(new attestationHelper.MockAttestationValidator())
         }
         await regtestMinerConnector.generateBlocks(7)
+        // The encoder refuses UTXO selection while the tracker trails the node, so the
+        // next tx build races these blocks unless the tracker is caught up first.
+        await utxoTrackerConnector.waitForSync()
 
         const deploy = await vmHelper.sendDeployV0(operatorAddr, CONTRACT_CODE, 500000)
         assert.strictEqual(deploy.contract.status, 'valid', 'deploy status: ' + deploy.contract.status)

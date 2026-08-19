@@ -139,6 +139,21 @@ class UtxoTracker {
         return status
     }
 
+    // Block-sync barrier. The encoder refuses to select UTXOs while the tracker is
+    // behind the node, so mining and then immediately building a tx races it. Polls
+    // the tracker's own `synced` verdict rather than a local lag threshold.
+    async waitForSync(timeMax = 60000, pollMs = 500){
+        const deadline = Date.now() + timeMax
+        let last = null
+        while (Date.now() < deadline){
+            const status = await this.getSyncStatus()
+            last = status
+            if (status && status.synced) return status
+            await this.sleep(pollMs)
+        }
+        return last
+    }
+
     async waitForUtxos(address, timeMax = 60000){
         const endTime = Date.now() + timeMax
 
