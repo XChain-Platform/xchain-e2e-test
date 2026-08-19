@@ -197,6 +197,7 @@ describe('REAL-URL attestation FAILURE paths: expired + no_quorum over a 3-valid
         // 3. Advance past DEADLINE_BLOCK. deadlineBlocks=2 + margin so the per-block
         //    expiry pipeline definitely runs at deadline+1.
         await regtestMinerConnector.generateBlocks(5)
+        await utxoTrackerConnector.waitForSync()
 
         // 4. Request status flips to 'expired'.
         const expired = await indexerDatabase.waitForAttestationRequest({

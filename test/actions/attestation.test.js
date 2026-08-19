@@ -249,6 +249,7 @@ module.exports = {
         // Advance past DEADLINE_BLOCK. deadlineBlocks=2 + comfortable margin so the
         // per-block expiry pipeline definitely runs at deadline+1.
         await regtestMinerConnector.generateBlocks(5)
+        await utxoTrackerConnector.waitForSync()
 
         // Request status should flip to 'expired'
         let expired = await indexerDatabase.waitForAttestationRequest({
@@ -321,6 +322,7 @@ module.exports = {
         await stakeValidatorFromOwnSource(v3)
         // Advance past activation delay
         await regtestMinerConnector.generateBlocks(7)
+        await utxoTrackerConnector.waitForSync()
 
         // Fire a request with redundancy=3
         let exec = await vmHelper.sendExecuteV0(operatorAddr, contractIndex, 'askOracleQuorum', ['https://example.com/v1/quorum/abc'])
