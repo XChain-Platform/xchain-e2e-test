@@ -140,18 +140,23 @@ describe('seed-escrow-state helpers', function () {
             assert.strictEqual(g.armed, 11200);
         });
 
-        it('reports BTC:testnet as SHADOWING but NOT armed, which is what decides whether the journal is written', function () {
-            // This assertion is the opposite of what it was when first written,
-            // and the change is the point rather than a correction: on
-            // 2026-08-11 this chain had neither an armed height nor a window, so
-            // seeding escrows produced an empty journal, and the tool said so.
-            // The §7 shadow window was then opened at 148000, which is what
-            // starts the journal writer without committing anything.
-            const g = escrowLeafGate('BTC', 'testnet');
-            assert.strictEqual(g.resolved, true);
-            assert.strictEqual(g.shadow, 148000, 'the §7 shadow window opened on this chain');
-            // Still NOT armed, and that is the half that must not drift: a shadow
-            // commits nothing, so locked-balance proofs stay refused here.
+        it('reports every testnet chain as ARMED at genesis, which is what decides whether the journal is written', function () {
+            // Operator ratification 2026-08-18: activate every platform feature at
+            // testnet genesis rather than coordinating six flag-day heights, so
+            // nothing is discovered dormant after release. Its condition is that
+            // testnet indexer state is rebuilt from the chain before launch.
+            for (const coin of ['BTC', 'LTC', 'DOGE']) {
+                const g = escrowLeafGate(coin, 'testnet');
+                assert.strictEqual(g.resolved, true, coin + ': the activation module must be resolvable from bin/');
+                assert.strictEqual(g.armed, 0, coin + ':testnet is armed at genesis');
+            }
+        });
+
+        it('leaves mainnet shadow-only, so a shadow still never reads as an arming', function () {
+            // The half that must not drift, re-scoped to the network that still
+            // carries shadow-only state: a shadow commits nothing, so
+            // locked-balance proofs stay refused on mainnet.
+            const g = escrowLeafGate('BTC', 'mainnet');
             assert.strictEqual(g.armed, null, 'a shadow window must never read as an arming');
         });
 
