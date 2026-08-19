@@ -13,6 +13,7 @@ const cryptoHelper = require('../cryptoHelper')
 const vmHelper = require('../helpers/vmHelper')
 const issueHelper = require('../helpers/issueHelper')
 const gasHelper = require('../helpers/gasHelper')
+const nativeFeeHelper = require('../helpers/nativeFeeHelper')
 
 /**
  * VM Extended: exercises the smart-contract engine end-to-end against the live
@@ -124,15 +125,18 @@ describe('VM Extended: on-chain capabilities', function () {
              WHERE d.action_index=? AND it.tick='XCHAIN'`, [actionIndex])
     }
     // The caller is charged for the execution either as an XCHAIN gas debit
-    // (BTC / xchain-gas mode) or via a native-coin fee output (LTC/DOGE). EXECUTE
-    // records gas in contract_executions, not the fees table. On native-fee chains
-    // an unpaid fee rejects the action pre-VM, so reaching a VM-outcome status with
-    // metered gas (gas_used > 0) proves the native fee was paid. BTC must still show
-    // the explicit debit (preserving the no-debit-on-failure regression guard).
+    // (xchain-gas mode) or via a native-coin fee output. EXECUTE records gas in
+    // contract_executions, not the fees table. Where native fees are ENABLED an
+    // unpaid fee rejects the action pre-VM, so reaching a VM-outcome status with
+    // metered gas (gas_used > 0) proves the fee was paid. Keyed on the venue's
+    // fee mode rather than the coin: a regtest BTC stack configured with a
+    // FEE_DESTINATION charges natively and writes no XCHAIN debit, and a gas-mode
+    // venue still must show the explicit debit (the no-debit-on-failure guard).
     async function feePaidFor(actionIndex, row) {
         const xchain = await gasDebitFor(actionIndex)
         if (xchain.length > 0) return true
-        if (COIN_CODE === 'LTC' || COIN_CODE === 'DOGE') return Number(row && row.gas_used) > 0
+        const feeMode = await nativeFeeHelper.discoverFeeMode()
+        if (feeMode && feeMode.enabled) return Number(row && row.gas_used) > 0
         return false
     }
     async function tickExists(tick) {
