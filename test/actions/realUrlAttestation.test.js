@@ -112,6 +112,9 @@ describe('REAL-URL attestation: 3-validator quorum over a live https GET', funct
         await stakeHelper.sendStakeV1(stakeSource, '15000.00000000', v.pubkey)
         v.source = stakeSource.address
         stakedValidators.push(v)
+        // Session-wide registration; the signer computation below ranks over the
+        // WHOLE session set, not this suite's slice (see attestationHelper).
+        attestationHelper.registerStakedValidator(v)
         return v
     }
 
@@ -127,9 +130,9 @@ describe('REAL-URL attestation: 3-validator quorum over a live https GET', funct
         )
         await gasHelper.ensureGasBalance(operatorAddr, '5000')
 
-        // Stake exactly three validators. On a clean chain these are the only
-        // attestation-capable keys, so the responsible set for any request is
-        // all three - our signatures meet the redundancy=3 quorum.
+        // Stake three validators of our own. The chain is SHARED with every suite
+        // that ran before this one, so these are NOT assumed to be the only
+        // qualifying keys: signer selection ranks over the session-wide registry.
         for (let i = 0; i < 3; i++) {
             await stakeValidatorFromOwnSource(new attestationHelper.MockAttestationValidator())
         }
@@ -170,10 +173,14 @@ describe('REAL-URL attestation: 3-validator quorum over a live https GET', funct
         console.log('LIVE BODY   ' + JSON.stringify(realBody))
         assert.strictEqual(realMeta, '200', 'expected HTTP 200 from the live endpoint')
 
-        // 3. Sign the REAL body with the request's responsible validators (on a
-        //    clean chain that is all three) and broadcast the ATTEST v1.
-        const signers = attestationHelper.computeResponsibleSigners(requestId, 3, stakedValidators)
-        assert.strictEqual(signers.length, 3, 'expected 3 responsible signers on a clean chain')
+        // 3. Sign the REAL body with the request's responsible validators and
+        //    broadcast the ATTEST v1. Ranked over the SESSION set: on the shared
+        //    action-suite chain, earlier suites' validators are in the indexer's
+        //    ranking too, so the responsible 3 may include theirs. Every session
+        //    key is signable in-process, so quorum is reachable either way.
+        const signers = attestationHelper.computeResponsibleSigners(
+            requestId, 3, attestationHelper.getSessionStakedValidators())
+        assert.strictEqual(signers.length, 3, 'expected 3 responsible signers from the session set')
         await attestationHelper.broadcastAttestationResponse(operatorAddr, {
             requestId:       requestId,
             providerId:      'http_get',

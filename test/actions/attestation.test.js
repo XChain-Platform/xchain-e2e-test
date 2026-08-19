@@ -66,6 +66,10 @@ describe('Attestation framework: round-trip request → response → callback', 
         await stakeHelper.sendStakeV1(stakeSource, '15000.00000000', v.pubkey)
         v.source = stakeSource.address
         stakedValidators.push(v)
+        // Session-wide registration: later suites on this shared chain must include
+        // these keys when they mirror the indexer's responsible-set ranking, or the
+        // ranking selects keys they cannot sign with (see attestationHelper).
+        attestationHelper.registerStakedValidator(v)
         return v
     }
 
@@ -450,7 +454,7 @@ module.exports = {
             // `validator` is often NOT the responsible signer for a given request_id, so
             // its sig is filtered out → 0/1. Picking the responsible key makes the sig
             // count (1) meet redundancy (1).
-            let signers = attestationHelper.computeResponsibleSigners(requestId, 1, stakedValidators)
+            let signers = attestationHelper.computeResponsibleSigners(requestId, 1, attestationHelper.getSessionStakedValidators())
 
             // Broadcast a properly-signed response carrying the retryable status. The
             // responsible validator's signature is valid (validSigs=1 >= redundancy=1), so
@@ -499,7 +503,7 @@ module.exports = {
         // Both rounds must be signed by the request's responsible validator (top-1 over the
         // full staked set, source-deduped): the same key the indexer will accept for this
         // request_id. The two rounds target the SAME request_id, so they share one signer.
-        let signers = attestationHelper.computeResponsibleSigners(requestId, 1, stakedValidators)
+        let signers = attestationHelper.computeResponsibleSigners(requestId, 1, attestationHelper.getSessionStakedValidators())
 
         // Round 1: a valid no_quorum response leaves the request pending
         await attestationHelper.broadcastAttestationResponse(operatorAddr, {
