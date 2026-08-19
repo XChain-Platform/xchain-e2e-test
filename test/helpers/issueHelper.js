@@ -11,14 +11,23 @@
 const transactionHelper = require('../transactionHelper')
 
 module.exports = {
-    async sendIssueV0(addressInfo, tick, maxSupply, maxMint, decimals, description, mintSupply,
+    // Broadcast an ISSUE v0 and return its txHash, waiting for NO particular
+    // indexer verdict. This is the helper for a test asserting a REJECTION:
+    // sendIssueV0 below demands status=valid, which is what ~190 of its callers
+    // want (they are building a fixture) and exactly wrong for the few sending
+    // an ISSUE the protocol is supposed to refuse. Those tests own the wait,
+    // because only they know which refusal they expect.
+    //
+    // Kept here rather than hand-rolled in each test so the v0 field order lives
+    // in ONE place: the message is 24 pipe-separated fields and a test that
+    // reproduces it from memory silently shifts every field after the one it
+    // drops.
+    async sendIssueV0Raw(addressInfo, tick, maxSupply, maxMint, decimals, description, mintSupply,
         transfer='', transferSupply='', lockMaxSupply='', lockMaxMint='', lockDescription='',
         lockSleep='', lockCallback='', callbackBlock='', callbackTick='', callbackAmount='',
         allowList='', blockList='', mintAddressMax='', mintStartBlock='', mintStopBlock='', lockMint='',
         lockMintSupply='', outputType=null, compressedPubKey=null
     ){
-        let address = addressInfo["address"]
-
         let issueMessage = "ISSUE|0|"+tick+"|"+maxSupply
             +"|"+maxMint+"|"+decimals+"|"+description+"|"+mintSupply
             +"|"+transfer+"|"+transferSupply+"|"+lockMaxSupply+"|"+lockMaxMint
@@ -28,7 +37,22 @@ module.exports = {
             +"|"+lockMint+"|"+lockMintSupply
 
         console.log("Creating and sending ISSUE V0 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, issueMessage, null, [], outputType, compressedPubKey)
+        return await transactionHelper.createAndSendTransaction(addressInfo, issueMessage, null, [], outputType, compressedPubKey)
+    },
+
+    async sendIssueV0(addressInfo, tick, maxSupply, maxMint, decimals, description, mintSupply,
+        transfer='', transferSupply='', lockMaxSupply='', lockMaxMint='', lockDescription='',
+        lockSleep='', lockCallback='', callbackBlock='', callbackTick='', callbackAmount='',
+        allowList='', blockList='', mintAddressMax='', mintStartBlock='', mintStopBlock='', lockMint='',
+        lockMintSupply='', outputType=null, compressedPubKey=null
+    ){
+        let address = addressInfo["address"]
+
+        let txHash = await this.sendIssueV0Raw(addressInfo, tick, maxSupply, maxMint, decimals,
+            description, mintSupply, transfer, transferSupply, lockMaxSupply, lockMaxMint,
+            lockDescription, lockSleep, lockCallback, callbackBlock, callbackTick, callbackAmount,
+            allowList, blockList, mintAddressMax, mintStartBlock, mintStopBlock, lockMint,
+            lockMintSupply, outputType, compressedPubKey)
 
         console.log("Waiting for ISSUE in the database...")
         let issueRow = await indexerDatabase.waitForIssue({
