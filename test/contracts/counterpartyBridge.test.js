@@ -237,7 +237,10 @@ describe('Counterparty Bridge: a REAL tokenscan.io burn check driving a mint or 
         for (let i = 0; i < 3; i++) {
             await stakeValidatorFromOwnSource(new attestationHelper.MockAttestationValidator())
         }
-        await regtestMinerConnector.generateBlocks(7)
+        // Activation delay AND snapshot burial: a request at height H resolves its
+        // responsible set at H-6, so mining only the delay leaves the stakes invisible
+        // and the request is rejected at admission.
+        await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
     })
 
     it('a fresh regtest address settles a REAL tokenscan.io burn-history check and is a harmless no-op (never burned anything)', async function () {

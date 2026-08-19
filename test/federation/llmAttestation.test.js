@@ -104,8 +104,9 @@ module.exports = {
         const stakeResult = await stakeHelper.sendStakeV1(staker, '30000.00000000', pubkey)
         assert.strictEqual(stakeResult.stake.status, 'valid', 'stake should be valid')
 
-        // Activation window
-        await regtestMinerConnector.generateBlocks(7)
+        // Activation window AND snapshot burial: the responsible set resolves at the
+        // request's block minus CANONICAL_REORG_BUFFER, so the delay alone is 6 short.
+        await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
         await _settleStack()
 
         // Fund + deploy

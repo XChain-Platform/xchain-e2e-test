@@ -158,7 +158,10 @@ describe('REAL-URL attestation FAILURE paths: expired + no_quorum over a 3-valid
         for (let i = 0; i < 3; i++) {
             await stakeValidatorFromOwnSource(new attestationHelper.MockAttestationValidator())
         }
-        await regtestMinerConnector.generateBlocks(7)
+        // Activation delay AND snapshot burial: a request at height H resolves its
+        // responsible set at H-6, so mining only the delay leaves all three invisible
+        // and every redundancy=3 request is rejected at admission.
+        await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
         // The encoder refuses UTXO selection while the tracker trails the node, so the
         // next tx build races these blocks unless the tracker is caught up first.
         await utxoTrackerConnector.waitForSync()

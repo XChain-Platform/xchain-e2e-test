@@ -256,7 +256,10 @@ describe('Escrow Delivery: custody + a REAL delivery attestation driving on-chai
         for (let i = 0; i < 3; i++) {
             await stakeValidatorFromOwnSource(new attestationHelper.MockAttestationValidator())
         }
-        await regtestMinerConnector.generateBlocks(7)
+        // Activation delay AND snapshot burial: a request at height H resolves its
+        // responsible set at H-6, so mining only the delay leaves the stakes invisible
+        // and the request is rejected at admission.
+        await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
     })
 
     it('a matching delivery body auto-releases the escrow to the seller - no release() call', async function () {

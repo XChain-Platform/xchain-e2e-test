@@ -145,8 +145,9 @@ module.exports = {
         // it survives SWQ source-dedup into request responsible sets.
         validator = new attestationHelper.MockAttestationValidator()
         await stakeValidatorFromOwnSource(validator)
-        // Advance past activation delay so the stake is observable
-        await regtestMinerConnector.generateBlocks(7)
+        // Advance past activation delay AND the snapshot burial, so the stake is
+        // selectable into a responsible set (see ATTESTATION_STAKE_VISIBLE_BLOCKS).
+        await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
         // The encoder refuses UTXO selection while the tracker trails the node, so the
         // next tx build races these blocks unless the tracker is caught up first.
         await utxoTrackerConnector.waitForSync()
@@ -320,8 +321,10 @@ module.exports = {
         let v3 = new attestationHelper.MockAttestationValidator()
         await stakeValidatorFromOwnSource(v2)
         await stakeValidatorFromOwnSource(v3)
-        // Advance past activation delay
-        await regtestMinerConnector.generateBlocks(7)
+        // Advance past activation delay AND the snapshot burial. This request asks for
+        // redundancy=3, so ALL THREE stakes must be selectable at its block; mining only
+        // the activation delay left the two just staked here invisible and the set at 2.
+        await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
         await utxoTrackerConnector.waitForSync()
 
         // Fire a request with redundancy=3
