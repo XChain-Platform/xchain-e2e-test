@@ -42,6 +42,15 @@ module.exports = {
             mintSupply: mintSupply,
             status: "valid"
         })
+        // Fail HERE, not three assertions later. A caller of this helper is
+        // setting up a fixture it needs to exist; returning a null row lets the
+        // test walk on and fail somewhere misleading (a rejected parent ISSUE
+        // leaves its tick interned but valueless, so a dependent action fails
+        // on the wrong rule and the real rejection never surfaces).
+        if(!issueRow)
+            throw new Error("sendIssueV0: ISSUE " + tick + " (tx " + txHash + ") never reached "
+                + "status=valid; the checkIssue give-up line above says whether the row is "
+                + "absent or landed with another status - read the indexer's verdict for this tx")
 
         let creditRow = await indexerDatabase.waitForCredit({
             address: address,
@@ -49,6 +58,9 @@ module.exports = {
             txHash: txHash,
             amount: mintSupply
         })
+        if(!creditRow)
+            throw new Error("sendIssueV0: ISSUE " + tick + " (tx " + txHash + ") is valid but its "
+                + "mint credit of " + mintSupply + " never appeared")
 
         return { txHash, issue: issueRow, credit: creditRow }
     },
