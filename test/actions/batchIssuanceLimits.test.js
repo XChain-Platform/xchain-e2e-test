@@ -72,6 +72,7 @@ const DUST_SATS = { BTC: 546, LTC: 5460, DOGE: 100000 }
 let FEE_DEST      = null    // resolvable FEE_DESTINATION, or null on a pure gas stack
 let GAS_MODE      = false   // this chain can pay an issuance fee from an XCHAIN balance
 let SATS_PER_XCHAIN = 0     // set per fee case by prepareFeeFixture()
+let FEE_CASE_REPRICED = false   // the FEE_CASE rows are live; restoreFeeFixture() must delete them
 
 async function q(sql, args){
     const conn = await indexerDatabase.getConnection()
@@ -252,6 +253,7 @@ async function prepareFeeFixture(perCommandXchain){
             blockTimestamp: chainTime, roundNumber: FEE_CASE_ROUND_COIN })
         prices = await effectivePrices()
         satsPerXchain = Math.round(Number(prices.xchain.price) / Number(prices.coin.price) * 1e8)
+        FEE_CASE_REPRICED = true
         console.log('fee fixture RE-PRICED (one command would have been dust): ' +
             COIN_CODE + '/USD=' + FEE_CASE_COIN_USD + ' anchored at chain_time=' + chainTime)
     }
@@ -265,6 +267,21 @@ async function prepareFeeFixture(perCommandXchain){
         prices.coin.price + ' -> ' + satsPerXchain + ' sats per XCHAIN, ' +
         perCommandSats + ' sats per command')
     return perCommandSats
+}
+
+// Undo prepareFeeFixture's re-price for whatever runs next. seedGlobalPrices alone
+// cannot do it: the FEE_CASE round numbers outrank every seed round, and
+// getLatestPrice picks by round_number DESC, so until the FEE_CASE rows age past
+// the staleness window they keep pricing every OTHER test's flat-fee actions
+// against the re-priced pair's much larger expectation. Deleting the pairs first
+// is what actually restores the shared fixture.
+async function restoreFeeFixture(){
+    if (FEE_CASE_REPRICED){
+        await priceSnapshotHelper.clearPair('XCHAIN/USD')
+        await priceSnapshotHelper.clearPair(COIN_CODE + '/USD')
+        FEE_CASE_REPRICED = false
+    }
+    await nativeFeeHelper.seedGlobalPrices(true)
 }
 
 function feeOutput(sats){
@@ -295,6 +312,12 @@ describe('BATCH issuance limits (BATCH_ISSUANCE_LIMITS)', function () {
 
     // ─── A1 ────────────────────────────────────────────────────────────────────
     describe('A1: one parent plus 50 children in ONE transaction', function () {
+        after(async function () {
+            // The native lane below re-prices the shared pair on dust-heavy chains;
+            // A2/A3 run next and rely on the standard fixture.
+            await restoreFeeFixture()
+        })
+
         it('lands 51 valid actions, every child owned by the issuer', async function () {
             const addr    = await cryptoHelper.getNewFundedAddress("BIL.A1", COIN, NETWORK, null, "legacy", 0, 1)
             const address = addr["address"]
@@ -661,7 +684,7 @@ describe('BATCH issuance limits (BATCH_ISSUANCE_LIMITS)', function () {
         after(async function () {
             if (!FEE_DEST || NO_PRICE_SEED) return
             // Put the shared fixture back for whatever runs next.
-            await nativeFeeHelper.seedGlobalPrices(true)
+            await restoreFeeFixture()
         })
 
         it('yields at most ONE valid command when the fee covers exactly one', async function () {
@@ -729,7 +752,7 @@ describe('BATCH issuance limits (BATCH_ISSUANCE_LIMITS)', function () {
 
         after(async function () {
             if (!FEE_DEST || NO_PRICE_SEED) return
-            await nativeFeeHelper.seedGlobalPrices(true)
+            await restoreFeeFixture()
         })
 
         async function orderCommands(count, giveAmount){
