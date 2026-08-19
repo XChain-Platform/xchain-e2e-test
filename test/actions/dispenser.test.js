@@ -521,10 +521,23 @@ describe('DISPENSER', () => {
 
             let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
             let chainNow   = await priceSnapshotHelper.latestBlockTime()
-            let coinPrice  = 50000     // validator: 1 coin = $50,000
             let tokenPrice = 0.05      // oracle: 1 token = $0.05
             let feeFrac    = 0.01      // oracle charges 1%
             let escrow     = 1000
+
+            // The below-dust waiver in quoteOracleFee is consensus: an expected fee
+            // under the chain's dust threshold requires NO output at all, so the
+            // coin price must keep one fee's worth of coin ABOVE dust on THIS venue
+            // or the rejection leg tests nothing (at a flat $50,000 the $5 fee is
+            // 1000 sats, which DOGE's 100000-sat dust threshold waives entirely and
+            // the no-output create is rightly valid). Re-price only where needed so
+            // the BTC numbers stay unchanged.
+            const DUST_SATS = { BTC: 546, LTC: 5460, DOGE: 100000 }
+            const dustSats  = DUST_SATS[COIN_CODE] || 546
+            let coinPrice   = 50000    // validator: 1 coin = $50,000
+            let feeUsd      = feeFrac * tokenPrice * escrow
+            if (Math.round(feeUsd / coinPrice * 1e8) < Math.ceil(dustSats * 1.5))
+                coinPrice = Math.max(1, Math.floor(feeUsd * 1e8 / (4 * dustSats)))
 
             await priceSnapshotHelper.clearPair(COIN_CODE + "/" + FIAT_OFEE)
             await priceSnapshotHelper.seedSnapshot({
