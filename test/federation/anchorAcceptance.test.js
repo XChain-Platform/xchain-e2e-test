@@ -53,6 +53,51 @@
  * The follow-up recovery drill (wipe indexer DB -> reindex from chain ->
  * src/recovery.js -> byte-identical hash triples) is driven by the runner
  * after this suite passes -- see the acceptance report.
+ *
+ * Three gaps that make the pipeline above unrunnable on a realistic venue,
+ * plus two reward-leg-only gaps, closed here with the repo's own seams
+ * (never re-derived plumbing):
+ *
+ *   (a) The platform DB user (xchain_hub / the indexer user) lacks CREATE
+ *       DATABASE, and MultiValidatorHub makes one DB per hub -> hub.start()
+ *       dies ER_DBACCESS_DENIED_ERROR. Fixed via test/helpers/disposableHubDb.js
+ *       with forceDocker:true (resolution path (1) would otherwise hand back
+ *       the venue's authenticating-but-can't-CREATE credential).
+ *   (b) On a DOGE-only venue the hub resolves the local indexer as its BTC
+ *       indexer, sees a DOGE indexer, and every live oracle_publish/cross_chain
+ *       resolution fails; _getActiveOraclePublishPubkeys has NO local-DB
+ *       fallback (only _resolveCapabilitySet does), so publisher election and
+ *       the fail-closed defer check both starve regardless of any row seeded
+ *       into capability_snapshots. Fixed via test/helpers/seededWeightSnapshot.js,
+ *       which monkeypatches hub.capabilitySnapshot.getWeightSnapshot /
+ *       getActiveWeightSnapshot directly (the one seam both call sites share)
+ *       and sets hub.network = 'regtest' so the WEIGHTED path is taken.
+ *   (c) XCHAIN_CONFIRMATIONS_DOGE defaults to 60 (coins/DOGE.js), read into
+ *       StateAnchorPublisher.dogeConfirmations ONCE at construction
+ *       (coins.resolveConfirmations); unreachable on regtest inside one test's
+ *       block budget. Set to a low value BEFORE `new MultiValidatorHub(...)`.
+ *
+ * Reward-leg-only (not asserted by this suite's own checks, but required for
+ * the v4/v5 ATTESTED anchor path -- without it the publisher abstains and
+ * falls back to legacy v0/v1, which carries no attestation and creates no
+ * reward row):
+ *   - an oracle_publish row seeded into the HUB's OWN capability_snapshots
+ *     (the prior version of this fixture seeded only cross_chain hub-side);
+ *   - a NON-BLANK `source` on those rows (WI-1: the stake-weighted tally
+ *     dedupes by source and fails closed on a blank one).
+ * seedWeightSnapshot's monkeypatch already makes both capabilities resolve
+ * correctly without touching the DB (it intercepts the method, not the
+ * table), so this insert is a belt-and-suspenders mirror of the indexer-side
+ * seed below, not the load-bearing fix -- see the code comment at the
+ * insert site.
+ *
+ * Also: a same-snapshot-block re-run self-poisons. The INDEXER db is real and
+ * persistent across runs (unlike the disposable hub db, torn down every run);
+ * each run's fresh MultiValidatorHub validator pubkey lands a NEW row at the
+ * SAME snapshot_block, so a second run's one live signer is only 50% of the
+ * tallied stake and on-chain verify fails closed. SNAPSHOT_BLOCK is therefore
+ * derived per-run (override via ANCHOR_ACCEPTANCE_SNAPSHOT_BLOCK for a
+ * deliberate replay).
  ********************************************************************/
 
 'use strict';
@@ -69,8 +114,19 @@ const cryptoHelper      = require('../cryptoHelper');
 const CryptoNetworks    = require('../../src/CryptoNetworks');
 const { MultiValidatorHub, ValidatorIdentity, loadHubModule, resolveHubFile } = require('../helpers/multiValidatorHubHelper');
 const anchorVersions    = require('../helpers/anchorVersionHelper');
+const { startDisposableHubDb } = require('../helpers/disposableHubDb');
+const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
 
-const SNAPSHOT_BLOCK = 100;            // deterministic regtest anchor (XDEX_SNAPSHOT_BLOCK)
+// Gap (a): forced off the ambient venue credential (CREATE DATABASE denied)
+// onto a disposable Docker MariaDB. Port/name derived from the pid so this
+// suite doesn't collide with another session's own disposable container on
+// the shared venue.
+const HUB_DB_PORT = 13300 + (process.pid % 300);
+const HUB_DB_NAME = 'xchain-anchor-acceptance-hubdb-' + process.pid;
+
+// Gap: self-poisoning re-runs (see file header). Override for a deliberate
+// replay against the same block; otherwise unique per run.
+const SNAPSHOT_BLOCK = Number(process.env.ANCHOR_ACCEPTANCE_SNAPSHOT_BLOCK) || (200000 + (Date.now() % 700000));
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -78,6 +134,8 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
     this.timeout(15 * 60 * 1000);
 
     let mvh = null, hub = null, identity = null;
+    let hubDb = null;                  // gap (a): disposable Docker MariaDB handle
+    let weightSeed = null;             // gap (b): seededWeightSnapshot restore()
     let publisherAddr = null;
     let signerDir = null;              // staged production signer (~/hub-signer analogue)
     let broadcasts = [];               // { payload, txid, phase1_txid }
@@ -137,6 +195,19 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
         process.env.ANCHOR_INTERVAL_MS        = '600000000';   // manual flush only
         if(!process.env.DOGE_INDEXER_URL)
             process.env.DOGE_INDEXER_URL = 'http://localhost:' + (process.env.INDEXER_API_PORT || '3124');
+        // Gap (c): coins/DOGE.js's confirmations:60 (StateAnchorPublisher.dogeConfirmations,
+        // frozen at hub construction below) is unreachable inside this suite's block
+        // budget. Must be set BEFORE `new MultiValidatorHub` / mvh.start(), which is
+        // when coins.resolveConfirmations reads it.
+        process.env.XCHAIN_CONFIRMATIONS_DOGE = '1';
+
+        // Gap (a): the ambient venue credential (xchain_hub / the indexer DB user)
+        // authenticates but lacks CREATE DATABASE, which MultiValidatorHub needs (one
+        // DB per hub). forceDocker:true is required -- without it, resolution path (1)
+        // in disposableHubDb hands back that same venue credential (it's already in
+        // env on a live host) instead of provisioning a throwaway root container.
+        hubDb = await startDisposableHubDb({ forceDocker: true, port: HUB_DB_PORT, name: HUB_DB_NAME });
+        if (!hubDb) { console.log('Skipping ANCHOR live acceptance: no Docker available for the disposable hub DB'); this.skip(); }
 
         mvh = new MultiValidatorHub({
             count: 1, basePort: 34100,
@@ -146,6 +217,26 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
         await mvh.start();
         hub      = mvh.hubs[0];
         identity = new ValidatorIdentity(mvh.identities[0].privkeyHex);
+
+        // Gap (b): the local indexer is DOGE, not BTC, so hub.capabilitySnapshot's
+        // live getSnapshot/getWeightSnapshot calls fail (wrong-chain indexer), and
+        // _getActiveOraclePublishPubkeys has NO local-table fallback (unlike
+        // _resolveCapabilitySet) -- it just returns [] and every anchor gets deferred
+        // "empty oracle_publish set (fail closed)". seedWeightSnapshot patches
+        // getWeightSnapshot/getActiveWeightSnapshot directly (the one seam both
+        // election and signing-set resolution share) and sets hub.network='regtest'
+        // so the WEIGHTED path is taken. Single-hub venue -> this hub's own identity
+        // is the sole (100%-stake) source, matching `identity` used below to sign.
+        weightSeed = seedWeightSnapshot(mvh, { blockIndex: SNAPSHOT_BLOCK, network: 'regtest' });
+        // Defensive mirror of the proven StateCheckpointEngine gotcha (see
+        // multiHubStateAnchorWeighted.integration.test.js): every consensus engine,
+        // StateAnchorPublisher included, caches `this.network = hub.network` ONCE AT
+        // CONSTRUCTION (StateAnchorPublisher.js:170), before seedWeightSnapshot ever
+        // runs. HUB_NETWORK is threaded through MultiValidatorHub's p2pConfig
+        // (defaults to regtest) so this is likely already correct by construction,
+        // but setting it again here costs nothing and removes the dependency on that
+        // threading being intact.
+        hub.stateAnchorPublisher.network = 'regtest';
 
         // Fund the publisher address; every ANCHOR broadcast goes through the
         // REAL client pipeline (encoder createTx -> sign -> broadcast -> P2SH
@@ -203,7 +294,9 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
     });
 
     after(async function () {
+        if (weightSeed) weightSeed.restore();
         if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
+        if (hubDb) await hubDb.stop();
         if (signerDir) fs.rmSync(signerDir, { recursive: true, force: true });
         delete process.env.DOGE_WIF;
         delete process.env.HUB_SIGNER_MODULE;
@@ -264,14 +357,28 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
              m.b_kind, m.b_tick, m.b_amount, m.b_filled_before, m.b_ownership, m.b_payout_addr,
              m.effective_time, sigs]);
 
-        // Persist the cross_chain set into the HUB's local capability_snapshots:
-        // what CrossChainDexConsensus._broadcastPropose does when a real match
-        // finalizes (the synthetic match bypassed the engine). The archive
-        // builder resolves capability sets from here when no BTC indexer
-        // resolution is available.
-        await hub.db.doQuery(
-            'INSERT IGNORE INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount) VALUES (?, ?, ?, ?)',
-            [snapBlock, 'cross_chain', identity.getPubkeyHex().toLowerCase(), '1']);
+        // Persist cross_chain AND oracle_publish into the HUB's own local
+        // capability_snapshots: what CrossChainDexConsensus._broadcastPropose
+        // persists for cross_chain when a real match finalizes (the synthetic
+        // match here bypassed the engine), extended to oracle_publish too.
+        // Without an oracle_publish row here,
+        // the v4/v5 attestation round has nothing to abstain-to-legacy over and
+        // falls back to v0/v1, which carries no attestation and creates no
+        // reward row. A blank `source` would also fail the WI-1 stake-weighted
+        // tally closed, so it's set to the validator's own key (its staking
+        // source), matching the indexer-side seed above.
+        //
+        // NOTE: this is a belt-and-suspenders mirror, not the load-bearing fix --
+        // seedWeightSnapshot's monkeypatch on hub.capabilitySnapshot already makes
+        // both capabilities resolve correctly straight through the live method
+        // (getWeightSnapshot), never touching this table. It's kept for any path
+        // that reads capability_snapshots directly (recovery) rather than through
+        // _resolveCapabilitySet/_getActiveOraclePublishPubkeys.
+        for (let cap of ['cross_chain', 'oracle_publish']) {
+            await hub.db.doQuery(
+                'INSERT IGNORE INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount, source) VALUES (?, ?, ?, ?, ?)',
+                [snapBlock, cap, identity.getPubkeyHex().toLowerCase(), '1', identity.getPubkeyHex().toLowerCase()]);
+        }
 
         // Which ANCHOR versions this venue is SUPPOSED to emit, read off the
         // hub's own flag-day modules at the snapshot_block the hub resolved.
