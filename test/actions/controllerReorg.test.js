@@ -134,8 +134,19 @@ describe('Controller Reorg: a token binding rolls back across an on-chain reorg'
         // The binding has teeth: a SEND of the bound token is DENIED pre-reorg.
         const bob = await cryptoHelper.getNewFundedAddress('creorg-bob', COIN, NETWORK, null, 'legacy', 0, 1)
         const bobBefore = await balanceOf(bob.address, tick)
-        await transactionHelper.createAndSendTransaction(owner, `SEND|0|${tick}|10|${bob.address}|pre-reorg`)
-        await mine(1); await sleep(3000)
+        const deniedTxHash = await transactionHelper.createAndSendTransaction(owner, `SEND|0|${tick}|10|${bob.address}|pre-reorg`)
+        await mine(1)
+        // Wait for the indexer's DECISION on this SEND, not a fixed window. actions/send.js
+        // calls createSend for every SEND it judges, denied ones included, so the arrival of
+        // the `sends` row IS the event that says the transfer guard has finished ruling. A
+        // blind sleep could only ever assert "nothing has happened YET", and passed for free
+        // if the tx was never judged at all.
+        const deniedRow = await indexerDatabase.waitForSend({
+            source: owner.address, txHash: deniedTxHash, tick: tick
+        }, 120000)
+        assert(deniedRow, 'the indexer recorded a decision row for the guarded SEND')
+        assert.match(String(deniedRow.status), /^invalid/,
+            `SEND rejected by the transfer guard pre-reorg (status: ${deniedRow.status})`)
         assert.strictEqual(await balanceOf(bob.address, tick), bobBefore, 'SEND denied by the active binding pre-reorg')
         console.log('   SEND denied by active transfer binding (binding has teeth)')
 

@@ -142,10 +142,20 @@ describe('Gated Content Reorg: a gated FILE (and its SEND-gating) rolls back acr
 
         // Teeth pre-reorg: a BARE SEND of the gated token (no sibling MESSAGE) is REJECTED.
         const recvBefore = await balanceOf(recipient.address, tick)
-        await transactionHelper.createAndSendTransaction(issuer, `SEND|0|${tick}|5|${recipient.address}|bare-pre`)
+        const bareTxHash = await transactionHelper.createAndSendTransaction(issuer, `SEND|0|${tick}|5|${recipient.address}|bare-pre`)
         await mine(1)
         await waitForIndexerToCatchUp(null, 60000)
-        await sleep(1500)
+        // Wait for the indexer's DECISION on this SEND, not a fixed window. actions/send.js
+        // calls createSend for every SEND it judges, denied ones included, so the arrival of
+        // the `sends` row IS the event that says the gated-SEND rule has finished ruling. A
+        // blind sleep could only ever assert "nothing has happened YET", and passed for free
+        // if the tx was never judged at all.
+        const bareRow = await indexerDatabase.waitForSend({
+            source: issuer.address, txHash: bareTxHash, tick: tick
+        }, 120000)
+        assert(bareRow, 'the indexer recorded a decision row for the bare SEND')
+        assert.match(String(bareRow.status), /^invalid/,
+            `bare SEND rejected by the gated-SEND rule pre-reorg (status: ${bareRow.status})`)
         assert.strictEqual(await balanceOf(recipient.address, tick), recvBefore,
             'bare SEND of the gated token denied pre-reorg (gated-SEND rule has teeth)')
         console.log('   bare SEND denied pre-reorg: gated-SEND rule active')

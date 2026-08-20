@@ -861,8 +861,15 @@ describe('BATCH issuance limits (BATCH_ISSUANCE_LIMITS)', function () {
                  customOutputs: [{ address: sAddr, value: 100000 }] })
             assert(result.batch, "the BATCH itself is valid")
 
-            // Give the indexer room to settle whatever it is going to settle.
-            await new Promise(r => setTimeout(r, 20000))
+            // The settlement this case is about IS an observable row: the first
+            // obligation flipping to 'fulfilled'. Both COINPAY sub-commands are
+            // judged in list order inside the SAME batch action, so once the first
+            // obligation carries its verdict the second one's is written too and
+            // the split below can be read. Waiting on the row rather than on 20s
+            // also means a run where nothing settles fails on the assertion that
+            // names the split instead of on how busy the venue was.
+            await indexerDatabase.waitForCoinpayObligation(
+                { actionIndex: obligations[0], coinpayStatus: 'fulfilled' }, 60000)
 
             const settled = []
             for (const ai of obligations){

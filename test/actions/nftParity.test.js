@@ -32,6 +32,7 @@ const assert            = require('assert')
 const cryptoHelper      = require('../cryptoHelper')
 const issueHelper       = require('../helpers/issueHelper')
 const transactionHelper = require('../transactionHelper')
+const { waitForTxIndexed } = require('../helpers/indexerWait')
 
 async function q(sql, params) {
     const conn = await indexerDatabase.getConnection()
@@ -61,7 +62,12 @@ async function sendAndSettle(addressInfo, wire) {
     await mine(1)
     let s = 0
     while ((await tip()) < (await nodeConnector.getBlockCount()) && s++ < 60) { await sleep(1000) }
-    await sleep(1500)
+    // The tip advancing means the BLOCK row landed, not that the action inside it
+    // was decided, and every caller of this function asserts on the absence of an
+    // effect. The indexer's own actions row for this tx is that decision, so wait
+    // for it rather than for a fixed 1.5s; it also fails loudly if the tx is never
+    // recorded, where the settle let the rejection assertion pass vacuously.
+    await waitForTxIndexed(txHash)
     return txHash
 }
 
