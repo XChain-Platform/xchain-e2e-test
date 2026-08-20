@@ -44,6 +44,12 @@ module.exports = {
     //                           native-fee output on LTC/DOGE
     //   timeout                 wait budget in ms (default 120000; a 250-command batch
     //                           is a lot of indexer work for one block)
+    //   outputType              encoder lane (null = auto, "P2SH", "TAPROOT"). A batch of
+    //                           250 real sub-commands is ~10 KB, over the chunk lanes'
+    //                           8192-byte ceiling, so the budget's own boundary cases can
+    //                           only be built on the envelope
+    //   compressedPubKey        hex public key; the envelope's internal key (§3.1), so
+    //                           "TAPROOT" needs it and a segwit-funded source
     async sendBatch(addressInfo, commands, opts = {}){
         let version = (opts.version === undefined || opts.version === null) ? 0 : opts.version
         let batchMessage = "BATCH|"+version+"|"+commands.join(";")
@@ -54,8 +60,8 @@ module.exports = {
             batchMessage,
             null,
             opts.customOutputs || [],
-            null,
-            null,
+            opts.outputType || null,
+            opts.compressedPubKey || null,
             opts.skipNativeFeeInjection === true
         )
 
