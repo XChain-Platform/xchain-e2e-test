@@ -129,9 +129,20 @@ describe('MultiValidatorHub: config-change PBFT (L2)', function () {
     });
 
     it('a non-leader proposing is rejected (only the round leader drives)', async function () {
+        // Predict the slot propose() will actually resolve, which is
+        // max(seq, lastAppliedSeq) + 1, not seq + 1. A hub that has applied
+        // rounds as a follower carries lastAppliedSeq above seq, so picking the
+        // non-leader of seq + 1 can hand back the hub that IS the leader of the
+        // slot propose() goes on to use: the proposal is then correctly accepted
+        // and the expected rejection never arrives. That divergence appeared when
+        // a not-leader refusal started consuming its slot, and it fails only when
+        // enough follower rounds have landed first, which is why it is flaky
+        // rather than constant.
         const nonLeader = mvh.hubs.find((h) => {
-            const l = h.consensus._getLeader(h.consensus.seq + 1);
-            return l && l.addr !== h.consensus.peerManager.validatorAddr;
+            const c = h.consensus;
+            const nextSeq = Math.max(c.seq, c.lastAppliedSeq) + 1;
+            const l = c._getLeader(nextSeq);
+            return l && l.addr !== c.peerManager.validatorAddr;
         });
         assert.ok(nonLeader, 'expected at least one non-leader');
         await assert.rejects(
