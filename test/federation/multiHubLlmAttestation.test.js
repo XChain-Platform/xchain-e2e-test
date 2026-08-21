@@ -108,7 +108,9 @@ module.exports = {
             stakers.push({ addressInfo: addr, pubkey: pubkeys[i] })
         }
 
-        await regtestMinerConnector.generateBlocks(7)
+        // Activation delay AND snapshot burial: the responsible set resolves at the
+        // request's block minus CANONICAL_REORG_BUFFER, so the delay alone is 6 short.
+        await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
         await _settleStack()
 
         owner = await cryptoHelper.getNewFundedAddress(

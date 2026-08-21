@@ -63,6 +63,32 @@ COPY ./xchain-indexer /xchain-indexer
 # default attestation path, and they were already unreachable before this change.
 RUN ln -s /XChainE2ETest/node_modules /xchain-indexer/node_modules
 
+# xchain-sync is staged into the build context by xchain-node's install path
+# (LIBRARY_BUNDLES) for ONE suite: consensusHashConformance recomputes each block's
+# hashes with sync's BlockHasher and compares them to the indexer's committed values,
+# which is the only place the two implementations meet over real stack data. Its
+# requires use '../../../xchain-sync/src/...', so the COPY target MUST be image root,
+# exactly as for xchain-indexer above. Staging alone was not enough: without this the
+# require threw, the suite SKIPPED rather than failed, and the drift-lock reported
+# green while never once running.
+COPY ./xchain-sync /xchain-sync
+
+# Same node_modules resolution problem as the bundled indexer: /xchain-sync/src/db.js
+# requires mariadb, which npm ci installed under /XChainE2ETest. Sync files needing
+# deps absent here (express, ws, helmet) still fail if loaded; none are on the
+# drift-lock path.
+RUN ln -s /XChainE2ETest/node_modules /xchain-sync/node_modules
+
+# xchain-hub already lives in the image at /XChainE2ETest/xchain-hub (the file:
+# dep above), but suites that borrow hub source directly address it as
+# '../../../xchain-hub/...', which resolves to IMAGE ROOT here exactly like the
+# indexer/sync requires above (xchainPriceDerivation's bcmath and
+# consensusHashConformance's DONATE1 coin-bundle lookup both take this path;
+# without the link they skip rather than run). A link suffices instead of a
+# second COPY: require() follows it to the real path, so hub files resolve
+# their own npm deps via /XChainE2ETest/node_modules with no extra symlink.
+RUN ln -s /XChainE2ETest/xchain-hub /xchain-hub
+
 # .env is NOT copied into the image to avoid baking credentials into layers.
 # Pass credentials via docker run --env-file or environment variables at runtime.
 

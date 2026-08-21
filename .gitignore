@@ -22,3 +22,7 @@ reports/mutation/*.json
 # seed-contract-state.js resume files. Public facts only (contract index, txids),
 # but they are per-run per-chain state, not source.
 .seed-*.json
+
+# Hub spend_guard runtime state (data/spend-state/<label>.json), written relative
+# to the cwd when a hub is driven from this directory. Per-run state, not source.
+data/spend-state/

@@ -175,9 +175,11 @@ describe('OWNERSHIP', () => {
             }, 30000)
             assert(rejectedV5, "ISSUE v5 should be rejected while parent ownership is escrowed")
 
-            // Child ISSUE (parent.child) is also gated; uses the 'parent ownership escrowed' message
+            // Child ISSUE (parent.child) is also gated; uses the 'parent ownership escrowed' message.
+            // Raw send: this ISSUE is SUPPOSED to be refused, and sendIssueV0 waits for
+            // status=valid and throws when it never arrives.
             let child = parent + ".SUB1"
-            await issueHelper.sendIssueV0(addr, child, 10, 5, 0, "Trying to mint child while parent escrowed", 5)
+            await issueHelper.sendIssueV0Raw(addr, child, 10, 5, 0, "Trying to mint child while parent escrowed", 5)
             let rejectedChild = await indexerDatabase.waitForIssue({
                 source: address, tick: child,
                 status: "invalid: TICK (parent ownership escrowed)"

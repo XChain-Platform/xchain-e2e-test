@@ -66,6 +66,19 @@ function codeOf(relPath) {
 
 const VM_REQUIRE = /require\s*\(\s*[^)]*xchain-vm/;
 
+// Every sibling staged into the e2e image by xchain-node's LIBRARY_BUNDLES. The
+// swallow shape below is not specific to the VM: any bundled sibling loaded inside a
+// try/catch can turn a suite that never runs into a green run.
+const BUNDLED_SIBLINGS = [
+    'xchain-vm', 'xchain-sync', 'xchain-hub',
+    'xchain-sdk', 'xchain-contracts', 'xchain-indexer'
+];
+
+function swallowsSiblingLoad(code, sibling){
+    return new RegExp('try\\s*{[^}]*' + sibling +
+        '[\\s\\S]{0,400}?catch\\s*\\([^)]*\\)\\s*{(?![^}]*throw)[^}]*}').test(code);
+}
+
 describe('VM false-green guard', function() {
 
     const files = discoverTestFiles(TEST_ROOT).filter(f => f !== SELF);
@@ -94,6 +107,26 @@ describe('VM false-green guard', function() {
             'than failing: ' + offenders.join(', ') + '. Resolve the checkout with ' +
             'require.resolve (absence may skip) and require it unguarded (a present ' +
             'checkout that will not load must be red).');
+    });
+
+    it('no suite swallows ANY bundled sibling load failure in a try/catch', function() {
+        // Generalizes the check above to every LIBRARY_BUNDLES sibling. Absence may
+        // skip; a sibling that is PRESENT and will not load must be red, or the suite
+        // reports green over assertions it never executed.
+        const offenders = [];
+        for (const file of files) {
+            const code = codeOf(file);
+            for (const sibling of BUNDLED_SIBLINGS) {
+                const requires = new RegExp('require\\s*\\(\\s*[^)]*' + sibling);
+                if (!requires.test(code)) continue;
+                if (swallowsSiblingLoad(code, sibling)) offenders.push(file + ' [' + sibling + ']');
+            }
+        }
+        assert.deepStrictEqual(offenders, [],
+            'these files load a bundled sibling inside a try/catch that does not rethrow, ' +
+            'so a sibling that cannot load makes the suite skip and the run exit 0 rather ' +
+            'than failing: ' + offenders.join(', ') + '. Detect absence with require.resolve ' +
+            '(absence may skip) and require it unguarded (present-but-broken must be red).');
     });
 
     it('no suite picks describe.skip off an xchain-vm load result', function() {

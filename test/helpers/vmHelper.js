@@ -110,6 +110,25 @@ module.exports = {
             }, 55000)
         }
 
+        // Both waits filter on status='valid', so a REJECTED execution is invisible to
+        // them and the give-up line reports "action writes idle" - which reads as "the
+        // indexer never wrote the row" when in fact it wrote one and failed it. That
+        // misreading cost several two-hour gate runs, where the real cause was an
+        // ATTEST emission rejected at admission. Re-query status-agnostically and say
+        // which of the two happened, so the next failure names its own reason.
+        if(!executionRow){
+            let anyRow = await indexerDatabase.checkExecution({
+                contractIndex: contractActionIndex,
+                caller:        address,
+                methodName:    method
+            }).catch(() => null)
+            console.log(anyRow
+                ? 'sendExecuteV0: an execution row EXISTS for ' + method + ' but its status is "'
+                  + anyRow.status + '", not valid; the row is not missing, the execution failed'
+                : 'sendExecuteV0: no execution row of ANY status for ' + method
+                  + '; the action never reached the indexer')
+        }
+
         return { txHash, execution: executionRow }
     },
 

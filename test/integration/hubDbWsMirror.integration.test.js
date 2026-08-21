@@ -219,7 +219,18 @@ describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration
         const row = { id: 2, round_number: 101, coin_pair: 'LTC/USD', price: '76.00000000', reference_block: 101,
             validator_count: 4, consensus_proof: 'proof-live', status: 'finalized' };
         broadcaster.broadcastRow({ table: 'price_snapshots', row });
-        await sleep(400);
+        // A duplicate that is correctly ignored emits nothing, so there is no event
+        // of its own to wait for. Give it one: a DISTINCT sentinel row broadcast
+        // immediately behind it. HubDbSync applies frames through a single
+        // serialized promise chain (_msgChain), so the sentinel cannot land before
+        // the re-broadcast ahead of it has been applied. The sentinel arriving is
+        // therefore proof the duplicate was already processed, which a 400ms guess
+        // only assumed.
+        const sentinel = { id: 3, round_number: 102, coin_pair: 'IDEM/USD', price: '1.00000000', reference_block: 102,
+            validator_count: 4, consensus_proof: 'proof-idem', status: 'finalized' };
+        broadcaster.broadcastRow({ table: 'price_snapshots', row: sentinel });
+        assert.ok(await waitFor(async () => (await count(repPool, 'price_snapshots', 'id=3')) === 1),
+            'the sentinel behind the re-broadcast never arrived, so the duplicate was never observed');
         assert.strictEqual(await count(repPool, 'price_snapshots', 'id=2'), 1, 're-broadcast must not duplicate');
     });
 

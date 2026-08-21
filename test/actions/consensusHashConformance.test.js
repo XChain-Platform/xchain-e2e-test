@@ -29,15 +29,24 @@
 const assert = require('assert');
 const path   = require('path');
 
-// Sibling xchain-sync (monorepo layout). If it's not present (sync excluded from
-// a given checkout), skip rather than fail.
+// Sibling xchain-sync (monorepo layout). ABSENCE may skip, because a single-repo
+// checkout cannot run this. A checkout that is PRESENT but will not load must be RED:
+// swallowing that turns the drift-lock into a suite that reports green having never run.
 let BlockHasher, SyncUtility, SyncStateCommitment, SyncDatabase;
+const SYNC_SRC = path.join(__dirname, '../../../xchain-sync/src');
+let syncPresent = true;
 try {
-    BlockHasher = require(path.join(__dirname, '../../../xchain-sync/src/BlockHasher.js'));
-    SyncUtility = require(path.join(__dirname, '../../../xchain-sync/src/utility.js'));
-    SyncStateCommitment = require(path.join(__dirname, '../../../xchain-sync/src/stateCommitment.js'));
-    SyncDatabase        = require(path.join(__dirname, '../../../xchain-sync/src/db.js'));
-} catch (e) { /* handled in before() */ }
+    require.resolve(path.join(SYNC_SRC, 'BlockHasher.js'));
+} catch (e) {
+    syncPresent = false;
+    if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1') throw e;
+}
+if (syncPresent) {
+    BlockHasher         = require(path.join(SYNC_SRC, 'BlockHasher.js'));
+    SyncUtility         = require(path.join(SYNC_SRC, 'utility.js'));
+    SyncStateCommitment = require(path.join(SYNC_SRC, 'stateCommitment.js'));
+    SyncDatabase        = require(path.join(SYNC_SRC, 'db.js'));
+}
 
 const COMMITTED_HASH_SQL =
     'SELECT t1.hash AS ledger_hash, t2.hash AS actions_hash, t3.hash AS contract_hash ' +
@@ -63,14 +72,53 @@ describe('consensus hash conformance: sync BlockHasher == indexer committed hash
         }
         const pool = global.indexerDatabase.pool;
         // BlockHasher needs a `doQuery(sql, params)` over the INDEXER db.
-        dbAdapter = {
-            doQuery: async (sql, params) => {
-                const conn = await pool.getConnection();
-                try { return await conn.query(sql, params); }
-                finally { conn.release(); }
-            }
+        //
+        // doQueryStrict is the same read here on purpose. The follower Database draws
+        // the distinction so a swallowed error cannot commit a partial row set, and
+        // this adapter never swallows: conn.query rejects straight through. Carrying
+        // both names means a sync read that moves from one to the other (M-17 did
+        // exactly that) does not take this probe out with a TypeError.
+        const read = async (sql, params) => {
+            const conn = await pool.getConnection();
+            try { return await conn.query(sql, params); }
+            finally { conn.release(); }
         };
+        dbAdapter = { doQuery: read, doQueryStrict: read };
         hasher = new BlockHasher(dbAdapter, new SyncUtility());
+
+        // Native-fee venues (LTC/DOGE) pay protocol fees as chain outputs, so a
+        // whole run can index without ONE ledger row touching a special address;
+        // both recompute loops and the coverage guard at the bottom of this file
+        // would then run without ever exercising special-address canonicalization.
+        // Give the run one deliberately: a 1 XCHAIN SEND to this chain's DONATE1
+        // treasury, indexed BEFORE the block lists are snapshotted so the loops
+        // cover the block that carries it.
+        const special = Object.keys(ROLE_BY_ADDRESS || {});
+        if (special.length) {
+            const placeholders = special.map(() => '?').join(', ');
+            const seen = await dbAdapter.doQuery(
+                'SELECT ia.address FROM credits c JOIN index_addresses ia ON ia.id = c.address_id ' +
+                'WHERE ia.address IN (' + placeholders + ') LIMIT 1', special);
+            if (!seen.length) {
+                let donate1 = null;
+                try {
+                    const { getCoinConfig } = require(path.join(__dirname, '../../../xchain-hub/src/coins'));
+                    donate1 = getCoinConfig(COIN_CODE, NETWORK).addresses.DONATE1;
+                } catch (e) {
+                    console.log('sibling xchain-hub coin bundle not loadable (' + e.message + '); ' +
+                        'cannot resolve DONATE1 - the coverage guard below will report the gap');
+                }
+                if (donate1) {
+                    console.log('no special-address ledger row on this venue yet; sending 1 XCHAIN to DONATE1 ' + donate1);
+                    const cryptoHelper = require('../cryptoHelper');
+                    const sendHelper   = require('../helpers/sendHelper');
+                    const gasTick      = (typeof GAS_TICK !== 'undefined' && GAS_TICK) ? GAS_TICK : 'XCHAIN';
+                    const addr = await cryptoHelper.getNewFundedAddress('CONF.DONATE', COIN, NETWORK, null, 'legacy', 0, 1);
+                    await sendHelper.sendSendV0(addr, gasTick, 1, donate1, 'canonicalization coverage');
+                }
+            }
+        }
+
         const rows = await dbAdapter.doQuery('SELECT block_index FROM blocks ORDER BY block_index ASC', []);
         blockIndexes = rows.map(r => Number(r.block_index));
     });
@@ -135,15 +183,16 @@ describe('state commitment conformance: sync block_merkle_root == indexer commit
             this.skip();
         }
         const pool = global.indexerDatabase.pool;
-        dbAdapter = {
-            doQuery: async (sql, params) => {
-                const conn = await pool.getConnection();
-                try { return await conn.query(sql, params); }
-                finally { conn.release(); }
-            }
+        const read = async (sql, params) => {
+            const conn = await pool.getConnection();
+            try { return await conn.query(sql, params); }
+            finally { conn.release(); }
         };
-        // computeBlockMerkleRoot reads its rows via db.getBlockLeafRows; bind the
-        // follower Database method onto the read-only adapter (it only doQuery's).
+        // Both names, for the reason given on the first adapter above.
+        dbAdapter = { doQuery: read, doQueryStrict: read };
+        // computeBlockMerkleRoot reads its rows via db.getBlockLeafRows, which reads
+        // through doQueryStrict since the M-17 hardening; bind the follower Database
+        // method onto the read-only adapter.
         dbAdapter.getBlockLeafRows = SyncDatabase.prototype.getBlockLeafRows.bind(dbAdapter);
         rootRows = await dbAdapter.doQuery(
             'SELECT block_index, block_merkle_root FROM state_tree_roots ORDER BY block_index ASC', []);

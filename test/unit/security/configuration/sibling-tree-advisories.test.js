@@ -172,4 +172,44 @@ describe('Security: staged sibling trees carry no vulnerable copies @regression 
                 + offenders.join('\n  '));
         });
     });
+
+    // The same silent-persistence hazard one level up, on the SNAPSHOT rather than
+    // the tree. package-lock.json records a frozen copy of each staged sibling's
+    // manifest under its file: path key, and once the staged directory has lost its
+    // package.json npm has nothing to reconcile that copy against, so it simply
+    // persists. The SDK snapshot sat at 2.0.3 (the unpublished pre-renumber cut)
+    // long after the repo renumbered to 0.10.0, describing a package that no longer
+    // exists. Nothing resolves differently while the pinned ranges still agree,
+    // which is exactly why it can rot unnoticed until a pin change lands on one
+    // side only. The floor checks above cannot see it: they read node_modules, not
+    // the lockfile's own path entries (uuid 7d50ae1b).
+    stagedSiblings().forEach(function (sibling) {
+        it(`ADV-9: the lockfile snapshot of ${sibling.name} records the sibling repo's own version`, function () {
+            const lock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
+            const key  = path.relative(root, sibling.dir).split(path.sep).join('/');
+            const snap = (lock.packages || {})[key];
+            assert.ok(snap, `package-lock.json has no packages["${key}"] entry for the staged ${sibling.name}; `
+                + 'the file: dependency layout changed and this guard needs re-pointing');
+            assert.ok(typeof snap.version === 'string',
+                `package-lock.json packages["${key}"] records no version for ${sibling.name}`);
+
+            // Source of truth, in the two places the sibling can actually be: staged
+            // inside this repo at build time, or checked out beside it (the CI venue
+            // layout .ci-siblings describes, which is also the normal local layout).
+            // A checkout with neither has nothing to compare against.
+            const candidates = [
+                path.join(sibling.dir, 'package.json'),
+                path.join(root, '..', path.basename(sibling.dir), 'package.json'),
+            ];
+            const manifestPath = candidates.find(p => fs.existsSync(p));
+            if (!manifestPath) return this.skip();
+
+            const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+            assert.strictEqual(snap.version, manifest.version,
+                `package-lock.json packages["${key}"] records ${sibling.name}@${snap.version}, but `
+                + `${path.relative(root, manifestPath)} declares ${manifest.version}. The staged snapshot is `
+                + 'frozen at a version the sibling no longer carries; re-stage the sibling and regenerate '
+                + 'the lockfile, or correct the version field when the tree cannot be re-staged here.');
+        });
+    });
 });

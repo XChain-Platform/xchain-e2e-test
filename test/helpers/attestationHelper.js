@@ -53,6 +53,34 @@ class MockAttestationValidator {
     }
 }
 
+// Every attestation validator staked in this mocha process, across every suite.
+//
+// The action suites share one chain, and the indexer computes a request's responsible
+// set over EVERY qualifying staked key on it, so a suite that ranks only its OWN
+// validators is mirroring a chain that does not exist. With two staking suites live,
+// a redundancy=3 request ranks over six qualifying keys and the hash ranking can
+// select keys the running suite cannot sign with; a live-fetched, correctly signed
+// response then dies as `invalid: insufficient valid signatures (1/3)`. A per-suite
+// slice only mirrors correctly when the suite runs alone against a fresh chain,
+// which makes the venue decide the outcome, not the test.
+//
+// The suites run in ONE process, so the validator objects (private keys included)
+// are all reachable: each suite REGISTERS what it stakes, and quorum suites compute
+// responsible signers over this process-wide set, signing with whichever registered
+// keys the ranking actually selects. Registration is the contract: any test that
+// stakes a validator at/above a provider floor without registering it here rebreaks
+// the mirror for every suite that runs after it.
+const sessionStakedValidators = [];
+
+function registerStakedValidator(v) {
+    sessionStakedValidators.push(v);
+    return v;
+}
+
+function getSessionStakedValidators() {
+    return sessionStakedValidators.slice();
+}
+
 // Mirror of xchain-indexer attest.js _computeResponsibleSet: picks the request's
 // deterministic responsible signer set so the test signs with exactly the keys the
 // indexer will accept. Sorts the staked validator pool by SHA256(request_id || pubkey);
@@ -135,6 +163,8 @@ async function broadcastAttestationResponse(broadcasterAddressInfo, payload) {
 
 module.exports = {
     MockAttestationValidator,
+    registerStakedValidator,
+    getSessionStakedValidators,
     computeResponsibleSigners,
     buildAttestationResponseAction,
     broadcastAttestationResponse

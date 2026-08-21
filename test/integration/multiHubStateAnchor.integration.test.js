@@ -64,8 +64,6 @@ const PEER_WAIT_MS = 60_000;
 const SETTLE_MS    = 60_000;
 const BLOCK_INDEX  = 100;      // seeded BTC anchor (election + snapshot block)
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
 // Identical "indexer" state on every hub: the checkpoint engine's stubbed
 // getblockhashes view of the BTC chain at height 500, hashes chained upstream.
 const TIP = {
@@ -257,7 +255,22 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
         // assuming a fixed settle (a 6s window raced the quorum round and saw 0).
         await waitFor(() => ({ ok: published.some(p => p.payload.split('|')[1] === '1') }),
             { timeoutMs: 30000, intervalMs: 500 });
-        await sleep(500); // let the checkpoint anchor + back-fill that ride the same round land too
+        // The checkpoint anchor and the XANC_FINALIZED back-fill ride the same round
+        // as the v1 archive and land behind it. Both are observable (a captured v3
+        // publish; a batch_seq on every hub's match rows) and both are asserted
+        // below, so poll for them instead of betting 500ms that the tail of the
+        // round finished. Polling also anchors the "exactly one v3" count on the
+        // round having completed rather than on a clock reading.
+        await waitFor(async () => {
+            if (!published.some(p => p.payload.split('|')[1] === '3')) return { ok: false, stage: 'v3 checkpoint anchor' };
+            for (let hub of mvh.hubs) {
+                try {
+                    let m = await hub.db.doQuery('SELECT batch_seq FROM cross_chain_matches WHERE batch_seq IS NOT NULL');
+                    if (m.length < 1) return { ok: false, stage: 'XANC_FINALIZED back-fill' };
+                } catch (_) { return { ok: false, stage: 'XANC_FINALIZED back-fill (hub read failed)' }; }
+            }
+            return { ok: true };
+        }, { timeoutMs: 30000, intervalMs: 250 });
 
         // SPV Phase 2 (xchain-hub 08228c8): the checkpoint anchor is published as
         // ANCHOR v3 (not legacy v0) whenever the checkpoint carries the signed

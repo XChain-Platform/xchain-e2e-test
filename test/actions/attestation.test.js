@@ -66,6 +66,10 @@ describe('Attestation framework: round-trip request → response → callback', 
         await stakeHelper.sendStakeV1(stakeSource, '15000.00000000', v.pubkey)
         v.source = stakeSource.address
         stakedValidators.push(v)
+        // Session-wide registration: later suites on this shared chain must include
+        // these keys when they mirror the indexer's responsible-set ranking, or the
+        // ranking selects keys they cannot sign with (see attestationHelper).
+        attestationHelper.registerStakedValidator(v)
         return v
     }
 
@@ -145,8 +149,12 @@ module.exports = {
         // it survives SWQ source-dedup into request responsible sets.
         validator = new attestationHelper.MockAttestationValidator()
         await stakeValidatorFromOwnSource(validator)
-        // Advance past activation delay so the stake is observable
-        await regtestMinerConnector.generateBlocks(7)
+        // Advance past activation delay AND the snapshot burial, so the stake is
+        // selectable into a responsible set (see ATTESTATION_STAKE_VISIBLE_BLOCKS).
+        await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
+        // The encoder refuses UTXO selection while the tracker trails the node, so the
+        // next tx build races these blocks unless the tracker is caught up first.
+        await utxoTrackerConnector.waitForSync()
 
         // Deploy the test contract
         let deploy = await vmHelper.sendDeployV0(operatorAddr, CONTRACT_CODE, 500000)
@@ -246,6 +254,7 @@ module.exports = {
         // Advance past DEADLINE_BLOCK. deadlineBlocks=2 + comfortable margin so the
         // per-block expiry pipeline definitely runs at deadline+1.
         await regtestMinerConnector.generateBlocks(5)
+        await utxoTrackerConnector.waitForSync()
 
         // Request status should flip to 'expired'
         let expired = await indexerDatabase.waitForAttestationRequest({
@@ -316,8 +325,11 @@ module.exports = {
         let v3 = new attestationHelper.MockAttestationValidator()
         await stakeValidatorFromOwnSource(v2)
         await stakeValidatorFromOwnSource(v3)
-        // Advance past activation delay
-        await regtestMinerConnector.generateBlocks(7)
+        // Advance past activation delay AND the snapshot burial. This request asks for
+        // redundancy=3, so ALL THREE stakes must be selectable at its block; mining only
+        // the activation delay left the two just staked here invisible and the set at 2.
+        await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
+        await utxoTrackerConnector.waitForSync()
 
         // Fire a request with redundancy=3
         let exec = await vmHelper.sendExecuteV0(operatorAddr, contractIndex, 'askOracleQuorum', ['https://example.com/v1/quorum/abc'])
@@ -442,7 +454,7 @@ module.exports = {
             // `validator` is often NOT the responsible signer for a given request_id, so
             // its sig is filtered out → 0/1. Picking the responsible key makes the sig
             // count (1) meet redundancy (1).
-            let signers = attestationHelper.computeResponsibleSigners(requestId, 1, stakedValidators)
+            let signers = attestationHelper.computeResponsibleSigners(requestId, 1, attestationHelper.getSessionStakedValidators())
 
             // Broadcast a properly-signed response carrying the retryable status. The
             // responsible validator's signature is valid (validSigs=1 >= redundancy=1), so
@@ -491,7 +503,7 @@ module.exports = {
         // Both rounds must be signed by the request's responsible validator (top-1 over the
         // full staked set, source-deduped): the same key the indexer will accept for this
         // request_id. The two rounds target the SAME request_id, so they share one signer.
-        let signers = attestationHelper.computeResponsibleSigners(requestId, 1, stakedValidators)
+        let signers = attestationHelper.computeResponsibleSigners(requestId, 1, attestationHelper.getSessionStakedValidators())
 
         // Round 1: a valid no_quorum response leaves the request pending
         await attestationHelper.broadcastAttestationResponse(operatorAddr, {

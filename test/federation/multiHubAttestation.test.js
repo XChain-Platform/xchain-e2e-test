@@ -179,11 +179,12 @@ module.exports = {
             stakers.push({ addressInfo: addr, pubkey: pubkeys[i] })
         }
 
-        // 4) Advance past the activation window so all three stakes show as
-        //    active when the hubs query the capability snapshot. Then wait
-        //    for the stack to fully settle so the owner's funding doesn't
-        //    land into a contended mempool.
-        await regtestMinerConnector.generateBlocks(7)
+        // 4) Advance past the activation window AND the snapshot burial, so all three
+        //    stakes are SELECTABLE when the hubs query the capability snapshot: that
+        //    lookup resolves at the request's block minus CANONICAL_REORG_BUFFER, so
+        //    the activation delay alone is 6 blocks short. Then wait for the stack to
+        //    fully settle so the owner's funding doesn't land into a contended mempool.
+        await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
         await _settleStack()
 
         // 5) Fund a separate contract owner + deploy the request contract.

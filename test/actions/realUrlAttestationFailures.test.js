@@ -137,6 +137,9 @@ describe('REAL-URL attestation FAILURE paths: expired + no_quorum over a 3-valid
         await stakeHelper.sendStakeV1(stakeSource, '15000.00000000', v.pubkey)
         v.source = stakeSource.address
         stakedValidators.push(v)
+        // Session-wide registration; the signer computation below ranks over the
+        // WHOLE session set, not this suite's slice (see attestationHelper).
+        attestationHelper.registerStakedValidator(v)
         return v
     }
 
@@ -152,13 +155,19 @@ describe('REAL-URL attestation FAILURE paths: expired + no_quorum over a 3-valid
         )
         await gasHelper.ensureGasBalance(operatorAddr, '5000')
 
-        // Stake exactly three source-distinct validators. On a clean chain these are
-        // the only attestation-capable keys, so the responsible set for any request is
-        // all three - our signatures meet a redundancy=3 quorum.
+        // Stake three source-distinct validators of our own. The chain is SHARED with
+        // every suite that ran before this one, so these are NOT assumed to be the
+        // only qualifying keys: signer selection ranks over the session-wide registry.
         for (let i = 0; i < 3; i++) {
             await stakeValidatorFromOwnSource(new attestationHelper.MockAttestationValidator())
         }
-        await regtestMinerConnector.generateBlocks(7)
+        // Activation delay AND snapshot burial: a request at height H resolves its
+        // responsible set at H-6, so mining only the delay leaves all three invisible
+        // and every redundancy=3 request is rejected at admission.
+        await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
+        // The encoder refuses UTXO selection while the tracker trails the node, so the
+        // next tx build races these blocks unless the tracker is caught up first.
+        await utxoTrackerConnector.waitForSync()
 
         const deploy = await vmHelper.sendDeployV0(operatorAddr, CONTRACT_CODE, 500000)
         assert.strictEqual(deploy.contract.status, 'valid', 'deploy status: ' + deploy.contract.status)
@@ -194,6 +203,7 @@ describe('REAL-URL attestation FAILURE paths: expired + no_quorum over a 3-valid
         // 3. Advance past DEADLINE_BLOCK. deadlineBlocks=2 + margin so the per-block
         //    expiry pipeline definitely runs at deadline+1.
         await regtestMinerConnector.generateBlocks(5)
+        await utxoTrackerConnector.waitForSync()
 
         // 4. Request status flips to 'expired'.
         const expired = await indexerDatabase.waitForAttestationRequest({
@@ -258,8 +268,12 @@ describe('REAL-URL attestation FAILURE paths: expired + no_quorum over a 3-valid
         //    request's responsible set (all 3 on a clean chain). The signatures are
         //    valid, so the RESPONSE row lands status='valid' - this is precisely the
         //    retryable case: a valid response that must NOT close the request.
-        const signers = attestationHelper.computeResponsibleSigners(requestId, 3, stakedValidators)
-        assert.strictEqual(signers.length, 3, 'expected 3 responsible signers on a clean chain')
+        // Ranked over the SESSION set: on the shared action-suite chain the
+        // responsible 3 may include earlier suites' validators, all signable
+        // in-process (see attestationHelper).
+        const signers = attestationHelper.computeResponsibleSigners(
+            requestId, 3, attestationHelper.getSessionStakedValidators())
+        assert.strictEqual(signers.length, 3, 'expected 3 responsible signers from the session set')
         await attestationHelper.broadcastAttestationResponse(operatorAddr, {
             requestId:       requestId,
             providerId:      'http_get',

@@ -72,6 +72,7 @@ const DUST_SATS = { BTC: 546, LTC: 5460, DOGE: 100000 }
 let FEE_DEST      = null    // resolvable FEE_DESTINATION, or null on a pure gas stack
 let GAS_MODE      = false   // this chain can pay an issuance fee from an XCHAIN balance
 let SATS_PER_XCHAIN = 0     // set per fee case by prepareFeeFixture()
+let FEE_CASE_REPRICED = false   // the FEE_CASE rows are live; restoreFeeFixture() must delete them
 
 async function q(sql, args){
     const conn = await indexerDatabase.getConnection()
@@ -134,27 +135,9 @@ async function tokenRow(tick){
     return rows.length ? rows[0] : null
 }
 
-// The GAS tick's decimal precision, and the rounding db.createLedgerChangeRecord
-// applies to every ledger row with it (`bcadd(amount, 0, decimals)`).
-//
-// This is load-bearing, not incidental. The regtest GAS token is issued with ZERO
-// decimals (test/initialCheck.test.js bootstraps XCHAIN that way), so ISSUE_SUBTOKEN's
-// 0.5-XCHAIN fee is RECORDED as 0.5 in the `fees` table and DEBITED as 1 in `debits`.
-// Balances derive from credits - debits, and each sub-command re-reads its balance
-// as-of its own action index, so the rounded figure is what actually meters a batch of
-// children. Expectations here are therefore computed from the venue's own precision
-// rather than from the gas schedule alone.
-async function tokenDecimals(tick){
-    const rows = await q(`SELECT tk.decimals FROM tokens tk
-                            JOIN index_tickers itk ON itk.id = tk.tick_id
-                           WHERE itk.tick = ?`, [tick])
-    return rows.length ? Number(rows[0].decimals) : 8
-}
-
-function ledgerRound(amount, decimals){
-    const factor = Math.pow(10, decimals)
-    return Math.round(amount * factor) / factor
-}
+// Gas expectations are the gas schedule EXACTLY. LEDGER_AMOUNT_PRECISION is armed on
+// regtest, so the ledger stores amounts exactly and rounds once at balance projection
+// rather than quantizing each row to the gas tick's decimals.
 
 async function feesForTx(txHash){
     return q(`SELECT f.action_index, f.gas_cost, f.amount, f.payment_mode
@@ -270,6 +253,7 @@ async function prepareFeeFixture(perCommandXchain){
             blockTimestamp: chainTime, roundNumber: FEE_CASE_ROUND_COIN })
         prices = await effectivePrices()
         satsPerXchain = Math.round(Number(prices.xchain.price) / Number(prices.coin.price) * 1e8)
+        FEE_CASE_REPRICED = true
         console.log('fee fixture RE-PRICED (one command would have been dust): ' +
             COIN_CODE + '/USD=' + FEE_CASE_COIN_USD + ' anchored at chain_time=' + chainTime)
     }
@@ -283,6 +267,21 @@ async function prepareFeeFixture(perCommandXchain){
         prices.coin.price + ' -> ' + satsPerXchain + ' sats per XCHAIN, ' +
         perCommandSats + ' sats per command')
     return perCommandSats
+}
+
+// Undo prepareFeeFixture's re-price for whatever runs next. seedGlobalPrices alone
+// cannot do it: the FEE_CASE round numbers outrank every seed round, and
+// getLatestPrice picks by round_number DESC, so until the FEE_CASE rows age past
+// the staleness window they keep pricing every OTHER test's flat-fee actions
+// against the re-priced pair's much larger expectation. Deleting the pairs first
+// is what actually restores the shared fixture.
+async function restoreFeeFixture(){
+    if (FEE_CASE_REPRICED){
+        await priceSnapshotHelper.clearPair('XCHAIN/USD')
+        await priceSnapshotHelper.clearPair(COIN_CODE + '/USD')
+        FEE_CASE_REPRICED = false
+    }
+    await nativeFeeHelper.seedGlobalPrices(true)
 }
 
 function feeOutput(sats){
@@ -313,6 +312,12 @@ describe('BATCH issuance limits (BATCH_ISSUANCE_LIMITS)', function () {
 
     // ─── A1 ────────────────────────────────────────────────────────────────────
     describe('A1: one parent plus 50 children in ONE transaction', function () {
+        after(async function () {
+            // The native lane below re-prices the shared pair on dust-heavy chains;
+            // A2/A3 run next and rely on the standard fixture.
+            await restoreFeeFixture()
+        })
+
         it('lands 51 valid actions, every child owned by the issuer', async function () {
             const addr    = await cryptoHelper.getNewFundedAddress("BIL.A1", COIN, NETWORK, null, "legacy", 0, 1)
             const address = addr["address"]
@@ -392,22 +397,25 @@ describe('BATCH issuance limits (BATCH_ISSUANCE_LIMITS)', function () {
                 return
             }
 
-            // The ledger side, at the venue's own GAS precision (see tokenDecimals).
-            const decimals   = await tokenDecimals(GAS_TICK)
-            const perChild   = ledgerRound(XCHAIN_PER_CHILD_ISSUE, decimals)
-            const expectedSpent = ledgerRound(XCHAIN_PER_ISSUE, decimals) + CHILDREN * perChild
+            // The ledger side, charged exactly (see the gas-expectation note above).
+            const perChild      = XCHAIN_PER_CHILD_ISSUE
+            const expectedSpent = XCHAIN_PER_ISSUE + CHILDREN * perChild
+            // Pinned so the expectation cannot silently track a change in the very fee
+            // arithmetic this test exists to hold still.
+            assert.strictEqual(expectedSpent, 26,
+                "gas schedule moved: 1 ISSUE + 50x0.5 ISSUE_SUBTOKEN should be 26 XCHAIN")
             const debits = await debitsForTx(result.txHash, GAS_TICK)
             assert.strictEqual(debits.length, 51, "one gas debit per sub-command")
             const spent = debits.reduce((s, d) => s + Number(d.amount), 0)
             assert.strictEqual(spent, expectedSpent,
-                "gas debited should be 1 ISSUE + 50 ISSUE_SUBTOKEN rounded to " + decimals +
-                " decimals = " + expectedSpent + " XCHAIN")
+                "gas debited should be 1 ISSUE + 50 ISSUE_SUBTOKEN charged exactly = " +
+                expectedSpent + " XCHAIN")
             const gasAfter = await balanceOf(address, GAS_TICK)
             assert.strictEqual(Number(gasBefore) - Number(gasAfter), expectedSpent,
                 "the source's XCHAIN balance moved by exactly the batch's gas")
             console.log("A1: 51/51 valid, gas_cost 100000 + 50x50000, " + expectedSpent +
-                " XCHAIN debited across " + debits.length + " debits (GAS decimals=" +
-                decimals + ", per-child debit " + perChild + ")")
+                " XCHAIN debited across " + debits.length + " debits (per-child debit " +
+                perChild + ")")
         })
     })
 
@@ -599,13 +607,11 @@ describe('BATCH issuance limits (BATCH_ISSUANCE_LIMITS)', function () {
             const N = 8
             const K = 6
 
-            // The budget is sized in what the LEDGER actually debits per child, which
-            // is the gas schedule rounded to the GAS tick's precision (see
-            // tokenDecimals): every sub-command re-reads its balance from the DB
-            // as-of its own action index, so the rounded figure is what meters this.
-            const decimals  = await tokenDecimals(GAS_TICK)
-            const perChild  = ledgerRound(XCHAIN_PER_CHILD_ISSUE, decimals)
-            const perParent = ledgerRound(XCHAIN_PER_ISSUE, decimals)
+            // The budget is what the LEDGER debits per child, the gas schedule EXACTLY.
+            // An over-sized budget silently buys extra children, so the K boundary this
+            // test pins stops being a boundary.
+            const perChild  = XCHAIN_PER_CHILD_ISSUE
+            const perParent = XCHAIN_PER_ISSUE
 
             // seedGas=false so the balance is exactly what this test mints, not the
             // 100 XCHAIN the funding helper hands out by default.
@@ -678,7 +684,7 @@ describe('BATCH issuance limits (BATCH_ISSUANCE_LIMITS)', function () {
         after(async function () {
             if (!FEE_DEST || NO_PRICE_SEED) return
             // Put the shared fixture back for whatever runs next.
-            await nativeFeeHelper.seedGlobalPrices(true)
+            await restoreFeeFixture()
         })
 
         it('yields at most ONE valid command when the fee covers exactly one', async function () {
@@ -746,7 +752,7 @@ describe('BATCH issuance limits (BATCH_ISSUANCE_LIMITS)', function () {
 
         after(async function () {
             if (!FEE_DEST || NO_PRICE_SEED) return
-            await nativeFeeHelper.seedGlobalPrices(true)
+            await restoreFeeFixture()
         })
 
         async function orderCommands(count, giveAmount){
@@ -855,8 +861,15 @@ describe('BATCH issuance limits (BATCH_ISSUANCE_LIMITS)', function () {
                  customOutputs: [{ address: sAddr, value: 100000 }] })
             assert(result.batch, "the BATCH itself is valid")
 
-            // Give the indexer room to settle whatever it is going to settle.
-            await new Promise(r => setTimeout(r, 20000))
+            // The settlement this case is about IS an observable row: the first
+            // obligation flipping to 'fulfilled'. Both COINPAY sub-commands are
+            // judged in list order inside the SAME batch action, so once the first
+            // obligation carries its verdict the second one's is written too and
+            // the split below can be read. Waiting on the row rather than on 20s
+            // also means a run where nothing settles fails on the assertion that
+            // names the split instead of on how busy the venue was.
+            await indexerDatabase.waitForCoinpayObligation(
+                { actionIndex: obligations[0], coinpayStatus: 'fulfilled' }, 60000)
 
             const settled = []
             for (const ai of obligations){

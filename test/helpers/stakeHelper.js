@@ -10,6 +10,23 @@
 
 const transactionHelper = require('../transactionHelper')
 
+// Blocks to mine after a STAKE before that stake can be SELECTED into an
+// attestation request's responsible set.
+//
+// Two delays compose here, and mining only the first is the trap: the stake becomes
+// ACTIVE at stakeBlock + ACTIVATION_DELAY_BLOCKS (6 on BTC), but
+// _computeResponsibleSet resolves the capability snapshot at the REQUEST's block
+// BURIED by CANONICAL_REORG_BUFFER (another 6; xchain-indexer
+// snapshot_reorg_buffer.js), matching where the hub's CapabilitySnapshot resolves it.
+// So a request at height H sees only stakes active at H-6, and the first height that
+// can select a stake landing at S is S+6+6.
+//
+// Getting this wrong does not fail softly. An attestation request whose responsible
+// set is smaller than its REDUNDANCY is REJECTED at admission, the rejected emission
+// throws, and the EXECUTE that emitted it rolls back to a failed status - so the
+// visible symptom is an EXECUTE with no valid execution row, nowhere near the stake.
+const ATTESTATION_STAKE_VISIBLE_BLOCKS = 14 // 6 activation + 6 burial + 2 margin
+
 // Poll until a stake/unstake row with the given txHash appears (any status).
 // Used by negative-path tests that need to read back an invalid-status row.
 async function waitForAnyStake({source, signingPubkey, txHash}, timeMax = 60000){
@@ -57,6 +74,7 @@ async function waitForAnyRewardClaim({source, txHash}, timeMax = 60000){
 }
 
 module.exports = {
+    ATTESTATION_STAKE_VISIBLE_BLOCKS,
     // Negative-path helpers: return the row regardless of status so the
     // test can assert against the specific rejection reason.
     waitForAnyStake,

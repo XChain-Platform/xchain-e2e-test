@@ -33,6 +33,7 @@
 
 const { expect } = require('chai');
 const { makeSdk, submit, fundedSdkAddress, fundedGasAddress, mine, uniqueTick, submitOpts } = require('./sdkHelper');
+const { waitForTxIndexed } = require('../helpers/indexerWait');
 
 // Pull the created action's on-chain action_index out of a submitAction
 // result. A VOTE tx carries exactly one action, so actions[0] is it; the
@@ -177,10 +178,15 @@ describe('[sdk] VOTE token-weighted governance', function () {
                 submitOpts({ wif: outsider.wif, requireValid: false })
             );
             console.log('    [sdk] non-holder ballot SDK status=' + (res.indexed && res.indexed.status));
-            // Give the indexer a beat to process, then confirm the gate held:
-            // still exactly the three valid ballots, the rejected one a no-op.
+            // The SDK status came from the explorer, which may answer from a
+            // DIFFERENT indexer than the DB read below, so it cannot stand in for
+            // "this DB processed the ballot". That DB's own actions row for the
+            // ballot tx can: it is written whether the action indexes valid or
+            // invalid, so its presence IS the gate's verdict being final. Wait on
+            // it rather than a fixed beat, then confirm the gate held: still
+            // exactly the three valid ballots, the rejected one a no-op.
             await mine(1);
-            await new Promise(r => setTimeout(r, 1500));
+            await waitForTxIndexed(res.txid);
             const votes = await dbQuery('SELECT * FROM votes WHERE poll_index = ?', [pollIndex]);
             expect(votes.length, 'votes row count unchanged (non-holder rejected)').to.equal(3);
         });
