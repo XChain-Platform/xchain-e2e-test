@@ -72,13 +72,18 @@ describe('consensus hash conformance: sync BlockHasher == indexer committed hash
         }
         const pool = global.indexerDatabase.pool;
         // BlockHasher needs a `doQuery(sql, params)` over the INDEXER db.
-        dbAdapter = {
-            doQuery: async (sql, params) => {
-                const conn = await pool.getConnection();
-                try { return await conn.query(sql, params); }
-                finally { conn.release(); }
-            }
+        //
+        // doQueryStrict is the same read here on purpose. The follower Database draws
+        // the distinction so a swallowed error cannot commit a partial row set, and
+        // this adapter never swallows: conn.query rejects straight through. Carrying
+        // both names means a sync read that moves from one to the other (M-17 did
+        // exactly that) does not take this probe out with a TypeError.
+        const read = async (sql, params) => {
+            const conn = await pool.getConnection();
+            try { return await conn.query(sql, params); }
+            finally { conn.release(); }
         };
+        dbAdapter = { doQuery: read, doQueryStrict: read };
         hasher = new BlockHasher(dbAdapter, new SyncUtility());
 
         // Native-fee venues (LTC/DOGE) pay protocol fees as chain outputs, so a
@@ -178,15 +183,16 @@ describe('state commitment conformance: sync block_merkle_root == indexer commit
             this.skip();
         }
         const pool = global.indexerDatabase.pool;
-        dbAdapter = {
-            doQuery: async (sql, params) => {
-                const conn = await pool.getConnection();
-                try { return await conn.query(sql, params); }
-                finally { conn.release(); }
-            }
+        const read = async (sql, params) => {
+            const conn = await pool.getConnection();
+            try { return await conn.query(sql, params); }
+            finally { conn.release(); }
         };
-        // computeBlockMerkleRoot reads its rows via db.getBlockLeafRows; bind the
-        // follower Database method onto the read-only adapter (it only doQuery's).
+        // Both names, for the reason given on the first adapter above.
+        dbAdapter = { doQuery: read, doQueryStrict: read };
+        // computeBlockMerkleRoot reads its rows via db.getBlockLeafRows, which reads
+        // through doQueryStrict since the M-17 hardening; bind the follower Database
+        // method onto the read-only adapter.
         dbAdapter.getBlockLeafRows = SyncDatabase.prototype.getBlockLeafRows.bind(dbAdapter);
         rootRows = await dbAdapter.doQuery(
             'SELECT block_index, block_merkle_root FROM state_tree_roots ORDER BY block_index ASC', []);
