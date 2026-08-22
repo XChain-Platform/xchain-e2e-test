@@ -22,7 +22,7 @@ End-to-end Mocha test suite for the XChain Platform. Exercises the full platform
 - **Full transaction lifecycle:** BIP39/BIP32 wallet generation, regtest funding, PSBT construction, signing, broadcast, mining, indexer verification
 - **7 service connectors:** BlockchainConnector, XChainUtxoTrackerConnector, XChainEncoderConnector, XChainIndexerConnector, XChainHubConnector, RegtestMinerConnector, and MariaDB Database class
 - **Hub auto-discovery:** falls back to xchain-hub for service endpoint resolution when env vars are not set
-- **Multi-chain support:** Bitcoin, Litecoin, and Dogecoin on regtest
+- **Multi-chain support:** Bitcoin, Litecoin, and Dogecoin today on regtest
 - **P2SH two-step encoding:** automatic detection and handling of two-transaction P2SH flows for messages exceeding 76 bytes
 - **Database polling assertions:** 30+ `waitFor*` methods that poll the indexer MariaDB until ACTION records appear, with configurable timeouts and performance tracking
 - **UTXO verification cache:** tracks confirmed UTXOs between transactions to avoid stale mempool entries
@@ -32,7 +32,7 @@ End-to-end Mocha test suite for the XChain Platform. Exercises the full platform
 - **SDK-driven tests:** action lifecycle tests via the bundled `xchain-sdk` local package, including chunked DEPLOY, x402, MCP, and ticker-ID equivalence
 - **Security tests:** VM sandbox escape, policy enforcement, and input validation suites against the live regtest stack
 - **Codec unit tests:** standalone encoder/decoder wire-format tests with no services required
-- **Multi-chain parity tests:** cross-chain ledger-hash and state consistency checks across Bitcoin, Litecoin, and Dogecoin
+- **Multi-chain parity tests:** cross-chain ledger-hash and state consistency checks across Bitcoin, Litecoin, and Dogecoin today
 - **Mutation testing:** Stryker Mutator with two-phase config (Phase 1: unit only; Phase 2: unit + integration)
 - **1777+ tests:** actions, unit, integration, e2e, federation, sdk, smoke, boundary, fuzz, chaos, regression, security, codec, parity, mutation, and performance
 
@@ -134,7 +134,7 @@ npm run test:regression:p0
 | Federation | ~16 | Multi-hub PBFT round-trip: quorum, consensus state buffering, LLM/http_get attestation providers |
 | SDK | ~279 | Action lifecycle via the bundled `xchain-sdk` package: chunked DEPLOY, x402, MCP, ticker-ID equivalence |
 | Codec | ~19 | Standalone encoder/decoder wire-format tests, no services required |
-| Parity | ~3 | Cross-chain ledger-hash and state consistency across Bitcoin, Litecoin, and Dogecoin |
+| Parity | ~3 | Cross-chain ledger-hash and state consistency across Bitcoin, Litecoin, and Dogecoin today |
 | Mutation | 2 phases | Stryker Mutator: Phase 1 (unit), Phase 2 (unit + integration) |
 | Performance | 3 modes | Custom Mocha reporter, bootstrap timing, poll instrumentation |
 | Actions | ~226 | Full action tests against live regtest (ISSUE, SEND, MINT, etc.) |

@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-08-22
+
+Joins the platform version stream. This component moves from `0.3.9` to
+`0.10.0`. **The number is higher but nothing was skipped**: the platform stream
+names the train a component shipped in, and this component shipped in v0.10.0.
+Versions below this line are its own legacy stream and are not comparable.
+
+### Changed
+- Adopted the platform version stream, so the version now matches the `v0.10.0` train tag.
+- Sibling checkouts resolve at the release branch when CI builds a release PR, so a train's version bumps are visible to the staged-snapshot guard.
+
+### Fixed
+- The staged lockfile snapshot records the train's `xchain-hub` version rather than a superseded one.
+- The state-commitment conformance probe carries `doQueryStrict`, which the follower's read path moved to; it previously failed on every coin.
+- The batch cost-weighting pair is gated on segwit support, so it no longer attempts a native-segwit address on Dogecoin.
+
 ## [0.3.9] - 2026-08-13
 
 ### Fixed
