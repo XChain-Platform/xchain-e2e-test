@@ -35,6 +35,7 @@ const batchHelper = require('../helpers/batchHelper')
 const gasHelper = require('../helpers/gasHelper')
 const vmHelper = require('../helpers/vmHelper')
 const nativeFeeHelper = require('../helpers/nativeFeeHelper')
+const envelopeHelper = require('../helpers/envelopeHelper')
 
 const WEIGHT_BUDGET  = 250
 const VM_WEIGHT      = 30   // DEPLOY, EXECUTE, XEXEC
@@ -213,6 +214,14 @@ describe('BATCH cost weighting (BATCH_COST_WEIGHTING)', function () {
     })
 
     describe('A2: ordinary sub-commands still weigh 1 each', function () {
+
+        // Both cases fund a SEGWIT source, because the envelope commit's inputs must
+        // all be segwit (§3.5). DOGE has no segwit at all, so p2wpkh cannot even be
+        // encoded there (bech32 throws on the absent network prefix) and the pair is
+        // unrunnable rather than failing. Same gate the envelope suites use.
+        beforeEach(function () {
+            if (!envelopeHelper.envelopeSupported()) this.skip()
+        })
 
         it('lands one parent plus 249 dotted children (weight 250, at budget)', async function () {
             // Segwit-funded: the envelope commit's inputs must be segwit (§3.5).
