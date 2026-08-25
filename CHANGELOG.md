@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-08-25
+
+### Changed
+- Clarified in the README that Bitcoin, Litecoin, and Dogecoin are the coins the platform runs today, not the definition of the platform.
+
+### Fixed
+- Updated the BTC mainnet reward pool address in the vendored coin bundles.
+- Corrected the vendored coin bundles' fee-destination comment to say the override is regtest-only.
+- Re-pinned the BTC, LTC, and DOGE testnet genesis heights to match the platform's fresh testnet genesis.
+- Corrected the NODEPROOF documentation to describe the reward-only validator model.
+
 ## [0.10.0] - 2026-08-22
 
 Joins the platform version stream. This component moves from `0.3.9` to
