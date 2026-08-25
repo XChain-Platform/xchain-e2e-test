@@ -676,6 +676,61 @@ describe('checkList()', function () {
         const itemSql = conn2.query.firstCall.args[0]
         assert.ok(itemSql.includes('index_tickers'))
     })
+
+    // LIST gained MEMO on the wire and a memo_id column on the lists table, but this
+    // checker joined neither, so waitForList({memo}) was a silent no-op: a wrong,
+    // dropped or unlinked LIST memo was unobservable end to end.
+    describe('memo support', function () {
+        function wireOneListRow(listRow, itemRows){
+            const conn1 = { query: sinon.stub().resolves([listRow]), release: sinon.stub().resolves() }
+            const conn2 = { query: sinon.stub().resolves(itemRows), release: sinon.stub().resolves() }
+            mockPool.getConnection.onFirstCall().resolves(conn1)
+            mockPool.getConnection.onSecondCall().resolves(conn2)
+            return conn1
+        }
+
+        it('projects the memo through the index_memos join', async function () {
+            const conn1 = wireOneListRow({ id: 1, action_index: 42, type: 1, memo: 'hello' }, [{ item_name: 'TICK' }])
+
+            const result = await db.checkList({ type: 1, items: ['TICK'] })
+
+            const sql = conn1.query.firstCall.args[0]
+            assert.ok(sql.includes('LEFT JOIN index_memos im ON im.id = l.memo_id'), 'joins index_memos on l.memo_id')
+            assert.ok(sql.includes('im.memo AS memo'), 'projects the memo column')
+            assert.strictEqual(result.memo, 'hello')
+        })
+
+        it('binds a non-empty memo as an equality filter', async function () {
+            const conn1 = wireOneListRow({ id: 1, action_index: 42, type: 1, memo: 'hello' }, [{ item_name: 'TICK' }])
+
+            await db.checkList({ type: 1, memo: 'hello', items: ['TICK'] })
+
+            const [sql, values] = conn1.query.firstCall.args
+            assert.ok(sql.includes('im.memo = ?'), 'emits the equality clause')
+            assert.ok(values.includes('hello'), 'binds the memo value')
+        })
+
+        it('treats an empty memo as the NULL the indexer stores', async function () {
+            const conn1 = wireOneListRow({ id: 1, action_index: 42, type: 1, memo: null }, [{ item_name: 'TICK' }])
+
+            await db.checkList({ type: 1, memo: '', items: ['TICK'] })
+
+            const [sql, values] = conn1.query.firstCall.args
+            assert.ok(sql.includes('im.memo IS NULL'), 'an empty memo asserts NULL, not an empty string')
+            assert.ok(!values.includes(''), 'nothing is bound for the NULL check')
+        })
+
+        it('filters listActionIndex against the l alias this query actually declares', async function () {
+            const conn1 = wireOneListRow({ id: 1, action_index: 42, type: 1 }, [{ item_name: 'TICK' }])
+
+            await db.checkList({ type: 1, listActionIndex: 7, items: ['TICK'] })
+
+            const [sql, values] = conn1.query.firstCall.args
+            assert.ok(sql.includes('l.list_action_index = ?'), 'uses the bound alias')
+            assert.ok(!/\bb\.list_action_index\b/.test(sql), 'no unbound b alias')
+            assert.ok(values.includes(7))
+        })
+    })
 })
 
 describe('_waitFor()', function () {

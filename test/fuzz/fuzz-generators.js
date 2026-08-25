@@ -179,7 +179,7 @@ const addressOptionFilterArb = filterObjectArb([
 ])
 
 const listFilterArb = filterObjectArb([
-    'blockIndex', 'txHash', 'source', 'type', 'edit', 'listActionIndex', 'status', 'items'
+    'blockIndex', 'txHash', 'source', 'type', 'edit', 'listActionIndex', 'memo', 'status', 'items'
 ])
 
 const airdropFilterArb = filterObjectArb([

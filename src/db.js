@@ -568,7 +568,7 @@ class Database {
 
     async waitForList(listObject, timeMax = 60000){ return this._waitFor(this.checkList, listObject, timeMax) }
     
-    async checkList({blockIndex,txHash,source,type,edit,listActionIndex,status,items}){
+    async checkList({blockIndex,txHash,source,type,edit,listActionIndex,memo,status,items}){
         let whereClauses = []
         let whereValues = []
         
@@ -593,16 +593,29 @@ class Database {
             whereValues.push(edit)
         }
         if (listActionIndex != null){
-            whereClauses.push("b.list_action_index = ?")
+            // Alias is `l`; there is no `b` in this query, so the old `b.` prefix made
+            // every listActionIndex filter throw and return null instead of asserting.
+            whereClauses.push("l.list_action_index = ?")
             whereValues.push(listActionIndex)
+        }
+        if (memo != null){
+            // The indexer stores an absent or empty LIST memo as memo_id NULL
+            // (xchain-indexer createMemo returns null for '' via util.isNull), so an
+            // asserted empty memo is a NULL check, matching checkMint.
+            if (memo == ''){
+                whereClauses.push("im.memo IS NULL")
+            } else {
+                whereClauses.push("im.memo = ?")
+                whereValues.push(memo)
+            }
         }
         if (status != null){
             whereClauses.push("ist.status = ?")
             whereValues.push(status)
         }
-         
+
         const query = `
-            SELECT 
+            SELECT
                 tr.block_index AS block_index,
                 itx.hash AS tx_hash,
                 l.action_index,
@@ -610,12 +623,14 @@ class Database {
                 l.type,
                 l.edit,
                 l.list_action_index,
-                ist.status AS status 
+                im.memo AS memo,
+                ist.status AS status
             FROM lists l
             LEFT JOIN actions act ON act.action_index = l.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
             LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
             LEFT JOIN index_addresses ia ON ia.id = tr.source_id
+            LEFT JOIN index_memos im ON im.id = l.memo_id
             LEFT JOIN index_statuses ist ON ist.id = l.status_id
         `+"WHERE "+whereClauses.join(" AND ");
         
