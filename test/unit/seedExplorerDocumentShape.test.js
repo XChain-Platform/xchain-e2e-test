@@ -291,7 +291,10 @@ describe('seed-contract-state explorerField: documents, not scalars', function (
             const err = await realTimeout();
             assert.strictEqual(err.code, 'CONFIRMATION_TIMEOUT');
             assert.strictEqual(err.details.txid, TX);
-            assert.ok(/Timed out waiting for transaction c{64} to be indexed/.test(err.message), err.message);
+            // Message reworded when the SDK started distinguishing
+            // broadcast-but-not-yet-indexed from a real failure; the recovery
+            // keys on the code and txid above, the message is advisory.
+            assert.ok(/Transaction c{64} was not indexed within \d+ms/.test(err.message), err.message);
         });
 
         it('a transaction that IS indexed: the run CONTINUES', async function () {

@@ -121,14 +121,34 @@ cmd_up() {
     docker start "$PARITY_CONTAINER" >/dev/null
 
     echo "== code identity check"
-    local a b
-    a=$(docker exec "$SRC_CONTAINER" sh -c 'find /XChainIndexer/src -type f -name "*.js" | sort | xargs cat | sha256sum' | cut -d' ' -f1)
-    b=$(docker exec "$PARITY_CONTAINER" sh -c 'find /XChainIndexer/src -type f -name "*.js" | sort | xargs cat | sha256sum' | cut -d' ' -f1)
-    if [ "$a" != "$b" ]; then
-        echo "   MISMATCH: node A src $a != node B src $b" >&2
+    # Hash the WHOLE src tree, as a sorted per-file manifest of path + content. Two
+    # reasons this is not a *.js filter over concatenated bytes any more:
+    #   - the filter skipped the 185 files under src/sql/ (per-table DDL) and
+    #     src/sql/migrations/ that xchain-indexer's db.js loads at startup, so the
+    #     two nodes could be running different table schemas and still pass;
+    #   - `xargs cat | sha256sum` hashes contents only, so a rename, a move or a
+    #     file split between the trees produced an identical digest.
+    # Unfiltered find + per-file manifest is the convention the platform's other
+    # tree-identity gates already use (xchain-indexer/bin/vendor-vm.sh:84).
+    # Paths are relative to /XChainIndexer so the manifest compares across containers.
+    local a b na nb
+    local hash_cmd='cd /XChainIndexer && find src -type f | LC_ALL=C sort | xargs sha256sum | sha256sum'
+    local count_cmd='cd /XChainIndexer && find src -type f | wc -l'
+    # An empty (or missing) tree hashes identically on BOTH sides, so a vacuous gate
+    # is indistinguishable from a passing one. Refuse rather than report parity.
+    na=$(docker exec "$SRC_CONTAINER" sh -c "$count_cmd" | tr -cd '0-9')
+    nb=$(docker exec "$PARITY_CONTAINER" sh -c "$count_cmd" | tr -cd '0-9')
+    if [ "${na:-0}" -lt 1 ] || [ "${nb:-0}" -lt 1 ]; then
+        echo "   REFUSING: src files node A=${na:-0} node B=${nb:-0}; an empty tree passes any digest comparison" >&2
         exit 1
     fi
-    echo "   both nodes run src sha256 ${a:0:16}..."
+    a=$(docker exec "$SRC_CONTAINER" sh -c "$hash_cmd" | cut -d' ' -f1)
+    b=$(docker exec "$PARITY_CONTAINER" sh -c "$hash_cmd" | cut -d' ' -f1)
+    if [ "$a" != "$b" ]; then
+        echo "   MISMATCH: node A src $a ($na files) != node B src $b ($nb files)" >&2
+        exit 1
+    fi
+    echo "   both nodes run src sha256 ${a:0:16}... ($na files, .sql schema included)"
 
     docker exec "$DB_CONTAINER" rm -f "$CNF" || true
     echo "== node B is up; give it a minute to catch up, then:"

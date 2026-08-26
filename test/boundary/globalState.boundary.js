@@ -129,11 +129,11 @@ describe('Boundary: Global State & Service Discovery', function () {
             assert.strictEqual(CryptoNetworks.getFirstBlock('bitcoin-mainnet'), 950000)
         })
 
-        // Repinned by the 2026-08-10 testnet re-genesis (vendored here as 5c41cec),
-        // which raised BTC testnet firstBlock 138000 -> 147500 to match the unit
+        // Repinned by the 2026-08-24 pre-announcement testnet re-genesis, which
+        // raised BTC testnet firstBlock 147500 -> 149700 to match the unit
         // suite's twin assertion.
-        it('returns 147500 for bitcoin-testnet', function () {
-            assert.strictEqual(CryptoNetworks.getFirstBlock('bitcoin-testnet'), 147500)
+        it('returns 149700 for bitcoin-testnet', function () {
+            assert.strictEqual(CryptoNetworks.getFirstBlock('bitcoin-testnet'), 149700)
         })
 
         it('returns 0 for bitcoin-regtest', function () {

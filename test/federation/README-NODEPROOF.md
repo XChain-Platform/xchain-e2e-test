@@ -2,12 +2,17 @@
 
 End-to-end proof of the verified-full-node tier (`NODEPROOF.md`) on a live
 regtest federation: two FULL validators (each with a coin node) get verified by
-the possession challenge; a LIGHT validator (no coin node) cannot answer and is
-excluded + slash-proposed.
+the possession challenge; a LIGHT validator (no coin node) cannot answer, so it
+accrues no passing epochs and earns no full-node tranche.
 
-> **Status:** authored against the existing `MultiValidatorHub` harness;
-> **not yet run** (needs the regtest stack + a coin-node RPC, which the dev Mac
-> doesn't host). Expect to shake out minor fixups on first venue run.
+The tier is REWARD-ONLY. A validator that does not run a coin node is never
+penalised for it: no failed-challenge slash exists, and its stake is untouched.
+Eligibility is a participation RATE over a trailing window, so a single missed
+epoch costs nothing.
+
+> **Status:** venue-green on a live regtest federation. Needs the regtest stack
+> plus a coin-node RPC, which a dev Mac does not host, so it skips without
+> `FULLNODE_BTC_RPC_URL`.
 
 ## Prerequisites (venue: regtest)
 
@@ -45,8 +50,9 @@ FULLNODE_BTC_RPC_URL='http://user:pass@127.0.0.1:18443' npm run test:federation:
 ### Asserts
 - `full_node_verifications` has `passed=1` rows for **both full** pubkeys.
 - The **light** pubkey is **not** verified.
-- A `failed_full_node_challenge` `slash_proposals` row exists for the light
-  pubkey (hub-local; checked on a full hub's DB).
+- Both full pubkeys accrue at least 2 DISTINCT passing epochs (a positive
+  participation rate) while the light pubkey accrues none, so it earns no
+  tranche. No slash is asserted, because none is issued.
 
 ## Out of scope here (covered elsewhere)
 - **Two-tranche reward split** (`oracle_base` + `oracle_full_node`): a pure

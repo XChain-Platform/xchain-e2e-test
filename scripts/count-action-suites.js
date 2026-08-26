@@ -33,6 +33,10 @@ const REPO_ROOT = path.join(__dirname, '..')
 const ACTIONS_DIR = path.join(REPO_ROOT, 'test/actions')
 const TEST_ROOT = path.join(REPO_ROOT, 'test')
 const DECODER_SRC = path.join(REPO_ROOT, '../xchain-decoder/src/XChainDecoder.js')
+// The alias table moved out of XChainDecoder.js into its own leaf module to
+// break a require cycle with batchSubCommandCapture.js. Read it where it lives
+// now; the inline-literal parse below is kept only for an older sibling.
+const ALIAS_SRC = path.join(REPO_ROOT, '../xchain-decoder/src/actionAliases.js')
 
 // Leading token of an ACTION payload literal: "ISSUE|0|...", `SEND|${v}|...`,
 // "BATCH|" + version + ... . The delimiter class after the pipe keeps ordinary
@@ -54,9 +58,61 @@ const FALLBACK_ACTION_NAMES = [
     'SWEEP', 'UNSTAKE', 'VOTE', 'WITHDRAW'
 ]
 
-// Reads the decoder's action vocabulary by parsing the source rather than by
-// requiring it: the script has to stay side-effect free and dependency free so
-// docs tooling can run it in a bare checkout.
+// Fallback alias table, same contract as FALLBACK_ACTION_NAMES: used only when
+// the sibling decoder checkout is absent. Without it a standalone clone folds
+// nothing and drops any suite that spells an action in short form, which is the
+// silent under-count this whole script exists to prevent.
+const FALLBACK_ACTION_ALIASES = {
+    TRANSFER: 'SEND',
+    ADDR: 'ADDRESS',
+    DROP: 'AIRDROP',
+    CAST: 'BROADCAST',
+    MSG: 'MESSAGE'
+}
+
+// Loads the decoder's short-form alias table. Requiring is safe here where
+// requiring the decoder itself is not: actionAliases.js is a leaf (one object
+// literal and a module.exports, no requires, no side effects), while
+// XChainDecoder.js would pull in its whole dependency tree.
+//
+// Fails LOUDLY when the sibling is present but the table cannot be read. The
+// regression this replaces did the opposite: the inline-literal regex stopped
+// matching after the table moved, aliases silently became {}, and the count
+// gate kept reporting a number with its alias folding dead.
+function readDecoderAliases(decoderSrc) {
+    if (fs.existsSync(ALIAS_SRC)) {
+        const table = require(ALIAS_SRC)
+        if (table && typeof table === 'object' && Object.keys(table).length > 0) {
+            return { aliases: { ...table }, aliasSource: 'xchain-decoder actionAliases.js' }
+        }
+    }
+
+    // Older sibling checkout, before the table moved out of XChainDecoder.js.
+    const aliasBlock = decoderSrc.match(/const ACTION_ALIASES = \{([\s\S]*?)\n\}/)
+    if (aliasBlock) {
+        const aliases = {}
+        for (const m of aliasBlock[1].matchAll(/'([A-Z][A-Z0-9]*)'\s*:\s*'([A-Z][A-Z0-9]*)'/g)) {
+            aliases[m[1]] = m[2]
+        }
+        if (Object.keys(aliases).length > 0) {
+            return { aliases, aliasSource: 'xchain-decoder XChainDecoder.js inline literal' }
+        }
+    }
+
+    throw new Error(
+        'count-action-suites: the sibling decoder checkout is present but its ACTION_ALIASES table ' +
+        'could not be read from ' + ALIAS_SRC + ' or as an inline literal in ' + DECODER_SRC + '. ' +
+        'The table moved or changed shape; update this script rather than counting with no aliases, ' +
+        'because an unfolded alias is dropped from the published figure with no error.'
+    )
+}
+
+// Reads the decoder's action vocabulary. VALID_ACTION_NAMES is parsed out of
+// the source rather than required, because requiring XChainDecoder.js would
+// pull in its whole dependency tree and this script must stay side-effect free
+// and dependency free so docs tooling can run it in a bare checkout. The alias
+// table is loaded from its own leaf module instead (see readDecoderAliases):
+// parsing it was what silently broke when the table moved.
 function readDecoderVocabulary() {
     if (!fs.existsSync(DECODER_SRC)) return null
 
@@ -67,29 +123,24 @@ function readDecoderVocabulary() {
     const names = [...namesBlock[1].matchAll(/'([A-Z][A-Z0-9]*)'/g)].map((m) => m[1])
     if (names.length === 0) return null
 
-    const aliasBlock = src.match(/const ACTION_ALIASES = \{([\s\S]*?)\n\}/)
-    const aliases = {}
-    if (aliasBlock) {
-        for (const m of aliasBlock[1].matchAll(/'([A-Z][A-Z0-9]*)'\s*:\s*'([A-Z][A-Z0-9]*)'/g)) {
-            aliases[m[1]] = m[2]
-        }
-    }
+    const { aliases, aliasSource } = readDecoderAliases(src)
 
-    return { names, aliases }
+    return { names, aliases, aliasSource }
 }
 
 function vocabulary() {
     const fromDecoder = readDecoderVocabulary()
     return {
         names: new Set(fromDecoder ? fromDecoder.names : FALLBACK_ACTION_NAMES),
-        aliases: fromDecoder ? fromDecoder.aliases : {},
-        source: fromDecoder ? 'xchain-decoder VALID_ACTION_NAMES' : 'vendored fallback list'
+        aliases: fromDecoder ? fromDecoder.aliases : { ...FALLBACK_ACTION_ALIASES },
+        source: fromDecoder ? 'xchain-decoder VALID_ACTION_NAMES' : 'vendored fallback list',
+        aliasSource: fromDecoder ? fromDecoder.aliasSource : 'vendored fallback list'
     }
 }
 
 // Collects a suite plus every test/ module it reaches through relative
 // requires; helper modules are where most payload literals actually live.
-function requireClosure(entry, seen = new Set()) {
+function requireClosure(entry, testRoot = TEST_ROOT, seen = new Set()) {
     const resolved = fs.existsSync(entry) ? entry : entry + '.js'
     if (!fs.existsSync(resolved) || seen.has(resolved)) return seen
     seen.add(resolved)
@@ -98,21 +149,24 @@ function requireClosure(entry, seen = new Set()) {
     for (const m of src.matchAll(LOCAL_REQUIRE)) {
         const target = path.resolve(path.dirname(resolved), m[2])
         const candidate = fs.existsSync(target) && fs.statSync(target).isFile() ? target : target + '.js'
-        if (candidate.startsWith(TEST_ROOT + path.sep)) requireClosure(candidate, seen)
+        if (candidate.startsWith(testRoot + path.sep)) requireClosure(candidate, testRoot, seen)
     }
     return seen
 }
 
-function countActionSuites() {
+// actionsDir/testRoot default to this repo's own tree; they are parameters only
+// so a test can drive the counter over a fixture suite and prove alias folding
+// actually happens, which nothing could express before.
+function countActionSuites({ actionsDir = ACTIONS_DIR, testRoot = TEST_ROOT } = {}) {
     const vocab = vocabulary()
-    const suites = fs.readdirSync(ACTIONS_DIR).filter((f) => f.endsWith('.test.js')).sort()
+    const suites = fs.readdirSync(actionsDir).filter((f) => f.endsWith('.test.js')).sort()
 
     const bySuite = {}
     const actions = new Set()
 
     for (const suite of suites) {
         const found = new Set()
-        for (const file of requireClosure(path.join(ACTIONS_DIR, suite))) {
+        for (const file of requireClosure(path.join(actionsDir, suite), testRoot)) {
             const src = fs.readFileSync(file, 'utf8')
             for (const m of src.matchAll(PAYLOAD_LITERAL)) {
                 const name = vocab.aliases[m[1]] || m[1]
@@ -125,6 +179,7 @@ function countActionSuites() {
 
     return {
         vocabularySource: vocab.source,
+        aliasSource: vocab.aliasSource,
         suiteFiles: suites.length,
         actions: [...actions].sort(),
         count: actions.size,
@@ -132,7 +187,7 @@ function countActionSuites() {
     }
 }
 
-module.exports = { countActionSuites, FALLBACK_ACTION_NAMES }
+module.exports = { countActionSuites, vocabulary, FALLBACK_ACTION_NAMES, FALLBACK_ACTION_ALIASES }
 
 if (require.main === module) {
     const result = countActionSuites()
@@ -141,6 +196,7 @@ if (require.main === module) {
     } else {
         console.log('ACTION test suites (one per ACTION name, versions folded in): ' + result.count)
         console.log('Vocabulary source: ' + result.vocabularySource)
+        console.log('Alias source: ' + result.aliasSource)
         console.log('Suite files scanned under test/actions/: ' + result.suiteFiles)
         console.log(result.actions.join(', '))
     }

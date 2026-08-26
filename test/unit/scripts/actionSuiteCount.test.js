@@ -24,17 +24,24 @@
 //  - PUBLISHED-FIGURE DRIFT: the docs numbers must equal what the script and a
 //    directory listing report right now, so adding a suite that the docs do not
 //    reflect fails here rather than in a reader's face.
+//  - ALIAS-FOLDING DRIFT: a suite may spell an action in short form, and the
+//    script folds it onto the canonical name before counting. That folding died
+//    silently once, when the decoder moved ACTION_ALIASES into its own module
+//    and the script's inline-literal regex stopped matching, so the guards below
+//    assert the alias table is present, equals the decoder's, and actually folds.
 //
 // The tier is hermetic on purpose: the counting rule was chosen precisely so
 // the figure needs no regtest venue to reproduce.
 
 const assert  = require('assert')
 const fs      = require('fs')
+const os      = require('os')
 const path    = require('path')
 const counter = require('../../../scripts/count-action-suites')
 
 const REPO_ROOT   = path.join(__dirname, '../../..')
 const DECODER_SRC = path.join(REPO_ROOT, '../xchain-decoder/src/XChainDecoder.js')
+const ALIAS_SRC   = path.join(REPO_ROOT, '../xchain-decoder/src/actionAliases.js')
 const DOCS_ROOT   = process.env.XCHAIN_DOCS_ROOT || path.join(REPO_ROOT, '../xchain-documentation')
 const DOCS_E2E    = path.join(DOCS_ROOT, 'components/e2e-test')
 
@@ -72,6 +79,72 @@ describe('published ACTION test-suite count', () => {
             assert.deepStrictEqual([...counter.FALLBACK_ACTION_NAMES].sort(), valid,
                 'FALLBACK_ACTION_NAMES in scripts/count-action-suites.js has drifted from the ' +
                 'decoder VALID_ACTION_NAMES set; re-vendor it')
+        })
+
+        it('the parsed alias table equals the decoder alias module', function () {
+            if (!fs.existsSync(ALIAS_SRC)) return this.skip()
+
+            const decoderAliases = require(ALIAS_SRC)
+            assert.deepStrictEqual(counter.vocabulary().aliases, { ...decoderAliases },
+                'the alias table this script reads has drifted from ' +
+                'xchain-decoder/src/actionAliases.js. It went empty once before, when the table ' +
+                'moved out of XChainDecoder.js and the inline-literal regex stopped matching; ' +
+                'an unfolded alias is dropped from the published count with no error')
+        })
+
+        it('the alias table is never empty when the decoder checkout is present', function () {
+            if (!fs.existsSync(DECODER_SRC)) return this.skip()
+
+            const vocab = counter.vocabulary()
+            assert.ok(Object.keys(vocab.aliases).length > 0,
+                'alias folding is dead: the script reported a vocabulary with no aliases while ' +
+                'the sibling decoder checkout is present')
+            assert.strictEqual(vocab.aliasSource, 'xchain-decoder actionAliases.js',
+                'the alias table silently degraded to ' + vocab.aliasSource +
+                ' while the decoder checkout is present')
+        })
+
+        it('the standalone-checkout fallback alias table matches the decoder', function () {
+            if (!fs.existsSync(ALIAS_SRC)) return this.skip()
+
+            assert.deepStrictEqual({ ...counter.FALLBACK_ACTION_ALIASES }, { ...require(ALIAS_SRC) },
+                'FALLBACK_ACTION_ALIASES in scripts/count-action-suites.js has drifted from the ' +
+                'decoder alias table; re-vendor it')
+        })
+
+        it('every alias expands to a real action name and is not one itself', function () {
+            const vocab = counter.vocabulary()
+            for (const [alias, canonical] of Object.entries(vocab.aliases)) {
+                assert.ok(vocab.names.has(canonical),
+                    'alias ' + alias + ' expands to ' + canonical + ', which is not an action name')
+                assert.ok(!vocab.names.has(alias),
+                    'alias ' + alias + ' is itself an action name, so folding it would rewrite a ' +
+                    'real action into a different one')
+            }
+        })
+
+        it('folds a short-form alias in a suite onto its canonical action', () => {
+            // The path that regressed. Counted against a fixture tree rather than
+            // the real one, because no suite here spells an action in short form,
+            // which is exactly why the dead folding stayed invisible.
+            const root = fs.mkdtempSync(path.join(os.tmpdir(), 'action-count-alias-'))
+            try {
+                const actionsDir = path.join(root, 'actions')
+                fs.mkdirSync(actionsDir)
+                fs.writeFileSync(path.join(actionsDir, 'alias.test.js'),
+                    'const payload = "MSG|0|abc"\nconst plain = "ISSUE|0|abc"\n')
+
+                const counted = counter.countActionSuites({ actionsDir, testRoot: root })
+                assert.ok(counted.actions.includes('MESSAGE'),
+                    'the MSG alias was not folded onto MESSAGE; it counted ' +
+                    JSON.stringify(counted.actions))
+                assert.ok(!counted.actions.includes('MSG'),
+                    'the raw alias token leaked into the counted set')
+                assert.ok(counted.actions.includes('ISSUE'),
+                    'the fixture counter lost a canonical action name')
+            } finally {
+                fs.rmSync(root, { recursive: true, force: true })
+            }
         })
 
         it('counts distinct ACTION names, not suite files', () => {

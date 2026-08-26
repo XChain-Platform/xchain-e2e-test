@@ -98,13 +98,13 @@ describe('CryptoNetworks', () => {
         })
 
         it('should return the canonical testnet start heights', () => {
-            // Repinned 2026-08-10 by the testnet re-genesis (xchain-decoder 1073d36,
-            // vendored here as 5c41cec): each testnet chain now starts just under its
-            // live tip. The vendored registry moved in that commit and this assertion
-            // did not, so the suite has been red since it landed.
-            assert.strictEqual(CryptoNetworks.getFirstBlock('bitcoin-testnet'), 147500)
-            assert.strictEqual(CryptoNetworks.getFirstBlock('litecoin-testnet'), 4855000)
-            assert.strictEqual(CryptoNetworks.getFirstBlock('dogecoin-testnet'), 67815000)
+            // Repinned 2026-08-24 by the pre-announcement testnet re-genesis:
+            // each testnet chain again starts just under its live tip, so the
+            // public testnet carries no pre-announcement test actions. Moved in
+            // the same wave as the vendored registry this time.
+            assert.strictEqual(CryptoNetworks.getFirstBlock('bitcoin-testnet'), 149700)
+            assert.strictEqual(CryptoNetworks.getFirstBlock('litecoin-testnet'), 4862500)
+            assert.strictEqual(CryptoNetworks.getFirstBlock('dogecoin-testnet'), 67847500)
         })
 
         it('should return 0 for regtest networks', () => {
@@ -178,18 +178,24 @@ describe('CryptoNetworks', () => {
 
         // Unknown-network error-path contract guard. The parity checks above iterate
         // only the 9 valid keys, so the unknown/empty/null path was never asserted even
-        // though the copies DISAGREE on it: the legacy switch here, xchain-utxo-tracker
-        // and xchain-regtest-miner return `undefined` (falsy, so consumers using the
+        // though the copies DISAGREE on it: the legacy switch here and
+        // xchain-regtest-miner return `undefined` (falsy, so consumers using the
         // `getBitcoinJsNetwork(x) || fallback` idiom keep working), while
-        // xchain-encoder and xchain-decoder `throw new TypeError`. Standardizing that
-        // contract fleet-wide is an open operator decision (touches encoder/decoder
-        // production code); until it is made, lock each copy's CURRENT contract so any
-        // future drift on the error path is caught instead of slipping through as it
-        // does today. `undefined` copies are also asserted not to throw.
+        // xchain-encoder, xchain-decoder and now xchain-utxo-tracker
+        // `throw new TypeError`. Standardizing that contract fleet-wide is an open
+        // operator decision (touches encoder/decoder production code); until it is
+        // made, lock each copy's CURRENT contract so any future drift on the error
+        // path is caught instead of slipping through. `undefined` copies are also
+        // asserted not to throw.
+        //
+        // utxo-tracker moved undefined -> throws on 2026-08-25, deliberately: bitcoinjs-lib
+        // reads an undefined network as BTC MAINNET, so the falsy-fallback idiom turns a
+        // typo'd network into real mainnet parameters. This guard caught that change,
+        // which is what it is for; the row records the new contract rather than reverting it.
         const UNKNOWN_INPUTS = ['ethereum-mainnet', '', null]
         // repo -> current unknown-network contract: 'undefined' or 'throws'.
         const UNKNOWN_CONTRACT = {
-            'xchain-utxo-tracker': 'undefined',
+            'xchain-utxo-tracker': 'throws',
             'xchain-regtest-miner': 'undefined',
             'xchain-encoder': 'throws',
             'xchain-decoder': 'throws',
