@@ -221,7 +221,7 @@ function byzantineScaleSuite({ count, quorum, faults, basePort, peerWaitMs }) {
             assert.notStrictEqual(before.GAS_PRICE, forgedValue, 'precondition: forged value not already set');
 
             await target.consensus._handlePrePrepare(
-                forgedPrePrepare(seq, { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: forgedValue } } } }, seed.blockIndex)
+                forgedPrePrepare(seq, { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: forgedValue } } } }, seed.blockIndex, target.consensus.validatorSet[0])
             );
 
             assert.ok(!target.consensus.pendingProposals.has(seq),
@@ -245,9 +245,14 @@ function byzantineScaleSuite({ count, quorum, faults, basePort, peerWaitMs }) {
             // (seq, view) with a registered sender. An equivocating leader is still
             // the LEGITIMATE leader; it just emits two conflicting configs for one seq.
             const N = follower.consensus.validatorSet.length;
-            const leaderAddr = follower.consensus.validatorSet[(seq + view) % N].addr;
+            const leader = follower.consensus.validatorSet[(seq + view) % N];
+            // Carries the leader's SIGNING KEY as well as its address: admission is
+            // keyed on the proven key, which transport stamps and verifies before a
+            // handler runs. Injecting into the handler skips that, so the fixture
+            // supplies it, otherwise the envelope is unattributable and dropped.
             const env = (digest, config) => ({
-                sender: leaderAddr,
+                sender: leader.addr,
+                sig_pubkey: leader.pubkey,
                 data: { seq, view, configDigest: digest, config, btcBlockHeight: seed.blockIndex }
             });
 
