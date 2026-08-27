@@ -38,20 +38,27 @@
  * Comparing those two would be comparing two different quantities on a key AT2
  * explicitly names. Both sides here reconstruct through the same path.
  *
- * WHAT BLOCKS THIS TODAY, measured and not inferred. On any non-BTC chain the
- * indexer resolves the `price` capability set from its own `stakes` table, and
- * capability staking is BTC-only (`CAPABILITIES: {}` in
- * xchain-indexer/src/coins/DOGE.js); the hub-mirrored `capability_snapshots`
- * fallback covers only `cross_chain` and `oracle_publish`. Every PRICE landing
- * on DOGE therefore qualifies zero signers and records
- * `invalid: insufficient signer stake`, and an invalid PRICE pushes nothing, so
- * a replayed chain reconstructs NOTHING. That is a real gap in section 2's
- * chain-as-backup-of-last-resort, not a fault of this rig, and this suite is
- * built to say so precisely: when reconstruction is empty it names the verdict
- * every PRICE received and how many received it, rather than reporting a vague
- * mismatch. Nothing here is stubbed or skipped past to manufacture a pass, and
- * nothing needs editing when the capability gap closes: the same assertions turn
- * green on their own.
+ * WHAT THE CLAIM IS SCOPED TO, and why the scope is the architecture rather than
+ * a caveat. Chain-only reconstruction REQUIRES the node to also run a Bitcoin
+ * indexer. Capability staking is Bitcoin-only by design, so a node with no
+ * Bitcoin view legitimately cannot resolve who was eligible to sign a batch: the
+ * qualifying `price` set is anchored to a Bitcoin height, the hub reads it from a
+ * BTC indexer, and its indexer twin reads a mirror of that same Bitcoin-anchored
+ * set. Inventing a second trust path for validator identity that does not go
+ * through Bitcoin would be worse than scoping the claim, so a Bitcoin indexer is
+ * a stated PRECONDITION of "chain as backup of last resort", not a workaround
+ * for a gap in it.
+ *
+ * Both nodes here are therefore built with one: a real BTC indexer as their
+ * capability oracle, verified to report Bitcoin for itself before either node is
+ * trusted, with the hub's own coin check left ON. Nothing is stubbed or skipped
+ * past to manufacture a pass, no guard is disabled, and the two halves of the
+ * comparison are configured identically, which is what keeps the comparison
+ * sound.
+ *
+ * WHEN IT IS STILL RED, this suite names the rung rather than reporting a vague
+ * mismatch: which of parse, signer resolution, push and mirror the reconstruction
+ * stopped at, the verdict every PRICE received, and how many received it.
  ********************************************************************/
 
 'use strict';
@@ -260,8 +267,10 @@ describe('AT2: a fresh indexer with its own empty hub and no peers rebuilds pric
         // --- 3. the live node absorbs them, then the federation goes away ---
         await liveNode.waitForHeight(targetHeight);
         // The reconstruction is asynchronous relative to the block loop (the push
-        // outbox delivers post-commit), so give the mirror a moment to settle
-        // before reading. A quiet failure to reconstruct still reads as zero.
+        // outbox delivers post-commit), so wait for the node's own outbox to empty
+        // and then let the mirror settle. A quiet failure to reconstruct still reads
+        // as zero, and an outbox that never drains still reports its rows.
+        await liveNode.waitForPushDrain();
         await new Promise((r) => setTimeout(r, 15_000));
 
         liveSnaps  = await liveNode.hubPriceSnapshots({ rounds: rounds.map((r) => r.round) });
@@ -285,6 +294,7 @@ describe('AT2: a fresh indexer with its own empty hub and no peers rebuilds pric
 
         console.log('  AT2: replay node built; replaying the chain to block ' + targetHeight + '...');
         await replayNode.waitForHeight(targetHeight);
+        await replayNode.waitForPushDrain();
         await new Promise((r) => setTimeout(r, 15_000));
 
         replaySnaps   = await replayNode.hubPriceSnapshots({ rounds: rounds.map((r) => r.round) });
@@ -312,6 +322,11 @@ describe('AT2: a fresh indexer with its own empty hub and no peers rebuilds pric
         console.log('  replay target block       : ' + targetHeight);
         console.log('  live node   isolation     : ' + JSON.stringify(liveIsolation));
         console.log('  replay node isolation     : ' + JSON.stringify(replayIsolation));
+        // The Bitcoin oracle each node judged with, named with the height it was
+        // actually asked at. Chain-only reconstruction is scoped to a node that has
+        // one, so a run that does not say which one it used has not made the claim.
+        console.log('  live   BTC cap. oracle    : ' + JSON.stringify(liveNode.btcOracleEvidence()));
+        console.log('  replay BTC cap. oracle    : ' + JSON.stringify(replayNode.btcOracleEvidence()));
         console.log('  live node   PRICE actions : ' + livePrices.length + ' -> ' + describeHistogram(histogram(livePrices, 'status')));
         console.log('  replay node PRICE actions : ' + replayPrices.length + ' -> ' + describeHistogram(histogram(replayPrices, 'status')));
         console.log('  live node   snapshots     : ' + liveSnaps.length);
@@ -381,11 +396,10 @@ describe('AT2: a fresh indexer with its own empty hub and no peers rebuilds pric
         // only rebuild what a live chain accepted, and the path from a landed wire to
         // a mirrored snapshot has four rungs. Walking them in order turns "AT2 is
         // still red" into a statement the next session can read as progress or as a
-        // regression, which matters while the `price` capability fix is only
-        // partially landed (the resolver consults the mirrored snapshot behind a
-        // gate, but the parser does not yet pass the block time, still resolves at
-        // the LANDING chain's height instead of the Bitcoin anchor, and the hub never
-        // persists a price snapshot for the mirror to serve).
+        // regression, and each rung names the store the set it needs comes from,
+        // because the node's two judges read two different ones: the INDEXER resolves
+        // the Bitcoin-anchored set from its hub-mirrored capability_snapshots, and the
+        // HUB resolves it by asking its Bitcoin capability oracle.
         const byStatus = histogram(livePrices, 'status');
         const gapCount = byStatus[CAPABILITY_GAP_STATUS] || 0;
         const valid    = byStatus['valid'] || 0;
@@ -397,25 +411,27 @@ describe('AT2: a fresh indexer with its own empty hub and no peers rebuilds pric
         } else if (gapCount === livePrices.length) {
             rung = 'RUNG 2 (signer resolution): every one of the ' + livePrices.length + ' PRICE action(s) it ' +
                 'indexed recorded "' + CAPABILITY_GAP_STATUS + '", so the `price` capability set resolved ' +
-                'empty at the batch anchor and weighted quorum failed closed on S=0. The node reads that set ' +
-                'from the capability_snapshots rows in its own HUB MIRROR database, which the rig supplies as ' +
+                'empty at the batch anchor and weighted quorum failed closed on S=0. This is the INDEXER\'s ' +
+                'half of the resolution, which off Bitcoin reads the Bitcoin-anchored set from the ' +
+                'capability_snapshots rows in the node\'s own HUB MIRROR database; the rig supplies them as ' +
                 'setup (oracleBatchVenue, the price capability precondition section, plus ' +
                 'oracleBatchReplay._registerPriceCapability). Check that the node registered as a target and ' +
                 'that a venue in this process actually seeded a set, before suspecting the resolver itself';
         } else if (valid > 0) {
+            const btc = liveNode.btcOracleEvidence() || {};
             rung = 'RUNG 3 (push): ' + valid + ' of the ' + livePrices.length + ' PRICE action(s) validated, ' +
-                'so signer resolution is working, but the hub still holds no snapshot for them. The push is ' +
-                'the suspect: its outbox reads ' + JSON.stringify(livePushQueue) + '. An empty outbox with ' +
-                'valid actions means the push was made and the hub refused it (PriceAggregator rejects on an ' +
-                'unresolvable validator snapshot, a duplicate, or a pair/price bound); a non-empty one means ' +
-                'delivery never succeeded. "validator snapshot unavailable" is the one refusal this rig cannot ' +
-                'answer from here, and it is not a rig gap: xchain-hub resolves the price validator set for a ' +
-                'batch from `batchData.block_index` (PriceAggregator.receiveValidatedBatch), which the indexer ' +
-                'fills with the LANDING CHAIN\'s height, then asks a BTC indexer for stake weights at that ' +
-                'height less the 6-block reorg buffer. capability_snapshots.snapshot_block is a BTC height and ' +
-                'the indexer twin keys on the batch\'s BTC anchor, so off BTC the two can never name the same ' +
-                'block. Seeding rows at a landing-chain height to make this pass would be faking BTC-anchored ' +
-                'data, so this rung waits on the hub keying its snapshot on btc_block_height';
+                'so signer resolution is working ON CHAIN, but the hub still holds no snapshot for them. The ' +
+                'push is the suspect: its outbox reads ' + JSON.stringify(livePushQueue) + '. An empty outbox ' +
+                'with valid actions means the push was made and the hub refused it (PriceAggregator rejects on ' +
+                'an unresolvable validator snapshot, a duplicate, or a pair/price bound); a non-empty one means ' +
+                'delivery never succeeded. For "validator snapshot unavailable", look at the node\'s BITCOIN ' +
+                'CAPABILITY ORACLE and not at the landing chain: the hub resolves the set at the batch\'s signed ' +
+                'Bitcoin anchor less the reorg buffer, which for this run is block ' + btc.queriedHeight + ' of ' +
+                btc.url + ', where the oracle answered ' + btc.priceSetAtBuried + ' validator(s). Zero there ' +
+                'means the federation\'s stake is not visible at the BURIED height (a set that exists only at ' +
+                'the anchor itself is not found); a null snapshot with a non-zero set means the hub was refused ' +
+                'the read, which is either a missing per-capability MIN_STAKE or the hub\'s own coin check ' +
+                'rejecting the endpoint';
         } else {
             rung = 'RUNG 2 (signer resolution), mixed: the ' + livePrices.length + ' PRICE action(s) it ' +
                 'indexed recorded: ' + describeHistogram(byStatus);
@@ -474,21 +490,62 @@ describe('AT2: a fresh indexer with its own empty hub and no peers rebuilds pric
             feeVerdictDiff.missing.slice(0, 10).map((m) => m.key).join(', '));
 
         // AGREEING ON NOTHING IS NOT THE PROPERTY. Two nodes that both failed every
-        // fee for want of a price agree perfectly and demonstrate nothing, and that
-        // is exactly the state the capability gap leaves them in: no PRICE validates,
-        // no snapshot is rebuilt, and getLatestPrice then has nothing to value a fee
-        // against on EITHER node. The identity above only means something once the
-        // fees were actually priced, so say so rather than bank a vacuous green.
-        const priceless = Object.keys(feeStatuses(liveVerdicts))
-            .filter((s) => /no current oracle price/.test(s))
-            .reduce((n, s) => n + feeStatuses(liveVerdicts)[s], 0);
+        // fee for want of a price agree perfectly and demonstrate nothing, and
+        // getLatestPrice has nothing to value a fee against on EITHER node whenever
+        // the reconstruction does not COVER that fee. The identity above only means
+        // something once the fees were actually priced, so say so rather than bank a
+        // vacuous green. This guard is deliberate and stays whatever the run does.
+        const pricelessStatuses = Object.keys(feeStatuses(liveVerdicts)).filter((s) => /no current oracle price/.test(s));
+        const priceless = pricelessStatuses.reduce((n, s) => n + feeStatuses(liveVerdicts)[s], 0);
+        // WHICH KIND OF VACUOUS, because the two have different fixes and a message
+        // that names the wrong one costs the next session a whole run. Rebuilding
+        // nothing is a reconstruction failure. Rebuilding something the fees cannot
+        // be valued against is a REACH failure, and the reach is bounded by time
+        // rather than by which pairs the federation chose.
+        //
+        // HOW A FEE REACHES A PRICE, stated exactly, because the obvious remedies do
+        // not work and each costs a run to disprove. `getLatestPrice` on a
+        // non-reference chain takes the newest snapshot FOR THAT PAIR whose
+        // `block_timestamp <= the action's own block time`, then rejects it when
+        // `blockTime - block_timestamp` exceeds ORACLE_MAX_PRICE_AGE (1800s). So a
+        // fee is priced only by a round for its own pair, timestamped inside a
+        // 30-minute window ending at that action's block time.
+        //
+        // MEASURED on the standing regtest chains 2026-08-27: the fee-bearing
+        // actions want <COIN>/USD for the LANDING coin, this venue publishes its own
+        // pairs at `anchorTimeBase + round * 600`, and the two do not meet on either
+        // axis. Even matching the pair leaves the window: DOGE carries 235
+        // fee-bearing actions spread over 2,968,459 seconds of block time (LTC 1541
+        // over a comparable span), so blanketing them at 1800-second spacing needs on
+        // the order of 1650 finalized-and-published rounds against the 3 this drill
+        // publishes per run.
+        //
+        // So this is NOT closable by publishing the landing coin's pair, and NOT
+        // closable by driving fresh fee-bearing actions after the rounds land: those
+        // ADD priced coordinates, they do not reach back into the historical ones
+        // this count is made of. Publishing the landing coin's own pair is also the
+        // one thing the venue deliberately refuses, because the fee output of its own
+        // publish re-seeds that pair underneath it.
+        const rebuiltPairs = [...new Set(liveSnaps.map((r) => r.coin_pair))];
+        const roundTimestamps = liveSnaps.map((r) => Number(r.block_timestamp));
+        const roundTsRange = roundTimestamps.length > 0
+            ? Math.min(...roundTimestamps) + '..' + Math.max(...roundTimestamps) : 'none';
+        const cause = liveSnaps.length === 0
+            ? 'NOTHING was reconstructed on either node, so this is the reconstruction failing one step upstream'
+            : 'the reconstruction WORKED (' + liveSnaps.length + ' snapshot(s) on ' + rebuiltPairs.join(', ') +
+              ', round timestamps ' + roundTsRange + ') but cannot REACH these fees, which want ' +
+              pricelessStatuses.join(' / ') + '. No round was published for that pair, and matching the pair ' +
+              'alone would not be enough: a fee is priced only by a round timestamped within 1800s at or ' +
+              'before its own block time, and this chain\'s fee-bearing actions are spread over weeks of ' +
+              'block time. Closing it needs a landing chain carrying no fee history older than the rounds, ' +
+              'or an explicit decision to scope this guard to the coordinates the reconstruction covers. ' +
+              'Neither is a change to this assertion';
         assert.strictEqual(priceless, 0,
             priceless + ' of the ' + feeVerdictDiff.compared + ' fee-bearing action(s) reached the SAME verdict on ' +
             'both nodes only because neither could price the fee at all ("no current oracle price for ...", the ' +
-            'staleness guard with an empty price history behind it). That is the capability gap one step ' +
-            'downstream: with no PRICE validating, no snapshot is rebuilt, and a fee has nothing to be valued ' +
-            'against. The agreement is real but vacuous, and this assertion is what keeps it from reading as ' +
-            'proof that fee validation is chain-time rather than arrival-time.');
+            'staleness guard with no usable price behind it). ' + cause + '. The agreement is real but vacuous, ' +
+            'and this assertion is what keeps it from reading as proof that fee validation is chain-time rather ' +
+            'than arrival-time.');
     });
 
     it('every action on the chain, fee-bearing or not, replays to the identical verdict', function () {

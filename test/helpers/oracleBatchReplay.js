@@ -71,14 +71,29 @@
  * names. The drill therefore stands up a LIVE node before the publish and a
  * REPLAY node after it, both built by this class, and compares those.
  *
+ * A NODE HERE ALSO RUNS A BITCOIN VIEW, and that is a precondition rather than a
+ * convenience. Judging a PRICE batch means resolving who was eligible to sign it
+ * at the batch's own signed Bitcoin anchor, and capability staking is Bitcoin-only
+ * by design: `usesCapabilitySnapshot` sends every non-BTC indexer to its mirrored
+ * capability_snapshots, and a HUB resolves the set by asking a BTC indexer
+ * directly. So each node is given a real Bitcoin capability oracle
+ * (BTC_INDEXER_API_URL) plus the per-capability MIN_STAKE thresholds a hub needs
+ * to query it with, and the hub's own coin check on that endpoint is left ON. A
+ * node with no Bitcoin view cannot resolve validator identity at all, and
+ * inventing a second trust path that does not go through Bitcoin would be worse
+ * than scoping the claim; see _resolveBtcOracle and _writeCapabilityConfig.
+ *
  * WHAT IS REAL AND WHAT IS BORROWED:
  *   REAL   - both node processes, their databases, their schema bootstrap and
  *            migrations, the block loop, every action handler, the fee
  *            validation, the durable hub push outbox, the hub's JSON-RPC
  *            surface, PriceAggregator's signature re-verification, the
  *            hub_db_sync REST bootstrap and WebSocket mirror.
- *   BORROWED - the decoder database (the chain, parsed) and the coin node's RPC.
- *            Both are read-only here and neither carries a verdict.
+ *   BORROWED - the decoder database (the chain, parsed), the coin node's RPC, and
+ *            the standing stack's BTC indexer as the Bitcoin capability oracle.
+ *            The first two are read-only and neither carries a verdict; the third
+ *            is read-only apart from the venue's own scoped, time-boxed and
+ *            removed signer-set seed (see applyPriceCapabilityStakes).
  *
  * SERIAL, LIKE THE VENUE. A node pair costs two processes and three databases,
  * and the disposable MariaDB it puts them on is the venue's fixed-port
@@ -94,10 +109,15 @@ const mariadb   = require('mariadb');
 
 const { startDisposableHubDb } = require('./disposableHubDb');
 const { waitFor }              = require('./consensusWait');
+const { loadHubModule }        = require('./multiValidatorHubHelper');
 const XChainHubConnector       = require('../../src/XChainHubConnector.js');
+const XChainIndexerConnector   = require('../../src/XChainIndexerConnector.js');
 const {
     applyPriceCapabilityRows,
     removePriceCapabilityRows,
+    applyPriceCapabilityStakes,
+    removePriceCapabilityStakes,
+    CANONICAL_REORG_BUFFER,
     registerPriceCapabilityTarget,
     unregisterPriceCapabilityTarget
 } = require('./oracleBatchVenue');
@@ -125,6 +145,11 @@ function coinCode(coin) {
 // bootstrap plus the indexer's verifyTables/runMigrations on an empty database,
 // which is where most of it goes.
 const BOOT_WAIT_MS = 180_000;
+
+// The BTC indexer's JSON-RPC port as the stack PUBLISHES it, which is not the port
+// the hub's config oracle stores (that one is container-internal). Same convention
+// chainRail.DEFAULT_PORTS carries; overridable with BTC_INDEXER_API_PORT.
+const DEFAULT_BTC_INDEXER_API_PORT = 3024;
 
 // How long a node has to replay to a requested height. The DOGE regtest chain
 // is small, but a replay runs every action handler including the contract VM.
@@ -452,6 +477,12 @@ class OracleBatchReplayNode {
         this._capabilityRows   = [];
         this._decoderConn = null;
         this._liveIndexerConn = null;
+        // The Bitcoin capability oracle this node's hub resolves its signer sets
+        // from: the connection its rows are seeded through, the rows written, and
+        // the read-back that proves it is a Bitcoin indexer rather than a bypass.
+        this._btcOracleConn  = null;
+        this._btcStakeRows   = [];
+        this._btcOracleProof = null;
     }
 
     // ---- bring-up -------------------------------------------------------
@@ -494,10 +525,49 @@ class OracleBatchReplayNode {
         this.indexerPort = indexerPort;
 
         this._live = live;
+        // A node with no Bitcoin view cannot resolve who was eligible to sign a
+        // batch, so it is not a configuration this rig can measure anything in. Say
+        // so and SKIP, rather than running a comparison whose only possible outcome
+        // is "neither node could judge a PRICE".
+        if (!live.btcOracle) {
+            this.unavailable = 'the stack hub names no bitcoin/' + this.network + ' indexer, so a node here ' +
+                'could not be given the Bitcoin capability oracle chain-only reconstruction requires';
+            return false;
+        }
+        this._btcOracleProof = await this._verifyBtcOracle(live.btcOracle);
+        if (!this._btcOracleProof) { this.unavailable = this.unavailable || 'BTC capability oracle unusable'; return false; }
+
         await this._startHub();
         await this._startIndexer(live);
         await this._registerPriceCapability();
         return true;
+    }
+
+    /**
+     * Prove the endpoint this node's hub will trust is a BITCOIN indexer.
+     *
+     * This is the same question `XChainHub._indexerCoinMismatch` asks before it
+     * lets a BTC-anchored read happen at all (`getblockhashes` is the one
+     * federation read that names the chain it answers for), asked HERE as well so
+     * the drill's evidence carries the answer instead of the operator having to
+     * take the wiring on trust. A rig that had quietly pointed the hub at the
+     * landing chain's own indexer, or switched the guard off, fails here.
+     */
+    async _verifyBtcOracle(oracle) {
+        try {
+            const conn = new XChainIndexerConnector(oracle.host, oracle.port, oracle.apiKey);
+            const hashes = await conn.call('getblockhashes', {});
+            const coin = hashes && hashes.coin ? String(hashes.coin).toUpperCase() : null;
+            if (coin !== 'BTC') {
+                this.unavailable = 'the capability oracle at ' + oracle.url + ' reports coin "' + coin +
+                    '", not BTC; a signer set resolved there would be another chain\'s state';
+                return null;
+            }
+            return { url: oracle.url, coin: coin, network: hashes.network, height: Number(hashes.block_index) };
+        } catch (e) {
+            this.unavailable = 'the BTC capability oracle at ' + oracle.url + ' did not answer: ' + (e && e.message);
+            return null;
+        }
     }
 
     /**
@@ -531,23 +601,87 @@ class OracleBatchReplayNode {
         const query = (sql, args) => this._conn.query(sql, args);
         this._capabilityRows = [];
         this._capabilityTarget = {
-            label: 'AT2 node ' + this.label + ' hub mirror',
+            label: 'AT2 node ' + this.label + ' (hub mirror + BTC capability oracle)',
             apply: async (rows) => {
                 await applyPriceCapabilityRows(query, rows, table);
                 this._capabilityRows = rows.slice();
+                // The node's HUB does not read the row above: it asks its Bitcoin
+                // oracle. Both stores get the same set, which is the relationship
+                // production keeps (the hub's Bitcoin read is what it later persists
+                // and mirrors down for its indexer).
+                this._btcStakeRows = await applyPriceCapabilityStakes(await this._btcOracleQuery(), rows);
+                await this._probeBtcOracle(rows);
             },
-            remove: async (rows) => removePriceCapabilityRows(query, rows, table)
+            remove: async (rows) => {
+                await removePriceCapabilityRows(query, rows, table);
+                if (this._btcStakeRows.length > 0) {
+                    await removePriceCapabilityStakes(await this._btcOracleQuery(), this._btcStakeRows);
+                    this._btcStakeRows = [];
+                }
+            }
         };
         const applied = await registerPriceCapabilityTarget(this._capabilityTarget);
         if (applied > 0) {
-            console.log('oracleBatchReplay[' + this.label + ']: applied ' + applied + ' `price` ' +
-                'capability_snapshots row(s) to this node\'s hub mirror (setup standing in for the hub\'s own ' +
-                'persist at finalization; see _registerPriceCapability).');
+            console.log('oracleBatchReplay[' + this.label + ']: applied ' + applied + ' `price` capability row(s) ' +
+                'to this node\'s hub mirror AND to its Bitcoin capability oracle (setup standing in for the ' +
+                'federation\'s own on-chain stake; see _registerPriceCapability).');
+        }
+    }
+
+    // A query(sql, args) against the Bitcoin oracle's own database, opened once and
+    // pinned to that schema so the row helpers never have to name it.
+    async _btcOracleQuery() {
+        if (!this._btcOracleConn) {
+            this._btcOracleConn = await connectTo(this._live.btcOracle.db);
+            await this._btcOracleConn.query('USE `' + ident(this._live.btcOracle.db.name, 'database name') + '`');
+        }
+        return (sql, args) => this._btcOracleConn.query(sql, args);
+    }
+
+    /**
+     * Ask the oracle the question the hub is about to ask, at the height the hub
+     * will actually ask it at.
+     *
+     * MEASURED, NEVER ASSUMED. `CapabilitySnapshot._buriedBlockIndex` subtracts
+     * CANONICAL_REORG_BUFFER before it resolves anything, so the height that
+     * reaches the indexer is (anchor - buffer) and a set that exists only at the
+     * anchor is invisible. Reading it back here turns "the seed should be visible"
+     * into a number in the run's own log, and a mismatch between this count and the
+     * federation's size is the first thing a red rung should be checked against.
+     */
+    async _probeBtcOracle(rows) {
+        const anchor = Number(rows[0].snapshotBlock);
+        const buried = Math.max(0, anchor - CANONICAL_REORG_BUFFER);
+        try {
+            const oracle = this._live.btcOracle;
+            const conn   = new XChainIndexerConnector(oracle.host, oracle.port, oracle.apiKey);
+            const at = async (h) => {
+                const r = await conn.call('getcapabilityvalidators',
+                    { capability: 'price', block_index: h, min_stake: this._priceMinStake });
+                return (r && r.count !== undefined) ? Number(r.count) : ('error: ' + JSON.stringify(r).slice(0, 120));
+            };
+            this._btcOracleProof.anchorHeight    = anchor;
+            this._btcOracleProof.queriedHeight   = buried;
+            this._btcOracleProof.priceSetAtAnchor = await at(anchor);
+            this._btcOracleProof.priceSetAtBuried = await at(buried);
+            console.log('oracleBatchReplay[' + this.label + ']: Bitcoin capability oracle ' + oracle.url +
+                ' (coin ' + this._btcOracleProof.coin + ', tip ' + this._btcOracleProof.height + ') answers the ' +
+                '`price` set as ' + this._btcOracleProof.priceSetAtBuried + ' validator(s) at block ' + buried +
+                ', the buried height CapabilitySnapshot resolves for a batch anchored at ' + anchor +
+                ' (' + this._btcOracleProof.priceSetAtAnchor + ' at the anchor itself).');
+        } catch (e) {
+            console.warn('oracleBatchReplay[' + this.label + ']: could not read the Bitcoin capability oracle ' +
+                'back: ' + (e && e.message));
         }
     }
 
     // The fee destination this node was launched with, for the run's evidence.
     feeDestination() { return this._live ? this._live.feeDestination : null; }
+
+    // What this node's Bitcoin capability oracle is and what it answered: the URL,
+    // the coin it reported for ITSELF, its tip, the height the hub resolves at once
+    // the reorg burial is applied, and the size of the `price` set there.
+    btcOracleEvidence() { return this._btcOracleProof; }
 
     // Which actions the STANDING chain charged a fee for, as chain coordinates.
     // See readFeeCoordinates for why the set has to come from a node with a
@@ -643,8 +777,41 @@ class OracleBatchReplayNode {
             feeDestination: await this._resolveFeeDestination(code, ixr),
             decoder: { host: dbHost, port: dbPort, name: dec.name, user: dec.user, pass: dec.pass },
             liveIndexer: liveIndexer,
+            btcOracle: this._resolveBtcOracle(cfg, dbHost, dbPort),
             node: svc['node'] || {},
             tracker: svc['xchain-utxo-tracker'] || {}
+        };
+    }
+
+    /**
+     * The node's BITCOIN CAPABILITY ORACLE: the real BTC indexer its hub resolves
+     * qualifying signer sets from.
+     *
+     * WHY EVERY NODE HERE HAS ONE. Judging a PRICE batch means resolving who was
+     * eligible to sign it at the batch's own signed Bitcoin anchor, and capability
+     * staking is Bitcoin-only by design. A Bitcoin indexer is therefore a stated
+     * PRECONDITION of chain-only reconstruction, not a workaround for it: the
+     * alternative would be a second trust path for validator identity that does not
+     * go through Bitcoin, which is worse than scoping the claim.
+     *
+     * Discovered the way every other endpoint in this rig is, through the standing
+     * hub's config oracle, so nothing is hardcoded and no credential is assembled
+     * here. The one substitution is the API port: the hub stores the
+     * CONTAINER-internal one, and a host-side process must dial the published one.
+     */
+    _resolveBtcOracle(cfg, dbHost, dbPort) {
+        const svc = cfg && cfg['bitcoin'] && cfg['bitcoin'][this.network];
+        if (!svc) return null;
+        const ixr = svc['xchain-indexer'] || {};
+        if (!ixr.name) return null;
+        const host = process.env.BTC_SERVICE_HOST || 'localhost';
+        const port = parseInt(process.env.BTC_INDEXER_API_PORT, 10) || DEFAULT_BTC_INDEXER_API_PORT;
+        return {
+            host: host,
+            port: port,
+            url:  'http://' + host + ':' + port,
+            apiKey: process.env.BTC_INDEXER_API_KEY || process.env.INDEXER_API_KEY || null,
+            db: { host: dbHost, port: dbPort, name: ixr.name, user: ixr.user, pass: ixr.pass }
         };
     }
 
@@ -698,7 +865,41 @@ class OracleBatchReplayNode {
     // arriving from a block. HUB_NETWORK is passed even though a standalone hub
     // reads it only through p2pConfig (see the header): a later version that fixes
     // that should find the right value already here.
+    /**
+     * The node's capability thresholds, written where the hub reads them.
+     *
+     * WHY A NODE MUST HAVE THIS TO JUDGE ANYTHING. A hub that has started its
+     * capability registry and has NO threshold for a capability refuses to build a
+     * snapshot for it at all (`CapabilitySnapshot._resolveMinStake` returns null
+     * while `_registryReady()` is true, which is a deliberate fail-closed: omitting
+     * min_stake would let each indexer apply its own local floor and fork the
+     * qualified set). `xchain-hub/src/api.js` calls startCapabilities on every hub,
+     * standalone included, so a node launched with no HUB_CAPABILITY_CONFIG resolves
+     * NO signer set for a price batch however healthy its Bitcoin oracle is. It is
+     * ordinary node configuration, not a test lever.
+     *
+     * The values are lifted from the hub's OWN canonical coins registry rather than
+     * typed here, so they cannot drift from the floor the hub asserts them against
+     * (`_assertCanonicalMinStakes`, which reads src/coins/BTC.js STAKING.CAPABILITIES).
+     */
+    _writeCapabilityConfig() {
+        const coins = loadHubModule('src/coins/index.js');
+        // Staking is Bitcoin-anchored, so BTC's floors are the only ones that gate a
+        // quorum, and the hub resolves them for 'mainnet' when its own network is
+        // standalone (''). Match that resolution exactly.
+        const cfg = coins.getCoinConfig('BTC', 'mainnet');
+        const canonical = (cfg && cfg.STAKING && cfg.STAKING.CAPABILITIES) || null;
+        if (!canonical) throw new Error('oracleBatchReplay: the hub coins registry carries no BTC STAKING.CAPABILITIES');
+        const caps = {};
+        for (const cap of Object.keys(canonical)) caps[cap] = { MIN_STAKE: String(canonical[cap].MIN_STAKE) };
+        this._priceMinStake = caps.price ? caps.price.MIN_STAKE : null;
+        const file = path.join(this._cwd, 'capabilities.json');
+        fs.writeFileSync(file, JSON.stringify({ CAPABILITIES: caps }, null, 2));
+        return file;
+    }
+
     async _startHub() {
+        const capabilityConfig = this._writeCapabilityConfig();
         const env = {
             PATH: process.env.PATH,
             HOME: process.env.HOME,
@@ -712,8 +913,41 @@ class OracleBatchReplayNode {
             HUB_NETWORK:   this.network,
             HUB_ALLOW_UNAUTHENTICATED: 'true',
             TELEMETRY_ENABLED: 'false',
-            CORS_ORIGIN:   'http://localhost'
+            CORS_ORIGIN:   'http://localhost',
+
+            // THE HUB'S PER-IP REQUEST CEILING, raised because of what this
+            // deployment IS, not to get past a check.
+            //
+            // MEASURED: at the shipped default of 100 requests per minute a
+            // chain-only node THROTTLES ITSELF. Its indexer walks the chain as fast
+            // as it can and consults its own hub as it goes, so a replay crosses 100
+            // requests in seconds, and the price_batch pushes then come back
+            // "Too many requests" as a plain-text 429 the push client reports as
+            // `Invalid JSON response: Unexpected token 'T'`. The reconstruction is
+            // lost to an abuse guard rather than to anything about the chain.
+            //
+            // The ceiling is an abuse guard for a hub serving the public; this hub is
+            // bound to 127.0.0.1 and its only client is the node's own indexer, which
+            // is the single-node deployment the default is not sized for. It gates no
+            // validation, no quorum and no verdict, and BOTH nodes in the comparison
+            // get the identical value.
+            HUB_RATE_LIMIT_RPM: '60000',
+
+            // THE BITCOIN CAPABILITY ORACLE, wired the way a properly configured node
+            // wires one: an explicit per-coin indexer URL, which is the first thing
+            // `XChainHub._resolveIndexerUrl` consults. The hub still VERIFIES the
+            // endpoint is a Bitcoin indexer for itself before it trusts a
+            // BTC-anchored read (`_indexerCoinMismatch`), and nothing here switches
+            // that check off; _verifyBtcOracle asks the same question first so the
+            // drill's own evidence carries the answer.
+            BTC_INDEXER_API_URL: this._live.btcOracle.url,
+
+            // Per-capability MIN_STAKE. Without it the hub's capability registry is
+            // live but empty and every price snapshot is refused; see
+            // _writeCapabilityConfig.
+            HUB_CAPABILITY_CONFIG: capabilityConfig
         };
+        if (this._live.btcOracle.apiKey) env.BTC_INDEXER_API_KEY = String(this._live.btcOracle.apiKey);
         this._hubProc = this._spawn('hub', path.join(this.repoRoot, 'xchain-hub', 'src', 'api.js'), [], env);
 
         const connector = new XChainHubConnector(['http://127.0.0.1:' + this.hubPort]);
@@ -896,6 +1130,43 @@ class OracleBatchReplayNode {
         return result;
     }
 
+    /**
+     * Block until this node has no push left to deliver.
+     *
+     * WHY A DRAIN AND NOT A FIXED PAUSE. The reconstruction is asynchronous
+     * relative to the block loop: `actions/price.js` write-aheads a durable
+     * `pending_hub_pushes` row inside the block transaction and HubPushQueue
+     * delivers it afterwards, retrying on a backoff. Reading the hub after a fixed
+     * pause therefore measures whichever of the two won a race, and a queue still
+     * holding rows reads exactly like a chain that rebuilt nothing. Waiting for the
+     * outbox to empty makes the read a statement about the reconstruction.
+     *
+     * It is a WAIT and not a rescue: nothing here retries, re-pushes or forgives a
+     * refusal. A queue that will not drain still returns, still leaves its rows to
+     * be printed with their last error, and still fails the assertions it should.
+     */
+    async waitForPushDrain(opts) {
+        opts = opts || {};
+        const db = ident(this.indexerDbName, 'database name');
+        const result = await waitFor(async () => {
+            try {
+                const rows = await this._conn.query(
+                    "SELECT COUNT(*) AS c FROM `" + db + "`.pending_hub_pushes WHERE status = 'pending'");
+                return { ok: Number(rows[0].c) === 0, pending: Number(rows[0].c) };
+            } catch (_) {
+                // No such table means no hub push path at all, which is not something
+                // to wait on.
+                return { ok: true, pending: null };
+            }
+        }, { timeoutMs: opts.timeoutMs || 180_000, intervalMs: opts.intervalMs || 2000 });
+        if (!result.ok) {
+            console.warn('oracleBatchReplay[' + this.label + ']: ' + (result.last && result.last.pending) +
+                ' hub push(es) were still undelivered after ' + result.waitedMs + 'ms; reading anyway so the ' +
+                'run reports what the node actually holds and why.');
+        }
+        return result;
+    }
+
     // ---- reading --------------------------------------------------------
 
     // What the node's own hub holds. This is the authoritative reconstruction:
@@ -964,8 +1235,17 @@ class OracleBatchReplayNode {
             await attempt('capability target unregister', async () => unregisterPriceCapabilityTarget(this._capabilityTarget));
             this._capabilityTarget = null;
         }
-        // The rows themselves need no DELETE: all three of this node's databases are
-        // dropped below, which takes them with it.
+        // The hub-mirror rows need no DELETE: all three of this node's databases are
+        // dropped below, which takes them with it. The Bitcoin capability oracle is
+        // the STANDING stack's, so its rows are the one thing this node has to give
+        // back by hand, and giving them back is what keeps a drill's federation out
+        // of every later reader's validator set.
+        if (this._btcStakeRows.length > 0) {
+            const rows = this._btcStakeRows;
+            this._btcStakeRows = [];
+            await attempt('btc capability oracle seed cleanup', async () =>
+                removePriceCapabilityStakes(await this._btcOracleQuery(), rows));
+        }
 
         await attempt('indexer stop', async () => this._kill(this._indexerProc));
         await attempt('hub stop',     async () => this._kill(this._hubProc));
@@ -987,6 +1267,13 @@ class OracleBatchReplayNode {
         if (this._liveIndexerConn) {
             await attempt('live indexer conn close', async () => this._liveIndexerConn.end());
             this._liveIndexerConn = null;
+        }
+        // The oracle's database is the standing stack's, not this rig's, so its
+        // seeded rows are removed explicitly (the unregister above already did it)
+        // and only the connection is given back here.
+        if (this._btcOracleConn) {
+            await attempt('btc oracle conn close', async () => this._btcOracleConn.end());
+            this._btcOracleConn = null;
         }
 
         if (this._cwd) {

@@ -212,6 +212,95 @@ async function removePriceCapabilityRows(query, rows, table) {
     return rows.length;
 }
 
+// ---- the SAME set, in the form a BITCOIN capability oracle answers from ------
+//
+// WHY THERE ARE TWO FORMS OF ONE PRECONDITION. Chain-only reconstruction requires
+// the node to also run a Bitcoin indexer: capability staking is Bitcoin-only by
+// design, so a node with no Bitcoin view legitimately cannot resolve who was
+// eligible to sign a batch. A node's HUB therefore resolves the qualifying `price`
+// set by asking a real BTC indexer (CapabilitySnapshot.getSnapshot ->
+// getcapabilityvalidators), and that RPC answers from the BTC indexer's own
+// `stakes` rows: `usesCapabilitySnapshot` is FALSE when the coin is BTC, so the
+// mirrored capability_snapshots the LANDING chain reads are not consulted there at
+// all. The rows above and the rows here are one validator set written into the two
+// stores that have to agree, which is exactly what the production mirror keeps in
+// step (the hub's BTC read is what it later persists and mirrors down).
+//
+// THE WINDOW, and why it is bounded at both ends. CapabilitySnapshot buries every
+// read by CANONICAL_REORG_BUFFER before it resolves, so the height actually asked
+// for is (anchor - 6), not the anchor. A row that exists only AT the anchor is
+// therefore invisible to the hub. `stakes` is a range store rather than a
+// point-in-time one (`activation_block <= N AND (deactivation_block IS NULL OR
+// deactivation_block > N)`), so the window is opened below the buried height and
+// CLOSED just above the anchor. Closing it is what keeps this seed out of every
+// tip-anchored read the standing federation on the same chain performs: at the BTC
+// tip these rows are already deactivated and no other hub's quorum denominator
+// moves while a drill runs.
+const CANONICAL_REORG_BUFFER = loadHubModule('src/snapshot_reorg_buffer.js').CANONICAL_REORG_BUFFER;
+
+// Reserved `stakes.action_index` values for the seeded rows. The column carries a
+// UNIQUE index, so the seed needs its own range: high enough that no real action on
+// a regtest chain can reach it, and deterministic so a rerun overwrites its
+// predecessor instead of accumulating rows.
+const PRICE_CAPABILITY_STAKE_ACTION_BASE = 9000000000000;
+
+// One `stakes` row per validator key, written through a caller-supplied
+// query(sql, args) against a BTC indexer database. Returns the rows as written so
+// a caller can hand the same list back to removePriceCapabilityStakes.
+async function applyPriceCapabilityStakes(query, rows) {
+    if (!rows || rows.length === 0) return [];
+    const anchor       = Number(rows[0].snapshotBlock);
+    const activation   = Math.max(0, anchor - 2 * CANONICAL_REORG_BUFFER);
+    const deactivation = anchor + CANONICAL_REORG_BUFFER + 1;
+    const landed       = Math.max(0, activation - CANONICAL_REORG_BUFFER);
+
+    const statuses = await query("SELECT id FROM index_statuses WHERE status = 'valid' LIMIT 1", []);
+    if (!statuses || statuses.length === 0) {
+        throw new Error('oracleBatchVenue: the BTC capability oracle has no `valid` status row, so it has ' +
+            'indexed nothing yet; a stake seeded against it could not qualify');
+    }
+    const validId = statuses[0].id;
+
+    const written = [];
+    for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        // index_pubkeys is a plain AUTO_INCREMENT lookup (getOrCreatePubkeyId does
+        // exactly this INSERT IGNORE + refetch), so adding a key carries none of the
+        // dense-id consensus weight index_addresses does. `source_id` is left at 0
+        // rather than minting an address row for that reason: the count read the hub
+        // performs joins only index_pubkeys, and a seed that cannot be summed by the
+        // source-keyed weight read fails CLOSED there rather than inventing a weight.
+        await query('INSERT IGNORE INTO index_pubkeys (pubkey) VALUES (?)', [r.pubkey]);
+        const found = await query('SELECT id FROM index_pubkeys WHERE pubkey = ? LIMIT 1', [r.pubkey]);
+        if (!found || found.length === 0) throw new Error('oracleBatchVenue: could not resolve a pubkey id for ' + r.pubkey);
+        const pubkeyId    = found[0].id;
+        const actionIndex = PRICE_CAPABILITY_STAKE_ACTION_BASE + i;
+
+        await query('INSERT INTO stakes (action_index, source_id, version, signing_pubkey_id, amount, ' +
+                    'status_id, block_index, activation_block, deactivation_block) ' +
+                    'VALUES (?, 0, 1, ?, ?, ?, ?, ?, ?) ' +
+                    'ON DUPLICATE KEY UPDATE signing_pubkey_id = VALUES(signing_pubkey_id), ' +
+                    'amount = VALUES(amount), status_id = VALUES(status_id), block_index = VALUES(block_index), ' +
+                    'activation_block = VALUES(activation_block), deactivation_block = VALUES(deactivation_block)',
+                    [actionIndex, pubkeyId, r.amount, validId, landed, activation, deactivation]);
+        written.push({ actionIndex: actionIndex, pubkeyId: pubkeyId, pubkey: r.pubkey });
+    }
+    return written;
+}
+
+// Take back exactly the rows applyPriceCapabilityStakes wrote, keyed on BOTH the
+// reserved action_index and the pubkey it was written for, so a delete can never
+// reach a row this venue did not create. The index_pubkeys entries are left in
+// place: they are a bare id-to-key lookup shared with every other reader, and a key
+// with no stake row qualifies for nothing.
+async function removePriceCapabilityStakes(query, written) {
+    for (const w of written || []) {
+        await query('DELETE FROM stakes WHERE action_index = ? AND signing_pubkey_id = ?',
+                    [w.actionIndex, w.pubkeyId]);
+    }
+    return (written || []).length;
+}
+
 // Landing-chain databases in THIS process that must be able to judge a batch a
 // venue here publishes, and the last set a venue seeded.
 //
@@ -768,6 +857,11 @@ module.exports = {
     priceCapabilityRows,
     applyPriceCapabilityRows,
     removePriceCapabilityRows,
+    // The same set in the form a real BITCOIN capability oracle answers from, for a
+    // rig whose hub resolves the signer set the way the ruling requires.
+    applyPriceCapabilityStakes,
+    removePriceCapabilityStakes,
+    CANONICAL_REORG_BUFFER,
     registerPriceCapabilityTarget,
     unregisterPriceCapabilityTarget,
     lastPriceCapabilitySeed
