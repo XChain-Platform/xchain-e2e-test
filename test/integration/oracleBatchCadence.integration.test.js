@@ -38,21 +38,19 @@
  * six rounds fall in one window; an unaligned base would split them across two
  * and produce two wires for a reason that has nothing to do with the code.
  *
- * KNOWN BLOCKER, and what it does and does NOT cost this drill. The `price`
- * capability cannot currently resolve away from Bitcoin: `xchain-indexer`
- * resolves the price-capable set from its own `stakes` table, capability staking
- * is BTC-only, and the hub-mirrored `capability_snapshots` fallback has
- * historically covered only `cross_chain` and `oracle_publish`. A PRICE landing
- * on DOGE therefore qualifies zero signers and records
- * `invalid: insufficient signer stake` however good the federation's quorum was.
- * Two other builders are closing that now.
+ * THE VERDICT IS NOW ASSERTED, not waited on. Capability staking is BTC-only, so
+ * on DOGE the indexer resolves the price-capable set from the hub-mirrored
+ * `capability_snapshots` at the batch's signed BTC anchor. In production the hub
+ * writes those rows itself when a round finalizes; this venue's hubs are
+ * in-process on disposable databases the landing chain's indexer never reads, so
+ * the venue writes its own validator set there as SETUP and takes it back at
+ * teardown (oracleBatchVenue._seedLandingChainPriceCapability states in full what
+ * it substitutes for and what would retire it).
  *
- * Every assertion below except ONE is independent of it: the cadence claim is
- * about how many transactions the federation emits and what they carry, not
- * about the verdict the landing chain reaches. The single dependent assertion is
- * isolated in its own `it()` and SKIPS with the exact reason printed while the
- * gap is open, so this file turns green with no edit the moment the fix lands.
- * Nothing here is stubbed to manufacture a pass.
+ * That is a precondition, not a thumb on the scale. The indexer still parses the
+ * wire, still verifies every signature against the batch canonical, and still
+ * applies the full source-deduped two-thirds stake test; the assertion below
+ * demands `valid` and nothing else. Nothing here is stubbed to manufacture a pass.
  ********************************************************************/
 
 const dotenv = require('dotenv');
@@ -72,9 +70,10 @@ const MIN_SIGNATURES = 3;
 // Seconds, not the shipped five minutes. See the header.
 const GRACE_MS = 4000;
 
-// The one verdict a well-formed PRICE can legitimately record on a non-BTC
-// indexer while the price-capability gap is open.
-const KNOWN_CAPABILITY_GAP_STATUS = 'invalid: insufficient signer stake';
+// The verdict a well-formed PRICE records when the landing chain resolves no
+// price-capable validator set at the batch's anchor. Named so the failure message
+// can tell that apart from a parse or wire regression.
+const CAPABILITY_GAP_STATUS = 'invalid: insufficient signer stake';
 
 describe('AT1 oracle batch cadence: six finalized rounds, ONE PRICE v0 on DOGE regtest (L3)', function () {
     // Six PBFT rounds, a peer signing round, an encoder build, a broadcast and a
@@ -265,20 +264,14 @@ describe('AT1 oracle batch cadence: six finalized rounds, ONE PRICE v0 on DOGE r
             'PARSE rung: rounds_json holds ' + storedRounds.length + ' round(s), not ' + WINDOW_ROUNDS);
     });
 
-    it('the landing chain accepted the batch [WAITING on the price-capability fix]', function () {
+    it('the landing chain accepted the batch', function () {
         const status = String(indexed.status);
-        if (status === KNOWN_CAPABILITY_GAP_STATUS) {
-            console.log('  AT1 verdict assertion is WAITING, not failing. The batch parsed, stored all ' +
-                WINDOW_ROUNDS + ' rounds and carried ' + parsed.sigs.length + ' verifying signatures, ' +
-                'and the ' + venue.rail.code + ' indexer still recorded "' + status + '" because the ' +
-                '`price` capability cannot resolve away from Bitcoin yet. This assertion turns green ' +
-                'with no edit to this file the moment that lands.');
-            this.skip();
-            return;
-        }
         assert.strictEqual(status, 'valid',
-            'SIGNER RESOLUTION rung: the batch indexed as "' + status + '". Expected either "valid" or ' +
-            'the known capability-gap status "' + KNOWN_CAPABILITY_GAP_STATUS + '". Anything else is a ' +
-            'parse, fee or wire regression, not the known gap.' + drive.railDiagnosis(venue, signerSet));
+            'SIGNER RESOLUTION rung: the batch indexed as "' + status + '". "' +
+            CAPABILITY_GAP_STATUS + '" means the landing chain resolved an EMPTY price-capable set at ' +
+            'the batch anchor: check that the venue seeded its `price` capability_snapshots rows at ' +
+            'anchor ' + parsed.anchor + ' and that a previous run\'s teardown did not remove them ' +
+            'mid-flight. Any other status is a parse, fee or wire regression.' +
+            drive.railDiagnosis(venue, signerSet));
     });
 });

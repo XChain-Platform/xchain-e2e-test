@@ -36,11 +36,13 @@
  *          write, OraclePublisher's leader rotation, its wire builder, its
  *          durable queue and marker table, the encoder, the signature, the
  *          node broadcast, the block, the decoder, the indexer's parse.
- *   SEEDED - the capability snapshots. An in-process hub has no indexer to
- *          read a staked validator set from, so seededWeightSnapshot (the
- *          `price` weighted quorum) and seededStakeSnapshot (the
+ *   SEEDED - the capability snapshots, on BOTH sides. An in-process hub has no
+ *          indexer to read a staked validator set from, so seededWeightSnapshot
+ *          (the `price` weighted quorum) and seededStakeSnapshot (the
  *          `oracle_publish` member set the publisher ranks itself in) stand in,
- *          exactly as every other multi-hub suite does.
+ *          exactly as every other multi-hub suite does; and the LANDING chain's
+ *          `price` capability rows are written by the venue rather than by the
+ *          hub, for the reasons set out at _seedLandingChainPriceCapability.
  *
  * THE WIRE VERSION IS A PARAMETER, NOT AN ASSUMPTION. Nothing here builds or
  * matches on `PRICE|0|`. The venue captures whatever wire the publisher hands
@@ -49,17 +51,19 @@
  * captured version instead. `expectWireVersion` only sharpens the failure
  * message when a run gets a version it did not plan for.
  *
- * KNOWN CEILING ON THE LANDED VERDICT, measured 2026-08-26 and NOT a venue
- * fault. On any non-BTC chain the indexer resolves the `price` capability set
- * from its own `stakes` table, and capability staking is BTC-only
- * (xchain-indexer/src/coins/DOGE.js: `CAPABILITIES: {}`). The hub-mirrored
- * `capability_snapshots` fallback in db.getValidatorsByCapability /
- * getStakeWeightsByCapability is scoped to `cross_chain` and `oracle_publish`
- * and does not cover `price`. A PRICE landing on DOGE therefore qualifies zero
- * signers and records `invalid: insufficient signer stake`, whatever the
- * federation did. The venue records the verdict it observes rather than
- * asserting a verdict it wants; `expectValidationStatus` lets a drill pin the
- * one it expects once that gap is closed.
+ * THE LANDED VERDICT NEEDS ONE MORE PRECONDITION, and the venue supplies it as
+ * SETUP. Capability staking is BTC-only, so on any other chain the indexer
+ * resolves the `price` capability set from the hub-mirrored
+ * `capability_snapshots` at the batch's signed BTC anchor. In production the hub
+ * writes those rows itself when a round finalizes; this venue's hubs are
+ * in-process on disposable databases the landing chain's indexer never reads, so
+ * `_seedLandingChainPriceCapability` writes the venue's OWN validator set there
+ * instead, and takes it back at teardown. That comment states in full what it
+ * substitutes for and what would retire it. Nothing about the indexer's judgment
+ * is weakened: parse, signature verification and the weighted-quorum test all
+ * still run, and the venue records the verdict it observes rather than asserting
+ * a verdict it wants. `expectValidationStatus` lets a drill pin the one it
+ * expects.
  *
  * ONE VENUE AT A TIME. startDisposableHubDb self-provisions its throwaway
  * MariaDB on a fixed port (13307) when the environment's hub DB credentials do
@@ -122,6 +126,118 @@ function wireVersionOf(wire) {
     return Number.isFinite(v) ? v : null;
 }
 
+// ---- the `price` capability precondition -----------------------------------
+//
+// VENUE SETUP STANDING IN FOR A PRODUCTION PRECONDITION, and deliberately owned
+// here rather than by any one drill, so every rig that has to JUDGE a batch this
+// venue publishes gets the identical rows.
+//
+// WHAT IT SUBSTITUTES FOR. In production these rows are the hub's own work:
+// OracleConsensus persists a `price` capability snapshot when a round finalizes,
+// and every indexer that judges a batch resolves the qualifying set from its own
+// copy of `capability_snapshots` at the batch's signed BTC anchor. Capability
+// staking is BTC-only, so on any other chain that mirrored table is the ONLY
+// source (getValidatorsByCapability / getStakeWeightsByCapability redirect
+// `price` there); nothing on the wire carries the set. With no row the
+// qualifying set is empty, stake sums to zero, and the weighted quorum fails
+// closed as `invalid: insufficient signer stake` however good the federation's
+// own quorum was.
+//
+// WHY IT CANNOT BE GOT THE PRODUCTION WAY HERE. The federation is four
+// in-process hubs on disposable databases that no indexer in these drills reads.
+// The hub a standing stack's indexer does mirror cannot finalize a price round at
+// all (one hub against a federation-sized quorum denominator never reaches
+// commit, so it never reaches the persist), and a purpose-built node's own fresh
+// hub is empty by construction: it has no peers, no oracle round, and so nothing
+// to persist. The in-memory fixtures the venue already applies
+// (seededWeightSnapshot, seededStakeSnapshot) stub hub methods and write no row
+// anywhere, so neither can supply this.
+//
+// WHAT WOULD MAKE IT UNNECESSARY. A rig whose federation writes into a hub
+// database the judging indexer mirrors. Then the hub's own finalization persist
+// arrives by the production route and this whole section is deleted, not adjusted.
+//
+// NOTHING HERE WEAKENS A VERDICT. The rows carry the venue's OWN validator
+// pubkeys, sources and weights, lifted verbatim from the weight snapshot its hubs
+// ran the rounds against so the two views cannot disagree, at the same BTC anchor
+// the batch signs. Every indexer still parses the wire, still verifies every
+// signature against the batch canonical, and still applies the full
+// source-deduped two-thirds stake test. A batch whose signatures do not verify,
+// or whose signers do not carry two-thirds of this stake, still records invalid.
+
+// One row per validator key, in the shape the mirrored `cross_chain` /
+// `oracle_publish` rows already use: snapshot_block is a BTC height (the batch's
+// own signed anchor, never the landing chain's), and `source` is non-blank
+// because the quorum test fails closed on a blank one (it would collapse every
+// row into a single dedupe bucket and drop the bar to one signature).
+function priceCapabilityRows(validators, snapshotBlock) {
+    return (validators || []).map((v) => ({
+        snapshotBlock: snapshotBlock,
+        pubkey: String(v.pubkey).toLowerCase(),
+        source: String(v.source),
+        amount: String(v.weight === undefined ? v.amount : v.weight)
+    }));
+}
+
+// Written through a caller-supplied `query(sql, args)` rather than against a
+// connection this module opens, because the same rows have to reach two very
+// different databases: the standing stack's indexer DB (through the suite's
+// pooled Database) and a purpose-built node's own hub-mirror DB (through that
+// rig's connection, which is why `table` can be schema-qualified). No credential
+// is assembled, read or logged here.
+async function applyPriceCapabilityRows(query, rows, table) {
+    const t = table || 'capability_snapshots';
+    for (const r of rows) {
+        // Idempotent across reruns on uq_cap_snap (snapshot_block, capability,
+        // signing_pubkey, source), so a second run re-states the same set instead
+        // of duplicating it or erroring.
+        await query('INSERT INTO ' + t + ' (snapshot_block, capability, signing_pubkey, amount, source) ' +
+                    "VALUES (?, 'price', ?, ?, ?) ON DUPLICATE KEY UPDATE amount = VALUES(amount)",
+                    [r.snapshotBlock, r.pubkey, r.amount, r.source]);
+    }
+    return rows.length;
+}
+
+// Take back exactly what was written, keyed on the anchor, pubkey and source that
+// were inserted. Scoped, never a blanket DELETE on the capability: the mirrored
+// cross_chain / oracle_publish rows, and any real price snapshot a hub later
+// mirrors, are none of a test venue's business.
+async function removePriceCapabilityRows(query, rows, table) {
+    const t = table || 'capability_snapshots';
+    for (const r of rows) {
+        await query('DELETE FROM ' + t + " WHERE snapshot_block = ? AND capability = 'price' " +
+                    'AND signing_pubkey = ? AND source = ?',
+                    [r.snapshotBlock, r.pubkey, r.source]);
+    }
+    return rows.length;
+}
+
+// Landing-chain databases in THIS process that must be able to judge a batch a
+// venue here publishes, and the last set a venue seeded.
+//
+// Two orders have to work and a per-drill call site handles neither cleanly. A
+// node built BEFORE the venue (the live node of a replay drill) cannot know the
+// validator set yet, so the venue pushes to it when it seeds. A node built AFTER
+// the venue has already torn down (the replay node, which walks the very blocks
+// the venue landed) still has to judge those batches, so it pulls the last seed
+// when it registers. The record therefore outlives the venue on purpose: the
+// transactions it explains are on the chain permanently, and each target removes
+// its own rows in its own teardown.
+const _capabilityTargets = new Set();
+let _lastPriceCapabilitySeed = null;
+
+// target: { label, apply(rows), remove(rows) }. Returns how many rows were applied.
+async function registerPriceCapabilityTarget(target) {
+    _capabilityTargets.add(target);
+    if (!_lastPriceCapabilitySeed) return 0;
+    await target.apply(_lastPriceCapabilitySeed.rows);
+    return _lastPriceCapabilitySeed.rows.length;
+}
+
+function unregisterPriceCapabilityTarget(target) { _capabilityTargets.delete(target); }
+
+function lastPriceCapabilitySeed() { return _lastPriceCapabilitySeed; }
+
 class OracleBatchVenue {
 
     /**
@@ -175,6 +291,9 @@ class OracleBatchVenue {
         this._railSaved   = null;
         this._weightSeed  = null;
         this._countSeed   = null;
+        // The `price` capability_snapshots rows this venue wrote into the landing
+        // chain's indexer DB, so teardown can take back exactly what it put there.
+        this._capabilitySeed = null;
         this._oracles     = [];
         this._queueDir    = null;
         this._portOverrides = null;
@@ -210,6 +329,7 @@ class OracleBatchVenue {
         await this._fundPublisherWallet();
         await this._startFederation();
         this._seedSnapshots();
+        await this._seedLandingChainPriceCapability();
         await this._attachOracles();
         await this._attachPublishers();
         return true;
@@ -292,6 +412,47 @@ class OracleBatchVenue {
             network:    this.network
         });
         this._countSeed = seedStakeSnapshot(this.mvh, { blockIndex: this.anchorHeight });
+    }
+
+    // Apply the `price` capability precondition to the LANDING CHAIN this venue
+    // publishes to, and to every landing-chain database already registered in this
+    // process. See the section above the class for what it substitutes for, why the
+    // venue cannot get it the production way, and what would retire it.
+    async _seedLandingChainPriceCapability() {
+        const validators = (this._weightSeed && this._weightSeed.snapshot && this._weightSeed.snapshot.validators) || [];
+        if (validators.length === 0) return;
+
+        const rows = priceCapabilityRows(validators, this.anchorHeight);
+
+        // Credentials come from the rail, which discovered them through the hub
+        // config oracle; nothing is hardcoded here and no value is logged.
+        await this._withRailQuery((q) => applyPriceCapabilityRows(q, rows));
+        this._capabilitySeed = { snapshotBlock: this.anchorHeight, rows: rows };
+
+        // The process-wide record, and the push to rigs that were built BEFORE this
+        // venue existed (a replay drill's live node is already walking the chain when
+        // the first batch lands, so it needs the rows now, not at its own bring-up).
+        _lastPriceCapabilitySeed = { snapshotBlock: this.anchorHeight, rows: rows };
+        const pushed = [];
+        for (const target of _capabilityTargets) {
+            try { await target.apply(rows); pushed.push(target.label); }
+            catch (e) { console.warn('OracleBatchVenue: could not apply the price capability rows to ' + target.label + ': ' + (e && e.message)); }
+        }
+
+        console.log('OracleBatchVenue: seeded ' + rows.length + ' `price` capability_snapshots row(s) at BTC anchor '
+            + this.anchorHeight + ' in the ' + this.rail.code + ' indexer DB'
+            + (pushed.length > 0 ? ' and in [' + pushed.join(', ') + ']' : '')
+            + ' (venue setup standing in for the hub\'s own persist at finalization; see the price capability '
+            + 'precondition section in this file).');
+    }
+
+    // Run one function against a pooled connection to the rail's indexer database,
+    // handing it a plain query(sql, args) so the shared row helpers never have to
+    // know which kind of connection they are writing through.
+    async _withRailQuery(fn) {
+        const conn = await this.rail.globals.indexerDatabase.getConnection();
+        try { return await fn((sql, args) => conn.query(sql, args)); }
+        finally { await conn.release().catch(() => {}); }
     }
 
     // A real OracleConsensus per hub, wired onto hub.oracleConsensus (the field
@@ -564,6 +725,19 @@ class OracleBatchVenue {
         if (this._weightSeed) await attempt('weight seed restore', async () => this._weightSeed.restore());
         this._countSeed = this._weightSeed = null;
 
+        // Take back the `price` capability rows this venue wrote INTO ITS OWN RAIL,
+        // so a shared regtest indexer is left as it was found. Rows pushed to
+        // registered targets are not touched here: each target owns the database it
+        // registered and removes them in its own teardown, and a target may still be
+        // reading the chain these batches are on. The process-wide record
+        // (_lastPriceCapabilitySeed) deliberately outlives this teardown, because a
+        // node built later still has to judge the transactions this venue landed.
+        if (this._capabilitySeed && this.rail) {
+            await attempt('capability seed cleanup', async () =>
+                this._withRailQuery((q) => removePriceCapabilityRows(q, this._capabilitySeed.rows)));
+        }
+        this._capabilitySeed = null;
+
         if (this.mvh) {
             await attempt('mvh stop',  async () => this.mvh.stop());
             await attempt('mvh drop',  async () => this.mvh.dropDatabases());
@@ -588,5 +762,13 @@ module.exports = {
     ValidatorIdentity,
     wireVersionOf,
     submissionsForRound,
-    DEFAULT_PAIRS
+    DEFAULT_PAIRS,
+    // The `price` capability precondition, for any rig that owns a landing-chain
+    // database of its own. See the section above the class.
+    priceCapabilityRows,
+    applyPriceCapabilityRows,
+    removePriceCapabilityRows,
+    registerPriceCapabilityTarget,
+    unregisterPriceCapabilityTarget,
+    lastPriceCapabilitySeed
 };

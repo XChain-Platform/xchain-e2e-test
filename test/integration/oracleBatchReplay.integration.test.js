@@ -396,21 +396,26 @@ describe('AT2: a fresh indexer with its own empty hub and no peers rebuilds pric
                 'decode or action-registration failure, not a capability one';
         } else if (gapCount === livePrices.length) {
             rung = 'RUNG 2 (signer resolution): every one of the ' + livePrices.length + ' PRICE action(s) it ' +
-                'indexed recorded "' + CAPABILITY_GAP_STATUS + '". The `price` capability set still resolves ' +
-                'empty on this chain, so zero signers qualify and weighted quorum fails closed on S=0. This is ' +
-                'the known gap: capability staking is BTC-only (xchain-indexer/src/coins/DOGE.js ' +
-                'CAPABILITIES: {}) and the mirrored capability_snapshots fallback historically covered only ' +
-                'cross_chain and oracle_publish. Check, in this order, whether the parser passes the block ' +
-                'time to the gate, whether it resolves at the BITCOIN ANCHOR rather than at the landing ' +
-                'chain\'s own height, and whether any hub is persisting a price capability snapshot for the ' +
-                'mirror to serve at all';
+                'indexed recorded "' + CAPABILITY_GAP_STATUS + '", so the `price` capability set resolved ' +
+                'empty at the batch anchor and weighted quorum failed closed on S=0. The node reads that set ' +
+                'from the capability_snapshots rows in its own HUB MIRROR database, which the rig supplies as ' +
+                'setup (oracleBatchVenue, the price capability precondition section, plus ' +
+                'oracleBatchReplay._registerPriceCapability). Check that the node registered as a target and ' +
+                'that a venue in this process actually seeded a set, before suspecting the resolver itself';
         } else if (valid > 0) {
             rung = 'RUNG 3 (push): ' + valid + ' of the ' + livePrices.length + ' PRICE action(s) validated, ' +
                 'so signer resolution is working, but the hub still holds no snapshot for them. The push is ' +
                 'the suspect: its outbox reads ' + JSON.stringify(livePushQueue) + '. An empty outbox with ' +
                 'valid actions means the push was made and the hub refused it (PriceAggregator rejects on an ' +
                 'unresolvable validator snapshot, a duplicate, or a pair/price bound); a non-empty one means ' +
-                'delivery never succeeded';
+                'delivery never succeeded. "validator snapshot unavailable" is the one refusal this rig cannot ' +
+                'answer from here, and it is not a rig gap: xchain-hub resolves the price validator set for a ' +
+                'batch from `batchData.block_index` (PriceAggregator.receiveValidatedBatch), which the indexer ' +
+                'fills with the LANDING CHAIN\'s height, then asks a BTC indexer for stake weights at that ' +
+                'height less the 6-block reorg buffer. capability_snapshots.snapshot_block is a BTC height and ' +
+                'the indexer twin keys on the batch\'s BTC anchor, so off BTC the two can never name the same ' +
+                'block. Seeding rows at a landing-chain height to make this pass would be faking BTC-anchored ' +
+                'data, so this rung waits on the hub keying its snapshot on btc_block_height';
         } else {
             rung = 'RUNG 2 (signer resolution), mixed: the ' + livePrices.length + ' PRICE action(s) it ' +
                 'indexed recorded: ' + describeHistogram(byStatus);

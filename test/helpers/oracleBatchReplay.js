@@ -95,6 +95,12 @@ const mariadb   = require('mariadb');
 const { startDisposableHubDb } = require('./disposableHubDb');
 const { waitFor }              = require('./consensusWait');
 const XChainHubConnector       = require('../../src/XChainHubConnector.js');
+const {
+    applyPriceCapabilityRows,
+    removePriceCapabilityRows,
+    registerPriceCapabilityTarget,
+    unregisterPriceCapabilityTarget
+} = require('./oracleBatchVenue');
 
 // The five columns AT2 compares a replayed snapshot against. `consensus_proof`
 // is deliberately absent: on a live node it holds COMMIT ADDRESSES rather than
@@ -440,6 +446,10 @@ class OracleBatchReplayNode {
         this._cwd         = null;   // neutral working directory for the children
         this._hubSnapshotsAtBoot = null;
         this._live = null;          // resolved live-chain endpoints (decoder, node, tracker)
+        // This node's registration on the `price` capability precondition list, and
+        // the rows it last took. See _registerPriceCapability.
+        this._capabilityTarget = null;
+        this._capabilityRows   = [];
         this._decoderConn = null;
         this._liveIndexerConn = null;
     }
@@ -486,7 +496,54 @@ class OracleBatchReplayNode {
         this._live = live;
         await this._startHub();
         await this._startIndexer(live);
+        await this._registerPriceCapability();
         return true;
+    }
+
+    /**
+     * Put this node's own hub-mirror database on the list of landing chains that
+     * must carry the `price` capability snapshot, and take whatever set a venue in
+     * this process has already published for.
+     *
+     * WHY A NODE NEEDS THIS AT ALL. Judging a PRICE batch means resolving the
+     * qualifying signer set at the batch's signed BTC anchor, and off BTC that set
+     * comes only from mirrored `capability_snapshots` (capability staking is
+     * BTC-only). This node reads that table through its HUB_DB_* connection, which
+     * is the MIRROR database, so that is where the rows have to be.
+     *
+     * WHY THE ROWS CANNOT ARRIVE THE PRODUCTION WAY HERE. In production the rows
+     * are the hub's own persist at finalization, carried down by hub_db_sync. This
+     * node's hub is empty by construction: no peers, no oracle round, nothing to
+     * persist, so the mirror it re-pages is empty of them too. That is the point of
+     * the rig, not a defect of it, and it is exactly why the precondition has to be
+     * supplied as SETUP. The definition, and the full statement of what it stands in
+     * for, live once in oracleBatchVenue; this only names the database.
+     *
+     * NOTHING ABOUT THE REPLAY CLAIM IS WEAKENED. The rows are a validator set, not
+     * a price and not a verdict: every price_snapshots row this node holds is still
+     * rebuilt from the chain by its own hub, and every action verdict is still
+     * reached by its own indexer running the full parse, signature and quorum path.
+     * Both nodes in a comparison register the same way, so neither is given an
+     * advantage the other lacks.
+     */
+    async _registerPriceCapability() {
+        const table = '`' + ident(this.mirrorDbName, 'database name') + '`.capability_snapshots';
+        const query = (sql, args) => this._conn.query(sql, args);
+        this._capabilityRows = [];
+        this._capabilityTarget = {
+            label: 'AT2 node ' + this.label + ' hub mirror',
+            apply: async (rows) => {
+                await applyPriceCapabilityRows(query, rows, table);
+                this._capabilityRows = rows.slice();
+            },
+            remove: async (rows) => removePriceCapabilityRows(query, rows, table)
+        };
+        const applied = await registerPriceCapabilityTarget(this._capabilityTarget);
+        if (applied > 0) {
+            console.log('oracleBatchReplay[' + this.label + ']: applied ' + applied + ' `price` ' +
+                'capability_snapshots row(s) to this node\'s hub mirror (setup standing in for the hub\'s own ' +
+                'persist at finalization; see _registerPriceCapability).');
+        }
     }
 
     // The fee destination this node was launched with, for the run's evidence.
@@ -900,6 +957,15 @@ class OracleBatchReplayNode {
         const attempt = async (label, fn) => {
             try { await fn(); } catch (e) { problems.push(label + ': ' + (e && e.message)); }
         };
+
+        // Off the capability-target list first, so a venue still coming up cannot
+        // push rows into databases this teardown is about to drop.
+        if (this._capabilityTarget) {
+            await attempt('capability target unregister', async () => unregisterPriceCapabilityTarget(this._capabilityTarget));
+            this._capabilityTarget = null;
+        }
+        // The rows themselves need no DELETE: all three of this node's databases are
+        // dropped below, which takes them with it.
 
         await attempt('indexer stop', async () => this._kill(this._indexerProc));
         await attempt('hub stop',     async () => this._kill(this._hubProc));
