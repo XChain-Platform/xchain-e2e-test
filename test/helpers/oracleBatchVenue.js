@@ -333,6 +333,12 @@ class OracleBatchVenue {
             const pub = new OraclePublisher(hub);
             pub.queuePath      = path.join(this._queueDir, 'publisher-queue-' + i + '.jsonl');
             pub.deadLetterPath = pub.queuePath.replace(/\.jsonl$/, '') + '.deadletter.jsonl';
+            // bufferPath is derived from queuePath IN THE CONSTRUCTOR, so redirecting
+            // queuePath afterwards leaves the batch buffer pointing at the checkout's own
+            // data/ file, SHARED by every hub and surviving the run. It is the input to
+            // _hydrateBuffer() and therefore to restart catch-up, so a stale window in it
+            // re-publishes on the next drill and breaks any "exactly one wire" assertion.
+            pub.bufferPath     = pub.queuePath.replace(/\.jsonl$/, '') + '.buffer.jsonl';
             pub.spendGuard.statePath = path.join(this._queueDir, 'spend-state-' + i + '.json');
             pub.setBroadcastHook((wire) => this._broadcast(i, wire));
             await pub.start();
@@ -540,9 +546,12 @@ class OracleBatchVenue {
         };
 
         for (const pub of this.publishers) {
-            // No timers on this class, so there is nothing to stop; clearing the
-            // hook keeps a late queue sweep from broadcasting after teardown.
+            // The batch rail DID bring timers to this class (window grace, buffer
+            // catch-up), so the old "no timers, nothing to stop" comment is stale.
+            // Clear the hook FIRST so a timer that fires mid-teardown cannot broadcast,
+            // then stop the publisher itself.
             await attempt('publisher hook', async () => pub.setBroadcastHook(null));
+            await attempt('publisher stop', async () => { if (pub.stop) await pub.stop(); });
         }
         this.publishers = [];
 

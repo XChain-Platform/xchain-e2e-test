@@ -338,7 +338,7 @@ function parsePriceBatchWire(wire) {
     const parts = String(wire || '').split('|');
     if (parts[0] !== 'PRICE') return { ok: false, reason: 'not-a-price-wire' };
     const version = parseInt(parts[1], 10);
-    if (version !== 2) return { ok: false, reason: 'not-version-2', version: version };
+    if (version !== 0) return { ok: false, reason: 'not-the-batch-version', version: version };
 
     let body, compressed = false, compressedBytes = null, ratio = null;
     if (parts[2] === priceBatch.PRICE_BATCH_COMPRESSION_MARKER) {

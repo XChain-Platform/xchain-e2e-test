@@ -92,7 +92,7 @@ describe('AT1 oracle batch cadence: six finalized rounds, ONE PRICE v0 on DOGE r
             validatorCount: VALIDATORS,
             basePort: 33900,
             roundBase: drive.alignedRoundBase(WINDOW_ROUNDS),
-            expectWireVersion: 2
+            expectWireVersion: 0
         });
 
         let up = false;
@@ -179,15 +179,15 @@ describe('AT1 oracle batch cadence: six finalized rounds, ONE PRICE v0 on DOGE r
             'race this run happened to win rather than a property.' + drive.railDiagnosis(venue, signerSet));
     });
 
-    it('the one transaction is a PRICE batch, and no PRICE v0 was emitted at all', function () {
+    // The old companion assertion here required ZERO per-round wires alongside the batch.
+    // It is void and was self-contradicting: the per-round wire is DELETED, the batch IS
+    // version 0, so a loop demanding every publication be something other than version 0
+    // could never hold beside the assertion directly above it. With no second wire for a
+    // round to ride, "exactly one publication" (asserted above) is the whole cadence claim.
+    it('the one transaction is a PRICE batch on the wire', function () {
         const p = venue.publications[0];
         assert.strictEqual(p.wireVersion, 0,
             'the federation published PRICE v' + p.wireVersion + ', not the batch version 0');
-        for (const other of venue.publications) {
-            assert.notStrictEqual(other.wireVersion, 0,
-                'AT1 requires ZERO PRICE v0 for a batched window; hub ' + other.hubIndex +
-                ' emitted one (tx ' + other.txid + ')');
-        }
         assert.ok(/^[0-9a-f]{64}$/.test(String(p.txid)),
             'PUSH rung: the publish returned ' + p.txid + ' rather than a transaction id');
     });

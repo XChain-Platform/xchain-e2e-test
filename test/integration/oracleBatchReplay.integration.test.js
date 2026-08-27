@@ -200,7 +200,7 @@ describe('AT2: a fresh indexer with its own empty hub and no peers rebuilds pric
 
         venue = new OracleBatchVenue({
             coin: 'dogecoin', network: 'regtest',
-            validatorCount: VALIDATORS, basePort: 33900, expectWireVersion: 2
+            validatorCount: VALIDATORS, basePort: 33900, expectWireVersion: 0
         });
         let venueUp = false;
         try { venueUp = await venue.up(); }
