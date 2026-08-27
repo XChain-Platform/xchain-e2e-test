@@ -23,7 +23,7 @@
  *     -> real decoder + indexer parse
  *     -> the `prices` row read back off the landing chain's own database
  *
- * WHY v0 WHEN THE POINT IS v2. PRICE v2 does not exist yet. Proving the rig on
+ * WHY v0 WHEN THE POINT IS v2. PRICE v0 does not exist yet. Proving the rig on
  * the version that DOES exist is what makes the v2 drills a small addition
  * (finalize a window, assert one wire covers six rounds) rather than a second
  * venue build. Nothing here matches on `PRICE|0|`: the venue reports the version

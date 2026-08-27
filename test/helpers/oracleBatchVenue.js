@@ -45,7 +45,7 @@
  * THE WIRE VERSION IS A PARAMETER, NOT AN ASSUMPTION. Nothing here builds or
  * matches on `PRICE|0|`. The venue captures whatever wire the publisher hands
  * its broadcast hook and reads the version out of field 1, so a publisher that
- * later emits a PRICE v2 batch needs no venue change: the drill asserts on the
+ * later emits a PRICE batch needs no venue change: the drill asserts on the
  * captured version instead. `expectWireVersion` only sharpens the failure
  * message when a run gets a version it did not plan for.
  *

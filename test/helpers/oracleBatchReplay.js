@@ -18,7 +18,7 @@
  *
  * WHY THIS EXISTS. `oracleBatchVenue.js` proves a federation can PUT price
  * history on a chain. AT2 is the other direction and it is the claim the whole
- * PRICE v2 spec rests on (section 2, section 5's "Replay property"): that the
+ * PRICE v0 spec rests on (section 2, section 5's "Replay property"): that the
  * chain ALONE is enough to get that history back. Nothing in this repo could
  * ask that question, because every drill runs against the one long-lived stack
  * whose databases already hold the answer. A node that inherits a populated

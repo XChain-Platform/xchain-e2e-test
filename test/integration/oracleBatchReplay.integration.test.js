@@ -12,7 +12,7 @@
  *
  * L3 integration: AT2, chain self-sufficiency.
  *
- * THE CLAIM UNDER TEST is the one the whole PRICE v2 spec rests on: the chain
+ * THE CLAIM UNDER TEST is the one the whole PRICE v0 spec rests on: the chain
  * alone is enough to rebuild price history. A node that was not there when the
  * federation ran, that has no peer to ask and no database to inherit, must be
  * able to read the chain and arrive at the same price_snapshots and the same fee
@@ -99,13 +99,13 @@ const PRICE_GRACE_S = 600;
 // Batch window knobs, set on the PROCESS before the venue builds its publishers
 // (OraclePublisher reads them in its constructor) and restored afterwards.
 //
-// WHY A ONE-ROUND WINDOW. PRICE v2 has landed in the hub, PRICE_BATCH_ACTIVATION
+// WHY A ONE-ROUND WINDOW. PRICE v0 has landed in the hub, PRICE_BATCH_ACTIVATION
 // is genesis on regtest, and `onRoundFinalized` now buffers every finalized round
 // instead of publishing it. The publish venue drives rounds one at a time and
 // waits for each one to reach the chain, so at the shipped six-round window it
 // waits forever and throws: the first five rounds of a window produce no
 // transaction at all. A window of one makes every finalized round its own batch,
-// which still puts a REAL `PRICE|2|` wire on the chain (the thing AT2 has to
+// which still puts a REAL `PRICE|0|` wire on the chain (the thing AT2 has to
 // replay) while keeping the venue's one-round-at-a-time contract intact. Window
 // COMPOSITION is AT1's question, not this suite's.
 const BATCH_WINDOW_ROUNDS = 1;
@@ -207,7 +207,7 @@ describe('AT2: a fresh indexer with its own empty hub and no peers rebuilds pric
         catch (err) { await bail('publish venue failed to build: ' + (err && err.message)); this.skip(); return; }
         if (!venueUp) { await bail(venue.unavailable); this.skip(); return; }
 
-        // Keep the v2 batch BUFFER out of the checkout.
+        // Keep the batch BUFFER out of the checkout.
         //
         // OraclePublisher derives `bufferPath` from `queuePath` in its CONSTRUCTOR
         // (`this.queuePath.replace(/\.jsonl$/, '') + '.buffer.jsonl'`), and the venue
@@ -227,7 +227,7 @@ describe('AT2: a fresh indexer with its own empty hub and no peers rebuilds pric
         // Give every hub a STARTED batch-signing round.
         //
         // The venue attaches an OracleConsensus and an OraclePublisher per hub, both
-        // of which predate PRICE v2, and nothing attaches an OracleBatchSigner.
+        // of which predate PRICE v0, and nothing attaches an OracleBatchSigner.
         // `OraclePublisher._getBatchSigner` lazily builds and starts one for itself,
         // but only the LEADER ever reaches that call: a follower returns at the
         // "not our window" branch long before it, so no follower has the XPRICEB
