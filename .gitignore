@@ -26,3 +26,11 @@ reports/mutation/*.json
 # Hub spend_guard runtime state (data/spend-state/<label>.json), written relative
 # to the cwd when a hub is driven from this directory. Per-run state, not source.
 data/spend-state/
+
+# Oracle publisher batch buffer, a sibling of the publish queue and written to the
+# same cwd-relative default. A drill should redirect the publisher's paths into a
+# temp dir (see test/helpers/oracleBatchVenue.js) rather than rely on this rule,
+# but the rule keeps an un-redirected run from staging an hour of buffered rounds
+# as if it were source. Note data/ is only PARTLY ignored here: some queue files
+# in it are deliberately tracked.
+data/*.buffer.jsonl
