@@ -409,9 +409,13 @@ function slashHarness(offenderPubkey) {
         getOrCreatePubkeyId:             async () => 7,
         hasCapabilitySlashEvent:         async () => false,
         getStakeSourceForDelegatedPubkey: async () => null,
+        // { total, releases }: a bond is LOCKED in the staker's escrow, so the burn reports
+        // whose escrow it reduced and the handler releases it there before redirecting any
+        // of it. A bare total cannot be attributed (a delegated key's bond lives on the
+        // owning source), which is why the shape changed.
         slashCapabilityStake: async (pubkeyId, blockIndex, actionIndex, burnPending, ownerSourceId) => {
             calls.burns.push({ pubkeyId, blockIndex, actionIndex, burnPending, ownerSourceId });
-            return '1000';
+            return { total: '1000', releases: [{ address: 'staker1', amount: '1000' }] };
         },
         createCapabilitySlashEvent: async (row) => { calls.events.push(row); },
         getAddressId:               async () => 1,
