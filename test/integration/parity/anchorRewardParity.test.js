@@ -10,30 +10,35 @@
  *
  * Anchor-reward re-derivation: cross-service XANCPUB parity.
  *
- * At/above the ANCHOR_REWARD flag-day the validator anchor reward is no longer
- * pushed by the hub but DERIVED by every indexer from the on-chain ANCHOR v4/v5
- * publisher attestation. The attested canonical (XANCPUB) is built INLINE in two
- * services (the hub producer StateAnchorPublisher._attestationCanonical and the
- * indexer verifier actions/anchor.js _rewardCanonical), and the flag-day map plus
- * the frozen reward amount live as LOCAL COPIES in both services AND the canonical
- * xchain-documentation/protocol/constants.js. A single byte of drift between any
- * two of these silently FORKS the derived validator_rewards row (a COLLECT-spendable
- * ledger entry), so this guards:
+ * The validator anchor reward is not pushed by the hub but DERIVED from the
+ * on-chain publisher attestation. The checkpoint leg carries ONE attestation per
+ * ANCHOR v7 bundle: reward type `anchor_bundle`, round_reference SNAPSHOT_BLOCK,
+ * the frozen ANCHOR_REWARD_AMOUNT. The attested canonical (XANCPUB) is built
+ * INLINE in two services (the hub producer StateAnchorPublisher._attestationCanonical
+ * and the indexer verifier actions/anchor.js _rewardCanonical), and the flag-day map
+ * plus the frozen reward amount live as LOCAL COPIES in both services AND the
+ * canonical xchain-documentation/protocol/constants.js. A single byte of drift
+ * between any two of these silently FORKS the derived validator_rewards row (a
+ * COLLECT-spendable ledger entry), so this guards:
  *
  *   1. ANCHOR_REWARD_ACTIVATION + ANCHOR_REWARD_AMOUNT are byte-equal across the hub
  *      and indexer twins AND the canonical protocol constant.
  *   2. Both local isAnchorRewardActive agree on the verdict for the same input.
- *   3. The post-flag-day XANCPUB canonical (EQUIV-wrapped) is byte-identical between
- *      the hub producer and the indexer verifier, carries the frozen amount, and
- *      matches the documented wire string.
- *   4. The pre-flag-day XANCPUB canonical (header-less, EQUIV dormant) is likewise
- *      byte-identical and carries no EQUIV prefix.
+ *   3. The bundle XANCPUB canonical is byte-identical between the hub producer and
+ *      the indexer verifier where the EQUIV header is armed, carries the frozen
+ *      amount, and matches the documented wire string.
+ *   4. The same canonical is byte-identical where the EQUIV header is dormant, and
+ *      carries no EQUIV prefix there.
+ *
+ * The canonical keeps SIX positional fields so slash.js reads snapshot_block at
+ * field index 3 for every XANCPUB family without a third branch; field 2 is
+ * round_reference, which for a bundle IS the snapshot block, hence the repeat.
  *
  * Because each builder is invoked through its OWN service's equivocation_header +
  * anchor_reward_activation copies, this also catches drift in either of those.
  *
- * Spec: xchain-documentation/protocol/actions/ANCHOR.md (Publisher-attestation
- * canonical).
+ * Spec: xchain-documentation/protocol/actions/anchor.md (Publisher-attestation
+ * canonical); anchor-bundle-per-network.md 2.5, D21-D23.
  ********************************************************************/
 
 'use strict';
@@ -53,20 +58,21 @@ const Anchor               = require(path.join(ROOT, 'xchain-indexer/src/actions
 
 // Both canonical builders read only their argument (no `this`), so invoke them
 // directly off the prototype, each through its own service's eq + ar copies.
-function hubXancpub(cp, publisher) {
-    return StateAnchorPublisher.prototype._attestationCanonical.call({}, cp, publisher);
+function hubXancpub(b, publisher) {
+    return StateAnchorPublisher.prototype._attestationCanonical.call({}, b, publisher);
 }
 function idxXancpub(d) {
     return Anchor.prototype._rewardCanonical.call({}, d);
 }
 
-// One logical reward attestation in BOTH the hub `cp` shape and the indexer wire-parse
-// `d` shape, so a single fixture drives both builders.
+// One logical bundle attestation in BOTH the hub `b` shape (the bundle header the
+// publisher attests) and the indexer wire-parse `d` shape, so a single fixture drives
+// both builders. A bundle attestation names no chain: the reward is one per bundle.
 function fixtures(net, snapshotBlock) {
     const PUBLISHER = '07'.repeat(32);
-    const cp = { chain: 'BTC', network: net, checkpoint_seq: 7, snapshot_block: snapshotBlock };
-    const d  = { CHAIN: 'BTC', NETWORK: net, CHECKPOINT_SEQ: 7, SNAPSHOT_BLOCK: snapshotBlock, PUBLISHER };
-    return { cp, d, PUBLISHER };
+    const b = { network: net, snapshot_block: snapshotBlock };
+    const d = { FORMAT: 7, NETWORK: net, SNAPSHOT_BLOCK: snapshotBlock, PUBLISHER };
+    return { b, d, PUBLISHER };
 }
 
 describe('ANCHOR_REWARD (XANCPUB) cross-service parity', function () {
@@ -112,32 +118,48 @@ describe('ANCHOR_REWARD (XANCPUB) cross-service parity', function () {
         }
     });
 
-    it('post-flag-day: hub == indexer XANCPUB canonical (EQUIV-wrapped, frozen amount)', function () {
-        // regtest flag-day is 0, so snapshot_block 100 is active and the EQUIV header applies.
-        const { cp, d, PUBLISHER } = fixtures('regtest', 100);
-        const hubC = hubXancpub(cp, PUBLISHER);
+    it('EQUIV armed: hub == indexer bundle XANCPUB canonical (EQUIV-wrapped, frozen amount)', function () {
+        // regtest arms the EQUIV header at 0, so snapshot_block 100 takes the wrapped leg.
+        const { b, d, PUBLISHER } = fixtures('regtest', 100);
+        const hubC = hubXancpub(b, PUBLISHER);
         const idxC = idxXancpub(d);
-        assert.strictEqual(hubC, idxC, 'hub vs indexer XANCPUB canonical drift');
-        // Matches the documented wire string (ANCHOR.md Publisher-attestation canonical).
+        assert.strictEqual(hubC, idxC, 'hub vs indexer bundle XANCPUB canonical drift');
+        // Matches the documented wire string (anchor.md Publisher-attestation canonical).
+        // The round id is the bundle family 'XANCPUB|bundle|NETWORK|SNAPSHOT_BLOCK'; the
+        // base repeats SNAPSHOT_BLOCK because field 2 is round_reference.
         assert.strictEqual(hubC,
-            'EQUIV|XCHECKPOINT|XANCPUB|BTC|regtest|7|100|0||XANCPUB|anchor_BTC|7|100|' +
+            'EQUIV|XCHECKPOINT|XANCPUB|bundle|regtest|100|0||XANCPUB|anchor_bundle|100|100|' +
             PUBLISHER + '|' + protocolConstants.ANCHOR_REWARD_AMOUNT,
-            'XANCPUB canonical drifted from the documented format');
+            'bundle XANCPUB canonical drifted from the documented format');
         assert.ok(hubC.endsWith('|' + protocolConstants.ANCHOR_REWARD_AMOUNT),
             'canonical must end with the frozen reward amount');
     });
 
-    it('pre-flag-day: hub == indexer XANCPUB canonical (header-less, EQUIV dormant)', function () {
-        // mainnet flag-day is the far-future placeholder, so snapshot_block 1000 is inactive
-        // and the EQUIV header is dormant: the bare XANCPUB string.
-        const { cp, d, PUBLISHER } = fixtures('mainnet', 1000);
-        const hubC = hubXancpub(cp, PUBLISHER);
+    it('the bundle XANCPUB canonical keeps six positional fields so slash.js finds snapshot_block', function () {
+        // slash.js reads snapshot_block at field index 3 of the base for EVERY XANCPUB
+        // family. A five-field bundle base would make every bundle equivocation report
+        // 'invalid: snapshot_block' instead of judging it (D22), so the count and the
+        // position of that field are both consensus surface.
+        const { b, PUBLISHER } = fixtures('regtest', 100);
+        const base = hubXancpub(b, PUBLISHER).split('||')[1].split('|');
+        assert.strictEqual(base.length, 6, 'bundle XANCPUB base must carry six positional fields');
+        assert.strictEqual(base[1], 'anchor_bundle', 'field 1 is the reward type');
+        assert.strictEqual(base[2], '100', 'field 2 is round_reference, the snapshot block for a bundle');
+        assert.strictEqual(base[3], '100', 'field 3 is snapshot_block, the index slash.js reads');
+    });
+
+    it('EQUIV dormant: hub == indexer bundle XANCPUB canonical (header-less)', function () {
+        // mainnet arms the EQUIV header far above 1000, so this block takes the dormant
+        // leg: the bare XANCPUB string with no wrapper. Both services must agree there
+        // too, or a bundle attested below an armed height forks the derived reward.
+        const { b, d, PUBLISHER } = fixtures('mainnet', 1000);
+        const hubC = hubXancpub(b, PUBLISHER);
         const idxC = idxXancpub(d);
-        assert.strictEqual(hubC, idxC, 'hub vs indexer pre-flag-day XANCPUB canonical drift');
+        assert.strictEqual(hubC, idxC, 'hub vs indexer EQUIV-dormant bundle XANCPUB canonical drift');
         assert.strictEqual(hubC,
-            'XANCPUB|anchor_BTC|7|1000|' + PUBLISHER + '|' + protocolConstants.ANCHOR_REWARD_AMOUNT,
-            'pre-flag-day canonical must be the bare XANCPUB string');
-        assert.ok(!hubC.startsWith('EQUIV|'), 'pre-flag-day canonical must carry no EQUIV prefix');
+            'XANCPUB|anchor_bundle|1000|1000|' + PUBLISHER + '|' + protocolConstants.ANCHOR_REWARD_AMOUNT,
+            'EQUIV-dormant canonical must be the bare XANCPUB string');
+        assert.ok(!hubC.startsWith('EQUIV|'), 'EQUIV-dormant canonical must carry no EQUIV prefix');
     });
 });
 
@@ -202,14 +224,15 @@ describe('ARCHIVE_REWARD (archive XANCPUB) cross-service parity', function () {
             'pre-flag-day archive canonical must be the bare XANCPUB string');
     });
 
-    it('the archive and per-chain XANCPUB round-id families are disjoint (no equivocation collision)', function () {
-        // Same seq/batch, same snapshot: the two canonicals must live in DIFFERENT
-        // EQUIV round-id families, or signing both would look like an equivocation.
+    it('the archive and bundle XANCPUB round-id families are disjoint (no equivocation collision)', function () {
+        // Same batch number, same snapshot: the two canonicals must live in DIFFERENT
+        // EQUIV round-id families, or a publisher that signs both in one cycle (the
+        // normal case, both legs ride the same flush) would look like an equivocation.
         const { cp, PUBLISHER } = archiveFixtures('regtest', 100);
-        const perChain = hubXancpub(Object.assign({}, cp, { checkpoint_seq: 3 }), PUBLISHER);
-        const archive  = hubArchXancpub(cp, 3, PUBLISHER);
+        const bundle  = hubXancpub({ network: cp.network, snapshot_block: cp.snapshot_block }, PUBLISHER);
+        const archive = hubArchXancpub(cp, 3, PUBLISHER);
         const roundIdOf = (s) => s.split('||')[0];
-        assert.notStrictEqual(roundIdOf(perChain), roundIdOf(archive),
-            'archive round id must not collide with the per-chain XANCPUB round id');
+        assert.notStrictEqual(roundIdOf(bundle), roundIdOf(archive),
+            'archive round id must not collide with the bundle XANCPUB round id');
     });
 });
