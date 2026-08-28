@@ -71,7 +71,10 @@ const CAPS = {
     },
     price:          { sources: ['coingecko'], fiats: ['USD'] },
     cross_chain:    { chains: { BTC: { rpc: 'http://node:8332' } } },
-    oracle_publish: { doge_address: 'D8vFz4p1L37jdg47kT9V9j1Z2nGw6Lp9aT', doge_wallet: '/data/.dogecoin/wallet.dat' }
+    // A REGTEST-format DOGE address ('n' prefix, 34 chars). The hub's oracle_publish
+    // self-test validates doge_address against HUB_NETWORK, so a mainnet 'D' address
+    // fails closed on the regtest hubs this harness stands up.
+    oracle_publish: { doge_address: 'nsTake195wjCuVwLHf26EsZnRjwpm2LJtb', doge_wallet: '/data/.dogecoin/wallet.dat' }
 };
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
