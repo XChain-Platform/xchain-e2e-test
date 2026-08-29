@@ -108,7 +108,7 @@ async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 describe('[sdk] cross-chain DEX LIVE escrow-release settlement (#10)', function () {
     this.timeout(0);
 
-    let sdk, maker, btcOrderIndex, dogeRecv, btcTokenBalanceBefore;
+    let sdk, maker, btcOrderIndex, dogeRecv, btcTokenBalanceBefore, matchEffectiveTime;
 
     before(async function () {
         expect(BTC_TICK, 'DEX_BTC_TICK env').to.match(/^[A-Z0-9]{1,12}$/);
@@ -170,7 +170,7 @@ describe('[sdk] cross-chain DEX LIVE escrow-release settlement (#10)', function 
         let match = null;
         while (Date.now() < deadline) {
             const rows = await hubDb(async (c) => c.query(
-                "SELECT match_id, status, a_chain, a_action_index, b_chain, b_action_index FROM cross_chain_matches WHERE " + MATCH_REF_WHERE + " ORDER BY id DESC LIMIT 1",
+                "SELECT match_id, status, a_chain, a_action_index, b_chain, b_action_index, effective_time FROM cross_chain_matches WHERE " + MATCH_REF_WHERE + " ORDER BY id DESC LIMIT 1",
                 [btcOrderIndex, btcOrderIndex]));
             if (rows.length && rows[0].status === 'finalized') { match = rows[0]; break; }
             await mine(1);
@@ -180,7 +180,9 @@ describe('[sdk] cross-chain DEX LIVE escrow-release settlement (#10)', function 
         const legs = [[match.a_chain, Number(match.a_action_index)], [match.b_chain, Number(match.b_action_index)]];
         expect(legs).to.deep.include(['BTC', btcOrderIndex]);
         expect(legs.map(l => l[0]).sort()).to.deep.equal(['BTC', 'DOGE']);
-        console.log('    [dex-settle] hub finalized match ' + match.match_id + ' legs=' + JSON.stringify(legs));
+        matchEffectiveTime = Number(match.effective_time);
+        console.log('    [dex-settle] hub finalized match ' + match.match_id + ' legs=' + JSON.stringify(legs) +
+            ' effective_time=' + matchEffectiveTime + ' (in ' + Math.max(0, matchEffectiveTime - Math.floor(Date.now() / 1000)) + 's)');
     });
 
     it('the BTC indexer SETTLES the match: escrow released to the DOGE maker', async function () {
@@ -193,9 +195,17 @@ describe('[sdk] cross-chain DEX LIVE escrow-release settlement (#10)', function 
         // (db.js: `settled` is derived from cross_chain_settlements, never the
         // mirrored match). order_statuses is NOT relied upon (a cross-chain fill is
         // recorded via the settlements table, not necessarily an order_statuses flip).
-        const deadline = Date.now() + 240000;
+        // The hub stamps effective_time = finalize + relayMarginFloorS (4 nominal blocks
+        // of the slower leg, 2400s for a BTC leg) and the indexer settles at the first
+        // block whose block_time reaches it, so a fixed short wait can never pass here.
+        const effMs    = Number.isFinite(matchEffectiveTime) ? matchEffectiveTime * 1000 : Date.now();
+        const deadline = Math.max(Date.now() + 240000, effMs + 240000);
         let settlements = 0, payoutAmt = null, orderStatus = null;
         while (Date.now() < deadline) {
+            // Idle cheaply until the row is effective; mining through the margin would
+            // add thousands of pointless regtest blocks.
+            const untilEffective = effMs - Date.now();
+            if (untilEffective > 0) { await sleep(Math.min(untilEffective + 1000, 30000)); continue; }
             await mine(1);
             await sleep(3000);
             settlements = await btcCount(

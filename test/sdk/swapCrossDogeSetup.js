@@ -70,7 +70,10 @@ const DB_PORT     = parseInt(process.env.XCALL_DB_PORT || '13306', 10);
 const HUB_DB_HOST = process.env.HUB_DB_HOST || DB_HOST;
 const HUB_DB_PORT = parseInt(process.env.HUB_DB_PORT || String(DB_PORT), 10);
 const HUB_DB_NAME = process.env.HUB_DB_NAME || 'XChain_Hub';
-const FEE_DESTINATION = process.env.SWAP_DOGE_FEE_DESTINATION || 'moArBUdgbkU3THWXnnPSBwfaPgL5c9tMqN';
+// Must track xchain-indexer/src/coins/DOGE.js regtest addresses.FEE_DESTINATION.
+// A stale value here pays a real DOGE output nobody credits, and the ISSUE dies as
+// 'insufficient fee (native coin output required)' with no mention of the address.
+const FEE_DESTINATION = process.env.SWAP_DOGE_FEE_DESTINATION || 'mfees5pa2HwNBonk5vG23aDWkN9fuDJib4';
 // Seeded oracle prices and the UNIFIED_FEES ISSUE gas (GAS_SCHEDULE.ISSUE x GAS_PRICE),
 // identical to dexDogeSetup so the two drivers value the same fee the same way.
 const DOGE_USD = 0.10, XCHAIN_USD = BOOTSTRAP_XCHAIN_USD_NUM;
@@ -124,11 +127,11 @@ async function main() {
         return rows.length ? Number(rows[0].block_time) : Math.floor(Date.now() / 1000);
     });
 
-    // Seed the prices the DOGE native-fee path reads. Anchor to the NEWER of the chain
-    // clock and wall-clock: freshness is judged against the block_time of the block the
-    // ISSUE lands in, and on a chain that sat idle the old tip time is stale beyond the
-    // 1800s gate while the newly mined block gets wall-clock time.
-    const seedTime = Math.max(blockTime, Math.floor(Date.now() / 1000));
+    // Seed the prices the DOGE native-fee path reads, anchored to the CHAIN clock.
+    // Freshness is judged against the block_time of the block the ISSUE lands in, and a
+    // regtest node whose clock is frozen mints blocks far behind wall-clock, so a
+    // wall-clock anchor lands in the future and the time-keyed selection skips it.
+    const seedTime = blockTime;
     refuseSeedIfSuppressed('swapCrossDogeSetup');
     await hubConn(async (c) => {
         for (const [pair, price, round] of [['DOGE/USD', DOGE_USD_SEED, 990001], ['XCHAIN/USD', BOOTSTRAP_XCHAIN_USD, 990002]]) {
@@ -152,24 +155,12 @@ async function main() {
     });
     const kp = sdk.generateKeyPair();
     const maker = { ...kp, address: sdk.deriveAddress(kp.publicKey, { type: 'p2pkh' }) };
-    const fundRes  = await minerRpc('send_funds', { address: maker.address, amount: 100 });
-    const fundTxid = typeof fundRes === 'string' ? fundRes : (fundRes && fundRes.txid) || null;
+    await minerRpc('send_funds', { address: maker.address, amount: 100 });
+    // index_transactions carries XChain protocol transactions only, so gating on
+    // the funding txid appearing there can only ever time out. Mine and settle,
+    // the same guarantee dexDogeSetup.js and xcallDogeSetup.js run on.
     await minerRpc('generate_blocks', { count: 2 });
-    // Wait on the funding tx being INDEXED rather than on a fixed settle: the
-    // first submitAction below builds from these UTXOs, so the condition that
-    // matters is the indexer having seen them, not that 3s elapsed. Keeps
-    // mining while it waits, because an idle DOGE regtest chain will not
-    // advance on its own. A miner that returned no txid falls back to the
-    // block count, which is the same guarantee the fixed sleep gave.
-    for (let i = 0; i < 30; i++) {
-        if (!fundTxid) { await sleep(3000); break; }
-        const rows = await dogeIdx((c) => c.query(
-            'SELECT 1 AS ok FROM index_transactions WHERE hash = ? LIMIT 1', [fundTxid]));
-        if (rows.length) break;
-        if (i === 29) throw new Error('[swap-doge-setup] funding tx ' + fundTxid + ' never indexed');
-        await minerRpc('generate_blocks', { count: 1 });
-        await sleep(1000);
-    }
+    await sleep(3000);
     console.log('[swap-doge-setup] maker=' + maker.address);
 
     // A valid BTC regtest address for the cross-chain SWAP's GET_ADDRESS (where this
