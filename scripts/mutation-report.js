@@ -52,16 +52,49 @@ function statusEmoji(status) {
   }
 }
 
-function run() {
-  const reportPath = process.argv[2] || path.join('reports', 'mutation', 'phase1.json')
+// Longest inline snippet a report row carries, before truncation.
+const SNIPPET_MAX = 120
 
-  if (!fs.existsSync(reportPath)) {
-    console.error(`Report not found: ${reportPath}`)
-    console.error('Run "npm run test:mutate" first to generate the Stryker report.')
-    process.exit(1)
-  }
+// Cut a mutant's pre-mutation text out of `files[path].source`, which the report
+// schema requires; `location` is 1-based in line AND column, start inclusive and
+// end exclusive. Returns null when extraction is impossible, so misses are countable.
+function sliceSource(source, location) {
+  if (typeof source !== 'string') return null
+  if (!location || !location.start || !location.end) return null
 
-  const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'))
+  const { start, end } = location
+  if (!(start.line >= 1) || !(start.column >= 1)) return null
+  if (!(end.line >= start.line) || !(end.column >= 1)) return null
+
+  const lines = source.split('\n')
+  if (end.line > lines.length) return null
+
+  if (start.line === end.line) return lines[start.line - 1].slice(start.column - 1, end.column - 1)
+
+  const out = [lines[start.line - 1].slice(start.column - 1)]
+  for (let i = start.line; i < end.line - 1; i++) out.push(lines[i])
+  out.push(lines[end.line - 1].slice(0, end.column - 1))
+  return out.join('\n')
+}
+
+// Flatten a snippet into a single-backtick markdown span: a backtick in the
+// source would close the span early, and a newline would break the list item.
+function inlineCode(text) {
+  if (typeof text !== 'string') return ''
+  let flat = text.replace(/\s+/g, ' ').trim().replace(/`/g, "'")
+  if (flat.length > SNIPPET_MAX) flat = flat.slice(0, SNIPPET_MAX - 3) + '...'
+  return flat
+}
+
+// The one mutation-score definition, shared by the per-file rows and the header.
+// Denominator is COVERED mutants (Stryker's covered-code score), counted UP from
+// Killed/Timeout/Survived so a status added to the schema cannot silently join it.
+function coveredScore({ killed, timeout, survived }) {
+  const covered = killed + timeout + survived
+  return covered > 0 ? ((killed + timeout) / covered * 100).toFixed(1) : 'N/A'
+}
+
+function buildReport(report, options = {}) {
   const files  = report.files || {}
 
   let totalMutants  = 0
@@ -75,6 +108,7 @@ function run() {
 
   const perFile      = []
   const survivedList = []
+  let unextractable  = 0
 
   for (const [filePath, fileData] of Object.entries(files)) {
     const mutants = fileData.mutants || []
@@ -95,22 +129,22 @@ function run() {
       }
 
       if (m.status === 'Survived') {
+        const original = sliceSource(fileData.source, m.location)
+        if (original === null) unextractable++
+
         survivedList.push({
           file: filePath,
-          line: m.location ? m.location.start.line : '?',
+          line: m.location && m.location.start ? m.location.start.line : '?',
           mutator: m.mutatorName || 'Unknown',
-          original: m.originalLines || '',
-          replacement: m.replacement || m.mutatedLines || '',
+          original: inlineCode(original),
+          replacement: inlineCode(m.replacement),
           priority: isCriticalPath(filePath) ? 'P1' : 'P2',
         })
       }
     }
 
     if (fTotal > 0) {
-      const detectable = fTotal - fNoCoverage
-      const score = detectable > 0
-        ? ((fKilled + fTimeout) / detectable * 100).toFixed(1)
-        : 'N/A'
+      const score = coveredScore({ killed: fKilled, timeout: fTimeout, survived: fSurvived })
       perFile.push({
         file: filePath,
         total: fTotal,
@@ -124,15 +158,15 @@ function run() {
     }
   }
 
-  const detectable  = totalMutants - noCoverage - ignored
-  const overallScore = detectable > 0
-    ? ((killed + timeout) / detectable * 100).toFixed(1)
-    : 'N/A'
+  const overallScore = coveredScore({ killed, timeout, survived })
 
-  // Sort: critical files first, then by score ascending (worst first)
+  // Critical files first, then worst score first, with 'N/A' last: parseFloat('N/A')
+  // is NaN and a NaN comparator leaves the WHOLE ranking undefined, not one row.
   perFile.sort((a, b) => {
     if (a.critical !== b.critical) return a.critical ? -1 : 1
-    return parseFloat(a.score) - parseFloat(b.score)
+    const aScore = a.score === 'N/A' ? Infinity : parseFloat(a.score)
+    const bScore = b.score === 'N/A' ? Infinity : parseFloat(b.score)
+    return aScore - bScore
   })
 
   // Sort survived: P1 first, then by file
@@ -142,12 +176,12 @@ function run() {
   })
 
   const lines = []
-  const now = new Date().toISOString().slice(0, 10)
+  const now = options.date || new Date().toISOString().slice(0, 10)
 
   lines.push('# Mutation Testing Report')
   lines.push('')
   lines.push(`**Date:** ${now}`)
-  lines.push(`**Config:** ${path.basename(reportPath, '.json')}`)
+  lines.push(`**Config:** ${options.config || 'unknown'}`)
   lines.push(`**Overall Mutation Score:** ${overallScore}%`)
   lines.push('')
   lines.push('## Summary')
@@ -162,6 +196,10 @@ function run() {
   lines.push(`| Runtime Error | ${runtimeError} |`)
   lines.push(`| Compile Error | ${compileError} |`)
   lines.push(`| Ignored | ${ignored} |`)
+  lines.push('')
+  lines.push('Scores above and in the table below are Stryker\'s covered-code mutation score: '
+    + '`(Killed + Timeout) / (Killed + Timeout + Survived)`. No Coverage, Ignored, Runtime Error '
+    + 'and Compile Error mutants are outside the denominator, per-file and overall alike.')
   lines.push('')
 
   lines.push('## Per-File Scores')
@@ -195,20 +233,51 @@ function run() {
     lines.push('')
   }
 
-  const md = lines.join('\n')
+  return {
+    md: lines.join('\n'),
+    date: now,
+    overallScore,
+    totals: { totalMutants, killed, survived, timeout, noCoverage, runtimeError, compileError, ignored },
+    perFile,
+    survivedCount: survivedList.length,
+    unextractable,
+  }
+}
+
+function run() {
+  const reportPath = process.argv[2] || path.join('reports', 'mutation', 'phase1.json')
+
+  if (!fs.existsSync(reportPath)) {
+    console.error(`Report not found: ${reportPath}`)
+    console.error('Run "npm run test:mutate" first to generate the Stryker report.')
+    process.exit(1)
+  }
+
+  const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'))
+  const built  = buildReport(report, { config: path.basename(reportPath, '.json') })
 
   const outDir = path.join('reports', 'mutation')
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true })
 
-  const outPath = path.join(outDir, `report-${now}.md`)
-  fs.writeFileSync(outPath, md, 'utf8')
-  console.log(`Mutation report written to ${outPath}`)
-  console.log(`Overall mutation score: ${overallScore}%`)
-  console.log(`  Killed: ${killed}  Survived: ${survived}  Timeout: ${timeout}  NoCoverage: ${noCoverage}`)
+  const outPath = path.join(outDir, `report-${built.date}.md`)
+  fs.writeFileSync(outPath, built.md, 'utf8')
 
-  if (survived > 0) {
-    console.log(`\n${survived} survived mutant(s): see report for details.`)
+  const t = built.totals
+  console.log(`Mutation report written to ${outPath}`)
+  console.log(`Overall mutation score: ${built.overallScore}%`)
+  console.log(`  Killed: ${t.killed}  Survived: ${t.survived}  Timeout: ${t.timeout}  NoCoverage: ${t.noCoverage}`)
+
+  if (t.survived > 0) {
+    console.log(`\n${t.survived} survived mutant(s): see report for details.`)
+  }
+
+  // Fail loud on schema drift rather than shipping a silently empty Original column.
+  if (built.unextractable > 0) {
+    console.error(`WARNING: could not extract original source for ${built.unextractable} of `
+      + `${built.survivedCount} survived mutant(s) (missing files[].source or usable location).`)
   }
 }
 
-run()
+module.exports = { sliceSource, inlineCode, coveredScore, buildReport, isCriticalPath, statusEmoji }
+
+if (require.main === module) run()

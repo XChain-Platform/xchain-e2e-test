@@ -89,7 +89,7 @@ function injectionBlock({ effectiveTime, rowVisibleAt, t0, interval, maxBlocks }
 const callId = (injBlock) =>
     crypto.createHash('sha256').update('XCALL|inj@' + injBlock).digest('hex');
 
-describe('XCALL relay: live/replay determinism under hub delivery lag', function(){
+describe('[regression:p0] XCALL relay: live/replay determinism under hub delivery lag', function(){
 
     const CrossChainCallEngine = loadEngine();
     before(function(){
