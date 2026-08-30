@@ -71,7 +71,7 @@ function idxXancpub(d) {
 function fixtures(net, snapshotBlock) {
     const PUBLISHER = '07'.repeat(32);
     const b = { network: net, snapshot_block: snapshotBlock };
-    const d = { FORMAT: 7, NETWORK: net, SNAPSHOT_BLOCK: snapshotBlock, PUBLISHER };
+    const d = { FORMAT: 0, NETWORK: net, SNAPSHOT_BLOCK: snapshotBlock, PUBLISHER };
     return { b, d, PUBLISHER };
 }
 
@@ -175,7 +175,7 @@ describe('ARCHIVE_REWARD (archive XANCPUB) cross-service parity', function () {
     function archiveFixtures(net, snapshotBlock) {
         const PUBLISHER = '07'.repeat(32);
         const cp = { chain: 'BTC', network: net, checkpoint_seq: 7, snapshot_block: snapshotBlock };
-        const d  = { FORMAT: 6, CHAIN: 'BTC', NETWORK: net, CHECKPOINT_SEQ: 7,
+        const d  = { FORMAT: 1, CHAIN: 'BTC', NETWORK: net, CHECKPOINT_SEQ: 7,
                      SNAPSHOT_BLOCK: snapshotBlock, MATCH_BATCH_SEQ: 3, PUBLISHER };
         return { cp, d, PUBLISHER };
     }
