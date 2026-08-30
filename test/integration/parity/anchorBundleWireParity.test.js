@@ -8,16 +8,19 @@
  * This file is part of XChain Platform. Licensed under the GNU Affero
  * General Public License v3.0 or later; see LICENSE.md.
  *
- * ANCHOR v7 bundle wire: cross-service producer/parser parity.
+ * ANCHOR v0 bundle wire: cross-service producer/parser parity.
  *
- * The checkpoint leg is ONE wire, ANCHOR v7: a header (NETWORK, the bundle
+ * The checkpoint leg is ONE wire, ANCHOR v0 (the version set restarted,
+ * anchor-v0-single-wire.md D2; byte-for-byte the same wire yesterday's ANCHOR
+ * v7 was, only the version byte moved): a header (NETWORK, the bundle
  * SNAPSHOT_BLOCK, SECTION_COUNT), SECTION_COUNT positional sections and one
  * publisher-attestation tail. Three services hold their own inline copy of that
  * field order:
  *
- *   producer  xchain-hub      StateAnchorPublisher._buildV7Payload
- *   parser    xchain-indexer  actions/anchor.js _parseBundle (formats[7])
- *   parser    xchain-sdk      light.parseAnchorV7
+ *   producer  xchain-hub      StateAnchorPublisher._buildV7Payload (method name
+ *                             unchanged; only the version byte it writes moved)
+ *   parser    xchain-indexer  actions/anchor.js _parseBundle (formats[0])
+ *   parser    xchain-sdk      light.parseAnchorV0
  *
  * A one-field drift between any two forks consensus silently: the indexer rebuilds
  * a section canonical the validators never signed (zero valid signatures, the whole
@@ -36,7 +39,8 @@
  * signature: what is under test is field order, ordering rules and cardinality.
  *
  * Spec: anchor-bundle-per-network.md 2.1 (wire), 2.3 (parse), D5 (ordering),
- * D6 (header block), D19 (vector location).
+ * D6 (header block), D19 (vector location); anchor-v0-single-wire.md 2.1 (the
+ * version restart), D10 (the vector's key rename).
  ********************************************************************/
 
 'use strict';
@@ -52,7 +56,7 @@ const Anchor               = require(path.join(ROOT, 'xchain-indexer/src/actions
 const sdkLight             = require(path.join(ROOT, 'xchain-sdk/src/light.js'));
 
 const BUNDLE = GOLDEN.fixture.bundle;
-const WIRE   = GOLDEN.vectors.v7;
+const WIRE   = GOLDEN.vectors.v0;
 
 // The builder reads validator_signatures as a JSON string off each state_checkpoints
 // row, and takes no `this` beyond _parseSigs.
@@ -89,16 +93,16 @@ async function indexerParse(wire) {
     });
     // The decoder hands parse() the pipe-split action data with the action name
     // stripped, so params[0] is the version byte.
-    const data = { FORMAT: 7 };
+    const data = { FORMAT: 0 };
     await anchor.parse(wire.split('|').slice(1), data, null);
     return { data, rows };
 }
 
-describe('ANCHOR v7 bundle wire cross-service parity', function () {
+describe('ANCHOR v0 bundle wire cross-service parity', function () {
 
     it('the hub producer reproduces the frozen vector byte-for-byte', function () {
         assert.strictEqual(hubBuild(hubSections), WIRE,
-            'StateAnchorPublisher._buildV7Payload drifted from the frozen ANCHOR v7 vector');
+            'StateAnchorPublisher._buildV7Payload drifted from the frozen ANCHOR v0 vector');
     });
 
     it('the hub applies both ordering rules rather than echoing input order', function () {
@@ -154,9 +158,9 @@ describe('ANCHOR v7 bundle wire cross-service parity', function () {
     });
 
     it('the SDK parser reads the frozen vector back to the same section fields', function () {
-        const parsed = sdkLight.parseAnchorV7(WIRE);
+        const parsed = sdkLight.parseAnchorV0(WIRE);
 
-        assert.strictEqual(parsed.version, 7);
+        assert.strictEqual(parsed.version, 0);
         assert.strictEqual(parsed.network, BUNDLE.network, 'header NETWORK');
         assert.strictEqual(parsed.snapshot_block, Number(BUNDLE.snapshot_block), 'header SNAPSHOT_BLOCK');
         assert.strictEqual(parsed.section_count, BUNDLE.sections.length, 'header SECTION_COUNT');
@@ -188,7 +192,7 @@ describe('ANCHOR v7 bundle wire cross-service parity', function () {
         // same claim. Compared through a normalized projection because one side names
         // fields for the DB and the other for the checkpoint shape.
         const { rows } = await indexerParse(WIRE);
-        const parsed   = sdkLight.parseAnchorV7(WIRE);
+        const parsed   = sdkLight.parseAnchorV0(WIRE);
         const fromRow  = (r) => [String(r.CHAIN), Number(r.BLOCK_INDEX_CHECKPOINTED), r.BLOCK_HASH,
                                  r.LEDGER_HASH, r.ACTIONS_HASH, r.CONTRACT_HASH,
                                  Number(r.CHECKPOINT_SEQ), Number(r.SNAPSHOT_BLOCK),
@@ -200,7 +204,7 @@ describe('ANCHOR v7 bundle wire cross-service parity', function () {
                                  s.state_root, s.state_root_version,
                                  s.block_merkle_root, s.block_merkle_version];
         assert.deepStrictEqual(rows.map(fromRow), parsed.sections.map(fromSec),
-            'indexer and SDK v7 section parsers disagree on the frozen vector');
+            'indexer and SDK v0 section parsers disagree on the frozen vector');
     });
 
     it('the SDK serves one chain out of the bundle, and null for a chain it does not carry', function () {

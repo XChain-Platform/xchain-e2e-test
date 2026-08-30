@@ -10,7 +10,7 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- * E2E: ANCHOR v7 BUNDLE election on a LIVE DOGE regtest chain.
+ * E2E: ANCHOR v0 BUNDLE election on a LIVE DOGE regtest chain.
  *
  * The multi-validator paths the single-validator mainnet deployment never
  * exercises: four hubs over REAL P2P (Ed25519-verified gossip, per-hub
@@ -22,14 +22,15 @@
  * used to elect PER CHECKPOINT ROW, so three pending chains meant three
  * elections, three transactions, three attestation rounds and three
  * `anchor_<CHAIN>` rewards, split across whichever validators won each key.
- * Now every chain's newest un-anchored checkpoint rides ONE ANCHOR v7 as a
- * section, under ONE election keyed `XANCV7|NETWORK|SNAPSHOT_BLOCK`, with ONE
- * `anchor_bundle` reward. The cardinality IS the property under test, so every
- * assert here counts bundles and sections rather than rows.
+ * Now every chain's newest un-anchored checkpoint rides ONE ANCHOR v0 as a
+ * section, under ONE election keyed `XANCV7|NETWORK|SNAPSHOT_BLOCK` (the
+ * internal round-id tag did not move with the wire's version byte, D3), with
+ * ONE `anchor_bundle` reward. The cardinality IS the property under test, so
+ * every assert here counts bundles and sections rather than rows.
  *
  * Verified:
  *
- *   1. AT1 (federation form): one flush across four hubs lands exactly ONE v7
+ *   1. AT1 (federation form): one flush across four hubs lands exactly ONE v0
  *      carrying all three chains as sections, chain-ascending, published by the
  *      bundle key's rank-0 validator and paid from that validator's own wallet;
  *      exactly one `anchor_bundle` reward at round_reference = SNAPSHOT_BLOCK;
@@ -45,8 +46,9 @@
  *      `getanchoraction` (_findExistingBundle) instead of spending a second
  *      time, and both hubs rebuild byte-identical bundle payloads (D5).
  *   4. Archive round (unchanged leg): the per-election-block leader collects
- *      2f+1 co-signatures, publishes ANCHOR v1/v6, and XANC_FINALIZED back-fills
- *      every hub, with the `anchor_archive` reward on the leader.
+ *      2f+1 co-signatures, publishes ANCHOR v1 (the tail always appended now,
+ *      D4), and XANC_FINALIZED back-fills every hub, with the `anchor_archive`
+ *      reward on the leader.
  *
  * The oracle_publish capability set is stubbed (identical 4-validator snapshot
  * on every hub): resolving REAL on-chain BTC stakes into snapshots is
@@ -137,7 +139,7 @@ describe('ANCHOR bundle live: multi-validator per-NETWORK publisher (DOGE regtes
             let found = 0;
             for (const row of rows) {
                 let r = await indexerQuery(
-                    'SELECT action_index FROM anchor_actions WHERE version = 7 AND chain = ? AND network = ? ' +
+                    'SELECT action_index FROM anchor_actions WHERE version = 0 AND chain = ? AND network = ? ' +
                     'AND block_index = ? AND checkpoint_seq = ?',
                     [row.chain, row.network, row.block_index, row.checkpoint_seq]);
                 if (r.length) found++;
@@ -189,7 +191,7 @@ describe('ANCHOR bundle live: multi-validator per-NETWORK publisher (DOGE regtes
              row.state_root, row.state_root_version, row.block_merkle_root, row.block_merkle_version]);
     }
 
-    // A v7 section is ROOT-BEARING BY CONSTRUCTION (D8): the publisher SKIPS a
+    // A v0 section is ROOT-BEARING BY CONSTRUCTION (D8): the publisher SKIPS a
     // checkpoint row with null roots with a log line rather than emitting a
     // rootless wire, so a rootless synthetic row would be silently absent from
     // every bundle and every cardinality assert below would read as a bug in the
@@ -210,7 +212,7 @@ describe('ANCHOR bundle live: multi-validator per-NETWORK publisher (DOGE regtes
     }
 
     // Seqs must clear the indexer's per-chain replay guard (dirty regtest
-    // chains carry anchors from prior runs). v7 section rows carry their own
+    // chains carry anchors from prior runs). v0 section rows carry their own
     // per-chain checkpoint_seq, so this reads exactly as it did per row.
     async function nextSeq(chain){
         let r = await indexerQuery(
@@ -219,7 +221,7 @@ describe('ANCHOR bundle live: multi-validator per-NETWORK publisher (DOGE regtes
         return Number(r[0].s);
     }
 
-    // Every v7 bundle this run put on the wire, parsed. The archive leg (v1/v6)
+    // Every v0 bundle this run put on the wire, parsed. The archive leg (v1)
     // and any earlier run's wires are filtered out by the parser.
     function bundles(){
         return anchorVersions.bundleBroadcasts(published);
@@ -347,7 +349,7 @@ describe('ANCHOR bundle live: multi-validator per-NETWORK publisher (DOGE regtes
         if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
     });
 
-    it('AT1: one flush lands ONE v7 bundle carrying all three chains, one election, one anchor_bundle reward, every hub stamped', async function () {
+    it('AT1: one flush lands ONE v0 bundle carrying all three chains, one election, one anchor_bundle reward, every hub stamped', async function () {
         const block = await waitForTip(0);
 
         // All three chains at the SAME snapshot_block: the steady state, where the
@@ -381,7 +383,7 @@ describe('ANCHOR bundle live: multi-validator per-NETWORK publisher (DOGE regtes
         // the pre-bundle publisher produced three transactions here.
         const bs = bundles();
         assert.strictEqual(bs.length, 1,
-            'exactly one ANCHOR v7 for the network, got ' + bs.length + ' (' +
+            'exactly one ANCHOR v0 for the network, got ' + bs.length + ' (' +
             bs.map(b => b.bundle.chains.join('+')).join(' / ') + ')');
         const bundle = bs[0];
         assert.strictEqual(bundle.hub, winner, 'published by the bundle key\'s hash-order rank 0');
@@ -609,9 +611,10 @@ describe('ANCHOR bundle live: multi-validator per-NETWORK publisher (DOGE regtes
         // reach every hub rather than a fixed window.
         await waitForArchiveFinalized(m.match_id, mvh.hubs, 60000);
 
-        // Archive-leg versions from the flag-days at the checkpoint's
-        // snapshot_block (v1, or v6 once archive-reward derivation is armed);
-        // v6 is v1 plus a publisher tail, so the field layout below is shared.
+        // The archive leg now has exactly one accepted version (D4): v1, with
+        // the publisher tail ALWAYS appended, whether or not archive-reward
+        // derivation is armed at the checkpoint's snapshot_block. There is no
+        // second, tail-less wire to fall back to any more.
         const arcVersions = anchorVersions.expectedArchiveAnchor(cpRow).accepted;
         const v1s = published.filter(p => arcVersions.includes(anchorVersions.anchorPayloadVersion(p.payload)));
         assert.strictEqual(v1s.length, 1, 'exactly one archive anchor published');
