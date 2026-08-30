@@ -93,7 +93,14 @@ async function indexerParse(wire) {
     });
     // The decoder hands parse() the pipe-split action data with the action name
     // stripped, so params[0] is the version byte.
-    const data = { FORMAT: 0 };
+    //
+    // BLOCK_INDEX is the anchor's own mined DOGE height, and it is REQUIRED: the
+    // activation gate at the top of parse() reads it and fails CLOSED on a
+    // non-numeric value, so a fixture that omits it is rejected as
+    // 'invalid: ANCHOR before activation' and never reaches the positional walk
+    // this suite exists to test. The real decoder always supplies it. regtest
+    // activates at 0, so any height at or above 0 exercises the parse path.
+    const data = { FORMAT: 0, BLOCK_INDEX: 1000 };
     await anchor.parse(wire.split('|').slice(1), data, null);
     return { data, rows };
 }
