@@ -253,11 +253,28 @@ function epochsAfter(afterHeight, network, count){
 // The skip carries its reason so it can never read as a pass.
 function requireRollcallVenue(ctx){
     const on = process.env.E2E_REQUIRE_FEDERATION
-    if (on === '1' || on === 'true') return true
-    console.log('[skip] ROLLCALL acceptance drives BOTH regtest stacks (BTC epochs + DOGE publishes) ' +
-                'against a seeded four-source federation. Set E2E_REQUIRE_FEDERATION=1 to run it.')
-    ctx.skip()
-    return false
+    if (on !== '1' && on !== 'true') {
+        console.log('[skip] ROLLCALL acceptance drives BOTH regtest stacks (BTC epochs + DOGE publishes) ' +
+                    'against a seeded four-source federation. Set E2E_REQUIRE_FEDERATION=1 to run it.')
+        ctx.skip()
+        return false
+    }
+    // Opted IN, but the rail may be inert on this network. Say so in those terms
+    // rather than letting assertRegtestConstants report it as "constant drift",
+    // which reads as a stale sibling checkout and sends the reader to the wrong
+    // place entirely.
+    const network = NETWORK
+    if (rca().ROLLCALL_ACTIVATION[network] === null) {
+        console.log('[skip] ROLLCALL is INERT on ' + network + ' (ROLLCALL_ACTIVATION.' + network + ' is null), ' +
+                    'so no epoch exists for this suite to drive and the close would return 0 at every height. ' +
+                    'Regtest was made inert on 2026-08-31: arming a network commits every BTC indexer on it to ' +
+                    'a wired DOGE peer, and a single-coin BTC regtest venue has none. This suite needs an armed ' +
+                    'height, and there is deliberately no env override (the activation file forbids reading one). ' +
+                    'Arming it is an operator decision, not a venue setting.')
+        ctx.skip()
+        return false
+    }
+    return true
 }
 
 // The close, the capability predicate and the stake rows are BTC-only
@@ -278,8 +295,13 @@ function assertBtcRail(){
 // heights are quietly wrong.
 function assertRegtestConstants(network){
     const r = rca()
+    // ROLLCALL_ACTIVATION is deliberately NOT pinned here. It went null (inert) on
+    // regtest on 2026-08-31, and requireRollcallVenue already refuses the run in
+    // those terms, so any venue that reaches this line has had it armed to some
+    // height on purpose. Pinning a value would fight that arming; pinning null
+    // would be unreachable. The CADENCE constants below are what this harness's
+    // epoch arithmetic actually assumes, and those still must not drift.
     const want = {
-        ROLLCALL_ACTIVATION:           0,
         ROLLCALL_INTERVAL_BLOCKS:      30,
         ROLLCALL_ACCEPT_WINDOW_BLOCKS: 12,
         ROLLCALL_PROOF_DELAY_BLOCKS:   2,
