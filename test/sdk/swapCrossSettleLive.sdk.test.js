@@ -139,7 +139,7 @@ async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 describe('[sdk] cross-coin SWAP live settlement', function () {
     this.timeout(0);
 
-    let sdk, maker, btcSwapIndex, dogeRecv;
+    let sdk, maker, btcSwapIndex, dogeRecv, matchEffectiveTime;
 
     before(async function () {
         const coinCode = global.COIN_CODE || 'BTC';
@@ -217,7 +217,7 @@ describe('[sdk] cross-coin SWAP live settlement', function () {
         let match = null;
         while (Date.now() < deadline) {
             const rows = await hubDb(async (c) => c.query(
-                "SELECT match_id, status, a_chain, a_action_index, a_kind, b_chain, b_action_index, b_kind " +
+                "SELECT match_id, status, a_chain, a_action_index, a_kind, b_chain, b_action_index, b_kind, effective_time " +
                 "FROM cross_chain_matches WHERE " + MATCH_REF_WHERE + " ORDER BY id DESC LIMIT 1",
                 [btcSwapIndex, btcSwapIndex]));
             if (rows.length && rows[0].status === 'finalized') { match = rows[0]; break; }
@@ -231,7 +231,9 @@ describe('[sdk] cross-coin SWAP live settlement', function () {
         // Phase A: both legs are swaps. a_kind/b_kind default to 'swap' when null.
         expect([match.a_kind || 'swap', match.b_kind || 'swap'], 'both legs matched as swaps (Phase A exact fill)')
             .to.deep.equal(['swap', 'swap']);
-        console.log('    [swap-cross] hub finalized match ' + match.match_id + ' legs=' + JSON.stringify(legs));
+        matchEffectiveTime = Number(match.effective_time);
+        console.log('    [swap-cross] hub finalized match ' + match.match_id + ' legs=' + JSON.stringify(legs) +
+            ' effective_time=' + matchEffectiveTime + ' (in ' + Math.max(0, matchEffectiveTime - Math.floor(Date.now() / 1000)) + 's)');
     });
 
     it('the BTC indexer SETTLES the swap: full escrow released to the DOGE maker', async function () {
@@ -242,9 +244,17 @@ describe('[sdk] cross-coin SWAP live settlement', function () {
         // The consensus-correct "did this leg settle" signal is a row in the LOCAL
         // cross_chain_settlements table keyed on this swap's action_index (db.js derives
         // `settled` from that table, never from the mirrored match row).
-        const deadline = Date.now() + 240000;
+        // The hub stamps effective_time = finalize + relayMarginFloorS (4 nominal blocks
+        // of the slower leg, 2400s for a BTC leg) and the indexer settles at the first
+        // block whose block_time reaches it, so a fixed short wait can never pass here.
+        const effMs    = Number.isFinite(matchEffectiveTime) ? matchEffectiveTime * 1000 : Date.now();
+        const deadline = Math.max(Date.now() + 240000, effMs + 240000);
         let settlements = 0, payoutAmt = null;
         while (Date.now() < deadline) {
+            // Idle cheaply until the row is effective; mining through the margin would
+            // add thousands of pointless regtest blocks.
+            const untilEffective = effMs - Date.now();
+            if (untilEffective > 0) { await sleep(Math.min(untilEffective + 1000, 30000)); continue; }
             await mine(1);
             await sleep(3000);
             settlements = await btcCount(

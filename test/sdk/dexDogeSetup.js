@@ -64,7 +64,10 @@ const DB_PORT   = parseInt(process.env.XCALL_DB_PORT || '13306', 10);
 const HUB_DB_HOST = process.env.HUB_DB_HOST || DB_HOST;
 const HUB_DB_PORT = parseInt(process.env.HUB_DB_PORT || String(DB_PORT), 10);
 const HUB_DB_NAME = process.env.HUB_DB_NAME || 'XChain_Hub';
-const FEE_DESTINATION = process.env.DEX_DOGE_FEE_DESTINATION || 'moArBUdgbkU3THWXnnPSBwfaPgL5c9tMqN';
+// Must track xchain-indexer/src/coins/DOGE.js regtest addresses.FEE_DESTINATION.
+// A stale value here pays a real DOGE output nobody credits, and the ISSUE dies as
+// 'insufficient fee (native coin output required)' with no mention of the address.
+const FEE_DESTINATION = process.env.DEX_DOGE_FEE_DESTINATION || 'mfees5pa2HwNBonk5vG23aDWkN9fuDJib4';
 // Seeded oracle prices and the UNIFIED_FEES ISSUE gas (GAS_SCHEDULE.ISSUE x GAS_PRICE).
 // XCHAIN at the production bootstrap: the pair is derived from
 // platform fills and, with D2 supersession disabled, a real hub publishes exactly
@@ -114,11 +117,11 @@ async function main() {
         return rows.length ? Number(rows[0].block_time) : Math.floor(Date.now() / 1000);
     });
 
-    // Seed the prices the DOGE native-fee path reads (hub DB). Anchor to the NEWER of
-    // the chain clock and wall-clock: freshness is judged against the block_time of the
-    // block the ISSUE lands in, and on a chain that sat idle the old tip time is stale
-    // beyond the 1800s gate while the newly mined block gets wall-clock time.
-    const seedTime = Math.max(blockTime, Math.floor(Date.now() / 1000));
+    // Seed the prices the DOGE native-fee path reads (hub DB), anchored to the CHAIN
+    // clock. Freshness is judged against the block_time of the block the ISSUE lands in,
+    // and a regtest node whose clock is frozen mints blocks far behind wall-clock, so a
+    // wall-clock anchor lands in the future and the time-keyed selection skips it.
+    const seedTime = blockTime;
     refuseSeedIfSuppressed('dexDogeSetup');
     await hubConn(async (c) => {
         for (const [pair, price, round] of [['DOGE/USD', DOGE_USD_SEED, 990001], ['XCHAIN/USD', BOOTSTRAP_XCHAIN_USD, 990002]]) {

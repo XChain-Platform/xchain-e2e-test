@@ -38,14 +38,16 @@
  *   dex         r.snapshot_block             m.snapshot_block            HEIGHT
  *   xcall       r.snapshot_block             c.snapshot_block           HEIGHT
  *   nodeproof   epoch (=epoch HEIGHT)        snapshotBlock=epochHeight   HEIGHT
- *   oracle      round (OracleRound counter)  round (= block height?)     *** MISMATCH
+ *   oracle      btcBlockHeight               BTC_BLOCK_HEIGHT off the wire  HEIGHT
  *
- * For ORACLE the hub feeds `round`, which OracleRound derives as a WALL-CLOCK
- * counter: `Math.floor((Date.now()-epochStart)/roundInterval)`, kept DISTINCT
- * from `currentBtcBlockHeight` (the BTC tip; they coincide only in the
- * degraded fallback). So the oracle gate input is a round counter, not the
- * BTC height every other engine (and the indexer's own comment) treats it as.
- * That non-height gate input is the cross-service-fork hazard this guards against.
+ * ORACLE WAS the outlier and is no longer. The hub used to feed `round`, which
+ * OracleRound derives as a WALL-CLOCK counter
+ * (`Math.floor((Date.now()-epochStart)/roundInterval)`) and keeps DISTINCT from
+ * `currentBtcBlockHeight`; the two coincide only in the degraded fallback. A gate
+ * keyed on a counter rather than a height is the cross-service-fork hazard this
+ * suite exists to catch, so the counter derivation is still asserted below, to
+ * prove the height being fed is genuinely a different value and not the counter
+ * wearing a new name.
  *
  * APPROACH (mock / contract level, no DB, Node 24):
  * A full cross-service round-trip per engine needs a live federation + DB, so
@@ -262,16 +264,21 @@ describe('EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', function () 
             assert.match(aggArg, /^btcBlockHeight$/, 'hub PriceAggregator must gate on btcBlockHeight');
 
             // Indexer on-chain verifier gates on the same height, passed into the
-            // canonical builder. The builder reads btcBlockHeight (the 5th arg) and the
-            // gate keys on it; the height is parsed off the PRICE v0 wire (params[3]).
+            // canonical builder. Re-pointed 2026-08-26 for the v0 collapse: the batch IS
+            // version 0 and the per-round wire is deleted, so the height no longer sits
+            // where the retired per-round layout put it and the builder is now
+            // buildPriceBatchPayload. The PROPERTY under test is unchanged and is the
+            // whole point of this suite: the indexer must parse the BTC height off the
+            // wire and feed that same value into the canonical the gate keys on.
+            // Batch wire: PRICE|0|FIRST_ROUND|LAST_ROUND|BTC_BLOCK_HEIGHT|ROUND_COUNT|...
             const edSrc = srcOf('xchain-indexer/src/ed25519.js');
             assert.match(edSrc, /isEquivHeaderActive\(btcBlockHeight,\s*network\)/,
                 'indexer ed25519 must gate the price canonical on btcBlockHeight');
             const priceSrc = srcOf('xchain-indexer/src/actions/price.js');
-            assert.match(priceSrc, /btcBlockHeight\s*=\s*parseInt\(params\[3\]\)/,
-                'indexer must parse BTC_BLOCK_HEIGHT off the PRICE v0 wire (params[3])');
-            assert.match(priceSrc, /buildPriceV0Payload\(round,\s*timestamp,\s*pairs,\s*this\.config\['NETWORK'\],\s*btcBlockHeight\)/,
-                'indexer must feed the parsed btcBlockHeight into the canonical builder');
+            assert.match(priceSrc, /btcBlockHeight\s*=\s*parseInt\(fields\[3\]\)/,
+                'indexer must parse BTC_BLOCK_HEIGHT off the PRICE batch wire (fields[3])');
+            assert.match(priceSrc, /buildPriceBatchPayload\(firstRound,\s*lastRound,\s*btcBlockHeight,\s*rounds\)/,
+                'indexer must feed the parsed btcBlockHeight into the batch canonical builder');
 
             assertHeightParity('ORACLE', 500);
         });

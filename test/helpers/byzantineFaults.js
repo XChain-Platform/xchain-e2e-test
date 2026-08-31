@@ -65,9 +65,17 @@ function silenceOracleValidator(hub) {
 // Build a PRE_PREPARE envelope with a deliberately WRONG digest for its config
 // (a forged proposal). A correct follower must reject it on the digest check and
 // create no pending proposal. `seq` should be above any already-applied seq.
-function forgedPrePrepare(seq, config, blockIndex) {
+//
+// Pass `signer` ({addr, pubkey}, normally a real member of the target's validator
+// set) to make the DIGEST the only thing wrong with the envelope. Admission is
+// keyed on the proven signing key, so an envelope carrying none is dropped as
+// unattributable before the digest is ever compared, and the test would then pass
+// without exercising what it names. A member sending a forged digest is also the
+// scenario worth testing: an outsider cannot get this far at all.
+function forgedPrePrepare(seq, config, blockIndex, signer) {
     return {
-        sender: '127.0.0.1:59999',
+        sender: (signer && signer.addr) || '127.0.0.1:59999',
+        sig_pubkey: signer && signer.pubkey,
         type:   'PBFT_PRE_PREPARE',
         data: {
             seq:            seq,

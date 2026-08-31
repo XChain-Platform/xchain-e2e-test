@@ -365,18 +365,20 @@ describe('XCHAIN price derivation from real fills (spec step 7)', function () {
 
             const fill = afterPay.fills.find(f => f.actionIndex === Number(orderMatch.action_index))
 
-            // CORRECTION 1: the match's OWN status is still 'pending_coinpay' right
-            // now and will stay that way forever - nothing updates it. The fill is
-            // selected anyway, because settlement is proven by the coinpays row. A
-            // predicate keyed on the match status selects zero rows on every chain.
-            assert(fill, 'a SETTLED coinpay fill must be selected despite its match status')
+            // CORRECTION 1: the fill is selected on the strength of the `coinpays`
+            // row, never on the match's own status. A fully paid match is cleared to
+            // 'valid' by the indexer's match-scoped status writer, and that clearing
+            // is forward-only: a match settled before it holds 'pending_coinpay'
+            // permanently. A selection keyed on the match status therefore drops
+            // exactly the historical fills a price window depends on.
+            assert(fill, 'a SETTLED coinpay fill must be selected on its coinpays row, whatever the match status')
             const matchStatus = await db.doQuery(
                 `SELECT s.status, a.block_index FROM order_matches m
                    JOIN index_statuses s ON s.id = m.status_id
                    JOIN actions a ON a.action_index = m.action_index
                   WHERE m.action_index = ?`, [Number(orderMatch.action_index)])
-            assert.strictEqual(String(matchStatus[0].status), 'pending_coinpay',
-                'the match row is expected to still read pending after full payment')
+            assert.strictEqual(String(matchStatus[0].status), 'valid',
+                'a fully paid coinpay match is cleared to valid by the settling COINPAY')
 
             // CORRECTION 2: the fill is dated by the COINPAY's block, not the match's.
             // Windowing on the match block makes a historical window mutable, which

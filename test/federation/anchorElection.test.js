@@ -10,33 +10,51 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
- * E2E: per-chain ANCHOR publisher ELECTION on a LIVE DOGE regtest chain.
+ * E2E: ANCHOR v0 BUNDLE election on a LIVE DOGE regtest chain.
  *
  * The multi-validator paths the single-validator mainnet deployment never
  * exercises: four hubs over REAL P2P (Ed25519-verified gossip, per-hub
- * MariaDB), each with its OWN funded regtest DOGE wallet, electing
- * per-chain publishers by hash-ordering and publishing REAL two-phase
- * P2SH transactions. Verifies:
+ * MariaDB), each with its OWN funded regtest DOGE wallet, electing ONE
+ * publisher per NETWORK per cycle and publishing REAL two-phase P2SH
+ * transactions.
  *
- *   1. Per-chain election: each pending checkpoint is anchored exactly
- *      once, by the hash-order rank-0 validator for that row's key, paid
- *      from that validator's own wallet (no shared-UTXO contention).
- *   2. XANC_V0_DONE back-fill: every other hub's copy of the row gets
- *      anchor_txid over live P2P; a second flush publishes nothing.
- *   3. Failover ladder: ranks above 0 stay locked inside the tolerance
- *      window, rank 1 takes over after it elapses, and the returning
- *      rank 0 does NOT double-anchor (back-fill won the race).
- *   4. Archive round: the per-election-block leader collects 2f+1
- *      co-signatures from followers verifying against their own DBs,
- *      publishes ANCHOR v1, and XANC_FINALIZED back-fills every hub.
- *   5. Rewards: only the winning publisher records anchor_<chain> /
- *      anchor_archive rewards.
+ * What changed with the bundle (anchor-bundle-per-network.md): the anchor rail
+ * used to elect PER CHECKPOINT ROW, so three pending chains meant three
+ * elections, three transactions, three attestation rounds and three
+ * `anchor_<CHAIN>` rewards, split across whichever validators won each key.
+ * Now every chain's newest un-anchored checkpoint rides ONE ANCHOR v0 as a
+ * section, under ONE election keyed `XANCV7|NETWORK|SNAPSHOT_BLOCK` (the
+ * internal round-id tag did not move with the wire's version byte, D3), with
+ * ONE `anchor_bundle` reward. The cardinality IS the property under test, so
+ * every assert here counts bundles and sections rather than rows.
  *
- * The oracle_publish capability set is stubbed (identical 4-validator
- * snapshot on every hub): resolving REAL on-chain BTC stakes into
- * snapshots is CapabilitySnapshot's own concern, covered by its units
- * and the Tier-2 federation proof. Everything downstream of the set
- * (election, gossip, signing, broadcast, DB state) is live.
+ * Verified:
+ *
+ *   1. AT1 (federation form): one flush across four hubs lands exactly ONE v0
+ *      carrying all three chains as sections, chain-ascending, published by the
+ *      bundle key's rank-0 validator and paid from that validator's own wallet;
+ *      exactly one `anchor_bundle` reward at round_reference = SNAPSHOT_BLOCK;
+ *      XANC_BUNDLE_DONE back-fills the SAME txid onto every section row on
+ *      every hub; a second flush publishes nothing.
+ *   2. AT3 (missing chain): a chain whose newest eligible checkpoint is already
+ *      anchored is simply ABSENT from the next bundle and never delays it (D4:
+ *      a short bundle is the NORMAL daily case, not an anomaly), and it rejoins
+ *      at its newer seq once it cuts one.
+ *   3. AT5 (failover race): ranks above 0 stay locked inside the tolerance
+ *      window; rank 1 takes over after it elapses; a returning rank 0 that
+ *      MISSED the announcement adopts the mined bundle through per-section
+ *      `getanchoraction` (_findExistingBundle) instead of spending a second
+ *      time, and both hubs rebuild byte-identical bundle payloads (D5).
+ *   4. Archive round (unchanged leg): the per-election-block leader collects
+ *      2f+1 co-signatures, publishes ANCHOR v1 (the tail always appended now,
+ *      D4), and XANC_FINALIZED back-fills every hub, with the `anchor_archive`
+ *      reward on the leader.
+ *
+ * The oracle_publish capability set is stubbed (identical 4-validator snapshot
+ * on every hub): resolving REAL on-chain BTC stakes into snapshots is
+ * CapabilitySnapshot's own concern, covered by its units and the Tier-2
+ * federation proof. Everything downstream of the set (election, gossip,
+ * signing, broadcast, DB state) is live.
  *
  * Pre-requisites: same dogecoin-regtest stack + env as
  * anchorAcceptance.test.js (node, utxo-tracker, encoder, decoder,
@@ -58,7 +76,7 @@ const anchorVersions = require('../helpers/anchorVersionHelper');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const N = 4;
 
-describe('ANCHOR election live: multi-validator per-chain publishers (DOGE regtest)', function () {
+describe('ANCHOR bundle live: multi-validator per-NETWORK publisher (DOGE regtest)', function () {
     this.timeout(20 * 60 * 1000);
 
     let mvh = null, sdk = null, SAP = null;
@@ -66,13 +84,16 @@ describe('ANCHOR election live: multi-validator per-chain publishers (DOGE regte
     let pubkeys   = [];   // lowercase signing pubkeys, hub order
     let published = [];   // { hub, payload, txid, phase1_txid, from }
     let rewards   = [];   // { hub, type, round, pubkey }
-    let cpRows    = [];   // synthetic checkpoints shared across the suite
+    let cpRows    = [];   // synthetic checkpoints of the FIRST bundle
 
-    function v0Key(row){
-        return 'XANCV0|' + row.chain + '|' + row.network + '|' + row.checkpoint_seq + '|' + row.snapshot_block;
+    // The bundle election key (StateAnchorPublisher._bundleElectionKey): ONE per
+    // network per cycle, replacing the per-row XANCV0 key. The rank ladder is
+    // otherwise unchanged, so the same hashOrder answers it.
+    function bundleKey(network, snapshotBlock){
+        return 'XANCV7|' + network + '|' + String(snapshotBlock);
     }
-    function rankOrder(row){                      // hub indices by election rank
-        return SAP.hashOrder(v0Key(row), pubkeys).map(pk => pubkeys.indexOf(pk));
+    function rankOrder(network, snapshotBlock){        // hub indices by election rank
+        return SAP.hashOrder(bundleKey(network, snapshotBlock), pubkeys).map(pk => pubkeys.indexOf(pk));
     }
 
     async function indexerQuery(sql, params){
@@ -85,9 +106,10 @@ describe('ANCHOR election live: multi-validator per-chain publishers (DOGE regte
         for (const hub of mvh.hubs) await hub.db.doQuery(sql, params);
     }
 
-    // Poll until the XANC_V0_DONE back-fill has landed: every named hub's copy of
-    // every row carries anchor_txid. Waiting on the back-fill itself rather than a
-    // fixed settle costs time on a slow gossip round instead of a false failure.
+    // Poll until the XANC_BUNDLE_DONE back-fill has landed: every named hub's copy
+    // of EVERY section row carries anchor_txid. Waiting on the back-fill itself
+    // rather than a fixed settle costs time on a slow gossip round instead of a
+    // false failure.
     async function waitForAnchorBackfill(rows, hubs, timeMax = 30000){
         const deadline = Date.now() + timeMax;
         while (Date.now() < deadline) {
@@ -103,6 +125,28 @@ describe('ANCHOR election live: multi-validator per-chain publishers (DOGE regte
             }
             if (!missing) return true;
             await sleep(500);
+        }
+        return false;
+    }
+
+    // Poll until the DOGE indexer has parsed and STORED every section of a bundle,
+    // which is what _findExistingBundle's per-section getanchoraction reads. AT5's
+    // adopt leg is only meaningful once this is true, and a fixed sleep here is the
+    // difference between proving adoption and proving a race.
+    async function waitForBundleIndexed(rows, timeMax = 120000){
+        const deadline = Date.now() + timeMax;
+        while (Date.now() < deadline) {
+            let found = 0;
+            for (const row of rows) {
+                let r = await indexerQuery(
+                    'SELECT action_index FROM anchor_actions WHERE version = 0 AND chain = ? AND network = ? ' +
+                    'AND block_index = ? AND checkpoint_seq = ?',
+                    [row.chain, row.network, row.block_index, row.checkpoint_seq]);
+                if (r.length) found++;
+            }
+            if (found === rows.length) return true;
+            await regtestMinerConnector.generateBlocks(1);
+            await sleep(2000);
         }
         return false;
     }
@@ -139,11 +183,19 @@ describe('ANCHOR election live: multi-validator per-chain publishers (DOGE regte
     async function insertCheckpointEverywhere(row){
         await allHubs(
             'INSERT IGNORE INTO state_checkpoints (chain, network, block_index, block_hash, ledger_hash, ' +
-            'actions_hash, contract_hash, checkpoint_seq, snapshot_block, validator_signatures) VALUES (?,?,?,?,?,?,?,?,?,?)',
+            'actions_hash, contract_hash, checkpoint_seq, snapshot_block, validator_signatures, ' +
+            'state_root, state_root_version, block_merkle_root, block_merkle_version) ' +
+            'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
             [row.chain, row.network, row.block_index, row.block_hash, row.ledger_hash,
-             row.actions_hash, row.contract_hash, row.checkpoint_seq, row.snapshot_block, row.validator_signatures]);
+             row.actions_hash, row.contract_hash, row.checkpoint_seq, row.snapshot_block, row.validator_signatures,
+             row.state_root, row.state_root_version, row.block_merkle_root, row.block_merkle_version]);
     }
 
+    // A v0 section is ROOT-BEARING BY CONSTRUCTION (D8): the publisher SKIPS a
+    // checkpoint row with null roots with a log line rather than emitting a
+    // rootless wire, so a rootless synthetic row would be silently absent from
+    // every bundle and every cardinality assert below would read as a bug in the
+    // publisher. Every synthetic row therefore carries all four root fields.
     function syntheticCheckpoint(chain, seq, snapshotBlock){
         return {
             chain, network: 'regtest', block_index: 100000 + seq,
@@ -151,17 +203,28 @@ describe('ANCHOR election live: multi-validator per-chain publishers (DOGE regte
             ledger_hash:   crypto.randomBytes(32).toString('hex'),
             actions_hash:  crypto.randomBytes(32).toString('hex'),
             contract_hash: crypto.randomBytes(32).toString('hex'),
-            checkpoint_seq: seq, snapshot_block: snapshotBlock, validator_signatures: '[]'
+            checkpoint_seq: seq, snapshot_block: snapshotBlock, validator_signatures: '[]',
+            state_root:        crypto.randomBytes(32).toString('hex'),
+            state_root_version: 1,
+            block_merkle_root:  crypto.randomBytes(32).toString('hex'),
+            block_merkle_version: 1
         };
     }
 
     // Seqs must clear the indexer's per-chain replay guard (dirty regtest
-    // chains carry anchors from prior runs).
+    // chains carry anchors from prior runs). v0 section rows carry their own
+    // per-chain checkpoint_seq, so this reads exactly as it did per row.
     async function nextSeq(chain){
         let r = await indexerQuery(
             'SELECT COALESCE(MAX(checkpoint_seq), -1) + 1 AS s FROM anchor_actions WHERE chain = ? AND network = ?',
             [chain, 'regtest']);
         return Number(r[0].s);
+    }
+
+    // Every v0 bundle this run put on the wire, parsed. The archive leg (v1)
+    // and any earlier run's wires are filtered out by the parser.
+    function bundles(){
+        return anchorVersions.bundleBroadcasts(published);
     }
 
     before(async function () {
@@ -197,6 +260,16 @@ describe('ANCHOR election live: multi-validator per-chain publishers (DOGE regte
             };
             hub.capabilitySnapshot = snap;                    // _getActiveOraclePublishPubkeys
             hub.stateAnchorPublisher.capSnapshot = snap;      // _resolveCapabilitySet (constructor-captured)
+            // AT5 reads the mined bundle back through the DOGE indexer's
+            // getanchoraction, which is the ONLY path _findExistingBundle has. An
+            // unwired indexer makes every lookup "undetermined", and a returning
+            // rank 0 would then spend a second time instead of adopting, which is
+            // precisely what AT5 exists to disprove.
+            hub.stateAnchorPublisher.indexers = hub.stateAnchorPublisher.indexers || {};
+            hub.stateAnchorPublisher.indexers.DOGE = {
+                url: indexerConnector.url,
+                key: process.env.INDEXER_API_KEY || ''
+            };
         }
 
         // One funded wallet per hub (separate keys, separate UTXO sets).
@@ -251,18 +324,22 @@ describe('ANCHOR election live: multi-validator per-chain publishers (DOGE regte
                 return { txid };
             });
             mvh.hubs[i].rewardTracker = {
-                recordAnchorReward: async (type, round, pubkey, blk) => {
+                // Signature mirrors StateAnchorPublisher._recordReward: (type, round,
+                // pubkey, blockIndex, network). `network` is threaded so the real
+                // RewardTracker's derive-vs-push gate reads the checkpoint's network;
+                // it is recorded here so a test can see it, not branched on.
+                recordAnchorReward: async (type, round, pubkey, blk, net) => {
                     // Every hub records the reward: the publisher at publish time
-                    // and each peer from the signature-verified V0_DONE / FINALIZED
-                    // (sender = the publisher's pubkey). Production collapses these
-                    // in the shared DB (RewardTracker.recordAnchorReward): one row
-                    // per (reward_type, round_number), lexicographically-smallest
+                    // and each peer from the signature-verified BUNDLE_DONE /
+                    // FINALIZED (sender = the publisher's pubkey). Production
+                    // collapses these in the shared DB (RewardTracker.recordAnchorReward):
+                    // one row per (reward_type, round_number), lexicographically-smallest
                     // pubkey wins, same-pubkey idempotent. Mirror that here:
                     // in-proc hubs share this one `rewards` array.
                     const pk = String(pubkey).toLowerCase();
                     const cur = rewards.find(r => r.type === type && r.round === round);
                     if (cur) { if (pk < cur.pubkey) { cur.pubkey = pk; cur.hub = hubIdx; } return; }
-                    rewards.push({ hub: hubIdx, type, round, pubkey: pk, blk });
+                    rewards.push({ hub: hubIdx, type, round, pubkey: pk, blk, network: net });
                 }
             };
         }
@@ -272,17 +349,20 @@ describe('ANCHOR election live: multi-validator per-chain publishers (DOGE regte
         if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
     });
 
-    it('elects one publisher per chain (rank 0 of each key), paying from its own wallet; V0_DONE back-fills every hub', async function () {
+    it('AT1: one flush lands ONE v0 bundle carrying all three chains, one election, one anchor_bundle reward, every hub stamped', async function () {
         const block = await waitForTip(0);
 
+        // All three chains at the SAME snapshot_block: the steady state, where the
+        // bundle's SNAPSHOT_BLOCK (D6, MAX over sections) equals every section's own.
         for (const chain of ['BTC', 'LTC', 'DOGE']) {
             const row = syntheticCheckpoint(chain, await nextSeq(chain), block);
             cpRows.push(row);
             await insertCheckpointEverywhere(row);
         }
 
-        // Pre-flush diagnostics: winner map + each wallet's tracker view.
-        console.log('    winners: ' + cpRows.map(r => r.chain + '→hub' + rankOrder(r)[0]).join(', '));
+        const order  = rankOrder('regtest', block);
+        const winner = order[0];
+        console.log('    bundle key ' + bundleKey('regtest', block) + ' → rank order hub' + order.join(', hub'));
         const axios = require('axios');
         for (let i = 0; i < N; i++) {
             const resp = await axios.post('http://' + (process.env.UTXO_TRACKER_URL || 'localhost') + ':' +
@@ -294,35 +374,58 @@ describe('ANCHOR election live: multi-validator per-chain publishers (DOGE regte
                 utxos.map(u => u.confirmations).join(',') + ']');
         }
 
-        // Every hub's flush timer would fire in production; fire them all.
+        // Every hub's flush timer would fire in production; fire them all. Only the
+        // bundle key's rank 0 is unlocked, so exactly one of them may spend.
         for (const hub of mvh.hubs) await hub.stateAnchorPublisher.flush();
-        // V0_DONE propagation: wait for the back-fill the assertions below read,
-        // not a fixed window.
         await waitForAnchorBackfill(cpRows, mvh.hubs, 30000);
 
+        // ONE bundle, not one per chain. This is the whole point of the rail change:
+        // the pre-bundle publisher produced three transactions here.
+        const bs = bundles();
+        assert.strictEqual(bs.length, 1,
+            'exactly one ANCHOR v0 for the network, got ' + bs.length + ' (' +
+            bs.map(b => b.bundle.chains.join('+')).join(' / ') + ')');
+        const bundle = bs[0];
+        assert.strictEqual(bundle.hub, winner, 'published by the bundle key\'s hash-order rank 0');
+        assert.strictEqual(bundle.from, wallets[winner].address, 'paid from the winner\'s own wallet');
+        assert.ok(bundle.phase1_txid && bundle.phase1_txid !== bundle.txid, 'two-phase publish');
+
+        // Three sections, chain-ascending (D5), one per pending chain, all at the
+        // bundle's own snapshot_block.
+        assert.strictEqual(bundle.bundle.section_count, 3, 'three sections');
+        assert.deepStrictEqual(bundle.bundle.chains, ['BTC', 'DOGE', 'LTC'],
+            'sections ride CHAIN ascending');
+        assert.strictEqual(bundle.bundle.network, 'regtest');
+        assert.strictEqual(bundle.bundle.snapshot_block, block, 'header SNAPSHOT_BLOCK is the sections\' MAX');
+        for (const s of bundle.bundle.sections) {
+            const mine = cpRows.find(r => r.chain === s.chain);
+            assert.strictEqual(s.checkpoint_seq, mine.checkpoint_seq, s.chain + ': section carries its own seq');
+            assert.strictEqual(s.section_snapshot_block, mine.snapshot_block, s.chain + ': section carries its own snapshot block');
+            assert.strictEqual(String(s.state_root).toLowerCase(), String(mine.state_root).toLowerCase(),
+                s.chain + ': section is root-bearing');
+        }
+
+        // ONE reward for the whole bundle, keyed on the bundle's snapshot block, not
+        // one per chain. The `anchor_<CHAIN>` types no longer exist.
+        assert.ok(bundle.bundle.attest_sig_count >= 1,
+            'the publisher attestation round reached quorum (ATTEST_SIG_COUNT ' +
+            bundle.bundle.attest_sig_count + '); without it the anchor still lands but no reward is derived');
+        const bundleRewards = rewards.filter(r => r.type === 'anchor_bundle' && r.round === block);
+        assert.strictEqual(bundleRewards.length, 1, 'exactly one anchor_bundle reward record for this bundle');
+        assert.strictEqual(bundleRewards[0].pubkey, pubkeys[winner], 'reward credited to the winner');
+        for (const chain of ['BTC', 'LTC', 'DOGE'])
+            assert.strictEqual(rewards.filter(r => r.type === 'anchor_' + chain).length, 0,
+                'no per-chain anchor_' + chain + ' reward is written any more');
+
+        // Every hub holds the SAME txid on ALL THREE section rows (XANC_BUNDLE_DONE
+        // carries the section list, so a peer stamps the whole set from one message).
         for (const row of cpRows) {
-            const order = rankOrder(row);
-            const winner = order[0];
-            const pubs = published.filter(p => {
-                const f = p.payload.split('|'); return f[1] === '0' && f[2] === row.chain;
-            });
-            assert.strictEqual(pubs.length, 1, row.chain + ': exactly one v0 published');
-            assert.strictEqual(pubs[0].hub, winner, row.chain + ': published by hash-order rank 0');
-            assert.strictEqual(pubs[0].from, wallets[winner].address, row.chain + ': paid from the winner\'s own wallet');
-            assert.ok(pubs[0].phase1_txid && pubs[0].phase1_txid !== pubs[0].txid, row.chain + ': two-phase publish');
-
-            assert.strictEqual(rewards.filter(r => r.type === 'anchor_' + row.chain).length, 1,
-                row.chain + ': exactly one reward record');
-            assert.ok(rewards.some(r => r.hub === winner && r.type === 'anchor_' + row.chain &&
-                r.round === row.checkpoint_seq && r.pubkey === pubkeys[winner]),
-                row.chain + ': reward credited to the winner');
-
             for (let i = 0; i < N; i++) {
                 const r = await mvh.hubs[i].db.doQuery(
                     'SELECT anchor_txid FROM state_checkpoints WHERE chain = ? AND network = ? AND block_index = ?',
                     [row.chain, row.network, row.block_index]);
-                assert.ok(r.length === 1 && r[0].anchor_txid, row.chain + ': hub ' + i + ' back-filled via V0_DONE');
-                assert.strictEqual(String(r[0].anchor_txid), pubs[0].txid, row.chain + ': hub ' + i + ' holds the real txid');
+                assert.ok(r.length === 1 && r[0].anchor_txid, row.chain + ': hub ' + i + ' back-filled via BUNDLE_DONE');
+                assert.strictEqual(String(r[0].anchor_txid), bundle.txid, row.chain + ': hub ' + i + ' holds the bundle txid');
             }
         }
 
@@ -334,45 +437,117 @@ describe('ANCHOR election live: multi-validator per-chain publishers (DOGE regte
         }
         assert.strictEqual(published.length, count, 'no double-anchoring after back-fill');
 
-        console.log('    election spread: ' + cpRows.map(r => r.chain + '→hub' + rankOrder(r)[0]).join(', '));
+        console.log('    bundle: hub' + winner + ' [' + bundle.bundle.chains.join(',') + '] @ ' + block +
+                    ' txid ' + bundle.txid + ' (' + bundle.bundle.attest_sig_count + ' attesting sig(s))');
     });
 
-    it('failover ladder: higher ranks stay locked in-window, rank 1 takes over after it, rank 0 returns to a back-filled row', async function () {
+    it('AT3: a chain whose newest eligible checkpoint is already anchored is ABSENT, the bundle is short, and it rejoins at its newer seq', async function () {
+        // AT1 anchored all three. Now BTC and DOGE cut a new checkpoint and LTC does
+        // not (on the venue: its indexer is stopped, so no new row is cut at all).
+        // LTC's MAX un-anchored seq does not exist, so it is absent - and per D4 that
+        // is the NORMAL daily case, never a reason to hold the bundle.
         const block = await waitForTip(0);
-        const btcRow = cpRows.find(r => r.chain === 'BTC');
-        const row = syntheticCheckpoint('BTC', btcRow.checkpoint_seq + 1, block);
+        const pair  = [];
+        for (const chain of ['BTC', 'DOGE']) {
+            const prev = cpRows.find(r => r.chain === chain);
+            const row  = syntheticCheckpoint(chain, prev.checkpoint_seq + 1, block);
+            pair.push(row);
+            await insertCheckpointEverywhere(row);
+        }
+
+        const before = bundles().length;
+        for (const hub of mvh.hubs) await hub.stateAnchorPublisher.flush();
+        await waitForAnchorBackfill(pair, mvh.hubs, 30000);
+
+        const fresh = bundles().slice(before);
+        assert.strictEqual(fresh.length, 1, 'the short bundle published, exactly once');
+        assert.strictEqual(fresh[0].bundle.section_count, 2, 'TWO sections: LTC has nothing new to anchor');
+        assert.deepStrictEqual(fresh[0].bundle.chains, ['BTC', 'DOGE'], 'still chain-ascending');
+        assert.strictEqual(fresh[0].bundle.snapshot_block, block);
+
+        // LTC rejoins the moment it cuts a newer un-anchored seq. Nothing had to be
+        // reset or replayed: the selector picks it up on the next cycle.
+        const ltcPrev = cpRows.find(r => r.chain === 'LTC');
+        const ltcNew  = syntheticCheckpoint('LTC', ltcPrev.checkpoint_seq + 1, block);
+        await insertCheckpointEverywhere(ltcNew);
+
+        const before2 = bundles().length;
+        for (const hub of mvh.hubs) await hub.stateAnchorPublisher.flush();
+        await waitForAnchorBackfill([ltcNew], mvh.hubs, 30000);
+
+        const rejoin = bundles().slice(before2);
+        assert.strictEqual(rejoin.length, 1, 'the catch-up bundle published, exactly once');
+        assert.deepStrictEqual(rejoin[0].bundle.chains, ['LTC'],
+            'LTC alone: BTC and DOGE were anchored by the short bundle above');
+        assert.strictEqual(rejoin[0].bundle.sections[0].checkpoint_seq, ltcNew.checkpoint_seq,
+            'LTC rejoined at its NEWER seq, not the one already on chain');
+        console.log('    AT3: [' + fresh[0].bundle.chains.join(',') + '] then [' +
+                    rejoin[0].bundle.chains.join(',') + '] at seq ' + ltcNew.checkpoint_seq);
+    });
+
+    it('AT5: ranks stay locked in-window, rank 1 takes over, and a returning rank 0 adopts by per-section lookup with no second spend', async function () {
+        const block = await waitForTip(0);
+        // A fresh single-chain bundle so the failover has something pending. BTC's
+        // previous seq came from the AT3 pair.
+        const prevSeq = (await indexerQuery(
+            "SELECT COALESCE(MAX(checkpoint_seq), -1) AS s FROM anchor_actions WHERE chain = 'BTC' AND network = 'regtest'"))[0].s;
+        const row = syntheticCheckpoint('BTC', Number(prevSeq) + 1, block);
         await insertCheckpointEverywhere(row);
 
-        const order = rankOrder(row);
+        const order = rankOrder('regtest', block);
         for (const hub of mvh.hubs) hub.stateAnchorPublisher.electionToleranceBlocks = 2;
 
         // Inside the window (since ≈ 0): every rank but 0 is locked.
-        const before = published.length;
+        const before = bundles().length;
         for (const r of order.slice(1)) await mvh.hubs[r].stateAnchorPublisher.flush();
-        assert.strictEqual(published.length, before, 'higher ranks locked inside the tolerance window');
+        assert.strictEqual(bundles().length, before, 'higher ranks locked inside the tolerance window');
 
         // Window elapses without rank 0 (it never flushes) → rank 1 unlocks.
         await regtestMinerConnector.generateBlocks(3);
         await waitForTip(block + 3);
         await mvh.hubs[order[1]].stateAnchorPublisher.flush();
-        // Checkpoint-leg versions come from the flag-days at this row's
-        // snapshot_block, not a hardcoded v0: the attestation leg legitimately
-        // emits v4/v5 on a venue past the reward thresholds.
-        const cpVersions = anchorVersions.expectedCheckpointAnchor(row).accepted;
-        const pubs = published.slice(before)
-            .filter(p => cpVersions.includes(anchorVersions.anchorPayloadVersion(p.payload)));
-        assert.strictEqual(pubs.length, 1, 'rank 1 published the failover anchor');
-        assert.strictEqual(pubs[0].hub, order[1]);
-        assert.strictEqual(pubs[0].from, wallets[order[1]].address, 'failover paid from rank 1\'s wallet');
+        const failover = bundles().slice(before);
+        assert.strictEqual(failover.length, 1, 'rank 1 published the failover bundle');
+        assert.strictEqual(failover[0].hub, order[1]);
+        assert.strictEqual(failover[0].from, wallets[order[1]].address, 'failover paid from rank 1\'s wallet');
+        assert.deepStrictEqual(failover[0].bundle.chains, ['BTC']);
 
-        // Rank 0 "comes back": its row was back-filled over P2P → no double-anchor.
-        // Wait for that back-fill to reach rank 0 rather than a fixed window; a
-        // flush before it arrives is the double-anchor this asserts against.
-        await waitForAnchorBackfill([row], [mvh.hubs[order[0]]], 30000);
-        const count = published.length;
+        // BYTE DETERMINISM (D5): rank 0 rebuilds the same bundle from ITS OWN rows and
+        // must produce the same bytes rank 1 put on the wire. _parseSigs returns the
+        // stored JSON order unsorted, so without the inner PUBKEY sort two publishers
+        // racing this bundle emit different bytes and the attestation round's DB
+        // byte-match stops being deterministic.
+        const mineRank0 = await mvh.hubs[order[0]].db.doQuery(
+            'SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND checkpoint_seq = ?',
+            [row.chain, row.network, row.checkpoint_seq]);
+        const rebuilt = mvh.hubs[order[0]].stateAnchorPublisher._buildV7Payload(
+            mineRank0, pubkeys[order[1]], failover[0].bundle.attestSigs);
+        assert.strictEqual(rebuilt, failover[0].payload,
+            'rank 0 rebuilds byte-identical bundle bytes for the same state');
+
+        // Rank 0 "comes back" having MISSED the announcement: clear its stamp so the
+        // back-fill cannot be what saves it, and make it flush. The only thing left to
+        // stop a second spend is _findExistingBundle's per-section getanchoraction
+        // against the mined transaction, which is exactly what AT5 asserts.
+        assert.ok(await waitForBundleIndexed([row], 120000),
+            'the DOGE indexer parsed and stored the failover bundle\'s section row');
+        await mvh.hubs[order[0]].db.doQuery(
+            'UPDATE state_checkpoints SET anchor_txid = NULL WHERE chain = ? AND network = ? AND checkpoint_seq = ?',
+            [row.chain, row.network, row.checkpoint_seq]);
+
+        const count = bundles().length;
         const s = await mvh.hubs[order[0]].stateAnchorPublisher.flush();
-        assert.strictEqual(s.anchored.length, 0, 'returning rank 0 reports nothing pending');
-        assert.strictEqual(published.length, count, 'returning rank 0 did not double-anchor');
+        assert.strictEqual(bundles().length, count, 'returning rank 0 did NOT spend a second time');
+        // The adopt path stamps the row with the txid it found on chain rather than
+        // leaving it pending, so the fleet converges on one txid.
+        const after = await mvh.hubs[order[0]].db.doQuery(
+            'SELECT anchor_txid FROM state_checkpoints WHERE chain = ? AND network = ? AND checkpoint_seq = ?',
+            [row.chain, row.network, row.checkpoint_seq]);
+        assert.strictEqual(String(after[0].anchor_txid).toLowerCase(), String(failover[0].txid).toLowerCase(),
+            'rank 0 adopted rank 1\'s txid through the per-section lookup');
+        assert.ok(Array.isArray(s.anchored), 'flush returned a summary');
+        console.log('    AT5: rank1 hub' + order[1] + ' published ' + failover[0].txid +
+                    '; rank0 hub' + order[0] + ' adopted it without spending');
     });
 
     it('archive: the per-block leader collects 2f+1 live co-signatures and XANC_FINALIZED back-fills every hub', async function () {
@@ -414,7 +589,8 @@ describe('ANCHOR election live: multi-validator per-chain publishers (DOGE regte
         // Elect the leader EXACTLY as _startArchiveRound does: hash-order over the
         // oracle_publish set keyed on _archiveElectionKey(wrapperCp, nextBatchSeq).
         // The wrapper is the BTC-preferred latest checkpoint; batchSeq is a
-        // non-consuming MAX+1 read, identical on every hub.
+        // non-consuming MAX+1 read, identical on every hub. The archive leg is
+        // UNCHANGED by the bundle (it was already one head per network per cycle).
         const sap0 = mvh.hubs[0].stateAnchorPublisher;
         const cpRow = (await mvh.hubs[0].db.doQuery(
             "SELECT * FROM state_checkpoints ORDER BY (chain = 'BTC') DESC, id DESC LIMIT 1"))[0];
@@ -435,9 +611,10 @@ describe('ANCHOR election live: multi-validator per-chain publishers (DOGE regte
         // reach every hub rather than a fixed window.
         await waitForArchiveFinalized(m.match_id, mvh.hubs, 60000);
 
-        // Archive-leg versions from the flag-days at the checkpoint's
-        // snapshot_block (v1, or v6 once archive-reward derivation is armed);
-        // v6 is v1 plus a publisher tail, so the field layout below is shared.
+        // The archive leg now has exactly one accepted version (D4): v1, with
+        // the publisher tail ALWAYS appended, whether or not archive-reward
+        // derivation is armed at the checkpoint's snapshot_block. There is no
+        // second, tail-less wire to fall back to any more.
         const arcVersions = anchorVersions.expectedArchiveAnchor(cpRow).accepted;
         const v1s = published.filter(p => arcVersions.includes(anchorVersions.anchorPayloadVersion(p.payload)));
         assert.strictEqual(v1s.length, 1, 'exactly one archive anchor published');

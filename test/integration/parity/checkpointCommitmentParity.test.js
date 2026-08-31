@@ -10,8 +10,8 @@
  *
  * SPV light-client Phase 2: cross-service CHECKPOINT-COMMITMENT parity.
  *
- * Phase 2 makes the quorum-signed checkpoint canonical (and the on-chain ANCHOR v3)
- * additively commit the light-client roots `STATE_ROOT|STATE_ROOT_VERSION|
+ * Phase 2 makes the quorum-signed checkpoint canonical (and every ANCHOR v0 bundle
+ * SECTION) additively commit the light-client roots `STATE_ROOT|STATE_ROOT_VERSION|
  * BLOCK_MERKLE_ROOT|BLOCK_MERKLE_VERSION`, gated on the BTC `snapshot_block` by the
  * CHECKPOINT_COMMITMENT flag-day. The signed string is built INLINE in four places
  * (hub engine, SDK verifier, indexer ANCHOR verifier, explorer verify endpoint) plus
@@ -26,7 +26,7 @@
  *      copies (hub/indexer/sdk/explorer/sync) AND the canonical
  *      xchain-documentation/protocol/constants.js.
  *   2. The post-flag-day checkpoint canonical (with the root suffix) is byte-identical
- *      across the hub engine, the SDK verifier, and the indexer ANCHOR v3 verifier.
+ *      across the hub engine, the SDK verifier, and the indexer's v0 SECTION verifier.
  *   3. The pre-flag-day canonical (no suffix) is likewise byte-identical, and the
  *      suffix is genuinely absent.
  *   4. A null-root row (legacy / pre-Phase-1) stays on the rootless canonical even
@@ -61,8 +61,10 @@ const sdkCheckpoint         = require(path.join(ROOT, 'xchain-sdk/src/checkpoint
 const Anchor                = require(path.join(ROOT, 'xchain-indexer/src/actions/anchor.js'));
 
 // The indexer ANCHOR _canonical is a plain method that reads only its `d` argument
-// (no `this`), so invoke it directly off the prototype with a representative v3 `d`.
-function anchorCanonicalV3(d) {
+// (no `this`), so invoke it directly off the prototype. `d` is ONE v0 bundle section,
+// already rebuilt with the header NETWORK and carrying its own SECTION_SNAPSHOT_BLOCK
+// as SNAPSHOT_BLOCK, which is the shape the parser hands it.
+function anchorSectionCanonical(d) {
     return Anchor.prototype._canonical.call({}, d);
 }
 
@@ -81,7 +83,10 @@ function fixtures(net, snapshotBlock, withRoots) {
         block_merkle_version: withRoots ? 1 : null
     };
     const d = {
-        FORMAT: withRoots ? 3 : 0,
+        // A v0 SECTION is root-bearing by construction: the publisher skips a null-root
+        // row rather than emitting a rootless section (D8), so the rootless shape has no
+        // FORMAT on the checkpoint leg at all and exercises _canonical's shared base.
+        FORMAT: withRoots ? 0 : undefined,
         CHAIN: 'BTC', NETWORK: net, BLOCK_INDEX_CHECKPOINTED: 500, BLOCK_HASH: 'c0'.repeat(32),
         LEDGER_HASH: 'a1'.repeat(32), ACTIONS_HASH: 'b2'.repeat(32), CONTRACT_HASH: 'c3'.repeat(32),
         CHECKPOINT_SEQ: 7, SNAPSHOT_BLOCK: snapshotBlock,
@@ -114,26 +119,32 @@ describe('SPV Phase 2: CHECKPOINT_COMMITMENT cross-service parity', function () 
         }
     });
 
-    it('post-flag-day: hub == SDK == indexer ANCHOR v3 canonical (root suffix present)', function () {
-        // regtest flag-day is 0, so snapshot_block 100 is active; roots present.
+    it('post-flag-day: hub == SDK == indexer ANCHOR v0 section canonical (root suffix present)', function () {
+        // regtest flag-day is 0, so snapshot_block 100 is active; roots present. This is
+        // the string a section's stored validator signatures were produced over, and the
+        // one the indexer rebuilds from the wire before checking quorum: three services,
+        // three inline builders, one byte string.
         const { cp, d, STATE_ROOT, BLOCK_MERKLE } = fixtures('regtest', 100, true);
         const hubC = StateCheckpointEngine.canonicalCheckpoint(cp);
         const sdkC = sdkCheckpoint.canonicalCheckpoint(cp);
-        const idxC = anchorCanonicalV3(d);
+        const idxC = anchorSectionCanonical(d);
         assert.strictEqual(hubC, sdkC, 'hub vs SDK checkpoint canonical drift');
-        assert.strictEqual(hubC, idxC, 'hub vs indexer ANCHOR v3 canonical drift');
+        assert.strictEqual(hubC, idxC, 'hub vs indexer ANCHOR v0 section canonical drift');
         assert.ok(hubC.includes('|' + STATE_ROOT + '|1|' + BLOCK_MERKLE + '|1'),
             'post-flag-day canonical must commit the root suffix; got ' + hubC);
     });
 
     it('pre-flag-day: hub == SDK == indexer canonical, and the root suffix is absent', function () {
-        // mainnet flag-day is the far-future placeholder, so snapshot_block 1000 is inactive.
+        // mainnet flag-day is the far-future placeholder, so snapshot_block 1000 is inactive
+        // and the row carries null roots. No v0 section is ever cut here (a rootless row is
+        // skipped, D8), so the indexer side is _canonical's shared rootless base, which the
+        // archive leg still signs and which the v0 branch extends.
         const { cp, d, STATE_ROOT, BLOCK_MERKLE } = fixtures('mainnet', 1000, false);
         const hubC = StateCheckpointEngine.canonicalCheckpoint(cp);
         const sdkC = sdkCheckpoint.canonicalCheckpoint(cp);
-        const idxC = anchorCanonicalV3({ ...d, FORMAT: 0 });   // v0 pre-flag-day
+        const idxC = anchorSectionCanonical(d);
         assert.strictEqual(hubC, sdkC, 'hub vs SDK pre-flag-day canonical drift');
-        assert.strictEqual(hubC, idxC, 'hub vs indexer v0 pre-flag-day canonical drift');
+        assert.strictEqual(hubC, idxC, 'hub vs indexer rootless base canonical drift');
         assert.ok(!hubC.includes(STATE_ROOT) && !hubC.includes(BLOCK_MERKLE),
             'pre-flag-day canonical must NOT contain any root');
     });

@@ -130,7 +130,7 @@ describe('MultiValidatorHub: byzantine fault tolerance (L5)', function () {
 
         // Feed the forged proposal straight into the consensus handler.
         await target.consensus._handlePrePrepare(
-            forgedPrePrepare(seq, { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: forgedValue } } } }, seed.blockIndex)
+            forgedPrePrepare(seq, { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: forgedValue } } } }, seed.blockIndex, target.consensus.validatorSet[0])
         );
 
         assert.ok(!target.consensus.pendingProposals.has(seq),
@@ -159,9 +159,16 @@ describe('MultiValidatorHub: byzantine fault tolerance (L5)', function () {
         // the follower processes it (a hardcoded non-leader/unregistered sender is
         // correctly dropped before any proposal is created).
         const N = follower.consensus.validatorSet.length;
-        const leaderAddr = follower.consensus.validatorSet[(seq + view) % N].addr;
+        const leader = follower.consensus.validatorSet[(seq + view) % N];
+        // The envelope carries the leader's SIGNING KEY, not just its address,
+        // because admission is keyed on the proven key: PeerManager stamps
+        // sig_pubkey on every real envelope and verifies the signature against it
+        // before a handler runs, so an envelope without one is unattributable and
+        // is dropped. Injecting straight into the handler skips the transport that
+        // would have stamped it, so the fixture has to supply it.
         const env = (digest, config) => ({
-            sender: leaderAddr,          // the (byzantine, but legitimate) leader
+            sender: leader.addr,         // the (byzantine, but legitimate) leader
+            sig_pubkey: leader.pubkey,
             data: { seq, view, configDigest: digest, config, btcBlockHeight: seed.blockIndex }
         });
 
