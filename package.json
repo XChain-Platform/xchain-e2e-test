@@ -14,7 +14,7 @@
     "bitcoinjs-lib": "6.1.7",
     "dotenv": "^16.4.5",
     "ecpair": "2.1.0",
-    "mariadb": "3.5.2",
+    "mariadb": "3.5.3",
     "tiny-secp256k1": "2.2.4",
     "xchain-hub": "file:./xchain-hub",
     "xchain-sdk": "file:./xchain-sdk"
