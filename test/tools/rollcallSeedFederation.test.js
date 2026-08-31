@@ -33,10 +33,19 @@
  *
  * WHAT IT SEEDS, and why these numbers.
  *
- * The roster is rollcallHelper's four FIXED Ed25519 seeds: hubs 0-2 sign,
- * seed 3 is the idle staker AT1 watches the protocol evict. Each is staked
- * from a DISTINCT source address, because absence, the K-streak and
- * eviction are all pinned per staking SOURCE.
+ * The roster is rollcallHelper's four Ed25519 keys: hubs 0-2 sign from FIXED
+ * seeds (they are the frozen vector's own signers), and the fourth is the
+ * IDLE staker AT1 watches the protocol evict. That fourth key is PER-VENUE,
+ * derived from this mnemonic and XC_ROLLCALL_IDLE_GENERATION, because an
+ * eviction retires a signing key permanently and a fixed one would
+ * let a venue run AT1 exactly once. Each is staked from a DISTINCT source
+ * address, because absence, the K-streak and eviction are all pinned per
+ * staking SOURCE.
+ *
+ * TO RE-RUN AT1 ON AN ALREADY-EVICTED VENUE: bump XC_ROLLCALL_IDLE_GENERATION
+ * and run this tool again. It stakes the new idle key from the same source
+ * address (the v1 rule is keyed on the pubkey, not the source) and leaves the
+ * three signing sources untouched.
  *
  * The weights are 40/40/10/10 rather than equal, and that is load-bearing
  * rather than cosmetic. Quorum is `3 * present > 2 * total` by source
@@ -139,7 +148,7 @@ describe('ROLLCALL: seed the four-source acceptance federation', function () {
             // venue it then declines to touch - which is exactly the state a
             // re-run is for.
             const addr = await cryptoHelper.getNewAddress(
-                'rollcall-source-' + entry.index, COIN, NETWORK, mnemonic, 'legacy', entry.index)
+                'rollcall-source-' + entry.addressIndex, COIN, NETWORK, mnemonic, 'legacy', entry.addressIndex)
             console.log('    source address : ' + addr.address)
 
             // Already effective? Leave it. A second STAKE|1 for the same pubkey
@@ -152,7 +161,7 @@ describe('ROLLCALL: seed the four-source acceptance federation', function () {
             }
 
             await cryptoHelper.getNewFundedAddress(
-                'rollcall-source-' + entry.index, COIN, NETWORK, mnemonic, 'legacy', entry.index, FUND_BTC)
+                'rollcall-source-' + entry.addressIndex, COIN, NETWORK, mnemonic, 'legacy', entry.addressIndex, FUND_BTC)
             await gasHelper.ensureGasBalance(addr, String(want + GAS_HEADROOM))
             console.log('    minted gas     : ' + (want + GAS_HEADROOM) + ' XCHAIN')
 

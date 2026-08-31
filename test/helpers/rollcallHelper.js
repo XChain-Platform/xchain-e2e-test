@@ -46,8 +46,13 @@
  *      kept here rather than added to multiValidatorHubHelper so no existing
  *      suite changes shape.
  *
- * NOTHING HERE SEEDS THE VENUE. Staking the federation is an operator decision.
- * The asserts report what is missing, with the exact pubkeys to stake, and stop.
+ * NOTHING HERE SEEDS THE VENUE. Staking the federation is an operator decision
+ * (test/tools/rollcallSeedFederation.test.js is the tool that does it). The
+ * asserts report what is missing, with the exact pubkeys to stake, and stop.
+ *
+ * THREE of the four roster keys are fixed; the IDLE one is per-venue. AT1 evicts
+ * the idle staker, and an evicted key can never be staked again, so a
+ * fixed idle seed would make AT1 one-shot per venue. See idleSeed() below.
  ********************************************************************/
 
 'use strict'
@@ -102,19 +107,83 @@ function frozenVector(){
 
 // ── the acceptance federation ────────────────────────────────────────────────
 //
-// FIXED Ed25519 seeds, the multiHubNodeProof convention: the operator must stake
-// these exact pubkeys before the run, so they cannot be random per run. Seeds
-// 0..2 are the three hubs this harness starts; seed 3 is the IDLE FOURTH STAKER
-// whose hub is never started, which is the source AT1 watches the protocol
-// evict. Seeds 0..2 are the frozen vector's own signer seeds, so a harness that
-// can sign for this federation is a harness that agrees with the vector.
-const FEDERATION_SEEDS = [
+// The three SIGNING seeds are fixed, the multiHubNodeProof convention: the
+// operator must stake these exact pubkeys before the run, so they cannot be
+// random per run. They are also the frozen vector's own signer seeds, so a
+// harness that can sign for this federation is a harness that agrees with the
+// vector - which is why they may never be made configurable.
+const SIGNING_SEEDS = [
     '11'.repeat(32),   // hub 0
     '22'.repeat(32),   // hub 1
     '33'.repeat(32),   // hub 2
-    '44'.repeat(32),   // IDLE fourth staker, no hub is ever started for it
 ]
 const IDLE_SEED_INDEX = 3
+
+// The legacy idle seed, kept so an unconfigured venue keeps its previous
+// behaviour and says so.
+const LEGACY_IDLE_SEED = '44'.repeat(32)
+
+// THE IDLE SEED IS PER-VENUE, AND THAT IS A CORRECTNESS REQUIREMENT RATHER THAN
+// A CONVENIENCE.
+//
+// AT1's whole point is that the protocol EVICTS this source, and an eviction
+// stamps deactivation_block through setStakeDeactivationBySourceAndPubkey
+// (xchain-indexer rollcall_close.js) exactly as an UNSTAKE does. The STAKE v1
+// admission rule then refuses that pubkey FOREVER: it asks
+// getActiveStakeByPubkey(pubkey, null), and a null blockIndex drops the whole
+// activation/deactivation clause, so the rule reads "any valid stake row for
+// this pubkey, ever" - and it is keyed on the pubkey alone, so re-staking from a
+// different source address does not rescue it either.
+//
+// So a FIXED idle seed makes AT1 a ONE-SHOT test: the first successful run burns
+// the key, and every later run on that venue fails to seed with
+// `invalid: SIGNING_PUBKEY (already in use)`. Measured on the the regtest host regtest
+// venue 2026-08-30 (recorded in the platform ledger).
+//
+// Resolution order, most explicit first:
+//   1. XC_ROLLCALL_IDLE_SEED         - an exact 32-byte hex seed.
+//   2. the federation mnemonic + XC_ROLLCALL_IDLE_GENERATION - derived, so a
+//      venue seeded from one mnemonic gets a stable idle key across the two
+//      epochs of a run (it must be stable WITHIN a run: the same source has to
+//      be absent twice for the K-streak to form), and rotating the generation
+//      mints a fresh one without re-seeding the three signing sources.
+//   3. the legacy 44... seed, with a warning, so an unconfigured venue still
+//      runs but nobody is surprised when its second run cannot seed.
+function idleSeed(){
+    const explicit = process.env.XC_ROLLCALL_IDLE_SEED
+    if (explicit){
+        assert.ok(/^[0-9a-fA-F]{64}$/.test(String(explicit)),
+            'XC_ROLLCALL_IDLE_SEED must be exactly 64 hex characters (a 32-byte Ed25519 seed); got ' +
+            String(explicit).length + ' character(s). A typo here silently stakes a different key than the ' +
+            'acceptance run signs for, which reads as a federation-wide absence.')
+        return String(explicit).toLowerCase()
+    }
+
+    const mnemonic = process.env.XC_ROLLCALL_FEDERATION_MNEMONIC
+    if (mnemonic){
+        const generation = String(process.env.XC_ROLLCALL_IDLE_GENERATION || '0')
+        // Domain-separated so this can never collide with any other key derived
+        // from the same mnemonic (the four SOURCE addresses come from its BIP39
+        // seed through a different path entirely).
+        return crypto.createHash('sha256')
+            .update('xchain-rollcall-idle|' + generation + '|' + mnemonic, 'utf8')
+            .digest('hex')
+    }
+
+    console.warn(
+        '    [rollcall] neither XC_ROLLCALL_IDLE_SEED nor XC_ROLLCALL_FEDERATION_MNEMONIC is set, so the idle ' +
+        'staker falls back to the legacy fixed seed. AT1 EVICTS this key and an evicted key can never be staked ' +
+        'again, so this venue gets exactly ONE AT1 run. Set the mnemonic (or bump ' +
+        'XC_ROLLCALL_IDLE_GENERATION) before re-seeding.')
+    return LEGACY_IDLE_SEED
+}
+
+// Kept as a getter rather than a constant: the idle entry depends on env, and a
+// module-load-time array would freeze whatever was set when the first require
+// happened.
+function federationSeeds(){
+    return SIGNING_SEEDS.concat([idleSeed()])
+}
 
 // Ed25519 pubkey for a 32-byte seed, derived without the hub package so a
 // precondition can print the roster the operator must stake even on a checkout
@@ -128,11 +197,28 @@ function pubkeyForSeed(seedHex){
     return crypto.createPublicKey(key).export({ format: 'der', type: 'spki' }).subarray(12).toString('hex')
 }
 
+// THE IDLE SOURCE ADDRESS ROTATES WITH THE KEY, and that is a second
+// requirement, not a tidiness choice. rollcall_absences is keyed on SOURCE_ID
+// (D11: weight and eviction are per source, because a delegated key owns no
+// stake row), and getRollcallAbsenceEpochsForSource has no term excluding rows
+// that predate the source's current stake. So a source that re-enters at the
+// same address inherits its old absences: with the window being the last 2K
+// ROLLED epochs, one more absence completes K and evicts it immediately.
+// Measured here - after the eviction at epoch 420, re-staking a fresh key from
+// the same address would have been evicted again at the very next rolled epoch.
+// A new generation therefore gets a new address as well as a new key.
+function idleAddressIndex(){
+    return IDLE_SEED_INDEX + Number(process.env.XC_ROLLCALL_IDLE_GENERATION || '0')
+}
+
 function federationRoster(){
-    return FEDERATION_SEEDS.map((seed, i) => ({
+    return federationSeeds().map((seed, i) => ({
         index:   i,
         seed:    seed,
         pubkey:  pubkeyForSeed(seed).toLowerCase(),
+        // The address the stake is made FROM. Signing sources are stable; the
+        // idle one moves with the generation (see idleAddressIndex above).
+        addressIndex: i === IDLE_SEED_INDEX ? idleAddressIndex() : i,
         role:    i === IDLE_SEED_INDEX ? 'idle (never signs; AT1 evicts this one)' : 'signing hub ' + i,
     }))
 }
@@ -525,6 +611,47 @@ function assertPublicRollcallRead(probe, method){
         'XC_ROLLCALL_SKIP_PUBLIC_READS=1 to assert the same facts from the indexer DB only.')
 }
 
+// AT1 asserts the idle source is NOT evicted after its first driven epoch,
+// which is only true if that epoch is its FIRST rolled absence. The K-streak
+// walks the last 2K ROLLED epochs and skips unrolled ones (D39), so a venue that
+// has ever rolled an epoch with this source absent carries a head start that no
+// amount of driving can undo.
+//
+// Measured on the venue: epoch 240 rolled with the idle source absent, epochs
+// 270-390 all closed unrolled and were skipped, and the very first epoch this
+// suite drove completed K=2 and evicted immediately. The protocol was right; the
+// suite was reading a venue with history as if it were clean, and reported a
+// correct eviction as a failure.
+//
+// A FRESH idle key has no history by construction, which is the same rotation
+// the ledger item forces after an eviction anyway - so the remedy for both is one step.
+async function assertIdleStreakClean(ctx){
+    const idle = ctx.roster[IDLE_SEED_INDEX]
+    const source = ctx.fed.byPubkey.get(idle.pubkey)
+    let res
+    try {
+        res = await indexerConnector.call('getrollcallabsences', { source: String(source), limit: 50 })
+    } catch (e) {
+        return null   // the public read is probed separately; do not fail twice on it
+    }
+    if (!res || res.error) return null
+    const rolled = (res.absences || []).filter(a => Number(a.epoch_height) >= 0)
+    if (rolled.length === 0) return { priorAbsences: 0 }
+
+    const evicted = rolled.some(a => Number(a.evicted) === 1)
+    assert.fail(
+        'ROLLCALL precondition FAILED: the idle source ' + source + ' already carries ' + rolled.length +
+        ' recorded absence(s) at epoch(s) ' + rolled.map(a => a.epoch_height).join(', ') +
+        (evicted ? ' and has ALREADY BEEN EVICTED' : '') + '. The K-streak counts ROLLED epochs and skips ' +
+        'unrolled ones, so this source starts with a head start and the first epoch this suite drives may ' +
+        'complete K=2 and evict immediately - which AT1 reads as "evicted on a streak of 1" and reports as a ' +
+        'protocol failure when the protocol was right.\n' +
+        'Remedy: seed a FRESH idle key, which has no history by construction. Bump ' +
+        'XC_ROLLCALL_IDLE_GENERATION (removing any XC_ROLLCALL_IDLE_SEED pin) and re-run ' +
+        'test/tools/rollcallSeedFederation.test.js. That is required after an eviction anyway, because an ' +
+        'evicted signing key can never be staked again.')
+}
+
 // ── the DOGE rail ────────────────────────────────────────────────────────────
 
 // The second stack, through the repo's own multi-chain rail rather than a
@@ -666,6 +793,7 @@ async function bringUpVenue(opts){
     ctx.totalWeight = Array.from(ctx.weightBySource.values()).reduce((a, b) => a + b, 0)
 
     ctx.publicReads = await probePublicRollcallReads(indexerConnector)
+    await assertIdleStreakClean(ctx)
 
     // Optional deterministic source addresses. When the operator seeded the
     // federation from this mnemonic, the harness holds the sources' keys, which
@@ -677,7 +805,7 @@ async function bringUpVenue(opts){
         const cryptoHelper = require('../cryptoHelper')
         for (const r of ctx.roster){
             const info = await cryptoHelper.getNewAddress(
-                'rollcall-source-' + r.index, COIN, NETWORK, ctx.federationMnemonic, 'legacy', r.index)
+                'rollcall-source-' + r.addressIndex, COIN, NETWORK, ctx.federationMnemonic, 'legacy', r.addressIndex)
             ctx.sourceAddressInfo.set(String(info.address), info)
         }
         const staked = new Set(ctx.fed.sources)
@@ -844,9 +972,28 @@ async function mineBtcTo(ctx, height, label){
         await utxoTrackerConnector.quiesce({ timeoutMs: 60000, pollMs: 250, regtestMiner: regtestMinerConnector })
         const deadline = Date.now() + 180000
         let seen = tip
+        let nudged = 0
         while (Date.now() < deadline){
             seen = await ctx.btcTip()
             if (seen >= Math.min(height, tip + need)) break
+            // A stalled tip whose NEXT block is a close is usually not a
+            // misconfiguration, it is a one-second cadence race: the close needs
+            // doge.tip_block_time > btc.block_time(E + W), and on regtest both
+            // stamps are wall clock, so mining BTC past the window end in the
+            // same instant as the last DOGE block leaves the DOGE side short by
+            // as little as ONE SECOND (measured on the venue: doge tip 1788142312
+            // against a window end of 1788142313). It is also how a FAILED drive
+            // wedges the venue for every later run - the epoch's BTC side is
+            // mined and its DOGE follow-up never happens, so the next run stalls
+            // on someone else's half-driven epoch.
+            //
+            // Mining DOGE distinguishes the two cases instead of guessing: the
+            // race clears, while a missing DOGE_INDEXER_API_URL or an unreadable
+            // manifest still stalls and still fails below with its real message.
+            if (rca().rollcallEpochClosingAt(seen + 1, ctx.network) !== null && nudged < 6){
+                nudged++
+                await mineDoge(ctx, 2)
+            }
             await sleep(1500)
         }
         assert.ok(seen > tip,
@@ -978,6 +1125,71 @@ async function dogeSigners(ctx, epoch){
  *                    `rollcalls` row is awaited (the proof-barrier suite drives
  *                    the close itself).
  */
+// Per-hub round state, printed on demand. Opt-in via XC_ROLLCALL_TRACE=1 so a
+// normal run stays readable.
+//
+// WHY THIS EXISTS: when an epoch closes with fewer present sources than the hubs
+// that signed, the log says only that a publish happened with N pairs, and every
+// candidate explanation (gossip had not crossed the mesh, the rank ladder had
+// not unlocked, the DOGE read was undecidable so a sweeper deferred, the elected
+// leader was the hub the test silenced) produces the SAME single line. The
+// engines already hold the answer; this prints it rather than making the next
+// reader guess between four theories, which is what cost this lane a session.
+async function traceRounds(ctx, label){
+    if (process.env.XC_ROLLCALL_TRACE !== '1') return
+    const tip = await ctx.btcTip()
+    const rows = ctx.rounds.map((eng, i) => {
+        const s = (eng && eng.getStatus && eng.getStatus()) || {}
+        return '      hub ' + i + ' epoch=' + s.epoch + ' signed=' + s.signed +
+               ' gossiped=' + s.gossiped_count + ' onchain=' + s.on_chain_count +
+               ' rank=' + s.our_rank + ' leader=' + String(s.leader || '').slice(0, 12) +
+               ' txids=' + (Array.isArray(s.txids) ? s.txids.length : 0)
+    })
+    console.log('    [trace] ' + label + ' (btc tip ' + tip + ', since=' + (tip - Number(ctx._traceEpoch || 0)) + ')')
+    for (const r of rows) console.log(r)
+}
+
+// The rank ladder climbs with BTC HEIGHT, so a publish phase that ticks at a
+// fixed height cannot exercise it.
+//
+// Measured on the venue: with hub 2 silenced, the elected LEADER was hub 2
+// (rank 0, never publishes), the hub holding BOTH signatures was rank 3, and the
+// only unlocked hub held just its own. _rankUnlocked allows rank <= floor(since /
+// ELECTION_TOLERANCE), so at since = 6 with a regtest tolerance of 3 only ranks
+// 0..2 can ever publish - and every tick happened at since = 6. One signature
+// reached the chain, the epoch closed UNROLLED at present 1/4, and it read as a
+// protocol failure when it was the harness holding the chain still.
+//
+// So mine FORWARD through the publish phase, which is also what a real venue
+// does, and stop as soon as the DOGE side actually holds every signature we
+// expect rather than after a fixed number of ticks.
+function electionTolerance(network){
+    const mod = require(_resolveSibling('xchain-hub', 'src/RollcallRound.js'))
+    const t = mod.ELECTION_TOLERANCE_DEFAULTS && mod.ELECTION_TOLERANCE_DEFAULTS[network]
+    assert.ok(Number.isFinite(Number(t)) && Number(t) > 0,
+        'cannot read ELECTION_TOLERANCE_DEFAULTS.' + network + ' from the shipped RollcallRound; the ladder ' +
+        'arithmetic here must come from the engine rather than be re-derived')
+    return Number(t)
+}
+
+// Which pubkeys the DOGE side already carries for this epoch.
+async function onChainSigners(ctx, epoch, pubkeys){
+    const res = await ctx.dogeRail.globals.indexerConnector.call('getrollcallsigners', {
+        network: ctx.network, epoch_height: epoch, max_block_time: 9999999999,
+        pubkeys: pubkeys, publishers: [],
+    })
+    if (!res || res.error) return new Set()
+    // The read echoes EVERY pubkey it was asked about and puts null against the
+    // ones it has no signature for, so Object.keys() counts absences as
+    // presences. Measured: a bounded ask for three keys with one on chain comes
+    // back as three keys, two of them null - and taking the key list made this
+    // helper report full coverage after a single publish, which ended the ladder
+    // climb before it began.
+    return new Set(Object.entries(res.signers || {})
+        .filter(([, v]) => v && v.sig)
+        .map(([k]) => String(k).toLowerCase()))
+}
+
 async function driveEpoch(ctx, epoch, opts){
     const o = opts || {}
     const silentHubs = o.silentHubs || []
@@ -995,7 +1207,9 @@ async function driveEpoch(ctx, epoch, opts){
     await mineBtcTo(ctx, epoch + 6, 'burying epoch ' + epoch)
 
     const want = ctx.rounds.length - silentHubs.length
+    ctx._traceEpoch = epoch
     const gossiped = await waitForGossip(ctx.mvh, epoch, want, 120000, silentHubs)
+    await traceRounds(ctx, 'after gossip')
     assert.ok(gossiped >= want,
         'epoch ' + epoch + ': expected ' + want + ' gossiped signature(s) across the mesh, saw ' + gossiped +
         '. Every hub signs regardless of whether it can publish, so a short count is a signing or gossip ' +
@@ -1003,9 +1217,34 @@ async function driveEpoch(ctx, epoch, opts){
 
     if (typeof o.beforePublish === 'function') await o.beforePublish()
 
-    await tickAll(ctx.mvh, silentHubs)
-    await mineDoge(ctx, 3)
-    await tickAll(ctx.mvh, silentHubs)
+    // Climb the rank ladder instead of ticking in place. Each round: tick (any
+    // newly unlocked rank publishes), let DOGE bury it, tick again so the
+    // engines see it on chain, then advance BTC by one tolerance step so the
+    // next rank unlocks. Stops as soon as every expected signature is on chain.
+    const tolerance = electionTolerance(ctx.network)
+    const wantKeys  = ctx.roster.slice(0, ctx.rounds.length)
+        .filter((_, i) => !silentHubs.map(Number).includes(i))
+        .map(r => r.pubkey)
+    for (let round = 0; ; round++){
+        await tickAll(ctx.mvh, silentHubs)
+        await mineDoge(ctx, 3)
+        await tickAll(ctx.mvh, silentHubs)
+        await traceRounds(ctx, 'publish round ' + round)
+
+        const on = await onChainSigners(ctx, epoch, wantKeys)
+        const missing = wantKeys.filter(k => !on.has(k))
+        if (missing.length === 0){
+            console.log('    epoch ' + epoch + ': all ' + wantKeys.length + ' expected signature(s) on chain')
+            break
+        }
+        const tip = await ctx.btcTip()
+        if (tip + tolerance > windowEnd){
+            console.log('    epoch ' + epoch + ': window end reached with ' + missing.length +
+                        ' signature(s) still off chain (' + missing.map(k => k.slice(0, 12)).join(', ') + ')')
+            break
+        }
+        await mineBtcTo(ctx, tip + tolerance, 'unlocking the next rank for epoch ' + epoch)
+    }
 
     if (typeof o.afterPublish === 'function') await o.afterPublish()
 
@@ -1038,7 +1277,8 @@ async function driveEpoch(ctx, epoch, opts){
 }
 
 module.exports = {
-    FEDERATION_SEEDS,
+    SIGNING_SEEDS,
+    federationSeeds,
     IDLE_SEED_INDEX,
     sleep,
     mineBtcTo,
