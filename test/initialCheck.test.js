@@ -45,6 +45,8 @@ const Database = require('../src/db.js')
 const CryptoNetworks = require('../src/CryptoNetworks')
 const cryptoHelper = require('./cryptoHelper')
 const issueHelper = require('./helpers/issueHelper')
+const stakeHelper = require('./helpers/stakeHelper')
+const stakeTeardown = require('./helpers/stakeTeardown')
 
 let perfCollector = null
 try { perfCollector = require('./perf/perfCollector') } catch(e) {}
@@ -347,6 +349,32 @@ exports.mochaHooks = {
                 console.log("GAS token ("+GAS_TICK+") already exists")
             }
         })
+
+        await phase('stake-baseline', async () => {
+            // A fixture STAKE joins the venue's REAL capability set and stays
+            // there unless a run takes it back out: on the shared BTC regtest
+            // that grew oracle_publish from 18 members to 61 and put checkpoint
+            // quorum out of reach. The policy is that a run leaves the set no
+            // larger than it found it, and this is the "found it" half - read
+            // before a single test has run, so the afterAll sweep has something
+            // to be measured against. Best-effort by design: a venue whose
+            // indexer cannot answer the capability read still runs its tests, it
+            // just says the leak check did not run.
+            global.stakeTeardownPolicy   = stakeTeardown.policy(process.env)
+            global.stakeTeardownBaseline = await stakeTeardown.readCapabilitySet({
+                indexer:    indexerConnector,
+                capability: global.stakeTeardownPolicy.capability
+            })
+
+            const b = global.stakeTeardownBaseline
+            if (!b || b.error)
+                console.log('[stake teardown] baseline for ' + global.stakeTeardownPolicy.capability +
+                            ' unreadable' + (b && b.error ? ' (' + b.error + ')' : '') +
+                            ': the end-of-run leak check will not run')
+            else
+                console.log('[stake teardown] baseline: ' + b.pubkeys.length + ' key(s) / ' +
+                            b.sources.length + ' source(s) in ' + b.capability + ' at block ' + b.blockIndex)
+        })
     },
 
     // After every test, wait for the regtest stack to be quiescent before
@@ -396,6 +424,36 @@ exports.mochaHooks = {
                 console.log("There was a problem setting the default mining time values for the regtest miner")
             }
 
+            // Give the venue back every stake this run created, BEFORE the wallet
+            // buffers below are zeroed: the release signs an UNSTAKE with the same
+            // source key that signed the STAKE, so it cannot run after the wipe.
+            // Under E2E_STAKE_TEARDOWN_STRICT=1 a leak throws here, which fails the
+            // run after its tests have already reported - the results are kept and
+            // the venue damage is still surfaced.
+            let teardownError = null
+            try {
+                await stakeTeardown.runTeardown({
+                    policy:   global.stakeTeardownPolicy || undefined,
+                    baseline: global.stakeTeardownBaseline || null,
+                    indexer:  global.indexerConnector || null,
+                    unstake:  async (entry) => {
+                        if (entry.contractIndex !== null && entry.contractIndex !== undefined)
+                            await stakeHelper.sendUnstakeV1(entry.addressInfo, entry.signingPubkey,
+                                                            entry.contractIndex, entry.tick)
+                        else
+                            await stakeHelper.sendUnstakeV0(entry.addressInfo, entry.signingPubkey)
+                    },
+                    // Read off `global` rather than the bare identifiers: a
+                    // bootstrap that threw before connector-init leaves these
+                    // unset, and a ReferenceError here would replace whatever
+                    // real failure the run is trying to report.
+                    mine:        async (n) => { await global.regtestMinerConnector.generateBlocks(n) },
+                    waitForSync: async ()  => { await global.utxoTrackerConnector.waitForSync() }
+                })
+            } catch (err) {
+                teardownError = err
+            }
+
             if (global.wallets) {
                 for (const label of Object.keys(global.wallets)) {
                     const w = global.wallets[label]
@@ -416,6 +474,11 @@ exports.mochaHooks = {
             } catch (err) {
                 console.log("There was a problem closing the database connection pool")
             }
+
+            // Raised last so the key wipe and the pool close still happen: a
+            // strict-mode leak must not leave a process holding a live pool and
+            // a wallet full of unzeroed private keys.
+            if (teardownError) throw teardownError
         })
     }
 }

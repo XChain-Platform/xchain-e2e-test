@@ -9,6 +9,7 @@
 // contact legal@dankest.llc.
 
 const transactionHelper = require('../transactionHelper')
+const stakeTeardown = require('./stakeTeardown')
 
 // Blocks to mine after a STAKE before that stake can be SELECTED into an
 // attestation request's responsible set.
@@ -97,6 +98,10 @@ module.exports = {
             status:        "valid"
         })
 
+        // The stake is now a REAL member of the venue's capability sets. Book the
+        // debt so the run's teardown gives it back (see stakeTeardown.js).
+        stakeTeardown.registerStake({ addressInfo, signingPubkey, amount })
+
         return { txHash, stake: stakeRow }
     },
 
@@ -115,6 +120,10 @@ module.exports = {
             txHash:        txHash,
             status:        "valid"
         })
+
+        // A top-up onto a stake this run already released (or one seeded before
+        // it) is still this run's debt: the single UNSTAKE sweeps every row.
+        stakeTeardown.registerStake({ addressInfo, signingPubkey, amount })
 
         return { txHash, stake: stakeRow }
     },
@@ -137,6 +146,10 @@ module.exports = {
             txHash:        txHash,
             status:        "valid"
         })
+
+        // Debt discharged, but only for a FULL sweep: a partial UNSTAKE re-stakes
+        // the residual, so the pubkey is still a member and still owed back.
+        stakeTeardown.noteUnstake({ signingPubkey, amount })
 
         return { txHash, unstake: unstakeRow }
     },
@@ -296,6 +309,8 @@ module.exports = {
             status:         "valid"
         })
 
+        stakeTeardown.registerStake({ addressInfo, signingPubkey, amount, contractIndex, tick })
+
         return { txHash, stake: stakeRow }
     },
 
@@ -349,6 +364,8 @@ module.exports = {
             txHash:        txHash,
             status:        "valid"
         })
+
+        stakeTeardown.noteUnstake({ signingPubkey, contractIndex, tick, amount })
 
         return { txHash, unstake: unstakeRow }
     },

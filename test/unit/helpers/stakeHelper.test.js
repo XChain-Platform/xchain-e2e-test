@@ -14,6 +14,7 @@ const sinon = require('sinon')
 const assert = require('assert')
 const transactionHelper = require('../../transactionHelper')
 const helper = require('../../helpers/stakeHelper')
+const stakeTeardown = require('../../helpers/stakeTeardown')
 
 const addressInfo = { address: 'addr1', privateKey: Buffer.alloc(32), publicKey: Buffer.alloc(33) }
 
@@ -84,6 +85,52 @@ describe('stakeHelper', () => {
             const waitArg = global.indexerDatabase.waitForUnstake.firstCall.args[0]
             assert.strictEqual(waitArg.source, 'addr1')
             assert.strictEqual(waitArg.signingPubkey, 'pubkey789')
+        })
+    })
+
+    // A fixture STAKE joins the venue's real capability set, so every
+    // stake this helper creates has to be booked for release and every full
+    // UNSTAKE has to discharge it. Wiring, not policy - the policy itself is
+    // covered in test/unit/helpers/stakeTeardown.test.js.
+    describe('fixture-stake teardown wiring', () => {
+        beforeEach(() => stakeTeardown.reset())
+        afterEach(() => stakeTeardown.reset())
+
+        it('books a v1 stake for release', async () => {
+            await helper.sendStakeV1(addressInfo, '1000.00000000', 'pubkeyTD1')
+            const out = stakeTeardown.outstanding()
+            assert.strictEqual(out.length, 1)
+            assert.strictEqual(out[0].signingPubkey, 'pubkeyTD1')
+            assert.strictEqual(out[0].source, 'addr1')
+        })
+
+        it('books a v2 top-up onto the same debt', async () => {
+            await helper.sendStakeV1(addressInfo, '1000.00000000', 'pubkeyTD2')
+            await helper.sendStakeV2(addressInfo, '500.00000000', 'pubkeyTD2')
+            assert.strictEqual(stakeTeardown.outstanding().length, 1)
+        })
+
+        it('a full UNSTAKE discharges it, a partial one does not', async () => {
+            await helper.sendStakeV1(addressInfo, '1000.00000000', 'pubkeyTD3')
+            await helper.sendUnstakeV0(addressInfo, 'pubkeyTD3', '250')
+            assert.strictEqual(stakeTeardown.outstanding().length, 1,
+                'the residual is re-staked, so the pubkey is still a member')
+            await helper.sendUnstakeV0(addressInfo, 'pubkeyTD3')
+            assert.strictEqual(stakeTeardown.outstanding().length, 0)
+        })
+
+        it('books a contract stake under its own contract/tick, and its UNSTAKE clears it', async () => {
+            global.indexerDatabase.waitForContractStake = sinon.stub().resolves({ id: 230 })
+            global.indexerDatabase.waitForContractUnstake = sinon.stub().resolves({ id: 231 })
+
+            await helper.sendStakeV3(addressInfo, '10.00000000', 'pubkeyTD4', 42, 'TOK')
+            const out = stakeTeardown.outstanding()
+            assert.strictEqual(out.length, 1)
+            assert.strictEqual(out[0].contractIndex, 42)
+            assert.strictEqual(out[0].tick, 'TOK')
+
+            await helper.sendUnstakeV1(addressInfo, 'pubkeyTD4', 42, 'TOK')
+            assert.strictEqual(stakeTeardown.outstanding().length, 0)
         })
     })
 

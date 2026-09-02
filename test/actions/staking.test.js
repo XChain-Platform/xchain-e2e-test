@@ -117,6 +117,9 @@ describe('Staking: STAKE, UNSTAKE, DELEGATE (capability model)', function () {
             // (within UNSTAKE's 6-block deactivation grace period, see
             // block comment above). otherAddr tries to top it up; the
             // indexer must reject as "SOURCE (does not own this stake)".
+            // stake-teardown-ok: rejected for source ownership, so it adds no
+            // stake and joins no capability set; the pubkey's real stake was
+            // booked by the sendStakeV1 that created it.
             let msg = "STAKE|2|500.00000000|" + signingPubkey
             let txHash = await transactionHelper.createAndSendTransaction(otherAddr, msg)
             let row = await stakeHelper.waitForAnyStake({
@@ -136,6 +139,8 @@ describe('Staking: STAKE, UNSTAKE, DELEGATE (capability model)', function () {
             let { publicKey } = crypto.generateKeyPairSync('ed25519')
             let freshPubkey = publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('hex')
 
+            // stake-teardown-ok: rejected as "no active stake to top up", so no
+            // stake row ever goes valid and nothing joins a capability set.
             let msg = "STAKE|2|500.00000000|" + freshPubkey
             let txHash = await transactionHelper.createAndSendTransaction(stakerAddr, msg)
             let row = await stakeHelper.waitForAnyStake({
@@ -347,6 +352,7 @@ describe('Staking: STAKE, UNSTAKE, DELEGATE (capability model)', function () {
         }
 
         it('should reject a v1 stake with AMOUNT = 0', async function () {
+            // stake-teardown-ok: rejected on the greater-than-zero guard.
             let msg = 'STAKE|1|0.00000000|' + freshPubkey()
             let txHash = await transactionHelper.createAndSendTransaction(badInputAddr, msg)
             let row = await stakeHelper.waitForAnyStake({
@@ -363,6 +369,7 @@ describe('Staking: STAKE, UNSTAKE, DELEGATE (capability model)', function () {
         it('should reject a v1 stake with AMOUNT carrying more than 8 decimals', async function () {
             // 9 decimal places: past XCHAIN's 8dp, so the AMOUNT format
             // regex rejects it before any balance lookup.
+            // stake-teardown-ok: rejected on the AMOUNT format guard.
             let msg = 'STAKE|1|1000.123456789|' + freshPubkey()
             let txHash = await transactionHelper.createAndSendTransaction(badInputAddr, msg)
             let row = await stakeHelper.waitForAnyStake({
@@ -380,6 +387,7 @@ describe('Staking: STAKE, UNSTAKE, DELEGATE (capability model)', function () {
             // 64 characters so length alone passes, but the leading 'zz'
             // is not hex, so the Ed25519 pubkey pattern rejects it.
             let malformedPubkey = 'zz' + 'a'.repeat(62)
+            // stake-teardown-ok: rejected on the SIGNING_PUBKEY format guard.
             let msg = 'STAKE|1|1000.00000000|' + malformedPubkey
             let txHash = await transactionHelper.createAndSendTransaction(badInputAddr, msg)
             let row = await stakeHelper.waitForAnyStake({
@@ -402,6 +410,7 @@ describe('Staking: STAKE, UNSTAKE, DELEGATE (capability model)', function () {
             )
             await gasHelper.ensureGasBalance(poorAddr, '10')
 
+            // stake-teardown-ok: rejected for an insufficient XCHAIN balance.
             let msg = 'STAKE|1|1000.00000000|' + freshPubkey()
             let txHash = await transactionHelper.createAndSendTransaction(poorAddr, msg)
             let row = await stakeHelper.waitForAnyStake({

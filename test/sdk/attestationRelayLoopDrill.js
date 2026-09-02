@@ -88,6 +88,7 @@ const gasHelper         = require('../helpers/gasHelper');
 const vmHelper          = require('../helpers/vmHelper');
 const attestationHelper = require('../helpers/attestationHelper');
 const chainRail         = require('../helpers/chainRail');
+const stakeTeardown     = require('../helpers/stakeTeardown');
 
 // Resolve the bundled hub (in-image) first, then the monorepo sibling - the same
 // loader test/actions/realUrlAttestation.test.js uses for the provider.
@@ -281,12 +282,24 @@ async function stakeKeyFrom(rail, addressInfo, amount, pubkey, label) {
         return rows.length ? rows[0] : null;
     }, 300000);
     assert.strictEqual(String(row.status), 'valid', label + ' indexed ' + row.status);
+    // Book the debt with the run's release ledger. The drill unwinds its
+    // cross_chain stake by hand (it has to: the relay leg needs the majority
+    // gone mid-run), while an unbooked attestation stake stays in the venue's
+    // capability set for good, which is the accumulation this ledger prevents.
+    // Only stakes on the BOOTSTRAPPED rail are booked: the root
+    // afterAll sweeps through the globals initialCheck set, so a stake on the
+    // origin rail would be swept against the wrong chain.
+    if (rail && rail.code === global.COIN_CODE)
+        stakeTeardown.registerStake({ addressInfo: addressInfo, signingPubkey: pubkey, amount: amount });
     return row;
 }
 
 async function unstakeKeyFrom(rail, addressInfo, pubkey, label) {
     await resilientSend(label, rail, () =>
         transactionHelper.createAndSendTransaction(addressInfo, 'UNSTAKE|0|' + pubkey));
+    // Discharged here, so the root sweep does not broadcast a second UNSTAKE
+    // that can only index invalid.
+    stakeTeardown.noteUnstake({ signingPubkey: pubkey });
     return pumpUntil(label + ' row', rail, async () => {
         const rows = await railQuery(rail,
             'SELECT s.deactivation_block FROM stakes s JOIN index_pubkeys ip ON ip.id = s.signing_pubkey_id ' +

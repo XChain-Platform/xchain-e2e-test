@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Fixture stakes are now released when a run ends, so a run leaves the venue's capability set no larger than it found it.
+- The suite reports, and can fail on, any staking key a run leaves behind in the shared venue.
+- A gate that fails any hand-built STAKE broadcast which bypasses the release ledger.
+
 ## [0.11.0] - 2026-08-25
 
 ### Changed
