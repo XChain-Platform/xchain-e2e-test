@@ -9,6 +9,7 @@
 // contact legal@dankest.llc.
 
 const transactionHelper = require('../transactionHelper')
+const requireRow = require('./requireRow')
 
 module.exports = {
     // DISPENSER v0 wire format:
@@ -53,7 +54,7 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(
             addressInfo, dispenserMessage, null, Array.isArray(customOutputs) ? customOutputs : [])
 
-        let dispenserRow = await indexerDatabase.waitForDispenser({
+        let dispenserRow = requireRow(await indexerDatabase.waitForDispenser({
             source: address, txHash: txHash,
             giveCoin: giveCoin, giveTick: giveTick,
             giveAmount: giveAmountQuery, giveEscrow: giveEscrowQuery,
@@ -65,7 +66,8 @@ module.exports = {
             // expectedStatus lets a caller wait for a REJECTED create (oracle
             // fee): waiting on "valid" would just time out.
             status: expectedStatus || "valid"
-        })
+        }), "sendDispenserV0: DISPENSER giving " + giveTick + " for " + getTick
+            + " (tx " + txHash + ") at status=" + (expectedStatus || "valid"))
 
         return { txHash, dispenser: dispenserRow }
     },

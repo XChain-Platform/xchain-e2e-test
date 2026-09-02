@@ -82,6 +82,8 @@ describe('Chaos Experiment 5: Database Mid-Query Disconnect @P1', function () {
             mockConn.query.onSecondCall().rejects(new Error('ER_LOCK_WAIT_TIMEOUT'))
             mockConn.query.onThirdCall().resolves([mockRow])
 
+            // give-up-ok: the mocked query decides the row; this case asserts on the
+            // connection release count, not on what came back.
             await db.waitForIssue({ tick: 'CHAOS' }, 30000)
 
             assert(mockConn.release.callCount >= 3, 'every poll should release its connection')

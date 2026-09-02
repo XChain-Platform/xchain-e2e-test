@@ -9,6 +9,7 @@
 // contact legal@dankest.llc.
 
 const transactionHelper = require('../transactionHelper')
+const requireRow = require('./requireRow')
 
 module.exports = {
     async sendBatchV0(addressInfo, commands){
@@ -18,11 +19,12 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, batchMessage)
 
         console.log("Waiting for BATCH in the database...")
-        let row = await indexerDatabase.waitForBatch({
+        let row = requireRow(await indexerDatabase.waitForBatch({
             txHash: txHash,
             source: addressInfo["address"],
             status: "valid"
-        })
+        }), "sendBatchV0: BATCH of " + commands.length + " commands (tx " + txHash
+            + ") at status=valid")
 
         return { txHash, batch: row }
     },
@@ -69,11 +71,12 @@ module.exports = {
         if (opts.status !== null){
             let status = opts.status || 'valid'
             console.log("Waiting for BATCH ("+status+") in the database...")
-            row = await indexerDatabase.waitForBatch({
+            row = requireRow(await indexerDatabase.waitForBatch({
                 txHash: txHash,
                 source: addressInfo["address"],
                 status: status
-            }, opts.timeout || 120000)
+            }, opts.timeout || 120000), "sendBatch: BATCH v" + version + " of "
+                + commands.length + " commands (tx " + txHash + ") at status=" + status)
         }
 
         return { txHash, batch: row }

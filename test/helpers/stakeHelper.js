@@ -10,6 +10,7 @@
 
 const transactionHelper = require('../transactionHelper')
 const stakeTeardown = require('./stakeTeardown')
+const requireRow = require('./requireRow')
 
 // Blocks to mine after a STAKE before that stake can be SELECTED into an
 // attestation request's responsible set.
@@ -91,12 +92,13 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for stake in the database...")
-        let stakeRow = await indexerDatabase.waitForStake({
+        let stakeRow = requireRow(await indexerDatabase.waitForStake({
             source:        address,
             signingPubkey: signingPubkey,
             txHash:        txHash,
             status:        "valid"
-        })
+        }), "sendStakeV1: STAKE of " + amount + " by " + address + " (tx " + txHash
+            + ") at status=valid")
 
         // The stake is now a REAL member of the venue's capability sets. Book the
         // debt so the run's teardown gives it back (see stakeTeardown.js).
@@ -114,12 +116,13 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for top-up stake row in the database...")
-        let stakeRow = await indexerDatabase.waitForStake({
+        let stakeRow = requireRow(await indexerDatabase.waitForStake({
             source:        address,
             signingPubkey: signingPubkey,
             txHash:        txHash,
             status:        "valid"
-        })
+        }), "sendStakeV2: the STAKE top-up of " + amount + " by " + address
+            + " (tx " + txHash + ") at status=valid")
 
         // A top-up onto a stake this run already released (or one seeded before
         // it) is still this run's debt: the single UNSTAKE sweeps every row.
@@ -140,12 +143,12 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for unstake in the database...")
-        let unstakeRow = await indexerDatabase.waitForUnstake({
+        let unstakeRow = requireRow(await indexerDatabase.waitForUnstake({
             source:        address,
             signingPubkey: signingPubkey,
             txHash:        txHash,
             status:        "valid"
-        })
+        }), "sendUnstakeV0: UNSTAKE by " + address + " (tx " + txHash + ") at status=valid")
 
         // Debt discharged, but only for a FULL sweep: a partial UNSTAKE re-stakes
         // the residual, so the pubkey is still a member and still owed back.
@@ -162,11 +165,11 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for delegation in the database...")
-        let delegationRow = await indexerDatabase.waitForDelegation({
+        let delegationRow = requireRow(await indexerDatabase.waitForDelegation({
             source: address,
             txHash: txHash,
             status: "valid"
-        })
+        }), "sendDelegateV0: DELEGATE by " + address + " (tx " + txHash + ") at status=valid")
 
         return { txHash, delegation: delegationRow }
     },
@@ -189,12 +192,13 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for the parent delegation to go deactivated...")
-        let revocationRow = await indexerDatabase.waitForDelegation({
+        let revocationRow = requireRow(await indexerDatabase.waitForDelegation({
             source:        address,
             signingPubkey: signingPubkey,
             status:        "valid",
             deactivated:   true
-        })
+        }), "sendRevokeDelegationV0: the parent delegation for " + address
+            + " going deactivated (tx " + txHash + ")")
 
         return { txHash, revocation: revocationRow }
     },
@@ -221,12 +225,13 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for stake-key revocation in the database...")
-        let revocationRow = await indexerDatabase.waitForStakeKeyRevocation({
+        let revocationRow = requireRow(await indexerDatabase.waitForStakeKeyRevocation({
             source:        address,
             signingPubkey: signingPubkey,
             txHash:        txHash,
             status:        "valid"
-        })
+        }), "sendStakeKeyRevoke: the stake-key revocation for " + address
+            + " (tx " + txHash + ") at status=valid")
 
         return { txHash, revocation: revocationRow }
     },
@@ -261,11 +266,12 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for reward claim in the database...")
-        let claimRow = await indexerDatabase.waitForRewardClaim({
+        let claimRow = requireRow(await indexerDatabase.waitForRewardClaim({
             source: address,
             txHash: txHash,
             status: "valid"
-        })
+        }), "sendCollectV0: the COLLECT reward claim by " + address + " (tx " + txHash
+            + ") at status=valid")
 
         return { txHash, claim: claimRow }
     },
@@ -300,14 +306,15 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for contract stake in the database...")
-        let stakeRow = await indexerDatabase.waitForContractStake({
+        let stakeRow = requireRow(await indexerDatabase.waitForContractStake({
             source:         address,
             signingPubkey:  signingPubkey,
             contractIndex:  contractIndex,
             tick:           tick,
             txHash:         txHash,
             status:         "valid"
-        })
+        }), "sendStakeV3: the contract STAKE of " + amount + " " + tick + " into contract "
+            + contractIndex + " (tx " + txHash + ") at status=valid")
 
         stakeTeardown.registerStake({ addressInfo, signingPubkey, amount, contractIndex, tick })
 
@@ -356,14 +363,15 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for contract unstake in the database...")
-        let unstakeRow = await indexerDatabase.waitForContractUnstake({
+        let unstakeRow = requireRow(await indexerDatabase.waitForContractUnstake({
             source:        address,
             signingPubkey: signingPubkey,
             contractIndex: contractIndex,
             tick:          tick,
             txHash:        txHash,
             status:        "valid"
-        })
+        }), "sendUnstakeV1: the contract UNSTAKE of " + tick + " from contract "
+            + contractIndex + " (tx " + txHash + ") at status=valid")
 
         stakeTeardown.noteUnstake({ signingPubkey, contractIndex, tick, amount })
 
@@ -379,13 +387,14 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for contract delegation in the database...")
-        let delegationRow = await indexerDatabase.waitForContractDelegation({
+        let delegationRow = requireRow(await indexerDatabase.waitForContractDelegation({
             source:        address,
             contractIndex: contractIndex,
             tick:          tick,
             txHash:        txHash,
             status:        "valid"
-        })
+        }), "sendDelegateV1: the contract DELEGATE on contract " + contractIndex
+            + "/" + tick + " (tx " + txHash + ") at status=valid")
 
         return { txHash, delegation: delegationRow }
     }

@@ -9,6 +9,7 @@
 // contact legal@dankest.llc.
 
 const transactionHelper = require('../transactionHelper')
+const requireRow = require('./requireRow')
 
 module.exports = {
     // Send a COINPAY v0 transaction with a native coin payment output
@@ -28,10 +29,11 @@ module.exports = {
         )
 
         console.log("Waiting for COINPAY in the database...")
-        let coinpay = await indexerDatabase.waitForCoinpay({
+        let coinpay = requireRow(await indexerDatabase.waitForCoinpay({
             obligationActionIndex: orderMatchActionIndex,
             status: 'valid'
-        })
+        }), "sendCoinpayV0: COINPAY against obligation " + orderMatchActionIndex
+            + " (tx " + txHash + ") at status=valid")
 
         return { txHash, coinpay }
     }

@@ -9,6 +9,7 @@
 // contact legal@dankest.llc.
 
 const transactionHelper = require('../transactionHelper')
+const requireRow = require('./requireRow')
 
 module.exports = {
     async sendBroadcastV0(addressInfo, message, value){
@@ -18,10 +19,10 @@ module.exports = {
         console.log("Creating and sending BROADCAST V0 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, broadcastMessage)
 
-        let broadcastRow = await indexerDatabase.waitForBroadcast({
+        let broadcastRow = requireRow(await indexerDatabase.waitForBroadcast({
             source: address, txHash: txHash, message: message,
             value: value, status: "valid"
-        })
+        }), "sendBroadcastV0: BROADCAST from " + address + " (tx " + txHash + ") at status=valid")
 
         return { txHash, broadcast: broadcastRow }
     },
@@ -33,10 +34,10 @@ module.exports = {
         console.log("Creating and sending BROADCAST V1 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, broadcastMessage)
 
-        let broadcastRow = await indexerDatabase.waitForBroadcast({
+        let broadcastRow = requireRow(await indexerDatabase.waitForBroadcast({
             source: address, txHash: txHash, message: message,
             value: value, fee: fee, memo: memo, status: "valid"
-        })
+        }), "sendBroadcastV1: BROADCAST from " + address + " (tx " + txHash + ") at status=valid")
 
         return { txHash, broadcast: broadcastRow }
     },
@@ -48,10 +49,10 @@ module.exports = {
         console.log("Creating and sending BROADCAST V2 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, broadcastMessage)
 
-        let broadcastRow = await indexerDatabase.waitForBroadcast({
+        let broadcastRow = requireRow(await indexerDatabase.waitForBroadcast({
             source: address, txHash: txHash, message: message,
             fee: fee, memo: memo, status: "valid"
-        })
+        }), "sendBroadcastV2: BROADCAST from " + address + " (tx " + txHash + ") at status=valid")
 
         return { txHash, broadcast: broadcastRow }
     },
@@ -63,10 +64,11 @@ module.exports = {
         console.log("Creating and sending BROADCAST V3 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, broadcastMessage)
 
-        let broadcastRow = await indexerDatabase.waitForBroadcast({
+        let broadcastRow = requireRow(await indexerDatabase.waitForBroadcast({
             source: address, txHash: txHash, broadcastActionIndex: broadcastActionIndex,
             value: value, memo: memo, status: "valid"
-        })
+        }), "sendBroadcastV3: BROADCAST update of action " + broadcastActionIndex
+            + " (tx " + txHash + ") at status=valid")
 
         return { txHash, broadcast: broadcastRow }
     }

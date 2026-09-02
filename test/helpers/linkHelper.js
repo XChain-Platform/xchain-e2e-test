@@ -9,6 +9,7 @@
 // contact legal@dankest.llc.
 
 const transactionHelper = require('../transactionHelper')
+const requireRow = require('./requireRow')
 
 module.exports = {
     async sendLinkV0(addressInfo, coin1, coin1ActionIndex, coin2, coin2ActionIndex, memo){
@@ -18,7 +19,7 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, linkMessage)
 
         console.log("Waiting for LINK in the database...")
-        let row = await indexerDatabase.waitForLink({
+        let row = requireRow(await indexerDatabase.waitForLink({
             txHash: txHash,
             source: addressInfo["address"],
             coin1: coin1,
@@ -26,7 +27,8 @@ module.exports = {
             coin2: coin2,
             coin2ActionIndex: coin2ActionIndex,
             status: "valid"
-        })
+        }), "sendLinkV0: LINK of " + coin1 + "/" + coin1ActionIndex + " to "
+            + coin2 + "/" + coin2ActionIndex + " (tx " + txHash + ") at status=valid")
 
         return { txHash, link: row }
     }

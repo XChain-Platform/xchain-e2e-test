@@ -118,6 +118,7 @@ describe('Database Polling Integration', function () {
             mockConn.query.onFirstCall().resolves([])
             mockConn.query.onSecondCall().resolves([mockRow])
 
+            // give-up-ok: as in the chaos suite, the assertion is the release count.
             await db.waitForIssue({ tick: 'TOK' }, 30000)
 
             assert(mockConn.release.callCount >= 2, 'connection released on each iteration')

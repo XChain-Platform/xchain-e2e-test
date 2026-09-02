@@ -9,6 +9,7 @@
 // contact legal@dankest.llc.
 
 const transactionHelper = require('../transactionHelper')
+const requireRow = require('./requireRow')
 
 module.exports = {
     async sendDestroyV0(addressInfo, tick, amount, memo){
@@ -18,20 +19,22 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, destroyMessage)
 
         console.log("Waiting for DESTROY in the database...")
-        let destroyRow = await indexerDatabase.waitForDestroy({
+        let destroyRow = requireRow(await indexerDatabase.waitForDestroy({
             txHash: txHash,
             source: addressInfo["address"],
             tick: tick,
             amount: amount,
             status: "valid"
-        })
+        }), "sendDestroyV0: DESTROY of " + amount + " " + tick + " (tx " + txHash
+            + ") at status=valid")
 
-        let debitRow = await indexerDatabase.waitForDebit({
+        let debitRow = requireRow(await indexerDatabase.waitForDebit({
             address: addressInfo["address"],
             tick: tick,
             txHash: txHash,
             amount: amount
-        })
+        }), "sendDestroyV0: the " + tick + " debit from " + addressInfo["address"]
+            + " (tx " + txHash + ")")
 
         return { txHash, destroy: destroyRow, debit: debitRow }
     },
@@ -52,13 +55,14 @@ module.exports = {
         // We check the last destroy until the indexer adds a composite key.
         let last = destroys[destroys.length - 1]
         console.log("Waiting for DESTROY in the database...")
-        let destroyRow = await indexerDatabase.waitForDestroy({
+        let destroyRow = requireRow(await indexerDatabase.waitForDestroy({
             txHash: txHash,
             source: addressInfo["address"],
             tick: last.tick,
             amount: last.amount,
             status: "valid"
-        })
+        }), "sendDestroyV1: the surviving DESTROY of " + last.amount + " " + last.tick
+            + " (tx " + txHash + ") at status=valid")
 
         return { txHash, destroy: destroyRow }
     },
@@ -76,13 +80,14 @@ module.exports = {
         // Note: same indexer limitation as v1, only last destroy survives.
         let last = destroys[destroys.length - 1]
         console.log("Waiting for DESTROY in the database...")
-        let destroyRow = await indexerDatabase.waitForDestroy({
+        let destroyRow = requireRow(await indexerDatabase.waitForDestroy({
             txHash: txHash,
             source: addressInfo["address"],
             tick: last.tick,
             amount: last.amount,
             status: "valid"
-        })
+        }), "sendDestroyV2: the surviving DESTROY of " + last.amount + " " + last.tick
+            + " (tx " + txHash + ") at status=valid")
 
         return { txHash, destroy: destroyRow }
     }

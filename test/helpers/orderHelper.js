@@ -9,6 +9,7 @@
 // contact legal@dankest.llc.
 
 const transactionHelper = require('../transactionHelper')
+const requireRow = require('./requireRow')
 
 module.exports = {
     // ORDER v0 wire format:
@@ -42,7 +43,7 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, orderMessage)
 
         console.log("Waiting for ORDER in the database...")
-        let row = await indexerDatabase.waitForOrder({
+        let row = requireRow(await indexerDatabase.waitForOrder({
             txHash: txHash,
             source: addressInfo["address"],
             giveCoin: giveCoin,
@@ -52,7 +53,8 @@ module.exports = {
             getTick: getTickQuery,
             getAmount: getAmountQuery,
             status: "valid"
-        })
+        }), "sendOrderV0: ORDER giving " + giveCoin + "/" + giveTick + " for "
+            + getCoin + "/" + getTick + " (tx " + txHash + ") at status=valid")
 
         return { txHash, order: row }
     },

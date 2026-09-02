@@ -9,6 +9,7 @@
 // contact legal@dankest.llc.
 
 const transactionHelper = require('../transactionHelper')
+const requireRow = require('./requireRow')
 
 module.exports = {
     // Broadcast an ISSUE v0 and return its txHash, waiting for NO particular
@@ -98,13 +99,13 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, issueMessage)
 
         console.log("Waiting for ISSUE in the database...")
-        let issueRow = await indexerDatabase.waitForIssue({
+        let issueRow = requireRow(await indexerDatabase.waitForIssue({
             source: address,
             tick: tick,
             txHash: txHash,
             description: description,
             status: "valid"
-        })
+        }), "sendIssueV1: ISSUE " + tick + " (tx " + txHash + ") at status=valid")
 
         return { txHash, issue: issueRow }
     },
@@ -124,12 +125,12 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, issueMessage)
 
         console.log("Waiting for ISSUE in the database...")
-        let issueRow = await indexerDatabase.waitForIssue({
+        let issueRow = requireRow(await indexerDatabase.waitForIssue({
             source: address,
             tick: tick,
             txHash: txHash,
             status: "valid"
-        })
+        }), "sendIssueV2: ISSUE " + tick + " (tx " + txHash + ") at status=valid")
 
         return { txHash, issue: issueRow }
     },
@@ -152,12 +153,12 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, issueMessage)
 
         console.log("Waiting for ISSUE in the database...")
-        let issueRow = await indexerDatabase.waitForIssue({
+        let issueRow = requireRow(await indexerDatabase.waitForIssue({
             source: address,
             tick: tick,
             txHash: txHash,
             status: "valid"
-        })
+        }), "sendIssueV3: ISSUE " + tick + " (tx " + txHash + ") at status=valid")
 
         return { txHash, issue: issueRow }
     },
@@ -175,12 +176,12 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, issueMessage)
 
         console.log("Waiting for ISSUE in the database...")
-        let issueRow = await indexerDatabase.waitForIssue({
+        let issueRow = requireRow(await indexerDatabase.waitForIssue({
             source: address,
             tick: tick,
             txHash: txHash,
             status: "valid"
-        })
+        }), "sendIssueV4: ISSUE " + tick + " (tx " + txHash + ") at status=valid")
 
         return { txHash, issue: issueRow }
     },
@@ -197,12 +198,12 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, issueMessage)
 
         console.log("Waiting for ISSUE in the database...")
-        let issueRow = await indexerDatabase.waitForIssue({
+        let issueRow = requireRow(await indexerDatabase.waitForIssue({
             source: address,
             tick: tick,
             txHash: txHash,
             status: "valid"
-        })
+        }), "sendIssueV5: ISSUE " + tick + " (tx " + txHash + ") at status=valid")
 
         return { txHash, issue: issueRow }
     }

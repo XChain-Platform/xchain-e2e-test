@@ -9,6 +9,7 @@
 // contact legal@dankest.llc.
 
 const transactionHelper = require('../transactionHelper')
+const requireRow = require('./requireRow')
 
 module.exports = {
     // MEMO sits BEFORE the variadic ITEM tail, so a memo-less LIST still spends an
@@ -21,10 +22,11 @@ module.exports = {
         console.log("Creating and sending LIST V0 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, listMessage)
 
-        let listRow = await indexerDatabase.waitForList({
+        let listRow = requireRow(await indexerDatabase.waitForList({
             source: address, txHash: txHash, type: type,
             status: "valid", items
-        })
+        }), "sendListV0: LIST type " + type + " of " + items.length + " items (tx "
+            + txHash + ") at status=valid")
 
         return { txHash, list: listRow }
     },
@@ -38,10 +40,11 @@ module.exports = {
         console.log("Creating and sending LIST V1 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, listMessage)
 
-        let listRow = await indexerDatabase.waitForList({
+        let listRow = requireRow(await indexerDatabase.waitForList({
             source: address, txHash: txHash, type: finalTypeToCheck,
             status: "valid", items: finalItemsToCheck
-        })
+        }), "sendListV1: the edited LIST " + listActionIndex + " at type "
+            + finalTypeToCheck + " (tx " + txHash + ") at status=valid")
 
         return { txHash, list: listRow }
     }

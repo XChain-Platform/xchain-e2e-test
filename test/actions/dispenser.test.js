@@ -118,8 +118,10 @@ describe('DISPENSER', () => {
 
             if (!dispenseRow) {
                 // Debug: query without filters
+                // give-up-ok: diagnostics for the assert below; empty is a finding, not a failure.
                 let debugResult = await indexerDatabase.waitForDispense({ txHash: txHash }, 5000)
                 console.log("Debug - dispense by txHash only:", debugResult)
+                // give-up-ok: same, widened to the source address.
                 let debugResult2 = await indexerDatabase.waitForDispense({ source: dispenseAddressInfo["address"] }, 5000)
                 console.log("Debug - dispense by source only:", debugResult2)
             }

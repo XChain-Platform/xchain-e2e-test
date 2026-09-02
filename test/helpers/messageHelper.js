@@ -9,6 +9,7 @@
 // contact legal@dankest.llc.
 
 const transactionHelper = require('../transactionHelper')
+const requireRow = require('./requireRow')
 
 module.exports = {
     // MESSAGE wire format: MESSAGE|VERSION|COIN|DESTINATION|...
@@ -19,13 +20,13 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, messageStr)
 
         console.log("Waiting for MESSAGE in the database...")
-        let row = await indexerDatabase.waitForMessage({
+        let row = requireRow(await indexerDatabase.waitForMessage({
             txHash: txHash,
             source: addressInfo["address"],
             destination: destination,
             plaintextMessage: plaintextMessage,
             status: "valid"
-        })
+        }), "sendMessageV3: MESSAGE to " + destination + " (tx " + txHash + ") at status=valid")
 
         return { txHash, message: row }
     },
@@ -37,13 +38,13 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, messageStr)
 
         console.log("Waiting for MESSAGE in the database...")
-        let row = await indexerDatabase.waitForMessage({
+        let row = requireRow(await indexerDatabase.waitForMessage({
             txHash: txHash,
             source: addressInfo["address"],
             destination: destination,
             encryptionMethod: encryptionMethod,
             status: "valid"
-        })
+        }), "sendMessageV0: MESSAGE to " + destination + " (tx " + txHash + ") at status=valid")
 
         return { txHash, message: row }
     },
@@ -55,13 +56,13 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, messageStr)
 
         console.log("Waiting for MESSAGE in the database...")
-        let row = await indexerDatabase.waitForMessage({
+        let row = requireRow(await indexerDatabase.waitForMessage({
             txHash: txHash,
             source: addressInfo["address"],
             destination: destination,
             encryptionMethod: encryptionMethod,
             status: "valid"
-        })
+        }), "sendMessageV1: MESSAGE to " + destination + " (tx " + txHash + ") at status=valid")
 
         return { txHash, message: row }
     },
@@ -73,12 +74,12 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, messageStr)
 
         console.log("Waiting for MESSAGE in the database...")
-        let row = await indexerDatabase.waitForMessage({
+        let row = requireRow(await indexerDatabase.waitForMessage({
             txHash: txHash,
             source: addressInfo["address"],
             destination: destination,
             status: "valid"
-        })
+        }), "sendMessageV2: MESSAGE to " + destination + " (tx " + txHash + ") at status=valid")
 
         return { txHash, message: row }
     }

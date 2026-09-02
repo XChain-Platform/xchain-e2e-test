@@ -130,6 +130,8 @@ describe('FILE: token-gated content', function () {
 
         const txHash = await transactionHelper.createAndSendTransaction(issuer, batchMessage, ciphertextRaw)
 
+        // give-up-ok: sequencing only; the gated FILE row asserted just below is
+        // what this case is about, and it cannot land without a valid BATCH.
         await indexerDatabase.waitForBatch({
             txHash,
             source: issuer.address,
@@ -159,7 +161,9 @@ describe('FILE: token-gated content', function () {
         const handoffCmd = ['MESSAGE', '2', COIN_CODE, recipient.address, stubEncryptedMessage(keyHash)].join('|')
         await batchHelper.sendBatchV0(issuer, [sendCmd, handoffCmd])
 
-        await indexerDatabase.waitForSend({
+        // The SEND row IS this case's only observable, so a swallowed give-up
+        // would let the test pass on a transfer that never happened.
+        const sendRow = await indexerDatabase.waitForSend({
             source: issuer.address,
             destination: recipient.address,
             tick: TICK,
@@ -167,6 +171,7 @@ describe('FILE: token-gated content', function () {
             memo: '',
             status: 'valid',
         })
+        assert(sendRow, 'the gated token transfer should land a valid SEND row')
     })
 
     it('rejects bare SEND of the gated token with no sibling MESSAGE', async function () {
@@ -216,6 +221,7 @@ describe('FILE: token-gated content', function () {
             'BATCH|0|' + [f1, mSelf].join(';'),
             ct1.toString('binary'),
         )
+        // give-up-ok: sequencing only; row1 below is the assertion for this batch.
         await indexerDatabase.waitForBatch({ txHash: tx1, source: issuer.address, status: 'valid' })
         const row1 = await indexerDatabase.waitForFile({ txHash: tx1, name: 'pack-1.txt', status: 'valid' })
         assert(row1, 'pack member 1 should land valid')

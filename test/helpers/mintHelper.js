@@ -9,6 +9,7 @@
 // contact legal@dankest.llc.
 
 const transactionHelper = require('../transactionHelper')
+const requireRow = require('./requireRow')
 
 module.exports = {
     async sendMintV0(addressInfo, tick, amount, destination, memo){
@@ -24,21 +25,22 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, mintMessage)
 
         console.log("Waiting for MINT in the database...")
-        let mintRow = await indexerDatabase.waitForMint({
+        let mintRow = requireRow(await indexerDatabase.waitForMint({
             txHash: txHash,
             tick: tick,
             destination: destination,
             amount: amount,
             memo: memo,
             status: "valid"
-        })
+        }), "sendMintV0: MINT of " + amount + " " + tick + " to " + destination
+            + " (tx " + txHash + ") at status=valid")
 
-        let creditRow = await indexerDatabase.waitForCredit({
+        let creditRow = requireRow(await indexerDatabase.waitForCredit({
             address: destination,
             tick: tick,
             txHash: txHash,
             amount: amount
-        })
+        }), "sendMintV0: the " + tick + " mint credit to " + destination + " (tx " + txHash + ")")
 
         return { txHash, mint: mintRow, credit: creditRow }
     }
