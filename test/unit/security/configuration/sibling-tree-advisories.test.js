@@ -53,7 +53,8 @@ describe('Security: staged sibling trees carry no vulnerable copies @regression 
         'shell-quote':          [1, 9, 0],
         'form-data':            [4, 0, 6],
         'tmp':                  [0, 2, 6],
-        'ip-address':           [10, 3, 1]
+        'ip-address':           [10, 3, 1],
+        'mariadb':              [3, 5, 3]
     };
 
     function cmp(a, b) {
