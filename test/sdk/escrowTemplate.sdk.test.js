@@ -161,6 +161,12 @@ describe('[sdk] template:escrow (on-chain custody)', function () {
             { pubkey: buyer.address, change: buyer.address },
             submitOpts({ wif: buyer.wif }));
         expect(issue.indexed.status, 'ISSUE indexed').to.equal('valid');
+        // This read is deliberate, and it is also what made the stale-read defect look like a
+        // consensus bug: it is the only balance read any template suite takes
+        // BEFORE the deposit, so it was the only one that could be answered from
+        // a stale cache afterwards. Keep it - the suite should keep exercising
+        // read-then-move-then-read on one address (fixed explorer-side in
+        // xchain-explorer src/db.js _resultCacheGeneration).
         expect(balanceFor(await sdk.getBalances(buyer.address), tick), 'buyer holds the minted supply').to.equal(AMOUNT);
 
         console.log('    [escrow] buyer=' + buyer.address);
@@ -224,11 +230,20 @@ describe('[sdk] template:escrow (on-chain custody)', function () {
         await mine(1);
         // fund() only sets FUNDED after require(getBalance(self,tick) >= amount), so a
         // FUNDED status is the on-chain proof that the indexer's getBalance wiring saw
-        // the same-BATCH deposit. (We assert custody via the buyer/seller balance flow
-        // rather than the explorer's per-contract balance endpoint.)
+        // the same-BATCH deposit. Custody is then asserted twice over: through the
+        // buyer/seller balance flow, and against the explorer's per-contract
+        // balance endpoint.
         expect(await readState(sdk, contractIndex, 'status'), 'status after fund').to.equal('FUNDED');
-        // Buyer spent the whole balance into the escrow.
+        // Buyer spent the whole balance into the escrow. Read once, with no poll
+        // or retry: a debit that is only visible on a later read is the stale-read
+        // defect (a cached pre-deposit balance served past the block that moved
+        // it), not a slow venue, and a retry loop here would hide it again.
         expect(balanceFor(await sdk.getBalances(buyer.address), tick), 'buyer debited the deposit').to.equal(0);
+        // ...and the contract is what holds it. Asserting custody by amount (not
+        // just the FUNDED flag) is what stops the release test below from being
+        // vacuously green: release pays out "the full held balance", which proves
+        // nothing unless the held balance is known to be the whole deposit.
+        expect(await contractBalance(sdk, contractIndex, tick), 'contract holds the deposit').to.equal(AMOUNT);
     });
 
     it('EXECUTE release pays the seller the full held balance', async function () {
@@ -243,5 +258,7 @@ describe('[sdk] template:escrow (on-chain custody)', function () {
         expect(await readState(sdk, contractIndex, 'status'), 'status after release').to.equal('RELEASED');
         // End-to-end custody proof: the deposited tokens moved buyer -> escrow -> seller.
         expect(balanceFor(await sdk.getBalances(seller.address), tick), 'seller received the escrow').to.equal(AMOUNT);
+        // The escrow paid out everything it held; nothing is stranded in custody.
+        expect(await contractBalance(sdk, contractIndex, tick), 'contract custody emptied').to.equal(0);
     });
 });
