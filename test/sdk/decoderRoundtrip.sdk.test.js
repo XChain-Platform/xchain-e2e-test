@@ -76,26 +76,96 @@ function indexedDetails(res) {
     return (actions[0] && actions[0].details) || {};
 }
 
-// The indexer's action NAME is a display name, not the wire action, and one
-// transaction can produce several rows. Three documented divergences, all
-// verified against the live regtest chain:
-//   - a DISPENSER v1/v2 indexes as DISPENSER_CANCEL / DISPENSER_EDIT;
-//   - each sub-action of a BATCH gets its own row, carrying the whole BATCH
-//     string as tx_data;
-//   - a SWEEP re-homes every object the address owns, so besides its own row
-//     it writes one derived row per swept object - a token ownership transfer
-//     lands as an ISSUE row whose tx_data is still the SWEEP wire string
-//     (regtest action_index 993, same tx_hash as the SWEEP row 992).
-// Anything else means parse() and the indexer read the same bytes differently.
-const DERIVED_ROW_ACTIONS = { SWEEP: ['ISSUE', 'DISPENSER', 'SEND'] };
+// One transaction can produce several action rows, and only ONE of them
+// carried the wire string. Every other row is DERIVED: it never had a string
+// of its own, so the explorer serves it the parent transaction's `tx_data`
+// rather than inventing one (xchain-explorer db.js: "a VM-emitted action has
+// no wire string of its own... inventing a wire form that was never broadcast
+// would be worse than the ambiguity"). The corpus lane therefore sees the
+// parent's bytes hanging off a row whose own COLUMNS describe the derived
+// action, and those columns are not comparable to the wire fields.
+//
+// The canonical example, RLTC block 1461, is the divergence this lane was
+// reporting as an SDK/indexer disagreement: a SEND to an open dispenser
+// writes the SEND row plus a DISPENSE payout row on the same tx_hash. The
+// SEND row's `destination` is the dispenser (exactly what the wire says); the
+// DISPENSE row's `destination` is the buyer being paid out. Each row is right
+// about its own action, and neither decoder nor indexer is wrong - the lane
+// was simply reading the payout row's columns against the SEND's bytes.
+//
+// Derived rows come from two places, and the two are recognised differently:
+//
+//   1. VM EMISSIONS, which the explorer marks explicitly: a non-null
+//      `emitted_by` naming the parent EXECUTE's action_index and the
+//      emission's position. Any action the VM can emit shows up this way, so
+//      there is no name list to keep - the marker IS the evidence, and the
+//      row is anchored to the parent EXECUTE's `emissions` manifest below.
+//
+//   2. INDEXER-DERIVED rows, which carry no such marker and have to be
+//      recognised by name:
+//        - a SWEEP re-homes every object the address owns, so besides its own
+//          row it writes one derived row per swept object - a token ownership
+//          transfer lands as an ISSUE row whose tx_data is still the SWEEP
+//          wire string (regtest action_index 993, same tx_hash as the SWEEP
+//          row 992);
+//        - a SEND whose DESTINATION is an open dispenser pays that dispenser
+//          out, and the payout is its own DISPENSE row on the same tx_hash
+//          (indexer utility.processDispenserSends).
+//
+// Two more name divergences are NOT derived rows - they are the wire row
+// under a display name, so their columns stay comparable to the wire:
+// a DISPENSER v1/v2 indexes as DISPENSER_CANCEL / DISPENSER_EDIT, and each
+// sub-action of a BATCH gets its own row carrying the whole BATCH string.
+//
+// Anything outside all of that means parse() and the indexer read the same
+// bytes differently, which is the failure this lane exists to catch.
+const DERIVED_ROW_ACTIONS = {
+    SWEEP: ['ISSUE', 'DISPENSER', 'SEND'],
+    SEND:  ['DISPENSE'],
+};
 
-function indexerNameMatches(rowAction, parsed) {
+// The parent EXECUTE's action_index for a VM-emitted row, or null.
+function emittedFrom(row) {
+    const e = row && row.emitted_by;
+    if (!e || e.execution_index === null || e.execution_index === undefined) return null;
+    return String(e.execution_index);
+}
+
+// Every action name a parse can legitimately show up under as an
+// indexer-derived row. A BATCH is included through its sub-actions: a batched
+// SEND to a dispenser emits the same DISPENSE row a top-level one does, and
+// the row then carries the whole BATCH string as tx_data.
+function derivedActionsFor(parsed) {
+    const out = new Set(DERIVED_ROW_ACTIONS[parsed.action] || []);
+    if (parsed.action === 'BATCH' && Array.isArray(parsed.commands))
+        for (const c of parsed.commands)
+            if (c.ok) for (const a of (DERIVED_ROW_ACTIONS[c.action] || [])) out.add(a);
+    return out;
+}
+
+// True when the row exists only because the VM or the indexer derived it from
+// the action the wire bytes actually carry.
+function isDerivedRow(row, parsed) {
+    if (emittedFrom(row)) return true;
+    const rowAction = String(row.action);
+    if (rowAction === parsed.action) return false;
+    if (rowAction.startsWith(parsed.action + '_')) return false;
+    if (parsed.action === 'BATCH' && Array.isArray(parsed.commands) &&
+        parsed.commands.some(c => c.ok && c.action === rowAction)) return false;
+    return derivedActionsFor(parsed).has(rowAction);
+}
+
+// A VM-emitted row's name is the EMITTED action and is unrelated to the wire
+// action by design, so the name check passes it through; the emission is
+// pinned against the parent EXECUTE's own manifest instead.
+function indexerNameMatches(row, parsed) {
+    if (emittedFrom(row)) return true;
+    const rowAction = String(row.action);
     if (rowAction === parsed.action) return true;
     if (rowAction.startsWith(parsed.action + '_')) return true;
-    if (parsed.action === 'BATCH' && Array.isArray(parsed.commands))
-        return parsed.commands.some(c => c.ok && c.action === rowAction);
-    const derived = DERIVED_ROW_ACTIONS[parsed.action];
-    return !!(derived && derived.includes(rowAction));
+    if (parsed.action === 'BATCH' && Array.isArray(parsed.commands) &&
+        parsed.commands.some(c => c.ok && c.action === rowAction)) return true;
+    return derivedActionsFor(parsed).has(rowAction);
 }
 
 describe('[sdk] decoder.parse vs the live chain', function () {
@@ -141,9 +211,14 @@ describe('[sdk] decoder.parse vs the live chain', function () {
             while (index > 0 && rows.length < CORPUS_SIZE) {
                 let row = null;
                 try { row = await chainSdk.explorer.getAction(index); } catch (e) { row = null; }
-                // tx_data is empty for actions the VM/indexer synthesized rather
-                // than lifted off an OP_RETURN (a DISPENSE, for instance); there
-                // is no wire string to re-parse.
+                // tx_data is empty for actions the VM/indexer synthesized on a
+                // transaction that carried no OP_RETURN at all (a DISPENSE
+                // triggered by a plain coin send); there is no wire string to
+                // re-parse. A synthesized action on a transaction that DID carry
+                // one (a DISPENSE triggered by a token SEND) is served the parent
+                // transaction's string instead, and stays in the corpus: those
+                // bytes are real, they just belong to the parent row. See
+                // DERIVED_ROW_ACTIONS.
                 if (row && typeof row.tx_data === 'string' && row.tx_data !== '') rows.push(row);
                 index--;
             }
@@ -179,10 +254,21 @@ describe('[sdk] decoder.parse vs the live chain', function () {
                     misses.push(row.action_index + ' action ' + parsed.action + ' != wire ' + expectedAction);
                 if (parsed.version !== Number(wire[1]))
                     misses.push(row.action_index + ' version ' + parsed.version + ' != wire ' + wire[1]);
-                if (Number(row.action_format) !== Number(wire[1]))
+                // A derived row has no wire format of its own. The indexer writes
+                // whatever `FORMAT` its data object carried: NULL where the row was
+                // built fresh (a DISPENSE), the parent's format where the derived row
+                // reuses the parent's object (a SWEEP's ISSUE). Anything else means
+                // the row claims a format the wire never stated.
+                if (isDerivedRow(row, parsed)) {
+                    if (row.action_format !== null && row.action_format !== undefined &&
+                        Number(row.action_format) !== Number(wire[1]))
+                        misses.push(row.action_index + ' derived ' + row.action +
+                                    ' action_format ' + row.action_format + ' != wire ' + wire[1]);
+                } else if (Number(row.action_format) !== Number(wire[1])) {
                     misses.push(row.action_index + ' indexer action_format ' + row.action_format +
                                 ' != wire ' + wire[1]);
-                if (!indexerNameMatches(String(row.action), parsed))
+                }
+                if (!indexerNameMatches(row, parsed))
                     misses.push(row.action_index + ' indexer action ' + row.action +
                                 ' unrelated to parsed ' + parsed.action);
             }
@@ -210,6 +296,10 @@ describe('[sdk] decoder.parse vs the live chain', function () {
             for (const row of rows) {
                 const parsed = decoder.parse(row.tx_data);
                 if (!parsed.ok || parsed.action === 'BATCH') continue;
+                // A derived row's columns describe the DERIVED action, not the wire
+                // one whose bytes it borrowed; see DERIVED_ROW_ACTIONS. The wire
+                // fields are checked against the parent row in the next test.
+                if (isDerivedRow(row, parsed)) continue;
                 const check = (field, indexed) => {
                     const got = firstOf(parsed.params[field]);
                     if (got === undefined || got === '' || compacted(got)) return;
@@ -223,6 +313,95 @@ describe('[sdk] decoder.parse vs the live chain', function () {
                 check('MEMO', row.memo);
             }
             expect(misses, 'wire/indexer field disagreements').to.deep.equal([]);
+        });
+
+        // The check the previous test hands off. Skipping a derived row there
+        // would otherwise buy silence: the wire bytes still have to agree with
+        // SOMETHING the indexer recorded, and the row they belong to is the
+        // parent on the same tx_hash. This is where a real SDK-vs-indexer
+        // divergence on a dispenser-triggering SEND would surface - the wire
+        // DESTINATION must equal the destination the parent SEND row resolved,
+        // one destination on both sides, even though the DISPENSE row beside it
+        // names the buyer instead.
+        it('derived rows agree with the parent row the wire bytes belong to', function () {
+            const byTx    = new Map();
+            const byIndex = new Map();
+            for (const row of rows) {
+                const key = String(row.tx_hash);
+                if (!byTx.has(key)) byTx.set(key, []);
+                byTx.get(key).push(row);
+                byIndex.set(String(row.action_index), row);
+            }
+
+            const misses = [];
+            let anchored = 0, emissions = 0;
+            for (const row of rows) {
+                const parsed = decoder.parse(row.tx_data);
+                if (!parsed.ok) continue;
+                if (!isDerivedRow(row, parsed)) continue;
+
+                // A VM emission names its parent outright. The parent EXECUTE is
+                // only in the corpus when the window reached back far enough; a
+                // truncated window is not a failure.
+                const execIndex = emittedFrom(row);
+                if (execIndex) {
+                    const parent = byIndex.get(execIndex);
+                    if (!parent) continue;
+                    emissions++;
+                    if (String(parent.tx_data) !== String(row.tx_data))
+                        misses.push(row.action_index + ' emission carries tx_data its EXECUTE (' +
+                                    execIndex + ') does not: ' + JSON.stringify(row.tx_data) +
+                                    ' vs ' + JSON.stringify(parent.tx_data));
+                    if (String(parent.action) !== parsed.action)
+                        misses.push(row.action_index + ' emission parent ' + execIndex +
+                                    ' is a ' + parent.action + ', not the wire ' + parsed.action);
+                    // The parent's emission manifest has to claim this row, or the
+                    // bytes and the row were joined by nothing but a shared tx_hash.
+                    const manifest = Array.isArray(parent.emissions) ? parent.emissions : [];
+                    const claim = manifest.find(m => String(m.action_index) === String(row.action_index));
+                    if (!claim)
+                        misses.push(row.action_index + ' ' + row.action +
+                                    ' claims emission from EXECUTE ' + execIndex +
+                                    ' but that row lists ' + JSON.stringify(manifest.map(m => m.action_index)));
+                    else if (String(claim.emitted_action) !== String(row.action))
+                        misses.push(row.action_index + ' EXECUTE ' + execIndex + ' lists it as ' +
+                                    claim.emitted_action + ', indexed as ' + row.action);
+                    continue;
+                }
+
+                // An indexer-derived row has no such marker: its parent is the row
+                // on the same transaction whose action IS the wire action.
+                const siblings = byTx.get(String(row.tx_hash)) || [];
+                const parent = siblings.find(r => String(r.action) === parsed.action);
+                if (!parent) continue;
+
+                if (String(parent.tx_data) !== String(row.tx_data)) {
+                    misses.push(row.action_index + ' derived ' + row.action +
+                                ' carries tx_data the parent ' + parent.action + ' (' +
+                                parent.action_index + ') does not: ' +
+                                JSON.stringify(row.tx_data) + ' vs ' + JSON.stringify(parent.tx_data));
+                    continue;
+                }
+
+                anchored++;
+                const check = (field, indexed) => {
+                    const got = firstOf(parsed.params[field]);
+                    if (got === undefined || got === '' || compacted(got)) return;
+                    if (indexed === null || indexed === undefined || indexed === '') return;
+                    if (String(got) !== String(indexed))
+                        misses.push(row.action_index + ' derived ' + row.action + ': wire ' + field +
+                                    '=' + JSON.stringify(got) + ' but parent ' + parsed.action + ' (' +
+                                    parent.action_index + ') recorded ' + JSON.stringify(indexed));
+                };
+                check('TICK', parent.tick);
+                check('DESTINATION', parent.destination);
+                check('MEMO', parent.memo);
+            }
+            if (anchored || emissions)
+                console.log('    [sdk] corpus [' + label + ']: ' + anchored +
+                            ' indexer-derived row(s) anchored to their parent, ' +
+                            emissions + ' VM emission(s) pinned to their EXECUTE');
+            expect(misses, 'derived-row/parent disagreements').to.deep.equal([]);
         });
 
         it('describe() renders every on-chain action', function () {
@@ -420,7 +599,7 @@ describe('[sdk] decoder.parse vs the live chain', function () {
                 if (!full || !full.tx_data) continue;
                 const parsed = decoder.parse(full.tx_data);
                 expect(parsed.ok, full.action_index + ' ' + full.tx_data).to.equal(true);
-                expect(indexerNameMatches(String(full.action), parsed),
+                expect(indexerNameMatches(full, parsed),
                     full.action_index + ' indexer=' + full.action + ' parsed=' + parsed.action).to.equal(true);
                 expect(parsed.version, full.action_index + ' version').to.equal(Number(full.action_format));
             }
