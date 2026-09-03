@@ -31,14 +31,12 @@ mariadbModule.loaded  = true
 require.cache[mariadbPath] = mariadbModule
 
 // Drop any cached copy of db.js so it is re-evaluated against the mock above.
-// This used to be load-bearing: the injection took effect only at db.js's LOAD
-// time, so this file depended on being the first in the run to require it, and any
-// test file sorting earlier (mocha loads alphabetically) left db.js already bound
-// to the real mariadb, so every `new Database()` here opened a REAL pool against a
-// dead host and the suite failed on timeouts that pointed nowhere near the cause.
-// db.js now resolves the driver when it creates a pool, so this line is
-// belt-and-braces rather than the thing standing between here and 55 failures;
-// test/unit/src/dbDriverBinding.test.js holds that property in place.
+// db.js resolves the driver when it creates a pool rather than at load time, so
+// this line is belt-and-braces, not load-bearing for the mock to take effect;
+// test/unit/src/dbDriverBinding.test.js holds that property in place. Without it,
+// a test file sorting earlier (mocha loads alphabetically) could still leave
+// db.js bound to the real mariadb, so every `new Database()` here would open a
+// REAL pool against a dead host and fail on timeouts unrelated to the cause.
 delete require.cache[require.resolve('../../../src/db')]
 
 const Database = require('../../../src/db')
@@ -130,6 +128,145 @@ describe('getConnection()', function () {
         const conn = await db.getConnection()
         assert.strictEqual(conn, goodConn)
         assert.strictEqual(mockPool.getConnection.callCount, 2)
+    })
+})
+
+// A stale venue credential must not make a drill hang: getConnection retrying an
+// unreachable pool forever would leave a run that neither ends nor says which
+// database it could not reach. These hold the bound and the diagnosis in place.
+describe('getConnection() gives up loudly on an unreachable pool', function () {
+
+    it('stops after the attempt cap instead of retrying forever', async function () {
+        db.CONNECT_MAX_ATTEMPTS = 4
+        mockPool.getConnection.rejects(new Error('ECONNREFUSED'))
+
+        await assert.rejects(() => db.getConnection(), /Can't connect to the indexer database/)
+        assert.strictEqual(mockPool.getConnection.callCount, 4, 'stops at the attempt cap')
+    })
+
+    it('names host, port, database and user so the stale credential is identifiable', async function () {
+        db.CONNECT_MAX_ATTEMPTS = 2
+        mockPool.getConnection.rejects(new Error('ECONNREFUSED'))
+
+        const err = await db.getConnection().then(
+            () => { throw new Error('expected getConnection to reject') },
+            (e) => e
+        )
+        assert.strictEqual(err.code, 'E2E_DB_UNREACHABLE')
+        assert.ok(err.message.includes('localhost:3306/testdb'), 'names host:port/database')
+        assert.ok(err.message.includes("user 'user'"), 'names the user')
+        assert.ok(err.message.includes('ECONNREFUSED'), 'carries the driver message')
+        assert.ok(err.message.includes('2 attempts'), 'says how many attempts it made')
+    })
+
+    it('never puts the password in the failure message', async function () {
+        db.CONNECT_MAX_ATTEMPTS = 1
+        mockPool.getConnection.rejects(new Error('ECONNREFUSED'))
+
+        const err = await db.getConnection().then(
+            () => { throw new Error('expected getConnection to reject') },
+            (e) => e
+        )
+        assert.ok(!err.message.includes('pass'), 'the password is not part of the diagnosis')
+    })
+
+    it('gives up on the wall clock even while attempts remain', async function () {
+        // A host that is simply unreachable burns the driver's acquire timeout per
+        // attempt, so the attempt cap alone would let a dead venue run for minutes.
+        db.CONNECT_MAX_ATTEMPTS = 1000
+        db.CONNECT_BUDGET_MS    = 30000
+        mockPool.getConnection.rejects(new Error('ETIMEDOUT'))
+
+        let ticks = 0
+        const nowStub = sinon.stub(Date, 'now').callsFake(() => (ticks++) * 12000)
+        try {
+            await assert.rejects(() => db.getConnection(), /after 3 attempts/)
+            assert.strictEqual(mockPool.getConnection.callCount, 3, 'stops once the budget is spent')
+        } finally {
+            nowStub.restore()
+        }
+    })
+
+    it('fails on the first attempt when the venue rejects the credentials', async function () {
+        // Retrying cannot turn a wrong password into a right one; waiting only delays
+        // a message that already contains the answer.
+        const denied = Object.assign(new Error('Access denied for user'), {
+            code: 'ER_ACCESS_DENIED_ERROR', errno: 1045
+        })
+        mockPool.getConnection.rejects(denied)
+
+        const err = await db.getConnection().then(
+            () => { throw new Error('expected getConnection to reject') },
+            (e) => e
+        )
+        assert.strictEqual(mockPool.getConnection.callCount, 1, 'no retries on a credential rejection')
+        assert.ok(db.sleep.notCalled, 'does not sleep before giving up')
+        assert.ok(err.message.includes('hub config oracle'), 'points at the config oracle, the real source')
+        assert.strictEqual(err.cause, denied)
+    })
+
+    it('sees a credential rejection the pool wrapped in its own timeout error', async function () {
+        // The pool reports an unusable credential as ER_GET_CONNECTION_TIMEOUT with the
+        // real refusal on `cause`. Reading only the outer error would retry a password
+        // that can never work, which is the hang this item exists to end.
+        const wrapped = Object.assign(new Error('pool failed to retrieve a connection from pool'), {
+            code: 'ER_GET_CONNECTION_TIMEOUT', errno: 45028,
+            cause: Object.assign(new Error('Access denied for user'), { errno: 1045 })
+        })
+        mockPool.getConnection.rejects(wrapped)
+
+        await assert.rejects(() => db.getConnection(), /venue rejected these credentials/)
+        assert.strictEqual(mockPool.getConnection.callCount, 1, 'no retries once the cause is read')
+    })
+
+    it('treats a missing database as fatal too', async function () {
+        mockPool.getConnection.rejects(Object.assign(new Error('Unknown database'), { errno: 1049 }))
+
+        await assert.rejects(() => db.getConnection(), /Can't connect to the indexer database/)
+        assert.strictEqual(mockPool.getConnection.callCount, 1)
+    })
+
+    it('still retries an ordinary transient failure', async function () {
+        const goodConn = makeMockConnection([{ id: 1 }])
+        mockPool.getConnection.rejects(new Error('ECONNREFUSED'))
+        mockPool.getConnection.onCall(3).resolves(goodConn)
+
+        const conn = await db.getConnection()
+        assert.strictEqual(conn, goodConn)
+        assert.strictEqual(mockPool.getConnection.callCount, 4)
+    })
+
+    it('defaults leave a dead venue failing well inside a minute', async function () {
+        // The worst case is the budget plus the one attempt that crosses it plus its
+        // sleep. The drill's contract is a non-zero exit within a minute, so the
+        // defaults have to leave room for a ~10s driver acquire timeout on top.
+        const fresh  = new Database('h', 3306, 'd', 'u', 'p')
+        const budget = fresh.CONNECT_BUDGET_MS + fresh.CONNECT_RETRY_MS
+        assert.ok(budget <= 45000, 'default connect budget is ' + budget + 'ms, too close to a minute')
+    })
+
+    it('honours the environment overrides for the budget', async function () {
+        const before = process.env.E2E_DB_CONNECT_ATTEMPTS
+        process.env.E2E_DB_CONNECT_ATTEMPTS = '2'
+        try {
+            const fresh = new Database('h', 3306, 'd', 'u', 'p')
+            assert.strictEqual(fresh.CONNECT_MAX_ATTEMPTS, 2)
+        } finally {
+            if (before === undefined) delete process.env.E2E_DB_CONNECT_ATTEMPTS
+            else process.env.E2E_DB_CONNECT_ATTEMPTS = before
+        }
+    })
+})
+
+describe('ping() on an unreachable pool', function () {
+    it('surfaces the unreachable-database error rather than reporting a plain false', async function () {
+        // ping() is the suite's first contact with the venue (initialCheck's
+        // service-pings phase). A bare false there says "database down" and loses the
+        // host/port/database the operator needs, so the error is allowed through.
+        db.CONNECT_MAX_ATTEMPTS = 1
+        mockPool.getConnection.rejects(new Error('ECONNREFUSED'))
+
+        await assert.rejects(() => db.ping(), /localhost:3306\/testdb/)
     })
 })
 

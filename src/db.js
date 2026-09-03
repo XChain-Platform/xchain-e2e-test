@@ -48,6 +48,16 @@ class Database {
         this.WAIT_PROBE_INTERVAL_MS = parseInt(process.env.E2E_WAIT_PROBE_INTERVAL_MS) || 10000;
         this.WAIT_PROBE_MIN_MS      = parseInt(process.env.E2E_WAIT_PROBE_MIN_MS) || 1000;
         this.WAIT_WRITE_IDLE_MS     = parseInt(process.env.E2E_WAIT_WRITE_IDLE_MS) || 20000;
+        // Connect-retry budget (see getConnection). Bounded by BOTH an attempt count
+        // and a wall-clock deadline, because the two failure shapes have wildly
+        // different per-attempt costs: a pool that rejects instantly burns attempts
+        // and no time, while an unreachable host burns the driver's acquire timeout
+        // (~10s) per attempt and no attempts worth counting. Either bound alone lets
+        // one shape run long. The budget is set so a dead venue gives up in roughly
+        // half a minute, well inside the one-minute ceiling a drill is judged by.
+        this.CONNECT_MAX_ATTEMPTS = parseInt(process.env.E2E_DB_CONNECT_ATTEMPTS) || 10;
+        this.CONNECT_BUDGET_MS    = parseInt(process.env.E2E_DB_CONNECT_BUDGET_MS) || 30000;
+        this.CONNECT_RETRY_MS     = parseInt(process.env.E2E_DB_CONNECT_RETRY_MS) || 1000;
         this.host   = host;
         this.port   = port;
         this.dbName = dbName;
@@ -97,21 +107,91 @@ class Database {
         }
     }
 
+    // A credential the venue no longer accepts is indistinguishable, from inside a
+    // retry loop, from a database that is merely slow to come up. The old loop
+    // retried forever and logged one anonymous line per attempt, so a stale indexer
+    // DB password turned every drill into a run that never ended and never said
+    // which database it could not reach: the operator saw a hung suite, not a
+    // configuration fault, and had to go looking for the cause by hand.
+    //
+    // Two changes make the failure legible:
+    //
+    //   1. The retry budget is bounded (attempts AND wall clock), so an unreachable
+    //      pool ends the run non-zero instead of hanging it. The thrown error names
+    //      host, port, database and user, which is the whole diagnosis: a drill's
+    //      last line now says exactly which venue credential to fix.
+    //   2. An authentication or missing-database rejection is FATAL on the first
+    //      attempt. Retrying cannot turn a wrong password into a right one, and the
+    //      wait only delays the message that already contains the answer.
+    //
+    // Transient failures still retry, because a stack coming up behind the suite is
+    // the ordinary case and was the reason this loop existed at all. The password is
+    // never part of the message; it is the one field a stale-credential report does
+    // not need and must not carry.
     async getConnection(){
         if(this.transactionConnection)
             return this.transactionConnection;
-        var connection = null;
-        while(connection == null){        
+        const startMs  = Date.now();
+        const deadline = startMs + this.CONNECT_BUDGET_MS;
+        let attempts   = 0;
+        let lastError  = null;
+        while(true){
+            attempts++;
             try {
-                connection = await this.pool.getConnection();
-                // console.log("Connected to database!");
+                return await this.pool.getConnection();
             } catch (e){
-                console.log("Can't connect to mariadb. Trying again...");
-                connection = null;
-                await this.sleep(1000);
+                lastError = e;
+                const fatal   = this._isFatalConnectError(e);
+                const spent   = attempts >= this.CONNECT_MAX_ATTEMPTS || Date.now() >= deadline;
+                if (fatal || spent) break;
+                console.log("Can't connect to mariadb at " + this._target()
+                    + " (attempt " + attempts + "/" + this.CONNECT_MAX_ATTEMPTS + "): "
+                    + this._errText(lastError) + ". Trying again...");
+                await this.sleep(this.CONNECT_RETRY_MS);
             }
         }
-        return connection;
+        const err = new Error("Can't connect to the indexer database at " + this._target()
+            + " after " + attempts + " attempt" + (attempts === 1 ? "" : "s")
+            + " (" + (Date.now() - startMs) + "ms): " + this._errText(lastError)
+            + (this._isFatalConnectError(lastError)
+                ? ". The venue rejected these credentials, so retrying cannot help:"
+                  + " the hub config oracle's copy of the indexer DB credentials is the"
+                  + " one that has to match, not just the .env file."
+                : ". Check that the venue is up and that its indexer DB credentials"
+                  + " are current in the hub config oracle, not only in the .env file."));
+        err.code  = 'E2E_DB_UNREACHABLE';
+        err.cause = lastError;
+        throw err;
+    }
+
+    // host:port/database as user, for every message about reaching this pool.
+    _target(){
+        return this.host + ":" + this.port + "/" + this.dbName + " as user '" + this.user + "'";
+    }
+
+    _errText(err){
+        if (!err) return 'unknown error';
+        return err.message || String(err);
+    }
+
+    // Rejections no amount of waiting can fix: wrong user, wrong password, wrong or
+    // absent database. Matched on the driver's own code/errno rather than message
+    // text, which is localized and version-dependent.
+    //
+    // The chain is walked because the pool does not always hand the rejection up
+    // unwrapped: a credential the server refuses can surface as the pool's own
+    // ER_GET_CONNECTION_TIMEOUT with the real refusal hanging off `cause`, and
+    // reading only the outer error would retry a password that will never work.
+    _isFatalConnectError(err){
+        const FATAL_CODES  = ['ER_ACCESS_DENIED_ERROR', 'ER_DBACCESS_DENIED_ERROR', 'ER_BAD_DB_ERROR'];
+        const FATAL_ERRNOS = [1044, 1045, 1049];
+        let node = err;
+        for (let depth = 0; node && depth < 5; depth++){
+            if (node.code && FATAL_CODES.includes(node.code)) return true;
+            if (node.errno !== undefined && FATAL_ERRNOS.includes(Number(node.errno))) return true;
+            node = node.cause;
+        }
+        return false;
     }
 
     async ping(){
@@ -348,7 +428,42 @@ class Database {
             await connection.release()
         }
     }
-    
+
+    /*
+     * The address's settled balance of one ticker, as a string, or "0" when the
+     * indexer holds no row for the pair.
+     *
+     * Returned as a STRING, never a JS number: balances are stored at full ledger
+     * precision and a large one loses digits the moment it becomes a double, which
+     * is the class of bug the platform's amount handling exists to avoid. Callers
+     * that need arithmetic should use BigInt or the same bignumber the indexer does.
+     *
+     * "No row" is a real zero here, not missing evidence: the indexer deletes a
+     * balance row when it drains, so absence and zero are the same state.
+     */
+    async getBalance({address, tick}){
+        const query = `
+            SELECT b.amount AS amount
+            FROM balances b
+            LEFT JOIN index_addresses ia ON ia.id = b.address_id
+            LEFT JOIN index_tickers itick ON itick.id = b.tick_id
+            WHERE ia.address = ? AND itick.tick = ?
+            LIMIT 1
+        `
+
+        let connection = await this.getConnection()
+
+        try {
+            const rows = await connection.query(query, [address, tick])
+            return (rows.length > 0) ? String(rows[0].amount) : "0"
+        } catch (err) {
+            console.error('Error with database query (balance):', err);
+            return null;
+        } finally {
+            await connection.release()
+        }
+    }
+
     async waitForDebit(debitObject, timeMax = 60000){ return this._waitFor(this.checkDebit, debitObject, timeMax) }
     
     async checkDebit({blockIndex,txHash,tick,address,amount}){
