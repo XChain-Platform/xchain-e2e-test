@@ -20,6 +20,10 @@ const { waitForTxIndexed } = require('../helpers/indexerWait')
 // so the proof this test signs is byte-identical to what a real equivocating
 // validator would have produced.
 const eq = require('../../../xchain-indexer/src/equivocation_header.js')
+// Same reason: the verifier resolves the proof's membership at the BURIED height, so the
+// declared snapshot_block this test signs has to be one whose buried form the bond is
+// active at, exactly as a real hub's locked slot would be.
+const srb = require('../../../xchain-indexer/src/snapshot_reorg_buffer.js')
 
 /**
  * CAPABILITY SLASH, driven on a chain.
@@ -162,16 +166,25 @@ describe('Capability SLASH: an equivocation proof burns a bond and releases its 
         const st = await stakeHelper.sendStakeV1(staker, BOND, offender.pubkey)
         assert.strictEqual(st.stake.status, 'valid', 'the bond must be staked before it can be slashed')
 
-        // Membership resolves at the proof's OWN snapshot_block, so pick the first block
-        // where this bond is active and mine the chain up to it: the equivocation being
-        // proved has to be one the chain could actually have witnessed.
+        // Membership resolves at the proof's own snapshot_block BURIED by
+        // CANONICAL_REORG_BUFFER, which is where the hub that locked the slot resolved its
+        // own signer set. So the declared height has to sit a buffer ABOVE the first block
+        // this bond is active at, or the buried read lands before activation, finds no
+        // member, and the proof is refused. Mine the chain up to the declared height: the
+        // equivocation being proved has to be one the chain could actually have witnessed.
         const activation = Number(st.stake.activation_block)
         assert.ok(Number.isFinite(activation) && activation > 0,
             'the stake row carries no activation_block; nothing can be proved against it')
-        snapshotBlock = activation
+        // Derived through the gate rather than hard-added, so this reads correctly on a
+        // network where burial is still inert and the declared height IS the resolved one.
+        snapshotBlock = srb.isSnapshotBurialActive(activation + srb.CANONICAL_REORG_BUFFER, NETWORK)
+            ? activation + srb.CANONICAL_REORG_BUFFER
+            : activation
+        assert.strictEqual(srb.buriedSnapshotBlock(snapshotBlock, NETWORK), activation,
+            'the declared snapshot_block must resolve onto the activation block on this network')
         const tip = await nodeConnector.getBlockCount()
-        if (tip < activation) {
-            await regtestMinerConnector.generateBlocks(activation - tip)
+        if (tip < snapshotBlock) {
+            await regtestMinerConnector.generateBlocks(snapshotBlock - tip)
             // The encoder refuses to pick UTXOs while the tracker trails the node, so the
             // SLASH below cannot be built until the mining above has been absorbed.
             const synced = await utxoTrackerConnector.waitForSync(120000)
