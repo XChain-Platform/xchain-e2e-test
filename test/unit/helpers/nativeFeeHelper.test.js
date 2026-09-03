@@ -220,3 +220,72 @@ describe('nativeFeeHelper.seedGlobalPrices anchoring', () => {
         assert(seeded.length > afterFirst, 'a rewound chain clock must re-seed')
     })
 })
+
+// A seed the indexer cannot see is worse than no seed: every priced action rejects
+// `no current oracle price` while the seed log says the prices are in place, and both
+// databases involved look healthy. That is exactly how a venue setting HUB_DB_NAME on
+// the indexer alone presented, and it is why the bootstrap seed checks itself.
+describe('nativeFeeHelper.warnIfSeedInvisible', () => {
+    let savedConnector, savedLog, lines
+
+    beforeEach(() => {
+        savedConnector = global.indexerConnector
+        lines = []
+        savedLog = console.log
+        console.log = (...a) => lines.push(a.join(' '))
+    })
+
+    afterEach(() => {
+        console.log = savedLog
+        if (savedConnector === undefined) delete global.indexerConnector
+        else global.indexerConnector = savedConnector
+        delete require.cache[HELPER_PATH]
+    })
+
+    function connector(sched){
+        return { call: async () => sched }
+    }
+
+    it('names both databases when the indexer still has no usable price', async () => {
+        global.indexerConnector = connector({
+            prices: { available: false, error: 'no current oracle price for BTC/USD' },
+            priceSource: { hubDb: true, database: 'XChain_Hub' }
+        })
+        await freshHelper().warnIfSeedInvisible({ database: 'XChain_BTC_Regtest_Indexer' })
+        const warn = lines.find(l => /WARN the indexer still reports no usable price/.test(l))
+        assert(warn, 'expected a warning, got: ' + JSON.stringify(lines))
+        assert(/Seeded into: XChain_BTC_Regtest_Indexer/.test(warn), warn)
+        assert(/Indexer reads: hub database XChain_Hub/.test(warn), warn)
+    })
+
+    it('says nothing when the indexer can price against the seed', async () => {
+        global.indexerConnector = connector({
+            prices: { available: true },
+            priceSource: { hubDb: false, database: 'XChain_BTC_Regtest_Indexer' }
+        })
+        await freshHelper().warnIfSeedInvisible({ database: 'XChain_BTC_Regtest_Indexer' })
+        assert.deepStrictEqual(lines, [])
+    })
+
+    // An older indexer, an unreachable one, or one that is simply not ready must not
+    // turn the bootstrap into a false alarm or an exception.
+    it('stays silent and never throws when the indexer cannot answer', async () => {
+        const helper = freshHelper()
+        global.indexerConnector = { call: async () => { throw new Error('ECONNREFUSED') } }
+        await helper.warnIfSeedInvisible({ database: 'X' })
+        global.indexerConnector = connector({ error: 'indexer not ready' })
+        await helper.warnIfSeedInvisible({ database: 'X' })
+        delete global.indexerConnector
+        await helper.warnIfSeedInvisible({ database: 'X' })
+        assert.deepStrictEqual(lines, [])
+    })
+
+    it('reports an undisclosed price source distinctly from a named one', async () => {
+        global.indexerConnector = connector({ prices: { available: false, error: 'stale' } })
+        await freshHelper().warnIfSeedInvisible(null)
+        const warn = lines.find(l => /WARN the indexer still reports no usable price/.test(l))
+        assert(warn, 'expected a warning, got: ' + JSON.stringify(lines))
+        assert(/Indexer reads: undisclosed/.test(warn), warn)
+        assert(/Seeded into: unknown/.test(warn), warn)
+    })
+})

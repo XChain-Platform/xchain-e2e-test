@@ -232,9 +232,41 @@ async function seedGlobalPrices(force){
     // The CHAIN anchor is what the drift check compares against: it is the row a
     // frozen or jumped chain actually reads.
     _lastSeedAnchor = chainTime
+    // Named only for the log and the visibility check below; a stubbed helper need not
+    // provide it, so this stays optional rather than becoming a second contract.
+    const target = (typeof priceSnapshotHelper.seedTarget === 'function')
+        ? priceSnapshotHelper.seedTarget() : null
     console.log('nativeFeeHelper: seeded oracle prices XCHAIN/USD=' + XCHAIN_USD +
         ' ' + global.COIN_CODE + '/USD=' + COIN_USD + ' (chain_time=' + chainTime +
-        (wallTime > chainTime ? ', wall_time=' + wallTime : '') + ')')
+        (wallTime > chainTime ? ', wall_time=' + wallTime : '') +
+        (target && target.database ? ', db=' + target.database : '') + ')')
+    // A seed that the indexer cannot see is worse than no seed: every priced action
+    // rejects `no current oracle price` while this log says the prices are in place, and
+    // the two databases involved both look healthy. Confirm it once at bootstrap, where
+    // the cost is one call and the answer is unambiguous.
+    if (force) await warnIfSeedInvisible(target)
+}
+
+// Ask the indexer whether the seed just written is the one it prices against, and say
+// so loudly when it is not. Never throws: a venue can be mid-reorg or have a tip the
+// suite is about to advance, and a false alarm must not fail the bootstrap.
+async function warnIfSeedInvisible(target){
+    const c = global.indexerConnector
+    if (!c || typeof c.call !== 'function') return
+    let sched = null
+    try { sched = await c.call('feeschedule', {}) } catch (e) { return }
+    if (!sched || sched.error || !sched.prices) return
+    if (sched.prices.available) return
+    const src = sched.priceSource
+    console.log('nativeFeeHelper: WARN the indexer still reports no usable price after seeding'
+        + ' (' + (sched.prices.error || 'unavailable') + ').'
+        + ' Seeded into: ' + ((target && target.database) || 'unknown') + '.'
+        + ' Indexer reads: ' + (src
+            ? (src.hubDb ? ('hub database ' + (src.database || 'unnamed')) : ('its own database '
+                + (src.database || 'unnamed')))
+            : 'undisclosed (indexer predates the priceSource field)')
+        + '. If those two differ, the fixtures and the indexer are pointed at different'
+        + ' databases; check HUB_DB_HOST/HUB_DB_USER/HUB_DB_PASS reach the one the indexer names.')
 }
 
 // Feeschedule-readiness retry budget for fee chains. On a freshly
@@ -322,4 +354,5 @@ async function getNativeFeeOutput(){
     return { address: mode.destination, value: FLAT_FEE_SATS }
 }
 
-module.exports = { resolveFeeDestination, discoverFeeMode, seedGlobalPrices, getNativeFeeOutput, FLAT_FEE_SATS }
+module.exports = { resolveFeeDestination, discoverFeeMode, seedGlobalPrices, getNativeFeeOutput,
+    warnIfSeedInvisible, FLAT_FEE_SATS }

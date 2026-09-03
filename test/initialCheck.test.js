@@ -314,6 +314,16 @@ exports.mochaHooks = {
             // refresh during long runs (transactionHelper -> getNativeFeeOutput
             // for the actions suite, sdkHelper.submit for the SDK suite), so a
             // run past ORACLE_MAX_PRICE_AGE never ages out. See nativeFeeHelper.js.
+            //
+            // Ask the indexer where its price reads land BEFORE seeding anything. The
+            // HUB_DB_* env this process was handed is a model of the indexer's config, not
+            // the config, and a venue that sets HUB_DB_NAME on the indexer alone (the
+            // cross-chain settle recipe) moves every price lookup to the hub DB while the
+            // fixtures keep writing to the indexer's own. Both databases stay healthy and
+            // every priced action rejects `no current oracle price`. Best-effort: an
+            // indexer that does not disclose priceSource leaves the env model in force.
+            const topology = require('./helpers/hubMirrorTopology')
+            await topology.discoverReadParams()
             const nativeFeeHelper = require('./helpers/nativeFeeHelper')
             await nativeFeeHelper.seedGlobalPrices(true)
         })

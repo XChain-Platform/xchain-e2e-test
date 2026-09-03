@@ -209,4 +209,192 @@ describe('hubMirrorTopology', () => {
             assert.deepStrictEqual(t.clearTargets(), [])
         })
     })
+
+    // Topology 5, and the reason discovery exists at all: the env above is this
+    // process's MODEL of the indexer's config, and the indexer is a different process
+    // with a different env. Once a venue sets HUB_DB_NAME on the indexer alone (the
+    // cross-chain settle recipe does), the model is wrong in a way nothing observes:
+    // fixtures seed one database, every price lookup reads the other, both look
+    // healthy, and every priced action rejects `no current oracle price`. It made the
+    // settle drills and the attestation suites mutually exclusive on one venue.
+    describe('discoverReadParams (ask the indexer instead of modelling it)', () => {
+        let savedConnector
+        beforeEach(() => { savedConnector = global.indexerConnector; delete global.indexerConnector })
+        afterEach(() => {
+            if (savedConnector === undefined) delete global.indexerConnector
+            else global.indexerConnector = savedConnector
+        })
+
+        function connectorSaying(priceSource, opts){
+            const o = opts || {}
+            return { call: async (method) => {
+                if (method !== 'feeschedule') throw new Error('unexpected method ' + method)
+                if (o.throws) throw new Error('indexer unreachable')
+                if (o.error) return { error: o.error }
+                return { coin: 'BTC', prices: { available: true }, priceSource: priceSource }
+            } }
+        }
+
+        // Discovery probes a candidate before pinning it. These cases are about the
+        // resolution, not the network, so the probe is stubbed; `probes` records the
+        // order candidates were offered in.
+        function probeAccepting(predicate, probes){
+            return async (params) => {
+                if (probes) probes.push(params)
+                return predicate ? !!predicate(params) : true
+            }
+        }
+        const ANY = { probe: probeAccepting(null) }
+
+        it('pins the hub database the indexer names, even with HUB_DB_NAME unset', async () => {
+            process.env.HUB_DB_HOST = 'mariadb'
+            process.env.HUB_DB_USER = 'xchain_hub'
+            process.env.HUB_DB_PASS = 'secret'
+            const t = freshTopology()
+            // Before discovery the both-or-nothing env model resolves to the local DB,
+            // which is precisely the wrong answer on this venue.
+            assert.strictEqual(t.readParams().database, LOCAL.dbName)
+
+            const pinned = await t.discoverReadParams(connectorSaying({ hubDb: true, database: 'XChain_Hub' }), ANY)
+            assert.strictEqual(pinned.database, 'XChain_Hub')
+            assert.strictEqual(t.readParams().database, 'XChain_Hub')
+            assert.strictEqual(t.discoveredReadParams().database, 'XChain_Hub')
+            // Coordinates stay this process's business: the name is the only thing the
+            // indexer is authoritative about, since its host lives in another namespace.
+            assert.strictEqual(t.readParams().host, 'mariadb')
+            assert.strictEqual(t.readParams().user, 'xchain_hub')
+            assert.strictEqual(t.readParams().password, 'secret')
+        })
+
+        // The mirror-image bug, and the one that bites when a venue is REVERTED: the
+        // runner still exports a hub DB the indexer no longer reads.
+        it('pins the local database when the indexer says it reads its own, overriding the env', async () => {
+            process.env.HUB_DB_HOST = 'mariadb'
+            process.env.HUB_DB_NAME = 'XChain_Hub'
+            const t = freshTopology()
+            assert.strictEqual(t.readParams().database, 'XChain_Hub', 'env model before discovery')
+
+            await t.discoverReadParams(connectorSaying({ hubDb: false, database: LOCAL.dbName }), ANY)
+            assert.strictEqual(t.readParams().database, LOCAL.dbName)
+            assert.strictEqual(t.seedsThroughMirror(), false)
+        })
+
+        it('falls back to HUB_DB_NAME when the indexer withholds the name (mainnet)', async () => {
+            process.env.HUB_DB_HOST = 'mariadb'
+            process.env.HUB_DB_NAME = 'XChain_Hub'
+            const t = freshTopology()
+            const pinned = await t.discoverReadParams(connectorSaying({ hubDb: true, database: null }), ANY)
+            assert.strictEqual(pinned.database, 'XChain_Hub')
+        })
+
+        it('pins nothing when the indexer names no database and the env names none either', async () => {
+            const t = freshTopology()
+            assert.strictEqual(await t.discoverReadParams(connectorSaying({ hubDb: true, database: null }), ANY), null)
+            assert.strictEqual(t.discoveredReadParams(), null)
+            assert.strictEqual(t.readParams().database, LOCAL.dbName, 'env model left in force')
+        })
+
+        // A venue whose indexer predates the disclosure must behave exactly as it did.
+        it('leaves the env model in force when the indexer does not disclose priceSource', async () => {
+            process.env.HUB_DB_HOST = 'mariadb'
+            process.env.HUB_DB_NAME = 'XChain_Hub'
+            const t = freshTopology()
+            assert.strictEqual(await t.discoverReadParams(connectorSaying(undefined), ANY), null)
+            assert.strictEqual(t.readParams().database, 'XChain_Hub')
+        })
+
+        it('never throws when the indexer is unreachable or answers an error', async () => {
+            const t = freshTopology()
+            assert.strictEqual(await t.discoverReadParams(connectorSaying(null, { throws: true }), ANY), null)
+            assert.strictEqual(await t.discoverReadParams(connectorSaying(null, { error: 'indexer not ready' }), ANY), null)
+            assert.strictEqual(await t.discoverReadParams(null, ANY), null)
+            assert.strictEqual(t.readParams().database, LOCAL.dbName)
+        })
+
+        // clearPair/clearTargets follow the pinned answer too, or a stale row survives
+        // in the database the indexer is actually reading.
+        it('routes clearTargets at the discovered database', async () => {
+            const t = freshTopology()
+            process.env.HUB_DB_HOST = 'mariadb'
+            await t.discoverReadParams(connectorSaying({ hubDb: true, database: 'XChain_Hub' }), ANY)
+            assert.deepStrictEqual(t.clearTargets().map(p => p.database), ['XChain_Hub'])
+        })
+
+        // The upstream-seed guard has to key on the RESOLVED read target: with a hub
+        // source named and the indexer reading its own DB, every seed would wait out its
+        // full timeout for a row nothing will ever carry down.
+        it('makes assertCoherent reject a hub source once the indexer reports a local read', async () => {
+            process.env.HUB_DB_HOST = 'mariadb'
+            process.env.HUB_DB_NAME = 'XChain_Hub_Mirror'
+            process.env.HUB_SOURCE_DB_NAME = 'XChain_Hub'
+            const t = freshTopology()
+            assert.doesNotThrow(() => t.assertCoherent(), 'coherent while the env model holds')
+            await t.discoverReadParams(connectorSaying({ hubDb: false, database: LOCAL.dbName }), ANY)
+            assert.throws(() => t.assertCoherent(), /HUB_SOURCE_DB_NAME is set but/)
+        })
+
+        // The coordinates are ours because the indexer's are not dialable from here:
+        // HUB_DB_HOST commonly holds a compose service name, and a suite reaching the
+        // stack over a published port cannot resolve it. Trying the explicit env first
+        // keeps a genuinely separate relay DB reachable; falling back to the indexer's
+        // own host keeps the ordinary stack working when that name is fiction.
+        it('offers the env coordinates first, then the indexer host, then its credentials', async () => {
+            process.env.HUB_DB_HOST = 'relay-box'
+            process.env.HUB_DB_PORT = '13341'
+            process.env.HUB_DB_USER = 'xchain_hub'
+            process.env.HUB_DB_PASS = 'hubpass'
+            const t = freshTopology()
+            const probes = []
+            const pinned = await t.discoverReadParams(
+                connectorSaying({ hubDb: true, database: 'XChain_Hub' }),
+                { probe: probeAccepting(p => p.host === LOCAL.host && p.user === LOCAL.user, probes) })
+
+            assert.deepStrictEqual(probes.map(p => [p.host, p.port, p.user]), [
+                ['relay-box', 13341, 'xchain_hub'],
+                ['mariadb',   3306,  'xchain_hub'],
+                ['mariadb',   3306,  'idx']
+            ])
+            assert.strictEqual(pinned.database, 'XChain_Hub')
+            assert.strictEqual(pinned.user, 'idx', 'pins the candidate that actually answered')
+        })
+
+        it('collapses to a single candidate on the ordinary one-MariaDB stack', async () => {
+            const t = freshTopology()
+            const probes = []
+            await t.discoverReadParams(connectorSaying({ hubDb: true, database: 'XChain_Hub' }),
+                { probe: probeAccepting(null, probes) })
+            assert.strictEqual(probes.length, 1)
+        })
+
+        // Pinning nothing here would send the seed back to the indexer's own database,
+        // which is the silent wrong answer this whole path exists to remove. Better a
+        // loud failure that names the database the indexer is really reading.
+        it('pins the hub database anyway when no candidate can reach it', async () => {
+            process.env.HUB_DB_HOST = 'relay-box'
+            const t = freshTopology()
+            const pinned = await t.discoverReadParams(
+                connectorSaying({ hubDb: true, database: 'XChain_Hub' }),
+                { probe: probeAccepting(() => false) })
+            assert.strictEqual(pinned.database, 'XChain_Hub')
+            assert.strictEqual(pinned.host, 'relay-box')
+            assert.strictEqual(t.readParams().database, 'XChain_Hub')
+        })
+
+        it('treats a probe that throws as unreachable rather than propagating it', async () => {
+            const t = freshTopology()
+            const pinned = await t.discoverReadParams(
+                connectorSaying({ hubDb: true, database: 'XChain_Hub' }),
+                { probe: async () => { throw new Error('ECONNREFUSED') } })
+            assert.strictEqual(pinned.database, 'XChain_Hub')
+        })
+
+        it('resetDiscovery restores the env model', async () => {
+            process.env.HUB_DB_HOST = 'mariadb'
+            const t = freshTopology()
+            await t.discoverReadParams(connectorSaying({ hubDb: true, database: 'XChain_Hub' }), ANY)
+            assert.strictEqual(t.readParams().database, 'XChain_Hub')
+            t.resetDiscovery()
+            assert.strictEqual(t.readParams().database, LOCAL.dbName)
+        })
+    })
 })
