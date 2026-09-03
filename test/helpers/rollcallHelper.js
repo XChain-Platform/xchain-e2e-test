@@ -95,6 +95,18 @@ function _resolveSiblingIfPresent(pkg, rel){
     catch (e) { return null }
 }
 
+// This harness IS a two-chain regtest venue, so it opts itself in.
+// rollcall_activation.js resolves ROLLCALL_ACTIVATION.regtest from this variable
+// at REQUIRE time and ships inert otherwise (arming a network by default wedged
+// every single-coin BTC venue at its first close, the 2026-08-31 finding), so it
+// has to be set before the sibling module is first loaded -- here, and before
+// the in-process hubs load their own byte-twin copy of it. The DEPLOYED BTC
+// indexer and any container-side hub need the SAME variable in their own
+// environment; assertBtcProofWiring below is what catches a venue that armed the
+// harness and forgot the containers.
+const ROLLCALL_REGTEST_ARMING_ENV = 'XC_ROLLCALL_REGTEST_ACTIVATION'
+if (!process.env[ROLLCALL_REGTEST_ARMING_ENV]) process.env[ROLLCALL_REGTEST_ARMING_ENV] = 'armed'
+
 let _rca = null, _eqh = null
 function rca(){ if (!_rca) _rca = require(_resolveSibling('xchain-indexer', 'src/rollcall_activation.js')); return _rca }
 function eqh(){ if (!_eqh) _eqh = require(_resolveSibling('xchain-indexer', 'src/equivocation_header.js')); return _eqh }
@@ -339,28 +351,11 @@ function epochsAfter(afterHeight, network, count){
 // The skip carries its reason so it can never read as a pass.
 function requireRollcallVenue(ctx){
     const on = process.env.E2E_REQUIRE_FEDERATION
-    if (on !== '1' && on !== 'true') {
-        console.log('[skip] ROLLCALL acceptance drives BOTH regtest stacks (BTC epochs + DOGE publishes) ' +
-                    'against a seeded four-source federation. Set E2E_REQUIRE_FEDERATION=1 to run it.')
-        ctx.skip()
-        return false
-    }
-    // Opted IN, but the rail may be inert on this network. Say so in those terms
-    // rather than letting assertRegtestConstants report it as "constant drift",
-    // which reads as a stale sibling checkout and sends the reader to the wrong
-    // place entirely.
-    const network = NETWORK
-    if (rca().ROLLCALL_ACTIVATION[network] === null) {
-        console.log('[skip] ROLLCALL is INERT on ' + network + ' (ROLLCALL_ACTIVATION.' + network + ' is null), ' +
-                    'so no epoch exists for this suite to drive and the close would return 0 at every height. ' +
-                    'Regtest was made inert on 2026-08-31: arming a network commits every BTC indexer on it to ' +
-                    'a wired DOGE peer, and a single-coin BTC regtest venue has none. This suite needs an armed ' +
-                    'height, and there is deliberately no env override (the activation file forbids reading one). ' +
-                    'Arming it is an operator decision, not a venue setting.')
-        ctx.skip()
-        return false
-    }
-    return true
+    if (on === '1' || on === 'true') return true
+    console.log('[skip] ROLLCALL acceptance drives BOTH regtest stacks (BTC epochs + DOGE publishes) ' +
+                'against a seeded four-source federation. Set E2E_REQUIRE_FEDERATION=1 to run it.')
+    ctx.skip()
+    return false
 }
 
 // The close, the capability predicate and the stake rows are BTC-only
@@ -381,12 +376,22 @@ function assertBtcRail(){
 // heights are quietly wrong.
 function assertRegtestConstants(network){
     const r = rca()
-    // ROLLCALL_ACTIVATION is deliberately NOT pinned here. It went null (inert) on
-    // regtest on 2026-08-31, and requireRollcallVenue already refuses the run in
-    // those terms, so any venue that reaches this line has had it armed to some
-    // height on purpose. Pinning a value would fight that arming; pinning null
-    // would be unreachable. The CADENCE constants below are what this harness's
-    // epoch arithmetic actually assumes, and those still must not drift.
+
+    // Checked BEFORE the numeric sweep below, because Number(null) is 0: an INERT
+    // regtest would otherwise sail through the ROLLCALL_ACTIVATION row and every
+    // verdict in this file would be read from a rail that never ran.
+    assert.notStrictEqual(r.ROLLCALL_ACTIVATION[network], null,
+        'ROLLCALL is INERT on ' + network + ': ROLLCALL_ACTIVATION.' + network + ' is null, so no epoch ' +
+        'exists and nothing below would close. This harness sets ' + ROLLCALL_REGTEST_ARMING_ENV + '=armed ' +
+        'for itself, so seeing null here means the variable was explicitly set to an off value in this shell.')
+
+    // ROLLCALL_ACTIVATION is deliberately NOT pinned to a number here. It is the
+    // one value a regtest venue owns, so a venue whose epochs start
+    // above an indexed prefix is armed at some other height on purpose, and
+    // pinning 0 would report that as "constant drift" and send the reader to the
+    // wrong place. The check above is the one that matters: armed, or not. The
+    // CADENCE constants are what this harness's epoch arithmetic assumes, and
+    // those still must not drift.
     const want = {
         ROLLCALL_INTERVAL_BLOCKS:      30,
         ROLLCALL_ACCEPT_WINDOW_BLOCKS: 12,
@@ -490,6 +495,72 @@ async function assertOraclePublishFederation(conn, blockIndex, needSources){
     assert.strictEqual(new Set(rosterSources).size, roster.length,
         'ROLLCALL precondition FAILED: the four roster keys must each be staked from a DISTINCT source ' +
         'address (absence and eviction are pinned per SOURCE). Got sources: ' + JSON.stringify(rosterSources))
+
+    // THE FEDERATION MUST BE EXACTLY THE ROSTER, not merely contain it.
+    //
+    // This check exists because its absence cost a whole session. A venue with
+    // one extra staked oracle_publish member produced `epoch 330: the elected
+    // leader must be one of the two hubs that are up, got index -1`, four runs
+    // running, and no hint anywhere that the venue rather than the protocol was
+    // the problem. Two independent things break, and neither says so:
+    //
+    //   ELECTION. RollcallRound._electionOrder is hashOrder over the WHOLE
+    //   oracle_publish key set, so any staked key the harness does not run can
+    //   win rank 0. It then never publishes (nobody is holding it), and AT6a/AT6b
+    //   read the -1 above. With n outsiders among the eight keys the roster wins
+    //   only 4/(4+n) of the time, so re-running is not a remedy, it is a coin
+    //   flip that the failure text invites the reader to keep taking.
+    //
+    //   QUORUM. An outsider never signs, but its weight still counts in the
+    //   TOTAL that stake_weighted_quorum.js measures presence against, so every
+    //   epoch closes UNROLLED unless the roster's own weight clears two thirds of
+    //   roster + outsider weight. The outage legs need more than that again.
+    //
+    // Hard-failing here rather than warning: a venue that cannot roll an epoch
+    // has no verdict to give, and the quiet forms of this are a twenty-minute
+    // drive that ends in a sentence about the wrong subsystem.
+    const rosterSourceSet = new Set(rosterSources.map(String))
+    const foreign = (res.validators || [])
+        .filter(v => !rosterSourceSet.has(String(v.source)))
+    if (foreign.length > 0){
+        const foreignBySource = new Map()
+        for (const v of foreign)
+            if (!foreignBySource.has(String(v.source))) foreignBySource.set(String(v.source), Number(v.weight))
+        const foreignWeight = Array.from(foreignBySource.values()).reduce((a, b) => a + b, 0)
+        const rosterWeight = rosterSources
+            .map(s => Number((res.validators || []).find(v => String(v.source) === String(s)).weight))
+            .reduce((a, b) => a + b, 0)
+        // What the roster's SIGNING sources would have to hold for an ordinary
+        // all-present epoch to roll at all, given this outsider weight. Reported
+        // so the operator can see whether re-seeding heavier is even an option
+        // before deciding to rebuild the venue.
+        const signingWeight = rosterSources
+            .filter((s, i) => i !== IDLE_SEED_INDEX)
+            .map(s => Number((res.validators || []).find(v => String(v.source) === String(s)).weight))
+            .reduce((a, b) => a + b, 0)
+        const total = rosterWeight + foreignWeight
+        assert.fail(
+            'ROLLCALL precondition FAILED: the venue\'s oracle_publish set contains ' + foreignBySource.size +
+            ' source(s) OUTSIDE the acceptance roster, and the acceptance suites need a federation that is ' +
+            'exactly the roster.\n' +
+            Array.from(foreignBySource.entries())
+                .map(([s, w]) => '    ' + s + '   weight ' + w + '   (not run by this harness)').join('\n') + '\n' +
+            'Outsider weight ' + foreignWeight + ' against roster weight ' + rosterWeight + '. Two things break:\n' +
+            '  1. ELECTION: hashOrder runs over all ' + (res.validators || []).length + ' key(s), so the roster ' +
+            'wins rank 0 only ' + roster.length + ' times in ' + (res.validators || []).length + '. A leader on ' +
+            'an outsider key never publishes and AT6a/AT6b report leader index -1. Re-running does not fix it.\n' +
+            '  2. QUORUM: outsiders never sign but their weight counts in the total. With all three hubs ' +
+            'present that is 3 * ' + signingWeight + ' vs 2 * ' + total + ', which ' +
+            (3 * signingWeight > 2 * total ? 'clears' : 'does NOT clear') + ' the bar, so an ordinary epoch ' +
+            (3 * signingWeight > 2 * total ? 'rolls' : 'closes UNROLLED and counts for nobody') + '.\n' +
+            'Remedy, in preference order:\n' +
+            '  a. Drive the acceptance suites on a venue seeded for them, whose oracle_publish set was empty ' +
+            'before rollcallSeedFederation ran. This is the only remedy that fixes the election half.\n' +
+            '  b. Unstake the outsider source(s) above. Needs the key each was staked from, which the harness ' +
+            'does not hold.\n' +
+            'Re-seeding the roster heavier fixes ONLY the quorum half; the election stays a coin flip, so it ' +
+            'is not a remedy for AT6a/AT6b.')
+    }
 
     return { sources, idleSource, byPubkey, weights: res.validators, sourceCount: res.source_count }
 }
@@ -597,9 +668,12 @@ async function assertBtcProofWiring(nodeConn, idxConn, idxQuery, network){
         assert.strictEqual(gaps.length, 0,
             'ROLLCALL precondition FAILED: the BTC indexer has indexed past close block(s) ' +
             gaps.join(', ') + ' but wrote no `rollcalls` row for them. Either this indexer predates ' +
-            'src/rollcall_close.js, or those blocks were indexed before ROLLCALL activated. Deploy the ' +
-            'rollcall-aware indexer and reindex from below block ' + gaps[0] + ' before driving the acceptance ' +
-            'tests, or every verdict below is read from a rail that never ran.')
+            'src/rollcall_close.js, or those blocks were indexed while ROLLCALL was inert on IT. The ' +
+            'deployed indexer needs ' + ROLLCALL_REGTEST_ARMING_ENV + '=armed in its own environment ' +
+            '(this harness sets that variable only for itself, and the activation map is read once at ' +
+            'startup) as well as DOGE_INDEXER_API_URL. Set both, restart, and reindex from below block ' +
+            gaps[0] + ' before driving the acceptance tests, or every verdict below is read from a rail ' +
+            'that never ran.')
     }
     return { idxTip, nodeTip, nextClose }
 }
@@ -1330,6 +1404,7 @@ module.exports = {
     closeHeightOf,
     epochsAfter,
     requireRollcallVenue,
+    ROLLCALL_REGTEST_ARMING_ENV,
     assertBtcRail,
     assertRegtestConstants,
     assertGatedReadsReachable,
