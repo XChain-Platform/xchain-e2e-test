@@ -57,6 +57,22 @@ function walk(dir, out = []) {
     return out
 }
 
+// Relative modules a file requires, resolved to absolute .js paths that exist.
+// A seed site is allowed to delegate the seeding itself to a shared helper, and the
+// suppression then lives in the helper rather than at the call site; following one
+// level of require is what lets the guard see it there.
+function localRequires(file, body) {
+    const out = []
+    const rx = /require\(\s*'(\.[^']+)'\s*\)/g
+    let m
+    while ((m = rx.exec(body)) !== null) {
+        let target = path.resolve(path.dirname(file), m[1])
+        if (!target.endsWith('.js')) target += '.js'
+        if (fs.existsSync(target)) out.push(target)
+    }
+    return out
+}
+
 describe('XCHAIN/USD seed guard', function () {
 
     const files = walk(TEST_ROOT)
@@ -107,7 +123,11 @@ describe('XCHAIN/USD seed guard', function () {
                 (l.includes('BOOTSTRAP_XCHAIN_USD') || /'[0-9]+\.[0-9]+'/.test(l)))
             const fileHit = body.includes('XCHAIN/USD') && body.includes('BOOTSTRAP_XCHAIN_USD')
             if (!lineHit && !fileHit) continue
-            if (body.includes('NO_PRICE_SEED') || body.includes('refuseSeedIfSuppressed')) continue
+            const suppressible = (text) =>
+                text.includes('NO_PRICE_SEED') || text.includes('refuseSeedIfSuppressed')
+            if (suppressible(body)) continue
+            // Or the helper it hands the seed to refuses on its behalf.
+            if (localRequires(file, body).some(dep => suppressible(fs.readFileSync(dep, 'utf8')))) continue
             offenders.push(path.relative(TEST_ROOT, file))
         }
         assert.deepStrictEqual(offenders, [],
