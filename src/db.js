@@ -2203,11 +2203,42 @@ class Database {
         } catch(err){ this._warnOnSchemaError('getAttestationValidatorSignatures', err); return [] } finally { await connection.release() }
     }
 
+    async waitForAttestationRequestCount(params, timeMax = 60000){ return this._waitFor(this.checkAttestationRequestCount, params, timeMax) }
+
+    // EVERY ATTEST v0 (request) row a contract has emitted, oldest first, with the
+    // action-level verdict text joined in; null until there are at least `count` of
+    // them, so it composes with _waitFor.
+    //
+    // checkAttestationRequest answers ONE row and filters by request_status, which
+    // cannot express the question an admission cap poses: what did the OTHER requests
+    // of this same block do, and in what order. The per-block caps
+    // (attest_request_cap_activation.js) are decided from the count of admissions
+    // EARLIER IN THE SAME BLOCK, so a test of them has to see the whole set, and it
+    // has to see the verdict STRING - request_status only says pending/rejected, it
+    // never says which rule refused the row.
+    async checkAttestationRequestCount({contractIndex, count}){
+        let rows = await this.getAttestationRequestsByContract(contractIndex)
+        if(rows.length < (Number(count) || 1)) return null
+        return rows
+    }
+
+    async getAttestationRequestsByContract(contractIndex){
+        let query = `SELECT ar.*, ist.status AS status
+            FROM attests ar
+            LEFT JOIN index_statuses ist ON ist.id = ar.status_id
+            WHERE ar.version = 0 AND ar.contract_index = ?
+            ORDER BY ar.action_index ASC`
+        let connection = await this.getConnection()
+        try {
+            return await connection.query(query, [contractIndex])
+        } catch(err){ this._warnOnSchemaError('getAttestationRequestsByContract', err); return [] } finally { await connection.release() }
+    }
+
     // Distinguish a schema drift (missing table / renamed column) from a normal
     // "no rows yet" poll. The attestation helpers above poll and legitimately
-    // return null/[] while waiting, so a swallowed SQL error used to masquerade
-    // as a benign timeout (this is exactly how the attestation_requests →
-    // attests table consolidation slipped through). Surface those loudly.
+    // return null/[] while waiting, so a swallowed SQL error can otherwise
+    // masquerade as a benign timeout instead of the schema mismatch it is.
+    // Surface those loudly.
     _warnOnSchemaError(where, err){
         if(err && (err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR')){
             console.error('[db] ' + where + ': attestation schema drift: ' + err.message +
