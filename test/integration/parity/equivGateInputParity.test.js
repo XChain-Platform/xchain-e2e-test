@@ -175,8 +175,13 @@ describe('EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', function () 
         it('ATTEST: both sides gate on the REQUEST block (height)', function () {
             const hubArg = gateInputArg(srcOf('xchain-hub/src/AttestationConsensus.js'),
                 /isEquivHeaderActive\(requestBlock/);
-            const idxArg = gateInputArg(srcOf('xchain-indexer/src/actions/attest.js'),
-                /isEquivHeaderActive\(declaredBlock/);
+            // The indexer's response verification lives in its own module beside the
+            // handler, so the gate call and the handler are in different files. Both
+            // are read here: what the case asserts is the INPUT the gate receives, not
+            // which file spells it.
+            const idxSrc = srcOf('xchain-indexer/src/actions/attest.js')
+                + '\n' + srcOf('xchain-indexer/src/attest_response_verify.js');
+            const idxArg = gateInputArg(idxSrc, /isEquivHeaderActive\(declaredBlock/);
             assert.ok(hubArg && idxArg, 'ATTEST gate inputs must be found on both sides');
             // Hub: requestBlock (the REQUEST's block_index). Indexer: declaredBlock
             // = request ? request.block_index : data.BLOCK_INDEX (same source).
@@ -191,8 +196,7 @@ describe('EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', function () 
             // exists to catch.
             assert.match(hubArg, /requestBlock/);
             assert.match(idxArg, /declaredBlock/);
-            const idxBody = srcOf('xchain-indexer/src/actions/attest.js');
-            assert.match(idxBody, /declaredBlock\s*=\s*request\s*\?\s*Number\(request\.block_index\)/,
+            assert.match(idxSrc, /declaredBlock\s*=\s*request\s*\?\s*Number\(request\.block_index\)/,
                 'indexer ATTEST declaredBlock must derive from the REQUEST block_index (height)');
             assertHeightParity('ATTEST', 500);
         });
