@@ -49,12 +49,19 @@ const SELF_TEST_WAIT_MS = 30_000;
 const CAP_NAMES = ['price', 'cross_chain', 'oracle_publish', 'attestation'];
 
 // MIN_STAKE thresholds used by the test config.
+//
+// Every capability the canonical coins registry names carries a floor here, and
+// full_node carries the canonical value because nothing in this suite exercises
+// it: a hub refuses to start when a canonical capability has no configured
+// floor, since an unconfigured one lets each indexer apply its own threshold and
+// fork. The four in CAP_NAMES are the ones whose hub self-tests this suite drives.
 const CAPS = {
     CAPABILITIES: {
         price:          { MIN_STAKE: '1000.00000000' },
         cross_chain:    { MIN_STAKE: '1000.00000000' },
         oracle_publish: { MIN_STAKE: '500.00000000'  },
-        attestation:    { MIN_STAKE: '1000.00000000' }
+        attestation:    { MIN_STAKE: '1000.00000000' },
+        full_node:      { MIN_STAKE: '2000.00000000' }
     },
     price:          { sources: ['coingecko'], fiats: ['USD'] },
     cross_chain:    { chains: { BTC: { rpc: 'http://node:8332' } } },

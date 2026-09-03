@@ -63,11 +63,15 @@ const OLD_MIN_STAKE = '1000.00000000';
 const NEW_MIN_STAKE = '1200.00000000'; // the (rejected) target a proposer/peer would try to set
 
 const CAPS = {
+    // full_node carries the canonical floor: a hub refuses to start when a
+    // capability the coins registry names has none configured, and this suite
+    // moves the price floor rather than that one.
     CAPABILITIES: {
         price:          { MIN_STAKE: OLD_MIN_STAKE },
         cross_chain:    { MIN_STAKE: '1000.00000000' },
         oracle_publish: { MIN_STAKE: '500.00000000'  },
-        attestation:    { MIN_STAKE: '1000.00000000' }
+        attestation:    { MIN_STAKE: '1000.00000000' },
+        full_node:      { MIN_STAKE: '2000.00000000' }
     },
     price:          { sources: ['coingecko'], fiats: ['USD'] },
     cross_chain:    { chains: { BTC: { rpc: 'http://node:8332' } } },
