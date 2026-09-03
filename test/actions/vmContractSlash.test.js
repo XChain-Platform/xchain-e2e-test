@@ -12,6 +12,7 @@ const assert = require('assert')
 const crypto = require('crypto')
 const cryptoHelper = require('../cryptoHelper')
 const stakeHelper = require('../helpers/stakeHelper')
+const stakeTeardown = require('../helpers/stakeTeardown')
 const vmHelper = require('../helpers/vmHelper')
 const gasHelper = require('../helpers/gasHelper')
 
@@ -107,6 +108,48 @@ describe('VM Contract SLASH: a contract slashes its own staker', function () {
             WHERE execution_index=? ORDER BY position`, [executionIndex])
         return rows.map(r => r.emitted_action)
     }
+    // One address's escrow row for an action. A contract stake LOCKS its tokens in the
+    // staker's escrow, so a slash that redirects them must RELEASE that lock in the same
+    // action - a negative row keyed to the staker. Without it the credit below is a mint
+    // and the burned stake stays locked in the staker's escrow for good.
+    async function escrowRow(actionIndex, address, tick) {
+        const rows = await q(`SELECT e.amount FROM escrows e
+            JOIN index_addresses ia ON ia.id=e.address_id
+            JOIN index_tickers it ON it.id=e.tick_id
+            WHERE e.action_index=? AND ia.address=? AND it.tick=?`,
+            [Number(actionIndex), address, tick])
+        return rows.length ? Number(rows[0].amount) : null
+    }
+    // Signed ledger rows for one action: credits positive, debits negative, escrows as
+    // written. Their sum is that action's effect on total supply.
+    async function ledgerFor(actionIndex, tick) {
+        const one = async (table) => {
+            const rows = await q(`SELECT COALESCE(SUM(CAST(l.amount AS DECIMAL(30,8))),0) AS amt
+                FROM ${table} l JOIN index_tickers it ON it.id=l.tick_id
+                WHERE l.action_index=? AND it.tick=?`, [Number(actionIndex), tick])
+            return Number(rows[0].amt)
+        }
+        const credits = await one('credits'), debits = await one('debits'), escrows = await one('escrows')
+        return { credits, debits, escrows, net: credits - debits + escrows }
+    }
+    // The ledger shape every slash below must have: the escrow release equals the amount
+    // slashed, and once the EXECUTE's own gas burn is netted out the slash moves supply by
+    // ZERO - a contract slash redirects the whole bond to its destination, so it has no
+    // un-redirected remainder to destroy. Any drift here is a mint or a stranded lock.
+    async function assertSlashIsARedirect(executionIndex, slashed) {
+        const released = await escrowRow(executionIndex, staker['address'], 'XCHAIN')
+        assert.notStrictEqual(released, null,
+            'the slash wrote no escrow row for the staker: the slashed stake is stranded in escrow ' +
+            'and the destination credit is a pure mint')
+        assert.strictEqual(released, -slashed,
+            'the escrow release must equal the amount slashed exactly')
+        const led = await ledgerFor(executionIndex, 'XCHAIN')
+        // The slash handler pushes no debits of its own, so anything debited on this
+        // action is the EXECUTE's gas: a genuine burn, but not part of the slash.
+        assert.strictEqual(led.net + led.debits, 0,
+            'the slash changed total supply; it redirects a locked stake, so it must not ' +
+            '(credits ' + led.credits + ', escrows ' + led.escrows + ', gas ' + led.debits + ')')
+    }
 
     before(async function () {
         const deployer = await cryptoHelper.getNewFundedAddress('slash-deployer', COIN, NETWORK, null, 'legacy', 0, 1)
@@ -122,6 +165,16 @@ describe('VM Contract SLASH: a contract slashes its own staker', function () {
 
         const st = await stakeHelper.sendStakeV3(staker, '200.00000000', pubkey, contractIndex, 'XCHAIN')
         assert(st.stake && st.stake.status === 'valid', 'STAKE v3 of 200 XCHAIN must be valid')
+    })
+
+    // A stake this suite slashed to zero owes the venue no UNSTAKE: there is nothing left
+    // to hand back, and the sweep's doomed broadcast costs the run a minute and prints a
+    // FAILED line that reads like a defect. Settle the fixture ledger only when the chain
+    // agrees the stake is empty, so a suite that stopped early still gets swept normally.
+    after(async function () {
+        if (contractIndex === null || pubkey === null) return
+        if (await activeStake(contractIndex, pubkey, 'XCHAIN') === 0)
+            stakeTeardown.noteUnstake({ signingPubkey: pubkey, contractIndex, tick: 'XCHAIN' })
     })
 
     it('records a 200 XCHAIN stake before any slash', async function () {
@@ -150,6 +203,8 @@ describe('VM Contract SLASH: a contract slashes its own staker', function () {
         // The slashed 50 XCHAIN was credited to the contract's slash destination (BURN address).
         assert.strictEqual(Number(await balanceOf(ev.dest, 'XCHAIN')), burnBefore + 50,
             'burn destination should be credited exactly the slashed 50 XCHAIN')
+
+        await assertSlashIsARedirect(ex.execution.action_index, 50)
     })
 
     it('over-slash is capped at the available stake (slash 300 of 150 → 150, stake → 0)', async function () {
@@ -165,5 +220,9 @@ describe('VM Contract SLASH: a contract slashes its own staker', function () {
         assert.strictEqual(await activeStake(contractIndex, pubkey, 'XCHAIN'), 0, 'stake should be fully drained to 0')
         assert.strictEqual(Number(await balanceOf(ev.dest, 'XCHAIN')), destBefore + 150,
             'burn destination should receive exactly the capped 150 more')
+
+        // The cap changes how much is taken, not the shape: the release still equals what
+        // was actually slashed, not what the contract asked for.
+        await assertSlashIsARedirect(ex.execution.action_index, 150)
     })
 })
