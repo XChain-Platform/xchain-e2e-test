@@ -7,6 +7,10 @@
 node_modules/
 .DS_Store
 perf-results/
+# Drill staker keys (mirrorDrillFixture). Throwaway regtest mnemonics, written
+# 0600 so a teardown that cannot finish leaves its stakes RELEASABLE rather than
+# stranded in the shared capability set. Credentials, so never committed.
+drill-keys/
 # Staged at build time by xchain-node (LIBRARY_BUNDLES) - not part of the repo
 /xchain-hub/
 /xchain-sdk/

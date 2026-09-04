@@ -50,6 +50,8 @@
  ********************************************************************/
 
 const assert = require('assert')
+const fsx    = require('fs')
+const pathx  = require('path')
 
 const cryptoHelper = require('../cryptoHelper')
 const stakeHelper  = require('../helpers/stakeHelper')
@@ -65,6 +67,49 @@ const DRILL_STAKE_XCHAIN = '15000.00000000'
 
 // Enough gas to pay for the stake plus its fee, with room for the mint.
 const DRILL_GAS_XCHAIN = '20000'
+
+// Where a drill's staker keys are kept so a stake is always releasable.
+//
+// WHY THIS EXISTS, and it is not hypothetical. `cryptoHelper` keeps its wallets
+// in a module-level object with no persistence, so a labelled address is NOT
+// reproducible in a later process: the same label returns a NEW mnemonic. When
+// AT1's teardown ran out of budget mid-release against a wedged indexer, two
+// stakes were left in the shared capability set and their signing keys had
+// already died with the run, so nothing could unstake them. They are still
+// there. An unstake must be signed by the staking address, so losing the key
+// makes the leak PERMANENT for anyone without venue-admin reach.
+//
+// The file is 0600 and gitignored. These are throwaway regtest mnemonics, but
+// they are credentials, and the rule that applies is the one about generated
+// credentials being stewarded rather than orphaned: whatever generates a key is
+// responsible for it being readable back by whoever has to clean up.
+const DRILL_KEYS_DIR = pathx.resolve(__dirname, '../../drill-keys')
+
+/**
+ * Record one staker's key material so a failed teardown stays recoverable.
+ *
+ * Written BEFORE the stake is broadcast, never after: a key recorded after a
+ * successful stake is exactly the key you do not have when the stake succeeded
+ * and the process then died.
+ */
+function recordStakerKey (label, entry) {
+    try {
+        fsx.mkdirSync(DRILL_KEYS_DIR, { recursive: true, mode: 0o700 })
+        const file = pathx.join(DRILL_KEYS_DIR, label + '.json')
+        let all = []
+        try { all = JSON.parse(fsx.readFileSync(file, 'utf8')) } catch (_) { all = [] }
+        all.push(entry)
+        fsx.writeFileSync(file, JSON.stringify(all, null, 1), { mode: 0o600 })
+        fsx.chmodSync(file, 0o600)
+        return file
+    } catch (e) {
+        // Never fail a drill over bookkeeping, but do not let it pass silently
+        // either: the whole point is that someone can clean up afterwards.
+        console.log('mirrorDrillFixture: WARNING could not record staker keys for ' + label +
+            ' (' + (e && e.message) + '). A teardown that cannot finish will strand its stakes.')
+        return null
+    }
+}
 
 /**
  * Wait until the mempool is empty and the tracker has caught up.
@@ -182,8 +227,21 @@ async function stakeDrillIdentities (opts) {
         // A separate source address per stake: stake weight is per source, and
         // one address staking five times is not the same roster as five
         // addresses staking once.
+        const stakerLabel = label + '-staker-' + i
         const addr = await cryptoHelper.getNewFundedAddress(
-            label + '-staker-' + i, COIN, NETWORK, null, 'legacy', 0, 0.02)
+            stakerLabel, COIN, NETWORK, null, 'legacy', 0, 0.02)
+
+        // Recorded BEFORE the stake exists, so the key is on disk no matter
+        // where the run dies afterwards.
+        const wallet = await cryptoHelper.getWallet(stakerLabel)
+        recordStakerKey(label, {
+            staker: stakerLabel,
+            address: addr.address,
+            signingPubkey: id.pubkeyHex,
+            mnemonic: wallet && wallet.mnemonic,
+            stakedAt: new Date().toISOString(),
+        })
+
         await settleStack()
         await gasHelper.ensureGasBalance(addr, DRILL_GAS_XCHAIN)
         await settleStack()
@@ -311,6 +369,8 @@ async function readContractState (venue, indexerIndex, contractIndex) {
 
 module.exports = {
     stakeDrillIdentities,
+    recordStakerKey,
+    DRILL_KEYS_DIR,
     deployRequestContract,
     stakeVisibilityBlocks,
     settleStack,
