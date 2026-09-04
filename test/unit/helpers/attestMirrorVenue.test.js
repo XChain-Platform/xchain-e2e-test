@@ -33,11 +33,17 @@ const {
     buildHubEnv,
     buildIndexerEnv,
     pickOutsideIndexer,
+    assertTimingInvariants,
+    resolveDecoderCredential,
+    HUB_CONFIG_REDACTION,
     coinCode,
     DEFAULT_HUB_COUNT,
     DEFAULT_INDEXER_COUNT,
     DEFAULT_FORWARD_S,
-    DEFAULT_GRACE_S
+    DEFAULT_BATCH_WINDOW_S,
+    DEFAULT_GRACE_S,
+    GOSSIP_HOP_BUDGET_S,
+    DB_PREFIX
 } = require('../../helpers/attestMirrorVenue')
 const { pickFreePorts, ephemeralRange } = require('../../helpers/multiValidatorHubHelper')
 
@@ -338,6 +344,155 @@ describe('attestMirrorVenue: the outside-the-responsible-set picker', function (
 
     it('refuses an empty responsible set instead of calling everything outside it', () => {
         assert.throws(() => pickOutsideIndexer(indexers, []), /empty responsible set/)
+    })
+})
+
+describe('attestMirrorVenue: timing invariants', function () {
+    // The hub's value at the baseline this venue drives, stated EXPLICITLY rather than
+    // read off whichever hub checkout happens to be resolvable. The guard itself takes
+    // the band as a parameter and the live venue reads it from the hub, so the wiring is
+    // covered by the absence case at the end; pinning the arithmetic to a literal is what
+    // keeps these cases meaningful in a checkout whose hub has moved.
+    const BOUNDARY_SKEW_S = 5
+
+    it('accepts the venue defaults, which is the combination every drill runs', () => {
+        assert.doesNotThrow(() =>
+            assertTimingInvariants(DEFAULT_FORWARD_S, DEFAULT_BATCH_WINDOW_S, BOUNDARY_SKEW_S))
+    })
+
+    it('refuses a forward margin at or below the gossip hop, naming both values', () => {
+        // At the hop exactly, not merely below it: a row arriving the instant it becomes
+        // applicable is already too late for the follower to bound it.
+        assert.throws(
+            () => assertTimingInvariants(GOSSIP_HOP_BUDGET_S, DEFAULT_BATCH_WINDOW_S, BOUNDARY_SKEW_S),
+            (e) => /refusing to boot/.test(e.message) &&
+                   /ATTEST_RESPONSE_FORWARD_S_OVERRIDE=2s/.test(e.message) &&
+                   /gossip hop/.test(e.message))
+    })
+
+    it('refuses a window whose quarter-clamped completeness band falls under the hop', () => {
+        // 4s window: the band clamps to floor(4/4) = 1s, under the 2s hop, so two hubs
+        // straddling a boundary intermittently cost the window its quorum. This is the
+        // exact shape that reads as a flaky AT5 rather than as a bad knob.
+        assert.throws(
+            () => assertTimingInvariants(DEFAULT_FORWARD_S, 4, BOUNDARY_SKEW_S),
+            (e) => /refusing to boot/.test(e.message) &&
+                   /completeness band is min\(BOUNDARY_SKEW_S 5, floor\(4\/4\) = 1\) = 1s/.test(e.message) &&
+                   /batchWindowS >= 8s/.test(e.message))
+    })
+
+    it('holds the band at the boundary window size rather than one either side of it', () => {
+        // The rule is band >= hop, so at a 2s band (an 8s window) it passes and at 7s it
+        // does not. Pinned because an off-by-one here is invisible until a drill flakes.
+        assert.doesNotThrow(() => assertTimingInvariants(DEFAULT_FORWARD_S, 8, BOUNDARY_SKEW_S))
+        assert.throws(() => assertTimingInvariants(DEFAULT_FORWARD_S, 7, BOUNDARY_SKEW_S),
+            /refusing to boot/)
+    })
+
+    it('refuses an absent boundary band rather than checking the window against nothing', () => {
+        // A hub that stops exporting the band has changed how a window is keyed, so rule B
+        // no longer describes it. Skipping the check there would run the drill under an
+        // invariant verified against nothing, which is the failure this guard exists to
+        // prevent, one level up.
+        for (const absent of [undefined, null, 0, NaN]) {
+            assert.throws(
+                () => assertTimingInvariants(DEFAULT_FORWARD_S, DEFAULT_BATCH_WINDOW_S, absent),
+                /must be a positive number/)
+        }
+    })
+
+    it('refuses a non-positive or unset knob rather than treating it as zero', () => {
+        for (const bad of [0, -1, undefined, null, NaN, 'soon']) {
+            assert.throws(() => assertTimingInvariants(bad, DEFAULT_BATCH_WINDOW_S, BOUNDARY_SKEW_S),
+                /must be a positive number/)
+            assert.throws(() => assertTimingInvariants(DEFAULT_FORWARD_S, bad, BOUNDARY_SKEW_S),
+                /must be a positive number/)
+        }
+    })
+})
+
+describe('attestMirrorVenue: the decoder credential', function () {
+    // Saved and restored around each case: these are process-wide and a leak here would
+    // silently change what a later case resolves.
+    let savedUser, savedPass
+    beforeEach(() => {
+        savedUser = process.env.DECODER_DB_USER
+        savedPass = process.env.DECODER_DB_PASS
+        delete process.env.DECODER_DB_USER
+        delete process.env.DECODER_DB_PASS
+    })
+    afterEach(() => {
+        if (savedUser === undefined) delete process.env.DECODER_DB_USER
+        else process.env.DECODER_DB_USER = savedUser
+        if (savedPass === undefined) delete process.env.DECODER_DB_PASS
+        else process.env.DECODER_DB_PASS = savedPass
+    })
+
+    // A coin/network pair with no sidecar on disk, so these cases exercise the oracle and
+    // environment branches without depending on the checkout's own config files.
+    const NO_SIDECAR = ['nosuchcoin', 'nosuchnet']
+
+    it('refuses the hub oracle redaction sentinel instead of trying to authenticate with it', () => {
+        // The failure this run actually hit. Passing '[redacted]' to MariaDB yields
+        // ER_ACCESS_DENIED_ERROR, which reads as a rotated password and sends the reader
+        // looking for a credential rotation that never happened.
+        const out = resolveDecoderCredential(
+            { user: 'xchain_decoder_x', pass: HUB_CONFIG_REDACTION }, ...NO_SIDECAR)
+        assert.ok(out.problem, 'expected a refusal, got a credential from the sentinel')
+        assert.match(out.problem, /redacts every password/)
+        assert.match(out.problem, /DECODER_DB_PASS/)
+        assert.strictEqual(out.pass, undefined, 'the sentinel must never be handed back as a password')
+    })
+
+    it('refuses an absent password the same way, rather than handing back undefined', () => {
+        const out = resolveDecoderCredential({ user: 'xchain_decoder_x' }, ...NO_SIDECAR)
+        assert.ok(out.problem)
+        assert.strictEqual(out.pass, undefined)
+    })
+
+    it('prefers an explicit environment credential and says where it came from', () => {
+        process.env.DECODER_DB_PASS = 'from-the-environment'
+        const out = resolveDecoderCredential(
+            { user: 'xchain_decoder_x', pass: HUB_CONFIG_REDACTION }, ...NO_SIDECAR)
+        assert.strictEqual(out.pass, 'from-the-environment')
+        assert.strictEqual(out.user, 'xchain_decoder_x')
+        assert.match(out.source, /environment/)
+    })
+
+    it('lets the environment override the user as well as the password', () => {
+        process.env.DECODER_DB_PASS = 'from-the-environment'
+        process.env.DECODER_DB_USER = 'someone_else'
+        const out = resolveDecoderCredential({ user: 'xchain_decoder_x' }, ...NO_SIDECAR)
+        assert.strictEqual(out.user, 'someone_else')
+    })
+
+    it('uses an unredacted oracle password when one is genuinely served', () => {
+        // Not dead code: a hub configured without redaction, or a future one that serves
+        // credentials to authenticated callers, must still work.
+        const out = resolveDecoderCredential(
+            { user: 'xchain_decoder_x', pass: 'a-real-password' }, ...NO_SIDECAR)
+        assert.strictEqual(out.pass, 'a-real-password')
+        assert.match(out.source, /config oracle/)
+    })
+
+    it('names the missing sidecar in the refusal so the reader knows which store to fix', () => {
+        const out = resolveDecoderCredential(
+            { user: 'xchain_decoder_x', pass: HUB_CONFIG_REDACTION }, ...NO_SIDECAR)
+        assert.match(out.problem, /no nosuchcoin-nosuchnet\.local config sidecar was found/)
+    })
+})
+
+describe('attestMirrorVenue: database naming', function () {
+    // The hub account's CREATE grant is `XChain\_%\_MVH\_%` and nothing else. A name
+    // outside it fails at the first CREATE DATABASE on a live venue and in no pure test,
+    // so the pattern is asserted here in the same shape MariaDB matches it.
+    it('produces names the pattern-restricted CREATE grant actually admits', () => {
+        const grant = /^XChain_.*_MVH_.*$/
+        for (const suffix of ['Hub0', 'Ixr1', 'Mirror1']) {
+            const name = DB_PREFIX + 'smoke_12345_abc_' + suffix
+            assert.ok(grant.test(name), name + ' is outside the granted pattern')
+            assert.ok(/^[A-Za-z0-9_]+$/.test(name), name + ' is not a plain identifier')
+        }
     })
 })
 

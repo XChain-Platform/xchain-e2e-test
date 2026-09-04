@@ -111,6 +111,14 @@ const DEFAULT_FORWARD_S = 5;
 // The batch window, same seam. Small so a window can be closed inside a drill.
 const DEFAULT_BATCH_WINDOW_S = 30;
 
+// The gossip hop this venue budgets for, and the figure both timing invariants are
+// judged against. It is a BUDGET, not a measurement: five hubs on loopback hop in
+// milliseconds, and the number is the ceiling the venue is willing to call ordinary
+// once process scheduling on a loaded host is included. AT2 deliberately drives the
+// delay proxy far above it, which is the point of that test and not a violation of
+// this: the invariant governs the venue's own resting knobs.
+const GOSSIP_HOP_BUDGET_S = 2;
+
 // Mirror barrier graces, at zero: the barrier then holds only for content the
 // stream has not yet delivered, which is the thing under test, rather than for a
 // fixed wait. Set to 0 rather than left unset because the frozen 120 would make
@@ -121,10 +129,15 @@ const DEFAULT_GRACE_S = 0;
 // verifyTables/runMigrations against an empty database is where most of it goes.
 const BOOT_WAIT_MS = 180_000;
 
-// The BTC indexer's JSON-RPC port as the stack PUBLISHES it, which is not the
-// port the hub's config oracle stores (that one is container-internal). Same
+// The indexer JSON-RPC ports as the stack PUBLISHES them, which are not the ports the
+// hub's config oracle stores (those are container-internal, 3004 on every chain). Same
 // convention `oracleBatchReplay` carries.
-const DEFAULT_BTC_INDEXER_API_PORT = 3024;
+//
+// Per-coin rather than BTC-only because the config oracle's value is wrong for a
+// host-run process on EVERY chain, not just bitcoin: falling back to it dials a port
+// nothing listens on and the caller sees a connection refused it can only swallow.
+const PUBLISHED_INDEXER_API_PORT = { BTC: 3024, DOGE: 3124, LTC: 3224 };
+const DEFAULT_BTC_INDEXER_API_PORT = PUBLISHED_INDEXER_API_PORT.BTC;
 
 // Child output kept for a failure message. A hub that dies during boot says why
 // on its own stderr and nowhere else.
@@ -134,6 +147,94 @@ const LOG_TAIL_LINES = 200;
 // parameterized, so the only safe posture is to refuse anything that is not a
 // plain identifier rather than to escape it.
 const SAFE_IDENT = /^[A-Za-z0-9_]+$/;
+
+// What the hub's config oracle puts where a password would go.
+//
+// `getallconfigs` REDACTS every credential it serves, returning this literal for the
+// node RPC, the decoder database and the indexer database alike. So the oracle is a
+// source of COORDINATES and never of credentials, and a helper that reads `pass` off it
+// is holding the string '[redacted]', which fails authentication and reports itself as
+// ER_ACCESS_DENIED_ERROR: indistinguishable, from the outside, from a rotated password.
+// Recognising the sentinel is what turns that into a message naming the real cause.
+const HUB_CONFIG_REDACTION = '[redacted]';
+
+// Where a per-coin credential actually lives: the xchain-node config sidecar the
+// containers themselves are built from. Tried relative to this checkout the same way
+// the hub source is resolved, because the harness runs both from the monorepo and from
+// an image where the layout differs.
+function resolveCoinConfigSidecar(coin, network) {
+    const rel = 'xchain-node/config/' + coin + '-' + network + '.local';
+    const candidates = [
+        process.env.XCHAIN_NODE_CONFIG_DIR && path.join(process.env.XCHAIN_NODE_CONFIG_DIR, coin + '-' + network + '.local'),
+        path.resolve(__dirname, '../../..', rel),
+        path.resolve(__dirname, '../../../..', rel)
+    ].filter(Boolean);
+    for (const p of candidates) {
+        if (fs.existsSync(p)) return p;
+    }
+    return null;
+}
+
+/**
+ * The decoder database credential, from the first store that actually holds one.
+ *
+ * THREE STORES DISAGREE ON THIS VALUE and only one of them is ever right, so the order
+ * is deliberate rather than a cascade of fallbacks:
+ *
+ *   1. An explicit `DECODER_DB_PASS` in the environment. An operator running the drill
+ *      against a venue whose credential they hold should not have to edit a file.
+ *   2. The per-coin config sidecar, which is the documented single source of truth and
+ *      the file the containers are built from.
+ *   3. The hub's config oracle, which cannot supply one at all (see the sentinel above)
+ *      and is kept only so the failure below can say so precisely.
+ *
+ * Returns `{user, pass, source}`, or `{problem}` naming the store to fix. It never logs
+ * a value and never puts one on a command line.
+ */
+function resolveDecoderCredential(dec, coin, network) {
+    const user = process.env.DECODER_DB_USER || dec.user;
+
+    if (process.env.DECODER_DB_PASS) {
+        return { user, pass: process.env.DECODER_DB_PASS, source: 'DECODER_DB_PASS in the environment' };
+    }
+
+    const sidecar = resolveCoinConfigSidecar(coin, network);
+    if (sidecar) {
+        let parsed = {};
+        try { parsed = require('dotenv').parse(fs.readFileSync(sidecar)); }
+        catch (_) { /* an unreadable sidecar is treated as absent */ }
+        if (parsed.DECODER_DB_PASS) {
+            return { user, pass: parsed.DECODER_DB_PASS, source: sidecar };
+        }
+    }
+
+    if (dec.pass && dec.pass !== HUB_CONFIG_REDACTION) {
+        return { user, pass: dec.pass, source: "the standing hub's config oracle" };
+    }
+
+    return {
+        problem: 'no usable ' + coin + '/' + network + ' decoder database credential. The standing ' +
+            "hub's config oracle redacts every password it serves (it returned " +
+            JSON.stringify(HUB_CONFIG_REDACTION) + '), so it can only supply coordinates' +
+            (sidecar
+                ? ', and the config sidecar ' + sidecar + ' carries no DECODER_DB_PASS'
+                : ', and no ' + coin + '-' + network + '.local config sidecar was found') +
+            '. Set DECODER_DB_PASS in the harness environment, or reconcile the sidecar with the ' +
+            'credential the running decoder actually uses; the two are known to drift apart ' +
+            'whenever a container is recreated and nothing propagates the new value back.'
+    };
+}
+
+// Prefix for every database this venue creates, and it is NOT cosmetic.
+//
+// The platform hub account holds no global CREATE: its grant is
+// `XChain\_%\_MVH\_%`, deliberately narrow so a test fixture can make and drop its own
+// databases and touch nothing else. A name outside that pattern is refused with
+// ER_DBACCESS_DENIED at the first CREATE DATABASE, which is why the segment is pinned
+// here in one place rather than spelled at each of the three call sites: hub, indexer
+// and mirror databases must all match, and a name that drifts out of the pattern fails
+// only on a live venue, never in a pure test.
+const DB_PREFIX = 'XChain_AM_MVH_';
 
 function ident(name, what) {
     if (!SAFE_IDENT.test(String(name || ''))) {
@@ -230,6 +331,94 @@ function planPorts(ports, hubCount, indexerCount) {
         p2pProxy: used.slice(hubCount * 2, hubCount * 3),
         indexerApi: used.slice(hubCount * 3, hubCount * 3 + indexerCount)
     };
+}
+
+/**
+ * Refuse a knob combination that makes an acceptance test flaky rather than failing.
+ *
+ * THE TWO SEAMS INTERACT, and nothing else in the venue notices. `forwardS` and
+ * `batchWindowS` are independent regtest overrides turned all the way down so a drill
+ * closes in seconds, and turned down far enough they stop describing a system the
+ * acceptance ladder can measure. Both rules below are read off the code being driven,
+ * not chosen:
+ *
+ * RULE A, `forwardS` must exceed the gossip hop. The leader stamps
+ * `effective_time = now + forwardS` and signs it. A follower has to receive, verify and
+ * store that row while the time is still in the future; below the hop the row is already
+ * applicable when it arrives, and the follower's bound on the leader's choice is what
+ * then rejects it. This is the regtest-scaled form of the protocol's own sizing of the
+ * frozen 120 as federation gossip plus stream lag plus hub clock skew.
+ *
+ * RULE B, the completeness band must cover the gossip hop. Window membership is keyed on
+ * `finalized_at`, which is per-hub WALL CLOCK and explicitly allowed to differ between
+ * two hubs' copies of one logical row, so two hubs' stamps for the same row can straddle
+ * a window boundary and place it in different windows. The follower's completeness check
+ * forgives exactly that, but only for a row inside `BOUNDARY_SKEW_S` of the boundary, and
+ * that band is CLAMPED TO A QUARTER OF THE WINDOW. So a small window shrinks the band
+ * below the hop and an honest window intermittently loses its quorum. Intermittently is
+ * the whole problem: it reads as a venue defect rather than as a misconfigured knob.
+ *
+ * Rule B is what forces a window much larger than the margin, and it is stated in terms
+ * of the band rather than as a ratio between the two knobs, because the band is the thing
+ * the hub actually computes.
+ *
+ * @param {number} forwardS       ATTEST_RESPONSE_FORWARD_S_OVERRIDE the venue will set
+ * @param {number} batchWindowS   ATTEST_BATCH_WINDOW_S_OVERRIDE the venue will set
+ * @param {number} boundarySkewS  the hub's own BOUNDARY_SKEW_S, read from its module
+ * @param {number} [hopBudgetS]   the hop this venue budgets for
+ */
+function assertTimingInvariants(forwardS, batchWindowS, boundarySkewS, hopBudgetS = GOSSIP_HOP_BUDGET_S) {
+    const f = Number(forwardS), w = Number(batchWindowS), skew = Number(boundarySkewS), hop = Number(hopBudgetS);
+    for (const [name, v] of [['forwardS', f], ['batchWindowS', w], ['boundarySkewS', skew], ['hopBudgetS', hop]]) {
+        if (!Number.isFinite(v) || v <= 0) {
+            throw new Error('attestMirrorVenue: ' + name + ' must be a positive number, got ' + String(v));
+        }
+    }
+
+    if (!(f > hop)) {
+        throw new Error('attestMirrorVenue: refusing to boot. The forward margin ' +
+            'ATTEST_RESPONSE_FORWARD_S_OVERRIDE=' + f + 's does not exceed the ' + hop +
+            's gossip hop this venue budgets for, so a follower can receive a mirror row whose ' +
+            'signed effective time has already passed and reject it. Wanted forwardS > ' + hop +
+            '; raise the margin or lower the hop budget deliberately.');
+    }
+
+    // The hub's own clamp, recomputed here rather than assumed, so this stays true if the
+    // hub changes how it narrows the band.
+    const band = Math.min(skew, Math.floor(w / 4));
+    if (!(band >= hop)) {
+        throw new Error('attestMirrorVenue: refusing to boot. With ' +
+            'ATTEST_BATCH_WINDOW_S_OVERRIDE=' + w + 's the batch completeness band is ' +
+            'min(BOUNDARY_SKEW_S ' + skew + ', floor(' + w + '/4) = ' + Math.floor(w / 4) + ') = ' +
+            band + 's, which is under the ' + hop + 's gossip hop, so two hubs stamping one row ' +
+            'either side of a window boundary will intermittently cost an honest window its ' +
+            'quorum and redden the batch drill at random. Wanted a band >= ' + hop +
+            ', i.e. batchWindowS >= ' + (4 * hop) + 's at this BOUNDARY_SKEW_S ' +
+            '(forwardS is ' + f + 's).');
+    }
+}
+
+/**
+ * The hub's own boundary band, or a refusal explaining why the invariant no longer applies.
+ *
+ * Read from the hub being driven rather than retyped, and REFUSED rather than skipped when
+ * it is absent. Absence is not a missing detail: the band exists only because window
+ * membership is keyed on per-hub wall clock, so a hub that no longer exports it has
+ * changed how a window is keyed, and rule B above is then describing a mechanism that hub
+ * does not have. Continuing would run the drill under an invariant checked against
+ * nothing, which is worse than the flake the invariant exists to prevent.
+ */
+function resolveBoundarySkewS() {
+    const pub  = loadHubModule('src/AttestationBatchPublisher.js');
+    const skew = Number(pub && pub.BOUNDARY_SKEW_S);
+    if (!Number.isFinite(skew) || skew <= 0) {
+        throw new Error('attestMirrorVenue: refusing to boot. The hub this venue resolves ' +
+            'exports no positive BOUNDARY_SKEW_S (got ' + String(pub && pub.BOUNDARY_SKEW_S) + '), ' +
+            'so its batch window is no longer keyed on finalized_at with a boundary band and this ' +
+            "venue's window invariant no longer describes it. Re-derive the invariant against that " +
+            'hub, or point XCHAIN_HUB_PATH at the hub revision this venue is meant to drive.');
+    }
+    return skew;
 }
 
 /**
@@ -632,6 +821,11 @@ class AttestMirrorVenue {
      * set when a dependency this helper does not own is missing.
      */
     async start() {
+        // BEFORE anything is spawned or provisioned. A knob combination that makes the
+        // batch drill intermittently red must stop the run here, where the message names
+        // the two values, and not thirty minutes later as a flaky assertion.
+        assertTimingInvariants(this.forwardS, this.batchWindowS, resolveBoundarySkewS());
+
         this._live = await this._resolveStandingStack();
         if (!this._live) return false;
 
@@ -696,7 +890,7 @@ class AttestMirrorVenue {
                 proxyPort: ports.p2pProxy[i],
                 p2pAddr:   '127.0.0.1:' + ports.p2pProxy[i],
                 pubkey:    this._identities[i].pubkeyHex,
-                dbName:    'XChain_AM_' + this.label + '_' + stamp + '_Hub' + i,
+                dbName:    DB_PREFIX + this.label + '_' + stamp + '_Hub' + i,
                 proxy:     proxy,
                 proc:      null,
                 connector: null,
@@ -785,8 +979,8 @@ class AttestMirrorVenue {
                 followsHub: hub.index,
                 hubApiUrl:  hub.apiUrl,
                 hubPubkey:  hub.pubkey,
-                indexerDbName: 'XChain_AM_' + this.label + '_' + stamp + '_Ixr' + i,
-                mirrorDbName:  'XChain_AM_' + this.label + '_' + stamp + '_Mirror' + i,
+                indexerDbName: DB_PREFIX + this.label + '_' + stamp + '_Ixr' + i,
+                mirrorDbName:  DB_PREFIX + this.label + '_' + stamp + '_Mirror' + i,
                 proc: null,
                 connector: null
             });
@@ -930,8 +1124,16 @@ class AttestMirrorVenue {
                 'be given the Bitcoin capability oracle a responsible set is resolved from';
             return null;
         }
+
+        // Resolved rather than read straight off the oracle, which serves a redaction
+        // sentinel in place of every password. Refusing here, with the store named, beats
+        // spawning seven children that each die on ER_ACCESS_DENIED four minutes later.
+        const cred = resolveDecoderCredential(dec, this.coin, this.network);
+        if (cred.problem) { this.unavailable = cred.problem; return null; }
+        this.decoderCredentialSource = cred.source;
+
         return {
-            decoder: { host: dbHost, port: dbPort, name: dec.name, user: dec.user, pass: dec.pass },
+            decoder: { host: dbHost, port: dbPort, name: dec.name, user: cred.user, pass: cred.pass },
             node:    svc['node'] || {},
             tracker: svc['xchain-utxo-tracker'] || {},
             feeDestination: await this._resolveFeeDestination(svc),
@@ -982,6 +1184,11 @@ class AttestMirrorVenue {
                     catch (_) { /* fall through to the hub's own value */ }
                 }
             }
+            // The published port BEFORE the hub's own value: the config oracle stores the
+            // container-internal port, so using it from the host dials nothing and the
+            // fee destination silently resolves to null. The hub's value stays as the
+            // last resort for a coin this map does not know.
+            if (!port) port = PUBLISHED_INDEXER_API_PORT[code];
             if (!port) port = svc['xchain-indexer'] && svc['xchain-indexer'].port;
             if (!port) return null;
             const conn = new XChainIndexerConnector(host, port,
@@ -1340,11 +1547,16 @@ module.exports = {
     buildHubEnv,
     buildIndexerEnv,
     pickOutsideIndexer,
+    assertTimingInvariants,
+    resolveDecoderCredential,
+    HUB_CONFIG_REDACTION,
     coinCode,
     DEFAULT_HUB_COUNT,
     DEFAULT_INDEXER_COUNT,
     DEFAULT_FORWARD_S,
     DEFAULT_BATCH_WINDOW_S,
     DEFAULT_GRACE_S,
+    GOSSIP_HOP_BUDGET_S,
+    DB_PREFIX,
     VENUE_REDUNDANCY
 };

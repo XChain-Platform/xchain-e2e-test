@@ -38,6 +38,7 @@
  */
 
 const { execFileSync } = require('child_process');
+const net = require('net');
 const mariadb = require('mariadb');
 
 // Throwaway, non-secret password for an ephemeral local-only test container.
@@ -52,13 +53,38 @@ function dockerAvailable() {
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
+// The first port at or above `base` that nothing is listening on, probed by binding it.
+//
+// Binding is the only honest test: docker publishes on the host network stack, so a
+// port held by another container, or by a process outside docker, is unavailable to us
+// either way and only an actual bind sees both. Bounded so a saturated host fails with
+// this function's own message rather than looping.
+async function firstFreePort(base, span = 64) {
+    for (let p = base; p < base + span; p++) {
+        const free = await new Promise((resolve) => {
+            const probe = net.createServer();
+            probe.once('error', () => resolve(false));
+            probe.listen(p, '127.0.0.1', () => probe.close(() => resolve(true)));
+        });
+        if (free) return p;
+    }
+    throw new Error('disposableHubDb: no free port in [' + base + ', ' + (base + span) + ')');
+}
+
 // Probe readiness by actually opening a connection (no credentials on any
 // command line; the driver handles auth in-process).
-async function waitForReady(host, port, pass, attempts = 180) {
+//
+// `user` is a parameter rather than a hardcoded 'root' because resolution path (1)
+// validates a PRE-PROVISIONED database, whose account is whatever HUB_DB_USER names
+// and is routinely not root: the platform's own hub account. Probing that database as
+// root with the hub account's password fails authentication, the path judges a healthy
+// database dead, and the fallback then tries to bind a container port that is already
+// taken, which surfaces as an opaque `docker run` failure several steps later.
+async function waitForReady(host, port, pass, attempts = 180, user = 'root') {
     for (let i = 0; i < attempts; i++) {
         let conn;
         try {
-            conn = await mariadb.createConnection({ host, port, user: 'root', password: pass, connectTimeout: 2000 });
+            conn = await mariadb.createConnection({ host, port, user, password: pass, connectTimeout: 2000 });
             await conn.query('SELECT 1');
             await conn.end();
             return true;
@@ -80,7 +106,8 @@ async function startDisposableHubDb(opts = {}) {
     if (process.env.HUB_DB_USER && process.env.HUB_DB_PASS && !opts.forceDocker) {
         const envHost = process.env.HUB_DB_HOST || '127.0.0.1';
         const envPort = process.env.HUB_DB_PORT || 3306;
-        const alive = await waitForReady(envHost, envPort, process.env.HUB_DB_PASS, 3);
+        const alive = await waitForReady(envHost, envPort, process.env.HUB_DB_PASS, 3,
+            process.env.HUB_DB_USER);
         if (alive) {
             return {
                 host: envHost,
@@ -98,19 +125,30 @@ async function startDisposableHubDb(opts = {}) {
     if (!dockerAvailable()) return null;
 
     const name = opts.name || ('xchain-mvh-testdb-' + process.pid);
-    const port = String(opts.port || 13307);
+    // A caller-named port is honoured as-is so a suite that must be reachable at a
+    // fixed coordinate still is; otherwise start at the conventional one and take the
+    // first free port above it. A bare literal here cannot survive a standing container
+    // already holding that port: the boot aborts with docker's own port-allocation
+    // message, which names neither the venue nor what is in the way.
+    const port = String(opts.port || (await firstFreePort(13307)));
     try { execFileSync('docker', ['rm', '-f', name], { stdio: 'ignore' }); } catch (_) {}
-    execFileSync('docker', [
-        'run', '-d', '--name', name,
-        '-e', 'MARIADB_ROOT_PASSWORD=' + TEST_DB_PASS,
-        '-p', '127.0.0.1:' + port + ':3306',
-        // tmpfs datadir: the DB is throwaway by definition, and RAM-backing it
-        // cuts MariaDB 11's first-boot "Initializing database files" from 60s+
-        // (observed on a loaded host; it blew the old 60s readiness budget) to
-        // a few seconds.
-        '--tmpfs', '/var/lib/mysql:rw',
-        IMAGE
-    ], { stdio: 'ignore' });
+    try {
+        execFileSync('docker', [
+            'run', '-d', '--name', name,
+            '-e', 'MARIADB_ROOT_PASSWORD=' + TEST_DB_PASS,
+            '-p', '127.0.0.1:' + port + ':3306',
+            // tmpfs datadir: the DB is throwaway by definition, and RAM-backing it
+            // cuts MariaDB 11's first-boot "Initializing database files" from 60s+
+            // (observed on a loaded host; it blew the old 60s readiness budget) to
+            // a few seconds.
+            '--tmpfs', '/var/lib/mysql:rw',
+            IMAGE
+        ], { stdio: 'ignore' });
+    } catch (e) {
+        throw new Error('disposableHubDb: could not start ' + IMAGE + ' as ' + name +
+            ' on 127.0.0.1:' + port + '. If that port is held by a standing container, ' +
+            'pass opts.port or provision HUB_DB_* instead. Underlying: ' + e.message);
+    }
 
     const ready = await waitForReady('127.0.0.1', port, TEST_DB_PASS);
     if (!ready) {
