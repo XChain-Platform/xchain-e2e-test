@@ -1463,6 +1463,9 @@ class AttestMirrorVenue {
         this.needsLlm        = !!opts.needsLlm;
         this.claudeConfigDir = opts.claudeConfigDir || process.env.HUB_CLAUDE_CONFIG_DIR || null;
         this.presetIdentities = opts.identities || null;
+        // Opt out of the reusable indexer databases; see the naming site for why
+        // nothing should want this without saying so.
+        this.freshIndexers   = opts.freshIndexers === true;
         this.oracleEpochStart = opts.oracleEpochStart || (Date.now() - 60_000);
         this.btcIndexerApiUrl = opts.btcIndexerApiUrl || null;
 
@@ -1707,8 +1710,25 @@ class AttestMirrorVenue {
                 hubApiUrl:  mirrorProxy.url,
                 mirrorProxy: mirrorProxy,
                 hubPubkey:  hub.pubkey,
-                indexerDbName: DB_PREFIX + this.label + '_' + stamp + '_Ixr' + i,
-                mirrorDbName:  DB_PREFIX + this.label + '_' + stamp + '_Mirror' + i,
+                // STABLE ACROSS RUNS, and this is the single change that makes the
+                // acceptance ladder affordable. These two carry the indexer's parsed
+                // chain. Stamping them meant every run built empty databases and
+                // replayed the borrowed chain FROM GENESIS before it could assert
+                // anything: 5584 blocks and climbing, measured at one to two hours
+                // per drill, paid seven times over and growing with every block the
+                // shared chain gains. Nothing about that work is per-run, so it is
+                // now done once and resumed: a second run replays only the blocks
+                // added since the first.
+                //
+                // The HUB databases keep their stamp and are still dropped, because
+                // hub state IS per-run: identities, rounds and mirror rows belong to
+                // the federation this run spawns.
+                //
+                // Pass `freshIndexers: true` for a drill that genuinely needs a node
+                // with no history. Nothing needs it today, and a drill reaching for
+                // it should say why, because it is buying back the whole replay.
+                indexerDbName: DB_PREFIX + this.label + (this.freshIndexers ? '_' + stamp : '') + '_Ixr' + i,
+                mirrorDbName:  DB_PREFIX + this.label + (this.freshIndexers ? '_' + stamp : '') + '_Mirror' + i,
                 proc: null,
                 connector: null
             });
@@ -2332,9 +2352,14 @@ class AttestMirrorVenue {
         for (const hub of this.hubs)    await attempt('proxy ' + hub.index + ' stop',  async () => hub.proxy && hub.proxy.stop());
 
         if (this._conn) {
+            // THE INDEXER DATABASES SURVIVE unless this venue made them throwaway.
+            // They hold the parsed chain, which is the expensive thing and is not
+            // per-run; dropping them is what forced a genesis replay on every
+            // drill. Hub databases are still dropped: their contents belong to the
+            // federation this run spawned and mean nothing to the next.
             const names = []
-                .concat(this.indexers.map((ix) => ix.mirrorDbName))
-                .concat(this.indexers.map((ix) => ix.indexerDbName))
+                .concat(this.freshIndexers ? this.indexers.map((ix) => ix.mirrorDbName) : [])
+                .concat(this.freshIndexers ? this.indexers.map((ix) => ix.indexerDbName) : [])
                 .concat(this.hubs.map((h) => h.dbName));
             for (const name of names) {
                 if (!name) continue;
