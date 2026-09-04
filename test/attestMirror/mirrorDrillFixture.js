@@ -27,8 +27,14 @@
  * own copy of a sequence whose every step has a non-obvious failure mode:
  *
  *   - Stake below the PROVIDER floor and the responsible set silently excludes
- *     the hub. 15000 clears both the attestation capability min_stake (1000)
- *     and the http_get / llm provider floor (10000).
+ *     the hub. THE TWO PROVIDERS DO NOT SHARE A FLOOR, which is what an
+ *     earlier version of this note got wrong: `http_get` is 10000 and `llm` is
+ *     25000 (ProviderRegistry.js DEFAULTS, read at HEAD). A stake of 15000
+ *     therefore cleared http_get and could NEVER clear llm, so every venue
+ *     identity was filtered out before the ranking for an llm request, the
+ *     responsible set came back short, admission refused it, and the EXECUTE
+ *     rolled back with no valid execution row. That is not a wait that needs
+ *     more patience; it is a request that can never be served.
  *   - Mine too few blocks after staking and the request's capability snapshot,
  *     which resolves at the request block BURIED by CANONICAL_REORG_BUFFER,
  *     cannot see the stake. The symptom is not a missing stake: a responsible
@@ -63,10 +69,23 @@ const { loadHubModule } = require('../helpers/multiValidatorHubHelper')
 // (10000) that is enforced on the responsible set at/above
 // STAKE_WEIGHTED_QUORUM, which regtest arms at genesis. A stake that clears
 // only the first produces a hub that is staked and never selected.
-const DRILL_STAKE_XCHAIN = '15000.00000000'
+// Above the HIGHEST provider floor, not merely above one of them. `llm` is
+// 25000, so anything at or below that makes the llm drills unservable rather
+// than slow. Read from the registry rather than pinned here would be better
+// still, but the registry is the hub's and this is a test fixture; the guard
+// below asserts the relationship instead, so a floor that moves fails loudly.
+const DRILL_STAKE_XCHAIN = '50000.00000000'
 
-// Enough gas to pay for the stake plus its fee, with room for the mint.
-const DRILL_GAS_XCHAIN = '20000'
+// MUST EXCEED DRILL_STAKE_XCHAIN, with headroom for the stake's fee.
+//
+// The stake is paid OUT OF this minted gas, so these two constants are coupled
+// and the coupling is invisible three lines apart: raising the stake without
+// raising this makes every `sendStakeV1` come back invalid for insufficient
+// balance, the prologue dies at identity 1 of 5, and it reads as a staking or
+// roster fault rather than as arithmetic. The guard below asserts BOTH
+// relationships, gas-versus-stake and stake-versus-floor, because a comment
+// stating a relationship is a claim that survives the number changing.
+const DRILL_GAS_XCHAIN = '60000'
 
 // Where a drill's staker keys are kept so a stake is always releasable.
 //

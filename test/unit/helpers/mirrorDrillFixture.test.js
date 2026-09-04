@@ -404,3 +404,68 @@ describe('mirrorDrillFixture: queryVenueDb selects the database it validates', f
         assert.strictEqual(captured.length, 0, 'it must refuse before opening a connection')
     })
 })
+
+describe('mirrorDrillFixture: the drill stake clears every provider floor', function () {
+    const { DRILL_STAKE_XCHAIN } = require('../../attestMirror/mirrorDrillFixture')
+
+    // WHY THIS IS A TEST AND NOT A COMMENT. A comment asserting the floor is a
+    // claim nobody re-reads, and the two providers declare DIFFERENT floors in
+    // another repo: http_get 10000, llm 25000. A stake between them clears one
+    // provider and silently disqualifies the other.
+    //
+    // The consequence is not a slow drill, it is an unservable one: the identity
+    // is filtered out before the ranking, the responsible set comes back short,
+    // admission refuses the request, and the EXECUTE rolls back with no valid
+    // execution row. Nothing in that chain of events mentions a stake floor.
+    it('exceeds the highest min_stake_xchain any provider declares', function () {
+        const registry = loadHubModule('src/ProviderRegistry.js')
+        const defaults = registry.DEFAULTS || registry.PROVIDER_DEFAULTS
+        assert.ok(defaults && typeof defaults === 'object',
+            'could not read the provider DEFAULTS; this guard must not pass vacuously')
+
+        const floors = Object.keys(defaults).map((id) => ({
+            id: id, floor: Number(defaults[id].min_stake_xchain),
+        })).filter((f) => Number.isFinite(f.floor))
+
+        assert.ok(floors.length >= 2,
+            'expected at least the http_get and llm providers, got ' + floors.length)
+
+        const highest = floors.reduce((a, b) => (b.floor > a.floor ? b : a))
+        assert.ok(Number(DRILL_STAKE_XCHAIN) > highest.floor,
+            'the drill stakes ' + DRILL_STAKE_XCHAIN + ' but provider ' + highest.id +
+            ' requires more than ' + highest.floor + '. A stake at or below a provider floor does ' +
+            'not make its drill slow, it makes it UNSERVABLE: the identity is filtered out before ' +
+            'the ranking, the responsible set comes back short, and the EXECUTE rolls back.')
+    })
+})
+
+describe('mirrorDrillFixture: the minted gas covers the stake it pays for', function () {
+    const { DRILL_STAKE_XCHAIN, DRILL_GAS_XCHAIN } = require('../../attestMirror/mirrorDrillFixture')
+
+    // THE SECOND RELATIONSHIP IN THE SAME THREE LINES. The stake is paid out of
+    // the minted gas, so raising one without the other makes every sendStakeV1
+    // come back invalid for insufficient balance. The prologue then dies at
+    // identity 1 of 5 and presents as a staking or roster fault, nowhere near
+    // the two constants that disagree.
+    it('mints strictly more gas than the stake it must pay', function () {
+        const stake = Number(DRILL_STAKE_XCHAIN)
+        const gas   = Number(DRILL_GAS_XCHAIN)
+        assert.ok(Number.isFinite(stake) && Number.isFinite(gas),
+            'both constants must be numeric, got stake=' + DRILL_STAKE_XCHAIN + ' gas=' + DRILL_GAS_XCHAIN)
+        assert.ok(gas > stake,
+            'the drill mints ' + gas + ' gas and then stakes ' + stake + ' out of it, so every ' +
+            'sendStakeV1 comes back invalid for insufficient balance and the prologue dies at ' +
+            'identity 1 of 5, reading as a staking fault rather than as arithmetic')
+    })
+
+    it('leaves headroom above the stake rather than matching it exactly', function () {
+        // An exact match pays the stake and nothing else, and the stake carries a
+        // fee. Headroom is what stops a fee schedule change from reproducing the
+        // insufficient-balance failure with no constant having moved.
+        const stake = Number(DRILL_STAKE_XCHAIN)
+        const gas   = Number(DRILL_GAS_XCHAIN)
+        assert.ok(gas - stake >= stake * 0.1,
+            'gas ' + gas + ' leaves only ' + (gas - stake) + ' above a stake of ' + stake +
+            '; the stake pays a fee out of the same balance, so this wants real headroom')
+    })
+})
