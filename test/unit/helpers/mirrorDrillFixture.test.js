@@ -351,3 +351,56 @@ describe('mirrorDrillFixture: withWedgeClear also pre-clears', function () {
             'a mid-wait wedge must still be cleared and the call retried')
     })
 })
+
+describe('mirrorDrillFixture: queryVenueDb selects the database it validates', function () {
+    const { queryVenueDb } = require('../../attestMirror/mirrorDrillFixture')
+    const mariadbPath = require.resolve('mariadb')
+    let saved
+
+    // queryVenueDb lazy-requires mariadb inside the function, so the module
+    // cache is the seam. A behavioural test would need a live venue database;
+    // this asserts the CONNECTION OPTIONS, which is where the defect lived.
+    function stubMariadb (captured) {
+        saved = require.cache[mariadbPath]
+        require.cache[mariadbPath] = {
+            id: mariadbPath, filename: mariadbPath, loaded: true,
+            exports: {
+                createConnection: async (opts) => {
+                    captured.push(opts)
+                    return {
+                        query: async () => [{ ok: 1 }],
+                        end: async () => {},
+                    }
+                },
+            },
+        }
+    }
+
+    afterEach(function () {
+        if (saved) { require.cache[mariadbPath] = saved } else { delete require.cache[mariadbPath] }
+        saved = undefined
+    })
+
+    const venue = { hubDb: { host: '127.0.0.1', port: '13306', user: 'u', pass: 'p' } }
+
+    it('passes the database name to the connection, not just past the validator', async function () {
+        // THE REGRESSION. Without `database:` every unqualified query dies with
+        // errno 1046, and both of this module's readers go through here, so the
+        // failure surfaces at the END of a long drill as an unexplained error.
+        const captured = []
+        stubMariadb(captured)
+        await queryVenueDb(venue, 'XChain_BTC_Regtest_MVH_ix0', 'SELECT 1', [])
+        assert.strictEqual(captured.length, 1, 'expected exactly one connection')
+        assert.strictEqual(captured[0].database, 'XChain_BTC_Regtest_MVH_ix0',
+            'the validated database name must reach the connection, or every query is 1046')
+    })
+
+    it('still refuses an unsafe identifier before connecting at all', async function () {
+        const captured = []
+        stubMariadb(captured)
+        await assert.rejects(
+            () => queryVenueDb(venue, 'bad; DROP TABLE x', 'SELECT 1', []),
+            /refusing an unsafe database identifier/)
+        assert.strictEqual(captured.length, 0, 'it must refuse before opening a connection')
+    })
+})

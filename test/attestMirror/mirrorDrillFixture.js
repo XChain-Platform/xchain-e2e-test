@@ -472,6 +472,20 @@ async function queryVenueDb (venue, dbName, sql, params) {
         conn = await mariadb.createConnection({
             host: venue.hubDb.host, port: parseInt(venue.hubDb.port, 10),
             user: venue.hubDb.user, password: venue.hubDb.pass, connectTimeout: 10_000,
+            // THE VALIDATED NAME HAS TO BE USED, not merely checked. Without this
+            // every unqualified query here dies with errno 1046, "No database
+            // selected", and BOTH readers below (`readAppliedResponse`,
+            // `readContractState`) go through this helper, so neither had ever
+            // worked. It went unnoticed only because no drill had reached one of
+            // them: AT1 died earlier every time, and the federation capture was
+            // the first caller to get this far. It would have failed AT2, AT3,
+            // AT4 and AT6 identically, as a fresh unexplained error at the END of
+            // a seven-minute run.
+            //
+            // The assertion above is what made it hard to see: a function that
+            // carefully validates an identifier reads like a function that uses
+            // it. Same shape as `ensureGasBalance` not ensuring anything.
+            database: String(dbName),
         })
         return await conn.query(sql, params || [])
     } finally {
