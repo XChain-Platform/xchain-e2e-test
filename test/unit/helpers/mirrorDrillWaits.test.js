@@ -461,3 +461,30 @@ describe('queryDb opens the connection WITH a database selected', () => {
         assert.strictEqual(ended, true, 'a failed query must not leak its connection')
     })
 })
+
+describe('wedgeVerdict: catch-up is not a finding', () => {
+
+    const held = { height: 4253, atMs: 1_000_000 }
+    const past = held.atMs + ROLLCALL_STALL_AFTER_MS + 1
+
+    // Measured on a real run: a fresh venue indexer 185 blocks behind, pausing on a
+    // heavy block, was reported as "a stall of a shape nobody has seen yet".
+    it('treats a large lag with no stall reason as ordinary catch-up', () => {
+        const v = wedgeVerdict({ height: 4253, decoder: 4438 }, held, past)
+        assert.strictEqual(v.nudge, false)
+        assert.ok(!v.finding, 'catch-up must not be reported as an anomaly')
+        assert.ok(/ordinary catch-up/.test(v.why), v.why)
+    })
+
+    // The genuinely odd shape: nothing left to do, and still not moving.
+    it('still reports a SMALL lag with no stall reason as a finding', () => {
+        const v = wedgeVerdict({ height: 4436, decoder: 4438 }, { height: 4436, atMs: 1_000_000 }, past)
+        assert.strictEqual(v.finding, true)
+        assert.ok(/NOT catch-up either/i.test(v.why), v.why)
+    })
+
+    it('still nudges a large lag when the reason IS the wedge', () => {
+        const v = wedgeVerdict({ height: 4253, decoder: 4438, reason: 'rollcall_proof_unavailable' }, held, past)
+        assert.strictEqual(v.nudge, true, 'the wedge is the wedge at any lag')
+    })
+})

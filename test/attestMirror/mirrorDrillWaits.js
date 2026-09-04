@@ -140,6 +140,11 @@ const MAX_DOGE_NUDGES = 6
 // remedy cannot drift into disagreeing about what the wedge is.
 const ROLLCALL_STALL_REASON = 'rollcall_proof_unavailable'
 
+// Beyond this many blocks behind its decoder, a node with no stated stall reason is
+// taken to be catching up rather than stalled. A venue indexer starts at genesis, so
+// early in a drill it is legitimately hundreds behind.
+const CATCHUP_LAG_BLOCKS = 50
+
 // BTC blocks per DOGE keep-up in a long mining run. The wedge was measured
 // re-forming every 25 to 30 BTC blocks with DOGE still, so this sits comfortably
 // inside that: often enough that a run cannot wedge itself, rare enough that the
@@ -496,14 +501,30 @@ function wedgeVerdict (sample, since, nowMs, opts) {
     // drill's own failure message pointed at whatever it happened to be waiting for.
     const reason = String((sample && sample.reason) || '')
     if (reason !== ROLLCALL_STALL_REASON) {
+        // A LARGE LAG WITH NO STATED REASON IS ORDINARY CATCH-UP, not a finding. A
+        // fresh venue indexer replays the chain from genesis and can sit tens of
+        // seconds on one heavy block, which looks identical to "stuck" through a
+        // height sample. Measured: a node 185 blocks behind, reported as a stall of
+        // a shape nobody had seen, that was simply still syncing and reached the tip
+        // on its own. What IS anomalous is a node close to its decoder, with nothing
+        // left to do, that still will not advance and states no reason.
+        const lag = decoder - height
+        if (lag > CATCHUP_LAG_BLOCKS) {
+            return {
+                nudge: false,
+                why: 'behind its decoder by ' + lag + ' blocks with no stall reason, which is ordinary ' +
+                     'catch-up rather than a stall: a fresh indexer replaying the chain pauses on heavy ' +
+                     'blocks and reaches the tip on its own',
+            }
+        }
         return {
             nudge: false,
             finding: true,
-            why: 'STUCK at ' + height + ' behind its decoder at ' + decoder + ' for ' + heldMs +
-                 'ms, but the stall reason is ' + (reason || 'absent') + ' rather than ' +
-                 ROLLCALL_STALL_REASON + '. That is not the wedge this remedy is for, so nothing is ' +
-                 'mined and it is reported instead: a stall of a shape nobody has seen yet is worth ' +
-                 'more as a finding than as something quietly worked around',
+            why: 'STUCK at ' + height + ', only ' + (decoder - height) + ' block(s) behind its decoder ' +
+                 'at ' + decoder + ', for ' + heldMs + 'ms, with the stall reason ' +
+                 (reason || 'absent') + ' rather than ' + ROLLCALL_STALL_REASON + '. It is NOT catch-up ' +
+                 'either, since there is almost nothing left to process, and it is not the wedge this ' +
+                 'remedy is for, so nothing is mined and it is reported instead',
         }
     }
     return {
