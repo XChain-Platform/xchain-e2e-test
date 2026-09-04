@@ -177,7 +177,16 @@ const DEFAULT_BTC_INDEXER_API_PORT = PUBLISHED_INDEXER_API_PORT.BTC;
 
 // Child output kept for a failure message. A hub that dies during boot says why
 // on its own stderr and nowhere else.
-const LOG_TAIL_LINES = 200;
+//
+// RAISED FROM 200 after it ate the evidence it exists to preserve. The venue
+// borrows the standing chain, so any attestation request an earlier failed run
+// left pending is retried by these hubs every poll for the rest of its deadline,
+// several log lines each time. On 2026-09-04 two such stale requests pushed the
+// whole of a live round out of the buffer, and the drill's failure message
+// showed only their retries: the round under test appeared never to have
+// happened, which sent the investigation looking for a request feed that was
+// working fine.
+const LOG_TAIL_LINES = 1200;
 
 // Guards every identifier interpolated into SQL. Database names cannot be
 // parameterized, so the only safe posture is to refuse anything that is not a

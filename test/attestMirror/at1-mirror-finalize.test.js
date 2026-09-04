@@ -66,7 +66,9 @@ const {
     provisionDrillIdentities, startAttestTestServer, deployRequestContract, settleStack,
     readAppliedResponse, readContractState,
 } = require('./mirrorDrillFixture')
-const { findEmittedAttestRequest, captureFederationState, responsibleHubTails } = require('./mirrorDrillWaits')
+const {
+    findEmittedAttestRequest, waitForMirrorRowEverywhere,
+} = require('./mirrorDrillWaits')
 const vmHelper = require('../helpers/vmHelper')
 
 // The applier's own synthesis, imported rather than reimplemented: the hash is
@@ -281,27 +283,33 @@ describe('AT1: an ATTEST response finalizes over P2P with no transaction of its 
         // them. The standing hubs cannot answer this: getattestationresponsibleset
         // landed in hub 71ad2eb and that stack predates it, so only a venue hub
         // can, and only while it is up.
-        const federation = await captureFederationState(venue, requestId, providerId + ':pre-assert')
-        console.log('AT1 FEDERATION CAPTURE ' + JSON.stringify(federation, null, 1))
+        // WAITED FOR, NOT READ ONCE, and this was a real defect rather than a
+        // tidy-up. The previous form mined past the hubs' confirmation depth and
+        // then read the mirror IMMEDIATELY, giving the round no time at all: the
+        // hubs poll rather than subscribe, then fetch from the provider, then run
+        // PROPOSE/PREPARE/COMMIT across three processes, then write and gossip
+        // the row, which the indexers then have to stream and clear their barrier
+        // on. That is tens of seconds on a good run. The bare read therefore
+        // reported "0 mirror rows" for a round that was working correctly and
+        // simply had not finished, which is indistinguishable in the failure
+        // output from a mirror that never delivered.
+        //
+        // The shared helper is what the other drills already use, and it also
+        // captures the federation state before AND after, so the responsible set
+        // is recorded while the request is still pending, which is the only
+        // moment it can be read at all.
+        const rowsPerIndexer = await waitForMirrorRowEverywhere(venue, requestId, null, {
+            // MINES WHILE WAITING: the responsible-set widening ladder is
+            // height-driven, so a still chain sits at widen 0 for the whole
+            // budget and a round that needs one more slot never gets it.
+            mineWhileWaiting: 40,
+        })
 
-        const rowsPerIndexer = []
-        for (const ix of venue.indexers) {
-            const rows = await venue.readMirrorRows(ix.index, { requestId })
-            assert.strictEqual(rows.length, 1,
-                providerId + ': indexer ' + ix.index + ' holds ' + rows.length +
-                ' mirror rows for ' + requestId + ', expected exactly 1.\n' +
-                // THE HUB TAILS, and they are the half this message needs and
-                // a bare indexer-only dump omits. Since the venue adopts the roster, a clean draw with
-                // no finalized row is now the COMMON failure rather than an
-                // impossible one, and its cause is always in a hub buffer: a
-                // provider fetch that failed, a body over the cap, a PREPARE
-                // nobody answered, a round that timed out. Printing only the
-                // indexer sent the previous investigation to block parsing.
-                responsibleHubTails(venue, federation) + '\n' +
-                venue.logTail('indexer' + ix.index))
-            assert.strictEqual(String(rows[0].status), 'ok',
-                providerId + ': mirror row status is ' + rows[0].status + ' on indexer ' + ix.index)
-            rowsPerIndexer.push(rows[0])
+        for (const [i, row] of rowsPerIndexer.entries()) {
+            assert.strictEqual(String(row.status), 'ok',
+                providerId + ': mirror row status is ' + row.status + ' on indexer ' + i +
+                ', so the round finalized a NON-OK outcome rather than failing to deliver. ' +
+                'provider_error means the fetch itself failed and the hub logs say why.')
         }
 
         // Both indexers followed DIFFERENT hubs, so identical rows here is the
