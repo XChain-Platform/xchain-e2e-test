@@ -26,8 +26,10 @@ describe('parity harness LTC daemon pin', function () {
     let src;
     before(function () { src = fs.readFileSync(SCRIPT, 'utf8'); });
 
-    it('pins litecoind via LTC_NODE_VERSION_PIN with a vX.Y.Z default', function () {
-        const m = src.match(/LTC_NODE_VERSION_PIN="\$\{LTC_NODE_VERSION_PIN:-(v\d+\.\d+\.\d+)\}"/);
+    // Litecoin tags carry three or four numeric components (v0.21.4, v0.21.5.6),
+    // so the default is matched loosely rather than to a fixed component count.
+    it('pins litecoind via LTC_NODE_VERSION_PIN with a released-tag default', function () {
+        const m = src.match(/LTC_NODE_VERSION_PIN="\$\{LTC_NODE_VERSION_PIN:-(v\d+(?:\.\d+){2,3})\}"/);
         expect(m, 'LTC_NODE_VERSION_PIN default missing from run-multichain-parity.sh').to.not.equal(null);
     });
 
