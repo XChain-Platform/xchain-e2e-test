@@ -510,21 +510,32 @@ async function startAttestTestServer (opts) {
  * rather than to shorten this wait, because a shortened wait does not fail, it
  * silently returns to the failure above.
  *
+ * THE BUDGET IS DELIBERATELY LARGE, and 60 minutes was measured to be too small.
+ * A genesis-to-tip replay is roughly forty minutes on a quiet box, but the rate
+ * is not a property of the code: it collapsed to one to four blocks a minute
+ * when a sibling repo's CI perf tier ran on the same host, and a run that had
+ * already spent half an hour then failed on the budget rather than on anything
+ * it was testing. Since this barrier polls to a CONDITION, a generous budget
+ * costs nothing on a healthy box and is the difference between a real verdict
+ * and a wasted hour on a loaded one.
+ *
  * @param {object} venue
  * @param {object} [opts]
- * @param {number} [opts.timeoutMs]  total budget (default 60 minutes)
+ * @param {number} [opts.timeoutMs]  total budget (default 150 minutes)
  * @param {number} [opts.maxLag]     blocks behind its own decoder still counted
  *                                   as caught up (default 1)
  */
 async function waitForVenueIndexersAtTip (venue, opts) {
     const o = opts || {}
-    const timeoutMs = Number(o.timeoutMs || 60 * 60 * 1000)
+    const timeoutMs = Number(o.timeoutMs || 150 * 60 * 1000)
     const maxLag    = Number.isFinite(Number(o.maxLag)) ? Number(o.maxLag) : 1
     const deadline  = Date.now() + timeoutMs
     const started   = Date.now()
 
     let last = null
     let announced = false
+    let lastReport = Date.now()
+    let lastWorst = null
     while (Date.now() < deadline) {
         const seen = []
         for (const ix of venue.indexers) {
@@ -551,18 +562,40 @@ async function waitForVenueIndexersAtTip (venue, opts) {
             return seen
         }
 
-        // Announced ONCE, with the arithmetic, because the first time anyone sees
-        // this wait they need to know it is progress rather than a hang.
+        const worst = readable.reduce((a, s) => Math.max(a, s.decoder - s.height), 0)
+
+        // Announced ONCE at the start, then PROGRESS every couple of minutes.
+        //
+        // NO PREDICTED DURATION, and that is a correction rather than an
+        // omission. The first version printed an estimate derived from a blocks
+        // per minute constant, and the rate is not constant: measured across one
+        // catch-up it ran about 265 blocks a minute over the empty early chain,
+        // about 60 over the later chain that carries real transaction volume, and
+        // about 1 while a sibling's CI saturated the host. Three samples, three
+        // answers, and the printed estimate was wrong every time. What a reader
+        // actually needs is whether the number is still moving, so that is what
+        // is printed.
         if (!announced) {
             announced = true
-            const worst = readable.reduce((a, s) => Math.max(a, s.decoder - s.height), 0)
             console.log('mirrorDrillFixture: holding until the venue indexers catch the chain. ' +
                 'Behind by up to ' + worst + ' block(s) (' +
                 seen.map((s) => s.index + '=' + s.height + '/' + s.decoder).join(', ') +
-                '). NOTHING IS MINED while this runs, deliberately: these nodes parse about 50 ' +
-                'blocks a minute and every mined block is one more to chase. Expect roughly ' +
-                Math.ceil(worst / 50) + ' minute(s).')
+                '). NOTHING IS MINED while this runs, deliberately: every mined block is one more ' +
+                'for these nodes to chase. Progress is reported below; no duration is predicted ' +
+                'because the replay rate varies by more than two orders of magnitude with chain ' +
+                'content and host load.')
+        } else if (Date.now() - lastReport >= 120000) {
+            lastReport = Date.now()
+            const moved = lastWorst === null ? null : (lastWorst - worst)
+            console.log('mirrorDrillFixture: catching up, ' + worst + ' block(s) behind (' +
+                seen.map((s) => s.index + '=' + s.height).join(', ') + ')' +
+                (moved === null ? '' :
+                    ', closed ' + moved + ' in the last 2 min' +
+                    (moved <= 0 ? ' -- NOT ADVANCING, check host load before waiting further' : '')) +
+                '.')
+            lastWorst = worst
         }
+        if (lastWorst === null) lastWorst = worst
         await new Promise((r) => setTimeout(r, 5000))
     }
 
