@@ -13,49 +13,62 @@
  * contact legal@dankest.llc.
  *
  **********************************************************************
- * The staking prologue every attest-mirror drill needs before it has a venue.
+ * The prologue every attest-mirror drill needs before it has a venue.
  *
- * WHY THIS IS NOT A METHOD ON THE VENUE. `AttestMirrorVenue` deliberately does
- * not stake: it takes `opts.identities` and expects them to be selectable
- * already. So the order is forced, identities first, staked second, venue
- * third, and a helper that hung off the venue could not run early enough to
- * matter. This is the thing you call to GET a venue, not a thing you call on
- * one.
+ * WHY THIS IS NOT A METHOD ON THE VENUE. `AttestMirrorVenue` takes
+ * `opts.identities` and expects them to be selectable already, so the order is
+ * forced: identities resolved first, venue second. A helper hanging off the
+ * venue could not run early enough to matter. This is the thing you call to GET
+ * a venue, not a thing you call on one.
  *
- * AT1 through AT6 all need the same prologue and AT0 needs none of it (it never
- * makes a request), so this exists to keep five drills from each growing their
- * own copy of a sequence whose every step has a non-obvious failure mode:
+ * THIS MODULE NO LONGER STAKES ANYTHING, and that reversal is the most
+ * expensive lesson the ladder has. It used to stake five fresh identities per
+ * run, on the belief that a well-funded venue would win the draw. Stake does not
+ * work that way: `AttestationRound._computeResponsibleSet` uses stake as a
+ * PRE-FILTER and then ranks by `sha256(requestId || pubkey)`, so staking
+ * alongside a standing roster never buys selection priority, it only DILUTES the
+ * pool with keys whose hubs are not in this mesh. Five AT1 drives died of it,
+ * every one presenting as "the mirror produced no row", which sent the
+ * investigation to the mirror instead of to the roster. The operator's ruling of
+ * 2026-09-04 replaced it: no provider floor, no new stake, the venue RUNS AS THE
+ * ROSTER.
  *
- *   - Stake below the PROVIDER floor and the responsible set silently excludes
- *     the hub. THE TWO PROVIDERS DO NOT SHARE A FLOOR, which is what an
- *     earlier version of this note got wrong: `http_get` is 10000 and `llm` is
- *     25000 (ProviderRegistry.js DEFAULTS, read at HEAD). A stake of 15000
- *     therefore cleared http_get and could NEVER clear llm, so every venue
- *     identity was filtered out before the ranking for an llm request, the
- *     responsible set came back short, admission refused it, and the EXECUTE
- *     rolled back with no valid execution row. That is not a wait that needs
- *     more patience; it is a request that can never be served.
- *   - Mine too few blocks after staking and the request's capability snapshot,
- *     which resolves at the request block BURIED by CANONICAL_REORG_BUFFER,
- *     cannot see the stake. The symptom is not a missing stake: a responsible
- *     set smaller than REDUNDANCY is rejected at admission, the rejected
- *     emission throws, and the EXECUTE rolls back to a failed status nowhere
- *     near the stake that caused it.
+ * So the surviving non-obvious failure modes are these:
+ *
+ *   - A SEATED KEY WITH NO LIVE HUB IS FATAL, not merely unlucky.
+ *     `AttestationConsensus` needs `max(quorum, redundancy)` valid signatures
+ *     with the quorum measured over the PRE-widening set size, and
+ *     `_handleCommit` accepts signatures only from responsible-set members. At
+ *     redundancy 3 that is three signatures from the three drawn members, so one
+ *     drawn member without a signer stalls the round to timeout. Wherever
+ *     redundancy equals the whole live set, one orphaned seated key is not a
+ *     probability, it is a guarantee of failure for every draw containing it.
+ *     `provisionDrillIdentities` refuses rather than running that lottery.
+ *   - The PROVIDER floor filters the seated set per provider BEFORE the ranking,
+ *     and the two providers do not share a floor: `http_get` is 10000 and `llm`
+ *     is 25000 (ProviderRegistry.js DEFAULTS). Filtering only ever removes
+ *     members, so it cannot introduce a foreign one, but it can shrink the set
+ *     below redundancy, and then the round is skipped as unfinalizable and the
+ *     request expires at its deadline with nothing anywhere near the floor that
+ *     caused it.
  *   - Fund and mint without letting the stack settle in between and the
  *     encoder's `unconfirmed=false` UTXO lookup intermittently crashes against
  *     a mid-batch tracker. That one reads as flake rather than as ordering.
  *
  * Every drill here runs against the STANDING regtest chain, which is the only
- * chain there is: the venue borrows it. Two live venues therefore stake into
- * one roster and are each other's pollution, so drills using this fixture must
- * be serialized, not parallelized.
+ * chain there is: the venue borrows it. Two live venues would run hubs for the
+ * SAME roster identities and be each other's equivocation, so drills using this
+ * fixture must be serialized, not parallelized, and a roll-call drive must not
+ * overlap one either.
  *
- * The harness globals (`indexerDatabase`, `regtestMinerConnector`,
- * `utxoTrackerConnector`, `COIN`, `NETWORK`) come from `test/initialCheck.test.js`,
- * which mocha loads with --require. Same convention as the federation drills.
+ * The harness globals (`indexerDatabase`, `indexerConnector`,
+ * `regtestMinerConnector`, `utxoTrackerConnector`, `COIN`, `NETWORK`) come from
+ * `test/initialCheck.test.js`, which mocha loads with --require. Same
+ * convention as the federation drills.
  ********************************************************************/
 
 const assert = require('assert')
+const crypto = require('crypto')
 const fsx    = require('fs')
 const pathx  = require('path')
 
@@ -65,28 +78,16 @@ const gasHelper    = require('../helpers/gasHelper')
 const vmHelper     = require('../helpers/vmHelper')
 const { loadHubModule } = require('../helpers/multiValidatorHubHelper')
 
-// Clears the attestation capability min_stake (1000) AND the PROVIDER floor,
-// which is enforced on the responsible set at/above STAKE_WEIGHTED_QUORUM,
-// armed at genesis on regtest. A stake clearing only the capability minimum
-// produces a hub that is staked and never selected.
+// How many idle-key generations to sweep when matching a seated key to a seed
+// this harness can sign for.
 //
-// Above the HIGHEST provider floor, not merely above one of them. `llm` is
-// 25000, so anything at or below that makes the llm drills unservable rather
-// than slow. Read from the registry rather than pinned here would be better
-// still, but the registry is the hub's and this is a test fixture; the guard
-// below asserts the relationship instead, so a floor that moves fails loudly.
-const DRILL_STAKE_XCHAIN = '50000.00000000'
-
-// MUST EXCEED DRILL_STAKE_XCHAIN, with headroom for the stake's fee.
-//
-// The stake is paid OUT OF this minted gas, so these two constants are coupled
-// and the coupling is invisible three lines apart: raising the stake without
-// raising this makes every `sendStakeV1` come back invalid for insufficient
-// balance, the prologue dies at identity 1 of 5, and it reads as a staking or
-// roster fault rather than as arithmetic. The guard below asserts BOTH
-// relationships, gas-versus-stake and stake-versus-floor, because a comment
-// stating a relationship is a claim that survives the number changing.
-const DRILL_GAS_XCHAIN = '60000'
+// A SWEEP RATHER THAN A CONFIGURED NUMBER, deliberately. The generation is a
+// ROLL-CALL-side rotation counter: that ladder bumps it whenever it burns a key,
+// and this lane is never told. A stale configured number derives a real, valid,
+// WRONG identity, which fails at the dissemination assertion instead of here.
+// Matching on the resulting PUBKEY is the only comparison that cannot go stale,
+// and the sweep is a handful of local hashes.
+const IDLE_GENERATION_SCAN = 32
 
 // Where a drill's staker keys are kept so a stake is always releasable.
 //
@@ -372,74 +373,260 @@ async function withWedgeClear (what, fn) {
     }
 }
 
-async function stakeDrillIdentities (opts) {
+/**
+ * Derive the pubkey a 32-byte Ed25519 seed signs with, through the hub's OWN
+ * identity module rather than a second derivation written here.
+ */
+function _pubkeyForSeed (seedHex) {
+    const ValidatorIdentity = loadHubModule('src/ValidatorIdentity.js')
+    return String(new ValidatorIdentity(String(seedHex).toLowerCase()).getPubkeyHex()).toLowerCase()
+}
+
+/**
+ * Every seed this harness could possibly hold a signer for, pubkey-keyed.
+ *
+ * THE THREE SIGNING SEEDS are fixed by the roll-call federation and re-exported
+ * rather than retyped, so a harness that can sign for this federation is the
+ * same harness that agrees with its frozen vector.
+ *
+ * THE FOURTH IS THE IDLE KEY, and it is the reason this is a search rather than
+ * a list. Its seed is `sha256('xchain-rollcall-idle|<generation>|<mnemonic>')`,
+ * where the generation is a ROLL-CALL-side rotation counter this lane has no
+ * authority over and no reliable way to be told: that ladder bumps it whenever
+ * it burns a key, and an attest drill configured with a stale number would
+ * derive a real, valid, WRONG identity and fail at the dissemination assertion
+ * rather than here. So generations are swept and the match is made ON THE
+ * PUBKEY, which is the only comparison that cannot be stale.
+ *
+ * The legacy fixed seed is included for the same reason: an unconfigured venue
+ * seats it, and a seated key nobody can sign for is precisely what this whole
+ * function exists to detect.
+ */
+function _knownSignerSeeds () {
+    const rollcall = require('../helpers/rollcallHelper')
+    const seeds = new Map()   // pubkey -> {seedHex, origin}
+
+    const add = (seedHex, origin) => {
+        if (!seedHex || !/^[0-9a-fA-F]{64}$/.test(String(seedHex))) return
+        const hex = String(seedHex).toLowerCase()
+        const pk  = _pubkeyForSeed(hex)
+        if (!seeds.has(pk)) seeds.set(pk, { seedHex: hex, origin: origin })
+    }
+
+    const signing = rollcall.SIGNING_SEEDS || []
+    signing.forEach((s, i) => add(s, 'federation signing seed ' + i))
+
+    // An operator-pinned idle seed wins, exactly as it does in rollcallHelper.
+    add(process.env.XC_ROLLCALL_IDLE_SEED, 'XC_ROLLCALL_IDLE_SEED')
+
+    const mnemonic = process.env.XC_ROLLCALL_FEDERATION_MNEMONIC
+    if (mnemonic) {
+        // The configured generation first, so its origin string names the
+        // configured value when that is what matched.
+        const configured = process.env.XC_ROLLCALL_IDLE_GENERATION
+        const gens = []
+        if (configured !== undefined && configured !== null && String(configured) !== '') {
+            gens.push(String(configured))
+        }
+        for (let g = 0; g <= IDLE_GENERATION_SCAN; g++) gens.push(String(g))
+        for (const g of gens) {
+            add(crypto.createHash('sha256')
+                .update('xchain-rollcall-idle|' + g + '|' + mnemonic, 'utf8')
+                .digest('hex'), 'idle generation ' + g)
+        }
+    }
+
+    add(rollcall.LEGACY_IDLE_SEED, 'the legacy fixed idle seed')
+    return seeds
+}
+
+/**
+ * The seated attestation set at the height a request made NOW would resolve.
+ *
+ * READ AT THE BURIED HEIGHT, NOT AT THE TIP, and the distinction is not
+ * pedantry: `CapabilitySnapshot` subtracts `CANONICAL_REORG_BUFFER` from every
+ * height it is handed, so the set a round actually draws from is the set as it
+ * stood a buffer ago. A tip read and a buried read disagree exactly while a
+ * stake is inside its activation window, which is the window that matters most,
+ * because that is when the roster is changing under the drill.
+ */
+async function readSeatedAttestationSet (opts) {
+    const o = opts || {}
+    const indexer = o.indexer || indexerConnector
+    const stakeTeardown = require('../helpers/stakeTeardown')
+    const buffer = Number(loadHubModule('src/snapshot_reorg_buffer.js').CANONICAL_REORG_BUFFER)
+
+    const tip = await indexer.call('getblockhashes', {})
+    assert.ok(tip && tip.block_index !== undefined && tip.block_index !== null,
+        'mirrorDrillFixture: the indexer would not report a tip, so the seated set cannot be read')
+    const buried = Number(tip.block_index) - buffer
+    assert.ok(Number.isFinite(buried) && buried > 0,
+        'mirrorDrillFixture: computed a nonsensical buried height (' + buried + ') from tip ' +
+        tip.block_index + ' and reorg buffer ' + buffer)
+
+    const set = await stakeTeardown.readCapabilitySet({
+        indexer: indexer, capability: 'attestation', blockIndex: buried,
+    })
+    // NO VERDICT rather than an empty one. An unreadable set says nothing about
+    // the roster, and treating it as clean is how a drill talks itself into
+    // running against a roster it never saw.
+    assert.ok(set && !set.error,
+        'mirrorDrillFixture: could not read the seated attestation set at buried block ' + buried +
+        (set && set.error ? ' (' + set.error + ')' : '') +
+        '. This is an INSTRUMENT failure and NOT evidence that the roster is clean.')
+    assert.ok(set.pubkeys.length > 0,
+        'mirrorDrillFixture: the attestation capability is EMPTY at buried block ' + buried +
+        ', so no responsible set can be drawn at all and every request would be refused at admission.')
+
+    return { set: set, tipBlock: Number(tip.block_index), buriedBlock: buried, reorgBuffer: buffer }
+}
+
+/**
+ * Provision the identities the venue's hubs sign with, by ADOPTING THE ROSTER
+ * rather than adding to it.
+ *
+ * THIS REPLACED A STAKING PROLOGUE, and the reason is the single most expensive
+ * lesson this ladder has: the responsible set is drawn from EVERY staked
+ * validator carrying the attestation capability, ranked by
+ * `sha256(requestId || pubkey)`, with stake acting only as a pre-filter
+ * (`AttestationRound._computeResponsibleSet`). Stake is therefore a FILTER and
+ * never a RANK, so staking new identities alongside a standing roster does not
+ * win the draw, it DILUTES it: the venue's keys compete with keys whose hubs are
+ * not in this mesh, and a draw containing one of those can never finalize.
+ *
+ * WHY IT CAN NEVER FINALIZE, since "it might work sometimes" is the belief that
+ * cost five runs: `AttestationConsensus` computes `needed = max(quorum,
+ * redundancy)` with the quorum measured over the PRE-widening set size, so at
+ * redundancy 3 it needs THREE valid signatures, and `_handleCommit` accepts
+ * signatures only from responsible-set members. One drawn member with no live
+ * hub means the round stalls to timeout. It does not degrade, it does not
+ * widen its way out on the first pass, and it presents as "the mirror produced
+ * no row", which points the investigation at the mirror instead of the roster.
+ *
+ * So the venue runs AS the roster: every seated key gets a live hub here, and
+ * the draw is venue-only BY CONSTRUCTION for any redundancy and any ranking.
+ * That is the operator's 2026-09-04 ruling (no provider floor, no new stake),
+ * and it is also the only form that stays correct when the roster changes size,
+ * which it did DURING this build, between one read and the next.
+ *
+ * WHAT THIS REFUSES TO DO, deliberately: it will not run with a seated key it
+ * cannot sign for. That is a 1-in-4 lottery at four seated keys and redundancy
+ * 3, and a drill that fails three times in four is worse than one that refuses
+ * once, because a lottery loss is indistinguishable from a real defect.
+ *
+ * @param {object} opts
+ * @param {number} [opts.count]        hub count to provision for (default 5)
+ * @param {number} [opts.redundancy]   the redundancy the drill's contract asks
+ *                                     for, checked against the eligible set
+ * @returns {Promise<{identities, adopted, observers, seated, buriedBlock}>}
+ */
+async function provisionDrillIdentities (opts) {
     const o     = opts || {}
     const label = String(o.label || 'drill').replace(/[^A-Za-z0-9]/g, '')
     const count = Number(o.count || 5)
-    const amount = String(o.amount || DRILL_STAKE_XCHAIN)
-    assert.ok(label, 'mirrorDrillFixture: a label is required; it names the funded addresses')
+    const redundancy = Number(o.redundancy || 3)
+    assert.ok(label, 'mirrorDrillFixture: a label is required; it names the drill in refusals')
     assert.ok(Number.isInteger(count) && count > 0, 'mirrorDrillFixture: count must be a positive integer')
 
-    // Resolved BEFORE any chain work, so a misconfigured chain refuses in
-    // seconds rather than after five funded addresses and a staking loop.
-    const visibilityBlocks = stakeVisibilityBlocks(o.coinTick || COIN, o.network || NETWORK)
+    const reading = await readSeatedAttestationSet({ indexer: o.indexer })
+    const seated  = reading.set
+    const known   = _knownSignerSeeds()
 
-    const ValidatorIdentity = loadHubModule('src/ValidatorIdentity.js')
-    const identities = []
-    const stakers    = []
-
-    for (let i = 0; i < count; i++) {
-        const id = ValidatorIdentity.generate()
-        identities.push({ pubkeyHex: id.pubkeyHex, privkeyHex: id.privkeyHex })
-
-        // A separate source address per stake: stake weight is per source, and
-        // one address staking five times is not the same roster as five
-        // addresses staking once.
-        const stakerLabel = label + '-staker-' + i
-        // WRAPPED, and the reason is a hole found only by driving it: this call
-        // seeds gas INTERNALLY (`seedGas` defaults true, and cryptoHelper mints
-        // 100 XCHAIN inside it), so the mint that actually died in run 1 was one
-        // level BELOW the ensureGasBalance below, which was the only mint the
-        // first version of this protection covered. Retry is safe: getNewAddress
-        // is keyed by label and returns the same wallet, so a second attempt
-        // funds the same address rather than minting a new identity.
-        const addr = await withWedgeClear('funding and gas seed for ' + stakerLabel,
-            () => cryptoHelper.getNewFundedAddress(
-                stakerLabel, COIN, NETWORK, null, 'legacy', 0, 0.02))
-
-        // Recorded BEFORE the stake exists, so the key is on disk no matter
-        // where the run dies afterwards.
-        const wallet = await cryptoHelper.getWallet(stakerLabel)
-        recordStakerKey(label, {
-            staker: stakerLabel,
-            address: addr.address,
-            signingPubkey: id.pubkeyHex,
-            mnemonic: wallet && wallet.mnemonic,
-            stakedAt: new Date().toISOString(),
-        })
-
-        await settleStack()
-        await withWedgeClear('gas mint for ' + stakerLabel,
-            () => gasHelper.ensureGasBalance(addr, DRILL_GAS_XCHAIN))
-        await settleStack()
-
-        // CLEARED BEFORE, NOT WRAPPED AROUND: sendStakeV1 broadcasts and then
-        // waits, so a retry would double-stake this identity.
-        await clearWedgeBefore('stake ' + i + ' for ' + label)
-        const result = await stakeHelper.sendStakeV1(addr, amount, id.pubkeyHex)
-        assert.strictEqual(result.stake.status, 'valid',
-            'mirrorDrillFixture: stake ' + i + ' for ' + label + ' came back ' + result.stake.status +
-            ' rather than valid; the venue built on it would have a short responsible set')
-        stakers.push({ addressInfo: addr, pubkey: id.pubkeyHex })
+    // ── every seated key must have a signer we can actually run ──────────────
+    const adopted = []
+    const orphans = []
+    for (const pk of seated.pubkeys) {
+        const hit = known.get(pk)
+        if (hit) adopted.push({ pubkeyHex: pk, privkeyHex: hit.seedHex, origin: hit.origin })
+        else orphans.push(pk)
     }
 
-    // Past activation AND past the snapshot burial, so a request made now
-    // resolves a capability snapshot that can see every stake above.
-    await regtestMinerConnector.generateBlocks(visibilityBlocks)
-    await settleStack()
+    assert.strictEqual(orphans.length, 0,
+        'mirrorDrillFixture: ' + orphans.length + ' of the ' + seated.pubkeys.length +
+        ' seated attestation validator(s) at buried block ' + reading.buriedBlock +
+        ' have NO signing key this harness can run: ' +
+        orphans.map((p) => p.slice(0, 16)).join(', ') + '.\n' +
+        'A responsible set is drawn from ALL of them and finalization needs max(quorum, redundancy) ' +
+        'signatures from the DRAWN members, so a draw containing one of these stalls to timeout and ' +
+        'reads as a missing mirror row. Refusing rather than running that lottery.\n' +
+        'The idle key is the usual cause: set XC_ROLLCALL_FEDERATION_MNEMONIC (with ' +
+        'XC_ROLLCALL_IDLE_GENERATION) or XC_ROLLCALL_IDLE_SEED so it can be derived, or have the ' +
+        'roll-call lane unstake it. Signers this harness holds: ' +
+        [...known.keys()].map((p) => p.slice(0, 16)).join(', '))
 
-    return { identities, stakers, visibilityBlocks }
+    assert.ok(count >= adopted.length,
+        'mirrorDrillFixture: ' + adopted.length + ' seated key(s) need a hub but the venue is sized ' +
+        'for ' + count + '. Raise the hub count: a seated key without a hub is the refusal above.')
+
+    // ── the eligible set must still be big enough to draw from ───────────────
+    //
+    // The PROVIDER floor filters the seated set BEFORE the ranking, per provider,
+    // and it filters to a SUBSET, so it can never introduce a foreign member.
+    // What it can do is shrink the set below redundancy, and `_computeResponsibleSet`
+    // then returns fewer members than needed, which `AttestationConsensus` skips
+    // as an unfinalizable round: the request sits until its deadline and expires.
+    // Checked through the hub's OWN comparator, never a second one written here,
+    // because a test-side `>=` on decimal strings is exactly the kind of second
+    // implementation this fixture exists to avoid.
+    const AttestationRound = loadHubModule('src/AttestationRound.js')
+    const meetsFloor = AttestationRound.prototype._meetsProviderFloor
+    assert.strictEqual(typeof meetsFloor, 'function',
+        'mirrorDrillFixture: the hub no longer exposes _meetsProviderFloor, so the provider-floor ' +
+        'precondition cannot be checked against the rule the hub actually applies')
+
+    const providerDefaults = loadHubModule('src/ProviderRegistry.js').DEFAULTS || {}
+    const floorReport = []
+    for (const providerId of Object.keys(providerDefaults)) {
+        const floor = providerDefaults[providerId].min_stake_xchain
+        if (floor === undefined || floor === null) continue
+        const eligible = seated.pubkeys.filter((pk) => {
+            const v = seated.byPubkey.get(pk)
+            return meetsFloor.call(null, v && v.weight, floor)
+        })
+        floorReport.push({ providerId: providerId, floor: String(floor), eligible: eligible.length })
+        assert.ok(eligible.length >= redundancy,
+            'mirrorDrillFixture: provider ' + providerId + ' declares min_stake_xchain ' + floor +
+            ' and only ' + eligible.length + ' of ' + seated.pubkeys.length + ' seated validator(s) ' +
+            'clear it at buried block ' + reading.buriedBlock + ', which is below the redundancy of ' +
+            redundancy + '. The responsible set comes back SHORT, the round is skipped as ' +
+            'unfinalizable, and the request expires at its deadline with no response and no error ' +
+            'anywhere near the floor that caused it.')
+    }
+
+    // ── the remaining hubs are deliberate OUTSIDERS ──────────────────────────
+    //
+    // Unstaked, in the mesh, and never in a responsible set. AT2 needs at least
+    // one: its whole claim is that an indexer following a hub OUTSIDE the set
+    // derives the identical rows, and a venue whose every hub is responsible
+    // cannot state that claim at all.
+    const ValidatorIdentity = loadHubModule('src/ValidatorIdentity.js')
+    const identities = adopted.map((a) => ({ pubkeyHex: a.pubkeyHex, privkeyHex: a.privkeyHex }))
+    const observers  = []
+    for (let i = adopted.length; i < count; i++) {
+        const gen = ValidatorIdentity.generate()
+        identities.push({ pubkeyHex: gen.pubkeyHex, privkeyHex: gen.privkeyHex })
+        observers.push(gen.pubkeyHex)
+    }
+
+    console.log('mirrorDrillFixture: adopted the roster for ' + label + ' at buried block ' +
+        reading.buriedBlock + ' (tip ' + reading.tipBlock + ', reorg buffer ' + reading.reorgBuffer + '): ' +
+        adopted.length + ' seated key(s) each given a live hub [' +
+        adopted.map((a) => a.pubkeyHex.slice(0, 16) + ' via ' + a.origin).join('; ') + '], plus ' +
+        observers.length + ' unstaked observer hub(s). Eligible per provider: ' +
+        floorReport.map((f) => f.providerId + ' ' + f.eligible + '/' + seated.pubkeys.length).join(', ') +
+        '. NOTHING WAS STAKED.')
+
+    return {
+        identities:  identities,
+        adopted:     adopted,
+        observers:   observers,
+        seated:      seated,
+        buriedBlock: reading.buriedBlock,
+        tipBlock:    reading.tipBlock,
+        floors:      floorReport,
+    }
 }
+
 
 /**
  * Fund an owner and deploy a contract that requests an attestation.
@@ -547,9 +734,11 @@ function assertResponsibleSetIsVenueOnly (venue, federation) {
     assert.strictEqual(foreign.length, 0,
         'the responsible set contains ' + [...new Set(foreign)].join(', ') + ', which this venue ' +
         'does not run, so the round cannot reach quorum and nothing downstream of it is being ' +
-        'tested. The provider stake floor is what excludes non-venue validators before the ' +
-        'ranking; this means it is not in effect, is too low for the standing roster\'s weight, ' +
-        'or was written for the wrong coin/network. Venue hubs: ' + [...ours].join(', '))
+        'tested. Since the venue ADOPTS the roster rather than staking into it, this means a key ' +
+        'was seated that `provisionDrillIdentities` did not give a hub: either the roster changed ' +
+        'mid-run (it activates on a delay, so a stake made before the drill can seat during it), ' +
+        'or the venue was sized for fewer hubs than there are seated keys. Re-read the seated set ' +
+        'at the buried height and compare. Venue hubs: ' + [...ours].join(', '))
 }
 
 /**
@@ -640,7 +829,8 @@ async function readContractState (venue, indexerIndex, contractIndex) {
 }
 
 module.exports = {
-    stakeDrillIdentities,
+    provisionDrillIdentities,
+    readSeatedAttestationSet,
     withWedgeClear,
     assertResponsibleSetIsVenueOnly,
     clearWedgeBefore,
@@ -652,6 +842,10 @@ module.exports = {
     queryVenueDb,
     readAppliedResponse,
     readContractState,
-    DRILL_STAKE_XCHAIN,
-    DRILL_GAS_XCHAIN,
+    IDLE_GENERATION_SCAN,
+    // Exported for the unit tier only: these are the two pure pieces of the
+    // adoption decision, and a guard that cannot reach them can only test
+    // adoption by standing up a chain.
+    _knownSignerSeeds,
+    _pubkeyForSeed,
 }

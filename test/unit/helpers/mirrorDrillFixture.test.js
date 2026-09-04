@@ -91,7 +91,7 @@ describe('mirrorDrillFixture: stake visibility distance', function () {
     })
 
     it('defaults to BTC when given nothing, rather than throwing on an absent argument', () => {
-        // The drills call it through stakeDrillIdentities, which passes the
+        // The drills reach it through the prologue, which passes the
         // harness COIN; a bare call is the developer-console path and should
         // answer for the chain the drills use.
         assert.strictEqual(stakeVisibilityBlocks(), Number(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS))
@@ -279,8 +279,34 @@ describe('mirrorDrillFixture: clearWedgeBefore, and the broadcast-safety rule it
             'double-stake or deploy twice; precede it with clearWedgeBefore instead')
 
         // And the protection is actually present rather than merely absent.
-        assert.ok(/clearWedgeBefore\('stake /.test(code), 'the stake broadcast lost its pre-clear')
         assert.ok(/clearWedgeBefore\('contract deploy /.test(code), 'the deploy broadcast lost its pre-clear')
+    })
+
+    // THE STAKE BROADCAST IS GONE, AND THAT IS THE RULING RATHER THAN A CLEANUP.
+    //
+    // This guard replaced one asserting the stake's pre-clear was present, which
+    // became a guard for the opposite of what the fixture is now supposed to do.
+    // The venue ADOPTS the seated roster instead of staking into it, because
+    // stake is a pre-filter and never a rank, so a new stake cannot win a draw
+    // and only dilutes the pool with keys whose hubs are not in this mesh.
+    //
+    // Re-introducing a stake here would not fail loudly. It would seat a key,
+    // the roster would grow by one, and roughly one draw in four would contain a
+    // member some later run has no signer for, which presents as a missing
+    // mirror row forty minutes in. So the absence is pinned.
+    it('does not stake, because the venue adopts the roster instead', function () {
+        const src = require('fs').readFileSync(fixturePath, 'utf8')
+        const code = src.split('\n')
+            .filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l))
+            .join('\n')
+
+        assert.ok(!/sendStakeV1/.test(code),
+            'mirrorDrillFixture broadcasts a stake again. The venue adopts the seated roster; a ' +
+            'fresh stake dilutes the draw with a key no venue hub signs for, which is the failure ' +
+            'that cost this ladder five AT1 drives.')
+        assert.ok(/provisionDrillIdentities/.test(code),
+            'the adoption entry point is gone; this guard must not pass vacuously against a file ' +
+            'that simply no longer does anything')
     })
 })
 
@@ -405,68 +431,154 @@ describe('mirrorDrillFixture: queryVenueDb selects the database it validates', f
     })
 })
 
-describe('mirrorDrillFixture: the drill stake clears every provider floor', function () {
-    const { DRILL_STAKE_XCHAIN } = require('../../attestMirror/mirrorDrillFixture')
+describe('mirrorDrillFixture: the venue adopts the roll-call roster', function () {
+    const { _pubkeyForSeed, _knownSignerSeeds, IDLE_GENERATION_SCAN } =
+        require('../../attestMirror/mirrorDrillFixture')
+    const rollcall = require('../../helpers/rollcallHelper')
+    const crypto   = require('crypto')
 
-    // WHY THIS IS A TEST AND NOT A COMMENT. A comment asserting the floor is a
-    // claim nobody re-reads, and the two providers declare DIFFERENT floors in
-    // another repo: http_get 10000, llm 25000. A stake between them clears one
-    // provider and silently disqualifies the other.
+    // THE WHOLE DESIGN RESTS ON THIS ONE EQUALITY, so it is pinned rather than
+    // trusted: the keys seated for the attestation capability on the regtest
+    // chain are the roll-call federation's three fixed signing seeds. If that
+    // ever stops being true, the venue is back to competing with validators it
+    // does not run, which is the failure that cost this ladder five drives.
     //
-    // The consequence is not a slow drill, it is an unservable one: the identity
-    // is filtered out before the ranking, the responsible set comes back short,
-    // admission refuses the request, and the EXECUTE rolls back with no valid
-    // execution row. Nothing in that chain of events mentions a stake floor.
-    it('exceeds the highest min_stake_xchain any provider declares', function () {
-        const registry = loadHubModule('src/ProviderRegistry.js')
-        const defaults = registry.DEFAULTS || registry.PROVIDER_DEFAULTS
-        assert.ok(defaults && typeof defaults === 'object',
-            'could not read the provider DEFAULTS; this guard must not pass vacuously')
+    // Pinned as PUBKEYS, read off the chain on 2026-09-04 at buried block 5370
+    // and again at tip 5387. A future roster change should fail HERE, loudly,
+    // rather than as a stalled round forty minutes into a drill.
+    const SEATED_ON_REGTEST_2026_09_04 = [
+        'd04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737',
+        'a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f0',
+        '17cb79fb2b4120f2b1ec65e4198d6e08b28e813feb01e4a400839b85e18080ce',
+    ]
 
-        const floors = Object.keys(defaults).map((id) => ({
-            id: id, floor: Number(defaults[id].min_stake_xchain),
-        })).filter((f) => Number.isFinite(f.floor))
+    it('derives the seated roster pubkeys from the federation signing seeds', function () {
+        const derived = (rollcall.SIGNING_SEEDS || []).map((s) => _pubkeyForSeed(s))
+        assert.deepStrictEqual(derived.slice().sort(), SEATED_ON_REGTEST_2026_09_04.slice().sort(),
+            'the three federation signing seeds no longer derive the three keys measured as seated ' +
+            'for the attestation capability. Either the seeds moved or the roster did; until they ' +
+            'agree again the venue cannot adopt the roster and every draw containing an unadopted ' +
+            'key stalls its round to timeout.')
+    })
 
-        assert.ok(floors.length >= 2,
-            'expected at least the http_get and llm providers, got ' + floors.length)
+    it('derives a pubkey through the hub module, not a second implementation', function () {
+        // Cross-checked against the hub's own identity class rather than against
+        // a literal, so a change in the hub's derivation fails here instead of
+        // producing hubs whose pubkeys nobody can match to a seat.
+        const ValidatorIdentity = loadHubModule('src/ValidatorIdentity.js')
+        const seed = '11'.repeat(32)
+        assert.strictEqual(_pubkeyForSeed(seed),
+            new ValidatorIdentity(seed).getPubkeyHex().toLowerCase())
+    })
 
-        const highest = floors.reduce((a, b) => (b.floor > a.floor ? b : a))
-        assert.ok(Number(DRILL_STAKE_XCHAIN) > highest.floor,
-            'the drill stakes ' + DRILL_STAKE_XCHAIN + ' but provider ' + highest.id +
-            ' requires more than ' + highest.floor + '. A stake at or below a provider floor does ' +
-            'not make its drill slow, it makes it UNSERVABLE: the identity is filtered out before ' +
-            'the ranking, the responsible set comes back short, and the EXECUTE rolls back.')
+    it('holds a signer for every federation signing seed', function () {
+        const known = _knownSignerSeeds()
+        for (const seed of (rollcall.SIGNING_SEEDS || [])) {
+            assert.ok(known.has(_pubkeyForSeed(seed)),
+                'no signer held for federation seed deriving ' + _pubkeyForSeed(seed).slice(0, 16))
+        }
+    })
+
+    it('holds the legacy idle seed, because an unconfigured venue seats it', function () {
+        const known = _knownSignerSeeds()
+        assert.ok(known.has(_pubkeyForSeed(rollcall.LEGACY_IDLE_SEED)),
+            'the legacy idle key can be seated by an unconfigured roll-call venue, and a seated ' +
+            'key with no signer is exactly what the adoption precondition exists to refuse')
+    })
+
+    it('SWEEPS idle generations, so a rotated generation still resolves', function () {
+        // The generation is a roll-call-side counter this lane is never told, so
+        // the sweep is what keeps a rotation from silently deriving a valid but
+        // WRONG identity. Driven with a stand-in mnemonic at a generation well
+        // above any configured one.
+        const saved = process.env.XC_ROLLCALL_FEDERATION_MNEMONIC
+        const savedGen = process.env.XC_ROLLCALL_IDLE_GENERATION
+        try {
+            process.env.XC_ROLLCALL_FEDERATION_MNEMONIC = 'a stand-in mnemonic for this guard'
+            delete process.env.XC_ROLLCALL_IDLE_GENERATION
+            const gen = IDLE_GENERATION_SCAN            // the last one swept
+            const seed = crypto.createHash('sha256')
+                .update('xchain-rollcall-idle|' + gen + '|' + process.env.XC_ROLLCALL_FEDERATION_MNEMONIC, 'utf8')
+                .digest('hex')
+            const known = _knownSignerSeeds()
+            assert.ok(known.has(_pubkeyForSeed(seed)),
+                'generation ' + gen + ' is inside the sweep and must resolve')
+            assert.strictEqual(known.get(_pubkeyForSeed(seed)).origin, 'idle generation ' + gen)
+        } finally {
+            if (saved === undefined) delete process.env.XC_ROLLCALL_FEDERATION_MNEMONIC
+            else process.env.XC_ROLLCALL_FEDERATION_MNEMONIC = saved
+            if (savedGen === undefined) delete process.env.XC_ROLLCALL_IDLE_GENERATION
+            else process.env.XC_ROLLCALL_IDLE_GENERATION = savedGen
+        }
+    })
+
+    it('does NOT resolve a generation past the sweep, so the bound is real', function () {
+        const saved = process.env.XC_ROLLCALL_FEDERATION_MNEMONIC
+        try {
+            process.env.XC_ROLLCALL_FEDERATION_MNEMONIC = 'a stand-in mnemonic for this guard'
+            const beyond = IDLE_GENERATION_SCAN + 1
+            const seed = crypto.createHash('sha256')
+                .update('xchain-rollcall-idle|' + beyond + '|' + process.env.XC_ROLLCALL_FEDERATION_MNEMONIC, 'utf8')
+                .digest('hex')
+            assert.ok(!_knownSignerSeeds().has(_pubkeyForSeed(seed)),
+                'a generation past the sweep must NOT resolve; a guard that matches everything ' +
+                'would never let the adoption precondition refuse')
+        } finally {
+            if (saved === undefined) delete process.env.XC_ROLLCALL_FEDERATION_MNEMONIC
+            else process.env.XC_ROLLCALL_FEDERATION_MNEMONIC = saved
+        }
+    })
+
+    it('lets an explicitly pinned idle seed resolve', function () {
+        const saved = process.env.XC_ROLLCALL_IDLE_SEED
+        try {
+            process.env.XC_ROLLCALL_IDLE_SEED = '5a'.repeat(32)
+            const known = _knownSignerSeeds()
+            const pk = _pubkeyForSeed('5a'.repeat(32))
+            assert.ok(known.has(pk), 'XC_ROLLCALL_IDLE_SEED must resolve')
+            assert.strictEqual(known.get(pk).origin, 'XC_ROLLCALL_IDLE_SEED')
+        } finally {
+            if (saved === undefined) delete process.env.XC_ROLLCALL_IDLE_SEED
+            else process.env.XC_ROLLCALL_IDLE_SEED = saved
+        }
     })
 })
 
-describe('mirrorDrillFixture: the minted gas covers the stake it pays for', function () {
-    const { DRILL_STAKE_XCHAIN, DRILL_GAS_XCHAIN } = require('../../attestMirror/mirrorDrillFixture')
+describe('mirrorDrillFixture: the provider floor is INCLUSIVE at equality', function () {
+    // THE ADOPTED ROSTER LEANS ON THIS EXACTLY, which is why it is a test.
+    //
+    // Two of the seated validators carry weight 25000 and the `llm` provider
+    // declares min_stake_xchain 25000, so the entire llm half of AT1 hangs on
+    // the comparison being `>=` rather than `>`. If the hub ever tightens it,
+    // the eligible set for llm drops from four to two, falls below redundancy 3,
+    // and every llm round is skipped as unfinalizable: the request expires at
+    // its deadline with nothing anywhere near the floor that caused it.
+    //
+    // Driven through the hub's OWN comparator rather than a re-implementation,
+    // because a second implementation of a consensus filter in the test tree is
+    // the thing this fixture exists to avoid.
+    it('admits a validator whose weight equals the floor exactly', function () {
+        const AttestationRound = loadHubModule('src/AttestationRound.js')
+        const meets = AttestationRound.prototype._meetsProviderFloor
+        assert.strictEqual(typeof meets, 'function',
+            'the hub no longer exposes _meetsProviderFloor; the adoption precondition checks the ' +
+            'floor through it and cannot silently fall back to a local comparison')
 
-    // THE SECOND RELATIONSHIP IN THE SAME THREE LINES. The stake is paid out of
-    // the minted gas, so raising one without the other makes every sendStakeV1
-    // come back invalid for insufficient balance. The prologue then dies at
-    // identity 1 of 5 and presents as a staking or roster fault, nowhere near
-    // the two constants that disagree.
-    it('mints strictly more gas than the stake it must pay', function () {
-        const stake = Number(DRILL_STAKE_XCHAIN)
-        const gas   = Number(DRILL_GAS_XCHAIN)
-        assert.ok(Number.isFinite(stake) && Number.isFinite(gas),
-            'both constants must be numeric, got stake=' + DRILL_STAKE_XCHAIN + ' gas=' + DRILL_GAS_XCHAIN)
-        assert.ok(gas > stake,
-            'the drill mints ' + gas + ' gas and then stakes ' + stake + ' out of it, so every ' +
-            'sendStakeV1 comes back invalid for insufficient balance and the prologue dies at ' +
-            'identity 1 of 5, reading as a staking fault rather than as arithmetic')
+        assert.strictEqual(meets.call(null, '25000.00000000', '25000'), true,
+            'weight exactly at the floor must be ADMITTED; two seated validators sit exactly here')
+        assert.strictEqual(meets.call(null, '24999.99999999', '25000'), false,
+            'a weight below the floor must be refused, or this guard proves nothing')
+        assert.strictEqual(meets.call(null, '300000.00000000', '25000'), true)
     })
 
-    it('leaves headroom above the stake rather than matching it exactly', function () {
-        // An exact match pays the stake and nothing else, and the stake carries a
-        // fee. Headroom is what stops a fee schedule change from reproducing the
-        // insufficient-balance failure with no constant having moved.
-        const stake = Number(DRILL_STAKE_XCHAIN)
-        const gas   = Number(DRILL_GAS_XCHAIN)
-        assert.ok(gas - stake >= stake * 0.1,
-            'gas ' + gas + ' leaves only ' + (gas - stake) + ' above a stake of ' + stake +
-            '; the stake pays a fee out of the same balance, so this wants real headroom')
+    it('reads the llm floor from the registry rather than a literal here', function () {
+        const defaults = loadHubModule('src/ProviderRegistry.js').DEFAULTS || {}
+        assert.ok(defaults.llm && defaults.llm.min_stake_xchain !== undefined,
+            'could not read the llm provider floor; this guard must not pass vacuously')
+        assert.strictEqual(String(defaults.llm.min_stake_xchain), '25000',
+            'the llm floor moved. The seated roster carries two validators at exactly 25000, so a ' +
+            'floor above that drops the eligible set below redundancy and makes every llm round ' +
+            'unfinalizable. Re-measure the seated weights before changing this number.')
     })
 })
 
@@ -498,8 +610,9 @@ describe('mirrorDrillFixture: assertResponsibleSetIsVenueOnly', function () {
             assert.ok(/7e3aa9d750d51883/.test(e.message), 'must name every foreign member, not the first')
             assert.ok(!/cc5d20c35ade8568,/.test(e.message.split('Venue hubs:')[0]),
                 'must not accuse the member that IS a venue hub')
-            assert.ok(/provider stake floor/.test(e.message),
-                'must point at the mechanism, since that is what the reader has to change')
+            assert.ok(/ADOPTS the roster/.test(e.message),
+                'must point at the mechanism, since that is what the reader has to change: the ' +
+                'venue adopts the roster, so a foreign member means a seated key got no hub')
             return true
         })
     })

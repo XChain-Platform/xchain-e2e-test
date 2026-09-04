@@ -56,7 +56,7 @@ dotenv.config()
 
 const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
-    stakeDrillIdentities, deployRequestContract, readContractState,
+    provisionDrillIdentities, deployRequestContract, readContractState,
     readAppliedResponse,
 } = require('./mirrorDrillFixture')
 const {
@@ -128,7 +128,7 @@ describe('AT4: a reorg moves the applied response with the chain, in both direct
             })
         })
 
-        const staked = await stakeDrillIdentities({ label: 'at4', count: 5 })
+        const staked = await provisionDrillIdentities({ label: 'at4', count: 5, redundancy: 3 })
         venue = new AttestMirrorVenue({ label: 'at4', identities: staked.identities })
         up = await venue.start()
         if (!up) {

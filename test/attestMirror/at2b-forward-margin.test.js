@@ -68,7 +68,7 @@ dotenv.config()
 
 const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
-    stakeDrillIdentities, deployRequestContract,
+    provisionDrillIdentities, deployRequestContract,
 } = require('./mirrorDrillFixture')
 const {
     APPLIED_FIELDS, until, untilOrClearDogeStall, diffRows, diffStateHashes,
@@ -159,7 +159,7 @@ describe('AT2 second clause: delivery past the forward margin holds the barrier 
             })
         })
 
-        const staked = await stakeDrillIdentities({ label: 'at2b', count: 5 })
+        const staked = await provisionDrillIdentities({ label: 'at2b', count: 5, redundancy: 3 })
         venue = new AttestMirrorVenue({
             label: 'at2b',
             identities: staked.identities,

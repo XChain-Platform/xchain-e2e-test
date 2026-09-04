@@ -49,9 +49,11 @@
  * request: it would wait forever and read as a consensus failure. Every
  * positive assertion reads a VENUE indexer.
  *
- * SERIALIZED, not parallel. The venue does not stake; this drill stakes into the
- * one standing regtest roster, so two live venues are each other's pollution and
- * the symptom is a wrong responsible set rather than an obvious clash.
+ * SERIALIZED, not parallel. This drill does not stake: it ADOPTS the standing
+ * regtest roster, giving every seated key one of this venue's hubs so the draw is
+ * venue-only by construction. Two live venues would therefore run hubs for the
+ * SAME identities and be each other's equivocation, and a roll-call drive must
+ * not overlap one either.
  ********************************************************************/
 
 const assert = require('assert')
@@ -62,10 +64,10 @@ dotenv.config()
 const fs = require('fs')
 const { AttestMirrorVenue, assertLlmAvailable } = require('../helpers/attestMirrorVenue')
 const {
-    stakeDrillIdentities, deployRequestContract, settleStack,
+    provisionDrillIdentities, deployRequestContract, settleStack,
     readAppliedResponse, readContractState,
 } = require('./mirrorDrillFixture')
-const { findEmittedAttestRequest, captureFederationState } = require('./mirrorDrillWaits')
+const { findEmittedAttestRequest, captureFederationState, responsibleHubTails } = require('./mirrorDrillWaits')
 const vmHelper = require('../helpers/vmHelper')
 
 // The applier's own synthesis, imported rather than reimplemented: the hash is
@@ -139,7 +141,7 @@ function llmRunnableHere () {
 }
 
 describe('AT1: an ATTEST response finalizes over P2P with no transaction of its own', function () {
-    // Staking prologue, five hub processes, two indexers bootstrapping schemas,
+    // Roster adoption, five hub processes, two indexers bootstrapping schemas,
     // then a PBFT round per provider.
     this.timeout(45 * 60 * 1000)
 
@@ -167,7 +169,7 @@ describe('AT1: an ATTEST response finalizes over P2P with no transaction of its 
 
         // Staked BEFORE the venue exists, because the venue takes the identities
         // and expects them already selectable.
-        const staked = await stakeDrillIdentities({ label: 'at1', count: 5 })
+        const staked = await provisionDrillIdentities({ label: 'at1', count: 5, redundancy: 3 })
 
         // needsLlm only when this box can actually serve it. Declared
         // unconditionally it refuses the whole drill, http_get included, on every
@@ -292,7 +294,15 @@ describe('AT1: an ATTEST response finalizes over P2P with no transaction of its 
             const rows = await venue.readMirrorRows(ix.index, { requestId })
             assert.strictEqual(rows.length, 1,
                 providerId + ': indexer ' + ix.index + ' holds ' + rows.length +
-                ' mirror rows for ' + requestId + ', expected exactly 1\n' +
+                ' mirror rows for ' + requestId + ', expected exactly 1.\n' +
+                // THE HUB TAILS, and they are the half this message needs and
+                // a bare indexer-only dump omits. Since the venue adopts the roster, a clean draw with
+                // no finalized row is now the COMMON failure rather than an
+                // impossible one, and its cause is always in a hub buffer: a
+                // provider fetch that failed, a body over the cap, a PREPARE
+                // nobody answered, a round that timed out. Printing only the
+                // indexer sent the previous investigation to block parsing.
+                responsibleHubTails(venue, federation) + '\n' +
                 venue.logTail('indexer' + ix.index))
             assert.strictEqual(String(rows[0].status), 'ok',
                 providerId + ': mirror row status is ' + rows[0].status + ' on indexer ' + ix.index)

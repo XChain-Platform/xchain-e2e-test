@@ -60,7 +60,7 @@ dotenv.config()
 
 const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
-    stakeDrillIdentities, deployRequestContract, readContractState,
+    provisionDrillIdentities, deployRequestContract, readContractState,
 } = require('./mirrorDrillFixture')
 const {
     APPLIED_FIELDS, STATE_HASH_FIELDS, until, diffRows, diffStateHashes,
@@ -134,7 +134,7 @@ describe('AT2: a hub outside the responsible set disseminates the response, iden
 
         // Staked BEFORE the venue exists: the venue does not stake, it takes the
         // identities and expects them already selectable.
-        const staked = await stakeDrillIdentities({ label: 'at2', count: 5 })
+        const staked = await provisionDrillIdentities({ label: 'at2', count: 5, redundancy: 3 })
 
         // needsLlm is false: AT2 says nothing about the llm provider and one
         // `http_get` request carries the whole claim, so requiring a model

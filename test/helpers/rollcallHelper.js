@@ -1680,6 +1680,7 @@ module.exports = {
     SIGNING_SEEDS,
     federationSeeds,
     IDLE_SEED_INDEX,
+    LEGACY_IDLE_SEED,
     reentrySeed,
     sleep,
     mineBtcTo,

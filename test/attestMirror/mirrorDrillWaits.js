@@ -835,8 +835,56 @@ async function waitForMirrorRowEverywhere (venue, requestId, timeoutMs, opts) {
         'draw that included a staked key belonging to no running hub does exactly this, and the ' +
         'responsible set printed above says whether that happened), while hubs holding one and an ' +
         'indexer without it is a mirror fault.\n' +
+        responsibleHubTails(venue, after) + '\n' +
         venue.logTail('indexer0') + '\n' + venue.logTail('indexer1'))
     return seen.rows.map((r) => r[0])
+}
+
+/**
+ * The log tails of the hubs that were RESPONSIBLE for a request.
+ *
+ * WHY THE HUB TAILS AND NOT JUST THE INDEXERS'. A missing mirror row has
+ * two candidate explanations and the capture separates them: a draw
+ * containing a key with no live signer, or a genuine mirror fault. Since the
+ * venue adopts the roster, the first one is gone by construction, and the
+ * capture now routinely reports a CLEAN draw with no hub holding a row. That
+ * combination says the round did not finalize even though every drawn member
+ * was live, and the reason for that is only ever in the hubs' own logs: a
+ * provider fetch that failed, a body over the cap, a PREPARE nobody answered, a
+ * round that timed out. The indexer tails, which is all a
+ * bare failure prints, cannot contain it, and dumping them alone sent the last investigation
+ * looking at block parsing while the answer sat in a hub buffer.
+ *
+ * Tails only the RESPONSIBLE hubs, because the other two are not participants
+ * and their buffers would push the useful lines out of a terminal.
+ */
+function responsibleHubTails (venue, capture) {
+    if (!venue || !Array.isArray(venue.hubs)) return '  (no venue hubs to tail)'
+
+    // The capture reports pubkeys truncated to 16 chars, so match on that prefix
+    // rather than re-deriving a full key that is not present.
+    const drawn = new Set()
+    for (const h of ((capture && capture.hubs) || [])) {
+        if (Array.isArray(h.responsible)) for (const m of h.responsible) drawn.add(String(m))
+    }
+    if (drawn.size === 0) return '  (no responsible set was readable, so no hub could be tailed)'
+
+    const parts = []
+    for (const hub of venue.hubs) {
+        if (!drawn.has(String(hub.pubkey).slice(0, 16))) continue
+        // Labelled the way allHubTails labels, so the two are readable side by
+        // side in one failure and a reader never has to work out which is which.
+        parts.push('--- responsible hub ' + hub.index + ' (' + String(hub.pubkey).slice(0, 16) + ') ---\n' +
+            venue.logTail('hub' + hub.index))
+    }
+    if (parts.length === 0) {
+        // Every drawn member is foreign. Say so rather than printing nothing:
+        // an empty section reads as "the hubs were quiet", which is the opposite
+        // of what this means.
+        return '  NONE of the drawn members is a hub this venue runs, so there are no logs to show ' +
+               'and the round could never have finalized. Drawn: ' + [...drawn].join(', ')
+    }
+    return parts.join('\n')
 }
 
 /**
@@ -1248,6 +1296,7 @@ module.exports = {
     clearBeforeBroadcast,
     venueTipProbe,
     allHubTails,
+    responsibleHubTails,
     standingTipProbe,
     diffRows,
     diffStateHashes,

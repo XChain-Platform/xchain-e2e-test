@@ -62,7 +62,7 @@ dotenv.config()
 
 const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
-    stakeDrillIdentities, deployRequestContract, readContractState,
+    provisionDrillIdentities, deployRequestContract, readContractState,
     readAppliedResponse,
 } = require('./mirrorDrillFixture')
 const {
@@ -137,7 +137,7 @@ describe('AT3: the deadline decides whether a mirrored response ever binds', fun
             })
         })
 
-        const staked = await stakeDrillIdentities({ label: 'at3', count: 5 })
+        const staked = await provisionDrillIdentities({ label: 'at3', count: 5, redundancy: 3 })
         venue = new AttestMirrorVenue({ label: 'at3', identities: staked.identities, forwardS: FORWARD_S })
         up = await venue.start()
         if (!up) {

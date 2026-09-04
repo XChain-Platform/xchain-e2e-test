@@ -64,7 +64,7 @@ dotenv.config()
 
 const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
-    stakeDrillIdentities, deployRequestContract, queryVenueDb, withWedgeClear,
+    provisionDrillIdentities, deployRequestContract, queryVenueDb, withWedgeClear,
 } = require('./mirrorDrillFixture')
 const {
     untilOrClearDogeStall, waitForMirrorRowEverywhere, waitForAppliedEverywhere,
@@ -274,7 +274,7 @@ describe('AT5: the responses of a window land on chain as one batch', function (
             })
         })
 
-        const staked = await stakeDrillIdentities({ label: 'at5', count: 5 })
+        const staked = await provisionDrillIdentities({ label: 'at5', count: 5, redundancy: 3 })
         venue = new AttestMirrorVenue({
             label: 'at5',
             identities: staked.identities,

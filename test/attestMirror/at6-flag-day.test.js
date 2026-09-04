@@ -63,7 +63,7 @@ dotenv.config()
 
 const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
-    stakeDrillIdentities, deployRequestContract, readContractState, withWedgeClear,
+    provisionDrillIdentities, deployRequestContract, readContractState, withWedgeClear,
 } = require('./mirrorDrillFixture')
 const {
     untilOrClearDogeStall, waitForMirrorRowEverywhere,
@@ -137,7 +137,7 @@ describe('AT6: above the flag day the chain cannot deliver a response, and the e
             })
         })
 
-        const staked = await stakeDrillIdentities({ label: 'at6', count: 5 })
+        const staked = await provisionDrillIdentities({ label: 'at6', count: 5, redundancy: 3 })
         venue = new AttestMirrorVenue({ label: 'at6', identities: staked.identities })
         up = await venue.start()
         if (!up) {
