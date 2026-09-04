@@ -152,7 +152,11 @@ describe('ROLLCALL acceptance: the DOGE proof barrier and the publish reward (AT
         await rc.tickAll(ctx.mvh)
         await rc.mineDoge(ctx, 3)
         await rc.tickAll(ctx.mvh)
-        await rc.mineDoge(ctx, 2)
+        // A ROLLCALL rides the two-phase P2SH lane, so a publish that has
+        // returned is not yet indexed: wait for the DOGE side to HOLD all three
+        // rather than mining a fixed few blocks and reading (the race both AT6
+        // legs lost on 2026-09-03).
+        await rc.waitForOnChainSigners(ctx, E, ctx.roster.slice(0, 3).map(r => r.pubkey))
 
         const onChain = await rc.dogeSigners(ctx, E)
         assert.strictEqual(onChain.length, 3,
@@ -337,29 +341,50 @@ describe('ROLLCALL acceptance: the DOGE proof barrier and the publish reward (AT
             assert.strictEqual(await nodeConnector.getBlockCount(), C - 1,
                 'the node must roll back to the block before the close')
 
-            const need = tipBefore - (C - 1) + 2
-            for (let i = 0; i < need; i++) await nodeConnector.generateBlock(minerAddr, [])
-            assert.ok(await nodeConnector.getBlockCount() > tipBefore, 'the competing chain must overtake the original')
-
-            let gone = false
+            // Read the rollback BEFORE the competing chain exists, the way AT3
+            // does. The close is a height event, so the replacement block at C
+            // re-closes the same epoch and re-derives the same reward; asserting
+            // "gone" after that block is mined races the re-parse and can only
+            // pass by luck.
+            let after = null, row = null, gone = false
             const deadline = Date.now() + 180000
             while (Date.now() < deadline){
-                const after = await rc.rollcallRewards(ctx, E)
-                const row   = await rc.rollcallRow(ctx, E)
-                gone = (after.length === 0) && (row === null)
+                after = await rc.rollcallRewards(ctx, E)
+                row   = await rc.rollcallRow(ctx, E)
+                gone  = (after.length === 0) && (row === null)
                 if (gone) break
                 await rc.sleep(2000)
             }
-            const after = await rc.rollcallRewards(ctx, E)
             assert.deepStrictEqual(after, [],
                 'AT10: a rollback of the close block ' + C + ' must delete the rollcall_publish reward for epoch ' +
                 E + '. Its own block_index is ' + E + ', far below the rollback height, so the earn-block delete ' +
                 'cannot reach it: only `DELETE FROM validator_rewards WHERE derive_block_index >= ?` can. A row ' +
                 'surviving here is a COLLECT-spendable credit a freshly synced node does not have.')
-            assert.strictEqual(await rc.rollcallRow(ctx, E), null,
+            assert.strictEqual(row, null,
                 'the `rollcalls` row for epoch ' + E + ' must be deleted with it')
+
+            const need = tipBefore - (C - 1) + 2
+            for (let i = 0; i < need; i++) await nodeConnector.generateBlock(minerAddr, [])
+            assert.ok(await nodeConnector.getBlockCount() > tipBefore, 'the competing chain must overtake the original')
         } finally {
             await regtestMinerConnector.resumeMining()
         }
+
+        // The re-parse must derive the reward exactly ONCE again: the delete
+        // above plus one re-derivation, never a survivor beside a fresh row.
+        await rc.mineBtcTo(ctx, C, 'reparse of the close')
+        let rederived = []
+        const deadline2 = Date.now() + 180000
+        while (Date.now() < deadline2){
+            rederived = await rc.rollcallRewards(ctx, E)
+            if (rederived.length) break
+            await rc.sleep(2000)
+        }
+        assert.strictEqual(rederived.length, 1,
+            'AT10: the re-parsed close at ' + C + ' must mint the reward exactly once again, got ' +
+            rederived.length + ': ' + JSON.stringify(rederived))
+        assert.strictEqual(String(rederived[0].signing_pubkey).toLowerCase(), leaderPubkey,
+            'the re-derived reward must go to the same elected leader')
+        assert.strictEqual(Number(rederived[0].derive_block_index), C)
     })
 })
