@@ -96,8 +96,16 @@ async function settleStack () {
  * responsible set. Comparing the two here turns that into a refusal with the
  * numbers in it.
  */
-function stakeVisibilityBlocks (coinTick, network) {
-    const tick = String(coinTick || 'BTC').toUpperCase()
+function stakeVisibilityBlocks (coin, network) {
+    // The harness's COIN global is the FULL NAME ('bitcoin'), while the registry
+    // is keyed by TICKER ('BTC'), so a caller passing COIN straight through asks
+    // the registry for 'BITCOIN' and gets refused. Accept either and translate
+    // through the registry's own map rather than a second table here.
+    const registry = loadHubModule('src/coins/index.js')
+    const raw  = String(coin || 'BTC').toUpperCase()
+    const tick = registry.FULL_NAME_TO_TICK
+        ? (registry.FULL_NAME_TO_TICK[raw] || registry.FULL_NAME_TO_TICK[raw.toLowerCase()] || raw)
+        : raw
     const net  = String(network || 'regtest')
     const shared = Number(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
     const burial = Number(loadHubModule('src/snapshot_reorg_buffer.js').CANONICAL_REORG_BUFFER)
@@ -109,7 +117,7 @@ function stakeVisibilityBlocks (coinTick, network) {
     // delegate.js, stake.js), so this reads the same place they do.
     let activation = null
     try {
-        const staking = loadHubModule('src/coins/index.js').getCoinConfig(tick, net).STAKING
+        const staking = registry.getCoinConfig(tick, net).STAKING
         activation = staking && Number(staking.ACTIVATION_DELAY_BLOCKS)
     } catch (e) {
         assert.fail('mirrorDrillFixture: could not read STAKING.ACTIVATION_DELAY_BLOCKS for ' +

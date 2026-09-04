@@ -59,7 +59,8 @@ const http   = require('http')
 const dotenv = require('dotenv')
 dotenv.config()
 
-const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
+const fs = require('fs')
+const { AttestMirrorVenue, assertLlmAvailable } = require('../helpers/attestMirrorVenue')
 const {
     stakeDrillIdentities, deployRequestContract, settleStack,
     readAppliedResponse, readContractState,
@@ -102,6 +103,40 @@ module.exports = {
 };
 `
 
+/**
+ * Can THIS box serve the llm provider, asked with the venue's own predicate?
+ *
+ * Asked rather than assumed because the two halves the provider needs live on
+ * different boxes today: the workstation has the `claude` binary and no
+ * credential directory, the venue box has the directory and keeps the binary off
+ * a non-interactive PATH, and the shared harness .env names a path that is only
+ * correct on one of them. Declaring needsLlm unconditionally therefore refuses
+ * the WHOLE drill on either box, including the http_get half that needs no
+ * credentials at all.
+ *
+ * So the drill degrades honestly instead: http_get runs anywhere, llm runs where
+ * it can and SKIPS WITH THE REASON where it cannot. The skip is loud and names
+ * the missing half, because a silent skip here would let AT1 report green while
+ * proving half of what it claims. AT1 is not satisfied until both have run
+ * somewhere, and the frontier says so rather than counting this file's exit code.
+ *
+ * The probe uses `assertLlmAvailable` and the same two predicates the venue
+ * passes it, so this can never disagree with the refusal it is trying to
+ * anticipate.
+ */
+function llmRunnableHere () {
+    const dir = process.env.HUB_CLAUDE_CONFIG_DIR || null
+    try {
+        assertLlmAvailable({ claudeConfigDir: dir, pathEnv: process.env.PATH }, {
+            dirExists: (p) => { try { return fs.statSync(p).isDirectory() } catch (_) { return false } },
+            isExecutable: (p) => { try { fs.accessSync(p, fs.constants.X_OK); return true } catch (_) { return false } },
+        })
+        return { ok: true, why: null }
+    } catch (e) {
+        return { ok: false, why: (e && e.message) || String(e) }
+    }
+}
+
 describe('AT1: an ATTEST response finalizes over P2P with no transaction of its own', function () {
     // Staking prologue, five hub processes, two indexers bootstrapping schemas,
     // then a PBFT round per provider.
@@ -112,8 +147,12 @@ describe('AT1: an ATTEST response finalizes over P2P with no transaction of its 
     let httpServer = null
     let testUrl    = null
     let contract   = null
+    let llm        = { ok: false, why: 'not probed' }
 
     before(async function () {
+        llm = llmRunnableHere()
+        if (!llm.ok) console.log('AT1: the llm case will SKIP on this box.\n' + llm.why)
+
         await new Promise((resolve) => {
             httpServer = http.createServer((_req, res) => {
                 res.writeHead(200, { 'Content-Type': 'application/json' })
@@ -129,15 +168,13 @@ describe('AT1: an ATTEST response finalizes over P2P with no transaction of its 
         // and expects them already selectable.
         const staked = await stakeDrillIdentities({ label: 'at1', count: 5 })
 
-        // needsLlm, because the second case drives that provider and the venue
-        // then refuses at start() unless a credential directory really exists on
-        // this box and `claude` is executable on the PATH the hubs will get.
-        // Declared even though the first case does not need it: one venue serves
-        // both, and discovering the gap after a round has started costs the whole
-        // prologue. The two halves live on different boxes today, so this refusal
-        // is load-bearing rather than defensive.
+        // needsLlm only when this box can actually serve it. Declared
+        // unconditionally it refuses the whole drill, http_get included, on every
+        // box we have; probed, the venue still refuses if the probe and the
+        // reality ever disagree, because start() re-checks with the same
+        // predicate rather than trusting this flag.
         venue = new AttestMirrorVenue({
-            label: 'at1', identities: staked.identities, needsLlm: true,
+            label: 'at1', identities: staked.identities, needsLlm: llm.ok,
         })
         up = await venue.start()
         if (!up) {
@@ -249,6 +286,12 @@ describe('AT1: an ATTEST response finalizes over P2P with no transaction of its 
     })
 
     it('settles an llm request with no transaction, on both indexers', async function () {
+        if (!llm.ok) {
+            // Skipped, not passed. AT1 names both providers, so this file going
+            // green with this case skipped does NOT satisfy AT1, and the reason
+            // is printed above rather than left to whoever reads a pending dot.
+            this.skip()
+        }
         // Deterministic arithmetic so five hubs' models agree byte for byte;
         // byte-equality is what the round converges on.
         await driveAndAssert('llm', JSON.stringify({ prompt: 'What is 2+2? Reply with only the number.' }),

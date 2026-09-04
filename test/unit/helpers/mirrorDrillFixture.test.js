@@ -66,6 +66,23 @@ describe('mirrorDrillFixture: stake visibility distance', function () {
             /24 activation \+ 6 burial = 30/)
     })
 
+    it('takes the harness COIN global, which is a full name and not a ticker', () => {
+        // The bug this caught on AT1's first run. The harness sets COIN to
+        // 'bitcoin' while the registry is keyed by 'BTC', so passing COIN
+        // straight through asked for 'BITCOIN' and the guard refused. It
+        // refused CORRECTLY, which is why this is a translation fix rather than
+        // a loosened rule: the drill would otherwise have staked and mined the
+        // wrong number of blocks against a chain nobody had checked.
+        assert.strictEqual(stakeVisibilityBlocks('bitcoin', 'regtest'),
+            Number(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS))
+        assert.strictEqual(stakeVisibilityBlocks('BITCOIN', 'regtest'),
+            Number(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS))
+        // And the full names still route to the per-chain answer rather than
+        // collapsing to BTC's: dogecoin must refuse exactly as DOGE does.
+        assert.throws(() => stakeVisibilityBlocks('dogecoin', 'regtest'),
+            /60 activation \+ 6 burial = 66/)
+    })
+
     it('refuses a coin it cannot resolve rather than falling back to a default', () => {
         // A silent default here is the whole failure mode: it would hand back 14
         // for a chain nobody checked.
