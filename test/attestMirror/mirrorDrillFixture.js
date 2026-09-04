@@ -915,9 +915,10 @@ async function readAppliedResponse (venue, indexerIndex, requestId) {
         // records itself. `actions` has `source_id`, not `source`, and it has NO
         // `tx_hash` at all: the hash lives on `transactions`, and a mirror-applied
         // action deliberately has no transaction, which is the entire claim. And
-        // `attests` spells its status `request_status`, never `status_id`.
+        // `attests` carries BOTH `request_status` and `status_id`, so both are read.
         'SELECT a.action_index, a.block_index, a.tx_index, a.source_id, ' +
         '       r.request_id, r.response_status, r.response_payload, r.request_status, ' +
+        '       r.status_id, ' +
         '       r.response_hash, r.callback_execute_action_index ' +
         'FROM attests r JOIN actions a ON a.action_index = r.action_index ' +
         'WHERE r.request_id = ? AND r.version = 1 ' +

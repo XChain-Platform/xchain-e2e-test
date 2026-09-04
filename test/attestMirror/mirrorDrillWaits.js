@@ -91,8 +91,15 @@ async function readAppliedResponse (venue, indexerIndex, requestId) {
     const ix = venue.indexers[indexerIndex]
     assert.ok(ix, 'mirrorDrillWaits: no indexer ' + indexerIndex)
     const rows = await queryDb(venue, ix.indexerDbName,
-        'SELECT a.action_index, a.block_index, a.tx_index, a.tx_hash, a.source, ' +
+        // NO a.tx_hash AND NO a.source: neither column exists. `actions` spells it
+        // `source_id`, and the transaction hash lives on `transactions` alone, which
+        // a mirror-applied action deliberately has no row in. This is the SECOND
+        // copy of this query in the drill tree, and fixing only the other one left
+        // every caller that comes through the waits helper still running the
+        // broken text.
+        'SELECT a.action_index, a.block_index, a.tx_index, a.source_id, ' +
         '       r.request_id, r.response_status, r.response_payload, r.status_id, ' +
+        '       r.response_hash, r.request_status, ' +
         '       r.callback_execute_action_index ' +
         'FROM attests r JOIN actions a ON a.action_index = r.action_index ' +
         'WHERE r.request_id = ? AND r.version = 1 ' +
@@ -219,8 +226,12 @@ let btcSinceDogeKeepUp = 0
  * `tx_index` and `tx_hash` are here because they carry the tx-less claim: NULL
  * and the deterministic synthesis respectively.
  */
+// NO tx_hash. It is not a column of anything a mirror-applied action touches, so
+// including it compared undefined against undefined on every node pair: a field
+// that can never differ weakens a cross-node diff instead of strengthening it.
+// `response_hash` replaces it and carries the same claim with real content.
 const APPLIED_FIELDS = Object.freeze([
-    'action_index', 'block_index', 'tx_index', 'tx_hash',
+    'action_index', 'block_index', 'tx_index', 'response_hash',
     'response_status', 'response_payload', 'status_id',
     'callback_execute_action_index',
 ])
@@ -975,7 +986,10 @@ async function readResponseRows (venue, indexerIndex, requestId) {
     const ix = venue.indexers[indexerIndex]
     assert.ok(ix, 'mirrorDrillWaits: no indexer ' + indexerIndex)
     return await queryDb(venue, ix.indexerDbName,
-        'SELECT a.action_index, a.block_index, a.tx_index, a.tx_hash, ' +
+        // a.tx_hash removed: the column does not exist, and a tx-less action has no
+        // transactions row to carry one. The discriminator this reader documents is
+        // tx_index, which does exist and is NULL exactly for the synthesized row.
+        'SELECT a.action_index, a.block_index, a.tx_index, r.response_hash, ' +
         '       r.request_id, r.response_status, r.response_payload, r.validator_signatures, ' +
         '       r.callback_execute_action_index, r.batch_action_index, s.status AS verdict ' +
         'FROM attests r ' +

@@ -251,10 +251,20 @@ describe('AT4: a reorg moves the applied response with the chain, in both direct
             const diffs = diffRows(reapplied.rows[0], reapplied.rows[1], APPLIED_FIELDS)
             assert.deepStrictEqual(diffs, [],
                 'keep: the two nodes re-bound the response differently after the reorg: ' + diffs.join('; '))
-            assert.strictEqual(String(reapplied.rows[0].tx_hash), String(before[0].tx_hash),
-                'keep: the synthetic TX_HASH changed across the reorg (' + before[0].tx_hash + ' to ' +
-                reapplied.rows[0].tx_hash + '). It is derived from the tag, network and request id, none of ' +
-                'which a reorg touches, so a change means it is being derived from something chain-dependent.')
+            // THE SYNTHETIC HASH CANNOT BE READ BACK, so the claim is made on what
+            // can. The hash is never persisted: `tx_hash` is a column of
+            // `transactions`, and the whole point of this row is that it has no
+            // transaction. Asserting on it compared undefined to undefined and
+            // could not fail. What a reorg would actually disturb, if the applier
+            // derived anything from chain position, is the response hash and the
+            // action the response binds to, so those are compared instead.
+            for (const field of ['response_hash', 'action_index']) {
+                assert.strictEqual(String(reapplied.rows[0][field]), String(before[0][field]),
+                    'keep: ' + field + ' changed across the reorg (' + before[0][field] + ' to ' +
+                    reapplied.rows[0][field] + '). The response is derived from the tag, network and ' +
+                    'request id, none of which a reorg touches, so a change means something ' +
+                    'chain-dependent is leaking into it.')
+            }
 
             const state = await readContractState(venue, 0, contract.contractIndex)
             assert.strictEqual(JSON.parse(state['status_keep']), 'ok',
