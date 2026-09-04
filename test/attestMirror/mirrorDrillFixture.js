@@ -484,6 +484,98 @@ async function startAttestTestServer (opts) {
 }
 
 /**
+ * Hold until every venue indexer has caught the chain, BEFORE any request is
+ * made, mining nothing while it waits.
+ *
+ * THIS IS THE BARRIER THE WHOLE LADDER WAS MISSING, and its absence is what
+ * every "not applied" reading in this spec has actually been. The venue builds
+ * FRESH indexer databases each run and replays the borrowed chain from its start
+ * height, so at the moment `start()` returns they are hundreds or thousands of
+ * blocks behind the tip. A drill that then makes a request at the tip is asking
+ * a node about a block it has not reached: the mirror row is delivered, valid
+ * and applicable, and the applier is never offered it, which surfaces as
+ * `applied [null,null]` and reads exactly like a broken applier. Measured
+ * 2026-09-04: the venue indexers ran 3249 to 4253 across a twenty-minute drill
+ * whose request sat at 5577.
+ *
+ * MINING WHILE WAITING IS THE TRAP, so this refuses to do it and callers must
+ * not either. These indexers parse roughly fifty blocks a minute; every mined
+ * block is one more they must chase, so a wait that mines is a race the drill
+ * loses by design. With mining stopped the gap closes monotonically.
+ *
+ * THE COST IS REAL AND IT GROWS, which is worth stating rather than hiding: the
+ * catch-up is proportional to how far the shared chain has advanced since the
+ * venue's start height, so it lengthens every session this ladder runs. When it
+ * stops being tolerable the fix is to seed the venue databases near the tip
+ * rather than to shorten this wait, because a shortened wait does not fail, it
+ * silently returns to the failure above.
+ *
+ * @param {object} venue
+ * @param {object} [opts]
+ * @param {number} [opts.timeoutMs]  total budget (default 60 minutes)
+ * @param {number} [opts.maxLag]     blocks behind its own decoder still counted
+ *                                   as caught up (default 1)
+ */
+async function waitForVenueIndexersAtTip (venue, opts) {
+    const o = opts || {}
+    const timeoutMs = Number(o.timeoutMs || 60 * 60 * 1000)
+    const maxLag    = Number.isFinite(Number(o.maxLag)) ? Number(o.maxLag) : 1
+    const deadline  = Date.now() + timeoutMs
+    const started   = Date.now()
+
+    let last = null
+    let announced = false
+    while (Date.now() < deadline) {
+        const seen = []
+        for (const ix of venue.indexers) {
+            let s = null
+            try { s = await venue.statusOf(ix.index) } catch (_) { s = null }
+            const b = (s && s.body) || {}
+            seen.push({
+                index:   ix.index,
+                height:  Number.isFinite(Number(b.indexerBlock)) ? Number(b.indexerBlock) : null,
+                decoder: Number.isFinite(Number(b.decoderBlock)) ? Number(b.decoderBlock) : null,
+                reason:  b.stallReason || null,
+                klass:   b.stallClass || null,
+            })
+        }
+        last = seen
+
+        const readable = seen.filter((s) => s.height !== null && s.decoder !== null)
+        const caught = readable.length === seen.length &&
+            readable.every((s) => (s.decoder - s.height) <= maxLag)
+        if (caught) {
+            console.log('mirrorDrillFixture: venue indexers caught the chain after ' +
+                Math.round((Date.now() - started) / 1000) + 's at ' +
+                seen.map((s) => s.index + '=' + s.height).join(', '))
+            return seen
+        }
+
+        // Announced ONCE, with the arithmetic, because the first time anyone sees
+        // this wait they need to know it is progress rather than a hang.
+        if (!announced) {
+            announced = true
+            const worst = readable.reduce((a, s) => Math.max(a, s.decoder - s.height), 0)
+            console.log('mirrorDrillFixture: holding until the venue indexers catch the chain. ' +
+                'Behind by up to ' + worst + ' block(s) (' +
+                seen.map((s) => s.index + '=' + s.height + '/' + s.decoder).join(', ') +
+                '). NOTHING IS MINED while this runs, deliberately: these nodes parse about 50 ' +
+                'blocks a minute and every mined block is one more to chase. Expect roughly ' +
+                Math.ceil(worst / 50) + ' minute(s).')
+        }
+        await new Promise((r) => setTimeout(r, 5000))
+    }
+
+    assert.fail('mirrorDrillFixture: the venue indexers did not catch the chain within ' +
+        timeoutMs + 'ms: ' +
+        (last || []).map((s) => 'indexer ' + s.index + ' at ' + s.height + ' of ' + s.decoder +
+            (s.reason ? ' (' + s.klass + '/' + s.reason + ')' : '')).join('; ') +
+        '. Making a request now would put it at a block these nodes have not reached, and the ' +
+        'response would read as "not applied" when the node simply has not got there yet. If they ' +
+        'are not advancing at all, check the stall reason above rather than extending this budget.')
+}
+
+/**
  * Derive the pubkey a 32-byte Ed25519 seed signs with, through the hub's OWN
  * identity module rather than a second derivation written here.
  */
@@ -947,6 +1039,7 @@ async function readContractState (venue, indexerIndex, contractIndex) {
 
 module.exports = {
     provisionDrillIdentities,
+    waitForVenueIndexersAtTip,
     startAttestTestServer,
     readSeatedAttestationSet,
     withWedgeClear,

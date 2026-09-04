@@ -72,7 +72,7 @@ dotenv.config()
 const fs = require('fs')
 const { AttestMirrorVenue, assertLlmAvailable } = require('../helpers/attestMirrorVenue')
 const {
-    provisionDrillIdentities, startAttestTestServer, deployRequestContract, settleStack,
+    provisionDrillIdentities, waitForVenueIndexersAtTip, startAttestTestServer, deployRequestContract, settleStack,
     readAppliedResponse, readContractState,
 } = require('./mirrorDrillFixture')
 const {
@@ -186,6 +186,12 @@ describe('AT1: an ATTEST response finalizes over P2P with no transaction of its 
             console.log('AT1 SKIPPED: ' + venue.unavailable)
             this.skip()
         }
+
+        // BEFORE ANY REQUEST. The venue's indexers replay the borrowed chain from
+        // scratch, so at this point they are far behind the tip. A request made now
+        // sits at a block they have not reached, and its response reads as "not
+        // applied" when the node simply has not got there yet.
+        await waitForVenueIndexersAtTip(venue)
 
         // ONE CONTRACT PER PROVIDER, and this is a correctness requirement rather
         // than tidiness.

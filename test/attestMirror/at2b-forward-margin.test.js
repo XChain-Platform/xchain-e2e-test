@@ -67,7 +67,7 @@ dotenv.config()
 
 const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
-    provisionDrillIdentities, startAttestTestServer, deployRequestContract,
+    provisionDrillIdentities, waitForVenueIndexersAtTip, startAttestTestServer, deployRequestContract,
 } = require('./mirrorDrillFixture')
 const {
     APPLIED_FIELDS, until, untilOrClearDogeStall, diffRows, diffStateHashes,
@@ -167,6 +167,12 @@ describe('AT2 second clause: delivery past the forward margin holds the barrier 
             this.skip()
             return
         }
+
+        // BEFORE ANY REQUEST. The venue's indexers replay the borrowed chain from
+        // scratch, so at this point they are far behind the tip. A request made now
+        // sits at a block they have not reached, and its response reads as "not
+        // applied" when the node simply has not got there yet.
+        await waitForVenueIndexersAtTip(venue)
         contract = await deployRequestContract({ label: 'at2b', code: CONTRACT_CODE })
     })
 

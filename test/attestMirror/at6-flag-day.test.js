@@ -62,7 +62,7 @@ dotenv.config()
 
 const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
-    provisionDrillIdentities, startAttestTestServer, deployRequestContract, readContractState, withWedgeClear,
+    provisionDrillIdentities, waitForVenueIndexersAtTip, startAttestTestServer, deployRequestContract, readContractState, withWedgeClear,
 } = require('./mirrorDrillFixture')
 const {
     untilOrClearDogeStall, waitForMirrorRowEverywhere,
@@ -139,6 +139,12 @@ describe('AT6: above the flag day the chain cannot deliver a response, and the e
             this.skip()
             return
         }
+
+        // BEFORE ANY REQUEST. The venue's indexers replay the borrowed chain from
+        // scratch, so at this point they are far behind the tip. A request made now
+        // sits at a block they have not reached, and its response reads as "not
+        // applied" when the node simply has not got there yet.
+        await waitForVenueIndexersAtTip(venue)
         contract = await deployRequestContract({ label: 'at6', code: CONTRACT_CODE })
 
         // Whoever relays an on-chain v1 pays its transaction fee and nothing else;

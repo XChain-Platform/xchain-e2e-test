@@ -63,7 +63,7 @@ dotenv.config()
 
 const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
-    provisionDrillIdentities, startAttestTestServer, deployRequestContract, queryVenueDb, withWedgeClear,
+    provisionDrillIdentities, waitForVenueIndexersAtTip, startAttestTestServer, deployRequestContract, queryVenueDb, withWedgeClear,
 } = require('./mirrorDrillFixture')
 const {
     untilOrClearDogeStall, waitForMirrorRowEverywhere, waitForAppliedEverywhere,
@@ -257,6 +257,12 @@ describe('AT5: the responses of a window land on chain as one batch', function (
             this.skip()
             return
         }
+
+        // BEFORE ANY REQUEST. The venue's indexers replay the borrowed chain from
+        // scratch, so at this point they are far behind the tip. A request made now
+        // sits at a block they have not reached, and its response reads as "not
+        // applied" when the node simply has not got there yet.
+        await waitForVenueIndexersAtTip(venue)
         publisher = await stageDogeSigner('at5')
 
         // REAL TLS, not http. The provider refuses a non-https payload before any

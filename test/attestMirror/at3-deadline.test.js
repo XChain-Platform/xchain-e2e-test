@@ -61,7 +61,7 @@ dotenv.config()
 
 const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
-    provisionDrillIdentities, startAttestTestServer, deployRequestContract, readContractState,
+    provisionDrillIdentities, waitForVenueIndexersAtTip, startAttestTestServer, deployRequestContract, readContractState,
     readAppliedResponse,
 } = require('./mirrorDrillFixture')
 const {
@@ -139,6 +139,12 @@ describe('AT3: the deadline decides whether a mirrored response ever binds', fun
             this.skip()
             return
         }
+
+        // BEFORE ANY REQUEST. The venue's indexers replay the borrowed chain from
+        // scratch, so at this point they are far behind the tip. A request made now
+        // sits at a block they have not reached, and its response reads as "not
+        // applied" when the node simply has not got there yet.
+        await waitForVenueIndexersAtTip(venue)
         contract = await deployRequestContract({ label: 'at3', code: CONTRACT_CODE })
     })
 
