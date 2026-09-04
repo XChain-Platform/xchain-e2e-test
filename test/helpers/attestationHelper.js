@@ -12,6 +12,7 @@
  ********************************************************************/
 
 const crypto = require('crypto');
+const axios = require('axios');
 const transactionHelper = require('../transactionHelper');
 // Sibling modules: same EQUIV header + SWQ gate the indexer's verifier uses (attest.js).
 const eq  = require('../../../xchain-indexer/src/equivocation_header.js');
@@ -126,6 +127,39 @@ function computeResponsibleSigners(requestId, redundancy, validators, snapshotBl
     return withHash.slice(0, Math.max(1, Number(redundancy) || 1)).map(e => e.v);
 }
 
+// Same contract as computeResponsibleSigners (the ranked validator objects a
+// caller can sign with), but asks the hub's getattestationresponsibleset RPC
+// first: that method resolves the ranking through the hub's own production
+// code, so a hub carrying the fix retires this file's mirror of the rule
+// without a call-site change. Falls back to the local derivation whenever the
+// hub cannot answer - unreachable, pre-row-47 (method not found), or the
+// request is not one it currently tracks - so older hubs still work.
+async function resolveResponsibleSigners({ hubUrl, requestId, redundancy, validators, snapshotBlock, network, minStake }) {
+    if (hubUrl) {
+        try {
+            const res = await axios.post(hubUrl, {
+                jsonrpc: '2.0', id: Date.now(),
+                method: 'getattestationresponsibleset',
+                params: { request_id: requestId }
+            }, { timeout: 5000, validateStatus: () => true });
+            const result = res && res.data && res.data.result;
+            if (result && !result.error && Array.isArray(result.responsible)) {
+                const byPubkey = new Map(validators.map(v => [String(v.pubkey).toLowerCase(), v]));
+                const resolved = result.responsible
+                    .map(pk => byPubkey.get(String(pk).toLowerCase()))
+                    .filter(Boolean);
+                // Trust the hub's answer only when every pubkey it named maps to a
+                // validator this process holds a key for; a partial map means the hub's
+                // view of the staked set disagrees with this process's (a stale snapshot,
+                // a chain not yet staked on here), and signing with a truncated set would
+                // just relocate the "insufficient signatures" failure rather than avoid it.
+                if (resolved.length === result.responsible.length) return resolved;
+            }
+        } catch (e) { /* unreachable or pre-row-47 hub: fall through to the local derivation */ }
+    }
+    return computeResponsibleSigners(requestId, redundancy, validators, snapshotBlock, network, minStake);
+}
+
 // Build the pipe-delimited ATTEST v1 (response) wire payload signed by N validators.
 // RESPONSE_PAYLOAD travels base64 on the wire (binary-safe, no embedded `|`).
 // Sigs hash the decoded bytes, which round-trip-equal the raw utf8 bytes,
@@ -166,6 +200,7 @@ module.exports = {
     registerStakedValidator,
     getSessionStakedValidators,
     computeResponsibleSigners,
+    resolveResponsibleSigners,
     buildAttestationResponseAction,
     broadcastAttestationResponse
 };
