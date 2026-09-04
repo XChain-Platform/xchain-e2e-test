@@ -479,6 +479,62 @@ function resolveWindowKeying() {
 }
 
 /**
+ * Refuse an llm drill on a box that cannot serve one, and SAY WHICH HALF is missing.
+ *
+ * The llm provider needs two independent things and they live in different places, so a
+ * box can have exactly one of them and look broken in the other's direction:
+ *
+ *   - a credential directory, which the hub reads through `HUB_CLAUDE_CONFIG_DIR`;
+ *   - the `claude` binary, on the PATH THE HUBS WILL ACTUALLY RECEIVE.
+ *
+ * The PATH clause is the subtle half. A hub child inherits the harness's
+ * `process.env.PATH`, and for a non-interactive shell that is not the PATH a human sees,
+ * so a binary that runs fine when typed by hand can be absent from every hub in the
+ * federation. Probing an interactive PATH would pass here and fail in the children.
+ *
+ * NAMING THE MISSING HALF is the point of this function rather than a nicety. A bare
+ * "llm unavailable" sends the reader hunting for credentials when the answer is a PATH,
+ * which is the wrong direction and has already cost this train time.
+ *
+ * PURE, with both probes injected, so a refusal can be driven for a box this run is not
+ * on and neither branch depends on the machine the suite happens to execute on.
+ *
+ * @param {object} spec   `{claudeConfigDir, pathEnv}` exactly as the hubs will receive them
+ * @param {object} probes `{dirExists(path), isExecutable(path)}`
+ */
+function assertLlmAvailable(spec, probes) {
+    const dir     = spec && spec.claudeConfigDir;
+    const pathEnv = String((spec && spec.pathEnv) || '');
+    const missing = [];
+
+    if (!dir) {
+        missing.push('no credential directory is configured: the drill declares it needs the llm ' +
+            'provider but nothing set HUB_CLAUDE_CONFIG_DIR, and this venue deliberately will not ' +
+            "fall back to an interactive CLAUDE_CONFIG_DIR, because borrowing a human's store is " +
+            'the thing to avoid');
+    } else if (!probes.dirExists(dir)) {
+        missing.push('the credential directory ' + dir + ' does not exist ON THIS BOX. The harness ' +
+            'environment is shared across boxes, so a path configured for one of them reads as ' +
+            'correct in a place where it is not');
+    }
+
+    // Every PATH entry, in order, exactly as a child would resolve it.
+    const entries = pathEnv.split(':').filter((p) => p.length > 0);
+    if (!entries.some((p) => probes.isExecutable(p.replace(/\/+$/, '') + '/claude'))) {
+        missing.push('the `claude` binary is not executable on the PATH THE HUBS WILL RECEIVE (' +
+            (entries.length ? entries.join(':') : '<empty>') + '). An interactive shell may well ' +
+            'resolve it; a hub child inherits this PATH and will not');
+    }
+
+    if (missing.length === 0) return;
+    throw new Error('attestMirrorVenue: refusing to boot an llm drill. ' + missing.length +
+        ' of the 2 halves the llm provider needs ' + (missing.length === 1 ? 'is' : 'are') +
+        ' missing here:\n  - ' + missing.join('\n  - ') +
+        '\nRun this drill on a box that has BOTH, or extend the PATH the harness passes to its ' +
+        'children. Do not copy credentials to make it work somewhere else.');
+}
+
+/**
  * The decision itself, over a publisher module rather than over a checkout.
  *
  * Split out so both keyings and both refusals are directly assertable: the venue resolves
@@ -608,6 +664,10 @@ function buildHubEnv(spec) {
         ATTEST_BATCH_WINDOW_S_OVERRIDE: String(s.batchWindowS)
     };
     if (s.btcIndexerApiKey) env.BTC_INDEXER_API_KEY = String(s.btcIndexerApiKey);
+    // EXPLICIT ONLY, and never defaulted from an interactive CLAUDE_CONFIG_DIR: the llm
+    // provider reads a real credential store, and a hub that silently picked up whichever
+    // one the operator happened to be logged into would be borrowing a human's.
+    if (s.claudeConfigDir) env.HUB_CLAUDE_CONFIG_DIR = String(s.claudeConfigDir);
     if (s.extraEnv) Object.assign(env, s.extraEnv);
     return env;
 }
@@ -895,6 +955,11 @@ class AttestMirrorVenue {
             MIRROR_BARRIERS.reduce((acc, b) => { acc[b] = DEFAULT_GRACE_S; return acc; }, {}),
             opts.graces || {});
         this.inboundOnlyHubs = new Set(opts.inboundOnlyHubs || []);
+        // A drill that reaches the llm provider says so, and the venue then refuses to
+        // boot on a box that cannot serve one. HUB_CLAUDE_CONFIG_DIR only, never the
+        // interactive CLAUDE_CONFIG_DIR.
+        this.needsLlm        = !!opts.needsLlm;
+        this.claudeConfigDir = opts.claudeConfigDir || process.env.HUB_CLAUDE_CONFIG_DIR || null;
         this.presetIdentities = opts.identities || null;
         this.oracleEpochStart = opts.oracleEpochStart || (Date.now() - 60_000);
         this.btcIndexerApiUrl = opts.btcIndexerApiUrl || null;
@@ -929,6 +994,18 @@ class AttestMirrorVenue {
         // batch drill intermittently red must stop the run here, where the message names
         // the two values, and not thirty minutes later as a flaky assertion.
         assertTimingInvariants(this.forwardS, this.batchWindowS, resolveWindowKeying());
+
+        // Same posture, for the other thing a drill can declare. The PATH probed is the
+        // one the CHILDREN will inherit, not an interactive one, because that is the only
+        // PATH that decides whether a hub can reach the provider.
+        if (this.needsLlm) {
+            assertLlmAvailable(
+                { claudeConfigDir: this.claudeConfigDir, pathEnv: process.env.PATH },
+                {
+                    dirExists: (p) => { try { return fs.statSync(p).isDirectory(); } catch (_) { return false; } },
+                    isExecutable: (p) => { try { fs.accessSync(p, fs.constants.X_OK); return true; } catch (_) { return false; } }
+                });
+        }
 
         this._live = await this._resolveStandingStack();
         if (!this._live) return false;
@@ -1014,6 +1091,7 @@ class AttestMirrorVenue {
             : this.hubs.filter((h) => h.index !== i).map((h) => h.p2pAddr);
         const env = buildHubEnv({
             db:        { host: this.hubDb.host, port: this.hubDb.port, user: this.hubDb.user, pass: this.hubDb.pass },
+            claudeConfigDir: this.claudeConfigDir,
             dbName:    hub.dbName,
             apiPort:   hub.apiPort,
             p2pPort:   hub.p2pPort,
@@ -1699,6 +1777,7 @@ module.exports = {
     pickOutsideIndexer,
     assertTimingInvariants,
     resolveWindowKeying,
+    assertLlmAvailable,
     resolveWindowKeyingFrom,
     resolveDecoderCredential,
     HUB_CONFIG_REDACTION,

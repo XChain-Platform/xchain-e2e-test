@@ -35,6 +35,7 @@ const {
     pickOutsideIndexer,
     assertTimingInvariants,
     resolveWindowKeying,
+    assertLlmAvailable,
     resolveWindowKeyingFrom,
     resolveDecoderCredential,
     HUB_CONFIG_REDACTION,
@@ -573,6 +574,70 @@ describe('attestMirrorVenue: the decoder credential', function () {
         const out = resolveDecoderCredential(
             { user: 'xchain_decoder_x', pass: HUB_CONFIG_REDACTION }, ...NO_SIDECAR)
         assert.match(out.problem, /no nosuchcoin-nosuchnet\.local config sidecar was found/)
+    })
+})
+
+describe('attestMirrorVenue: the llm precondition', function () {
+    // The two halves live in different places and a box can have exactly one, which is
+    // why the refusal has to say WHICH. Both probes are injected so these cases describe
+    // boxes this run is not on.
+    const OK = {
+        dirExists: () => true,
+        isExecutable: (p) => p === '/opt/venue-fixture/bin/claude'
+    }
+    const SPEC = { claudeConfigDir: '/opt/venue-fixture/creds', pathEnv: '/usr/bin:/opt/venue-fixture/bin' }
+
+    it('passes when both halves are present', () => {
+        assert.doesNotThrow(() => assertLlmAvailable(SPEC, OK))
+    })
+
+    it('names the CREDENTIAL half when only the directory is missing', () => {
+        const probes = Object.assign({}, OK, { dirExists: () => false })
+        assert.throws(() => assertLlmAvailable(SPEC, probes), (e) => {
+            assert.match(e.message, /1 of the 2 halves/)
+            assert.match(e.message, /credential directory \/opt\/venue-fixture\/creds does not exist/)
+            assert.ok(!/claude` binary is not executable/.test(e.message),
+                'it blamed the PATH as well, which sends the reader in the wrong direction')
+            return true
+        })
+    })
+
+    it('names the PATH half when only the binary is missing, and shows the PATH searched', () => {
+        const probes = Object.assign({}, OK, { isExecutable: () => false })
+        assert.throws(() => assertLlmAvailable(SPEC, probes), (e) => {
+            assert.match(e.message, /1 of the 2 halves/)
+            assert.match(e.message, /binary is not executable on the PATH THE HUBS WILL RECEIVE/)
+            assert.match(e.message, /usr\/bin:\/opt\/venue-fixture\/bin/)
+            assert.ok(!/does not exist ON THIS BOX/.test(e.message),
+                'it blamed the credentials as well, which is the exact confusion this avoids')
+            return true
+        })
+    })
+
+    it('names BOTH when neither is present', () => {
+        assert.throws(
+            () => assertLlmAvailable(SPEC, { dirExists: () => false, isExecutable: () => false }),
+            /2 of the 2 halves/)
+    })
+
+    it('refuses an unconfigured credential directory rather than falling back to an interactive one', () => {
+        // The venue must never inherit whichever store the operator happens to be logged
+        // into, so an absent config is its own named failure and not a default.
+        assert.throws(
+            () => assertLlmAvailable({ claudeConfigDir: null, pathEnv: SPEC.pathEnv }, OK),
+            /no credential directory is configured/)
+    })
+
+    it('searches PATH entries in order and tolerates a trailing slash', () => {
+        const probes = { dirExists: () => true, isExecutable: (p) => p === '/opt/bin/claude' }
+        assert.doesNotThrow(() =>
+            assertLlmAvailable({ claudeConfigDir: '/d', pathEnv: '/usr/bin:/opt/bin/' }, probes))
+    })
+
+    it('reports an empty PATH as empty rather than as a mysterious absence', () => {
+        assert.throws(
+            () => assertLlmAvailable({ claudeConfigDir: '/d', pathEnv: '' }, OK),
+            /<empty>/)
     })
 })
 
