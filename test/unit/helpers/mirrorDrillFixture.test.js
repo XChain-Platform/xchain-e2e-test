@@ -126,11 +126,15 @@ describe('mirrorDrillFixture: withWedgeClear', function () {
         }
     }
 
-    it('passes a succeeding step straight through, and never probes', async function () {
+    // RENAMED from "never probes": the wrapper now pre-clears, so it DOES probe
+    // before the call. What must still hold is that an unreadable probe never
+    // blocks or retries the work it guards, which is what this drives by making
+    // the probe throw.
+    it('runs a succeeding step exactly once even when the probe cannot answer', async function () {
         const mined = []
         stubWaits({
             DOGE_NUDGE_BLOCKS: 3,
-            standingTipProbe: () => async () => { throw new Error('must not probe on success') },
+            standingTipProbe: () => async () => { throw new Error('probe is down') },
             mineDogeBlocks: async () => { throw new Error('must not mine on success') },
         })
         let calls = 0
@@ -151,7 +155,13 @@ describe('mirrorDrillFixture: withWedgeClear', function () {
         })
         assert.strictEqual(out, 'landed')
         assert.strictEqual(calls, 2, 'the step must be retried exactly once after the clear')
-        assert.deepStrictEqual(mined, [3], 'it must mine the nudge block count')
+        // TWICE, and that is correct rather than a double-nudge bug: this stub
+        // reports the node wedged from the very start, so the PRE-clear fires
+        // before the call and the RETRY clear fires after it fails. A node that
+        // is healthy at the start and wedges mid-wait mines only once, which is
+        // the 'forms DURING the wait' case below.
+        assert.deepStrictEqual(mined, [3, 3],
+            'a node wedged from the start is cleared once before the call and once before the retry')
     })
 
     it('rethrows the ORIGINAL error when the node is merely draining, and mines nothing', async function () {
@@ -271,5 +281,73 @@ describe('mirrorDrillFixture: clearWedgeBefore, and the broadcast-safety rule it
         // And the protection is actually present rather than merely absent.
         assert.ok(/clearWedgeBefore\('stake /.test(code), 'the stake broadcast lost its pre-clear')
         assert.ok(/clearWedgeBefore\('contract deploy /.test(code), 'the deploy broadcast lost its pre-clear')
+    })
+})
+
+describe('mirrorDrillFixture: withWedgeClear also pre-clears', function () {
+    const { withWedgeClear } = require('../../attestMirror/mirrorDrillFixture')
+    const waitsPath = require.resolve('../../attestMirror/mirrorDrillWaits')
+    let savedWaits
+
+    function stubWaits (stub) {
+        savedWaits = require.cache[waitsPath]
+        require.cache[waitsPath] = { id: waitsPath, filename: waitsPath, loaded: true, exports: stub }
+    }
+    afterEach(function () {
+        if (savedWaits) { require.cache[waitsPath] = savedWaits } else { delete require.cache[waitsPath] }
+        savedWaits = undefined
+    })
+
+    it('clears a wedge that ALREADY EXISTS before running the call, without retrying', async function () {
+        // The pre-clear case: wedged at the start, the call then succeeds. The
+        // retry must NOT fire, so the call runs exactly once.
+        const order = []
+        stubWaits({
+            DOGE_NUDGE_BLOCKS: 3,
+            standingTipProbe: () => async () => ({ height: 10, decoder: 20, reason: 'rollcall_proof_unavailable' }),
+            mineDogeBlocks: async () => { order.push('mine'); return 1 },
+        })
+        const out = await withWedgeClear('gas mint', async () => { order.push('call'); return 'ok' })
+        assert.strictEqual(out, 'ok')
+        assert.deepStrictEqual(order, ['mine', 'call'],
+            'the wedge must be cleared BEFORE the call, and the call must run once')
+    })
+
+    it('does not mine at all when the node is healthy', async function () {
+        const order = []
+        stubWaits({
+            DOGE_NUDGE_BLOCKS: 3,
+            standingTipProbe: () => async () => ({ height: 20, decoder: 20, reason: null }),
+            mineDogeBlocks: async () => { order.push('mine') },
+        })
+        await withWedgeClear('gas mint', async () => { order.push('call'); return 'ok' })
+        assert.deepStrictEqual(order, ['call'], 'a healthy node must not be mined for')
+    })
+
+    it('still recovers a wedge that forms DURING the wait', async function () {
+        // Healthy at the start, so the pre-clear does nothing; the call then
+        // fails against a node that has since wedged, and the retry recovers it.
+        let probes = 0
+        const order = []
+        stubWaits({
+            DOGE_NUDGE_BLOCKS: 3,
+            standingTipProbe: () => async () => {
+                probes++
+                return probes === 1
+                    ? { height: 20, decoder: 20, reason: null }
+                    : { height: 20, decoder: 33, reason: 'rollcall_proof_unavailable' }
+            },
+            mineDogeBlocks: async () => { order.push('mine'); return 1 },
+        })
+        let calls = 0
+        const out = await withWedgeClear('gas mint', async () => {
+            order.push('call')
+            calls++
+            if (calls === 1) throw new Error('checkMint: GAVE UP')
+            return 'recovered'
+        })
+        assert.strictEqual(out, 'recovered')
+        assert.deepStrictEqual(order, ['call', 'mine', 'call'],
+            'a mid-wait wedge must still be cleared and the call retried')
     })
 })

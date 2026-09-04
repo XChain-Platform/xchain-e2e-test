@@ -270,6 +270,22 @@ async function _wedgeSample () {
  * So for those calls the wedge is cleared FIRST and the broadcast happens ONCE.
  * A wedge that forms during the wait still fails the drill, and that is the
  * correct trade: a clean failure beats a measurement nobody can trust.
+ *
+ * THE FUNDING AND GAS CALLS KEEP THEIR RETRY, on the ground that a re-broadcast
+ * there is waste rather than wrongness: funding hits the same label-keyed
+ * address, and an extra mint is gas nothing asserts on. Note that
+ * `ensureGasBalance` does NOT check a balance first despite its name
+ * (`gasHelper.js:28` mints unconditionally, justified by a comment that is sound
+ * for a fresh run and false under retry), so the extra mint really does happen.
+ *
+ * THAT "WASTE, NOT WRONG" IS CONDITIONAL AND WORTH RE-CHECKING, not a permanent
+ * property. Extra minted gas changes balances, and `balances_root` is one of the
+ * signed roots the drills compare. It is safe today only because those
+ * comparisons are between the two indexers AT THE SAME BLOCK, where both see the
+ * same mints, rather than against a fixed expected value. The moment any drill
+ * asserts a root or a balance against a FIXED expectation, a retried mint stops
+ * being waste and becomes wrong, and these four sites have to move to pre-clear
+ * only, like the two below.
  */
 async function clearWedgeBefore (what) {
     const sample = await _wedgeSample()
@@ -285,6 +301,14 @@ async function clearWedgeBefore (what) {
 }
 
 async function withWedgeClear (what, fn) {
+    // BOTH PROTECTIONS, because they cover different failures and neither
+    // subsumes the other. The pre-clear handles a wedge that already EXISTS when
+    // the call starts; the retry handles one that FORMS DURING the wait, which is
+    // not theoretical here, since the wedge re-forms every 25 to 30 blocks of BTC
+    // mining and a mint-and-wait can easily span that. Pre-clearing alone would
+    // leave these sites dying on a mid-wait wedge with no recovery, which is the
+    // failure that has cost this ladder the most runs.
+    await clearWedgeBefore(what)
     try {
         return await fn()
     } catch (err) {
