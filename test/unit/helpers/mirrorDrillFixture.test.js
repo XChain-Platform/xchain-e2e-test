@@ -198,3 +198,78 @@ describe('mirrorDrillFixture: withWedgeClear', function () {
         assert.strictEqual(calls, 2, 'exactly one retry, never a loop')
     })
 })
+
+describe('mirrorDrillFixture: clearWedgeBefore, and the broadcast-safety rule it enforces', function () {
+    const fixturePath = require.resolve('../../attestMirror/mirrorDrillFixture')
+    const { clearWedgeBefore } = require('../../attestMirror/mirrorDrillFixture')
+    const waitsPath = require.resolve('../../attestMirror/mirrorDrillWaits')
+    let savedWaits
+
+    function stubWaits (stub) {
+        savedWaits = require.cache[waitsPath]
+        require.cache[waitsPath] = { id: waitsPath, filename: waitsPath, loaded: true, exports: stub }
+    }
+
+    afterEach(function () {
+        if (savedWaits) { require.cache[waitsPath] = savedWaits } else { delete require.cache[waitsPath] }
+        savedWaits = undefined
+    })
+
+    it('mines and reports true when the node is wedged', async function () {
+        const mined = []
+        stubWaits({
+            DOGE_NUDGE_BLOCKS: 3,
+            standingTipProbe: () => async () => ({ height: 4033, decoder: 4046, reason: 'rollcall_proof_unavailable' }),
+            mineDogeBlocks: async (n) => { mined.push(n); return 1 },
+        })
+        assert.strictEqual(await clearWedgeBefore('stake 0'), true)
+        assert.deepStrictEqual(mined, [3])
+    })
+
+    it('mines nothing and reports false when the node is merely draining', async function () {
+        const mined = []
+        stubWaits({
+            DOGE_NUDGE_BLOCKS: 3,
+            standingTipProbe: () => async () => ({ height: 4033, decoder: 4046, reason: null }),
+            mineDogeBlocks: async (n) => { mined.push(n) },
+        })
+        assert.strictEqual(await clearWedgeBefore('stake 0'), false)
+        assert.deepStrictEqual(mined, [], 'a draining node must not be nudged')
+    })
+
+    it('never throws when the probe cannot answer, because it guards a broadcast', async function () {
+        stubWaits({
+            DOGE_NUDGE_BLOCKS: 3,
+            standingTipProbe: () => async () => { throw new Error('ECONNREFUSED') },
+            mineDogeBlocks: async () => { throw new Error('must not mine') },
+        })
+        assert.strictEqual(await clearWedgeBefore('deploy'), false,
+            'an unreadable probe must not block the broadcast it precedes')
+    })
+
+    // THE REGRESSION GUARD FOR THE HAZARD ITSELF, not for the helper.
+    //
+    // withWedgeClear RETRIES its callback. Around a broadcast-and-wait that means
+    // a second transaction: a double stake, or two contracts where the drill
+    // assumes one. Those two calls must therefore be preceded by clearWedgeBefore
+    // and never wrapped. This reads the source because the rule is about SHAPE,
+    // and a behavioural test would have to actually broadcast twice to catch it.
+    it('never wraps a broadcast-and-wait call in the retrying helper', function () {
+        const src = require('fs').readFileSync(fixturePath, 'utf8')
+
+        // Only the executable body: the file's own prose explains this rule and
+        // legitimately names both helpers next to both calls.
+        const code = src.split('\n')
+            .filter((l) => !/^\s*(\*|\/\/|\/\*)/.test(l))
+            .join('\n')
+
+        const wrapped = /withWedgeClear\([^)]*,\s*\(\)\s*=>\s*(stakeHelper\.sendStakeV1|vmHelper\.sendDeployV0)/
+        assert.ok(!wrapped.test(code),
+            'a broadcast-and-wait call is wrapped in withWedgeClear, which retries it and would ' +
+            'double-stake or deploy twice; precede it with clearWedgeBefore instead')
+
+        // And the protection is actually present rather than merely absent.
+        assert.ok(/clearWedgeBefore\('stake /.test(code), 'the stake broadcast lost its pre-clear')
+        assert.ok(/clearWedgeBefore\('contract deploy /.test(code), 'the deploy broadcast lost its pre-clear')
+    })
+})

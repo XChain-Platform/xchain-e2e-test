@@ -234,6 +234,56 @@ function stakeVisibilityBlocks (coin, network) {
  * Nudges only when the node is actually behind its decoder, never on a schedule,
  * so a batch-window drill is not handed a continuously advancing DOGE tip.
  */
+/**
+ * Is the standing indexer parked on the roll-call wedge right now?
+ *
+ * Split out so it can be asked BEFORE a broadcast as well as after a failure.
+ * Returns the probe sample when wedged and null otherwise, never throws.
+ */
+async function _wedgeSample () {
+    const waits = require('./mirrorDrillWaits')
+    let sample = null
+    try { sample = await waits.standingTipProbe()() } catch (_) { return null }
+
+    const behind = sample && Number.isFinite(Number(sample.height)) &&
+        Number.isFinite(Number(sample.decoder)) && Number(sample.height) < Number(sample.decoder)
+    const rollcall = sample && String(sample.reason || '') === 'rollcall_proof_unavailable'
+
+    // Both conditions, not either. Behind-its-decoder alone is a node merely
+    // draining, which needs no help and would mine DOGE for nothing.
+    return (behind && rollcall) ? sample : null
+}
+
+/**
+ * Clear the wedge BEFORE a broadcast, and never retry one.
+ *
+ * THIS EXISTS BECAUSE `withWedgeClear` IS ONLY SAFE AROUND IDEMPOTENT WORK, and
+ * a broadcast-and-wait is not idempotent. `sendStakeV1` and `sendDeployV0` both
+ * broadcast a transaction and THEN wait for the indexer to record it, so a wedge
+ * fails the WAIT with the transaction already on the chain. Retrying that emits
+ * a SECOND transaction: a double stake, or two contracts where the drill assumes
+ * one, and the drill then measures something it never meant to create. A double
+ * stake stays recoverable (UNSTAKE v0 sweeps every active row for a pubkey) but
+ * a drill silently holding more stake than it staked is a corrupted measurement,
+ * which is worse than a clean failure.
+ *
+ * So for those calls the wedge is cleared FIRST and the broadcast happens ONCE.
+ * A wedge that forms during the wait still fails the drill, and that is the
+ * correct trade: a clean failure beats a measurement nobody can trust.
+ */
+async function clearWedgeBefore (what) {
+    const sample = await _wedgeSample()
+    if (!sample) return false
+
+    const waits = require('./mirrorDrillWaits')
+    console.log('mirrorDrillFixture: clearing the roll-call wedge before ' + what +
+        ' (standing indexer at ' + sample.height + ' behind its decoder at ' + sample.decoder +
+        ' on ' + sample.reason + '). Cleared BEFORE the broadcast because this step cannot ' +
+        'safely be retried once its transaction is out.')
+    await waits.mineDogeBlocks(waits.DOGE_NUDGE_BLOCKS)
+    return true
+}
+
 async function withWedgeClear (what, fn) {
     try {
         return await fn()
@@ -241,16 +291,11 @@ async function withWedgeClear (what, fn) {
         // Lazy require: mirrorDrillWaits requires THIS module at its top level,
         // so a top-level require here would close the cycle.
         const waits = require('./mirrorDrillWaits')
-        let sample = null
-        try { sample = await waits.standingTipProbe()() } catch (_) { sample = null }
+        const sample = await _wedgeSample()
 
-        const behind = sample && Number.isFinite(Number(sample.height)) &&
-            Number.isFinite(Number(sample.decoder)) && Number(sample.height) < Number(sample.decoder)
-        const rollcall = sample && String(sample.reason || '') === 'rollcall_proof_unavailable'
-
-        // Both conditions, not either. Behind-its-decoder alone is a node merely
-        // draining, which needs no help and would mine DOGE for nothing.
-        if (!behind || !rollcall) throw err
+        // Not the wedge: the original error is the real one and must escape
+        // unchanged rather than be retried into a second, more confusing failure.
+        if (!sample) throw err
 
         console.log('mirrorDrillFixture: ' + what + ' failed with the standing indexer at ' +
             sample.height + ' behind its decoder at ' + sample.decoder + ' on ' + sample.reason +
@@ -312,8 +357,10 @@ async function stakeDrillIdentities (opts) {
             () => gasHelper.ensureGasBalance(addr, DRILL_GAS_XCHAIN))
         await settleStack()
 
-        const result = await withWedgeClear('stake ' + i + ' for ' + label,
-            () => stakeHelper.sendStakeV1(addr, amount, id.pubkeyHex))
+        // CLEARED BEFORE, NOT WRAPPED AROUND: sendStakeV1 broadcasts and then
+        // waits, so a retry would double-stake this identity.
+        await clearWedgeBefore('stake ' + i + ' for ' + label)
+        const result = await stakeHelper.sendStakeV1(addr, amount, id.pubkeyHex)
         assert.strictEqual(result.stake.status, 'valid',
             'mirrorDrillFixture: stake ' + i + ' for ' + label + ' came back ' + result.stake.status +
             ' rather than valid; the venue built on it would have a short responsible set')
@@ -366,8 +413,12 @@ async function deployRequestContract (opts) {
 
     // The step run 2 died on, after a full 5-identity prologue and a deployed
     // contract: `checkContract GAVE UP after 225505ms` with 3 polls in 225s.
-    const deploy = await withWedgeClear('contract deploy for ' + label,
-        () => vmHelper.sendDeployV0(owner, o.code, Number(o.gas || 500000)))
+    //
+    // CLEARED BEFORE, NOT WRAPPED AROUND: sendDeployV0 broadcasts and then waits,
+    // so a retry would deploy a SECOND contract while every later assertion here
+    // assumes exactly one contract index.
+    await clearWedgeBefore('contract deploy for ' + label)
+    const deploy = await vmHelper.sendDeployV0(owner, o.code, Number(o.gas || 500000))
     assert.strictEqual(deploy.contract.status, 'valid',
         'mirrorDrillFixture: deploy for ' + label + ' came back ' + deploy.contract.status)
 
@@ -450,6 +501,7 @@ async function readContractState (venue, indexerIndex, contractIndex) {
 module.exports = {
     stakeDrillIdentities,
     withWedgeClear,
+    clearWedgeBefore,
     recordStakerKey,
     DRILL_KEYS_DIR,
     deployRequestContract,
