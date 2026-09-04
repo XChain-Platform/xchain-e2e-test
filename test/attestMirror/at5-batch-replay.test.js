@@ -26,17 +26,20 @@
  * the useful part of it. Two of the four clauses are driven here. The other two
  * are skipped with measurements rather than opinions, in their own cases below.
  *
- * THE PRECONDITION THAT GATES ALL OF IT, and it is not a code defect. The hub's
- * `AttestationBatchPublisher` is constructed and started on every real hub boot and
- * regtest is armed at height 0, so the venue's hubs are ALREADY closing windows on
- * the cadence the venue sets. They can publish nothing, because publishing needs
- * three things the venue does not and should not invent: a signer module
- * (`HUB_SIGNER_MODULE`), a DOGE encoder URL, and a funded DOGE address to pay the
- * transaction. Those are operator property. So this drill reads them from the
- * environment, passes them to the hubs through the venue's `hubExtraEnv` seam, and
- * SKIPS LOUDLY naming each missing one rather than pretending a silent publisher is
- * a passing test. A window that never publishes is indistinguishable from a window
- * that published nothing, and that is precisely the confusion this refuses.
+ * THE PUBLISHER IS WIRED BY THIS DRILL, not by an operator, and an earlier version
+ * of this file got that wrong in a way worth recording. The hub's
+ * `AttestationBatchPublisher` starts with every real hub and regtest is armed at
+ * height 0, so these hubs are ALREADY closing windows on the venue's cadence; they
+ * simply cannot publish without a signer module, an encoder URL and a funded DOGE
+ * address. This file first declared those three "operator property" and skipped.
+ * That was a misclassification, and each third of it fell to one measurement:
+ * regtest funding is a block rather than money, `HUB_SIGNER_MODULE` is a path to a
+ * module a drill can stage from the one the hub repo ships, and the encoder URL is
+ * a venue coordinate pinned in `chainRail`. `stageDogeSigner` below now builds all
+ * three, and the only skip left is a DOGE rail that cannot be reached at all.
+ *
+ * The general shape, since it has caught more than one lane: "I cannot do X"
+ * hardening into "the operator must do X" without a measurement in between.
  *
  * THE SECOND PRECONDITION is the anchor. `_resolveAnchor` reads a BTC chain tip
  * that arrives on the hub only through the `pushchaintip` JSON-RPC, and without one
@@ -67,8 +70,10 @@ const {
     untilOrClearDogeStall, waitForMirrorRowEverywhere, waitForAppliedEverywhere,
     venueTipProbe, mineDogeBlocks,
 } = require('./mirrorDrillWaits')
-const vmHelper  = require('../helpers/vmHelper')
-const chainRail = require('../helpers/chainRail')
+const vmHelper     = require('../helpers/vmHelper')
+const chainRail    = require('../helpers/chainRail')
+const cryptoHelper = require('../cryptoHelper')
+const { loadHubModule } = require('../helpers/multiValidatorHubHelper')
 
 // Short enough that several windows close inside a drill, and comfortably above
 // the four-times-the-hop floor the venue's own timing invariant would impose if
@@ -81,6 +86,10 @@ const FORWARD_S = 8
 
 const DEADLINE_BLOCKS = 60
 const BURIAL_BLOCKS   = 6
+
+// The DOGE encoder this venue publishes through, taken from the rail's own port map
+// so the drill and the rail cannot disagree about where that service lives.
+const DOGE_ENCODER_PORT = chainRail.DEFAULT_PORTS.DOGE.encoder
 
 // The head and continuation versions, and the DOGE-side action formats a drill
 // reads them back as.
@@ -113,26 +122,108 @@ module.exports = {
 `
 
 /**
- * The hub environment the batch publisher needs, and what is missing from it.
+ * Fund a DOGE publisher wallet, stage the shipped signer module against it, and
+ * return the hub environment that turns the batch publisher on.
  *
- * Returns `{env, missing}`. Everything is read from the process environment
- * rather than invented: a DOGE address this drill minted would hold no coin, and a
- * signer module it wrote would be a second implementation of a production seam.
+ * THIS WAS ONCE WRITTEN AS AN OPERATOR PRECONDITION AND THAT WAS WRONG. The
+ * earlier version of this drill skipped unless four variables were already in the
+ * environment, on the reasoning that a funded wallet on another chain is not a
+ * test's to invent. Every part of that fell to measurement:
+ *
+ *   - FUNDING ON REGTEST IS A BLOCK, NOT MONEY. `getNewFundedAddress` on the DOGE
+ *     rail funds an address the same way every other drill funds one; there is
+ *     nothing to be granted.
+ *   - `HUB_SIGNER_MODULE` IS A PATH, and this venue spawns hubs as processes with
+ *     an environment this file constructs, not as containers with a mounted
+ *     operator directory. The module it points at is the one the hub repo SHIPS as
+ *     its reference signer, copied into a temp directory with the two packages it
+ *     requires symlinked in. `test/federation/anchorAcceptance.test.js` has staged
+ *     it exactly this way for the ANCHOR rail all along.
+ *   - `DOGE_ENCODER_URL` IS A VENUE COORDINATE, pinned at 3123 in `chainRail`.
+ *
+ * So the whole thing is arranged here, and the drill skips only if the DOGE rail
+ * itself cannot be reached, which is a venue fault with a named cause rather than
+ * a category of work belonging to someone else.
+ *
+ * THE KEY NEVER TOUCHES DISK. The staged signer reads its `.env` through dotenv,
+ * which does not override variables already present, so the WIF is handed to the
+ * hub child through its environment and no file is written with a key in it.
  */
-function resolveBatchPublisherEnv () {
-    const wanted = {
-        HUB_SIGNER_MODULE: process.env.HUB_SIGNER_MODULE,
-        DOGE_ENCODER_URL:  process.env.DOGE_ENCODER_URL,
-        DOGE_ADDRESS:      process.env.DOGE_ADDRESS,
-        DOGE_PUBKEY_HEX:   process.env.DOGE_PUBKEY_HEX,
+async function stageDogeSigner (label) {
+    const os     = require('os')
+    const fs     = require('fs')
+    const path   = require('path')
+    const crypto = require('crypto')
+    const { encode: wifEncode } = require('wif')
+    const CryptoNetworks = require('../../src/CryptoNetworks.js')
+
+    // Funded ON the DOGE rail, which is the whole point: the publisher pays a real
+    // fee on that chain for every window it broadcasts.
+    const funded = await chainRail.withRail(dogeRail, async () => {
+        const addr = await cryptoHelper.getNewFundedAddress(
+            label + '-batch-publisher', COIN, NETWORK, null, 'legacy', 0, 2.0)
+        await regtestMinerConnector.generateBlocks(2)
+        await utxoTrackerConnector.quiesce({
+            timeoutMs: 60_000, pollMs: 250, regtestMiner: regtestMinerConnector,
+        })
+        return { address: addr.address, privateKey: addr.privateKey, publicKey: addr.publicKey,
+                 coin: COIN, network: NETWORK }
+    })
+    assert.ok(funded && funded.address,
+        'could not fund a DOGE publisher address, so the batch publisher would have nothing to pay with')
+
+    // The reference signer, staged the way an operator installs it. os.tmpdir()
+    // rather than the checkout, because the e2e tree can live on a share where
+    // symlink creation is unreliable.
+    const hubRoot = path.resolve(__dirname, '../../../xchain-hub')
+    const examplePath = path.join(hubRoot, 'examples', 'doge-signer.example.js')
+    assert.ok(fs.existsSync(examplePath),
+        'the hub ships no examples/doge-signer.example.js at ' + examplePath +
+        ', so there is no reference signer to stage')
+    const signerDir = path.join(os.tmpdir(),
+        'xchain-attest-batch-signer-' + process.pid + '-' + crypto.randomBytes(4).toString('hex'))
+    fs.rmSync(signerDir, { recursive: true, force: true })
+    fs.mkdirSync(path.join(signerDir, 'node_modules'), { recursive: true })
+    fs.copyFileSync(examplePath, path.join(signerDir, 'signer.js'))
+    for (const dep of ['xchain-sdk', 'dotenv']) {
+        let target
+        try { target = path.dirname(require.resolve(dep + '/package.json')) }
+        catch (e) {
+            target = path.resolve(__dirname, '../../../', dep)
+            assert.ok(fs.existsSync(target), 'cannot resolve ' + dep + ' for the staged signer')
+        }
+        fs.symlinkSync(target, path.join(signerDir, 'node_modules', dep), 'dir')
     }
-    const missing = Object.keys(wanted).filter((k) => !wanted[k])
-    const env = {}
-    for (const [k, v] of Object.entries(wanted)) if (v) env[k] = String(v)
+
+    const netObj = CryptoNetworks.getBitcoinJsNetwork(funded.coin + '-' + funded.network)
+    const host = process.env.DOGE_SERVICE_HOST || 'localhost'
+    const port = process.env.DOGE_ENCODER_API_PORT || String(DOGE_ENCODER_PORT)
+    const env = {
+        HUB_SIGNER_MODULE: path.join(signerDir, 'signer.js'),
+        DOGE_NETWORK:      funded.coin + '-' + funded.network,
+        DOGE_ADDRESS:      funded.address,
+        DOGE_WIF:          wifEncode(netObj.wif, Buffer.from(funded.privateKey), true),
+        // Read by the publisher for election and low-balance warnings, separately
+        // from the signer's own key material.
+        DOGE_PUBKEY_HEX:   Buffer.from(funded.publicKey).toString('hex'),
+        DOGE_ENCODER_URL:  'http://' + host + ':' + port,
+        // Explicit, so this never depends on the default staying true.
+        ATTEST_BATCH_PUBLISH_ENABLED: 'true',
+    }
     if (process.env.DOGE_ENCODER_API_KEY) env.DOGE_ENCODER_API_KEY = String(process.env.DOGE_ENCODER_API_KEY)
-    // Explicitly on, so a drill never depends on the default staying true.
-    env.ATTEST_BATCH_PUBLISH_ENABLED = 'true'
-    return { env: env, missing: missing }
+
+    // PROVED IN-PROCESS BEFORE FIVE HUBS ARE SPAWNED, through the hub's own loader
+    // rather than by inspection: a signer that cannot fulfil its contract throws at
+    // load, and discovering that from five dead children four minutes later costs
+    // the whole prologue.
+    const { loadSignerHooks } = loadHubModule('src/lib/signer-loader.js')
+    const hooks = loadSignerHooks(Object.assign({}, process.env, env))
+    assert.ok(hooks && hooks.broadcastFn,
+        'the hub signer loader did not wire a broadcast hook from the staged signer, so every window ' +
+        'would defer with "no broadcast pipeline configured"')
+
+    console.log('AT5: staged the reference DOGE signer at ' + signerDir + ' for a funded publisher address')
+    return { env: env, signerDir: signerDir, address: funded.address }
 }
 
 describe('AT5: the responses of a window land on chain as one batch', function () {
@@ -147,19 +238,18 @@ describe('AT5: the responses of a window land on chain as one batch', function (
     let dogeRail   = null
 
     before(async function () {
-        publisher = resolveBatchPublisherEnv()
-        if (publisher.missing.length > 0) {
-            // LOUD, and naming every missing piece at once so an operator wiring this
-            // up needs one round trip rather than four.
-            console.log('AT5 SKIPPED: the attestation batch publisher is not wired on this box. ' +
-                'Missing: ' + publisher.missing.join(', ') + '. The hubs are already closing ' +
-                BATCH_WINDOW_S + 's windows (regtest is armed at height 0 and the publisher starts with ' +
-                'every hub), but publishing a window needs a signer module, a DOGE encoder and a FUNDED ' +
-                'DOGE address, none of which a test may invent. Set those four in the harness environment ' +
-                'and this drill runs; the venue passes them straight through to every hub.')
+        // The DOGE rail first: the signer's wallet is funded on it, and every wait
+        // below confirms batches through it.
+        try {
+            dogeRail = await chainRail.createRail('dogecoin', 'regtest')
+        } catch (e) {
+            console.log('AT5 SKIPPED: the DOGE regtest rail is unreachable (' + (e && e.message) +
+                '), so the chain this batch rides cannot be driven at all. This is a venue fault with a ' +
+                'named cause, not a missing credential.')
             this.skip()
             return
         }
+        publisher = await stageDogeSigner('at5')
 
         await new Promise((resolve) => {
             httpServer = http.createServer((req, res) => {
@@ -207,12 +297,17 @@ describe('AT5: the responses of a window land on chain as one batch', function (
         console.log('AT5: pushed BTC tip ' + tip + ' to all ' + venue.hubs.length + ' hubs')
 
         contract = await deployRequestContract({ label: 'at5', code: CONTRACT_CODE })
-        dogeRail = await chainRail.createRail('dogecoin', 'regtest')
     })
 
     after(async function () {
         if (httpServer) await new Promise((r) => httpServer.close(() => r()))
         if (venue) await venue.stop()
+        // The staged signer holds a WIF only in the hub children's environment, but the
+        // directory itself is this drill's litter and goes back.
+        if (publisher && publisher.signerDir) {
+            try { require('fs').rmSync(publisher.signerDir, { recursive: true, force: true }) }
+            catch (_) { /* already gone */ }
+        }
     })
 
     /** Every published-window marker any hub holds, with the hub that holds it. */
