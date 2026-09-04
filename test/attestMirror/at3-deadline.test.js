@@ -62,7 +62,7 @@ dotenv.config()
 
 const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
-    stakeDrillIdentities, deployRequestContract, settleStack, readContractState,
+    stakeDrillIdentities, deployRequestContract, readContractState,
     readAppliedResponse,
 } = require('./mirrorDrillFixture')
 const {
@@ -72,6 +72,7 @@ const {
     clearBeforeBroadcast,
     waitForHeightWithClear,
     attestRequestWatermark,
+    settleOrReport,
 } = require('./mirrorDrillWaits')
 const vmHelper = require('../helpers/vmHelper')
 
@@ -179,7 +180,7 @@ describe('AT3: the deadline decides whether a mirrored response ever binds', fun
         const requestId = request.requestId
 
         await regtestMinerConnector.generateBlocks(BURIAL_BLOCKS)
-        await settleStack()
+        await settleOrReport('at3')
 
         const rows = await waitForMirrorRowEverywhere(venue, requestId)
         assert.strictEqual(String(rows[0].status), 'ok',
@@ -240,7 +241,7 @@ describe('AT3: the deadline decides whether a mirrored response ever binds', fun
         } finally {
             await regtestMinerConnector.resumeMining()
         }
-        await settleStack()
+        await settleOrReport('at3')
 
         // Both indexers past the expiry block, so the sweep has run on both.
         for (const ix of venue.indexers) await waitForHeightWithClear(venue, ix.index, driven.deadlineBlock + 1)
@@ -289,7 +290,7 @@ describe('AT3: the deadline decides whether a mirrored response ever binds', fun
             { timeoutMs: (FORWARD_S + 120) * 1000, intervalMs: 5000, tipProbe: venueTipProbe(venue, 0) })
         assert.ok(elapsed.ok, tag + ': wall clock never passed the effective time ' + driven.effectiveTime)
         await regtestMinerConnector.generateBlocks(5)
-        await settleStack()
+        await settleOrReport('at3')
         for (const ix of venue.indexers) await waitForHeightWithClear(venue, ix.index, driven.deadlineBlock + 6)
 
         for (const ix of venue.indexers) {
@@ -345,7 +346,7 @@ describe('AT3: the deadline decides whether a mirrored response ever binds', fun
         } finally {
             await regtestMinerConnector.resumeMining()
         }
-        await settleStack()
+        await settleOrReport('at3')
 
         const applied = await waitForAppliedEverywhere(venue, driven.requestId)
 

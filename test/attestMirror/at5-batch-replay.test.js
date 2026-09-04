@@ -64,7 +64,7 @@ dotenv.config()
 
 const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
-    stakeDrillIdentities, deployRequestContract, settleStack, queryVenueDb, withWedgeClear,
+    stakeDrillIdentities, deployRequestContract, queryVenueDb, withWedgeClear,
 } = require('./mirrorDrillFixture')
 const {
     untilOrClearDogeStall, waitForMirrorRowEverywhere, waitForAppliedEverywhere,
@@ -72,6 +72,7 @@ const {
     clearBeforeBroadcast,
     allHubTails,
     attestRequestWatermark,
+    settleOrReport,
 } = require('./mirrorDrillWaits')
 const vmHelper     = require('../helpers/vmHelper')
 const chainRail    = require('../helpers/chainRail')
@@ -405,7 +406,7 @@ describe('AT5: the responses of a window land on chain as one batch', function (
         }
 
         await regtestMinerConnector.generateBlocks(BURIAL_BLOCKS)
-        await settleStack()
+        await settleOrReport('at5')
         for (const id of ids) await waitForMirrorRowEverywhere(venue, id)
         for (const id of ids) await waitForAppliedEverywhere(venue, id)
         console.log('AT5: ' + ids.length + ' responses finalized and applied; waiting for their window to close')

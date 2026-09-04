@@ -68,7 +68,7 @@ dotenv.config()
 
 const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
-    stakeDrillIdentities, deployRequestContract, settleStack,
+    stakeDrillIdentities, deployRequestContract,
 } = require('./mirrorDrillFixture')
 const {
     APPLIED_FIELDS, until, untilOrClearDogeStall, diffRows, diffStateHashes,
@@ -77,6 +77,7 @@ const {
     clearBeforeBroadcast,
     allHubTails,
     attestRequestWatermark,
+    settleOrReport,
 } = require('./mirrorDrillWaits')
 const vmHelper = require('../helpers/vmHelper')
 const XChainIndexerConnector = require('../../src/XChainIndexerConnector.js')
@@ -202,7 +203,7 @@ describe('AT2 second clause: delivery past the forward margin holds the barrier 
         const requestId = request.requestId
 
         await regtestMinerConnector.generateBlocks(BURIAL_BLOCKS)
-        await settleStack()
+        await settleOrReport('at2b')
 
         // CAPTURED WHILE THE REQUEST IS STILL PENDING, which is the only window in
         // which the responsible set is readable at all: `getattestationresponsibleset`
@@ -299,7 +300,7 @@ describe('AT2 second clause: delivery past the forward margin holds the barrier 
         // stops reporting the barrier and keeps up.
         venue.releaseMirrorTable(DELAYED, MIRROR_TABLE)
         await regtestMinerConnector.generateBlocks(2)
-        await settleStack()
+        await settleOrReport('at2b')
 
         const clear = await untilOrClearDogeStall(async () => {
             const a = await statusOf(DELAYED)

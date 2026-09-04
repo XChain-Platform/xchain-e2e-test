@@ -481,9 +481,7 @@ async function mineDogeBlocks (blocks) {
     const rail = await chainRail.createRail('dogecoin', 'regtest')
     return await chainRail.withRail(rail, async () => {
         await regtestMinerConnector.generateBlocks(Number(blocks) || DOGE_NUDGE_BLOCKS)
-        await utxoTrackerConnector.quiesce({
-            timeoutMs: 60_000, pollMs: 250, regtestMiner: regtestMinerConnector,
-        })
+        await settleOrReport('the DOGE keep-up', { timeoutMs: 60_000 })
         return Number((await indexerConnector.call('getblockhashes', {})).block_index)
     })
 }
@@ -532,6 +530,35 @@ async function mineBtcKeepingDogeAlive (total, opts) {
 /**
  * Move the other chain and reset the counter. Strictly between operations.
  */
+/**
+ * Quiesce the stack and SAY SO when it did not.
+ *
+ * `quiesce` is a barrier whose failure is a return value, not a throw: on timeout
+ * it hands back the last status carrying `ready: false`, and its own comment says
+ * callers that are a barrier rather than a retry loop must inspect that. Every
+ * settle in this tree discarded it, so thirty seconds of NON-settlement resolved as
+ * success. The cost is not hypothetical: the encoder looks up UTXOs with
+ * `unconfirmed=false`, so acting on an unsettled tracker is what produces the
+ * intermittent mid-batch crash that reads as flake rather than as ordering.
+ *
+ * Warns rather than throwing, deliberately. A drill that failed outright on one
+ * unsettled poll would red for a transient; what was missing is not severity but
+ * VISIBILITY, so the next unexplained encoder error has this line above it.
+ */
+async function settleOrReport (label, opts) {
+    const o = opts || {}
+    const status = await utxoTrackerConnector.quiesce({
+        timeoutMs: Number(o.timeoutMs) || 30000, pollMs: 250, regtestMiner: regtestMinerConnector,
+    })
+    if (!status || !status.ready) {
+        console.log('mirrorDrillWaits: the stack did NOT quiesce for ' + label + ' (' +
+            JSON.stringify(status) + '). Anything spending a UTXO after this is acting on a view ' +
+            'that is neither the confirmed set nor the mempool set, which surfaces later as an ' +
+            'encoder crash rather than here.')
+    }
+    return status
+}
+
 async function keepDogeAlive () {
     btcSinceDogeKeepUp = 0
     return await mineDogeBlocks(DOGE_NUDGE_BLOCKS).catch((e) => {
@@ -1131,6 +1158,7 @@ module.exports = {
     mineDogeBlocks,
     mineBtcKeepingDogeAlive,
     keepDogeAlive,
+    settleOrReport,
     clearBeforeBroadcast,
     venueTipProbe,
     allHubTails,

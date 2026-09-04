@@ -60,7 +60,7 @@ dotenv.config()
 
 const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
-    stakeDrillIdentities, deployRequestContract, settleStack, readContractState,
+    stakeDrillIdentities, deployRequestContract, readContractState,
 } = require('./mirrorDrillFixture')
 const {
     APPLIED_FIELDS, STATE_HASH_FIELDS, until, diffRows, diffStateHashes,
@@ -68,6 +68,7 @@ const {
     readAttestRewards, happyPathVerdict, findEmittedAttestRequest, captureFederationState,
     clearBeforeBroadcast,
     attestRequestWatermark,
+    settleOrReport,
 } = require('./mirrorDrillWaits')
 const vmHelper = require('../helpers/vmHelper')
 const XChainIndexerConnector = require('../../src/XChainIndexerConnector.js')
@@ -180,7 +181,7 @@ describe('AT2: a hub outside the responsible set disseminates the response, iden
         // The hubs wait three confirmations before they fetch a request, and they
         // poll rather than subscribe.
         await regtestMinerConnector.generateBlocks(6)
-        await settleStack()
+        await settleOrReport('at2')
 
         const rows = await waitForMirrorRowEverywhere(venue, requestId)
         for (let i = 0; i < rows.length; i++) {

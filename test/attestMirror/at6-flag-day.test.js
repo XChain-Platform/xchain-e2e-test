@@ -63,7 +63,7 @@ dotenv.config()
 
 const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
-    stakeDrillIdentities, deployRequestContract, settleStack, readContractState, withWedgeClear,
+    stakeDrillIdentities, deployRequestContract, readContractState, withWedgeClear,
 } = require('./mirrorDrillFixture')
 const {
     untilOrClearDogeStall, waitForMirrorRowEverywhere,
@@ -71,6 +71,7 @@ const {
     findEmittedAttestRequest, captureFederationState,
     clearBeforeBroadcast,
     attestRequestWatermark,
+    settleOrReport,
 } = require('./mirrorDrillWaits')
 const vmHelper          = require('../helpers/vmHelper')
 const cryptoHelper      = require('../cryptoHelper')
@@ -155,7 +156,7 @@ describe('AT6: above the flag day the chain cannot deliver a response, and the e
         broadcaster = await withWedgeClear('funding the at6 relayer',
             () => cryptoHelper.getNewFundedAddress('at6-relayer', COIN, NETWORK, null, 'legacy', 0, 0.02))
         await regtestMinerConnector.generateBlocks(2)
-        await settleStack()
+        await settleOrReport('at6')
     })
 
     after(async function () {
@@ -180,7 +181,7 @@ describe('AT6: above the flag day the chain cannot deliver a response, and the e
             network: NETWORK,
         })
         await regtestMinerConnector.generateBlocks(1)
-        await settleStack()
+        await settleOrReport('at6')
         assert.ok(sent && sent.txHash,
             label + ': the on-chain ATTEST v1 was not broadcast, so the gate was never offered anything')
         return String(sent.txHash)
@@ -201,7 +202,7 @@ describe('AT6: above the flag day the chain cannot deliver a response, and the e
         const requestId = request.requestId
 
         await regtestMinerConnector.generateBlocks(BURIAL_BLOCKS)
-        await settleStack()
+        await settleOrReport('at6')
         await waitForMirrorRowEverywhere(venue, requestId)
 
         // THE STALE BROADCAST, while the request is still pending, which is the only
@@ -323,7 +324,7 @@ describe('AT6: above the flag day the chain cannot deliver a response, and the e
         const requestId = request.requestId
 
         await regtestMinerConnector.generateBlocks(BURIAL_BLOCKS)
-        await settleStack()
+        await settleOrReport('at6')
         await waitForMirrorRowEverywhere(venue, requestId)
 
         // Let it reach a terminal state FIRST this time.

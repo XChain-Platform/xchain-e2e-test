@@ -56,7 +56,7 @@ dotenv.config()
 
 const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
-    stakeDrillIdentities, deployRequestContract, settleStack, readContractState,
+    stakeDrillIdentities, deployRequestContract, readContractState,
     readAppliedResponse,
 } = require('./mirrorDrillFixture')
 const {
@@ -66,6 +66,7 @@ const {
     clearBeforeBroadcast,
     waitForHeightWithClear,
     attestRequestWatermark,
+    settleOrReport,
 } = require('./mirrorDrillWaits')
 const vmHelper     = require('../helpers/vmHelper')
 const cryptoHelper = require('../cryptoHelper')
@@ -162,7 +163,7 @@ describe('AT4: a reorg moves the applied response with the chain, in both direct
         const requestId = request.requestId
 
         await regtestMinerConnector.generateBlocks(BURIAL_BLOCKS)
-        await settleStack()
+        await settleOrReport('at4')
         await waitForMirrorRowEverywhere(venue, requestId)
 
         // The applier binds at the first block past the effective time; with the
@@ -176,7 +177,7 @@ describe('AT4: a reorg moves the applied response with the chain, in both direct
         assert.ok(nudged.ok, tag + ': the response never applied on indexer 0 before the reorg could be staged\n' +
             venue.logTail('indexer0'))
 
-        await settleStack()
+        await settleOrReport('at4')
         const applied = await waitForAppliedEverywhere(venue, requestId)
         const local   = await readRequestRow(venue, 0, requestId)
         return {
