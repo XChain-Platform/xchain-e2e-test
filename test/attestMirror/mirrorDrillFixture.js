@@ -65,10 +65,11 @@ const gasHelper    = require('../helpers/gasHelper')
 const vmHelper     = require('../helpers/vmHelper')
 const { loadHubModule } = require('../helpers/multiValidatorHubHelper')
 
-// Clears the attestation capability min_stake (1000) AND the provider floor
-// (10000) that is enforced on the responsible set at/above
-// STAKE_WEIGHTED_QUORUM, which regtest arms at genesis. A stake that clears
-// only the first produces a hub that is staked and never selected.
+// Clears the attestation capability min_stake (1000) AND the PROVIDER floor,
+// which is enforced on the responsible set at/above STAKE_WEIGHTED_QUORUM,
+// armed at genesis on regtest. A stake clearing only the capability minimum
+// produces a hub that is staked and never selected.
+//
 // Above the HIGHEST provider floor, not merely above one of them. `llm` is
 // 25000, so anything at or below that makes the llm drills unservable rather
 // than slow. Read from the registry rather than pinned here would be better
@@ -138,9 +139,31 @@ function recordStakerKey (label, entry) {
  * neither the confirmed set nor the mempool set.
  */
 async function settleStack () {
-    await utxoTrackerConnector.quiesce({
+    // INSPECT THE RESULT. `quiesce` is a barrier whose failure is a RETURN VALUE,
+    // not a throw: on timeout it returns the last status with `ready: false`, and
+    // its own body says callers that are a barrier rather than a retry loop must
+    // check `.ready`. Discarding it made thirty seconds of NON-settlement resolve
+    // as success, which is precisely the ordering failure this function exists to
+    // prevent and which the header above warns about: the encoder looks up UTXOs
+    // with `unconfirmed=false`, so acting on an unsettled tracker produces the
+    // intermittent mid-batch crash that reads as flake.
+    //
+    // WARNS RATHER THAN THROWS, deliberately. What was missing here was
+    // VISIBILITY, not severity: an unsettled tracker often still works, and
+    // failing the drill on it would trade a rare wrong answer for a common
+    // spurious failure. The next step's own wait is what enforces correctness.
+    const status = await utxoTrackerConnector.quiesce({
         timeoutMs: 30000, pollMs: 250, regtestMiner: regtestMinerConnector,
     })
+    if (status && status.ready === false) {
+        console.log('mirrorDrillFixture: WARNING the tracker did NOT settle within 30000ms ' +
+            '(quiesce returned ready:false' +
+            (status.height !== undefined ? ', height ' + status.height : '') +
+            (status.lag !== undefined ? ', lag ' + status.lag : '') +
+            '). The next step acts on a mid-batch tracker, so an encoder UTXO lookup ' +
+            'failing right after this is ordering rather than flake.')
+    }
+    return status
 }
 
 /**
@@ -469,6 +492,67 @@ async function deployRequestContract (opts) {
 }
 
 /**
+ * Refuse a round whose responsible set contains anyone this venue does not run.
+ *
+ * WHY A GUARD AND NOT A MECHANISM. The responsible set is drawn from EVERY
+ * staked validator carrying the attestation capability and ranked by
+ * `sha256(requestId || pubkey)`, with stake acting only as a pre-filter
+ * (`AttestationRound.js`). The venue stakes its identities INTO a shared roster
+ * that already holds others, so nothing makes its own hubs win: measured
+ * 2026-09-04, an all-venue draw of three from five venue identities among eleven
+ * is C(5,3)/C(11,3), about 6%. Retrying until the draw is clean is therefore not
+ * a strategy, and this must never be used as one.
+ *
+ * The MECHANISM is the provider stake floor, raised between the venue's
+ * identities and the standing roster through the `configs` table under
+ * module='ATTESTATION_PROVIDER', scoped by coin and network so nothing outside
+ * regtest moves. This function is what makes a floor that did not work FAIL
+ * LOUDLY AND EARLY, naming the members it could not account for, rather than
+ * presenting an hour later as a round that never finalized.
+ *
+ * WHY "not a venue hub" AND NOT "dead": a staked validator whose hub is not in
+ * THIS venue's P2P mesh cannot sign this venue's round however alive it is
+ * elsewhere. Two of the standing six have no key at all and the other four are
+ * simply out of mesh, and both are equally unusable, so the test is membership
+ * of the mesh rather than liveness.
+ *
+ * @param {object} venue       the started AttestMirrorVenue
+ * @param {object} federation  a `captureFederationState` result
+ */
+function assertResponsibleSetIsVenueOnly (venue, federation) {
+    assert.ok(venue && Array.isArray(venue.hubs) && venue.hubs.length,
+        'mirrorDrillFixture: no venue hubs to compare a responsible set against')
+    assert.ok(federation && Array.isArray(federation.hubs),
+        'mirrorDrillFixture: assertResponsibleSetIsVenueOnly needs a captureFederationState result')
+
+    // The capture reports pubkeys truncated to 16 chars, so compare on that
+    // prefix rather than re-deriving a full key that is not present.
+    const ours = new Set(venue.hubs.map((h) => String(h.pubkey).slice(0, 16)))
+
+    const readable = federation.hubs.filter((h) => Array.isArray(h.responsible))
+    // NO VERDICT rather than a pass. An unreadable capture says nothing about
+    // the draw, and letting that look like a clean set is the same defect the
+    // capture itself had to be rebuilt for.
+    assert.ok(readable.length > 0,
+        'mirrorDrillFixture: no hub returned a readable responsible set, so the draw cannot be ' +
+        'judged. This is an INSTRUMENT failure and NOT evidence that the set was clean.')
+
+    const foreign = []
+    for (const h of readable) {
+        for (const member of h.responsible) {
+            if (!ours.has(String(member))) foreign.push(String(member))
+        }
+    }
+
+    assert.strictEqual(foreign.length, 0,
+        'the responsible set contains ' + [...new Set(foreign)].join(', ') + ', which this venue ' +
+        'does not run, so the round cannot reach quorum and nothing downstream of it is being ' +
+        'tested. The provider stake floor is what excludes non-venue validators before the ' +
+        'ranking; this means it is not in effect, is too low for the standing roster\'s weight, ' +
+        'or was written for the wrong coin/network. Venue hubs: ' + [...ours].join(', '))
+}
+
+/**
  * Read one of the venue's own indexer databases.
  *
  * These live HERE rather than on the venue helper deliberately: the venue is a
@@ -558,6 +642,7 @@ async function readContractState (venue, indexerIndex, contractIndex) {
 module.exports = {
     stakeDrillIdentities,
     withWedgeClear,
+    assertResponsibleSetIsVenueOnly,
     clearWedgeBefore,
     recordStakerKey,
     DRILL_KEYS_DIR,

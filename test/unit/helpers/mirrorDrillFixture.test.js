@@ -469,3 +469,58 @@ describe('mirrorDrillFixture: the minted gas covers the stake it pays for', func
             '; the stake pays a fee out of the same balance, so this wants real headroom')
     })
 })
+
+describe('mirrorDrillFixture: assertResponsibleSetIsVenueOnly', function () {
+    const { assertResponsibleSetIsVenueOnly } = require('../../attestMirror/mirrorDrillFixture')
+
+    const venue = { hubs: [
+        { pubkey: 'ff5eeb94d7559682aaaa' },
+        { pubkey: 'c6f6a81411278f23bbbb' },
+        { pubkey: 'cc5d20c35ade8568cccc' },
+    ] }
+    const cap = (responsibleArrays) => ({
+        phase: 'x', requestId: 'r',
+        hubs: responsibleArrays.map((r, i) => ({ hub: i, responsible: r })),
+    })
+
+    it('passes when every drawn member is a hub this venue runs', function () {
+        assertResponsibleSetIsVenueOnly(venue, cap([
+            ['ff5eeb94d7559682', 'c6f6a81411278f23', 'cc5d20c35ade8568'],
+        ]))
+    })
+
+    it('names the members it cannot account for', function () {
+        // The real run 5 draw: one venue hub, one out-of-mesh validator, one dead key.
+        assert.throws(() => assertResponsibleSetIsVenueOnly(venue, cap([
+            ['d04ab232742bb4ab', 'cc5d20c35ade8568', '7e3aa9d750d51883'],
+        ])), (e) => {
+            assert.ok(/d04ab232742bb4ab/.test(e.message), 'must name the foreign member')
+            assert.ok(/7e3aa9d750d51883/.test(e.message), 'must name every foreign member, not the first')
+            assert.ok(!/cc5d20c35ade8568,/.test(e.message.split('Venue hubs:')[0]),
+                'must not accuse the member that IS a venue hub')
+            assert.ok(/provider stake floor/.test(e.message),
+                'must point at the mechanism, since that is what the reader has to change')
+            return true
+        })
+    })
+
+    it('refuses to render a verdict when no hub returned a readable set', function () {
+        // The capture reports an error STRING rather than an array when a probe
+        // fails. Treating that as a clean draw is the same defect the capture
+        // itself was rebuilt for, so this must refuse rather than pass.
+        assert.throws(() => assertResponsibleSetIsVenueOnly(venue, {
+            phase: 'x', requestId: 'r',
+            hubs: [{ hub: 0, responsible: 'unreachable: boom' }, { hub: 1, responsible: 'hub stopped' }],
+        }), /INSTRUMENT failure and NOT evidence/)
+    })
+
+    it('judges on the readable hubs when only some could be read', function () {
+        assert.throws(() => assertResponsibleSetIsVenueOnly(venue, {
+            phase: 'x', requestId: 'r',
+            hubs: [
+                { hub: 0, responsible: 'unreachable: boom' },
+                { hub: 1, responsible: ['d04ab232742bb4ab'] },
+            ],
+        }), /d04ab232742bb4ab/)
+    })
+})
