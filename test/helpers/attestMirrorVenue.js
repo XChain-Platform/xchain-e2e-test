@@ -119,6 +119,13 @@ const DEFAULT_BATCH_WINDOW_S = 30;
 // this: the invariant governs the venue's own resting knobs.
 const GOSSIP_HOP_BUDGET_S = 2;
 
+// The two window keyings this venue knows how to reason about, named so a verdict cannot
+// be spelled two ways in the helper and its guard. `effective_time` is the signed field
+// every hub reads identically; `finalized_at` is the per-hub wall clock older hubs keyed
+// on, kept because XCHAIN_HUB_PATH can point at one.
+const WINDOW_KEY_SIGNED     = 'effective_time';
+const WINDOW_KEY_WALL_CLOCK = 'finalized_at';
+
 // Mirror barrier graces, at zero: the barrier then holds only for content the
 // stream has not yet delivered, which is the thing under test, rather than for a
 // fixed wait. Set to 0 rather than left unset because the frozen 120 would make
@@ -349,76 +356,141 @@ function planPorts(ports, hubCount, indexerCount) {
  * then rejects it. This is the regtest-scaled form of the protocol's own sizing of the
  * frozen 120 as federation gossip plus stream lag plus hub clock skew.
  *
- * RULE B, the completeness band must cover the gossip hop. Window membership is keyed on
- * `finalized_at`, which is per-hub WALL CLOCK and explicitly allowed to differ between
- * two hubs' copies of one logical row, so two hubs' stamps for the same row can straddle
- * a window boundary and place it in different windows. The follower's completeness check
- * forgives exactly that, but only for a row inside `BOUNDARY_SKEW_S` of the boundary, and
- * that band is CLAMPED TO A QUARTER OF THE WINDOW. So a small window shrinks the band
- * below the hop and an honest window intermittently loses its quorum. Intermittently is
- * the whole problem: it reads as a venue defect rather than as a misconfigured knob.
+ * RULE B, and WHICH rule B depends on how the hub keys a window, which is why the keying
+ * is read off the hub rather than assumed:
  *
- * Rule B is what forces a window much larger than the margin, and it is stated in terms
- * of the band rather than as a ratio between the two knobs, because the band is the thing
- * the hub actually computes.
+ *   SIGNED KEYING (`effective_time`, the shape shipped today). Every hub holding a row
+ *   reads the same signed value, so all five partition the boundary identically and the
+ *   straddle rule B guards against cannot happen. What carries the weight instead is not
+ *   a second
+ *   knob relation but a stronger reading of rule A: a row's effective time is its leader's
+ *   clock plus the forward margin, so a row destined for a window is written a whole
+ *   forward margin before that window can close. The margin therefore has to cover the hop
+ *   twice over, once for the follower's future-time bound and once for the co-signer's
+ *   rebuild to hold the same rows the leader's does, and both are already rule A. So there
+ *   is NO window-versus-margin constraint under this keying, and asserting one would be
+ *   inventing a rule the hub does not have.
+ *
+ *   WALL-CLOCK KEYING (`finalized_at`, kept because a venue may be pointed at an older
+ *   hub). `finalized_at` is per-hub wall clock the schema explicitly allows two hubs to
+ *   disagree on, so two stamps for one logical row can straddle a boundary and land it in
+ *   different windows. The follower's completeness check forgives exactly that, but only
+ *   inside `BOUNDARY_SKEW_S` of the boundary, and that band is CLAMPED TO A QUARTER OF THE
+ *   WINDOW. A small window shrinks the band below the hop and an honest window
+ *   intermittently loses its quorum. Intermittently is the whole problem: it reads as a
+ *   venue defect rather than as a misconfigured knob. Stated in terms of the band rather
+ *   than as a ratio between the two knobs, because the band is what the hub computes.
  *
  * @param {number} forwardS       ATTEST_RESPONSE_FORWARD_S_OVERRIDE the venue will set
  * @param {number} batchWindowS   ATTEST_BATCH_WINDOW_S_OVERRIDE the venue will set
- * @param {number} boundarySkewS  the hub's own BOUNDARY_SKEW_S, read from its module
+ * @param {object} keying         `resolveWindowKeying()`'s verdict for the hub being driven
  * @param {number} [hopBudgetS]   the hop this venue budgets for
  */
-function assertTimingInvariants(forwardS, batchWindowS, boundarySkewS, hopBudgetS = GOSSIP_HOP_BUDGET_S) {
-    const f = Number(forwardS), w = Number(batchWindowS), skew = Number(boundarySkewS), hop = Number(hopBudgetS);
-    for (const [name, v] of [['forwardS', f], ['batchWindowS', w], ['boundarySkewS', skew], ['hopBudgetS', hop]]) {
+function assertTimingInvariants(forwardS, batchWindowS, keying, hopBudgetS = GOSSIP_HOP_BUDGET_S) {
+    const f = Number(forwardS), w = Number(batchWindowS), hop = Number(hopBudgetS);
+    for (const [name, v] of [['forwardS', f], ['batchWindowS', w], ['hopBudgetS', hop]]) {
         if (!Number.isFinite(v) || v <= 0) {
             throw new Error('attestMirrorVenue: ' + name + ' must be a positive number, got ' + String(v));
         }
+    }
+    const key = keying && keying.key;
+    if (key !== WINDOW_KEY_SIGNED && key !== WINDOW_KEY_WALL_CLOCK) {
+        throw new Error('attestMirrorVenue: window keying must be the verdict of ' +
+            'resolveWindowKeying(), got ' + JSON.stringify(keying));
     }
 
     if (!(f > hop)) {
         throw new Error('attestMirrorVenue: refusing to boot. The forward margin ' +
             'ATTEST_RESPONSE_FORWARD_S_OVERRIDE=' + f + 's does not exceed the ' + hop +
             's gossip hop this venue budgets for, so a follower can receive a mirror row whose ' +
-            'signed effective time has already passed and reject it. Wanted forwardS > ' + hop +
-            '; raise the margin or lower the hop budget deliberately.');
+            'signed effective time has already passed and reject it' +
+            (key === WINDOW_KEY_SIGNED
+                ? ', and a co-signer can rebuild a closing window without a row the leader ' +
+                  'already holds. Under ' + WINDOW_KEY_SIGNED + ' keying the margin is the only ' +
+                  'thing standing between the drill and both faults'
+                : '') +
+            '. Wanted forwardS > ' + hop + '; raise the margin or lower the hop budget deliberately.');
     }
 
-    // The hub's own clamp, recomputed here rather than assumed, so this stays true if the
-    // hub changes how it narrows the band.
-    const band = Math.min(skew, Math.floor(w / 4));
-    if (!(band >= hop)) {
-        throw new Error('attestMirrorVenue: refusing to boot. With ' +
-            'ATTEST_BATCH_WINDOW_S_OVERRIDE=' + w + 's the batch completeness band is ' +
-            'min(BOUNDARY_SKEW_S ' + skew + ', floor(' + w + '/4) = ' + Math.floor(w / 4) + ') = ' +
-            band + 's, which is under the ' + hop + 's gossip hop, so two hubs stamping one row ' +
-            'either side of a window boundary will intermittently cost an honest window its ' +
-            'quorum and redden the batch drill at random. Wanted a band >= ' + hop +
-            ', i.e. batchWindowS >= ' + (4 * hop) + 's at this BOUNDARY_SKEW_S ' +
-            '(forwardS is ' + f + 's).');
+    // The straddle only exists under wall-clock keying. Under the signed key the rows a
+    // window holds are the same on every hub by construction, so there is no band to size.
+    if (key === WINDOW_KEY_WALL_CLOCK) {
+        const skew = Number(keying.boundarySkewS);
+        if (!Number.isFinite(skew) || skew <= 0) {
+            throw new Error('attestMirrorVenue: boundarySkewS must be a positive number under ' +
+                WINDOW_KEY_WALL_CLOCK + ' keying, got ' + String(keying.boundarySkewS));
+        }
+        // The hub's own clamp, recomputed here rather than assumed, so this stays true if the
+        // hub changes how it narrows the band.
+        const band = Math.min(skew, Math.floor(w / 4));
+        if (!(band >= hop)) {
+            throw new Error('attestMirrorVenue: refusing to boot. With ' +
+                'ATTEST_BATCH_WINDOW_S_OVERRIDE=' + w + 's the batch completeness band is ' +
+                'min(BOUNDARY_SKEW_S ' + skew + ', floor(' + w + '/4) = ' + Math.floor(w / 4) + ') = ' +
+                band + 's, which is under the ' + hop + 's gossip hop, so two hubs stamping one row ' +
+                'either side of a window boundary will intermittently cost an honest window its ' +
+                'quorum and redden the batch drill at random. Wanted a band >= ' + hop +
+                ', i.e. batchWindowS >= ' + (4 * hop) + 's at this BOUNDARY_SKEW_S ' +
+                '(forwardS is ' + f + 's).');
+        }
     }
 }
 
 /**
- * The hub's own boundary band, or a refusal explaining why the invariant no longer applies.
+ * How the hub being driven keys a batch window, or a refusal saying the invariant no
+ * longer describes it.
  *
- * Read from the hub being driven rather than retyped, and REFUSED rather than skipped when
- * it is absent. Absence is not a missing detail: the band exists only because window
- * membership is keyed on per-hub wall clock, so a hub that no longer exports it has
- * changed how a window is keyed, and rule B above is then describing a mechanism that hub
- * does not have. Continuing would run the drill under an invariant checked against
- * nothing, which is worse than the flake the invariant exists to prevent.
+ * READ FROM THE HUB, never assumed, because a venue outlives the hub it was written
+ * against: one keyed on `finalized_at`, the next on the signed `effective_time`, and a
+ * guard pinned to either spelling refuses to boot on the other for want of a constant
+ * that belongs to only one of them. Absence of `BOUNDARY_SKEW_S` is therefore not by
+ * itself the signal, and neither is its presence: the window read is, so the verdict comes from the
+ * column `_selectWindowRows` actually filters on and the band is only collected once that
+ * read says wall clock.
+ *
+ * Refused rather than defaulted when neither shape is recognizable. A third keying would
+ * run the drill under an invariant checked against nothing, which is worse than the flake
+ * the invariant exists to prevent.
  */
-function resolveBoundarySkewS() {
-    const pub  = loadHubModule('src/AttestationBatchPublisher.js');
-    const skew = Number(pub && pub.BOUNDARY_SKEW_S);
-    if (!Number.isFinite(skew) || skew <= 0) {
-        throw new Error('attestMirrorVenue: refusing to boot. The hub this venue resolves ' +
-            'exports no positive BOUNDARY_SKEW_S (got ' + String(pub && pub.BOUNDARY_SKEW_S) + '), ' +
-            'so its batch window is no longer keyed on finalized_at with a boundary band and this ' +
-            "venue's window invariant no longer describes it. Re-derive the invariant against that " +
-            'hub, or point XCHAIN_HUB_PATH at the hub revision this venue is meant to drive.');
+function resolveWindowKeying() {
+    return resolveWindowKeyingFrom(loadHubModule('src/AttestationBatchPublisher.js'));
+}
+
+/**
+ * The decision itself, over a publisher module rather than over a checkout.
+ *
+ * Split out so both keyings and both refusals are directly assertable: the venue resolves
+ * exactly one hub, so a guard that could only call `resolveWindowKeying()` would be able
+ * to test whichever shape that checkout happens to have and nothing else.
+ *
+ * @param {Function} pub  the hub's `AttestationBatchPublisher` module export
+ */
+function resolveWindowKeyingFrom(pub) {
+    const select = pub && pub.prototype && pub.prototype._selectWindowRows;
+    const src    = typeof select === 'function' ? String(select) : '';
+    const onSigned = /effective_time\s*>=\s*\?/.test(src);
+    const onWall   = /finalized_at\s*>=\s*\?/.test(src);
+
+    if (onSigned && !onWall) return { key: WINDOW_KEY_SIGNED, boundarySkewS: null };
+
+    if (onWall && !onSigned) {
+        const skew = Number(pub && pub.BOUNDARY_SKEW_S);
+        if (!Number.isFinite(skew) || skew <= 0) {
+            throw new Error('attestMirrorVenue: refusing to boot. The hub this venue resolves ' +
+                'keys its batch window on finalized_at but exports no positive BOUNDARY_SKEW_S ' +
+                '(got ' + String(pub && pub.BOUNDARY_SKEW_S) + '), so the completeness band this ' +
+                'venue has to size against cannot be read. Re-derive the invariant against that ' +
+                'hub, or point XCHAIN_HUB_PATH at the hub revision this venue is meant to drive.');
+        }
+        return { key: WINDOW_KEY_WALL_CLOCK, boundarySkewS: skew };
     }
-    return skew;
+
+    throw new Error('attestMirrorVenue: refusing to boot. The hub this venue resolves keys its ' +
+        'batch window on neither effective_time alone nor finalized_at alone (' +
+        (select ? 'its _selectWindowRows matches ' + (onSigned && onWall ? 'both' : 'neither') :
+            'it exposes no _selectWindowRows') + '), so this venue\'s window invariant no longer ' +
+        'describes it. Re-derive the invariant against that hub, or point XCHAIN_HUB_PATH at the ' +
+        'hub revision this venue is meant to drive.');
 }
 
 /**
@@ -824,7 +896,7 @@ class AttestMirrorVenue {
         // BEFORE anything is spawned or provisioned. A knob combination that makes the
         // batch drill intermittently red must stop the run here, where the message names
         // the two values, and not thirty minutes later as a flaky assertion.
-        assertTimingInvariants(this.forwardS, this.batchWindowS, resolveBoundarySkewS());
+        assertTimingInvariants(this.forwardS, this.batchWindowS, resolveWindowKeying());
 
         this._live = await this._resolveStandingStack();
         if (!this._live) return false;
@@ -1594,6 +1666,8 @@ module.exports = {
     buildIndexerEnv,
     pickOutsideIndexer,
     assertTimingInvariants,
+    resolveWindowKeying,
+    resolveWindowKeyingFrom,
     resolveDecoderCredential,
     HUB_CONFIG_REDACTION,
     coinCode,
@@ -1603,6 +1677,8 @@ module.exports = {
     DEFAULT_BATCH_WINDOW_S,
     DEFAULT_GRACE_S,
     GOSSIP_HOP_BUDGET_S,
+    WINDOW_KEY_SIGNED,
+    WINDOW_KEY_WALL_CLOCK,
     DB_PREFIX,
     VENUE_REDUNDANCY
 };

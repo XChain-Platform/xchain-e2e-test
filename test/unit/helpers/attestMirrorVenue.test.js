@@ -34,6 +34,8 @@ const {
     buildIndexerEnv,
     pickOutsideIndexer,
     assertTimingInvariants,
+    resolveWindowKeying,
+    resolveWindowKeyingFrom,
     resolveDecoderCredential,
     HUB_CONFIG_REDACTION,
     coinCode,
@@ -43,6 +45,8 @@ const {
     DEFAULT_BATCH_WINDOW_S,
     DEFAULT_GRACE_S,
     GOSSIP_HOP_BUDGET_S,
+    WINDOW_KEY_SIGNED,
+    WINDOW_KEY_WALL_CLOCK,
     DB_PREFIX
 } = require('../../helpers/attestMirrorVenue')
 const { pickFreePorts, ephemeralRange } = require('../../helpers/multiValidatorHubHelper')
@@ -348,26 +352,43 @@ describe('attestMirrorVenue: the outside-the-responsible-set picker', function (
 })
 
 describe('attestMirrorVenue: timing invariants', function () {
-    // The hub's value at the baseline this venue drives, stated EXPLICITLY rather than
-    // read off whichever hub checkout happens to be resolvable. The guard itself takes
-    // the band as a parameter and the live venue reads it from the hub, so the wiring is
-    // covered by the absence case at the end; pinning the arithmetic to a literal is what
-    // keeps these cases meaningful in a checkout whose hub has moved.
-    const BOUNDARY_SKEW_S = 5
+    // The two verdicts the guard branches on, built here rather than read off whichever
+    // hub checkout happens to be resolvable. The wall-clock band is the value the hub
+    // carried at the revision that keyed windows that way; pinning the arithmetic to a
+    // literal is what keeps these cases meaningful in a checkout whose hub has moved.
+    // resolveWindowKeying's own reading of a live hub is covered further down.
+    const SIGNED = { key: WINDOW_KEY_SIGNED, boundarySkewS: null }
+    const WALL   = { key: WINDOW_KEY_WALL_CLOCK, boundarySkewS: 5 }
 
     it('accepts the venue defaults, which is the combination every drill runs', () => {
         assert.doesNotThrow(() =>
-            assertTimingInvariants(DEFAULT_FORWARD_S, DEFAULT_BATCH_WINDOW_S, BOUNDARY_SKEW_S))
+            assertTimingInvariants(DEFAULT_FORWARD_S, DEFAULT_BATCH_WINDOW_S, SIGNED))
+        assert.doesNotThrow(() =>
+            assertTimingInvariants(DEFAULT_FORWARD_S, DEFAULT_BATCH_WINDOW_S, WALL))
     })
 
     it('refuses a forward margin at or below the gossip hop, naming both values', () => {
         // At the hop exactly, not merely below it: a row arriving the instant it becomes
         // applicable is already too late for the follower to bound it.
+        for (const keying of [SIGNED, WALL]) {
+            assert.throws(
+                () => assertTimingInvariants(GOSSIP_HOP_BUDGET_S, DEFAULT_BATCH_WINDOW_S, keying),
+                (e) => /refusing to boot/.test(e.message) &&
+                       /ATTEST_RESPONSE_FORWARD_S_OVERRIDE=2s/.test(e.message) &&
+                       /gossip hop/.test(e.message))
+        }
+    })
+
+    it('says the margin also guards the co-signer rebuild, but only under signed keying', () => {
+        // Under the signed key the margin is what gives a co-signer time to hold the same
+        // rows the leader does when a window closes. The wall-clock hub has the band for
+        // that, so its refusal must NOT claim the second reason.
         assert.throws(
-            () => assertTimingInvariants(GOSSIP_HOP_BUDGET_S, DEFAULT_BATCH_WINDOW_S, BOUNDARY_SKEW_S),
-            (e) => /refusing to boot/.test(e.message) &&
-                   /ATTEST_RESPONSE_FORWARD_S_OVERRIDE=2s/.test(e.message) &&
-                   /gossip hop/.test(e.message))
+            () => assertTimingInvariants(GOSSIP_HOP_BUDGET_S, DEFAULT_BATCH_WINDOW_S, SIGNED),
+            /co-signer can rebuild a closing window/)
+        assert.throws(
+            () => assertTimingInvariants(GOSSIP_HOP_BUDGET_S, DEFAULT_BATCH_WINDOW_S, WALL),
+            (e) => /refusing to boot/.test(e.message) && !/co-signer/.test(e.message))
     })
 
     it('refuses a window whose quarter-clamped completeness band falls under the hop', () => {
@@ -375,7 +396,7 @@ describe('attestMirrorVenue: timing invariants', function () {
         // straddling a boundary intermittently cost the window its quorum. This is the
         // exact shape that reads as a flaky AT5 rather than as a bad knob.
         assert.throws(
-            () => assertTimingInvariants(DEFAULT_FORWARD_S, 4, BOUNDARY_SKEW_S),
+            () => assertTimingInvariants(DEFAULT_FORWARD_S, 4, WALL),
             (e) => /refusing to boot/.test(e.message) &&
                    /completeness band is min\(BOUNDARY_SKEW_S 5, floor\(4\/4\) = 1\) = 1s/.test(e.message) &&
                    /batchWindowS >= 8s/.test(e.message))
@@ -384,30 +405,103 @@ describe('attestMirrorVenue: timing invariants', function () {
     it('holds the band at the boundary window size rather than one either side of it', () => {
         // The rule is band >= hop, so at a 2s band (an 8s window) it passes and at 7s it
         // does not. Pinned because an off-by-one here is invisible until a drill flakes.
-        assert.doesNotThrow(() => assertTimingInvariants(DEFAULT_FORWARD_S, 8, BOUNDARY_SKEW_S))
-        assert.throws(() => assertTimingInvariants(DEFAULT_FORWARD_S, 7, BOUNDARY_SKEW_S),
+        assert.doesNotThrow(() => assertTimingInvariants(DEFAULT_FORWARD_S, 8, WALL))
+        assert.throws(() => assertTimingInvariants(DEFAULT_FORWARD_S, 7, WALL),
             /refusing to boot/)
     })
 
-    it('refuses an absent boundary band rather than checking the window against nothing', () => {
-        // A hub that stops exporting the band has changed how a window is keyed, so rule B
-        // no longer describes it. Skipping the check there would run the drill under an
-        // invariant verified against nothing, which is the failure this guard exists to
-        // prevent, one level up.
+    it('applies no band rule at all under signed keying, at any window size', () => {
+        // The straddle the band forgives cannot happen when every hub reads the same signed
+        // value, so a 1s window is legal there while it is refused under wall clock. This is
+        // the case that would red if the band rule were left applying to both keyings, which
+        // is exactly the defect that stopped the venue booting against the shipped hub.
+        assert.doesNotThrow(() => assertTimingInvariants(DEFAULT_FORWARD_S, 1, SIGNED))
+        assert.throws(() => assertTimingInvariants(DEFAULT_FORWARD_S, 1, WALL), /refusing to boot/)
+    })
+
+    it('refuses an absent boundary band under wall-clock keying rather than checking nothing', () => {
+        // Under that keying the band is the whole of rule B, so a verdict that carries no
+        // usable band must refuse rather than pass the window against nothing.
         for (const absent of [undefined, null, 0, NaN]) {
             assert.throws(
-                () => assertTimingInvariants(DEFAULT_FORWARD_S, DEFAULT_BATCH_WINDOW_S, absent),
-                /must be a positive number/)
+                () => assertTimingInvariants(DEFAULT_FORWARD_S, DEFAULT_BATCH_WINDOW_S,
+                    { key: WINDOW_KEY_WALL_CLOCK, boundarySkewS: absent }),
+                /boundarySkewS must be a positive number/)
+        }
+    })
+
+    it('refuses a keying verdict it does not recognize rather than picking a rule', () => {
+        // A third keying is not a missing detail: the guard would be judging a mechanism
+        // the hub does not have. Includes the pre-rewrite call shape, a bare number, which
+        // must not be read as a band any more.
+        for (const bad of [undefined, null, 5, {}, { key: 'block_index' }, 'effective_time']) {
+            assert.throws(
+                () => assertTimingInvariants(DEFAULT_FORWARD_S, DEFAULT_BATCH_WINDOW_S, bad),
+                /window keying must be the verdict of resolveWindowKeying/)
         }
     })
 
     it('refuses a non-positive or unset knob rather than treating it as zero', () => {
         for (const bad of [0, -1, undefined, null, NaN, 'soon']) {
-            assert.throws(() => assertTimingInvariants(bad, DEFAULT_BATCH_WINDOW_S, BOUNDARY_SKEW_S),
+            assert.throws(() => assertTimingInvariants(bad, DEFAULT_BATCH_WINDOW_S, SIGNED),
                 /must be a positive number/)
-            assert.throws(() => assertTimingInvariants(DEFAULT_FORWARD_S, bad, BOUNDARY_SKEW_S),
+            assert.throws(() => assertTimingInvariants(DEFAULT_FORWARD_S, bad, SIGNED),
                 /must be a positive number/)
         }
+    })
+})
+
+describe('attestMirrorVenue: reading the hub\'s window keying', function () {
+    // The venue resolves ONE hub checkout, so the keyings it does not currently have are
+    // reached by driving the resolver's decision against stand-in publisher shapes. The
+    // real hub is then read for real in the last case, which is what ties the decision to
+    // the code being driven rather than to these stand-ins.
+    //
+    // The clause has to be BAKED INTO the stand-in's source, not closed over: the resolver
+    // reads the function's own text, and a closed-over variable leaves that text saying
+    // `whereClause` and every stand-in looking identical.
+    const publisherWith = (whereClause, extra) => Object.assign(
+        function AttestationBatchPublisher() {}, extra || {},
+        { prototype: { _selectWindowRows: new Function('a', 'b',
+            'return this.q(' + JSON.stringify(whereClause) + ', [a, b])') } })
+
+    it('reads the shipped hub and calls its window signed, with no band', () => {
+        // The real module, not a stand-in: this is the case that failed before the rewrite,
+        // when the resolver demanded a constant the hub had correctly deleted.
+        const verdict = resolveWindowKeying()
+        assert.strictEqual(verdict.key, WINDOW_KEY_SIGNED)
+        assert.strictEqual(verdict.boundarySkewS, null)
+    })
+
+    it('refuses a publisher whose window read matches neither column', () => {
+        assert.throws(() => resolveWindowKeyingFrom(publisherWith('WHERE network = ? AND id >= ?')),
+            (e) => /refusing to boot/.test(e.message) && /matches neither/.test(e.message))
+    })
+
+    it('refuses a publisher whose window read matches both columns', () => {
+        assert.throws(() => resolveWindowKeyingFrom(publisherWith(
+            'WHERE finalized_at >= ? AND effective_time >= ?')),
+            /matches both/)
+    })
+
+    it('reads the band only once the window read says wall clock', () => {
+        const withBand = publisherWith('WHERE network = ? AND finalized_at >= ? AND finalized_at < ?',
+            { BOUNDARY_SKEW_S: 5 })
+        assert.deepStrictEqual(resolveWindowKeyingFrom(withBand),
+            { key: WINDOW_KEY_WALL_CLOCK, boundarySkewS: 5 })
+
+        // A signed-keying hub that still carries the constant is signed, not wall clock:
+        // the read decides, not the leftover export.
+        const signedWithStaleBand = publisherWith(
+            'WHERE network = ? AND effective_time >= ? AND effective_time < ?', { BOUNDARY_SKEW_S: 5 })
+        assert.strictEqual(resolveWindowKeyingFrom(signedWithStaleBand).key, WINDOW_KEY_SIGNED)
+    })
+
+    it('refuses a wall-clock publisher that exports no usable band', () => {
+        assert.throws(() => resolveWindowKeyingFrom(publisherWith(
+            'WHERE network = ? AND finalized_at >= ? AND finalized_at < ?')),
+            (e) => /refusing to boot/.test(e.message) &&
+                   /keys its batch window on finalized_at but exports no positive BOUNDARY_SKEW_S/.test(e.message))
     })
 })
 
