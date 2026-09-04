@@ -76,7 +76,7 @@ const {
     readAppliedResponse, readContractState,
 } = require('./mirrorDrillFixture')
 const {
-    findEmittedAttestRequest, waitForMirrorRowEverywhere,
+    findEmittedAttestRequest, waitForMirrorRowEverywhere, waitForAppliedEverywhere,
 } = require('./mirrorDrillWaits')
 const vmHelper = require('../helpers/vmHelper')
 
@@ -349,16 +349,20 @@ describe('AT1: an ATTEST response finalizes over P2P with no transaction of its 
         // with the same response hash. A per-node difference there is exactly the
         // divergence the shared hash exists to prevent, and unlike the old
         // assertion it can actually fail.
+        // WAITED FOR, for the same reason the mirror row is: the row ARRIVING and
+        // the row being APPLIED are separated by at least one block. The applier
+        // runs in the block loop and only once the response's signed effective
+        // time has passed, so reading straight after the row lands asks the
+        // question a block too early and gets a null that looks exactly like an
+        // applier that never ran.
+        const appliedRows = await waitForAppliedEverywhere(venue, requestId, null, { mineWhileWaiting: 40 })
+
         const applieds = []
-        for (const ix of venue.indexers) {
-            const applied = await readAppliedResponse(venue, ix.index, requestId)
-            assert.ok(applied,
-                providerId + ': indexer ' + ix.index + ' never applied the mirror row\n' +
-                venue.logTail('indexer' + ix.index))
+        for (const [i, applied] of appliedRows.entries()) {
             assert.strictEqual(applied.tx_index, null,
-                providerId + ': the synthesized action on indexer ' + ix.index + ' carries tx_index ' +
+                providerId + ': the synthesized action on indexer ' + i + ' carries tx_index ' +
                 applied.tx_index + ' rather than NULL, so something gave it a transaction')
-            applieds.push({ index: ix.index, applied: applied })
+            applieds.push({ index: i, applied: applied })
         }
 
         const first = applieds[0]

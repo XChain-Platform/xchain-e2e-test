@@ -895,14 +895,25 @@ function responsibleHubTails (venue, capture) {
  * applier that runs on one node and not the other is the interesting failure and
  * it must be reported as a difference between two nodes, not as a timeout.
  */
-async function waitForAppliedEverywhere (venue, requestId, timeoutMs) {
+async function waitForAppliedEverywhere (venue, requestId, timeoutMs, opts) {
+    // Fourth argument added, never a reordering: other callers pass three.
+    const o = opts || {}
     const got = await untilOrClearDogeStall(async () => {
         const applied = []
         for (const ix of venue.indexers) {
             applied.push(await readAppliedResponse(venue, ix.index, requestId))
         }
         return { ok: applied.every((a) => a && a.action_index !== undefined), applied: applied }
-    }, { timeoutMs: timeoutMs || 15 * 60 * 1000, tipProbe: venueTipProbe(venue, 0) })
+    }, {
+        timeoutMs: timeoutMs || 15 * 60 * 1000,
+        tipProbe: venueTipProbe(venue, 0),
+        // MINES WHILE WAITING when the caller allows it. The applier runs inside
+        // the block loop, so on a chain nobody is mining the response can be
+        // delivered, valid and applicable and still never applied: there is no
+        // next block to apply it in. That times out at fifteen minutes and reads
+        // as an applier that does not work.
+        mineWhileWaiting: o.mineWhileWaiting,
+    })
     assert.ok(got.ok,
         'the response for ' + requestId + ' was not applied on every venue indexer: applied ' +
         JSON.stringify((got.applied || []).map((a) => (a ? a.block_index : null))) + '\n' +
