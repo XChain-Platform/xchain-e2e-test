@@ -204,6 +204,63 @@ function stakeVisibilityBlocks (coin, network) {
  * @param {string} [opts.network]  network for the visibility check (default the harness NETWORK)
  * @returns {Promise<{identities: Array, stakers: Array, visibilityBlocks: number}>}
  */
+/**
+ * Run one prologue step, and if the roll-call wedge is what killed it, clear the
+ * wedge and run it once more.
+ *
+ * WHY THIS EXISTS. Two AT1 drives died here on 2026-09-04 without reaching a
+ * single assertion, and neither failure was the step's own: the BTC indexer was
+ * parked on `rollcall_proof_unavailable` behind its own decoder, so the row the
+ * step waits for could not land and the helper timed out. The wedge is NOT
+ * wall-clock idleness. A drill mines BTC hard (3862 to 3891 in two minutes in
+ * that run) while the DOGE tip sits still, the roll-call epoch cannot be decided
+ * until DOGE passes the window end, and so the wedge RECURS mid-drill. It hit
+ * that drive twice.
+ *
+ * The drills of the other lane survive this because their waits go through
+ * `untilOrClearDogeStall`. The prologue cannot: its waits are inside the SHARED
+ * harness helpers (`ensureGasBalance`, `sendStakeV1`, `sendDeployV0`), which are
+ * every e2e drill's code and not this spec's to re-plumb. So the clear is applied
+ * AROUND those calls instead, which fixes it for both lanes, since the other
+ * lane's drills reach the same helpers through this fixture.
+ *
+ * DELIBERATELY NOT A BACKGROUND WATCHDOG, and this is the part to not "improve"
+ * later: `mineDogeBlocks` goes through `chainRail`, which SWAPS the harness
+ * globals to Dogecoin and restores them afterwards. A timer firing that while
+ * `sendStakeV1` is mid-flight on the BTC globals would corrupt the run it is
+ * supposed to protect. Retrying strictly BETWEEN operations is what makes the
+ * rail switch safe.
+ *
+ * Nudges only when the node is actually behind its decoder, never on a schedule,
+ * so a batch-window drill is not handed a continuously advancing DOGE tip.
+ */
+async function withWedgeClear (what, fn) {
+    try {
+        return await fn()
+    } catch (err) {
+        // Lazy require: mirrorDrillWaits requires THIS module at its top level,
+        // so a top-level require here would close the cycle.
+        const waits = require('./mirrorDrillWaits')
+        let sample = null
+        try { sample = await waits.standingTipProbe()() } catch (_) { sample = null }
+
+        const behind = sample && Number.isFinite(Number(sample.height)) &&
+            Number.isFinite(Number(sample.decoder)) && Number(sample.height) < Number(sample.decoder)
+        const rollcall = sample && String(sample.reason || '') === 'rollcall_proof_unavailable'
+
+        // Both conditions, not either. Behind-its-decoder alone is a node merely
+        // draining, which needs no help and would mine DOGE for nothing.
+        if (!behind || !rollcall) throw err
+
+        console.log('mirrorDrillFixture: ' + what + ' failed with the standing indexer at ' +
+            sample.height + ' behind its decoder at ' + sample.decoder + ' on ' + sample.reason +
+            '. That is the roll-call wedge, not this step. Mining DOGE and retrying once.')
+
+        await waits.mineDogeBlocks(waits.DOGE_NUDGE_BLOCKS)
+        return await fn()
+    }
+}
+
 async function stakeDrillIdentities (opts) {
     const o     = opts || {}
     const label = String(o.label || 'drill').replace(/[^A-Za-z0-9]/g, '')
@@ -243,10 +300,12 @@ async function stakeDrillIdentities (opts) {
         })
 
         await settleStack()
-        await gasHelper.ensureGasBalance(addr, DRILL_GAS_XCHAIN)
+        await withWedgeClear('gas mint for ' + stakerLabel,
+            () => gasHelper.ensureGasBalance(addr, DRILL_GAS_XCHAIN))
         await settleStack()
 
-        const result = await stakeHelper.sendStakeV1(addr, amount, id.pubkeyHex)
+        const result = await withWedgeClear('stake ' + i + ' for ' + label,
+            () => stakeHelper.sendStakeV1(addr, amount, id.pubkeyHex))
         assert.strictEqual(result.stake.status, 'valid',
             'mirrorDrillFixture: stake ' + i + ' for ' + label + ' came back ' + result.stake.status +
             ' rather than valid; the venue built on it would have a short responsible set')
@@ -285,9 +344,13 @@ async function deployRequestContract (opts) {
     // the funding CONFIRMED, and quiesce alone is satisfied by an empty mempool.
     await regtestMinerConnector.generateBlocks(2)
     await settleStack()
-    await gasHelper.ensureGasBalance(owner, '5000')
+    await withWedgeClear('gas mint for ' + label + '-owner',
+        () => gasHelper.ensureGasBalance(owner, '5000'))
 
-    const deploy = await vmHelper.sendDeployV0(owner, o.code, Number(o.gas || 500000))
+    // The step run 2 died on, after a full 5-identity prologue and a deployed
+    // contract: `checkContract GAVE UP after 225505ms` with 3 polls in 225s.
+    const deploy = await withWedgeClear('contract deploy for ' + label,
+        () => vmHelper.sendDeployV0(owner, o.code, Number(o.gas || 500000)))
     assert.strictEqual(deploy.contract.status, 'valid',
         'mirrorDrillFixture: deploy for ' + label + ' came back ' + deploy.contract.status)
 
@@ -369,6 +432,7 @@ async function readContractState (venue, indexerIndex, contractIndex) {
 
 module.exports = {
     stakeDrillIdentities,
+    withWedgeClear,
     recordStakerKey,
     DRILL_KEYS_DIR,
     deployRequestContract,

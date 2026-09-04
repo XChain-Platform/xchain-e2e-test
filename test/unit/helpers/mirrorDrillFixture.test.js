@@ -97,3 +97,104 @@ describe('mirrorDrillFixture: stake visibility distance', function () {
         assert.strictEqual(stakeVisibilityBlocks(), Number(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS))
     })
 })
+
+describe('mirrorDrillFixture: withWedgeClear', function () {
+    const { withWedgeClear } = require('../../attestMirror/mirrorDrillFixture')
+    const waitsPath = require.resolve('../../attestMirror/mirrorDrillWaits')
+    let savedWaits
+
+    // The helper lazy-requires mirrorDrillWaits (a cycle otherwise), so the
+    // seam is the module cache. Driving the REAL module here would mine DOGE
+    // on a live regtest chain from a unit test.
+    function stubWaits (stub) {
+        savedWaits = require.cache[waitsPath]
+        require.cache[waitsPath] = {
+            id: waitsPath, filename: waitsPath, loaded: true, exports: stub,
+        }
+    }
+
+    afterEach(function () {
+        if (savedWaits) { require.cache[waitsPath] = savedWaits } else { delete require.cache[waitsPath] }
+        savedWaits = undefined
+    })
+
+    function waitsStub (sample, mined) {
+        return {
+            DOGE_NUDGE_BLOCKS: 3,
+            standingTipProbe: () => async () => sample,
+            mineDogeBlocks: async (n) => { mined.push(n); return 999 },
+        }
+    }
+
+    it('passes a succeeding step straight through, and never probes', async function () {
+        const mined = []
+        stubWaits({
+            DOGE_NUDGE_BLOCKS: 3,
+            standingTipProbe: () => async () => { throw new Error('must not probe on success') },
+            mineDogeBlocks: async () => { throw new Error('must not mine on success') },
+        })
+        let calls = 0
+        const out = await withWedgeClear('step', async () => { calls++; return 'ok' })
+        assert.strictEqual(out, 'ok')
+        assert.strictEqual(calls, 1, 'a succeeding step must run exactly once')
+        assert.deepStrictEqual(mined, [])
+    })
+
+    it('clears the wedge and retries ONCE when the node is behind its decoder on rollcall', async function () {
+        const mined = []
+        stubWaits(waitsStub({ height: 3853, decoder: 3855, reason: 'rollcall_proof_unavailable' }, mined))
+        let calls = 0
+        const out = await withWedgeClear('mint', async () => {
+            calls++
+            if (calls === 1) throw new Error('checkMint: GAVE UP after 60282ms')
+            return 'landed'
+        })
+        assert.strictEqual(out, 'landed')
+        assert.strictEqual(calls, 2, 'the step must be retried exactly once after the clear')
+        assert.deepStrictEqual(mined, [3], 'it must mine the nudge block count')
+    })
+
+    it('rethrows the ORIGINAL error when the node is merely draining, and mines nothing', async function () {
+        // Behind its decoder but NOT on the roll-call reason: a node draining
+        // normally. Mining DOGE here would be a nudge for nothing.
+        const mined = []
+        stubWaits(waitsStub({ height: 3853, decoder: 3855, reason: null }, mined))
+        await assert.rejects(
+            () => withWedgeClear('mint', async () => { throw new Error('checkMint: GAVE UP after 60282ms') }),
+            /GAVE UP after 60282ms/)
+        assert.deepStrictEqual(mined, [], 'a draining node must not be nudged')
+    })
+
+    it('rethrows when the node is AT its decoder even if the reason still reads rollcall', async function () {
+        const mined = []
+        stubWaits(waitsStub({ height: 3855, decoder: 3855, reason: 'rollcall_proof_unavailable' }, mined))
+        await assert.rejects(
+            () => withWedgeClear('deploy', async () => { throw new Error('checkContract: GAVE UP') }),
+            /checkContract: GAVE UP/)
+        assert.deepStrictEqual(mined, [], 'a node level with its decoder is not wedged')
+    })
+
+    it('rethrows the original error when the probe itself cannot answer', async function () {
+        const mined = []
+        stubWaits({
+            DOGE_NUDGE_BLOCKS: 3,
+            standingTipProbe: () => async () => { throw new Error('ECONNREFUSED') },
+            mineDogeBlocks: async (n) => { mined.push(n) },
+        })
+        await assert.rejects(
+            () => withWedgeClear('stake', async () => { throw new Error('original failure') }),
+            /original failure/,
+            'an unreadable probe must not swallow the real error')
+        assert.deepStrictEqual(mined, [])
+    })
+
+    it('lets a second failure escape rather than retrying forever', async function () {
+        const mined = []
+        stubWaits(waitsStub({ height: 3853, decoder: 3855, reason: 'rollcall_proof_unavailable' }, mined))
+        let calls = 0
+        await assert.rejects(
+            () => withWedgeClear('mint', async () => { calls++; throw new Error('still wedged #' + calls) }),
+            /still wedged #2/)
+        assert.strictEqual(calls, 2, 'exactly one retry, never a loop')
+    })
+})
