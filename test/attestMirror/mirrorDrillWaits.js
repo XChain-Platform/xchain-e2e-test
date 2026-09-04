@@ -44,6 +44,10 @@ const assert = require('assert')
 // what lets test/unit/helpers/mirrorDrillFixture.test.js cover it at all.
 const { queryVenueDb } = require('./mirrorDrillFixture')
 
+// The ladder's own constants, imported rather than retyped: a local copy would let
+// this file disagree with the rule it is doing arithmetic about.
+const { ATTEST_RESPONSIBLE_WIDENING } = require('../../../xchain-indexer/src/attest_responsible_widening_activation.js')
+
 /**
  * Query one of the venue's databases, WITH THAT DATABASE SELECTED.
  *
@@ -141,6 +145,52 @@ const ROLLCALL_STALL_REASON = 'rollcall_proof_unavailable'
 // inside that: often enough that a run cannot wedge itself, rare enough that the
 // DOGE tip is not being advanced on a schedule.
 const BTC_BLOCKS_PER_DOGE_KEEPUP = 12
+
+/**
+ * What a widen step COSTS IN BLOCKS, and why a drill mines while it waits.
+ *
+ * THE LADDER IS HEIGHT-DRIVEN, NOT TIME-DRIVEN. `widenSlots` computes
+ *
+ *     start   = requestBlock + confirmations
+ *     span    = deadlineBlock - start
+ *     segment = span / (maxSlots + 1)
+ *     widen   = floor((atBlock - start) / segment)
+ *
+ * so the responsible set only grows as the CHAIN advances toward the deadline.
+ * Nothing about round timeouts, round failures or elapsed wall time moves it. A
+ * drill that mines its burial blocks and then waits therefore sits at widen 0 for
+ * as long as it waits, and a draw containing a key no live hub holds can never
+ * finalize: measured three times on this venue as a request that produced no row
+ * while every hub reported NO ROW and the responsible set never changed.
+ *
+ * At `deadlineBlocks` 60 with confirmations 3 and maxSlots 2 that is a segment of
+ * 19 blocks, so widen 1 arrives 19 blocks past the confirmation lag and widen 2 at
+ * 38. THIS NUMBER IS WHY A WAIT MINES; a future reader who removes the mining as
+ * noise reintroduces an unfinalizable drill.
+ *
+ * `safeCap` stops mining before the deadline, because the expiry sweep fires at
+ * deadline + 1 and an expired request fails the drill for an unrelated reason.
+ */
+function widenArithmetic (deadlineBlocks) {
+    const conf  = Number(ATTEST_RESPONSIBLE_WIDENING.confirmations)
+    const slots = Number(ATTEST_RESPONSIBLE_WIDENING.maxSlots)
+    const dl    = Number(deadlineBlocks)
+    if (!Number.isFinite(dl) || dl <= conf) {
+        return { span: 0, segment: 0, toFullWiden: 0, safeCap: 0, confirmations: conf, maxSlots: slots }
+    }
+    const span    = dl - conf
+    const segment = span / (slots + 1)
+    return {
+        span: span,
+        segment: segment,
+        toFullWiden: Math.ceil(segment * slots),
+        // Half a segment of headroom below the deadline: enough to reach full widen
+        // and still leave room before the expiry sweep.
+        safeCap: Math.max(0, Math.floor(span - segment / 2)),
+        confirmations: conf,
+        maxSlots: slots,
+    }
+}
 
 // BTC blocks mined through this module since the other chain was last moved.
 //
@@ -616,6 +666,12 @@ async function untilOrClearDogeStall (observe, opts) {
     const timeoutMs  = Number(o.timeoutMs) || 15 * 60 * 1000
     const intervalMs = Number(o.intervalMs) || DEFAULT_INTERVAL_MS
     const tipProbe   = o.tipProbe
+    // Mining WHILE waiting, because the widening ladder is height-driven: see
+    // widenArithmetic. Off unless a caller asks, and bounded so a wait cannot mine
+    // a request past its own deadline.
+    const minePerPoll = Number((o.mineWhileWaiting || {}).perPoll) || 0
+    const mineCap     = Number((o.mineWhileWaiting || {}).maxBlocks) || 0
+    let mined         = 0
     const deadline   = Date.now() + timeoutMs
     let last    = null
     let since   = null
@@ -711,7 +767,9 @@ function standingTipProbe (apiPort) {
  * nothing about dissemination, and exactly one because two rows for one request
  * is the double-finalize §4.1 tie-breaks and a drill must not average over it.
  */
-async function waitForMirrorRowEverywhere (venue, requestId, timeoutMs) {
+async function waitForMirrorRowEverywhere (venue, requestId, timeoutMs, opts) {
+    // Fourth argument added, never a reordering: another lane calls this with three.
+    const o = opts || {}
     // CAPTURED BEFORE THE ROUND SETTLES, because this is the only moment the
     // responsible set can be read: `getattestationresponsibleset` answers for
     // PENDING requests only, and by the time a row exists the request is not
@@ -726,7 +784,13 @@ async function waitForMirrorRowEverywhere (venue, requestId, timeoutMs) {
             rows.push(await venue.readMirrorRows(ix.index, { requestId: requestId }))
         }
         return { ok: rows.every((r) => r.length === 1), rows: rows }
-    }, { timeoutMs: timeoutMs || 10 * 60 * 1000, tipProbe: venueTipProbe(venue, 0) })
+    }, {
+        timeoutMs: timeoutMs || 10 * 60 * 1000,
+        tipProbe: venueTipProbe(venue, 0),
+        // Mines while waiting when the caller says how far it may go, so the
+        // height-driven widening ladder can climb; see widenArithmetic.
+        mineWhileWaiting: o.mineWhileWaiting,
+    })
 
     // AND AFTER, on pass as well as on failure. "0 mirror rows" has two competing
     // explanations that the count cannot separate: the mirror failed to deliver a
@@ -1153,6 +1217,7 @@ module.exports = {
     BTC_BLOCKS_PER_DOGE_KEEPUP,
     MAX_DOGE_NUDGES,
     until,
+    widenArithmetic,
     untilOrClearDogeStall,
     wedgeVerdict,
     mineDogeBlocks,

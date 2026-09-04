@@ -73,6 +73,7 @@ const {
     allHubTails,
     attestRequestWatermark,
     settleOrReport,
+    widenArithmetic,
 } = require('./mirrorDrillWaits')
 const vmHelper     = require('../helpers/vmHelper')
 const chainRail    = require('../helpers/chainRail')
@@ -407,7 +408,9 @@ describe('AT5: the responses of a window land on chain as one batch', function (
 
         await regtestMinerConnector.generateBlocks(BURIAL_BLOCKS)
         await settleOrReport('at5')
-        for (const id of ids) await waitForMirrorRowEverywhere(venue, id)
+        for (const id of ids) await waitForMirrorRowEverywhere(venue, id, null, {
+                mineWhileWaiting: { perPoll: 1, maxBlocks: widenArithmetic(DEADLINE_BLOCKS).safeCap },
+            })
         for (const id of ids) await waitForAppliedEverywhere(venue, id)
         console.log('AT5: ' + ids.length + ' responses finalized and applied; waiting for their window to close')
 

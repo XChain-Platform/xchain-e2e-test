@@ -78,6 +78,7 @@ const {
     allHubTails,
     attestRequestWatermark,
     settleOrReport,
+    widenArithmetic,
 } = require('./mirrorDrillWaits')
 const vmHelper = require('../helpers/vmHelper')
 const XChainIndexerConnector = require('../../src/XChainIndexerConnector.js')
@@ -219,10 +220,19 @@ describe('AT2 second clause: delivery past the forward margin holds the barrier 
 
         // The PROMPT indexer's mirror is untouched, so it gets the row on the ordinary
         // path and this establishes the round finalized at all.
-        const prompt = await until(async () => {
+        // MINES WHILE WAITING for the same reason its neighbours do: the widening
+        // ladder is height-driven, so a still chain never leaves widen 0 and a draw
+        // holding a key no live hub holds can never finalize. This drill cannot use
+        // the shared row wait (one of its indexers is starved on purpose), so it
+        // carries the same option on its own loop.
+        const prompt = await untilOrClearDogeStall(async () => {
             const rows = await venue.readMirrorRows(PROMPT, { requestId: requestId })
             return { ok: rows.length === 1, rows: rows }
-        }, 10 * 60 * 1000)
+        }, {
+            timeoutMs: 10 * 60 * 1000,
+            tipProbe: venueTipProbe(venue, PROMPT),
+            mineWhileWaiting: { perPoll: 1, maxBlocks: widenArithmetic(DEADLINE_BLOCKS).safeCap },
+        })
 
         // AND AGAIN whichever way that went, because a round that never finalized and
         // a row that never arrived look identical from the indexer side.

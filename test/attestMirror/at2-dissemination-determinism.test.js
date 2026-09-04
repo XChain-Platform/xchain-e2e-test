@@ -69,6 +69,7 @@ const {
     clearBeforeBroadcast,
     attestRequestWatermark,
     settleOrReport,
+    widenArithmetic,
 } = require('./mirrorDrillWaits')
 const vmHelper = require('../helpers/vmHelper')
 const XChainIndexerConnector = require('../../src/XChainIndexerConnector.js')
@@ -183,7 +184,13 @@ describe('AT2: a hub outside the responsible set disseminates the response, iden
         await regtestMinerConnector.generateBlocks(6)
         await settleOrReport('at2')
 
-        const rows = await waitForMirrorRowEverywhere(venue, requestId)
+        const rows = await waitForMirrorRowEverywhere(venue, requestId, null, {
+            // MINES WHILE WAITING, because the widening ladder is height-driven and a
+            // still chain sits at widen 0 forever: a draw containing a key no live hub
+            // holds then never finalizes. Capped below the deadline so the wait cannot
+            // run the request into its own expiry sweep.
+            mineWhileWaiting: { perPoll: 1, maxBlocks: widenArithmetic(DEADLINE_BLOCKS).safeCap },
+        })
         for (let i = 0; i < rows.length; i++) {
             assert.strictEqual(String(rows[i].status), 'ok',
                 'attempt ' + attempt + ': mirror row status is ' + rows[i].status + ' on indexer ' + i)

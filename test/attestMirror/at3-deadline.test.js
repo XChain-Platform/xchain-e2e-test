@@ -182,6 +182,14 @@ describe('AT3: the deadline decides whether a mirrored response ever binds', fun
         await regtestMinerConnector.generateBlocks(BURIAL_BLOCKS)
         await settleOrReport('at3')
 
+        // NO KEEP-MINING HERE, DELIBERATELY, and this is an opt-out rather than an
+        // omission. Every other drill mines while waiting so the height-driven
+        // widening ladder can climb. This drill's entire subject is the deadline
+        // boundary: it counts blocks to place the applying block exactly at or past
+        // the deadline, so a wait that mined would move the boundary under the
+        // assertion. The cost is that a draw containing a key no live hub holds
+        // cannot finalize here and the drill fails with the capture saying so, which
+        // is the correct trade for a drill about heights.
         const rows = await waitForMirrorRowEverywhere(venue, requestId)
         assert.strictEqual(String(rows[0].status), 'ok',
             tag + ': the round did not produce an ok response, so the deadline is not what is under test')

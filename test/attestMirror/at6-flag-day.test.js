@@ -72,6 +72,7 @@ const {
     clearBeforeBroadcast,
     attestRequestWatermark,
     settleOrReport,
+    widenArithmetic,
 } = require('./mirrorDrillWaits')
 const vmHelper          = require('../helpers/vmHelper')
 const cryptoHelper      = require('../cryptoHelper')
@@ -203,7 +204,13 @@ describe('AT6: above the flag day the chain cannot deliver a response, and the e
 
         await regtestMinerConnector.generateBlocks(BURIAL_BLOCKS)
         await settleOrReport('at6')
-        await waitForMirrorRowEverywhere(venue, requestId)
+        await waitForMirrorRowEverywhere(venue, requestId, null, {
+            // MINES WHILE WAITING, because the widening ladder is height-driven and a
+            // still chain sits at widen 0 forever: a draw containing a key no live hub
+            // holds then never finalizes. Capped below the deadline so the wait cannot
+            // run the request into its own expiry sweep.
+            mineWhileWaiting: { perPoll: 1, maxBlocks: widenArithmetic(DEADLINE_BLOCKS).safeCap },
+        })
 
         // THE STALE BROADCAST, while the request is still pending, which is the only
         // moment at which accepting it would double-deliver.
@@ -325,7 +332,13 @@ describe('AT6: above the flag day the chain cannot deliver a response, and the e
 
         await regtestMinerConnector.generateBlocks(BURIAL_BLOCKS)
         await settleOrReport('at6')
-        await waitForMirrorRowEverywhere(venue, requestId)
+        await waitForMirrorRowEverywhere(venue, requestId, null, {
+            // MINES WHILE WAITING, because the widening ladder is height-driven and a
+            // still chain sits at widen 0 forever: a draw containing a key no live hub
+            // holds then never finalizes. Capped below the deadline so the wait cannot
+            // run the request into its own expiry sweep.
+            mineWhileWaiting: { perPoll: 1, maxBlocks: widenArithmetic(DEADLINE_BLOCKS).safeCap },
+        })
 
         // Let it reach a terminal state FIRST this time.
         const done = await untilOrClearDogeStall(async () => {

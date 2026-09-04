@@ -67,6 +67,7 @@ const {
     waitForHeightWithClear,
     attestRequestWatermark,
     settleOrReport,
+    widenArithmetic,
 } = require('./mirrorDrillWaits')
 const vmHelper     = require('../helpers/vmHelper')
 const cryptoHelper = require('../cryptoHelper')
@@ -164,7 +165,13 @@ describe('AT4: a reorg moves the applied response with the chain, in both direct
 
         await regtestMinerConnector.generateBlocks(BURIAL_BLOCKS)
         await settleOrReport('at4')
-        await waitForMirrorRowEverywhere(venue, requestId)
+        await waitForMirrorRowEverywhere(venue, requestId, null, {
+            // MINES WHILE WAITING, because the widening ladder is height-driven and a
+            // still chain sits at widen 0 forever: a draw containing a key no live hub
+            // holds then never finalizes. Capped below the deadline so the wait cannot
+            // run the request into its own expiry sweep.
+            mineWhileWaiting: { perPoll: 1, maxBlocks: widenArithmetic(DEADLINE_BLOCKS).safeCap },
+        })
 
         // The applier binds at the first block past the effective time; with the
         // venue's short forward margin that is a block or two away, so keep the
