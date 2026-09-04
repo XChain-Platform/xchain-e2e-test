@@ -346,8 +346,17 @@ async function deployRequestContract (opts) {
     const label = String(o.label || 'drill').replace(/[^A-Za-z0-9]/g, '')
     assert.ok(o.code, 'mirrorDrillFixture: deployRequestContract needs contract source')
 
-    const owner = await cryptoHelper.getNewFundedAddress(
-        label + '-owner', COIN, NETWORK, null, 'legacy', 0, 0.02)
+    // WRAPPED for the same reason as the staker funding above, and this is the
+    // call another lane's AT2b actually died in: the traceback ran
+    // deployRequestContract -> getNewFundedAddress -> ensureGasBalance ->
+    // sendMintV0, i.e. the internal 100-gas seed, NOT the explicit gas mint that
+    // follows on the next lines. The first version of this protection wrapped
+    // only that following mint, which is the same one-level-too-high mistake
+    // twice over. Retry is safe here as above: the wallet is cached per label,
+    // so a second attempt re-funds the SAME owner rather than minting a new one.
+    const owner = await withWedgeClear('funding and gas seed for ' + label + '-owner',
+        () => cryptoHelper.getNewFundedAddress(
+            label + '-owner', COIN, NETWORK, null, 'legacy', 0, 0.02))
     // Explicitly mined rather than only quiesced: the mint's UTXO lookup wants
     // the funding CONFIRMED, and quiesce alone is satisfied by an empty mempool.
     await regtestMinerConnector.generateBlocks(2)
