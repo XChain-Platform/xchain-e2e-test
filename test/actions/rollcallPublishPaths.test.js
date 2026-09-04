@@ -111,9 +111,36 @@ describe('ROLLCALL acceptance: sweeper, self-publish and the below-threshold epo
         rc.assertOutageStillRolls(ctx, [ctx.idleSource])
         rc.assertOutageFallsBelowThreshold(ctx, [ctx.idleSource, omittedSource, ctx.sourceOf(1)])
 
+        // CHOOSE THE EPOCHS BY THEIR ELECTION, rather than taking the next three
+        // and hoping. AT6a and AT6b both need the elected leader to be a hub this
+        // harness is RUNNING and is not silencing, and the election is hashOrder
+        // over the whole oracle_publish key set - which includes the idle fourth
+        // staker, who runs no hub at all. On a four-member roster with hub 2
+        // omitted that leaves two usable leaders out of four, so half of all runs
+        // failed on a draw and the message invited the reader to re-run into
+        // another draw. The order is deterministic given (epoch, key set), so the
+        // right move is to ask which epochs are usable and take those.
+        //
+        // Falls back to the next three epochs when the engine cannot resolve a
+        // future epoch's capability set: a run that cannot look ahead is exactly
+        // the old behaviour, and the leader assertions still say what happened.
         const tip = await ctx.btcTip()
-        const epochs = rc.epochsAfter(tip + 6, ctx.network, 3)
-        EA = epochs[0]; EB = epochs[1]; EC = epochs[2]
+        const candidates = rc.epochsAfter(tip + 6, ctx.network, 12)
+        const usable = [];
+        for (const e of candidates){
+            const idx = await rc.electedLeaderIndex(ctx, e)
+            if (idx === null) break                       // cannot look ahead; use the fallback
+            if (idx >= 0 && idx < ctx.rounds.length && idx !== OMITTED_HUB) usable.push(e)
+            if (usable.length >= 2) break
+        }
+        if (usable.length >= 2){
+            EA = usable[0]; EB = usable[1]
+            EC = candidates.find(e => e !== EA && e !== EB && e > EB)
+            console.log('    elections resolved ahead: AT6a and AT6b take epochs whose leader is a running hub')
+        } else {
+            EA = candidates[0]; EB = candidates[1]; EC = candidates[2]
+            console.log('    elections could not be resolved ahead of time; taking the next three epochs')
+        }
         console.log('    AT6a epoch ' + EA + ', AT6b epoch ' + EB + ', AT6c epoch ' + EC +
                     '; omitted hub ' + OMITTED_HUB + ' at source ' + omittedSource)
     })
@@ -137,10 +164,13 @@ describe('ROLLCALL acceptance: sweeper, self-publish and the below-threshold epo
         await rc.waitForGossip(ctx.mvh, EA, 2, 60000)
 
         const leaderIdx = leaderIndexFor(EA)
-        assert.ok(leaderIdx >= 0 && leaderIdx !== OMITTED_HUB,
+        assert.ok(leaderIdx >= 0 && leaderIdx < ctx.rounds.length && leaderIdx !== OMITTED_HUB,
             'epoch ' + EA + ': the elected leader must be one of the two hubs that are up, got index ' + leaderIdx +
-            '. The election is hashOrder over the oracle_publish keys, so a leader landing on the stopped hub is a ' +
-            'seeding accident: re-run, or stop a different hub.')
+            '. The election is hashOrder over the whole oracle_publish key set, which includes the IDLE fourth ' +
+            'staker (index ' + rc.IDLE_SEED_INDEX + '), who runs no hub and can win it. The before hook picks ' +
+            'epochs whose leader is a running hub, so reaching this means the election could not be resolved ' +
+            'ahead of time: ' +
+            're-run, which draws a different epoch.')
 
         const wiresBefore = ctx.publishedWires.length
         ctx.rounds[leaderIdx].publishDelayBlocks = 0
@@ -153,7 +183,14 @@ describe('ROLLCALL acceptance: sweeper, self-publish and the below-threshold epo
         assert.strictEqual(Number(leaderWire[5]), 2,
             'the leader\'s action must carry the two signatures it had, not the third it never saw; SIG_COUNT=' +
             leaderWire[5])
-        await rc.mineDoge(ctx, 3)
+        // WAIT for the leader's action to be on chain, do not mine a fixed few
+        // blocks and hope. The sweeper's whole job is to publish only what is
+        // MISSING, and _maybePublish decides that by asking the DOGE side what it
+        // already holds - so a sweeper that ticks first sees an empty chain, has
+        // nothing to filter, and republishes the whole set.
+        await rc.waitForOnChainSigners(ctx, EA,
+            ctx.roster.slice(0, ctx.rounds.length)
+                .filter((_, i) => i !== OMITTED_HUB).map(r => r.pubkey))
 
         // The omitted hub comes back, signs, and gossips. Its own sweep path stays
         // shut, so anything that lands its signature is somebody else sweeping.
@@ -229,7 +266,7 @@ describe('ROLLCALL acceptance: sweeper, self-publish and the below-threshold epo
         await rc.waitForGossip(ctx.mvh, EB, 2, 60000)
 
         const leaderIdx = leaderIndexFor(EB)
-        assert.ok(leaderIdx >= 0 && leaderIdx !== OMITTED_HUB,
+        assert.ok(leaderIdx >= 0 && leaderIdx < ctx.rounds.length && leaderIdx !== OMITTED_HUB,
             'epoch ' + EB + ': the elected leader must be one of the two hubs that are up, got index ' + leaderIdx)
 
         const wiresBefore = ctx.publishedWires.length
@@ -262,7 +299,10 @@ describe('ROLLCALL acceptance: sweeper, self-publish and the below-threshold epo
             'AT6b: the self-publish wire must be a one-pair ROLLCALL naming the lone signer as PUBLISHER.\n' +
             '  on chain: ' + selfWire + '\n  expected: ' + expected)
 
-        await rc.mineDoge(ctx, 3)
+        // Same rule as AT6a: wait for the DOGE side to HOLD it rather than
+        // mining a fixed few blocks and reading. The two-phase P2SH lane means a
+        // publish that has returned is not yet a publish that is indexed.
+        await rc.waitForOnChainSigners(ctx, EB, [ctx.roster[OMITTED_HUB].pubkey])
         const signers = await rc.dogeSigners(ctx, EB)
         const selfRow = signers.find(s => String(s.pubkey).toLowerCase() === ctx.roster[OMITTED_HUB].pubkey)
         assert.ok(selfRow, 'the self-published signature must be stored on the DOGE side for epoch ' + EB)

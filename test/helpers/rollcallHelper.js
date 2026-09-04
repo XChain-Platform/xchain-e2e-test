@@ -746,7 +746,8 @@ async function assertDogePeerManifest(dogeConn, network){
 // container returned nothing.
 async function assertBtcProofWiring(nodeConn, idxConn, idxQuery, network){
     const tipRes = await idxConn.call('getblockhashes', {})
-    const idxTip = Number(tipRes.block_index)
+    // Reassigned by the DOGE-lag recovery below, which advances it on purpose.
+    let idxTip = Number(tipRes.block_index)
     const nodeTip = Number(await nodeConn.getBlockCount())
 
     const r = rca()
@@ -757,13 +758,52 @@ async function assertBtcProofWiring(nodeConn, idxConn, idxQuery, network){
     })()
 
     if (nodeTip > idxTip && nextClose === idxTip + 1){
-        throw new Error(
-            'ROLLCALL precondition FAILED: the BTC indexer is stalled at ' + idxTip + ' while the node is at ' +
-            nodeTip + ', and its next block ' + (idxTip + 1) + ' is the close of epoch ' +
-            r.rollcallEpochClosingAt(idxTip + 1, network) + '. That is the signature of a DEFERRING epoch close: ' +
-            'RollcallProofClient has no DOGE peer to ask, so it returns unknown and the block is retried forever. ' +
-            'Set DOGE_INDEXER_API_URL (and DOGE_INDEXER_API_KEY if the DOGE indexer is keyed) on the BTC indexer ' +
-            'and restart it.')
+        // A STALL AT A CLOSE BLOCK HAS TWO CAUSES, AND NAMING ONLY THE WRONG ONE
+        // COSTS HOURS. Missing DOGE wiring is permanent and needs an operator; a
+        // DOGE tip that has not yet passed the BTC window-end stamp is ORDINARY
+        // and clears by mining DOGE, because regtest DOGE blocks are stamped at
+        // wall clock. The benign case is also the common one between runs: any
+        // BTC-only mining (a seeding run, another lane's suite) can walk the
+        // indexer onto a close whose epoch nobody has driven, and it then sits
+        // there until some DOGE block is mined. It cost three bring-ups on
+        // 2026-09-03, each reported as "set DOGE_INDEXER_API_URL" on a venue
+        // whose DOGE_INDEXER_API_URL was set and correct.
+        //
+        // So clear the benign one HERE rather than describing it: mine DOGE, give
+        // the indexer a moment, and re-read. Only a tip that STILL will not move
+        // is the operator's problem, and the message then carries both causes.
+        console.log('    [rollcall] BTC indexer parked at ' + idxTip + ' with node at ' + nodeTip +
+                    '; block ' + (idxTip + 1) + ' closes epoch ' + r.rollcallEpochClosingAt(idxTip + 1, network) +
+                    '. Mining DOGE so the close can decide.')
+        let cleared = false, dogeErr = null
+        try {
+            const rail = await chainRail.createRail('dogecoin', network)
+            for (let attempt = 0; attempt < 3 && !cleared; attempt++){
+                await rail.globals.regtestMinerConnector.generateBlocks(4)
+                for (let poll = 0; poll < 10 && !cleared; poll++){
+                    await sleep(3000)
+                    const now = Number((await idxConn.call('getblockhashes', {})).block_index)
+                    if (now > idxTip){ cleared = true; idxTip = now }
+                }
+            }
+        } catch (e) { dogeErr = (e && e.message) || String(e) }
+
+        if (!cleared){
+            throw new Error(
+                'ROLLCALL precondition FAILED: the BTC indexer is stalled at ' + idxTip + ' while the node is at ' +
+                nodeTip + ', and its next block ' + (idxTip + 1) + ' is the close of epoch ' +
+                r.rollcallEpochClosingAt(idxTip + 1, network) + '. That is a DEFERRING epoch close, and mining ' +
+                'DOGE did not clear it' + (dogeErr ? ' (the DOGE rail itself failed: ' + dogeErr + ')' : '') +
+                '. Two causes, in the order worth checking:\n' +
+                '  1. The BTC indexer has no DOGE peer to ask, so RollcallProofClient returns unknown and the ' +
+                'block is retried forever. Set DOGE_INDEXER_API_URL (and DOGE_INDEXER_API_KEY if the DOGE ' +
+                'indexer is keyed) on the BTC indexer and restart it. Check this first: it is the permanent one.\n' +
+                '  2. The DOGE peer is reachable but its answer is still undecidable - its tip has not passed the ' +
+                'BTC window-end stamp, or the cut is not buried by ROLLCALL_DOGE_MATURITY, or its vendored ' +
+                'manifest_hash does not match. The first two clear by mining DOGE, which is what just failed here, ' +
+                'so read the BTC indexer log for the exact `ROLLCALL PROOF UNAVAILABLE` reason.')
+        }
+        console.log('    [rollcall] cleared: the BTC indexer advanced to ' + idxTip)
     }
 
     // Every close at or below the indexed tip wrote a row, or the close is not
@@ -856,6 +896,31 @@ function assertPublicRollcallRead(probe, method){
 async function assertRosterStreaksClean(ctx, allowDirtyStreaks){
     const dirty = []
     let read = 0
+
+    // THE WINDOW, not the whole history. The protocol's streak walks the last
+    // ROLLCALL_STREAK_LOOKBACK (2K) ROLLED epochs and skips unrolled ones
+    // (getRolledRollcallEpochs), so an absence older than that counts for
+    // nothing and a check that flags it is stricter than the rule it protects.
+    // That difference is not academic: it made the remedy this assertion itself
+    // names - drive 2K rolled epochs with the hub present until the absence ages
+    // out - fail to satisfy the assertion afterwards, which is the worst shape a
+    // guard can have. Measured 2026-09-03: hub 2's absence at epoch 2160 was
+    // still reported after four later rolled epochs had pushed it out of the
+    // window and the protocol had long stopped counting it.
+    const lookback = Number(rca().ROLLCALL_STREAK_LOOKBACK)
+    let window = null
+    try {
+        const res = await indexerConnector.call('getrollcalls', { limit: 200 })
+        if (res && !res.error && Array.isArray(res.rollcalls)){
+            const rolled = res.rollcalls
+                .filter(r => Number(r.rolled) === 1)
+                .map(r => Number(r.epoch_height))
+                .sort((a, b) => b - a)
+                .slice(0, lookback)
+            window = new Set(rolled)
+        }
+    } catch (e) { window = null }   // the public read is probed separately
+
     for (const entry of ctx.roster){
         const source = ctx.fed.byPubkey.get(entry.pubkey)
         if (!source) continue
@@ -867,7 +932,12 @@ async function assertRosterStreaksClean(ctx, allowDirtyStreaks){
         }
         if (!res || res.error) return null
         read++
-        const rolled = (res.absences || []).filter(a => Number(a.epoch_height) >= 0)
+        // Only absences the protocol would still count: inside the window when
+        // one could be computed, and every recorded absence when it could not,
+        // because failing closed on an unreadable window is the safe direction.
+        const rolled = (res.absences || [])
+            .filter(a => Number(a.epoch_height) >= 0)
+            .filter(a => window === null || window.has(Number(a.epoch_height)))
         if (rolled.length) dirty.push({ entry, source, rolled })
     }
     if (!dirty.length) return { priorAbsences: 0, sourcesRead: read }
@@ -899,6 +969,8 @@ async function assertRosterStreaksClean(ctx, allowDirtyStreaks){
         'Remedy for the IDLE source: bump XC_ROLLCALL_IDLE_GENERATION (removing any XC_ROLLCALL_IDLE_SEED ' +
         'pin) and re-run test/tools/rollcallSeedFederation.test.js, which mints a fresh key at a fresh ' +
         'address.\n' +
+        'The window here is the last ' + lookback + ' ROLLED epoch(s)' +
+        (window ? ': ' + Array.from(window).join(', ') : ' (unreadable, so every recorded absence counts)') + '.\n' +
         'Remedy for a SIGNING source: its address cannot be rotated - STAKE v1 refuses a pubkey that has ' +
         'ever been staked, from any source - so either drive 2K rolled epochs with that hub PRESENT until ' +
         'the old absence ages out of the window, or drive on a fresh chain. A signing key that was actually ' +
@@ -947,6 +1019,52 @@ function rollcallRounds(mvh){
         JSON.stringify(process.env.XCHAIN_HUB_PATH || '(XCHAIN_HUB_PATH unset; resolved by the sibling ladder)') +
         ' and point XCHAIN_HUB_PATH at a checkout that carries src/RollcallRound.js.')
     return rounds
+}
+
+// The roster index of the hub the election would pick for `epoch`, asked of a
+// live engine so the answer is the one the chain will pay rather than a second
+// copy of hashOrder that could disagree with it.
+//
+// Returns null when the engine cannot resolve the capability set for that epoch,
+// which is a real state rather than an error: _electionOrder resolves the set AT
+// the epoch, and a far-future epoch has no snapshot to resolve. A caller that
+// gets null must fall back rather than treat it as "no leader".
+//
+// -1 means the elected key is not in the roster at all, which on an exact-roster
+// venue cannot happen and elsewhere means an outsider won.
+async function electedLeaderIndex(ctx, epoch){
+    const eng = ctx.rounds && ctx.rounds[0]
+    if (!eng || typeof eng._electionOrder !== 'function') return null
+
+    // The engine's own resolver first, because it is the one the chain agrees
+    // with. It resolves the capability set AT the epoch, so it answers for an
+    // epoch the chain has reached and returns null for one it has not - measured
+    // 2026-09-03: every future epoch came back null, which is why the look-ahead
+    // fell through to a draw and AT6a lost one.
+    let order = null
+    try { order = await eng._electionOrder(Number(epoch)) } catch (e) { order = null }
+
+    // FALL BACK TO THE HUB'S OWN ORDERING OVER A SET WE ALREADY KNOW, which is
+    // not a second copy of the election logic: _electionKey and hashOrder are the
+    // hub's own functions, called here with the roster keys instead of a snapshot
+    // the chain cannot yet provide. Sound only where the set is certain, so it is
+    // gated on an EXACT-ROSTER venue: assertOraclePublishFederation has already
+    // established that the staked oracle_publish set is exactly these four keys,
+    // and a future epoch's set can only differ if someone stakes in between.
+    if ((!Array.isArray(order) || !order.length)
+        && ctx.fed && !ctx.fed.outsiders
+        && typeof eng._electionKey === 'function'){
+        try {
+            const { resolveHubFile } = require('./multiValidatorHubHelper')
+            const sap = require(resolveHubFile('src/StateAnchorPublisher.js'))
+            if (sap && typeof sap.hashOrder === 'function')
+                order = sap.hashOrder(eng._electionKey(Number(epoch)), ctx.roster.map(r => r.pubkey))
+        } catch (e) { order = null }
+    }
+
+    if (!Array.isArray(order) || !order.length) return null
+    const leader = String(order[0]).toLowerCase()
+    return ctx.roster.findIndex(r => r.pubkey === leader)
 }
 
 // Wire one DOGE publish hook into every hub's RollcallRound. Only the ranks the
@@ -1444,6 +1562,34 @@ async function onChainSigners(ctx, epoch, pubkeys){
         .map(([k]) => String(k).toLowerCase()))
 }
 
+// Wait until the DOGE side actually HOLDS `pubkeys` for `epoch`, mining DOGE
+// while it waits. A ROLLCALL rides the two-phase P2SH lane, so a publish is not
+// on chain when the call returns: both legs have to confirm and the DOGE indexer
+// has to index them. Every read-after-publish in the acceptance suites needs
+// this, and the two that used a fixed `mineDoge(3)` instead both failed for the
+// same reason on 2026-09-03: a sweeper that ticks before the leader's action is
+// visible sees nothing on chain to filter and republishes the whole set
+// (SIG_COUNT 3 where the test asserts 1), and a self-publish asserted too early
+// reads as never stored. Neither was a protocol fault; both were the harness
+// racing its own publish.
+async function waitForOnChainSigners(ctx, epoch, pubkeys, timeoutMs){
+    const want = pubkeys.map(k => String(k).toLowerCase())
+    const deadline = Date.now() + (timeoutMs || 120000)
+    let have = new Set()
+    while (Date.now() < deadline){
+        have = await onChainSigners(ctx, epoch, want)
+        if (want.every(k => have.has(k))) return have
+        await mineDoge(ctx, 2)
+        await sleep(2000)
+    }
+    const missing = want.filter(k => !have.has(k))
+    throw new Error(
+        'epoch ' + epoch + ': the DOGE side never stored signature(s) ' +
+        missing.map(k => k.slice(0, 12)).join(', ') + ' within ' + (timeoutMs || 120000) + 'ms, after mining DOGE ' +
+        'throughout. A ROLLCALL rides the two-phase P2SH lane, so this means a leg never confirmed or the DOGE ' +
+        'indexer never indexed it - check the DOGE indexer log for the action, and the publisher wallet for funds.')
+}
+
 async function driveEpoch(ctx, epoch, opts){
     const o = opts || {}
     const silentHubs = o.silentHubs || []
@@ -1574,6 +1720,9 @@ module.exports = {
     assertPublicRollcallRead,
     openDogeRail,
     rollcallRounds,
+    electedLeaderIndex,
+    waitForOnChainSigners,
+    onChainSigners,
     setRollcallBroadcastHook,
     tickAll,
     waitForGossip,
