@@ -62,13 +62,12 @@
  ********************************************************************/
 
 const assert = require('assert')
-const http   = require('http')
 const dotenv = require('dotenv')
 dotenv.config()
 
 const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
-    provisionDrillIdentities, deployRequestContract,
+    provisionDrillIdentities, startAttestTestServer, deployRequestContract,
 } = require('./mirrorDrillFixture')
 const {
     APPLIED_FIELDS, until, untilOrClearDogeStall, diffRows, diffStateHashes,
@@ -133,7 +132,7 @@ describe('AT2 second clause: delivery past the forward margin holds the barrier 
 
     let venue      = null
     let up         = false
-    let httpServer = null
+    let testServer = null
     let testUrl    = null
     let contract   = null
 
@@ -148,16 +147,11 @@ describe('AT2 second clause: delivery past the forward margin holds the barrier 
     }
 
     before(async function () {
-        await new Promise((resolve) => {
-            httpServer = http.createServer((_req, res) => {
-                res.writeHead(200, { 'Content-Type': 'application/json' })
-                res.end(FIXED_BODY)
-            })
-            httpServer.listen(0, '127.0.0.1', () => {
-                testUrl = 'http://127.0.0.1:' + httpServer.address().port + '/score'
-                resolve()
-            })
-        })
+        // REAL TLS, not http. The provider refuses a non-https payload before it
+        // does any network work, so a plain-HTTP server here resolves every round
+        // provider_error, which reads downstream as a missing mirror row.
+        testServer = await startAttestTestServer({ body: FIXED_BODY })
+        testUrl    = testServer.url
 
         const staked = await provisionDrillIdentities({ label: 'at2b', count: 5, redundancy: 3 })
         venue = new AttestMirrorVenue({
@@ -165,6 +159,7 @@ describe('AT2 second clause: delivery past the forward margin holds the barrier 
             identities: staked.identities,
             forwardS: FORWARD_S,
             indexerGraces: { [DELAYED]: { attestResponse: BARRIER_GRACE_S } },
+            hubExtraEnv: testServer.hubEnv,
         })
         up = await venue.start()
         if (!up) {
@@ -180,7 +175,7 @@ describe('AT2 second clause: delivery past the forward margin holds the barrier 
             try { venue.releaseMirrorTable(DELAYED, MIRROR_TABLE) } catch (_) { /* never armed */ }
             await venue.stop()
         }
-        if (httpServer) await new Promise((r) => httpServer.close(() => r()))
+        if (testServer) await testServer.close()
     })
 
     it('waits on the named barrier and still binds at the same block on both nodes', async function () {

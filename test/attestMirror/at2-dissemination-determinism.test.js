@@ -54,13 +54,12 @@
  ********************************************************************/
 
 const assert = require('assert')
-const http   = require('http')
 const dotenv = require('dotenv')
 dotenv.config()
 
 const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
-    provisionDrillIdentities, deployRequestContract, readContractState,
+    provisionDrillIdentities, startAttestTestServer, deployRequestContract, readContractState,
 } = require('./mirrorDrillFixture')
 const {
     APPLIED_FIELDS, STATE_HASH_FIELDS, until, diffRows, diffStateHashes,
@@ -116,21 +115,16 @@ describe('AT2: a hub outside the responsible set disseminates the response, iden
 
     let venue      = null
     let up         = false
-    let httpServer = null
+    let testServer = null
     let testUrl    = null
     let contract   = null
 
     before(async function () {
-        await new Promise((resolve) => {
-            httpServer = http.createServer((_req, res) => {
-                res.writeHead(200, { 'Content-Type': 'application/json' })
-                res.end(FIXED_BODY)
-            })
-            httpServer.listen(0, '127.0.0.1', () => {
-                testUrl = 'http://127.0.0.1:' + httpServer.address().port + '/score'
-                resolve()
-            })
-        })
+        // REAL TLS, not http. The provider refuses a non-https payload before it
+        // does any network work, so a plain-HTTP server here resolves every round
+        // provider_error, which reads downstream as a missing mirror row.
+        testServer = await startAttestTestServer({ body: FIXED_BODY })
+        testUrl    = testServer.url
 
         // Staked BEFORE the venue exists: the venue does not stake, it takes the
         // identities and expects them already selectable.
@@ -139,7 +133,7 @@ describe('AT2: a hub outside the responsible set disseminates the response, iden
         // needsLlm is false: AT2 says nothing about the llm provider and one
         // `http_get` request carries the whole claim, so requiring a model
         // credential here would make the drill unrunnable on a box for no gain.
-        venue = new AttestMirrorVenue({ label: 'at2', identities: staked.identities })
+        venue = new AttestMirrorVenue({ label: 'at2', identities: staked.identities, hubExtraEnv: testServer.hubEnv })
         up = await venue.start()
         if (!up) {
             console.log('AT2 SKIPPED: ' + venue.unavailable)
@@ -151,7 +145,7 @@ describe('AT2: a hub outside the responsible set disseminates the response, iden
     })
 
     after(async function () {
-        if (httpServer) await new Promise((r) => httpServer.close(() => r()))
+        if (testServer) await testServer.close()
         if (venue) await venue.stop()
     })
 

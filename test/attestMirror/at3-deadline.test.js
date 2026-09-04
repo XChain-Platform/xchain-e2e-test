@@ -56,13 +56,12 @@
  ********************************************************************/
 
 const assert = require('assert')
-const http   = require('http')
 const dotenv = require('dotenv')
 dotenv.config()
 
 const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
-    provisionDrillIdentities, deployRequestContract, readContractState,
+    provisionDrillIdentities, startAttestTestServer, deployRequestContract, readContractState,
     readAppliedResponse,
 } = require('./mirrorDrillFixture')
 const {
@@ -121,24 +120,19 @@ describe('AT3: the deadline decides whether a mirrored response ever binds', fun
 
     let venue      = null
     let up         = false
-    let httpServer = null
+    let testServer = null
     let testUrl    = null
     let contract   = null
 
     before(async function () {
-        await new Promise((resolve) => {
-            httpServer = http.createServer((_req, res) => {
-                res.writeHead(200, { 'Content-Type': 'application/json' })
-                res.end(FIXED_BODY)
-            })
-            httpServer.listen(0, '127.0.0.1', () => {
-                testUrl = 'http://127.0.0.1:' + httpServer.address().port + '/score'
-                resolve()
-            })
-        })
+        // REAL TLS, not http. The provider refuses a non-https payload before it
+        // does any network work, so a plain-HTTP server here resolves every round
+        // provider_error, which reads downstream as a missing mirror row.
+        testServer = await startAttestTestServer({ body: FIXED_BODY })
+        testUrl    = testServer.url
 
         const staked = await provisionDrillIdentities({ label: 'at3', count: 5, redundancy: 3 })
-        venue = new AttestMirrorVenue({ label: 'at3', identities: staked.identities, forwardS: FORWARD_S })
+        venue = new AttestMirrorVenue({ label: 'at3', identities: staked.identities, forwardS: FORWARD_S, hubExtraEnv: testServer.hubEnv })
         up = await venue.start()
         if (!up) {
             console.log('AT3 SKIPPED: ' + venue.unavailable)
@@ -153,7 +147,7 @@ describe('AT3: the deadline decides whether a mirrored response ever binds', fun
         // brace, because a case that threw before its finally would otherwise leave
         // the shared venue's miner paused for every drill after it.
         try { await regtestMinerConnector.resumeMining() } catch (_) { /* never paused */ }
-        if (httpServer) await new Promise((r) => httpServer.close(() => r()))
+        if (testServer) await testServer.close()
         if (venue) await venue.stop()
     })
 

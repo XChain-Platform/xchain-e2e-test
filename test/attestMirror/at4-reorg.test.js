@@ -50,13 +50,12 @@
  ********************************************************************/
 
 const assert = require('assert')
-const http   = require('http')
 const dotenv = require('dotenv')
 dotenv.config()
 
 const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
-    provisionDrillIdentities, deployRequestContract, readContractState,
+    provisionDrillIdentities, startAttestTestServer, deployRequestContract, readContractState,
     readAppliedResponse,
 } = require('./mirrorDrillFixture')
 const {
@@ -111,25 +110,20 @@ describe('AT4: a reorg moves the applied response with the chain, in both direct
 
     let venue      = null
     let up         = false
-    let httpServer = null
+    let testServer = null
     let testUrl    = null
     let contract   = null
     let minerAddr  = null
 
     before(async function () {
-        await new Promise((resolve) => {
-            httpServer = http.createServer((_req, res) => {
-                res.writeHead(200, { 'Content-Type': 'application/json' })
-                res.end(FIXED_BODY)
-            })
-            httpServer.listen(0, '127.0.0.1', () => {
-                testUrl = 'http://127.0.0.1:' + httpServer.address().port + '/score'
-                resolve()
-            })
-        })
+        // REAL TLS, not http. The provider refuses a non-https payload before it
+        // does any network work, so a plain-HTTP server here resolves every round
+        // provider_error, which reads downstream as a missing mirror row.
+        testServer = await startAttestTestServer({ body: FIXED_BODY })
+        testUrl    = testServer.url
 
         const staked = await provisionDrillIdentities({ label: 'at4', count: 5, redundancy: 3 })
-        venue = new AttestMirrorVenue({ label: 'at4', identities: staked.identities })
+        venue = new AttestMirrorVenue({ label: 'at4', identities: staked.identities, hubExtraEnv: testServer.hubEnv })
         up = await venue.start()
         if (!up) {
             console.log('AT4 SKIPPED: ' + venue.unavailable)
@@ -144,7 +138,7 @@ describe('AT4: a reorg moves the applied response with the chain, in both direct
 
     after(async function () {
         try { await regtestMinerConnector.resumeMining() } catch (_) { /* never paused */ }
-        if (httpServer) await new Promise((r) => httpServer.close(() => r()))
+        if (testServer) await testServer.close()
         if (venue) await venue.stop()
     })
 

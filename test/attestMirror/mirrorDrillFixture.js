@@ -22,8 +22,8 @@
  * a venue, not a thing you call on one.
  *
  * THIS MODULE NO LONGER STAKES ANYTHING, and that reversal is the most
- * expensive lesson the ladder has. It used to stake five fresh identities per
- * run, on the belief that a well-funded venue would win the draw. Stake does not
+ * expensive lesson the ladder has. Staking five fresh identities per run, on
+ * the belief that a well-funded venue would win the draw, is what this refuses. Stake does not
  * work that way: `AttestationRound._computeResponsibleSet` uses stake as a
  * PRE-FILTER and then ranks by `sha256(requestId || pubkey)`, so staking
  * alongside a standing roster never buys selection priority, it only DILUTES the
@@ -370,6 +370,116 @@ async function withWedgeClear (what, fn) {
 
         await waits.mineDogeBlocks(waits.DOGE_NUDGE_BLOCKS)
         return await fn()
+    }
+}
+
+/**
+ * The HTTPS server the `http_get` drills point a request at, plus the hub
+ * environment that makes the real provider willing to fetch it.
+ *
+ * WHY THIS IS NOT `http.createServer`, WHICH ALL SEVEN DRILLS WOULD OTHERWISE
+ * REACH FOR AND WHY ALL SEVEN WOULD FAIL IDENTICALLY. The provider refuses a
+ * non-https payload outright (`http_get.js`: "only https:// URLs allowed"),
+ * before any network work, so a plain-HTTP test server does not make the drill
+ * slow or flaky, it makes the round resolve `provider_error` every single time.
+ * That is not a mirror failure and it is not a roster failure, but it presents
+ * as one: the round finalizes a non-ok status or nothing at all, no mirror row
+ * with status `ok` ever appears, and the drill reports "0 mirror rows" exactly
+ * as a genuine dissemination fault would. Measured on the venue 2026-09-04, hub
+ * 0's own log: "fetch failed ... only https:// URLs allowed", then "[FOLLOWER]
+ * proposing (provider=http_get, status=provider_error)".
+ *
+ * THE OLDER FEDERATION DRILL'S SOLUTION DOES NOT TRANSFER, which is worth saying
+ * because it is the first place anyone will look:
+ * `multiHubAttestationWeighted` monkey-patches `providerRegistry`'s `http_get`
+ * module to accept its http URL. That works only because those hubs run
+ * IN-PROCESS. This venue spawns hubs as separate PROCESSES, so there is no
+ * object to patch, and reaching for that pattern here wastes a run.
+ *
+ * SO THE DRILL SERVES REAL TLS, which is also the better test: the provider's
+ * actual TLS path runs rather than being stubbed past. A throwaway certificate
+ * is minted per run, trusted by the hubs through `NODE_EXTRA_CA_CERTS`, and
+ * thrown away with the run. Nothing is weakened: the certificate is a
+ * short-lived local file, and the hub keeps its https-only rule intact.
+ *
+ * `ATTESTATION_HTTP_GET_ALLOW_PRIVATE` is needed as well and is NOT part of this
+ * workaround: 127.0.0.1 is a forbidden address to the provider's SSRF guard, and
+ * that hatch is the hub's own regtest-gated seam for exactly this, ignored with
+ * a warning on any other network. Any local test server needs it whatever scheme
+ * it speaks.
+ *
+ * @param {object} opts
+ * @param {string} [opts.body]    the exact body to serve, byte for byte
+ * @param {string} [opts.path]    the path to answer on (default '/score')
+ * @param {function} [opts.handler] a full (req, res) handler, for a drill whose
+ *                                body must vary per request; overrides `body`
+ * @returns {Promise<{url, certPath, dir, hubEnv, close}>}
+ */
+async function startAttestTestServer (opts) {
+    const o    = opts || {}
+    const body = String(o.body === undefined ? '{}' : o.body)
+    const urlPath = String(o.path || '/score')
+    const handler = typeof o.handler === 'function' ? o.handler : null
+
+    const https = require('https')
+    const os    = require('os')
+    const { execFileSync } = require('child_process')
+
+    const dir = fsx.mkdtempSync(pathx.join(os.tmpdir(), 'xchain-attest-tls-'))
+    const keyPath  = pathx.join(dir, 'key.pem')
+    const certPath = pathx.join(dir, 'cert.pem')
+
+    // CA:TRUE and an IP SAN, both load-bearing. The certificate is handed to the
+    // hubs as a trust ROOT, so a leaf without CA:TRUE is rejected as a self
+    // signed certificate; and the provider connects to a bare IP, which is
+    // matched against IP SANs only, never against the common name.
+    try {
+        execFileSync('openssl', [
+            'req', '-x509', '-newkey', 'rsa:2048',
+            '-keyout', keyPath, '-out', certPath,
+            '-days', '1', '-nodes', '-subj', '/CN=127.0.0.1',
+            '-addext', 'subjectAltName=IP:127.0.0.1',
+            '-addext', 'basicConstraints=critical,CA:TRUE',
+            '-addext', 'keyUsage=critical,digitalSignature,keyCertSign',
+            '-addext', 'extendedKeyUsage=serverAuth',
+        ], { stdio: ['ignore', 'ignore', 'pipe'] })
+    } catch (e) {
+        // REFUSE rather than fall back to http. A fallback would produce exactly
+        // the provider_error this function exists to prevent, one layer further
+        // from the cause.
+        throw new Error('mirrorDrillFixture: could not mint a throwaway TLS certificate with openssl ' +
+            '(' + (e && e.message) + '). The http_get provider refuses non-https payloads, so there ' +
+            'is no usable fallback: every round would resolve provider_error and read as a missing ' +
+            'mirror row. Install openssl on this box or run the drill where it exists.')
+    }
+
+    const server = https.createServer(
+        { key: fsx.readFileSync(keyPath), cert: fsx.readFileSync(certPath) },
+        handler || ((_req, res) => {
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(body)
+        }))
+
+    const port = await new Promise((resolve, reject) => {
+        server.once('error', reject)
+        server.listen(0, '127.0.0.1', () => resolve(server.address().port))
+    })
+
+    return {
+        url:      'https://127.0.0.1:' + port + urlPath,
+        certPath: certPath,
+        dir:      dir,
+        // Handed to the venue as `hubExtraEnv`. NODE_EXTRA_CA_CERTS is read once
+        // at process start, which is why it has to reach the hub's spawn env
+        // rather than being set here.
+        hubEnv: {
+            NODE_EXTRA_CA_CERTS: certPath,
+            ATTESTATION_HTTP_GET_ALLOW_PRIVATE: '1',
+        },
+        close: async () => {
+            await new Promise((resolve) => server.close(() => resolve()))
+            try { fsx.rmSync(dir, { recursive: true, force: true }) } catch (_) { /* tmp */ }
+        },
     }
 }
 
@@ -830,6 +940,7 @@ async function readContractState (venue, indexerIndex, contractIndex) {
 
 module.exports = {
     provisionDrillIdentities,
+    startAttestTestServer,
     readSeatedAttestationSet,
     withWedgeClear,
     assertResponsibleSetIsVenueOnly,

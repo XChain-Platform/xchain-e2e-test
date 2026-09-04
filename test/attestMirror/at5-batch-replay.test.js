@@ -58,13 +58,12 @@
  ********************************************************************/
 
 const assert = require('assert')
-const http   = require('http')
 const dotenv = require('dotenv')
 dotenv.config()
 
 const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
-    provisionDrillIdentities, deployRequestContract, queryVenueDb, withWedgeClear,
+    provisionDrillIdentities, startAttestTestServer, deployRequestContract, queryVenueDb, withWedgeClear,
 } = require('./mirrorDrillFixture')
 const {
     untilOrClearDogeStall, waitForMirrorRowEverywhere, waitForAppliedEverywhere,
@@ -240,7 +239,7 @@ describe('AT5: the responses of a window land on chain as one batch', function (
 
     let venue      = null
     let up         = false
-    let httpServer = null
+    let testServer = null
     let testUrl    = null
     let contract   = null
     let publisher  = null
@@ -260,19 +259,20 @@ describe('AT5: the responses of a window land on chain as one batch', function (
         }
         publisher = await stageDogeSigner('at5')
 
-        await new Promise((resolve) => {
-            httpServer = http.createServer((req, res) => {
+        // REAL TLS, not http. The provider refuses a non-https payload before any
+        // network work, so a plain-HTTP server resolves every round provider_error
+        // and no batch would ever have a terminal response to carry.
+        testServer = await startAttestTestServer({
+            path: '/blob',
+            handler: (req, res) => {
                 // Incompressible: random hex, so deflate cannot shrink the batch body
                 // below the wire ceiling and the chunking under test actually happens.
                 const filler = require('crypto').randomBytes(INCOMPRESSIBLE_BYTES / 2).toString('hex')
                 res.writeHead(200, { 'Content-Type': 'application/json' })
                 res.end(JSON.stringify({ path: String(req.url), filler: filler }))
-            })
-            httpServer.listen(0, '127.0.0.1', () => {
-                testUrl = 'http://127.0.0.1:' + httpServer.address().port + '/blob'
-                resolve()
-            })
+            },
         })
+        testUrl = testServer.url
 
         const staked = await provisionDrillIdentities({ label: 'at5', count: 5, redundancy: 3 })
         venue = new AttestMirrorVenue({
@@ -280,7 +280,9 @@ describe('AT5: the responses of a window land on chain as one batch', function (
             identities: staked.identities,
             forwardS: FORWARD_S,
             batchWindowS: BATCH_WINDOW_S,
-            hubExtraEnv: publisher.env,
+            // BOTH, merged: the signer's WIF and the TLS trust root are needed by
+            // the same hub children, and passing either alone silently drops the other.
+            hubExtraEnv: Object.assign({}, publisher.env, testServer.hubEnv),
         })
         up = await venue.start()
         if (!up) {
@@ -309,7 +311,7 @@ describe('AT5: the responses of a window land on chain as one batch', function (
     })
 
     after(async function () {
-        if (httpServer) await new Promise((r) => httpServer.close(() => r()))
+        if (testServer) await testServer.close()
         if (venue) await venue.stop()
         // The staged signer holds a WIF only in the hub children's environment, but the
         // directory itself is this drill's litter and goes back.

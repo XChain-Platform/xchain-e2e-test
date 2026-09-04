@@ -57,14 +57,13 @@
  ********************************************************************/
 
 const assert = require('assert')
-const http   = require('http')
 const dotenv = require('dotenv')
 dotenv.config()
 
 const fs = require('fs')
 const { AttestMirrorVenue, assertLlmAvailable } = require('../helpers/attestMirrorVenue')
 const {
-    provisionDrillIdentities, deployRequestContract, settleStack,
+    provisionDrillIdentities, startAttestTestServer, deployRequestContract, settleStack,
     readAppliedResponse, readContractState,
 } = require('./mirrorDrillFixture')
 const { findEmittedAttestRequest, captureFederationState, responsibleHubTails } = require('./mirrorDrillWaits')
@@ -147,7 +146,7 @@ describe('AT1: an ATTEST response finalizes over P2P with no transaction of its 
 
     let venue      = null
     let up         = false
-    let httpServer = null
+    let testServer = null
     let testUrl    = null
     let contracts  = null
     let llm        = { ok: false, why: 'not probed' }
@@ -156,16 +155,11 @@ describe('AT1: an ATTEST response finalizes over P2P with no transaction of its 
         llm = llmRunnableHere()
         if (!llm.ok) console.log('AT1: the llm case will SKIP on this box.\n' + llm.why)
 
-        await new Promise((resolve) => {
-            httpServer = http.createServer((_req, res) => {
-                res.writeHead(200, { 'Content-Type': 'application/json' })
-                res.end(FIXED_BODY)
-            })
-            httpServer.listen(0, '127.0.0.1', () => {
-                testUrl = 'http://127.0.0.1:' + httpServer.address().port + '/score'
-                resolve()
-            })
-        })
+        // REAL TLS, not http. The provider refuses a non-https payload before it
+        // does any network work, so a plain-HTTP server here resolves every round
+        // provider_error, which reads downstream as a missing mirror row.
+        testServer = await startAttestTestServer({ body: FIXED_BODY })
+        testUrl    = testServer.url
 
         // Staked BEFORE the venue exists, because the venue takes the identities
         // and expects them already selectable.
@@ -178,6 +172,7 @@ describe('AT1: an ATTEST response finalizes over P2P with no transaction of its 
         // predicate rather than trusting this flag.
         venue = new AttestMirrorVenue({
             label: 'at1', identities: staked.identities, needsLlm: llm.ok,
+            hubExtraEnv: testServer.hubEnv,
         })
         up = await venue.start()
         if (!up) {
@@ -218,7 +213,7 @@ describe('AT1: an ATTEST response finalizes over P2P with no transaction of its 
     })
 
     after(async function () {
-        if (httpServer) await new Promise((r) => httpServer.close(() => r()))
+        if (testServer) await testServer.close()
         if (venue) await venue.stop()
     })
 
