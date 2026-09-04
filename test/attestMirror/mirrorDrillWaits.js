@@ -60,6 +60,14 @@ const DOGE_NUDGE_BLOCKS = 3
 // message instead of being mined at forever.
 const MAX_DOGE_NUDGES = 6
 
+// The ONE stall reason this remedy is for. Checked as well as the behind-its-decoder
+// condition, and both are required, deliberately: a node stuck for any OTHER reason is
+// a finding to report rather than something to mine DOGE at, and a predicate that
+// swallowed every stall would hide exactly the defect a drill exists to find. This is
+// the same pair `mirrorDrillFixture.withWedgeClear` tests, so the two halves of the
+// remedy cannot drift into disagreeing about what the wedge is.
+const ROLLCALL_STALL_REASON = 'rollcall_proof_unavailable'
+
 /**
  * The `attests` columns two nodes must agree on for one applied response.
  *
@@ -330,11 +338,27 @@ function wedgeVerdict (sample, since, nowMs, opts) {
     if (!(heldMs >= stallAfterMs)) {
         return { nudge: false, why: 'behind its decoder for only ' + heldMs + 'ms, inside the ' + stallAfterMs + 'ms grace' }
     }
+    // BOTH CONDITIONS, never either. A node stuck behind its decoder for some OTHER
+    // reason is a finding, and mining DOGE at it would neither help nor be honest: it
+    // would convert an unexplained stall into a slower unexplained stall while the
+    // drill's own failure message pointed at whatever it happened to be waiting for.
+    const reason = String((sample && sample.reason) || '')
+    if (reason !== ROLLCALL_STALL_REASON) {
+        return {
+            nudge: false,
+            finding: true,
+            why: 'STUCK at ' + height + ' behind its decoder at ' + decoder + ' for ' + heldMs +
+                 'ms, but the stall reason is ' + (reason || 'absent') + ' rather than ' +
+                 ROLLCALL_STALL_REASON + '. That is not the wedge this remedy is for, so nothing is ' +
+                 'mined and it is reported instead: a stall of a shape nobody has seen yet is worth ' +
+                 'more as a finding than as something quietly worked around',
+        }
+    }
     return {
         nudge: true,
         why: 'held at ' + height + ' with its decoder at ' + decoder + ' for ' + heldMs +
-             'ms, which is the roll-call wedge: the epoch cannot be decided until the DOGE tip passes ' +
-             'the window end',
+             'ms on ' + reason + ', which is the roll-call wedge: the epoch cannot be decided until ' +
+             'the DOGE tip passes the window end',
     }
 }
 
@@ -379,6 +403,7 @@ async function untilOrClearDogeStall (observe, opts) {
     let last    = null
     let since   = null
     let nudges  = 0
+    let reportedFinding = false
 
     while (Date.now() < deadline) {
         last = await observe()
@@ -391,6 +416,12 @@ async function untilOrClearDogeStall (observe, opts) {
                 since = { height: height, atMs: Date.now() }
             }
             const verdict = wedgeVerdict(sample, since, Date.now(), o)
+            // Said out loud ONCE, because an unexplained stall that nobody reports is
+            // the one that gets rediscovered.
+            if (verdict.finding && !reportedFinding) {
+                reportedFinding = true
+                console.log('mirrorDrillWaits: the indexer is ' + verdict.why)
+            }
             if (verdict.nudge && nudges < MAX_DOGE_NUDGES) {
                 nudges++
                 console.log('mirrorDrillWaits: the BTC indexer is ' + verdict.why + '. This is ORDINARY on ' +
@@ -595,6 +626,7 @@ module.exports = {
     STATE_HASH_FIELDS,
     DEFAULT_INTERVAL_MS,
     ROLLCALL_STALL_AFTER_MS,
+    ROLLCALL_STALL_REASON,
     DOGE_NUDGE_BLOCKS,
     MAX_DOGE_NUDGES,
     until,

@@ -258,10 +258,14 @@ describe('mirrorDrillWaits: the shared comparison layer for AT2 to AT6', () => {
 
         const held = { height: 3823, atMs: 1_000_000 }
         const past = held.atMs + ROLLCALL_STALL_AFTER_MS + 1
+        // The wedge's own reason. Required as well as the behind-decoder condition,
+        // matching the predicate the fixture's withWedgeClear uses, so the two halves
+        // of one remedy cannot disagree about what the wedge is.
+        const WEDGE = 'rollcall_proof_unavailable'
 
         // The measured shape: indexer behind its own decoder, not advancing.
         it('nudges an indexer held behind its decoder past the grace', () => {
-            const v = wedgeVerdict({ height: 3823, decoder: 3834 }, held, past)
+            const v = wedgeVerdict({ height: 3823, decoder: 3834, reason: WEDGE }, held, past)
             assert.strictEqual(v.nudge, true)
             assert.ok(/roll-call wedge/.test(v.why), v.why)
         })
@@ -270,32 +274,51 @@ describe('mirrorDrillWaits: the shared comparison layer for AT2 to AT6', () => {
         // and the tip is static for minutes by design. Mining DOGE for that would be
         // mining for no reason, and on the batch rail it would move a window.
         it('does NOT nudge an idle venue that is level with its decoder', () => {
-            const v = wedgeVerdict({ height: 3834, decoder: 3834 }, { height: 3834, atMs: 1_000_000 }, past)
+            const v = wedgeVerdict({ height: 3834, decoder: 3834, reason: WEDGE }, { height: 3834, atMs: 1_000_000 }, past)
             assert.strictEqual(v.nudge, false)
             assert.ok(/idle rather than wedged/.test(v.why), v.why)
         })
 
         it('does not nudge while the indexer is still advancing', () => {
-            const v = wedgeVerdict({ height: 3824, decoder: 3834 }, held, past)
+            const v = wedgeVerdict({ height: 3824, decoder: 3834, reason: WEDGE }, held, past)
             assert.strictEqual(v.nudge, false)
             assert.strictEqual(v.why, 'advancing')
         })
 
         it('does not nudge inside the grace, so one slow block is not a wedge', () => {
-            const v = wedgeVerdict({ height: 3823, decoder: 3834 }, held, held.atMs + 1000)
+            const v = wedgeVerdict({ height: 3823, decoder: 3834, reason: WEDGE }, held, held.atMs + 1000)
             assert.strictEqual(v.nudge, false)
             assert.ok(/inside the .* grace/.test(v.why), v.why)
         })
 
         it('does not nudge on an unreadable status, which is its own problem', () => {
             assert.strictEqual(wedgeVerdict(null, held, past).nudge, false)
-            assert.strictEqual(wedgeVerdict({ height: null, decoder: 3834 }, held, past).nudge, false)
-            assert.strictEqual(wedgeVerdict({ height: 3823, decoder: null }, held, past).nudge, false)
+            assert.strictEqual(wedgeVerdict({ height: null, decoder: 3834, reason: WEDGE }, held, past).nudge, false)
+            assert.strictEqual(wedgeVerdict({ height: 3823, decoder: null, reason: WEDGE }, held, past).nudge, false)
         })
 
         it('honours a caller-supplied grace', () => {
-            const v = wedgeVerdict({ height: 3823, decoder: 3834 }, held, held.atMs + 5000, { stallAfterMs: 1000 })
+            const v = wedgeVerdict({ height: 3823, decoder: 3834, reason: WEDGE }, held,
+                held.atMs + 5000, { stallAfterMs: 1000 })
             assert.strictEqual(v.nudge, true)
+        })
+
+        // THE NARROWING THAT MATTERS. A node stuck for some other reason must be
+        // REPORTED, not mined at: mining DOGE would turn an unexplained stall into a
+        // slower unexplained stall while the drill blamed whatever it was waiting for.
+        it('refuses to mine for a stall of any other shape, and marks it a finding', () => {
+            const v = wedgeVerdict({ height: 3823, decoder: 3834, reason: 'price_sync_barrier' }, held, past)
+            assert.strictEqual(v.nudge, false)
+            assert.strictEqual(v.finding, true)
+            assert.ok(/price_sync_barrier/.test(v.why), v.why)
+            assert.ok(/rather than/.test(v.why), v.why)
+        })
+
+        it('treats an absent stall reason as a finding too, never as the wedge', () => {
+            const v = wedgeVerdict({ height: 3823, decoder: 3834 }, held, past)
+            assert.strictEqual(v.nudge, false)
+            assert.strictEqual(v.finding, true)
+            assert.ok(/absent/.test(v.why), v.why)
         })
     })
 
