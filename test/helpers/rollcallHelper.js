@@ -197,6 +197,39 @@ function federationSeeds(){
     return SIGNING_SEEDS.concat([idleSeed()])
 }
 
+// The legacy AT4 re-entry seed, kept so an unconfigured venue behaves as before.
+const LEGACY_REENTRY_SEED = '55'.repeat(32)
+
+// AT4's RE-ENTRY key, and it has to rotate for the same reason the idle key does.
+// AT4 stakes this pubkey to prove an evicted source can come back on a fresh
+// key; STAKE v1 admission then refuses that pubkey forever, so a FIXED seed made
+// AT4 one-shot per chain in exactly the way a fixed idle seed made AT1 one-shot.
+// Domain-separated from the idle derivation so the two can never collide, and
+// bumped by the same XC_ROLLCALL_IDLE_GENERATION, so one env change re-arms the
+// whole suite.
+function reentrySeed(){
+    const explicit = process.env.XC_ROLLCALL_REENTRY_SEED
+    if (explicit){
+        assert.ok(/^[0-9a-fA-F]{64}$/.test(String(explicit)),
+            'XC_ROLLCALL_REENTRY_SEED must be exactly 64 hex characters (a 32-byte Ed25519 seed); got ' +
+            String(explicit).length + ' character(s).')
+        return String(explicit).toLowerCase()
+    }
+    const mnemonic = process.env.XC_ROLLCALL_FEDERATION_MNEMONIC
+    if (mnemonic){
+        const generation = String(process.env.XC_ROLLCALL_IDLE_GENERATION || '0')
+        return crypto.createHash('sha256')
+            .update('xchain-rollcall-reentry|' + generation + '|' + mnemonic, 'utf8')
+            .digest('hex')
+    }
+    console.warn(
+        '    [rollcall] neither XC_ROLLCALL_REENTRY_SEED nor XC_ROLLCALL_FEDERATION_MNEMONIC is set, so AT4 ' +
+        'will re-enter on the legacy fixed seed. AT4 STAKES that key and an already-staked key can never be ' +
+        'staked again, so this venue gets exactly ONE AT4 run. Set the mnemonic (or bump ' +
+        'XC_ROLLCALL_IDLE_GENERATION) before re-running.')
+    return LEGACY_REENTRY_SEED
+}
+
 // Ed25519 pubkey for a 32-byte seed, derived without the hub package so a
 // precondition can print the roster the operator must stake even on a checkout
 // where xchain-hub is absent.
@@ -216,9 +249,33 @@ function pubkeyForSeed(seedHex){
 // that predate the source's current stake. So a source that re-enters at the
 // same address inherits its old absences: with the window being the last 2K
 // ROLLED epochs, one more absence completes K and evicts it immediately.
-// Measured here - after the eviction at epoch 420, re-staking a fresh key from
-// the same address would have been evicted again at the very next rolled epoch.
-// A new generation therefore gets a new address as well as a new key.
+// Measured 2026-09-01 - after an eviction at epoch 420, re-staking a fresh key
+// from the same address would have been evicted again at the very next rolled
+// epoch. A new generation therefore gets a new address as well as a new key.
+//
+// THE SIGNING SOURCES CANNOT ROTATE, AND THE FIX THAT SAID THEY SHOULD IS
+// UNIMPLEMENTABLE. It was proposed on 2026-09-01, after AT2's outage let the
+// protocol evict hub 2 (a FROZEN vector key, so unrotatable, so permanently
+// unstakeable) on a signing source that arrived carrying an earlier run's
+// absence. The proposal was to move all four source addresses with the
+// generation, i + 4 * generation, so every roster member would get a clean
+// streak. It cannot work: STAKE v1 admission asks
+// getActiveStakeByPubkey(pubkey, null) (xchain-indexer stake.js:93) and the null
+// blockIndex drops the whole activation/deactivation clause, so the rule reads
+// "any valid stake row for this pubkey, EVER" and is keyed on the pubkey with no
+// source term. Once seed 11's key has been staked from address 0 on a chain, it
+// can never be staked again from address 4 or anywhere else. So a signing
+// source's address is fixed for the LIFE OF THE CHAIN, and only the idle
+// entry - whose key is per-generation and has never been staked - can move.
+//
+// WHAT TO DO INSTEAD, for a signing source carrying a stale absence:
+//   - the absence window is the last 2K ROLLED epochs (getRolledRollcallEpochs),
+//     so drive 2K rolled epochs with that hub PRESENT and the old absence ages
+//     out of the window on its own; or
+//   - drive on a fresh chain, which is the only remedy for a signing key that
+//     was actually EVICTED.
+// The check that makes either one possible is assertRosterStreaksClean below,
+// which refuses the run instead of letting the protocol retire a frozen key.
 function idleAddressIndex(){
     return IDLE_SEED_INDEX + Number(process.env.XC_ROLLCALL_IDLE_GENERATION || '0')
 }
@@ -228,8 +285,9 @@ function federationRoster(){
         index:   i,
         seed:    seed,
         pubkey:  pubkeyForSeed(seed).toLowerCase(),
-        // The address the stake is made FROM. Signing sources are stable; the
-        // idle one moves with the generation (see idleAddressIndex above).
+        // The address the stake is made FROM. Signing sources are fixed for the
+        // life of the chain (see idleAddressIndex above for why); the idle one
+        // moves with the generation.
         addressIndex: i === IDLE_SEED_INDEX ? idleAddressIndex() : i,
         role:    i === IDLE_SEED_INDEX ? 'idle (never signs; AT1 evicts this one)' : 'signing hub ' + i,
     }))
@@ -445,7 +503,10 @@ async function assertGatedReadsReachable(conn, blockIndex, label){
 // eviction rule is concerned. getstakeweightsbycapability is the read that
 // reports both, and it is the same source-keyed shape the close resolves R(E)
 // with (getStakeWeightsByCapability).
-async function assertOraclePublishFederation(conn, blockIndex, needSources){
+// `requireExactRoster` is for the suites that assert WHICH hub the election
+// picked; see the outsider block below for why every other suite takes a
+// warning instead.
+async function assertOraclePublishFederation(conn, blockIndex, needSources, requireExactRoster){
     const res = await conn.call('getstakeweightsbycapability', {
         capability: 'oracle_publish', block_index: Number(blockIndex),
     })
@@ -522,47 +583,103 @@ async function assertOraclePublishFederation(conn, blockIndex, needSources){
     const rosterSourceSet = new Set(rosterSources.map(String))
     const foreign = (res.validators || [])
         .filter(v => !rosterSourceSet.has(String(v.source)))
+    let outsiders = null
     if (foreign.length > 0){
         const foreignBySource = new Map()
         for (const v of foreign)
             if (!foreignBySource.has(String(v.source))) foreignBySource.set(String(v.source), Number(v.weight))
         const foreignWeight = Array.from(foreignBySource.values()).reduce((a, b) => a + b, 0)
-        const rosterWeight = rosterSources
-            .map(s => Number((res.validators || []).find(v => String(v.source) === String(s)).weight))
-            .reduce((a, b) => a + b, 0)
-        // What the roster's SIGNING sources would have to hold for an ordinary
-        // all-present epoch to roll at all, given this outsider weight. Reported
-        // so the operator can see whether re-seeding heavier is even an option
-        // before deciding to rebuild the venue.
-        const signingWeight = rosterSources
-            .filter((s, i) => i !== IDLE_SEED_INDEX)
-            .map(s => Number((res.validators || []).find(v => String(v.source) === String(s)).weight))
-            .reduce((a, b) => a + b, 0)
+        const weightOf = (s) => Number((res.validators || []).find(v => String(v.source) === String(s)).weight)
+        const rosterWeight  = rosterSources.map(weightOf).reduce((a, b) => a + b, 0)
+        // The SIGNING sources only: the idle fourth never signs, so it is
+        // never part of a present side.
+        const signingSources = rosterSources.filter((s, i) => i !== IDLE_SEED_INDEX)
+        const signingWeight  = signingSources.map(weightOf).reduce((a, b) => a + b, 0)
+        // AT2 silences the SMALLEST signing source, so the outage leg's present
+        // side is the signing weight less that one.
+        const smallestSigning = Math.min.apply(null, signingSources.map(weightOf))
         const total = rosterWeight + foreignWeight
-        assert.fail(
-            'ROLLCALL precondition FAILED: the venue\'s oracle_publish set contains ' + foreignBySource.size +
-            ' source(s) OUTSIDE the acceptance roster, and the acceptance suites need a federation that is ' +
-            'exactly the roster.\n' +
+        const rollsAllPresent = 3 * signingWeight > 2 * total
+        const rollsUnderOutage = 3 * (signingWeight - smallestSigning) > 2 * total
+
+        // THE TWO COSTS OF AN OUTSIDER ARE NOT THE SAME COST, and conflating
+        // them into one hard failure made this precondition refuse venues that
+        // could have answered the question being asked. Separated 2026-09-03
+        // after measuring that the only regtest chain with a clean ROLLCALL
+        // history also carried four fixture stakes whose source keys nobody
+        // holds (the e2e fixture path derives each source from a mnemonic
+        // generated per run, so an un-torn-down fixture stake is unremovable),
+        // which left "rebuild the venue" as the sole remedy for tests that did
+        // not need it.
+        //
+        //   QUORUM is a hard, arithmetic blocker for EVERY suite. An outsider
+        //   never signs, but its weight counts in the TOTAL that presence is
+        //   measured against, so past a certain outsider weight no epoch can
+        //   roll and no suite has a verdict to give. It is also fixable without
+        //   touching the venue: re-seed the roster heavier. So it is checked
+        //   here with the real numbers and it still fails the run.
+        //
+        //   ELECTION only breaks the suites that assert WHO the leader is.
+        //   RollcallRound._electionOrder is hashOrder over the whole
+        //   oracle_publish key set, so an outsider can win rank 0 and then never
+        //   publish (nobody holds it). That is fatal to AT6a/AT6b, which read
+        //   `leader index -1`, and it makes AT10's leader-reward leg
+        //   undecidable. It is NOT fatal to AT1/AT2/AT3: the rank ladder unlocks
+        //   the remaining ranks as BTC height climbs and each live hub publishes
+        //   its own signature as a sweeper, which is how epoch 420 rolled on
+        //   2026-09-01 with the elected leader silent. Those suites therefore
+        //   run with a named warning instead of a refusal.
+        //
+        // Suites that do assert leader identity pass requireExactRoster and get
+        // the old hard failure.
+        const detail =
+            'the venue\'s oracle_publish set contains ' + foreignBySource.size +
+            ' source(s) OUTSIDE the acceptance roster:\n' +
             Array.from(foreignBySource.entries())
                 .map(([s, w]) => '    ' + s + '   weight ' + w + '   (not run by this harness)').join('\n') + '\n' +
-            'Outsider weight ' + foreignWeight + ' against roster weight ' + rosterWeight + '. Two things break:\n' +
-            '  1. ELECTION: hashOrder runs over all ' + (res.validators || []).length + ' key(s), so the roster ' +
-            'wins rank 0 only ' + roster.length + ' times in ' + (res.validators || []).length + '. A leader on ' +
-            'an outsider key never publishes and AT6a/AT6b report leader index -1. Re-running does not fix it.\n' +
-            '  2. QUORUM: outsiders never sign but their weight counts in the total. With all three hubs ' +
-            'present that is 3 * ' + signingWeight + ' vs 2 * ' + total + ', which ' +
-            (3 * signingWeight > 2 * total ? 'clears' : 'does NOT clear') + ' the bar, so an ordinary epoch ' +
-            (3 * signingWeight > 2 * total ? 'rolls' : 'closes UNROLLED and counts for nobody') + '.\n' +
-            'Remedy, in preference order:\n' +
-            '  a. Drive the acceptance suites on a venue seeded for them, whose oracle_publish set was empty ' +
-            'before rollcallSeedFederation ran. This is the only remedy that fixes the election half.\n' +
-            '  b. Unstake the outsider source(s) above. Needs the key each was staked from, which the harness ' +
-            'does not hold.\n' +
-            'Re-seeding the roster heavier fixes ONLY the quorum half; the election stays a coin flip, so it ' +
-            'is not a remedy for AT6a/AT6b.')
+            'Outsider weight ' + foreignWeight + ' against roster weight ' + rosterWeight +
+            ' (signing ' + signingWeight + ', smallest signing ' + smallestSigning + ').\n' +
+            '  QUORUM, all three hubs present: 3 * ' + signingWeight + ' vs 2 * ' + total + ' -> ' +
+            (rollsAllPresent ? 'ROLLS' : 'UNROLLED, counts for nobody') + '.\n' +
+            '  QUORUM, AT2 outage of the smallest signing hub: 3 * ' + (signingWeight - smallestSigning) +
+            ' vs 2 * ' + total + ' -> ' + (rollsUnderOutage ? 'ROLLS' : 'UNROLLED, so AT2 passes vacuously') + '.\n' +
+            '  ELECTION: hashOrder runs over all ' + (res.validators || []).length + ' key(s), so the roster ' +
+            'wins rank 0 only ' + roster.length + ' times in ' + (res.validators || []).length + '.'
+
+        if (!rollsAllPresent || !rollsUnderOutage){
+            assert.fail(
+                'ROLLCALL precondition FAILED on QUORUM: ' + detail + '\n' +
+                'Remedy, in preference order:\n' +
+                '  a. Re-seed the roster heavier. The seeding tool\'s weights need 2 * (small signing weight) ' +
+                'to exceed the idle weight plus twice the outsider weight for an ordinary epoch, and the ' +
+                'large signing weight to exceed twice the small one plus the outsider weight for AT2. This ' +
+                'fixes the quorum half on the venue as it stands.\n' +
+                '  b. Unstake the outsider source(s) above. Needs the key each was staked from, which the ' +
+                'harness does not hold when the stake came from a fixture run.\n' +
+                '  c. Drive on a venue whose oracle_publish set was empty before rollcallSeedFederation ran. ' +
+                'This is the only remedy that also fixes the election half.')
+        }
+        if (requireExactRoster){
+            assert.fail(
+                'ROLLCALL precondition FAILED on ELECTION: ' + detail + '\n' +
+                'This suite asserts WHICH hub the election picked, so an outsider winning rank 0 reports ' +
+                '`leader index -1` and re-running is a coin flip rather than a remedy. Drive it on a venue ' +
+                'whose oracle_publish set was empty before rollcallSeedFederation ran.')
+        }
+        console.warn(
+            '\n    [rollcall] VENUE CARRIES OUTSIDERS, and this run continues on purpose: ' + detail + '\n' +
+            '    Quorum clears in both cases above, so epochs roll and the eviction/outage verdicts are real. ' +
+            'What is NOT decidable here is leader identity: a leader on an outsider key never publishes, so ' +
+            'coverage comes from the rank ladder unlocking each live hub as a sweeper. Suites asserting the ' +
+            'elected leader (AT6a/AT6b, AT10\'s leader-reward leg) must run on a venue seeded from empty.\n')
+        outsiders = {
+            sources: Array.from(foreignBySource.keys()),
+            weight:  foreignWeight,
+            rollsAllPresent, rollsUnderOutage,
+        }
     }
 
-    return { sources, idleSource, byPubkey, weights: res.validators, sourceCount: res.source_count }
+    return { sources, idleSource, byPubkey, weights: res.validators, sourceCount: res.source_count, outsiders }
 }
 
 // The DOGE peer's own report of its vendored action-manifest hash. This is the
@@ -719,33 +836,73 @@ function assertPublicRollcallRead(probe, method){
 // suite was reading a venue with history as if it were clean, and reported a
 // correct eviction as a failure.
 //
-// A FRESH idle key has no history by construction, which is the same rotation
-// the ledger item forces after an eviction anyway - so the remedy for both is one step.
-async function assertIdleStreakClean(ctx){
-    const idle = ctx.roster[IDLE_SEED_INDEX]
-    const source = ctx.fed.byPubkey.get(idle.pubkey)
-    let res
-    try {
-        res = await indexerConnector.call('getrollcallabsences', { source: String(source), limit: 50 })
-    } catch (e) {
-        return null   // the public read is probed separately; do not fail twice on it
+// A FRESH source address has no history by construction, which is the same
+// rotation the ledger item forces after an eviction anyway - so the remedy for
+// both is one step.
+//
+// CHECKED FOR EVERY ROSTER SOURCE, not only the idle one. The earlier version
+// read the idle source alone and therefore watched the wrong member get evicted:
+// AT2 silences a live hub across a rolled epoch, so a signing source with prior
+// absences completes K exactly as the idle one does, and on 2026-09-01 hub 2 was
+// evicted at epoch 930 with this check green. A signing key's eviction is worse
+// than the idle key's, because the signing seeds are the frozen vector's and can
+// never be rotated.
+// `allowDirtyStreaks` is for a venue run that SILENCES NOBODY. The guard exists
+// because a silenced hub completes a streak and the protocol then evicts a frozen
+// vector key; a drive with every hub present adds no absence to any roster source,
+// so it cannot complete anything, and it is the only way to age a stale absence
+// out of the 2K-rolled-epoch window (the remedy this very assertion names). A
+// run that passes it must therefore keep silentHubs empty.
+async function assertRosterStreaksClean(ctx, allowDirtyStreaks){
+    const dirty = []
+    let read = 0
+    for (const entry of ctx.roster){
+        const source = ctx.fed.byPubkey.get(entry.pubkey)
+        if (!source) continue
+        let res
+        try {
+            res = await indexerConnector.call('getrollcallabsences', { source: String(source), limit: 50 })
+        } catch (e) {
+            return null   // the public read is probed separately; do not fail twice on it
+        }
+        if (!res || res.error) return null
+        read++
+        const rolled = (res.absences || []).filter(a => Number(a.epoch_height) >= 0)
+        if (rolled.length) dirty.push({ entry, source, rolled })
     }
-    if (!res || res.error) return null
-    const rolled = (res.absences || []).filter(a => Number(a.epoch_height) >= 0)
-    if (rolled.length === 0) return { priorAbsences: 0 }
+    if (!dirty.length) return { priorAbsences: 0, sourcesRead: read }
 
-    const evicted = rolled.some(a => Number(a.evicted) === 1)
+    if (allowDirtyStreaks === true){
+        console.warn(
+            '\n    [rollcall] ' + dirty.length + ' roster source(s) carry prior absence(s), and this run ' +
+            'continues because it silences NOBODY:\n' +
+            dirty.map(d => '        [' + d.entry.index + '] ' + d.source + '   ' + d.entry.role +
+                           '   epoch(s) ' + d.rolled.map(a => a.epoch_height).join(', ')).join('\n') + '\n' +
+            '    Every hub present means no roster source gains an absence, so no streak can complete and no ' +
+            'key can be retired. Driving 2K rolled epochs this way is what ages a stale absence out of the ' +
+            'window, which is the remedy an acceptance run needs. Keep silentHubs EMPTY for the whole run.\n')
+        return { priorAbsences: dirty.length, sourcesRead: read, dirty: dirty.map(d => d.source) }
+    }
+
     assert.fail(
-        'ROLLCALL precondition FAILED: the idle source ' + source + ' already carries ' + rolled.length +
-        ' recorded absence(s) at epoch(s) ' + rolled.map(a => a.epoch_height).join(', ') +
-        (evicted ? ' and has ALREADY BEEN EVICTED' : '') + '. The K-streak counts ROLLED epochs and skips ' +
-        'unrolled ones, so this source starts with a head start and the first epoch this suite drives may ' +
-        'complete K=2 and evict immediately - which AT1 reads as "evicted on a streak of 1" and reports as a ' +
-        'protocol failure when the protocol was right.\n' +
-        'Remedy: seed a FRESH idle key, which has no history by construction. Bump ' +
-        'XC_ROLLCALL_IDLE_GENERATION (removing any XC_ROLLCALL_IDLE_SEED pin) and re-run ' +
-        'test/tools/rollcallSeedFederation.test.js. That is required after an eviction anyway, because an ' +
-        'evicted signing key can never be staked again.')
+        'ROLLCALL precondition FAILED: ' + dirty.length + ' roster source(s) already carry recorded ' +
+        'absence(s) on this venue:\n' +
+        dirty.map(d =>
+            '    [' + d.entry.index + '] ' + d.source + '   ' + d.entry.role + '   epoch(s) ' +
+            d.rolled.map(a => a.epoch_height).join(', ') +
+            (d.rolled.some(a => Number(a.evicted) === 1) ? '   ALREADY EVICTED' : '')).join('\n') + '\n' +
+        'The K-streak counts ROLLED epochs and skips unrolled ones, so each of these starts with a head ' +
+        'start and the first epoch this suite drives may complete K=2 and evict immediately - which AT1 ' +
+        'reads as "evicted on a streak of 1" and reports as a protocol failure when the protocol was right. ' +
+        'On a SIGNING source it is worse than a bad reading: AT2 silences a live hub on purpose, so the ' +
+        'streak completes and the protocol evicts a frozen vector key that can never be staked again.\n' +
+        'Remedy for the IDLE source: bump XC_ROLLCALL_IDLE_GENERATION (removing any XC_ROLLCALL_IDLE_SEED ' +
+        'pin) and re-run test/tools/rollcallSeedFederation.test.js, which mints a fresh key at a fresh ' +
+        'address.\n' +
+        'Remedy for a SIGNING source: its address cannot be rotated - STAKE v1 refuses a pubkey that has ' +
+        'ever been staked, from any source - so either drive 2K rolled epochs with that hub PRESENT until ' +
+        'the old absence ages out of the window, or drive on a fresh chain. A signing key that was actually ' +
+        'EVICTED leaves only the fresh chain.')
 }
 
 // ── the DOGE rail ────────────────────────────────────────────────────────────
@@ -879,7 +1036,8 @@ async function bringUpVenue(opts){
     ctx.peer = await assertDogePeerManifest(ctx.dogeRail.globals.indexerConnector, ctx.network)
 
     ctx.roster = federationRoster()
-    ctx.fed    = await assertOraclePublishFederation(indexerConnector, tip, o.needSources || 4)
+    ctx.fed    = await assertOraclePublishFederation(
+        indexerConnector, tip, o.needSources || 4, o.requireExactRoster === true)
     ctx.idleSource = ctx.fed.idleSource
     ctx.sourceOf   = (hubIndex) => ctx.fed.byPubkey.get(ctx.roster[hubIndex].pubkey)
 
@@ -889,7 +1047,7 @@ async function bringUpVenue(opts){
     ctx.totalWeight = Array.from(ctx.weightBySource.values()).reduce((a, b) => a + b, 0)
 
     ctx.publicReads = await probePublicRollcallReads(indexerConnector)
-    await assertIdleStreakClean(ctx)
+    ctx.streaks = await assertRosterStreaksClean(ctx, o.allowDirtyStreaks === true)
 
     // Optional deterministic source addresses. When the operator seeded the
     // federation from this mnemonic, the harness holds the sources' keys, which
@@ -1376,6 +1534,7 @@ module.exports = {
     SIGNING_SEEDS,
     federationSeeds,
     IDLE_SEED_INDEX,
+    reentrySeed,
     sleep,
     mineBtcTo,
     mineDoge,

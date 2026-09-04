@@ -201,7 +201,9 @@ describe('getConnection() gives up loudly on an unreachable pool', function () {
         )
         assert.strictEqual(mockPool.getConnection.callCount, 1, 'no retries on a credential rejection')
         assert.ok(db.sleep.notCalled, 'does not sleep before giving up')
-        assert.ok(err.message.includes('hub config oracle'), 'points at the config oracle, the real source')
+        assert.ok(err.message.includes('_INDEXER_DB_PASS'), 'names the override that fixes it')
+        assert.ok(err.message.includes('.env.<code>'), 'names the per-chain file too')
+        assert.ok(/hub.*stale|stale.*hub/i.test(err.message), 'says the hub copy is the one that goes stale')
         assert.strictEqual(err.cause, denied)
     })
 

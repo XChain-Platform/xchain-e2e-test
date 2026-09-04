@@ -121,6 +121,42 @@ function resolveNodeCreds(code, chainEnv, hubNode) {
     return { user, pass };
 }
 
+// The indexer DATABASE credential, on the SAME ladder and for the same reason,
+// which it did not have until 2026-09-03:
+//   1. <CODE>_INDEXER_DB_NAME / _USER / _PASS in the environment
+//   2. INDEXER_DB_NAME / _USER / _PASS from .env.<code>
+//   3. the hub's stored copy
+//
+// WHY THE HUB IS LAST HERE TOO. The header above already says the hub's node
+// credential is written at install time and goes stale; the DB credential is
+// written by the same install and goes stale the same way, and it was the one
+// field with no way to correct it. Measured on the regtest acceptance venue
+// 2026-09-03: an `xchain-node update` rotated the per-coin indexer DB passwords
+// to fresh per-coin values (the live containers and MariaDB agreed on them, and
+// so did the per-coin config files), while the hub kept serving ONE
+// install-time password for BOTH coins. Every DOGE-rail suite then failed at
+// bring-up on `pool failed to retrieve a connection from pool`, and no
+// operator action could fix it: this hub runs with consensus enabled, so an
+// `updateconfig` push becomes a PROPOSAL that a single hub can never commit
+// (its committed seq stayed 0), which means the stale copy is not correctable
+// from outside. A venue whose hub cannot be re-pointed must still be drivable.
+//
+// The resolved SOURCE is reported (never the value) so drift is visible in the
+// run's own output instead of being discovered by a connection failure.
+function resolveIndexerDb(code, chainEnv, ix) {
+    const pick = (key) => {
+        const envKey = code + '_INDEXER_DB_' + key;
+        if (process.env[envKey]) return { value: process.env[envKey], from: envKey };
+        if (chainEnv['INDEXER_DB_' + key]) return { value: chainEnv['INDEXER_DB_' + key], from: '.env.' + code.toLowerCase() };
+        return { value: ix && ix[key.toLowerCase() === 'name' ? 'name' : key.toLowerCase()], from: 'hub' };
+    };
+    const name = pick('NAME'), user = pick('USER'), pass = pick('PASS');
+    return {
+        name: name.value, user: user.value, pass: pass.value,
+        sources: { name: name.from, user: user.from, pass: pass.from },
+    };
+}
+
 // Build a rail for `coin` on `network`, discovering the node RPC + indexer DB
 // credentials from the hub. Throws (never silently degrades) when the hub has no
 // config for the coin: a rail built on guessed credentials would fail later, deep
@@ -149,8 +185,15 @@ async function createRail(coin, network = 'regtest', opts = {}) {
     // Wrong-DB guard, same rule parityBoot uses: the hub names per-coin databases
     // XChain_<CODE>_<Network>_<Service>, so a name that does not carry this coin's
     // code means stale config and every later wait would watch the wrong chain.
-    if (!String(ix.name || '').toUpperCase().includes(code))
-        throw new Error('[chainRail] indexer DB "' + ix.name + '" does not belong to ' + code);
+    // Checked on the RESOLVED name, not the hub's, so an env or .env.<code>
+    // override is guarded too.
+    const db = resolveIndexerDb(code, chainEnv, ix);
+    if (!String(db.name || '').toUpperCase().includes(code))
+        throw new Error('[chainRail] indexer DB "' + db.name + '" does not belong to ' + code);
+    if (db.sources.pass !== 'hub')
+        console.log('[chainRail] ' + code + ' indexer DB credential from ' + db.sources.pass +
+                    ' (name from ' + db.sources.name + ', user from ' + db.sources.user + '), ' +
+                    'overriding the hub\'s install-time copy');
 
     const rail = {
         coin, network, code,
@@ -164,7 +207,7 @@ async function createRail(coin, network = 'regtest', opts = {}) {
             miner:   envPort(code, 'REGTEST_MINER_API_PORT', ports.miner),
             explorer: parseInt(process.env.EXPLORER_API_PORT, 10) || 18080,
         },
-        db: { host: dbHost, port: dbPort, name: ix.name, user: ix.user, pass: ix.pass },
+        db: { host: dbHost, port: dbPort, name: db.name, user: db.user, pass: db.pass },
         globals: null,
     };
 
@@ -179,16 +222,16 @@ async function createRail(coin, network = 'regtest', opts = {}) {
         decoderConnector:      new XChainDecoderConnector(host, rail.ports.decoder),
         indexerConnector:      new XChainIndexerConnector(host, rail.ports.indexer, process.env[code + '_INDEXER_API_KEY'] || process.env.INDEXER_API_KEY || null),
         explorerConnector:     new XChainExplorerConnector(host, rail.ports.explorer),
-        indexerDatabase:       new Database(dbHost, dbPort, ix.name, ix.user, ix.pass),
+        indexerDatabase:       new Database(dbHost, dbPort, db.name, db.user, db.pass),
         regtestMinerConnector: new RegtestMinerConnector(host, rail.ports.miner, process.env[code + '_MINER_API_KEY'] || process.env.MINER_API_KEY || null),
     };
 
     rail.env = {
         COIN:            coin,
         NETWORK:         network,
-        INDEXER_DB_NAME: ix.name,
-        INDEXER_DB_USER: ix.user,
-        INDEXER_DB_PASS: ix.pass,
+        INDEXER_DB_NAME: db.name,
+        INDEXER_DB_USER: db.user,
+        INDEXER_DB_PASS: db.pass,
     };
 
     return rail;

@@ -43,9 +43,13 @@
  * staking SOURCE.
  *
  * TO RE-RUN AT1 ON AN ALREADY-EVICTED VENUE: bump XC_ROLLCALL_IDLE_GENERATION
- * and run this tool again. It stakes the new idle key from the same source
- * address (the v1 rule is keyed on the pubkey, not the source) and leaves the
- * three signing sources untouched.
+ * and run this tool again. It stakes a fresh idle key from a fresh source
+ * address (both move with the generation) and leaves the three signing sources
+ * untouched, because it has no choice: STAKE v1 refuses a pubkey that has ever
+ * been staked, from any source, so a frozen signing key's address is fixed for
+ * the life of the chain. A signing source carrying a stale absence is cleared by
+ * driving 2K rolled epochs with that hub present, or by a fresh chain; a signing
+ * key that was EVICTED leaves only the fresh chain.
  *
  * The weights are 40/40/10/10 rather than equal, and that is load-bearing
  * rather than cosmetic. Quorum is `3 * present > 2 * total` by source
@@ -58,7 +62,8 @@
  * and gets it: silencing both 40s leaves 10 of 100.
  *
  * The addresses are derived from a mnemonic the caller supplies, at address
- * index i for roster entry i, matching what rollcallHelper's
+ * index i for roster entry i (the idle entry at 3 + XC_ROLLCALL_IDLE_GENERATION),
+ * matching what rollcallHelper's
  * XC_ROLLCALL_FEDERATION_MNEMONIC branch derives. Hand the same mnemonic to
  * the acceptance run and it holds the sources' keys, which is what lets AT10
  * drive a real COLLECT rather than only asserting the arithmetic behind one.
@@ -85,17 +90,60 @@ const rc           = require('../helpers/rollcallHelper')
 // asserts on the DISTRIBUTION it finds on chain, never on the numbers a
 // seeding run happened to choose; a venue seeded 400/400/100/100 satisfies
 // the same suites.
-const WEIGHTS = [40000, 40000, 10000, 10000]
+// The ratio is 12:1 rather than the original 4:1, and the absolute numbers are
+// large, because a SHARED regtest venue is never empty. Quorum is measured
+// against the weight of every staked oracle_publish source, including fixture
+// stakes from other lanes' runs that were never torn down, and whose source
+// keys nobody holds (the fixture path derives each source from a mnemonic
+// generated per run, so an orphan cannot be unstaked). Measured on the venue
+// 2026-09-03: four such sources holding 70000 between them.
+//
+// Two inequalities have to hold, with F for the outsider weight, A for a large
+// signing source and B for the small signing source and the idle one:
+//   an ordinary all-present epoch rolls when  2A > B + 2F
+//   AT2's outage of the small signing hub rolls when  A > 2B + F
+// At 300000/300000/25000/25000 the second one, which is the tighter, tolerates
+// F up to 250000 - about fifteen more orphan fixture stakes at the 15000 the
+// fixture path uses. At the original 40000/40000/10000/10000 it tolerated
+// F = 60000, which the venue already exceeded.
+const WEIGHTS = [300000, 300000, 25000, 25000]
 
 // Headroom over the stake for the protocol fees the STAKE itself pays, plus
-// slack for a re-run. XCHAIN is an open faucet on regtest with MAX_MINT
-// 100000 per transaction, so each of these is one MINT.
+// slack for a re-run.
 const GAS_HEADROOM = 5000
+
+// XCHAIN is an open faucet on regtest, but MINT is capped per TRANSACTION
+// (MAX_MINT, 100000 on this venue), so a stake larger than the cap is funded by
+// several mints rather than one. Read from the chain rather than hardcoded: a
+// venue whose token was issued with a different cap would otherwise fail with a
+// MINT rejection that names the amount and not the cap.
+const MINT_CAP_FALLBACK = 100000
 
 // Enough BTC for a two-phase P2SH action plus its change. Every ROLLCALL-era
 // action exceeds the 76-byte OP_RETURN cap, so the P2SH lane is the only one,
 // and it funds a second leg out of the first.
 const FUND_BTC = 0.5
+
+// The gas token's per-transaction MINT cap, read from the venue once. Falls
+// back to the documented regtest value if the row cannot be read, so a seeding
+// run is never blocked by a diagnostic query.
+let _mintCap = null
+async function mintCap(){
+    if (_mintCap !== null) return _mintCap
+    _mintCap = MINT_CAP_FALLBACK
+    try {
+        const conn = await indexerDatabase.getConnection()
+        try {
+            const rows = await conn.query(
+                'SELECT max_mint FROM tokens WHERE tick = ? ORDER BY tick_id DESC LIMIT 1', ['XCHAIN'])
+            const v = rows && rows[0] && Number(rows[0].max_mint)
+            if (Number.isFinite(v) && v > 0) _mintCap = v
+        } finally { await conn.release() }
+    } catch (e) {
+        console.log('    mint cap       : falling back to ' + MINT_CAP_FALLBACK + ' (' + (e && e.message) + ')')
+    }
+    return _mintCap
+}
 
 describe('ROLLCALL: seed the four-source acceptance federation', function () {
 
@@ -162,8 +210,22 @@ describe('ROLLCALL: seed the four-source acceptance federation', function () {
 
             await cryptoHelper.getNewFundedAddress(
                 'rollcall-source-' + entry.addressIndex, COIN, NETWORK, mnemonic, 'legacy', entry.addressIndex, FUND_BTC)
-            await gasHelper.ensureGasBalance(addr, String(want + GAS_HEADROOM))
-            console.log('    minted gas     : ' + (want + GAS_HEADROOM) + ' XCHAIN')
+
+            // MINT is capped per TRANSACTION, so a stake above the cap is
+            // funded by several mints. Chunked rather than one call because the
+            // rejection an oversized MINT earns names the amount, not the cap,
+            // and reads as a broken faucet.
+            const cap  = await mintCap()
+            let owed   = want + GAS_HEADROOM
+            let mints  = 0
+            while (owed > 0){
+                const chunk = Math.min(owed, cap)
+                await gasHelper.ensureGasBalance(addr, String(chunk))
+                owed -= chunk
+                mints++
+            }
+            console.log('    minted gas     : ' + (want + GAS_HEADROOM) + ' XCHAIN in ' + mints + ' mint(s) ' +
+                        '(cap ' + cap + ' per transaction)')
 
             const res = await stakeHelper.sendStakeV1(addr, want.toFixed(0) + '.00000000', entry.pubkey)
             console.log('    STAKE v1       : ' + want + ' XCHAIN, tx ' + res.txHash)
@@ -188,6 +250,7 @@ describe('ROLLCALL: seed the four-source acceptance federation', function () {
         // answer available - it points at the amounts, and the amounts were
         // never the problem.
         let tip = 0, res = null, byPubkey = new Map(), missing = roster
+        let lastTip = -1, stalls = 0
         const deadline = Date.now() + 10 * 60 * 1000
         while (Date.now() < deadline) {
             tip = Number((await indexerConnector.call('getblockhashes', {})).block_index)
@@ -198,6 +261,35 @@ describe('ROLLCALL: seed the four-source acceptance federation', function () {
             byPubkey = new Map((res.validators || []).map(v => [String(v.pubkey).toLowerCase(), v]))
             missing  = roster.filter(r => !byPubkey.has(r.pubkey))
             if (!missing.length) break
+
+            // A STALLED TIP ON AN ARMED VENUE IS A DEFERRING CLOSE, and a loop that polls
+            // through it for the full ten minutes ends up blaming the seeding
+            // instead. This tool mines BTC only, so it can walk the indexer onto a
+            // close block whose epoch cannot be decided yet: the close needs the
+            // DOGE tip's block_time to pass the BTC window-end stamp, and freshly
+            // mined DOGE blocks are stamped at wall clock, so mining DOGE is what
+            // clears it. Measured twice on the regtest acceptance venue 2026-09-03, both
+            // times parked at a close with the activation poll spinning. Only fired
+            // when the tip does NOT move, so a healthy venue never mines DOGE for
+            // no reason, and a genuinely broken one still fails with its own
+            // message rather than this one.
+            if (tip === lastTip){
+                stalls++
+                if (stalls >= 2){
+                    console.log('    tip parked at ' + tip + '; mining DOGE so a deferring epoch close can decide')
+                    try {
+                        const rail = await require('../helpers/chainRail').createRail('dogecoin', NETWORK)
+                        await rail.globals.regtestMinerConnector.generateBlocks(4)
+                    } catch (e) {
+                        console.log('    could not mine DOGE (' + (e && e.message) + '); the close will stay deferred')
+                    }
+                    stalls = 0
+                }
+            } else {
+                stalls = 0
+            }
+            lastTip = tip
+
             console.log('    waiting for activation: ' + missing.length + ' roster key(s) not yet effective at ' + tip)
             await regtestMinerConnector.generateBlocks(2)
             await new Promise(r => setTimeout(r, 3000))
@@ -225,15 +317,37 @@ describe('ROLLCALL: seed the four-source acceptance federation', function () {
             if (!weightBySource.has(String(v.source))) weightBySource.set(String(v.source), Number(v.weight))
         const total = Array.from(weightBySource.values()).reduce((a, b) => a + b, 0)
 
-        const idleSource   = String(byPubkey.get(roster[rc.IDLE_SEED_INDEX].pubkey).source)
-        const smallSigner  = String(byPubkey.get(roster[2].pubkey).source)
-        const at2Present   = total - (weightBySource.get(idleSource) || 0) - (weightBySource.get(smallSigner) || 0)
-        assert.ok(3 * at2Present > 2 * total,
-            'AT2 cannot pass on this distribution: with the idle source and one signing hub silent, present ' +
-            'weight is ' + at2Present + ' of ' + total + ', which does not clear 3 * present > 2 * total. Any ' +
-            'source outside the roster (for example a validator staked here by another lane) counts toward ' +
-            'total while never signing, so it must be unstaked before the acceptance run.')
+        // PRESENCE IS THE ROSTER'S SIGNING WEIGHT, never "total minus the silent
+        // ones". The earlier form subtracted the idle and small-signer weights
+        // from the WHOLE set's total, which silently counts every outsider as
+        // PRESENT - the exact opposite of what an outsider does. On a venue with
+        // 70000 of outsider weight it reported AT2 as satisfiable at
+        // 40000/40000/10000/10000, where the real present side is 80000 of
+        // 170000 and the epoch closes UNROLLED.
+        const idleSource  = String(byPubkey.get(roster[rc.IDLE_SEED_INDEX].pubkey).source)
+        const smallSigner = String(byPubkey.get(roster[2].pubkey).source)
+        const signingSources = roster
+            .filter(r => r.index !== rc.IDLE_SEED_INDEX)
+            .map(r => String(byPubkey.get(r.pubkey).source))
+        const signingWeight = signingSources
+            .map(s => weightBySource.get(s) || 0).reduce((a, b) => a + b, 0)
+        const at2Present    = signingWeight - (weightBySource.get(smallSigner) || 0)
+        const outsiderWeight = total - signingWeight - (weightBySource.get(idleSource) || 0)
 
-        console.log('\nfederation ready: total weight ' + total + ', AT2 outage leaves ' + at2Present + ' present')
+        assert.ok(3 * signingWeight > 2 * total,
+            'an ORDINARY epoch cannot roll on this distribution: with all three hubs present the signing ' +
+            'weight is ' + signingWeight + ' of ' + total + ' (outsiders hold ' + outsiderWeight + '), which ' +
+            'does not clear 3 * present > 2 * total, so every epoch closes UNROLLED and no acceptance test ' +
+            'has a verdict. Raise WEIGHTS in this tool, or unstake the outsiders.')
+
+        assert.ok(3 * at2Present > 2 * total,
+            'AT2 cannot pass on this distribution: with the idle source and the small signing hub silent, ' +
+            'present weight is ' + at2Present + ' of ' + total + ' (outsiders hold ' + outsiderWeight + ', ' +
+            'and an outsider counts toward total while never signing), which does not clear ' +
+            '3 * present > 2 * total. Raise WEIGHTS in this tool so the large signing weight exceeds twice ' +
+            'the small one plus the outsider weight, or unstake the outsiders.')
+
+        console.log('\nfederation ready: total weight ' + total + ' (roster signing ' + signingWeight +
+                    ', outsiders ' + outsiderWeight + '), AT2 outage leaves ' + at2Present + ' present')
     })
 })

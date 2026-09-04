@@ -369,7 +369,19 @@ describe('ROLLCALL acceptance: eviction of an idle staking source (AT1-AT4)', fu
         // Re-entry. A fresh STAKE v1 with a NEW signing key, because the evicted
         // key is spent (STAKE rejects "SIGNING_PUBKEY already in use"), which is
         // itself part of the contract.
-        const reentryPubkey = rc.pubkeyForSeed('55'.repeat(32))
+        //
+        // THE RE-ENTRY KEY IS PER-GENERATION, for the reason AT1's idle key is.
+        // It was the fixed seed 55...55 until 2026-09-03, which made AT4 exactly
+        // as one-shot as AT1 was before its own rotation: the first run stakes that pubkey, the
+        // run's own assertion proves it is now in oracle_publish, and STAKE v1
+        // refuses it forever after ("any valid stake row for this pubkey, EVER"),
+        // so the second AT4 run on the same chain fails on its re-entry leg with
+        // `invalid: SIGNING_PUBKEY (already in use)`. Measured on the regtest acceptance
+        // venue: the first green AT4 left c6822637... staked from the fixed seed,
+        // and nothing but a new chain could have run it again. Rotating with
+        // XC_ROLLCALL_IDLE_GENERATION costs nothing and makes the suite re-runnable
+        // by the same bump AT1 already needs.
+        const reentryPubkey = rc.pubkeyForSeed(rc.reentrySeed())
         const stakerAddr = await cryptoHelper.getNewFundedAddress('rollcall-reentry', COIN, NETWORK, null, 'legacy', 0, 0.05)
         await gasHelper.ensureGasBalance(stakerAddr, '30000')
         await utxoTrackerConnector.quiesce({ timeoutMs: 60000, pollMs: 250, regtestMiner: regtestMinerConnector })

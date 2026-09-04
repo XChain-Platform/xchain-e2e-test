@@ -154,11 +154,15 @@ class Database {
             + " after " + attempts + " attempt" + (attempts === 1 ? "" : "s")
             + " (" + (Date.now() - startMs) + "ms): " + this._errText(lastError)
             + (this._isFatalConnectError(lastError)
-                ? ". The venue rejected these credentials, so retrying cannot help:"
-                  + " the hub config oracle's copy of the indexer DB credentials is the"
-                  + " one that has to match, not just the .env file."
-                : ". Check that the venue is up and that its indexer DB credentials"
-                  + " are current in the hub config oracle, not only in the .env file."));
+                ? ". The venue rejected these credentials, so retrying cannot help."
+                  + " A second-chain rail resolves this credential from <CODE>_INDEXER_DB_PASS"
+                  + " in the environment, then INDEXER_DB_PASS in .env.<code>, then the hub's"
+                  + " stored copy - so any ONE of those three being current is enough, and the"
+                  + " hub's is the one that goes stale (it is written at install time, and a"
+                  + " consensus-enabled hub cannot accept a corrected push without quorum)."
+                : ". Check that the venue is up and that its indexer DB credentials are current"
+                  + " in at least one of: <CODE>_INDEXER_DB_PASS in the environment,"
+                  + " INDEXER_DB_PASS in .env.<code>, or the hub's stored copy."));
         err.code  = 'E2E_DB_UNREACHABLE';
         err.cause = lastError;
         throw err;

@@ -101,7 +101,8 @@ describe('ROLLCALL acceptance: sweeper, self-publish and the below-threshold epo
         if (!rc.requireRollcallVenue(this)) return
         if (!requireFederationEnv(this)) return
 
-        ctx = await rc.bringUpVenue({ hubCount: 3, needSources: 4, dbNamePrefix: 'XChain_BTC_Regtest_ROLLCALLPUB_' })
+        ctx = await rc.bringUpVenue({ hubCount: 3, needSources: 4, requireExactRoster: true,
+            dbNamePrefix: 'XChain_BTC_Regtest_ROLLCALLPUB_' })
         omittedSource = ctx.sourceOf(OMITTED_HUB)
 
         // AT6a and AT6b both need the epoch to ROLL once the omitted signature is
