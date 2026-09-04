@@ -77,6 +77,7 @@
 const fs   = require('fs');
 const net  = require('net');
 const os   = require('os');
+const http = require('http');
 const path = require('path');
 const { spawn } = require('child_process');
 const mariadb = require('mariadb');
@@ -914,6 +915,443 @@ class P2pDelayProxy {
 }
 
 // ---------------------------------------------------------------------------
+// The hub-DB mirror proxy: a per-table, per-edge withhold and delay
+// ---------------------------------------------------------------------------
+
+/**
+ * WHY THIS EXISTS, and why nothing coarser will do. Operator ruling 2026-09-04.
+ *
+ * The mirror barriers sit in SEQUENCE in one block loop and every one of them
+ * reads the SAME global stream watermark, differing only in the grace it adds. So
+ * stopping a hub starves all of them at once and the earliest in the loop,
+ * `anchor_attest_barrier`, reports first: `attest_response_sync_barrier` can never
+ * be the observed stall class that way, which is precisely why AT0's last clause
+ * could not be driven. What is needed instead is a fault that starves ONE TABLE of
+ * ONE indexer's mirror while leaving every other table, every other barrier and
+ * every other hub untouched.
+ *
+ * WHERE IT HAS TO SIT. An indexer reaches its hub's mirror through exactly one
+ * coordinate, `HUB_API_URL`: the snapshot route is `<hubUrl>/hub-db/snapshot/<table>`
+ * and the live stream is `ws://<host>/hub-db/subscribe` derived from the same value
+ * (`xchain-indexer/src/hub_db_sync.js`). One proxy in front of that value therefore
+ * governs the whole mirror for one indexer, and pointing only that indexer at it is
+ * what makes the fault per-edge rather than per-hub: indexer 0's feed of hub 2 can
+ * be starved while indexer 1 reads the same hub normally.
+ *
+ * WHAT IT MUST NOT TOUCH, stated because conflating these is how a test proves the
+ * wrong thing. It does not touch the hub's own database writes, and it does not
+ * touch P2P gossip. A hub behind this proxy still reaches quorum, still writes its
+ * row and still gossips it to its peers; only what the mirror SERVES to one
+ * follower changes. Delaying gossip specifically is a different lever and it is
+ * `P2pDelayProxy` above.
+ *
+ * THE TWO FIELDS IT ALWAYS PASSES THROUGH are what make this surgical rather than
+ * blunt, and they were measured before this was written:
+ *   - `watermark`: the bootstrap takes each table's mark from the last page it
+ *     fetches and advances the global stream watermark to the MINIMUM across every
+ *     table, after which live advancement rides the hub's heartbeat, gated on the
+ *     bootstrap having drained. Suppress the watermark and every barrier starves,
+ *     which is the blunt failure this exists to avoid.
+ *   - `schema_version`: a mismatch parks the WHOLE mirror by design, and an absent
+ *     value would read as an older hub.
+ * An empty `rows` array with both fields intact is a legitimate, fully drained
+ * "nothing new for you" answer, so the mirror stays live and every other barrier
+ * stays satisfied while the withheld table alone starves.
+ *
+ * COMPRESSION IS REFUSED ON PURPOSE. The proxy strips `Sec-WebSocket-Extensions`
+ * from the upgrade request, so the hub cannot negotiate permessage-deflate and
+ * every server frame arrives as readable text. Without that the frames would be
+ * compressed and the table name unreadable, and the alternative was taking a new
+ * WebSocket dependency into this repo for a test lever.
+ */
+
+// Filter modes. `withhold` suppresses indefinitely; `delay` releases each row a
+// fixed time after the proxy first saw it.
+const MIRROR_WITHHOLD = 'withhold';
+const MIRROR_DELAY    = 'delay';
+
+// Verdicts for one row or one stream event.
+const MIRROR_PASS = 'pass';
+const MIRROR_DROP = 'drop';
+const MIRROR_HOLD = 'hold';
+
+/**
+ * The table a hub-DB snapshot request is asking for, or null for any other path.
+ *
+ * Deliberately strict about the prefix: the proxy must not filter a path that
+ * merely contains the words, and it must leave `/hub-db/subscribe` alone (that is
+ * the socket, handled on the upgrade).
+ */
+function snapshotTableOf(reqUrl) {
+    const p = String(reqUrl || '').split('?')[0];
+    const m = /^\/hub-db\/snapshot\/([A-Za-z0-9_]+)$/.exec(p);
+    return m ? m[1] : null;
+}
+
+/**
+ * What happens to one row or one row event of a filtered table.
+ *
+ * PURE, and the only place the two modes are interpreted, so the REST half and
+ * the WebSocket half of this proxy can never disagree about what a filter means.
+ *
+ * @param {object|null} filter       `{mode, delayMs}` or null for unfiltered
+ * @param {number}      firstSeenMs  when this proxy first observed the row
+ * @param {number}      nowMs        now
+ * @returns {'pass'|'drop'|'hold'}
+ */
+function mirrorFilterVerdict(filter, firstSeenMs, nowMs) {
+    if (!filter) return MIRROR_PASS;
+    if (filter.mode === MIRROR_WITHHOLD) return MIRROR_DROP;
+    if (filter.mode === MIRROR_DELAY) {
+        // Refused BY NAME before Number(), which turns null and '' into 0: a row whose
+        // first-seen is unknown would otherwise look infinitely old and be served
+        // immediately, which is a fault injector failing OPEN. Holding is the safe
+        // direction, because a held row shows up as an unmet condition rather than as
+        // a barrier that silently never fired.
+        const unreadable = (v) => v === null || v === undefined || v === '' || typeof v === 'boolean';
+        if (unreadable(firstSeenMs) || unreadable(filter.delayMs)) return MIRROR_HOLD;
+        const first = Number(firstSeenMs);
+        const delay = Number(filter.delayMs);
+        if (!Number.isFinite(first) || !Number.isFinite(delay)) return MIRROR_HOLD;
+        return (Number(nowMs) - first >= delay) ? MIRROR_PASS : MIRROR_HOLD;
+    }
+    throw new Error('attestMirrorVenue: unknown mirror filter mode ' + JSON.stringify(filter && filter.mode));
+}
+
+/**
+ * A snapshot response body with the filtered table's rows removed.
+ *
+ * Returns a NEW object; `watermark`, `schema_version` and `table` are carried over
+ * verbatim for the reasons in the header, and `count` is corrected to what is
+ * actually being served so the body stays internally consistent.
+ *
+ * `seen` is the proxy's first-seen ledger, keyed by row id, and is updated here
+ * because the REST path is usually where a row is observed first.
+ */
+function filterSnapshotBody(body, table, filter, seen, nowMs) {
+    if (!body || !Array.isArray(body.rows) || !filter) return { body: body, held: 0 };
+    const kept = [];
+    let held = 0;
+    for (const row of body.rows) {
+        const key = table + ':' + String(row && row.id);
+        if (!seen.has(key)) seen.set(key, nowMs);
+        const verdict = mirrorFilterVerdict(filter, seen.get(key), nowMs);
+        if (verdict === MIRROR_PASS) kept.push(row);
+        else held++;
+    }
+    const out = Object.assign({}, body);
+    out.rows  = kept;
+    out.count = kept.length;
+    return { body: out, held: held };
+}
+
+/**
+ * Read whole server-to-client WebSocket frames out of a buffer.
+ *
+ * PURE. Returns the frames it could delimit and whatever tail bytes remain, so a
+ * caller can carry the tail into the next chunk. Server frames are unmasked by
+ * protocol, so nothing here needs to unmask; and because the proxy forwards the
+ * ORIGINAL bytes rather than re-encoding, a frame it does not understand is
+ * forwarded intact instead of being mangled.
+ *
+ * `text` is the decoded payload only for a complete, unfragmented text frame,
+ * which is the only shape this proxy filters. Everything else is `opaque`.
+ */
+function readServerFrames(buf) {
+    const frames = [];
+    let off = 0;
+    while (off + 2 <= buf.length) {
+        const b0 = buf[off];
+        const b1 = buf[off + 1];
+        const fin    = (b0 & 0x80) !== 0;
+        const opcode = b0 & 0x0f;
+        const masked = (b1 & 0x80) !== 0;
+        let len = b1 & 0x7f;
+        let headerLen = 2;
+        if (len === 126) {
+            if (off + 4 > buf.length) break;
+            len = buf.readUInt16BE(off + 2);
+            headerLen = 4;
+        } else if (len === 127) {
+            if (off + 10 > buf.length) break;
+            const big = buf.readBigUInt64BE(off + 2);
+            // A frame this large is not something the hub's broadcaster produces; refuse
+            // to buffer it rather than allocating against a wire value.
+            if (big > BigInt(64 * 1024 * 1024)) return { frames: frames, rest: buf.subarray(off), overlong: true };
+            len = Number(big);
+            headerLen = 10;
+        }
+        if (masked) headerLen += 4;
+        const total = headerLen + len;
+        if (off + total > buf.length) break;
+        const bytes = buf.subarray(off, off + total);
+        let text = null;
+        if (fin && opcode === 0x1 && !masked) {
+            text = bytes.subarray(headerLen).toString('utf8');
+        }
+        frames.push({ bytes: bytes, opcode: opcode, fin: fin, text: text, opaque: text === null });
+        off += total;
+    }
+    return { frames: frames, rest: buf.subarray(off) };
+}
+
+/**
+ * The table one stream frame concerns, or null when the frame is not a row event.
+ *
+ * `row:inserted` and `row:deleted` are the only frames that carry table data; a
+ * `ready` or `watermark` frame must always pass, and returning null here is what
+ * guarantees that.
+ */
+function mirrorFrameTable(text) {
+    let event = null;
+    try { event = JSON.parse(text); } catch (_) { return null; }
+    if (!event || (event.type !== 'row:inserted' && event.type !== 'row:deleted')) return null;
+    return event.table ? String(event.table) : null;
+}
+
+/**
+ * An HTTP-plus-WebSocket proxy in front of one hub's API port, with a per-table
+ * withhold and delay on the hub-DB mirror.
+ *
+ * Explicit only: with no filter armed it is a transparent relay, and it must be
+ * asked for a table by name. Releasable mid-run, because a wedge test has to show
+ * the indexer RESUMING and converging with its peer, not merely stalling.
+ */
+class HubDbMirrorProxy {
+
+    constructor(listenPort, targetPort, label) {
+        this.listenPort = listenPort;
+        this.targetPort = targetPort;
+        this.label      = label || 'mirror-proxy';
+        this.filters    = new Map();   // table -> {mode, delayMs}
+        this.seen       = new Map();   // 'table:id' -> first-seen ms
+        this.stats      = { snapshotRowsHeld: 0, framesDropped: 0, framesHeld: 0, opaqueFrames: 0 };
+        this._server    = null;
+        this._sockets   = new Set();
+        this._timers    = new Set();
+    }
+
+    async start() {
+        this._server = http.createServer((req, res) => this._proxyHttp(req, res));
+        this._server.on('upgrade', (req, socket) => this._proxyUpgrade(req, socket));
+        await new Promise((resolve, reject) => {
+            this._server.once('error', reject);
+            this._server.listen(this.listenPort, '127.0.0.1', () => {
+                this._server.removeListener('error', reject);
+                resolve();
+            });
+        });
+    }
+
+    get url() { return 'http://127.0.0.1:' + this.listenPort; }
+
+    // ---- the levers -----------------------------------------------------
+
+    /** Serve nothing for `table`, on this edge only, until released. */
+    withholdTable(table) {
+        this.filters.set(String(table), { mode: MIRROR_WITHHOLD });
+    }
+
+    /** Hold every row of `table` for `ms` past when the proxy first saw it. */
+    delayTable(table, ms) {
+        const delayMs = Number(ms);
+        if (!Number.isFinite(delayMs) || delayMs < 0) {
+            throw new Error('attestMirrorVenue: a mirror delay must be a non-negative number of ms');
+        }
+        this.filters.set(String(table), { mode: MIRROR_DELAY, delayMs: delayMs });
+    }
+
+    /**
+     * Stop filtering `table`.
+     *
+     * RECONNECT IS THE DEFAULT AND IT MATTERS. Rows withheld from the live stream
+     * are gone from it: the hub does not resend them, so releasing alone would
+     * leave this indexer permanently missing the row and diverging, which is a
+     * fault the test injected rather than one it found. Dropping the socket makes
+     * the indexer's own reconnect path re-run the bootstrap, and
+     * `attestation_responses` is a FULL_REPAGE table whose drain re-pages from
+     * id 0, so the withheld rows arrive through the node's ordinary recovery.
+     */
+    releaseTable(table, opts) {
+        const o = opts || {};
+        this.filters.delete(String(table));
+        if (o.reconnect !== false) this.dropSockets();
+    }
+
+    releaseAll(opts) {
+        this.filters.clear();
+        if (!opts || opts.reconnect !== false) this.dropSockets();
+    }
+
+    /** Cut every proxied connection, so the client reconnects and re-bootstraps. */
+    dropSockets() {
+        for (const s of this._sockets) { try { s.destroy(); } catch (_) { /* already gone */ } }
+        this._sockets.clear();
+    }
+
+    // ---- plumbing -------------------------------------------------------
+
+    _proxyHttp(req, res) {
+        const table  = snapshotTableOf(req.url);
+        const filter = table ? this.filters.get(table) : null;
+        const headers = Object.assign({}, req.headers);
+        headers.host = '127.0.0.1:' + this.targetPort;
+        // Identity encoding, so a filtered body is readable rather than compressed.
+        headers['accept-encoding'] = 'identity';
+
+        const upstream = http.request({
+            host: '127.0.0.1', port: this.targetPort, method: req.method,
+            path: req.url, headers: headers,
+        }, (up) => {
+            const chunks = [];
+            up.on('data', (c) => chunks.push(c));
+            up.on('end', () => {
+                const raw = Buffer.concat(chunks);
+                if (!filter || up.statusCode !== 200) {
+                    res.writeHead(up.statusCode, this._forwardableHeaders(up.headers));
+                    return res.end(raw);
+                }
+                let parsed = null;
+                try { parsed = JSON.parse(raw.toString('utf8')); } catch (_) { parsed = null; }
+                if (!parsed) {
+                    res.writeHead(up.statusCode, this._forwardableHeaders(up.headers));
+                    return res.end(raw);
+                }
+                const filtered = filterSnapshotBody(parsed, table, filter, this.seen, Date.now());
+                this.stats.snapshotRowsHeld += filtered.held;
+                const body = Buffer.from(JSON.stringify(filtered.body), 'utf8');
+                const out = this._forwardableHeaders(up.headers);
+                out['content-length'] = String(body.length);
+                res.writeHead(up.statusCode, out);
+                res.end(body);
+            });
+        });
+        upstream.on('error', () => { try { res.destroy(); } catch (_) { /* client gone */ } });
+        req.pipe(upstream);
+    }
+
+    // Content-length is recomputed for a filtered body and transfer-encoding cannot
+    // survive a buffered rewrite, so both are dropped here and set deliberately.
+    _forwardableHeaders(headers) {
+        const out = {};
+        for (const [k, v] of Object.entries(headers || {})) {
+            const key = k.toLowerCase();
+            if (key === 'content-length' || key === 'transfer-encoding' || key === 'content-encoding') continue;
+            out[key] = v;
+        }
+        return out;
+    }
+
+    _proxyUpgrade(req, socket) {
+        const upstream = net.connect(this.targetPort, '127.0.0.1');
+        this._sockets.add(socket);
+        this._sockets.add(upstream);
+
+        const lines = [req.method + ' ' + req.url + ' HTTP/1.1'];
+        for (const [k, v] of Object.entries(req.headers)) {
+            // See the header: refusing the extension negotiation is what keeps every
+            // server frame readable, and it is the only header this proxy rewrites.
+            if (k.toLowerCase() === 'sec-websocket-extensions') continue;
+            if (k.toLowerCase() === 'host') { lines.push('host: 127.0.0.1:' + this.targetPort); continue; }
+            lines.push(k + ': ' + v);
+        }
+        upstream.write(lines.join('\r\n') + '\r\n\r\n');
+
+        // Client to hub is never inspected: those frames are masked, and nothing this
+        // proxy models happens in that direction.
+        socket.pipe(upstream);
+
+        let handshakeDone = false;
+        let buffered = Buffer.alloc(0);
+        upstream.on('data', (chunk) => {
+            if (!handshakeDone) {
+                buffered = Buffer.concat([buffered, chunk]);
+                const end = buffered.indexOf('\r\n\r\n');
+                if (end === -1) return;
+                const head = buffered.subarray(0, end + 4);
+                this._write(socket, head);
+                buffered = buffered.subarray(end + 4);
+                handshakeDone = true;
+            } else {
+                buffered = Buffer.concat([buffered, chunk]);
+            }
+            const read = readServerFrames(buffered);
+            buffered = read.rest;
+            for (const frame of read.frames) this._forwardFrame(socket, frame);
+        });
+
+        const close = () => {
+            this._sockets.delete(socket);
+            this._sockets.delete(upstream);
+            try { socket.destroy(); } catch (_) { /* already gone */ }
+            try { upstream.destroy(); } catch (_) { /* already gone */ }
+        };
+        socket.on('error', close);
+        socket.on('close', close);
+        upstream.on('error', close);
+        upstream.on('close', close);
+    }
+
+    _forwardFrame(socket, frame) {
+        if (frame.opaque) {
+            // Fragmented, binary or control: forwarded untouched. Counted so a drill
+            // that expected to filter something can tell that it never saw text.
+            this.stats.opaqueFrames++;
+            return this._write(socket, frame.bytes);
+        }
+        const table = mirrorFrameTable(frame.text);
+        const filter = table ? this.filters.get(table) : null;
+        if (!filter) return this._write(socket, frame.bytes);
+
+        // A live event's first-seen is now: this is the moment it would have been
+        // served. The REST ledger is shared, so a row already seen there keeps its
+        // original clock rather than having it reset by arriving twice.
+        const key = table + ':' + this._frameRowId(frame.text);
+        if (!this.seen.has(key)) this.seen.set(key, Date.now());
+        const verdict = mirrorFilterVerdict(filter, this.seen.get(key), Date.now());
+
+        if (verdict === MIRROR_PASS) return this._write(socket, frame.bytes);
+        if (verdict === MIRROR_DROP) { this.stats.framesDropped++; return; }
+
+        this.stats.framesHeld++;
+        const waitMs = Math.max(0, Number(filter.delayMs) - (Date.now() - this.seen.get(key)));
+        const timer = setTimeout(() => {
+            this._timers.delete(timer);
+            // Re-checked on release: a withhold armed while this was in flight must
+            // still suppress it, and a released filter must let it through.
+            const now = this.filters.get(table);
+            if (now && now.mode === MIRROR_WITHHOLD) { this.stats.framesDropped++; return; }
+            this._write(socket, frame.bytes);
+        }, waitMs);
+        // Unref'd: a held frame must never keep the mocha process alive.
+        if (timer.unref) timer.unref();
+        this._timers.add(timer);
+    }
+
+    _frameRowId(text) {
+        try {
+            const event = JSON.parse(text);
+            const row = event && event.row;
+            return String(row && row.id !== undefined ? row.id : text.length);
+        } catch (_) { return 'unparsed'; }
+    }
+
+    _write(socket, bytes) {
+        if (!socket.destroyed) { try { socket.write(bytes); } catch (_) { /* client gone */ } }
+    }
+
+    async stop() {
+        for (const t of this._timers) clearTimeout(t);
+        this._timers.clear();
+        this.dropSockets();
+        if (this._server) {
+            await new Promise((resolve) => this._server.close(resolve));
+            this._server = null;
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // The venue
 // ---------------------------------------------------------------------------
 
@@ -955,6 +1393,14 @@ class AttestMirrorVenue {
             MIRROR_BARRIERS.reduce((acc, b) => { acc[b] = DEFAULT_GRACE_S; return acc; }, {}),
             opts.graces || {});
         this.inboundOnlyHubs = new Set(opts.inboundOnlyHubs || []);
+        // `{0: {attestResponse: 120}}`: a per-indexer overlay on `graces`. See the
+        // comment at the buildIndexerEnv call site for why the grace is the only term
+        // that can single out one barrier.
+        this.indexerGraces   = opts.indexerGraces || {};
+        // Extra environment for every hub child, applied last. The seam exists for the
+        // attestation BATCH publisher, which needs a signer module, a DOGE encoder and
+        // a funded DOGE address that only a drill can supply; see the buildHubEnv call.
+        this.hubExtraEnv     = opts.hubExtraEnv || null;
         // A drill that reaches the llm provider says so, and the venue then refuses to
         // boot on a box that cannot serve one. HUB_CLAUDE_CONFIG_DIR only, never the
         // interactive CLAUDE_CONFIG_DIR.
@@ -1047,9 +1493,23 @@ class AttestMirrorVenue {
         this._cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-attestmirror-' + this.label + '-'));
         this._capabilityConfigPath = this._writeCapabilityConfig();
 
-        const ports = planPorts(
-            await pickFreePorts(portCount(this.hubCount, this.indexerCount), this.basePort),
-            this.hubCount, this.indexerCount);
+        // ONE PROBE, TWO CONSUMERS, and it has to be one probe.
+        //
+        // The venue needs `portCount()` ports for its children plus one mirror proxy per
+        // indexer. A SECOND independent `pickFreePorts` call for the proxies looks
+        // equivalent and is not: the first call's ports are only PLANNED at that moment,
+        // nothing is bound yet, so the second probe finds them free and hands back the
+        // very ports the indexers are about to use. Measured exactly that way on the
+        // first boot of this lever, where the two proxies took 61015 and 61016, which
+        // `planPorts` had already assigned to the two indexer APIs; the indexers then had
+        // no API to serve and every `/status` read answered with a hub's JSON-RPC error
+        // instead of a height, which reads as a venue that will not come up rather than
+        // as a port collision. So the pool is probed once and sliced: the head is exactly
+        // what `planPorts` expects, and the tail is the proxies'.
+        const planned = portCount(this.hubCount, this.indexerCount);
+        const pool = await pickFreePorts(planned + this.indexerCount, this.basePort);
+        const ports = planPorts(pool.slice(0, planned), this.hubCount, this.indexerCount);
+        this._mirrorProxyPorts = pool.slice(planned);
         const followed = assignFollowedHubs(this.hubCount, this.indexerCount);
 
         await this._startHubs(ports, stamp);
@@ -1106,6 +1566,15 @@ class AttestMirrorVenue {
             capabilityConfigPath: this._capabilityConfigPath,
             forwardS:     this.forwardS,
             batchWindowS: this.batchWindowS,
+            // Explicit extra hub environment, for the one subsystem this venue does not
+            // configure: the attestation BATCH publisher. It is constructed and started
+            // on every real hub boot and regtest is armed at 0, so those hubs are already
+            // closing windows, but they can publish nothing without a signer module, a
+            // DOGE encoder URL and a funded DOGE address. Wiring those means funding a
+            // wallet on another chain, which is a drill's business rather than a venue's,
+            // so the venue offers the seam and AT5 fills it or skips saying what is
+            // missing. Applied LAST, so a drill can override anything above deliberately.
+            extraEnv: this.hubExtraEnv,
             path: process.env.PATH,
             home: process.env.HOME
         });
@@ -1152,14 +1621,33 @@ class AttestMirrorVenue {
     }
 
     async _startIndexers(ports, followed, stamp) {
+        // One mirror proxy per indexer, in front of the hub that indexer follows, on
+        // the tail of the single port pool `start()` probed. See the comment there for
+        // why these cannot come from a probe of their own.
+        const proxyPorts = this._mirrorProxyPorts;
+        if (!Array.isArray(proxyPorts) || proxyPorts.length < this.indexerCount) {
+            throw new Error('attestMirrorVenue: the mirror proxy ports were not reserved from the ' +
+                'venue port pool; start() must slice them off the single probe');
+        }
+
         for (let i = 0; i < this.indexerCount; i++) {
             const hub = this.hubs[followed[i]];
+            const mirrorProxy = new HubDbMirrorProxy(proxyPorts[i], hub.apiPort,
+                this.label + '-mirror' + i);
+            await mirrorProxy.start();
             this.indexers.push({
                 index:  i,
                 apiPort: ports.indexerApi[i],
                 apiUrl:  'http://127.0.0.1:' + ports.indexerApi[i],
                 followsHub: hub.index,
-                hubApiUrl:  hub.apiUrl,
+                // THE INDEXER READS ITS MIRROR THROUGH THE PROXY, always: the snapshot
+                // route and the subscribe socket both derive from this one value, so this
+                // is what puts the per-table lever on this edge. With no filter armed it
+                // is a transparent relay. `hub.apiUrl` stays available on the hub record
+                // for a drill that wants to ask the HUB what it holds, which is how a
+                // withhold is told apart from a hub that never got the row.
+                hubApiUrl:  mirrorProxy.url,
+                mirrorProxy: mirrorProxy,
                 hubPubkey:  hub.pubkey,
                 indexerDbName: DB_PREFIX + this.label + '_' + stamp + '_Ixr' + i,
                 mirrorDbName:  DB_PREFIX + this.label + '_' + stamp + '_Mirror' + i,
@@ -1192,7 +1680,15 @@ class AttestMirrorVenue {
             decoder: this._live.decoder,
             node:    this._live.node,
             tracker: this._live.tracker,
-            graces:  this.graces,
+            // PER-INDEXER graces, layered over the venue-wide set.
+            //
+            // Every barrier reads the SAME global stream watermark and differs only in
+            // the grace it adds, so the grace is the only per-barrier term there is: a
+            // barrier whose grace exceeds every other barrier's is the only one that can
+            // be unsatisfied while the rest are clear, which is what lets a stall be
+            // attributed BY NAME. Per indexer rather than venue-wide because the
+            // attribution also needs an unaffected peer to advance past the parked node.
+            graces:  Object.assign({}, this.graces, this.indexerGraces[i] || {}),
             feeDestination: this._live.feeDestination,
             path: process.env.PATH,
             home: process.env.HOME
@@ -1508,6 +2004,52 @@ class AttestMirrorVenue {
         await this._spawnHub(i);
     }
 
+    /**
+     * Starve indexer `i`'s mirror of ONE table, indefinitely, until released.
+     *
+     * Route-level and edge-scoped: the hub keeps writing, keeps gossiping and keeps
+     * serving that table to every other follower, and every OTHER table keeps
+     * flowing to this indexer, watermark and schema version included. That is what
+     * leaves the other barriers satisfied so the one under test can be the only
+     * thing holding a block.
+     *
+     * This is NOT the gossip lever. To make a hub learn a row late, use
+     * `delayHubGossip`; to make an indexer learn it late, use `delayMirrorTable`.
+     */
+    withholdMirrorTable(indexerIndex, table) {
+        const ix = this.indexers[indexerIndex];
+        if (!ix) throw new Error('attestMirrorVenue: no indexer ' + indexerIndex);
+        ix.mirrorProxy.withholdTable(table);
+    }
+
+    /** Hold every row of `table` for `ms` before serving it to indexer `i`. */
+    delayMirrorTable(indexerIndex, table, ms) {
+        const ix = this.indexers[indexerIndex];
+        if (!ix) throw new Error('attestMirrorVenue: no indexer ' + indexerIndex);
+        ix.mirrorProxy.delayTable(table, ms);
+    }
+
+    /**
+     * Stop filtering `table` for indexer `i`.
+     *
+     * Drops the mirror socket by default, which is what makes the release a real
+     * recovery rather than a permanent hole: rows withheld from the live stream are
+     * never resent, so the indexer has to re-bootstrap to pick them up, and
+     * `attestation_responses` re-pages from id 0 when it does.
+     */
+    releaseMirrorTable(indexerIndex, table, opts) {
+        const ix = this.indexers[indexerIndex];
+        if (!ix) throw new Error('attestMirrorVenue: no indexer ' + indexerIndex);
+        ix.mirrorProxy.releaseTable(table, opts);
+    }
+
+    /** What one indexer's mirror proxy actually held back, for a failure message. */
+    mirrorProxyStats(indexerIndex) {
+        const ix = this.indexers[indexerIndex];
+        if (!ix) throw new Error('attestMirrorVenue: no indexer ' + indexerIndex);
+        return Object.assign({ filters: Array.from(ix.mirrorProxy.filters.entries()) }, ix.mirrorProxy.stats);
+    }
+
     // Delay every byte on a connection terminating at hub i. See P2pDelayProxy
     // for why this and not an env knob or a signal, and for the exact scope.
     delayHubGossip(i, ms) {
@@ -1724,6 +2266,10 @@ class AttestMirrorVenue {
         };
 
         for (const ix of this.indexers) await attempt('indexer ' + ix.index + ' stop', async () => this._kill(ix.proc));
+        for (const ix of this.indexers) {
+            await attempt('mirror proxy ' + ix.index + ' stop',
+                async () => ix.mirrorProxy && ix.mirrorProxy.stop());
+        }
         for (const hub of this.hubs)    await attempt('hub ' + hub.index + ' stop',    async () => this._kill(hub.proc));
         for (const hub of this.hubs)    await attempt('proxy ' + hub.index + ' stop',  async () => hub.proxy && hub.proxy.stop());
 
@@ -1768,6 +2314,19 @@ function coinCode(coin) {
 module.exports = {
     AttestMirrorVenue,
     P2pDelayProxy,
+    HubDbMirrorProxy,
+    // The mirror proxy's pure decision layer, exported so the fault injection can be
+    // falsified without a venue.
+    snapshotTableOf,
+    mirrorFilterVerdict,
+    filterSnapshotBody,
+    readServerFrames,
+    mirrorFrameTable,
+    MIRROR_WITHHOLD,
+    MIRROR_DELAY,
+    MIRROR_PASS,
+    MIRROR_DROP,
+    MIRROR_HOLD,
     // The pure composition layer, exported for test/unit/helpers/attestMirrorVenue.test.js.
     assignFollowedHubs,
     planPorts,
