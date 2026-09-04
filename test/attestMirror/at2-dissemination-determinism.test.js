@@ -65,7 +65,7 @@ const {
 const {
     APPLIED_FIELDS, STATE_HASH_FIELDS, until, diffRows, diffStateHashes,
     rewardFingerprint, waitForMirrorRowEverywhere, waitForAppliedEverywhere,
-    readAttestRewards, happyPathVerdict,
+    readAttestRewards, happyPathVerdict, findEmittedAttestRequest, captureFederationState,
 } = require('./mirrorDrillWaits')
 const vmHelper = require('../helpers/vmHelper')
 const XChainIndexerConnector = require('../../src/XChainIndexerConnector.js')
@@ -167,11 +167,9 @@ describe('AT2: a hub outside the responsible set disseminates the response, iden
             exec.execution.status + '. A responsible set smaller than redundancy is rejected at ' +
             'admission and rolls the EXECUTE back, so this is the shape a short stake roster takes.')
 
-        const request = await indexerDatabase.waitForAttestationRequest({
-            txHash: exec.txHash, requestStatus: 'pending',
-        })
-        assert.ok(request, 'attempt ' + attempt + ': no pending request row on the standing indexer')
-        const requestId = String(request.request_id)
+        const request = await findEmittedAttestRequest(
+            contract.contractIndex, exec.execution.action_index, { label: 'attempt ' + attempt })
+        const requestId = request.requestId
 
         // The hubs wait three confirmations before they fetch a request, and they
         // poll rather than subscribe.

@@ -73,6 +73,7 @@ const {
 const {
     APPLIED_FIELDS, until, untilOrClearDogeStall, diffRows, diffStateHashes,
     waitForMirrorRowEverywhere, waitForAppliedEverywhere, venueTipProbe,
+    findEmittedAttestRequest, captureFederationState,
 } = require('./mirrorDrillWaits')
 const vmHelper = require('../helpers/vmHelper')
 const XChainIndexerConnector = require('../../src/XChainIndexerConnector.js')
@@ -189,11 +190,9 @@ describe('AT2 second clause: delivery past the forward margin holds the barrier 
             contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl])
         assert.strictEqual(exec.execution.status, 'valid',
             'the EXECUTE that emits the request came back ' + exec.execution.status)
-        const request = await indexerDatabase.waitForAttestationRequest({
-            txHash: exec.txHash, requestStatus: 'pending',
-        })
-        assert.ok(request, 'no pending request row on the standing indexer')
-        const requestId = String(request.request_id)
+        const request = await findEmittedAttestRequest(
+            contract.contractIndex, exec.execution.action_index, { label: 'at2b' })
+        const requestId = request.requestId
 
         await regtestMinerConnector.generateBlocks(BURIAL_BLOCKS)
         await settleStack()

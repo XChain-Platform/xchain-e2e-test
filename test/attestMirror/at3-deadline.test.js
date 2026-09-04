@@ -68,6 +68,7 @@ const {
 const {
     untilOrClearDogeStall, waitForMirrorRowEverywhere, waitForAppliedEverywhere,
     readBlockWindow, readRequestRow, firstSatisfyingBlock, venueTipProbe,
+    findEmittedAttestRequest, captureFederationState,
 } = require('./mirrorDrillWaits')
 const vmHelper = require('../helpers/vmHelper')
 
@@ -166,11 +167,9 @@ describe('AT3: the deadline decides whether a mirrored response ever binds', fun
         assert.strictEqual(exec.execution.status, 'valid',
             tag + ': the EXECUTE that emits the request came back ' + exec.execution.status)
 
-        const request = await indexerDatabase.waitForAttestationRequest({
-            txHash: exec.txHash, requestStatus: 'pending',
-        })
-        assert.ok(request, tag + ': no pending request row on the standing indexer')
-        const requestId = String(request.request_id)
+        const request = await findEmittedAttestRequest(
+            contract.contractIndex, exec.execution.action_index, { label: tag })
+        const requestId = request.requestId
 
         await regtestMinerConnector.generateBlocks(BURIAL_BLOCKS)
         await settleStack()

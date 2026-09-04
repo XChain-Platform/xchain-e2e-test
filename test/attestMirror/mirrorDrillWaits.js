@@ -495,6 +495,14 @@ function standingTipProbe (apiPort) {
  * is the double-finalize §4.1 tie-breaks and a drill must not average over it.
  */
 async function waitForMirrorRowEverywhere (venue, requestId, timeoutMs) {
+    // CAPTURED BEFORE THE ROUND SETTLES, because this is the only moment the
+    // responsible set can be read: `getattestationresponsibleset` answers for
+    // PENDING requests only, and by the time a row exists the request is not
+    // pending. A capture failure must never mask the assertion below, so it is
+    // swallowed with its reason printed.
+    try { await captureFederationState(venue, requestId, 'before the round settles') }
+    catch (e) { console.log('FEDERATION STATE (before): unreadable, ' + (e && e.message)) }
+
     const seen = await untilOrClearDogeStall(async () => {
         const rows = []
         for (const ix of venue.indexers) {
@@ -502,9 +510,29 @@ async function waitForMirrorRowEverywhere (venue, requestId, timeoutMs) {
         }
         return { ok: rows.every((r) => r.length === 1), rows: rows }
     }, { timeoutMs: timeoutMs || 10 * 60 * 1000, tipProbe: venueTipProbe(venue, 0) })
+
+    // AND AFTER, on pass as well as on failure. "0 mirror rows" has two competing
+    // explanations that the count cannot separate: the mirror failed to deliver a
+    // row that exists, or no row exists because the round never finalized. Which of
+    // those it was is only readable from the hubs, and the hub databases are
+    // disposable, so a reading taken after teardown cannot be taken at all.
+    let after = null
+    try {
+        after = await captureFederationState(venue, requestId,
+            seen.ok ? 'row present on both indexers' : 'row MISSING')
+    } catch (e) { console.log('FEDERATION STATE (after): unreadable, ' + (e && e.message)) }
+
+    const holders = after
+        ? after.hubs.filter((h) => h.finalized && typeof h.finalized === 'object').length
+        : 'unread'
     assert.ok(seen.ok,
         'the mirror row for ' + requestId + ' did not reach both indexers: counts ' +
-        JSON.stringify((seen.rows || []).map((r) => r.length)) + '\n' +
+        JSON.stringify((seen.rows || []).map((r) => r.length)) + '. ' +
+        holders + ' of the hubs hold a finalized row, which is the reading that tells the two ' +
+        'explanations apart: NO hub holding one means the round never finalized (a redundancy-sized ' +
+        'draw that included a staked key belonging to no running hub does exactly this, and the ' +
+        'responsible set printed above says whether that happened), while hubs holding one and an ' +
+        'indexer without it is a mirror fault.\n' +
         venue.logTail('indexer0') + '\n' + venue.logTail('indexer1'))
     return seen.rows.map((r) => r[0])
 }
@@ -597,6 +625,152 @@ async function readResponseRows (venue, indexerIndex, requestId) {
         [String(requestId)])
 }
 
+/**
+ * THE REQUEST MY OWN EXECUTE EMITTED, found without trusting a transaction hash.
+ *
+ * WHY NOT `waitForAttestationRequest({txHash})`, which is the obvious call and is
+ * WRONG here. That filters on `index_transactions.hash`, the ON-CHAIN hash, and for
+ * a P2SH-encoded EXECUTE the txid `sendrawtransaction` returned is not that hash.
+ * `sendExecuteV0` documents the mismatch and works around it for its OWN row (a
+ * short strict wait, then a no-txHash search on the contract, caller and method
+ * tuple), but a drill looking up the ATTEST request afterwards inherits the problem
+ * with no fallback. Which encoding is chosen varies, so the failure is
+ * INTERMITTENT and presents at the request lookup as though admission had refused
+ * the emission.
+ *
+ * WHY NOT A BARE `{requestStatus: 'pending'}` FALLBACK EITHER, which is the
+ * tempting fix: that read is `LIMIT 1` over every pending request on a shared
+ * chain, so it can hand back a STALE request from an earlier aborted run, and the
+ * drill would then assert against a request the hubs never worked on. That is worse
+ * than failing, because it looks like a pass.
+ *
+ * So the correlation is on identity: the emitting EXECUTE's own action index and
+ * the contract it ran in. An emission is minted at or after its EXECUTE, so a v0
+ * row for that contract at or above that index is this drill's request and nothing
+ * else can be. More than one candidate is refused loudly rather than resolved by
+ * picking, because two would mean this drill emitted twice and the caller must say
+ * which it meant.
+ */
+async function findEmittedAttestRequest (contractIndex, sinceActionIndex, opts) {
+    const o = opts || {}
+    const label = String(o.label || 'request')
+    const since = Number(sinceActionIndex)
+    assert.ok(Number.isFinite(since),
+        label + ': the emitting execution carried no action_index to correlate on, so this request ' +
+        'cannot be identified without trusting a transaction hash that may not match')
+
+    const read = async () => {
+        let connection = null
+        try {
+            connection = await indexerDatabase.getConnection()
+            return await connection.query(
+                'SELECT ar.request_id, ar.request_status, ar.deadline_block, ar.action_index, ' +
+                '       ar.provider_id, a.block_index ' +
+                'FROM attests ar JOIN actions a ON a.action_index = ar.action_index ' +
+                'WHERE ar.version = 0 AND ar.contract_index = ? AND ar.action_index >= ? ' +
+                'ORDER BY ar.action_index ASC',
+                [Number(contractIndex), since])
+        } catch (e) {
+            return []
+        } finally {
+            if (connection) await connection.release()
+        }
+    }
+
+    const found = await untilOrClearDogeStall(async () => {
+        const rows = await read()
+        return { ok: rows.length > 0, rows: rows }
+    }, {
+        timeoutMs: Number(o.timeoutMs) || 5 * 60 * 1000,
+        intervalMs: 2000,
+        tipProbe: o.tipProbe || standingTipProbe(),
+    })
+
+    const rows = found.rows || []
+    assert.ok(rows.length > 0,
+        label + ': no ATTEST v0 request row for contract ' + contractIndex + ' at or above action ' +
+        since + '. The EXECUTE came back valid, so either the emission was refused at admission (a ' +
+        'responsible set shorter than the redundancy does exactly this) or the indexer has not written ' +
+        'it yet.')
+    assert.strictEqual(rows.length, 1,
+        label + ': ' + rows.length + ' candidate request rows for contract ' + contractIndex +
+        ' at or above action ' + since + ' (' + rows.map((r) => String(r.request_id).slice(0, 12)).join(', ') +
+        '). This drill emitted more than one request from that point, so which one is under test is ' +
+        'ambiguous and picking would be guessing.')
+
+    const row = rows[0]
+    assert.strictEqual(String(row.request_status), 'pending',
+        label + ': the request landed with status ' + row.request_status + ' rather than pending, so no ' +
+        'hub will ever work on it. `rejected` here means the emission failed structural validation.')
+    return {
+        requestId: String(row.request_id),
+        requestStatus: String(row.request_status),
+        deadlineBlock: Number(row.deadline_block),
+        actionIndex: Number(row.action_index),
+        blockIndex: Number(row.block_index),
+        providerId: String(row.provider_id),
+    }
+}
+
+/**
+ * THE READING THAT TELLS A MIRROR DEFECT FROM A ROSTER PROBLEM, taken while the
+ * venue is still up.
+ *
+ * WHY THIS IS UNCONDITIONAL AND PRINTED. "indexer 0 holds 0 mirror rows for this
+ * request" has two competing explanations and the row count cannot separate them:
+ * the mirror failed to deliver a row that exists, or no row exists because a
+ * redundancy-3 draw included a staked key belonging to no running hub and the round
+ * never finalized. The venue's hub databases are DISPOSABLE and go with the run, so
+ * a reading taken after teardown cannot be taken at all, and every red without it
+ * stays ambiguous forever. It therefore runs on pass as well as on failure.
+ *
+ * `getattestationresponsibleset` answers the first half, and only a VENUE hub can:
+ * the standing stack predates the method and answers "Method not found". It also
+ * answers for PENDING requests only, which is why a drill should capture it BEFORE
+ * the round finalizes and the per-hub state afterwards.
+ */
+async function captureFederationState (venue, requestId, phase) {
+    const out = { phase: String(phase || ''), requestId: String(requestId), hubs: [] }
+    for (const hub of venue.hubs) {
+        const entry = { hub: hub.index, pubkey: String(hub.pubkey).slice(0, 16) }
+        if (hub.connector) {
+            try {
+                const res = await hub.connector.call('getattestationresponsibleset',
+                    { request_id: String(requestId) })
+                entry.responsible = (res && Array.isArray(res.responsible))
+                    ? res.responsible.map((p) => String(p).slice(0, 16))
+                    : (res && res.error ? 'error: ' + JSON.stringify(res.error) : 'no answer')
+                if (res && res.redundancy !== undefined) entry.redundancy = res.redundancy
+                if (res && res.widen !== undefined) entry.widen = res.widen
+            } catch (e) {
+                entry.responsible = 'unreachable: ' + (e && e.message)
+            }
+        } else {
+            entry.responsible = 'hub stopped'
+        }
+        try {
+            const rows = await queryVenueDb(venue, hub.dbName,
+                'SELECT status, effective_time, widen, signer_pubkeys FROM attestation_responses ' +
+                'WHERE request_id = ?', [String(requestId)])
+            entry.finalized = rows.length === 0 ? 'NO ROW' : {
+                status: String(rows[0].status),
+                effective_time: Number(rows[0].effective_time),
+                widen: rows[0].widen,
+            }
+        } catch (e) {
+            entry.finalized = 'unreadable: ' + (e && e.message)
+        }
+        out.hubs.push(entry)
+    }
+    const held = out.hubs.filter((h) => h.finalized && h.finalized !== 'NO ROW' &&
+        typeof h.finalized === 'object').length
+    console.log('FEDERATION STATE (' + out.phase + ') for ' + out.requestId.slice(0, 12) + ': ' +
+        held + ' of ' + out.hubs.length + ' hubs hold a finalized row.\n' +
+        out.hubs.map((h) => '  hub ' + h.hub + ' (' + h.pubkey + '...): responsible=' +
+            JSON.stringify(h.responsible) + ' finalized=' + JSON.stringify(h.finalized)).join('\n'))
+    return out
+}
+
 /** One venue indexer's `blocks` rows over a height window, for §4.1 arithmetic. */
 async function readBlockWindow (venue, indexerIndex, fromHeight, toHeight) {
     const ix = venue.indexers[indexerIndex]
@@ -642,6 +816,8 @@ module.exports = {
     happyPathVerdict,
     waitForMirrorRowEverywhere,
     waitForAppliedEverywhere,
+    findEmittedAttestRequest,
+    captureFederationState,
     readAttestRewards,
     readResponseRows,
     readBlockWindow,

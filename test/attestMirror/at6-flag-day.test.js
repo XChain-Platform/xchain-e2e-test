@@ -68,6 +68,7 @@ const {
 const {
     untilOrClearDogeStall, waitForMirrorRowEverywhere,
     readAttestRewards, readResponseRows, readRequestRow, venueTipProbe,
+    findEmittedAttestRequest, captureFederationState,
 } = require('./mirrorDrillWaits')
 const vmHelper          = require('../helpers/vmHelper')
 const cryptoHelper      = require('../cryptoHelper')
@@ -185,11 +186,9 @@ describe('AT6: above the flag day the chain cannot deliver a response, and the e
         assert.strictEqual(exec.execution.status, 'valid',
             'the EXECUTE that emits the request came back ' + exec.execution.status)
 
-        const request = await indexerDatabase.waitForAttestationRequest({
-            txHash: exec.txHash, requestStatus: 'pending',
-        })
-        assert.ok(request, 'no pending request row on the standing indexer')
-        const requestId = String(request.request_id)
+        const request = await findEmittedAttestRequest(
+            contract.contractIndex, exec.execution.action_index, { label: 'at6 first' })
+        const requestId = request.requestId
 
         await regtestMinerConnector.generateBlocks(BURIAL_BLOCKS)
         await settleStack()
@@ -305,11 +304,9 @@ describe('AT6: above the flag day the chain cannot deliver a response, and the e
             contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl])
         assert.strictEqual(exec.execution.status, 'valid',
             'the second EXECUTE came back ' + exec.execution.status)
-        const request = await indexerDatabase.waitForAttestationRequest({
-            txHash: exec.txHash, requestStatus: 'pending',
-        })
-        assert.ok(request, 'no pending request row for the second request')
-        const requestId = String(request.request_id)
+        const request = await findEmittedAttestRequest(
+            contract.contractIndex, exec.execution.action_index, { label: 'at6 second' })
+        const requestId = request.requestId
 
         await regtestMinerConnector.generateBlocks(BURIAL_BLOCKS)
         await settleStack()
