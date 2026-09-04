@@ -23,7 +23,7 @@
     "test:rollcall": "E2E_REQUIRE_FEDERATION=1 mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/actions/rollcall*.test.js'",
     "venue:seed-rollcall": "E2E_STAKE_TEARDOWN=off mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/tools/rollcallSeedFederation.test.js",
     "venue:clear-rollcall-outsiders": "E2E_STAKE_TEARDOWN=off E2E_REQUIRE_FEDERATION=1 XC_ROLLCALL_CLEAR_OUTSIDERS=1 mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/tools/rollcallClearOutsiders.test.js",
-    "test:attest-mirror": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/attestMirror/venue.smoke.test.js",
+    "test:attest-mirror": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/attestMirror/*.test.js'",
     "lint:sleep-flake": "node scripts/check-sleep-flake.js",
     "lint:wait-swallow": "node scripts/check-wait-swallow.js",
     "lint:stake-teardown": "node scripts/check-stake-teardown.js",
