@@ -75,6 +75,7 @@ const {
     waitForMirrorRowEverywhere, waitForAppliedEverywhere, venueTipProbe,
     findEmittedAttestRequest, captureFederationState,
     clearBeforeBroadcast,
+    allHubTails,
 } = require('./mirrorDrillWaits')
 const vmHelper = require('../helpers/vmHelper')
 const XChainIndexerConnector = require('../../src/XChainIndexerConnector.js')
@@ -199,15 +200,42 @@ describe('AT2 second clause: delivery past the forward margin holds the barrier 
         await regtestMinerConnector.generateBlocks(BURIAL_BLOCKS)
         await settleStack()
 
+        // CAPTURED WHILE THE REQUEST IS STILL PENDING, which is the only window in
+        // which the responsible set is readable at all: `getattestationresponsibleset`
+        // answers for pending requests only. This drill cannot get the capture for
+        // free the way its neighbours do, because it deliberately does NOT use
+        // `waitForMirrorRowEverywhere` (one of its two indexers is being starved on
+        // purpose, so "both hold the row" is not the condition it waits for), and the
+        // capture lives inside that helper. Without this call the one reading that
+        // separates a mirror fault from a dead-member draw is missing from exactly the
+        // drill most likely to need it.
+        try { await captureFederationState(venue, requestId, 'before the round settles') }
+        catch (e) { console.log('FEDERATION STATE (before): unreadable, ' + (e && e.message)) }
+
         // The PROMPT indexer's mirror is untouched, so it gets the row on the ordinary
         // path and this establishes the round finalized at all.
         const prompt = await until(async () => {
             const rows = await venue.readMirrorRows(PROMPT, { requestId: requestId })
             return { ok: rows.length === 1, rows: rows }
         }, 10 * 60 * 1000)
+
+        // AND AGAIN whichever way that went, because a round that never finalized and
+        // a row that never arrived look identical from the indexer side.
+        let after = null
+        try {
+            after = await captureFederationState(venue, requestId,
+                prompt.ok ? 'row present on the unfiltered indexer' : 'row MISSING')
+        } catch (e) { console.log('FEDERATION STATE (after): unreadable, ' + (e && e.message)) }
+        const holders = after
+            ? after.hubs.filter((h) => h.finalized && typeof h.finalized === 'object').length
+            : 'unread'
+
         assert.ok(prompt.ok,
             'the unfiltered indexer never received the mirror row, so the round did not finalize and the ' +
-            'delay is not what is under test\n' + venue.logTail('indexer' + PROMPT))
+            'delay is not what is under test. ' + holders + ' of the hubs hold a finalized row: NO hub ' +
+            'holding one means the round never reached quorum, which a redundancy-sized draw including a ' +
+            'staked key belonging to no running hub does exactly, and the responsible set printed above ' +
+            'says whether that is what happened.\n' + allHubTails(venue))
         console.log('AT2b: the unfiltered indexer holds the row; effective_time ' +
             prompt.rows[0].effective_time)
 

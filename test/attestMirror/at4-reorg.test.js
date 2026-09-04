@@ -64,6 +64,7 @@ const {
     waitForMirrorRowEverywhere, waitForAppliedEverywhere,
     readRequestRow, venueTipProbe, findEmittedAttestRequest, captureFederationState,
     clearBeforeBroadcast,
+    waitForHeightWithClear,
 } = require('./mirrorDrillWaits')
 const vmHelper     = require('../helpers/vmHelper')
 const cryptoHelper = require('../cryptoHelper')
@@ -310,7 +311,7 @@ describe('AT4: a reorg moves the applied response with the chain, in both direct
             // so blocks keep coming and it stays unapplied.
             for (let i = 0; i < 4; i++) await nodeConnector.generateBlock(minerAddr, [])
             const tip = Number(await nodeConnector.getBlockCount())
-            for (const ix of venue.indexers) await venue.waitForHeight(ix.index, tip)
+            for (const ix of venue.indexers) await waitForHeightWithClear(venue, ix.index, tip)
             for (const ix of venue.indexers) {
                 const applied = await readAppliedResponse(venue, ix.index, driven.requestId)
                 assert.strictEqual(applied, null,

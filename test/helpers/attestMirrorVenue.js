@@ -149,6 +149,12 @@ function graceEnv(graces) {
     return out;
 }
 
+// Round cadence for the venue's hubs. LOWER than the hub's own defaults (15000 and
+// 120000) on purpose, and only ever lower: see the note at the ATTESTATION_* keys in
+// buildHubEnv for why raising the round timeout is the unsafe direction.
+const DEFAULT_ATTESTATION_POLL_MS          = 2000;
+const DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS = 30000;
+
 // Mirror barrier graces, at zero: the barrier then holds only for content the
 // stream has not yet delivered, which is the thing under test, rather than for a
 // fixed wait. Set to 0 rather than left unset because the frozen 120 would make
@@ -662,7 +668,34 @@ function buildHubEnv(spec) {
         // The batch cadence seam, on the same regtest-only pattern. Passed
         // through by xchain-node today; the hub gains its reader with the batch
         // publisher, so setting it here is forward wiring and inert until then.
-        ATTEST_BATCH_WINDOW_S_OVERRIDE: String(s.batchWindowS)
+        ATTEST_BATCH_WINDOW_S_OVERRIDE: String(s.batchWindowS),
+
+        // ROUND CADENCE, and LOWERED ONLY. The hub reads both of these out of its
+        // environment into `p2pConfig` (`api.js:403-404`), and their defaults are a
+        // 15s request poll and a 120s round timeout. Those are right for a real
+        // federation and expensive here: every widening step costs a round timeout, so
+        // a responsible-set draw that includes a staked key belonging to no running hub
+        // finalizes LATE rather than never, and a drill waiting ten minutes can time out
+        // on a round that was going to succeed. At these values a widening step costs
+        // seconds instead of two minutes, which speeds up every staking drill rather
+        // than only the one that noticed.
+        //
+        // THE DIRECTION IS THE SAFETY ARGUMENT AND IT IS NOT SYMMETRIC.
+        // `ATTESTATION_ROUND_TIMEOUT_MS` is read by BOTH the round engine and the
+        // consensus engine, and the request-seen window is sized to sit OUTSIDE a live
+        // round. RAISING it is the dangerous direction: a seen window nested inside a
+        // still-pending round re-opens the request and pays a provider a second time
+        // for the same fetch. LOWERING leaves the unchanged seen window comfortably
+        // larger than the shorter round, so it is safe with respect to that coupling.
+        // Never raise these here without raising the seen window with them.
+        // DEFAULTED rather than required, so every existing caller of this builder keeps
+        // working; the venue passes both explicitly. The defaults are the venue's own
+        // lowered values, never the hub's, so a caller that omits them still gets the
+        // fast cadence rather than the 120s round timeout.
+        ATTESTATION_POLL_MS: String(s.attestationPollMs === undefined
+            ? DEFAULT_ATTESTATION_POLL_MS : s.attestationPollMs),
+        ATTESTATION_ROUND_TIMEOUT_MS: String(s.attestationRoundTimeoutMs === undefined
+            ? DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS : s.attestationRoundTimeoutMs)
     };
     if (s.btcIndexerApiKey) env.BTC_INDEXER_API_KEY = String(s.btcIndexerApiKey);
     // EXPLICIT ONLY, and never defaulted from an interactive CLAUDE_CONFIG_DIR: the llm
@@ -1401,6 +1434,20 @@ class AttestMirrorVenue {
         // attestation BATCH publisher, which needs a signer module, a DOGE encoder and
         // a funded DOGE address that only a drill can supply; see the buildHubEnv call.
         this.hubExtraEnv     = opts.hubExtraEnv || null;
+        // Lower-only knobs; a caller raising the round timeout must raise the
+        // request-seen window with it, so the venue refuses that below.
+        this.attestationPollMs = opts.attestationPollMs === undefined
+            ? DEFAULT_ATTESTATION_POLL_MS : opts.attestationPollMs;
+        this.attestationRoundTimeoutMs = opts.attestationRoundTimeoutMs === undefined
+            ? DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS : opts.attestationRoundTimeoutMs;
+        if (Number(this.attestationRoundTimeoutMs) > 120000) {
+            throw new Error('attestMirrorVenue: refusing ATTESTATION_ROUND_TIMEOUT_MS=' +
+                this.attestationRoundTimeoutMs + '. The round engine and the consensus engine read ' +
+                'the same value and the request-seen window is sized to sit OUTSIDE a live round, so ' +
+                'RAISING it nests a seen window inside a still-pending round, re-opens the request and ' +
+                'pays a provider twice for one fetch. Lower it freely; to raise it, raise the seen ' +
+                'window with it deliberately.');
+        }
         // A drill that reaches the llm provider says so, and the venue then refuses to
         // boot on a box that cannot serve one. HUB_CLAUDE_CONFIG_DIR only, never the
         // interactive CLAUDE_CONFIG_DIR.
@@ -1566,6 +1613,8 @@ class AttestMirrorVenue {
             capabilityConfigPath: this._capabilityConfigPath,
             forwardS:     this.forwardS,
             batchWindowS: this.batchWindowS,
+            attestationPollMs:          this.attestationPollMs,
+            attestationRoundTimeoutMs:  this.attestationRoundTimeoutMs,
             // Explicit extra hub environment, for the one subsystem this venue does not
             // configure: the attestation BATCH publisher. It is constructed and started
             // on every real hub boot and regtest is armed at 0, so those hubs are already
@@ -2346,6 +2395,8 @@ module.exports = {
     DEFAULT_FORWARD_S,
     DEFAULT_BATCH_WINDOW_S,
     DEFAULT_GRACE_S,
+    DEFAULT_ATTESTATION_POLL_MS,
+    DEFAULT_ATTESTATION_ROUND_TIMEOUT_MS,
     GOSSIP_HOP_BUDGET_S,
     WINDOW_KEY_SIGNED,
     WINDOW_KEY_WALL_CLOCK,

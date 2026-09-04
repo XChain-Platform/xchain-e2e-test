@@ -70,6 +70,7 @@ const {
     untilOrClearDogeStall, waitForMirrorRowEverywhere, waitForAppliedEverywhere,
     venueTipProbe, mineDogeBlocks, findEmittedAttestRequest,
     clearBeforeBroadcast,
+    allHubTails,
 } = require('./mirrorDrillWaits')
 const vmHelper     = require('../helpers/vmHelper')
 const chainRail    = require('../helpers/chainRail')
@@ -418,7 +419,8 @@ describe('AT5: the responses of a window land on chain as one batch', function (
         assert.ok(sent.ok,
             'no hub ever published a non-empty window. Markers seen: ' + JSON.stringify(sent.markers) +
             '. A window with rows that never reaches `sent` is either unelected, unsigned, unanchored or ' +
-            'unfunded, and the hub logs say which.\n' + venue.logTail('hub0'))
+            'unfunded, and the hub logs say which. Publication is ELECTED, so the hub that should have ' +
+            'published is not knowable here and every tail follows.\n' + allHubTails(venue))
         const marker = sent.hit[0]
         console.log('AT5: hub ' + marker.hub + ' published window ' + marker.window_start + '-' +
             marker.window_end + ' with ' + marker.row_count + ' row(s), status ' + marker.status)

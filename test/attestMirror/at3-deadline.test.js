@@ -70,6 +70,7 @@ const {
     readBlockWindow, readRequestRow, firstSatisfyingBlock, venueTipProbe,
     findEmittedAttestRequest, captureFederationState,
     clearBeforeBroadcast,
+    waitForHeightWithClear,
 } = require('./mirrorDrillWaits')
 const vmHelper = require('../helpers/vmHelper')
 
@@ -238,7 +239,7 @@ describe('AT3: the deadline decides whether a mirrored response ever binds', fun
         await settleStack()
 
         // Both indexers past the expiry block, so the sweep has run on both.
-        for (const ix of venue.indexers) await venue.waitForHeight(ix.index, driven.deadlineBlock + 1)
+        for (const ix of venue.indexers) await waitForHeightWithClear(venue, ix.index, driven.deadlineBlock + 1)
 
         // THE PRECONDITION, MEASURED rather than trusted: no block in the request's
         // whole eligible window reached the effective time. Without this the case
@@ -285,7 +286,7 @@ describe('AT3: the deadline decides whether a mirrored response ever binds', fun
         assert.ok(elapsed.ok, tag + ': wall clock never passed the effective time ' + driven.effectiveTime)
         await regtestMinerConnector.generateBlocks(5)
         await settleStack()
-        for (const ix of venue.indexers) await venue.waitForHeight(ix.index, driven.deadlineBlock + 6)
+        for (const ix of venue.indexers) await waitForHeightWithClear(venue, ix.index, driven.deadlineBlock + 6)
 
         for (const ix of venue.indexers) {
             const applied = await readAppliedResponse(venue, ix.index, driven.requestId)

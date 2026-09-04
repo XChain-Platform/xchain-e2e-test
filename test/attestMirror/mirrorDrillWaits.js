@@ -116,6 +116,23 @@ const STATE_HASH_FIELDS = Object.freeze([
 function sleep (ms) { return new Promise((r) => setTimeout(r, ms)) }
 
 /**
+ * EVERY hub's log tail, for an assertion whose cause can only be on a hub.
+ *
+ * WHY ALL OF THEM RATHER THAN ONE. Two questions a drill asks are answerable only
+ * hub-side, and for both of them the relevant hub is not knowable in advance.
+ * "Did the round finalize?" belongs to whichever hubs were in the responsible set,
+ * which the hash ranking chose. "Why did no window publish?" belongs to whichever
+ * hub the election picked, which is a different hash. Printing one hub's tail for
+ * either question shows the wrong process most of the time, which is worse than
+ * printing nothing because it reads as evidence.
+ */
+function allHubTails (venue) {
+    return (venue.hubs || [])
+        .map((h) => '--- hub ' + h.index + ' ---\n' + venue.logTail('hub' + h.index))
+        .join('\n')
+}
+
+/**
  * Poll `fn` until it returns a truthy `ok`, then hand back its whole last
  * observation. On timeout the last observation comes back with `ok` falsy rather
  * than an exception, so the caller's assertion owns the message and can print
@@ -876,6 +893,46 @@ async function captureFederationState (venue, requestId, phase) {
     return out
 }
 
+/**
+ * Wait for a venue indexer to COMMIT a height, clearing the wedge if that is what
+ * is holding it.
+ *
+ * WHY NOT `venue.waitForHeight`, which is the obvious call. It watches the
+ * indexer's own `blocks` table, which is the right thing to watch, and it has no
+ * wedge clear: under the roll-call wedge the indexer commits nothing, so that wait
+ * spends its entire budget and then reports a height that never moved. AT3 and AT4
+ * both mine long runs of BTC and then wait for both nodes to reach a height, which
+ * is precisely the combination that forms the wedge and then blocks on it.
+ *
+ * Watches the same table for the same reason: a health endpoint can report progress
+ * that the block transaction later rolls back, and after a reorg the committed
+ * height is the only honest reading.
+ */
+async function waitForHeightWithClear (venue, indexerIndex, height, opts) {
+    const o = opts || {}
+    const ix = venue.indexers[indexerIndex]
+    assert.ok(ix, 'mirrorDrillWaits: no indexer ' + indexerIndex)
+    const target = Number(height)
+    const got = await untilOrClearDogeStall(async () => {
+        let at = null
+        try {
+            const rows = await queryVenueDb(venue, ix.indexerDbName,
+                'SELECT MAX(block_index) AS h FROM blocks')
+            at = (rows && rows[0] && rows[0].h !== null) ? Number(rows[0].h) : null
+        } catch (e) { at = null }
+        return { ok: at !== null && at >= target, at: at }
+    }, {
+        timeoutMs: Number(o.timeoutMs) || 30 * 60 * 1000,
+        intervalMs: Number(o.intervalMs) || 2000,
+        tipProbe: venueTipProbe(venue, indexerIndex),
+    })
+    assert.ok(got.ok,
+        'indexer ' + indexerIndex + ' committed block ' + got.at + ' of ' + target +
+        ' before the budget ran out. A height that does not move at all is the wedge rather than ' +
+        'slowness, and the clear above says whether one was found.\n' + venue.logTail('indexer' + indexerIndex))
+    return got
+}
+
 /** One venue indexer's `blocks` rows over a height window, for §4.1 arithmetic. */
 async function readBlockWindow (venue, indexerIndex, fromHeight, toHeight) {
     const ix = venue.indexers[indexerIndex]
@@ -917,6 +974,7 @@ module.exports = {
     keepDogeAlive,
     clearBeforeBroadcast,
     venueTipProbe,
+    allHubTails,
     standingTipProbe,
     diffRows,
     diffStateHashes,
@@ -925,6 +983,7 @@ module.exports = {
     happyPathVerdict,
     waitForMirrorRowEverywhere,
     waitForAppliedEverywhere,
+    waitForHeightWithClear,
     findEmittedAttestRequest,
     captureFederationState,
     readAttestRewards,
