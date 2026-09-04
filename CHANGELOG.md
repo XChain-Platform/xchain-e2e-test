@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.15.0] - 2026-09-04
+## [0.15.0] - 2026-09-07
 
 ### Added
 - The ATTEST response-mirror acceptance venue: five real hubs and two mirror-fed indexers, a per-table mirror fault injection, and the AT0 to AT6 drills with a shared staking prologue and wedge-clearing waits.
