@@ -67,6 +67,7 @@ const {
     rewardFingerprint, waitForMirrorRowEverywhere, waitForAppliedEverywhere,
     readAttestRewards, happyPathVerdict, findEmittedAttestRequest, captureFederationState,
     clearBeforeBroadcast,
+    attestRequestWatermark,
 } = require('./mirrorDrillWaits')
 const vmHelper = require('../helpers/vmHelper')
 const XChainIndexerConnector = require('../../src/XChainIndexerConnector.js')
@@ -161,6 +162,9 @@ describe('AT2: a hub outside the responsible set disseminates the response, iden
      * the responsible set is discarded rather than asserted on.
      */
     async function driveOneRequest (attempt) {
+        // Watermark FIRST: see attestRequestWatermark for why the execute's own
+        // action index cannot be trusted as the correlation input.
+        const sinceAction = await attestRequestWatermark(contract.contractIndex)
         await clearBeforeBroadcast()
         const exec = await vmHelper.sendExecuteV0(
             contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl])
@@ -170,7 +174,7 @@ describe('AT2: a hub outside the responsible set disseminates the response, iden
             'admission and rolls the EXECUTE back, so this is the shape a short stake roster takes.')
 
         const request = await findEmittedAttestRequest(
-            contract.contractIndex, exec.execution.action_index, { label: 'attempt ' + attempt })
+            contract.contractIndex, sinceAction + 1, { label: 'attempt ' + attempt })
         const requestId = request.requestId
 
         // The hubs wait three confirmations before they fetch a request, and they

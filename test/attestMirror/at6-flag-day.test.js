@@ -70,6 +70,7 @@ const {
     readAttestRewards, readResponseRows, readRequestRow, venueTipProbe,
     findEmittedAttestRequest, captureFederationState,
     clearBeforeBroadcast,
+    attestRequestWatermark,
 } = require('./mirrorDrillWaits')
 const vmHelper          = require('../helpers/vmHelper')
 const cryptoHelper      = require('../cryptoHelper')
@@ -186,6 +187,9 @@ describe('AT6: above the flag day the chain cannot deliver a response, and the e
     }
 
     it('refuses an on-chain v1, applies the mirror row anyway, and settles the whole escrow', async function () {
+        // Watermark FIRST: see attestRequestWatermark for why the execute's own
+        // action index cannot be trusted as the correlation input.
+        const sinceAction = await attestRequestWatermark(contract.contractIndex)
         await clearBeforeBroadcast()
         const exec = await vmHelper.sendExecuteV0(
             contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl])
@@ -193,7 +197,7 @@ describe('AT6: above the flag day the chain cannot deliver a response, and the e
             'the EXECUTE that emits the request came back ' + exec.execution.status)
 
         const request = await findEmittedAttestRequest(
-            contract.contractIndex, exec.execution.action_index, { label: 'at6 first' })
+            contract.contractIndex, sinceAction + 1, { label: 'at6 first' })
         const requestId = request.requestId
 
         await regtestMinerConnector.generateBlocks(BURIAL_BLOCKS)
@@ -306,13 +310,16 @@ describe('AT6: above the flag day the chain cannot deliver a response, and the e
         // ordering fault could not admit the action; what it WOULD do is record a
         // different reason for the same wire depending on the request's incidental
         // state, and the reason is consensus. This case is what notices that.
+        // Watermark FIRST: see attestRequestWatermark for why the execute's own
+        // action index cannot be trusted as the correlation input.
+        const sinceAction = await attestRequestWatermark(contract.contractIndex)
         await clearBeforeBroadcast()
         const exec = await vmHelper.sendExecuteV0(
             contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl])
         assert.strictEqual(exec.execution.status, 'valid',
             'the second EXECUTE came back ' + exec.execution.status)
         const request = await findEmittedAttestRequest(
-            contract.contractIndex, exec.execution.action_index, { label: 'at6 second' })
+            contract.contractIndex, sinceAction + 1, { label: 'at6 second' })
         const requestId = request.requestId
 
         await regtestMinerConnector.generateBlocks(BURIAL_BLOCKS)

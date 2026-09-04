@@ -42,7 +42,75 @@ const assert = require('assert')
 // Safe to require at load even from the unit tier: the fixture reaches for the
 // harness globals and the database driver only inside its functions, which is
 // what lets test/unit/helpers/mirrorDrillFixture.test.js cover it at all.
-const { queryVenueDb, readAppliedResponse } = require('./mirrorDrillFixture')
+const { queryVenueDb } = require('./mirrorDrillFixture')
+
+/**
+ * Query one of the venue's databases, WITH THAT DATABASE SELECTED.
+ *
+ * WHY NOT THE FIXTURE'S `queryVenueDb`, which takes a database name. It validates
+ * the name and then discards it: the connection is opened with host, port, user
+ * and password and no `database`, so every unqualified table reference through it
+ * fails with errno 1046, "No database selected". Nothing had noticed because no
+ * drill had ever reached one of those reads, and the first thing to reach one was
+ * the federation capture, where the failure was then MISCOUNTED as a hub holding
+ * no row.
+ *
+ * Reported to the fixture's owner for `readAppliedResponse` and
+ * `readContractState`; the readers below no longer depend on it either way.
+ */
+async function queryDb (venue, dbName, sql, params, deps) {
+    // Injectable so the ONE thing that broke here is assertable without a venue:
+    // that the connection is opened WITH a database. That is invisible to every
+    // other kind of test and is exactly the class this guards.
+    const mariadb = (deps && deps.mariadb) || require('mariadb')
+    assert.ok(venue && venue.hubDb, 'mirrorDrillWaits: the venue has no hubDb; it is not started')
+    assert.ok(/^[A-Za-z0-9_]+$/.test(String(dbName)),
+        'mirrorDrillWaits: refusing an unsafe database identifier ' + dbName)
+    let conn = null
+    try {
+        conn = await mariadb.createConnection({
+            host: venue.hubDb.host, port: parseInt(venue.hubDb.port, 10),
+            user: venue.hubDb.user, password: venue.hubDb.pass,
+            database: String(dbName), connectTimeout: 10_000,
+        })
+        return await conn.query(sql, params || [])
+    } finally {
+        if (conn) await conn.end().catch(() => {})
+    }
+}
+
+/**
+ * The applied ATTEST v1 row joined to the action it hangs off, read with the
+ * database selected. Same shape the fixture's reader returns.
+ */
+async function readAppliedResponse (venue, indexerIndex, requestId) {
+    const ix = venue.indexers[indexerIndex]
+    assert.ok(ix, 'mirrorDrillWaits: no indexer ' + indexerIndex)
+    const rows = await queryDb(venue, ix.indexerDbName,
+        'SELECT a.action_index, a.block_index, a.tx_index, a.tx_hash, a.source, ' +
+        '       r.request_id, r.response_status, r.response_payload, r.status_id, ' +
+        '       r.callback_execute_action_index ' +
+        'FROM attests r JOIN actions a ON a.action_index = r.action_index ' +
+        'WHERE r.request_id = ? AND r.version = 1 ' +
+        'ORDER BY a.action_index ASC LIMIT 1',
+        [String(requestId)])
+    return (rows && rows[0]) || null
+}
+
+/** Every state key a contract carries on one venue indexer, latest value per key. */
+async function readContractState (venue, indexerIndex, contractIndex) {
+    const ix = venue.indexers[indexerIndex]
+    assert.ok(ix, 'mirrorDrillWaits: no indexer ' + indexerIndex)
+    const rows = await queryDb(venue, ix.indexerDbName,
+        'SELECT cs.state_key, cs.state_value FROM contract_state cs ' +
+        'INNER JOIN (SELECT MAX(id) AS max_id FROM contract_state ' +
+        '            WHERE contract_index = ? GROUP BY state_key) latest ' +
+        '  ON latest.max_id = cs.id',
+        [Number(contractIndex)])
+    const out = {}
+    for (const r of rows || []) out[String(r.state_key)] = r.state_value
+    return out
+}
 
 const DEFAULT_INTERVAL_MS = 2000
 
@@ -644,13 +712,13 @@ async function waitForMirrorRowEverywhere (venue, requestId, timeoutMs) {
             seen.ok ? 'row present on both indexers' : 'row MISSING')
     } catch (e) { console.log('FEDERATION STATE (after): unreadable, ' + (e && e.message)) }
 
-    const holders = after
-        ? after.hubs.filter((h) => h.finalized && typeof h.finalized === 'object').length
-        : 'unread'
+    // The VERDICT, never a count: it reads NO VERDICT when any hub was unreadable,
+    // so an instrument failure can never be mistaken for a mirror failure.
+    const verdict = after ? after.verdict : 'capture did not run'
     assert.ok(seen.ok,
         'the mirror row for ' + requestId + ' did not reach both indexers: counts ' +
-        JSON.stringify((seen.rows || []).map((r) => r.length)) + '. ' +
-        holders + ' of the hubs hold a finalized row, which is the reading that tells the two ' +
+        JSON.stringify((seen.rows || []).map((r) => r.length)) + '. Hub finalization: ' +
+        verdict + '. That is the reading that tells the two ' +
         'explanations apart: NO hub holding one means the round never finalized (a redundancy-sized ' +
         'draw that included a staked key belonging to no running hub does exactly this, and the ' +
         'responsible set printed above says whether that happened), while hubs holding one and an ' +
@@ -709,7 +777,7 @@ async function readAttestRewards (venue, indexerIndex, opts) {
     assert.ok(where.length > 0,
         'mirrorDrillWaits: readAttestRewards needs a blockIndex or a roundReference; an unscoped read ' +
         'would sweep every attestation the venue ever settled')
-    return await queryVenueDb(venue, ix.indexerDbName,
+    return await queryDb(venue, ix.indexerDbName,
         'SELECT vr.reward_type, vr.amount, vr.block_index, vr.round_reference, p.pubkey ' +
         'FROM validator_rewards vr JOIN index_pubkeys p ON p.id = vr.signing_pubkey_id ' +
         'WHERE ' + where.join(' AND ') + " AND vr.reward_type IN ('attest_fee', 'attest_bcast') " +
@@ -735,7 +803,7 @@ async function readAttestRewards (venue, indexerIndex, opts) {
 async function readResponseRows (venue, indexerIndex, requestId) {
     const ix = venue.indexers[indexerIndex]
     assert.ok(ix, 'mirrorDrillWaits: no indexer ' + indexerIndex)
-    return await queryVenueDb(venue, ix.indexerDbName,
+    return await queryDb(venue, ix.indexerDbName,
         'SELECT a.action_index, a.block_index, a.tx_index, a.tx_hash, ' +
         '       r.request_id, r.response_status, r.response_payload, r.validator_signatures, ' +
         '       r.callback_execute_action_index, r.batch_action_index, s.status AS verdict ' +
@@ -745,6 +813,45 @@ async function readResponseRows (venue, indexerIndex, requestId) {
         'WHERE r.request_id = ? AND r.version = 1 ' +
         'ORDER BY a.action_index ASC',
         [String(requestId)])
+}
+
+/**
+ * The highest v0 request action index this contract has already emitted.
+ *
+ * TAKEN BEFORE THE EXECUTE, and it is what makes the correlation immune to the one
+ * input it cannot otherwise trust. `sendExecuteV0`'s strict txHash wait misses a
+ * P2SH-encoded EXECUTE, and its fallback searches on (contract, caller, method,
+ * status=valid), which cannot tell two executions of the SAME method by the SAME
+ * caller on the SAME contract apart. Measured on another lane's run: it returned
+ * the EARLIER execution, so the second case silently measured the first case's
+ * request. Correlating on the action index it hands back cannot help, because the
+ * wrong index arrives as INPUT.
+ *
+ * A watermark read before the broadcast is not derived from that return value at
+ * all: the request this EXECUTE emits is the only v0 row for the contract ABOVE it.
+ * That is cheaper than a contract per execution (five of six drills here execute the
+ * same method more than once, one of them up to six times) and it removes the
+ * ambiguity rather than routing around it.
+ *
+ * REFUSES rather than defaulting to 0 on a read failure: a zero watermark would
+ * re-admit every earlier request as a candidate, which is the ambiguity again.
+ */
+async function attestRequestWatermark (contractIndex) {
+    let connection = null
+    try {
+        connection = await indexerDatabase.getConnection()
+        const rows = await connection.query(
+            'SELECT MAX(action_index) AS m FROM attests WHERE version = 0 AND contract_index = ?',
+            [Number(contractIndex)])
+        const m = rows && rows[0] ? rows[0].m : null
+        return (m === null || m === undefined) ? 0 : Number(m)
+    } catch (e) {
+        assert.fail('mirrorDrillWaits: could not read the request watermark for contract ' +
+            contractIndex + ' (' + (e && e.message) + '). Without it the request this drill is about ' +
+            'to emit cannot be told apart from one it emitted earlier.')
+    } finally {
+        if (connection) await connection.release()
+    }
 }
 
 /**
@@ -851,27 +958,57 @@ async function findEmittedAttestRequest (contractIndex, sinceActionIndex, opts) 
  * answers for PENDING requests only, which is why a drill should capture it BEFORE
  * the round finalizes and the per-hub state afterwards.
  */
-async function captureFederationState (venue, requestId, phase) {
-    const out = { phase: String(phase || ''), requestId: String(requestId), hubs: [] }
+async function captureFederationState (venue, requestId, phase, deps) {
+    // INJECTABLE, so the no-verdict rule can be falsified without a venue. A capture
+    // exercised only against a healthy federation is exactly how the miscount shipped.
+    const d = deps || {}
+    const post = d.post || (async (url, body) => {
+        const axios = require('axios')
+        return await axios.post(url, body, { timeout: 8000, validateStatus: () => true })
+    })
+    const readRows = d.readRows || ((dbName, sql, params) => queryDb(venue, dbName, sql, params))
+    const out = { phase: String(phase || ''), requestId: String(requestId), hubs: [], unreadable: 0 }
+
     for (const hub of venue.hubs) {
         const entry = { hub: hub.index, pubkey: String(hub.pubkey).slice(0, 16) }
-        if (hub.connector) {
+        let readOk = true
+
+        // THE RESPONSIBLE SET, over the hub's JSON-RPC. Through axios and not
+        // `hub.connector`: `XChainHubConnector` exposes `_call`, `ping` and
+        // `getAllConfig` and no public `call`, so the obvious spelling throws
+        // "call is not a function" on every hub. This is the shape
+        // `attestationHelper.resolveResponsibleSigners` already uses.
+        if (!hub.proc) {
+            entry.responsible = 'hub stopped'
+            readOk = false
+        } else {
             try {
-                const res = await hub.connector.call('getattestationresponsibleset',
-                    { request_id: String(requestId) })
-                entry.responsible = (res && Array.isArray(res.responsible))
-                    ? res.responsible.map((p) => String(p).slice(0, 16))
-                    : (res && res.error ? 'error: ' + JSON.stringify(res.error) : 'no answer')
-                if (res && res.redundancy !== undefined) entry.redundancy = res.redundancy
-                if (res && res.widen !== undefined) entry.widen = res.widen
+                const res = await post(hub.apiUrl, {
+                    jsonrpc: '2.0', id: Date.now(),
+                    method: 'getattestationresponsibleset', params: { request_id: String(requestId) },
+                })
+                const result = res && res.data && res.data.result
+                const rpcErr = res && res.data && res.data.error
+                if (rpcErr) {
+                    entry.responsible = 'rpc error: ' + JSON.stringify(rpcErr)
+                    readOk = false
+                } else if (result && Array.isArray(result.responsible)) {
+                    entry.responsible = result.responsible.map((p) => String(p).slice(0, 16))
+                    if (result.redundancy !== undefined) entry.redundancy = result.redundancy
+                    if (result.widen !== undefined) entry.widen = result.widen
+                } else {
+                    entry.responsible = 'no responsible set in the answer: ' + JSON.stringify(result)
+                    readOk = false
+                }
             } catch (e) {
                 entry.responsible = 'unreachable: ' + (e && e.message)
+                readOk = false
             }
-        } else {
-            entry.responsible = 'hub stopped'
         }
+
+        // FINALIZATION, from the hub's own table, with its database selected.
         try {
-            const rows = await queryVenueDb(venue, hub.dbName,
+            const rows = await readRows(hub.dbName,
                 'SELECT status, effective_time, widen, signer_pubkeys FROM attestation_responses ' +
                 'WHERE request_id = ?', [String(requestId)])
             entry.finalized = rows.length === 0 ? 'NO ROW' : {
@@ -881,15 +1018,38 @@ async function captureFederationState (venue, requestId, phase) {
             }
         } catch (e) {
             entry.finalized = 'unreadable: ' + (e && e.message)
+            readOk = false
         }
+
+        entry.readOk = readOk
+        if (!readOk) out.unreadable++
         out.hubs.push(entry)
     }
-    const held = out.hubs.filter((h) => h.finalized && h.finalized !== 'NO ROW' &&
-        typeof h.finalized === 'object').length
-    console.log('FEDERATION STATE (' + out.phase + ') for ' + out.requestId.slice(0, 12) + ': ' +
-        held + ' of ' + out.hubs.length + ' hubs hold a finalized row.\n' +
-        out.hubs.map((h) => '  hub ' + h.hub + ' (' + h.pubkey + '...): responsible=' +
-            JSON.stringify(h.responsible) + ' finalized=' + JSON.stringify(h.finalized)).join('\n'))
+
+    // NEVER SUMMARISE OVER A FAILED READ, and this is the whole lesson of this
+    // function. An earlier version counted hubs whose row it could not read as hubs
+    // holding no row, and printed "0 of 5 hubs hold a finalized row" when the truth
+    // was that ZERO HUBS WERE READ: the responsible-set probe threw on every hub and
+    // the finalization query failed with "No database selected" on every hub. That
+    // reads as strong evidence for exactly the hypothesis under test, which is the
+    // most dangerous direction for an instrument to fail in. A count that cannot
+    // tell "read it, and there is no row" from "could not read it" must not be
+    // emitted at all.
+    const total  = out.hubs.length
+    const held   = out.hubs.filter((h) => h.readOk && h.finalized && typeof h.finalized === 'object').length
+    out.total    = total
+    out.held     = held
+    out.verdict  = out.unreadable > 0 ? 'NO VERDICT' : (held + ' of ' + total + ' hubs hold a finalized row')
+
+    const headline = out.unreadable > 0
+        ? 'UNREADABLE on ' + out.unreadable + ' of ' + total + ' hubs, NO VERDICT: this says the ' +
+          'instrument is broken, NOT that the mirror failed to deliver. Do not read a missing row ' +
+          'from these lines.'
+        : held + ' of ' + total + ' hubs hold a finalized row.'
+    console.log('FEDERATION STATE (' + out.phase + ') for ' + out.requestId.slice(0, 12) + ': ' + headline + '\n' +
+        out.hubs.map((h) => '  hub ' + h.hub + ' (' + h.pubkey + '...) read=' + (h.readOk ? 'ok' : 'FAILED') +
+            ' responsible=' + JSON.stringify(h.responsible) +
+            ' finalized=' + JSON.stringify(h.finalized)).join('\n'))
     return out
 }
 
@@ -897,16 +1057,16 @@ async function captureFederationState (venue, requestId, phase) {
  * Wait for a venue indexer to COMMIT a height, clearing the wedge if that is what
  * is holding it.
  *
- * WHY NOT `venue.waitForHeight`, which is the obvious call. It watches the
- * indexer's own `blocks` table, which is the right thing to watch, and it has no
- * wedge clear: under the roll-call wedge the indexer commits nothing, so that wait
- * spends its entire budget and then reports a height that never moved. AT3 and AT4
- * both mine long runs of BTC and then wait for both nodes to reach a height, which
- * is precisely the combination that forms the wedge and then blocks on it.
+ * WHY NOT `venue.waitForHeight`. It watches the indexer's own `blocks` table,
+ * which is the right thing to watch, and it has no wedge clear: under the roll-call
+ * wedge the indexer commits nothing, so that wait spends its entire budget and then
+ * reports a height that never moved. Two drills mine long runs and then wait for
+ * both nodes to reach a height, which is precisely the combination that forms the
+ * wedge and then blocks on it.
  *
  * Watches the same table for the same reason: a health endpoint can report progress
- * that the block transaction later rolls back, and after a reorg the committed
- * height is the only honest reading.
+ * a block transaction later rolls back, and after a reorg the committed height is
+ * the only honest reading.
  */
 async function waitForHeightWithClear (venue, indexerIndex, height, opts) {
     const o = opts || {}
@@ -916,8 +1076,7 @@ async function waitForHeightWithClear (venue, indexerIndex, height, opts) {
     const got = await untilOrClearDogeStall(async () => {
         let at = null
         try {
-            const rows = await queryVenueDb(venue, ix.indexerDbName,
-                'SELECT MAX(block_index) AS h FROM blocks')
+            const rows = await queryDb(venue, ix.indexerDbName, 'SELECT MAX(block_index) AS h FROM blocks')
             at = (rows && rows[0] && rows[0].h !== null) ? Number(rows[0].h) : null
         } catch (e) { at = null }
         return { ok: at !== null && at >= target, at: at }
@@ -937,7 +1096,7 @@ async function waitForHeightWithClear (venue, indexerIndex, height, opts) {
 async function readBlockWindow (venue, indexerIndex, fromHeight, toHeight) {
     const ix = venue.indexers[indexerIndex]
     assert.ok(ix, 'mirrorDrillWaits: no indexer ' + indexerIndex)
-    return await queryVenueDb(venue, ix.indexerDbName,
+    return await queryDb(venue, ix.indexerDbName,
         'SELECT block_index, block_time FROM blocks WHERE block_index >= ? AND block_index <= ? ' +
         'ORDER BY block_index ASC',
         [Number(fromHeight), Number(toHeight)])
@@ -947,7 +1106,7 @@ async function readBlockWindow (venue, indexerIndex, fromHeight, toHeight) {
 async function readRequestRow (venue, indexerIndex, requestId) {
     const ix = venue.indexers[indexerIndex]
     assert.ok(ix, 'mirrorDrillWaits: no indexer ' + indexerIndex)
-    const rows = await queryVenueDb(venue, ix.indexerDbName,
+    const rows = await queryDb(venue, ix.indexerDbName,
         'SELECT r.request_id, r.request_status, r.deadline_block, r.provider_id, r.redundancy, ' +
         '       r.fee_amount, r.resolved_block, r.contract_index, r.callback_method, ' +
         '       a.block_index, a.action_index ' +
@@ -985,7 +1144,11 @@ module.exports = {
     waitForAppliedEverywhere,
     waitForHeightWithClear,
     findEmittedAttestRequest,
+    attestRequestWatermark,
     captureFederationState,
+    queryDb,
+    readAppliedResponse,
+    readContractState,
     readAttestRewards,
     readResponseRows,
     readBlockWindow,

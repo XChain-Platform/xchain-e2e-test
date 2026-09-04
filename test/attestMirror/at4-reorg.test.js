@@ -65,6 +65,7 @@ const {
     readRequestRow, venueTipProbe, findEmittedAttestRequest, captureFederationState,
     clearBeforeBroadcast,
     waitForHeightWithClear,
+    attestRequestWatermark,
 } = require('./mirrorDrillWaits')
 const vmHelper     = require('../helpers/vmHelper')
 const cryptoHelper = require('../cryptoHelper')
@@ -147,6 +148,9 @@ describe('AT4: a reorg moves the applied response with the chain, in both direct
 
     /** Drive one tagged request all the way to an applied response on both nodes. */
     async function driveToApplied (tag) {
+        // Watermark FIRST: see attestRequestWatermark for why the execute's own
+        // action index cannot be trusted as the correlation input.
+        const sinceAction = await attestRequestWatermark(contract.contractIndex)
         await clearBeforeBroadcast()
         const exec = await vmHelper.sendExecuteV0(
             contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl, tag])
@@ -154,7 +158,7 @@ describe('AT4: a reorg moves the applied response with the chain, in both direct
             tag + ': the EXECUTE that emits the request came back ' + exec.execution.status)
 
         const request = await findEmittedAttestRequest(
-            contract.contractIndex, exec.execution.action_index, { label: tag })
+            contract.contractIndex, sinceAction + 1, { label: tag })
         const requestId = request.requestId
 
         await regtestMinerConnector.generateBlocks(BURIAL_BLOCKS)

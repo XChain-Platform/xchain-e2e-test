@@ -71,6 +71,7 @@ const {
     venueTipProbe, mineDogeBlocks, findEmittedAttestRequest,
     clearBeforeBroadcast,
     allHubTails,
+    attestRequestWatermark,
 } = require('./mirrorDrillWaits')
 const vmHelper     = require('../helpers/vmHelper')
 const chainRail    = require('../helpers/chainRail')
@@ -390,6 +391,7 @@ describe('AT5: the responses of a window land on chain as one batch', function (
         // single 8189-byte wire, so the batch has to chunk.
         const ids = []
         for (const tag of ['b1', 'b2']) {
+            const sinceAction = await attestRequestWatermark(contract.contractIndex)
             await clearBeforeBroadcast()
             const exec = await vmHelper.sendExecuteV0(
                 contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl + '?' + tag, tag])
@@ -398,7 +400,7 @@ describe('AT5: the responses of a window land on chain as one batch', function (
             // Correlated on the emitting action, never on the broadcast txid: for a
             // P2SH-encoded EXECUTE that hash is not the one recorded against the row.
             const request = await findEmittedAttestRequest(
-                contract.contractIndex, exec.execution.action_index, { label: tag })
+                contract.contractIndex, sinceAction + 1, { label: tag })
             ids.push(request.requestId)
         }
 

@@ -345,3 +345,119 @@ describe('mirrorDrillWaits: the shared comparison layer for AT2 to AT6', () => {
         })
     })
 })
+
+describe('captureFederationState: an unreadable probe is never counted as evidence', () => {
+
+    const { captureFederationState } = require('../../attestMirror/mirrorDrillWaits')
+
+    // A venue shaped exactly as the helper reads it, with three live hubs.
+    const venue = () => ({
+        hubDb: { host: 'h', port: 1, user: 'u', pass: 'p' },
+        hubs: [0, 1, 2].map((i) => ({
+            index: i, pubkey: 'pub' + i, apiUrl: 'http://127.0.0.1:' + (9000 + i),
+            dbName: 'db' + i, proc: {},
+        })),
+    })
+    const okPost  = async () => ({ data: { result: { responsible: ['aa', 'bb', 'cc'], redundancy: 3, widen: 0 } } })
+    const rowFor  = () => [{ status: 'ok', effective_time: 1788500000, widen: 0 }]
+    const noRows  = async () => []
+
+    it('gives a real verdict only when every hub was read', async () => {
+        const out = await captureFederationState(venue(), 'r1', 'test', { post: okPost, readRows: async () => rowFor() })
+        assert.strictEqual(out.unreadable, 0)
+        assert.strictEqual(out.verdict, '3 of 3 hubs hold a finalized row')
+    })
+
+    it('says 0 of 3 when the hubs were READ and genuinely hold no row', async () => {
+        // The distinction the miscount destroyed: this IS evidence about the mirror.
+        const out = await captureFederationState(venue(), 'r1', 'test', { post: okPost, readRows: noRows })
+        assert.strictEqual(out.unreadable, 0)
+        assert.strictEqual(out.verdict, '0 of 3 hubs hold a finalized row')
+    })
+
+    // FALSIFICATION 1: break the responsible-set probe alone.
+    it('refuses a verdict when the responsible-set probe throws on every hub', async () => {
+        const out = await captureFederationState(venue(), 'r1', 'test', {
+            post: async () => { throw new Error('call is not a function') },
+            readRows: async () => rowFor(),
+        })
+        assert.strictEqual(out.unreadable, 3)
+        assert.strictEqual(out.verdict, 'NO VERDICT',
+            'a broken responsible-set probe must not yield a verdict about the mirror')
+    })
+
+    // FALSIFICATION 2: break the finalization read alone. This is the exact shape
+    // that printed "0 of 5 hubs hold a finalized row" when nothing had been read.
+    it('refuses a verdict when the finalization read fails on every hub', async () => {
+        const out = await captureFederationState(venue(), 'r1', 'test', {
+            post: okPost,
+            readRows: async () => { throw new Error('(no: 1046, SQLState: 3D000) No database selected') },
+        })
+        assert.strictEqual(out.unreadable, 3)
+        assert.strictEqual(out.verdict, 'NO VERDICT')
+        assert.strictEqual(out.held, 0)
+        assert.ok(out.hubs.every((h) => h.readOk === false))
+    })
+
+    // FALSIFICATION 3: one hub of three unreadable still forbids a verdict, because
+    // a partial count is the same lie in smaller type.
+    it('refuses a verdict when even ONE hub of three is unreadable', async () => {
+        let n = 0
+        const out = await captureFederationState(venue(), 'r1', 'test', {
+            post: okPost,
+            readRows: async () => { n++; if (n === 2) throw new Error('boom'); return rowFor() },
+        })
+        assert.strictEqual(out.unreadable, 1)
+        assert.strictEqual(out.verdict, 'NO VERDICT')
+    })
+
+    it('marks a stopped hub unreadable rather than as holding no row', async () => {
+        const v = venue()
+        v.hubs[1].proc = null
+        const out = await captureFederationState(v, 'r1', 'test', { post: okPost, readRows: async () => rowFor() })
+        assert.strictEqual(out.unreadable, 1)
+        assert.strictEqual(out.verdict, 'NO VERDICT')
+    })
+})
+
+describe('queryDb opens the connection WITH a database selected', () => {
+
+    const { queryDb } = require('../../attestMirror/mirrorDrillWaits')
+    const venue = { hubDb: { host: 'h', port: '3306', user: 'u', pass: 'p' } }
+
+    // THE WHOLE DEFECT THIS GUARDS. The helper it replaces took a database name,
+    // validated it and then discarded it, so every unqualified table reference
+    // failed with errno 1046 "No database selected". Nothing noticed until a
+    // federation capture became the first caller to reach one, and the failure was
+    // then miscounted as a hub holding no row. An options object is the only place
+    // this shows up without a live database.
+    it('passes the database name through to createConnection', async () => {
+        let opts = null
+        const fake = { createConnection: async (o) => { opts = o; return { query: async () => [], end: async () => {} } } }
+        await queryDb(venue, 'XChain_AM_Ixr0', 'SELECT 1', [], { mariadb: fake })
+        assert.strictEqual(opts.database, 'XChain_AM_Ixr0',
+            'the database was not selected, so every unqualified table reference would fail with errno 1046')
+        assert.strictEqual(opts.host, 'h')
+        assert.strictEqual(opts.port, 3306, 'the port must be an integer, not the string the handle carries')
+        assert.strictEqual(opts.user, 'u')
+        assert.strictEqual(opts.password, 'p')
+    })
+
+    it('still refuses an unsafe database identifier before connecting', async () => {
+        let called = false
+        const fake = { createConnection: async () => { called = true; return { query: async () => [], end: async () => {} } } }
+        await assert.rejects(() => queryDb(venue, 'bad; DROP', 'SELECT 1', [], { mariadb: fake }),
+            /refusing an unsafe database identifier/)
+        assert.strictEqual(called, false, 'it connected before validating the identifier')
+    })
+
+    it('closes the connection even when the query throws', async () => {
+        let ended = false
+        const fake = { createConnection: async () => ({
+            query: async () => { throw new Error('boom') },
+            end: async () => { ended = true },
+        }) }
+        await assert.rejects(() => queryDb(venue, 'db', 'SELECT 1', [], { mariadb: fake }), /boom/)
+        assert.strictEqual(ended, true, 'a failed query must not leak its connection')
+    })
+})

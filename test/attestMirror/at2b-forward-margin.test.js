@@ -76,6 +76,7 @@ const {
     findEmittedAttestRequest, captureFederationState,
     clearBeforeBroadcast,
     allHubTails,
+    attestRequestWatermark,
 } = require('./mirrorDrillWaits')
 const vmHelper = require('../helpers/vmHelper')
 const XChainIndexerConnector = require('../../src/XChainIndexerConnector.js')
@@ -188,13 +189,16 @@ describe('AT2 second clause: delivery past the forward margin holds the barrier 
             DELAYED + ' mirror edge; the forward margin is ' + FORWARD_S +
             's, so the row will arrive with its effective time already past')
 
+        // Watermark FIRST: see attestRequestWatermark for why the execute's own
+        // action index cannot be trusted as the correlation input.
+        const sinceAction = await attestRequestWatermark(contract.contractIndex)
         await clearBeforeBroadcast()
         const exec = await vmHelper.sendExecuteV0(
             contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl])
         assert.strictEqual(exec.execution.status, 'valid',
             'the EXECUTE that emits the request came back ' + exec.execution.status)
         const request = await findEmittedAttestRequest(
-            contract.contractIndex, exec.execution.action_index, { label: 'at2b' })
+            contract.contractIndex, sinceAction + 1, { label: 'at2b' })
         const requestId = request.requestId
 
         await regtestMinerConnector.generateBlocks(BURIAL_BLOCKS)
@@ -226,13 +230,11 @@ describe('AT2 second clause: delivery past the forward margin holds the barrier 
             after = await captureFederationState(venue, requestId,
                 prompt.ok ? 'row present on the unfiltered indexer' : 'row MISSING')
         } catch (e) { console.log('FEDERATION STATE (after): unreadable, ' + (e && e.message)) }
-        const holders = after
-            ? after.hubs.filter((h) => h.finalized && typeof h.finalized === 'object').length
-            : 'unread'
+        const verdict = after ? after.verdict : 'capture did not run'
 
         assert.ok(prompt.ok,
             'the unfiltered indexer never received the mirror row, so the round did not finalize and the ' +
-            'delay is not what is under test. ' + holders + ' of the hubs hold a finalized row: NO hub ' +
+            'delay is not what is under test. Hub finalization: ' + verdict + '. NO hub ' +
             'holding one means the round never reached quorum, which a redundancy-sized draw including a ' +
             'staked key belonging to no running hub does exactly, and the responsible set printed above ' +
             'says whether that is what happened.\n' + allHubTails(venue))
