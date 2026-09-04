@@ -126,6 +126,28 @@ const GOSSIP_HOP_BUDGET_S = 2;
 const WINDOW_KEY_SIGNED     = 'effective_time';
 const WINDOW_KEY_WALL_CLOCK = 'finalized_at';
 
+// Every mirror barrier the indexer has a grace for, read from the indexer itself so
+// this venue cannot fall behind a barrier being added. The names are the keys; the
+// frozen values are irrelevant here because the venue sets all of them to zero.
+const { HUB_SYNC_WATERMARK_GRACE_S } = require('../../../xchain-indexer/src/hub_db_sync.js');
+const MIRROR_BARRIERS = Object.freeze(Object.keys(HUB_SYNC_WATERMARK_GRACE_S));
+
+// `attestResponse` -> `HUB_SYNC_ATTEST_RESPONSE_GRACE_S`, the spelling
+// `resolveWatermarkGrace` reads for that barrier.
+function graceEnvKey(barrier) {
+    return 'HUB_SYNC_' + String(barrier).replace(/[A-Z]/g, (c) => '_' + c).toUpperCase() + '_GRACE_S';
+}
+
+// The env pairs for every barrier, each defaulting to zero and each overridable by name.
+function graceEnv(graces) {
+    const out = {};
+    for (const barrier of MIRROR_BARRIERS) {
+        const v = (graces || {})[barrier];
+        out[graceEnvKey(barrier)] = String(v === undefined || v === null ? DEFAULT_GRACE_S : v);
+    }
+    return out;
+}
+
 // Mirror barrier graces, at zero: the barrier then holds only for content the
 // stream has not yet delivered, which is the thing under test, rather than for a
 // fixed wait. Set to 0 rather than left unset because the frozen 120 would make
@@ -660,12 +682,19 @@ function buildIndexerEnv(spec) {
         UTXO_TRACKER_URL:      String(tracker.host || ''),
         UTXO_TRACKER_API_PORT: String(tracker.port || ''),
 
-        // The mirror barriers. All three are honoured on regtest only and are
-        // ignored with a loud warning elsewhere (`resolveWatermarkGrace`), so
-        // they cannot travel to a real network.
-        HUB_SYNC_ATTEST_RESPONSE_GRACE_S: g(graces.attestResponse),
-        HUB_SYNC_PRICE_GRACE_S:           g(graces.price),
-        HUB_SYNC_ORACLE_GRACE_S:          g(graces.oracle),
+        // The mirror barriers, EVERY ONE OF THEM, generated from the indexer's own
+        // grace table rather than listed here. Honoured on regtest only and ignored
+        // with a loud warning elsewhere (`resolveWatermarkGrace`), so they cannot
+        // travel to a real network.
+        //
+        // ALL OR NOTHING IS THE WHOLE POINT. The barriers sit in sequence in one block
+        // loop, so the FIRST one whose grace is not turned down parks the block and the
+        // ones after it are never reached. Turning down three of six left the block
+        // parked on `anchor_attest_barrier` at its frozen 120s, which on a chain stamped
+        // at about wall clock is never satisfiable, and made the attest-response barrier
+        // this venue exists to drive permanently unobservable. Generating the set means a
+        // seventh barrier cannot be silently missed the same way.
+        ...graceEnv(graces),
 
         // The push outbox's default first retry is 30s, which on a venue driving
         // a response in seconds is the difference between a mirror that keeps up
@@ -861,7 +890,10 @@ class AttestMirrorVenue {
         this.repoRoot     = opts.repoRoot || path.resolve(__dirname, '../../..');
         this.forwardS     = opts.forwardS     === undefined ? DEFAULT_FORWARD_S     : opts.forwardS;
         this.batchWindowS = opts.batchWindowS === undefined ? DEFAULT_BATCH_WINDOW_S : opts.batchWindowS;
-        this.graces       = Object.assign({ attestResponse: DEFAULT_GRACE_S, price: DEFAULT_GRACE_S, oracle: DEFAULT_GRACE_S }, opts.graces || {});
+        // Every barrier at zero by default, not the three that were once listed by hand.
+        this.graces       = Object.assign(
+            MIRROR_BARRIERS.reduce((acc, b) => { acc[b] = DEFAULT_GRACE_S; return acc; }, {}),
+            opts.graces || {});
         this.inboundOnlyHubs = new Set(opts.inboundOnlyHubs || []);
         this.presetIdentities = opts.identities || null;
         this.oracleEpochStart = opts.oracleEpochStart || (Date.now() - 60_000);

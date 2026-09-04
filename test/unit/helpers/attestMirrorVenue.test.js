@@ -576,6 +576,55 @@ describe('attestMirrorVenue: the decoder credential', function () {
     })
 })
 
+describe('attestMirrorVenue: mirror barrier graces', function () {
+    // The barriers sit in sequence in ONE block loop, so the first one whose grace is
+    // not turned down parks the block and every barrier after it is never reached.
+    // Turning down a subset is therefore not a partial win, it is a wedge, and it made
+    // the attest-response barrier unobservable behind anchor_attest_barrier.
+    const { HUB_SYNC_WATERMARK_GRACE_S } =
+        require('../../../../xchain-indexer/src/hub_db_sync.js')
+
+    function indexerEnv(graces) {
+        return buildIndexerEnv({
+            coin: 'bitcoin', network: 'regtest', apiPort: 61015,
+            indexerDbName: 'XChain_AM_MVH_x_Ixr0', mirrorDbName: 'XChain_AM_MVH_x_Mirror0',
+            hubApiUrl: 'http://127.0.0.1:61000',
+            db: { host: '127.0.0.1', port: 13306, user: 'u', pass: 'p' },
+            decoder: { host: '127.0.0.1', port: 13306, name: 'D', user: 'du', pass: 'dp' },
+            graces: graces
+        })
+    }
+
+    it('zeroes EVERY barrier the indexer has a grace for, not a hand-listed subset', () => {
+        const env = indexerEnv(undefined)
+        const missing = []
+        for (const barrier of Object.keys(HUB_SYNC_WATERMARK_GRACE_S)) {
+            const key = 'HUB_SYNC_' + barrier.replace(/[A-Z]/g, (c) => '_' + c).toUpperCase() + '_GRACE_S'
+            if (env[key] === undefined) missing.push(barrier + ' (' + key + ')')
+            else assert.strictEqual(env[key], '0', key + ' is ' + env[key] + ' rather than 0')
+        }
+        assert.deepStrictEqual(missing, [],
+            'these barriers get no grace override, so the first of them parks every block ' +
+            'and the barriers after it are never reached: ' + missing.join(', '))
+    })
+
+    it('covers the barriers that were previously missed by name', () => {
+        // Named explicitly because these three are the ones that were left frozen, and a
+        // generated set that silently stopped covering them would otherwise pass.
+        const env = indexerEnv(undefined)
+        for (const key of ['HUB_SYNC_ANCHOR_ATTEST_GRACE_S', 'HUB_SYNC_MATCH_GRACE_S',
+                           'HUB_SYNC_CALL_GRACE_S']) {
+            assert.strictEqual(env[key], '0', key + ' must be turned down on the venue')
+        }
+    })
+
+    it('still lets one barrier be overridden by name without disturbing the others', () => {
+        const env = indexerEnv({ attestResponse: 7 })
+        assert.strictEqual(env.HUB_SYNC_ATTEST_RESPONSE_GRACE_S, '7')
+        assert.strictEqual(env.HUB_SYNC_ANCHOR_ATTEST_GRACE_S, '0')
+    })
+})
+
 describe('attestMirrorVenue: database naming', function () {
     // The hub account's CREATE grant is `XChain\_%\_MVH\_%` and nothing else. A name
     // outside it fails at the first CREATE DATABASE on a live venue and in no pure test,
