@@ -1723,6 +1723,7 @@ module.exports = {
     electedLeaderIndex,
     waitForOnChainSigners,
     onChainSigners,
+    electionTolerance,
     setRollcallBroadcastHook,
     tickAll,
     waitForGossip,

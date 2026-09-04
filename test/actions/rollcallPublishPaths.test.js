@@ -97,6 +97,26 @@ describe('ROLLCALL acceptance: sweeper, self-publish and the below-threshold epo
     // attributable to one hub.
     async function tickOne(i){ await ctx.rounds[i]._tick() }
 
+    // Wait until hub `i` ITSELF holds `n` signatures for `epoch`. waitForGossip
+    // returns on the mesh-wide maximum, and the leg then ticks one specific hub
+    // to publish: on 2026-09-04 the leader published a single pair for epoch
+    // 4710 because the other running hub's gossip had reached a third engine
+    // but not the leader yet. The publishing hub's own count is the only one
+    // that decides what its action carries.
+    async function waitForHubGossip(i, epoch, n, timeoutMs){
+        const deadline = Date.now() + (timeoutMs || 60000)
+        let have = 0
+        while (Date.now() < deadline){
+            const s = ctx.rounds[i].getStatus()
+            have = (s && s.epoch === epoch) ? Number(s.gossiped_count || 0) : 0
+            if (have >= n) return have
+            await tickOne(i)
+            await rc.sleep(1000)
+        }
+        assert.fail('hub ' + i + ' holds ' + have + ' of the ' + n + ' signature(s) it needs for epoch ' + epoch +
+                    ' after ' + (timeoutMs || 60000) + 'ms; gossip from a running hub never reached it')
+    }
+
     before(async function () {
         if (!rc.requireRollcallVenue(this)) return
         if (!requireFederationEnv(this)) return
@@ -161,7 +181,13 @@ describe('ROLLCALL acceptance: sweeper, self-publish and the below-threshold epo
 
         await rc.mineBtcTo(ctx, EA + 6, 'burying epoch ' + EA)
         for (let i = 0; i < ctx.rounds.length; i++) if (i !== OMITTED_HUB) await tickOne(i)
-        await rc.waitForGossip(ctx.mvh, EA, 2, 60000)
+        // The skip set is the outage. waitForGossip ticks every engine it is not
+        // told to skip, and RollcallRound.stop() only stops the engine's own
+        // timer, so without it the "omitted" hub signed and gossiped on the first
+        // poll: measured in every recorded AT6 epoch (3600, 3630, 3720, 3750),
+        // hub 2's signature landed within 20 ms of the other two, the leader's
+        // action then carried three pairs, and there was nothing left to sweep.
+        await rc.waitForGossip(ctx.mvh, EA, 2, 60000, [OMITTED_HUB])
 
         const leaderIdx = leaderIndexFor(EA)
         assert.ok(leaderIdx >= 0 && leaderIdx < ctx.rounds.length && leaderIdx !== OMITTED_HUB,
@@ -173,6 +199,7 @@ describe('ROLLCALL acceptance: sweeper, self-publish and the below-threshold epo
             're-run, which draws a different epoch.')
 
         const wiresBefore = ctx.publishedWires.length
+        await waitForHubGossip(leaderIdx, EA, 2)
         ctx.rounds[leaderIdx].publishDelayBlocks = 0
         await tickOne(leaderIdx)
         ctx.rounds[leaderIdx].publishDelayBlocks = NEVER
@@ -202,6 +229,25 @@ describe('ROLLCALL acceptance: sweeper, self-publish and the below-threshold epo
             gossiped)
 
         const sweeperIdx = [0, 1, 2].find(i => i !== leaderIdx && i !== OMITTED_HUB)
+
+        // UNLOCK THE SWEEPER'S RANK BEFORE TICKING IT. publishDelayBlocks is only
+        // the first gate in _maybePublish; the second is the rank ladder, which
+        // climbs with BTC HEIGHT (rank r publishes once tip - E >= r * tolerance)
+        // and a tick at a fixed height cannot pass it. This leg ticks at about
+        // E + 6, so a rank-3 sweeper on a four-key roster never publishes and the
+        // assertion below reads as "the sweeper did not sweep" when the engine
+        // was correctly waiting for block E + 9. Same trap driveEpoch pays for by
+        // mining forward through the publish phase.
+        const sweeperRank = Number(ctx.rounds[sweeperIdx].getStatus().our_rank)
+        assert.ok(Number.isFinite(sweeperRank) && sweeperRank >= 1,
+            'the sweeper hub ' + sweeperIdx + ' must have resolved its election rank for epoch ' + EA +
+            ' (got ' + sweeperRank + '); it ticked and signed, so an unresolved order means the capability set ' +
+            'at the epoch could not be read')
+        const unlockAt = EA + sweeperRank * rc.electionTolerance(ctx.network)
+        assert.ok(unlockAt <= windowEnd,
+            'sweeper rank ' + sweeperRank + ' unlocks at ' + unlockAt + ', past the accept window end ' + windowEnd)
+        await rc.mineBtcTo(ctx, unlockAt, 'unlocking rank ' + sweeperRank + ' for the sweeper')
+
         ctx.rounds[sweeperIdx].publishDelayBlocks = 0
         await tickOne(sweeperIdx)
         ctx.rounds[sweeperIdx].publishDelayBlocks = NEVER
@@ -218,7 +264,9 @@ describe('ROLLCALL acceptance: sweeper, self-publish and the below-threshold epo
             'PUBLISHER names the sweeper, not the leader: the chain pays only the ELECTED leader, so the field is ' +
             'a claim the close checks rather than a race anyone can win')
 
-        await rc.mineDoge(ctx, 3)
+        // Wait for the DOGE side to HOLD all three, not for a fixed few blocks:
+        // the sweep rides the same two-phase lane as the leader's action.
+        await rc.waitForOnChainSigners(ctx, EA, ctx.roster.slice(0, ctx.rounds.length).map(r => r.pubkey))
 
         // Two actions, one union. This is the DOGE side's own record.
         const signers = await rc.dogeSigners(ctx, EA)
@@ -263,17 +311,27 @@ describe('ROLLCALL acceptance: sweeper, self-publish and the below-threshold epo
 
         await rc.mineBtcTo(ctx, EB + 6, 'burying epoch ' + EB)
         for (let i = 0; i < ctx.rounds.length; i++) if (i !== OMITTED_HUB) await tickOne(i)
-        await rc.waitForGossip(ctx.mvh, EB, 2, 60000)
+        await rc.waitForGossip(ctx.mvh, EB, 2, 60000, [OMITTED_HUB])   // the skip set IS the outage; see AT6a
 
         const leaderIdx = leaderIndexFor(EB)
         assert.ok(leaderIdx >= 0 && leaderIdx < ctx.rounds.length && leaderIdx !== OMITTED_HUB,
             'epoch ' + EB + ': the elected leader must be one of the two hubs that are up, got index ' + leaderIdx)
 
         const wiresBefore = ctx.publishedWires.length
+        await waitForHubGossip(leaderIdx, EB, 2)
         ctx.rounds[leaderIdx].publishDelayBlocks = 0
         await tickOne(leaderIdx)
         ctx.rounds[leaderIdx].publishDelayBlocks = NEVER
-        await rc.mineDoge(ctx, 3)
+        const leaderWire = ctx.publishedWires[ctx.publishedWires.length - 1].payload.split('|')
+        assert.strictEqual(Number(leaderWire[5]), 2,
+            'the leader\'s action must carry both running hubs\' signatures, or the epoch cannot roll on the ' +
+            'self-publish alone; SIG_COUNT=' + leaderWire[5])
+        // The leader's action must be ON CHAIN before the omitted hub decides to
+        // self-publish: _maybeSelfPublish asks the DOGE side whether its own
+        // signature is already there, and an unresolved read publishes anyway.
+        await rc.waitForOnChainSigners(ctx, EB,
+            ctx.roster.slice(0, ctx.rounds.length)
+                .filter((_, i) => i !== OMITTED_HUB).map(r => r.pubkey))
 
         // Every sweep path stays shut. The only route left for the omitted hub's
         // signature is the censorship escape hatch: its own one-pair publish.
@@ -304,10 +362,19 @@ describe('ROLLCALL acceptance: sweeper, self-publish and the below-threshold epo
         // publish that has returned is not yet a publish that is indexed.
         await rc.waitForOnChainSigners(ctx, EB, [ctx.roster[OMITTED_HUB].pubkey])
         const signers = await rc.dogeSigners(ctx, EB)
-        const selfRow = signers.find(s => String(s.pubkey).toLowerCase() === ctx.roster[OMITTED_HUB].pubkey)
-        assert.ok(selfRow, 'the self-published signature must be stored on the DOGE side for epoch ' + EB)
-        assert.strictEqual(String(selfRow.publisher).toLowerCase(), ctx.roster[OMITTED_HUB].pubkey,
-            'the stored row must carry the self-publisher as PUBLISHER')
+        const selfRows = signers.filter(s => String(s.pubkey).toLowerCase() === ctx.roster[OMITTED_HUB].pubkey)
+        assert.ok(selfRows.length >= 1, 'the self-published signature must be stored on the DOGE side for epoch ' + EB)
+        // EVERY stored row for the omitted key must name it as publisher, not just
+        // the first one found. A row published by anyone else means a sweep path
+        // carried this signature despite being shut, and this leg then measured
+        // the sweeper rather than the self-publish: on 2026-09-03 the first row
+        // for the key was the leader's three-pair action and the assertion below
+        // read it as "wrong publisher" when the real defect was upstream.
+        const foreign = selfRows.filter(s => String(s.publisher).toLowerCase() !== ctx.roster[OMITTED_HUB].pubkey)
+        assert.deepStrictEqual(foreign, [],
+            'AT6b: every stored row for the omitted hub\'s key must carry the self-publisher as PUBLISHER; ' +
+            'these were published by someone else, so a sweep path fired despite its delay: ' +
+            JSON.stringify(foreign.map(s => ({ publisher: String(s.publisher).slice(0, 12), action_index: s.action_index }))))
 
         await rc.mineBtcTo(ctx, windowEnd, 'window end for epoch ' + EB)
         await rc.mineDoge(ctx, 2 + Number(rc.rca().ROLLCALL_DOGE_MATURITY[ctx.network]) + 2)
