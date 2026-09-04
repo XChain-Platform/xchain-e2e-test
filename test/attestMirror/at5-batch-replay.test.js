@@ -65,7 +65,7 @@ const {
 } = require('./mirrorDrillFixture')
 const {
     untilOrClearDogeStall, waitForMirrorRowEverywhere, waitForAppliedEverywhere,
-    venueTipProbe,
+    venueTipProbe, mineDogeBlocks,
 } = require('./mirrorDrillWaits')
 const vmHelper  = require('../helpers/vmHelper')
 const chainRail = require('../helpers/chainRail')
@@ -228,6 +228,30 @@ describe('AT5: the responses of a window land on chain as one batch', function (
     }
 
     /**
+     * Mine one DOGE block, because a broadcast batch is not a landed batch.
+     *
+     * THE WINDOW CLOSES ON WALL CLOCK, so the publisher fires without any help. The
+     * TRANSACTION it broadcasts is a different matter: nothing mines DOGE on this
+     * venue, so a v5 sits unconfirmed in the mempool forever and every read below
+     * reports an empty chain. The stalled-tip clear in the shared waits helper does
+     * not cover this, and correctly so: it mines DOGE only when the BTC indexer is
+     * stuck behind its own decoder, which an unconfirmed DOGE transaction never
+     * causes.
+     *
+     * Mining here cannot move what this drill measures. The batch window is keyed on
+     * the SIGNED effective time, not on DOGE height, so DOGE blocks cannot shift a
+     * window boundary; they only let a transaction confirm. That is why this is one
+     * block per poll rather than the miner's mine-empty heartbeat, which both lanes
+     * agreed to leave off.
+     */
+    async function nudgeDoge () {
+        await mineDogeBlocks(1).catch((e) => {
+            console.log('AT5: could not mine DOGE (' + (e && e.message) + '), and a broadcast batch ' +
+                'cannot confirm without it')
+        })
+    }
+
+    /**
      * The DOGE-side ATTEST batch actions, read on the standing DOGE indexer.
      *
      * There is no generic `query` on the harness Database, and no helper anywhere
@@ -300,6 +324,7 @@ describe('AT5: the responses of a window land on chain as one batch', function (
 
         // AND IT LANDED ON DOGE, judged valid, as a head plus its continuations.
         const landed = await untilOrClearDogeStall(async () => {
+            await nudgeDoge()
             const actions = await readDogeBatchActions()
             const heads = actions.filter((a) => Number(a.version) === BATCH_HEAD_VERSION &&
                 Number(a.batch_window_start) === Number(marker.window_start))
@@ -337,6 +362,9 @@ describe('AT5: the responses of a window land on chain as one batch', function (
         // indexer writes it onto the applied response. That whole road is what this
         // single column proves.
         const linked = await untilOrClearDogeStall(async () => {
+            // The link travels DOGE parse to hub push to mirror stream, so the DOGE
+            // side has to keep confirming for any of it to happen.
+            await nudgeDoge()
             const rows = []
             for (const id of ids) {
                 const r = await venue.readMirrorRows(0, { requestId: id })
@@ -367,6 +395,7 @@ describe('AT5: the responses of a window land on chain as one batch', function (
 
         const marker = empty.hit[0]
         const landed = await untilOrClearDogeStall(async () => {
+            await nudgeDoge()
             const actions = await readDogeBatchActions()
             const heads = actions.filter((a) => Number(a.version) === BATCH_HEAD_VERSION &&
                 Number(a.batch_window_start) === Number(marker.window_start))
