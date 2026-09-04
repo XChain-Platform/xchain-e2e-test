@@ -1132,6 +1132,24 @@ class AttestMirrorVenue {
         if (cred.problem) { this.unavailable = cred.problem; return null; }
         this.decoderCredentialSource = cred.source;
 
+        // PROVE the credential before spawning anything. Resolving one only means some
+        // store had a value, and these stores are known to hold stale values: the sidecar
+        // keeps whatever the decoder used before its last recreate, and nothing propagates
+        // the new one back. Without this probe a stale value is discovered by seven
+        // children dying on ER_ACCESS_DENIED several minutes in, and the error names the
+        // account rather than the store, which is the wrong thing to go looking at.
+        const denied = await this._probeDecoderAccess(
+            { host: dbHost, port: dbPort, name: dec.name, user: cred.user, pass: cred.pass });
+        if (denied) {
+            this.unavailable = 'the ' + this.coin + '/' + this.network + ' decoder database credential from ' +
+                cred.source + ' does not work: ' + denied + '. The venue needs to read ' + dec.name +
+                ' as ' + cred.user + '. These stores drift apart whenever a container is recreated, so ' +
+                'reconcile that store with the credential the running decoder actually uses, or set ' +
+                'DECODER_DB_PASS in the harness environment, or grant the harness account SELECT on ' +
+                dec.name + '.';
+            return null;
+        }
+
         return {
             decoder: { host: dbHost, port: dbPort, name: dec.name, user: cred.user, pass: cred.pass },
             node:    svc['node'] || {},
@@ -1139,6 +1157,34 @@ class AttestMirrorVenue {
             feeDestination: await this._resolveFeeDestination(svc),
             btcOracle: btcOracle
         };
+    }
+
+    /**
+     * Can we actually read the decoder database with this credential?
+     *
+     * Returns null when yes, and a short reason when no. It probes the READ the indexers
+     * depend on rather than only the connection, because authenticating and being unable
+     * to see the tables are different failures with different fixes: the first is a wrong
+     * password, the second a missing grant, and the message has to say which.
+     */
+    async _probeDecoderAccess(d) {
+        let conn = null;
+        try {
+            conn = await mariadb.createConnection({
+                host: d.host, port: d.port, user: d.user, password: d.pass, connectTimeout: 5000
+            });
+            await conn.query('SELECT 1 FROM `' + ident(d.name, 'database name') + '`.blocks LIMIT 1');
+            return null;
+        } catch (e) {
+            const code = (e && e.code) ? e.code : String(e && e.message);
+            if (code === 'ER_ACCESS_DENIED_ERROR') return 'authentication was refused (' + code + ')';
+            if (code === 'ER_TABLEACCESS_DENIED_ERROR' || code === 'ER_DBACCESS_DENIED_ERROR') {
+                return 'it authenticates but has no read grant (' + code + ')';
+            }
+            return code;
+        } finally {
+            if (conn) { try { await conn.end(); } catch (_) { /* already closed */ } }
+        }
     }
 
     /**
