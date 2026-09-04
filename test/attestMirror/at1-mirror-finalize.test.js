@@ -147,7 +147,7 @@ describe('AT1: an ATTEST response finalizes over P2P with no transaction of its 
     let up         = false
     let httpServer = null
     let testUrl    = null
-    let contract   = null
+    let contracts  = null
     let llm        = { ok: false, why: 'not probed' }
 
     before(async function () {
@@ -183,7 +183,36 @@ describe('AT1: an ATTEST response finalizes over P2P with no transaction of its 
             this.skip()
         }
 
-        contract = await deployRequestContract({ label: 'at1', code: CONTRACT_CODE })
+        // ONE CONTRACT PER PROVIDER, and this is a correctness requirement rather
+        // than tidiness.
+        //
+        // THE RULE: two executions of the SAME method by the SAME caller on ONE
+        // contract cannot be told apart by `sendExecuteV0`'s no-txHash fallback,
+        // which searches on (contractIndex, caller, methodName, status) alone.
+        // When the strict-txHash wait times out, that fallback returns whichever
+        // execution it finds first, which is the EARLIER one, and any correlation
+        // built on the returned action_index then resolves the earlier REQUEST
+        // faithfully and wrongly. A drill in that state asserts against a request
+        // it did not create, so it can pass or fail for a reason unrelated to
+        // what it is testing.
+        //
+        // A contract each makes the fallback unambiguous by construction: one
+        // execution of `ask` per contractIndex leaves it nothing to confuse.
+        // Cheaper alternative worth knowing for a drill that executes many times:
+        // read MAX(action_index) of that contract's v0 rows BEFORE broadcasting
+        // and correlate above that watermark, which removes the ambiguity at the
+        // source and costs no extra deploy. A watermark read must REFUSE on
+        // failure rather than defaulting to zero, since zero re-admits every
+        // earlier request as a candidate.
+        //
+        // A contract each makes the fallback unambiguous by construction: one
+        // execution of `ask` per contractIndex, so there is nothing for it to
+        // confuse. Cheaper and more durable than teaching the shared helper to
+        // disambiguate, which is every e2e suite's code.
+        contracts = {
+            http_get: await deployRequestContract({ label: 'at1http', code: CONTRACT_CODE }),
+            llm:      await deployRequestContract({ label: 'at1llm',  code: CONTRACT_CODE }),
+        }
     })
 
     after(async function () {
@@ -201,6 +230,11 @@ describe('AT1: an ATTEST response finalizes over P2P with no transaction of its 
      * the same tx-less settlement.
      */
     async function driveAndAssert (providerId, payload, expectBody) {
+        // This provider's OWN contract, so the shared helper's ambiguous
+        // fallback has exactly one execution of `ask` to find here.
+        const contract = contracts[providerId]
+        assert.ok(contract, 'AT1: no contract deployed for provider ' + providerId)
+
         const exec = await vmHelper.sendExecuteV0(
             contract.owner, contract.contractIndex, 'ask', [providerId, payload])
         assert.strictEqual(exec.execution.status, 'valid',
