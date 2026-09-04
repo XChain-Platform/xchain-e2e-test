@@ -376,12 +376,18 @@ describe('AT2: a hub outside the responsible set disseminates the response, iden
      *   2. keep the wording and rule that the barrier should hold on per-row
      *      completeness, which is a design change to the watermark, not a test.
      */
-    it.skip('holds the barrier when gossip is delayed past the forward margin (needs ruling: see comment)',
+    it.skip('holds the barrier when delivery is delayed past the forward margin (DRIVEN in at2b, see comment)',
         async function () {
-            // Left unwritten deliberately. The injection is one line
-            // (`venue.delayHubGossip(outside.followsHub, 20000)`); what is missing is
-            // an observable that can distinguish a held barrier from a satisfied one,
-            // and per the comment above the implementation has none.
-            assert.fail('unreachable: see the comment above this case')
+            // NOT a pending question any more: the operator ruled on 2026-09-04 and the
+            // lever was built, so this clause IS driven, in
+            // `at2b-forward-margin.test.js`. It lives there rather than here because it
+            // needs one indexer running a RAISED `attestResponse` grace, and a raised
+            // grace makes every freshly mined block wait that grace out on that node,
+            // which would tax the dozens of blocks the case above mines while it hunts
+            // for a request whose responsible set leaves an indexer outside it.
+            //
+            // The comment above still records WHY the delay alone is not enough, and
+            // that reasoning is now in the spec at section 4.2 as well.
+            assert.fail('unreachable: this clause is driven in at2b-forward-margin.test.js')
         })
 })
