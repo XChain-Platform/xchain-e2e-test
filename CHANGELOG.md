@@ -5,9 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.15.0] - 2026-09-04
 
 ### Added
+- The ATTEST response-mirror acceptance venue: five real hubs and two mirror-fed indexers, a per-table mirror fault injection, and the AT0 to AT6 drills with a shared staking prologue and wedge-clearing waits.
+- The ROLLCALL acceptance suites drive eviction, rollback, cooldown re-entry and the publish paths on a shared two-chain regtest venue, with a seeding tool and an outsider-clearing tool.
+- Responsible-set widening is driven on a chain from both sides of the ladder, and the ATTEST per-block and per-contract admission caps are driven live.
+- Capability and contract slashes are asserted to release escrow, and capability slash coverage aligns with the buried snapshot height.
+- Template DEPLOYs route through the size-aware chunked path, and chained MINTs from one address are pinned to distinct transactions.
+- A swallowed wait fails instead of passing on a missing row, and CI lints for the pattern.
 - Fixture stakes are now released when a run ends, so a run leaves the venue's capability set no larger than it found it.
 - The suite reports, and can fail on, any staking key a run leaves behind in the shared venue.
 - A gate that fails any hand-built STAKE broadcast which bypasses the release ledger.
