@@ -22,6 +22,15 @@
  * carries the payload, and the synthetic v1 action has a NULL `tx_index` and the
  * deterministic hash.
  *
+ * ON THAT LAST CLAUSE, measured 2026-09-04: the synthetic hash is NOT PERSISTED
+ * anywhere, so it cannot be read back and asserted directly. `tx_hash` is a
+ * column of `transactions` alone, and a mirror-applied action deliberately has
+ * no transaction, which is the very thing being proved. The hash is an
+ * in-memory value the applier uses to build the injected exec context so that
+ * anything the callback emits gets ids every node derives identically. What is
+ * observable is that determinism, so the drill asserts it: both nodes apply the
+ * response at the same action index and block with the same response hash.
+ *
  * WHAT MAKES THIS DIFFERENT FROM THE FEDERATION DRILLS. multiHubAttestation
  * proves the same request reaches a callback; it does so through an on-chain
  * ATTEST v1 that the leader broadcasts. Here that transaction must NOT EXIST,
@@ -71,10 +80,6 @@ const {
 } = require('./mirrorDrillWaits')
 const vmHelper = require('../helpers/vmHelper')
 
-// The applier's own synthesis, imported rather than reimplemented: the hash is
-// consensus, and a literal typed here would agree with a broken applier that
-// changed both sides together.
-const { synthesizeTxHash, SYNTH_TAGS } = require('../../../xchain-indexer/src/actions/execContext.js')
 
 const FIXED_BODY = '{"score":42,"meta":"at1-mirror"}'
 
@@ -328,8 +333,23 @@ describe('AT1: an ATTEST response finalizes over P2P with no transaction of its 
             "publisher's per-request decline rather than a test problem.")
 
         // ZERO TRANSACTIONS, DIRECTION 2: the applier's own row, on both nodes.
-        const expectedHash = synthesizeTxHash(
-            SYNTH_TAGS.ATTEST_MIRROR_RESPONSE, NETWORK, COIN.toUpperCase(), requestId)
+        //
+        // THE SYNTHETIC HASH IS NOT READ BACK, AND THAT IS A MEASUREMENT RATHER
+        // THAN A CONCESSION. This drill deliberately does NOT assert `actions.tx_hash` equals
+        // `synthesizeTxHash(...)`, which could never pass: no table stores it.
+        // `tx_hash` exists only on `transactions`, and the whole claim of the
+        // mirror is that this action has NO transaction, so the column the
+        // assertion wanted is precisely the one whose absence is the point. The
+        // hash is an in-memory value the applier uses to build the injected exec
+        // context, so that anything the callback emits gets ids every node
+        // derives identically.
+        //
+        // What IS observable is that determinism, so that is what is asserted:
+        // both nodes must apply the response at the same action index and block
+        // with the same response hash. A per-node difference there is exactly the
+        // divergence the shared hash exists to prevent, and unlike the old
+        // assertion it can actually fail.
+        const applieds = []
         for (const ix of venue.indexers) {
             const applied = await readAppliedResponse(venue, ix.index, requestId)
             assert.ok(applied,
@@ -338,11 +358,18 @@ describe('AT1: an ATTEST response finalizes over P2P with no transaction of its 
             assert.strictEqual(applied.tx_index, null,
                 providerId + ': the synthesized action on indexer ' + ix.index + ' carries tx_index ' +
                 applied.tx_index + ' rather than NULL, so something gave it a transaction')
-            assert.strictEqual(String(applied.tx_hash), expectedHash,
-                providerId + ': synthetic TX_HASH on indexer ' + ix.index + ' is ' + applied.tx_hash +
-                ' but the applier derives ' + expectedHash + " from its own tag, network and request id. " +
-                'Every node must derive the same value or anything the callback emits gets ids that ' +
-                'resolve differently per node.')
+            applieds.push({ index: ix.index, applied: applied })
+        }
+
+        const first = applieds[0]
+        for (const other of applieds.slice(1)) {
+            for (const field of ['action_index', 'block_index', 'response_hash', 'response_payload']) {
+                assert.strictEqual(String(other.applied[field]), String(first.applied[field]),
+                    providerId + ': indexer ' + other.index + ' applied ' + field + '=' +
+                    other.applied[field] + ' while indexer ' + first.index + ' applied ' +
+                    first.applied[field] + '. The applier is deterministic by construction, so a ' +
+                    'difference here is a fork between two nodes reading the same mirror row.')
+            }
         }
 
         // The callback fired, and the contract carries what the provider returned.

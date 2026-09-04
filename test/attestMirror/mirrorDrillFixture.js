@@ -910,9 +910,15 @@ async function readAppliedResponse (venue, indexerIndex, requestId) {
     const ix = venue.indexers[indexerIndex]
     assert.ok(ix, 'mirrorDrillFixture: no indexer ' + indexerIndex)
     const rows = await queryVenueDb(venue, ix.indexerDbName,
-        'SELECT a.action_index, a.block_index, a.tx_index, a.tx_hash, a.source, ' +
-        '       r.request_id, r.response_status, r.response_payload, r.status_id, ' +
-        '       r.callback_execute_action_index ' +
+        // COLUMNS THAT EXIST, and the three that did not are worth naming because
+        // each was a different wrong assumption about where a synthetic action
+        // records itself. `actions` has `source_id`, not `source`, and it has NO
+        // `tx_hash` at all: the hash lives on `transactions`, and a mirror-applied
+        // action deliberately has no transaction, which is the entire claim. And
+        // `attests` spells its status `request_status`, never `status_id`.
+        'SELECT a.action_index, a.block_index, a.tx_index, a.source_id, ' +
+        '       r.request_id, r.response_status, r.response_payload, r.request_status, ' +
+        '       r.response_hash, r.callback_execute_action_index ' +
         'FROM attests r JOIN actions a ON a.action_index = r.action_index ' +
         'WHERE r.request_id = ? AND r.version = 1 ' +
         'ORDER BY a.action_index ASC LIMIT 1',
