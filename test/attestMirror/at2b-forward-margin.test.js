@@ -74,6 +74,7 @@ const {
     APPLIED_FIELDS, until, untilOrClearDogeStall, diffRows, diffStateHashes,
     waitForMirrorRowEverywhere, waitForAppliedEverywhere, venueTipProbe,
     findEmittedAttestRequest, captureFederationState,
+    clearBeforeBroadcast,
 } = require('./mirrorDrillWaits')
 const vmHelper = require('../helpers/vmHelper')
 const XChainIndexerConnector = require('../../src/XChainIndexerConnector.js')
@@ -186,6 +187,7 @@ describe('AT2 second clause: delivery past the forward margin holds the barrier 
             DELAYED + ' mirror edge; the forward margin is ' + FORWARD_S +
             's, so the row will arrive with its effective time already past')
 
+        await clearBeforeBroadcast()
         const exec = await vmHelper.sendExecuteV0(
             contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl])
         assert.strictEqual(exec.execution.status, 'valid',

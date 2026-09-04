@@ -69,7 +69,21 @@ const RELEASE_SETTLE_BLOCKS = 14
 
 // Whole-sweep budget. A release that cannot finish inside it stops and reports
 // what it did not get to, rather than hanging a suite's teardown forever.
-const DEFAULT_BUDGET_MS = 10 * 60 * 1000
+//
+// RAISED from ten minutes on 2026-09-04, deliberately, because the two sides of
+// this trade are not symmetric. A teardown that runs long costs ONE run some
+// wall clock. A teardown that runs out costs EVERY FUTURE DRAW on the venue: the
+// unstakes it never broadcast leave keys seated in a shared capability set, and
+// if the process then exits, their signing keys are gone with it. Measured that
+// night: a wedged indexer ate the budget, three unstakes timed out and two were
+// never sent, and five keys were left in `oracle_publish`. The budget is the last
+// thing standing between a failed drill and permanent roster contamination, so it
+// gets room.
+const DEFAULT_BUDGET_MS = 20 * 60 * 1000
+
+// The one stall shape whose remedy this file knows, spelled the same way the
+// attest-mirror drills spell it so the two cannot drift.
+const ROLLCALL_STALL_REASON = 'rollcall_proof_unavailable'
 
 // The run's outstanding fixture stakes, keyed so a v2 top-up of a stake this
 // run already created does not enqueue a second UNSTAKE for the same pubkey
@@ -220,6 +234,75 @@ function diffAgainstBaseline(baseline, current){
     }
 }
 
+/**
+ * Clear the roll-call wedge, if that is what is stopping this teardown, and say
+ * whether it did.
+ *
+ * WHY A TEARDOWN NEEDS THIS AT ALL, which is the whole finding of 2026-09-04. The
+ * wedge does not merely fail a drill, IT MANUFACTURES LEAKS. When the BTC indexer
+ * parks because the other chain's tip has not passed the roll-call window end,
+ * nothing confirms at `status=valid`, so every UNSTAKE broadcast here times out
+ * and the ones behind it are never sent. A failed drill that releases cleanly
+ * costs one run; a failed drill that cannot release costs every future draw on the
+ * venue. So this is the HIGHEST-value place for the clear, not the lowest.
+ *
+ * INERT WHERE IT DOES NOT APPLY, and that is a hard requirement rather than
+ * politeness: this file is a shared root hook for every suite in this tree, not
+ * only the attest drills. A single-coin venue, or one with no second rail, must
+ * not have its teardown try to mine a chain that is not there, and must NEVER
+ * fail a teardown because a clear was impossible. Everything below is wrapped and
+ * every unavailable dependency reads as "no clear available" rather than an error.
+ *
+ * THE PREDICATE IS THE NARROW ONE, both conditions required: behind its own
+ * decoder AND the stall reason is the roll-call one. A node stuck for any other
+ * reason is a finding to report, not something to mine at, and a clear that
+ * swallowed every stall would hide the defect a suite exists to find.
+ */
+async function clearWedgeIfPresent(log){
+    let waits = null
+    try {
+        // Lazily required, and tolerated absent. The remedy lives beside the
+        // attest-mirror drills because that is where it was measured; a tree
+        // without that module still tears down normally.
+        waits = require('../attestMirror/mirrorDrillWaits')
+    } catch (e) {
+        return { cleared: false, reason: 'no wedge-clear module in this tree' }
+    }
+    if(!waits || typeof waits.standingTipProbe !== 'function' || typeof waits.mineDogeBlocks !== 'function'){
+        return { cleared: false, reason: 'wedge-clear module has no probe or miner' }
+    }
+
+    let sample = null
+    try { sample = await waits.standingTipProbe()() } catch (e) { sample = null }
+    if(!sample) return { cleared: false, reason: 'the indexer did not answer, so no verdict' }
+
+    const height  = Number(sample.height)
+    const decoder = Number(sample.decoder)
+    if(!Number.isFinite(height) || !Number.isFinite(decoder)){
+        return { cleared: false, reason: 'no height or decoder reading' }
+    }
+    if(!(height < decoder)){
+        return { cleared: false, reason: 'level with its decoder at ' + height + ', so not wedged' }
+    }
+    const reason = String(sample.reason || '')
+    if(reason !== ROLLCALL_STALL_REASON){
+        return { cleared: false,
+                 finding: true,
+                 reason: 'STUCK at ' + height + ' behind its decoder at ' + decoder + ' on ' +
+                         (reason || 'no stated reason') + ', which is not the wedge this remedy is for' }
+    }
+
+    try {
+        const tip = await waits.mineDogeBlocks(waits.DOGE_NUDGE_BLOCKS)
+        log('[stake teardown] the indexer was wedged at ' + height + ' behind its decoder at ' + decoder +
+            ' on ' + reason + '. That is what stops an UNSTAKE confirming, and it is ordinary on this ' +
+            'venue: mined the other chain to ' + tip + ' and retrying.')
+        return { cleared: true, reason: reason, dogeTip: tip }
+    } catch (e) {
+        return { cleared: false, reason: 'the other chain could not be mined: ' + (e && e.message) }
+    }
+}
+
 // Sweep the run's outstanding stakes. `unstake` is the broadcast+wait callback
 // (stakeHelper's sendUnstakeV0 / sendUnstakeV1 shape); `mine` mines the settle
 // blocks. Never throws: a stake that cannot be released is a reported failure,
@@ -248,7 +331,30 @@ async function releaseStakes(opts){
             entry.released = true
             result.released.push(entry)
         } catch (err){
-            result.failed.push({ entry: entry, error: (err && err.message) ? err.message : String(err) })
+            // ONE retry, and only behind the wedge verdict. The first failure is
+            // usually not about this stake at all: a wedged indexer confirms
+            // nothing, so the broadcast times out waiting for a status it cannot
+            // reach. Clearing between operations and trying once more is what turns
+            // a manufactured leak back into a release.
+            let clear = { cleared: false, reason: 'not attempted' }
+            try { clear = await clearWedgeIfPresent(log) } catch (e) { /* never fail teardown on the clear */ }
+            if(clear.finding) log('[stake teardown] ' + clear.reason + ', so nothing was mined for it')
+            if(clear.cleared){
+                try {
+                    await o.unstake(entry)
+                    entry.released = true
+                    entry.releasedAfterClear = true
+                    result.released.push(entry)
+                    result.clearedWedges = (result.clearedWedges || 0) + 1
+                    continue
+                } catch (err2){
+                    result.failed.push({ entry: entry, afterClear: true,
+                        error: (err2 && err2.message) ? err2.message : String(err2) })
+                    continue
+                }
+            }
+            result.failed.push({ entry: entry, clearReason: clear.reason,
+                error: (err && err.message) ? err.message : String(err) })
         }
     }
 
@@ -298,11 +404,63 @@ function formatReport(state){
     else if(state.diff){
         lines.push('[stake teardown] ' + cap + ': ' + state.diff.beforeCount + ' -> ' + state.diff.afterCount + ' member(s)')
         if(state.diff.grew){
-            lines.push('[stake teardown] LEAK: this run left ' + state.diff.added.length + ' key(s) in the shared ' +
-                       cap + ' set. Every one of them dilutes the operator hub\'s weight share and moves the venue ' +
-                       'toward an unreachable quorum.')
-            for(const p of state.diff.added)
-                lines.push('[stake teardown]   LEAKED  ' + p)
+            // CLASSIFIED, because three different situations put a key in this list
+            // and only one of them is a loss. A bare count cannot tell them apart,
+            // and the two that are not losses are the common ones. The distinction
+            // is what a reader needs:
+            //
+            //   UNSTAKE NOT SENT  the release never went out, so the key IS seated
+            //                     and stays seated until someone sends one.
+            //   NOT YET SETTLED   it went out and was accepted; an UNSTAKE only
+            //                     STAMPS deactivation_block, and the key leaves the
+            //                     effective set once that block is reached AND
+            //                     buried past the reorg buffer the snapshot reads
+            //                     at. So this is a timing statement, not a loss.
+            //   LEAKED            neither of the above: seated, with no explanation
+            //                     this file can offer.
+            //
+            // Every line carries the block the read was taken at, because a claim
+            // about membership without a height is not checkable.
+            const at = ' (read at block ' + state.current.blockIndex + ')'
+            const rel = state.release || { released: [], failed: [], skipped: [] }
+            const sentFor = new Set((rel.released || [])
+                .map(e => String(e.signingPubkey).toLowerCase()))
+            const notSentFor = new Map()
+            for(const f of (rel.failed || []))
+                notSentFor.set(String(f.entry.signingPubkey).toLowerCase(), f.error)
+            for(const s of (rel.skipped || []))
+                notSentFor.set(String(s.entry.signingPubkey).toLowerCase(), s.reason)
+
+            const notSent = [], notSettled = [], leaked = []
+            for(const p of state.diff.added){
+                const key = String(p).toLowerCase()
+                if(notSentFor.has(key))   notSent.push({ pubkey: p, why: notSentFor.get(key) })
+                else if(sentFor.has(key)) notSettled.push(p)
+                else                      leaked.push(p)
+            }
+
+            if(notSent.length){
+                lines.push('[stake teardown] UNSTAKE NOT SENT for ' + notSent.length + ' key(s)' + at +
+                           ': these are seated because no release was broadcast for them, and they stay ' +
+                           'seated until one is. The recorded keys make that possible.')
+                for(const n of notSent)
+                    lines.push('[stake teardown]   NOT SENT  ' + n.pubkey + ': ' + n.why)
+            }
+            if(notSettled.length){
+                lines.push('[stake teardown] NOT YET SETTLED for ' + notSettled.length + ' key(s)' + at +
+                           ': the UNSTAKE was accepted, and the key leaves the effective set once its ' +
+                           'deactivation block is reached and buried. This is arithmetic, not a leak; ' +
+                           'mine further and re-read before reporting loss.')
+                for(const p of notSettled)
+                    lines.push('[stake teardown]   NOT SETTLED  ' + p)
+            }
+            if(leaked.length){
+                lines.push('[stake teardown] LEAK: this run left ' + leaked.length + ' key(s) in the shared ' +
+                           cap + ' set' + at + '. Every one of them dilutes the operator hub\'s weight share ' +
+                           'and moves the venue toward an unreachable quorum.')
+                for(const p of leaked)
+                    lines.push('[stake teardown]   LEAKED  ' + p)
+            }
         }
     }
 
@@ -365,6 +523,8 @@ module.exports = {
     captureBaseline: readCapabilitySet,
     diffAgainstBaseline,
     releaseStakes,
+    clearWedgeIfPresent,
+    ROLLCALL_STALL_REASON,
     formatReport,
     runTeardown
 }

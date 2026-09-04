@@ -63,6 +63,7 @@ const {
     APPLIED_FIELDS, untilOrClearDogeStall, diffRows,
     waitForMirrorRowEverywhere, waitForAppliedEverywhere,
     readRequestRow, venueTipProbe, findEmittedAttestRequest, captureFederationState,
+    clearBeforeBroadcast,
 } = require('./mirrorDrillWaits')
 const vmHelper     = require('../helpers/vmHelper')
 const cryptoHelper = require('../cryptoHelper')
@@ -145,6 +146,7 @@ describe('AT4: a reorg moves the applied response with the chain, in both direct
 
     /** Drive one tagged request all the way to an applied response on both nodes. */
     async function driveToApplied (tag) {
+        await clearBeforeBroadcast()
         const exec = await vmHelper.sendExecuteV0(
             contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl, tag])
         assert.strictEqual(exec.execution.status, 'valid',

@@ -63,12 +63,13 @@ dotenv.config()
 
 const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
-    stakeDrillIdentities, deployRequestContract, settleStack, readContractState,
+    stakeDrillIdentities, deployRequestContract, settleStack, readContractState, withWedgeClear,
 } = require('./mirrorDrillFixture')
 const {
     untilOrClearDogeStall, waitForMirrorRowEverywhere,
     readAttestRewards, readResponseRows, readRequestRow, venueTipProbe,
     findEmittedAttestRequest, captureFederationState,
+    clearBeforeBroadcast,
 } = require('./mirrorDrillWaits')
 const vmHelper          = require('../helpers/vmHelper')
 const cryptoHelper      = require('../cryptoHelper')
@@ -146,8 +147,12 @@ describe('AT6: above the flag day the chain cannot deliver a response, and the e
         // Whoever relays an on-chain v1 pays its transaction fee and nothing else;
         // it is deliberately NOT one of the stakers, so the escrow assertions cannot
         // be confused by the relayer also being a payee.
-        broadcaster = await cryptoHelper.getNewFundedAddress(
-            'at6-relayer', COIN, NETWORK, null, 'legacy', 0, 0.02)
+        // WRAPPED, and safe to retry: `getNewFundedAddress` mints gas internally
+        // (100 XCHAIN seed) so it reaches a `status=valid` wait and starves under the
+        // wedge, and it is keyed by label, so a second attempt re-funds this same
+        // relayer rather than minting another identity.
+        broadcaster = await withWedgeClear('funding the at6 relayer',
+            () => cryptoHelper.getNewFundedAddress('at6-relayer', COIN, NETWORK, null, 'legacy', 0, 0.02))
         await regtestMinerConnector.generateBlocks(2)
         await settleStack()
     })
@@ -181,6 +186,7 @@ describe('AT6: above the flag day the chain cannot deliver a response, and the e
     }
 
     it('refuses an on-chain v1, applies the mirror row anyway, and settles the whole escrow', async function () {
+        await clearBeforeBroadcast()
         const exec = await vmHelper.sendExecuteV0(
             contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl])
         assert.strictEqual(exec.execution.status, 'valid',
@@ -300,6 +306,7 @@ describe('AT6: above the flag day the chain cannot deliver a response, and the e
         // ordering fault could not admit the action; what it WOULD do is record a
         // different reason for the same wire depending on the request's incidental
         // state, and the reason is consensus. This case is what notices that.
+        await clearBeforeBroadcast()
         const exec = await vmHelper.sendExecuteV0(
             contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl])
         assert.strictEqual(exec.execution.status, 'valid',

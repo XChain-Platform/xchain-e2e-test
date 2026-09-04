@@ -68,6 +68,23 @@ const MAX_DOGE_NUDGES = 6
 // remedy cannot drift into disagreeing about what the wedge is.
 const ROLLCALL_STALL_REASON = 'rollcall_proof_unavailable'
 
+// BTC blocks per DOGE keep-up in a long mining run. The wedge was measured
+// re-forming every 25 to 30 BTC blocks with DOGE still, so this sits comfortably
+// inside that: often enough that a run cannot wedge itself, rare enough that the
+// DOGE tip is not being advanced on a schedule.
+const BTC_BLOCKS_PER_DOGE_KEEPUP = 12
+
+// BTC blocks mined through this module since the other chain was last moved.
+//
+// MODULE-LEVEL AND CUMULATIVE, because the wedge does not care how a caller
+// chunked its mining: it cares how many BTC blocks have landed since that chain
+// last advanced. A per-call counter looks equivalent and is not, and the
+// difference cost a release: a tool that mined 14 blocks and then ten more, six
+// times, fired the keep-up ONCE, because every later call was a single chunk with
+// no "between" in it. Seventy-four BTC blocks went by on three DOGE blocks and the
+// wedge re-formed exactly as predicted.
+let btcSinceDogeKeepUp = 0
+
 /**
  * The `attests` columns two nodes must agree on for one applied response.
  *
@@ -384,6 +401,94 @@ async function mineDogeBlocks (blocks) {
         })
         return Number((await indexerConnector.call('getblockhashes', {})).block_index)
     })
+}
+
+/**
+ * Mine BTC while keeping the OTHER chain's tip alive, deterministically.
+ *
+ * WHY REACTING IS NOT ENOUGH ON ITS OWN. The roll-call wedge is caused by mining
+ * BTC hard while DOGE sits still: the epoch cannot be decided until the DOGE tip
+ * passes the window end. Measured on this venue, it re-forms every 25 to 30 BTC
+ * blocks, so anything that mines a long run of them MANUFACTURES the wedge it
+ * then has to recover from. The teardown is the worst case and the most expensive:
+ * it mines the settle distance, wedges itself, and then cannot broadcast the very
+ * unstakes it exists to broadcast, which is how a failed drill turns into
+ * permanent roster contamination.
+ *
+ * So a long BTC run is broken into chunks with a DOGE mine between them. This is
+ * NOT a background heartbeat and must never become one: `mineDogeBlocks` swaps the
+ * harness globals to Dogecoin through `chainRail` and restores them, so it is only
+ * safe strictly BETWEEN operations, which is exactly where this puts it. A timer
+ * firing it mid-operation would corrupt the run it is protecting.
+ *
+ * The reactive clear stays, and the two are complements rather than alternatives:
+ * this stops a drill causing the wedge itself, while the clear recovers from one
+ * caused by anything else, including another lane's mining.
+ */
+async function mineBtcKeepingDogeAlive (total, opts) {
+    const o = opts || {}
+    const want = Number(total)
+    assert.ok(Number.isFinite(want) && want >= 0, 'mirrorDrillWaits: block count must be a number')
+    const chunk = Number(o.chunk) || BTC_BLOCKS_PER_DOGE_KEEPUP
+    let done = 0
+    while (done < want) {
+        // Never mine past the point the counter is due, so a long run keeps the
+        // other chain alive throughout rather than only at its seams.
+        const room = Math.max(1, chunk - btcSinceDogeKeepUp)
+        const n = Math.min(room, want - done)
+        await regtestMinerConnector.generateBlocks(n)
+        done += n
+        btcSinceDogeKeepUp += n
+        if (btcSinceDogeKeepUp >= chunk) await keepDogeAlive()
+    }
+    return done
+}
+
+/**
+ * Move the other chain and reset the counter. Strictly between operations.
+ */
+async function keepDogeAlive () {
+    btcSinceDogeKeepUp = 0
+    return await mineDogeBlocks(DOGE_NUDGE_BLOCKS).catch((e) => {
+        console.log('mirrorDrillWaits: DOGE keep-up failed (' + (e && e.message) +
+            '); the reactive clear will still catch a wedge if one forms')
+        return null
+    })
+}
+
+/**
+ * Clear the wedge, if present, immediately BEFORE a broadcast that must not be
+ * retried.
+ *
+ * WHY THIS EXISTS SEPARATELY FROM `withWedgeClear`. That wrapper runs an
+ * operation, and on the wedge verdict runs it AGAIN. That is exactly right for an
+ * idempotent step: `getNewFundedAddress` is keyed by label and returns the same
+ * wallet, so a second attempt re-funds one identity rather than minting another.
+ * It is exactly WRONG for a broadcast-and-wait. `sendExecuteV0` puts a
+ * transaction on the chain and then waits for it to index at `status=valid`; a
+ * wedged indexer fails the WAIT with the transaction already broadcast, so a retry
+ * broadcasts a SECOND EXECUTE. Two EXECUTEs emit two attestation requests, and the
+ * drill is then measuring a request it did not mean to make. The correlated lookup
+ * refuses two candidates rather than picking, so this would surface as an
+ * ambiguity failure instead of silent nonsense, but the right answer is not to
+ * create the ambiguity.
+ *
+ * So for those calls the remedy goes BEFORE the broadcast rather than around it:
+ * probe, clear if genuinely wedged, then broadcast once into an indexer that can
+ * confirm it. Cheap, since it is one status read when nothing is wrong.
+ */
+async function clearBeforeBroadcast () {
+    try {
+        // Lazy: `stakeTeardown` already reaches back into this module for the same
+        // remedy, so a top-level require here would close that cycle.
+        const { clearWedgeIfPresent } = require('../helpers/stakeTeardown')
+        if (typeof clearWedgeIfPresent !== 'function') return { cleared: false, reason: 'no clear available' }
+        const verdict = await clearWedgeIfPresent(console.log)
+        if (verdict && verdict.finding) console.log('mirrorDrillWaits: ' + verdict.reason)
+        return verdict
+    } catch (e) {
+        return { cleared: false, reason: 'clear unavailable: ' + (e && e.message) }
+    }
 }
 
 /**
@@ -802,11 +907,15 @@ module.exports = {
     ROLLCALL_STALL_AFTER_MS,
     ROLLCALL_STALL_REASON,
     DOGE_NUDGE_BLOCKS,
+    BTC_BLOCKS_PER_DOGE_KEEPUP,
     MAX_DOGE_NUDGES,
     until,
     untilOrClearDogeStall,
     wedgeVerdict,
     mineDogeBlocks,
+    mineBtcKeepingDogeAlive,
+    keepDogeAlive,
+    clearBeforeBroadcast,
     venueTipProbe,
     standingTipProbe,
     diffRows,

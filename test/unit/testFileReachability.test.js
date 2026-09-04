@@ -35,6 +35,10 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..');
 // is itself a failure, so this list cannot quietly outlive its reasons.
 const INTENTIONALLY_UNRUN = [
     {
+        file: 'test/attestMirror/releaseLeakedStakes.js',
+        why: 'Repair tool, not coverage: it BROADCASTS an UNSTAKE for every staker key a failed drill recorded, so a script that ran it as part of a suite would release stakes a healthy run still needs. Driven by name when a teardown could not finish, with RELEASE_LABEL naming the drill whose keys to release; its own header carries the invocation. It is deliberately not a *.test.js file so the attest-mirror glob cannot collect it either.'
+    },
+    {
         file: 'test/drills/physicalByzantine.drill.js',
         why: 'Hand-driven Byzantine drill against a live multi-host stack; test/drills/README.md carries the invocation and the operator preconditions it needs.'
     },

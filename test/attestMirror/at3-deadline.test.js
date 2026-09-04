@@ -69,6 +69,7 @@ const {
     untilOrClearDogeStall, waitForMirrorRowEverywhere, waitForAppliedEverywhere,
     readBlockWindow, readRequestRow, firstSatisfyingBlock, venueTipProbe,
     findEmittedAttestRequest, captureFederationState,
+    clearBeforeBroadcast,
 } = require('./mirrorDrillWaits')
 const vmHelper = require('../helpers/vmHelper')
 
@@ -162,6 +163,7 @@ describe('AT3: the deadline decides whether a mirrored response ever binds', fun
      * itself decides to move it.
      */
     async function driveToMirrorRow (tag) {
+        await clearBeforeBroadcast()
         const exec = await vmHelper.sendExecuteV0(
             contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl, tag])
         assert.strictEqual(exec.execution.status, 'valid',

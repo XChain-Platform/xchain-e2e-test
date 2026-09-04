@@ -66,6 +66,7 @@ const {
     APPLIED_FIELDS, STATE_HASH_FIELDS, until, diffRows, diffStateHashes,
     rewardFingerprint, waitForMirrorRowEverywhere, waitForAppliedEverywhere,
     readAttestRewards, happyPathVerdict, findEmittedAttestRequest, captureFederationState,
+    clearBeforeBroadcast,
 } = require('./mirrorDrillWaits')
 const vmHelper = require('../helpers/vmHelper')
 const XChainIndexerConnector = require('../../src/XChainIndexerConnector.js')
@@ -160,6 +161,7 @@ describe('AT2: a hub outside the responsible set disseminates the response, iden
      * the responsible set is discarded rather than asserted on.
      */
     async function driveOneRequest (attempt) {
+        await clearBeforeBroadcast()
         const exec = await vmHelper.sendExecuteV0(
             contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl])
         assert.strictEqual(exec.execution.status, 'valid',

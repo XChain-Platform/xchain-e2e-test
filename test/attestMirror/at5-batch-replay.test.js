@@ -64,11 +64,12 @@ dotenv.config()
 
 const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
-    stakeDrillIdentities, deployRequestContract, settleStack, queryVenueDb,
+    stakeDrillIdentities, deployRequestContract, settleStack, queryVenueDb, withWedgeClear,
 } = require('./mirrorDrillFixture')
 const {
     untilOrClearDogeStall, waitForMirrorRowEverywhere, waitForAppliedEverywhere,
-    venueTipProbe, mineDogeBlocks,
+    venueTipProbe, mineDogeBlocks, findEmittedAttestRequest,
+    clearBeforeBroadcast,
 } = require('./mirrorDrillWaits')
 const vmHelper     = require('../helpers/vmHelper')
 const chainRail    = require('../helpers/chainRail')
@@ -160,8 +161,12 @@ async function stageDogeSigner (label) {
     // Funded ON the DOGE rail, which is the whole point: the publisher pays a real
     // fee on that chain for every window it broadcasts.
     const funded = await chainRail.withRail(dogeRail, async () => {
-        const addr = await cryptoHelper.getNewFundedAddress(
-            label + '-batch-publisher', COIN, NETWORK, null, 'legacy', 0, 2.0)
+        // WRAPPED for the same reason as the relayer in AT6: the funding call mints
+        // gas internally, so it starves under the wedge, and it is keyed by label so
+        // a retry re-funds one publisher rather than minting a second wallet.
+        const addr = await withWedgeClear('funding the batch publisher on the other rail',
+            () => cryptoHelper.getNewFundedAddress(
+                label + '-batch-publisher', COIN, NETWORK, null, 'legacy', 0, 2.0))
         await regtestMinerConnector.generateBlocks(2)
         await utxoTrackerConnector.quiesce({
             timeoutMs: 60_000, pollMs: 250, regtestMiner: regtestMinerConnector,
@@ -384,15 +389,16 @@ describe('AT5: the responses of a window land on chain as one batch', function (
         // single 8189-byte wire, so the batch has to chunk.
         const ids = []
         for (const tag of ['b1', 'b2']) {
+            await clearBeforeBroadcast()
             const exec = await vmHelper.sendExecuteV0(
                 contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl + '?' + tag, tag])
             assert.strictEqual(exec.execution.status, 'valid',
                 tag + ': the EXECUTE that emits the request came back ' + exec.execution.status)
-            const request = await indexerDatabase.waitForAttestationRequest({
-                txHash: exec.txHash, requestStatus: 'pending',
-            })
-            assert.ok(request, tag + ': no pending request row on the standing indexer')
-            ids.push(String(request.request_id))
+            // Correlated on the emitting action, never on the broadcast txid: for a
+            // P2SH-encoded EXECUTE that hash is not the one recorded against the row.
+            const request = await findEmittedAttestRequest(
+                contract.contractIndex, exec.execution.action_index, { label: tag })
+            ids.push(request.requestId)
         }
 
         await regtestMinerConnector.generateBlocks(BURIAL_BLOCKS)
