@@ -41,12 +41,28 @@ describe('mirrorDrillWaits: the shared comparison layer for AT2 to AT6', () => {
         // comparison cannot quietly stop covering the columns that carry the
         // claim, while a drill remains free to add one.
         it('keeps every field that carries the tx-less and determinism claims', () => {
-            for (const f of ['action_index', 'block_index', 'tx_index', 'tx_hash',
+            for (const f of ['action_index', 'block_index', 'tx_index', 'response_hash',
                              'response_payload', 'callback_execute_action_index']) {
                 assert.ok(APPLIED_FIELDS.includes(f),
                     'APPLIED_FIELDS no longer covers ' + f + ', so a drill comparing two applied rows ' +
                     'would agree about a difference in it')
             }
+        })
+
+        // THE FIELD THAT MUST NOT COME BACK, and it was in the list above until
+        // 2026-09-04. `tx_hash` is not a column of anything an applied mirror row
+        // touches: it belongs to `transactions`, and the whole claim of this rail
+        // is that the row has no transaction. Comparing it across two nodes read
+        // undefined on both sides, so the field weakened the diff instead of
+        // strengthening it, and the query that fed it failed outright with
+        // Unknown column 'a.tx_hash' once a drill actually reached that read.
+        // `response_hash` carries the determinism claim with real content.
+        it('does NOT carry tx_hash, which no applied row has', () => {
+            assert.ok(!APPLIED_FIELDS.includes('tx_hash'),
+                'tx_hash is back in APPLIED_FIELDS. It is not a column of actions or attests, so ' +
+                'every cross-node comparison of it comes back undefined against undefined and ' +
+                'silently passes. If a synthetic hash ever does get persisted, pin THAT column ' +
+                'here by name rather than restoring this one.')
         })
 
         it('keeps all four signed roots, because height agreement is not ledger agreement', () => {
