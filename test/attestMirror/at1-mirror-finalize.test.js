@@ -65,6 +65,7 @@ const {
     stakeDrillIdentities, deployRequestContract, settleStack,
     readAppliedResponse, readContractState,
 } = require('./mirrorDrillFixture')
+const { findEmittedAttestRequest, captureFederationState } = require('./mirrorDrillWaits')
 const vmHelper = require('../helpers/vmHelper')
 
 // The applier's own synthesis, imported rather than reimplemented: the hash is
@@ -207,11 +208,23 @@ describe('AT1: an ATTEST response finalizes over P2P with no transaction of its 
             '. A responsible set smaller than redundancy is rejected at admission and rolls the ' +
             'EXECUTE back, so this is the shape a short stake roster takes.')
 
-        const request = await indexerDatabase.waitForAttestationRequest({
-            txHash: exec.txHash, requestStatus: 'pending',
-        })
-        assert.ok(request, providerId + ': no pending request row on the standing indexer')
-        const requestId = String(request.request_id)
+        // CORRELATED ON THE EMITTING ACTION, NOT ON THE TRANSACTION HASH. The
+        // previous form filtered on `itx.hash = exec.txHash`, and for a
+        // P2SH-encoded EXECUTE the broadcast txid does NOT match the on-chain
+        // hash in index_transactions. That is not a theory: `sendExecuteV0`
+        // carries a 5s strict-txHash wait and a 55s no-txHash fallback for
+        // exactly this reason, both of this drill's EXECUTEs tripped that
+        // fallback on 2026-09-04, and the llm case then died on
+        // `checkAttestationRequest: GAVE UP after 60123ms` looking for a request
+        // that existed. It is intermittent, decided by the encode type chosen.
+        //
+        // The naive repair, dropping txHash and taking a bare pending row, is
+        // WORSE than the bug: `LIMIT 1` can return a STALE pending request left
+        // by an earlier aborted run, and the drill would then assert against a
+        // request the hubs never worked on and could pass for the wrong reason.
+        const request = await findEmittedAttestRequest(
+            contract.contractIndex, exec.execution.action_index, { label: providerId })
+        const requestId = request.requestId
 
         // The hubs need the request buried by their own confirmations before they
         // fetch, and they poll rather than subscribe.
@@ -222,6 +235,24 @@ describe('AT1: an ATTEST response finalizes over P2P with no transaction of its 
         // claim is that no chain row exists. Both indexers, because AT1 says the
         // callback fires on both and a single-node pass would hide a
         // dissemination failure.
+        // CAPTURED BEFORE THE ASSERTION, UNCONDITIONALLY, because run 3 failed
+        // here with "indexer 0 holds 0 mirror rows" and the reading that decides
+        // WHY could not be taken afterwards: the venue's hub DBs are disposable
+        // and go with the run. A missing row has two very different causes, and
+        // they are indistinguishable from the row's absence alone:
+        //   - the round never finalized, because the responsible set drew a
+        //     member with no live signer (the roster carries such keys, and
+        //     roll-call eviction is inert here because epochs close without
+        //     rolling), or
+        //   - the hubs finalized and the row genuinely failed to reach the
+        //     indexer, which is a real mirror defect.
+        // The responsible set plus each hub's own finalization state separates
+        // them. The standing hubs cannot answer this: getattestationresponsibleset
+        // landed in hub 71ad2eb and that stack predates it, so only a venue hub
+        // can, and only while it is up.
+        const federation = await captureFederationState(venue, requestId, providerId + ':pre-assert')
+        console.log('AT1 FEDERATION CAPTURE ' + JSON.stringify(federation, null, 1))
+
         const rowsPerIndexer = []
         for (const ix of venue.indexers) {
             const rows = await venue.readMirrorRows(ix.index, { requestId })

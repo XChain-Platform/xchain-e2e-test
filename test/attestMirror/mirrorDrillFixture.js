@@ -285,8 +285,16 @@ async function stakeDrillIdentities (opts) {
         // one address staking five times is not the same roster as five
         // addresses staking once.
         const stakerLabel = label + '-staker-' + i
-        const addr = await cryptoHelper.getNewFundedAddress(
-            stakerLabel, COIN, NETWORK, null, 'legacy', 0, 0.02)
+        // WRAPPED, and the reason is a hole found only by driving it: this call
+        // seeds gas INTERNALLY (`seedGas` defaults true, and cryptoHelper mints
+        // 100 XCHAIN inside it), so the mint that actually died in run 1 was one
+        // level BELOW the ensureGasBalance below, which was the only mint the
+        // first version of this protection covered. Retry is safe: getNewAddress
+        // is keyed by label and returns the same wallet, so a second attempt
+        // funds the same address rather than minting a new identity.
+        const addr = await withWedgeClear('funding and gas seed for ' + stakerLabel,
+            () => cryptoHelper.getNewFundedAddress(
+                stakerLabel, COIN, NETWORK, null, 'legacy', 0, 0.02))
 
         // Recorded BEFORE the stake exists, so the key is on disk no matter
         // where the run dies afterwards.
