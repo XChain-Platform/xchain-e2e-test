@@ -1746,6 +1746,7 @@ class AttestMirrorVenue {
         // and the barrier never opening on mirror content.
         await this._conn.query('CREATE DATABASE IF NOT EXISTS `' + ident(ix.mirrorDbName, 'database name') + '`');
         await this._provisionMirrorSchema(ix.mirrorDbName);
+        await this._seedMirrorPrices(ix.mirrorDbName);
 
         const env = buildIndexerEnv({
             coin:    coinCode(this.coin),
@@ -1802,6 +1803,64 @@ class AttestMirrorVenue {
      * single-host topology that connection is a full schema, so making it one
      * here matches production rather than padding.
      */
+    /**
+     * Seed the oracle prices the venue's OWN indexers price actions against.
+     *
+     * WHY THIS EXISTS, and it is the defect that made every AT1 run fail in a
+     * way that looked like a mirror fault. A priced action (a contract DEPLOY's
+     * constructor, and anything the VM charges for) is refused outright when the
+     * indexer has no current price: "invalid: no current oracle price for
+     * BTC/USD (missing or stale beyond 1800s)". The harness seeds prices into the
+     * STANDING indexer's database, which is where the standing node reads them,
+     * and that is why the standing node admits the drill's deploy.
+     *
+     * A venue indexer does not read there. It reads its own HUB_DB_NAME, the
+     * mirror database this venue provisions, and nothing ever wrote a price into
+     * it. So on the venue nodes the constructor was invalid, the contract never
+     * existed, every later "ask" failed with CONTRACT_ACTION_INDEX (unknown),
+     * nothing was emitted, and NO attestation request row was ever written.
+     * With no pending request the mirror applier had nothing to bind, which is
+     * why it applied nothing and said nothing while the delivered row sat there.
+     *
+     * The two nodes therefore disagreed about the same block, and the drill read
+     * execution status from the standing one, so it never noticed.
+     *
+     * Seeded at BOTH the chain time and wall clock, the same pair and the same
+     * shape the harness uses, because the staleness window is measured against
+     * whichever the reader treats as now.
+     */
+    async _seedMirrorPrices(mirrorDbName) {
+        const db = ident(mirrorDbName, 'database name');
+        const tick = coinCode(this.coin);
+        let chainTime = 0;
+        try {
+            const r = await this._conn.query(
+                'SELECT MAX(block_time) AS t FROM `' + ident(this._live.decoder.database, 'database name') + '`.blocks');
+            chainTime = Number(r[0] && r[0].t) || 0;
+        } catch (_) { chainTime = 0; }
+        const wallTime = Math.floor(Date.now() / 1000);
+        const stamps = [chainTime, wallTime].filter((t) => t > 0);
+
+        const rows = [];
+        for (const pair of ['XCHAIN/USD', tick + '/USD']) {
+            const price = pair === 'XCHAIN/USD' ? '2.00000000' : '100000.00000000';
+            stamps.forEach((t, i) => rows.push([9000000 + i * 1000 + rows.length, pair, price, t]));
+        }
+        for (const [round, pair, price, ts] of rows) {
+            await this._conn.query(
+                'INSERT INTO `' + db + '`.price_snapshots ' +
+                '(round_number, coin_pair, price, reference_block, reference_chain, block_timestamp, ' +
+                ' validator_count, consensus_round, consensus_proof, status) ' +
+                "VALUES (?, ?, ?, 0, 'BTC', ?, 1, 1, '[]', 'finalized') " +
+                'ON DUPLICATE KEY UPDATE price = VALUES(price), block_timestamp = VALUES(block_timestamp)',
+                [round, pair, price, ts]);
+        }
+        console.log('attestMirrorVenue[' + this.label + ']: seeded ' + rows.length +
+            ' oracle price row(s) into ' + mirrorDbName + ' (chain_time ' + chainTime +
+            ', wall_time ' + wallTime + '). Without these the venue indexers refuse every priced ' +
+            'action and no attestation request is ever emitted on them.');
+    }
+
     async _provisionMirrorSchema(dbName) {
         const dir = path.join(this.repoRoot, 'xchain-indexer', 'src', 'sql');
         await this._conn.query('USE `' + ident(dbName, 'database name') + '`');
