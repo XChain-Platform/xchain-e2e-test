@@ -153,7 +153,9 @@ describe('AT3: the deadline decides whether a mirrored response ever binds', fun
         // Mining is resumed by each case's own finally; this is the belt to that
         // brace, because a case that threw before its finally would otherwise leave
         // the shared venue's miner paused for every drill after it.
-        try { await regtestMinerConnector.resumeMining() } catch (_) { /* never paused */ }
+        try { await regtestMinerConnector.resumeMining() } catch (e) {
+            console.log('AT3 teardown: resumeMining failed (' + (e && e.message) + '); the shared miner may still be paused')
+        }
         if (testServer) await testServer.close()
         if (venue) await venue.stop()
     })

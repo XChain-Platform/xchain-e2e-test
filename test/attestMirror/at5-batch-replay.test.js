@@ -74,6 +74,7 @@ const {
     attestRequestWatermark,
     settleOrReport,
     widenArithmetic,
+    jsonSafe,
 } = require('./mirrorDrillWaits')
 const vmHelper     = require('../helpers/vmHelper')
 const chainRail    = require('../helpers/chainRail')
@@ -88,6 +89,16 @@ const BATCH_WINDOW_S = 30
 // Above the gossip hop budget, as the venue requires, and above the window so a
 // row destined for a window is written a whole margin before it can close.
 const FORWARD_S = 8
+
+// How often the drill re-pushes the node's live BTC tip to every hub. Half the
+// miner's 6 s ceiling on the drive venue, so no hub ever holds a tip more than
+// one block stale; cheap (five fire-and-forget RPCs).
+const TIP_FEED_MS = 3000
+
+// DOGE funded to the publisher. Two DOGE covered 500 windows at 0.004 each and was
+// never the limiter (confirmation timing was, see the marker wait's nudge); twenty
+// removes money from the list entirely.
+const PUBLISHER_FUND_DOGE = 20.0
 
 const DEADLINE_BLOCKS = 60
 const BURIAL_BLOCKS   = 6
@@ -104,8 +115,24 @@ const BATCH_CONTINUATION_VERSION = 6
 // The bodies are deliberately incompressible so that two responses exceed one
 // 8189-byte wire and the batch must chunk, which is the only way a v6 appears at
 // all. Compressible filler would ride in a single head and the continuation half of
-// this clause would silently never be exercised.
+// this clause would silently never be exercised. Entropy bytes per body; carried as
+// base64 (6 bits per character, so deflate recovers little), which puts two bodies
+// at roughly 12 KB on the wire against the 8189-byte ceiling.
 const INCOMPRESSIBLE_BYTES = 6000
+
+/** SHA-256 chain seeded on `seed`, base64, INCOMPRESSIBLE_BYTES of entropy. */
+function deterministicFiller (seed) {
+    const crypto = require('crypto')
+    const chunks = []
+    let h = crypto.createHash('sha256').update('at5:' + seed).digest()
+    let n = 0
+    while (n < INCOMPRESSIBLE_BYTES) {
+        chunks.push(h)
+        n += h.length
+        h = crypto.createHash('sha256').update(h).digest()
+    }
+    return Buffer.concat(chunks).subarray(0, INCOMPRESSIBLE_BYTES).toString('base64')
+}
 
 const CONTRACT_CODE = `
 module.exports = {
@@ -154,7 +181,7 @@ module.exports = {
  * which does not override variables already present, so the WIF is handed to the
  * hub child through its environment and no file is written with a key in it.
  */
-async function stageDogeSigner (label) {
+async function stageDogeSigner (label, rail) {
     const os     = require('os')
     const fs     = require('fs')
     const path   = require('path')
@@ -164,13 +191,13 @@ async function stageDogeSigner (label) {
 
     // Funded ON the DOGE rail, which is the whole point: the publisher pays a real
     // fee on that chain for every window it broadcasts.
-    const funded = await chainRail.withRail(dogeRail, async () => {
+    const funded = await chainRail.withRail(rail, async () => {
         // WRAPPED for the same reason as the relayer in AT6: the funding call mints
         // gas internally, so it starves under the wedge, and it is keyed by label so
         // a retry re-funds one publisher rather than minting a second wallet.
         const addr = await withWedgeClear('funding the batch publisher on the other rail',
             () => cryptoHelper.getNewFundedAddress(
-                label + '-batch-publisher', COIN, NETWORK, null, 'legacy', 0, 2.0))
+                label + '-batch-publisher', COIN, NETWORK, null, 'legacy', 0, PUBLISHER_FUND_DOGE))
         await regtestMinerConnector.generateBlocks(2)
         await utxoTrackerConnector.quiesce({
             timeoutMs: 60_000, pollMs: 250, regtestMiner: regtestMinerConnector,
@@ -226,7 +253,26 @@ async function stageDogeSigner (label) {
     // load, and discovering that from five dead children four minutes later costs
     // the whole prologue.
     const { loadSignerHooks } = loadHubModule('src/lib/signer-loader.js')
-    const hooks = loadSignerHooks(Object.assign({}, process.env, env))
+    // THE SIGNER READS process.env, NOT THE OBJECT THE LOADER IS HANDED: the
+    // loader uses its env argument only to find HUB_SIGNER_MODULE, then
+    // `require`s it, and the module reads DOGE_WIF and friends off process.env
+    // after a dotenv load of its own (empty) directory. Handed only the object,
+    // the probe failed with `DOGE_WIF is not set in <dir>/.env` on 2026-09-05
+    // while the hub children, which receive the same variables in THEIR
+    // environment, would have loaded it fine. So the variables are placed in
+    // this process's environment for the load and taken out again. Still
+    // never on disk.
+    const previous = {}
+    for (const k of Object.keys(env)) { previous[k] = process.env[k]; process.env[k] = env[k] }
+    let hooks
+    try {
+        hooks = loadSignerHooks(Object.assign({}, process.env, env))
+    } finally {
+        for (const k of Object.keys(env)) {
+            if (previous[k] === undefined) delete process.env[k]
+            else process.env[k] = previous[k]
+        }
+    }
     assert.ok(hooks && hooks.broadcastFn,
         'the hub signer loader did not wire a broadcast hook from the staged signer, so every window ' +
         'would defer with "no broadcast pipeline configured"')
@@ -245,8 +291,16 @@ describe('AT5: the responses of a window land on chain as one batch', function (
     let contract   = null
     let publisher  = null
     let dogeRail   = null
+    // The live BTC tip feeder (see the before-hook), and its re-entrancy latch so a
+    // slow push never stacks a second one behind it.
+    let tipFeeder   = null
+    let tipFeedBusy = false
+    // The BTC node connector as it stands before the first rail switch (see
+    // pushLiveTipToAllHubs for why the global cannot be read from a timer).
+    let btcNode = null
 
     before(async function () {
+        btcNode = nodeConnector
         // The DOGE rail first: the signer's wallet is funded on it, and every wait
         // below confirms batches through it.
         try {
@@ -259,12 +313,7 @@ describe('AT5: the responses of a window land on chain as one batch', function (
             return
         }
 
-        // BEFORE ANY REQUEST. The venue's indexers replay the borrowed chain from
-        // scratch, so at this point they are far behind the tip. A request made now
-        // sits at a block they have not reached, and its response reads as "not
-        // applied" when the node simply has not got there yet.
-        await waitForVenueIndexersAtTip(venue)
-        publisher = await stageDogeSigner('at5')
+        publisher = await stageDogeSigner('at5', dogeRail)
 
         // REAL TLS, not http. The provider refuses a non-https payload before any
         // network work, so a plain-HTTP server resolves every round provider_error
@@ -272,11 +321,15 @@ describe('AT5: the responses of a window land on chain as one batch', function (
         testServer = await startAttestTestServer({
             path: '/blob',
             handler: (req, res) => {
-                // Incompressible: random hex, so deflate cannot shrink the batch body
-                // below the wire ceiling and the chunking under test actually happens.
-                const filler = require('crypto').randomBytes(INCOMPRESSIBLE_BYTES / 2).toString('hex')
+                // Incompressible AND DETERMINISTIC PER URL. Every responsible hub
+                // fetches this URL for itself and the round needs 2f+1 IDENTICAL
+                // bodies; `randomBytes` per request (passes 6 and 7, 2026-09-05) gave
+                // each hub its own body, so every round ended `no consensus (3
+                // proposals diverged)`, `status=no_quorum`, and the mirror skips a
+                // no-quorum round by design. A SHA-256 chain seeded on the URL is
+                // as incompressible as random bytes and the same on every fetch.
                 res.writeHead(200, { 'Content-Type': 'application/json' })
-                res.end(JSON.stringify({ path: String(req.url), filler: filler }))
+                res.end(JSON.stringify({ path: String(req.url), filler: deterministicFiller(String(req.url)) }))
             },
         })
         testUrl = testServer.url
@@ -298,26 +351,90 @@ describe('AT5: the responses of a window land on chain as one batch', function (
             return
         }
 
+        // BEFORE ANY REQUEST, and AFTER the venue exists: this call sat above the
+        // venue's construction and dereferenced null in 92 ms on 2026-09-05, so
+        // AT5 had never reached its first assertion. The venue indexers are seeded
+        // from the standing node and still need to catch its tip before a request
+        // made here can be applied on them.
+        await waitForVenueIndexersAtTip(venue)
+
         // THE ANCHOR. Without a BTC chain tip every hub defers every window with a
         // latched warning and publishes nothing, which reads exactly like a publisher
         // that is broken. Pushed to every hub, since any of them may be elected.
-        const tip = Number(await nodeConnector.getBlockCount())
-        const block = await nodeConnector.getBlock(await nodeConnector.getBlockHash(tip))
-        for (const hub of venue.hubs) {
-            const res = await hub.connector.call('pushchaintip', {
-                coin: 'bitcoin', network: venue.network,
-                block_height: tip, block_time: Number(block.time),
-            }).catch((e) => ({ error: String(e && e.message) }))
-            assert.ok(res && !res.error,
-                'hub ' + hub.index + ' refused the chain tip push, so it will defer every window: ' +
-                JSON.stringify(res))
+        //
+        // AND KEPT LIVE, NOT PINNED. The same `chain_tips` row is the FIRST source
+        // `XChainHub._resolveBtcLatestBlock` consults for every attestation round
+        // (Consensus.js), preferred over the live indexer while its block_time is
+        // younger than MAX_TIP_AGE_S (default twice the oracle round interval, 20
+        // min). Pass 6 (2026-09-05) pushed the tip ONCE at 7405: the responsible
+        // hubs then measured every request against a height the 6 s miner left
+        // behind within seconds, saw it as unconfirmed, and executed nothing; the
+        // 60-block deadline (about 6 min) expired long before the row went stale,
+        // so 0 of 5 hubs ever held a finalized row. A co-located indexer re-pushes on
+        // every block in production; the venue's hubs have no such feeder, so this
+        // drill is one, for its whole life, cleared in the after-hook.
+        const first = await pushLiveTipToAllHubs()
+        for (const [i, res] of first.entries()) {
+            assert.ok(!res.error,
+                'hub ' + i + ' refused the chain tip push (or was unreachable), so it will defer ' +
+                'every window and co-sign none: ' + res.error + '; last failures: ' +
+                JSON.stringify(venue.hubs[i].connector.lastFailures || []))
         }
-        console.log('AT5: pushed BTC tip ' + tip + ' to all ' + venue.hubs.length + ' hubs')
+        console.log('AT5: pushed BTC tip ' + first.tip + ' to all ' + venue.hubs.length + ' hubs (status success on each); ' +
+            'feeding the live tip every ' + (TIP_FEED_MS / 1000) + ' s from here on')
+        let feedFailuresReported = 0
+        tipFeeder = setInterval(() => {
+            if (tipFeedBusy) return
+            tipFeedBusy = true
+            pushLiveTipToAllHubs().then((r) => {
+                const bad = r.map((x, i) => (x.error ? 'hub ' + i + ': ' + x.error : null)).filter(Boolean)
+                // Said once, not every 3 s: a refusal that starts mid-drill is the
+                // thing to read, and a wall of the same line hides it.
+                if (bad.length && feedFailuresReported++ === 0) console.log('AT5: tip feed refused: ' + bad.join('; '))
+            }).catch(() => null).then(() => { tipFeedBusy = false })
+        }, TIP_FEED_MS)
 
         contract = await deployRequestContract({ label: 'at5', code: CONTRACT_CODE })
     })
 
+    /**
+     * Push the node's CURRENT BTC tip (height and block time) to every venue hub.
+     * Returns the per-hub results (null where a hub refused or was unreachable),
+     * with `.tip` set to the height pushed. `XChainHubConnector` exposes `_call(body)`
+     * over a full JSON-RPC body and returns the RESULT, or null when every endpoint
+     * failed or the hub answered with an error. There is no `.call`:
+     * `hub.connector.call is not a function` was this drill's first line past its
+     * venue boot on 2026-09-05, the same shape the federation capture documents.
+     */
+    async function pushLiveTipToAllHubs () {
+        // THE BTC NODE CAPTURED BEFORE ANY RAIL SWITCH, never the global. `chainRail.withRail`
+        // swaps `global.nodeConnector` (and its siblings) to the DOGE rail for the duration
+        // of every DOGE nudge, and this runs on a timer: pass 9 (2026-09-05) read the
+        // DOGE height through the global mid-swap and pushed it as the BTC tip, so every
+        // hub's batch anchor became the DOGE height (4236, 4252, ...).
+        const tip = Number(await btcNode.getBlockCount())
+        const block = await btcNode.getBlock(await btcNode.getBlockHash(tip))
+        const results = []
+        for (const hub of venue.hubs) {
+            // `coin` is the hub's chain TICKER: `validateChain` admits BTC, LTC and
+            // DOGE and nothing else, and a refused push comes back as a RESULT
+            // object carrying `error`, not as a JSON-RPC error and not as null.
+            // Passes 6 and 7 (2026-09-05) sent `bitcoin`, were refused on every hub
+            // every time, and read the refusal as success through a null check;
+            // the followers then held no chain_tips row and refused to co-sign every
+            // window (`tip unresolved: no BTC chain_tips row exists`).
+            const res = await hub.connector._call({
+                jsonrpc: '2.0', id: Date.now(), method: 'pushchaintip',
+                params: { coin: 'BTC', network: venue.network, block_height: tip, block_time: Number(block.time) },
+            }).catch((e) => ({ error: String(e && e.message) }))
+            results.push(res && !res.error && String(res.status) === 'success' ? res : { error: jsonSafe(res) })
+        }
+        results.tip = tip
+        return results
+    }
+
     after(async function () {
+        if (tipFeeder) { clearInterval(tipFeeder); tipFeeder = null }
         if (testServer) await testServer.close()
         if (venue) await venue.stop()
         // The staged signer holds a WIF only in the hub children's environment, but the
@@ -420,19 +537,29 @@ describe('AT5: the responses of a window land on chain as one batch', function (
         for (const id of ids) await waitForMirrorRowEverywhere(venue, id, null, {
                 mineWhileWaiting: { perPoll: 1, maxBlocks: widenArithmetic(DEADLINE_BLOCKS).safeCap },
             })
-        for (const id of ids) await waitForAppliedEverywhere(venue, id)
+        // Mined under, as AT1's applied wait is: the applier runs inside the block
+        // loop, so an idle chain never applies a row that is already valid.
+        for (const id of ids) await waitForAppliedEverywhere(venue, id, null,
+                { mineWhileWaiting: { perPoll: 1, maxBlocks: widenArithmetic(DEADLINE_BLOCKS).safeCap } })
         console.log('AT5: ' + ids.length + ' responses finalized and applied; waiting for their window to close')
 
         // The window has to close, be elected, be signed and be broadcast. Several
         // windows of patience, because rank decides who publishes and when.
         const sent = await untilOrClearDogeStall(async () => {
+            // One DOGE block per poll, IN SEQUENCE with everything else this drill
+            // does (a timer-driven cadence raced the rail switch, pass 9). The
+            // publisher pays each window out of the previous window's CHANGE and the
+            // encoder spends confirmed outputs only; with nothing mining DOGE here,
+            // pass 8 saw 8 of 22 windows fail `insufficient funds`, the responses'
+            // window among them, and the publisher never retries a failed broadcast.
+            await nudgeDoge()
             const markers = await readMarkers()
             const hit = markers.filter((m) => Number(m.row_count) > 0 &&
                 (String(m.status) === 'sent' || String(m.status) === 'landed'))
             return { ok: hit.length > 0, hit: hit, markers: markers }
         }, { timeoutMs: 30 * 60 * 1000, intervalMs: 5000, tipProbe: venueTipProbe(venue, 0) })
         assert.ok(sent.ok,
-            'no hub ever published a non-empty window. Markers seen: ' + JSON.stringify(sent.markers) +
+            'no hub ever published a non-empty window. Markers seen: ' + jsonSafe(sent.markers) +
             '. A window with rows that never reaches `sent` is either unelected, unsigned, unanchored or ' +
             'unfunded, and the hub logs say which. Publication is ELECTED, so the hub that should have ' +
             'published is not knowable here and every tail follows.\n' + allHubTails(venue))
@@ -450,7 +577,7 @@ describe('AT5: the responses of a window land on chain as one batch', function (
         }, { timeoutMs: 20 * 60 * 1000, intervalMs: 5000, tipProbe: venueTipProbe(venue, 0) })
         assert.ok(landed.ok,
             'the published window never appeared on DOGE as an ATTEST v5. Batch actions seen: ' +
-            JSON.stringify(landed.actions))
+            jsonSafe(landed.actions))
 
         const head = landed.heads[0]
         assert.strictEqual(String(head.verdict), 'valid',
@@ -491,7 +618,7 @@ describe('AT5: the responses of a window land on chain as one batch', function (
             return { ok: rows.every((v) => v !== null && v !== undefined), rows: rows }
         }, { timeoutMs: 20 * 60 * 1000, intervalMs: 5000, tipProbe: venueTipProbe(venue, 0) })
         assert.ok(linked.ok,
-            'batch_action_index was never set on the mirrored rows: ' + JSON.stringify(linked.rows) +
+            'batch_action_index was never set on the mirrored rows: ' + jsonSafe(linked.rows) +
             '. The batch landed, so the gap is on the DOGE-parse to hub-push to mirror road.')
         console.log('AT5: batch_action_index set on every carried row')
     })
@@ -507,7 +634,7 @@ describe('AT5: the responses of a window land on chain as one batch', function (
             return { ok: hit.length > 0, hit: hit, markers: markers }
         }, { timeoutMs: 30 * 60 * 1000, intervalMs: 5000, tipProbe: venueTipProbe(venue, 0) })
         assert.ok(empty.ok,
-            'no empty window was ever published. Markers: ' + JSON.stringify(empty.markers) +
+            'no empty window was ever published. Markers: ' + jsonSafe(empty.markers) +
             '. An empty window that is skipped rather than published leaves a hole a chain-only node ' +
             'cannot tell from a window it simply did not receive.')
 

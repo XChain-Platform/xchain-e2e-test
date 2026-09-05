@@ -73,6 +73,9 @@ const {
     attestRequestWatermark,
     settleOrReport,
     widenArithmetic,
+    jsonSafe,
+    feeLines,
+    rawAttestRewards,
 } = require('./mirrorDrillWaits')
 const vmHelper          = require('../helpers/vmHelper')
 const cryptoHelper      = require('../cryptoHelper')
@@ -92,9 +95,22 @@ const ALREADY_VERDICT_PREFIX = 'invalid: REQUEST already'
 const DEADLINE_BLOCKS = 60
 const BURIAL_BLOCKS   = 6
 
-// The per-signer split floors at 8 decimals, so the pool keeps a remainder of at
-// most one unit in the last place per signer. Anything beyond that is a carve-out.
-const FEE_DECIMALS = 8
+// The per-signer split floors at the GAS token's ISSUE decimals (attest.js
+// `feeCap = min(8, gasDecimals)`), so the pool keeps a remainder of at most one
+// unit in the last place per signer. Anything beyond that is a carve-out.
+// MEASURED 2026-09-05 on the standing BTC regtest indexer: XCHAIN's one valid
+// ISSUE row carries `decimals 0`, so a unit here is a WHOLE XCHAIN. The earlier
+// value of 8 assumed a divisible token and would have failed the residual bound
+// on any widened set.
+const FEE_DECIMALS = 0
+
+// The request fee each of this drill's two requests escrows, in XCHAIN. Small
+// against the owner's minted gas, and chosen so the split leaves a POSITIVE whole
+// share for every responsible-set size the widening ladder can reach (3 to 6):
+// 6 / 3 = 2, 6 / 4 = 1, 6 / 5 = 1. With `2` (pass 5, 2026-09-05) a 3-way split
+// floored to 0 at 0 decimals, the writer was never called, and the whole escrow
+// stayed in the REWARD pool with no `attest_fee` row to read.
+const FEE_XCHAIN = '6'
 
 const CONTRACT_CODE = `
 module.exports = {
@@ -104,7 +120,12 @@ module.exports = {
             xchain.getInputParam(1),
             'handleResponse',
             ['ctx-at6'],
-            { redundancy: 3, deadlineBlocks: ${DEADLINE_BLOCKS} }
+            // A REAL ESCROW, because the money half of this drill is a statement
+            // about how the escrow is split: without feeTick/feeAmount the request
+            // is fee=none, fee_amount is NULL, and the split assertions cannot even
+            // start (measured 2026-09-05: DecimalError on the null). The fee payer is
+            // the EXECUTE caller, the contract owner, whom the fixture mints gas to.
+            { redundancy: 3, deadlineBlocks: ${DEADLINE_BLOCKS}, feeTick: 'XCHAIN', feeAmount: '${FEE_XCHAIN}' }
         );
         return requestId;
     },
@@ -184,9 +205,15 @@ describe('AT6: above the flag day the chain cannot deliver a response, and the e
         })
         await regtestMinerConnector.generateBlocks(1)
         await settleOrReport('at6')
-        assert.ok(sent && sent.txHash,
+        // THE HELPER RETURNS THE HASH AS A BARE STRING (`createAndSendTransaction`
+        // ends in `return spentTxHash != null ? spentTxHash : txHash`), not an
+        // object. Reading `.txHash` off it declared a broadcast that the log showed
+        // succeeding, two transactions and all, as "not broadcast" (2026-09-05).
+        // Same defect shape as the option-shape faults: check the SHAPE first.
+        const txHash = (typeof sent === 'string') ? sent : (sent && sent.txHash)
+        assert.ok(txHash,
             label + ': the on-chain ATTEST v1 was not broadcast, so the gate was never offered anything')
-        return String(sent.txHash)
+        return String(txHash)
     }
 
     it('refuses an on-chain v1, applies the mirror row anyway, and settles the whole escrow', async function () {
@@ -230,7 +257,7 @@ describe('AT6: above the flag day the chain cannot deliver a response, and the e
         }, { timeoutMs: 15 * 60 * 1000, intervalMs: 3000, tipProbe: venueTipProbe(venue, 0) })
         assert.ok(settled.ok,
             'the two v1 rows this case needs did not both appear on both indexers. Rows seen: ' +
-            JSON.stringify((settled.perIndexer || []).map((rows) =>
+            jsonSafe((settled.perIndexer || []).map((rows) =>
                 rows.map((r) => ({ action: r.action_index, tx: r.tx_index, verdict: r.verdict })))) +
             '\n' + venue.logTail('indexer0'))
 
@@ -286,10 +313,14 @@ describe('AT6: above the flag day the chain cannot deliver a response, and the e
             assert.deepStrictEqual(bcast, [],
                 'indexer ' + ix.index + ' wrote ' + bcast.length + ' attest_bcast row(s) for a mirror-era ' +
                 'request. Nobody broadcasts above the height, so the reimbursement is retired and the row ' +
-                'type must not appear: ' + JSON.stringify(bcast))
+                'type must not appear: ' + jsonSafe(bcast))
 
+            const rawRewards = fees.length > 0 ? '' : await rawAttestRewards(venue, ix.index)
             assert.ok(fees.length > 0,
-                'indexer ' + ix.index + ' paid no attest_fee at all, so the escrow went nowhere')
+                'indexer ' + ix.index + ' paid no attest_fee at all, so the escrow went nowhere\n' +
+                feeLines(venue, 'indexer' + ix.index) + '\n' + rawRewards +
+                '\n  drill scoped on round_reference ' + Number(local.action_index) +
+                ' (v0 action of ' + String(requestId).slice(0, 12) + ')')
 
             // THE WHOLE ESCROW. Deliberately expressed as a residual rather than as
             // an expected per-signer amount: the number of payees comes from the
@@ -348,7 +379,7 @@ describe('AT6: above the flag day the chain cannot deliver a response, and the e
             return { ok: !!req && String(req.request_status) === 'fulfilled', req: req }
         }, { timeoutMs: 15 * 60 * 1000, intervalMs: 3000, tipProbe: venueTipProbe(venue, 0) })
         assert.ok(done.ok, 'the second request never reached fulfilled: ' +
-            JSON.stringify(done.req) + '\n' + venue.logTail('indexer0'))
+            jsonSafe(done.req) + '\n' + venue.logTail('indexer0'))
 
         await broadcastStaleOnChainResponse(requestId, 'fulfilled')
 

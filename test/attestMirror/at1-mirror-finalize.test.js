@@ -88,9 +88,19 @@ const FIXED_BODY = '{"score":42,"meta":"at1-mirror"}'
 // deadline_block + 1 and would mark the request expired mid-drill; that is
 // harmless to the venue but pure noise in the logs at the moment something else
 // is being diagnosed.
-const DEADLINE_BLOCKS = 60
+// PER PROVIDER, because the registry caps each provider's window and the VM
+// gateway throws at call time above it: `http_get` allows 100 blocks, `llm`
+// only 20 (xchain-indexer providerRegistry.js DEFAULTS.llm
+// deadline_window_blocks). One shared 60 made every llm EXECUTE fail before a
+// round could start (measured 2026-09-05, pass 3: `execution row EXISTS for ask
+// but its status is "failed"`), which read as a provider problem and was not.
+const DEADLINE_BLOCKS = Object.freeze({ http_get: 60, llm: 20 })
 
-const CONTRACT_CODE = `
+// How far the request is buried before the hubs are expected to fetch it.
+const BURIAL_BLOCKS = 6
+
+function contractCode (deadlineBlocks) {
+    return `
 module.exports = {
     ask: function(xchain) {
         var requestId = xchain.attestation.request(
@@ -98,7 +108,7 @@ module.exports = {
             xchain.getInputParam(1),
             'handleResponse',
             ['ctx-at1'],
-            { redundancy: 3, deadlineBlocks: ${DEADLINE_BLOCKS} }
+            { redundancy: 3, deadlineBlocks: ${deadlineBlocks} }
         );
         xchain.state.set('pending_request_id', requestId);
         return requestId;
@@ -112,6 +122,7 @@ module.exports = {
     }
 };
 `
+}
 
 /**
  * Can THIS box serve the llm provider, asked with the venue's own predicate?
@@ -178,9 +189,18 @@ describe('AT1: an ATTEST response finalizes over P2P with no transaction of its 
         // box we have; probed, the venue still refuses if the probe and the
         // reality ever disagree, because start() re-checks with the same
         // predicate rather than trusting this flag.
+        // THE HUB CREDENTIAL TRAVELS WITH THE DRILL, not with the venue. The venue
+        // builds each hub child's environment from scratch (HUB_CLAUDE_CONFIG_DIR
+        // only, by policy), and on the venue box the hub credential is an OAuth
+        // token in the harness environment rather than a populated directory
+        // (`~/.claude-xchain` holds a stub). Every hub's fetch failed with
+        // `llm: Set HUB_CLAUDE_CONFIG_DIR` on 2026-09-05 until the token reached
+        // the children. Forwarded only when present, never written anywhere.
+        const hubCredentialEnv = process.env.HUB_CLAUDE_CODE_OAUTH_TOKEN
+            ? { HUB_CLAUDE_CODE_OAUTH_TOKEN: process.env.HUB_CLAUDE_CODE_OAUTH_TOKEN } : {}
         venue = new AttestMirrorVenue({
             label: 'at1', identities: staked.identities, needsLlm: llm.ok,
-            hubExtraEnv: testServer.hubEnv,
+            hubExtraEnv: Object.assign({}, testServer.hubEnv, hubCredentialEnv),
         })
         up = await venue.start()
         if (!up) {
@@ -221,8 +241,8 @@ describe('AT1: an ATTEST response finalizes over P2P with no transaction of its 
         // confuse. Cheaper and more durable than teaching the shared helper to
         // disambiguate, which is every e2e suite's code.
         contracts = {
-            http_get: await deployRequestContract({ label: 'at1http', code: CONTRACT_CODE }),
-            llm:      await deployRequestContract({ label: 'at1llm',  code: CONTRACT_CODE }),
+            http_get: await deployRequestContract({ label: 'at1http', code: contractCode(DEADLINE_BLOCKS.http_get) }),
+            llm:      await deployRequestContract({ label: 'at1llm',  code: contractCode(DEADLINE_BLOCKS.llm) }),
         }
     })
 
@@ -273,7 +293,7 @@ describe('AT1: an ATTEST response finalizes over P2P with no transaction of its 
 
         // The hubs need the request buried by their own confirmations before they
         // fetch, and they poll rather than subscribe.
-        await regtestMinerConnector.generateBlocks(6)
+        await regtestMinerConnector.generateBlocks(BURIAL_BLOCKS)
         await settleStack()
 
         // FINALIZATION IS READ OFF THE MIRROR, never off a chain row: the whole
@@ -310,22 +330,13 @@ describe('AT1: an ATTEST response finalizes over P2P with no transaction of its 
         // captures the federation state before AND after, so the responsible set
         // is recorded while the request is still pending, which is the only
         // moment it can be read at all.
-        const rowsPerIndexer = await waitForMirrorRowEverywhere(venue, requestId, null, {
-            // MINES WHILE WAITING: the responsible-set widening ladder is
-            // height-driven, so a still chain sits at widen 0 for the whole
-            // budget and a round that needs one more slot never gets it.
-            // THE OBJECT FORM, which is the only one the wait reads. It takes
-            // `{perPoll, maxBlocks}`; a bare number leaves `.perPoll` undefined,
-            // `Number(undefined) || 0` is 0, and mining is then silently OFF.
-            // This file was the ONLY caller passing a number - every sibling
-            // drill already passes the object - and that is why AT1 alone never
-            // reached an applied row: on a chain nobody else is mining, the
-            // response was delivered, valid and applicable, with no next block
-            // to apply it in. Measured 2026-09-05: the venue indexers parked at
-            // block 6310 stamped 41 s BEFORE the response effective time and
-            // stayed there for the whole 15-minute wait.
-            mineWhileWaiting: { perPoll: 1, maxBlocks: widenArithmetic(DEADLINE_BLOCKS).safeCap },
-        })
+        // NO MINING UNDER THE ROW WAIT. The widening ladder it once served is
+        // never needed on this venue: the roster is adopted, every draw is
+        // venue-only, and every finalized round today closed at widen 0 (AT3 and
+        // AT4 wait the same way). What mining here DID do was spend the llm
+        // request's 20-block window before its round could finish. The block the
+        // applier needs is mined under the applied wait below instead.
+        const rowsPerIndexer = await waitForMirrorRowEverywhere(venue, requestId)
 
         for (const [i, row] of rowsPerIndexer.entries()) {
             assert.strictEqual(String(row.status), 'ok',
@@ -372,8 +383,14 @@ describe('AT1: an ATTEST response finalizes over P2P with no transaction of its 
         // time has passed, so reading straight after the row lands asks the
         // question a block too early and gets a null that looks exactly like an
         // applier that never ran.
+        // MINES WHILE WAITING, capped INSIDE this provider's own window: the
+        // burial blocks are already spent, and mining past the deadline turns an
+        // applier verdict into an expiry. The object form is the only one the wait
+        // reads; a bare number silently disabled mining here for ten sessions.
+        const deadline = DEADLINE_BLOCKS[providerId]
+        const cap = Math.max(1, widenArithmetic(deadline).safeCap - BURIAL_BLOCKS)
         const appliedRows = await waitForAppliedEverywhere(venue, requestId, null,
-            { mineWhileWaiting: { perPoll: 1, maxBlocks: widenArithmetic(DEADLINE_BLOCKS).safeCap } })
+            { mineWhileWaiting: { perPoll: 1, maxBlocks: cap } })
 
         const applieds = []
         for (const [i, applied] of appliedRows.entries()) {

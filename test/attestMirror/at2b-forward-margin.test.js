@@ -102,7 +102,13 @@ const FORWARD_S = 5
 const DELIVERY_DELAY_MS = 25_000
 
 // The grace on the affected indexer, above the delay so the wait can absorb it.
-const BARRIER_GRACE_S = 70
+// WELL above the barrier's per-attempt timeout too (HUB_PRICE_SYNC_TIMEOUT_MS,
+// 60 s), because that timeout is the ONLY thing that sets `stallReason`: a wait
+// that resolves inside one attempt parks the node silently. At 70 s the reason
+// was readable for ten seconds per block, and on 2026-09-05 the drill missed it
+// entirely (indexer 1 had deferred 6761 by name at 15:58:47, before the poll
+// began). At 100 s a fresh block parks the node for forty readable seconds.
+const BARRIER_GRACE_S = 100
 
 // The indexer whose delivery is delayed. Its peer keeps every grace at zero and an
 // unfiltered feed, which is what makes "one waiting, one not" attributable.
@@ -222,18 +228,20 @@ describe('AT2 second clause: delivery past the forward margin holds the barrier 
 
         // The PROMPT indexer's mirror is untouched, so it gets the row on the ordinary
         // path and this establishes the round finalized at all.
-        // MINES WHILE WAITING for the same reason its neighbours do: the widening
-        // ladder is height-driven, so a still chain never leaves widen 0 and a draw
-        // holding a key no live hub holds can never finalize. This drill cannot use
-        // the shared row wait (one of its indexers is starved on purpose), so it
-        // carries the same option on its own loop.
+        // NO MINING UNDER THIS WAIT. Every block mined here is a block the DELAYED
+        // indexer must still clear its barrier on later, one attempt at a time, and
+        // that backlog is what hid the hold on 2026-09-05: by the time this drill
+        // began polling, indexer 1 was twenty blocks behind, each wait resolving
+        // inside the 60 s attempt that alone sets `stallReason`. The widening ladder
+        // the mining served is not needed: the venue adopts the roll-call roster, so
+        // every draw is venue-only and finalizes at widen 0 (AT3 and AT4 wait the
+        // same way).
         const prompt = await untilOrClearDogeStall(async () => {
             const rows = await venue.readMirrorRows(PROMPT, { requestId: requestId })
             return { ok: rows.length === 1, rows: rows }
         }, {
             timeoutMs: 10 * 60 * 1000,
             tipProbe: venueTipProbe(venue, PROMPT),
-            mineWhileWaiting: { perPoll: 1, maxBlocks: widenArithmetic(DEADLINE_BLOCKS).safeCap },
         })
 
         // AND AGAIN whichever way that went, because a round that never finalized and
@@ -282,7 +290,12 @@ describe('AT2 second clause: delivery past the forward margin holds the barrier 
         // against: both nodes bound the response at the SAME block, so the wait
         // absorbed the delay instead of the delayed node skipping past it and binding
         // later.
-        const applied = await waitForAppliedEverywhere(venue, requestId, 20 * 60 * 1000)
+        // MINES WHILE WAITING, as AT1 does: the applier runs inside the block loop,
+        // and the one block mined above may well be stamped before the effective
+        // time. The claim rests on the BARRIER holding the delayed node, not on the
+        // chain standing still, so blocks under this wait do not weaken it.
+        const applied = await waitForAppliedEverywhere(venue, requestId, 20 * 60 * 1000,
+            { mineWhileWaiting: { perPoll: 1, maxBlocks: widenArithmetic(DEADLINE_BLOCKS).safeCap } })
         const diffs = diffRows(applied[PROMPT], applied[DELAYED], APPLIED_FIELDS)
         assert.deepStrictEqual(diffs, [],
             'the delayed indexer bound the response differently from its peer: ' + diffs.join('; ') +

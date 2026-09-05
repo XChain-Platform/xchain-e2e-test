@@ -1886,21 +1886,50 @@ class AttestMirrorVenue {
                 tables++;
 
                 // Generated columns are computed on insert and cannot be written.
-                const cols = (await src.query('SHOW COLUMNS FROM `' + t + '`'))
-                    .filter((c) => !/GENERATED/i.test(String(c.Extra || '')))
-                    .map((c) => c.Field);
+                const colInfo = (await src.query('SHOW COLUMNS FROM `' + t + '`'))
+                    .filter((c) => !/GENERATED/i.test(String(c.Extra || '')));
+                const cols = colInfo.map((c) => c.Field);
                 if (cols.length === 0) continue;
                 const list = cols.map((c) => '`' + c + '`').join(', ');
                 const marks = cols.map(() => '?').join(', ');
 
-                for (let off = 0; ; off += CHAIN_CLONE_PAGE) {
-                    const page = await src.query(
-                        'SELECT ' + list + ' FROM `' + t + '` LIMIT ' + CHAIN_CLONE_PAGE + ' OFFSET ' + off);
-                    if (!page.length) break;
-                    await dst.batch('INSERT INTO `' + t + '` (' + list + ') VALUES (' + marks + ')',
-                        page.map((r) => cols.map((c) => r[c])));
-                    rows += page.length;
-                    if (page.length < CHAIN_CLONE_PAGE) break;
+                // KEYSET, NOT OFFSET, wherever the table has a single integer
+                // primary key. `LIMIT n OFFSET m` re-reads the table from row
+                // zero on every page, which made this copy quadratic in table
+                // size: measured 2026-09-05 as the regtest database reading
+                // 126 MB/s for ten minutes to move a 256 MB seed, on a host that
+                // was IO-bound the whole time, at 5 to 15 minutes per indexer.
+                // Paging on the key reads each row once. OFFSET stays only as
+                // the fallback for a table with a composite or non-integer key,
+                // and those are the small ones.
+                const pk = colInfo.filter((c) => String(c.Key) === 'PRI');
+                const keyCol = (pk.length === 1 && /int/i.test(String(pk[0].Type))) ? pk[0].Field : null;
+
+                if (keyCol) {
+                    let last = null;
+                    for (;;) {
+                        const page = await src.query(
+                            'SELECT ' + list + ' FROM `' + t + '`' +
+                            (last === null ? '' : ' WHERE `' + keyCol + '` > ?') +
+                            ' ORDER BY `' + keyCol + '` LIMIT ' + CHAIN_CLONE_PAGE,
+                            last === null ? [] : [last]);
+                        if (!page.length) break;
+                        await dst.batch('INSERT INTO `' + t + '` (' + list + ') VALUES (' + marks + ')',
+                            page.map((r) => cols.map((c) => r[c])));
+                        rows += page.length;
+                        last = page[page.length - 1][keyCol];
+                        if (page.length < CHAIN_CLONE_PAGE) break;
+                    }
+                } else {
+                    for (let off = 0; ; off += CHAIN_CLONE_PAGE) {
+                        const page = await src.query(
+                            'SELECT ' + list + ' FROM `' + t + '` LIMIT ' + CHAIN_CLONE_PAGE + ' OFFSET ' + off);
+                        if (!page.length) break;
+                        await dst.batch('INSERT INTO `' + t + '` (' + list + ') VALUES (' + marks + ')',
+                            page.map((r) => cols.map((c) => r[c])));
+                        rows += page.length;
+                        if (page.length < CHAIN_CLONE_PAGE) break;
+                    }
                 }
             }
         } finally {
@@ -2566,7 +2595,27 @@ class AttestMirrorVenue {
         const proc = spawn(process.execPath, [...nodeArgs, script], {
             cwd: this._cwd, env: env, stdio: ['ignore', 'pipe', 'pipe']
         });
+        // ATTEST_VENUE_LOG_DIR: ALSO append every child line to
+        // <dir>/<label>-<which>.log. The in-memory tail is only ever printed by a
+        // failing assertion, and mocha prints those at the END of the run: a drill
+        // killed by an outer timeout (AT5, 2026-09-05, 40 min into a 30 min silent
+        // wait after its first case failed) takes every hub's explanation with it.
+        // Append, never truncate, so a re-run on the same label keeps the history.
+        let sink = null;
+        const logDir = process.env.ATTEST_VENUE_LOG_DIR;
+        if (logDir) {
+            try {
+                fs.mkdirSync(logDir, { recursive: true });
+                sink = fs.openSync(path.join(logDir, this.label + '-' + which + '.log'), 'a');
+                fs.writeSync(sink, '\n=== ' + new Date().toISOString() + ' spawn ' + which + ' pid ' + proc.pid + ' ===\n');
+            } catch (e) {
+                sink = null;
+                console.log('attestMirrorVenue[' + this.label + ']: no on-disk log for ' + which + ': ' + (e && e.message));
+            }
+            proc.once('exit', () => { if (sink !== null) { try { fs.closeSync(sink); } catch (_) { /* closed */ } sink = null; } });
+        }
         const keep = (buf) => {
+            if (sink !== null) { try { fs.writeSync(sink, String(buf)); } catch (_) { /* disk is best effort */ } }
             const lines = String(buf).split('\n').filter((l) => l.length > 0);
             const log = this._logs[which];
             log.push(...lines);

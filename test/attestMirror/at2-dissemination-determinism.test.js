@@ -70,6 +70,9 @@ const {
     attestRequestWatermark,
     settleOrReport,
     widenArithmetic,
+    jsonSafe,
+    feeLines,
+    rawAttestRewards,
 } = require('./mirrorDrillWaits')
 const vmHelper = require('../helpers/vmHelper')
 const XChainIndexerConnector = require('../../src/XChainIndexerConnector.js')
@@ -94,7 +97,16 @@ module.exports = {
             xchain.getInputParam(1),
             'handleResponse',
             ['ctx-at2'],
-            { redundancy: 3, deadlineBlocks: ${DEADLINE_BLOCKS} }
+            // A REAL ESCROW: the reward clause below compares attest_fee rows
+            // across the two nodes and asserts there are some, and a fee=none
+            // request writes none (measured 2026-09-05, pass 3, with every other
+            // clause green). The fee payer is the EXECUTE caller, the contract
+            // owner, whom the fixture mints gas to. SIX, not two: regtest XCHAIN is
+            // issued with 0 decimals (measured 2026-09-05), the split floors to the
+            // gas decimals, and 2 / 3 floored to 0 wrote no row at all in pass 6
+            // while the indexer logged the 3-way split. 6 leaves a whole share for
+            // every set size the widening ladder can reach.
+            { redundancy: 3, deadlineBlocks: ${DEADLINE_BLOCKS}, feeTick: 'XCHAIN', feeAmount: '6' }
         );
         xchain.state.set('pending_request_id', requestId);
         return requestId;
@@ -185,13 +197,15 @@ describe('AT2: a hub outside the responsible set disseminates the response, iden
         await regtestMinerConnector.generateBlocks(6)
         await settleOrReport('at2')
 
-        const rows = await waitForMirrorRowEverywhere(venue, requestId, null, {
-            // MINES WHILE WAITING, because the widening ladder is height-driven and a
-            // still chain sits at widen 0 forever: a draw containing a key no live hub
-            // holds then never finalizes. Capped below the deadline so the wait cannot
-            // run the request into its own expiry sweep.
-            mineWhileWaiting: { perPoll: 1, maxBlocks: widenArithmetic(DEADLINE_BLOCKS).safeCap },
-        })
+        // NO MINING UNDER THIS WAIT, and for this drill that is load-bearing: the
+        // widening ladder is HEIGHT-driven, so a block per poll climbed past the
+        // first widen boundary (19 blocks) whenever a round took over ~40 s, the
+        // leader widened to step 1, and this drill then skipped its own premise
+        // (`the leader used widening step 1, so the responsible set is WIDER than
+        // the signatures`; measured 2026-09-05 pass 4). On a still chain the round
+        // finalizes at widen 0 with a venue-only draw, which is the happy path
+        // the dissemination claim needs. The applied wait below mines instead.
+        const rows = await waitForMirrorRowEverywhere(venue, requestId)
         for (let i = 0; i < rows.length; i++) {
             assert.strictEqual(String(rows[i].status), 'ok',
                 'attempt ' + attempt + ': mirror row status is ' + rows[i].status + ' on indexer ' + i)
@@ -280,7 +294,11 @@ describe('AT2: a hub outside the responsible set disseminates the response, iden
         // IDENTICAL `attests` ROWS. Every field, including the locally minted
         // action_index: two nodes agreeing on that is a statement about the applier
         // running at the same pipeline position in the same block on both.
-        const applied = await waitForAppliedEverywhere(venue, requestId)
+        // MINES WHILE WAITING, for the same reason AT1 does: the applier runs
+        // inside the block loop, so on a chain nobody is moving a delivered,
+        // valid row never applies and reads as `applied [null,null]`.
+        const applied = await waitForAppliedEverywhere(venue, requestId, null,
+            { mineWhileWaiting: { perPoll: 1, maxBlocks: widenArithmetic(DEADLINE_BLOCKS).safeCap } })
         const a0 = applied[outside.index]
         const a1 = applied[inside.index]
         const rowDiffs = diffRows(a0, a1, APPLIED_FIELDS)
@@ -317,9 +335,11 @@ describe('AT2: a hub outside the responsible set disseminates the response, iden
         // autoincrements and would differ on every honest run.
         const rewards0 = rewardFingerprint(await readAttestRewards(venue, outside.index, { blockIndex: appliedBlock }))
         const rewards1 = rewardFingerprint(await readAttestRewards(venue, inside.index, { blockIndex: appliedBlock }))
+        const rawRewards = rewards0.length > 0 ? '' : await rawAttestRewards(venue, outside.index)
         assert.ok(rewards0.length > 0,
             'no attest_fee rows at block ' + appliedBlock + ' on the outside-following indexer, so the ' +
-            'applier fired the callback without settling the request fee to the signers')
+            'applier fired the callback without settling the request fee to the signers\n' +
+            feeLines(venue, 'indexer' + outside.index) + '\n' + rawRewards)
         assert.deepStrictEqual(rewards0, rewards1,
             'the two indexers paid different rewards at block ' + appliedBlock + ':\n  outside: ' +
             rewards0.join('\n  outside: ') + '\n  inside:  ' + rewards1.join('\n  inside:  '))
@@ -332,9 +352,9 @@ describe('AT2: a hub outside the responsible set disseminates the response, iden
         const h0 = await conn0.call('getblockhashes', { block_index: appliedBlock })
         const h1 = await conn1.call('getblockhashes', { block_index: appliedBlock })
         assert.ok(h0 && !h0.error, 'indexer ' + outside.index + ' would not report block hashes at ' +
-            appliedBlock + ': ' + JSON.stringify(h0))
+            appliedBlock + ': ' + jsonSafe(h0))
         assert.ok(h1 && !h1.error, 'indexer ' + inside.index + ' would not report block hashes at ' +
-            appliedBlock + ': ' + JSON.stringify(h1))
+            appliedBlock + ': ' + jsonSafe(h1))
         const hashDiffs = diffStateHashes(h0, h1)
         assert.deepStrictEqual(hashDiffs, [],
             'the two indexers disagree on ' + hashDiffs.join('; ') + ' at the applying block ' +

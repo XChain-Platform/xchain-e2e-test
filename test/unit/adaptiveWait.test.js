@@ -45,7 +45,7 @@ function makeDb({ lag = null, writes = null, maxExtensions = 3, probeEvery } = {
         }
     }
     db.WAIT_MAX_EXTENSIONS = maxExtensions
-    db.WAIT_LAG_BLOCKS = 2
+    db.WAIT_LAG_BLOCKS = 0          // the shipped default: any unreached block may hold the row
     db.WAIT_MIN_FOR_EXTENSION = 0   // these budgets are tiny by design; opt in to extension
     db.WAIT_LAG_PROBE_MS = 500
     // Sampling floor. Left above these tiny budgets unless a test asks for
@@ -92,6 +92,36 @@ describe('adaptive wait deadline', function () {
             'a lagging indexer must buy the row more time instead of failing the case')
     })
 
+    it('extends on a lag of ONE or TWO blocks, which is where the row usually is', async () => {
+        // The boundary that cost a drill and a release rehearsal on 2026-09-05: a
+        // threshold of 2 read "2 blocks behind" as caught up and gave up with the
+        // row sitting in one of the two blocks the indexer had not reached.
+        for (const lag of [1, 2]) {
+            const db = makeDb({ lag })
+            const started = Date.now()
+            const row = await db._waitFor(
+                function checkThing(){ return Date.now() - started > TIMEMAX * 1.5 ? { id: lag } : null },
+                {}, TIMEMAX)
+            assert.deepStrictEqual(row, { id: lag },
+                'a wait must extend while the indexer is ' + lag + ' block(s) behind: that block may hold the row')
+        }
+    })
+
+    it('honours an explicit E2E_WAIT_LAG_BLOCKS=0 and refuses junk', () => {
+        // The tunable the way the constructor computes it (src/db.js), checked
+        // here without standing up a Database: `parseInt('0') || 2` was 2, so an
+        // operator setting 0 got the old threshold back without knowing.
+        const compute = (raw) => {
+            const n = raw === undefined || raw === '' ? NaN : Number(raw)
+            return Number.isInteger(n) && n >= 0 ? n : 0
+        }
+        assert.strictEqual(compute('0'), 0, 'an explicit 0 must be 0, not the default')
+        assert.strictEqual(compute(undefined), 0, 'the default is 0')
+        assert.strictEqual(compute('3'), 3)
+        assert.strictEqual(compute('junk'), 0)
+        assert.strictEqual(compute('-1'), 0)
+    })
+
     it('caps extensions so a wedged stack fails instead of hanging the suite', async () => {
         const db = makeDb({ lag: 999, maxExtensions: 2 })
         const row = await db._waitFor(checkThing, {}, TIMEMAX)
@@ -102,12 +132,18 @@ describe('adaptive wait deadline', function () {
     })
 
     it('does not extend when lag is at or below the threshold', async () => {
-        // Ordinary one-block skew between the RPC tip and the indexer is not "behind".
-        const db = makeDb({ lag: 2 })
-        const started = Date.now()
-        const row = await db._waitFor(checkThing, {}, TIMEMAX)
-        assert.strictEqual(row, null)
-        assert(Date.now() - started < TIMEMAX * 3, 'lag at the threshold must not extend')
+        // At the shipped default (0) only a level indexer is "not behind"; an
+        // operator who raises the threshold gets the old tolerance back, and a
+        // lag exactly AT that threshold still does not extend.
+        for (const [threshold, lag] of [[0, 0], [2, 2]]) {
+            const db = makeDb({ lag })
+            db.WAIT_LAG_BLOCKS = threshold
+            const started = Date.now()
+            const row = await db._waitFor(checkThing, {}, TIMEMAX)
+            assert.strictEqual(row, null)
+            assert(Date.now() - started < TIMEMAX * 3,
+                'lag ' + lag + ' at threshold ' + threshold + ' must not extend')
+        }
     })
 
     it('does not extend when the lag signal is unavailable', async () => {

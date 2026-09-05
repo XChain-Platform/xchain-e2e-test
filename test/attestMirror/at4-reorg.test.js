@@ -67,7 +67,7 @@ const {
     waitForHeightWithClear,
     attestRequestWatermark,
     settleOrReport,
-    widenArithmetic,
+    jsonSafe,
 } = require('./mirrorDrillWaits')
 const vmHelper     = require('../helpers/vmHelper')
 const cryptoHelper = require('../cryptoHelper')
@@ -78,12 +78,21 @@ const FIXED_BODY = '{"score":11,"meta":"at4-reorg"}'
 // being orphaned and remade.
 const DEADLINE_BLOCKS = 80
 
-const BURIAL_BLOCKS = 6
+// Four, not six: the hubs fetch a request after three confirmations, and every
+// block between the request and the remove-reorg counts against the standing
+// tracker's 12-block undo window (see TRACKER_UNDO_BLOCKS). Measured 2026-09-05:
+// 6 burial plus the apply nudges reached 15 and the guard refused the reorg.
+const BURIAL_BLOCKS = 4
 
 // How far past the orphan point the competing chain is built. Two is enough to
 // make it strictly longer than what it replaces, which is what makes the node
 // switch to it.
 const COMPETING_OVERSHOOT = 2
+
+// The standing BTC utxo-tracker's reorg recovery window (xchain-utxo-tracker
+// DEFAULT_UNDO_BLOCKS for BTC, overridable per venue with XCHAIN_UNDO_BLOCKS_BTC).
+// A reorg deeper than this halts that tracker for every drill after this one.
+const TRACKER_UNDO_BLOCKS = 12
 
 const CONTRACT_CODE = `
 module.exports = {
@@ -144,7 +153,11 @@ describe('AT4: a reorg moves the applied response with the chain, in both direct
     })
 
     after(async function () {
-        try { await regtestMinerConnector.resumeMining() } catch (_) { /* never paused */ }
+        // Said out loud rather than swallowed: a resume that genuinely fails leaves
+        // the SHARED miner paused for every drill queued after this one.
+        try { await regtestMinerConnector.resumeMining() } catch (e) {
+            console.log('AT4 teardown: resumeMining failed (' + (e && e.message) + '); the shared miner may still be paused')
+        }
         if (testServer) await testServer.close()
         if (venue) await venue.stop()
     })
@@ -166,22 +179,37 @@ describe('AT4: a reorg moves the applied response with the chain, in both direct
 
         await regtestMinerConnector.generateBlocks(BURIAL_BLOCKS)
         await settleOrReport('at4')
-        await waitForMirrorRowEverywhere(venue, requestId, null, {
-            // MINES WHILE WAITING, because the widening ladder is height-driven and a
-            // still chain sits at widen 0 forever: a draw containing a key no live hub
-            // holds then never finalizes. Capped below the deadline so the wait cannot
-            // run the request into its own expiry sweep.
-            mineWhileWaiting: { perPoll: 1, maxBlocks: widenArithmetic(DEADLINE_BLOCKS).safeCap },
-        })
+        // NO MINING UNDER THIS WAIT, deliberately, and the reason is the reorg this
+        // drill is about to make. The remove case orphans everything from the
+        // request block up, and the standing utxo-tracker can only undo
+        // TRACKER_UNDO_BLOCKS (12 on BTC) of them: deeper, it halts and every
+        // funding wait on the venue fails until an operator resyncs it, which is
+        // what happened on 2026-09-05 (orphaned 6614 from a tip of 6633, 20 deep).
+        // Mining one block per poll while the round ran was most of that depth.
+        // The widening ladder the mining served is not needed here: the venue
+        // adopts the roll-call roster, so every draw is venue-only and finalizes at
+        // widen 0, exactly as AT3 (which also waits without mining) measured today.
+        await waitForMirrorRowEverywhere(venue, requestId)
 
         // The applier binds at the first block past the effective time; with the
         // venue's short forward margin that is a block or two away, so keep the
         // chain moving until it lands.
+        // ONE BLOCK AT A TIME, AND ONLY ONCE INDEXER 0 HAS PARSED THE LAST ONE.
+        // Mining on a fixed cadence outran the venue indexer (each block clears
+        // several mirror barriers before it commits), so blocks piled up between
+        // the request and the reorg that follows, and the remove case's depth
+        // blew the tracker window. A block mined onto a node that is level is a
+        // block that will be applied or not; a block mined onto a node that is
+        // behind is only depth.
+        const probe = venueTipProbe(venue, 0)
         const nudged = await untilOrClearDogeStall(async () => {
-            await regtestMinerConnector.generateBlocks(1)
             const applied = await readAppliedResponse(venue, 0, requestId)
-            return { ok: !!applied, applied: applied }
-        }, { timeoutMs: 10 * 60 * 1000, intervalMs: 3000, tipProbe: venueTipProbe(venue, 0) })
+            if (applied) return { ok: true, applied: applied }
+            const tip = Number(await nodeConnector.getBlockCount())
+            const at = await probe().catch(() => null)
+            if (at && Number(at.height) >= tip) await regtestMinerConnector.generateBlocks(1)
+            return { ok: false, applied: null }
+        }, { timeoutMs: 10 * 60 * 1000, intervalMs: 3000, tipProbe: probe })
         assert.ok(nudged.ok, tag + ': the response never applied on indexer 0 before the reorg could be staged\n' +
             venue.logTail('indexer0'))
 
@@ -207,6 +235,16 @@ describe('AT4: a reorg moves the applied response with the chain, in both direct
      */
     async function orphanFrom (height, label) {
         const tipBefore = Number(await nodeConnector.getBlockCount())
+        // REFUSE rather than halt the venue: a reorg deeper than the standing
+        // tracker's undo window does not test anything about the mirror, it takes
+        // the venue's funding path down for every drill after this one.
+        const depth = tipBefore - height + 1
+        assert.ok(depth <= TRACKER_UNDO_BLOCKS,
+            label + ': orphaning from ' + height + ' at tip ' + tipBefore + ' is ' + depth +
+            ' blocks deep, past the standing utxo-tracker\'s ' + TRACKER_UNDO_BLOCKS + '-block undo ' +
+            'window; the tracker would halt and need a resync. Fewer blocks must land between the ' +
+            'request and the reorg (see driveToApplied), or the venue tracker needs ' +
+            'XCHAIN_UNDO_BLOCKS_BTC raised.')
         const hash = await nodeConnector.getBlockHash(height)
         await nodeConnector.invalidateBlock(hash)
         const rolled = Number(await nodeConnector.getBlockCount())
@@ -248,7 +286,7 @@ describe('AT4: a reorg moves the applied response with the chain, in both direct
             }, { timeoutMs: 15 * 60 * 1000, tipProbe: venueTipProbe(venue, 0) })
             assert.ok(reapplied.ok,
                 'keep: the response did not come back at block ' + driven.appliedBlock + ' on both nodes after ' +
-                'the reorg; they hold ' + JSON.stringify(reapplied.rows.map((r) => (r ? r.block_index : null))) +
+                'the reorg; they hold ' + jsonSafe(reapplied.rows.map((r) => (r ? r.block_index : null))) +
                 '. The mirror row is still there and the request is still pending, so the applier had ' +
                 'everything it needed.\n' + venue.logTail('indexer0') + '\n' + venue.logTail('indexer1'))
 
@@ -279,6 +317,7 @@ describe('AT4: a reorg moves the applied response with the chain, in both direct
             console.log('AT4 keep: re-bound at block ' + driven.appliedBlock + ' on both nodes, same synthetic hash')
         } finally {
             await regtestMinerConnector.resumeMining()
+            await settleAfterReorg('keep')
         }
     })
 
@@ -308,8 +347,8 @@ describe('AT4: a reorg moves the applied response with the chain, in both direct
             }, { timeoutMs: 15 * 60 * 1000, tipProbe: venueTipProbe(venue, 0) })
             assert.ok(rolled.ok,
                 'gone: the reorg did not remove both the request and its applied response on both nodes. ' +
-                'applied ' + JSON.stringify(rolled.applied.map((a) => (a ? a.block_index : null))) +
-                ', requests ' + JSON.stringify(rolled.requests.map((r) => (r ? r.request_status : null))) +
+                'applied ' + jsonSafe(rolled.applied.map((a) => (a ? a.block_index : null))) +
+                ', requests ' + jsonSafe(rolled.requests.map((r) => (r ? r.request_status : null))) +
                 '. The applied rows hang off an action minted at the applying block, so they must be deleted ' +
                 'with it by the ordinary rollback.\n' + venue.logTail('indexer0'))
 
@@ -348,6 +387,28 @@ describe('AT4: a reorg moves the applied response with the chain, in both direct
             // The EXECUTE returns to the mempool here and will be mined again; see the
             // header. Everything asserted above was asserted while it could not be.
             await regtestMinerConnector.resumeMining()
+            await settleAfterReorg('gone')
         }
     })
+
+    /**
+     * Leave the stack QUIESCENT before handing back to the harness.
+     *
+     * The global afterEach barrier (initialCheck) gives the stack 15 s to reach
+     * mempool-empty with the tracker level with the node, and fails the case if it
+     * does not. A deliberate reorg is the one thing on this venue that legitimately
+     * leaves the tracker tens of blocks behind (measured 2026-09-05: `tracker=6621
+     * node=6639 lag=18` after the remove case rebuilt 25 blocks, both subject cases
+     * green and the run red on the barrier). So each case waits the tracker in
+     * itself, with a budget sized to a rebuild rather than to a clean stack.
+     */
+    async function settleAfterReorg (label) {
+        const status = await utxoTrackerConnector.quiesce({
+            timeoutMs: 4 * 60 * 1000, pollMs: 500, regtestMiner: regtestMinerConnector,
+        }).catch((e) => ({ ready: false, error: String(e && e.message) }))
+        if (!status || !status.ready) {
+            console.log('AT4 ' + label + ': the stack did not settle after the reorg (' +
+                JSON.stringify(status) + '); the harness barrier will say so')
+        }
+    }
 })

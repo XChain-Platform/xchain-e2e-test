@@ -34,10 +34,19 @@ class Database {
     constructor(host, port, dbName, user, pass){
         this.sqlPath  = __dirname+'/sql';
         // Adaptive-wait tunables. Extensions are bounded so a wedged stack
-        // still fails; the lag threshold is above zero so ordinary one-block skew
-        // between the RPC tip and the indexer does not count as "behind".
+        // still fails. The lag threshold is ZERO: these waits ask "has MY row
+        // been indexed", and any block the indexer has not reached may be the
+        // one holding it. A threshold of 2 made the wait give up precisely when
+        // it was nearly done (measured 2026-09-05: `GAVE UP ... last indexer lag
+        // 2 blocks` with two extensions unused, the row landing seconds later;
+        // the v0.15.0 rehearsal's bitcoin leg died the same way in before()).
+        // Parsed so an explicit 0 is honoured: `parseInt('0') || 2` is 2.
         this.WAIT_MAX_EXTENSIONS = parseInt(process.env.E2E_WAIT_MAX_EXTENSIONS) || 3;
-        this.WAIT_LAG_BLOCKS     = parseInt(process.env.E2E_WAIT_LAG_BLOCKS) || 2;
+        this.WAIT_LAG_BLOCKS     = (() => {
+            const raw = process.env.E2E_WAIT_LAG_BLOCKS;
+            const n = raw === undefined || raw === '' ? NaN : Number(raw);
+            return Number.isInteger(n) && n >= 0 ? n : 0;
+        })();
         this.WAIT_LAG_PROBE_MS   = parseInt(process.env.E2E_WAIT_LAG_PROBE_MS) || 2000;
         this.WAIT_MIN_FOR_EXTENSION = parseInt(process.env.E2E_WAIT_MIN_FOR_EXTENSION) || 5000;
         // The second progress signal (see _waitFor): how often a long wait samples

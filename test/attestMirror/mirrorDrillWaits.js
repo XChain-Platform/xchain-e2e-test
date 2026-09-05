@@ -250,6 +250,66 @@ const STATE_HASH_FIELDS = Object.freeze([
 function sleep (ms) { return new Promise((r) => setTimeout(r, ms)) }
 
 /**
+ * `JSON.stringify` that survives a database row.
+ *
+ * mariadb returns BIGINT columns as BigInt, and `JSON.stringify` throws on one.
+ * An assertion MESSAGE is built eagerly, on the pass path as well as the fail
+ * path, so a message that serializes an applied row turns a passing wait into
+ * `TypeError: Do not know how to serialize a BigInt`. Every message that
+ * prints rows goes through this.
+ */
+function jsonSafe (value) {
+    return JSON.stringify(value, (k, v) => (typeof v === 'bigint' ? Number(v) : v))
+}
+
+/**
+ * The fee-settlement lines a venue indexer logged, for a reward assertion.
+ *
+ * `_settleRequestFee` says exactly what it did (`ATTEST fee : <amount> ... split
+ * N way(s)`, or `fee left in escrow` with the reason), and it says it far enough
+ * above the tail that a bare `logTail` misses it. A reward assertion that fails
+ * without these lines cannot tell a settle that never ran from one that split to
+ * an empty set, which is what AT6 could not tell on 2026-09-05.
+ */
+/**
+ * The newest attest reward rows on one venue indexer, RAW and unjoined.
+ *
+ * `readAttestRewards` joins `index_pubkeys` and scopes by block or round; when
+ * it returns nothing while the indexer log says `split 3 way(s)`, only the raw
+ * rows say whether the writer skipped them (an unresolved stake `source_id`),
+ * stamped a different `round_reference`, or wrote them under a pubkey id the
+ * join cannot see. The venue databases are dropped at teardown, so this has to
+ * be printed by the assertion that fails.
+ */
+async function rawAttestRewards (venue, indexerIndex, limit) {
+    const ix = venue.indexers[indexerIndex]
+    if (!ix) return '  (no indexer ' + indexerIndex + ')'
+    try {
+        const rows = await queryDb(venue, ix.indexerDbName,
+            'SELECT id, reward_type, amount, block_index, round_reference, signing_pubkey_id, source_id ' +
+            'FROM validator_rewards WHERE reward_type LIKE ? ORDER BY id DESC LIMIT ' + (Number(limit) || 8),
+            ['attest%'])
+        const total = await queryDb(venue, ix.indexerDbName,
+            'SELECT COUNT(*) AS n FROM validator_rewards WHERE reward_type LIKE ?', ['attest%'])
+        return '  raw attest reward rows on indexer ' + indexerIndex + ' (newest first, ' +
+            String(total && total[0] ? total[0].n : '?') + ' total): ' + jsonSafe(rows)
+    } catch (e) {
+        return '  (raw reward read failed on indexer ' + indexerIndex + ': ' + (e && e.message) + ')'
+    }
+}
+
+function feeLines (venue, which) {
+    const tail = (venue && typeof venue.logTail === 'function') ? String(venue.logTail(which)) : ''
+    // `createValidatorReward:` is the writer saying why it SKIPPED a row (unknown
+    // pubkey, or no active stake/delegation at the block), which is the one
+    // line that separates "settled to nobody" from "settled and unreadable".
+    const hits = tail.split('\n').filter((l) =>
+        /ATTEST fee|fee settle|fee left|fee_payer|REWARD pool|handleResponse|createValidatorReward/.test(l))
+    return hits.length ? ('  fee-related lines from ' + which + ':\n' + hits.join('\n')) :
+        ('  (no fee-related line in the last lines of ' + which + '; the settle either never logged or scrolled out)')
+}
+
+/**
  * EVERY hub's log tail, for an assertion whose cause can only be on a hub.
  *
  * WHY ALL OF THEM RATHER THAN ONE. Two questions a drill asks are answerable only
@@ -881,7 +941,7 @@ async function waitForMirrorRowEverywhere (venue, requestId, timeoutMs, opts) {
     const verdict = after ? after.verdict : 'capture did not run'
     assert.ok(seen.ok,
         'the mirror row for ' + requestId + ' did not reach both indexers: counts ' +
-        JSON.stringify((seen.rows || []).map((r) => r.length)) + '. Hub finalization: ' +
+        jsonSafe((seen.rows || []).map((r) => r.length)) + '. Hub finalization: ' +
         verdict + '. That is the reading that tells the two ' +
         'explanations apart: NO hub holding one means the round never finalized (a redundancy-sized ' +
         'draw that included a staked key belonging to no running hub does exactly this, and the ' +
@@ -968,7 +1028,7 @@ async function waitForAppliedEverywhere (venue, requestId, timeoutMs, opts) {
     })
     assert.ok(got.ok,
         'the response for ' + requestId + ' was not applied on every venue indexer: applied ' +
-        JSON.stringify((got.applied || []).map((a) => (a ? a.block_index : null))) + '\n' +
+        jsonSafe((got.applied || []).map((a) => (a ? a.block_index : null))) + '\n' +
         venue.logTail('indexer0') + '\n' + venue.logTail('indexer1'))
     return got.applied
 }
@@ -1343,6 +1403,9 @@ async function readRequestRow (venue, indexerIndex, requestId) {
 }
 
 module.exports = {
+    jsonSafe,
+    feeLines,
+    rawAttestRewards,
     APPLIED_FIELDS,
     STATE_HASH_FIELDS,
     DEFAULT_INTERVAL_MS,
