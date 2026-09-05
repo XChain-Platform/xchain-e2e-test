@@ -77,6 +77,7 @@ const stakeHelper  = require('../helpers/stakeHelper')
 const gasHelper    = require('../helpers/gasHelper')
 const vmHelper     = require('../helpers/vmHelper')
 const { loadHubModule } = require('../helpers/multiValidatorHubHelper')
+const xchainPrice = require('../helpers/xchainPriceConstants')
 
 // How many idle-key generations to sweep when matching a seated key to a seed
 // this harness can sign for.
@@ -88,6 +89,13 @@ const { loadHubModule } = require('../helpers/multiValidatorHubHelper')
 // Matching on the resulting PUBKEY is the only comparison that cannot go stale,
 // and the sweep is a handful of local hashes.
 const IDLE_GENERATION_SCAN = 32
+
+// The coin price the harness prices its own fees against, and the band a venue
+// price must fall in to be usable. The band is wide on purpose: the drill does
+// not care what the price IS, only that both nodes compute comparable fees from
+// it, and a venue oracle that is out by two orders of magnitude is not that.
+const CANONICAL_COIN_USD = 100000
+const PRICE_TOLERANCE    = 10
 
 // Where a drill's staker keys are kept so a stake is always releasable.
 //
@@ -652,7 +660,20 @@ async function waitForVenuePrices (venue, opts) {
                         'SELECT price FROM price_snapshots WHERE coin_pair = ? AND price IS NOT NULL ' +
                         "AND status = 'finalized' ORDER BY block_timestamp DESC LIMIT 1", [pair])
                 } catch (_) { rows = [] }
-                if (!rows || rows.length === 0) missing.push(ix.index + ':' + pair)
+                        // SANE, not merely present. The venue hubs run their own oracle and
+                // it publishes a BTC price about 96x the harness's canonical one,
+                // measured 2026-09-04 (7,679,017 against 79,666). A price that
+                // wrong is worse than none: the venue node then computes a native
+                // fee two orders of magnitude above what the harness paid off the
+                // STANDING node's prices, and rejects the deploy for an
+                // insufficient fee. Two nodes disagreeing about a fee is the same
+                // divergence class as the missing price, one layer down.
+                const px = (rows && rows.length) ? Number(rows[0].price) : null
+                const want = pair === 'XCHAIN/USD'
+                    ? Number(xchainPrice.BOOTSTRAP_XCHAIN_USD) : CANONICAL_COIN_USD
+                const sane = px !== null && Number.isFinite(px) &&
+                    px >= want / PRICE_TOLERANCE && px <= want * PRICE_TOLERANCE
+                if (!sane) missing.push(ix.index + ':' + pair + (px === null ? ' (absent)' : ' (' + px + ')'))
             }
         }
         if (missing.length === 0) {
