@@ -1005,7 +1005,7 @@ async function deployRequestContract (opts) {
     await regtestMinerConnector.generateBlocks(2)
     await settleStack()
     await withWedgeClear('gas mint for ' + label + '-owner',
-        () => gasHelper.ensureGasBalance(owner, '5000'))
+        () => mineWhile(() => gasHelper.ensureGasBalance(owner, '5000')))
 
     // The step run 2 died on, after a full 5-identity prologue and a deployed
     // contract: `checkContract GAVE UP after 225505ms` with 3 polls in 225s.
@@ -1014,7 +1014,15 @@ async function deployRequestContract (opts) {
     // so a retry would deploy a SECOND contract while every later assertion here
     // assumes exactly one contract index.
     await clearWedgeBefore('contract deploy for ' + label)
-    const deploy = await vmHelper.sendDeployV0(owner, o.code, Number(o.gas || 500000))
+    // MINED WHILE IT WAITS, and that is not the retry the paragraph above
+    // forbids: nothing is re-broadcast, the venue's block cadence is simply not
+    // left to decide. `sendDeployV0` polls on a fixed 60s budget that extends
+    // only when the indexer is visibly behind or still writing, and neither
+    // fires when the transaction is merely waiting for a BLOCK. Measured
+    // 2026-09-05: this leg gave up at 60s with `last indexer lag 1 blocks` and
+    // the indexer logged the very same transaction `DEPLOY ... : valid` moments
+    // later, which reads as a failed deploy and is a lost race.
+    const deploy = await mineWhile(() => vmHelper.sendDeployV0(owner, o.code, Number(o.gas || 500000)))
     assert.strictEqual(deploy.contract.status, 'valid',
         'mirrorDrillFixture: deploy for ' + label + ' came back ' + deploy.contract.status)
 
@@ -1097,6 +1105,31 @@ function assertResponsibleSetIsVenueOnly (venue, federation) {
  * across tens of minutes, so a pooled handle would spend most of its life idle
  * and occasionally time out mid-drill, which reads as a venue fault.
  */
+/**
+ * Run `work` while mining underneath it, and settle exactly as `work` does.
+ *
+ * The broadcast-then-wait helpers poll for their row on a fixed budget and
+ * extend it only when the indexer is visibly behind or still writing. A
+ * transaction waiting for a BLOCK trips neither signal: the indexer is at the
+ * tip, idle and correct, and the wait expires while the chain is simply between
+ * blocks. Mining removes that dependency without touching the wait's budget or
+ * its diagnostics, and re-broadcasts nothing.
+ */
+async function mineWhile (work, everyMs) {
+    let settled = false
+    const p = Promise.resolve(work()).finally(() => { settled = true })
+    const miner = (async () => {
+        while (!settled) {
+            await new Promise((r) => setTimeout(r, everyMs || 5000))
+            if (settled) break
+            try { await regtestMinerConnector.generateBlocks(1) }
+            catch (e) { /* the wait itself reports the real failure */ }
+        }
+    })()
+    try { return await p }
+    finally { await miner }
+}
+
 async function queryVenueDb (venue, dbName, sql, params) {
     const mariadb = require('mariadb')
     assert.ok(venue && venue.hubDb, 'mirrorDrillFixture: the venue has no hubDb; it is not started')
@@ -1193,6 +1226,7 @@ module.exports = {
     stakeVisibilityBlocks,
     settleStack,
     queryVenueDb,
+    mineWhile,
     readAppliedResponse,
     readContractState,
     IDLE_GENERATION_SCAN,
