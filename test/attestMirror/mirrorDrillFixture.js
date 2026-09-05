@@ -94,6 +94,10 @@ const IDLE_GENERATION_SCAN = 32
 // price must fall in to be usable. The band is wide on purpose: the drill does
 // not care what the price IS, only that both nodes compute comparable fees from
 // it, and a venue oracle that is out by two orders of magnitude is not that.
+// How far the indexer may trail the node before `mineWhile` stops adding blocks.
+// Small on purpose: that loop exists to keep an idle chain moving, not to drive it.
+const MINE_WHILE_MAX_LAG = 3
+
 const CANONICAL_COIN_USD = 100000
 const PRICE_TOLERANCE    = 10
 
@@ -1128,8 +1132,21 @@ async function mineWhile (work, everyMs) {
         while (!settled) {
             await new Promise((r) => setTimeout(r, everyMs || 5000))
             if (settled) break
-            try { await regtestMinerConnector.generateBlocks(1) }
-            catch (e) { /* the wait itself reports the real failure */ }
+            try {
+                // NEVER MINE ONTO A NODE THAT IS ALREADY BEHIND. The wait this
+                // runs under extends itself when the indexer is lagging, so
+                // adding blocks it has not reached both prolongs the wait and
+                // starves it: measured 2026-09-05, `checkMint` reported
+                // `last indexer lag 49 blocks` after this loop mined every five
+                // seconds while the node spent up to 60 s on a single block.
+                // The point here is only to stop a transaction waiting on an
+                // idle chain, which one block at a time satisfies.
+                const tip = await indexerConnector.call('getblockhashes', {})
+                const at  = Number(tip && tip.block_index)
+                const node = Number(await nodeConnector.getBlockCount())
+                if (Number.isFinite(at) && Number.isFinite(node) && node - at > MINE_WHILE_MAX_LAG) continue
+                await regtestMinerConnector.generateBlocks(1)
+            } catch (e) { /* the wait itself reports the real failure */ }
         }
     })()
     try { return await p }

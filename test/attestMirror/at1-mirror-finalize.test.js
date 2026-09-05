@@ -76,7 +76,7 @@ const {
     readAppliedResponse, readContractState,
 } = require('./mirrorDrillFixture')
 const {
-    findEmittedAttestRequest, waitForMirrorRowEverywhere, waitForAppliedEverywhere,
+    findEmittedAttestRequest, waitForMirrorRowEverywhere, waitForAppliedEverywhere, widenArithmetic,
 } = require('./mirrorDrillWaits')
 const vmHelper = require('../helpers/vmHelper')
 
@@ -313,7 +313,17 @@ describe('AT1: an ATTEST response finalizes over P2P with no transaction of its 
             // MINES WHILE WAITING: the responsible-set widening ladder is
             // height-driven, so a still chain sits at widen 0 for the whole
             // budget and a round that needs one more slot never gets it.
-            mineWhileWaiting: 40,
+            // THE OBJECT FORM, which is the only one the wait reads. It takes
+            // `{perPoll, maxBlocks}`; a bare number leaves `.perPoll` undefined,
+            // `Number(undefined) || 0` is 0, and mining is then silently OFF.
+            // This file was the ONLY caller passing a number - every sibling
+            // drill already passes the object - and that is why AT1 alone never
+            // reached an applied row: on a chain nobody else is mining, the
+            // response was delivered, valid and applicable, with no next block
+            // to apply it in. Measured 2026-09-05: the venue indexers parked at
+            // block 6310 stamped 41 s BEFORE the response effective time and
+            // stayed there for the whole 15-minute wait.
+            mineWhileWaiting: { perPoll: 1, maxBlocks: widenArithmetic(DEADLINE_BLOCKS).safeCap },
         })
 
         for (const [i, row] of rowsPerIndexer.entries()) {
@@ -361,7 +371,8 @@ describe('AT1: an ATTEST response finalizes over P2P with no transaction of its 
         // time has passed, so reading straight after the row lands asks the
         // question a block too early and gets a null that looks exactly like an
         // applier that never ran.
-        const appliedRows = await waitForAppliedEverywhere(venue, requestId, null, { mineWhileWaiting: 40 })
+        const appliedRows = await waitForAppliedEverywhere(venue, requestId, null,
+            { mineWhileWaiting: { perPoll: 1, maxBlocks: widenArithmetic(DEADLINE_BLOCKS).safeCap } })
 
         const applieds = []
         for (const [i, applied] of appliedRows.entries()) {

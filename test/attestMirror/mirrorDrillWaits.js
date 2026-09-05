@@ -701,6 +701,23 @@ async function untilOrClearDogeStall (observe, opts) {
     // Mining WHILE waiting, because the widening ladder is height-driven: see
     // widenArithmetic. Off unless a caller asks, and bounded so a wait cannot mine
     // a request past its own deadline.
+    // A MALFORMED ASK IS LOUD, because the quiet version of this cost AT1 ten
+    // sessions. The option is read as `{perPoll, maxBlocks}`; passing the bare
+    // number a reader would naturally write leaves `.perPoll` undefined,
+    // `Number(undefined) || 0` is 0, and mining is then OFF while the call site
+    // plainly says it is on. AT1 passed `mineWhileWaiting: 40` at both its waits
+    // and every sibling drill passed the object, so AT1 alone waited on a chain
+    // nobody was mining and read the missing block as an applier that does not
+    // work. Refusing the wrong shape is the whole fix: a caller that wants no
+    // mining omits the option.
+    if (o.mineWhileWaiting !== undefined &&
+        (typeof o.mineWhileWaiting !== 'object' || o.mineWhileWaiting === null ||
+         !(Number(o.mineWhileWaiting.perPoll) > 0))) {
+        throw new Error('mirrorDrillWaits: mineWhileWaiting must be {perPoll, maxBlocks} with a positive ' +
+            'perPoll, got ' + JSON.stringify(o.mineWhileWaiting) + '. A bare number silently disables mining, ' +
+            'and a wait that does not mine on an otherwise idle chain can never see a response applied: there ' +
+            'is no next block to apply it in. Omit the option to wait without mining.')
+    }
     const minePerPoll = Number((o.mineWhileWaiting || {}).perPoll) || 0
     const mineCap     = Number((o.mineWhileWaiting || {}).maxBlocks) || 0
     let mined         = 0
@@ -737,6 +754,30 @@ async function untilOrClearDogeStall (observe, opts) {
                 console.log('mirrorDrillWaits: DOGE tip now ' + dogeTip + '; the BTC indexer should resume within a minute.')
                 // The clock restarts so a nudge is given time to work before the next.
                 since = { height: Number((sample && sample.height)), atMs: Date.now() }
+            }
+        }
+
+        // MINE, which until 2026-09-05 this loop only CLAIMED to do. `minePerPoll`,
+        // `mineCap` and `mined` were parsed at the top and then never read again:
+        // the option was dead code behind three paragraphs of comment describing
+        // its behaviour, and every caller that asked for it - all six drills -
+        // waited on a chain nobody was moving. On an otherwise idle regtest chain
+        // that is fatal rather than slow: a mirror response can be delivered,
+        // valid and applicable, and still never apply, because applying happens
+        // inside the block loop and there is no next block. AT1 read that as
+        // `applied [null,null]` for ten sessions.
+        //
+        // Capped, because the cap is what keeps a wait from mining a request past
+        // its own deadline_block (widenArithmetic's safeCap is that bound).
+        if (minePerPoll > 0 && (mineCap <= 0 || mined < mineCap)) {
+            const want = mineCap > 0 ? Math.min(minePerPoll, mineCap - mined) : minePerPoll
+            try {
+                await regtestMinerConnector.generateBlocks(want)
+                mined += want
+            } catch (e) {
+                // A miner that cannot be reached is the caller's failure to
+                // report, not this loop's: the wait below will time out and say
+                // what it was waiting for.
             }
         }
         await sleep(intervalMs)
