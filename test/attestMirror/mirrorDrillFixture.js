@@ -997,9 +997,15 @@ async function deployRequestContract (opts) {
     // only that following mint, which is the same one-level-too-high mistake
     // twice over. Retry is safe here as above: the wallet is cached per label,
     // so a second attempt re-funds the SAME owner rather than minting a new one.
+    // MINED UNDER, at THIS level and not one lower. `getNewFundedAddress` does
+    // its own 100-XCHAIN seed mint internally, and that mint is what lost the
+    // 60-second poll on 2026-09-05: the standing node logged `MINT : XCHAIN :
+    // 100 : valid` seconds later, on a block that took 59.8s to parse. Wrapping
+    // only `ensureGasBalance` below leaves this one exposed, which is the same
+    // one-level-too-high mistake the paragraph above records, made downward.
     const owner = await withWedgeClear('funding and gas seed for ' + label + '-owner',
-        () => cryptoHelper.getNewFundedAddress(
-            label + '-owner', COIN, NETWORK, null, 'legacy', 0, 0.02))
+        () => mineWhile(() => cryptoHelper.getNewFundedAddress(
+            label + '-owner', COIN, NETWORK, null, 'legacy', 0, 0.02)))
     // Explicitly mined rather than only quiesced: the mint's UTXO lookup wants
     // the funding CONFIRMED, and quiesce alone is satisfied by an empty mempool.
     await regtestMinerConnector.generateBlocks(2)

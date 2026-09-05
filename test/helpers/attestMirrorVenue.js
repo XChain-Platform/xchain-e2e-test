@@ -108,6 +108,17 @@ const VENUE_REDUNDANCY = 3;
 // bind for two real minutes per attestation. Five is long enough to survive
 // gossip plus stream lag on a loaded venue and short enough that a drill closes
 // in seconds.
+// Tables the chain-database seed does NOT copy: hub-authored state the venue
+// reads from its own mirror database instead, rebuilt per run from this run's
+// hubs. price_snapshots alone is ~87 MB on this venue and would be inert in the
+// chain database anyway, because the indexer reads mirrored tables from
+// HUB_DB_NAME.
+const CHAIN_CLONE_SKIP_TABLES = new Set(['price_snapshots']);
+
+// Rows per page when seeding. Big enough that the 283k-row state tree copies in
+// tens of pages, small enough that no single batch holds the table in memory.
+const CHAIN_CLONE_PAGE = 10000;
+
 const DEFAULT_FORWARD_S = 5;
 
 // The batch window, same seam. Small so a window can be closed inside a drill.
@@ -1738,8 +1749,177 @@ class AttestMirrorVenue {
         for (let i = 0; i < this.indexerCount; i++) await this._spawnIndexer(i);
     }
 
+    /**
+     * Give this venue indexer the STANDING node's chain database instead of
+     * letting it replay the chain, and do nothing when it already has one.
+     *
+     * WHY A COPY AND NOT A REPLAY, measured 2026-09-05 rather than reasoned
+     * about. A venue indexer that replayed this chain from genesis produced a
+     * DIFFERENT LEDGER from the standing node: the same contract in the same
+     * block 3895 is `action_index 791` on the standing node and 586 on the venue
+     * one, both counters dense, 139 blocks disagreeing, 278 extra rows on the
+     * standing side. By action type the divergence is almost entirely ATTEST,
+     * 119 against 17, with EXECUTE, SEND and UNSTAKE following it downstream and
+     * every purely chain-derived type identical.
+     *
+     * That is not a bug in either node. A mirror-era response is a SYSTEM
+     * SYNTHESIZED action with a NULL `tx_index` (spec section 4.4), derived from
+     * a mirror row the node HELD AT THE TIME; the decoder never carried it, so a
+     * node replaying today cannot re-derive it, and every action index after the
+     * first divergence shifts. The on-chain ATTEST batches exist precisely so a
+     * chain-only node can rebuild that history (section 6), and nothing has ever
+     * published one on this chain.
+     *
+     * The cost of the replay was the whole AT1 ladder: the drill composes its
+     * EXECUTE with the contract index the STANDING node reported, the venue node
+     * answered `invalid: CONTRACT_ACTION_INDEX (unknown)`, no request existed
+     * there for a response to bind to, and ten sessions read the resulting
+     * `applied [null,null]` as an applier that does not work.
+     *
+     * TWO USERS, DELIBERATELY. The venue's own account owns `XChain_%_MVH_%` and
+     * cannot read the standing database; the indexer account owns the standing
+     * database and cannot write the venue's. So this copies across two
+     * connections rather than asking for a grant that would widen either.
+     */
+    /**
+     * Does this venue chain database hold the SAME LEDGER as the standing node?
+     *
+     * Compared at a height BOTH have reached, by action count, because that is
+     * the quantity whose divergence broke AT1: an EXECUTE names a contract by
+     * `action_index`, so two nodes that number actions differently cannot even
+     * exchange a contract reference. Lag is not divergence - a venue node simply
+     * behind the standing node still agrees about the blocks it HAS - so the
+     * comparison is scoped to the lower of the two tips.
+     */
+    async _chainDbAgreesWithStanding(ix, srcName) {
+        const db = ident(ix.indexerDbName, 'database name');
+        let mine = null, theirs = null, height = null;
+        const src = await mariadb.createConnection({
+            host: this.hubDb.host, port: parseInt(this.hubDb.port, 10),
+            user: process.env.INDEXER_DB_USER, password: process.env.INDEXER_DB_PASS,
+            database: srcName, connectTimeout: 15000,
+        });
+        try {
+            const a = await this._conn.query('SELECT MAX(block_index) AS hi FROM `' + db + '`.blocks');
+            const b = await src.query('SELECT MAX(block_index) AS hi FROM blocks');
+            if (a[0].hi === null || b[0].hi === null) return { ok: false, mine, theirs, height };
+            height = Math.min(Number(a[0].hi), Number(b[0].hi));
+            const m = await this._conn.query(
+                'SELECT COUNT(*) AS n FROM `' + db + '`.actions WHERE block_index <= ?', [height]);
+            const t = await src.query('SELECT COUNT(*) AS n FROM actions WHERE block_index <= ?', [height]);
+            mine = Number(m[0].n); theirs = Number(t[0].n);
+            return { ok: mine === theirs, mine, theirs, height };
+        } catch (e) {
+            return { ok: false, mine, theirs, height };
+        } finally {
+            await src.end().catch(() => {});
+        }
+    }
+
+    async _cloneChainDbFromStanding(ix) {
+        const srcName = process.env.INDEXER_DB_NAME;
+        if (!srcName || !process.env.INDEXER_DB_USER || !process.env.INDEXER_DB_PASS)
+            throw new Error(
+                'attestMirrorVenue: INDEXER_DB_NAME/USER/PASS must be in the environment to seed a venue ' +
+                'indexer from the standing node. Without them the venue would replay the chain and derive ' +
+                'a different ledger, which is the AT1 blocker measured on 2026-09-05.');
+
+        await this._conn.query('CREATE DATABASE IF NOT EXISTS `' + ident(ix.indexerDbName, 'database name') + '`');
+
+        // REUSE ONLY WHAT AGREES. "It already has blocks" is the wrong question:
+        // every venue database built by the old replay path HAS blocks and is
+        // exactly the divergent ledger this method exists to stop using. So the
+        // reuse test is agreement with the standing node - the same action count
+        // at a common height, which is the quantity that actually broke - and a
+        // database that fails it is rebuilt once, here, rather than being carried
+        // into another run and read as an applier fault.
+        const have = await this._conn.query(
+            'SELECT COUNT(*) AS c FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?',
+            [ix.indexerDbName, 'actions']);
+        if (Number(have[0].c) > 0) {
+            const agrees = await this._chainDbAgreesWithStanding(ix, srcName);
+            if (agrees.ok) {
+                console.log('attestMirrorVenue[' + this.label + ']: indexer ' + ix.index + ' already agrees with ' +
+                            srcName + ' (' + agrees.mine + ' action(s) at or below block ' + agrees.height +
+                            '); not re-seeding.');
+                return;
+            }
+            if (agrees.mine !== null)
+                console.log('attestMirrorVenue[' + this.label + ']: indexer ' + ix.index + ' holds ' + agrees.mine +
+                            ' action(s) at or below block ' + agrees.height + ' where the standing node holds ' +
+                            agrees.theirs + '. That is a DIFFERENT LEDGER, not lag, so it is rebuilt from the ' +
+                            'standing node rather than reused.');
+        }
+
+        const src = await mariadb.createConnection({
+            host: this.hubDb.host, port: parseInt(this.hubDb.port, 10),
+            user: process.env.INDEXER_DB_USER, password: process.env.INDEXER_DB_PASS,
+            database: srcName, connectTimeout: 15000,
+        });
+        const dst = await mariadb.createConnection({
+            host: this.hubDb.host, port: parseInt(this.hubDb.port, 10),
+            user: this.hubDb.user, password: this.hubDb.pass,
+            database: ix.indexerDbName, connectTimeout: 15000,
+        });
+        const started = Date.now();
+        let tables = 0, rows = 0;
+        try {
+            // The copy is bulk-loaded into an empty schema, so the checks buy
+            // nothing and the ordering constraint they impose would force a
+            // dependency sort over 131 tables.
+            await dst.query('SET FOREIGN_KEY_CHECKS = 0');
+            await dst.query('SET UNIQUE_CHECKS = 0');
+
+            const names = (await src.query('SHOW TABLES')).map((r) => Object.values(r)[0]);
+            for (const t of names) {
+                // Hub-authored tables are NOT chain state. The venue reads them
+                // from its own mirror database, which is rebuilt per run from
+                // this run's hubs, so copying the standing node's would be both
+                // wasted work (price_snapshots alone is ~87 MB here) and a second
+                // copy of exactly the cross-run staleness the mirror rebuild
+                // exists to prevent.
+                if (CHAIN_CLONE_SKIP_TABLES.has(t)) continue;
+
+                const create = (await src.query('SHOW CREATE TABLE `' + t + '`'))[0]['Create Table'];
+                await dst.query('DROP TABLE IF EXISTS `' + t + '`');
+                await dst.query(create);
+                tables++;
+
+                // Generated columns are computed on insert and cannot be written.
+                const cols = (await src.query('SHOW COLUMNS FROM `' + t + '`'))
+                    .filter((c) => !/GENERATED/i.test(String(c.Extra || '')))
+                    .map((c) => c.Field);
+                if (cols.length === 0) continue;
+                const list = cols.map((c) => '`' + c + '`').join(', ');
+                const marks = cols.map(() => '?').join(', ');
+
+                for (let off = 0; ; off += CHAIN_CLONE_PAGE) {
+                    const page = await src.query(
+                        'SELECT ' + list + ' FROM `' + t + '` LIMIT ' + CHAIN_CLONE_PAGE + ' OFFSET ' + off);
+                    if (!page.length) break;
+                    await dst.batch('INSERT INTO `' + t + '` (' + list + ') VALUES (' + marks + ')',
+                        page.map((r) => cols.map((c) => r[c])));
+                    rows += page.length;
+                    if (page.length < CHAIN_CLONE_PAGE) break;
+                }
+            }
+        } finally {
+            try { await dst.query('SET FOREIGN_KEY_CHECKS = 1'); } catch (e) { /* closing anyway */ }
+            await src.end().catch(() => {});
+            await dst.end().catch(() => {});
+        }
+        console.log('attestMirrorVenue[' + this.label + ']: seeded indexer ' + ix.index + ' from ' + srcName +
+                    ' - ' + tables + ' table(s), ' + rows + ' row(s) in ' +
+                    Math.round((Date.now() - started) / 1000) + 's. It shares the standing node\'s action ' +
+                    'numbering by construction rather than by replaying a chain whose mirror-era ATTEST ' +
+                    'responses no replay can re-derive.');
+    }
+
     async _spawnIndexer(i) {
         const ix = this.indexers[i];
+
+        // The chain database comes from the standing node, not from a replay.
+        await this._cloneChainDbFromStanding(ix);
 
         // The mirror database is the one NOBODY creates for itself, and that is a
         // property of the code rather than an oversight here: `XChainIndexer.start()`
