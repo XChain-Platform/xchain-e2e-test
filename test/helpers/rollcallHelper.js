@@ -1685,15 +1685,22 @@ async function driveEpoch(ctx, epoch, opts){
  * is not the LTC or DOGE one.
  */
 async function protocolRewardAddress(ctx){
-    try {
-        const coin = (global.COIN_CODE || 'BTC');
-        const net  = (global.NETWORK || 'regtest');
-        // The per-chain config's own ADDRESS map, which is the same object
-        // collect.js reads its REWARD address from.
-        const cfg = require(_resolveSibling('xchain-indexer', 'src/configs/' + coin + '.js'));
-        const c   = (cfg && typeof cfg.getConfig === 'function') ? cfg.getConfig(net) : null;
-        if(c && c.ADDRESS && c.ADDRESS.REWARD) return String(c.ADDRESS.REWARD);
-    } catch (_) { /* fall through: the caller treats null as "cannot fund" */ }
+    const coin = (global.COIN_CODE || 'BTC');
+    const net  = (global.NETWORK || 'regtest');
+    const rel  = 'src/configs/' + coin + '.js';
+
+    // ABSENCE MAY SKIP, PRESENT-BUT-BROKEN MUST BE RED, which is why the
+    // resolve and the require are separated. Wrapping the require in a
+    // try/catch swallows a sibling that is present and throws, and the caller
+    // then reads null as "no reward address configured" and quietly declines to
+    // fund the pool: the drill goes green having tested nothing.
+    // UNGUARDED, matching rca() and eqh() above. A sibling that is present and
+    // throws must be RED: swallowing it would hand the caller null, which reads
+    // as "no reward address configured", and the drill would then decline to
+    // fund the pool and pass having tested nothing.
+    const cfg = require(_resolveSibling('xchain-indexer', rel));
+    const c   = (cfg && typeof cfg.getConfig === 'function') ? cfg.getConfig(net) : null;
+    if(c && c.ADDRESS && c.ADDRESS.REWARD) return String(c.ADDRESS.REWARD);
     return null;
 }
 
