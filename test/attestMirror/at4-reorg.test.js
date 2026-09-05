@@ -57,7 +57,8 @@ const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
     provisionDrillIdentities, waitForVenueIndexersAtTip, startAttestTestServer, deployRequestContract, readContractState,
     readAppliedResponse,
-} = require('./mirrorDrillFixture')
+    mineWhile,
+} = require("./mirrorDrillFixture")
 const {
     APPLIED_FIELDS, untilOrClearDogeStall, diffRows,
     waitForMirrorRowEverywhere, waitForAppliedEverywhere,
@@ -154,8 +155,8 @@ describe('AT4: a reorg moves the applied response with the chain, in both direct
         // action index cannot be trusted as the correlation input.
         const sinceAction = await attestRequestWatermark(contract.contractIndex)
         await clearBeforeBroadcast()
-        const exec = await vmHelper.sendExecuteV0(
-            contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl, tag])
+        const exec = await mineWhile(() => vmHelper.sendExecuteV0(
+            contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl, tag]))
         assert.strictEqual(exec.execution.status, 'valid',
             tag + ': the EXECUTE that emits the request came back ' + exec.execution.status)
 

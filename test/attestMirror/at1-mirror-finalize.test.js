@@ -74,7 +74,8 @@ const { AttestMirrorVenue, assertLlmAvailable } = require('../helpers/attestMirr
 const {
     provisionDrillIdentities, waitForVenueIndexersAtTip, startAttestTestServer, deployRequestContract, settleStack,
     readAppliedResponse, readContractState,
-} = require('./mirrorDrillFixture')
+    mineWhile,
+} = require("./mirrorDrillFixture")
 const {
     findEmittedAttestRequest, waitForMirrorRowEverywhere, waitForAppliedEverywhere, widenArithmetic,
 } = require('./mirrorDrillWaits')
@@ -245,8 +246,8 @@ describe('AT1: an ATTEST response finalizes over P2P with no transaction of its 
         const contract = contracts[providerId]
         assert.ok(contract, 'AT1: no contract deployed for provider ' + providerId)
 
-        const exec = await vmHelper.sendExecuteV0(
-            contract.owner, contract.contractIndex, 'ask', [providerId, payload])
+        const exec = await mineWhile(() => vmHelper.sendExecuteV0(
+            contract.owner, contract.contractIndex, 'ask', [providerId, payload]))
         assert.strictEqual(exec.execution.status, 'valid',
             providerId + ': the EXECUTE that emits the request came back ' + exec.execution.status +
             '. A responsible set smaller than redundancy is rejected at admission and rolls the ' +

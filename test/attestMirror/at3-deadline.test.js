@@ -63,7 +63,8 @@ const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
     provisionDrillIdentities, waitForVenueIndexersAtTip, startAttestTestServer, deployRequestContract, readContractState,
     readAppliedResponse,
-} = require('./mirrorDrillFixture')
+    mineWhile,
+} = require("./mirrorDrillFixture")
 const {
     untilOrClearDogeStall, waitForMirrorRowEverywhere, waitForAppliedEverywhere,
     readBlockWindow, readRequestRow, firstSatisfyingBlock, venueTipProbe,
@@ -170,8 +171,8 @@ describe('AT3: the deadline decides whether a mirrored response ever binds', fun
         // action index cannot be trusted as the correlation input.
         const sinceAction = await attestRequestWatermark(contract.contractIndex)
         await clearBeforeBroadcast()
-        const exec = await vmHelper.sendExecuteV0(
-            contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl, tag])
+        const exec = await mineWhile(() => vmHelper.sendExecuteV0(
+            contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl, tag]))
         assert.strictEqual(exec.execution.status, 'valid',
             tag + ': the EXECUTE that emits the request came back ' + exec.execution.status)
 

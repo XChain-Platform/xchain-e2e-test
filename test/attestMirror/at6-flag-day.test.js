@@ -63,7 +63,8 @@ dotenv.config()
 const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
     provisionDrillIdentities, waitForVenueIndexersAtTip, startAttestTestServer, deployRequestContract, readContractState, withWedgeClear,
-} = require('./mirrorDrillFixture')
+    mineWhile,
+} = require("./mirrorDrillFixture")
 const {
     untilOrClearDogeStall, waitForMirrorRowEverywhere,
     readAttestRewards, readResponseRows, readRequestRow, venueTipProbe,
@@ -193,8 +194,8 @@ describe('AT6: above the flag day the chain cannot deliver a response, and the e
         // action index cannot be trusted as the correlation input.
         const sinceAction = await attestRequestWatermark(contract.contractIndex)
         await clearBeforeBroadcast()
-        const exec = await vmHelper.sendExecuteV0(
-            contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl])
+        const exec = await mineWhile(() => vmHelper.sendExecuteV0(
+            contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl]))
         assert.strictEqual(exec.execution.status, 'valid',
             'the EXECUTE that emits the request came back ' + exec.execution.status)
 
@@ -322,8 +323,8 @@ describe('AT6: above the flag day the chain cannot deliver a response, and the e
         // action index cannot be trusted as the correlation input.
         const sinceAction = await attestRequestWatermark(contract.contractIndex)
         await clearBeforeBroadcast()
-        const exec = await vmHelper.sendExecuteV0(
-            contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl])
+        const exec = await mineWhile(() => vmHelper.sendExecuteV0(
+            contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl]))
         assert.strictEqual(exec.execution.status, 'valid',
             'the second EXECUTE came back ' + exec.execution.status)
         const request = await findEmittedAttestRequest(

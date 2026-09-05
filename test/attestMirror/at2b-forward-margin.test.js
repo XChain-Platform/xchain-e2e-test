@@ -68,7 +68,8 @@ dotenv.config()
 const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
     provisionDrillIdentities, waitForVenueIndexersAtTip, startAttestTestServer, deployRequestContract,
-} = require('./mirrorDrillFixture')
+    mineWhile,
+} = require("./mirrorDrillFixture")
 const {
     APPLIED_FIELDS, until, untilOrClearDogeStall, diffRows, diffStateHashes,
     waitForMirrorRowEverywhere, waitForAppliedEverywhere, venueTipProbe,
@@ -196,8 +197,8 @@ describe('AT2 second clause: delivery past the forward margin holds the barrier 
         // action index cannot be trusted as the correlation input.
         const sinceAction = await attestRequestWatermark(contract.contractIndex)
         await clearBeforeBroadcast()
-        const exec = await vmHelper.sendExecuteV0(
-            contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl])
+        const exec = await mineWhile(() => vmHelper.sendExecuteV0(
+            contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl]))
         assert.strictEqual(exec.execution.status, 'valid',
             'the EXECUTE that emits the request came back ' + exec.execution.status)
         const request = await findEmittedAttestRequest(

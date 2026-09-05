@@ -60,7 +60,8 @@ dotenv.config()
 const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
     provisionDrillIdentities, waitForVenueIndexersAtTip, startAttestTestServer, deployRequestContract, readContractState,
-} = require('./mirrorDrillFixture')
+    mineWhile,
+} = require("./mirrorDrillFixture")
 const {
     APPLIED_FIELDS, STATE_HASH_FIELDS, until, diffRows, diffStateHashes,
     rewardFingerprint, waitForMirrorRowEverywhere, waitForAppliedEverywhere,
@@ -168,8 +169,8 @@ describe('AT2: a hub outside the responsible set disseminates the response, iden
         // action index cannot be trusted as the correlation input.
         const sinceAction = await attestRequestWatermark(contract.contractIndex)
         await clearBeforeBroadcast()
-        const exec = await vmHelper.sendExecuteV0(
-            contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl])
+        const exec = await mineWhile(() => vmHelper.sendExecuteV0(
+            contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl]))
         assert.strictEqual(exec.execution.status, 'valid',
             'attempt ' + attempt + ': the EXECUTE that emits the request came back ' +
             exec.execution.status + '. A responsible set smaller than redundancy is rejected at ' +
@@ -314,8 +315,8 @@ describe('AT2: a hub outside the responsible set disseminates the response, iden
         // IDENTICAL REWARD ROWS. Compared as (type, pubkey, amount, block) rather
         // than row for row, because the surrogate keys are per-database
         // autoincrements and would differ on every honest run.
-        const rewards0 = rewardFingerprint(await readAttestRewards(venue, outside.index, appliedBlock))
-        const rewards1 = rewardFingerprint(await readAttestRewards(venue, inside.index,  appliedBlock))
+        const rewards0 = rewardFingerprint(await readAttestRewards(venue, outside.index, { blockIndex: appliedBlock }))
+        const rewards1 = rewardFingerprint(await readAttestRewards(venue, inside.index, { blockIndex: appliedBlock }))
         assert.ok(rewards0.length > 0,
             'no attest_fee rows at block ' + appliedBlock + ' on the outside-following indexer, so the ' +
             'applier fired the callback without settling the request fee to the signers')

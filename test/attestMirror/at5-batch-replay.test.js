@@ -64,7 +64,8 @@ dotenv.config()
 const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
     provisionDrillIdentities, waitForVenueIndexersAtTip, startAttestTestServer, deployRequestContract, queryVenueDb, withWedgeClear,
-} = require('./mirrorDrillFixture')
+    mineWhile,
+} = require("./mirrorDrillFixture")
 const {
     untilOrClearDogeStall, waitForMirrorRowEverywhere, waitForAppliedEverywhere,
     venueTipProbe, mineDogeBlocks, findEmittedAttestRequest,
@@ -403,8 +404,8 @@ describe('AT5: the responses of a window land on chain as one batch', function (
         for (const tag of ['b1', 'b2']) {
             const sinceAction = await attestRequestWatermark(contract.contractIndex)
             await clearBeforeBroadcast()
-            const exec = await vmHelper.sendExecuteV0(
-                contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl + '?' + tag, tag])
+            const exec = await mineWhile(() => vmHelper.sendExecuteV0(
+                contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl + '?' + tag, tag]))
             assert.strictEqual(exec.execution.status, 'valid',
                 tag + ': the EXECUTE that emits the request came back ' + exec.execution.status)
             // Correlated on the emitting action, never on the broadcast txid: for a
