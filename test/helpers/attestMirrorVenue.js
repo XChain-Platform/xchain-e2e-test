@@ -1601,6 +1601,7 @@ class AttestMirrorVenue {
         // Sequential, so log lines interleave cleanly and the hubs' schema
         // bootstraps do not race each other on one MariaDB.
         for (let i = 0; i < this.hubCount; i++) await this._spawnHub(i);
+        await this._seedHubPrices();
     }
 
     async _spawnHub(i) {
@@ -1746,7 +1747,6 @@ class AttestMirrorVenue {
         // and the barrier never opening on mirror content.
         await this._conn.query('CREATE DATABASE IF NOT EXISTS `' + ident(ix.mirrorDbName, 'database name') + '`');
         await this._provisionMirrorSchema(ix.mirrorDbName);
-        await this._seedMirrorPrices(ix.mirrorDbName);
 
         const env = buildIndexerEnv({
             coin:    coinCode(this.coin),
@@ -1859,6 +1859,63 @@ class AttestMirrorVenue {
             ' oracle price row(s) into ' + mirrorDbName + ' (chain_time ' + chainTime +
             ', wall_time ' + wallTime + '). Without these the venue indexers refuse every priced ' +
             'action and no attestation request is ever emitted on them.');
+    }
+
+    /**
+     * Seed oracle prices into every venue HUB database, which is where the
+     * indexers' mirror pulls them FROM.
+     *
+     * SEEDED AT THE SOURCE, and the first attempt at this got it wrong in a way
+     * worth recording. Writing prices straight into each indexer's mirror
+     * database looked right and was silently undone: price_snapshots is a
+     * mirrored table, so hub_db_sync's bootstrap repages it from the hub and
+     * replaces whatever the harness put there. Measured after that attempt, the
+     * seeded rows were simply gone.
+     *
+     * WHY ANY OF THIS IS NEEDED. A priced action is refused outright when the
+     * indexer has no current price for both COIN/USD and XCHAIN/USD, and a
+     * contract DEPLOY's constructor is a priced action. The venue's own hubs run
+     * an oracle but it does not price XCHAIN: every XCHAIN/USD row they produce
+     * arrives status 'skipped' with a NULL price. So the venue indexers refused
+     * every constructor, the contract never existed on them, every later call
+     * failed as an unknown contract action, and no attestation request was ever
+     * emitted there. The applier then had nothing to bind, which is what made a
+     * delivered mirror row look like an applier defect for six runs.
+     *
+     * Rows are written finalized at BOTH the wall clock and slightly behind it,
+     * so the staleness window is covered whichever anchor the reader uses, and
+     * with a high round number so a real oracle round always wins on recency.
+     */
+    async _seedHubPrices() {
+        const tick = coinCode(this.coin);
+        const now  = Math.floor(Date.now() / 1000);
+        const pairs = [['XCHAIN/USD', '2.00000000'], [tick + '/USD', '100000.00000000']];
+        let seeded = 0;
+        for (const hub of this.hubs) {
+            const db = ident(hub.dbName, 'database name');
+            for (const [pair, price] of pairs) {
+                for (const [round, ts] of [[9000001, now], [9000002, now - 60]]) {
+                    try {
+                        await this._conn.query(
+                            'INSERT INTO `' + db + '`.price_snapshots ' +
+                            '(round_number, coin_pair, price, reference_block, reference_chain, ' +
+                            ' block_timestamp, validator_count, consensus_round, consensus_proof, status) ' +
+                            "VALUES (?, ?, ?, 0, 'BTC', ?, 1, 1, '[]', 'finalized') " +
+                            'ON DUPLICATE KEY UPDATE price = VALUES(price), status = VALUES(status), ' +
+                            ' block_timestamp = VALUES(block_timestamp)',
+                            [round, pair, price, ts]);
+                        seeded++;
+                    } catch (e) {
+                        console.log('attestMirrorVenue[' + this.label + ']: could not seed ' + pair +
+                            ' into ' + hub.dbName + ' (' + (e && e.message ? e.message.slice(0, 90) : e) + ')');
+                    }
+                }
+            }
+        }
+        console.log('attestMirrorVenue[' + this.label + ']: seeded ' + seeded +
+            ' oracle price row(s) across ' + this.hubs.length + ' hub database(s). The venue oracle ' +
+            'does not price XCHAIN, and without a price for both pairs every priced action on a ' +
+            'venue indexer is refused and no attestation request is ever emitted there.');
     }
 
     async _provisionMirrorSchema(dbName) {
