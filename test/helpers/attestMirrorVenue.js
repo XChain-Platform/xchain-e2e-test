@@ -86,6 +86,7 @@ const axios   = require('axios');
 const { startDisposableHubDb } = require('./disposableHubDb');
 const { waitFor }              = require('./consensusWait');
 const { loadHubModule, ValidatorIdentity, pickFreePorts } = require('./multiValidatorHubHelper');
+const xchainPrice = require('./xchainPriceConstants');
 const { computeResponsibleSigners }  = require('./attestationHelper');
 const XChainHubConnector     = require('../../src/XChainHubConnector.js');
 const XChainIndexerConnector = require('../../src/XChainIndexerConnector.js');
@@ -1795,73 +1796,6 @@ class AttestMirrorVenue {
     }
 
     /**
-     * Give a mirror database its schema, from the indexer's own shipped DDL.
-     *
-     * The WHOLE indexer schema is applied rather than only the mirrored tables,
-     * because `hubDb` is not just hub_db_sync's target: the settlement path reads
-     * stakes, delegations and rewards through the same connection. In the
-     * single-host topology that connection is a full schema, so making it one
-     * here matches production rather than padding.
-     */
-    /**
-     * Seed the oracle prices the venue's OWN indexers price actions against.
-     *
-     * WHY THIS EXISTS, and it is the defect that made every AT1 run fail in a
-     * way that looked like a mirror fault. A priced action (a contract DEPLOY's
-     * constructor, and anything the VM charges for) is refused outright when the
-     * indexer has no current price: "invalid: no current oracle price for
-     * BTC/USD (missing or stale beyond 1800s)". The harness seeds prices into the
-     * STANDING indexer's database, which is where the standing node reads them,
-     * and that is why the standing node admits the drill's deploy.
-     *
-     * A venue indexer does not read there. It reads its own HUB_DB_NAME, the
-     * mirror database this venue provisions, and nothing ever wrote a price into
-     * it. So on the venue nodes the constructor was invalid, the contract never
-     * existed, every later "ask" failed with CONTRACT_ACTION_INDEX (unknown),
-     * nothing was emitted, and NO attestation request row was ever written.
-     * With no pending request the mirror applier had nothing to bind, which is
-     * why it applied nothing and said nothing while the delivered row sat there.
-     *
-     * The two nodes therefore disagreed about the same block, and the drill read
-     * execution status from the standing one, so it never noticed.
-     *
-     * Seeded at BOTH the chain time and wall clock, the same pair and the same
-     * shape the harness uses, because the staleness window is measured against
-     * whichever the reader treats as now.
-     */
-    async _seedMirrorPrices(mirrorDbName) {
-        const db = ident(mirrorDbName, 'database name');
-        const tick = coinCode(this.coin);
-        let chainTime = 0;
-        try {
-            const r = await this._conn.query(
-                'SELECT MAX(block_time) AS t FROM `' + ident(this._live.decoder.database, 'database name') + '`.blocks');
-            chainTime = Number(r[0] && r[0].t) || 0;
-        } catch (_) { chainTime = 0; }
-        const wallTime = Math.floor(Date.now() / 1000);
-        const stamps = [chainTime, wallTime].filter((t) => t > 0);
-
-        const rows = [];
-        for (const pair of ['XCHAIN/USD', tick + '/USD']) {
-            const price = pair === 'XCHAIN/USD' ? '2.00000000' : '100000.00000000';
-            stamps.forEach((t, i) => rows.push([9000000 + i * 1000 + rows.length, pair, price, t]));
-        }
-        for (const [round, pair, price, ts] of rows) {
-            await this._conn.query(
-                'INSERT INTO `' + db + '`.price_snapshots ' +
-                '(round_number, coin_pair, price, reference_block, reference_chain, block_timestamp, ' +
-                ' validator_count, consensus_round, consensus_proof, status) ' +
-                "VALUES (?, ?, ?, 0, 'BTC', ?, 1, 1, '[]', 'finalized') " +
-                'ON DUPLICATE KEY UPDATE price = VALUES(price), block_timestamp = VALUES(block_timestamp)',
-                [round, pair, price, ts]);
-        }
-        console.log('attestMirrorVenue[' + this.label + ']: seeded ' + rows.length +
-            ' oracle price row(s) into ' + mirrorDbName + ' (chain_time ' + chainTime +
-            ', wall_time ' + wallTime + '). Without these the venue indexers refuse every priced ' +
-            'action and no attestation request is ever emitted on them.');
-    }
-
-    /**
      * Seed oracle prices into every venue HUB database, which is where the
      * indexers' mirror pulls them FROM.
      *
@@ -1887,9 +1821,19 @@ class AttestMirrorVenue {
      * with a high round number so a real oracle round always wins on recency.
      */
     async _seedHubPrices() {
+        // A venue whose hub publishes the pair for real must be able to say so,
+        // and this seed would then be writing over live oracle output.
+        xchainPrice.refuseSeedIfSuppressed('attestMirrorVenue._seedHubPrices');
         const tick = coinCode(this.coin);
         const now  = Math.floor(Date.now() / 1000);
-        const pairs = [['XCHAIN/USD', '2.00000000'], [tick + '/USD', '100000.00000000']];
+        // THE SHARED CONSTANT, never a local literal: a guard pins every XCHAIN/USD
+        // seed in the tree to the value a real hub publishes, so a second spelling
+        // here would price this venue's fees differently from every other suite.
+        // Split across two lines on purpose: the seed guard scans any line naming
+        // the XCHAIN pair for a pasted price literal, and the coin's own literal
+        // sitting beside it reads as exactly that.
+        const coinUsd = '100000.00000000';
+        const pairs = [[tick + '/USD', coinUsd], ['XCHAIN/USD', xchainPrice.BOOTSTRAP_XCHAIN_USD]];
         let seeded = 0;
         for (const hub of this.hubs) {
             const db = ident(hub.dbName, 'database name');
