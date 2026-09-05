@@ -159,15 +159,22 @@ describe('FILE: token-gated content', function () {
     it('issuer can transfer the gated token in BATCH(SEND, MESSAGE-to-recipient)', async function () {
         const sendCmd = ['SEND', '0', TICK, '1', recipient.address, ''].join('|')
         const handoffCmd = ['MESSAGE', '2', COIN_CODE, recipient.address, stubEncryptedMessage(keyHash)].join('|')
-        await batchHelper.sendBatchV0(issuer, [sendCmd, handoffCmd])
+        const batch = await batchHelper.sendBatchV0(issuer, [sendCmd, handoffCmd])
 
         // The SEND row IS this case's only observable, so a swallowed give-up
         // would let the test pass on a transfer that never happened.
+        //
+        // PINNED TO THIS BATCH'S TXHASH. The suite sends the permitted transfer and
+        // a refused one with the same source, destination, tick and amount, so
+        // those five fields alone name two rows with opposite verdicts and the
+        // answer would depend on row order. `status` narrows it today; the txHash
+        // is what makes it the row this case actually sent.
         const sendRow = await indexerDatabase.waitForSend({
             source: issuer.address,
             destination: recipient.address,
             tick: TICK,
             amount: '1',
+            txHash: batch.txHash,
             memo: '',
             status: 'valid',
         })

@@ -338,17 +338,27 @@ class Database {
             whereValues.push(txHash)
         }
         if (memo != null){
-            whereClauses.push("im.memo = ?")
-            whereValues.push(memo)
+            // '' means NO MEMO, which the indexer stores as NULL, and `= ''` never
+            // matches a NULL. checkMint and checkList have carried this branch for as
+            // long as the parameter has existed; checkSend never got it, so a caller
+            // asking for a memo-less SEND matched nothing and read the transfer as
+            // one that never landed (the gated-token BATCH case in the 2026-09-05
+            // release matrix, where the SEND was on chain and valid the whole time).
+            if (memo == ''){
+                whereClauses.push("im.memo IS NULL")
+            } else {
+                whereClauses.push("im.memo = ?")
+                whereValues.push(memo)
+            }
         }
         if (status != null){
             whereClauses.push("ist.status = ?")
             whereValues.push(status)
         }
-    
+
         const query = `
-            SELECT s.*, 
-                itick.tick AS tick, 
+            SELECT s.*,
+                itick.tick AS tick,
                 itx.hash AS tx_hash, 
                 ia.address AS source, 
                 ia2.address AS destination, 

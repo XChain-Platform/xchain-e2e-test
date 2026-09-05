@@ -157,6 +157,17 @@ describe('Capability SLASH: an equivocation proof burns a bond and releases its 
     }
 
     before(async function () {
+        // Capability staking is BTC-only by protocol design: STAKE off Bitcoin is
+        // rejected outright (`invalid: ACTION (BTC only)`), so the bond this whole
+        // suite is built on can never land on LTC or DOGE. Measured in the
+        // 2026-09-05 release matrix, where this suite failed identically on both
+        // and the indexer had already written that verdict. Same skip the COLLECT
+        // suite carries for the same reason.
+        if (COIN_CODE !== 'BTC') {
+            console.log('capability SLASH rides on STAKE, which is BTC-only; skipping on ' + COIN_CODE)
+            this.skip()
+            return
+        }
         staker = await cryptoHelper.getNewFundedAddress('cap-slash-staker', COIN, NETWORK, null, 'legacy', 0, 1)
         await gasHelper.ensureGasBalance(staker, '600')
         submitter = await cryptoHelper.getNewFundedAddress('cap-slash-submitter', COIN, NETWORK, null, 'legacy', 0, 1)
