@@ -654,26 +654,45 @@ async function waitForVenuePrices (venue, opts) {
         const missing = []
         for (const ix of venue.indexers) {
             for (const pair of pairs) {
+                // READ THE ROW THE READER WILL READ. `db.getLatestPrice` orders
+                // by `round_number DESC` (with a reference_block / block_timestamp
+                // ceiling), NEVER by timestamp, so a barrier that ordered by
+                // block_timestamp was judging a different row from the one the
+                // indexer prices against: the venue's seeded rows carry a
+                // synthetic round far above any round a venue hub reaches, while
+                // the hub's own oracle rounds carry later timestamps. Both a false
+                // refusal and a false pass are reachable that way, and the first
+                // is what a 2026-09-04 reading of 7,679,017 against a canonical
+                // 100,000 may well have been.
                 let rows = []
                 try {
                     rows = await queryVenueDb(venue, ix.mirrorDbName,
-                        'SELECT price FROM price_snapshots WHERE coin_pair = ? AND price IS NOT NULL ' +
-                        "AND status = 'finalized' ORDER BY block_timestamp DESC LIMIT 1", [pair])
+                        'SELECT price, round_number, reference_block, block_timestamp ' +
+                        'FROM price_snapshots WHERE coin_pair = ? AND price IS NOT NULL ' +
+                        "AND status = 'finalized' ORDER BY round_number DESC LIMIT 3", [pair])
                 } catch (_) { rows = [] }
-                        // SANE, not merely present. The venue hubs run their own oracle and
-                // it publishes a BTC price about 96x the harness's canonical one,
-                // measured 2026-09-04 (7,679,017 against 79,666). A price that
-                // wrong is worse than none: the venue node then computes a native
-                // fee two orders of magnitude above what the harness paid off the
-                // STANDING node's prices, and rejects the deploy for an
-                // insufficient fee. Two nodes disagreeing about a fee is the same
-                // divergence class as the missing price, one layer down.
+                // SANE, not merely present. A price that is wrong by orders of
+                // magnitude is worse than none: the venue node then computes a
+                // native fee far above what the harness paid off the STANDING
+                // node's prices and rejects the deploy for an insufficient fee,
+                // which is the same divergence class as a missing price one layer
+                // down, and which surfaces much later as a mirror row that never
+                // applies.
                 const px = (rows && rows.length) ? Number(rows[0].price) : null
                 const want = pair === 'XCHAIN/USD'
                     ? Number(xchainPrice.BOOTSTRAP_XCHAIN_USD) : CANONICAL_COIN_USD
                 const sane = px !== null && Number.isFinite(px) &&
                     px >= want / PRICE_TOLERANCE && px <= want * PRICE_TOLERANCE
-                if (!sane) missing.push(ix.index + ':' + pair + (px === null ? ' (absent)' : ' (' + px + ')'))
+                if (!sane){
+                    // Name the rows, not just the number. Which row won and by
+                    // what round is the whole diagnosis: a bad SEED and a bad
+                    // ORACLE round are different faults with different remedies,
+                    // and the bare value cannot tell them apart.
+                    const detail = (rows || []).map((r) =>
+                        Number(r.price) + '@round ' + r.round_number + '/ref ' + r.reference_block).join(', ')
+                    missing.push(ix.index + ':' + pair +
+                        (px === null ? ' (absent)' : ' (' + px + '; top rounds: ' + detail + ')'))
+                }
             }
         }
         if (missing.length === 0) {

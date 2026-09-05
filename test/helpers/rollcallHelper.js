@@ -1097,11 +1097,26 @@ async function tickAll(mvh, skip){
 // Gossip needs a moment to cross the in-process mesh between the tick that signs
 // and the tick that publishes. Poll the engines' own collected counts rather
 // than sleeping a fixed span.
-async function waitForGossip(mvh, epoch, wantSigners, timeoutMs, skip){
+// `nudgeCtx`, when given, MINES DOGE WHILE IT WAITS, and that is not a
+// convenience. A hub signs an epoch only once its own BTC indexer can answer
+// `ledger_hash(E)`, and that indexer HALTS on any close whose DOGE evidence it
+// cannot prove ("ROLLCALL PROOF UNAVAILABLE ... HALTING block processing"). An
+// epoch nobody drove sitting between the run's start and its target epoch is
+// enough: measured 2026-09-04, the indexer parked at block 5803 on epoch 5790's
+// close for this whole wait, no hub could open a round for 5820, and the leg
+// failed as "expected three gossiped signatures, saw 0" - which reads as a
+// signing or gossip fault and is neither. The cure is the one `mineBtcTo`
+// already applies for the same halt: mine DOGE so the close can decide.
+async function waitForGossip(mvh, epoch, wantSigners, timeoutMs, skip, nudgeCtx){
     const deadline = Date.now() + (timeoutMs || 60000)
     const skipSet  = new Set((skip || []).map(Number))
     let best = 0
+    let nudgedAt = 0
     while (Date.now() < deadline){
+        if (nudgeCtx && Date.now() - nudgedAt > 10000){
+            nudgedAt = Date.now()
+            try { await mineDoge(nudgeCtx, 2) } catch (e) { /* the rail is asserted elsewhere */ }
+        }
         await tickAll(mvh, skip)
         // Count only the hubs that are up. A silenced engine's own view is not
         // evidence about the mesh, and reading it would let an outage satisfy
@@ -1378,6 +1393,36 @@ async function mineBtcTo(ctx, height, label){
     return tip
 }
 
+/**
+ * Run `work` while mining BTC underneath it, and settle exactly as `work` does.
+ *
+ * A broadcast-then-wait helper (`sendSendV0`, `sendCollectV0`) polls for its row
+ * on a fixed budget and extends that budget only when the indexer is visibly
+ * behind or still writing. Neither signal fires when the transaction is simply
+ * waiting for a BLOCK: the indexer is at the tip, idle, and correct. Measured
+ * 2026-09-04: AT10's pool-funding SEND was refused as "never landed" after 60s
+ * with `last indexer lag 1 blocks`, and the indexer logged the very same
+ * transaction `SEND : XCHAIN : 108 : valid` moments later. The venue's own miner
+ * cadence decided it, which is not something the drill should be losing to.
+ *
+ * Mining while waiting removes the dependency without touching the wait's own
+ * budget or its diagnostics.
+ */
+async function mineWhile(ctx, work, everyMs){
+    let settled = false
+    const p = Promise.resolve(work()).finally(() => { settled = true })
+    const miner = (async () => {
+        while (!settled){
+            await sleep(everyMs || 5000)
+            if (settled) break
+            try { await mineBtcTo(ctx, (await ctx.btcTip()) + 1, 'confirming an in-flight transaction') }
+            catch (e) { /* the wait below reports the real failure */ }
+        }
+    })()
+    try { return await p }
+    finally { await miner }
+}
+
 async function mineDoge(ctx, n){
     return await chainRail.withRail(ctx.dogeRail, async () => {
         await regtestMinerConnector.generateBlocks(n)
@@ -1583,11 +1628,76 @@ async function waitForOnChainSigners(ctx, epoch, pubkeys, timeoutMs){
         await sleep(2000)
     }
     const missing = want.filter(k => !have.has(k))
+    // This wait mines DOGE and nothing else, so it can only ever finish a
+    // publish that some hub already SENT. A signature nobody published never
+    // arrives here however long it runs, and that is the likelier cause on this
+    // rail than a lost leg: rank unlock is a function of BTC HEIGHT, so a caller
+    // that ticks at a fixed height leaves every rank above floor(since /
+    // ELECTION_TOLERANCE) locked forever. Measured 2026-09-04, epoch 5700: all
+    // three hubs signed, ranks 0 and 2 published, rank 3 never did, and this
+    // message blamed the DOGE lane for it. Say both causes, and say the
+    // arithmetic, because only one of them is fixed by waiting.
+    let sinceText = ''
+    try {
+        const tip = await ctx.btcTip()
+        sinceText = ' BTC tip ' + tip + ', so since = ' + (tip - epoch) + ' and ranks up to ' +
+                    Math.floor(Math.max(0, tip - epoch) / electionTolerance(ctx.network)) + ' are unlocked.'
+    } catch (e) { sinceText = '' }
     throw new Error(
         'epoch ' + epoch + ': the DOGE side never stored signature(s) ' +
         missing.map(k => k.slice(0, 12)).join(', ') + ' within ' + (timeoutMs || 120000) + 'ms, after mining DOGE ' +
-        'throughout. A ROLLCALL rides the two-phase P2SH lane, so this means a leg never confirmed or the DOGE ' +
-        'indexer never indexed it - check the DOGE indexer log for the action, and the publisher wallet for funds.')
+        'throughout.' + sinceText + ' Either no hub ever PUBLISHED that pair (climb the rank ladder with ' +
+        'climbPublishLadder rather than ticking in place), or a published leg never confirmed - a ROLLCALL rides ' +
+        'the two-phase P2SH lane, so check the run\'s publish.spend.jsonl for a `sent` line carrying the key ' +
+        'before reading the DOGE indexer log.')
+}
+
+/**
+ * Drive the publish phase as a CLIMB, and stop as soon as the DOGE side holds
+ * every expected signature.
+ *
+ * Rank unlock is `rank <= floor(sinceBlocks / ELECTION_TOLERANCE)` with
+ * `sinceBlocks = btcTip - epoch` (`RollcallRound._rankUnlocked`), so which hubs
+ * may publish is decided by BTC HEIGHT and not by how many times the harness
+ * ticks. Ticking in place therefore publishes the low ranks and leaves the high
+ * ones locked for the life of the run - the run-5 failure, and again on
+ * 2026-09-04 in AT9, which ticked twice at `E + 6` (ranks 0..2 with the regtest
+ * tolerance of 3), got ranks 0 and 2 on chain, and then waited two minutes for a
+ * rank-3 signature no hub was allowed to send.
+ *
+ * `maxHeight` caps the climb. It defaults to the window end; a caller that must
+ * mine the window end itself under its own preconditions (AT9 freezes DOGE
+ * first) passes `windowEnd - 1` so the ladder never reaches it. Returns the keys
+ * still off chain, so a caller can decide whether that is fatal.
+ */
+async function climbPublishLadder(ctx, epoch, pubkeys, opts){
+    const o          = opts || {}
+    const silentHubs = o.silentHubs || []
+    const wantKeys   = pubkeys.map(k => String(k).toLowerCase())
+    const tolerance  = electionTolerance(ctx.network)
+    const windowEnd  = rca().rollcallWindowEndHeight(epoch, ctx.network)
+    const ceiling    = Number.isFinite(Number(o.maxHeight)) ? Number(o.maxHeight) : windowEnd
+
+    for (let round = 0; ; round++){
+        await tickAll(ctx.mvh, silentHubs)
+        await mineDoge(ctx, 3)
+        await tickAll(ctx.mvh, silentHubs)
+        await traceRounds(ctx, 'publish round ' + round)
+
+        const on = await onChainSigners(ctx, epoch, wantKeys)
+        const missing = wantKeys.filter(k => !on.has(k))
+        if (missing.length === 0){
+            console.log('    epoch ' + epoch + ': all ' + wantKeys.length + ' expected signature(s) on chain')
+            return []
+        }
+        const tip = await ctx.btcTip()
+        if (tip + tolerance > ceiling){
+            console.log('    epoch ' + epoch + ': height ceiling ' + ceiling + ' reached with ' + missing.length +
+                        ' signature(s) still off chain (' + missing.map(k => k.slice(0, 12)).join(', ') + ')')
+            return missing
+        }
+        await mineBtcTo(ctx, tip + tolerance, 'unlocking the next rank for epoch ' + epoch)
+    }
 }
 
 async function driveEpoch(ctx, epoch, opts){
@@ -1608,7 +1718,7 @@ async function driveEpoch(ctx, epoch, opts){
 
     const want = ctx.rounds.length - silentHubs.length
     ctx._traceEpoch = epoch
-    const gossiped = await waitForGossip(ctx.mvh, epoch, want, 120000, silentHubs)
+    const gossiped = await waitForGossip(ctx.mvh, epoch, want, 120000, silentHubs, ctx)
     await traceRounds(ctx, 'after gossip')
     assert.ok(gossiped >= want,
         'epoch ' + epoch + ': expected ' + want + ' gossiped signature(s) across the mesh, saw ' + gossiped +
@@ -1617,34 +1727,14 @@ async function driveEpoch(ctx, epoch, opts){
 
     if (typeof o.beforePublish === 'function') await o.beforePublish()
 
-    // Climb the rank ladder instead of ticking in place. Each round: tick (any
-    // newly unlocked rank publishes), let DOGE bury it, tick again so the
-    // engines see it on chain, then advance BTC by one tolerance step so the
-    // next rank unlocks. Stops as soon as every expected signature is on chain.
-    const tolerance = electionTolerance(ctx.network)
+    // Climb the rank ladder instead of ticking in place: which hub may publish
+    // is a function of BTC height, not of tick count. One implementation, shared
+    // with the AT9 leg, because the two drifted apart once already and the copy
+    // that ticked in place could never publish the top rank.
     const wantKeys  = ctx.roster.slice(0, ctx.rounds.length)
         .filter((_, i) => !silentHubs.map(Number).includes(i))
         .map(r => r.pubkey)
-    for (let round = 0; ; round++){
-        await tickAll(ctx.mvh, silentHubs)
-        await mineDoge(ctx, 3)
-        await tickAll(ctx.mvh, silentHubs)
-        await traceRounds(ctx, 'publish round ' + round)
-
-        const on = await onChainSigners(ctx, epoch, wantKeys)
-        const missing = wantKeys.filter(k => !on.has(k))
-        if (missing.length === 0){
-            console.log('    epoch ' + epoch + ': all ' + wantKeys.length + ' expected signature(s) on chain')
-            break
-        }
-        const tip = await ctx.btcTip()
-        if (tip + tolerance > windowEnd){
-            console.log('    epoch ' + epoch + ': window end reached with ' + missing.length +
-                        ' signature(s) still off chain (' + missing.map(k => k.slice(0, 12)).join(', ') + ')')
-            break
-        }
-        await mineBtcTo(ctx, tip + tolerance, 'unlocking the next rank for epoch ' + epoch)
-    }
+    await climbPublishLadder(ctx, epoch, wantKeys, { silentHubs, maxHeight: windowEnd })
 
     if (typeof o.afterPublish === 'function') await o.afterPublish()
 
@@ -1713,15 +1803,28 @@ async function protocolRewardAddress(ctx){
  */
 async function addressTickBalance(ctx, address, tick){
     if(!address) return null;
-    try {
-        const rows = await indexerDatabase.query(
-            'SELECT b.amount AS amount FROM balances b ' +
-            'JOIN index_addresses a ON a.id = b.address_id ' +
-            'JOIN index_ticks t ON t.id = b.tick_id ' +
-            'WHERE a.address = ? AND t.tick = ? LIMIT 1', [String(address), String(tick)]);
-        if(!rows || rows.length === 0) return 0;
-        return Number(rows[0].amount);
-    } catch (_) { return null; }
+    // THE TICK TABLE IS `index_tickers`, and the name is load-bearing rather
+    // than cosmetic. This read named `index_ticks`, which does not exist in the
+    // indexer schema, so every call threw 1146 and the catch below turned it
+    // into null - and AT10's caller read null as "no funding needed" and drove a
+    // COLLECT into an unfunded pool twice, each time failing with the handler's
+    // `insufficient reward pool` and nothing in the drill's own log about the
+    // pool at all. Measured 2026-09-04: the pool held 2 XCHAIN against a 120
+    // claim while the leader held 5,200.
+    // `ctx.idxQuery`, not `indexerDatabase.query`: that module exposes named
+    // waiters and `getConnection()`, and has no bare `query`. The old call threw
+    // TypeError on every invocation, which the catch turned into the same silent
+    // null as the wrong table name did.
+    const rows = await ctx.idxQuery(
+        'SELECT b.amount AS amount FROM balances b ' +
+        'JOIN index_addresses a ON a.id = b.address_id ' +
+        'JOIN index_tickers t ON t.id = b.tick_id ' +
+        'WHERE a.address = ? AND t.tick = ? LIMIT 1', [String(address), String(tick)]);
+    // An address with no row for this tick holds none of it, which is a real
+    // zero. A query that THROWS is an instrument fault and propagates: swallowing
+    // it here is what hid the wrong table name for two runs.
+    if(!rows || rows.length === 0) return 0;
+    return Number(rows[0].amount);
 }
 
 module.exports = {
@@ -1735,6 +1838,7 @@ module.exports = {
     sleep,
     mineBtcTo,
     mineDoge,
+    mineWhile,
     driveEpoch,
     rollcallRow,
     absenceRows,
@@ -1773,6 +1877,7 @@ module.exports = {
     rollcallRounds,
     electedLeaderIndex,
     waitForOnChainSigners,
+    climbPublishLadder,
     onChainSigners,
     electionTolerance,
     setRollcallBroadcastHook,

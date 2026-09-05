@@ -1746,7 +1746,32 @@ class AttestMirrorVenue {
         // calls verifyTables() on `indexerDb` only, so a missing mirror schema leaves
         // hub_db_sync probing SHOW COLUMNS, logging "not ready for bootstrap" forever,
         // and the barrier never opening on mirror content.
-        await this._conn.query('CREATE DATABASE IF NOT EXISTS `' + ident(ix.mirrorDbName, 'database name') + '`');
+        //
+        // AND IT IS DROPPED AND REBUILT EVERY RUN, WHICH IS NOT TIDINESS. Each run
+        // gets a FRESH per-run hub database whose `price_snapshots.id` sequence
+        // restarts at 1, while a reused venue keeps its mirror database. The
+        // mirror applies rows keyed on the HUB'S OWN id, and the price upsert
+        // (`hub_db_sync.priceUpsertSql`) excludes `round_number` and `coin_pair`
+        // from its ODKU because the duplicate it is written for is the natural
+        // key. Collide on the PRIMARY key instead - which is exactly what a stale
+        // row at id 12 does when a new hub writes its own id 12 - and MariaDB
+        // updates the OLD row: the new row's PRICE lands on the OLD row's PAIR.
+        //
+        // Measured 2026-09-04 on this venue, and it is the whole of the "the
+        // venue oracle publishes a 96x price" report: the mirror served
+        // `BTC/USD = 7,676,531` while all five venue hubs held `BTC/USD =
+        // 79,603` for that round with a four-validator quorum, and the seeded
+        // 100,000 and 2.00 sat in the mirror under `BTC/AUD` and `BTC/CAD`. The
+        // oracle was never wrong; the mirror was crossing two runs. The venue
+        // node then priced its deploy off that number, refused the fee the
+        // harness had paid off the standing node, and no attestation request
+        // was ever emitted.
+        //
+        // Reuse is kept where it pays: the `_Ixr` chain database is what saves
+        // the genesis replay. The mirror holds only hub-authored state, which
+        // MUST come from this run's hubs, so it is worth nothing across runs.
+        await this._conn.query('DROP DATABASE IF EXISTS `' + ident(ix.mirrorDbName, 'database name') + '`');
+        await this._conn.query('CREATE DATABASE `' + ident(ix.mirrorDbName, 'database name') + '`');
         await this._provisionMirrorSchema(ix.mirrorDbName);
 
         const env = buildIndexerEnv({
