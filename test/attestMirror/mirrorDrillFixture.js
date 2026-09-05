@@ -556,6 +556,25 @@ async function waitForVenueIndexersAtTip (venue, opts) {
         const caught = readable.length === seen.length &&
             readable.every((s) => (s.decoder - s.height) <= maxLag)
         if (caught) {
+            // AND THE PRICES, before this barrier reports the venue ready.
+            //
+            // Catching the chain is necessary and not sufficient. A priced action
+            // is refused without a current price for BOTH the coin pair and
+            // XCHAIN, and a contract DEPLOY's constructor is a priced action, so a
+            // drill that deploys before the venue hubs have published their first
+            // oracle round gets "no current oracle price", the contract never
+            // exists on the venue nodes, every later call fails as an unknown
+            // contract action, and NO attestation request is ever emitted there.
+            // The applier then has nothing to bind and stays silent, which is what
+            // made a delivered mirror row look like an applier defect for runs on
+            // end.
+            //
+            // It is a RACE rather than a missing capability: the venue hubs do
+            // publish both pairs, just not by the time the drill wants to deploy.
+            // So this waits for the rows to be visible instead of seeding them,
+            // which is what an earlier attempt did and which the mirror bootstrap
+            // silently overwrote.
+            await waitForVenuePrices(venue)
             console.log('mirrorDrillFixture: venue indexers caught the chain after ' +
                 Math.round((Date.now() - started) / 1000) + 's at ' +
                 seen.map((s) => s.index + '=' + s.height).join(', '))
@@ -606,6 +625,55 @@ async function waitForVenueIndexersAtTip (venue, opts) {
         '. Making a request now would put it at a block these nodes have not reached, and the ' +
         'response would read as "not applied" when the node simply has not got there yet. If they ' +
         'are not advancing at all, check the stall reason above rather than extending this budget.')
+}
+
+/**
+ * Hold until every venue indexer can see a CURRENT price for both pairs.
+ *
+ * Read from the same mirror database the indexer prices actions against, so this
+ * cannot pass while the reader still sees nothing.
+ */
+async function waitForVenuePrices (venue, opts) {
+    const o = opts || {}
+    const timeoutMs = Number(o.timeoutMs || 20 * 60 * 1000)
+    const deadline  = Date.now() + timeoutMs
+    const tick = String(global.COIN_CODE || 'BTC').toUpperCase()
+    const pairs = [tick + '/USD', 'XCHAIN/USD']
+    let last = ''
+    let announced = false
+
+    while (Date.now() < deadline) {
+        const missing = []
+        for (const ix of venue.indexers) {
+            for (const pair of pairs) {
+                let rows = []
+                try {
+                    rows = await queryVenueDb(venue, ix.mirrorDbName,
+                        'SELECT price FROM price_snapshots WHERE coin_pair = ? AND price IS NOT NULL ' +
+                        "AND status = 'finalized' ORDER BY block_timestamp DESC LIMIT 1", [pair])
+                } catch (_) { rows = [] }
+                if (!rows || rows.length === 0) missing.push(ix.index + ':' + pair)
+            }
+        }
+        if (missing.length === 0) {
+            console.log('mirrorDrillFixture: every venue indexer sees a finalized price for ' +
+                pairs.join(' and ') + '.')
+            return true
+        }
+        last = missing.join(', ')
+        if (!announced) {
+            announced = true
+            console.log('mirrorDrillFixture: waiting for the venue hubs to publish their first oracle ' +
+                'round. Missing ' + last + '. A priced action, which includes a contract deploy, is ' +
+                'refused until both pairs are present, and that refusal surfaces much later as a ' +
+                'mirror row that never applies.')
+        }
+        await new Promise((r) => setTimeout(r, 5000))
+    }
+
+    assert.fail('mirrorDrillFixture: the venue hubs never published a usable oracle price within ' +
+        timeoutMs + 'ms; still missing ' + last + '. Deploying now would fail the constructor for a ' +
+        'missing price and no attestation request would ever be emitted on the venue nodes.')
 }
 
 /**
@@ -1073,6 +1141,7 @@ async function readContractState (venue, indexerIndex, contractIndex) {
 module.exports = {
     provisionDrillIdentities,
     waitForVenueIndexersAtTip,
+    waitForVenuePrices,
     startAttestTestServer,
     readSeatedAttestationSet,
     withWedgeClear,
