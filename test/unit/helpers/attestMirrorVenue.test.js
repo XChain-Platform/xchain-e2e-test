@@ -561,6 +561,20 @@ describe('attestMirrorVenue: the decoder credential', function () {
         assert.strictEqual(out.user, 'someone_else')
     })
 
+    it('ignores the environment credential entirely when it is not this coin\'s', () => {
+        // A venue for a coin the harness .env does not describe (AT5's DOGE reader):
+        // taking Bitcoin's decoder user there authenticates and then fails
+        // ER_TABLEACCESS_DENIED on the other coin's database, which reads as a venue
+        // that cannot start rather than as the wrong credential.
+        process.env.DECODER_DB_PASS = 'from-the-environment'
+        process.env.DECODER_DB_USER = 'someone_else'
+        const out = resolveDecoderCredential(
+            { user: 'xchain_decoder_x', pass: 'a-real-password' }, ...NO_SIDECAR, false)
+        assert.strictEqual(out.user, 'xchain_decoder_x')
+        assert.strictEqual(out.pass, 'a-real-password')
+        assert.match(out.source, /config oracle/)
+    })
+
     it('uses an unredacted oracle password when one is genuinely served', () => {
         // Not dead code: a hub configured without redaction, or a future one that serves
         // credentials to authenticated callers, must still work.

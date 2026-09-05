@@ -219,17 +219,31 @@ const HUB_CONFIG_REDACTION = '[redacted]';
 // containers themselves are built from. Tried relative to this checkout the same way
 // the hub source is resolved, because the harness runs both from the monorepo and from
 // an image where the layout differs.
-function resolveCoinConfigSidecar(coin, network) {
+function resolveCoinConfigSidecar(coin, network, needKey) {
     const rel = 'xchain-node/config/' + coin + '-' + network + '.local';
+    // The `.local` sidecar first, then the coin config itself: on the regtest stack
+    // the DOGE decoder password sits in `dogecoin-regtest` with no `.local` beside
+    // it (2026-09-05), and a resolver that only knew the sidecar name found nothing.
     const candidates = [
         process.env.XCHAIN_NODE_CONFIG_DIR && path.join(process.env.XCHAIN_NODE_CONFIG_DIR, coin + '-' + network + '.local'),
+        process.env.XCHAIN_NODE_CONFIG_DIR && path.join(process.env.XCHAIN_NODE_CONFIG_DIR, coin + '-' + network),
         path.resolve(__dirname, '../../..', rel),
         path.resolve(__dirname, '../../../..', rel)
     ].filter(Boolean);
+    // With `needKey`, the first EXISTING candidate that carries that key wins, and
+    // the first existing one at all is the fallback (so the error can name it). The
+    // regtest stack's `dogecoin-regtest.local` exists and holds only the indexer
+    // credential; stopping at it hid the `dogecoin-regtest` beside it (pass 16).
+    let firstExisting = null;
     for (const p of candidates) {
-        if (fs.existsSync(p)) return p;
+        if (!fs.existsSync(p)) continue;
+        if (!needKey) return p;
+        if (firstExisting === null) firstExisting = p;
+        try {
+            if (require('dotenv').parse(fs.readFileSync(p))[needKey]) return p;
+        } catch (_) { /* unreadable: keep looking */ }
     }
-    return null;
+    return firstExisting;
 }
 
 /**
@@ -248,14 +262,20 @@ function resolveCoinConfigSidecar(coin, network) {
  * Returns `{user, pass, source}`, or `{problem}` naming the store to fix. It never logs
  * a value and never puts one on a command line.
  */
-function resolveDecoderCredential(dec, coin, network) {
-    const user = process.env.DECODER_DB_USER || dec.user;
+function resolveDecoderCredential(dec, coin, network, allowEnv = true) {
+    // `allowEnv` false means IGNORE the environment's DECODER_DB_*, which describe
+    // ONE coin: the harness .env is Bitcoin's, and a venue for another coin that
+    // takes them authenticates as `xchain_decoder_bitcoin_regtest` and then fails
+    // ER_TABLEACCESS_DENIED on that coin's decoder database (2026-09-05, AT5).
+    // An option rather than a coin comparison, because the rail switch swaps COIN
+    // while leaving the credentials alone, so COIN cannot be trusted here.
+    const user = (allowEnv && process.env.DECODER_DB_USER) || dec.user;
 
-    if (process.env.DECODER_DB_PASS) {
+    if (allowEnv && process.env.DECODER_DB_PASS) {
         return { user, pass: process.env.DECODER_DB_PASS, source: 'DECODER_DB_PASS in the environment' };
     }
 
-    const sidecar = resolveCoinConfigSidecar(coin, network);
+    const sidecar = resolveCoinConfigSidecar(coin, network, 'DECODER_DB_PASS');
     if (sidecar) {
         let parsed = {};
         try { parsed = require('dotenv').parse(fs.readFileSync(sidecar)); }
@@ -1437,6 +1457,20 @@ class AttestMirrorVenue {
         this.hubCount     = opts.hubCount     || DEFAULT_HUB_COUNT;
         this.indexerCount = opts.indexerCount || DEFAULT_INDEXER_COUNT;
         this.coin         = opts.coin    || 'bitcoin';
+        // ATTACH MODE: `attachHubs` is another venue's `hubs` array. This venue then
+        // spawns NO hubs and touches none at stop; it only spawns indexers (for ITS
+        // coin) that follow those hubs, sharing the owner's `hubDb`. Built for AT5: a
+        // DOGE indexer that mirrors the venue federation is the only reader that can
+        // hold the capability snapshots the venue hubs write at a batch anchor, and
+        // the standing DOGE indexer follows the standing hub, which never sees them
+        // (2026-09-05). Pass `hubDb` from the owner too, or this venue would start a
+        // disposable one that the attached hubs know nothing about.
+        this.attachHubs   = Array.isArray(opts.attachHubs) && opts.attachHubs.length > 0 ? opts.attachHubs : null;
+        // Whether the harness environment's DECODER_DB_* apply to THIS venue's coin
+        // (see resolveDecoderCredential). Default true, because the common venue is
+        // the coin the harness .env describes; a venue for another coin passes false.
+        this.useEnvDecoderCredential = opts.useEnvDecoderCredential !== false;
+        if (this.attachHubs) this.hubCount = this.attachHubs.length;
         this.network      = opts.network || 'regtest';
         this.basePort     = opts.basePort || 41000;
         this.repoRoot     = opts.repoRoot || path.resolve(__dirname, '../../..');
@@ -1534,7 +1568,7 @@ class AttestMirrorVenue {
         }
 
         this._identities = [];
-        for (let i = 0; i < this.hubCount; i++) {
+        for (let i = 0; i < (this.attachHubs ? 0 : this.hubCount); i++) {
             if (this.presetIdentities) {
                 if (!this.presetIdentities[i]) {
                     throw new Error('attestMirrorVenue: identities provided (' + this.presetIdentities.length +
@@ -1583,7 +1617,13 @@ class AttestMirrorVenue {
         this._mirrorProxyPorts = pool.slice(planned);
         const followed = assignFollowedHubs(this.hubCount, this.indexerCount);
 
-        await this._startHubs(ports, stamp);
+        if (this.attachHubs) {
+            // Borrowed, not owned: the records carry the apiPort, apiUrl, index and
+            // pubkey the indexer plumbing reads; procs and proxies stay the owner's.
+            this.hubs = this.attachHubs.slice();
+        } else {
+            await this._startHubs(ports, stamp);
+        }
         await this._startIndexers(ports, followed, stamp);
         return true;
     }
@@ -2178,7 +2218,7 @@ class AttestMirrorVenue {
         // Resolved rather than read straight off the oracle, which serves a redaction
         // sentinel in place of every password. Refusing here, with the store named, beats
         // spawning seven children that each die on ER_ACCESS_DENIED four minutes later.
-        const cred = resolveDecoderCredential(dec, this.coin, this.network);
+        const cred = resolveDecoderCredential(dec, this.coin, this.network, this.useEnvDecoderCredential);
         if (cred.problem) { this.unavailable = cred.problem; return null; }
         this.decoderCredentialSource = cred.source;
 
@@ -2662,8 +2702,10 @@ class AttestMirrorVenue {
             await attempt('mirror proxy ' + ix.index + ' stop',
                 async () => ix.mirrorProxy && ix.mirrorProxy.stop());
         }
-        for (const hub of this.hubs)    await attempt('hub ' + hub.index + ' stop',    async () => this._kill(hub.proc));
-        for (const hub of this.hubs)    await attempt('proxy ' + hub.index + ' stop',  async () => hub.proxy && hub.proxy.stop());
+        // Attached hubs belong to another venue: not killed, not dropped, not ours.
+        const ownedHubs = this.attachHubs ? [] : this.hubs;
+        for (const hub of ownedHubs)    await attempt('hub ' + hub.index + ' stop',    async () => this._kill(hub.proc));
+        for (const hub of ownedHubs)    await attempt('proxy ' + hub.index + ' stop',  async () => hub.proxy && hub.proxy.stop());
 
         if (this._conn) {
             // THE INDEXER DATABASES SURVIVE unless this venue made them throwaway.
@@ -2674,7 +2716,7 @@ class AttestMirrorVenue {
             const names = []
                 .concat(this.freshIndexers ? this.indexers.map((ix) => ix.mirrorDbName) : [])
                 .concat(this.freshIndexers ? this.indexers.map((ix) => ix.indexerDbName) : [])
-                .concat(this.hubs.map((h) => h.dbName));
+                .concat(ownedHubs.map((h) => h.dbName));
             for (const name of names) {
                 if (!name) continue;
                 await attempt('drop ' + name, async () =>

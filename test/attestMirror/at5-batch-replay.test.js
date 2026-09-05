@@ -86,19 +86,32 @@ const { loadHubModule } = require('../helpers/multiValidatorHubHelper')
 // this hub keyed windows on wall clock rather than on the signed effective time.
 const BATCH_WINDOW_S = 30
 
-// Above the gossip hop budget, as the venue requires, and above the window so a
-// row destined for a window is written a whole margin before it can close.
-const FORWARD_S = 8
+// Above the gossip hop budget, as the venue requires, AND ABOVE A ROUND: a row's
+// effective time is its leader's clock plus this margin, and the row is only
+// written at finalization. A round that runs through a leader-slot timeout
+// (30 s here) finalizes long after the leader's clock, so with 8 s the second of
+// two responses landed in a window hub 3 had already closed and published with
+// one row; the re-publish with both was refused on chain as a duplicate head
+// (`BATCH_KEY`) and that response never linked (pass 17, 2026-09-05). Ninety
+// seconds covers two slots plus gossip and keeps the drill's own waits intact.
+const FORWARD_S = 90
 
 // How often the drill re-pushes the node's live BTC tip to every hub. Half the
 // miner's 6 s ceiling on the drive venue, so no hub ever holds a tip more than
 // one block stale; cheap (five fire-and-forget RPCs).
 const TIP_FEED_MS = 3000
 
-// DOGE funded to the publisher. Two DOGE covered 500 windows at 0.004 each and was
-// never the limiter (confirmation timing was, see the marker wait's nudge); twenty
-// removes money from the list entirely.
-const PUBLISHER_FUND_DOGE = 20.0
+// DOGE funded to the publisher, as MANY INDEPENDENT OUTPUTS rather than one. The
+// encoder spends confirmed outputs only, and every window (empty ones too, one per
+// BATCH_WINDOW_S) spends the wallet's largest output into fresh, unconfirmed
+// change; with one funding output the publisher can reach only the small
+// carrier outputs earlier windows left behind, and a 3-wire batch needing
+// 2,000,000 against `selected inputs total 600000` failed at the one window that
+// carried the responses (pass 10, 2026-09-05; the publisher never retries a
+// failed broadcast). With PUBLISHER_FUND_OUTPUTS outputs of PUBLISHER_FUND_DOGE
+// each, at most one is in flight per window and a confirmed one is always there.
+const PUBLISHER_FUND_DOGE    = 1.0
+const PUBLISHER_FUND_OUTPUTS = 40
 
 const DEADLINE_BLOCKS = 60
 const BURIAL_BLOCKS   = 6
@@ -198,6 +211,14 @@ async function stageDogeSigner (label, rail) {
         const addr = await withWedgeClear('funding the batch publisher on the other rail',
             () => cryptoHelper.getNewFundedAddress(
                 label + '-batch-publisher', COIN, NETWORK, null, 'legacy', 0, PUBLISHER_FUND_DOGE))
+        // The remaining outputs, each its own transaction from the miner's wallet
+        // (see PUBLISHER_FUND_OUTPUTS). Idempotency is not needed here: a retry
+        // that re-funds simply leaves the publisher richer.
+        for (let i = 1; i < PUBLISHER_FUND_OUTPUTS; i++) {
+            await regtestMinerConnector.sendFunds(addr.address, PUBLISHER_FUND_DOGE)
+        }
+        console.log('AT5: publisher ' + addr.address + ' funded with ' + PUBLISHER_FUND_OUTPUTS +
+            ' outputs of ' + PUBLISHER_FUND_DOGE + ' DOGE')
         await regtestMinerConnector.generateBlocks(2)
         await utxoTrackerConnector.quiesce({
             timeoutMs: 60_000, pollMs: 250, regtestMiner: regtestMinerConnector,
@@ -285,6 +306,7 @@ describe('AT5: the responses of a window land on chain as one batch', function (
     this.timeout(120 * 60 * 1000)
 
     let venue      = null
+    let dogeVenue  = null   // the attached DOGE reader, see the before-hook
     let up         = false
     let testServer = null
     let testUrl    = null
@@ -357,6 +379,33 @@ describe('AT5: the responses of a window land on chain as one batch', function (
         // from the standing node and still need to catch its tip before a request
         // made here can be applied on them.
         await waitForVenueIndexersAtTip(venue)
+
+        // THE DOGE READER IS PART OF THE VENUE. A v5 head is judged on DOGE against
+        // `capability_snapshots` at its anchor, mirrored from the hub the DOGE indexer
+        // follows. The venue hubs write those rows; the STANDING DOGE indexer follows
+        // the STANDING hub and never sees them, so every head it judges reads
+        // `invalid: insufficient signer stake` (pass 12, 2026-09-05). This second venue
+        // spawns one DOGE indexer from the tree that follows venue hub 0 and shares the
+        // hub database; the batch actions are read from it. Started INSIDE the DOGE
+        // rail switch so the seed clones from the standing DOGE indexer (the rail swaps
+        // INDEXER_DB_* for its duration) and the decoder discovered is DOGE's.
+        dogeVenue = await chainRail.withRail(dogeRail, async () => {
+            const dv = new AttestMirrorVenue({
+                label: 'at5doge',
+                coin: 'dogecoin',
+                attachHubs: venue.hubs,
+                hubDb: venue.hubDb,
+                indexerCount: 1,
+                // The harness DECODER_DB_* are Bitcoin's; this venue's decoder is DOGE's.
+                useEnvDecoderCredential: false,
+            })
+            const dvUp = await dv.start()
+            assert.ok(dvUp, 'the attached DOGE venue did not start: ' + dv.unavailable)
+            return dv
+        })
+        await waitForVenueIndexersAtTip(dogeVenue)
+        console.log('AT5: DOGE venue indexer follows hub ' + dogeVenue.indexers[0].followsHub +
+            ' and reads ' + dogeVenue.indexers[0].indexerDbName)
 
         // THE ANCHOR. Without a BTC chain tip every hub defers every window with a
         // latched warning and publishes nothing, which reads exactly like a publisher
@@ -436,6 +485,8 @@ describe('AT5: the responses of a window land on chain as one batch', function (
     after(async function () {
         if (tipFeeder) { clearInterval(tipFeeder); tipFeeder = null }
         if (testServer) await testServer.close()
+        // The attached venue first: its indexer follows a hub the owner is about to kill.
+        if (dogeVenue) await dogeVenue.stop()
         if (venue) await venue.stop()
         // The staged signer holds a WIF only in the hub children's environment, but the
         // directory itself is this drill's litter and goes back.
@@ -491,27 +542,25 @@ describe('AT5: the responses of a window land on chain as one batch', function (
      * word in some MariaDB versions and an unquoted alias would fail only there.
      */
     async function readDogeBatchActions () {
-        return await chainRail.withRail(dogeRail, async () => {
-            let connection = null
-            try {
-                connection = await indexerDatabase.getConnection()
-                return await connection.query(
-                    'SELECT a.action_index, a.block_index, `at`.version, `at`.batch_window_start, ' +
-                    '       `at`.batch_window_end, `at`.batch_row_count, `at`.batch_chunk_index, ' +
-                    '       `at`.batch_total_chunks, s.status AS verdict ' +
-                    'FROM attests `at` JOIN actions a ON a.action_index = `at`.action_index ' +
-                    'LEFT JOIN index_statuses s ON s.id = `at`.status_id ' +
-                    'WHERE `at`.version IN (?, ?) ORDER BY a.action_index ASC',
-                    [BATCH_HEAD_VERSION, BATCH_CONTINUATION_VERSION])
-            } catch (e) {
-                // Reported rather than swallowed: an unreadable DOGE side is a different
-                // failure from an empty one, and the caller's assertion prints this.
-                console.log('AT5: could not read DOGE batch actions: ' + (e && e.message))
-                return []
-            } finally {
-                if (connection) await connection.release()
-            }
-        })
+        // Read on the VENUE's DOGE indexer (see the before-hook), never the standing
+        // one: only a node mirroring the venue federation holds the capability
+        // snapshot the verdict is judged against.
+        if (!dogeVenue || !dogeVenue.indexers[0]) return []
+        try {
+            return await queryVenueDb(dogeVenue, dogeVenue.indexers[0].indexerDbName,
+                'SELECT a.action_index, a.block_index, `at`.version, `at`.batch_window_start, ' +
+                '       `at`.batch_window_end, `at`.batch_row_count, `at`.batch_chunk_index, ' +
+                '       `at`.batch_total_chunks, s.status AS verdict ' +
+                'FROM attests `at` JOIN actions a ON a.action_index = `at`.action_index ' +
+                'LEFT JOIN index_statuses s ON s.id = `at`.status_id ' +
+                'WHERE `at`.version IN (?, ?) ORDER BY a.action_index ASC',
+                [BATCH_HEAD_VERSION, BATCH_CONTINUATION_VERSION])
+        } catch (e) {
+            // Reported rather than swallowed: an unreadable DOGE side is a different
+            // failure from an empty one, and the caller's assertion prints this.
+            console.log('AT5: could not read DOGE batch actions: ' + (e && e.message))
+            return []
+        }
     }
 
     it('lands a window of responses on DOGE as a valid v5 head with its continuations', async function () {
@@ -573,15 +622,26 @@ describe('AT5: the responses of a window land on chain as one batch', function (
             const actions = await readDogeBatchActions()
             const heads = actions.filter((a) => Number(a.version) === BATCH_HEAD_VERSION &&
                 Number(a.batch_window_start) === Number(marker.window_start))
-            return { ok: heads.length > 0, heads: heads, actions: actions }
+            // A VALID head, not the first head. The same window's head can sit on the
+            // chain more than once and the indexer judges each arrival on what it holds
+            // at that block: pass 18 (2026-09-05) recorded one `invalid: ATTEST_BATCH
+            // (crc32-mismatch)` head, its continuations not yet all indexed, and two
+            // valid ones for one window, and the lowest action index was the invalid
+            // one. Coverage is provable the moment ONE valid head exists.
+            const valid = heads.filter((h) => String(h.verdict) === 'valid')
+            return { ok: valid.length > 0, heads: heads, valid: valid, actions: actions }
         }, { timeoutMs: 20 * 60 * 1000, intervalMs: 5000, tipProbe: venueTipProbe(venue, 0) })
         assert.ok(landed.ok,
-            'the published window never appeared on DOGE as an ATTEST v5. Batch actions seen: ' +
-            jsonSafe(landed.actions))
+            'the published window never appeared on DOGE as a VALID ATTEST v5. Heads seen for it: ' +
+            jsonSafe((landed.heads || []).map((h) => ({ action: h.action_index, block: h.block_index, verdict: h.verdict }))) +
+            '. All batch actions seen: ' + jsonSafe(landed.actions))
+        if (landed.heads.length > landed.valid.length) {
+            console.log('AT5 NOTE: window ' + marker.window_start + ' has ' + landed.heads.length + ' head row(s) on DOGE, ' +
+                landed.valid.length + ' valid; the others: ' +
+                landed.heads.filter((h) => String(h.verdict) !== 'valid').map((h) => h.action_index + '=' + h.verdict).join(', '))
+        }
 
-        const head = landed.heads[0]
-        assert.strictEqual(String(head.verdict), 'valid',
-            'the v5 head landed but was judged ' + head.verdict + ' rather than valid')
+        const head = landed.valid[0]
         assert.strictEqual(Number(head.batch_row_count), Number(marker.row_count),
             'the head declares ' + head.batch_row_count + ' rows and the publisher recorded ' +
             marker.row_count)
