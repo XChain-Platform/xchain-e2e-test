@@ -58,6 +58,7 @@ const rc        = require('../helpers/rollcallHelper')
 const chainRail = require('../helpers/chainRail')
 const cryptoHelper = require('../cryptoHelper')
 const stakeHelper  = require('../helpers/stakeHelper')
+const sendHelper   = require('../helpers/sendHelper')
 const { requireFederationEnv } = require('../helpers/federationGuards')
 
 // How long a stalled tip must stay stalled before it counts as a deferral rather
@@ -318,6 +319,41 @@ describe('ROLLCALL acceptance: the DOGE proof barrier and the publish reward (AT
                         'leader\'s staking source ' + leaderSource + '. Seed the federation from ' +
                         'XC_ROLLCALL_FEDERATION_MNEMONIC (address index i for roster entry i) to drive it.')
         } else {
+            // FUND THE PROTOCOL REWARD POOL FIRST, when it cannot cover the claim.
+            //
+            // COLLECT debits the protocol REWARD address and refuses with
+            // "invalid: insufficient reward pool" when its balance is under the
+            // claim. That address is credited by ATTEST fees on FULFILLED requests
+            // and by nothing a roll-call venue does on its own, so on a chain that
+            // has never fulfilled an attestation it sits at whatever it was
+            // seeded with. Measured on this regtest chain: 2 XCHAIN against a 40
+            // XCHAIN claim, which is why AT10's on-chain leg was the ladder's last
+            // red for days while every other assertion in the file was green.
+            //
+            // Topping it up is legitimate rather than a fudge: the pool is an
+            // ordinary balance at a protocol address, this drill is asserting the
+            // COLLECT path rather than the economics that fill it, and the credit
+            // path itself is exercised by the attest ladder instead. The SEND is a
+            // real on-chain transaction, so the balance the handler reads is real.
+            const rewardAddress = await rc.protocolRewardAddress(ctx)
+            const poolBefore    = await rc.addressTickBalance(ctx, rewardAddress, 'XCHAIN')
+            const claimNeeds    = Number(rc.rca().ROLLCALL_REWARD_AMOUNT)
+            if (rewardAddress && poolBefore !== null && poolBefore < claimNeeds){
+                const short = claimNeeds - poolBefore
+                // Headroom, not the exact shortfall: the leader's unclaimed total can
+                // exceed this run's single reward when earlier epochs left rewards
+                // uncollected, and a COLLECT claims the whole unclaimed balance.
+                const topUp = String(Math.ceil(short + claimNeeds * 4))
+                console.log('    [AT10] protocol REWARD pool holds ' + poolBefore + ' XCHAIN against a ' +
+                            claimNeeds + ' XCHAIN claim; funding it with ' + topUp +
+                            ' XCHAIN so the COLLECT path can be driven.')
+                await sendHelper.sendSendV0(leaderAddrInfo, 'XCHAIN', topUp, rewardAddress)
+                const poolAfter = await rc.addressTickBalance(ctx, rewardAddress, 'XCHAIN')
+                assert.ok(poolAfter !== null && poolAfter >= claimNeeds,
+                    'AT10: the reward pool is still ' + poolAfter + ' XCHAIN after funding it with ' +
+                    topUp + '; the COLLECT below would fail on the pool rather than on its own logic.')
+            }
+
             const res = await stakeHelper.sendCollectV0(leaderAddrInfo)
             assert.strictEqual(String(res.claim.status), 'valid',
                 'AT10: a COLLECT from the leader\'s staking source must be valid; got ' + res.claim.status)

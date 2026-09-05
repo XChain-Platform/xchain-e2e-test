@@ -1676,7 +1676,50 @@ async function driveEpoch(ctx, epoch, opts){
     return row
 }
 
+/**
+ * The protocol REWARD address for the chain under test, read from the indexer's
+ * own per-chain role map rather than pinned here.
+ *
+ * COLLECT debits this address, so a drill that funds it must fund exactly the
+ * one the handler will read: the roles are encoded per chain, and a BTC address
+ * is not the LTC or DOGE one.
+ */
+async function protocolRewardAddress(ctx){
+    try {
+        const coin = (global.COIN_CODE || 'BTC');
+        const net  = (global.NETWORK || 'regtest');
+        // The per-chain config's own ADDRESS map, which is the same object
+        // collect.js reads its REWARD address from.
+        const cfg = require(_resolveSibling('xchain-indexer', 'src/configs/' + coin + '.js'));
+        const c   = (cfg && typeof cfg.getConfig === 'function') ? cfg.getConfig(net) : null;
+        if(c && c.ADDRESS && c.ADDRESS.REWARD) return String(c.ADDRESS.REWARD);
+    } catch (_) { /* fall through: the caller treats null as "cannot fund" */ }
+    return null;
+}
+
+/**
+ * One address's balance for one tick, as a Number, or null when it cannot be read.
+ *
+ * NULL RATHER THAN ZERO on a failed read, deliberately: zero is a balance a
+ * caller would act on, and funding decisions made from an unreadable balance
+ * are how a drill spends real coin for no reason.
+ */
+async function addressTickBalance(ctx, address, tick){
+    if(!address) return null;
+    try {
+        const rows = await indexerDatabase.query(
+            'SELECT b.amount AS amount FROM balances b ' +
+            'JOIN index_addresses a ON a.id = b.address_id ' +
+            'JOIN index_ticks t ON t.id = b.tick_id ' +
+            'WHERE a.address = ? AND t.tick = ? LIMIT 1', [String(address), String(tick)]);
+        if(!rows || rows.length === 0) return 0;
+        return Number(rows[0].amount);
+    } catch (_) { return null; }
+}
+
 module.exports = {
+    protocolRewardAddress,
+    addressTickBalance,
     SIGNING_SEEDS,
     federationSeeds,
     IDLE_SEED_INDEX,
