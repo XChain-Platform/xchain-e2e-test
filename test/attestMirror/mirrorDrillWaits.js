@@ -894,11 +894,14 @@ function standingTipProbe (apiPort) {
 }
 
 /**
- * Wait until BOTH venue indexers hold exactly one mirror row for a request.
+ * Wait until BOTH venue indexers hold at least one mirror row for a request.
  *
  * Both, because a single node holding it proves the hub wrote a row and proves
- * nothing about dissemination, and exactly one because two rows for one request
- * is the double-finalize §4.1 tie-breaks and a drill must not average over it.
+ * nothing about dissemination. At least one, not exactly one: a round that
+ * finalized under two leader slots leaves two honestly signed rows differing
+ * only in effective_time, and since 2026-09-06 the mirror keeps both by design
+ * (the key is network, request_id, effective_time). Which of them binds is the
+ * applier's §4.1 tie-break, and the applied wait is what proves that choice.
  */
 async function waitForMirrorRowEverywhere (venue, requestId, timeoutMs, opts) {
     // Fourth argument added, never a reordering: another lane calls this with three.
@@ -916,7 +919,7 @@ async function waitForMirrorRowEverywhere (venue, requestId, timeoutMs, opts) {
         for (const ix of venue.indexers) {
             rows.push(await venue.readMirrorRows(ix.index, { requestId: requestId }))
         }
-        return { ok: rows.every((r) => r.length === 1), rows: rows }
+        return { ok: rows.every((r) => r.length >= 1), rows: rows }
     }, {
         timeoutMs: timeoutMs || 10 * 60 * 1000,
         tipProbe: venueTipProbe(venue, 0),

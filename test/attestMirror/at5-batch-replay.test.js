@@ -567,6 +567,7 @@ describe('AT5: the responses of a window land on chain as one batch', function (
         // Two large responses in one window: enough compressed bytes to exceed a
         // single 8189-byte wire, so the batch has to chunk.
         const ids = []
+        const emitted = []
         for (const tag of ['b1', 'b2']) {
             const sinceAction = await attestRequestWatermark(contract.contractIndex)
             await clearBeforeBroadcast()
@@ -579,17 +580,34 @@ describe('AT5: the responses of a window land on chain as one batch', function (
             const request = await findEmittedAttestRequest(
                 contract.contractIndex, sinceAction + 1, { label: tag })
             ids.push(request.requestId)
+            emitted.push(request)
         }
 
         await regtestMinerConnector.generateBlocks(BURIAL_BLOCKS)
         await settleOrReport('at5')
-        for (const id of ids) await waitForMirrorRowEverywhere(venue, id, null, {
-                mineWhileWaiting: { perPoll: 1, maxBlocks: widenArithmetic(DEADLINE_BLOCKS).safeCap },
-            })
+        // ONE mining budget for every wait below, measured against the EARLIEST
+        // request deadline from the chain tip at the moment each wait starts. A
+        // per-wait cap of safeCap (47 blocks at a 60-block deadline) let four waits
+        // mine up to 188 blocks against that deadline: pass 20 mined b2 past its
+        // own deadline_block while its round was still finalizing, the expiry sweep
+        // fired at 8403, and a row that finalized 40 s later could never bind.
+        // The same half-segment headroom safeCap keeps is kept here, below the
+        // deadline rather than below a fixed count.
+        const earliestDeadline = Math.min(...emitted.map((r) => r.deadlineBlock))
+        const headroom = Math.ceil(widenArithmetic(DEADLINE_BLOCKS).segment / 2)
+        const budgetProbe = venueTipProbe(venue, 0)
+        const mineOpts = async () => {
+            const t = await budgetProbe()
+            const tip = Number.isFinite(t.decoder) ? t.decoder : (Number.isFinite(t.height) ? t.height : 0)
+            const budget = earliestDeadline - headroom - tip
+            // maxBlocks 0 reads as UNCAPPED to the wait, so an exhausted budget passes
+            // no mining option at all rather than a zero.
+            return budget > 0 ? { mineWhileWaiting: { perPoll: 1, maxBlocks: budget } } : {}
+        }
+        for (const id of ids) await waitForMirrorRowEverywhere(venue, id, null, await mineOpts())
         // Mined under, as AT1's applied wait is: the applier runs inside the block
         // loop, so an idle chain never applies a row that is already valid.
-        for (const id of ids) await waitForAppliedEverywhere(venue, id, null,
-                { mineWhileWaiting: { perPoll: 1, maxBlocks: widenArithmetic(DEADLINE_BLOCKS).safeCap } })
+        for (const id of ids) await waitForAppliedEverywhere(venue, id, null, await mineOpts())
         console.log('AT5: ' + ids.length + ' responses finalized and applied; waiting for their window to close')
 
         // The window has to close, be elected, be signed and be broadcast. Several
