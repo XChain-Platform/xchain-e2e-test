@@ -300,9 +300,9 @@ describe('VM Contract Custody: emitted entities belong to the contract, not the 
         const cancel = await orderHelper.sendOrderCancelV1(deployer, orderIndex, 'caller tries to cancel')
         // Wait for the indexer's verdict on the cancel (an actions row lands for every
         // parsed action, valid or not); "the escrow is still held" means nothing before
-        // then. Bound = the 30000ms pollBalance gives the accepting path in this file.
+        // then. Bound = one indexer barrier cycle (a 60s cross-chain defer plus retry).
         await regtestMinerConnector.generateBlocks(2)
-        await waitForTxIndexed(cancel.txHash, { timeoutMs: 30000, intervalMs: 250 })
+        await waitForTxIndexed(cancel.txHash, { timeoutMs: 120000, intervalMs: 250 })
 
         // The order must still be open and the escrow still held. A wrongful cancel would have
         // refunded the 40 to the contract (60 -> 100). Staying at 60 proves the cancel was rejected.

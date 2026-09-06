@@ -102,8 +102,8 @@ async function waitValidOrder(source, giveTick, timeMax = 25000) {
 }
 // Confirm an order WAS rejected: wait for the indexer's verdict on the ORDER's own
 // tx (an actions row lands for every parsed action, valid or not), then assert no
-// valid order exists. Bound = the 25000ms waitValidOrder gives the accepting path.
-async function expectOrderRejected(source, giveTick, txHash, waitMs = 25000) {
+// valid order exists. Bound = one indexer barrier cycle (60s timeout plus retry).
+async function expectOrderRejected(source, giveTick, txHash, waitMs = 120000) {
     await waitForTxIndexed(txHash, { timeoutMs: waitMs, intervalMs: 250 })
     const valid = await indexerDatabase.checkOrder({ source, giveTick, status: 'valid' })
     return !valid
@@ -289,8 +289,8 @@ describe('Controller Policy Layer: bindings, enforcement, royalty split + permis
         const blockedSendTx = await submitRaw(owner, `SEND|0|${tick}|10|${carol.address}|blocked-send`)
         // Wait for the indexer's verdict on THIS send (its actions row lands whether
         // accepted or refused); an unchanged balance says nothing before then. Bound
-        // = the 20000ms the controller waits in this file give the accepting path.
-        await mine(1); await waitForTxIndexed(blockedSendTx, { timeoutMs: 20000, intervalMs: 250 })
+        // = one indexer barrier cycle (a 60s cross-chain defer plus its retry).
+        await mine(1); await waitForTxIndexed(blockedSendTx, { timeoutMs: 120000, intervalMs: 250 })
         const after = await balanceOf(carol.address, tick)
         assert(before === after, 'SEND of transfer-bound token is REJECTED (recipient balance unchanged)')
         console.log('   SEND blocked by transfer controller; OK. carol balance still', after)
@@ -380,7 +380,7 @@ describe('Controller Policy Layer: bindings, enforcement, royalty split + permis
         const unsolicitedTx = await submitRaw(owner, `SEND|0|${tick}|25|${recip.address}|unsolicited`)
         // The indexer's verdict on THIS send, not a fixed interval: an unchanged
         // recipient balance only means "reverted" once the send has been judged.
-        await mine(1); await waitForTxIndexed(unsolicitedTx, { timeoutMs: 20000, intervalMs: 250 })
+        await mine(1); await waitForTxIndexed(unsolicitedTx, { timeoutMs: 120000, intervalMs: 250 })
         const after = await balanceOf(recip.address, tick)
         assert(before === after, 'inbound SEND to gated recipient REVERTS (no credit)')
         console.log('   inbound SEND reverted by recipient gate; OK. recip balance', after)
@@ -464,8 +464,8 @@ describe('Controller Policy Layer: bindings, enforcement, royalty split + permis
         // the allowlist -> throws -> guard DENIES -> the original SEND is blocked (recipient gets none).
         const manifestBlockedTx = await submitRaw(owner, `SEND|0|${tick}|10|${recip.address}|manifest-blocked`)
         // Wait for the send to be judged; the recipient's balance is only evidence
-        // of a denial after that. Bound = the 20000ms the accepting path budgets.
-        await waitForTxIndexed(manifestBlockedTx, { timeoutMs: 20000, intervalMs: 250 })
+        // of a denial after that. Bound = one indexer barrier cycle (60s plus retry).
+        await waitForTxIndexed(manifestBlockedTx, { timeoutMs: 120000, intervalMs: 250 })
         const after = await balanceOf(recip.address, tick)
         assert.strictEqual(after, before, 'SEND blocked by the allowlist (contract IS funded, so the block is the manifest, not balance)')
         console.log('   E2 manifest-forbidden emission denied the funded contract; OK')
@@ -518,7 +518,7 @@ describe('Controller Policy Layer: bindings, enforcement, royalty split + permis
         let before = await balanceOf(fred.address, tick)
         const allBlockedSendTx = await submitRaw(owner, `SEND|0|${tick}|10|${fred.address}|all-blocked-send`)
         // The indexer's verdict on THIS send, not a fixed interval.
-        await mine(1); await waitForTxIndexed(allBlockedSendTx, { timeoutMs: 20000, intervalMs: 250 })
+        await mine(1); await waitForTxIndexed(allBlockedSendTx, { timeoutMs: 120000, intervalMs: 250 })
         assert.strictEqual(await balanceOf(fred.address, tick), before, "SEND falls back to the 'all' guard and is DENIED")
         console.log("   SEND denied via 'all' fallback (transfer class); OK")
 
