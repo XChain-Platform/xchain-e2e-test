@@ -139,16 +139,28 @@ class UtxoTracker {
         return status
     }
 
-    // Block-sync barrier. The encoder refuses to select UTXOs while the tracker is
-    // behind the node, so mining and then immediately building a tx races it. Polls
-    // the tracker's own `synced` verdict rather than a local lag threshold.
+    // Serve-readiness barrier. The encoder refuses to select UTXOs while the tracker
+    // is behind the node, so mining and then immediately building a tx races it. Polls
+    // the tracker's own verdicts rather than a local lag threshold.
+    //
+    // Releasing on `synced` alone was not the encoder's condition: block sync flips
+    // true before the first mempool rebuild finishes, and the encoder refuses on
+    // `mempool_ready === false` on BOTH of its paths (XChainEncoder.js's create_tx
+    // freshness gate and UtxoTracker.js's fetch gate), so the barrier could release
+    // into a window where every tx build answers UTXO_TRACKER_NOT_READY. The tracker
+    // publishes mempool_ready = synced && isMempoolReconverged() on get_sync_status
+    // and withdraws it on any mempool-poll error or synced=false transition.
+    //
+    // Strict `!== false`, not truthiness: a tracker build predating the field omits
+    // it and must stay on the fail-open path, which is the same convention the
+    // encoder's own gates use.
     async waitForSync(timeMax = 60000, pollMs = 500){
         const deadline = Date.now() + timeMax
         let last = null
         while (Date.now() < deadline){
             const status = await this.getSyncStatus()
             last = status
-            if (status && status.synced) return status
+            if (status && status.synced && status.mempool_ready !== false) return status
             await this.sleep(pollMs)
         }
         return last

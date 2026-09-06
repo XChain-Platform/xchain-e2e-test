@@ -80,7 +80,7 @@ describe('Bootstrap: environment variable path', function () {
             envVars.UTXO_TRACKER_URL, envVars.UTXO_TRACKER_API_PORT
         )
         global.encoderConnector = new XChainEncoderConnector(
-            envVars.ENCODER_URL, envVars.ENCODER_API_PORT
+            envVars.ENCODER_URL, envVars.ENCODER_API_PORT, process.env.ENCODER_API_KEY || null
         )
         global.decoderConnector = new XChainDecoderConnector(
             envVars.DECODER_URL, envVars.DECODER_API_PORT

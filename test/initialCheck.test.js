@@ -248,7 +248,7 @@ exports.mochaHooks = {
                 NODE_URL, NODE_PORT, NODE_USER, NODE_PASS
             )
             global.utxoTrackerConnector = new XChainUtxoTrackerConnector(UTXO_TRACKER_URL, UTXO_TRACKER_PORT)
-            global.encoderConnector = new XChainEncoderConnector(ENCODER_URL, ENCODER_PORT)
+            global.encoderConnector = new XChainEncoderConnector(ENCODER_URL, ENCODER_PORT, process.env.ENCODER_API_KEY || null)
             global.decoderConnector = new XChainDecoderConnector(DECODER_URL, DECODER_PORT)
             global.indexerConnector = new XChainIndexerConnector(INDEXER_URL, INDEXER_PORT, process.env.INDEXER_API_KEY || null)
             global.explorerConnector = new XChainExplorerConnector(EXPLORER_URL, EXPLORER_PORT)

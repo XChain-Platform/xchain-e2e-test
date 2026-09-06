@@ -176,6 +176,56 @@ describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
         });
     });
 
+    // The barrier has to hold on exactly the condition the encoder refuses on:
+    // it gates tx construction, and the encoder answers UTXO_TRACKER_NOT_READY
+    // whenever mempool_ready === false, which block sync alone does not imply.
+    describe('waitForSync', function () {
+        it('holds while the tracker is synced but its mempool has not reconverged', async function () {
+            const status = sinon.stub(tracker, 'getSyncStatus');
+            status.onCall(0).resolves({ synced: true, mempool_ready: false });
+            status.onCall(1).resolves({ synced: true, mempool_ready: false });
+            status.resolves({ synced: true, mempool_ready: true });
+            sinon.stub(tracker, 'sleep').resolves();
+
+            const result = await tracker.waitForSync(1000, 1);
+            assert.deepStrictEqual(result, { synced: true, mempool_ready: true });
+            assert.strictEqual(status.callCount, 3, 'expected the barrier to keep polling past the unready statuses');
+        });
+
+        it('releases immediately when the field is absent, keeping older trackers fail-open', async function () {
+            const status = sinon.stub(tracker, 'getSyncStatus').resolves({ synced: true });
+            sinon.stub(tracker, 'sleep').resolves();
+
+            const result = await tracker.waitForSync(1000, 1);
+            assert.deepStrictEqual(result, { synced: true });
+            assert.strictEqual(status.callCount, 1);
+        });
+
+        it('releases immediately when both verdicts are asserted', async function () {
+            const status = sinon.stub(tracker, 'getSyncStatus').resolves({ synced: true, mempool_ready: true });
+            sinon.stub(tracker, 'sleep').resolves();
+
+            await tracker.waitForSync(1000, 1);
+            assert.strictEqual(status.callCount, 1);
+        });
+
+        it('does not release on mempool readiness while block sync is false', async function () {
+            sinon.stub(tracker, 'getSyncStatus').resolves({ synced: false, mempool_ready: true });
+            sinon.stub(tracker, 'sleep').resolves();
+
+            const result = await tracker.waitForSync(20, 1);
+            assert.strictEqual(result.synced, false, 'expected the last unready status back on timeout');
+        });
+
+        it('returns the last unready status on timeout rather than throwing', async function () {
+            sinon.stub(tracker, 'getSyncStatus').resolves({ synced: true, mempool_ready: false });
+            sinon.stub(tracker, 'sleep').resolves();
+
+            const result = await tracker.waitForSync(20, 1);
+            assert.deepStrictEqual(result, { synced: true, mempool_ready: false });
+        });
+    });
+
     describe('waitForUtxos', function () {
         const ADDRESS = 'bcrt1qwait';
 

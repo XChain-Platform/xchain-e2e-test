@@ -1,5 +1,5 @@
 {
     "check": "fixed-settle sleep call sites under test/",
-    "note": "Ratchet only. Lower this when sleeps are converted to condition waits; never raise it.",
-    "count": 26
+    "note": "Ratchet only. Lower this when waits are converted to condition waits; never raise it. Raised once, 26 to 38, when the detector was widened to read the inline `await new Promise(r => setTimeout(r, n))` form alongside `await sleep(n)`: that rise was the gate seeing a shape it had been blind to, not new debt.",
+    "count": 38
 }

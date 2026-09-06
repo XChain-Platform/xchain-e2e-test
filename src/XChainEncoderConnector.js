@@ -21,9 +21,16 @@
 const axios = require('axios');
 
 class XChainEncoderConnector {
-    constructor(url, port) {
+    constructor(url, port, apiKey = null) {
         this.url = "http://"+url+":"+port
         this.port = port
+        this.apiKey = apiKey || null
+        // Mirror the encoder's opt-in API_KEY gate (xchain-encoder/src/api.js reads
+        // x-api-key and 401s every JSON-RPC method, ping included): when a key is
+        // configured, attach it to every request so a keyed encoder does not 401 the
+        // harness at bootstrap. No key -> no header and a byte-identical request to
+        // before, so existing two-arg callers are unaffected.
+        this.reqConfig = this.apiKey ? { headers: { 'x-api-key': this.apiKey } } : {}
     }
 
     async sleep(ms) {
@@ -39,7 +46,7 @@ class XChainEncoderConnector {
 
         var response = null
         try {
-            response = await axios.post(this.url, data)
+            response = await axios.post(this.url, data, this.reqConfig)
         } catch (err) {
             console.log(err)
             return false
@@ -68,7 +75,7 @@ class XChainEncoderConnector {
 
         let response = null
         try {
-            response = await axios.post(this.url, dataToSend)
+            response = await axios.post(this.url, dataToSend, this.reqConfig)
         } catch (err){
             throw new Error('Error trying to create an envelope cancel tx: ' + (err && err.message))
         }
@@ -108,7 +115,7 @@ class XChainEncoderConnector {
         
         let response = null
         try{
-            response = await axios.post(this.url, dataToSend)
+            response = await axios.post(this.url, dataToSend, this.reqConfig)
         } catch (err){
             console.log(err)
             throw new Error('Error trying to create a tx with the encoder module: ' + (err && err.message));

@@ -218,7 +218,7 @@ async function createRail(coin, network = 'regtest', opts = {}) {
         COIN_CODE:      code,
         nodeConnector:         new BlockchainConnector(host, rail.ports.node, nodeCreds.user, nodeCreds.pass),
         utxoTrackerConnector:  new XChainUtxoTrackerConnector(host, rail.ports.tracker),
-        encoderConnector:      new XChainEncoderConnector(host, rail.ports.encoder),
+        encoderConnector:      new XChainEncoderConnector(host, rail.ports.encoder, process.env[code + '_ENCODER_API_KEY'] || process.env.ENCODER_API_KEY || null),
         decoderConnector:      new XChainDecoderConnector(host, rail.ports.decoder),
         indexerConnector:      new XChainIndexerConnector(host, rail.ports.indexer, process.env[code + '_INDEXER_API_KEY'] || process.env.INDEXER_API_KEY || null),
         explorerConnector:     new XChainExplorerConnector(host, rail.ports.explorer),

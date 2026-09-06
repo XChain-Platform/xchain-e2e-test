@@ -298,10 +298,18 @@ describe('Boundary: Connectors', function () {
 
         describe('constructor', function () {
 
-            it('builds correct URL ignoring unused rpcUser/rpcPassword', function () {
-                const encoder = new XChainEncoderConnector('myhost', '5555', 'ignored_user', 'ignored_pass')
+            it('builds correct URL and stays keyless with two args', function () {
+                const encoder = new XChainEncoderConnector('myhost', '5555')
                 assert.strictEqual(encoder.url, 'http://myhost:5555')
                 assert.strictEqual(encoder.port, '5555')
+                assert.strictEqual(encoder.apiKey, null)
+                assert.deepStrictEqual(encoder.reqConfig, {})
+            })
+
+            it('carries the optional api key as the third argument', function () {
+                const encoder = new XChainEncoderConnector('myhost', '5555', 'k')
+                assert.strictEqual(encoder.apiKey, 'k')
+                assert.deepStrictEqual(encoder.reqConfig, { headers: { 'x-api-key': 'k' } })
             })
         })
     })

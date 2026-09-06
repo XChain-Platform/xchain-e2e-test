@@ -102,7 +102,7 @@ describe('Bootstrap: hub discovery fallback', function () {
 
         global.nodeConnector = new BlockchainConnector(NODE_URL, NODE_PORT, NODE_USER, NODE_PASS)
         global.utxoTrackerConnector = new XChainUtxoTrackerConnector(UTXO_TRACKER_URL, UTXO_TRACKER_PORT)
-        global.encoderConnector = new XChainEncoderConnector(ENCODER_URL, ENCODER_PORT)
+        global.encoderConnector = new XChainEncoderConnector(ENCODER_URL, ENCODER_PORT, process.env.ENCODER_API_KEY || null)
         global.indexerConnector = new XChainIndexerConnector(INDEXER_URL, INDEXER_PORT)
         global.indexerDatabase = new Database(DATABASE_URL, DATABASE_PORT, INDEXER_DATABASE_NAME, INDEXER_DATABASE_USER, INDEXER_DATABASE_PASS)
         global.regtestMinerConnector = new RegtestMinerConnector(REGTEST_MINER_URL, REGTEST_MINER_PORT, process.env.MINER_API_KEY || null)

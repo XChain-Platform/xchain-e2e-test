@@ -13,9 +13,20 @@
  **********************************************************************
  * Stryker Mutation Testing: Phase 2 Configuration
  *
- * Extends Phase 1 by adding integration tests to the test spec.
- * Integration tests exercise connectors and db.js with mock fixtures,
- * catching mutations that unit tests alone may miss.
+ * Extends Phase 1 by adding the STUBBED integration suites to the test spec:
+ * the ones under test/integration/<dir>/, which exercise connectors and db.js
+ * against mock fixtures and catch mutations unit tests alone may miss. That is
+ * the same selection package.json declares as `test:integration:stubbed`.
+ *
+ * The top-level test/integration/*.integration.test.js live suites are
+ * deliberately OUT. They provision a Docker MariaDB (test/helpers/disposableHubDb.js)
+ * and return null without Docker, so including them made this phase's score
+ * host-dependent: a Docker-less host silently skips 34 of the 56 files and still
+ * reports a number. Docker also does not survive mutation well here, since
+ * disposableHubDb.js is itself in the `mutate` list above, so a mutant of the
+ * teardown path leaks containers; and `timeoutMS` below is far under live
+ * bring-up, which would score live mutants as timeouts rather than survivors.
+ * A live mutation tier, if it is ever wanted, belongs in its own serial config.
  *
  * Usage:
  *   npm run test:mutate:integration
@@ -33,7 +44,9 @@ export default {
   mochaOptions: {
     spec: [
       'test/unit/**/*.test.js',
-      'test/integration/**/*.test.js',
+      // Stubbed integration only. `test/integration/**` also matches the 34
+      // top-level live suites; the one-directory-deep form is the stubbed lane.
+      'test/integration/*/**/*.test.js',
     ],
   },
   coverageAnalysis: 'perTest',

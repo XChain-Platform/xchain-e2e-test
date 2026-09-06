@@ -70,6 +70,10 @@ UTXO_TRACKER_URL=localhost
 UTXO_TRACKER_API_PORT=3030
 ENCODER_URL=localhost
 ENCODER_API_PORT=3031
+# Optional. Only needed when the encoder is deployed with API_KEY set; the
+# harness then sends it as x-api-key, which the encoder requires on every
+# JSON-RPC method including ping. Leave unset for an unkeyed encoder.
+ENCODER_API_KEY=
 INDEXER_URL=localhost
 INDEXER_API_PORT=3032
 INDEXER_DB_NAME=XChain_BTC_Regtest_Indexer
@@ -113,7 +117,7 @@ npm run test:regression:p0
 | `npm run test:perf:actions` | Performance-instrumented action tests (291 tests) |
 | `npm run test:perf:e2e` | Performance-instrumented E2E tests (38 tests) |
 | `npm run test:mutate` | Mutation testing, Phase 1 (unit tests only) |
-| `npm run test:mutate:integration` | Mutation testing, Phase 2 (unit + integration) |
+| `npm run test:mutate:integration` | Mutation testing, Phase 2 (unit + stubbed integration; the Docker-backed live suites are excluded so the score is host-independent) |
 | `npm run perf:gate` | CI performance gate check |
 | `npm run perf:report` | Generate performance report |
 | `npm run mutate:report` | Generate mutation testing report |

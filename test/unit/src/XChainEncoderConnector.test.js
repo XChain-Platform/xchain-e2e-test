@@ -20,15 +20,17 @@ describe('XChainEncoderConnector', function () {
 
     const URL  = 'localhost';
     const PORT = 8080;
-    const USER = 'user';   // ignored by constructor but valid arg
-    const PASS = 'pass';   // ignored by constructor but valid arg
+    // The third positional arg is the optional encoder API key, so nothing stale
+    // may be passed here: a leftover rpcUser string would silently become the key
+    // and be sent as x-api-key on every request.
+    const API_KEY = 'encoder-key';
 
     let connector;
     let axiosPostStub;
 
     beforeEach(function () {
         axiosPostStub = sinon.stub(axios, 'post');
-        connector = new XChainEncoderConnector(URL, PORT, USER, PASS);
+        connector = new XChainEncoderConnector(URL, PORT);
     });
 
     afterEach(function () {
@@ -47,6 +49,55 @@ describe('XChainEncoderConnector', function () {
         it('does NOT store rpcUser or rpcPassword', function () {
             assert.strictEqual(connector.rpcUser, undefined);
             assert.strictEqual(connector.rpcPassword, undefined);
+        });
+
+        it('defaults to no api key and an empty request config', function () {
+            assert.strictEqual(connector.apiKey, null);
+            assert.deepStrictEqual(connector.reqConfig, {});
+        });
+
+        it('builds an x-api-key request config when a key is supplied', function () {
+            const keyed = new XChainEncoderConnector(URL, PORT, API_KEY);
+            assert.strictEqual(keyed.apiKey, API_KEY);
+            assert.deepStrictEqual(keyed.reqConfig, { headers: { 'x-api-key': API_KEY } });
+        });
+
+        it('treats an empty-string key as no key', function () {
+            const unkeyed = new XChainEncoderConnector(URL, PORT, '');
+            assert.strictEqual(unkeyed.apiKey, null);
+            assert.deepStrictEqual(unkeyed.reqConfig, {});
+        });
+    });
+
+    // The encoder 401s every JSON-RPC method when it is deployed with API_KEY set,
+    // ping included, so each request has to carry the header or the harness dies at
+    // bootstrap. These assert the third axios.post argument, which is where a
+    // regression would show up as undefined.
+    describe('api key header', function () {
+        const methods = [
+            ['ping', (c) => c.ping()],
+            ['createTx', (c) => c.createTx([], 'pk', [], {}, '', 1, false, 'OP_RETURN', 'chg', null, null, null)],
+            ['createEnvelopeCancelTx', (c) => c.createEnvelopeCancelTx({
+                commitTxid: 'tx', commitVout: 0, commitValue: 1000,
+                internalPubkey: 'ipk', tapleafHash: 'tlh', destination: 'dest'
+            })]
+        ];
+
+        methods.forEach(function ([name, invoke]) {
+            it(`${name} sends x-api-key when a key is configured`, async function () {
+                axiosPostStub.resolves({ data: { result: 'ok' } });
+                const keyed = new XChainEncoderConnector(URL, PORT, API_KEY);
+                await invoke(keyed);
+                const [, , config] = axiosPostStub.firstCall.args;
+                assert.deepStrictEqual(config, { headers: { 'x-api-key': API_KEY } });
+            });
+
+            it(`${name} sends an empty config when no key is configured`, async function () {
+                axiosPostStub.resolves({ data: { result: 'ok' } });
+                await invoke(connector);
+                const [, , config] = axiosPostStub.firstCall.args;
+                assert.deepStrictEqual(config, {});
+            });
         });
     });
 
