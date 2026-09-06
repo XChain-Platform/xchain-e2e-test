@@ -36,6 +36,12 @@
  * spent polling, so it fails at the first hub that applies instead of only
  * looking once at the end.
  *
+ * waitFor() is the one polling loop; waitUntil() is its throwing general form,
+ * and the sweep off fixed settles in other suites converts onto those two
+ * rather than growing a second poll engine per suite. waitFor reports a
+ * timeout as data (for a caller whose own assertion is the loud one);
+ * waitUntil raises it.
+ *
  * Every wait here polls inside a loop and returns early, which is also the
  * shape scripts/check-sleep-flake.js exempts from its fixed-settle ratchet.
  ********************************************************************/
@@ -74,6 +80,46 @@ async function waitFor(probe, opts) {
         if (elapsed >= timeoutMs) return { ok: false, waitedMs: elapsed, last: last };
         await sleep(Math.max(0, Math.min(intervalMs, timeoutMs - elapsed)));
     }
+}
+
+/**
+ * Poll `predicate` until it holds, and THROW when the deadline passes.
+ *
+ * The general form of the two throwing waits below, for callers outside the
+ * PBFT suites that have a condition to wait on but no domain wrapper for it.
+ * waitFor() reports a timeout as data, which is right for a caller that then
+ * asserts on the observation; a caller with no such assertion needs the
+ * timeout to be loud, because a poll that cannot fail converts a flaky test
+ * into one that passes unconditionally, which says less than the flake did.
+ *
+ * The bound is the caller's: convert a fixed settle at the SAME budget the
+ * settle spent. A converted site that needs a bigger bound is a finding about
+ * that test, not a knob to turn here.
+ *
+ * @param predicate () => boolean | {ok:boolean, saw?:any} | Promise of either.
+ *                  The object form carries what it last saw into the message.
+ * @param opts      {timeoutMs, intervalMs, now, what} - `what` names the
+ *                  condition in the give-up message and is effectively required
+ *                  (a timeout that cannot say what it waited for is a puzzle).
+ * @returns {ok, waitedMs, last}
+ */
+async function waitUntil(predicate, opts) {
+    opts = opts || {};
+    const what = opts.what || 'an unnamed condition';
+    const res  = await waitFor(async () => {
+        const seen = await predicate();
+        // A bare boolean and a probe object are both accepted; normalising here
+        // keeps every call site from having to spell `{ ok: ... }`.
+        return (seen && typeof seen === 'object')
+            ? { ok: !!seen.ok, saw: seen.saw }
+            : { ok: !!seen, saw: undefined };
+    }, opts);
+    if (!res.ok) {
+        const saw = res.last && res.last.saw;
+        throw new Error('waitUntil: ' + what + ' was still not true after ' + res.waitedMs + 'ms'
+            + (saw === undefined ? '' : '; last saw ' + JSON.stringify(saw)));
+    }
+    return res;
 }
 
 // Peers of `hub` whose socket is OPEN. A 'connecting' entry counts for nothing:
@@ -197,6 +243,7 @@ module.exports = {
     WS_OPEN,
     sleep,
     waitFor,
+    waitUntil,
     openPeerCount,
     meshState,
     waitForMesh,

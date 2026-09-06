@@ -14,6 +14,7 @@ const vmHelper = require('../helpers/vmHelper')
 const issueHelper = require('../helpers/issueHelper')
 const gasHelper = require('../helpers/gasHelper')
 const orderHelper = require('../helpers/orderHelper')
+const { waitForTxIndexed } = require('../helpers/indexerWait')
 
 /**
  * VM Contract Custody: proves that a contract's own emitted entities are attributed to the
@@ -296,10 +297,12 @@ describe('VM Contract Custody: emitted entities belong to the contract, not the 
 
         // The caller (deployer) tries to cancel the contract's order. The cancel owner-gate checks
         // the order's SOURCE (the contract) against the canceller (the deployer) and must reject.
-        await orderHelper.sendOrderCancelV1(deployer, orderIndex, 'caller tries to cancel')
-        // Give the indexer a couple of blocks to settle the rejection.
+        const cancel = await orderHelper.sendOrderCancelV1(deployer, orderIndex, 'caller tries to cancel')
+        // Wait for the indexer's verdict on the cancel (an actions row lands for every
+        // parsed action, valid or not); "the escrow is still held" means nothing before
+        // then. Bound = the 30000ms pollBalance gives the accepting path in this file.
         await regtestMinerConnector.generateBlocks(2)
-        await new Promise(r => setTimeout(r, 3000))
+        await waitForTxIndexed(cancel.txHash, { timeoutMs: 30000, intervalMs: 250 })
 
         // The order must still be open and the escrow still held. A wrongful cancel would have
         // refunded the 40 to the contract (60 -> 100). Staying at 60 proves the cancel was rejected.
