@@ -50,6 +50,7 @@ const stakeHelper = require('../helpers/stakeHelper')
 const gasHelper = require('../helpers/gasHelper')
 const vmHelper = require('../helpers/vmHelper')
 const attestationHelper = require('../helpers/attestationHelper')
+const { skipIfResponseMirrorEra } = require('../helpers/attestLegacyResponsePath')
 
 // Resolve the REAL http_get provider from the bundled (in-image) xchain-hub,
 // falling back to the monorepo sibling for local dev. Mirrors realUrlAttestation.
@@ -229,6 +230,7 @@ describe('REAL-URL attestation FAILURE paths: expired + no_quorum over a 3-valid
     })
 
     it('keeps a real-URL request pending under a no_quorum round from a non-deterministic source', async function () {
+        if (skipIfResponseMirrorEra(this, NETWORK)) return
         // 1. EXECUTE -> pending request (the non-deterministic URL is the payload).
         const exec = await vmHelper.sendExecuteV0(operatorAddr, contractIndex, 'askNoQuorum', [NONDET_URL])
         assert.strictEqual(exec.execution.status, 'valid', 'execute status: ' + exec.execution.status)

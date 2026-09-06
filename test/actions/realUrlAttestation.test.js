@@ -46,6 +46,7 @@ const stakeHelper = require('../helpers/stakeHelper')
 const gasHelper = require('../helpers/gasHelper')
 const vmHelper = require('../helpers/vmHelper')
 const attestationHelper = require('../helpers/attestationHelper')
+const { skipIfResponseMirrorEra } = require('../helpers/attestLegacyResponsePath')
 
 // Resolve the REAL http_get provider from the bundled (in-image) xchain-hub,
 // falling back to the monorepo sibling for local dev. Mirrors the loader in
@@ -150,6 +151,7 @@ describe('REAL-URL attestation: 3-validator quorum over a live https GET', funct
     })
 
     it('fetches the real URL, reaches 3/3 quorum, and writes the live body to state', async function () {
+        if (skipIfResponseMirrorEra(this, NETWORK)) return
         // 1. EXECUTE -> pending ATTEST v0 request (the real URL is the payload).
         const exec = await vmHelper.sendExecuteV0(operatorAddr, contractIndex, 'askOracleQuorum', [REAL_URL])
         assert.strictEqual(exec.execution.status, 'valid', 'execute status: ' + exec.execution.status)

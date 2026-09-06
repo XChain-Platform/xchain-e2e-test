@@ -15,6 +15,7 @@ const stakeHelper = require('../helpers/stakeHelper')
 const gasHelper = require('../helpers/gasHelper')
 const vmHelper = require('../helpers/vmHelper')
 const attestationHelper = require('../helpers/attestationHelper')
+const { skipIfResponseMirrorEra } = require('../helpers/attestLegacyResponsePath')
 
 /**
  * ATTEST responsible-set widening, driven on a chain.
@@ -157,6 +158,7 @@ module.exports = {
     })
 
     it('rejects an out-of-set signature before the ladder opens, then accepts the SAME set after it', async function () {
+        if (skipIfResponseMirrorEra(this, NETWORK)) return
         const ownedKeys = new Set(owned.map(v => String(v.pubkey).toLowerCase()))
         let request = null
         let signers = null
