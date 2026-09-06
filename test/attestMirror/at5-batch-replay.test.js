@@ -670,12 +670,15 @@ describe('AT5: the responses of a window land on chain as one batch', function (
             // The link travels DOGE parse to hub push to mirror stream, so the DOGE
             // side has to keep confirming for any of it to happen.
             await nudgeDoge()
+            // EVERY row the request holds, not the first: a round that finalized under
+            // two leader slots leaves two honest rows differing only in effective_time,
+            // and each one rides a window and gets its own link.
             const rows = []
             for (const id of ids) {
                 const r = await venue.readMirrorRows(0, { requestId: id })
-                rows.push(r[0] && r[0].batch_action_index)
+                rows.push(r.length ? r.map((x) => x.batch_action_index) : [null])
             }
-            return { ok: rows.every((v) => v !== null && v !== undefined), rows: rows }
+            return { ok: rows.flat().every((v) => v !== null && v !== undefined), rows: rows }
         }, { timeoutMs: 20 * 60 * 1000, intervalMs: 5000, tipProbe: venueTipProbe(venue, 0) })
         assert.ok(linked.ok,
             'batch_action_index was never set on the mirrored rows: ' + jsonSafe(linked.rows) +
