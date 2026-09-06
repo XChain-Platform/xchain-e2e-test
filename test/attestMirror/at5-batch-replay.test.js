@@ -594,20 +594,33 @@ describe('AT5: the responses of a window land on chain as one batch', function (
         // The same half-segment headroom safeCap keeps is kept here, below the
         // deadline rather than below a fixed count.
         const earliestDeadline = Math.min(...emitted.map((r) => r.deadlineBlock))
-        const headroom = Math.ceil(widenArithmetic(DEADLINE_BLOCKS).segment / 2)
+        // THE APPLIED STAGE NEEDS BLOCKS THE MIRROR STAGE MUST NOT SPEND, and the
+        // reason is protocol time rather than arithmetic. A row binds at the first
+        // block whose PROTOCOL time reaches its signed effective_time, and off
+        // mainnet that is median-time-past, which trails the tip by half an
+        // eleven-block window. So a row can be present on every node, verified and
+        // valid, and still unappliable until several more blocks are mined. Pass 21
+        // proved it the expensive way: the mirror stage mined to nine blocks of the
+        // deadline, the applied stage was left nothing to mine, and the applier
+        // logged "considered 1 pending request(s) and 0 mirror row(s)" at every
+        // block until the wait timed out.
+        const APPLY_RESERVE = 12
         const budgetProbe = venueTipProbe(venue, 0)
-        const mineOpts = async () => {
+        // Blocks left BELOW the deadline when a stage stops mining. The applied
+        // stage keeps only one, because a row satisfied AT the deadline block still
+        // binds: the expiry sweep's own predicate is `deadline_block < B` (§4.1).
+        const mineOpts = async (reserve) => {
             const t = await budgetProbe()
             const tip = Number.isFinite(t.decoder) ? t.decoder : (Number.isFinite(t.height) ? t.height : 0)
-            const budget = earliestDeadline - headroom - tip
+            const budget = earliestDeadline - reserve - tip
             // maxBlocks 0 reads as UNCAPPED to the wait, so an exhausted budget passes
             // no mining option at all rather than a zero.
             return budget > 0 ? { mineWhileWaiting: { perPoll: 1, maxBlocks: budget } } : {}
         }
-        for (const id of ids) await waitForMirrorRowEverywhere(venue, id, null, await mineOpts())
+        for (const id of ids) await waitForMirrorRowEverywhere(venue, id, null, await mineOpts(APPLY_RESERVE))
         // Mined under, as AT1's applied wait is: the applier runs inside the block
         // loop, so an idle chain never applies a row that is already valid.
-        for (const id of ids) await waitForAppliedEverywhere(venue, id, null, await mineOpts())
+        for (const id of ids) await waitForAppliedEverywhere(venue, id, null, await mineOpts(1))
         console.log('AT5: ' + ids.length + ' responses finalized and applied; waiting for their window to close')
 
         // The window has to close, be elected, be signed and be broadcast. Several
