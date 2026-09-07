@@ -113,7 +113,24 @@ const TIP_FEED_MS = 3000
 const PUBLISHER_FUND_DOGE    = 1.0
 const PUBLISHER_FUND_OUTPUTS = 40
 
-const DEADLINE_BLOCKS = 60
+// THE PROVIDER'S CEILING, and it is a ceiling rather than a preference: the
+// registry admits a request only while `deadline - block <= deadline_window_blocks`
+// (attestation/providerRegistry.js), which is 100 for http_get, and the VM gateway
+// rejects an over-limit value at CALL time, so the EXECUTE that emits the request
+// comes back `failed` rather than the request landing and expiring. Pass 25 proved
+// that the expensive way at 150: `EXECUTE : contract=1791 : method=ask : failed`.
+//
+// Sixty was too tight and cost three passes before that. The cost is not the
+// widening ladder, which needs 65 blocks here; it is that a row becomes applicable
+// on PROTOCOL time while the deadline is spent in BLOCKS, and off mainnet protocol
+// time is median-time-past. So the applied stage has to mine slowly enough for a
+// median over eleven blocks to climb past a signed stamp that sits a forward margin
+// in the future, and every transaction this drill sends mines a block of its own
+// meanwhile. Measured on pass 24: the stamp came due 269 seconds before the chain
+// reached the deadline and the rows were still unbound, because every block in the
+// median window had been mined seconds apart. So this sits AT the ceiling, which is
+// the most wall-clock room the protocol allows a drill to buy.
+const DEADLINE_BLOCKS = 100
 const BURIAL_BLOCKS   = 6
 
 // The DOGE encoder this venue publishes through, taken from the rail's own port map
@@ -604,7 +621,23 @@ describe('AT5: the responses of a window land on chain as one batch', function (
         // deadline, the applied stage was left nothing to mine, and the applier
         // logged "considered 1 pending request(s) and 0 mirror row(s)" at every
         // block until the wait timed out.
-        const APPLY_RESERVE = 12
+        // Sized against BOTH constraints rather than picked. The mirror stage needs
+        // enough blocks for the widening ladder to climb, which is 98 at a 150-block
+        // deadline (widenArithmetic: span 147, segment 49, two slots). The applied
+        // stage needs enough blocks that a median over eleven of them can climb past
+        // a stamp set a forward margin in the future, and it mines one per poll at a
+        // 2s interval, so 40 blocks buys about 80 seconds of wall clock. 110 for the
+        // ladder and 40 here satisfies both with room, where 12 did not: pass 24's
+        // applied stage spent its whole allowance inside half a minute.
+        const APPLY_RESERVE = 30
+        // The ladder half of that sizing, CHECKED rather than asserted in prose,
+        // because a later edit to either constant would otherwise quietly starve
+        // the widening ladder and the drill would fail somewhere far from here.
+        const ladder = widenArithmetic(DEADLINE_BLOCKS)
+        assert.ok(DEADLINE_BLOCKS - APPLY_RESERVE >= ladder.toFullWiden,
+            'the mirror stage would be left ' + (DEADLINE_BLOCKS - APPLY_RESERVE) +
+            ' block(s) to climb a widening ladder that needs ' + ladder.toFullWiden +
+            '; raise DEADLINE_BLOCKS or lower APPLY_RESERVE')
         const budgetProbe = venueTipProbe(venue, 0)
         // Blocks left BELOW the deadline when a stage stops mining. The applied
         // stage keeps only one, because a row satisfied AT the deadline block still
@@ -620,7 +653,14 @@ describe('AT5: the responses of a window land on chain as one batch', function (
         for (const id of ids) await waitForMirrorRowEverywhere(venue, id, null, await mineOpts(APPLY_RESERVE))
         // Mined under, as AT1's applied wait is: the applier runs inside the block
         // loop, so an idle chain never applies a row that is already valid.
-        for (const id of ids) await waitForAppliedEverywhere(venue, id, null, await mineOpts(1))
+        // Reserve NOTHING here: the applied stage may mine up to and INCLUDING the
+        // deadline block, because a row satisfied at that block still binds (the
+        // expiry sweep's predicate is `deadline_block < B`). Pass 24 lost on this
+        // exact off-by-one - it stopped mining at the block before the deadline
+        // with the rows eligible by time and unbound, because block time is
+        // median-time-past and the blocks it had already mined were all stamped
+        // within seconds of one another.
+        for (const id of ids) await waitForAppliedEverywhere(venue, id, null, await mineOpts(0))
         console.log('AT5: ' + ids.length + ' responses finalized and applied; waiting for their window to close')
 
         // The window has to close, be elected, be signed and be broadcast. Several
