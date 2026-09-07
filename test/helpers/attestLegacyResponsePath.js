@@ -59,7 +59,7 @@
 // OFF, legacy path runs byte for byte); a number = armed at that BTC block index.
 const ATTEST_RESPONSE_MIRROR_ACTIVATION = {
     mainnet: null,
-    testnet: null,
+    testnet: 151324,
     regtest: 0
 };
 
