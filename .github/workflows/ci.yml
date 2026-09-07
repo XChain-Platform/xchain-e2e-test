@@ -78,13 +78,16 @@ jobs:
       # The seed-escrow-state gate tests resolve
       # ../../xchain-indexer/src/state_subtree_activation.js from bin/ and FAIL
       # (not skip) without it: an arming-height read must never degrade
-      # silently. This sibling stays a bare checkout with NO install on
-      # purpose: everything the unit tier reads from it is pure-constant
-      # modules with zero requires, so a dependency install would only add
-      # minutes. If a future guard pulls in an indexer module with real deps,
-      # the failure mode is a loud `Cannot find module` thrown from the
-      # indexer's own tree, which is the documented cue to add it to the
-      # install loop below.
+      # silently. This sibling USED to stay a bare checkout with no install,
+      # on the grounds that everything the unit tier read from it was
+      # pure-constant modules with zero requires. That stopped being true: the
+      # attest-mirror venue helper reaches the indexer's stake_weighted_quorum,
+      # which requires mathjs out of the indexer's own tree. The comment then
+      # predicted its own failure exactly, calling a loud `Cannot find module`
+      # thrown from the indexer's tree the cue to add it to the install loop.
+      # That cue fired, so the indexer is installed below and this note is kept
+      # rather than deleted, because the next sibling added here will be bare
+      # for the same good reason and will stop being safe the same way.
       - name: Check out xchain-indexer (arming-height constants read by the escrow gate tests)
         uses: actions/checkout@v4
         with:
@@ -93,6 +96,21 @@ jobs:
           ssh-key: ${{ secrets.XCHAIN_INDEXER_DEPLOY_KEY }}
           path: xchain-indexer
 
+      # test/sdk/sdkHelper.js resolves the SDK by trying `xchain-sdk` first and
+      # then two paths BESIDE this repo, and throws its own error when none
+      # answers. A unit test reaches the attest-mirror venue helper, which
+      # reaches that loader, so the sdk has to be beside this checkout or the
+      # tier dies at module load with a message that reads like a missing
+      # dependency here and is not one.
+      # No deploy key: this repository is public now, unlike when the two keys
+      # above were added, so a plain checkout resolves it.
+      - name: Check out xchain-sdk (resolved beside this repo by the sdk helper)
+        uses: actions/checkout@v4
+        with:
+          repository: XChain-Platform/xchain-sdk
+          ref: ${{ startsWith(github.head_ref, 'release/') && github.head_ref || (github.ref == 'refs/heads/master' && 'master' || 'develop') }}
+          path: xchain-sdk
+
       - name: Use Node.js 22
         uses: actions/setup-node@v4
         with:
@@ -100,15 +118,24 @@ jobs:
 
       # Every suite in this repo requires exactly Node 22; 18 and 24 fail, and
       # some of those failures are silent skips rather than errors.
-      # BOTH trees, for the reason the live-tier job below spells out: the hub
-      # helper requires hub source at require time, and Node resolves that file's
-      # dependencies from the HUB's own tree, never from xchain-e2e-test's. A
-      # source-only sibling therefore dies at module load on the hub's own deps
-      # (`Cannot find module 'mariadb'`), which is not a missing dependency here
-      # and reads like one.
-      - name: Install dependencies (both trees)
+      # ALL FOUR trees, for the reason the live-tier job below spells out: a
+      # helper here requires sibling source at require time, and Node resolves
+      # that file's dependencies from the SIBLING's own tree, never from
+      # xchain-e2e-test's. A source-only sibling therefore dies at module load
+      # on the sibling's own deps (`Cannot find module 'mariadb'` for the hub),
+      # which is not a missing dependency here and reads like one.
+      #
+      # The indexer belongs in this loop for exactly that reason and was
+      # missing from it: a unit test reaches attestMirrorVenue, which reaches
+      # attestationHelper, which requires the indexer's stake_weighted_quorum,
+      # which requires mathjs out of the INDEXER's tree. With the indexer
+      # checked out but never installed, the whole unit tier died at load with
+      # `Cannot find module 'mathjs'`, which reads as a missing dependency in
+      # this repo and is not one. The live-tier job below already installs all
+      # the others, which is why it stayed green while this job did not.
+      - name: Install dependencies (all four trees)
         run: |
-          for d in xchain-e2e-test xchain-hub; do
+          for d in xchain-e2e-test xchain-hub xchain-indexer xchain-sdk; do
             ( cd "$d" && if [ -f package-lock.json ]; then npm ci; else npm install; fi )
           done
 

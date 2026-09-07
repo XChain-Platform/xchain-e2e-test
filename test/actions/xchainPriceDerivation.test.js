@@ -438,6 +438,8 @@ describe('XCHAIN price derivation from real fills (spec step 7)', function () {
             const pubkey = process.env.XCHAIN_VALIDATOR_PUBKEY
             if (!pubkey) this.skip()
 
+            // give-up-ok: an existence probe - empty means the stake is gone and
+            // this venue op has work to do, which is the branch below.
             const existing = await indexerDatabase.waitForStake({
                 signingPubkey: pubkey, status: 'valid'
             }, 5000).catch(() => null)

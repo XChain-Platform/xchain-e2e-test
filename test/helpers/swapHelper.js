@@ -9,6 +9,7 @@
 // contact legal@dankest.llc.
 
 const transactionHelper = require('../transactionHelper')
+const requireRow = require('./requireRow')
 
 module.exports = {
     // SWAP v0 wire format:
@@ -39,7 +40,7 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, swapMessage)
 
         console.log("Waiting for SWAP in the database...")
-        let row = await indexerDatabase.waitForSwap({
+        let row = requireRow(await indexerDatabase.waitForSwap({
             txHash: txHash,
             source: addressInfo["address"],
             giveCoin: giveCoin,
@@ -49,7 +50,8 @@ module.exports = {
             getTick: getTick,
             getAmount: getAmountQuery,
             status: "valid"
-        })
+        }), "sendSwapV0: SWAP giving " + giveCoin + "/" + giveTick + " for "
+            + getCoin + "/" + getTick + " (tx " + txHash + ") at status=valid")
 
         return { txHash, swap: row }
     },

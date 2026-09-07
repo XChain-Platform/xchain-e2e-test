@@ -190,7 +190,12 @@ describe('spvSeed contract (arming seed)', function () {
         assert.strictEqual(GAS_SCHEDULE.VM_STATE_WRITE, 200, 'sanity: the schedule is the real one');
     });
 
-    this.timeout(30000);
+    // The budget covers the before hook, which requires the sibling checkout and
+    // builds an isolate: a native binding load that costs seconds on an idle box
+    // and far more on a venue running three suites at once. 30s fails there
+    // intermittently while the contract cases themselves finish in milliseconds,
+    // so the ceiling is the harness cost rather than anything under assertion.
+    this.timeout(180000);
     let vm;
     before(function () {
         if (!VM_PATH) {

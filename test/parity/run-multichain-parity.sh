@@ -56,7 +56,7 @@ COINS=(${COINS[@]})
 # in the SAME change (bump-with-fleet rule). xchain-node's install path
 # honors the pin via XCHAIN_NODE_NODE_VERSION_LITECOIN and fails loudly if
 # a cached local daemon mismatches it.
-LTC_NODE_VERSION_PIN="${LTC_NODE_VERSION_PIN:-v0.21.4}"
+LTC_NODE_VERSION_PIN="${LTC_NODE_VERSION_PIN:-v0.21.5.6}"
 export XCHAIN_NODE_NODE_VERSION_LITECOIN="$LTC_NODE_VERSION_PIN"
 
 PARITY_OUT_DIR="${PARITY_OUT_DIR:-$HOME/parity-out}"

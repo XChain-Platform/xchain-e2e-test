@@ -58,6 +58,7 @@ const rc        = require('../helpers/rollcallHelper')
 const chainRail = require('../helpers/chainRail')
 const cryptoHelper = require('../cryptoHelper')
 const stakeHelper  = require('../helpers/stakeHelper')
+const sendHelper   = require('../helpers/sendHelper')
 const { requireFederationEnv } = require('../helpers/federationGuards')
 
 // How long a stalled tip must stay stalled before it counts as a deferral rather
@@ -122,7 +123,17 @@ describe('ROLLCALL acceptance: the DOGE proof barrier and the publish reward (AT
         if (!rc.requireRollcallVenue(this)) return
         if (!requireFederationEnv(this)) return
 
-        ctx = await rc.bringUpVenue({ hubCount: 3, needSources: 4, dbNamePrefix: 'XChain_BTC_Regtest_ROLLCALLPRF_' })
+        // allowDirtyStreaks: this suite SILENCES NO HUB. Every roster hub signs
+        // every epoch it drives, so no roster source can gain an absence here and
+        // no K-streak can complete: a stale absence carried by a signing source
+        // cannot make this run evict anybody, and driving rolled epochs with
+        // every hub present is exactly what ages such an absence out of the
+        // lookback window. AT9 takes the DOGE INDEXER down, not a hub, which is
+        // why that leg does not disqualify the exemption. Without this the file
+        // is unrunnable for 2K rolled epochs after any run that left a signing
+        // source absent, and the venue has no other way to age the window.
+        ctx = await rc.bringUpVenue({ hubCount: 3, needSources: 4, allowDirtyStreaks: true,
+                                      dbNamePrefix: 'XChain_BTC_Regtest_ROLLCALLPRF_' })
 
         // The epoch must ROLL for AT10 to have a reward at all.
         rc.assertOutageStillRolls(ctx, [ctx.idleSource])
@@ -147,12 +158,33 @@ describe('ROLLCALL acceptance: the DOGE proof barrier and the publish reward (AT
         // the DOGE evidence, not about its absence, so the roll call must really
         // be on chain before any of the deferrals below mean anything.
         await rc.mineBtcTo(ctx, E + 6, 'burying epoch ' + E)
-        const gossiped = await rc.waitForGossip(ctx.mvh, E, 3, 120000)
+        const gossiped = await rc.waitForGossip(ctx.mvh, E, 3, 120000, [], ctx)
         assert.ok(gossiped >= 3, 'epoch ' + E + ': expected three gossiped signatures, saw ' + gossiped)
-        await rc.tickAll(ctx.mvh)
-        await rc.mineDoge(ctx, 3)
-        await rc.tickAll(ctx.mvh)
-        await rc.mineDoge(ctx, 2)
+        // CLIMB the rank ladder; do not tick in place. A hub may publish only at
+        // `rank <= floor((btcTip - E) / ELECTION_TOLERANCE)`, so two ticks at
+        // E + 6 unlock ranks 0..2 on regtest and the rank-3 hub is barred for the
+        // whole run however long anything waits afterwards. Measured 2026-09-04,
+        // epoch 5700: all three hubs signed, ranks 0 and 2 landed, and this leg
+        // then spent its two-minute wait on a signature no hub was allowed to
+        // send. The ceiling is windowEnd - 1 because the window end must be mined
+        // AFTER the DOGE freeze below, or conditions (3) and (4) are undrivable.
+        const stillOff = await rc.climbPublishLadder(ctx, E, ctx.roster.slice(0, 3).map(r => r.pubkey),
+                                                     { maxHeight: windowEnd - 1 })
+        // NOT AN ASSERTION, deliberately. The ladder's last tick can publish and
+        // the read that follows it races the two-phase P2SH lane: a pair sent
+        // seconds ago is on neither chain nor index yet, so "still off chain at
+        // the ceiling" is the ordinary shape of a publish that just happened
+        // (measured 2026-09-04 on epoch 5910: ranks 2 and 3 both published and
+        // this read still saw one key short). The wait below is what decides,
+        // because it mines DOGE and polls, and its message now names both causes.
+        if (stillOff.length)
+            console.log('    epoch ' + E + ': ' + stillOff.length + ' signature(s) not yet indexed at the ladder ' +
+                        'ceiling (' + stillOff.map(k => k.slice(0, 12)).join(', ') + '); waiting for the DOGE side.')
+        // A ROLLCALL rides the two-phase P2SH lane, so a publish that has
+        // returned is not yet indexed: wait for the DOGE side to HOLD all three
+        // rather than mining a fixed few blocks and reading (the race both AT6
+        // legs lost on 2026-09-03).
+        await rc.waitForOnChainSigners(ctx, E, ctx.roster.slice(0, 3).map(r => r.pubkey))
 
         const onChain = await rc.dogeSigners(ctx, E)
         assert.strictEqual(onChain.length, 3,
@@ -314,7 +346,72 @@ describe('ROLLCALL acceptance: the DOGE proof barrier and the publish reward (AT
                         'leader\'s staking source ' + leaderSource + '. Seed the federation from ' +
                         'XC_ROLLCALL_FEDERATION_MNEMONIC (address index i for roster entry i) to drive it.')
         } else {
-            const res = await stakeHelper.sendCollectV0(leaderAddrInfo)
+            // FUND THE PROTOCOL REWARD POOL FIRST, when it cannot cover the claim.
+            //
+            // COLLECT debits the protocol REWARD address and refuses with
+            // "invalid: insufficient reward pool" when its balance is under the
+            // claim. That address is credited by ATTEST fees on FULFILLED requests
+            // and by nothing a roll-call venue does on its own, so on a chain that
+            // has never fulfilled an attestation it sits at whatever it was
+            // seeded with. Measured on this regtest chain: 2 XCHAIN against a 40
+            // XCHAIN claim, which is why AT10's on-chain leg was the ladder's last
+            // red for days while every other assertion in the file was green.
+            //
+            // Topping it up is legitimate rather than a fudge: the pool is an
+            // ordinary balance at a protocol address, this drill is asserting the
+            // COLLECT path rather than the economics that fill it, and the credit
+            // path itself is exercised by the attest ladder instead. The SEND is a
+            // real on-chain transaction, so the balance the handler reads is real.
+            const rewardAddress = await rc.protocolRewardAddress(ctx)
+            const poolBefore    = await rc.addressTickBalance(ctx, rewardAddress, 'XCHAIN')
+            // SIZE THE POOL ON THE WHOLE CLAIM, not on this run's single reward.
+            // A COLLECT with no AMOUNT claims the source's ENTIRE unclaimed total
+            // (`collect.js`: rewardAmount is getUnclaimedRewardTotal, and only an
+            // explicit partial AMOUNT narrows it), so the pool must cover THAT.
+            // Measured 2026-09-04: the pool was topped up to cover a 10 XCHAIN
+            // reward, the leader's accumulated total was 110, and the handler
+            // refused `insufficient reward pool` with the funding step having
+            // decided there was nothing to do. `unclaimed` above is the same
+            // arithmetic the handler runs.
+            const claimNeeds    = Math.max(Number(rc.rca().ROLLCALL_REWARD_AMOUNT), Number(unclaimed))
+            // BOTH READS MUST BE LOUD. `protocolRewardAddress` and
+            // `addressTickBalance` each answer null on a failure they swallow;
+            // a null here must fail the drill rather than skip the funding step,
+            // or the run goes on to a COLLECT the handler refuses for an unfunded
+            // pool while the drill's own log says nothing about the pool.
+            // Measured 2026-09-04: two consecutive runs failed
+            // `insufficient reward pool` with no `[AT10]` line in either.
+            assert.ok(rewardAddress,
+                'AT10: the protocol REWARD address did not resolve, so the pool can neither be read nor funded. ' +
+                'It comes from the indexer\'s own per-chain role map (protocolAddressRoles); a null here is a ' +
+                'broken sibling resolve, not a chain without a reward pool.')
+            assert.ok(poolBefore !== null,
+                'AT10: the protocol REWARD pool balance at ' + rewardAddress + ' could not be read. That read ' +
+                'returns null only when its query throws, so this is an instrument fault and must not be taken ' +
+                'as "the pool needs no funding".')
+            console.log('    [AT10] reward pool ' + rewardAddress + ' holds ' + poolBefore +
+                        ' XCHAIN; the leader\'s unclaimed total is ' + unclaimed + ', so the COLLECT will claim ' +
+                        claimNeeds + '.')
+            if (poolBefore < claimNeeds){
+                const short = claimNeeds - poolBefore
+                // Headroom, not the exact shortfall: the close can mint another
+                // reward between this read and the COLLECT, and the pool is read
+                // at the COLLECT's own (block, action) index.
+                const topUp = String(Math.ceil(short + Number(rc.rca().ROLLCALL_REWARD_AMOUNT) * 4))
+                console.log('    [AT10] protocol REWARD pool holds ' + poolBefore + ' XCHAIN against a ' +
+                            claimNeeds + ' XCHAIN claim (this epoch\'s ' + rc.rca().ROLLCALL_REWARD_AMOUNT +
+                            ' plus the leader\'s earlier uncollected rewards); funding it with ' + topUp +
+                            ' XCHAIN so the COLLECT path can be driven.')
+                await rc.mineWhile(ctx, () =>
+                    sendHelper.sendSendV0(leaderAddrInfo, 'XCHAIN', topUp, rewardAddress))
+                const poolAfter = await rc.addressTickBalance(ctx, rewardAddress, 'XCHAIN')
+                assert.ok(poolAfter !== null && poolAfter >= claimNeeds,
+                    'AT10: the reward pool is still ' + poolAfter + ' XCHAIN after funding it with ' +
+                    topUp + ' against a claim of ' + claimNeeds + '; the COLLECT below would fail on the pool ' +
+                    'rather than on its own logic.')
+            }
+
+            const res = await rc.mineWhile(ctx, () => stakeHelper.sendCollectV0(leaderAddrInfo))
             assert.strictEqual(String(res.claim.status), 'valid',
                 'AT10: a COLLECT from the leader\'s staking source must be valid; got ' + res.claim.status)
             assert.ok(Number(res.claim.amount) >= Number(rc.rca().ROLLCALL_REWARD_AMOUNT),
@@ -337,29 +434,50 @@ describe('ROLLCALL acceptance: the DOGE proof barrier and the publish reward (AT
             assert.strictEqual(await nodeConnector.getBlockCount(), C - 1,
                 'the node must roll back to the block before the close')
 
-            const need = tipBefore - (C - 1) + 2
-            for (let i = 0; i < need; i++) await nodeConnector.generateBlock(minerAddr, [])
-            assert.ok(await nodeConnector.getBlockCount() > tipBefore, 'the competing chain must overtake the original')
-
-            let gone = false
+            // Read the rollback BEFORE the competing chain exists, the way AT3
+            // does. The close is a height event, so the replacement block at C
+            // re-closes the same epoch and re-derives the same reward; asserting
+            // "gone" after that block is mined races the re-parse and can only
+            // pass by luck.
+            let after = null, row = null, gone = false
             const deadline = Date.now() + 180000
             while (Date.now() < deadline){
-                const after = await rc.rollcallRewards(ctx, E)
-                const row   = await rc.rollcallRow(ctx, E)
-                gone = (after.length === 0) && (row === null)
+                after = await rc.rollcallRewards(ctx, E)
+                row   = await rc.rollcallRow(ctx, E)
+                gone  = (after.length === 0) && (row === null)
                 if (gone) break
                 await rc.sleep(2000)
             }
-            const after = await rc.rollcallRewards(ctx, E)
             assert.deepStrictEqual(after, [],
                 'AT10: a rollback of the close block ' + C + ' must delete the rollcall_publish reward for epoch ' +
                 E + '. Its own block_index is ' + E + ', far below the rollback height, so the earn-block delete ' +
                 'cannot reach it: only `DELETE FROM validator_rewards WHERE derive_block_index >= ?` can. A row ' +
                 'surviving here is a COLLECT-spendable credit a freshly synced node does not have.')
-            assert.strictEqual(await rc.rollcallRow(ctx, E), null,
+            assert.strictEqual(row, null,
                 'the `rollcalls` row for epoch ' + E + ' must be deleted with it')
+
+            const need = tipBefore - (C - 1) + 2
+            for (let i = 0; i < need; i++) await nodeConnector.generateBlock(minerAddr, [])
+            assert.ok(await nodeConnector.getBlockCount() > tipBefore, 'the competing chain must overtake the original')
         } finally {
             await regtestMinerConnector.resumeMining()
         }
+
+        // The re-parse must derive the reward exactly ONCE again: the delete
+        // above plus one re-derivation, never a survivor beside a fresh row.
+        await rc.mineBtcTo(ctx, C, 'reparse of the close')
+        let rederived = []
+        const deadline2 = Date.now() + 180000
+        while (Date.now() < deadline2){
+            rederived = await rc.rollcallRewards(ctx, E)
+            if (rederived.length) break
+            await rc.sleep(2000)
+        }
+        assert.strictEqual(rederived.length, 1,
+            'AT10: the re-parsed close at ' + C + ' must mint the reward exactly once again, got ' +
+            rederived.length + ': ' + JSON.stringify(rederived))
+        assert.strictEqual(String(rederived[0].signing_pubkey).toLowerCase(), leaderPubkey,
+            'the re-derived reward must go to the same elected leader')
+        assert.strictEqual(Number(rederived[0].derive_block_index), C)
     })
 })

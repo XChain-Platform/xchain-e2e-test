@@ -120,8 +120,10 @@ describe('OWNERSHIP', () => {
 
             // After listing, an ISSUE v1 description edit should be rejected
             // because the ownership gate is set.
-            let blockedEdit = await issueHelper.sendIssueV1(addr, jdog, "Trying to edit while escrowed")
-            // sendIssueV1 waits for status='valid'; we expect that wait to time out.
+            // Raw send: this edit is SUPPOSED to be refused, and sendIssueV1 demands
+            // status=valid and now throws when it never arrives (requireRow), which
+            // killed this test inside the helper before it reached its own assertion.
+            await issueHelper.sendIssueV1Raw(addr, jdog, "Trying to edit while escrowed")
             // Verify the issue landed with the ownership-escrowed rejection reason.
             let rejectedIssue = await indexerDatabase.waitForIssue({
                 source: address, tick: jdog,
@@ -167,8 +169,10 @@ describe('OWNERSHIP', () => {
                 1, 0
             )
 
-            // ISSUE v5 (ALLOW_LIST / BLOCK_LIST edit) is also owner-only and should be rejected
-            await issueHelper.sendIssueV5(addr, parent, "", "", "Trying to lock-list while escrowed")
+            // ISSUE v5 (ALLOW_LIST / BLOCK_LIST edit) is also owner-only and should be rejected.
+            // Raw send for the same reason as the v1 edit above: the helper that waits
+            // for status=valid throws on a refusal this test exists to observe.
+            await issueHelper.sendIssueV5Raw(addr, parent, "", "", "Trying to lock-list while escrowed")
             let rejectedV5 = await indexerDatabase.waitForIssue({
                 source: address, tick: parent,
                 status: "invalid: TICK (ownership escrowed)"

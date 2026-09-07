@@ -155,12 +155,22 @@ describe('COINPAY', function () {
 
             // The buyer never pays. Drive the obligation past its deadline. Unlike the
             // block-height deadlines used by ORDER/attestation expiry, the COINPay
-            // obligation expires on block_time (match block_time + COINPAY_EXPIRATION,
-            // 2h). Rather than wait two real hours, freeze the node clock past the
-            // deadline and mine: the first block whose block_time exceeds the
-            // obligation's expiration makes the indexer's per-block expiry pass emit
-            // COINPAY_EXPIRE, which releases the escrow.
-            let expireAt = Number(obligation.expiration) + 600 // 10 min past the deadline
+            // obligation expires on block_time (match block_time + COINPAY_EXPIRATION).
+            // Rather than wait the window out, freeze the node clock past the deadline
+            // and mine: the first block whose block_time exceeds the obligation's
+            // expiration makes the indexer's per-block expiry pass emit COINPAY_EXPIRE,
+            // which releases the escrow.
+            //
+            // KEEP THIS MARGIN SMALL. The blocks mined below are stamped at `expireAt`,
+            // so they are future-dated by however far ahead of wall clock it sits, and
+            // the indexer's anchor-attest barrier holds a block until the hub's
+            // wall-clock watermark reaches that stamp. Every second of margin here is a
+            // second the whole BTC parse pipeline stalls for real. At the shared-ledger
+            // 7200s window plus the former 600s margin that was 2h10m, and run
+            // 34015867460 spent 2h08m50s of a 289-minute leg deferring one block on it.
+            // The venue now sets a 300s window (XCHAIN_COINPAY_EXPIRATION_S, regtest
+            // only); 60s past the deadline is ample to carry a block over it.
+            let expireAt = Number(obligation.expiration) + 60
 
             // Pause the auto-miner so it cannot slip a real-time block into our window
             // (a real-time block would sit below the deadline and not trigger expiry).

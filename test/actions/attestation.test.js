@@ -14,6 +14,7 @@ const stakeHelper = require('../helpers/stakeHelper')
 const gasHelper = require('../helpers/gasHelper')
 const vmHelper = require('../helpers/vmHelper')
 const attestationHelper = require('../helpers/attestationHelper')
+const { skipIfResponseMirrorEra } = require('../helpers/attestLegacyResponsePath')
 
 /**
  * Round-trip test for the External Attestation Framework.
@@ -184,6 +185,7 @@ module.exports = {
     })
 
     it('accepts a signed ATTEST v1 (response), fulfills the request, and fires the callback', async function () {
+        if (skipIfResponseMirrorEra(this, NETWORK)) return
         // Pick up requestId from the prior test
         let requestId = this.test.parent.ctx.requestId
         if (!requestId) {
@@ -316,6 +318,7 @@ module.exports = {
     })
 
     it('accepts a redundancy=3 response with 3 valid signatures (PBFT quorum)', async function () {
+        if (skipIfResponseMirrorEra(this, NETWORK)) return
         // Stake two additional validators (each from its OWN distinct source; see
         // stakeValidatorFromOwnSource) so the snapshot has 3 source-distinct validators at the
         // request block. With 3 validators and REDUNDANCY=3 the responsible set is all 3, so a
@@ -441,6 +444,7 @@ module.exports = {
 
     RETRYABLE_STATUSES.forEach(function (retryStatus) {
         it('leaves the request pending and injects no callback for a valid response with status=' + retryStatus, async function () {
+            if (skipIfResponseMirrorEra(this, NETWORK)) return
             // Fresh pending request (redundancy=1; a single staked validator sig suffices)
             let exec = await vmHelper.sendExecuteV0(operatorAddr, contractIndex, 'askOracle', ['https://example.com/v1/retry/' + retryStatus])
             assert.strictEqual(exec.execution.status, 'valid', 'execute status: ' + exec.execution.status)
@@ -493,6 +497,7 @@ module.exports = {
     })
 
     it('fulfills the request with a callback when an ok response follows an earlier retryable (no_quorum) response', async function () {
+        if (skipIfResponseMirrorEra(this, NETWORK)) return
         // Fresh pending request (deadlineBlocks=10 leaves comfortable room for two rounds)
         let exec = await vmHelper.sendExecuteV0(operatorAddr, contractIndex, 'askOracle', ['https://example.com/v1/retry-then-ok/abc'])
         assert.strictEqual(exec.execution.status, 'valid', 'execute status: ' + exec.execution.status)

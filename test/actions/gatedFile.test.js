@@ -130,6 +130,8 @@ describe('FILE: token-gated content', function () {
 
         const txHash = await transactionHelper.createAndSendTransaction(issuer, batchMessage, ciphertextRaw)
 
+        // give-up-ok: sequencing only; the gated FILE row asserted just below is
+        // what this case is about, and it cannot land without a valid BATCH.
         await indexerDatabase.waitForBatch({
             txHash,
             source: issuer.address,
@@ -157,16 +159,26 @@ describe('FILE: token-gated content', function () {
     it('issuer can transfer the gated token in BATCH(SEND, MESSAGE-to-recipient)', async function () {
         const sendCmd = ['SEND', '0', TICK, '1', recipient.address, ''].join('|')
         const handoffCmd = ['MESSAGE', '2', COIN_CODE, recipient.address, stubEncryptedMessage(keyHash)].join('|')
-        await batchHelper.sendBatchV0(issuer, [sendCmd, handoffCmd])
+        const batch = await batchHelper.sendBatchV0(issuer, [sendCmd, handoffCmd])
 
-        await indexerDatabase.waitForSend({
+        // The SEND row IS this case's only observable, so a swallowed give-up
+        // would let the test pass on a transfer that never happened.
+        //
+        // PINNED TO THIS BATCH'S TXHASH. The suite sends the permitted transfer and
+        // a refused one with the same source, destination, tick and amount, so
+        // those five fields alone name two rows with opposite verdicts and the
+        // answer would depend on row order. `status` narrows it today; the txHash
+        // is what makes it the row this case actually sent.
+        const sendRow = await indexerDatabase.waitForSend({
             source: issuer.address,
             destination: recipient.address,
             tick: TICK,
             amount: '1',
+            txHash: batch.txHash,
             memo: '',
             status: 'valid',
         })
+        assert(sendRow, 'the gated token transfer should land a valid SEND row')
     })
 
     it('rejects bare SEND of the gated token with no sibling MESSAGE', async function () {
@@ -216,6 +228,7 @@ describe('FILE: token-gated content', function () {
             'BATCH|0|' + [f1, mSelf].join(';'),
             ct1.toString('binary'),
         )
+        // give-up-ok: sequencing only; row1 below is the assertion for this batch.
         await indexerDatabase.waitForBatch({ txHash: tx1, source: issuer.address, status: 'valid' })
         const row1 = await indexerDatabase.waitForFile({ txHash: tx1, name: 'pack-1.txt', status: 'valid' })
         assert(row1, 'pack member 1 should land valid')

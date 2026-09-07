@@ -9,6 +9,7 @@
 // contact legal@dankest.llc.
 
 const transactionHelper = require('../transactionHelper')
+const requireRow = require('./requireRow')
 
 module.exports = {
     async sendSendV0(addressInfo, tick, amount, destination, memo){
@@ -19,7 +20,7 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, sendMessage)
 
         console.log("Waiting for SEND in the database...")
-        let sendRow = await indexerDatabase.waitForSend({
+        let sendRow = requireRow(await indexerDatabase.waitForSend({
             source: address,
             destination: destination,
             tick: tick,
@@ -27,21 +28,22 @@ module.exports = {
             txHash: txHash,
             memo: memo,
             status: "valid"
-        })
+        }), "sendSendV0: SEND " + amount + " " + tick + " to " + destination
+            + " (tx " + txHash + ") at status=valid")
 
-        let creditRow = await indexerDatabase.waitForCredit({
+        let creditRow = requireRow(await indexerDatabase.waitForCredit({
             address: destination,
             tick: tick,
             txHash: txHash,
             amount: amount
-        })
+        }), "sendSendV0: the " + tick + " credit to " + destination + " (tx " + txHash + ")")
 
-        let debitRow = await indexerDatabase.waitForDebit({
+        let debitRow = requireRow(await indexerDatabase.waitForDebit({
             address: address,
             tick: tick,
             txHash: txHash,
             amount: amount
-        })
+        }), "sendSendV0: the " + tick + " debit from " + address + " (tx " + txHash + ")")
 
         return { txHash, send: sendRow, credit: creditRow, debit: debitRow }
     },
@@ -53,23 +55,25 @@ module.exports = {
         console.log("Creating and sending SEND V1 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, sendMessage)
 
-        let send1Row = await indexerDatabase.waitForSend({
+        let send1Row = requireRow(await indexerDatabase.waitForSend({
             source: address, destination: destination1, tick: tick,
             amount: amount1, txHash: txHash, memo: memo, status: "valid"
-        })
-        let send2Row = await indexerDatabase.waitForSend({
+        }), "sendSendV1: SEND leg 1 of " + amount1 + " " + tick + " to " + destination1
+            + " (tx " + txHash + ") at status=valid")
+        let send2Row = requireRow(await indexerDatabase.waitForSend({
             source: address, destination: destination2, tick: tick,
             amount: amount2, txHash: txHash, memo: memo, status: "valid"
-        })
-        let credit1Row = await indexerDatabase.waitForCredit({
+        }), "sendSendV1: SEND leg 2 of " + amount2 + " " + tick + " to " + destination2
+            + " (tx " + txHash + ") at status=valid")
+        let credit1Row = requireRow(await indexerDatabase.waitForCredit({
             address: destination1, tick: tick, txHash: txHash, amount: amount1
-        })
-        let credit2Row = await indexerDatabase.waitForCredit({
+        }), "sendSendV1: the " + tick + " credit to " + destination1 + " (tx " + txHash + ")")
+        let credit2Row = requireRow(await indexerDatabase.waitForCredit({
             address: destination2, tick: tick, txHash: txHash, amount: amount2
-        })
-        let debitRow = await indexerDatabase.waitForDebit({
+        }), "sendSendV1: the " + tick + " credit to " + destination2 + " (tx " + txHash + ")")
+        let debitRow = requireRow(await indexerDatabase.waitForDebit({
             address: address, tick: tick, txHash: txHash, amount: amount1 + amount2
-        })
+        }), "sendSendV1: the combined " + tick + " debit from " + address + " (tx " + txHash + ")")
 
         return { txHash, send1: send1Row, send2: send2Row, credit1: credit1Row, credit2: credit2Row, debit: debitRow }
     },
@@ -81,26 +85,28 @@ module.exports = {
         console.log("Creating and sending SEND V2 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, sendMessage)
 
-        let send1Row = await indexerDatabase.waitForSend({
+        let send1Row = requireRow(await indexerDatabase.waitForSend({
             source: address, destination: destination1, tick: tick1,
             amount: amount1, txHash: txHash, memo: memo, status: "valid"
-        })
-        let send2Row = await indexerDatabase.waitForSend({
+        }), "sendSendV2: SEND leg 1 of " + amount1 + " " + tick1 + " to " + destination1
+            + " (tx " + txHash + ") at status=valid")
+        let send2Row = requireRow(await indexerDatabase.waitForSend({
             source: address, destination: destination2, tick: tick2,
             amount: amount2, txHash: txHash, memo: memo, status: "valid"
-        })
-        let credit1Row = await indexerDatabase.waitForCredit({
+        }), "sendSendV2: SEND leg 2 of " + amount2 + " " + tick2 + " to " + destination2
+            + " (tx " + txHash + ") at status=valid")
+        let credit1Row = requireRow(await indexerDatabase.waitForCredit({
             address: destination1, tick: tick1, txHash: txHash, amount: amount1
-        })
-        let credit2Row = await indexerDatabase.waitForCredit({
+        }), "sendSendV2: the " + tick1 + " credit to " + destination1 + " (tx " + txHash + ")")
+        let credit2Row = requireRow(await indexerDatabase.waitForCredit({
             address: destination2, tick: tick2, txHash: txHash, amount: amount2
-        })
-        let debit1Row = await indexerDatabase.waitForDebit({
+        }), "sendSendV2: the " + tick2 + " credit to " + destination2 + " (tx " + txHash + ")")
+        let debit1Row = requireRow(await indexerDatabase.waitForDebit({
             address: address, tick: tick1, txHash: txHash, amount: amount1
-        })
-        let debit2Row = await indexerDatabase.waitForDebit({
+        }), "sendSendV2: the " + tick1 + " debit from " + address + " (tx " + txHash + ")")
+        let debit2Row = requireRow(await indexerDatabase.waitForDebit({
             address: address, tick: tick2, txHash: txHash, amount: amount2
-        })
+        }), "sendSendV2: the " + tick2 + " debit from " + address + " (tx " + txHash + ")")
 
         return { txHash, send1: send1Row, send2: send2Row, credit1: credit1Row, credit2: credit2Row, debit1: debit1Row, debit2: debit2Row }
     },
@@ -112,26 +118,28 @@ module.exports = {
         console.log("Creating and sending SEND V3 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, sendMessage)
 
-        let send1Row = await indexerDatabase.waitForSend({
+        let send1Row = requireRow(await indexerDatabase.waitForSend({
             source: address, destination: destination1, tick: tick1,
             amount: amount1, txHash: txHash, memo: memo1, status: "valid"
-        })
-        let send2Row = await indexerDatabase.waitForSend({
+        }), "sendSendV3: SEND leg 1 of " + amount1 + " " + tick1 + " to " + destination1
+            + " (tx " + txHash + ") at status=valid")
+        let send2Row = requireRow(await indexerDatabase.waitForSend({
             source: address, destination: destination2, tick: tick2,
             amount: amount2, txHash: txHash, memo: memo2, status: "valid"
-        })
-        let credit1Row = await indexerDatabase.waitForCredit({
+        }), "sendSendV3: SEND leg 2 of " + amount2 + " " + tick2 + " to " + destination2
+            + " (tx " + txHash + ") at status=valid")
+        let credit1Row = requireRow(await indexerDatabase.waitForCredit({
             address: destination1, tick: tick1, txHash: txHash, amount: amount1
-        })
-        let credit2Row = await indexerDatabase.waitForCredit({
+        }), "sendSendV3: the " + tick1 + " credit to " + destination1 + " (tx " + txHash + ")")
+        let credit2Row = requireRow(await indexerDatabase.waitForCredit({
             address: destination2, tick: tick2, txHash: txHash, amount: amount2
-        })
-        let debit1Row = await indexerDatabase.waitForDebit({
+        }), "sendSendV3: the " + tick2 + " credit to " + destination2 + " (tx " + txHash + ")")
+        let debit1Row = requireRow(await indexerDatabase.waitForDebit({
             address: address, tick: tick1, txHash: txHash, amount: amount1
-        })
-        let debit2Row = await indexerDatabase.waitForDebit({
+        }), "sendSendV3: the " + tick1 + " debit from " + address + " (tx " + txHash + ")")
+        let debit2Row = requireRow(await indexerDatabase.waitForDebit({
             address: address, tick: tick2, txHash: txHash, amount: amount2
-        })
+        }), "sendSendV3: the " + tick2 + " debit from " + address + " (tx " + txHash + ")")
 
         return { txHash, send1: send1Row, send2: send2Row, credit1: credit1Row, credit2: credit2Row, debit1: debit1Row, debit2: debit2Row }
     }

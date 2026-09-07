@@ -9,6 +9,7 @@
 // contact legal@dankest.llc.
 
 const transactionHelper = require('../transactionHelper')
+const requireRow = require('./requireRow')
 
 module.exports = {
     async sendSleepV0(addressInfo, resumeBlock, memo){
@@ -18,12 +19,13 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, sleepMessage)
 
         console.log("Waiting for SLEEP in the database...")
-        let row = await indexerDatabase.waitForSleep({
+        let row = requireRow(await indexerDatabase.waitForSleep({
             txHash: txHash,
             source: addressInfo["address"],
             resumeBlock: resumeBlock,
             status: "valid"
-        })
+        }), "sendSleepV0: SLEEP until block " + resumeBlock + " (tx " + txHash
+            + ") at status=valid")
 
         return { txHash, sleep: row }
     },
@@ -35,13 +37,14 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, sleepMessage)
 
         console.log("Waiting for SLEEP in the database...")
-        let row = await indexerDatabase.waitForSleep({
+        let row = requireRow(await indexerDatabase.waitForSleep({
             txHash: txHash,
             source: addressInfo["address"],
             tick: tick,
             resumeBlock: resumeBlock,
             status: "valid"
-        })
+        }), "sendSleepV1: SLEEP of " + tick + " until block " + resumeBlock
+            + " (tx " + txHash + ") at status=valid")
 
         return { txHash, sleep: row }
     }

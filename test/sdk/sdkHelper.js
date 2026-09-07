@@ -155,6 +155,104 @@ async function submit(sdk, actionData, encoderOpts, opts, attempts = 6) {
     throw lastErr;
 }
 
+// Deploy a contract through whichever DEPLOY path its size demands, so a
+// caller never has to know which one it is on.
+//
+// A source whose base64 form fits one compiled action goes inline (DEPLOY v0).
+// One that does not - the crowdsale and amm templates both land ~500-900 bytes
+// over the 8192-byte cap - uploads its ordered base64 slices as DEPLOY v4
+// carriers, then assembles with a DEPLOY v2 carrying the CODE_HASH; the indexer
+// concatenates the slices, sha256-verifies them against that hash and runs the
+// normal deploy flow. chunkHelper.planDeploy makes the call, budgeting the
+// action's non-code tail (gas limit + constructor params) exactly as the wire
+// serializes it, so the decision is not a guess at the margin.
+//
+// Returns the inline-or-assembling submit result with `deployPlan` attached, so
+// a suite can assert on (and log) which path it actually took.
+async function deployContract(sdk, params, encoderOpts, opts) {
+    const { chunkHelper } = loadSDK();
+    const code             = params.code;
+    const gasLimit         = params.gasLimit;
+    const constructorParams = params.constructorParams || [];
+    const plan = chunkHelper.planDeploy(code, { gasLimit, constructorParams });
+
+    if (plan.single) {
+        const res = await submit(sdk,
+            { action: 'DEPLOY', params: { code, gasLimit, constructorParams } },
+            encoderOpts, opts);
+        res.deployPlan = plan;
+        return res;
+    }
+
+    // Each carrier is its own transaction and must be indexed before the next
+    // is built (the assembling DEPLOY reads them back by CODE_HASH), so mine
+    // between them rather than racing the tracker's mempool view.
+    for (let i = 0; i < plan.parts.length; i++) {
+        const carrier = await submit(sdk,
+            { action: 'DEPLOY', params: {
+                version: '4', codeHash: plan.codeHash,
+                chunkIndex: i, totalChunks: plan.totalChunks, codePart: plan.parts[i]
+            } },
+            encoderOpts, opts);
+        const status = carrier && carrier.indexed && carrier.indexed.status;
+        if (status !== 'valid') {
+            throw new Error('DEPLOY v4 carrier ' + (i + 1) + '/' + plan.totalChunks +
+                ' for CODE_HASH ' + plan.codeHash.slice(0, 12) + ' indexed "' + status + '"');
+        }
+        await mine(1);
+    }
+
+    const res = await submit(sdk,
+        { action: 'DEPLOY', params: { version: '2', codeHash: plan.codeHash, gasLimit, constructorParams } },
+        encoderOpts, opts);
+    res.deployPlan = plan;
+    return res;
+}
+
+// Pull one tick's amount out of whatever shape getBalances returned.
+function balanceFor(balances, tick) {
+    const list = balances && (Array.isArray(balances) ? balances : balances.data);
+    if (!Array.isArray(list)) return 0;
+    const row = list.find((b) => (b.tick || b.TICK) === tick);
+    return row ? Number(row.amount ?? row.quantity ?? row.balance) : 0;
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Read an address's tick balance, polling until it settles on what the caller
+// expects.
+//
+// A single read straight after mine() is not a ledger read. The explorer serves
+// getBalances from a short-TTL result cache whose key carries the coin's tip, so
+// a new block retires the entry, but it memoizes that tip for ~1s, so
+// a read issued inside that window still answers from the PRE-block entry. Every
+// balance assertion in a contract drill sits exactly there: submit, mine, read.
+// That is how a contract drill "fails" on a value the chain already holds.
+//
+// `expected` is a number, or a predicate for the loose cases ('received
+// something'). The give-up throws naming address, tick and the last value seen:
+// a balance that never arrives has to fail here, not three assertions later.
+async function waitForBalance(sdk, address, tick, expected, opts = {}) {
+    const timeoutMs  = opts.timeoutMs  === undefined ? 60000 : opts.timeoutMs;
+    const intervalMs = opts.intervalMs === undefined ? 1000  : opts.intervalMs;
+    const matches    = typeof expected === 'function' ? expected : (v) => v === Number(expected);
+    const deadline   = Date.now() + timeoutMs;
+    let seen = null;
+    let lastErr = null;
+    for (;;) {
+        try { seen = balanceFor(await sdk.getBalances(address), tick); lastErr = null; }
+        catch (err) { seen = null; lastErr = err; }
+        if (seen !== null && matches(seen)) return seen;
+        if (Date.now() >= deadline) {
+            throw new Error('balance of ' + tick + ' at ' + address + ' never reached ' +
+                (typeof expected === 'function' ? '<predicate>' : String(expected)) +
+                ' within ' + timeoutMs + 'ms (last saw ' + seen + ')' +
+                (lastErr ? '; last read failed: ' + lastErr.message : ''));
+        }
+        await sleep(intervalMs);
+    }
+}
+
 const GAS_TICK = 'XCHAIN';
 
 // Cap matches the genesis XCHAIN MAX_MINT: a seed above it indexes
@@ -200,6 +298,9 @@ module.exports = {
     makeSdk,
     resolveNetwork,
     submit,
+    deployContract,
+    balanceFor,
+    waitForBalance,
     isTransientStackError,
     fundedSdkAddress,
     mintGas,

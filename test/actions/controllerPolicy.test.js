@@ -39,6 +39,7 @@ const sendHelper        = require('../helpers/sendHelper')
 const destroyHelper     = require('../helpers/destroyHelper')
 const vmHelper          = require('../helpers/vmHelper')
 const transactionHelper = require('../transactionHelper')
+const { waitForTxIndexed } = require('../helpers/indexerWait')
 
 async function q(sql, params) {
     const conn = await indexerDatabase.getConnection()
@@ -99,10 +100,11 @@ function addressBindWire(controllerIdx, actionClass, cooldown, unbind) {
 async function waitValidOrder(source, giveTick, timeMax = 25000) {
     return await indexerDatabase.waitForOrder({ source, giveTick, status: 'valid' }, timeMax)
 }
-// Confirm an order WAS rejected: after the indexer has had time to process,
-// assert no valid order exists for (source, giveTick).
-async function expectOrderRejected(source, giveTick, settleMs = 7000) {
-    await sleep(settleMs)
+// Confirm an order WAS rejected: wait for the indexer's verdict on the ORDER's own
+// tx (an actions row lands for every parsed action, valid or not), then assert no
+// valid order exists. Bound = one indexer barrier cycle (60s timeout plus retry).
+async function expectOrderRejected(source, giveTick, txHash, waitMs = 120000) {
+    await waitForTxIndexed(txHash, { timeoutMs: waitMs, intervalMs: 250 })
     const valid = await indexerDatabase.checkOrder({ source, giveTick, status: 'valid' })
     return !valid
 }
@@ -241,9 +243,9 @@ describe('Controller Policy Layer: bindings, enforcement, royalty split + permis
         console.log('   SEND allowed under trade binding; routing OK; bob balance =', await balanceOf(bob.address, tick))
 
         // GATING: an ORDER listing the token must be REJECTED while bound.
-        await submitRaw(owner, `ORDER|0|${COIN_CODE}|${tick}|50||${COIN_CODE}|XCHAIN|50||${owner.address}||||blocked-order`)
+        const blockedOrderTx = await submitRaw(owner, `ORDER|0|${COIN_CODE}|${tick}|50||${COIN_CODE}|XCHAIN|50||${owner.address}||||blocked-order`)
         await mine(1)
-        assert(await expectOrderRejected(owner.address, tick), 'ORDER is REJECTED while trade controller is active')
+        assert(await expectOrderRejected(owner.address, tick, blockedOrderTx), 'ORDER is REJECTED while trade controller is active')
         console.log('   ORDER rejected while bound; gating OK')
 
         // UNBIND -> cooldown begins; still gates until cooldown_end_block.
@@ -257,9 +259,9 @@ describe('Controller Policy Layer: bindings, enforcement, royalty split + permis
             'cooldown_end_block = unbind block + cooldown_blocks')
 
         // Still within cooldown -> ORDER still rejected.
-        await submitRaw(owner, `ORDER|0|${COIN_CODE}|${tick}|50||${COIN_CODE}|XCHAIN|50||${owner.address}||||cooldown-order`)
+        const cooldownOrderTx = await submitRaw(owner, `ORDER|0|${COIN_CODE}|${tick}|50||${COIN_CODE}|XCHAIN|50||${owner.address}||||cooldown-order`)
         await mine(1)
-        assert(await expectOrderRejected(owner.address, tick), 'ORDER still REJECTED during drop cooldown (anti-instant-drop)')
+        assert(await expectOrderRejected(owner.address, tick, cooldownOrderTx), 'ORDER still REJECTED during drop cooldown (anti-instant-drop)')
         console.log('   ORDER still rejected during cooldown; cooldown teeth OK')
 
         // Advance past cooldown_end_block -> ORDER now ACCEPTED.
@@ -284,8 +286,11 @@ describe('Controller Policy Layer: bindings, enforcement, royalty split + permis
 
         const carol = await cryptoHelper.getNewFundedAddress('cv-carol', COIN, NETWORK, null, 'legacy', 0, 1)
         const before = await balanceOf(carol.address, tick)
-        await submitRaw(owner, `SEND|0|${tick}|10|${carol.address}|blocked-send`)
-        await mine(1); await sleep(3000)
+        const blockedSendTx = await submitRaw(owner, `SEND|0|${tick}|10|${carol.address}|blocked-send`)
+        // Wait for the indexer's verdict on THIS send (its actions row lands whether
+        // accepted or refused); an unchanged balance says nothing before then. Bound
+        // = one indexer barrier cycle (a 60s cross-chain defer plus its retry).
+        await mine(1); await waitForTxIndexed(blockedSendTx, { timeoutMs: 120000, intervalMs: 250 })
         const after = await balanceOf(carol.address, tick)
         assert(before === after, 'SEND of transfer-bound token is REJECTED (recipient balance unchanged)')
         console.log('   SEND blocked by transfer controller; OK. carol balance still', after)
@@ -372,8 +377,10 @@ describe('Controller Policy Layer: bindings, enforcement, royalty split + permis
         assert(ace.length === 1 && Number(ace[0].is_unbind) === 0, 'address bind row present')
 
         const before = await balanceOf(recip.address, tick)
-        await submitRaw(owner, `SEND|0|${tick}|25|${recip.address}|unsolicited`)
-        await mine(1); await sleep(3000)
+        const unsolicitedTx = await submitRaw(owner, `SEND|0|${tick}|25|${recip.address}|unsolicited`)
+        // The indexer's verdict on THIS send, not a fixed interval: an unchanged
+        // recipient balance only means "reverted" once the send has been judged.
+        await mine(1); await waitForTxIndexed(unsolicitedTx, { timeoutMs: 120000, intervalMs: 250 })
         const after = await balanceOf(recip.address, tick)
         assert(before === after, 'inbound SEND to gated recipient REVERTS (no credit)')
         console.log('   inbound SEND reverted by recipient gate; OK. recip balance', after)
@@ -455,8 +462,10 @@ describe('Controller Policy Layer: bindings, enforcement, royalty split + permis
         const before = await balanceOf(recip.address, tick)
         // The SEND triggers the transfer guard; the (now-funded) guard's SEND emission is not in
         // the allowlist -> throws -> guard DENIES -> the original SEND is blocked (recipient gets none).
-        await submitRaw(owner, `SEND|0|${tick}|10|${recip.address}|manifest-blocked`)
-        await sleep(7000)
+        const manifestBlockedTx = await submitRaw(owner, `SEND|0|${tick}|10|${recip.address}|manifest-blocked`)
+        // Wait for the send to be judged; the recipient's balance is only evidence
+        // of a denial after that. Bound = one indexer barrier cycle (60s plus retry).
+        await waitForTxIndexed(manifestBlockedTx, { timeoutMs: 120000, intervalMs: 250 })
         const after = await balanceOf(recip.address, tick)
         assert.strictEqual(after, before, 'SEND blocked by the allowlist (contract IS funded, so the block is the manifest, not balance)')
         console.log('   E2 manifest-forbidden emission denied the funded contract; OK')
@@ -473,8 +482,8 @@ describe('Controller Policy Layer: bindings, enforcement, royalty split + permis
         await submitRaw(owner, issueBindWire(tickA, depA.contract.action_index, 'trade', 0, 0))
         await waitTokenController(tickA, e => e.action_class === 'trade' && e.is_unbind === 0)
         await mine(1)
-        await submitRaw(owner, `ORDER|0|${COIN_CODE}|${tickA}|1000||${COIN_CODE}|XCHAIN|1000||${owner.address}||||e3-overcap`)
-        assert(await expectOrderRejected(owner.address, tickA), 'over-cap legs: ORDER rejected by tighter per-contract maxTakeBps')
+        const overcapTx = await submitRaw(owner, `ORDER|0|${COIN_CODE}|${tickA}|1000||${COIN_CODE}|XCHAIN|1000||${owner.address}||||e3-overcap`)
+        assert(await expectOrderRejected(owner.address, tickA, overcapTx), 'over-cap legs: ORDER rejected by tighter per-contract maxTakeBps')
         console.log('   E3a over-cap legs denied by tighter per-contract maxTakeBps; OK')
 
         // (b) maxTakeBps 600 > Σlegs 350 -> ALLOWED, legs persisted.
@@ -507,15 +516,16 @@ describe('Controller Policy Layer: bindings, enforcement, royalty split + permis
         // FALLBACK across classes: a SEND (transfer) is blocked by the 'all' guard...
         const fred = await cryptoHelper.getNewFundedAddress('cv-fred', COIN, NETWORK, null, 'legacy', 0, 1)
         let before = await balanceOf(fred.address, tick)
-        await submitRaw(owner, `SEND|0|${tick}|10|${fred.address}|all-blocked-send`)
-        await mine(1); await sleep(3000)
+        const allBlockedSendTx = await submitRaw(owner, `SEND|0|${tick}|10|${fred.address}|all-blocked-send`)
+        // The indexer's verdict on THIS send, not a fixed interval.
+        await mine(1); await waitForTxIndexed(allBlockedSendTx, { timeoutMs: 120000, intervalMs: 250 })
         assert.strictEqual(await balanceOf(fred.address, tick), before, "SEND falls back to the 'all' guard and is DENIED")
         console.log("   SEND denied via 'all' fallback (transfer class); OK")
 
         // ...and an ORDER (trade) is ALSO blocked by the same single 'all' binding.
-        await submitRaw(owner, `ORDER|0|${COIN_CODE}|${tick}|50||${COIN_CODE}|XCHAIN|50||${owner.address}||||all-blocked-order`)
+        const allBlockedOrderTx = await submitRaw(owner, `ORDER|0|${COIN_CODE}|${tick}|50||${COIN_CODE}|XCHAIN|50||${owner.address}||||all-blocked-order`)
         await mine(1)
-        assert(await expectOrderRejected(owner.address, tick), "ORDER falls back to the 'all' guard and is DENIED")
+        assert(await expectOrderRejected(owner.address, tick, allBlockedOrderTx), "ORDER falls back to the 'all' guard and is DENIED")
         console.log("   ORDER denied via 'all' fallback (trade class); one binding gates both; OK")
 
         // OVERRIDE: bind a permissive controller to the specific 'transfer' class on top of 'all'.
@@ -535,9 +545,9 @@ describe('Controller Policy Layer: bindings, enforcement, royalty split + permis
 
         // The override is class-scoped: ORDER (trade) still has no specific binding, so it STILL
         // falls back to the 'all' deny guard.
-        await submitRaw(owner, `ORDER|0|${COIN_CODE}|${tick}|50||${COIN_CODE}|XCHAIN|50||${owner.address}||||still-blocked-order`)
+        const stillBlockedOrderTx = await submitRaw(owner, `ORDER|0|${COIN_CODE}|${tick}|50||${COIN_CODE}|XCHAIN|50||${owner.address}||||still-blocked-order`)
         await mine(1)
-        assert(await expectOrderRejected(owner.address, tick), "ORDER still falls back to 'all' (override is class-scoped)")
+        assert(await expectOrderRejected(owner.address, tick, stillBlockedOrderTx), "ORDER still falls back to 'all' (override is class-scoped)")
         console.log("   ORDER still denied via 'all'; override is class-scoped; OK")
     })
 

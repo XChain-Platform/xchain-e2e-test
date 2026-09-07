@@ -9,6 +9,7 @@
 // contact legal@dankest.llc.
 
 const transactionHelper = require('../transactionHelper')
+const requireRow = require('./requireRow')
 
 module.exports = {
     async sendDividendV0(addressInfo, tick, dividendTick, amount, memo){
@@ -18,14 +19,15 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, dividendMessage)
 
         console.log("Waiting for DIVIDEND in the database...")
-        let row = await indexerDatabase.waitForDividend({
+        let row = requireRow(await indexerDatabase.waitForDividend({
             txHash: txHash,
             source: addressInfo["address"],
             tick: tick,
             dividendTick: dividendTick,
             amount: amount,
             status: "valid"
-        })
+        }), "sendDividendV0: DIVIDEND of " + amount + " " + dividendTick + " on " + tick
+            + " (tx " + txHash + ") at status=valid")
 
         return { txHash, dividend: row }
     }

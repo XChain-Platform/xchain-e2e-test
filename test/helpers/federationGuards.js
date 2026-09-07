@@ -90,4 +90,86 @@ async function assertCleanValidatorSet(indexerDatabase){
         '(run each federation suite on its own fresh chain; they are not isolated from prior staking).')
 }
 
-module.exports = { requireFederationEnv, assertCleanValidatorSet }
+// ── Per-request responsible-set guards (selection-dependent cases) ──────────
+//
+// `assertCleanValidatorSet` above is the blunt, suite-wide form: refuse to run
+// at all on a polluted chain. That is right for the hub-federation suites,
+// which own their venue. It is wrong for a suite that has to share a venue with
+// a long-lived seed (the rollcall federation seed lives on the BTC regtest
+// chain and is deliberately preserved by an operator ruling):
+// most of that suite is deterministic and stays green, and only the cases that
+// need the suite's OWN validator to be the elected responder are at the mercy
+// of selection.
+//
+// The indexer pins the elected set on the request row itself
+// (`attests.responsible_set_json`, ATT-RECOMP-1), so the suite can read the
+// election result rather than guess at it: if the suite's validator is not in
+// the set, no signature it produces can ever be valid for that request, the
+// request will expire by design, and a failure there says nothing about the
+// code under test. Those cases report as PENDING with the elected set named,
+// which is honest, instead of as a red assertion, which is not.
+
+// The responsible set pinned on a v0 attestation request row, lower-cased, or
+// null when the row carries none (pre-ATT-RECOMP-1 row, or a status that never
+// pins one). Null means "unknown", NOT "empty": callers proceed on unknown.
+function pinnedResponsibleSet(request){
+    if (!request) return null
+    const raw = request.responsible_set_json
+    if (raw === null || raw === undefined || raw === '') return null
+    let parsed = raw
+    if (typeof raw === 'string'){
+        try { parsed = JSON.parse(raw) } catch (e){ return null }
+    }
+    if (!Array.isArray(parsed)) return null
+    return parsed.map((p) => String(p).toLowerCase())
+}
+
+// true / false when the set is known, null when it is not.
+function isResponsibleFor(request, pubkey){
+    const set = pinnedResponsibleSet(request)
+    if (set === null) return null
+    return set.indexOf(String(pubkey || '').toLowerCase()) !== -1
+}
+
+// Gate a selection-dependent case on the suite's validator having actually been
+// elected for `request`. Returns true when the case should proceed.
+//
+// When it was not elected the case is VENUE-DEPENDENT, not broken: mark it
+// pending via `ctx.skip()` and say which pubkey the venue elected instead. Set
+// E2E_REQUIRE_FEDERATION=1 (a venue the caller controls and has just reset) to
+// turn that into a hard failure, so a suite meant to prove the fulfillment path
+// cannot pass by skipping it.
+function requireResponsibleValidator(ctx, request, pubkey, label){
+    const elected = isResponsibleFor(request, pubkey)
+    if (elected === true) return true
+    if (elected === null){
+        // No pinned set to read: proceed and let the case's own assertions rule.
+        console.log('[venue] ' + (label || 'request') +
+            ': no responsible_set_json pinned on the request row; running the case unguarded')
+        return true
+    }
+
+    const set = pinnedResponsibleSet(request) || []
+    const msg = (label || 'request') + ' elected responsible set [' + set.join(', ') +
+        '], which does not include this suite\'s validator ' + String(pubkey).toLowerCase() +
+        '. Selection is top-REDUNDANCY by SHA256(request_id||pubkey) across every staked ' +
+        'attestation validator, so a venue carrying other stakes routes some request-ids ' +
+        'away from this suite and those requests expire by design.'
+
+    if (_mustRun()){
+        throw new Error('E2E_REQUIRE_FEDERATION is set but ' + msg +
+            ' Reset to a clean validator set first:\n' +
+            '    XCHAIN_NODE_DATA_DIR=<data dir> xchain_node reset all bitcoin regtest')
+    }
+    console.log('[venue-dependent] ' + msg + ' Reporting as pending rather than failed.')
+    ctx.skip()
+    return false
+}
+
+module.exports = {
+    requireFederationEnv,
+    assertCleanValidatorSet,
+    pinnedResponsibleSet,
+    isResponsibleFor,
+    requireResponsibleValidator
+}

@@ -9,6 +9,7 @@
 // contact legal@dankest.llc.
 
 const transactionHelper = require('../transactionHelper')
+const requireRow = require('./requireRow')
 
 module.exports = {
     // Broadcast an ISSUE v0 and return its txHash, waiting for NO particular
@@ -89,6 +90,17 @@ module.exports = {
         return { txHash, issue: issueRow, credit: creditRow }
     },
 
+    // Broadcast an ISSUE v1 and return its txHash, waiting for NO verdict. The
+    // sendIssueV0Raw contract, for the same reason: sendIssueV1 demands
+    // status=valid, which is wrong for a test sending an edit the protocol is
+    // supposed to refuse (an ownership-escrowed tick). Those tests own the wait.
+    async sendIssueV1Raw(addressInfo, tick, description){
+        let issueMessage = "ISSUE|1|"+tick+"|"+description
+
+        console.log("Creating and sending ISSUE V1 tx (raw, no verdict awaited)...")
+        return await transactionHelper.createAndSendTransaction(addressInfo, issueMessage)
+    },
+
     async sendIssueV1(addressInfo, tick, description){
         let address = addressInfo["address"]
 
@@ -98,13 +110,13 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, issueMessage)
 
         console.log("Waiting for ISSUE in the database...")
-        let issueRow = await indexerDatabase.waitForIssue({
+        let issueRow = requireRow(await indexerDatabase.waitForIssue({
             source: address,
             tick: tick,
             txHash: txHash,
             description: description,
             status: "valid"
-        })
+        }), "sendIssueV1: ISSUE " + tick + " (tx " + txHash + ") at status=valid")
 
         return { txHash, issue: issueRow }
     },
@@ -124,12 +136,12 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, issueMessage)
 
         console.log("Waiting for ISSUE in the database...")
-        let issueRow = await indexerDatabase.waitForIssue({
+        let issueRow = requireRow(await indexerDatabase.waitForIssue({
             source: address,
             tick: tick,
             txHash: txHash,
             status: "valid"
-        })
+        }), "sendIssueV2: ISSUE " + tick + " (tx " + txHash + ") at status=valid")
 
         return { txHash, issue: issueRow }
     },
@@ -152,12 +164,12 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, issueMessage)
 
         console.log("Waiting for ISSUE in the database...")
-        let issueRow = await indexerDatabase.waitForIssue({
+        let issueRow = requireRow(await indexerDatabase.waitForIssue({
             source: address,
             tick: tick,
             txHash: txHash,
             status: "valid"
-        })
+        }), "sendIssueV3: ISSUE " + tick + " (tx " + txHash + ") at status=valid")
 
         return { txHash, issue: issueRow }
     },
@@ -175,14 +187,28 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, issueMessage)
 
         console.log("Waiting for ISSUE in the database...")
-        let issueRow = await indexerDatabase.waitForIssue({
+        let issueRow = requireRow(await indexerDatabase.waitForIssue({
             source: address,
             tick: tick,
             txHash: txHash,
             status: "valid"
-        })
+        }), "sendIssueV4: ISSUE " + tick + " (tx " + txHash + ") at status=valid")
 
         return { txHash, issue: issueRow }
+    },
+
+    // Broadcast an ISSUE v5 and return its txHash, waiting for NO verdict; see
+    // sendIssueV0Raw. The list edit is owner-only, so a test proving it is
+    // refused on an escrowed tick has to send it without demanding validity.
+    async sendIssueV5Raw(addressInfo, tick, allowList, blockList, memo){
+        if (allowList == null) allowList = ""
+        if (blockList == null) blockList = ""
+        if (memo == null) memo = ""
+
+        let issueMessage = "ISSUE|5|"+tick+"|"+allowList+"|"+blockList+"|"+memo
+
+        console.log("Creating and sending ISSUE V5 tx (raw, no verdict awaited)...")
+        return await transactionHelper.createAndSendTransaction(addressInfo, issueMessage)
     },
 
     async sendIssueV5(addressInfo, tick, allowList, blockList, memo){
@@ -197,12 +223,12 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, issueMessage)
 
         console.log("Waiting for ISSUE in the database...")
-        let issueRow = await indexerDatabase.waitForIssue({
+        let issueRow = requireRow(await indexerDatabase.waitForIssue({
             source: address,
             tick: tick,
             txHash: txHash,
             status: "valid"
-        })
+        }), "sendIssueV5: ISSUE " + tick + " (tx " + txHash + ") at status=valid")
 
         return { txHash, issue: issueRow }
     }

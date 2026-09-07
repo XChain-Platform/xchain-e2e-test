@@ -9,6 +9,7 @@
 // contact legal@dankest.llc.
 
 const transactionHelper = require('../transactionHelper')
+const requireRow = require('./requireRow')
 
 module.exports = {
     async sendCallbackV0(addressInfo, tick, memo){
@@ -18,12 +19,12 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, callbackMessage)
 
         console.log("Waiting for CALLBACK in the database...")
-        let row = await indexerDatabase.waitForCallback({
+        let row = requireRow(await indexerDatabase.waitForCallback({
             txHash: txHash,
             source: addressInfo["address"],
             tick: tick,
             status: "valid"
-        })
+        }), "sendCallbackV0: CALLBACK on " + tick + " (tx " + txHash + ") at status=valid")
 
         return { txHash, callback: row }
     }

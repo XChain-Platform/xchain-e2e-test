@@ -9,6 +9,7 @@
 // contact legal@dankest.llc.
 
 const transactionHelper = require('../transactionHelper')
+const requireRow = require('./requireRow')
 
 module.exports = {
     async sendAirdropV0(addressInfo, tick, amount, listActionIndex, memo){
@@ -18,11 +19,12 @@ module.exports = {
         console.log("Creating and sending AIRDROP V0 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, airdropMessage)
 
-        let airdropRow = await indexerDatabase.waitForAirdrop({
+        let airdropRow = requireRow(await indexerDatabase.waitForAirdrop({
             source: address, txHash: txHash, tick: tick,
             amount: amount, listActionIndex: listActionIndex,
             memo: memo, status: "valid"
-        })
+        }), "sendAirdropV0: AIRDROP of " + amount + " " + tick + " over list "
+            + listActionIndex + " (tx " + txHash + ") at status=valid")
 
         return { txHash, airdrop: airdropRow }
     },
@@ -34,17 +36,19 @@ module.exports = {
         console.log("Creating and sending AIRDROP V1 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, airdropMessage)
 
-        let airdropRow1 = await indexerDatabase.waitForAirdrop({
+        let airdropRow1 = requireRow(await indexerDatabase.waitForAirdrop({
             source: address, txHash: txHash, tick: tick1,
             amount: amount1, listActionIndex: listActionIndex,
             memo: memo, status: "valid"
-        })
+        }), "sendAirdropV1: AIRDROP leg 1 of " + amount1 + " " + tick1 + " over list "
+            + listActionIndex + " (tx " + txHash + ") at status=valid")
 
-        let airdropRow2 = await indexerDatabase.waitForAirdrop({
+        let airdropRow2 = requireRow(await indexerDatabase.waitForAirdrop({
             source: address, txHash: txHash, tick: tick2,
             amount: amount2, listActionIndex: listActionIndex,
             status: "valid"
-        })
+        }), "sendAirdropV1: AIRDROP leg 2 of " + amount2 + " " + tick2 + " over list "
+            + listActionIndex + " (tx " + txHash + ") at status=valid")
 
         return { txHash, airdrop1: airdropRow1, airdrop2: airdropRow2 }
     },
@@ -56,17 +60,19 @@ module.exports = {
         console.log("Creating and sending AIRDROP V2 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, airdropMessage)
 
-        let airdropRow1 = await indexerDatabase.waitForAirdrop({
+        let airdropRow1 = requireRow(await indexerDatabase.waitForAirdrop({
             source: address, txHash: txHash, tick: tick1,
             amount: amount1, listActionIndex: listActionIndex,
             memo: memo, status: "valid"
-        })
+        }), "sendAirdropV2: AIRDROP leg 1 of " + amount1 + " " + tick1 + " over list "
+            + listActionIndex + " (tx " + txHash + ") at status=valid")
 
-        let airdropRow2 = await indexerDatabase.waitForAirdrop({
+        let airdropRow2 = requireRow(await indexerDatabase.waitForAirdrop({
             source: address, txHash: txHash, tick: tick2,
             amount: amount2, listActionIndex: listActionIndex2,
             status: "valid"
-        })
+        }), "sendAirdropV2: AIRDROP leg 2 of " + amount2 + " " + tick2 + " over list "
+            + listActionIndex2 + " (tx " + txHash + ") at status=valid")
 
         return { txHash, airdrop1: airdropRow1, airdrop2: airdropRow2 }
     },
@@ -78,17 +84,19 @@ module.exports = {
         console.log("Creating and sending AIRDROP V3 tx...")
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, airdropMessage)
 
-        let airdropRow1 = await indexerDatabase.waitForAirdrop({
+        let airdropRow1 = requireRow(await indexerDatabase.waitForAirdrop({
             source: address, txHash: txHash, tick: tick1,
             amount: amount1, listActionIndex: listActionIndex,
             memo: memo, status: "valid"
-        })
+        }), "sendAirdropV3: AIRDROP leg 1 of " + amount1 + " " + tick1 + " over list "
+            + listActionIndex + " (tx " + txHash + ") at status=valid")
 
-        let airdropRow2 = await indexerDatabase.waitForAirdrop({
+        let airdropRow2 = requireRow(await indexerDatabase.waitForAirdrop({
             source: address, txHash: txHash, tick: tick2,
             amount: amount2, listActionIndex: listActionIndex2,
             memo: memo2, status: "valid"
-        })
+        }), "sendAirdropV3: AIRDROP leg 2 of " + amount2 + " " + tick2 + " over list "
+            + listActionIndex2 + " (tx " + txHash + ") at status=valid")
 
         return { txHash, airdrop1: airdropRow1, airdrop2: airdropRow2 }
     }

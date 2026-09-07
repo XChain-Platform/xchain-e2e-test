@@ -51,7 +51,8 @@
 const axios   = require('axios');
 const mariadb = require('mariadb');
 const { XChainSDK } = require('./sdkHelper');
-const { BOOTSTRAP_XCHAIN_USD, BOOTSTRAP_XCHAIN_USD_NUM, refuseSeedIfSuppressed } = require('../helpers/xchainPriceConstants');
+const { BOOTSTRAP_XCHAIN_USD, BOOTSTRAP_XCHAIN_USD_NUM } = require('../helpers/xchainPriceConstants');
+const { seedDogeFixturePrices, describeSeed } = require('../helpers/dogeSetupPriceSeed');
 
 const MINER_URL = process.env.XCALL_DOGE_MINER_URL || 'http://localhost:3125';
 const INDEXER_URL = process.env.XCALL_DOGE_INDEXER_URL || 'http://127.0.0.1:3124';
@@ -117,24 +118,17 @@ async function main() {
         return rows.length ? Number(rows[0].block_time) : Math.floor(Date.now() / 1000);
     });
 
-    // Seed the prices the DOGE native-fee path reads (hub DB), anchored to the CHAIN
-    // clock. Freshness is judged against the block_time of the block the ISSUE lands in,
-    // and a regtest node whose clock is frozen mints blocks far behind wall-clock, so a
-    // wall-clock anchor lands in the future and the time-keyed selection skips it.
-    const seedTime = blockTime;
-    refuseSeedIfSuppressed('dexDogeSetup');
-    await hubConn(async (c) => {
-        for (const [pair, price, round] of [['DOGE/USD', DOGE_USD_SEED, 990001], ['XCHAIN/USD', BOOTSTRAP_XCHAIN_USD, 990002]]) {
-            await c.query(
-                `INSERT INTO price_snapshots
-                    (round_number, coin_pair, price, reference_block, reference_chain,
-                     block_timestamp, validator_count, consensus_round, consensus_proof, status)
-                 VALUES (?, ?, ?, 0, 'BTC', ?, 1, 1, '[]', 'finalized')
-                 ON DUPLICATE KEY UPDATE price = VALUES(price), block_timestamp = VALUES(block_timestamp), status = 'finalized'`,
-                [round, pair, price, seedTime]);
-        }
-    });
-    console.log('[dex-doge-setup] prices seeded (DOGE/USD, XCHAIN/USD) at time ' + seedTime);
+    // Seed the prices the DOGE native-fee path reads (hub DB). Both anchors, because
+    // the tip alone is wrong on the idle chain this driver usually finds - see
+    // helpers/dogeSetupPriceSeed.js for why, and for what it costs when it happens.
+    async function seedPrices() {
+        const seeded = await seedDogeFixturePrices({
+            hubConn, dogeIdx, coinPair: 'DOGE/USD',
+            coinUsd: DOGE_USD_SEED, xchainUsd: BOOTSTRAP_XCHAIN_USD, label: 'dexDogeSetup',
+        });
+        console.log('[dex-doge-setup] prices seeded (DOGE/USD, XCHAIN/USD) at ' + describeSeed(seeded));
+    }
+    await seedPrices();
 
     const sdk = new XChainSDK({
         network:     'dogecoin-regtest',
@@ -160,6 +154,11 @@ async function main() {
     // Submit without the explorer waiter (no DOGE explorer), mine, and resolve
     // the indexed action row by tx hash via the indexer DB. Mirrors xcallDogeSetup.
     async function submitAndIndex(label, actionData, encoderOpts) {
+        // Re-anchor first. This driver mines blocks between its submits, and the very
+        // first generate_blocks on an idle chain drags block time forward by the whole
+        // idle gap, so a seed taken before that jump is already stale by the time the
+        // action is evaluated. Cheap: two indexed reads and up to four upserts.
+        await seedPrices();
         const res = await sdk.submitAction(actionData,
             Object.assign({ pubkey: maker.address, change: maker.address, unconfirmed: false }, encoderOpts),
             { wif: maker.wif, waitForIndexer: false });

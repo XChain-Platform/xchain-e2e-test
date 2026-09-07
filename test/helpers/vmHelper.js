@@ -9,6 +9,7 @@
 // contact legal@dankest.llc.
 
 const transactionHelper = require('../transactionHelper')
+const requireRow = require('./requireRow')
 
 module.exports = {
     async sendDeployV0(addressInfo, code, gasLimit, constructorParams){
@@ -25,11 +26,12 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg, null, [], "P2SH")
 
         console.log("Waiting for contract in the database...")
-        let contractRow = await indexerDatabase.waitForContract({
+        let contractRow = requireRow(await indexerDatabase.waitForContract({
             source: address,
             txHash: txHash,
             status: "valid"
-        })
+        }), "sendDeployV0: the DEPLOY contract row for " + address + " (tx " + txHash
+            + ") at status=valid")
 
         return { txHash, contract: contractRow }
     },
@@ -47,11 +49,12 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg, null, [], "P2SH")
 
         console.log("Waiting for stakeable contract in the database...")
-        let contractRow = await indexerDatabase.waitForContract({
+        let contractRow = requireRow(await indexerDatabase.waitForContract({
             source: address,
             txHash: txHash,
             status: "valid"
-        })
+        }), "sendDeployV1: the stakeable DEPLOY contract row for " + address
+            + " (tx " + txHash + ") at status=valid")
 
         return { txHash, contract: contractRow }
     },
@@ -116,13 +119,18 @@ module.exports = {
         // misreading cost several two-hour gate runs, where the real cause was an
         // ATTEST emission rejected at admission. Re-query status-agnostically and say
         // which of the two happened, so the next failure names its own reason.
+        //
+        // The diagnosis is worth nothing if the helper then hands the null back:
+        // the caller stores it and fails on the next property read, which reads as
+        // a contract bug rather than an execution that never landed. Say which of
+        // the two happened AND stop here.
         if(!executionRow){
             let anyRow = await indexerDatabase.checkExecution({
                 contractIndex: contractActionIndex,
                 caller:        address,
                 methodName:    method
             }).catch(() => null)
-            console.log(anyRow
+            throw new Error(anyRow
                 ? 'sendExecuteV0: an execution row EXISTS for ' + method + ' but its status is "'
                   + anyRow.status + '", not valid; the row is not missing, the execution failed'
                 : 'sendExecuteV0: no execution row of ANY status for ' + method
@@ -167,14 +175,15 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for deposit in the database...")
-        let depositRow = await indexerDatabase.waitForDeposit({
+        let depositRow = requireRow(await indexerDatabase.waitForDeposit({
             source: address,
             contractIndex: contractActionIndex,
             tick: tick,
             amount: quantity,
             txHash: txHash,
             status: "valid"
-        })
+        }), "sendDepositV0: DEPOSIT of " + quantity + " " + tick + " into contract "
+            + contractActionIndex + " (tx " + txHash + ") at status=valid")
 
         return { txHash, deposit: depositRow }
     },
@@ -187,14 +196,15 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for withdrawal in the database...")
-        let withdrawalRow = await indexerDatabase.waitForWithdrawal({
+        let withdrawalRow = requireRow(await indexerDatabase.waitForWithdrawal({
             source: address,
             contractIndex: contractActionIndex,
             tick: tick,
             amount: quantity,
             txHash: txHash,
             status: "valid"
-        })
+        }), "sendWithdrawV0: WITHDRAW of " + quantity + " " + tick + " from contract "
+            + contractActionIndex + " (tx " + txHash + ") at status=valid")
 
         return { txHash, withdrawal: withdrawalRow }
     }

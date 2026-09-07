@@ -37,11 +37,24 @@
  * Attestation rides on STAKE + EXECUTE, which are BTC-only protocol
  * features. This suite skips on non-BTC chains.
  *
+ * VENUE DEPENDENCE, settled by an operator ruling. Two of these cases
+ * need the suite's own validator to be the ELECTED responder for their request.
+ * Election is top-REDUNDANCY by SHA256(request_id || pubkey) across every staked
+ * attestation validator on the chain, and the shared BTC regtest venue carries a
+ * deliberately preserved rollcall federation seed, so some request-ids route to a
+ * stake that never answers and those requests expire by design. The indexer pins
+ * the elected set on the request row (attests.responsible_set_json), so the two
+ * cases read the election result and report PENDING, naming the elected pubkey,
+ * rather than failing on a venue fact. Everything else here is deterministic and
+ * runs on any venue. Run with E2E_REQUIRE_FEDERATION=1 on a freshly reset chain
+ * to make a non-election a hard failure and prove 7/7.
+ *
  ********************************************************************/
 
 const { expect } = require('chai');
 const { makeSdk, submit, fundedGasAddress, mine, submitOpts, loadSDK } = require('./sdkHelper');
 const attestationHelper = require('../helpers/attestationHelper');
+const { requireResponsibleValidator } = require('../helpers/federationGuards');
 // Reuse the harness's SDK resolver (sibling checkout or installed dep) to get
 // the top-level AttestationHelpers builders (also exposed as sdk.attestation).
 const { AttestationHelpers } = loadSDK();
@@ -145,15 +158,22 @@ async function xchainEscrowSum(address) {
     } finally { await conn.release(); }
 }
 
-// attest_fee validator_rewards rows credited to a staker (source) address.
-async function attestFeeRewards(sourceAddress) {
+// Attestation validator_rewards rows credited to a staker (source) address.
+//
+// A fulfilled paid request settles into TWO reward types, not one: the elected
+// broadcaster's flat reimbursement (`attest_bcast`, carved out of the escrow
+// first and capped by it) and the equal split of what is left across the
+// responsible set (`attest_fee`). Both are queried here so the assertions can
+// speak about the fee as a whole; see the settlement comment in the paid case.
+async function attestRewards(sourceAddress) {
     const conn = await global.indexerDatabase.getConnection();
     try {
         return await conn.query(
-            `SELECT vr.amount AS amount, vr.round_reference AS round_reference
+            `SELECT vr.amount AS amount, vr.round_reference AS round_reference,
+                    vr.reward_type AS reward_type
                FROM validator_rewards vr
                JOIN index_addresses ia ON ia.id = vr.source_id
-              WHERE vr.reward_type = 'attest_fee' AND ia.address = ?`,
+              WHERE vr.reward_type IN ('attest_fee', 'attest_bcast') AND ia.address = ?`,
             [sourceAddress]);
     } finally { await conn.release(); }
 }
@@ -267,11 +287,18 @@ describe('[sdk] External Attestation Framework (request -> response -> callback)
         expect(row.request_status).to.equal('pending');
 
         this.test.parent.ctx.requestId = request.request_id;
+        // Carry the pinned election through to the fulfillment case below, which
+        // can only be run when this suite's validator is in it.
+        this.test.parent.ctx.requestRow = request;
     });
 
     it('a signed ATTEST v1 (response) fulfills the request and fires the callback', async function () {
         let requestId = this.test.parent.ctx.requestId;
         expect(requestId, 'requestId from the prior test').to.exist;
+
+        // Venue gate: only the elected responsible set can produce a valid v1.
+        if (!requireResponsibleValidator(this, this.test.parent.ctx.requestRow,
+            validator.pubkey, 'unpaid fulfillment request')) return;
 
         const responsePayload = '{"score":7}';
 
@@ -414,6 +441,10 @@ describe('[sdk] External Attestation Framework (request -> response -> callback)
         expect(request, 'paid request should be pending').to.exist;
         expect(String(request.fee_amount), 'fee_amount persisted on the request').to.equal('2');
 
+        // Venue gate: the settlement half of this case needs a valid v1, which
+        // only the elected responsible set can produce.
+        if (!requireResponsibleValidator(this, request, validator.pubkey, 'paid request')) return;
+
         await mine(1);
         const escrowPending = await xchainEscrowSum(operator.address);
         expect(escrowPending - escrowBefore, 'fee should be escrowed from the caller').to.be.closeTo(2, 1e-9);
@@ -433,16 +464,26 @@ describe('[sdk] External Attestation Framework (request -> response -> callback)
         expect(fulfilled, 'paid request should be fulfilled').to.exist;
         await mine(1);
 
-        // validator_rewards: one attest_fee row for the responsible set (N=1),
-        // keyed to the request's action_index, credited to the staker (operator).
-        // NOTE: requires a fresh chain. The responsible set is computed
-        // deterministically across ALL staked attestation validators, so a
-        // regtest chain reused across runs routes the reward to a stale
-        // validator. `reset all bitcoin regtest` before running this suite.
-        const rewards = await attestFeeRewards(operator.address);
-        const rewardForThis = rewards.find(r => String(r.round_reference) === String(request.action_index));
-        expect(rewardForThis, 'attest_fee validator_rewards row for this request').to.exist;
-        expect(String(rewardForThis.amount), 'N=1, so the full fee accrues to the one validator').to.equal('2');
+        // validator_rewards for the responsible set (N=1), keyed to the request's
+        // action_index and credited to the staker (operator, gated above).
+        //
+        // The settle splits the escrow in two: the elected broadcaster's flat
+        // reimbursement is carved out FIRST as `attest_bcast` (ATTEST_BROADCAST_FEE,
+        // armed at genesis on regtest) and the remainder is split across the
+        // responsible set as `attest_fee`. With REDUNDANCY=1 the sole responsible
+        // validator IS the elected broadcaster, so both rows credit this staker and
+        // the ledger-level invariant is that the WHOLE fee arrives as attestation
+        // rewards for this request. Asserting the total rather than one row's amount
+        // keeps the case honest across the regtest oracle price, which decides how
+        // the 2 XCHAIN divides between the two rows (the reimbursement is a native-coin
+        // allowance converted at the settle block, clamped to the escrow, and floored
+        // onto the GAS decimal grid, which is 0 dp for the regtest XCHAIN).
+        const rewards = await attestRewards(operator.address);
+        const rewardsForThis = rewards.filter(r => String(r.round_reference) === String(request.action_index));
+        expect(rewardsForThis.length, 'attestation validator_rewards row(s) for this request').to.be.gte(1);
+        const rewardTotal = rewardsForThis.reduce((sum, r) => sum + Number(r.amount), 0);
+        expect(rewardTotal, 'N=1, so the full fee accrues to the one validator (reimbursement + split)')
+            .to.be.closeTo(2, 1e-9);
 
         const escrowAfter = await xchainEscrowSum(operator.address);
         expect(escrowAfter - escrowBefore, 'fulfillment releases the escrow').to.be.closeTo(0, 1e-9);
@@ -496,7 +537,9 @@ describe('[sdk] External Attestation Framework (request -> response -> callback)
         const escrowAfter = await xchainEscrowSum(operator.address);
         expect(escrowAfter - escrowBefore, 'expiry releases the escrow (refund to caller)').to.be.closeTo(0, 1e-9);
 
-        const rewards = await attestFeeRewards(operator.address);
+        // Neither reward type: an expired request pays no split AND no broadcast
+        // reimbursement, because no response was ever broadcast.
+        const rewards = await attestRewards(operator.address);
         expect(rewards.find(r => String(r.round_reference) === String(request.action_index)),
             'an expired request must NOT create a validator reward').to.equal(undefined);
     });

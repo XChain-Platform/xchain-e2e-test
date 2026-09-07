@@ -9,6 +9,7 @@
 // contact legal@dankest.llc.
 
 const transactionHelper = require('../transactionHelper')
+const requireRow = require('./requireRow')
 
 module.exports = {
     // SWEEP v0 wire format:
@@ -31,12 +32,12 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, sweepMessage)
 
         console.log("Waiting for SWEEP in the database...")
-        let row = await indexerDatabase.waitForSweep({
+        let row = requireRow(await indexerDatabase.waitForSweep({
             txHash: txHash,
             source: addressInfo["address"],
             destination: destination,
             status: "valid"
-        })
+        }), "sendSweepV0: SWEEP to " + destination + " (tx " + txHash + ") at status=valid")
 
         return { txHash, sweep: row }
     }

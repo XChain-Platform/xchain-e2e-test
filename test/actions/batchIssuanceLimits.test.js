@@ -868,6 +868,8 @@ describe('BATCH issuance limits (BATCH_ISSUANCE_LIMITS)', function () {
             // the split below can be read. Waiting on the row rather than on 20s
             // also means a run where nothing settles fails on the assertion that
             // names the split instead of on how busy the venue was.
+            // give-up-ok: a wait that times out changes nothing; the per-obligation
+            // status read below is the assertion, and it reports what is really there.
             await indexerDatabase.waitForCoinpayObligation(
                 { actionIndex: obligations[0], coinpayStatus: 'fulfilled' }, 60000)
 
@@ -949,6 +951,7 @@ describe('BATCH issuance limits (BATCH_ISSUANCE_LIMITS)', function () {
             // 'fulfilled' instead of on a fixed window. The status read below is
             // unchanged, so a wait that gives up still reports what is really there.
             for (const ai of obligations){
+                // give-up-ok: as above, the status read below is the assertion.
                 await indexerDatabase.waitForCoinpayObligation(
                     { actionIndex: ai, coinpayStatus: 'fulfilled' }, 20000)
             }

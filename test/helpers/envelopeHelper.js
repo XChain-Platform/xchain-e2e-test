@@ -18,6 +18,7 @@
 const crypto = require('crypto')
 const zlib = require('zlib')
 const transactionHelper = require('../transactionHelper')
+const requireRow = require('./requireRow')
 
 const OP_0 = 0x00
 const OP_IF = 0x63
@@ -86,13 +87,14 @@ module.exports = {
         )
 
         console.log("Waiting for the envelope-carried FILE in the database...")
-        const row = await indexerDatabase.waitForFile({
+        const row = requireRow(await indexerDatabase.waitForFile({
             txHash: txHash,
             source: addressInfo["address"],
             name: name,
             title: title,
             status: "valid"
-        }, 180000)
+        }, 180000), "sendFileViaEnvelope: the envelope-carried FILE " + name
+            + " (tx " + txHash + ") at status=valid")
 
         return { txHash, file: row, capture, payload }
     },

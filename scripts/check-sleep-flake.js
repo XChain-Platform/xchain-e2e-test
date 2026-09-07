@@ -16,15 +16,18 @@
  * Fixed-settle sleep ratchet.
  *
  * This suite drives a live regtest stack, so tests wait for the indexer to
- * catch up. Two shapes of wait exist here and only one of them is flaky:
+ * catch up. A wait is written two ways here, `await sleep(n)` (the helper form)
+ * and `await new Promise(r => setTimeout(r, n))` (the inline form), and both
+ * spellings are read the same way. Two shapes of wait exist and only one of
+ * them is flaky:
  *
- *   POLL INTERVAL - `await sleep(n)` as the last step of a loop that re-checks
- *   a condition and returns early. Deterministic: the loop exits as soon as the
- *   condition holds, and the sleep only bounds how often it asks. Not counted.
+ *   POLL INTERVAL - the wait as the last step of a loop that re-checks a
+ *   condition and returns early. Deterministic: the loop exits as soon as the
+ *   condition holds, and the wait only bounds how often it asks. Not counted.
  *
- *   FIXED SETTLE - a standalone `await sleep(n)` used to "give the system time"
- *   before an assertion. Flaky by construction: it passes or fails on how busy
- *   the venue is. Counted.
+ *   FIXED SETTLE - a standalone wait used to "give the system time" before an
+ *   assertion. Flaky by construction: it passes or fails on how busy the venue
+ *   is. Counted.
  *
  * A raw grep for `await sleep(` conflates the two and lands around 178 hits,
  * which is why counting it that way produced a number nobody could act on. This
@@ -50,7 +53,21 @@ const BASELINE     = path.join(ROOT, BASELINE_REL)
 
 // Only test/ is scanned. One-off drill scripts tracked outside it have no npm
 // script running them, so ratcheting them would tax throwaway work for no CI gain.
-const WAIT_CALL = /\b(?:sleep|delay)\s*\(/
+
+// The two spellings of an awaited wait. Reading only the helper form left the
+// inline one ungated: the shared indexer helpers (orderHelper, swapHelper,
+// dispenserHelper) and the oracleBatch settles are all written that way, so a
+// new wait of that shape could land without the count moving at all.
+const AWAIT_SLEEP   = /\bawait\s+(?:sleep|delay)\s*\(/g
+const AWAIT_PROMISE = /\bawait\s+new\s+Promise\s*\(/g
+
+// An awaited promise is a wait on a DURATION only when a timer resolves it.
+// Two neighbouring shapes deliberately fall outside this: an event wait
+// (`await new Promise(r => ws.on('open', r))`) resolves on a condition, and a
+// `Promise.race` timeout arm carries no `await` of its own, so neither the
+// helper definitions (`const sleep = (ms) => new Promise(...)`) nor the race
+// arms reach the detector at all.
+const TIMER_INSIDE  = /\bsetTimeout\s*\(/
 
 // Blank out comments, strings and template literals so brace counting and call
 // detection see code only. Returns a same-length string (offsets stay valid).
@@ -169,8 +186,18 @@ function walk(dir, acc) {
     return acc
 }
 
-function scanFile(file) {
-    const src  = fs.readFileSync(file, 'utf8')
+// Span of the argument list of the call whose `(` sits at `open`. Counted over
+// the blanked code, so a paren inside a string or comment cannot unbalance it.
+function argSpan(code, open) {
+    let depth = 0
+    for (let i = open; i < code.length; i++) {
+        if (code[i] === '(') depth++
+        else if (code[i] === ')') { depth--; if (depth === 0) return { from: open + 1, to: i } }
+    }
+    return null
+}
+
+function scanSource(src, name) {
     const code = blankNonCode(src)
     const { mask, balanced } = loopMask(code)
     const hits = []
@@ -181,20 +208,37 @@ function scanFile(file) {
         while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (lineStarts[mid] <= off) lo = mid; else hi = mid - 1 }
         return lo + 1
     }
-    const re = /\bawait\s+(?:sleep|delay)\s*\(/g
+    const lines = src.split('\n')
+
+    const offsets = []
     let m
-    while ((m = re.exec(code)) !== null) {
-        const off  = m.index
+    AWAIT_SLEEP.lastIndex = 0
+    while ((m = AWAIT_SLEEP.exec(code)) !== null) offsets.push(m.index)
+    AWAIT_PROMISE.lastIndex = 0
+    while ((m = AWAIT_PROMISE.exec(code)) !== null) {
+        const span = argSpan(code, m.index + m[0].length - 1)
+        if (span && TIMER_INSIDE.test(code.slice(span.from, span.to))) offsets.push(m.index)
+    }
+    offsets.sort((a, b) => a - b)
+
+    for (const off of offsets) {
         const line = lineOf(off)
-        const text = src.split('\n')[line - 1] || ''
-        // Same-line brace-less loop body: `while (...) await sleep(n)`.
-        const sameLineLoop = /\b(?:while|for)\s*\(/.test(text.slice(0, text.search(WAIT_CALL)))
+        const text = lines[line - 1] || ''
+        // Same-line brace-less loop body: `while (...) await sleep(n)`. The
+        // prefix is cut at this hit's own offset, so a second wait later on the
+        // same line reads its own prefix and not the first one's.
+        const prefix = text.slice(0, off - lineStarts[line - 1])
+        const sameLineLoop = /\b(?:while|for)\s*\(/.test(prefix)
         // An unbalanced parse means the mask cannot be trusted, so count the
         // site rather than let a scanner defect quietly lower the baseline.
         const inLoop = balanced && (mask[off] === 1 || sameLineLoop)
-        if (!inLoop) hits.push({ file: path.relative(ROOT, file), line, text: text.trim() })
+        if (!inLoop) hits.push({ file: name, line, text: text.trim() })
     }
     return { hits, balanced }
+}
+
+function scanFile(file) {
+    return scanSource(fs.readFileSync(file, 'utf8'), path.relative(ROOT, file))
 }
 
 function main() {
@@ -213,7 +257,10 @@ function main() {
     if (args.includes('--write-baseline')) {
         fs.writeFileSync(BASELINE, JSON.stringify({
             check: 'fixed-settle sleep call sites under test/',
-            note: 'Ratchet only. Lower this when sleeps are converted to condition waits; never raise it.',
+            note: 'Ratchet only. Lower this when waits are converted to condition waits; never raise it. '
+                + 'Raised once, 26 to 38, when the detector was widened to read the inline '
+                + '`await new Promise(r => setTimeout(r, n))` form alongside `await sleep(n)`: that rise '
+                + 'was the gate seeing a shape it had been blind to, not new debt.',
             count: hits.length,
         }, null, 4) + '\n')
         console.log(`wrote ${BASELINE_REL}: ${hits.length}`)
@@ -233,7 +280,8 @@ function main() {
 
     if (hits.length > baseline) {
         console.error(`sleep-flake: ${hits.length} fixed-settle sleep call sites, baseline ${baseline}.`)
-        console.error('A fixed `await sleep(n)` before an assertion passes or fails on how busy the venue is.')
+        console.error('A fixed `await sleep(n)` or `await new Promise(r => setTimeout(r, n))` before an')
+        console.error('assertion passes or fails on how busy the venue is.')
         console.error('Wait on the condition instead: src/db.js `_waitFor` and its `waitForX` wrappers, or')
         console.error('the poll helpers in test/helpers/stakeHelper.js. Poll-interval sleeps inside a loop')
         console.error('that re-checks a condition are not counted and need no change.')
@@ -253,4 +301,6 @@ function main() {
     return 0
 }
 
-process.exit(main())
+if (require.main === module) process.exit(main())
+
+module.exports = { blankNonCode, loopMask, scanSource, scanFile, main }

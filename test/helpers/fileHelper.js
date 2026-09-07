@@ -9,6 +9,7 @@
 // contact legal@dankest.llc.
 
 const transactionHelper = require('../transactionHelper')
+const requireRow = require('./requireRow')
 
 module.exports = {
     async sendFileV0(addressInfo, name, type, title, memo, rawData){
@@ -18,13 +19,13 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, fileMessage, rawData)
 
         console.log("Waiting for FILE in the database...")
-        let row = await indexerDatabase.waitForFile({
+        let row = requireRow(await indexerDatabase.waitForFile({
             txHash: txHash,
             source: addressInfo["address"],
             name: name,
             title: title,
             status: "valid"
-        })
+        }), "sendFileV0: FILE " + name + " (tx " + txHash + ") at status=valid")
 
         return { txHash, file: row }
     }

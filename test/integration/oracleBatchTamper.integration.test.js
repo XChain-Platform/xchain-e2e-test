@@ -699,8 +699,17 @@ describe('AT4: a post-signing tamper is refused identically by two nodes, and an
         console.log('  AT4: replay node built; replaying the chain to block ' + targetHeight + '...');
         await replayNode.waitForHeight(targetHeight);
         // The verdict is written inside the block transaction, but the hub push that
-        // follows it is asynchronous; a short settle keeps a read from racing it.
-        await new Promise((r) => setTimeout(r, 15_000));
+        // follows it is asynchronous. What the reads below need is one PRICE action
+        // per landed block, which is a query, so poll for exactly that rather than
+        // settling blind. Same 15s budget. Timing out is not fatal here: the three
+        // drill assertions already fail loudly on a missing verdict ('the replaying
+        // node recorded NO PRICE action at block N'), naming the block.
+        await waitFor(async () => {
+            const rows    = await replayNode.priceActions({ minBlock: minBlock });
+            const heights = Object.keys(landed).map((n) => landed[n].height);
+            const judged  = heights.filter((h) => rows.some((r) => Number(r.block_index) === h));
+            return { ok: judged.length === heights.length, seen: judged.length + '/' + heights.length };
+        }, { timeoutMs: 15_000, intervalMs: 1000 });
 
         replayPriceRows = await replayNode.priceActions({ minBlock: minBlock });
         for (const name of Object.keys(landed)) {

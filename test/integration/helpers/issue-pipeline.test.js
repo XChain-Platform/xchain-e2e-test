@@ -115,28 +115,47 @@ describe('Issue Helper → DB Assertion Pipeline', function () {
         })
     })
 
-    describe('Scenario 3.3.5: Helper returns null when DB times out', function () {
+    // A fixture builder that hands back a null row is the failure mode this
+    // scenario exists to prevent: the caller stores the null, the test walks on,
+    // and it fails several assertions later on the wrong rule. The helper throws
+    // at the wait instead, naming the row that never came.
+    describe('Scenario 3.3.5: Helper fails loud when the DB times out', function () {
 
-        it('returns null issue and credit when waitForIssue returns null', async function () {
+        it('throws, naming the ISSUE and the status it waited for', async function () {
             global.indexerDatabase = {
                 waitForIssue: async () => null,
                 waitForCredit: async () => null,
             }
 
-            const result = await issueHelper.sendIssueV0(
-                addressInfo, 'MYTOKEN', 1000, 100, 8, 'desc', 50
+            await assert.rejects(
+                () => issueHelper.sendIssueV0(addressInfo, 'MYTOKEN', 1000, 100, 8, 'desc', 50),
+                /sendIssueV0: ISSUE MYTOKEN \(tx txhash_issue\) never reached status=valid/,
             )
-
-            assert.strictEqual(result.txHash, 'txhash_issue')
-            assert.strictEqual(result.issue, null, 'issue should be null on timeout')
-            assert.strictEqual(result.credit, null, 'credit should be null on timeout')
         })
 
-        it('does not throw; caller can assert on null result', function () {
-            const result = { txHash: 'abc', issue: null, credit: null }
-            assert.throws(
-                () => assert(result.issue, 'Issue should exist in DB'),
-                /Issue should exist in DB/
+        it('points the reader at the give-up line, which says absent vs wrong status', async function () {
+            global.indexerDatabase = {
+                waitForIssue: async () => null,
+                waitForCredit: async () => null,
+            }
+
+            await assert.rejects(
+                () => issueHelper.sendIssueV0(addressInfo, 'MYTOKEN', 1000, 100, 8, 'desc', 50),
+                /checkIssue give-up line above/,
+            )
+        })
+
+        // A valid ISSUE whose mint credit never lands is a DIFFERENT fault, and
+        // a null field for both would leave the two indistinguishable.
+        it('names the missing mint credit when the ISSUE itself landed', async function () {
+            global.indexerDatabase = {
+                waitForIssue: async () => dbRows.issueRow(),
+                waitForCredit: async () => null,
+            }
+
+            await assert.rejects(
+                () => issueHelper.sendIssueV0(addressInfo, 'MYTOKEN', 1000, 100, 8, 'desc', 50),
+                /is valid but its mint credit of 50 never appeared/,
             )
         })
     })

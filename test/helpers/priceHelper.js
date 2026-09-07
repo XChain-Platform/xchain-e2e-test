@@ -9,6 +9,7 @@
 // contact legal@dankest.llc.
 
 const transactionHelper = require('../transactionHelper')
+const requireRow = require('./requireRow')
 
 // PRICE v1 is the permissionless user TOKEN/FIAT oracle action (no stake).
 // Wire format: PRICE|1|COIN|TICK|FIAT|VALUE|FEE|MEMO. The indexer records
@@ -25,9 +26,10 @@ module.exports = {
         console.log('Creating and sending PRICE V1 tx...')
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, priceMessage)
 
-        let priceRow = await indexerDatabase.waitForPrice({
+        let priceRow = requireRow(await indexerDatabase.waitForPrice({
             source: address, txHash: txHash, version: 1, validationStatus: validationStatus
-        })
+        }), "sendPriceV1: PRICE " + tick + "/" + fiat + " (tx " + txHash + ") at validation_status="
+            + validationStatus)
 
         return { txHash, price: priceRow }
     }

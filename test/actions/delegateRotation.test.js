@@ -146,6 +146,8 @@ describe('DELEGATE rotation: additive effective signer set (F8) + collision guar
     })
 
     it('STAKE v1 rejects a pubkey currently held by an active delegation (mirror collision)', async function () {
+        // stake-teardown-ok: rejected as "already delegated", so K2 never gains a
+        // stake of its own and no capability set grows by it.
         let msg = "STAKE|1|" + STAKE_AMOUNT + "|" + K2
         let txHash = await transactionHelper.createAndSendTransaction(ownerAddr, msg)
         let row = await stakeHelper.waitForAnyStake({

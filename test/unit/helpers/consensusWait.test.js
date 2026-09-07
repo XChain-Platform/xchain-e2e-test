@@ -20,7 +20,7 @@
 
 const assert = require('assert')
 const {
-    WS_OPEN, waitFor, openPeerCount, meshState, waitForMesh,
+    WS_OPEN, waitFor, waitUntil, openPeerCount, meshState, waitForMesh,
     readConfigEverywhere, waitForConfigEverywhere, assertNeverApplied
 } = require('../../helpers/consensusWait')
 
@@ -155,6 +155,49 @@ describe('consensusWait: deterministic PBFT waits', function () {
             const res = await waitFor(() => { probes++; return { ok: true } }, { timeoutMs: 0 })
             assert.strictEqual(probes, 1)
             assert.strictEqual(res.ok, true)
+        })
+    })
+
+    // waitUntil is the form the fixed-settle sweep converts onto, so its TEETH are
+    // what these cases pin: a poll-until that cannot fail is worse than the flake
+    // it replaced, because the flake at least reported something. This is the
+    // standing proof that the timeout is reachable and says what it waited for.
+    describe('waitUntil', () => {
+        it('rejects when the predicate never holds, naming the condition and the budget', async () => {
+            await assert.rejects(
+                () => waitUntil(() => false, { timeoutMs: 100, intervalMs: 20, what: 'the row to land' }),
+                (err) => {
+                    assert.match(err.message, /the row to land/)
+                    assert.match(err.message, /still not true after \d+ms/)
+                    return true
+                })
+        })
+
+        it('carries the last observation into the give-up message', async () => {
+            await assert.rejects(
+                () => waitUntil(() => ({ ok: false, saw: { snaps: 2, expected: 6 } }),
+                    { timeoutMs: 100, intervalMs: 20, what: 'six snapshots' }),
+                /last saw \{"snaps":2,"expected":6\}/)
+        })
+
+        it('returns as soon as the predicate holds rather than spending the budget', async () => {
+            let probes = 0
+            const started = Date.now()
+            const res = await waitUntil(() => ++probes >= 3, { timeoutMs: 10000, intervalMs: 10 })
+            assert.strictEqual(res.ok, true)
+            assert.strictEqual(probes, 3)
+            assert.ok(Date.now() - started < 2000, 'waitUntil sat out the budget instead of returning early')
+        })
+
+        it('accepts a bare boolean and a probe object alike', async () => {
+            assert.strictEqual((await waitUntil(() => true, { timeoutMs: 50 })).ok, true)
+            assert.strictEqual((await waitUntil(() => ({ ok: true }), { timeoutMs: 50 })).ok, true)
+        })
+
+        it('a predicate that throws is not silently read as "not yet"', async () => {
+            await assert.rejects(
+                () => waitUntil(() => { throw new Error('connection reset') }, { timeoutMs: 100 }),
+                /connection reset/)
         })
     })
 })

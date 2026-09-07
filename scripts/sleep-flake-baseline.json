@@ -1,5 +1,5 @@
 {
     "check": "fixed-settle sleep call sites under test/",
-    "note": "Ratchet only. Lower this when sleeps are converted to condition waits; never raise it.",
-    "count": 26
+    "note": "Ratchet only. Lower this when waits are converted to condition waits; never raise it. Raised once, 26 to 38, when the detector was widened to read the inline `await new Promise(r => setTimeout(r, n))` form alongside `await sleep(n)`: that rise was the gate seeing a shape it had been blind to, not new debt. Lowered once, 38 to 31, by the C-51a8ad sweep: seven settles across controllerPolicy, vmContractCustody and oracleBatchTamper became condition waits on consensusWait `waitUntil` and indexerWait `waitForTxIndexed`. The sites left in those files, and the two 15s settles in oracleBatchReplay, are deliberate observation windows for an ABSENCE (a throttle that must not fire twice, a quorum that must not form, a ghost row that must not appear, a snapshot a chain-only node must not invent): the elapsed time IS the claim there, and converting one to a condition wait would make its assertion vacuous. The oracleBatchReplay pair was converted once and reverted, because a poll that returns the instant a >= floor is met closes the window the file's later `extra.length === 0` assertions observe.",
+    "count": 31
 }

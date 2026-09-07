@@ -9,6 +9,7 @@
 // contact legal@dankest.llc.
 
 const transactionHelper = require('../transactionHelper')
+const requireRow = require('./requireRow')
 
 module.exports = {
     /*
@@ -52,13 +53,14 @@ module.exports = {
         let txHash = await transactionHelper.createAndSendTransaction(addressInfo, addressMessage)
 
         console.log("Waiting for ADDRESS in the database...")
-        let row = await indexerDatabase.waitForAddressOption({
+        let row = requireRow(await indexerDatabase.waitForAddressOption({
             txHash: txHash,
             source: addressInfo["address"],
             feePreference: feePreference,
             requireMemo: requireMemo,
             status: "valid"
-        })
+        }), "sendAddressV0: ADDRESS options for " + addressInfo["address"]
+            + " (tx " + txHash + ") at status=valid")
 
         return { txHash, addressOption: row }
     }
