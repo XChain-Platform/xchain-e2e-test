@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - The staged SDK snapshot records 0.15.1, the version the sibling carries since its hotfix.
+- The staged hub snapshot records 0.15.2, the version the sibling carries since its hotfix.
 
 ## [0.15.0] - 2026-09-07
 
