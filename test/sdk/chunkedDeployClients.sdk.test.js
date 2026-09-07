@@ -236,8 +236,14 @@ async function actionDetail(sdk, actionIndex) {
     let body = null;
     try { body = await sdk.getAction(actionIndex); } catch (e) { return null; }
     if (!body) return null;
-    const d = body.data || body;
-    return (d && d.action) || d;
+    let d = (body.data !== undefined && body.data !== null) ? body.data : body;
+    // db.getAction answers a single-element array and some envelopes nest the row
+    // under `action`; on this explorer `action` is the NAME string ("DEPLOY"), so
+    // only an object carrying action_index is the row, never the string.
+    if (Array.isArray(d)) d = d.length ? d[0] : null;
+    if (d && typeof d === "object" && d.action && typeof d.action === "object"
+        && d.action.action_index !== undefined) d = d.action;
+    return (d && typeof d === "object") ? d : null;
 }
 
 function hasField(detail, name) {
