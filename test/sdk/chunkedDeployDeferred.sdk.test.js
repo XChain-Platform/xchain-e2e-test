@@ -179,6 +179,17 @@ async function contractRows(srcId, codeHash) {
     return rows.map(r => ({ action_index: Number(r.action_index), code_hash: r.code_hash, status: r.status }));
 }
 
+// One contracts row by its own action_index. A REJECTED assembler is not a member
+// of its group in the table: like every other invalid assembler, its row stores
+// sha256('') as code_hash (only a PENDING landing stores the declared hash, R2.3),
+// so a group query by declared hash never sees it and it must be read by index.
+async function contractRowAt(actionIndex) {
+    const rows = await idxQuery(
+        'SELECT c.action_index, c.code_hash, s.status FROM contracts c ' +
+        'LEFT JOIN index_statuses s ON s.id = c.status_id WHERE c.action_index = ?', [actionIndex]);
+    return rows.length ? { action_index: Number(rows[0].action_index), code_hash: rows[0].code_hash, status: rows[0].status } : null;
+}
+
 async function executionRow(actionIndex) {
     const rows = await idxQuery(
         'SELECT e.action_index, e.contract_index, e.method_name, e.gas_used, e.gas_limit, ' +
@@ -258,8 +269,21 @@ function expectDeployedContractIndex(detail, expected, label) {
 // list a parent first), so a chained funding set would silently turn every
 // ordering assertion below into a tautology.
 async function fundIndependentInputs(sdk, pieces) {
-    const addr = await fundedGasAddress(sdk, 1);
-    for (let i = 0; i < pieces; i++) await global.regtestMinerConnector.sendFunds(addr.address, 1);
+    // The gas leg (fundedGasAddress -> mintGas) goes through sdkHelper's submit(),
+    // which broadcasts and then waits on the indexer for up to 120s; submit's
+    // quiesce runs BEFORE the broadcast, so under the suite-wide mining hold
+    // nothing confirms that MINT and every caller died at the timeout. Funding
+    // runs before this round's first piece is broadcast, so an auto-mined block
+    // here cannot disturb the deterministic placement below; the hold is restored
+    // before returning, and the suite's miningPaused flag stays true throughout.
+    try { await global.regtestMinerConnector.resumeMining(); } catch (e) { /* best effort */ }
+    let addr;
+    try {
+        addr = await fundedGasAddress(sdk, 1);
+        for (let i = 0; i < pieces; i++) await global.regtestMinerConnector.sendFunds(addr.address, 1);
+    } finally {
+        await global.regtestMinerConnector.pauseMining();
+    }
     await mine(1);
     await waitFor(async () => (await spendableUtxos(sdk, addr.address)).length >= pieces,
         pieces + ' independent confirmed inputs at ' + addr.address, 180000);
@@ -346,7 +370,6 @@ describe('[sdk] chunked DEPLOY deferred assembly (a group deploys at its LAST pi
         if (global.COIN_CODE !== 'BTC') this.skip();
 
         sdk = makeSdk();
-        await pauseMining();
         payout = (await cryptoHelper.getNewAddress('chunk-deferred-miner', COIN, NETWORK, null, 'legacy', 0)).address;
 
         // AT1 asserts the deferred contract's state is byte-identical to the same
@@ -387,6 +410,16 @@ describe('[sdk] chunked DEPLOY deferred assembly (a group deploys at its LAST pi
 
         console.log('    [deferred] reference contract=' + refContractIndex + ' hash=' + refPlan.codeHash.slice(0, 12) +
                     ' gas_used=' + refGasUsed + ' state_rows=' + refState.length);
+
+        // Auto-mining is held only from HERE, once the reference deploy is on chain.
+        // It cannot be held across the reference: that leg goes through submit(),
+        // which broadcasts and then waits on the indexer, and the only thing that
+        // would confirm it is the auto-miner (submit's quiesce runs BEFORE the
+        // broadcast, and deployContract's mine() only after the wait returns). Held
+        // from the top, every reference piece timed out at 120s and the hook died.
+        // The `it`s below place their own blocks, so the hold starts where the
+        // deterministic placement does.
+        await pauseMining();
     });
 
     // Auto-mining is held for the whole suite; never leave it held.
@@ -555,11 +588,15 @@ describe('[sdk] chunked DEPLOY deferred assembly (a group deploys at its LAST pi
 
         const A1 = await waitFor(async () => actionIndexOfTx(asm1Tx), 'the first assembler to index');
         const A2 = await waitFor(async () => actionIndexOfTx(asm2Tx), 'the second assembler to index');
-        await waitFor(async () => (await contractRows(srcId, plan.codeHash)).length === 2, 'both assembler rows to index');
+        // The pending row is a group member (declared hash); the rejected one is
+        // read by its own index, see contractRowAt. Group counts below exclude it.
+        await waitFor(async () => (await contractRows(srcId, plan.codeHash)).length === 1, 'the pending assembler row to index');
+        const rejected = await waitFor(async () => contractRowAt(A2), 'the rejected assembler row to index');
         let contracts = await contractRows(srcId, plan.codeHash);
         expect(contracts.find(r => r.action_index === A1).status, 'the first assembler lands pending').to.equal(PENDING_STATUS);
-        expect(contracts.find(r => r.action_index === A2).status,
-            'a second assembler while one is pending is rejected').to.equal(DUPLICATE_STATUS);
+        expect(rejected.status, 'a second assembler while one is pending is rejected').to.equal(DUPLICATE_STATUS);
+        expect(rejected.code_hash, 'a rejected assembler stores the empty-code hash like every invalid assembler')
+            .to.not.equal(plan.codeHash);
 
         // (ii) the carriers complete the group; only the FIRST assembler is consumed.
         const c1Tx = await broadcastPiece(sdk, deployer, carrierAction(plan, 1), inputs[2]);
@@ -568,7 +605,7 @@ describe('[sdk] chunked DEPLOY deferred assembly (a group deploys at its LAST pi
         await placeBlockInOrder(node, payout, [c1Tx, c0Tx], { log });
 
         const C = await waitFor(async () => actionIndexOfTx(c0Tx), 'the completing carrier to index');
-        await waitFor(async () => (await contractRows(srcId, plan.codeHash)).length === 3, 'the deployed contract row');
+        await waitFor(async () => (await contractRows(srcId, plan.codeHash)).length === 2, 'the deployed contract row');
         const firstExec = await executionRow(C);
         expect(firstExec.assembler_action_index, 'the FIRST assembler is the one consumed').to.equal(A1);
         expect((await contractRows(srcId, plan.codeHash)).find(r => r.action_index === C).status,
@@ -579,7 +616,7 @@ describe('[sdk] chunked DEPLOY deferred assembly (a group deploys at its LAST pi
         const asm3Tx = await broadcastPiece(sdk, deployer, assemblerAction(plan), inputs[4]);
         await placeBlockInOrder(node, payout, [asm3Tx], { log });
         const A3 = await waitFor(async () => actionIndexOfTx(asm3Tx), 'the post-completion assembler to index');
-        await waitFor(async () => (await contractRows(srcId, plan.codeHash)).length === 4, 'the second contract row');
+        await waitFor(async () => (await contractRows(srcId, plan.codeHash)).length === 3, 'the second contract row');
         contracts = await contractRows(srcId, plan.codeHash);
         expect(contracts.find(r => r.action_index === A3).status,
             'an assembler over a complete group deploys immediately').to.equal('valid');
