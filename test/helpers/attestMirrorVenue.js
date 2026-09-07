@@ -46,14 +46,19 @@
  *     `HUB_SYNC_ORACLE_GRACE_S` at 0. Both seams are refused off regtest by the
  *     product itself, so neither can travel.
  *
- * WHAT CANNOT BE TURNED DOWN, so a drill budgets for it rather than meeting it
- * by surprise: the attestation round's discovery poll and its round timeout.
- * `ATTESTATION_POLL_MS` and `ATTESTATION_ROUND_TIMEOUT_MS` are read off
- * `hub.p2pConfig`, and `xchain-hub/src/api.js` does not put either key into the
- * p2pConfig it assembles, so exporting them to a spawned hub does nothing. A
- * request waits up to one 15s poll before a round starts, whatever the forward
- * margin is. `MultiValidatorHub` can move both only because it builds p2pConfig
- * itself; a real `api.js` child cannot.
+ * THE DISCOVERY POLL AND THE ROUND TIMEOUT ARE LIVE OPTIONS, and this note used
+ * to say the opposite. It claimed `ATTESTATION_POLL_MS` and
+ * `ATTESTATION_ROUND_TIMEOUT_MS` could not reach a spawned `api.js` hub because
+ * that file left them out of the `p2pConfig` it assembles. Re-measured
+ * 2026-09-07 (zero-confirmation-flip spec D83): `xchain-hub/src/api.js:403`
+ * reads both into `p2pConfig`, so `attestationPollMs` and
+ * `attestationRoundTimeoutMs` on this venue DO change what a hub does, which is
+ * what `buildHubEnv` has been exporting all along and what ZC1 sets to 3000 to
+ * measure the fleet default (spec §3.3, D8).
+ *
+ * What is still true, and is the reason the note existed: a request waits up to
+ * ONE poll interval before its round starts, whatever the forward margin is, so
+ * a drill budgets for the interval it set rather than for zero.
  *
  * WHAT IT DELIBERATELY DOES NOT DO:
  *   - It does not stake. A responsible set is resolved from BTC stake, and the
@@ -2354,13 +2359,16 @@ class AttestMirrorVenue {
     /**
      * The responsible set for a request, computed the way the indexer computes it.
      *
-     * A MIRROR, and named as one: the hub exposes no method that answers "who is
-     * responsible for request X" (there is no such JSON-RPC in `xchain-hub/src/api.js`),
-     * so the only pre-finalization answer available to a test is the shared
-     * ranking in `attestationHelper.computeResponsibleSigners`, which is itself
-     * pinned against the indexer's `_computeResponsibleSet`. Once the round has
-     * finalized, prefer `responsibleSetFromMirror`: that reads the pubkeys that
-     * actually signed, from the row itself, and is not a mirror of anything.
+     * A MIRROR, and named as one: it re-applies the shared ranking in
+     * `attestationHelper.computeResponsibleSigners`, which is itself pinned against
+     * the indexer's `_computeResponsibleSet`.
+     *
+     * PREFER `responsibleSetFromHub` WHERE IT CAN ANSWER: the hub's
+     * `getattestationresponsibleset` RPC resolves the set through the hub's own
+     * engines, so it cannot drift from a live round the way a re-implementation can. It
+     * answers for PENDING requests only. Once the round has finalized, prefer
+     * `responsibleSetFromMirror`: that reads the pubkeys that actually signed, from the
+     * row itself, and is not a mirror of anything.
      *
      * `validators` defaults to this venue's own hubs, which is correct only when
      * they are the ONLY staked attestation keys on the chain; on a shared chain
@@ -2378,6 +2386,77 @@ class AttestMirrorVenue {
             this.network,
             opts.minStake);
         return chosen.map((v) => String(v.pubkey).toLowerCase());
+    }
+
+    /**
+     * The responsible set for a PENDING request, from one hub's own engines.
+     *
+     * `getattestationresponsibleset` (`xchain-hub/src/api.js:1713`) resolves the
+     * capability snapshot, the provider floor and the widening step through the same
+     * objects a live round uses, so this is the authoritative pre-finalization answer
+     * and the only one that cannot drift from what the hub will actually do. It refuses
+     * once the request is no longer pending, which is why a drill that needs the draw
+     * takes it BEFORE the round can finish.
+     *
+     * Returns `{responsible, redundancy, widen, block_index}` with lower-cased pubkeys,
+     * or `{error}`; never throws on an answering hub, so a caller can print the refusal
+     * rather than losing it in a stack trace. Full pubkeys, not the 16-character
+     * fingerprints `captureFederationState` prints, because mapping a drawn member back
+     * to a venue hub index needs the whole key.
+     */
+    async responsibleSetFromHub(hubIndex, requestId) {
+        const hub = this.hubs[hubIndex];
+        if (!hub) throw new Error('attestMirrorVenue: no hub ' + hubIndex);
+        if (!hub.proc) return { error: 'hub ' + hubIndex + ' is stopped' };
+        let res = null;
+        try {
+            res = await axios.post(hub.apiUrl, {
+                jsonrpc: '2.0', id: Date.now(),
+                method: 'getattestationresponsibleset', params: { request_id: String(requestId) },
+            }, { timeout: 10_000, validateStatus: () => true });
+        } catch (e) {
+            return { error: 'hub ' + hubIndex + ' unreachable: ' + (e && e.message) };
+        }
+        const body = res && res.data;
+        if (body && body.error) return { error: 'rpc error: ' + JSON.stringify(body.error) };
+        const result = body && body.result;
+        if (!result || result.error) return { error: (result && result.error) || 'no result in the answer' };
+        if (!Array.isArray(result.responsible)) return { error: 'no responsible set: ' + JSON.stringify(result) };
+        return {
+            responsible: result.responsible.map((p) => String(p).toLowerCase()),
+            redundancy:  Number(result.redundancy),
+            widen:       Number(result.widen),
+            block_index: Number(result.block_index),
+        };
+    }
+
+    /** One hub's `getattestationstats`, or `{error}`. Carries `fetch_count` (ZC2). */
+    async attestationStatsOf(hubIndex) {
+        const hub = this.hubs[hubIndex];
+        if (!hub) throw new Error('attestMirrorVenue: no hub ' + hubIndex);
+        if (!hub.proc) return { error: 'hub ' + hubIndex + ' is stopped' };
+        let res = null;
+        try {
+            res = await axios.post(hub.apiUrl, {
+                jsonrpc: '2.0', id: Date.now(), method: 'getattestationstats', params: {},
+            }, { timeout: 10_000, validateStatus: () => true });
+        } catch (e) {
+            return { error: 'hub ' + hubIndex + ' unreachable: ' + (e && e.message) };
+        }
+        const body = res && res.data;
+        if (body && body.error) return { error: 'rpc error: ' + JSON.stringify(body.error) };
+        const result = body && body.result;
+        if (!result || result.error) return { error: (result && result.error) || 'no result in the answer' };
+        return result;
+    }
+
+    /** The venue hub index that signs with `pubkey`, or -1. */
+    hubIndexForPubkey(pubkey) {
+        const want = String(pubkey || '').toLowerCase();
+        for (const hub of this.hubs) {
+            if (String(hub.pubkey).toLowerCase() === want) return hub.index;
+        }
+        return -1;
     }
 
     // The pubkeys that actually signed the finalized row, read from an indexer's
@@ -2414,6 +2493,87 @@ class AttestMirrorVenue {
         if (!hub) throw new Error('attestMirrorVenue: no hub ' + i);
         if (hub.proc) return;
         await this._spawnHub(i);
+    }
+
+    /**
+     * Write ONE `attestation_responses` row straight into hub databases, then make
+     * the followers pick it up.
+     *
+     * THE LEVER ZC4 NEEDS AND NOTHING ELSE PROVIDES. Every other row on this venue is
+     * produced by a round: five honest hubs agreeing on one artifact. The fall-through
+     * (`utility.selectApplicableAttestationResponses` above the zero-conf height) is
+     * about what an indexer does with a row it CANNOT admit, and no honest federation
+     * will make one. So the row is written where a finalized row lives, at the source,
+     * and travels the ordinary mirror path from there.
+     *
+     * THE INSERT ALONE IS NOT ENOUGH, and this is the half that is easy to get wrong.
+     * A hub broadcasts `row:inserted` from `AttestationResponseMirror.insertAndBroadcast`;
+     * a row that appears in the table by other means is announced to nobody, so a
+     * follower sitting on a live WebSocket never hears about it. What delivers it is the
+     * BOOTSTRAP: `attestation_responses` is a FULL_REPAGE table on the indexer side
+     * (xchain-indexer/src/hub_db_sync.js FULL_REPAGE_TABLES), so every reconnect
+     * re-pages it from `since_id=0` and the injected row arrives with the rest.
+     * Dropping each follower's proxied sockets is therefore part of the injection, not
+     * a tidy-up, and it is the same mechanism `releaseMirrorTable` already relies on.
+     *
+     * COLUMNS COME FROM THE ROW, never from a list kept here: a second copy of the hub's
+     * MIRROR_COLUMNS would go stale the first time a column is added, and silently write
+     * a row shaped unlike the ones under test. Pass a row read back off a hub, minus its
+     * `id`, with the fields the drill wants changed.
+     *
+     * @param {object} row      column name -> value; keys are validated as identifiers
+     * @param {object} [opts]   `{hubs: [i], reconnect: false}`; hubs defaults to every
+     *                          hub an indexer actually follows, which is the only set
+     *                          that can reach a follower at all
+     * @returns {Promise<Array>} one `{hub, inserted, id}` per hub written
+     */
+    async injectMirrorRow(row, opts) {
+        const o = opts || {};
+        const cols = Object.keys(row || {}).filter((c) => c !== 'id');
+        if (cols.length === 0) {
+            throw new Error('attestMirrorVenue: injectMirrorRow was given no columns to write');
+        }
+        for (const c of cols) ident(c, 'mirror row column');
+
+        const hubIndexes = (Array.isArray(o.hubs) && o.hubs.length)
+            ? o.hubs.slice()
+            : Array.from(new Set(this.indexers.map((ix) => ix.followsHub)));
+
+        const written = [];
+        for (const hubIndex of hubIndexes) {
+            const hub = this.hubs[hubIndex];
+            if (!hub) throw new Error('attestMirrorVenue: no hub ' + hubIndex);
+            const db = ident(hub.dbName, 'database name');
+            // INSERT IGNORE, exactly as the hub's own writer does: the natural key is
+            // (network, request_id, effective_time), and re-running a drill against a
+            // hub that already holds the row must be ordinary traffic rather than an
+            // error the caller has to distinguish from a real failure.
+            const res = await this._conn.query(
+                'INSERT IGNORE INTO `' + db + '`.attestation_responses ' +
+                '(' + cols.map((c) => '`' + c + '`').join(', ') + ') ' +
+                'VALUES (' + cols.map(() => '?').join(', ') + ')',
+                cols.map((c) => (row[c] === undefined ? null : row[c])));
+            // Read the id back rather than trusting insertId, which is 0 on an ignored
+            // insert. The id is what the follower pages on, so a drill that cannot name
+            // it cannot say the row was reachable at all.
+            const back = await this._conn.query(
+                'SELECT id FROM `' + db + '`.attestation_responses ' +
+                'WHERE network = ? AND request_id = ? AND effective_time = ? LIMIT 1',
+                [row.network, row.request_id, row.effective_time]);
+            written.push({
+                hub:      hubIndex,
+                inserted: !!(res && Number(res.affectedRows) > 0),
+                id:       (back && back[0]) ? Number(back[0].id) : null,
+            });
+        }
+
+        if (o.reconnect !== false) {
+            for (const ix of this.indexers) {
+                if (!hubIndexes.includes(ix.followsHub)) continue;
+                ix.mirrorProxy.dropSockets();
+            }
+        }
+        return written;
     }
 
     /**
@@ -2543,6 +2703,32 @@ class AttestMirrorVenue {
                 ' on the attestation_responses snapshot route');
         }
         return res.data;
+    }
+
+    /**
+     * The `attestation_responses` rows one HUB holds, in its own table.
+     *
+     * The SOURCE side of the mirror, and it answers two questions no follower can.
+     * `finalized_at` is the hub's wall clock at quorum and is deliberately off the
+     * wire (it is the one column two hubs may disagree on), so a mined-to-mirrored
+     * measurement that does not want to be a measurement of when the drill happened
+     * to look has to read it here. And a row a drill INJECTED (`injectMirrorRow`) is
+     * a row of this table by definition, so "did it survive" is asked here too.
+     *
+     * `SELECT *` rather than a column list, on purpose: this is what the injector
+     * clones, and a list kept here would drop a column added to the hub's writer and
+     * inject rows shaped unlike the real ones.
+     */
+    async hubMirrorRows(hubIndex, opts) {
+        opts = opts || {};
+        const hub = this.hubs[hubIndex];
+        if (!hub) throw new Error('attestMirrorVenue: no hub ' + hubIndex);
+        const db = ident(hub.dbName, 'database name');
+        let sql = 'SELECT * FROM `' + db + '`.attestation_responses';
+        const params = [];
+        if (opts.requestId) { sql += ' WHERE request_id = ?'; params.push(String(opts.requestId)); }
+        sql += ' ORDER BY id ASC';
+        return plain(await this._conn.query(sql, params));
     }
 
     /**
@@ -2750,10 +2936,164 @@ function coinCode(coin) {
     return COIN_CODE_MAP[coin] || String(coin).toUpperCase().slice(0, 3);
 }
 
+/**
+ * Re-sign one mirror row's canonical with a given set of keys.
+ *
+ * THE CANONICAL COMES FROM THE HUB'S OWN MODULES, and that is the whole design of
+ * this helper. A second implementation of the signable bytes in the test tree is
+ * the thing at6's header refuses to add, and for good reason: a drill that builds
+ * its own canonical proves whatever its copy happens to say. `buildResponseCanonicalRaw`
+ * and `buildEquivCanonical` are the two functions the leader signs with and the
+ * indexer's verifier rebuilds with, so a row signed here is signed over exactly the
+ * bytes the verifier will check, and the ONLY thing wrong with it is who signed.
+ *
+ * That precision is what ZC4 needs. A row carrying garbage signatures is refused
+ * too, with the same string, so a drill that injected garbage could not tell the
+ * responsible-set gate from a bytes-are-junk gate.
+ *
+ * @param {object} row       a mirror row (network, request_id, provider_id, status,
+ *                           response_hash, meta, effective_time), typically read off a hub
+ * @param {Array}  signers   `[{pubkeyHex, privkeyHex}]`
+ * @param {number} requestBlock  the request's own block, which selects the EQUIV wrapper
+ * @param {string} network
+ * @returns {{signer_pubkeys: string, signatures: string, canonical: string}}
+ */
+function signMirrorRowAs(row, signers, requestBlock, network) {
+    const canon = loadHubModule('src/attest_response_canonical.js');
+    const eq    = loadHubModule('src/equivocation_header.js');
+    const rid   = String(row.request_id).toLowerCase();
+
+    let raw = canon.buildResponseCanonicalRaw({
+        requestId:     rid,
+        providerId:    String(row.provider_id),
+        responseHash:  String(row.response_hash),
+        status:        String(row.status),
+        meta:          row.meta == null ? '' : String(row.meta),
+        effectiveTime: Number(row.effective_time),
+    });
+    // The header rides the canonical from its own activation height on, keyed on the
+    // REQUEST's block exactly as the verifier keys it. Asked rather than assumed: on a
+    // venue where it is inert, wrapping would produce bytes nothing verifies.
+    if (eq.isEquivHeaderActive(Number(requestBlock), String(network))) {
+        raw = eq.buildEquivCanonical(eq.ENGINE_TAGS.ATTEST, rid, 0, raw);
+    }
+
+    const signed = (signers || []).map((s) => {
+        const id = new ValidatorIdentity(s.privkeyHex);
+        // DERIVED, never taken from the caller. A pubkey that does not belong to the
+        // private key beside it produces a signature nothing verifies, and the row is
+        // then refused for the wrong reason with the right string: exactly the
+        // indistinguishable failure this helper exists to rule out.
+        if (s.pubkeyHex && String(s.pubkeyHex).toLowerCase() !== id.pubkeyHex.toLowerCase()) {
+            throw new Error('attestMirrorVenue: signer pubkey ' + String(s.pubkeyHex).slice(0, 16) +
+                '... does not belong to the private key given with it (derives ' +
+                id.pubkeyHex.slice(0, 16) + '...)');
+        }
+        return { pubkey: id.pubkeyHex.toLowerCase(), sig: id.sign(raw).toLowerCase() };
+    });
+    return {
+        // Ordered exactly as the signature list is, which is the pairing rule the hub's
+        // own writer states: the pubkey at index i signed the signature at index i.
+        signer_pubkeys: JSON.stringify(signed.map((s) => s.pubkey)),
+        signatures:     JSON.stringify(signed),
+        canonical:      raw,
+    };
+}
+
+/**
+ * Inject a row that no node may admit, for a request that has an honest one.
+ *
+ * WHAT MAKES IT INERT rather than merely different: the signers are outside the
+ * request's responsible set. That is refused deterministically on every node, at
+ * `attest_response_verify.js:319`, with `invalid: insufficient valid signatures
+ * (N/M)`, and a refused mirror row writes NOTHING at all: no action index, no
+ * verdict row, no mark on the request. It stays in the mirror table for audit and
+ * for the on-chain batch, which is what ZC4 asserts.
+ *
+ * WHAT MAKES IT LOAD-BEARING: a SMALLER `effective_time` puts it at the HEAD of the
+ * selector's candidate order (effective_time ASC, response_hash ASC), so it is the
+ * row the old single-choice selector would have picked and re-picked at every block
+ * until the deadline. Above the zero-conf height the applier falls through it to
+ * the honest row in the same block, and that is the whole of §5.
+ *
+ * THE TEMPLATE IS AN HONEST ROW, read back off a hub rather than composed here: it
+ * carries the network, the payload, the response hash and the provider the real
+ * round produced, so the injected row differs from a valid one in exactly two
+ * fields and nothing else can explain a refusal.
+ *
+ * @param {AttestMirrorVenue} venue
+ * @param {object} opts
+ * @param {object|string} opts.request        the request row (`request_id`, `block_index`)
+ *                                            or the bare request id
+ * @param {number} opts.effectiveTime         the injected row's signed stamp
+ * @param {Array}  opts.signers               `[{pubkeyHex, privkeyHex}]`, outside the set
+ * @param {Array}  [opts.hubs]                hubs to write to (default: every followed hub)
+ * @returns {Promise<{row: object, written: Array}>}
+ */
+async function writeInertMirrorRow(venue, opts) {
+    const o = opts || {};
+    const req = (typeof o.request === 'string') ? { request_id: o.request } : (o.request || {});
+    const requestId = String(req.request_id || '').toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(requestId)) {
+        throw new Error('attestMirrorVenue: writeInertMirrorRow needs a 64-hex request id, got ' + requestId);
+    }
+    if (!Array.isArray(o.signers) || o.signers.length === 0) {
+        throw new Error('attestMirrorVenue: writeInertMirrorRow needs at least one signer identity');
+    }
+    const effectiveTime = Number(o.effectiveTime);
+    if (!Number.isInteger(effectiveTime) || effectiveTime < 0) {
+        throw new Error('attestMirrorVenue: writeInertMirrorRow needs an integer effectiveTime, got ' +
+            o.effectiveTime);
+    }
+
+    // The honest row, from whichever hub holds one. REFUSES rather than composing a
+    // template: without a real row there is nothing for the injected one to lose the
+    // tie-break to, and the drill would be asserting fall-through with nothing to fall
+    // through to.
+    let template = null;
+    for (const hub of venue.hubs) {
+        const rows = await venue.hubMirrorRows(hub.index, { requestId: requestId });
+        if (rows.length > 0) { template = rows[0]; break; }
+    }
+    if (!template) {
+        throw new Error('attestMirrorVenue: no hub holds a mirror row for ' + requestId.slice(0, 16) +
+            '..., so there is no honest row to inject an inert sibling beside');
+    }
+    if (Number(template.effective_time) === effectiveTime) {
+        throw new Error('attestMirrorVenue: the injected effective_time ' + effectiveTime +
+            ' equals the honest row\'s, so the two collide on the mirror\'s (network, request_id, ' +
+            'effective_time) key and only one row would exist');
+    }
+
+    const requestBlock = (req.block_index !== undefined && req.block_index !== null)
+        ? Number(req.block_index) : Number(template.request_block_index);
+    const signed = signMirrorRowAs(
+        Object.assign({}, template, { effective_time: effectiveTime }),
+        o.signers, requestBlock, String(template.network));
+
+    const row = Object.assign({}, template, {
+        effective_time: effectiveTime,
+        signer_pubkeys: signed.signer_pubkeys,
+        signatures:     signed.signatures,
+        // The receiver's own audit stamp on an honest row; on this one it is simply the
+        // moment of injection, and nothing consumes it.
+        finalized_at:   Math.floor(Date.now() / 1000),
+    });
+    delete row.id;
+
+    const written = await venue.injectMirrorRow(row, { hubs: o.hubs });
+    return { row: row, written: written };
+}
+
 module.exports = {
     AttestMirrorVenue,
     P2pDelayProxy,
     HubDbMirrorProxy,
+    // The mirror-row injector (zero-confirmation-flip spec §10 ZC4, D73-D79). The row
+    // builder is exported beside it because it is the only piece that can be falsified
+    // without a venue: it is a pure function of the template, the keys and the height.
+    writeInertMirrorRow,
+    signMirrorRowAs,
     // The mirror proxy's pure decision layer, exported so the fault injection can be
     // falsified without a venue.
     snapshotTableOf,

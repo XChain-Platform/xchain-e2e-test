@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Drills for the zero-confirmation attestation flip (serve at the tip, re-mine, headroom, applier fall-through, flag day) with a mirror-row injector, and a roll-call gates drill that publishes v1 roll calls and checks the rules-aware attestation set.
 - Drills for order-independent chunked DEPLOY assembly: an out-of-order group in one block, pieces across blocks in reverse, duplicate assemblers and carriers, and a rollback of the completing carrier followed by a reordered replay.
 
 ### Changed

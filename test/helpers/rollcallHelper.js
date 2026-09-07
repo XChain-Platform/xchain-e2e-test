@@ -46,6 +46,17 @@
  *      kept here rather than added to multiValidatorHubHelper so no existing
  *      suite changes shape.
  *
+ *   4. TWO RAILS, ARMED SEPARATELY. ROLLCALL itself arms from
+ *      XC_ROLLCALL_REGTEST_ACTIVATION, which this file sets for itself. The
+ *      GATES rail (ROLLCALL v1, whose wire carries the publisher's consensus
+ *      gate list and whose canonical commits to sha256 of it) arms from
+ *      XC_ROLLCALL_GATES_REGTEST_ACTIVATION, which this file deliberately does
+ *      NOT set: it changes the WIRE, and a harness publishing v1 at indexers
+ *      that read the epoch as v0 lands actions the chain refuses. Every builder
+ *      below takes the epoch's own form by default, so a suite written for v0
+ *      keeps working on an armed venue and a drill that needs a specific list
+ *      passes one explicitly.
+ *
  * NOTHING HERE SEEDS THE VENUE. Staking the federation is an operator decision
  * (test/tools/rollcallSeedFederation.test.js is the tool that does it). The
  * asserts report what is missing, with the exact pubkeys to stake, and stop.
@@ -107,9 +118,31 @@ function _resolveSiblingIfPresent(pkg, rel){
 const ROLLCALL_REGTEST_ARMING_ENV = 'XC_ROLLCALL_REGTEST_ACTIVATION'
 if (!process.env[ROLLCALL_REGTEST_ARMING_ENV]) process.env[ROLLCALL_REGTEST_ARMING_ENV] = 'armed'
 
-let _rca = null, _eqh = null
+// The GATES rail (ROLLCALL v1: the roll call names the consensus gates its
+// signers know, and the rules-aware attestation set reads them) has its OWN
+// environment variable, and this harness DELIBERATELY DOES NOT SET IT.
+//
+// Arming the ROLLCALL rail for ourselves is safe: it only decides whether the
+// in-process hubs sign an epoch at all. Arming the GATES rail is not, because it
+// changes the WIRE the hubs publish, and the DOGE parser refuses a v1 action for
+// an epoch its own build reads as v0 ('invalid: ROLLCALL v1 before gates
+// activation'). A harness that armed itself against unarmed indexer containers
+// would land actions the chain rejects and read the result as a federation-wide
+// absence - the same shape ROLLCALL_REGTEST_ARMING_ENV's own note warns about,
+// with a louder failure. So this variable is the VENUE's opt-in: set it in the
+// shell that runs the suite AND in both indexer containers' environments, or
+// leave it unset and every leg here stays v0 exactly as before.
+const ROLLCALL_GATES_ARMING_ENV = 'XC_ROLLCALL_GATES_REGTEST_ACTIVATION'
+
+let _rca = null, _eqh = null, _rga = null, _crd = null
 function rca(){ if (!_rca) _rca = require(_resolveSibling('xchain-indexer', 'src/rollcall_activation.js')); return _rca }
 function eqh(){ if (!_eqh) _eqh = require(_resolveSibling('xchain-indexer', 'src/equivocation_header.js')); return _eqh }
+function rga(){ if (!_rga) _rga = require(_resolveSibling('xchain-indexer', 'src/rollcall_gates_activation.js')); return _rga }
+// Any other shipped indexer module, through the SAME candidate ladder. A suite
+// that hard-coded '../../../xchain-indexer/...' would resolve in a monorepo
+// checkout and fail in the e2e image bundle, where the sibling sits elsewhere.
+function indexerModule(rel){ return require(_resolveSibling('xchain-indexer', rel)) }
+function crd(){ if (!_crd) _crd = require(_resolveSibling('xchain-indexer', 'src/consensus_rules_digest.js')); return _crd }
 
 // The frozen cross-implementation vector. Authoritative in xchain-documentation;
 // read, never forked.
@@ -295,28 +328,96 @@ function federationRoster(){
 
 // ── canonical + wire ─────────────────────────────────────────────────────────
 
-// The signed preimage, built by the SHIPPED indexer module. Byte-identical to
-// what RollcallRound signs, what actions/rollcall.js rebuilds from the carried
-// fields, and what the BTC close rebuilds from its own ledger_hash.
-function canonical(network, epochHeight, ledgerHash){
+// This build's full gate list, as the wire carries it: the sorted, comma-joined
+// `<module>.<EXPORT>` keys of consensus_rules_digest.knownGateKeys(). Borrowed
+// from the sibling for the same reason every constant here is: a harness that
+// spelled its own list would agree with itself and disagree with the hub that
+// actually publishes.
+function knownGates(){
+    return crd().knownGateKeys().join(',')
+}
+
+// The gates ACTIVE at a BTC height, which is the comparand the rules-aware
+// attestation filter subsets against. A drill that wants a validator DROPPED
+// publishes a list missing one of these.
+function activeGates(height, network){
+    return crd().activeGatesAt(Number(height), String(network))
+}
+
+// Whether an epoch publishes ROLLCALL v1, asked of the SHIPPED gate module so
+// the harness and the hubs cannot disagree about which form an epoch is. The
+// module resolves the regtest height from ROLLCALL_GATES_ARMING_ENV once, at
+// require time, exactly as rollcall_activation.js does for its own rail.
+function gatesArmed(epochHeight, network){
+    return rga().isRollcallGatesActive(Number(epochHeight), String(network))
+}
+
+// The GATES field for an epoch: this build's full list on an armed epoch, null
+// on a v0 one. Mirrors RollcallRound._gatesFor.
+function gatesForEpoch(epochHeight, network){
+    return gatesArmed(epochHeight, network) ? knownGates() : null
+}
+
+// sha256 of the GATES field EXACTLY as carried, which is what the v1 canonical
+// commits to. Spelled here rather than borrowed from
+// xchain-indexer/src/rollcall_canonical.js on purpose: the point of this harness
+// is to be an INDEPENDENT implementation of the bytes the three shipped sites
+// build, pinned against the frozen vector, so borrowing the very function under
+// test would make the vector check tautological.
+function gatesHash(gates){
+    return crypto.createHash('sha256').update(String(gates), 'utf8').digest('hex')
+}
+
+// The signed preimage. The EQUIV wrapper comes from the SHIPPED indexer module
+// (an engine tag and a round id are not this harness's to invent); the content
+// is spelled here. Byte-identical to what RollcallRound signs, what
+// actions/rollcall.js rebuilds from the carried fields, and what the BTC close
+// rebuilds from its own ledger_hash.
+//
+//   v0:  network|epochHeight|ledgerHash
+//   v1:  network|epochHeight|ledgerHash|sha256(GATES)
+//
+// `gates` decides the form, and the DEFAULT is the epoch's own: omit it and an
+// armed epoch gets this build's full list while an unarmed one stays v0
+// byte-for-byte, so every existing caller keeps working on a venue that arms the
+// rail. Pass a STRING to publish a specific list (a drill that needs one
+// validator to name a shorter one), or NULL to force v0 - which is what the
+// frozen v0 vector check does, since those bytes must stay v0 on any venue.
+function canonical(network, epochHeight, ledgerHash, gates){
     const e = eqh()
-    const content = String(network) + '|' + Number(epochHeight) + '|' + String(ledgerHash).toLowerCase()
+    const g = (gates === undefined) ? gatesForEpoch(epochHeight, network) : gates
+    let content = String(network) + '|' + Number(epochHeight) + '|' + String(ledgerHash).toLowerCase()
+    if (g !== null && g !== undefined) content += '|' + gatesHash(g)
     return e.buildEquivCanonical(e.ENGINE_TAGS.ROLLCALL, String(Number(epochHeight)), 0, content)
 }
 
-// The only ROLLCALL wire version. Spelled as one literal rather than assembled
-// from parts so scripts/count-action-suites.js sees the payload this harness
-// builds and the published ACTION-name figure carries ROLLCALL.
+// The two ROLLCALL wire versions. Spelled as literals rather than assembled from
+// parts so scripts/count-action-suites.js sees the payloads this harness builds
+// and the published ACTION-name figure carries ROLLCALL.
 const ROLLCALL_WIRE_V0 = 'ROLLCALL|0'
+const ROLLCALL_WIRE_V1 = 'ROLLCALL|1'
 
-// ROLLCALL|0|EPOCH_HEIGHT|LEDGER_HASH|PUBLISHER|SIG_COUNT|PUBKEY_1|SIG_1|...
+// v0: ROLLCALL|0|EPOCH_HEIGHT|LEDGER_HASH|PUBLISHER|SIG_COUNT|PUBKEY_1|SIG_1|...
+// v1: ROLLCALL|1|EPOCH_HEIGHT|LEDGER_HASH|PUBLISHER|GATES|SIG_COUNT|PUBKEY_1|SIG_1|...
+//
 // Mirrors RollcallRound._buildWire. Used by the sweeper and self-publish legs,
 // which have to land an action the hub engine deliberately would not, and by the
 // frozen-vector check that pins this builder against the three implementations.
-function buildWire(epochHeight, ledgerHash, publisher, pairs){
-    const parts = [ROLLCALL_WIRE_V0, String(Number(epochHeight)),
-                   String(ledgerHash).toLowerCase(), String(publisher).toLowerCase(),
-                   String(pairs.length)]
+// `gates` follows the same rule canonical() does - omitted takes the epoch's own
+// form, a string publishes that exact list, null forces v0 - so a wire and the
+// canonical its pairs were signed over can never disagree about the version.
+function buildWire(epochHeight, ledgerHash, publisher, pairs, gates){
+    // The wire carries no network, so the default form is resolved against the
+    // venue's own (the same global every other read here runs on). A caller that
+    // wants a form the venue does not imply passes `gates` explicitly.
+    const g = (gates === undefined)
+        ? gatesForEpoch(epochHeight, (typeof NETWORK !== 'undefined' && NETWORK) ? NETWORK : 'regtest')
+        : gates
+    const v1 = (g !== null && g !== undefined)
+    const parts = [v1 ? ROLLCALL_WIRE_V1 : ROLLCALL_WIRE_V0, String(Number(epochHeight)),
+                   String(ledgerHash).toLowerCase(), String(publisher).toLowerCase()]
+    if (v1) parts.push(String(g))
+    parts.push(String(pairs.length))
     for (const p of pairs) parts.push(String(p.pubkey).toLowerCase(), String(p.sig).toLowerCase())
     return parts.join('|')
 }
@@ -338,7 +439,11 @@ function signCanonical(seedHex, canonicalString){
 // is the one failure mode that reads as a protocol bug rather than a test bug.
 function assertFrozenCanonicalVector(){
     const v = frozenVector()
-    const got = canonical(v.canonical.network, v.canonical.epoch_height, v.canonical.ledger_hash)
+    // NULL, not omitted: these bytes are the v0 case and stay v0 whatever the
+    // venue arms. Letting the epoch decide the form here would make the check
+    // report "canonical drift" on a gates-armed venue, which is the one message
+    // that must only ever mean a real disagreement.
+    const got = canonical(v.canonical.network, v.canonical.epoch_height, v.canonical.ledger_hash, null)
     assert.strictEqual(got, v.canonical.expected,
         'ROLLCALL canonical drift: this harness builds\n  ' + got + '\nbut the frozen vector ' +
         '(xchain-documentation/protocol/test-vectors/rollcall_canonical.json) says\n  ' + v.canonical.expected +
@@ -366,8 +471,91 @@ function assertFrozenCanonicalVector(){
         const exact  = []
         for (let i = 0; i < wanted.length; i += 2) exact.push({ pubkey: wanted[i], sig: wanted[i + 1] })
         const got2 = buildWire(v.canonical.epoch_height, v.canonical.ledger_hash, w.publisher,
-                               exact.length === w.sig_count ? exact : pairs)
+                               exact.length === w.sig_count ? exact : pairs, null)
         assert.strictEqual(got2, w.expected, 'ROLLCALL wire drift on frozen case "' + w.name + '"')
+    }
+
+    // On a GATES-ARMED venue the hubs publish v1, so the v1 half of the vector is
+    // load-bearing for the same run and is checked with it. On an unarmed venue
+    // nothing here builds a v1 byte, so it is not the run's business.
+    if (gatesArmed(v.canonical.epoch_height, v.canonical.network)) assertFrozenGatesVector()
+}
+
+// PRECONDITION for every leg that drives the GATES rail: the v1 half of the same
+// frozen vector.
+//
+// Separate from the v0 check above, and HARD-FAILING on a vector that carries no
+// v1 entry, because the two answer different questions. The v0 check asks whether
+// this harness still agrees with the three shipped implementations. This one asks
+// whether it agrees about the SECOND form - the one whose whole content is a
+// commitment to a list the drill hand-builds - and a drill that signed a v1
+// canonical this vector does not recognise would publish actions the DOGE parser
+// silently refuses and read the result as a federation-wide absence, which is
+// precisely the reading the vector exists to make impossible.
+function assertFrozenGatesVector(){
+    const v = frozenVector()
+    assert.ok(v.canonical_v1 && v.signers_v1 && v.wire_v1,
+        'the frozen vector (xchain-documentation/protocol/test-vectors/rollcall_canonical.json) carries no v1 ' +
+        'entry (canonical_v1 / signers_v1 / wire_v1), but this venue arms ' + ROLLCALL_GATES_ARMING_ENV +
+        ', so every roll call it publishes is ROLLCALL v1. Refresh the xchain-documentation sibling checkout: a ' +
+        'v1 byte nothing pins is a byte three implementations can drift on with nothing going red.')
+
+    const c1 = v.canonical_v1
+    assert.strictEqual(gatesHash(c1.gates), String(c1.gates_hash).toLowerCase(),
+        'ROLLCALL v1 gatesHash drift: this harness hashes the vector\'s GATES field to\n  ' + gatesHash(c1.gates) +
+        '\nbut the frozen vector says\n  ' + c1.gates_hash +
+        '\nThe canonical commits to THIS hash, so a drift here makes every v1 signature this harness produces ' +
+        'unverifiable to the DOGE parser and the BTC close.')
+
+    const got = canonical(c1.network, c1.epoch_height, c1.ledger_hash, c1.gates)
+    assert.strictEqual(got, c1.expected,
+        'ROLLCALL v1 canonical drift: this harness builds\n  ' + got + '\nbut the frozen vector says\n  ' +
+        c1.expected + '\nThe v1 content appends |sha256(GATES) to the v0 content inside the same EQUIV header; ' +
+        'a difference here is the harness and the sibling checkout disagreeing, not the test being wrong.')
+
+    // Real signatures over the v1 canonical, from the same fixed seeds: proof that
+    // this harness can produce a v1 pair the three implementations accept.
+    for (const s of v.signers_v1){
+        assert.strictEqual(pubkeyForSeed(s.seed).toLowerCase(), String(s.pubkey).toLowerCase(),
+            'ROLLCALL harness seed derivation disagrees with the frozen v1 vector for seed ' + s.seed.slice(0, 8) + '...')
+        assert.strictEqual(signCanonical(s.seed, c1.expected).toLowerCase(), String(s.sig).toLowerCase(),
+            'ROLLCALL harness v1 signing disagrees with the frozen vector for pubkey ' + s.pubkey.slice(0, 16) + '...')
+    }
+
+    // And the v1 wire, field order included: GATES sits between PUBLISHER and
+    // SIG_COUNT, and a builder that put it anywhere else would land an action the
+    // parser reads as a malformed v0.
+    //
+    // THE PAIRS COME FROM signers_v1, NOT FROM THE EXPECTED STRING, and that is
+    // the difference between a check and a mirror. Reading a case's pairs out of
+    // the very payload it is compared against makes the comparison circular: a
+    // tampered `expected` feeds its own tampered bytes back into the builder and
+    // reproduces itself. Measured on this file 2026-09-07 - the first version of
+    // this loop took both halves of each pair from `expected` and went GREEN
+    // against a vector whose payload had been edited. Only the pubkey ORDER is
+    // read from the case (which signer a case lists first is part of what it
+    // pins); the signature bytes are the vector's own, and are asserted to match
+    // the ones the case carries before anything is built.
+    const bySeed = new Map(v.signers_v1.map(s => [s.pubkey.toLowerCase(), s.sig.toLowerCase()]))
+    for (const w of v.wire_v1){
+        const fields = String(w.expected).split('|')
+        const pairs  = []
+        for (let i = 7; i + 1 < fields.length; i += 2){
+            const pubkey = String(fields[i]).toLowerCase()
+            const sig    = bySeed.get(pubkey)
+            assert.ok(sig,
+                'the frozen v1 wire case "' + w.name + '" names signer ' + pubkey.slice(0, 16) +
+                '... which signers_v1 does not carry, so its payload cannot be rebuilt from signed material')
+            assert.strictEqual(String(fields[i + 1]).toLowerCase(), sig,
+                'the frozen v1 wire case "' + w.name + '" carries a signature for ' + pubkey.slice(0, 16) +
+                '... that signers_v1 does not: the vector disagrees with itself, so one of the two was edited')
+            pairs.push({ pubkey, sig })
+        }
+        assert.strictEqual(pairs.length, Number(w.sig_count),
+            'the frozen v1 wire case "' + w.name + '" declares sig_count ' + w.sig_count + ' but its payload ' +
+            'carries ' + pairs.length + ' pair(s)')
+        const got2 = buildWire(c1.epoch_height, c1.ledger_hash, w.publisher, pairs, w.gates)
+        assert.strictEqual(got2, w.expected, 'ROLLCALL v1 wire drift on frozen case "' + w.name + '"')
     }
 }
 
@@ -1265,12 +1453,12 @@ async function bringUpVenue(opts){
     await ctx.mvh.start()
     ctx.rounds = rollcallRounds(ctx.mvh)
 
-    // The DOGE publish rail. Every ROLLCALL is a two-phase P2SH action and
-    // transactionHelper drives exactly that pipeline, plus the native DOGE fee
-    // output the chain requires. The only thing the wrapper adds is the regtest
-    // block production a live chain supplies on its own.
-    const cryptoHelper      = require('../cryptoHelper')
-    const transactionHelper = require('../transactionHelper')
+    // The DOGE publish rail: the funded address every ROLLCALL is broadcast from.
+    // The broadcast itself lives in publishWire (below), which is the single route
+    // every ROLLCALL takes to that chain - the engines' hook and a drill's
+    // hand-built action must ride the SAME pipeline, or a drill could land a
+    // payload shape no hub could have produced.
+    const cryptoHelper = require('../cryptoHelper')
     ctx.dogePublisher = await chainRail.withRail(ctx.dogeRail, async () => {
         // seedGas=false, and it is load-bearing on DOGE. The default seeds the
         // new address with an XCHAIN gas MINT, but ROLLCALL carries NO protocol
@@ -1287,15 +1475,7 @@ async function bringUpVenue(opts){
         return addr
     })
     ctx.publishedWires = []
-    setRollcallBroadcastHook(ctx.mvh, async (payload) => {
-        return await chainRail.withRail(ctx.dogeRail, async () => {
-            const txid = await transactionHelper.createAndSendTransaction(ctx.dogePublisher, payload)
-            ctx.publishedWires.push({ payload, txid })
-            await regtestMinerConnector.generateBlocks(1)
-            await utxoTrackerConnector.quiesce({ timeoutMs: 60000, pollMs: 250, regtestMiner: regtestMinerConnector })
-            return { txid }
-        })
-    })
+    setRollcallBroadcastHook(ctx.mvh, async (payload) => await publishWire(ctx, payload))
     for (let i = 0; i < ctx.rounds.length; i++)
         assert.strictEqual(ctx.rounds[i].broadcastCapable(), true,
             'hub ' + i + ' must be broadcast-capable for this run; a hub that can only sign and gossip cannot ' +
@@ -1423,6 +1603,28 @@ async function mineWhile(ctx, work, everyMs){
     finally { await miner }
 }
 
+// Land one ROLLCALL payload on DOGE, the only route this harness has to that
+// chain. Every ROLLCALL is a two-phase P2SH action and transactionHelper drives
+// exactly that pipeline, plus the native DOGE fee output the chain requires; the
+// only thing the wrapper adds is the regtest block production a live chain
+// supplies on its own.
+//
+// The hubs' broadcast hook calls this, and so does a drill that hand-builds an
+// action the engine deliberately would not (a sweep, a self-publish, a validator
+// naming a SHORTER gate list). One route, so the two can never differ in
+// anything but the bytes, and every landed payload appears in ctx.publishedWires
+// whoever built it.
+async function publishWire(ctx, payload){
+    const transactionHelper = require('../transactionHelper')
+    return await chainRail.withRail(ctx.dogeRail, async () => {
+        const txid = await transactionHelper.createAndSendTransaction(ctx.dogePublisher, payload)
+        ctx.publishedWires.push({ payload, txid })
+        await regtestMinerConnector.generateBlocks(1)
+        await utxoTrackerConnector.quiesce({ timeoutMs: 60000, pollMs: 250, regtestMiner: regtestMinerConnector })
+        return { txid }
+    })
+}
+
 async function mineDoge(ctx, n){
     return await chainRail.withRail(ctx.dogeRail, async () => {
         await regtestMinerConnector.generateBlocks(n)
@@ -1452,6 +1654,29 @@ async function absenceRows(ctx, epoch){
            JOIN index_addresses ia ON ia.id = ra.source_id
           WHERE ra.epoch_height = ?
           ORDER BY ia.address ASC`, [epoch])
+}
+
+// The BTC-side gate lists an epoch's close recorded, one row per VERIFIED signer
+// of a ROLLED v1 epoch. This is the only artifact the rules-aware attestation
+// filter reads, so a drill asserts on it directly rather than inferring it from
+// the filter's own answer: an empty table and a filter that never ran produce the
+// same capability set, and only one of them is correct.
+//
+// gates_json is stored as a JSON array; parsed here so a caller compares lists
+// rather than string spellings.
+async function rollcallGatesRows(ctx, epoch){
+    const rows = await ctx.idxQuery(
+        'SELECT epoch_height, pubkey, close_block, gates_json FROM rollcall_gates ' +
+        'WHERE epoch_height = ? ORDER BY pubkey ASC', [epoch])
+    return rows.map(r => {
+        let gates = null
+        // A row this harness cannot parse is reported as null rather than as [],
+        // because [] is what the FILTER reads a malformed row as ("knows no gate",
+        // so dropped) and a drill must be able to tell the two apart.
+        try { const p = JSON.parse(String(r.gates_json)); if (Array.isArray(p)) gates = p.map(String) } catch (e) { gates = null }
+        return { epoch_height: Number(r.epoch_height), pubkey: String(r.pubkey).toLowerCase(),
+                 close_block: Number(r.close_block), gates }
+    })
 }
 
 // The synthetic UNSTAKE rows an eviction mints: one per (source, signing key)
@@ -1839,9 +2064,11 @@ module.exports = {
     mineBtcTo,
     mineDoge,
     mineWhile,
+    publishWire,
     driveEpoch,
     rollcallRow,
     absenceRows,
+    rollcallGatesRows,
     evictionUnstakes,
     stakeDeactivations,
     delegationDeactivations,
@@ -1857,9 +2084,21 @@ module.exports = {
     signCanonical,
     canonical,
     buildWire,
+    ROLLCALL_WIRE_V0,
+    ROLLCALL_WIRE_V1,
+    gatesHash,
+    knownGates,
+    activeGates,
+    gatesArmed,
+    gatesForEpoch,
     assertFrozenCanonicalVector,
+    assertFrozenGatesVector,
+    ROLLCALL_GATES_ARMING_ENV,
     rca,
     eqh,
+    rga,
+    crd,
+    indexerModule,
     frozenVector,
     closeHeightOf,
     epochsAfter,
