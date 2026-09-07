@@ -494,13 +494,24 @@ describe('[sdk] chunked DEPLOY deferred assembly (a group deploys at its LAST pi
         expect(await stateRows(C), 'deferred assembly produced identical constructor state').to.deep.equal(refState);
         expect(await readState(sdk, C, 'run'), 'the explorer resolves the contract at the CARRIER index').to.equal(run);
 
-        // Explorer surfaces: a later milestone, asserted only where present.
-        expectDeployedContractIndex(await actionDetail(sdk, A), C, 'assembler page resolves deployed_contract_index = C');
+        // Explorer surfaces: a later milestone, asserted only where present. Where the
+        // field IS present the whole D48 contract is asserted, not just the index: the
+        // clients poll `assembly_status` to know when to stop, and a carrier page that
+        // names the contract but carries none of its fields renders no deploy card.
+        const asmDetail = await actionDetail(sdk, A);
+        if (expectDeployedContractIndex(asmDetail, C, 'assembler page resolves deployed_contract_index = C'))
+            expect(String(asmDetail.assembly_status),
+                'the assembler page reports the group as assembled').to.equal('valid');
         const carrierDetail = await actionDetail(sdk, C);
-        if (carrierDetail && Object.prototype.hasOwnProperty.call(carrierDetail, 'deployed_contract_index'))
+        if (carrierDetail && Object.prototype.hasOwnProperty.call(carrierDetail, 'deployed_contract_index')) {
             expect(Number(carrierDetail.deployed_contract_index), 'the carrier page exposes its own contract').to.equal(C);
-        else
+            expect(Number(carrierDetail.assembler_action_index),
+                'the carrier deploy card names the assembler it completed').to.equal(A);
+            expect(String(carrierDetail.contract_status),
+                'the carrier deploy card carries the contract status').to.equal('valid');
+        } else {
             console.log('    [deferred] AT1 carrier deploy-card assertion SKIPPED (explorer milestone not landed)');
+        }
 
         console.log('    [deferred] AT1 A=' + A + ' chunk1=' + c1Index + ' C=' + C +
                     ' pending_gas=' + pendingExec.gas_used + ' (reference ' + refGasUsed + ')');
