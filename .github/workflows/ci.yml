@@ -96,6 +96,21 @@ jobs:
           ssh-key: ${{ secrets.XCHAIN_INDEXER_DEPLOY_KEY }}
           path: xchain-indexer
 
+      # test/sdk/sdkHelper.js resolves the SDK by trying `xchain-sdk` first and
+      # then two paths BESIDE this repo, and throws its own error when none
+      # answers. A unit test reaches the attest-mirror venue helper, which
+      # reaches that loader, so the sdk has to be beside this checkout or the
+      # tier dies at module load with a message that reads like a missing
+      # dependency here and is not one.
+      # No deploy key: this repository is public now, unlike when the two keys
+      # above were added, so a plain checkout resolves it.
+      - name: Check out xchain-sdk (resolved beside this repo by the sdk helper)
+        uses: actions/checkout@v4
+        with:
+          repository: XChain-Platform/xchain-sdk
+          ref: ${{ startsWith(github.head_ref, 'release/') && github.head_ref || (github.ref == 'refs/heads/master' && 'master' || 'develop') }}
+          path: xchain-sdk
+
       - name: Use Node.js 22
         uses: actions/setup-node@v4
         with:
@@ -103,7 +118,7 @@ jobs:
 
       # Every suite in this repo requires exactly Node 22; 18 and 24 fail, and
       # some of those failures are silent skips rather than errors.
-      # ALL THREE trees, for the reason the live-tier job below spells out: a
+      # ALL FOUR trees, for the reason the live-tier job below spells out: a
       # helper here requires sibling source at require time, and Node resolves
       # that file's dependencies from the SIBLING's own tree, never from
       # xchain-e2e-test's. A source-only sibling therefore dies at module load
@@ -117,10 +132,10 @@ jobs:
       # checked out but never installed, the whole unit tier died at load with
       # `Cannot find module 'mathjs'`, which reads as a missing dependency in
       # this repo and is not one. The live-tier job below already installs all
-      # three, which is why it stayed green while this job did not.
-      - name: Install dependencies (all three trees)
+      # the others, which is why it stayed green while this job did not.
+      - name: Install dependencies (all four trees)
         run: |
-          for d in xchain-e2e-test xchain-hub xchain-indexer; do
+          for d in xchain-e2e-test xchain-hub xchain-indexer xchain-sdk; do
             ( cd "$d" && if [ -f package-lock.json ]; then npm ci; else npm install; fi )
           done
 
