@@ -89,6 +89,7 @@ const DEADLINE_BLOCKS = 60
 
 const CONTRACT_CODE = `
 module.exports = {
+    meta: { name: 'Zero Conf Asker', description: 'Requests an attestation answered from a zero-confirmation mirror row.', version: '1.0.0' },
     ask: function(xchain) {
         var requestId = xchain.attestation.request(
             xchain.getInputParam(0),

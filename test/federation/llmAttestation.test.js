@@ -56,6 +56,7 @@ describe('LLM attestation provider: redundancy=1 via claude_spawn', function () 
     // multiple model calls.
     const CONTRACT_CODE = `
 module.exports = {
+    meta: { name: 'LLM Asker', description: 'Requests an LLM attestation over a prompt envelope.', version: '1.0.0' },
     askLlm: function(xchain) {
         var envelope = xchain.getInputParam(0);
         var requestId = xchain.attestation.request(

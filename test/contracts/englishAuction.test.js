@@ -41,6 +41,7 @@ const gasHelper = require('../helpers/gasHelper')
 // DEPLOY payload cap; the readable canonical source lives in
 // xchain-contracts/englishAuction/englishAuction.js. Behaviour is identical.
 const ENGLISH_AUCTION = `module.exports = {
+    meta: { name: 'English Auction', description: 'Sells an item to the highest bidder before the auction closes.', version: '1.0.0' },
     initialize: function (x) {
         var s=x.getInputParam(0), it=x.getInputParam(1), ia=x.getInputParam(2),
             bt=x.getInputParam(3), mb=x.getInputParam(4), d=x.getInputParam(5);

@@ -54,6 +54,7 @@ const XCHAIN_PER_CHILD_ISSUE = 0.5
 
 const CONTRACT = `
     module.exports = {
+        meta: { name: 'Batch Cost Counter', description: 'Counter contract used to weigh the gas cost of a batched execution.', version: '1.0.0' },
         initialize: function() {
             xchain.state.set('count', '0');
         },

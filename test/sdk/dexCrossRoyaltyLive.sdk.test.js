@@ -132,7 +132,7 @@ describe('[sdk] cross-chain DEX LIVE royalty split (finding B live drill)', func
     });
 
     it('DEPLOY the royalty guard, ISSUE the BTC token, BIND its trade class', async function () {
-        const guardSrc = "module.exports={ guard:function(){ return { payoutLegs: [{ to: '" +
+        const guardSrc = "module.exports={ meta: { name: 'Royalty Live Guard', description: 'Returns a royalty payout leg for the live cross-chain royalty drill.', version: '1.0.0' }, guard:function(){ return { payoutLegs: [{ to: '" +
             legAddr + "', bps: " + ROYALTY_BPS + " }] }; } };";
         const dep = await submit(sdk,
             { action: 'DEPLOY', params: { code: guardSrc, gasLimit: 300000, constructorParams: [] } },

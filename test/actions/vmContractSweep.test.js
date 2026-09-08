@@ -35,6 +35,7 @@ describe('VM Contract SWEEP: a contract sweeps its own order escrow', function (
     // exposes a sweep that routes the contract's own order escrow to a destination. BALANCES and
     // OWNERSHIPS are explicitly 0 so only the ORDER-escrow path (source_id reader) is exercised.
     const SWEEPER = `module.exports = {
+        meta: { name: 'Sweeper', description: 'Emits an order so contract-held balances can be swept.', version: '1.0.0' },
         mkorder: function(){
             xchain.emit.order({ giveCoin: '${CHAIN}', giveTick: xchain.getInputParam(0), giveAmount: '40',
                 getCoin: '${CHAIN}', getTick: 'XCHAIN', getAmount: '5' });

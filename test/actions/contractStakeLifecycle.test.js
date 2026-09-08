@@ -39,6 +39,7 @@ function newSigningPubkey(){
 // test can drive xchain.contract.slash through a real EXECUTE.
 const STAKE_GATED_CONTRACT = `
     module.exports = {
+        meta: { name: 'Stake Gate Lifecycle', description: 'Reports whether the caller holds an active stake against this contract.', version: '1.0.0' },
         isStaked: function() {
             let pubkey = xchain.getInputParam(0)
             let amount = xchain.contract.getStake(pubkey, 'XCHAIN')

@@ -37,6 +37,7 @@ describe('VM Contract SLASH: a contract slashes its own staker', function () {
     // Stakeable contract exposing a single slash primitive: slash(pubkey, amount) of XCHAIN.
     const SLASHER = `
         module.exports = {
+            meta: { name: 'Slasher', description: 'Slashes a staked contract from inside a contract method.', version: '1.0.0' },
             doSlash: function() {
                 xchain.contract.slash(xchain.getInputParam(0), 'XCHAIN', xchain.getInputParam(1))
                 return 'ok'

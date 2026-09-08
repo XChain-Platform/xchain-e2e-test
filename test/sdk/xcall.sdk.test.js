@@ -35,6 +35,7 @@ const { makeSdk, submit, fundedGasAddress, mine, submitOpts } = require('./sdkHe
 
 const CONTRACT_A = `
     module.exports = {
+        meta: { name: 'XCall Origin', description: 'Sends a cross-chain call to a contract on another chain.', version: '1.0.0' },
         crossCallable: [],
         callOut: function(xchain) {
             var id = xchain.emit.crossExecute({

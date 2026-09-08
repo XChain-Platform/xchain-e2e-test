@@ -26,17 +26,17 @@ describe('VM Emissions: emitted action variety', function () {
     const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
 
     // Sends two different amounts to two recipients in one execution.
-    const MULTI_SEND = `module.exports = { payout: function(){
+    const MULTI_SEND = `module.exports = { meta: { name: 'Multi Sender', description: 'Emits several SEND actions from a single execution.', version: '1.0.0' }, payout: function(){
         var t = xchain.getInputParam(0);
         xchain.emit.send({ tick: t, quantity: '10', destination: xchain.getInputParam(1) });
         xchain.emit.send({ tick: t, quantity: '20', destination: xchain.getInputParam(2) });
     } };`
 
-    const DESTROYER = `module.exports = { burn: function(){
+    const DESTROYER = `module.exports = { meta: { name: 'Destroyer', description: 'Emits a DESTROY of a contract-held token.', version: '1.0.0' }, burn: function(){
         xchain.emit.destroy({ tick: xchain.getInputParam(0), quantity: '30' });
     } };`
 
-    const CASTER = `module.exports = { announce: function(){
+    const CASTER = `module.exports = { meta: { name: 'Broadcaster', description: 'Emits a BROADCAST message from a contract.', version: '1.0.0' }, announce: function(){
         xchain.emit.broadcast({ message: 'hello-from-contract', value: '' });
     } };`
 
@@ -44,7 +44,7 @@ describe('VM Emissions: emitted action variety', function () {
     // GIVE_COIN must be a supported network. GET_ADDRESS must be an explicit real address;
     // a contract's synthetic C:${CHAIN}:N address fails the isCryptoAddress format check, so
     // it cannot default GET_ADDRESS to itself.
-    const ORDERER = `module.exports = { mkorder: function(){
+    const ORDERER = `module.exports = { meta: { name: 'Orderer', description: 'Emits an ORDER from a contract.', version: '1.0.0' }, mkorder: function(){
         xchain.emit.order({ giveCoin: '${CHAIN}', giveTick: xchain.getInputParam(0), giveAmount: '40',
             getCoin: '${CHAIN}', getTick: 'XCHAIN', getAmount: '5',
             getAddress: xchain.getInputParam(1) });
@@ -55,14 +55,14 @@ describe('VM Emissions: emitted action variety', function () {
     // of its own same-chain token ORDER: proceeds settle on the XChain ledger to the
     // contract's balance. Before this was allowed, the default-to-SOURCE produced the
     // contract's synthetic address, which failed isCryptoAddress and aborted the execution.
-    const SELF_ORDERER = `module.exports = { mkselforder: function(){
+    const SELF_ORDERER = `module.exports = { meta: { name: 'Self Orderer', description: 'Emits an order the contract is itself the counterparty to.', version: '1.0.0' }, mkselforder: function(){
         xchain.emit.order({ giveCoin: '${CHAIN}', giveTick: xchain.getInputParam(0), giveAmount: '40',
             getCoin: '${CHAIN}', getTick: 'XCHAIN', getAmount: '5' });
     } };`
 
     // Self-addressed token order with a caller-supplied EXPIRATION (input param 1), so the
     // test can make it expire and assert the escrow refunds to the contract.
-    const EXPIRING_ORDERER = `module.exports = { mkexporder: function(){
+    const EXPIRING_ORDERER = `module.exports = { meta: { name: 'Expiring Orderer', description: 'Emits an order that carries an expiration.', version: '1.0.0' }, mkexporder: function(){
         xchain.emit.order({ giveCoin: '${CHAIN}', giveTick: xchain.getInputParam(0), giveAmount: '40',
             getCoin: '${CHAIN}', getTick: 'XCHAIN', getAmount: '5',
             expiration: xchain.getInputParam(1) });
@@ -73,14 +73,14 @@ describe('VM Emissions: emitted action variety', function () {
     // whole execution must roll back (the GIVE side must NOT be escrowed). Proves the
     // intended half of the GET_ADDRESS rule: contract addresses are allowed for token
     // proceeds only, never native coin.
-    const NATIVE_ORDERER = `module.exports = { mknativeorder: function(){
+    const NATIVE_ORDERER = `module.exports = { meta: { name: 'Native Orderer', description: 'Emits an order that gives native coin.', version: '1.0.0' }, mknativeorder: function(){
         xchain.emit.order({ giveCoin: '${CHAIN}', giveTick: xchain.getInputParam(0), giveAmount: '40',
             getCoin: '${CHAIN}', getTick: '', getAmount: '1' });
     } };`
 
     // Native-coin dispenser: dispense 10 of the test tick per trigger for 1 ${CHAIN}.
     // GET_ADDRESS must be a fresh real address (anti-replay: no prior on-chain activity).
-    const DISPENSERR = `module.exports = { mkdisp: function(){
+    const DISPENSERR = `module.exports = { meta: { name: 'Dispenser Maker', description: 'Emits a dispenser from a contract.', version: '1.0.0' }, mkdisp: function(){
         xchain.emit.dispenser({ giveCoin: '${CHAIN}', giveTick: xchain.getInputParam(0), giveAmount: '10',
             giveEscrow: '100', getCoin: '${CHAIN}', getTick: '', getAmount: '1',
             getAddress: xchain.getInputParam(1) });
@@ -89,14 +89,14 @@ describe('VM Emissions: emitted action variety', function () {
     // Coin-scoped message to a real address. Exercises the MESSAGE emission's leading
     // COIN field: without it the DESTINATION would land in the COIN slot and the handler
     // would reject it as 'invalid: COIN (value)', aborting the whole execution.
-    const MESSENGER = `module.exports = { ping: function(){
+    const MESSENGER = `module.exports = { meta: { name: 'Messenger', description: 'Emits a MESSAGE action from a contract.', version: '1.0.0' }, ping: function(){
         xchain.emit.message({ coin: '${CHAIN}', destination: xchain.getInputParam(0) });
     } };`
 
     // Public (non-gated) file. A contract can only emit a public FILE; gated files
     // require SOURCE to be the GATE_TICKER issuer, which a contract address is not. So
     // this covers the emit.file -> FILE handler -> files-row plumbing.
-    const FILER = `module.exports = { publish: function(){
+    const FILER = `module.exports = { meta: { name: 'Filer', description: 'Emits a FILE action carrying a small note.', version: '1.0.0' }, publish: function(){
         xchain.emit.file({ name: 'contract-note.txt', type: 'text/plain', title: 'Note', memo: 'from contract' });
     } };`
 

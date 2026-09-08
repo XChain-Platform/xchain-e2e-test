@@ -33,6 +33,7 @@ describe('VM Edge: negative paths and boundaries', function () {
     // Sets initial state from a constructor param at deploy time.
     const CONSTRUCTED = `
         module.exports = {
+            meta: { name: 'Constructed', description: 'Writes its initial state from the constructor.', version: '1.0.0' },
             initialize: function() {
                 xchain.state.set('initialized', xchain.getInputParam(0) || 'yes');
             },
@@ -43,6 +44,7 @@ describe('VM Edge: negative paths and boundaries', function () {
     // Pays out tokens it does not hold. The emitted SEND must fail and roll back.
     const SENDER = `
         module.exports = {
+            meta: { name: 'Edge Sender', description: 'Emits a SEND of a contract-held balance.', version: '1.0.0' },
             payout: function() {
                 xchain.emit.send({
                     tick: xchain.getInputParam(2),
@@ -55,6 +57,7 @@ describe('VM Edge: negative paths and boundaries', function () {
 
     const PUT_DELETE = `
         module.exports = {
+            meta: { name: 'Put Delete', description: 'Writes a state key and deletes it again.', version: '1.0.0' },
             put: function()    { xchain.state.set('k', 'v'); },
             remove: function() { xchain.state.delete('k'); }
         };

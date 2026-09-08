@@ -79,6 +79,7 @@ const NONDET_URL = 'https://httpbin.org/uuid'
 
 const CONTRACT_CODE = `
 module.exports = {
+    meta: { name: 'Real URL Expiry Asker', description: 'Requests an attestation with a short deadline so failure paths can be observed.', version: '1.0.0' },
     askExpiring: function(xchain) {
         var url = xchain.getInputParam(0);
         var requestId = xchain.attestation.request(

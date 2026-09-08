@@ -33,6 +33,7 @@ describe('Contract Staking: STAKE v3 / UNSTAKE v1 / DELEGATE v1 + slashing', fun
     // through real method invocations. Stored as a small string so the e2e log stays readable.
     const STAKE_GATED_CONTRACT = `
         module.exports = {
+            meta: { name: 'Stake Gate', description: 'Reports whether the calling pubkey has staked against this contract.', version: '1.0.0' },
             isStaked: function() {
                 let pubkey = xchain.getInputParam(0)
                 let amount = xchain.contract.getStake(pubkey, 'XCHAIN')

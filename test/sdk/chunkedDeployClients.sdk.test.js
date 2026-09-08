@@ -105,6 +105,7 @@ function sourceFor(run, padBytes) {
         'var PAD = "' + 'x'.repeat(padBytes) + '";',
         'var RUN = "' + run + '";',
         'module.exports = {',
+        "  meta: { name: 'Chunked Counter Clients', description: 'Per-run padded counter reassembled from a chunked DEPLOY group.', version: '1.0.0' },",
         '  initialize: function (xchain) {',
         '    var start = xchain.getInputParam(0);',
         '    xchain.state.set("count", String(parseInt(start) || 0));',

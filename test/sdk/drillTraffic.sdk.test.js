@@ -39,6 +39,7 @@ const OUT  = process.env.DRILL_OUT || process.env.HOME + '/drill/traffic.json';
 
 const SYNC_CONTRACT = `
     module.exports = {
+        meta: { name: 'Traffic Sync', description: 'Counter contract driven by the synchronous traffic drill.', version: '1.0.0' },
         initialize: function() {
             xchain.state.set('count', '0');
         },
@@ -54,6 +55,7 @@ const SYNC_CONTRACT = `
 // active, accepted (and Promise-runnable) where it is not yet active.
 const ASYNC_CONTRACT = `
     module.exports = {
+        meta: { name: 'Traffic Async', description: 'Counter contract with an async constructor, driven by the traffic drill.', version: '1.0.0' },
         initialize: async function() {
             xchain.state.set('x', '1');
         }

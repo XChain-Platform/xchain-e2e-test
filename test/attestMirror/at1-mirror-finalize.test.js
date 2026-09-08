@@ -102,6 +102,7 @@ const BURIAL_BLOCKS = 6
 function contractCode (deadlineBlocks) {
     return `
 module.exports = {
+    meta: { name: 'Mirror Finalize Asker', description: 'Requests an attestation whose response is finalized through the hub mirror.', version: '1.0.0' },
     ask: function(xchain) {
         var requestId = xchain.attestation.request(
             xchain.getInputParam(0),

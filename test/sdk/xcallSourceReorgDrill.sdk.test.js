@@ -59,6 +59,7 @@ const { makeSdk, submit, fundedGasAddress, mine, submitOpts } = require('./sdkHe
 
 const CONTRACT_A = `
     module.exports = {
+        meta: { name: 'XCall Source Reorg Origin', description: 'Sends a cross-chain call whose source chain reorgs.', version: '1.0.0' },
         crossCallable: [],
         callOut: function(xchain) {
             var id = xchain.emit.crossExecute({

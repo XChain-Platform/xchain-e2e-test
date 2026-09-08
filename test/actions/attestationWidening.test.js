@@ -69,6 +69,7 @@ describe('Attestation: responsible-set widening rescues a set with a non-serving
 
     const CONTRACT_CODE = `
 module.exports = {
+    meta: { name: 'Attest Widening Asker', description: 'Requests an attestation whose responder set widens as deadlines pass.', version: '1.0.0' },
     askWidening: function(xchain) {
         var url = xchain.getInputParam(0);
         var requestId = xchain.attestation.request(

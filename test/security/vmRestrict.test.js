@@ -47,7 +47,7 @@ describe('VM Restrict: banned native-DoS literals rejected on-chain', function (
 
     it('a benign contract still deploys (regression)', async function () {
         const dep = await vmHelper.sendDeployV0(deployer,
-            `module.exports = { inc: function(){ var c=parseInt(xchain.state.get('n')||'0'); xchain.state.set('n',String(c+1)); return String(c+1); } };`,
+            `module.exports = { meta: { name: 'Benign Counter', description: 'Increments a stored counter; the control case for the restriction suite.', version: '1.0.0' }, inc: function(){ var c=parseInt(xchain.state.get('n')||'0'); xchain.state.set('n',String(c+1)); return String(c+1); } };`,
             200000)
         assert(dep.contract, 'benign contract should deploy')
         assert.strictEqual(dep.contract.status, 'valid')
@@ -55,7 +55,12 @@ describe('VM Restrict: banned native-DoS literals rejected on-chain', function (
 
     it('a contract with a BigInt literal is rejected at deploy', async function () {
         const atk = await cryptoHelper.getNewFundedAddress('vmr-bigint', COIN, NETWORK, null, 'legacy', 0, 1)
-        await deployRaw(atk, `module.exports = function(){ return (2n ** 5000000n).toString(); };`)
+        // Meta present so the banned-literal verdict is what fails this deploy:
+        // the syntax gate runs before the manifest read, so a green assertion
+        // here cannot be CONTRACT_META_REQUIRED wearing the BigInt rule's name.
+        await deployRaw(atk, `function contract(){ return (2n ** 5000000n).toString(); } `
+            + `contract.meta = { name: 'BigInt Literal', description: 'Uses a BigInt literal, which the syntax gate refuses.', version: '1.0.0' }; `
+            + `module.exports = contract;`)
         const row = await waitContractAny(atk.address)
         assert(row, 'a rejected contract row should be recorded')
         assert.notStrictEqual(row.status, 'valid', 'BigInt-literal contract must be rejected')
@@ -64,7 +69,10 @@ describe('VM Restrict: banned native-DoS literals rejected on-chain', function (
 
     it('a contract with a RegExp literal is rejected at deploy', async function () {
         const atk = await cryptoHelper.getNewFundedAddress('vmr-regex', COIN, NETWORK, null, 'legacy', 0, 1)
-        await deployRaw(atk, `module.exports = function(){ return /(a+)+$/.test('aaaa!'); };`)
+        // Meta present for the same reason as the BigInt case above.
+        await deployRaw(atk, `function contract(){ return /(a+)+$/.test('aaaa!'); } `
+            + `contract.meta = { name: 'RegExp Literal', description: 'Uses a RegExp literal, which the syntax gate refuses.', version: '1.0.0' }; `
+            + `module.exports = contract;`)
         const row = await waitContractAny(atk.address)
         assert(row, 'a rejected contract row should be recorded')
         assert.notStrictEqual(row.status, 'valid', 'RegExp-literal contract must be rejected')

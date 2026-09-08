@@ -28,6 +28,7 @@ const { makeSdk, submit, fundedGasAddress, mine, submitOpts } = require('./sdkHe
 // Callee: records who called it; can call back; can revert on demand.
 const CONTRACT_B = `
     module.exports = {
+        meta: { name: 'Cross Callee', description: 'Records a value written by another contract on the same chain.', version: '1.0.0' },
         initialize: function() {
             xchain.state.set('pings', '0');
         },
@@ -54,6 +55,7 @@ const CONTRACT_B = `
 // Caller: calls B (optionally a failing method); supports bounded recursion.
 const CONTRACT_A = `
     module.exports = {
+        meta: { name: 'Cross Caller', description: 'Calls another contract on the same chain.', version: '1.0.0' },
         initialize: function() {
             xchain.state.set('acks', '0');
         },

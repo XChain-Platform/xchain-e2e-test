@@ -102,6 +102,7 @@ const SKIP_REASON_PREFIX = 'invalid: insufficient valid signatures'
 
 const CONTRACT_CODE = `
 module.exports = {
+    meta: { name: 'Zero Conf Fallthrough Asker', description: 'Requests an attestation that falls through zero-conf onto the confirmed path.', version: '1.0.0' },
     ask: function(xchain) {
         var requestId = xchain.attestation.request(
             xchain.getInputParam(0),

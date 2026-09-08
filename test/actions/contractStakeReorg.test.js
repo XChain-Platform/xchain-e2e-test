@@ -35,6 +35,7 @@ function newSigningPubkey(){
 }
 const STAKE_GATED_CONTRACT = `
     module.exports = {
+        meta: { name: 'Stake Gate Reorg', description: 'Reports the staked amount so a reorg can be observed against contract stake.', version: '1.0.0' },
         isStaked: function() {
             let amount = xchain.contract.getStake(xchain.getInputParam(0), 'XCHAIN')
             return xchain.math.gte(amount, '100') ? 'yes' : 'no'

@@ -67,6 +67,7 @@ describe('Attestation admission caps: an over-cap ATTEST v0 refusal on a live ch
 
     const CONTRACT_CODE = `
 module.exports = {
+    meta: { name: 'Attest Cap Asker', description: 'Requests two attestations in one execution to exercise the per-execution request cap.', version: '1.0.0' },
     askTwo: function(xchain) {
         var tag = xchain.getInputParam(0);
         xchain.state.set('two_marker', tag);
@@ -246,6 +247,7 @@ module.exports = {
         const fillerCode = (n) => `
 // filler ${n}
 module.exports = {
+    meta: { name: 'Attest Cap Filler', description: 'Filler contract that requests two attestations to fill the block request budget.', version: '1.0.0' },
     askTwo: function(xchain) {
         xchain.attestation.request('http_get', 'https://example.com/ceiling/${n}/a',
             'noop', ['ctx-fill'], { redundancy: ${REDUNDANCY}, deadlineBlocks: ${DEADLINE_BLOCKS} });

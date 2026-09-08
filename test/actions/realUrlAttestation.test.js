@@ -71,6 +71,7 @@ const REAL_URL = 'https://jsonplaceholder.typicode.com/todos/1'
 
 const CONTRACT_CODE = `
 module.exports = {
+    meta: { name: 'Real URL Asker', description: 'Requests a quorum attestation over a real URL.', version: '1.0.0' },
     askOracleQuorum: function(xchain) {
         var url = xchain.getInputParam(0);
         var requestId = xchain.attestation.request(

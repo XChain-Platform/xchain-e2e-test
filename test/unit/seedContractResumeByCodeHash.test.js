@@ -69,16 +69,18 @@ describe('seed-contract-state findDeployedContract: resume from the chain, not t
         assert.strictEqual(codeHashOf(CODE), HASH);
     });
 
-    // The real chain measurement this whole mechanism rests on: the explorer's
-    // code_hash for BTC:testnet action_index 6 is the sha256 of the seed
-    // contract source shipped in this repo. If the file changes without the
-    // chain, this fails - which is correct, because the resume lookup would
-    // then stop finding the deployed contract.
-    it('agrees with the code_hash BTC:testnet published for the real seed contract', function () {
+    // A SELF-CONSISTENCY pin, not a chain measurement: no live testnet contract
+    // carries this hash (the copy the earlier literal named did not survive the
+    // 2026-08-24 re-genesis). What the literal buys is the thing the resume
+    // mechanism rests on: the hash is computed from the file's bytes, so an
+    // unnoticed edit to the seed source changes it and fails here, which is
+    // exactly when a resume would stop finding an already-deployed copy.
+    // Re-pin this literal deliberately whenever spvSeed.js is edited on purpose.
+    it('pins the sha256 of the seed contract source the resume lookup matches on', function () {
         const src = fs.readFileSync(path.join(__dirname, '../../bin/contracts/spvSeed.js'), 'utf8');
         assert.strictEqual(
             codeHashOf(src),
-            'f304ab588e538d87214191eb33d2cd8fb8862b741d7eb0a2bf56f11b8362f848'
+            '8844863444b6f278cc00520dcb420b4713eb3c0784a722e25356b2eb1cd578b4'
         );
     });
 

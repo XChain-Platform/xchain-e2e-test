@@ -32,6 +32,7 @@ const { makeSdk, submit, fundedGasAddress, mine, uniqueTick, submitOpts } = requ
 // Callback target: records the result the binding poll delivers.
 const CALLBACK_TARGET = `
     module.exports = {
+        meta: { name: 'Vote Callback', description: 'Records that a poll result callback fired.', version: '1.0.0' },
         initialize: function() { xchain.state.set('fired', '0'); },
         onPoll: function() {
             xchain.state.set('fired', '1');
@@ -47,6 +48,7 @@ const CALLBACK_TARGET = `
 // Poll actor: creates a poll and casts a ballot as the contract itself.
 const ACTOR_CONTRACT = `
     module.exports = {
+        meta: { name: 'Vote Actor', description: 'Creates a poll and reacts to its bound result.', version: '1.0.0' },
         initialize: function() {},
         makePoll: function() {
             xchain.emit.vote({ version: 0, tick: xchain.getInputParam(0),

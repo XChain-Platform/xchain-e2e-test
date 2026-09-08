@@ -42,6 +42,7 @@ const { makeSdk, submit, fundedGasAddress, mine, submitOpts } = require('./sdkHe
 // fire-and-record, callback keyed by call_id so concurrent calls don't collide.
 const CONTRACT_A = `
     module.exports = {
+        meta: { name: 'XCall Scenarios Origin', description: 'Sends the cross-chain calls that cover the scenario matrix.', version: '1.0.0' },
         crossCallable: [],
         callOut: function(xchain) {
             var id = xchain.emit.crossExecute({

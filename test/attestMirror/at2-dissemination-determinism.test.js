@@ -91,6 +91,7 @@ const OUTSIDE_ATTEMPTS = 6
 
 const CONTRACT_CODE = `
 module.exports = {
+    meta: { name: 'Mirror Determinism Asker', description: 'Requests an attestation used to prove mirror dissemination is deterministic.', version: '1.0.0' },
     ask: function(xchain) {
         var requestId = xchain.attestation.request(
             xchain.getInputParam(0),

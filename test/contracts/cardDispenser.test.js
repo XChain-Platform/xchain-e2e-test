@@ -33,6 +33,7 @@ const issueHelper = require('../helpers/issueHelper')
 const gasHelper = require('../helpers/gasHelper')
 
 const CARD_DISPENSER = `module.exports = {
+    meta: { name: 'Card Dispenser', description: 'Dispenses cards from a fixed pool in exchange for a payment token.', version: '1.0.0' },
     initialize: function (xchain) {
         var payTick = xchain.getInputParam(0), price = xchain.getInputParam(1), unit = xchain.getInputParam(2);
         xchain.require(payTick, 'payTick required');

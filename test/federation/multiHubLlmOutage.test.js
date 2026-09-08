@@ -169,6 +169,7 @@ describe('Phase 4 drill: LLM attestation outage resilience (redundancy=3)', func
     // each other's assertions.
     const CONTRACT_CODE = `
 module.exports = {
+    meta: { name: 'LLM Outage Asker', description: 'Requests an LLM attestation while one hub is offline.', version: '1.0.0' },
     askLlm: function(xchain) {
         var envelope = xchain.getInputParam(0);
         var requestId = xchain.attestation.request(

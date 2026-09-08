@@ -92,6 +92,7 @@ const REDUNDANCY = 3
 
 const CONTRACT_CODE = `
 module.exports = {
+    meta: { name: 'Zero Conf Headroom Asker', description: 'Requests an attestation used to measure zero-conf mirror headroom.', version: '1.0.0' },
     ask: function(xchain) {
         var requestId = xchain.attestation.request(
             xchain.getInputParam(0),

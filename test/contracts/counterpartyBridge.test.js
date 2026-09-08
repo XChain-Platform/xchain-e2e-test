@@ -112,6 +112,7 @@ const COUNTERPARTY_BRIDGE = `var BA='1BitcoinEaterAddressDontSendf59kuE';
 function fD(v,d){var s=String(v),n=s.charAt(0)==='-';if(n)s=s.substring(1);var i=s.indexOf('.');if(i<0)return v;var f=s.substring(i+1);if(f.length<=d)return v;var k=d>0?'.'+f.substring(0,d):'';var o=s.substring(0,i)+k;return n?'-'+o:o;}
 function eB(p,a,c){var j;try{j=JSON.parse(p);}catch(e){return [];}if(!j||typeof j!=='object'||!Array.isArray(j.data))return [];var o=[];for(var i=0;i<j.data.length;i++){var r=j.data[i];if(r&&r.asset===a&&r.source===c&&r.status==='valid'&&typeof r.tx_hash==='string'&&r.tx_hash.length>0&&r.quantity!==undefined&&r.quantity!==null)o.push({h:r.tx_hash,q:String(r.quantity)});}return o;}
 module.exports = {
+    meta: { name: 'Counterparty Bridge', description: 'Bridges a Counterparty asset claim onto XChain.', version: '1.0.0' },
     initialize: function (x) {
         var ca=x.getInputParam(0), xt=x.getInputParam(1), ms=x.getInputParam(2), dc=x.getInputParam(3)||'8';
         x.require(ca&&ca.length>0,'cpAsset required');

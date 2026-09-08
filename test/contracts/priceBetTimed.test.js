@@ -47,6 +47,7 @@ const gasHelper = require('../helpers/gasHelper')
 const priceSnapshotHelper = require('../helpers/priceSnapshotHelper')
 
 const PRICE_BET_TIMED = `module.exports = {
+meta: { name: 'Price Bet Timed', description: 'Settles a two-sided price bet inside a fixed block window.', version: '1.0.0' },
 initialize: function (xchain) {
 var maker = xchain.getInputParam(0), coinPair = xchain.getInputParam(1),
 strike = xchain.getInputParam(2), side = xchain.getInputParam(3),

@@ -61,6 +61,7 @@ const { AttestationHelpers } = loadSDK();
 
 const CONTRACT_CODE = `
 module.exports = {
+    meta: { name: 'SDK Attest Asker', description: 'Requests a URL attestation through the SDK.', version: '1.0.0' },
     askOracle: function(xchain) {
         var url = xchain.getInputParam(0);
         var requestId = xchain.attestation.request(

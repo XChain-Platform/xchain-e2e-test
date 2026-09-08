@@ -96,6 +96,7 @@ const TRACKER_UNDO_BLOCKS = 12
 
 const CONTRACT_CODE = `
 module.exports = {
+    meta: { name: 'Mirror Reorg Asker', description: 'Requests an attestation whose mirror rows are rolled back by a reorg.', version: '1.0.0' },
     ask: function(xchain) {
         var requestId = xchain.attestation.request(
             xchain.getInputParam(0),

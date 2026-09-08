@@ -85,6 +85,7 @@ describe('Issuance fee: VM-emitted ISSUE from a constructor is fee-exempt', func
         // (audit finding F-14).
         const CTOR_MINTER = `
             module.exports = {
+                meta: { name: 'Constructor Minter', description: 'Mints a token from its constructor to exercise fee-exempt issue emissions.', version: '1.0.0' },
                 initialize: function() {
                     xchain.emit.issue({
                         tick: '${tick}', maxSupply: '1000', maxMint: '1000',

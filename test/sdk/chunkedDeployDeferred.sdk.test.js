@@ -109,6 +109,7 @@ function sourceFor(run, padBytes) {
         'var PAD = "' + 'x'.repeat(padBytes) + '";',
         'var RUN = "' + run + '";',
         'module.exports = {',
+        "  meta: { name: 'Chunked Counter Deferred', description: 'Per-run padded counter reassembled by the deferred chunked DEPLOY lane.', version: '1.0.0' },",
         '  initialize: function (xchain) {',
         '    var start = xchain.getInputParam(0);',
         '    xchain.state.set("count", String(parseInt(start) || 0));',

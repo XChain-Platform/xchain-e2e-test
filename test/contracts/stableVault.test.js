@@ -41,6 +41,7 @@ const priceSnapshotHelper = require('../helpers/priceSnapshotHelper')
 // DEPLOY payload is capped at 8192 bytes by the encoder; the readable
 // canonical source lives in xchain-contracts/stableVault/stableVault.js.
 const STABLE_VAULT = `module.exports = {
+    meta: { name: 'Stable Vault', description: 'Mints a stable token against collateral deposited into the vault.', version: '1.0.0' },
     initialize: function (x) {
         var ct = x.getInputParam(0), st = x.getInputParam(1), cp = x.getInputParam(2),
             mr = x.getInputParam(3), lb = x.getInputParam(4), ma = x.getInputParam(5);

@@ -79,6 +79,7 @@ const MARKER_NO_MATCH = 'no-such-delivery-token-xyz123'
 // DEPLOY payload cap; the readable canonical source lives in
 // xchain-contracts/escrowDelivery/escrowDelivery.js. Behaviour is identical.
 const ESCROW_DELIVERY = `module.exports = {
+    meta: { name: 'Escrow Delivery', description: 'Holds payment in escrow until the buyer confirms delivery.', version: '1.0.0' },
     initialize: function (x) {
         var b=x.getInputParam(0), s=x.getInputParam(1), a=x.getInputParam(2),
             t=x.getInputParam(3), m=x.getInputParam(4), d=x.getInputParam(5), k=x.getInputParam(6);

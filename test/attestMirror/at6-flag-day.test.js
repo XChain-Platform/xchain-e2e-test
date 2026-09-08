@@ -114,6 +114,7 @@ const FEE_XCHAIN = '6'
 
 const CONTRACT_CODE = `
 module.exports = {
+    meta: { name: 'Mirror Flag Day Asker', description: 'Requests an attestation across the mirror flag day boundary.', version: '1.0.0' },
     ask: function(xchain) {
         var requestId = xchain.attestation.request(
             xchain.getInputParam(0),
