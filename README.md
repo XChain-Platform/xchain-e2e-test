@@ -96,6 +96,33 @@ npm run test:unit
 npm run test:regression:p0
 ```
 
+## Running the SDK suites locally
+
+`test/sdk/**` requires two packages that `package.json` declares as
+`file:./xchain-sdk` and `file:./xchain-hub`: local, gitignored vendor
+directories that a fresh checkout does not have. Without them, those suites
+fail at `require()` time with `Cannot find module 'xchain-sdk'`.
+
+The CI venue fills `./xchain-sdk` and `./xchain-hub` with real staged package
+snapshots before it runs `npm ci`. Nothing in this repo does that
+automatically on `npm test` (no `pretest` hook), because a pretest would
+silently overwrite a CI-staged snapshot with a symlink the next time CI ran
+this script by mistake. Staging is therefore a separate, opt-in step you run
+by hand:
+
+```bash
+npm run stage:siblings:check   # report state, changes nothing
+npm run stage:siblings         # symlink ../xchain-sdk and ../xchain-hub in, if empty
+npm install                    # only if node_modules/xchain-sdk or xchain-hub were stale
+```
+
+`npm run stage:siblings` symlinks the sibling `xchain-sdk` and `xchain-hub`
+checkouts (`../xchain-sdk`, `../xchain-hub`, next to this repo) into the
+vendor slots when they are absent or empty. If a directory already holds a
+staged snapshot (its own `package.json`), the script leaves it alone and
+says so; it never overwrites real content. Remove a symlink it created with
+`node scripts/stage-siblings.js --unstage`.
+
 ## Scripts
 
 | Command | Description |
@@ -121,6 +148,8 @@ npm run test:regression:p0
 | `npm run perf:gate` | CI performance gate check |
 | `npm run perf:report` | Generate performance report |
 | `npm run mutate:report` | Generate mutation testing report |
+| `npm run stage:siblings` | Symlink the sibling `xchain-sdk`/`xchain-hub` checkouts into the gitignored vendor dirs, when empty (see "Running the SDK suites locally") |
+| `npm run stage:siblings:check` | Report vendor-dir and `node_modules` link state, changes nothing |
 
 ## Test Suite
 

@@ -288,4 +288,211 @@ describe('nativeFeeHelper.warnIfSeedInvisible', () => {
         assert(/Indexer reads: undisclosed/.test(warn), warn)
         assert(/Seeded into: unknown/.test(warn), warn)
     })
+
+    // Once the seed goes upstream of the mirror, the two databases differ BY DESIGN, so
+    // the mismatch advice is a false accusation that sends an operator to "fix" a correct
+    // configuration. The unavailability itself is still real and still reported: the
+    // direct write went in too, so a missing price is the mirror leg, not the seed.
+    it('drops the database-mismatch advice when the seed went through the hub', async () => {
+        global.indexerConnector = connector({
+            prices: { available: false, error: 'no current oracle price for BTC/USD' },
+            priceSource: { hubDb: true, database: 'XChain_BTC_Regtest_Indexer' }
+        })
+        await freshHelper().warnIfSeedInvisible(
+            { database: 'XChain_BTC_Regtest_Indexer' },
+            { direct: { database: 'XChain_BTC_Regtest_Indexer' }, hub: { database: 'XChain_Hub' }, hubError: null })
+        const warn = lines.find(l => /WARN the indexer still reports no usable price/.test(l))
+        assert(warn, 'expected a warning, got: ' + JSON.stringify(lines))
+        assert(/Seeded into: hub database XChain_Hub \(upstream\) and XChain_BTC_Regtest_Indexer/.test(warn), warn)
+        assert(!/pointed at different\s+databases/.test(warn),
+            'the mismatch advice must not be repeated where the databases differ by design: ' + warn)
+        assert(/differ by design/.test(warn), warn)
+        assert(/hub_db_sync/.test(warn), warn)
+    })
+})
+
+// Replay-safety (spec D45 / row 29c). A seed written only where the indexer READS does
+// not survive that indexer: price_snapshots is a hub_db_sync FULL_REPAGE table, so a
+// `reset` rebuilds it from the hub, and _reconcileForeignPriceRounds deletes finalized
+// rows the hub never served. Seeding the hub's own table is what makes a drive's
+// native-fee blocks reproducible on replay.
+describe('nativeFeeHelper.seedGlobalPrices hub seeding', () => {
+    const SNAPSHOT_PATH = require.resolve('../../helpers/priceSnapshotHelper')
+    const TOPOLOGY_PATH = require.resolve('../../helpers/hubMirrorTopology')
+    const MARIADB_PATH  = require.resolve('mariadb')
+    const ENV_KEYS = ['HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS',
+        'HUB_SOURCE_DB_HOST', 'HUB_SOURCE_DB_PORT', 'HUB_SOURCE_DB_NAME',
+        'HUB_SOURCE_DB_USER', 'HUB_SOURCE_DB_PASS']
+
+    const topology = require(TOPOLOGY_PATH)
+    const savedEnv = {}
+    let savedSnapshotModule, savedMariadbModule, savedCoin, savedIndexerDb, savedLog
+    let events, hubConns, seeded, cleared, chainTime, lines
+
+    // One ordered log for both write paths: the hub write must land BEFORE the direct
+    // one, so a mirror re-page between them cannot purge the direct copy as a round the
+    // hub does not hold.
+    function stubSnapshots(){
+        seeded = []
+        cleared = []
+        require.cache[SNAPSHOT_PATH] = { id: SNAPSHOT_PATH, filename: SNAPSHOT_PATH, loaded: true, exports: {
+            isAvailable: async () => true,
+            latestBlockTime: async () => chainTime,
+            seedTarget: () => ({ database: 'XChain_BTC_Regtest_Indexer' }),
+            clearPair: async (pair) => { cleared.push(pair); events.push('clearPair:' + pair) },
+            seedSnapshot: async (row) => { seeded.push(row); events.push('seedSnapshot:' + row.roundNumber) }
+        }}
+    }
+
+    // Fake driver. `mode` is 'ok' or 'refuse' (a hub this process cannot reach).
+    function stubMariadb(mode){
+        hubConns = []
+        require.cache[MARIADB_PATH] = { id: MARIADB_PATH, filename: MARIADB_PATH, loaded: true, exports: {
+            createConnection: async (params) => {
+                if (mode === 'refuse') throw new Error('connection refused by the fake driver')
+                const rec = { params, queries: [], ended: false }
+                hubConns.push(rec)
+                events.push('hubConnect:' + params.database)
+                return {
+                    query: async (sql, args) => {
+                        rec.queries.push({ sql, args })
+                        events.push('hubQuery:' + (args && args[0]))
+                        return { affectedRows: 1 }
+                    },
+                    end: async () => { rec.ended = true }
+                }
+            }
+        }}
+    }
+
+    beforeEach(() => {
+        for (const k of ENV_KEYS) { savedEnv[k] = process.env[k]; delete process.env[k] }
+        savedSnapshotModule = require.cache[SNAPSHOT_PATH]
+        savedMariadbModule  = require.cache[MARIADB_PATH]
+        savedCoin = global.COIN_CODE
+        savedIndexerDb = global.indexerDatabase
+        global.COIN_CODE = 'LTC'
+        // The chain trails the wall clock, which is the regime that writes all four rows.
+        chainTime = Math.floor(Date.now() / 1000) - 2547
+        events = []
+        lines = []
+        savedLog = console.log
+        console.log = (...a) => lines.push(a.join(' '))
+        topology.resetDiscovery()
+        stubSnapshots()
+        stubMariadb('ok')
+    })
+
+    afterEach(() => {
+        console.log = savedLog
+        for (const k of ENV_KEYS) {
+            if (savedEnv[k] === undefined) delete process.env[k]
+            else process.env[k] = savedEnv[k]
+        }
+        if (savedSnapshotModule) require.cache[SNAPSHOT_PATH] = savedSnapshotModule
+        else delete require.cache[SNAPSHOT_PATH]
+        if (savedMariadbModule) require.cache[MARIADB_PATH] = savedMariadbModule
+        else delete require.cache[MARIADB_PATH]
+        global.COIN_CODE = savedCoin
+        global.indexerDatabase = savedIndexerDb
+        topology.resetDiscovery()
+        delete require.cache[HELPER_PATH]
+    })
+
+    // HUB_SOURCE_DB_NAME is the operator saying "hub_db_sync is carrying these tables,
+    // so seed upstream of it" (hubMirrorTopology's env contract).
+    function mirroredVenue(){
+        process.env.HUB_DB_HOST = 'venue-db.invalid'
+        process.env.HUB_DB_NAME = 'XChain_BTC_Regtest_Indexer'
+        process.env.HUB_SOURCE_DB_NAME = 'XChain_Hub'
+    }
+
+    it('writes the seed rows into the hub database the mirror bootstraps from', async () => {
+        mirroredVenue()
+        const helper = freshHelper()
+        assert.strictEqual(helper.hubSeedTarget().database, 'XChain_Hub')
+        await helper.seedGlobalPrices(true)
+
+        assert.strictEqual(hubConns.length, 1, 'expected exactly one hub connection')
+        const conn = hubConns[0]
+        assert.strictEqual(conn.params.database, 'XChain_Hub')
+        assert.strictEqual(conn.params.host, 'venue-db.invalid')
+        assert.strictEqual(conn.ended, true, 'the hub connection must be closed')
+
+        // Both pairs at both anchors, oldest anchor first so the fresher row carries the
+        // higher round, exactly as the direct path orders them.
+        assert.deepStrictEqual(conn.queries.map(q => q.args[0]),
+            [888100001, 888100002, 888100011, 888100012])
+        assert.deepStrictEqual(conn.queries.map(q => q.args[1]),
+            ['XCHAIN/USD', 'LTC/USD', 'XCHAIN/USD', 'LTC/USD'])
+        assert.deepStrictEqual(conn.queries.map(q => q.args[3]),
+            [chainTime, chainTime, Math.floor(Date.now() / 1000), Math.floor(Date.now() / 1000)])
+    })
+
+    it('upserts finalized rows and never deletes on the hub', async () => {
+        mirroredVenue()
+        await freshHelper().seedGlobalPrices(true)
+        for (const q of hubConns[0].queries) {
+            assert(/INSERT INTO price_snapshots/.test(q.sql), q.sql)
+            assert(/ON DUPLICATE KEY UPDATE/.test(q.sql), q.sql)
+            assert(/'finalized'/.test(q.sql), q.sql)
+            // The hub's table is the federation's authoritative price history; clearing a
+            // pair there would destroy real validator rounds.
+            assert(!/DELETE/i.test(q.sql), 'the hub path must never delete: ' + q.sql)
+        }
+    })
+
+    it('still writes the copy the running indexer reads, hub first', async () => {
+        mirroredVenue()
+        await freshHelper().seedGlobalPrices(true)
+        // The mirror carries no out-of-band hub row live (HubDbBroadcaster only fires for
+        // the hub's own writers, and price_snapshots re-pages on reconnect), so the direct
+        // write is what prices THIS run.
+        assert.deepStrictEqual(cleared, ['XCHAIN/USD', 'LTC/USD'])
+        assert.strictEqual(seeded.length, 4)
+        const firstDirect = events.findIndex(e => e.startsWith('clearPair:'))
+        const lastHub     = events.map(e => e.startsWith('hubQuery:')).lastIndexOf(true)
+        assert(lastHub >= 0 && lastHub < firstDirect,
+            'every hub write must precede the direct write: ' + JSON.stringify(events))
+    })
+
+    it('falls back to the direct write alone when no hub database is named', async () => {
+        // No HUB_SOURCE_DB_NAME: seedParams collapses onto the read target and there is
+        // no upstream to seed, which is the pre-D45 behaviour unchanged.
+        process.env.HUB_DB_HOST = 'venue-db.invalid'
+        process.env.HUB_DB_NAME = 'XChain_BTC_Regtest_Indexer'
+        const helper = freshHelper()
+        assert.strictEqual(helper.hubSeedTarget(), null)
+        await helper.seedGlobalPrices(true)
+        assert.strictEqual(hubConns.length, 0, 'no hub connection may be opened')
+        assert.deepStrictEqual(cleared, ['XCHAIN/USD', 'LTC/USD'])
+        assert.strictEqual(seeded.length, 4)
+        assert.strictEqual(helper.lastSeedReport().hub, null)
+    })
+
+    it('survives an unreachable hub: warns, seeds directly, and says the replay is not covered', async () => {
+        mirroredVenue()
+        stubMariadb('refuse')
+        const helper = freshHelper()
+        await helper.seedGlobalPrices(true)
+        assert.strictEqual(seeded.length, 4, 'the direct seed must still carry the run')
+        const report = helper.lastSeedReport()
+        assert.strictEqual(report.hub, null)
+        assert(/connection refused/.test(report.hubError), report.hubError)
+        const warn = lines.find(l => /could not seed the hub database XChain_Hub/.test(l))
+        assert(warn, 'expected a hub-seed warning, got: ' + JSON.stringify(lines))
+        assert(/reset will replay these blocks with no oracle price/.test(warn), warn)
+    })
+
+    it('records the hub target so a run can say its prices are replay-safe', async () => {
+        mirroredVenue()
+        const helper = freshHelper()
+        await helper.seedGlobalPrices(true)
+        const report = helper.lastSeedReport()
+        assert.strictEqual(report.hub.database, 'XChain_Hub')
+        assert.strictEqual(report.direct.database, 'XChain_BTC_Regtest_Indexer')
+        assert.strictEqual(report.hubError, null)
+        const log = lines.find(l => /seeded oracle prices/.test(l))
+        assert(/hub_db=XChain_Hub \(replay-safe\)/.test(log), log)
+    })
 })

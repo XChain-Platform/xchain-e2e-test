@@ -25,6 +25,7 @@
 // per-action fee computation is needed. BTC is left untouched (gas mode).
 
 const priceSnapshotHelper = require('./priceSnapshotHelper')
+const topology            = require('./hubMirrorTopology')
 
 const PLACEHOLDER = 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'
 
@@ -102,6 +103,85 @@ function resolveFeeDestination(){
         || process.env.FEE_DESTINATION || null
     return (a && a !== PLACEHOLDER) ? a : null
 }
+
+// ── Where a seed has to land to survive an indexer `reset` ───────────────────
+//
+// The direct seed writes where the indexer READS, which on a mirrored venue is the
+// local copy hub_db_sync owns. That copy is not durable state, for two independent
+// reasons, and both were measured on the chunked-deploy regtest venue:
+//   - price_snapshots is in hub_db_sync's FULL_REPAGE_TABLES, so its cursor is forced
+//     to 0 and every bootstrap re-pages the table from the hub over
+//     /hub-db/snapshot/price_snapshots. A `reset` replays from genesis against a table
+//     rebuilt from the hub, and a row that was never on the hub does not come back;
+//   - even without a reset, _reconcileForeignPriceRounds DELETES every local finalized
+//     row a complete drain did not see the hub serve, which is exactly the shape of an
+//     out-of-band seed.
+// So every native-fee action a drive produced re-parses as `no current oracle price` on
+// replay, and no replay can reproduce a live block that held one (spec D45, row 29c).
+//
+// Seeding the HUB's own price_snapshots answers both: the row lives outside the
+// indexer's database entirely, and the next bootstrap mirrors it down like any other
+// finalized round.
+//
+// It does NOT replace the direct write, and that is a measurement rather than caution.
+// The hub broadcasts new rows only from its own writers (HubDbBroadcaster is fed by
+// PriceAggregator), and the mirror re-pages price_snapshots only on a (re)connect,
+// watchdog or forced resync, so a hub-only seed is invisible to the indexer that is
+// running right now. Both writes are made, hub FIRST: hub first is what stops a re-page
+// landing between them from purging the direct copy as a foreign round.
+//
+// Which database is the hub's own is the operator's statement, never a guess:
+// HUB_SOURCE_DB_NAME, the env hubMirrorTopology already defines for exactly this
+// ("seed upstream of the mirror"). With it unset, seedParams() collapses onto the read
+// target, there is no hub path to take, and this is today's behaviour unchanged.
+function hubSeedTarget(){
+    let seed = null
+    let read = null
+    try { seed = topology.seedParams(); read = topology.readParams() } catch (e) { return null }
+    if (!seed || !read || !seed.database) return null
+    return topology.sameTarget(seed, read) ? null : seed
+}
+
+// The upsert the hub copy receives.
+//
+// Never a DELETE, unlike the direct path's clearPair: the hub's table is the
+// federation's authoritative price history, so on a venue that has a federation wiping
+// a pair there would destroy real validator rounds. The blast radius is the sentinel
+// rounds and nothing else, keyed on the table's own UNIQUE (round_number, coin_pair) so
+// a re-seed replaces its own row.
+//
+// The column list is the subset the hub and the indexer's mirror both declare
+// (xchain-hub/src/sql/price_snapshots.sql, xchain-indexer/src/sql/price_snapshots.sql),
+// so the row a bootstrap carries down is the row seeded here; the columns left out
+// (source_chain, source_action_index, push_generation) all carry table defaults that
+// mark it hub-finalized, which is what a round with no source-chain PRICE tx is.
+const HUB_SEED_SQL = `INSERT INTO price_snapshots
+    (round_number, coin_pair, price, reference_block, reference_chain,
+     block_timestamp, validator_count, consensus_round, consensus_proof, status)
+    VALUES (?, ?, ?, 0, 'BTC', ?, 1, 1, '[]', 'finalized')
+    ON DUPLICATE KEY UPDATE
+     price = VALUES(price),
+     block_timestamp = VALUES(block_timestamp),
+     status = 'finalized'`
+
+async function seedIntoHub(target, rows){
+    // Resolved at call time, so a fake driver can stand in for this without depending on
+    // the order the helper and the test load their module graphs.
+    const mariadb = require('mariadb')
+    const conn = await mariadb.createConnection(Object.assign({ connectTimeout: 5000 }, target))
+    try {
+        for (const row of rows)
+            await conn.query(HUB_SEED_SQL, [row.roundNumber, row.coinPair, row.price, row.blockTimestamp])
+    } finally {
+        if (conn && typeof conn.end === 'function') await conn.end().catch(() => {})
+    }
+}
+
+// Where the last seed actually landed: { direct, hub, hubError }. Read by
+// warnIfSeedInvisible so its diagnosis matches what was written, and exposed so a
+// caller (or a drive report) can say whether this run's prices are replay-safe.
+let _lastSeedReport = null
+function lastSeedReport(){ return _lastSeedReport }
 
 // Seed XCHAIN/USD + {COIN}/USD so the indexer can value fees. Runs on EVERY
 // chain: native-fee chains (LTC/DOGE) value the injected fee output against
@@ -219,15 +299,41 @@ async function seedGlobalPrices(force){
     // Both pairs stay spelled out at the call sites rather than hoisted into a
     // variable: an isolation guard scans this file for the clearPair set to
     // prove the seed's blast radius is still these two pairs, and it cannot
-    // resolve an indirection.
+    // resolve an indirection. (Both clearPair calls are still spelled out below.)
+    //
+    // The rows this seed writes, oldest anchor first so the fresher one carries the
+    // higher round (see the anchor note above). Built once and handed to BOTH targets,
+    // so the durable hub copy and the copy the indexer reads today cannot disagree.
+    const rows = [
+        { coinPair: 'XCHAIN/USD', price: XCHAIN_USD, blockTimestamp: chainTime, roundNumber: XCHAIN_ROUND },
+        { coinPair: global.COIN_CODE + '/USD', price: COIN_USD, blockTimestamp: chainTime, roundNumber: COIN_ROUND }
+    ]
+    if (wallTime > chainTime) {
+        rows.push({ coinPair: 'XCHAIN/USD', price: XCHAIN_USD, blockTimestamp: wallTime, roundNumber: XCHAIN_ROUND_NOW })
+        rows.push({ coinPair: global.COIN_CODE + '/USD', price: COIN_USD, blockTimestamp: wallTime, roundNumber: COIN_ROUND_NOW })
+    }
+
+    // The durable half, first (see hubSeedTarget). Non-fatal by construction: a venue
+    // whose hub database this process cannot reach must keep behaving exactly as it did,
+    // with the direct write below carrying the run.
+    const hubTarget = hubSeedTarget()
+    let hubSeeded = null
+    let hubError  = null
+    if (hubTarget) {
+        try {
+            await seedIntoHub(hubTarget, rows)
+            hubSeeded = hubTarget
+        } catch (e) {
+            hubError = (e && e.message) ? e.message : String(e)
+            console.log('nativeFeeHelper: WARN could not seed the hub database ' + hubTarget.database +
+                ' (' + hubError + '); this run is still priced by the direct seed, but an indexer ' +
+                'reset will replay these blocks with no oracle price')
+        }
+    }
+
     await priceSnapshotHelper.clearPair('XCHAIN/USD')
     await priceSnapshotHelper.clearPair(global.COIN_CODE + '/USD')
-    await priceSnapshotHelper.seedSnapshot({ coinPair: 'XCHAIN/USD', price: XCHAIN_USD, blockTimestamp: chainTime, roundNumber: XCHAIN_ROUND })
-    await priceSnapshotHelper.seedSnapshot({ coinPair: global.COIN_CODE + '/USD', price: COIN_USD, blockTimestamp: chainTime, roundNumber: COIN_ROUND })
-    if (wallTime > chainTime) {
-        await priceSnapshotHelper.seedSnapshot({ coinPair: 'XCHAIN/USD', price: XCHAIN_USD, blockTimestamp: wallTime, roundNumber: XCHAIN_ROUND_NOW })
-        await priceSnapshotHelper.seedSnapshot({ coinPair: global.COIN_CODE + '/USD', price: COIN_USD, blockTimestamp: wallTime, roundNumber: COIN_ROUND_NOW })
-    }
+    for (const row of rows) await priceSnapshotHelper.seedSnapshot(row)
     _lastSeedMs = now
     // The CHAIN anchor is what the drift check compares against: it is the row a
     // frozen or jumped chain actually reads.
@@ -236,21 +342,26 @@ async function seedGlobalPrices(force){
     // provide it, so this stays optional rather than becoming a second contract.
     const target = (typeof priceSnapshotHelper.seedTarget === 'function')
         ? priceSnapshotHelper.seedTarget() : null
+    _lastSeedReport = { direct: target || null, hub: hubSeeded, hubError: hubError }
     console.log('nativeFeeHelper: seeded oracle prices XCHAIN/USD=' + XCHAIN_USD +
         ' ' + global.COIN_CODE + '/USD=' + COIN_USD + ' (chain_time=' + chainTime +
         (wallTime > chainTime ? ', wall_time=' + wallTime : '') +
-        (target && target.database ? ', db=' + target.database : '') + ')')
+        (target && target.database ? ', db=' + target.database : '') +
+        // Named so a drive's log says whether its native-fee blocks can be replayed.
+        (hubSeeded ? ', hub_db=' + hubSeeded.database + ' (replay-safe)' : '') + ')')
     // A seed that the indexer cannot see is worse than no seed: every priced action
     // rejects `no current oracle price` while this log says the prices are in place, and
     // the two databases involved both look healthy. Confirm it once at bootstrap, where
     // the cost is one call and the answer is unambiguous.
-    if (force) await warnIfSeedInvisible(target)
+    if (force) await warnIfSeedInvisible(target, _lastSeedReport)
 }
 
 // Ask the indexer whether the seed just written is the one it prices against, and say
 // so loudly when it is not. Never throws: a venue can be mid-reorg or have a tip the
 // suite is about to advance, and a false alarm must not fail the bootstrap.
-async function warnIfSeedInvisible(target){
+// `report` is the seed's own account of where it landed (lastSeedReport); optional, so
+// an older caller passing only `target` gets exactly the diagnosis it always got.
+async function warnIfSeedInvisible(target, report){
     const c = global.indexerConnector
     if (!c || typeof c.call !== 'function') return
     let sched = null
@@ -258,15 +369,28 @@ async function warnIfSeedInvisible(target){
     if (!sched || sched.error || !sched.prices) return
     if (sched.prices.available) return
     const src = sched.priceSource
+    const hub = report && report.hub
     console.log('nativeFeeHelper: WARN the indexer still reports no usable price after seeding'
         + ' (' + (sched.prices.error || 'unavailable') + ').'
-        + ' Seeded into: ' + ((target && target.database) || 'unknown') + '.'
+        + ' Seeded into: ' + (hub
+            ? ('hub database ' + hub.database + ' (upstream) and '
+                + ((target && target.database) || 'unknown'))
+            : ((target && target.database) || 'unknown')) + '.'
         + ' Indexer reads: ' + (src
             ? (src.hubDb ? ('hub database ' + (src.database || 'unnamed')) : ('its own database '
                 + (src.database || 'unnamed')))
             : 'undisclosed (indexer predates the priceSource field)')
-        + '. If those two differ, the fixtures and the indexer are pointed at different'
-        + ' databases; check HUB_DB_HOST/HUB_DB_USER/HUB_DB_PASS reach the one the indexer names.')
+        // The mismatch advice is only true of a seed with ONE target. Once the hub path
+        // is in play the two databases differ BY DESIGN (seed upstream, read the mirror),
+        // so repeating it there sends an operator to "fix" a correct configuration, and
+        // the honest reading of an unavailable price is the opposite one: the row is
+        // durable, it is the mirror leg that has not delivered it.
+        + (hub
+            ? '. Those two differ by design here (the seed is upstream of the mirror), so this is'
+            + ' the mirror not having carried the row down rather than a database mismatch;'
+            + ' check hub_db_sync is running against HUB_API_URL.'
+            : '. If those two differ, the fixtures and the indexer are pointed at different'
+            + ' databases; check HUB_DB_HOST/HUB_DB_USER/HUB_DB_PASS reach the one the indexer names.'))
 }
 
 // Feeschedule-readiness retry budget for fee chains. On a freshly
@@ -355,4 +479,4 @@ async function getNativeFeeOutput(){
 }
 
 module.exports = { resolveFeeDestination, discoverFeeMode, seedGlobalPrices, getNativeFeeOutput,
-    warnIfSeedInvisible, FLAT_FEE_SATS }
+    warnIfSeedInvisible, hubSeedTarget, lastSeedReport, FLAT_FEE_SATS }
