@@ -2112,6 +2112,7 @@ module.exports = {
     assertBtcProofWiring,
     probePublicRollcallReads,
     assertPublicRollcallRead,
+    assertRosterStreaksClean,
     openDogeRail,
     rollcallRounds,
     electedLeaderIndex,

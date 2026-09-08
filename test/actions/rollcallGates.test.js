@@ -131,7 +131,23 @@ describe('ROLLCALL acceptance: the rules-aware attestation set (ZC7)', function 
             'getcapabilityvalidators(' + capability + ') at buried block ' + buriedBlock + ' failed: ' +
             JSON.stringify(res && res.error))
         const keys    = new Set((res.validators || []).map(v => String(v.pubkey).toLowerCase()))
-        const sources = new Set((res.validators || []).map(v => String(v.source)))
+        // getcapabilityvalidators answers {pubkey, amount} only: it carries no
+        // source, so counting `v.source` here collapsed every key into one
+        // undefined source and sized ZC7b/ZC7d as "1 source before, 1 after" on
+        // a venue holding four (measured 2026-09-08 at blocks 7605/7635). The
+        // SOURCE is what the responsible set dedupes on (D58), so it is read from
+        // getstakeweightsbycapability, the same-height, same-floor view that does
+        // carry it, joined by pubkey to the FILTERED set above.
+        const weights = await indexerConnector.call('getstakeweightsbycapability', params)
+        assert.ok(weights && !weights.error,
+            'getstakeweightsbycapability(' + capability + ') at buried block ' + buriedBlock + ' failed: ' +
+            JSON.stringify(weights && weights.error))
+        const sourceOf = new Map((weights.validators || []).map(v => [String(v.pubkey).toLowerCase(), String(v.source)]))
+        const sources  = new Set(Array.from(keys).filter(k => sourceOf.has(k)).map(k => sourceOf.get(k)))
+        assert.strictEqual(sources.size > 0, keys.size > 0,
+            'every filtered ' + capability + ' key must resolve to a staking source through the weights read; ' +
+            'keys ' + Array.from(keys).map(k => k.slice(0, 8)).join(',') + ' vs sources known for ' +
+            Array.from(sourceOf.keys()).map(k => k.slice(0, 8)).join(','))
         return { res, keys, sources }
     }
 
@@ -257,6 +273,12 @@ describe('ROLLCALL acceptance: the rules-aware attestation set (ZC7)', function 
         // sliced to REDUNDANCY, so what bounds it is the number of qualifying
         // SOURCES; http_get only accepts redundancy 1, 3 or 5, so ZC7d needs the
         // filter to take the surviving source count strictly below one of those.
+        //
+        // ZC7a leaves the BTC tip exactly at C1, and the indexer refuses a read
+        // above its tip ("block_index C1+1 not yet indexed"), so mine past the
+        // close before asking about it, the same way ZC7c does for C2. Measured
+        // 2026-09-08 on the first venue run that reached this leg.
+        await rc.mineBtcTo(ctx, C1 + 2, 'reading the capability set past the close of epoch ' + E1)
         const before = await capabilitySet('attestation', C1 + 1, httpGet.min_stake_xchain)
         sourcesBefore = before.sources.size
         const allowed = httpGet.allowed_redundancy.slice().sort((a, b) => a - b)
@@ -301,9 +323,23 @@ describe('ROLLCALL acceptance: the rules-aware attestation set (ZC7)', function 
         // rows for one key with different lists, and which one the close saw would
         // depend on row order. One publisher per key is what makes the verdict
         // deterministic.
+        //
+        // BEFORE the rank-ladder climb, never after it. The close counts a DOGE row
+        // only if its block is stamped no later than the BTC window-end block, and
+        // the climb mines BTC up to that block whenever a high rank has to unlock,
+        // which is exactly what silencing a hub forces on the survivors. Measured
+        // 2026-09-08 at epoch 7230: the cut was stamped 05:26:52 UTC, the short-list
+        // action parsed valid at 05:27:23, and the close read the hub as absent
+        // (no_row) rather than present with a short list. In beforePublish the BTC
+        // tip sits at about E + 6 and the cut is six blocks away.
+        const windowEnd2 = Number(rc.rca().rollcallWindowEndHeight(E2, ctx.network))
         const row = await rc.driveEpoch(ctx, E2, {
             silentHubs: shortHubs,
-            afterPublish: async () => {
+            beforePublish: async () => {
+                const tipNow = await ctx.btcTip()
+                assert.ok(tipNow < windowEnd2 - 1,
+                    'epoch ' + E2 + ': BTC tip ' + tipNow + ' is already at the window end ' + windowEnd2 +
+                    ', so a short-list publish now would stamp after the cut and read as an absence')
                 const bh = await indexerConnector.call('getblockhashes', { block_index: E2 })
                 const ledgerHash = String(bh.ledger_hash).toLowerCase()
                 for (const i of shortHubs){
@@ -411,6 +447,14 @@ describe('ROLLCALL acceptance: the rules-aware attestation set (ZC7)', function 
 
     it('ZC7d: with fewer surviving sources than REDUNDANCY the emitting EXECUTE reverts with the rules-aware literal', async function () {
         assert.ok(redundancy, 'ZC7d emits the redundancy ZC7b sized; this suite runs in file order')
+
+        // The filter reads the most recent ROLLED epoch whose close is at or below
+        // the request's BURIED block (D92), and ZC7c leaves the tip at C2 + 2, so a
+        // request mined now would be judged on E1's full lists and the pre-read at
+        // tip - 6 would say the same: measured 2026-09-08, "1 qualifying source(s)
+        // survive against redundancy 1" with ZC7c green a moment earlier. Bury E2's
+        // close first so both the pre-read and the request block see its rows.
+        await rc.mineBtcTo(ctx, C2 + 7, 'burying the close of epoch ' + E2 + ' so a request block reads its gates rows')
 
         const tip = await ctx.btcTip()
         const after = await capabilitySet('attestation', tip - 6, httpGet.min_stake_xchain)
