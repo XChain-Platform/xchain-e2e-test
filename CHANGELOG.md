@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `.env.example` documents the hub database reach (`HUB_DB_*`) and `HUB_SOURCE_DB_NAME`, the hub's own database the fee helper seeds so oracle prices survive an indexer reset.
 - A venue tool (`venue:age-rollcall-absences`) that drives ROLLED epochs with every roster source present until a stale roll-call absence leaves the streak window, so the roll-call suites can run again without a chain reset.
 - Drills for the zero-confirmation attestation flip (serve at the tip, re-mine, headroom, applier fall-through, flag day) with a mirror-row injector, and a roll-call gates drill that publishes v1 roll calls and checks the rules-aware attestation set.
 - `npm run stage:siblings` symlinks the sibling `xchain-sdk`/`xchain-hub` checkouts into the gitignored vendor dirs when they are empty, so `test/sdk/**` loads without a hand-set `NODE_PATH`; opt-in only, since CI stages real snapshots into the same dirs.
