@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `npm run venue:seed-attestation` seeds the attestation roster on a reset regtest chain, staking only keys the harness can derive and reserving the roll-call roster it must never spend.
 
 ### Changed
+- The staged SDK snapshot records 0.15.3, the version the sibling carries since its hotfix.
 - The staged SDK snapshot records 0.15.1, the version the sibling carries since its hotfix.
 - The staged hub snapshot records 0.15.2, the version the sibling carries since its hotfix.
 
