@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Native-fee price seeding also writes the hub's own `price_snapshots` when `HUB_SOURCE_DB_NAME` names it, so seeded oracle prices survive an indexer reset and a replay can reproduce a native-fee block.
 
 ### Fixed
+- The hub-topology coherence guard keys on whether the indexer disclosed a hub database, not on the read target equalling the indexer database, so the replay-safe price seed works on a regtest stack whose mirror lands in the indexer database.
 - The roll-call venue refuses epochs the DOGE side already holds rows for above the BTC tip (a BTC-only reset leaves the old chain's rows in place), and the publish-path drills read a published roll call by field name so v1 wires are not misread at v0 offsets.
 - The roll-call gates drill publishes its short-list actions before the rank-ladder climb, reads the capability set only at indexed heights, and counts staking sources through the stake-weights read instead of a field the validators read never carried.
 - Drills for order-independent chunked DEPLOY assembly: an out-of-order group in one block, pieces across blocks in reverse, duplicate assemblers and carriers, and a rollback of the completing carrier followed by a reordered replay.

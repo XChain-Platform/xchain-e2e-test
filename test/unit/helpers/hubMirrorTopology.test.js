@@ -279,6 +279,32 @@ describe('hubMirrorTopology', () => {
             assert.strictEqual(t.seedsThroughMirror(), false)
         })
 
+        // The ordinary regtest stack: the indexer HAS a hub database and it is its own
+        // database (hub_db_sync lands the mirror tables there). Seeding upstream of that
+        // mirror is the replay-safe fee seed, so the coherence guard must key on the
+        // disclosure, not on the read target equalling the local one. Measured 2026-09-08:
+        // keyed on equality it refused every seed on that stack.
+        it('accepts a hub source when the indexer\'s hub database is its own database', async () => {
+            process.env.HUB_DB_HOST = 'mariadb'
+            process.env.HUB_DB_NAME = LOCAL.dbName
+            process.env.HUB_SOURCE_DB_NAME = 'XChain_Hub'
+            const t = freshTopology()
+            await t.discoverReadParams(connectorSaying({ hubDb: true, database: LOCAL.dbName }), ANY)
+            assert.strictEqual(t.readParams().database, LOCAL.dbName)
+            assert.doesNotThrow(() => t.assertCoherent())
+            assert.strictEqual(t.seedsThroughMirror(), true)
+        })
+
+        it('still rejects a hub source when the indexer says it has no hub database, whatever the env claims', async () => {
+            process.env.HUB_DB_HOST = 'mariadb'
+            process.env.HUB_DB_NAME = 'XChain_Hub_Mirror'
+            process.env.HUB_SOURCE_DB_NAME = 'XChain_Hub'
+            const t = freshTopology()
+            assert.doesNotThrow(() => t.assertCoherent(), 'env model alone is coherent')
+            await t.discoverReadParams(connectorSaying({ hubDb: false, database: LOCAL.dbName }), ANY)
+            assert.throws(() => t.assertCoherent(), /HUB_SOURCE_DB_NAME is set but HUB_DB_HOST\/HUB_DB_NAME are not/)
+        })
+
         it('falls back to HUB_DB_NAME when the indexer withholds the name (mainnet)', async () => {
             process.env.HUB_DB_HOST = 'mariadb'
             process.env.HUB_DB_NAME = 'XChain_Hub'
