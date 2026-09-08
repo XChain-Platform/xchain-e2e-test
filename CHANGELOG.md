@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Drills for the zero-confirmation attestation flip (serve at the tip, re-mine, headroom, applier fall-through, flag day) with a mirror-row injector, and a roll-call gates drill that publishes v1 roll calls and checks the rules-aware attestation set.
 
 ### Fixed
+- The roll-call venue refuses epochs the DOGE side already holds rows for above the BTC tip (a BTC-only reset leaves the old chain's rows in place), and the publish-path drills read a published roll call by field name so v1 wires are not misread at v0 offsets.
 - The roll-call gates drill publishes its short-list actions before the rank-ladder climb, reads the capability set only at indexed heights, and counts staking sources through the stake-weights read instead of a field the validators read never carried.
 - Drills for order-independent chunked DEPLOY assembly: an out-of-order group in one block, pieces across blocks in reverse, duplicate assemblers and carriers, and a rollback of the completing carrier followed by a reordered replay.
 - `npm run venue:seed-attestation` seeds the attestation roster on a reset regtest chain, staking only keys the harness can derive and reserving the roll-call roster it must never spend.

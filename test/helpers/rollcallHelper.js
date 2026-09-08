@@ -422,6 +422,55 @@ function buildWire(epochHeight, ledgerHash, publisher, pairs, gates){
     return parts.join('|')
 }
 
+// Read a published wire by NAME, never by position. v0 and v1 differ by one
+// field (GATES sits between PUBLISHER and SIG_COUNT), so a suite that indexed
+// the split payload with v0 offsets read GATES as SIG_COUNT and the count as
+// the first pubkey on every gates-armed venue.
+function parseWire(payload){
+    const p = String(payload).split('|')
+    assert.strictEqual(p[0], 'ROLLCALL', 'not a ROLLCALL wire: ' + String(payload).slice(0, 40))
+    const version = Number(p[1])
+    assert.ok(version === 0 || version === 1, 'unknown ROLLCALL wire version ' + p[1])
+    const v1 = version === 1
+    const gates = v1 ? p[5] : null
+    const countAt = v1 ? 6 : 5
+    const sigCount = Number(p[countAt])
+    const pairs = []
+    for (let i = countAt + 1; i + 1 < p.length; i += 2)
+        pairs.push({ pubkey: String(p[i]).toLowerCase(), sig: String(p[i + 1]).toLowerCase() })
+    assert.strictEqual(pairs.length, sigCount,
+        'ROLLCALL v' + version + ' wire declares SIG_COUNT ' + sigCount + ' but carries ' + pairs.length + ' pair(s)')
+    return { version, epochHeight: Number(p[2]), ledgerHash: String(p[3]).toLowerCase(),
+             publisher: String(p[4]).toLowerCase(), gates, sigCount, pairs }
+}
+
+// A venue whose BTC chain was reset while DOGE was not still carries the OLD
+// chain's ROLLCALL rows keyed by the same epoch heights, and the peer read is
+// first-seen per (epoch, pubkey): at such a height a fresh signature is
+// shadowed and dropped on ledger_hash, so the epoch stays unrolled (silently
+// wasting a drive) or, with only some keys shadowed, ROLLS with a bogus
+// absence on a SIGNING key that the K-streak then counts. None of the epochs a
+// suite is about to drive has happened on this chain yet, so ANY row at those
+// heights is foreign. Measured 2026-09-08: 44 such heights after a BTC-only
+// reset, epoch 4470 dropped all three engines. The remedy is to mine the BTC
+// chain past the last such height, which is why this fails loud instead of
+// skipping: a skipped epoch reads as a slow drive, not as a venue fact.
+async function assertEpochsUnshadowed(ctx, epochs){
+    const keys = ctx.roster.map(r => r.pubkey)
+    const shadowed = []
+    for (const E of epochs){
+        const have = await onChainSigners(ctx, E, keys)
+        if (have.size) shadowed.push({ epoch: E, keys: Array.from(have).map(k => k.slice(0, 8)) })
+    }
+    assert.deepStrictEqual(shadowed, [],
+        'ROLLCALL precondition FAILED: the DOGE side already holds signer rows for epoch(s) the BTC chain has not ' +
+        'reached: ' + shadowed.map(s => s.epoch + ' (' + s.keys.join(',') + ')').join(', ') + '. These are rows from ' +
+        'a pre-reset chain; a fresh signature from the same key would be shadowed (first-seen per epoch and pubkey) ' +
+        'and dropped on ledger_hash, so these epochs cannot roll cleanly. Mine the BTC chain past the last such ' +
+        'height (tmp/zc-probe/probe-doge-legacy-epochs.js lists them) or reset the DOGE chain too, then re-run.')
+    return epochs
+}
+
 // Sign the canonical with a raw 32-byte seed. Node's own Ed25519, so this helper
 // carries no dependency on xchain-hub being resolvable.
 function signCanonical(seedHex, canonicalString){
@@ -1370,6 +1419,10 @@ async function bringUpVenue(opts){
     ctx.publicReads = await probePublicRollcallReads(indexerConnector)
     ctx.streaks = await assertRosterStreaksClean(ctx, o.allowDirtyStreaks === true)
 
+    // The next few epochs must be unshadowed on the DOGE side (see the helper);
+    // four covers the longest single-suite drive plus the age-out tool.
+    await assertEpochsUnshadowed(ctx, epochsAfter(tip + 6, ctx.network, o.unshadowedEpochs || 4))
+
     // Optional deterministic source addresses. When the operator seeded the
     // federation from this mnemonic, the harness holds the sources' keys, which
     // is what lets AT10 drive a real COLLECT rather than only asserting the
@@ -2113,6 +2166,8 @@ module.exports = {
     probePublicRollcallReads,
     assertPublicRollcallRead,
     assertRosterStreaksClean,
+    assertEpochsUnshadowed,
+    parseWire,
     openDogeRail,
     rollcallRounds,
     electedLeaderIndex,

@@ -111,24 +111,9 @@ describe('VENUE TOOL: age stale roll-call absences out of the streak window', fu
         console.log('    [age] ' + prior + ' source(s) dirty (' + (ctx.streaks.dirty || []).join(', ') + '); driving ' +
                     lookback + ' rolled epoch(s) with all ' + ctx.roster.length + ' sources present: ' + epochs.join(', '))
 
-        // A venue whose BTC chain was reset while DOGE was not still carries the
-        // OLD chain's ROLLCALL rows, keyed by the same epoch heights. The peer read
-        // is first-seen per (epoch, pubkey), so at such a height a fresh signature
-        // is shadowed by the stale row and dropped on ledger_hash: the epoch either
-        // stays unrolled (ages nothing) or, worse, ROLLS with a bogus absence on a
-        // SIGNING key. Measured 2026-09-08 at epoch 4470 (three v0 rows from DOGE
-        // blocks 2526-2533 shadowed the three engines). None of the chosen epochs
-        // has happened on this chain yet, so ANY row at those heights is foreign.
-        const keys = ctx.roster.map(r => r.pubkey)
-        for (const E of epochs){
-            const have = await rc.onChainSigners(ctx, E, keys)
-            assert.strictEqual(have.size, 0,
-                'epoch ' + E + ' already carries ' + have.size + ' ROLLCALL signer row(s) on the DOGE side (' +
-                Array.from(have).map(k => k.slice(0, 8)).join(', ') + ') although the BTC chain has not reached it: ' +
-                'rows from a pre-reset chain. A fresh signature from the same key would be shadowed and dropped, so ' +
-                'this epoch cannot roll cleanly. Mine the BTC chain past the last such height first ' +
-                '(tmp/zc-probe/probe-doge-legacy-epochs.js lists them) and re-run.')
-        }
+        // bringUpVenue already checked the next four epochs; this run's own choice
+        // is checked again in case the level-with-node wait moved the tip.
+        await rc.assertEpochsUnshadowed(ctx, epochs)
     })
 
     after(async function () { await rc.tearDownVenue(ctx) })
