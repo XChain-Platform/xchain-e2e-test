@@ -4,8 +4,8 @@
 # XChain Platform End-to-End Test Suite
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.15.0-blue" alt="Version">
-  <img src="https://img.shields.io/badge/tests-2%2C598%2B%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/version-0.16.0-blue" alt="Version">
+  <img src="https://img.shields.io/badge/tests-2%2C680%2B%20passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/node-%3E%3D22-green" alt="Node">
   <img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue" alt="License">
 </p>
@@ -127,12 +127,12 @@ says so; it never overwrites real content. Remove a symlink it created with
 
 | Command | Description |
 |---|---|
-| `npm test` | Full action test suite (27 ACTION types, `--timeout 0`, requires live stack, 301 tests) |
-| `npm run test:unit` | Unit tests (1,153 tests, no services required) |
+| `npm test` | Full action test suite (27 ACTION types, `--timeout 0`, requires live stack, 305 tests) |
+| `npm run test:unit` | Unit tests (1,215 tests, no services required) |
 | `npm run test:integration` | Integration tests (260 tests: 117 stubbed I/O + 142 live) |
 | `npm run test:e2e` | E2E meta-tests (38 tests, validates suite against live services) |
 | `npm run test:smoke` | Smoke tests (18 tests, quick bootstrap and connectivity checks) |
-| `npm run test:boundary` | Boundary tests (144 tests, edge cases and limits) |
+| `npm run test:boundary` | Boundary tests (145 tests, edge cases and limits) |
 | `npm run test:fuzz` | Fuzz tests (170 tests, property-based via fast-check) |
 | `npm run test:fuzz:quick` | Quick fuzz (30s timeout, 170 tests) |
 | `npm run test:chaos` | Chaos engineering tests (80 tests, failure injection) |
@@ -141,7 +141,7 @@ says so; it never overwrites real content. Remove a symlink it created with
 | `npm run test:regression:p0` | Regression P0: critical gate (136 tests, < 500ms) |
 | `npm run test:regression:p0p1` | Regression P0+P1: merge gate (156 tests, < 500ms) |
 | `npm run test:perf` | Performance tests with custom reporter (18 tests) |
-| `npm run test:perf:actions` | Performance-instrumented action tests (301 tests) |
+| `npm run test:perf:actions` | Performance-instrumented action tests (305 tests) |
 | `npm run test:perf:e2e` | Performance-instrumented E2E tests (38 tests) |
 | `npm run test:mutate` | Mutation testing, Phase 1 (unit tests only) |
 | `npm run test:mutate:integration` | Mutation testing, Phase 2 (unit + stubbed integration; the Docker-backed live suites are excluded so the score is host-independent) |
