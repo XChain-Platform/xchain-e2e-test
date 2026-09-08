@@ -66,9 +66,16 @@
  *      window with generateblock(payout, [rawhex...]) one block per original block.
  *      That takes raw hex and ignores the mempool, so it re-injects and orders in one
  *      step. What this proves is the real invariant: a reorg that preserves transaction
- *      order cannot change WHAT gets built, only WHERE. Reordering is a different event
- *      (the assembler is then legitimately invalid and the deployer must re-send it),
- *      and asserting determinism across it would be asserting something untrue.
+ *      order cannot change WHAT gets built, only WHERE.
+ *
+ *      REORDERING IS THE OTHER CASE, and it is the one DEPLOY_DEFERRED_ASSEMBLY
+ *      exists for. PRE-activation an assembler a reorg pushed ahead of its carriers
+ *      is legitimately invalid and the deployer must re-send it, which is why this
+ *      drill preserves order rather than asserting determinism across a reorder.
+ *      POST-activation the group deploys at whichever piece lands LAST, so the same
+ *      reordered window rebuilds the same contract at a different action_index -
+ *      that is chunkedDeployDeferred.sdk.test.js (AT5), not this drill, which keeps
+ *      pinning the order-preserving invariant on both sides of the flag day.
  *   c) IDENTITY. The source carries a per-run marker, so the code_hash - and therefore
  *      the deploy_chunks group this drill resolves - belongs to THIS run. The source
  *      was previously fixed, so on any stack that had run the drill before,
@@ -116,6 +123,7 @@
 const { expect } = require('chai');
 const cryptoHelper = require('../cryptoHelper');
 const { makeSdk, submit, fundedGasAddress, mine, submitOpts, uniqueTick } = require('./sdkHelper');
+const { snapshotWindow, replayWindowInOrder } = require('./helpers/rawHexBlocks');
 const { chunkHelper } = require('xchain-sdk');
 
 // A contract too large for a single DEPLOY: a ~7 KB string literal pads the source
@@ -306,25 +314,9 @@ describe('[sdk] chunked DEPLOY reorg drill (orphaned chunk -> assembled contract
         // Snapshot every transaction about to be orphaned, PER BLOCK and in the exact
         // position it occupies, so leg 3 can lay the same window down again - see reorg
         // contract (b). Read while the blocks are still connected.
-        orphanedTxs    = [];
-        orphanedBlocks = [];
-        for (let h = firstChunkBlock; h <= tipBefore; h++) {
-            const block = await node.getBlock(await node.getBlockHash(h), 1);
-            const txs   = [];
-            for (let j = 1; j < block.tx.length; j++) { // j=0 is the coinbase (never re-injectable)
-                const txid = block.tx[j];
-                try {
-                    const entry = { txid, height: h, hex: await node.getTransactionHex(txid) };
-                    txs.push(entry);
-                    orphanedTxs.push(entry);
-                } catch (e) {
-                    // No raw hex means this block cannot be reproduced, and an out-of-order
-                    // rebuild is exactly the failure mode this drill exists to rule out.
-                    throw new Error('cannot snapshot orphaned tx ' + txid + ' at height ' + h + ': ' + e.message);
-                }
-            }
-            orphanedBlocks.push({ height: h, txs });
-        }
+        const snapshot = await snapshotWindow(node, firstChunkBlock, tipBefore);
+        orphanedTxs    = snapshot.txs;
+        orphanedBlocks = snapshot.blocks;
         // A two-phase (P2SH/P2WSH) action's funding tx can land in an earlier block than its
         // reveal, in which case it is below the fork and survives; only what is actually
         // orphaned has to come back. Every carrier and the assembler contribute their reveal.
@@ -375,51 +367,14 @@ describe('[sdk] chunked DEPLOY reorg drill (orphaned chunk -> assembled contract
         // placed just the same. Evict and place are not atomic against an outside miner,
         // so the pair is retried; each attempt verifies every tx landed in the block the
         // drill built for it.
-        const REPLAY_ATTEMPTS = 4;
-        let replayed = false, lastReplayError = null;
-
-        for (let attempt = 1; attempt <= REPLAY_ATTEMPTS && !replayed; attempt++) {
-            // Evict, lowest first, until nothing of the window is confirmed. Bounded: each
-            // pass strictly lowers the tip, and the depth guard keeps it inside the
-            // utxo-tracker's recovery window (contract (a)).
-            for (let pass = 0; pass < 10; pass++) {
-                let lowest = null;
-                for (const tx of orphanedTxs) {
-                    const v = await node.getTransaction(tx.txid);
-                    if (!v || !v.blockhash || Number(v.confirmations || 0) < 1) continue;
-                    const h = Number((await node.getBlock(v.blockhash, 1)).height);
-                    if (lowest === null || h < lowest.height) lowest = { height: h, hash: v.blockhash };
-                }
-                if (!lowest) break;
-                expect(await node.getBlockCount() - lowest.height + 1,
-                    'evicting the re-mined window stays inside ORPHAN_DEPTH_LIMIT').to.be.at.most(ORPHAN_DEPTH_LIMIT);
-                console.log('    [chunk-reorg] window partly re-mined at height ' + lowest.height +
-                            ' by something else on this venue; evicting it');
-                await node.invalidateBlock(lowest.hash);
-            }
-
-            // Place the window.
-            try {
-                const built = [];
-                for (const b of orphanedBlocks) built.push(await node.generateBlock(payout, b.txs.map(t => t.hex)));
-
-                const misplaced = [];
-                for (let i = 0; i < orphanedBlocks.length; i++) {
-                    const want = built[i] && built[i].hash;
-                    for (const tx of orphanedBlocks[i].txs) {
-                        const v = await node.getTransaction(tx.txid);
-                        if (!v || v.blockhash !== want) misplaced.push(tx.txid.slice(0, 12));
-                    }
-                }
-                if (misplaced.length) throw new Error('replayed txs not in the blocks built for them: ' + misplaced.join(','));
-                replayed = true;
-            } catch (e) {
-                lastReplayError = e;
-                console.log('    [chunk-reorg] replay attempt ' + attempt + ' failed: ' + e.message);
-            }
-        }
-        expect(replayed, 'orphaned window replayed in original order' +
-            (lastReplayError ? ' (last error: ' + lastReplayError.message + ')' : '')).to.equal(true);
+        await replayWindowInOrder(node, {
+            payout,
+            blocks:     orphanedBlocks,
+            txs:        orphanedTxs,
+            depthLimit: ORPHAN_DEPTH_LIMIT,
+            attempts:   4,
+            log:        (msg) => console.log('    [chunk-reorg] ' + msg),
+        });
         console.log('    [chunk-reorg] replayed ' + orphanedBlocks.length + ' block(s) / ' +
                     orphanedTxs.length + ' txs in original order; tip=' + (await node.getBlockCount()));
 

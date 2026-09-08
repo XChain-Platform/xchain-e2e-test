@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-09-08
+
+### Added
+- A venue tool (`venue:age-rollcall-absences`) that drives ROLLED epochs with every roster source present until a stale roll-call absence leaves the streak window, so the roll-call suites can run again without a chain reset.
+- Drills for the zero-confirmation attestation flip (serve at the tip, re-mine, headroom, applier fall-through, flag day) with a mirror-row injector, and a roll-call gates drill that publishes v1 roll calls and checks the rules-aware attestation set.
+- `npm run stage:siblings` symlinks the sibling `xchain-sdk`/`xchain-hub` checkouts into the gitignored vendor dirs when they are empty, so `test/sdk/**` loads without a hand-set `NODE_PATH`; opt-in only, since CI stages real snapshots into the same dirs.
+- Native-fee price seeding also writes the hub's own `price_snapshots` when `HUB_SOURCE_DB_NAME` names it, so seeded oracle prices survive an indexer reset and a replay can reproduce a native-fee block.
+
+### Fixed
+- The roll-call venue refuses epochs the DOGE side already holds rows for above the BTC tip (a BTC-only reset leaves the old chain's rows in place), and the publish-path drills read a published roll call by field name so v1 wires are not misread at v0 offsets.
+- The roll-call gates drill publishes its short-list actions before the rank-ladder climb, reads the capability set only at indexed heights, and counts staking sources through the stake-weights read instead of a field the validators read never carried.
+- Drills for order-independent chunked DEPLOY assembly: an out-of-order group in one block, pieces across blocks in reverse, duplicate assemblers and carriers, and a rollback of the completing carrier followed by a reordered replay.
+- `npm run venue:seed-attestation` seeds the attestation roster on a reset regtest chain, staking only keys the harness can derive and reserving the roll-call roster it must never spend.
+
+### Changed
+- The staged hub and SDK snapshots record 0.16.0, the train both siblings ship in.
+- The staged SDK snapshot records 0.15.3, the version the sibling carries since its hotfix.
+- The staged SDK snapshot records 0.15.1, the version the sibling carries since its hotfix.
+- The staged hub snapshot records 0.15.2, the version the sibling carries since its hotfix.
+
 ## [0.15.0] - 2026-09-07
 
 ### Added

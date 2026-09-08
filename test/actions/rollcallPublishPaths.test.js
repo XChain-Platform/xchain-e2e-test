@@ -206,10 +206,12 @@ describe('ROLLCALL acceptance: sweeper, self-publish and the below-threshold epo
         assert.strictEqual(ctx.publishedWires.length, wiresBefore + 1,
             'the leader must land exactly one ROLLCALL for epoch ' + EA)
 
-        const leaderWire = ctx.publishedWires[ctx.publishedWires.length - 1].payload.split('|')
-        assert.strictEqual(Number(leaderWire[5]), 2,
+        // Read by field name: a gates-armed venue publishes v1, whose GATES field
+        // sits where v0 keeps SIG_COUNT, so positional offsets misread it.
+        const leaderWire = rc.parseWire(ctx.publishedWires[ctx.publishedWires.length - 1].payload)
+        assert.strictEqual(leaderWire.sigCount, 2,
             'the leader\'s action must carry the two signatures it had, not the third it never saw; SIG_COUNT=' +
-            leaderWire[5])
+            leaderWire.sigCount)
         // WAIT for the leader's action to be on chain, do not mine a fixed few
         // blocks and hope. The sweeper's whole job is to publish only what is
         // MISSING, and _maybePublish decides that by asking the DOGE side what it
@@ -254,13 +256,13 @@ describe('ROLLCALL acceptance: sweeper, self-publish and the below-threshold epo
         assert.strictEqual(ctx.publishedWires.length, wiresBefore + 2,
             'the sweeper must land a second ROLLCALL for epoch ' + EA)
 
-        const sweepWire = ctx.publishedWires[ctx.publishedWires.length - 1].payload.split('|')
-        assert.strictEqual(Number(sweepWire[5]), 1,
+        const sweepWire = rc.parseWire(ctx.publishedWires[ctx.publishedWires.length - 1].payload)
+        assert.strictEqual(sweepWire.sigCount, 1,
             'a sweeper publishes ONLY what is missing: _maybePublish filters out every pair already on chain, so ' +
-            'SIG_COUNT must be 1, got ' + sweepWire[5])
-        assert.strictEqual(String(sweepWire[6]).toLowerCase(), ctx.roster[OMITTED_HUB].pubkey,
+            'SIG_COUNT must be 1, got ' + sweepWire.sigCount)
+        assert.strictEqual(sweepWire.pairs[0].pubkey, ctx.roster[OMITTED_HUB].pubkey,
             'the swept pair must be the omitted hub\'s')
-        assert.strictEqual(String(sweepWire[4]).toLowerCase(), ctx.roster[sweeperIdx].pubkey,
+        assert.strictEqual(sweepWire.publisher, ctx.roster[sweeperIdx].pubkey,
             'PUBLISHER names the sweeper, not the leader: the chain pays only the ELECTED leader, so the field is ' +
             'a claim the close checks rather than a race anyone can win')
 
@@ -322,10 +324,10 @@ describe('ROLLCALL acceptance: sweeper, self-publish and the below-threshold epo
         ctx.rounds[leaderIdx].publishDelayBlocks = 0
         await tickOne(leaderIdx)
         ctx.rounds[leaderIdx].publishDelayBlocks = NEVER
-        const leaderWire = ctx.publishedWires[ctx.publishedWires.length - 1].payload.split('|')
-        assert.strictEqual(Number(leaderWire[5]), 2,
+        const leaderWire = rc.parseWire(ctx.publishedWires[ctx.publishedWires.length - 1].payload)
+        assert.strictEqual(leaderWire.sigCount, 2,
             'the leader\'s action must carry both running hubs\' signatures, or the epoch cannot roll on the ' +
-            'self-publish alone; SIG_COUNT=' + leaderWire[5])
+            'self-publish alone; SIG_COUNT=' + leaderWire.sigCount)
         // The leader's action must be ON CHAIN before the omitted hub decides to
         // self-publish: _maybeSelfPublish asks the DOGE side whether its own
         // signature is already there, and an unresolved read publishes anyway.

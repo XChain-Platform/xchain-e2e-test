@@ -28,8 +28,8 @@
  * stakeHelper's two-phase P2SH STAKE) reads the globals that
  * test/initialCheck.test.js installs. Re-deriving that bootstrap in a
  * standalone script would give the venue a second, subtly different client
- * of the same chain, which is exactly the divergence
- * claude/scripts/regtest-gas-bootstrap.js's header warns about.
+ * of the same chain, which is exactly the divergence the regtest
+ * gas-bootstrap script's header warns about.
  *
  * WHAT IT SEEDS, and why these numbers.
  *
