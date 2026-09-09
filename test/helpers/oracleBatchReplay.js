@@ -441,6 +441,13 @@ class OracleBatchReplayNode {
      *                            documents it as test tunability; see the note on
      *                            `_startIndexer` for what setting it trades away, and
      *                            NEVER give two nodes in one comparison different values.
+     * @param opts.liveChain      the live-chain endpoints, supplied instead of discovered.
+     *                            Same shape `_resolveLiveChain` returns; see there for why
+     *                            a host may have to supply them and what is validated.
+     * @param opts.onLog          fn(which, line) called for every stdout/stderr line the
+     *                            hub and indexer emit, so a long-running caller can keep
+     *                            its own history of a line class (the price barrier's
+     *                            deferrals, say) instead of racing the LOG_TAIL_LINES ring.
      */
     constructor(opts) {
         opts = opts || {};
@@ -450,6 +457,8 @@ class OracleBatchReplayNode {
         this.basePort = opts.basePort || 61000;
         this.repoRoot = opts.repoRoot || path.resolve(__dirname, '../../..');
         this.priceGraceS = opts.priceGraceS === undefined ? null : opts.priceGraceS;
+        this.liveChain   = opts.liveChain || null;
+        this._onLog      = typeof opts.onLog === 'function' ? opts.onLog : null;
 
         // Why the node could not be built, when it could not be. Non-null means the
         // caller should SKIP: a node that never booted proves nothing either way.
@@ -631,6 +640,17 @@ class OracleBatchReplayNode {
     // A query(sql, args) against the Bitcoin oracle's own database, opened once and
     // pinned to that schema so the row helpers never have to name it.
     async _btcOracleQuery() {
+        // Only a drill that publishes through oracleBatchVenue seeds a signer set
+        // into the oracle, and only such a drill can name the oracle's database. A
+        // node whose Bitcoin view is a REAL federation's indexer (the live-chain
+        // override case) reads a real stake and seeds nothing, so reaching here
+        // with no database means a seed was attempted against an oracle this node
+        // has no write path to; say that rather than dying inside the driver.
+        if (!this._live.btcOracle.db) {
+            throw new Error('oracleBatchReplay[' + this.label + ']: this node\'s Bitcoin capability oracle was ' +
+                'given no database, so a `price` capability seed cannot be applied to it. Only a drill that ' +
+                'publishes its own federation through oracleBatchVenue needs that seed.');
+        }
         if (!this._btcOracleConn) {
             this._btcOracleConn = await connectTo(this._live.btcOracle.db);
             await this._btcOracleConn.query('USE `' + ident(this._live.btcOracle.db.name, 'database name') + '`');
@@ -687,6 +707,16 @@ class OracleBatchReplayNode {
     // See readFeeCoordinates for why the set has to come from a node with a
     // complete price history rather than from either side of the comparison.
     async liveChainFeeCoordinates(opts) {
+        // The ONE reader of `liveIndexer`, which is why the field is optional: a
+        // cross-node comparison (AT2) cannot run without a standing node to take
+        // the fee-bearing coordinate set from, while a single-node observation
+        // (the barrier drill) never asks. Refusing here names which of the two
+        // this node was built for, instead of failing as a null host in the driver.
+        if (!this._live || !this._live.liveIndexer) {
+            throw new Error('oracleBatchReplay[' + this.label + ']: this node was built with a live-chain override ' +
+                'that names no `liveIndexer`, so the standing chain\'s fee-bearing coordinates cannot be read. ' +
+                'A cross-node verdict comparison needs them; a single-node barrier observation does not.');
+        }
         if (!this._liveIndexerConn) this._liveIndexerConn = await connectTo(this._live.liveIndexer);
         return readFeeCoordinates(this._liveIndexerConn, this._live.liveIndexer.name, opts);
     }
@@ -747,7 +777,19 @@ class OracleBatchReplayNode {
     //
     // Endpoints come from the hub the standing stack already serves, exactly as
     // chainRail does, so no credential is written to a file or a command line.
+    //
+    // WHEN A CALLER HAS TO SUPPLY THEM INSTEAD (`opts.liveChain`). The discovery
+    // below is one auth-gated read: `getAllConfig` is a sensitive hub call, and a
+    // host whose standing hub carries no key (a shared CI host's may not) can answer
+    // nothing, so a node could not be built there at all. The override is the same
+    // shape this method returns, so nothing downstream can tell the two apart, and
+    // it is VALIDATED rather than trusted: a half-filled override otherwise
+    // surfaces as an indexer that boots and then indexes nothing, hours later.
+    // A caller sources it from its own process environment, which keeps every
+    // credential out of a file, a command line and this rig's log.
     async _resolveLiveChain() {
+        if (this.liveChain) return this._validateLiveChain(this.liveChain);
+
         let cfg = null;
         try {
             const hub = new XChainHubConnector(XChainHubConnector.parseEndpoints());
@@ -780,6 +822,54 @@ class OracleBatchReplayNode {
             btcOracle: this._resolveBtcOracle(cfg, dbHost, dbPort),
             node: svc['node'] || {},
             tracker: svc['xchain-utxo-tracker'] || {}
+        };
+    }
+
+    /**
+     * Check a caller-supplied live chain against the shape `_resolveLiveChain`
+     * discovers, and normalize it to exactly that shape.
+     *
+     * FAIL HERE OR FAIL IN SIX HOURS. Every field below is read once, deep inside
+     * a child process's environment: a missing decoder password is an indexer that
+     * boots, connects to nothing and sits at height 0, and a missing btcOracle key
+     * is a hub that refuses every signer-set read. Both read as "the barrier never
+     * opened" in a drill's result, which is the one conclusion that must never be
+     * manufactured by a typo in a launcher. So the shape is asserted before a
+     * process is spawned, and the message names the field rather than the shape.
+     *
+     * `feeDestination` may be null (a chain whose fee destination is the pinned
+     * default) but the KEY has to be present, because an omitted one is far more
+     * likely a launcher that forgot it, and a node replaying with the wrong fee
+     * destination rejects every fee the chain accepted (see _resolveFeeDestination).
+     * `liveIndexer` is genuinely optional: only a cross-node comparison reads it.
+     */
+    _validateLiveChain(live) {
+        const at = (what) => 'oracleBatchReplay[' + this.label + ']: liveChain override is missing ' + what;
+        const need = (obj, where, keys) => {
+            if (!obj || typeof obj !== 'object') throw new Error(at('`' + where + '`'));
+            for (const k of keys) {
+                const v = obj[k];
+                if (v === undefined || v === null || String(v) === '') throw new Error(at('`' + where + '.' + k + '`'));
+            }
+        };
+        if (!live || typeof live !== 'object') throw new Error(at('everything: it is not an object'));
+        need(live.decoder,   'decoder',   ['host', 'port', 'name', 'user', 'pass']);
+        need(live.node,      'node',      ['host', 'port', 'user', 'pass']);
+        need(live.tracker,   'tracker',   ['host', 'port']);
+        need(live.btcOracle, 'btcOracle', ['host', 'port', 'url', 'apiKey']);
+        if (!Object.prototype.hasOwnProperty.call(live, 'feeDestination')) throw new Error(at('`feeDestination`'));
+        if (live.feeDestination !== null && typeof live.feeDestination !== 'string') {
+            throw new Error(at('a usable `feeDestination`: it must be an address string or null, not ' +
+                typeof live.feeDestination));
+        }
+        if (live.liveIndexer) need(live.liveIndexer, 'liveIndexer', ['host', 'port', 'name', 'user', 'pass']);
+        return {
+            feeDestination: live.feeDestination,
+            decoder:     live.decoder,
+            liveIndexer: live.liveIndexer || null,
+            btcOracle:   Object.assign({ db: null }, live.btcOracle),
+            node:        live.node,
+            tracker:     live.tracker
         };
     }
 
@@ -1088,6 +1178,15 @@ class OracleBatchReplayNode {
             const log = this._logs[which];
             log.push(...lines);
             if (log.length > LOG_TAIL_LINES) log.splice(0, log.length - LOG_TAIL_LINES);
+            // The hook sees every line as it arrives, before the ring drops it. A
+            // run measured in hours produces far more than LOG_TAIL_LINES, so a
+            // caller that needs a line class kept whole cannot get it from _tail.
+            // Its failure is its own: a throwing hook must not kill the node.
+            if (this._onLog) {
+                for (const line of lines) {
+                    try { this._onLog(which, line); } catch (_) { /* a log hook cannot break the run */ }
+                }
+            }
         };
         proc.stdout.on('data', keep);
         proc.stderr.on('data', keep);
