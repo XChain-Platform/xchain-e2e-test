@@ -90,6 +90,38 @@
  * alignment is therefore on the hash, the refusals are named in the result, and
  * a pair that genuinely cannot be aligned is still counted neither way.
  *
+ * WHY THE ESCAPE IS SAMPLED AND NOT SCRAPED (row 56). Until run 5 the escape was
+ * derived from the indexer's "Deferring block N (price time-sync)" log lines,
+ * which carry the barrier's two inputs verbatim. Run 5 graded 191 blocks and
+ * attributed ONE: 190 read `escape: "none"`, `deferralCount: 0`, and its 843 KB
+ * drill log contains not a single line matching /defer/i, on blocks that waited
+ * 4,400+ seconds. The cause is not the capture (the rig pipes both child streams
+ * and calls `onLog` per line before its ring truncates) and not the regex: the
+ * indexer only PRINTS that line when one barrier attempt TIMES OUT.
+ * `waitForPriceSyncTime` returns an already-resolved promise when the predicate
+ * is satisfied, and `_releasePriceTimeWaiters` resolves a pending waiter silently
+ * the moment it opens, so the warn at XChainIndexer.js:1294 is reached only if
+ * the block is still held after HUB_PRICE_SYNC_TIMEOUT_MS (60 s by default). At
+ * this node's working point every block's residual wait is shorter than that, so
+ * the barrier opens hundreds of times and says nothing. Attribution by log line
+ * is therefore structurally incomplete, whatever the regex says.
+ *
+ * WHAT REPLACED IT. The barrier's ONLY inputs besides the block's own time and
+ * the grace are `priceSyncMaxTimestamp` and `streamWatermark`
+ * (`_priceTimeSyncSatisfied`, hub_db_sync.js:2171), and the indexer already
+ * publishes both, unauthenticated, on its own `GET /status`:
+ * `hubMirror.streamWatermark` and `hubMirror.tables.price_snapshots` are filled
+ * from those two fields by `mirrorStatus()`. So the drill SAMPLES the pair once
+ * per observe tick and attributes each block from the samples: the first sampled
+ * instant at which either shipped clause is true for that block's time is when
+ * the barrier permitted it, and which clause was true is the escape. A block the
+ * samples cannot settle reads `escape: "unknown"` WITH the reason, never `none`:
+ * conflating "the barrier was open before we looked" with "we do not know" is
+ * what made TA5's "never before the barrier permits" half unmeasurable. Deferral
+ * lines are still folded in as samples of the same pair (they are readings of
+ * exactly those two fields at a moment the barrier was CLOSED), so nothing that
+ * worked before was given up.
+ *
  * RUNNING IT (plain node, not mocha; hours of wall clock):
  *
  *   node test/drills/oracleBatchBarrierTestnet.drill.js
@@ -664,6 +696,30 @@ async function decoderBlock(conn, dbName, height) {
     return { height: num(rows[0].block_index), blockTime: num(rows[0].block_time) };
 }
 
+/**
+ * WHETHER THE PRICE BARRIER APPLIES TO THIS BLOCK AT ALL (row 56).
+ *
+ * The indexer only enters the time barrier when `blockMayReadPrice` is true, and
+ * that predicate is `blockTransactions.length > 0` over the decoder rows for the
+ * block (priceReadPredicate.js, reached through `_evaluatePriceBarrier`). A block
+ * carrying no transaction is committed without ever consulting the barrier, so
+ * "which escape opened it" has no answer for it, and a sampled attribution that
+ * did not know this would report every empty block as processed while the barrier
+ * was closed: 289 of run 5's 290 blocks, an impossible result manufactured by
+ * asking the wrong question rather than by anything the node did.
+ *
+ * `getDecoderBlockData` joins outward from `transactions`, and the fan-out
+ * collapse the indexer applies afterwards only ever shrinks that set, so a count
+ * of the decoder's own transaction rows answers `length > 0` exactly.
+ */
+async function decoderBlockTransactionCount(conn, dbName, height) {
+    const db = ident(dbName, 'database name');
+    const rows = await conn.query(
+        'SELECT COUNT(*) AS n FROM `' + db + '`.transactions WHERE block_index = ?', [height]);
+    if (rows.length === 0) return null;
+    return num(rows[0].n);
+}
+
 async function decoderRange(conn, dbName) {
     const db = ident(dbName, 'database name');
     const rows = await conn.query(
@@ -682,6 +738,102 @@ async function mirrorNewestRound(conn, dbName, blockTime) {
         "WHERE status = 'finalized' AND block_timestamp <= ? ORDER BY round_number DESC LIMIT 1", [blockTime]);
     if (rows.length === 0) return { round: null, blockTimestamp: null };
     return { round: num(rows[0].round_number), blockTimestamp: num(rows[0].block_timestamp) };
+}
+
+/**
+ * THE CLOCK THE BARRIER ACTUALLY GATES ON (row 56), which is not the one the
+ * decoder's `blocks.block_time` carries.
+ *
+ * `_priceTimeSyncSatisfied(blockTime)` is called with whatever
+ * `decoderDb.getBlockTime()` returned (XChainIndexer.js:1181), and on a network
+ * where protocol time is MTP-resolved that is `min(medianTimePast(previous 11
+ * raw stamps), raw stamp)`, not the raw stamp (db.js:2470, protocol_time.js).
+ * testnet is such a network. MEASURED on run 5: the drill recorded block
+ * 67881904's time as 1788982721 while the indexer's own deferral line for that
+ * same block says it was "waiting for block time 1788982515", 206 s earlier.
+ * Attributing the watermark escape against the raw stamp therefore asks for
+ * 1788987521 on a block the node released at 1788987328, which reads as
+ * "processed 193 s before the barrier permitted it" for every block on the
+ * chain: an impossible result produced by the wrong clock, not by the node.
+ * Against the protocol time the same block was permitted at 1788987315 and seen
+ * processed 13 s later, inside one poll.
+ *
+ * The SHIPPED module does the deciding, loaded from the same checkout the rig
+ * spawns the indexer out of, so this cannot drift into a second definition. If it
+ * cannot be loaded the drill says so and attributes nothing, rather than falling
+ * back to a stamp it has just measured to be the wrong one.
+ */
+// Keyed by checkout, not global: a cache that ignored the root would hand one
+// venue's module to a caller asking about another, which is exactly the kind of
+// silent substitution this whole path exists to stop.
+const _protocolTimeModules = new Map();
+function loadProtocolTime(repoRoot) {
+    const key = String(repoRoot);
+    if (_protocolTimeModules.has(key)) return _protocolTimeModules.get(key);
+    // ABSENCE may degrade to an unresolved clock; PRESENT-BUT-BROKEN must be red.
+    // Resolving and loading are therefore separate steps: only the resolve is
+    // guarded, and the load is unguarded so a module that exists and throws stops
+    // the run instead of quietly downgrading every block to "clock unavailable".
+    const modulePath = path.join(key, 'xchain-indexer', 'src', 'protocol_time.js');
+    let present = true;
+    try {
+        require.resolve(modulePath);
+    } catch (e) {
+        present = false;
+    }
+    const mod = present ? require(modulePath) : null;
+    _protocolTimeModules.set(key, mod);
+    return mod;
+}
+
+// The window `db.getPreviousBlockTimes` reads, with the same ordering and the
+// same "a null stamp is not part of the median" filter.
+async function previousBlockTimes(conn, dbName, height, span) {
+    const db = ident(dbName, 'database name');
+    const rows = await conn.query(
+        'SELECT block_time FROM `' + db + '`.blocks ' +
+        'WHERE block_index < ? AND block_time IS NOT NULL ' +
+        'ORDER BY block_index DESC LIMIT ?', [height, span]);
+    return rows.map((r) => num(r.block_time));
+}
+
+/**
+ * The block time the barrier will be asked about, resolved the way the node
+ * resolves it. Returns the value AND where it came from, because a drill that
+ * silently substituted one clock for another is the defect being fixed.
+ */
+async function resolveBarrierBlockTime(conn, dbName, height, rawBlockTime, network, repoRoot) {
+    const mod = loadProtocolTime(repoRoot);
+    if (!mod) {
+        return { blockTime: null, source: 'unavailable',
+                 note: 'xchain-indexer/src/protocol_time.js could not be loaded from ' + repoRoot +
+                       ', so the clock the barrier gates on is unknown' };
+    }
+    if (!mod.isProtocolTimeMtpActive(network)) {
+        return { blockTime: finite(rawBlockTime), source: 'raw',
+                 note: 'protocol time is the raw stamp on ' + network };
+    }
+    const previous = await previousBlockTimes(conn, dbName, height, mod.MEDIAN_TIME_SPAN);
+    const resolved = mod.protocolTime(network, rawBlockTime, previous);
+    return {
+        blockTime: finite(resolved),
+        source: finite(resolved) === finite(rawBlockTime) ? 'mtp-equals-raw' : 'mtp',
+        note: 'median time past over ' + previous.length + ' preceding stamp(s)'
+    };
+}
+
+// `priceSyncMaxTimestamp` as the indexer computes it: the query in
+// `hub_db_sync._refreshPriceSyncHeight`, verbatim and UNCAPPED. This is the
+// content clause's own input, and it is a different quantity from
+// `mirrorNewestRound` above, whose `block_timestamp <= blockTime` filter is the
+// price SELECTION and can never exceed the block's time.
+async function mirrorMaxFinalizedTimestamp(conn, dbName) {
+    const db = ident(dbName, 'database name');
+    const rows = await conn.query(
+        'SELECT MAX(block_timestamp) AS ts FROM `' + db + '`.price_snapshots ' +
+        "WHERE status = 'finalized'");
+    if (rows.length === 0) return null;
+    return num(rows[0].ts);
 }
 
 /**
@@ -801,22 +953,21 @@ async function blockActions(conn, indexerDb, tables, height) {
 // ---------------------------------------------------------------------------
 
 /**
- * Which escape opened the barrier for a block, decided from what the node held
- * rather than from a log line that says so (there is none: the indexer logs the
- * DEFERRALS, and proceeding is silent).
+ * SUPERSEDED by attributeEscape (row 56), kept because it is what run 5's result
+ * file recorded and a reader comparing two runs needs to be able to reproduce it.
+ * Its reading is carried in the record as `escapeEvidence.deferralLineReading`
+ * and is NOT what `escape` reports any more. Two defects, both measured:
  *
- *   none      the block was never deferred, so the barrier was already satisfied
- *             when it arrived.
- *   content   it was deferred and, by the time it was processed, the node's own
- *             mirror held a finalized round at or past the block's time. That is
- *             the case D61 says a chain-only node cannot reach at the tip, so a
- *             'content' here is the interesting result, not the expected one.
- *   watermark it was deferred and the mirror still held no such round, which
- *             leaves the hub's stream watermark as the only escape the code has.
- *             Corroborated by the stall against the frozen grace.
- *
- * The deferral lines are kept verbatim in the record either way, so the
- * derivation can be re-judged by a reader who does not accept it.
+ *   1. `none` means "no deferral LINE was seen", which is true both when the
+ *      barrier was already open and when it opened silently inside one 60 s
+ *      attempt. Run 5 returned it for 190 of 191 graded blocks, several of which
+ *      had waited over an hour, so TA5's "never before the barrier permits" half
+ *      could not be read off it at all.
+ *   2. The `content` branch is unreachable against the drill's own input.
+ *      `mirrorNewestRound` selects `WHERE block_timestamp <= blockTime`, so its
+ *      timestamp is capped at blockTime by construction and `>= blockTime` can
+ *      only ever fire on exact equality, while the clause it is standing in for
+ *      reads an UNCAPPED `MAX(block_timestamp) WHERE status = 'finalized'`.
  */
 function classifyEscape(deferrals, mirrorNewestTs, blockTime, stallS) {
     if (!deferrals || deferrals.length === 0) return { escape: 'none', corroborated: true };
@@ -847,6 +998,275 @@ function parseDeferral(line) {
         mirrorMaxRoundTs: state ? Number(state[1]) : null,
         streamWatermark:  state ? Number(state[2]) : null,
         line: line.slice(0, 400)
+    };
+}
+
+// A deferral line IS a sample of the barrier's two inputs: the indexer builds
+// that message out of `priceSyncMaxTimestamp` and `streamWatermark` themselves
+// (hub_db_sync.js:2221), at an instant the predicate was false. Folding it in as
+// a sample keeps every reading in one model instead of two.
+function barrierSampleFromDeferral(d) {
+    if (!d) return null;
+    return {
+        at: finite(d.at),
+        source: 'deferral',
+        height: d.height === undefined ? null : d.height,
+        // A node that has deferred a block has read its price mirror at least
+        // once, which is exactly what priceBootstrapped records.
+        bootstrapped: true,
+        streamWatermark: finite(d.streamWatermark),
+        priceSyncMaxTimestamp: finite(d.mirrorMaxRoundTs),
+        error: null
+    };
+}
+
+// How long the drill waits on one /status read. The endpoint is a local HTTP GET
+// against this run's own node, so anything slower than this is the node being
+// too busy to answer, and a missed sample must never stall the observe loop.
+const STATUS_TIMEOUT_MS = 5_000;
+
+/**
+ * The barrier's two inputs, read from the node's own `/status`.
+ *
+ * `mirrorStatus()` fills `hubMirror.streamWatermark` from `this.streamWatermark`
+ * and `hubMirror.tables.price_snapshots` from `this.priceSyncMaxTimestamp`, which
+ * are the two fields `_priceTimeSyncSatisfied` reads. Nothing here re-derives the
+ * barrier: it reads the barrier's own state and evaluates the shipped clauses.
+ *
+ * A failed read returns a sample carrying its error rather than throwing, because
+ * a sampling gap must be visible in the record and must not end a four-hour run.
+ *
+ * NOTE ON `bootstrapped`. The predicate's third input is `priceBootstrapped`,
+ * which `mirrorStatus()` does NOT publish (it reports `_bootstrapDrained`, a
+ * different flag). It is recorded for the reader and gates no clause here:
+ * both inputs start at 0, so a false clause cannot be turned true by
+ * assuming the flag, and by the observe phase the node has been committing blocks
+ * for hours, which it cannot do with `priceBootstrapped` unset.
+ */
+async function readBarrierState(indexerPort, source) {
+    const at = nowS();
+    const empty = {
+        at: at, source: source || 'status', height: null, bootstrapped: null,
+        streamWatermark: null, priceSyncMaxTimestamp: null,
+        indexerBlock: null, stallReason: null, error: null
+    };
+    try {
+        const res = await axios.get('http://127.0.0.1:' + indexerPort + '/status',
+            { timeout: STATUS_TIMEOUT_MS, validateStatus: () => true });
+        const body = (res && res.data) || {};
+        const m = body.hubMirror;
+        if (!m || m.configured !== true) {
+            return Object.assign({}, empty, {
+                error: 'no configured hubMirror in /status (HTTP ' + (res && res.status) + ')'
+            });
+        }
+        return Object.assign({}, empty, {
+            bootstrapped: m.bootstrapped === undefined ? null : !!m.bootstrapped,
+            streamWatermark: finite(m.streamWatermark),
+            priceSyncMaxTimestamp: finite(m.tables ? m.tables.price_snapshots : null),
+            indexerBlock: finite(body.indexerBlock),
+            stallReason: body.stallReason === undefined ? null : body.stallReason
+        });
+    } catch (e) {
+        return Object.assign({}, empty, { error: String((e && e.message) || e).slice(0, 200) });
+    }
+}
+
+/**
+ * The two shipped clauses of `_priceTimeSyncSatisfied`, evaluated against one
+ * sample of the barrier's state, for one block time.
+ *
+ *   content    priceSyncMaxTimestamp >= blockTime
+ *   watermark  streamWatermark       >= blockTime + graceS
+ *
+ * Written once, here, so nothing downstream can invent a second definition of the
+ * barrier. A missing reading is not a satisfied clause.
+ */
+function barrierClauses(sample, blockTime, graceS) {
+    const max  = finite(sample && sample.priceSyncMaxTimestamp);
+    const mark = finite(sample && sample.streamWatermark);
+    const bt   = finite(blockTime);
+    const g    = finite(graceS);
+    return {
+        content:   max  !== null && bt !== null && max  >= bt,
+        watermark: mark !== null && bt !== null && g !== null && mark >= bt + g
+    };
+}
+
+/**
+ * WHICH ESCAPE OPENED THE BARRIER FOR ONE BLOCK (row 56).
+ *
+ * Pure, so it can be driven against a run's real samples without a chain. Walks
+ * the samples taken at or before the block was seen processed, in time order, and
+ * stops at the first one in which either shipped clause is true for this block's
+ * time. That instant is when the barrier PERMITTED the block, and which clause
+ * was true is the escape.
+ *
+ *   content    the node's own mirror held a finalized round at or past the
+ *              block's time. D61 says a chain-only node cannot reach this at the
+ *              tip, so it is the interesting result rather than the expected one.
+ *   watermark  its hub's stream watermark had passed the block's time by the
+ *              grace, which is the escape D61 predicts.
+ *   both       both clauses were already true in the first open sample; the
+ *              sampling cannot say which crossed first, and it says so.
+ *   not-applicable  the block carried no transaction, so `blockMayReadPrice` was
+ *              false and the indexer never entered the barrier for it. There is
+ *              no escape to name, and the TA5 clause does not apply either.
+ *   unknown    the samples cannot settle it, WITH the reason. Never `none`: a
+ *              block nobody attributed must not read like a block that sailed
+ *              through, which is the confusion this function exists to end.
+ *
+ * TWO RESOLUTIONS BOUND EVERY ANSWER, and both are recorded rather than assumed
+ * away. `permittedAt` is an UPPER bound: the barrier opened somewhere in
+ * (lastClosedAt, permittedAt], one sample interval wide. `processedAt` is also an
+ * upper bound, because it is when the drill's poll DETECTED the node past this
+ * height, not when the node committed it. So `beforePermission` is only ever
+ * claimed as observed when a sample taken AFTER the block was already detected
+ * processed still shows the barrier closed for it; anything narrower than that
+ * would be reading the sampling grid rather than the node.
+ */
+function attributeEscape(s) {
+    s = s || {};
+    const blockTime   = finite(s.blockTime);
+    const processedAt = finite(s.processedAt);
+    const graceS      = finite(s.graceS) === null ? PRICE_WATERMARK_GRACE_S : finite(s.graceS);
+    const intervalS   = finite(s.sampleIntervalS);
+    const stallS      = (processedAt !== null && blockTime !== null) ? processedAt - blockTime : null;
+
+    const samples = (s.samples || [])
+        .filter((x) => x && finite(x.at) !== null)
+        .slice()
+        .sort((a, b) => finite(a.at) - finite(b.at));
+
+    const out = {
+        escape: 'unknown',
+        corroborated: false,
+        graceS: graceS,
+        permittedAt: null,
+        permittedAtIso: null,
+        permittedBy: null,
+        permittedAtIsUpperBound: null,
+        openedBeforeFirstSample: null,
+        lastClosedAt: null,
+        lastClosedAtIso: null,
+        beforePermission: 'unknown',
+        samplesConsidered: 0,
+        samplesTotal: samples.length,
+        sampleIntervalS: intervalS,
+        reason: null
+    };
+
+    if (blockTime === null || processedAt === null) {
+        out.reason = 'the block time or the moment it was seen processed was not read, ' +
+            'so the barrier cannot be evaluated for this block';
+        return out;
+    }
+
+    // Asked BEFORE the samples, because a barrier the node never entered cannot
+    // have held this block and must not be reported as having been closed across
+    // it. Only an explicit false counts: an unread transaction count leaves the
+    // question open rather than answering it either way.
+    if (s.barrierApplies === false) {
+        out.escape = 'not-applicable';
+        out.beforePermission = 'not-applicable';
+        out.reason = 'the block carried no transaction, so blockMayReadPrice was false and the ' +
+            'indexer never entered the price time barrier for it: there is no escape to name';
+        return out;
+    }
+
+    const upTo = samples.filter((x) => finite(x.at) <= processedAt);
+    out.samplesConsidered = upTo.length;
+    if (upTo.length === 0) {
+        out.reason = samples.length === 0
+            ? 'the barrier state was never sampled, so no escape can be attributed'
+            : 'no barrier sample was taken at or before this block was seen processed (' +
+              samples.length + ' later sample(s) only)';
+        return out;
+    }
+
+    let lastClosedAt = null;
+    for (let i = 0; i < upTo.length; i++) {
+        const c = barrierClauses(upTo[i], blockTime, graceS);
+        if (!c.content && !c.watermark) { lastClosedAt = finite(upTo[i].at); continue; }
+        out.escape = (c.content && c.watermark) ? 'both' : (c.content ? 'content' : 'watermark');
+        out.permittedAt = finite(upTo[i].at);
+        out.permittedAtIso = iso(out.permittedAt);
+        out.permittedBy = String(upTo[i].source || 'status');
+        out.permittedAtIsUpperBound = true;
+        out.openedBeforeFirstSample = (lastClosedAt === null);
+        out.lastClosedAt = lastClosedAt;
+        out.lastClosedAtIso = lastClosedAt === null ? null : iso(lastClosedAt);
+        out.beforePermission = 'no';
+        // A watermark escape cannot fire before the grace has elapsed against the
+        // block's own time, so a stall shorter than that contradicts the reading
+        // and the record says so instead of asserting it away. The content escape
+        // has no such bound: a round at or past the block's time can land at any
+        // moment, which is precisely what makes it the interesting case.
+        out.corroborated = (out.escape === 'content')
+            ? true
+            : (stallS !== null && stallS >= graceS);
+        out.reason = out.escape + ' escape observed open at ' + out.permittedAtIso +
+            (out.openedBeforeFirstSample
+                ? ', in the FIRST sample taken at or before this block was processed: ' +
+                  'it may have opened earlier, so this instant is an upper bound only'
+                : ', last observed closed at ' + out.lastClosedAtIso);
+        return out;
+    }
+
+    out.lastClosedAt = lastClosedAt;
+    out.lastClosedAtIso = lastClosedAt === null ? null : iso(lastClosedAt);
+    const after = samples.find((x) => finite(x.at) > processedAt);
+    const afterClauses = after ? barrierClauses(after, blockTime, graceS) : null;
+    const closedAfter = !!afterClauses && !afterClauses.content && !afterClauses.watermark;
+    if (closedAfter) {
+        out.beforePermission = 'observed-closed-across-processing';
+        out.reason = 'the barrier was observed CLOSED for this block at every sample up to ' +
+            out.lastClosedAtIso + ' AND at ' + iso(finite(after.at)) + ', after the node was ' +
+            'already seen past this height: the block was processed while neither shipped ' +
+            'clause was satisfied for it';
+        return out;
+    }
+    out.reason = 'the barrier was observed closed for this block at every sample up to ' +
+        out.lastClosedAtIso + ' and ' +
+        (after ? 'the next sample already showed it open, after the block was seen processed'
+               : 'no sample was taken after the block was seen processed') +
+        ', so which escape opened it was never observed';
+    return out;
+}
+
+/**
+ * The record shape for one block's escape, written from an attribution.
+ *
+ * Shared by the first pass (as the observation is built) and the run's final
+ * pass, so the two can never disagree about what a field means. Nothing here
+ * decides anything; the deciding is all in attributeEscape.
+ */
+function escapeRecord(attribution, deferrals, deferralLineEscape) {
+    deferrals = deferrals || [];
+    return {
+        corroborated: attribution.corroborated,
+        graceS: attribution.graceS === undefined ? null : attribution.graceS,
+        reason: attribution.reason,
+        // When the barrier was first OBSERVED open for this block, and when it was
+        // last observed closed: the true crossing lies between the two.
+        permittedAt: attribution.permittedAtIso,
+        permittedBy: attribution.permittedBy,
+        permittedAtIsUpperBound: attribution.permittedAtIsUpperBound,
+        openedBeforeFirstSample: attribution.openedBeforeFirstSample,
+        lastClosedAt: attribution.lastClosedAtIso,
+        // 'no' | 'observed-closed-across-processing' | 'unknown'. This is the TA5
+        // clause: was the block processed before the shipped predicate permitted
+        // it? Only the middle value is a measurement of a violation.
+        beforePermission: attribution.beforePermission,
+        samplesConsidered: attribution.samplesConsidered,
+        samplesTotal: attribution.samplesTotal,
+        sampleIntervalS: attribution.sampleIntervalS,
+        deferralCount: deferrals.length,
+        firstDeferral: deferrals.length > 0 ? deferrals[0] : null,
+        lastDeferral:  deferrals.length > 0 ? deferrals[deferrals.length - 1] : null,
+        // What the superseded log-scraping attribution says for this same block,
+        // so run 5's numbers stay reproducible beside the new ones.
+        deferralLineReading: deferralLineEscape === undefined ? null : deferralLineEscape
     };
 }
 
@@ -999,9 +1419,51 @@ async function main(env) {
         replay: null,
         catchUp: null,
         observe: null,
+        // Every sample of the barrier's own two inputs taken during the observe
+        // phase (row 56). This series IS the escape attribution's evidence: a
+        // reader who does not accept the per-block verdict can re-run
+        // attributeEscape over it.
+        barrier: {
+            graceS: PRICE_WATERMARK_GRACE_S,
+            sampleIntervalS: POLL_MS / 1000,
+            source: "the node's own GET /status: hubMirror.streamWatermark and " +
+                    'hubMirror.tables.price_snapshots, which mirrorStatus() fills from ' +
+                    'streamWatermark and priceSyncMaxTimestamp, the two inputs of ' +
+                    '_priceTimeSyncSatisfied',
+            startedAt: null,
+            lastAt: null,
+            samples: 0,
+            failures: 0,
+            lastError: null,
+            series: []
+        },
         observations: [],
         originLagSeries: [],
         summary: null
+    };
+
+    // Bounded the same way the deferral ring is: a four-hour run at one sample a
+    // poll is about a thousand entries, and a run that overruns keeps its ends,
+    // which is where the barrier's crossings are.
+    const barrierSamples = [];
+    const noteBarrierSample = (sample) => {
+        if (!sample) return;
+        barrierSamples.push(sample);
+        // The working set only has to span one block's whole hold, which the
+        // barrier caps at about a grace: two thousand samples is over eight hours
+        // of them, so the oldest can go without ever reaching an attribution.
+        if (barrierSamples.length > 2000) barrierSamples.shift();
+        result.barrier.samples++;
+        result.barrier.lastAt = iso(sample.at);
+        if (result.barrier.startedAt === null) result.barrier.startedAt = iso(sample.at);
+        if (sample.error) {
+            result.barrier.failures++;
+            result.barrier.lastError = sample.error;
+        }
+        result.barrier.series.push(sample);
+        if (result.barrier.series.length > 5000) {
+            result.barrier.series.splice(2500, result.barrier.series.length - 5000);
+        }
     };
 
     // Deferral lines, kept whole for the run's whole length. The rig's own ring
@@ -1213,7 +1675,18 @@ async function main(env) {
             usableObservations(result.observations).length >= settings.observeBlocks &&
             comparedVerdicts(result.observations) >= settings.minVerdicts;
 
+        // The barrier's state, sampled once before the first block is even seen, so
+        // a block that is processed on the very first tick still has a reading at
+        // or before its processing rather than none at all (row 56).
+        noteBarrierSample(await readBarrierState(node.indexerPort));
+        write();
+
         while (!observeSatisfied() && Date.now() < deadline) {
+            // The barrier's own two inputs, read before anything is declared
+            // processed this tick so the sample is at or before every processedAt
+            // this iteration stamps.
+            noteBarrierSample(await readBarrierState(node.indexerPort));
+
             // New chain blocks: noted the moment the DECODER has them, which is
             // what makes waitS a measure of the node's own hold rather than of
             // how long the chain took to produce a block.
@@ -1221,8 +1694,24 @@ async function main(env) {
             for (let h = lastDecoderSeen + 1; h <= tip; h++) {
                 const blk = await decoderBlock(decoderConn, liveChain.decoder.name, h);
                 if (!blk) continue;
-                pending.set(h, { blockTime: blk.blockTime, firstSeenAt: nowS() });
-                console.log('at5: chain block ' + h + ' arrived (block time ' + iso(blk.blockTime) + ')');
+                // The clock the barrier will be asked about, resolved once, now:
+                // the median window is over blocks the decoder already holds, so
+                // it cannot change under this block later (row 56).
+                const barrierTime = await resolveBarrierBlockTime(
+                    decoderConn, liveChain.decoder.name, h, blk.blockTime, NETWORK, node.repoRoot);
+                // And whether the barrier applies to it at all: an empty block
+                // never enters it, so it can carry no escape.
+                const txCount = await decoderBlockTransactionCount(
+                    decoderConn, liveChain.decoder.name, h);
+                pending.set(h, {
+                    blockTime: blk.blockTime, firstSeenAt: nowS(),
+                    barrierBlockTime: barrierTime.blockTime,
+                    barrierBlockTimeSource: barrierTime.source,
+                    blockTransactionCount: txCount
+                });
+                console.log('at5: chain block ' + h + ' arrived (block time ' + iso(blk.blockTime) +
+                    ', barrier time ' + (barrierTime.blockTime === null ? 'UNKNOWN' : iso(barrierTime.blockTime)) +
+                    ' by ' + barrierTime.source + ')');
             }
             lastDecoderSeen = tip === null ? lastDecoderSeen : tip;
 
@@ -1238,7 +1727,15 @@ async function main(env) {
                 const observation = await observeBlock({
                     node, conn, origin, tables, height: h,
                     blockTime: seen.blockTime, firstSeenAt: seen.firstSeenAt, processedAt,
+                    barrierBlockTime: seen.barrierBlockTime,
+                    barrierBlockTimeSource: seen.barrierBlockTimeSource,
+                    blockTransactionCount: seen.blockTransactionCount,
                     deferrals: deferralsByHeight.get(h) || [],
+                    // Passed by reference on purpose: the attribution reads the
+                    // whole series, and a copy per block would be a thousand
+                    // arrays for nothing.
+                    barrierSamples: barrierSamples,
+                    sampleIntervalS: POLL_MS / 1000,
                     originNow: originNow,
                     maxBlockAgeS: settings.maxBlockAgeS,
                     originActionPage: settings.originActionPage
@@ -1264,6 +1761,46 @@ async function main(env) {
             if (observeSatisfied()) break;
             await sleep(POLL_MS);
         }
+
+        // --- 3. the final escape attribution (row 56) ---
+        //
+        // A block's escape is first decided the moment the drill sees the node
+        // past its height, when no sample taken AFTER that instant exists yet. The
+        // TA5 clause ("never processed before the barrier permits") can only be
+        // OBSERVED against such a later sample: a barrier still closed for a block
+        // the node has already committed is the only reading that proves a
+        // violation, and no single-pass reading can supply it. So
+        // every observation is re-decided here against the whole series, and the
+        // record carries the settled reading.
+        //
+        // One last sample first, so the newest block observed has an "after" too.
+        noteBarrierSample(await readBarrierState(node.indexerPort));
+        let reattributed = 0;
+        for (const o of result.observations) {
+            const samples = barrierSamples.concat(
+                (deferralsByHeight.get(o.height) || [])
+                    .map(barrierSampleFromDeferral).filter((x) => x !== null));
+            const a = attributeEscape({
+                // The clock the barrier gates on, resolved when the block was
+                // first seen, NOT the chain's raw stamp.
+                blockTime: o.barrierBlockTime,
+                processedAt: o.processedAtS,
+                samples: samples,
+                graceS: PRICE_WATERMARK_GRACE_S,
+                barrierApplies: o.barrierApplies === null ? undefined : o.barrierApplies,
+                sampleIntervalS: POLL_MS / 1000
+            });
+            const before = o.escape;
+            o.escape = a.escape;
+            o.escapeEvidence = escapeRecord(a, deferralsByHeight.get(o.height) || [],
+                o.escapeEvidence ? o.escapeEvidence.deferralLineReading : null);
+            if (before !== o.escape) reattributed++;
+        }
+        result.barrier.reattributedBlocks = reattributed;
+        write();
+        console.log('at5: final escape attribution over ' + result.barrier.samples +
+            ' barrier sample(s): ' + reattributed + ' of ' + result.observations.length +
+            ' observation(s) changed verdict against the first pass');
 
         const gradedTotal = usableObservations(result.observations).length;
         result.observe.gradedBlocks = gradedTotal;
@@ -1354,7 +1891,39 @@ async function observeBlock(ctx) {
     const hubNewest    = await mirrorNewestRound(conn, node.hubDbName, blockTime);
     const originNewest = await origin.newestRoundAtOrBefore(blockTime);
     const stallS = processedAt - blockTime;
-    const escape = classifyEscape(deferrals, mirrorNewest.blockTimestamp, blockTime, stallS);
+
+    // WHICH ESCAPE OPENED THIS BLOCK (row 56). Decided from samples of the
+    // barrier's own two inputs, against the clock the barrier gates on, and the
+    // deferral lines are folded in as samples of the same pair rather than read
+    // as a separate kind of evidence.
+    //
+    // `barrierBlockTime` is the protocol time (see resolveBarrierBlockTime); it
+    // is passed in because it costs a decoder read and is resolved once, when the
+    // block is first seen. A caller that does not supply one is taken to be on a
+    // venue where protocol time IS the raw stamp, and the record says so rather
+    // than leaving the assumption implicit.
+    const barrierBlockTime = ctx.barrierBlockTime === undefined || ctx.barrierBlockTime === null
+        ? blockTime : finite(ctx.barrierBlockTime);
+    const barrierBlockTimeSource = ctx.barrierBlockTimeSource || 'raw-assumed';
+    const samples = (ctx.barrierSamples || [])
+        .concat((deferrals || []).map(barrierSampleFromDeferral).filter((x) => x !== null));
+    // Whether the barrier applied to this block at all. Undefined (a caller that
+    // did not read the count) leaves the question open; only a measured zero says
+    // the node never entered the barrier.
+    const txCount = ctx.blockTransactionCount === undefined ? null : finite(ctx.blockTransactionCount);
+    const escape = attributeEscape({
+        blockTime: barrierBlockTime, processedAt: processedAt,
+        samples: samples, graceS: PRICE_WATERMARK_GRACE_S,
+        barrierApplies: txCount === null ? undefined : txCount > 0,
+        sampleIntervalS: ctx.sampleIntervalS === undefined ? null : ctx.sampleIntervalS
+    });
+    // What the superseded log-scraping attribution would have said for this same
+    // block, so run 5's numbers stay reproducible beside the new ones.
+    const deferralLineReading = classifyEscape(deferrals, mirrorNewest.blockTimestamp, blockTime, stallS);
+    // The content clause's OWN input, read the way the indexer reads it
+    // (`_refreshPriceSyncHeight`): uncapped, unlike `mirrorNewestRound` above,
+    // which is the price SELECTION and caps at blockTime by construction.
+    const mirrorMaxFinalizedTs = await mirrorMaxFinalizedTimestamp(conn, node.mirrorDbName);
 
     const actions = await blockActions(conn, node.indexerDbName, tables, height);
     // Origin's window is read ONCE per block, and only for a block that carries
@@ -1416,6 +1985,25 @@ async function observeBlock(ctx) {
         blockTimeIso: iso(blockTime),
         firstSeenAt: iso(firstSeenAt),
         processedAt: iso(processedAt),
+        // The same instant as a number, because the run's final attribution pass
+        // re-decides the escape from it and must not re-parse its own ISO string.
+        processedAtS: processedAt,
+        // THE CLOCK THE BARRIER GATES ON, beside the chain's raw stamp (row 56).
+        // `stallS` below is kept measured against the RAW stamp so every number a
+        // previous run reported still means what it meant; `barrierStallS` is the
+        // same wait measured against the time the node actually compared, which is
+        // the one the 4,800 s grace is a bound on. Run 5's whole graded set missed
+        // that bound by up to 206 s purely because of this difference.
+        barrierBlockTime: barrierBlockTime,
+        barrierBlockTimeIso: barrierBlockTime === null ? null : iso(barrierBlockTime),
+        barrierBlockTimeSource: barrierBlockTimeSource,
+        protocolTimeLagS: (barrierBlockTime === null || blockTime === null)
+            ? null : blockTime - barrierBlockTime,
+        barrierStallS: barrierBlockTime === null ? null : processedAt - barrierBlockTime,
+        // The decoder's own transaction count for the block, which IS
+        // `blockMayReadPrice`: zero means the node never entered the barrier.
+        blockTransactionCount: txCount,
+        barrierApplies: txCount === null ? null : txCount > 0,
         stallS: stallS,
         waitS: processedAt - firstSeenAt,
         // The row 46 gate. `usable` says whether `stallS` is a barrier
@@ -1425,16 +2013,18 @@ async function observeBlock(ctx) {
         usable: freshness.usable,
         unusableReason: freshness.usable ? null : freshness.reason,
         maxBlockAgeS: freshness.maxAgeS,
+        // 'content' | 'watermark' | 'both' | 'unknown'. NEVER 'none': a block the
+        // samples could not settle carries its reason in `escapeEvidence.reason`
+        // and is counted as unattributed, because reading it as an instant pass is
+        // what left TA5's "never before the barrier permits" half unmeasured.
         escape: escape.escape,
-        escapeEvidence: {
-            corroborated: escape.corroborated,
-            graceS: escape.graceS === undefined ? null : escape.graceS,
-            deferralCount: deferrals.length,
-            firstDeferral: deferrals.length > 0 ? deferrals[0] : null,
-            lastDeferral:  deferrals.length > 0 ? deferrals[deferrals.length - 1] : null
-        },
+        escapeEvidence: escapeRecord(escape, deferrals, deferralLineReading.escape),
         mirrorNewestRound: mirrorNewest.round,
         mirrorNewestRoundTs: mirrorNewest.blockTimestamp,
+        // The content clause's input, uncapped, beside the capped selection above:
+        // run 5's result carried only the capped one, and comparing it against
+        // blockTime is what made the old content branch unreachable.
+        mirrorMaxFinalizedTs: mirrorMaxFinalizedTs,
         hubNewestRound: hubNewest.round,
         originNewestRound: originNewest.round,
         originNewestRoundTs: originNewest.blockTimestamp,
@@ -1502,6 +2092,71 @@ function summarize(result) {
         }, {}),
         maxAgeAtFirstSeenS: ages.length > 0 ? Math.max(...ages) : null,
         gradedEscapes: graded.reduce((h, o) => { h[o.escape] = (h[o.escape] || 0) + 1; return h; }, {}),
+        // THE ROW 56 NUMBERS. `gradedEscapesAttributed` is how many graded blocks
+        // the samples could name an escape for; the rest carry their reason. A run
+        // whose attribution rate is low has not measured TA5's escape half,
+        // whatever its stall numbers say, and this is where that shows.
+        // Counted over the blocks the barrier ACTUALLY GATED. A transaction-free
+        // block never enters it (blockMayReadPrice), so counting it either way
+        // would drown the measurement: on this chain the empty blocks are the
+        // overwhelming majority, and run 5's 290 contained exactly one that the
+        // barrier ever held.
+        gradedBarrierApplied: graded.filter((o) => o.barrierApplies === true).length,
+        gradedBarrierNotApplicable: graded.filter((o) => o.escape === 'not-applicable').length,
+        gradedBarrierApplicabilityUnread: graded.filter((o) => o.barrierApplies === null ||
+            o.barrierApplies === undefined).length,
+        gradedEscapesAttributed: graded.filter((o) => o.barrierApplies === true &&
+            ['content', 'watermark', 'both'].includes(o.escape)).length,
+        gradedEscapesUnattributed: graded.filter((o) => o.barrierApplies === true &&
+            (!o.escape || o.escape === 'unknown')).length,
+        escapeAttributionMeasured: graded.some((o) => o.barrierApplies === true) &&
+            graded.filter((o) => o.barrierApplies === true)
+                  .every((o) => ['content', 'watermark', 'both'].includes(o.escape)),
+        // Why the unattributed ones could not be settled, so a gap in the sampling
+        // and a barrier observed closed across processing are never one number.
+        unattributedReasons: graded
+            .filter((o) => o.barrierApplies === true && (!o.escape || o.escape === 'unknown'))
+            .reduce((h, o) => {
+                const k = String((o.escapeEvidence && o.escapeEvidence.beforePermission) || 'unknown');
+                h[k] = (h[k] || 0) + 1;
+                return h;
+            }, {}),
+        // TA5's second half, as a count rather than a claim: graded blocks the
+        // node was seen past while the shipped predicate was still observed false
+        // for them. Anything but 0 is the bound broken, and it is only ever
+        // counted from a sample taken AFTER the block was seen processed.
+        gradedProcessedBeforePermission: graded.filter((o) =>
+            o.escapeEvidence && o.escapeEvidence.beforePermission === 'observed-closed-across-processing').length,
+        // A watermark escape claiming to have opened before the grace elapsed.
+        gradedEscapesUncorroborated: graded.filter((o) =>
+            o.escape && o.escape !== 'unknown' && o.escapeEvidence &&
+            o.escapeEvidence.corroborated === false).length,
+        barrierSamples: result.barrier ? result.barrier.samples : null,
+        barrierSampleFailures: result.barrier ? result.barrier.failures : null,
+        // THE GRACE BOUND, MEASURED ON THE CLOCK THE BARRIER USES.
+        // `gradedStallsWithinGracePlusConfirm` above is measured against the
+        // chain's raw stamp and is kept unchanged so a previous run's number still
+        // means what it meant; this one is measured against the protocol time the
+        // node actually compared. Run 5 reported 0 of 290 on the raw stamp with a
+        // maximum stall of 4,607 s, which is the 4,800 s grace minus the MTP lag,
+        // not a barrier that opened early.
+        gradedBarrierStallsWithinGrace: graded.filter((o) =>
+            Number.isFinite(o.barrierStallS) && o.barrierStallS >= PRICE_WATERMARK_GRACE_S).length,
+        gradedMaxBarrierStallS: (() => {
+            const v = graded.map((o) => o.barrierStallS).filter((n) => Number.isFinite(n));
+            return v.length > 0 ? Math.max(...v) : null;
+        })(),
+        // How the barrier clock was resolved for each graded block, so a run whose
+        // protocol_time module could not be loaded cannot read as a measurement.
+        barrierClockSources: graded.reduce((h, o) => {
+            const k = String(o.barrierBlockTimeSource || 'unknown');
+            h[k] = (h[k] || 0) + 1;
+            return h;
+        }, {}),
+        maxProtocolTimeLagS: (() => {
+            const v = graded.map((o) => o.protocolTimeLagS).filter((n) => Number.isFinite(n));
+            return v.length > 0 ? Math.max(...v) : null;
+        })(),
         gradedMaxStallS: gradedStalls.length > 0 ? Math.max(...gradedStalls) : null,
         gradedMinStallS: gradedStalls.length > 0 ? Math.min(...gradedStalls) : null,
         // The same bound as `stallsWithinGracePlusConfirm`, over the blocks whose
@@ -1545,6 +2200,19 @@ module.exports = {
     // test/unit/oracleBatchBarrierTestnet.observe.test.js, and a run that gets it
     // wrong costs four hours to find out.
     evaluateCatchUp, classifyBlockFreshness, usableObservations, observeBlock,
+    // The escape attribution (row 56). `attributeEscape` and `barrierClauses` are
+    // pure and are driven against run 5's own readings by
+    // test/unit/oracleBatchBarrierEscape.test.js; `readBarrierState` is the one
+    // half that reads someone else's HTTP, so it is exported to be driven on its
+    // own against a real /status. The version they replace scraped a log line the
+    // indexer only prints on a barrier TIMEOUT, and attributed 1 of run 5's 191
+    // graded blocks.
+    attributeEscape, barrierClauses, barrierSampleFromDeferral, readBarrierState,
+    mirrorMaxFinalizedTimestamp, escapeRecord, decoderBlockTransactionCount,
+    // The clock the barrier gates on, resolved through the SHIPPED protocol_time
+    // module. Exported so a venue can check which clock a run will reason about
+    // before spending four hours reasoning about the wrong one.
+    loadProtocolTime, previousBlockTimes, resolveBarrierBlockTime,
     // The parity clause's own gate: comparisons, not blocks. A run that grades its
     // block quota while comparing nothing reads green and proves nothing.
     comparedVerdicts,
