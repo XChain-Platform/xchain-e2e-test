@@ -70,7 +70,7 @@ const dotenv = require('dotenv')
 dotenv.config()
 
 const fs = require('fs')
-const { AttestMirrorVenue, assertLlmAvailable } = require('../helpers/attestMirrorVenue')
+const { AttestMirrorVenue, assertLlmAvailable, llmProbes, hubCredentialEnv } = require('../helpers/attestMirrorVenue')
 const {
     provisionDrillIdentities, waitForVenueIndexersAtTip, startAttestTestServer, deployRequestContract, settleStack,
     readAppliedResponse, readContractState,
@@ -142,17 +142,26 @@ module.exports = {
  * proving half of what it claims. AT1 is not satisfied until both have run
  * somewhere, and the frontier says so rather than counting this file's exit code.
  *
- * The probe uses `assertLlmAvailable` and the same two predicates the venue
- * passes it, so this can never disagree with the refusal it is trying to
- * anticipate.
+ * The probe uses `assertLlmAvailable` with the venue's own `llmProbes()` and the
+ * same credential env this file later forwards to the hubs, so this can never
+ * disagree with the refusal it is trying to anticipate.
  */
+// The credential this drill forwards to its hub children: the OAuth token when the
+// harness environment carries one, nothing otherwise. One function, called by the
+// pre-check and by the venue construction, so both see the identical object.
+function forwardedHubCredentialEnv () {
+    return process.env.HUB_CLAUDE_CODE_OAUTH_TOKEN
+        ? { HUB_CLAUDE_CODE_OAUTH_TOKEN: process.env.HUB_CLAUDE_CODE_OAUTH_TOKEN } : {}
+}
+
 function llmRunnableHere () {
     const dir = process.env.HUB_CLAUDE_CONFIG_DIR || null
     try {
-        assertLlmAvailable({ claudeConfigDir: dir, pathEnv: process.env.PATH }, {
-            dirExists: (p) => { try { return fs.statSync(p).isDirectory() } catch (_) { return false } },
-            isExecutable: (p) => { try { fs.accessSync(p, fs.constants.X_OK); return true } catch (_) { return false } },
-        })
+        assertLlmAvailable({
+            claudeConfigDir: dir,
+            pathEnv: process.env.PATH,
+            hubEnv: hubCredentialEnv(dir, forwardedHubCredentialEnv())
+        }, llmProbes())
         return { ok: true, why: null }
     } catch (e) {
         return { ok: false, why: (e && e.message) || String(e) }
@@ -196,12 +205,11 @@ describe('AT1: an ATTEST response finalizes over P2P with no transaction of its 
         // token in the harness environment rather than a populated directory
         // (`~/.claude-xchain` holds a stub). Every hub's fetch failed with
         // `llm: Set HUB_CLAUDE_CONFIG_DIR` on 2026-09-05 until the token reached
-        // the children. Forwarded only when present, never written anywhere.
-        const hubCredentialEnv = process.env.HUB_CLAUDE_CODE_OAUTH_TOKEN
-            ? { HUB_CLAUDE_CODE_OAUTH_TOKEN: process.env.HUB_CLAUDE_CODE_OAUTH_TOKEN } : {}
+        // the children. Forwarded only when present, never written anywhere. The SAME
+        // object the llm pre-check judged, so the check and the hubs cannot diverge.
         venue = new AttestMirrorVenue({
             label: 'at1', identities: staked.identities, needsLlm: llm.ok,
-            hubExtraEnv: Object.assign({}, testServer.hubEnv, hubCredentialEnv),
+            hubExtraEnv: Object.assign({}, testServer.hubEnv, forwardedHubCredentialEnv()),
         })
         up = await venue.start()
         if (!up) {

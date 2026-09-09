@@ -531,33 +531,59 @@ function resolveWindowKeying() {
     return resolveWindowKeyingFrom(loadHubModule('src/AttestationBatchPublisher.js'));
 }
 
+// The environment keys the hub's credential resolver reads (`xchain-hub/src/lib/
+// hub-credentials.js resolveHubLlmAuth`). Only these are handed to the probe, so a
+// signer WIF or an API key for another vendor riding in the same extra env never
+// travels further than it has to.
+const HUB_LLM_CREDENTIAL_KEYS = [
+    'HUB_CLAUDE_CONFIG_DIR', 'HUB_CLAUDE_CODE_OAUTH_TOKEN', 'HUB_CLAUDE_DEFAULT_CONFIG_DIR',
+    'CLAUDE_CONFIG_DIR', 'CLAUDE_CODE_OAUTH_TOKEN', 'HUB_ANTHROPIC_API_KEY', 'ANTHROPIC_API_KEY'
+];
+
 /**
- * Refuse an llm drill on a box that cannot serve one, and SAY WHICH HALF is missing.
+ * The credential-bearing part of a hub child's environment, built from the same two inputs
+ * `buildHubEnv` merges so the llm precondition and the children agree by construction.
  *
- * The llm provider needs two independent things and they live in different places, so a
- * box can have exactly one of them and look broken in the other's direction:
+ * @param {string|null} claudeConfigDir  what the venue will set as HUB_CLAUDE_CONFIG_DIR
+ * @param {object|null} extraEnv         the drill's `hubExtraEnv`, or the subset it will forward
+ * @returns {object} a fresh env object; never logged, never written
+ */
+function hubCredentialEnv(claudeConfigDir, extraEnv) {
+    const env = {};
+    if (claudeConfigDir) env.HUB_CLAUDE_CONFIG_DIR = String(claudeConfigDir);
+    for (const k of HUB_LLM_CREDENTIAL_KEYS) {
+        if (extraEnv && extraEnv[k] != null && String(extraEnv[k]).trim() !== '') env[k] = String(extraEnv[k]);
+    }
+    return env;
+}
+
+/**
+ * The real probes for `assertLlmAvailable`, one set for every drill's pre-check and the
+ * venue's start-time check. The credential probe IS the hub's resolver: restating what
+ * counts as a credential here would be a second copy that drifts.
+ */
+function llmProbes() {
+    return {
+        dirExists: (p) => { try { return fs.statSync(p).isDirectory(); } catch (_) { return false; } },
+        isExecutable: (p) => { try { fs.accessSync(p, fs.constants.X_OK); return true; } catch (_) { return false; } },
+        resolveCredential: (env) => loadHubModule('src/lib/hub-credentials.js').resolveHubLlmAuth({ env: env })
+    };
+}
+
+/**
+ * Refuse an llm drill on a box that cannot serve one, naming which of the three things the
+ * provider needs is missing: the credential directory (`HUB_CLAUDE_CONFIG_DIR`), a credential
+ * the hub's own resolver accepts from the env the children receive (a directory that exists
+ * is not one), and the `claude` binary on the PATH the children inherit, not an interactive one.
+ * Pure, every probe injected; `llmProbes()` is the real set.
  *
- *   - a credential directory, which the hub reads through `HUB_CLAUDE_CONFIG_DIR`;
- *   - the `claude` binary, on the PATH THE HUBS WILL ACTUALLY RECEIVE.
- *
- * The PATH clause is the subtle half. A hub child inherits the harness's
- * `process.env.PATH`, and for a non-interactive shell that is not the PATH a human sees,
- * so a binary that runs fine when typed by hand can be absent from every hub in the
- * federation. Probing an interactive PATH would pass here and fail in the children.
- *
- * NAMING THE MISSING HALF is the point of this function rather than a nicety. A bare
- * "llm unavailable" sends the reader hunting for credentials when the answer is a PATH,
- * which is the wrong direction and has already cost this train time.
- *
- * PURE, with both probes injected, so a refusal can be driven for a box this run is not
- * on and neither branch depends on the machine the suite happens to execute on.
- *
- * @param {object} spec   `{claudeConfigDir, pathEnv}` exactly as the hubs will receive them
- * @param {object} probes `{dirExists(path), isExecutable(path)}`
+ * @param {object} spec   `{claudeConfigDir, pathEnv, hubEnv}` as the hubs will receive them
+ * @param {object} probes `{dirExists(path), isExecutable(path), resolveCredential(env) -> {ok}}`
  */
 function assertLlmAvailable(spec, probes) {
     const dir     = spec && spec.claudeConfigDir;
     const pathEnv = String((spec && spec.pathEnv) || '');
+    const hubEnv  = (spec && spec.hubEnv) || {};
     const missing = [];
 
     if (!dir) {
@@ -571,6 +597,19 @@ function assertLlmAvailable(spec, probes) {
             'correct in a place where it is not');
     }
 
+    // The hub's own verdict over the env its children get. A throwing resolver is a
+    // missing credential, not a pass: the hub would have thrown at fetch time too.
+    let resolved = null;
+    try { resolved = typeof probes.resolveCredential === 'function' ? probes.resolveCredential(hubEnv) : null; }
+    catch (_) { resolved = null; }
+    if (!resolved || resolved.ok !== true) {
+        missing.push('no credential the hub can resolve from the environment its children receive ' +
+            '(keys present: ' + (Object.keys(hubEnv).join(', ') || '<none>') + '). A directory ' +
+            'that exists is not a credential: HUB_CLAUDE_CONFIG_DIR must hold a `.credentials.json` ' +
+            'that carries a token, or HUB_CLAUDE_CODE_OAUTH_TOKEN must ride in the hub env (on ' +
+            'the venue box: source the hub token env file before the drill)');
+    }
+
     // Every PATH entry, in order, exactly as a child would resolve it.
     const entries = pathEnv.split(':').filter((p) => p.length > 0);
     if (!entries.some((p) => probes.isExecutable(p.replace(/\/+$/, '') + '/claude'))) {
@@ -581,9 +620,9 @@ function assertLlmAvailable(spec, probes) {
 
     if (missing.length === 0) return;
     throw new Error('attestMirrorVenue: refusing to boot an llm drill. ' + missing.length +
-        ' of the 2 halves the llm provider needs ' + (missing.length === 1 ? 'is' : 'are') +
+        ' of the 3 things the llm provider needs ' + (missing.length === 1 ? 'is' : 'are') +
         ' missing here:\n  - ' + missing.join('\n  - ') +
-        '\nRun this drill on a box that has BOTH, or extend the PATH the harness passes to its ' +
+        '\nRun this drill on a box that has ALL THREE, or extend the PATH the harness passes to its ' +
         'children. Do not copy credentials to make it work somewhere else.');
 }
 
@@ -1554,13 +1593,15 @@ class AttestMirrorVenue {
         // Same posture, for the other thing a drill can declare. The PATH probed is the
         // one the CHILDREN will inherit, not an interactive one, because that is the only
         // PATH that decides whether a hub can reach the provider.
+        // Judged over the env the children will actually get, the merge buildHubEnv performs.
         if (this.needsLlm) {
             assertLlmAvailable(
-                { claudeConfigDir: this.claudeConfigDir, pathEnv: process.env.PATH },
                 {
-                    dirExists: (p) => { try { return fs.statSync(p).isDirectory(); } catch (_) { return false; } },
-                    isExecutable: (p) => { try { fs.accessSync(p, fs.constants.X_OK); return true; } catch (_) { return false; } }
-                });
+                    claudeConfigDir: this.claudeConfigDir,
+                    pathEnv: process.env.PATH,
+                    hubEnv: hubCredentialEnv(this.claudeConfigDir, this.hubExtraEnv)
+                },
+                llmProbes());
         }
 
         this._live = await this._resolveStandingStack();
@@ -3116,6 +3157,9 @@ module.exports = {
     assertTimingInvariants,
     resolveWindowKeying,
     assertLlmAvailable,
+    llmProbes,
+    hubCredentialEnv,
+    HUB_LLM_CREDENTIAL_KEYS,
     resolveWindowKeyingFrom,
     resolveDecoderCredential,
     HUB_CONFIG_REDACTION,

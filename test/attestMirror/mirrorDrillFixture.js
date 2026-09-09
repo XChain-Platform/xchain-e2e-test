@@ -828,6 +828,231 @@ async function readSeatedAttestationSet (opts) {
     return { set: set, tipBlock: Number(tip.block_index), buriedBlock: buried, reorgBuffer: buffer }
 }
 
+/** One seated key's snapshot weight, for a message; '?' when it cannot be read. */
+function _weightOf (seated, pubkeyHex) {
+    const v = seated && seated.byPubkey && seated.byPubkey.get(pubkeyHex)
+    return (v && v.weight !== undefined && v.weight !== null) ? String(v.weight) : '?'
+}
+
+/**
+ * Decide, from a seated set alone, which keys this drill adopts, which it passes
+ * over, and which make it refuse.
+ *
+ * PURE AND SEPARATE FROM THE CHAIN READ, because this is the whole decision and a
+ * decision that can only be exercised by standing up a venue is a decision nobody
+ * checks. `provisionDrillIdentities` reads the chain and calls this; the unit tier
+ * calls it with a synthetic set.
+ *
+ * THREE OUTCOMES PER SEATED KEY, and the middle one is the reason this function
+ * exists:
+ *
+ *   - ADOPTED: the harness derives its seed, so it gets a live hub.
+ *   - PASSED OVER: no seed, and its snapshot weight is below the floor of EVERY
+ *     provider the drill declares, so `_computeResponsibleSet` filters it out
+ *     before the ranking and no draw of this drill can contain it. Listed, never
+ *     adopted, never refused.
+ *   - ORPHAN: no seed, and it clears at least one declared provider's floor, so a
+ *     draw containing it stalls the round to timeout. Refused.
+ *
+ * @param {object} seated  a `readCapabilitySet` result: {pubkeys, byPubkey}
+ * @param {Map}    known   a `_knownSignerSeeds()` result, pubkey -> {seedHex, origin}
+ * @param {object} opts    {providers, redundancy, buriedBlock, network}
+ * @returns {{declared, adopted, orphans, belowFloor, floorReport, quorum}}
+ */
+function resolveAdoptionPlan (seated, known, opts) {
+    const o           = opts || {}
+    const redundancy  = Number(o.redundancy || 3)
+    const buriedBlock = o.buriedBlock
+    const network     = String(o.network || 'regtest')
+
+    assert.ok(seated && Array.isArray(seated.pubkeys) && seated.byPubkey,
+        'mirrorDrillFixture: resolveAdoptionPlan needs a readCapabilitySet result')
+
+    // ── which seated keys this drill could actually draw ─────────────────────
+    //
+    // Checked through the hub's OWN comparator, never a second one written here,
+    // because a test-side `>=` on decimal strings is exactly the kind of second
+    // implementation this fixture exists to avoid.
+    const providerDefaults = loadHubModule('src/ProviderRegistry.js').DEFAULTS || {}
+    const declared = (o.providers === undefined || o.providers === null)
+        ? Object.keys(providerDefaults)
+        : [].concat(o.providers).map((p) => String(p))
+    assert.ok(declared.length > 0,
+        'mirrorDrillFixture: opts.providers, when given, must name at least one provider. Omit it ' +
+        'to scope the orphan rule to every provider the registry declares; an empty list would scope ' +
+        'it to nothing and adopt a roster no draw could ever use.')
+    for (const providerId of declared) {
+        assert.ok(providerDefaults[providerId],
+            'mirrorDrillFixture: unknown provider ' + providerId + '. The registry declares ' +
+            Object.keys(providerDefaults).join(', ') + ', and a typo here would scope the orphan rule ' +
+            'to a provider nothing serves rather than failing.')
+    }
+
+    const AttestationRound = loadHubModule('src/AttestationRound.js')
+    const meetsFloor = AttestationRound.prototype._meetsProviderFloor
+    assert.strictEqual(typeof meetsFloor, 'function',
+        'mirrorDrillFixture: the hub no longer exposes _meetsProviderFloor, so the provider-floor ' +
+        'precondition cannot be checked against the rule the hub actually applies')
+
+    const eligibleBy = new Map()
+    const drawable   = new Set()
+    for (const providerId of declared) {
+        const floor = providerDefaults[providerId].min_stake_xchain
+        // A provider that declares NO floor filters nothing, so every seated key is
+        // drawable for it. Spelled out rather than left to the comparator, which
+        // excludes on an unusable floor and would read here as "nobody is eligible"
+        // when the truth is the opposite.
+        const eligible = (floor === undefined || floor === null)
+            ? seated.pubkeys.slice()
+            : seated.pubkeys.filter((pk) => meetsFloor.call(null, _rawWeight(seated, pk), floor))
+        eligibleBy.set(providerId, eligible)
+        for (const pk of eligible) drawable.add(pk)
+    }
+
+    // ── every DRAWABLE seated key must have a signer we can actually run ─────
+    const adopted    = []
+    const orphans    = []
+    const belowFloor = []
+    for (const pk of seated.pubkeys) {
+        const hit = known.get(pk)
+        if (hit) { adopted.push({ pubkeyHex: pk, privkeyHex: hit.seedHex, origin: hit.origin }); continue }
+        if (!drawable.has(pk)) { belowFloor.push(pk); continue }
+        orphans.push(pk)
+    }
+
+    assert.strictEqual(orphans.length, 0,
+        'mirrorDrillFixture: ' + orphans.length + ' of the ' + seated.pubkeys.length +
+        ' seated attestation validator(s) at buried block ' + buriedBlock +
+        ' have NO signing key this harness can run AND clear the floor of a provider this drill ' +
+        'declares (' + declared.join(', ') + '): ' +
+        orphans.map((p) => p.slice(0, 16) + '@' + _weightOf(seated, p)).join(', ') + '.\n' +
+        'A responsible set is drawn from ALL of them and finalization needs max(quorum, redundancy) ' +
+        'signatures from the DRAWN members, so a draw containing one of these stalls to timeout and ' +
+        'reads as a missing mirror row. Refusing rather than running that lottery.\n' +
+        'The idle key is the usual cause: set XC_ROLLCALL_FEDERATION_MNEMONIC (with ' +
+        'XC_ROLLCALL_IDLE_GENERATION) or XC_ROLLCALL_IDLE_SEED so it can be derived, or have the ' +
+        'roll-call lane unstake it. Where the key belongs to a validator this harness must NOT ' +
+        'impersonate, declare only providers whose floor it misses instead. Signers this harness ' +
+        'holds: ' + [...known.keys()].map((p) => p.slice(0, 16)).join(', '))
+
+    // ── the eligible set must still be big enough to draw from ───────────────
+    //
+    // Filtering only ever removes members, so it cannot introduce a foreign one.
+    // What it can do is shrink the set below redundancy, and `_computeResponsibleSet`
+    // then returns fewer members than needed, which `AttestationConsensus` skips as
+    // an unfinalizable round: the request sits until its deadline and expires, with
+    // no error anywhere near the floor that caused it.
+    const floorReport = []
+    for (const providerId of declared) {
+        const floor    = providerDefaults[providerId].min_stake_xchain
+        const eligible = eligibleBy.get(providerId)
+        floorReport.push({ providerId: providerId, floor: String(floor), eligible: eligible.length })
+        assert.ok(eligible.length >= redundancy,
+            'mirrorDrillFixture: provider ' + providerId + ' declares min_stake_xchain ' + floor +
+            ' and only ' + eligible.length + ' of ' + seated.pubkeys.length + ' seated validator(s) ' +
+            'clear it at buried block ' + buriedBlock + ', which is below the redundancy of ' +
+            redundancy + '. The responsible set comes back SHORT, the round is skipped as ' +
+            'unfinalizable, and the request expires at its deadline with no response and no error ' +
+            'anywhere near the floor that caused it.')
+    }
+
+    const quorum = _batchQuorumReach(seated, adopted, belowFloor, buriedBlock, network)
+
+    return {
+        declared:    declared,
+        adopted:     adopted,
+        orphans:     orphans,
+        belowFloor:  belowFloor,
+        floorReport: floorReport,
+        quorum:      quorum,
+    }
+}
+
+/** The raw snapshot weight the hub's comparator is given, undefined when absent. */
+function _rawWeight (seated, pubkeyHex) {
+    const v = seated.byPubkey.get(pubkeyHex)
+    return v && v.weight
+}
+
+/**
+ * Can the hubs this venue runs reach the BATCH co-sign quorum on their own?
+ *
+ * THE PROVIDER FLOOR SCOPES THE DRAW AND NOT THE BATCH, which is the one trap in
+ * scoping the orphan rule at all. `AttestationResponseMirror._verifyBatchQuorum`
+ * and the leader half in `AttestationBatchPublisher` judge a window's signatures
+ * against the WHOLE attestation capability snapshot at the batch anchor, with no
+ * provider anywhere in the rule. So a seated key this venue does not run is a set
+ * member on every window while signing none of them: it raises the bar and never
+ * helps clear it. Passing it over for the draw does not pass it over here, and a
+ * venue whose own share is too small publishes nothing, which presents as AT5's
+ * "no hub ever published a non-empty window" half an hour in.
+ *
+ * Judged through the hub's own modules on both sides of the flag day, because the
+ * two rules are different arithmetic and only the network's activation height
+ * decides which one a window is measured by.
+ */
+function _batchQuorumReach (seated, adopted, belowFloor, buriedBlock, network) {
+    const swq = loadHubModule('src/stake_weighted_quorum.js')
+    const { bftQuorumOrSingle } = loadHubModule('src/lib/bft_quorum.js')
+
+    const weighted   = !!swq.isStakeWeightedQuorumActive(buriedBlock, network)
+    const validators = seated.pubkeys.map((pk) => seated.byPubkey.get(pk))
+    const ourKeys    = adopted.map((a) => a.pubkeyHex)
+
+    const reaches = (signers) => {
+        if (!weighted) return signers.length >= bftQuorumOrSingle(seated.pubkeys.length, 1)
+        try {
+            return swq.meetsStakeThreshold(validators, signers)
+        } catch (e) {
+            assert.fail('mirrorDrillFixture: the seated snapshot at buried block ' + buriedBlock +
+                ' cannot be measured for stake-weighted quorum (' + (e && e.message) + '). That is an ' +
+                'INSTRUMENT or roster fault and NOT evidence the set is usable: every batch window ' +
+                'would be refused on the same reading.')
+        }
+    }
+
+    let totalStake = '?'
+    let oursStake  = '?'
+    if (weighted) {
+        try {
+            totalStake = String(swq.totalStake(validators))
+            oursStake  = String(swq.totalStake(ourKeys.map((pk) => seated.byPubkey.get(pk))))
+        } catch (_) { /* the refusal below still names the counts */ }
+    }
+
+    assert.ok(reaches(ourKeys),
+        'mirrorDrillFixture: the ' + ourKeys.length + ' hub(s) this venue runs cannot reach the batch ' +
+        'co-sign quorum on their own at buried block ' + buriedBlock + ' (' +
+        (weighted ? 'stake-weighted: 3 x ' + oursStake + ' must exceed 2 x ' + totalStake
+                  : 'count-based: ' + ourKeys.length + ' of ' + bftQuorumOrSingle(seated.pubkeys.length, 1) +
+                    ' needed over a set of ' + seated.pubkeys.length) + '). ' +
+        (belowFloor.length
+            ? 'The ' + belowFloor.length + ' seated key(s) passed over for the draw (' +
+              belowFloor.map((p) => p.slice(0, 16) + '@' + _weightOf(seated, p)).join(', ') +
+              ') still count as set members here and sign nothing, which is what raises the bar. '
+            : '') +
+        'Seed more adoptable stake before driving a batch: no window would ever publish, and that ' +
+        'surfaces as a publisher that looks broken rather than as a short roster.')
+
+    // A SPARE, not merely a quorum. Every hub in this venue is a child process on
+    // one box, so "all of them answer" is an assumption rather than a property, and
+    // a window that needs every last signer fails the first time one is slow. Not
+    // fatal, because a venue at exactly quorum still publishes when nothing goes
+    // wrong; said out loud so a later failure is recognisable instead of new.
+    const spare = ourKeys.length > 0 &&
+        ourKeys.every((pk) => reaches(ourKeys.filter((x) => x !== pk)))
+
+    return {
+        weighted:   weighted,
+        reaches:    true,
+        spare:      spare,
+        totalStake: totalStake,
+        oursStake:  oursStake,
+        setSize:    seated.pubkeys.length,
+        ourSize:    ourKeys.length,
+    }
+}
+
 /**
  * Provision the identities the venue's hubs sign with, by ADOPTING THE ROSTER
  * rather than adding to it.
@@ -857,14 +1082,37 @@ async function readSeatedAttestationSet (opts) {
  * which it did DURING this build, between one read and the next.
  *
  * WHAT THIS REFUSES TO DO, deliberately: it will not run with a seated key it
- * cannot sign for. That is a 1-in-4 lottery at four seated keys and redundancy
- * 3, and a drill that fails three times in four is worse than one that refuses
- * once, because a lottery loss is indistinguishable from a real defect.
+ * cannot sign for AND THAT THE DRILL COULD ACTUALLY DRAW. That is a 1-in-4
+ * lottery at four seated keys and redundancy 3, and a drill that fails three
+ * times in four is worse than one that refuses once, because a lottery loss is
+ * indistinguishable from a real defect.
+ *
+ * THE "COULD ACTUALLY DRAW" HALF IS `opts.providers`, and it is what lets an
+ * acceptance drill run on a chain carrying a validator nobody here may sign as.
+ * The provider floor filters the seated set BEFORE the hash ranking
+ * (`AttestationRound._computeResponsibleSet` calls `_meetsProviderFloor` on the
+ * snapshot weight), and the floors differ: `http_get` 10000, `llm` 25000. A key
+ * below the floor of EVERY provider a drill declares can therefore never appear
+ * in that drill's responsible set however the ranking falls, so it is not that
+ * drill's orphan. It is listed in the adoption log and passed over.
+ *
+ * WHY THAT MATTERS RATHER THAN BEING A CONVENIENCE: the seated key it exists for
+ * is the STANDING hub's own identity. Its seed lives only in that hub's
+ * container, so it cannot be adopted; and if it could, adopting it would put a
+ * second live hub on the chain signing as that identity, which is equivocation
+ * and would get the real hub slashed. Refusing on it instead parks every
+ * acceptance drill on a validator no drill can reach.
  *
  * @param {object} opts
  * @param {number} [opts.count]        hub count to provision for (default 5)
  * @param {number} [opts.redundancy]   the redundancy the drill's contract asks
  *                                     for, checked against the eligible set
+ * @param {string[]} [opts.providers]  the provider ids this drill will actually
+ *                                     request from, which scopes the orphan rule
+ *                                     and the eligibility check; omitted means
+ *                                     every provider the registry declares,
+ *                                     which is the behaviour every caller had
+ *                                     before this option existed
  * @returns {Promise<{identities, adopted, observers, seated, buriedBlock}>}
  */
 async function provisionDrillIdentities (opts) {
@@ -879,66 +1127,18 @@ async function provisionDrillIdentities (opts) {
     const seated  = reading.set
     const known   = _knownSignerSeeds()
 
-    // ── every seated key must have a signer we can actually run ──────────────
-    const adopted = []
-    const orphans = []
-    for (const pk of seated.pubkeys) {
-        const hit = known.get(pk)
-        if (hit) adopted.push({ pubkeyHex: pk, privkeyHex: hit.seedHex, origin: hit.origin })
-        else orphans.push(pk)
-    }
-
-    assert.strictEqual(orphans.length, 0,
-        'mirrorDrillFixture: ' + orphans.length + ' of the ' + seated.pubkeys.length +
-        ' seated attestation validator(s) at buried block ' + reading.buriedBlock +
-        ' have NO signing key this harness can run: ' +
-        orphans.map((p) => p.slice(0, 16)).join(', ') + '.\n' +
-        'A responsible set is drawn from ALL of them and finalization needs max(quorum, redundancy) ' +
-        'signatures from the DRAWN members, so a draw containing one of these stalls to timeout and ' +
-        'reads as a missing mirror row. Refusing rather than running that lottery.\n' +
-        'The idle key is the usual cause: set XC_ROLLCALL_FEDERATION_MNEMONIC (with ' +
-        'XC_ROLLCALL_IDLE_GENERATION) or XC_ROLLCALL_IDLE_SEED so it can be derived, or have the ' +
-        'roll-call lane unstake it. Signers this harness holds: ' +
-        [...known.keys()].map((p) => p.slice(0, 16)).join(', '))
+    const plan = resolveAdoptionPlan(seated, known, {
+        providers:   o.providers,
+        redundancy:  redundancy,
+        buriedBlock: reading.buriedBlock,
+        network:     o.network || (typeof NETWORK === 'undefined' ? 'regtest' : NETWORK),
+    })
+    const adopted     = plan.adopted
+    const floorReport = plan.floorReport
 
     assert.ok(count >= adopted.length,
         'mirrorDrillFixture: ' + adopted.length + ' seated key(s) need a hub but the venue is sized ' +
         'for ' + count + '. Raise the hub count: a seated key without a hub is the refusal above.')
-
-    // ── the eligible set must still be big enough to draw from ───────────────
-    //
-    // The PROVIDER floor filters the seated set BEFORE the ranking, per provider,
-    // and it filters to a SUBSET, so it can never introduce a foreign member.
-    // What it can do is shrink the set below redundancy, and `_computeResponsibleSet`
-    // then returns fewer members than needed, which `AttestationConsensus` skips
-    // as an unfinalizable round: the request sits until its deadline and expires.
-    // Checked through the hub's OWN comparator, never a second one written here,
-    // because a test-side `>=` on decimal strings is exactly the kind of second
-    // implementation this fixture exists to avoid.
-    const AttestationRound = loadHubModule('src/AttestationRound.js')
-    const meetsFloor = AttestationRound.prototype._meetsProviderFloor
-    assert.strictEqual(typeof meetsFloor, 'function',
-        'mirrorDrillFixture: the hub no longer exposes _meetsProviderFloor, so the provider-floor ' +
-        'precondition cannot be checked against the rule the hub actually applies')
-
-    const providerDefaults = loadHubModule('src/ProviderRegistry.js').DEFAULTS || {}
-    const floorReport = []
-    for (const providerId of Object.keys(providerDefaults)) {
-        const floor = providerDefaults[providerId].min_stake_xchain
-        if (floor === undefined || floor === null) continue
-        const eligible = seated.pubkeys.filter((pk) => {
-            const v = seated.byPubkey.get(pk)
-            return meetsFloor.call(null, v && v.weight, floor)
-        })
-        floorReport.push({ providerId: providerId, floor: String(floor), eligible: eligible.length })
-        assert.ok(eligible.length >= redundancy,
-            'mirrorDrillFixture: provider ' + providerId + ' declares min_stake_xchain ' + floor +
-            ' and only ' + eligible.length + ' of ' + seated.pubkeys.length + ' seated validator(s) ' +
-            'clear it at buried block ' + reading.buriedBlock + ', which is below the redundancy of ' +
-            redundancy + '. The responsible set comes back SHORT, the round is skipped as ' +
-            'unfinalizable, and the request expires at its deadline with no response and no error ' +
-            'anywhere near the floor that caused it.')
-    }
 
     // ── the remaining hubs are deliberate OUTSIDERS ──────────────────────────
     //
@@ -959,8 +1159,20 @@ async function provisionDrillIdentities (opts) {
         reading.buriedBlock + ' (tip ' + reading.tipBlock + ', reorg buffer ' + reading.reorgBuffer + '): ' +
         adopted.length + ' seated key(s) each given a live hub [' +
         adopted.map((a) => a.pubkeyHex.slice(0, 16) + ' via ' + a.origin).join('; ') + '], plus ' +
-        observers.length + ' unstaked observer hub(s). Eligible per provider: ' +
+        observers.length + ' unstaked observer hub(s). Declared provider(s): ' + plan.declared.join(', ') +
+        '. Eligible per provider: ' +
         floorReport.map((f) => f.providerId + ' ' + f.eligible + '/' + seated.pubkeys.length).join(', ') +
+        // NAMED, NEVER SILENT. A key passed over here is a set member that signs
+        // nothing: it cannot be drawn for this drill, but it still counts against
+        // the batch co-sign quorum, so a reader diagnosing a window that never
+        // publishes has to be able to see it from the adoption line alone.
+        '. Passed over as below the floor of every declared provider (NOT adopted, NOT refused): ' +
+        (plan.belowFloor.length
+            ? plan.belowFloor.map((p) => p.slice(0, 16) + '@' + _weightOf(seated, p)).join(', ')
+            : 'none') +
+        '. Batch co-sign quorum ' + (plan.quorum.weighted ? 'stake-weighted' : 'count-based') +
+        ': this venue signs ' + plan.quorum.oursStake + ' of ' + plan.quorum.totalStake +
+        ' seated stake' + (plan.quorum.spare ? ' with a spare' : ' WITH NO SPARE') +
         '. NOTHING WAS STAKED.')
 
     return {
@@ -971,6 +1183,9 @@ async function provisionDrillIdentities (opts) {
         buriedBlock: reading.buriedBlock,
         tipBlock:    reading.tipBlock,
         floors:      floorReport,
+        providers:   plan.declared,
+        belowFloor:  plan.belowFloor,
+        quorum:      plan.quorum,
     }
 }
 
@@ -1253,9 +1468,10 @@ module.exports = {
     readAppliedResponse,
     readContractState,
     IDLE_GENERATION_SCAN,
-    // Exported for the unit tier only: these are the two pure pieces of the
-    // adoption decision, and a guard that cannot reach them can only test
-    // adoption by standing up a chain.
+    // Exported for the unit tier only: these are the pure pieces of the adoption
+    // decision, and a guard that cannot reach them can only test adoption by
+    // standing up a chain.
     _knownSignerSeeds,
     _pubkeyForSeed,
+    resolveAdoptionPlan,
 }

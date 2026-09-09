@@ -36,6 +36,8 @@ const {
     assertTimingInvariants,
     resolveWindowKeying,
     assertLlmAvailable,
+    llmProbes,
+    hubCredentialEnv,
     resolveWindowKeyingFrom,
     resolveDecoderCredential,
     HUB_CONFIG_REDACTION,
@@ -592,23 +594,25 @@ describe('attestMirrorVenue: the decoder credential', function () {
 })
 
 describe('attestMirrorVenue: the llm precondition', function () {
-    // The two halves live in different places and a box can have exactly one, which is
-    // why the refusal has to say WHICH. Both probes are injected so these cases describe
+    // The three things live in different places and a box can have any subset, which is
+    // why the refusal has to say WHICH. Every probe is injected so these cases describe
     // boxes this run is not on.
     const OK = {
         dirExists: () => true,
-        isExecutable: (p) => p === '/opt/venue-fixture/bin/claude'
+        isExecutable: (p) => p === '/opt/venue-fixture/bin/claude',
+        resolveCredential: () => ({ ok: true, source: 'hub_token' })
     }
-    const SPEC = { claudeConfigDir: '/opt/venue-fixture/creds', pathEnv: '/usr/bin:/opt/venue-fixture/bin' }
+    const HUB_ENV = { HUB_CLAUDE_CONFIG_DIR: '/opt/venue-fixture/creds', HUB_CLAUDE_CODE_OAUTH_TOKEN: 'fixture-token' }
+    const SPEC = { claudeConfigDir: '/opt/venue-fixture/creds', pathEnv: '/usr/bin:/opt/venue-fixture/bin', hubEnv: HUB_ENV }
 
-    it('passes when both halves are present', () => {
+    it('passes when all three are present', () => {
         assert.doesNotThrow(() => assertLlmAvailable(SPEC, OK))
     })
 
-    it('names the CREDENTIAL half when only the directory is missing', () => {
+    it('names the DIRECTORY when only the directory is missing', () => {
         const probes = Object.assign({}, OK, { dirExists: () => false })
         assert.throws(() => assertLlmAvailable(SPEC, probes), (e) => {
-            assert.match(e.message, /1 of the 2 halves/)
+            assert.match(e.message, /1 of the 3 things/)
             assert.match(e.message, /credential directory \/opt\/venue-fixture\/creds does not exist/)
             assert.ok(!/claude` binary is not executable/.test(e.message),
                 'it blamed the PATH as well, which sends the reader in the wrong direction')
@@ -616,10 +620,10 @@ describe('attestMirrorVenue: the llm precondition', function () {
         })
     })
 
-    it('names the PATH half when only the binary is missing, and shows the PATH searched', () => {
+    it('names the PATH when only the binary is missing, and shows the PATH searched', () => {
         const probes = Object.assign({}, OK, { isExecutable: () => false })
         assert.throws(() => assertLlmAvailable(SPEC, probes), (e) => {
-            assert.match(e.message, /1 of the 2 halves/)
+            assert.match(e.message, /1 of the 3 things/)
             assert.match(e.message, /binary is not executable on the PATH THE HUBS WILL RECEIVE/)
             assert.match(e.message, /usr\/bin:\/opt\/venue-fixture\/bin/)
             assert.ok(!/does not exist ON THIS BOX/.test(e.message),
@@ -628,30 +632,94 @@ describe('attestMirrorVenue: the llm precondition', function () {
         })
     })
 
-    it('names BOTH when neither is present', () => {
+    // A directory that exists is not a credential (a stub or a logged-out husk is a
+    // directory too), and only the hub's own resolver knows what counts as one.
+    it('names the CREDENTIAL when the directory exists but the hub resolver finds nothing in it', () => {
+        const probes = Object.assign({}, OK, {
+            resolveCredential: () => ({ ok: false, reason: 'no_credential_configured' })
+        })
+        assert.throws(() => assertLlmAvailable(SPEC, probes), (e) => {
+            assert.match(e.message, /1 of the 3 things/)
+            assert.match(e.message, /no credential the hub can resolve/)
+            assert.match(e.message, /source the hub token env file/)
+            assert.ok(!/does not exist ON THIS BOX/.test(e.message),
+                'it blamed the directory, which exists; the reader would go looking for a path')
+            assert.ok(!/binary is not executable/.test(e.message),
+                'it blamed the PATH as well, which sends the reader in the wrong direction')
+            return true
+        })
+    })
+
+    it('hands the resolver the env the HUB CHILDREN receive, never the harness environment', () => {
+        // The harness may be logged into an interactive CLAUDE_CONFIG_DIR or carry an
+        // ambient ANTHROPIC_API_KEY; the children get neither, so a probe that consulted
+        // process.env would pass here and fail in every hub.
+        let seen = null
+        const probes = Object.assign({}, OK, {
+            resolveCredential: (env) => { seen = env; return { ok: true, source: 'hub_token' } }
+        })
+        assertLlmAvailable(SPEC, probes)
+        assert.deepStrictEqual(seen, HUB_ENV)
+    })
+
+    it('treats a resolver that throws as no credential rather than as a pass', () => {
+        const probes = Object.assign({}, OK, { resolveCredential: () => { throw new Error('boom') } })
+        assert.throws(() => assertLlmAvailable(SPEC, probes), /no credential the hub can resolve/)
+    })
+
+    it('names ALL THREE when nothing is present', () => {
         assert.throws(
-            () => assertLlmAvailable(SPEC, { dirExists: () => false, isExecutable: () => false }),
-            /2 of the 2 halves/)
+            () => assertLlmAvailable(SPEC, {
+                dirExists: () => false, isExecutable: () => false, resolveCredential: () => ({ ok: false })
+            }),
+            /3 of the 3 things/)
     })
 
     it('refuses an unconfigured credential directory rather than falling back to an interactive one', () => {
         // The venue must never inherit whichever store the operator happens to be logged
         // into, so an absent config is its own named failure and not a default.
         assert.throws(
-            () => assertLlmAvailable({ claudeConfigDir: null, pathEnv: SPEC.pathEnv }, OK),
+            () => assertLlmAvailable({ claudeConfigDir: null, pathEnv: SPEC.pathEnv, hubEnv: {} }, OK),
             /no credential directory is configured/)
     })
 
     it('searches PATH entries in order and tolerates a trailing slash', () => {
-        const probes = { dirExists: () => true, isExecutable: (p) => p === '/opt/bin/claude' }
+        const probes = Object.assign({}, OK, { isExecutable: (p) => p === '/opt/bin/claude' })
         assert.doesNotThrow(() =>
-            assertLlmAvailable({ claudeConfigDir: '/d', pathEnv: '/usr/bin:/opt/bin/' }, probes))
+            assertLlmAvailable({ claudeConfigDir: '/d', pathEnv: '/usr/bin:/opt/bin/', hubEnv: HUB_ENV }, probes))
     })
 
     it('reports an empty PATH as empty rather than as a mysterious absence', () => {
         assert.throws(
-            () => assertLlmAvailable({ claudeConfigDir: '/d', pathEnv: '' }, OK),
+            () => assertLlmAvailable({ claudeConfigDir: '/d', pathEnv: '', hubEnv: HUB_ENV }, OK),
             /<empty>/)
+    })
+
+    it('builds the hub credential env from the policy directory plus ONLY the credential keys of the extra env', () => {
+        // A signer WIF rides in the same hubExtraEnv as the token; it is needed by the
+        // children but is no business of the credential probe.
+        const env = hubCredentialEnv('/opt/venue-fixture/creds', {
+            HUB_CLAUDE_CODE_OAUTH_TOKEN: 'fixture-token', ORACLE_SIGNER_WIF: 'not-for-the-probe', ANTHROPIC_API_KEY: '  '
+        })
+        assert.deepStrictEqual(env, { HUB_CLAUDE_CONFIG_DIR: '/opt/venue-fixture/creds', HUB_CLAUDE_CODE_OAUTH_TOKEN: 'fixture-token' })
+        assert.deepStrictEqual(hubCredentialEnv(null, null), {})
+    })
+
+    it('exports real probes whose credential half IS the hub resolver, so the venue cannot disagree with its hubs', () => {
+        // The hub's resolver, given the env a hub child will receive, must agree with the
+        // probe on the same env: same module, same answer. A token-only env resolves; an
+        // env with a directory that has no credentials file and no token does not.
+        const { resolveHubLlmAuth } = require('../../../../xchain-hub/src/lib/hub-credentials.js')
+        const probes = llmProbes()
+        const tokenEnv = { HUB_CLAUDE_CONFIG_DIR: '/nonexistent/venue-fixture', HUB_CLAUDE_CODE_OAUTH_TOKEN: 'fixture-token' }
+        const bareEnv  = { HUB_CLAUDE_CONFIG_DIR: '/nonexistent/venue-fixture' }
+        assert.strictEqual(probes.resolveCredential(tokenEnv).ok, true)
+        assert.strictEqual(probes.resolveCredential(tokenEnv).ok, resolveHubLlmAuth({ env: tokenEnv }).ok)
+        // Whatever this box holds in the hub's default directory, the probe and the hub
+        // must read it the same way; the value is the box's, the agreement is the claim.
+        assert.strictEqual(probes.resolveCredential(bareEnv).ok, resolveHubLlmAuth({ env: bareEnv }).ok)
+        assert.strictEqual(typeof probes.dirExists, 'function')
+        assert.strictEqual(typeof probes.isExecutable, 'function')
     })
 })
 
