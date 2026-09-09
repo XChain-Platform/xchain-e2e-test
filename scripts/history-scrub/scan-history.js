@@ -75,7 +75,22 @@ const SCRATCH_REF_RULES = [
     // clone, so nothing is lost by skipping these.
     { id: 'ci-venue',   test: (ref) => /(^|\/)ci-[0-9a-f]{7,40}$/.test(ref) || /(^|\/)ci-sibling$/.test(ref) },
     // Local rescue tags written when recovering a clobbered shared worktree.
-    { id: 'wip-rescue', test: (ref) => /(^|\/)wip-rescue\//.test(ref) }
+    { id: 'wip-rescue', test: (ref) => /(^|\/)wip-rescue\//.test(ref) },
+    // A backup branch cut by hand before a path scrub, which is the manual
+    // equivalent of refs/original/ above and is exempt for the identical
+    // reason: its whole PURPOSE is to hold the pre-scrub content, and it is
+    // pushed nowhere. Without this rule such a ref reports its own backed-up
+    // leaks as NEW ones, which is a false positive that cannot be fixed by
+    // editing any live file and points the reader at the scrub or at the
+    // documented-exception list, both of which are the wrong lever for an
+    // object no remote carries. Measured 2026-09-09: refs/heads/
+    // backup/pre-path-scrub held a superseded pre-amend commit whose blob
+    // carried two synthetic fixture paths, and it reddened this gate for every
+    // session sharing the checkout while origin's history was clean.
+    // Deliberately narrow: `backup/<something>scrub`, not every `backup/` ref.
+    // A backup branch that is NOT a scrub backup can carry a genuinely new
+    // leak, and exempting the whole namespace would hide it.
+    { id: 'scrub-backup', test: (ref) => /(^|\/)backup\/[a-z0-9-]*scrub(\/|$)/.test(ref) }
 ];
 
 /** The scratch rule that claims this ref, or null. */
