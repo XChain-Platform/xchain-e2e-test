@@ -257,6 +257,7 @@ function readSettings(env) {
         label:         String(env.AT5_LABEL || 'at5').replace(/[^A-Za-z0-9]/g, '') || 'at5',
         basePort:      int('AT5_BASE_PORT', 61000),
         observeBlocks: int('AT5_OBSERVE_BLOCKS', 6),
+        minVerdicts:   int('AT5_MIN_VERDICTS', 1),
         maxMinutes:    int('AT5_MAX_MINUTES', 240),
         // The observe-phase gate (row 46). Read here rather than at the point of
         // use so the values a run reasoned about are in its result file.
@@ -702,6 +703,14 @@ function classifyBlockFreshness(s) {
 // The observations that may be scored. Written once and used by both the
 // observe loop's stopping condition and the summary, so a run can never stop on
 // a count the summary then grades differently.
+// Verdicts actually COMPARED against origin so far. The parity clause is about
+// comparisons, not blocks: six graded blocks carrying no action compare nothing
+// and would read green while proving nothing.
+function comparedVerdicts(observations) {
+    return usableObservations(observations)
+        .reduce((n, o) => n + o.actions.filter((a) => a.coordinateAligned).length, 0);
+}
+
 function usableObservations(observations) {
     return (observations || []).filter((o) => o && o.usable === true);
 }
@@ -952,7 +961,11 @@ async function main(env) {
             result.observe.backlogSkipped + ' block(s) mined during the replay and catch-up); ' +
             'grading only blocks first seen within ' + settings.maxBlockAgeS + 's of their block time');
 
-        while (usableObservations(result.observations).length < settings.observeBlocks && Date.now() < deadline) {
+        const observeSatisfied = () =>
+            usableObservations(result.observations).length >= settings.observeBlocks &&
+            comparedVerdicts(result.observations) >= settings.minVerdicts;
+
+        while (!observeSatisfied() && Date.now() < deadline) {
             // New chain blocks: noted the moment the DECODER has them, which is
             // what makes waitS a measure of the node's own hold rather than of
             // how long the chain took to produce a block.
@@ -994,19 +1007,32 @@ async function main(env) {
                         : 'NOT GRADED: ' + observation.unusableReason + ' (' +
                           observation.ageAtFirstSeenS + 's old when first seen, limit ' +
                           settings.maxBlockAgeS + 's)') +
-                    '; graded ' + graded + ' of ' + settings.observeBlocks);
-                if (graded >= settings.observeBlocks) break;
+                    '; graded ' + graded + ' of ' + settings.observeBlocks +
+                    ', verdicts compared ' + comparedVerdicts(result.observations) +
+                    ' of ' + settings.minVerdicts);
+                if (observeSatisfied()) break;
             }
-            if (usableObservations(result.observations).length >= settings.observeBlocks) break;
+            if (observeSatisfied()) break;
             await sleep(POLL_MS);
         }
 
         const gradedTotal = usableObservations(result.observations).length;
         result.observe.gradedBlocks = gradedTotal;
         result.observe.unusableBlocks = result.observations.length - gradedTotal;
-        if (gradedTotal >= settings.observeBlocks) {
+        const comparedTotal = comparedVerdicts(result.observations);
+        result.observe.verdictsCompared = comparedTotal;
+        result.observe.wantedVerdicts   = settings.minVerdicts;
+        if (gradedTotal >= settings.observeBlocks && comparedTotal >= settings.minVerdicts) {
             result.status = 'completed';
             exitCode = 0;
+        } else if (gradedTotal >= settings.observeBlocks && comparedTotal < settings.minVerdicts) {
+            // The blocks graded fine; the chain simply carried no action to compare.
+            // Saying so beats a green run whose parity clause measured nothing.
+            result.status = 'insufficient-parity-traffic';
+            result.error  = 'graded ' + gradedTotal + ' block(s) but compared only ' + comparedTotal +
+                ' verdict(s) against origin, under the ' + settings.minVerdicts + ' this run required';
+            console.error('at5: graded enough blocks but the chain carried too few actions to compare verdicts');
+            exitCode = 4;
         } else if (gradedTotal === 0) {
             // LOUD, because this is the run 3 shape: blocks were observed and not
             // one of them arrived live, so there is no barrier measurement here at
@@ -1213,6 +1239,9 @@ module.exports = {
     // test/unit/oracleBatchBarrierTestnet.observe.test.js, and a run that gets it
     // wrong costs four hours to find out.
     evaluateCatchUp, classifyBlockFreshness, usableObservations, observeBlock,
+    // The parity clause's own gate: comparisons, not blocks. A run that grades its
+    // block quota while comparing nothing reads green and proves nothing.
+    comparedVerdicts,
     // Exported so the origin side of every comparison can be driven on its own,
     // against the real public API, without building a node or spending the run's
     // wall clock. It is the half most likely to rot: it reads someone else's HTTP.

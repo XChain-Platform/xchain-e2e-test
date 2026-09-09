@@ -473,3 +473,33 @@ describe('AT5 barrier drill: the observe-phase gate (row 46)', function () {
         });
     });
 });
+
+describe('comparedVerdicts: the parity clause counts comparisons, not blocks', () => {
+
+    const graded = (actions) => ({ usable: true, actions });
+    const stale  = (actions) => ({ usable: false, actions });
+    const aligned   = { coordinateAligned: true,  agree: true };
+    const unaligned = { coordinateAligned: false, agree: false };
+
+    it('counts nothing when graded blocks carry no actions, which is run 4', () => {
+        const obs = [graded([]), graded([]), graded([]), graded([]), graded([]), graded([])];
+        assert.strictEqual(drill.usableObservations(obs).length, 6);
+        assert.strictEqual(drill.comparedVerdicts(obs), 0,
+            'six graded blocks with no actions must compare nothing, or the clause is vacuous');
+    });
+
+    it('counts only comparisons that actually aligned against origin', () => {
+        const obs = [graded([aligned, unaligned]), graded([aligned])];
+        assert.strictEqual(drill.comparedVerdicts(obs), 2);
+    });
+
+    it('ignores actions in blocks that were never graded', () => {
+        const obs = [stale([aligned, aligned]), graded([aligned])];
+        assert.strictEqual(drill.comparedVerdicts(obs), 1,
+            'a stale block is not evidence, so its verdicts are not comparisons either');
+    });
+
+    it('is zero for an empty run rather than throwing', () => {
+        assert.strictEqual(drill.comparedVerdicts([]), 0);
+    });
+});
