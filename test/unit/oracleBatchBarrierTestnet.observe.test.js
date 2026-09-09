@@ -109,9 +109,33 @@ async function observe(opts) {
         firstSeenAt: opts.firstSeenAt,
         processedAt: opts.processedAt,
         deferrals: opts.deferrals || [],
+        // The barrier state series the escape attribution reads (row 56). These
+        // fixtures are regtest-shaped, so the barrier clock is the raw stamp and
+        // observeBlock's own `raw-assumed` default is the right one.
+        barrierSamples: opts.barrierSamples || [],
+        sampleIntervalS: opts.sampleIntervalS === undefined ? 15 : opts.sampleIntervalS,
+        // These fixtures are about blocks the barrier DID gate, so they carry a
+        // transaction: `blockMayReadPrice` is `blockTransactions.length > 0`, and
+        // a transaction-free block never enters the barrier at all (row 56).
+        blockTransactionCount: opts.blockTransactionCount === undefined ? 1 : opts.blockTransactionCount,
         originNow: { lag: 0, blockIndex: opts.height },
         maxBlockAgeS: opts.maxBlockAgeS === undefined ? DEFAULTS.maxBlockAgeS : opts.maxBlockAgeS
     });
+}
+
+// A /status poll series across a block's hold, at the rate the drill polls. The
+// hub's stream watermark is its own clock, so it tracks the sample instant; the
+// mirror is left behind the block, which is the chain-only node D61 describes.
+function sampleSeries(fromAt, toAt, stepS, blockTime) {
+    const out = [];
+    for (let t = fromAt; t <= toAt; t += stepS) {
+        out.push({
+            at: t, source: 'status', bootstrapped: true,
+            priceSyncMaxTimestamp: blockTime - 5000,
+            streamWatermark: t - 1
+        });
+    }
+    return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -151,17 +175,24 @@ async function run3Observations() {
 // A run of the same shape as the one AT5 is asking for: blocks seen seconds
 // after they were mined, held at the barrier, released on the watermark once
 // the grace had passed.
-async function liveObservations(stalls) {
+async function liveObservations(stalls, opts) {
+    opts = opts || {};
     const out = [];
     for (let i = 0; i < stalls.length; i++) {
         const blockTime = 1_757_500_000 + i * 60;
         const height = 67_900_000 + i;
+        const firstSeenAt = blockTime + 18;       // one poll after the decoder had it
+        const processedAt = blockTime + stalls[i];
         out.push(await observe({
             height: height,
             blockTime: blockTime,
-            firstSeenAt: blockTime + 18,          // one poll after the decoder had it
-            processedAt: blockTime + stalls[i],
-            deferrals: [deferralFor(height, blockTime)]
+            firstSeenAt: firstSeenAt,
+            processedAt: processedAt,
+            deferrals: [deferralFor(height, blockTime)],
+            blockTransactionCount: opts.blockTransactionCount,
+            barrierSamples: opts.barrierSamples
+                ? opts.barrierSamples(blockTime, firstSeenAt, processedAt)
+                : sampleSeries(firstSeenAt, processedAt + 15, 15, blockTime)
         }));
     }
     return out;
@@ -319,7 +350,18 @@ describe('AT5 barrier drill: the observe-phase gate (row 46)', function () {
                 // The record run 3 wrote, reproduced: no wait, no deferral, and a
                 // "stall" that is only the block's age.
                 assert.strictEqual(obs[i].waitS, 0);
-                assert.strictEqual(obs[i].escape, 'none');
+                // Run 3 recorded `escape: "none"` here. Since row 56 there is no
+                // such value: nothing sampled the barrier for these blocks, so the
+                // record says UNKNOWN and carries the reason. Reading an
+                // unattributed block as an instant pass is what left TA5's
+                // "never before the barrier permits" half unmeasured.
+                assert.strictEqual(obs[i].escape, 'unknown');
+                assert.ok(/never sampled/.test(obs[i].escapeEvidence.reason),
+                    obs[i].escapeEvidence.reason);
+                assert.strictEqual(obs[i].escapeEvidence.beforePermission, 'unknown');
+                // The superseded log-scraping reading is kept beside it, so run
+                // 3's own numbers stay reproducible.
+                assert.strictEqual(obs[i].escapeEvidence.deferralLineReading, 'none');
                 assert.strictEqual(obs[i].escapeEvidence.deferralCount, 0);
                 assert.strictEqual(obs[i].stallS, RUN3[i].ageAtFirstSeenS);
             }
@@ -336,6 +378,12 @@ describe('AT5 barrier drill: the observe-phase gate (row 46)', function () {
             assert.strictEqual(o.stallS, GRACE_S + 30);
             assert.strictEqual(o.waitS, GRACE_S + 12);
             assert.strictEqual(o.escape, 'watermark');
+            // Attributed from a sampled crossing now, not inferred from the
+            // absence of a content round: the record names when the barrier was
+            // first seen open and when it was last seen closed (row 56).
+            assert.strictEqual(o.escapeEvidence.beforePermission, 'no');
+            assert.ok(o.escapeEvidence.permittedAt, 'the crossing must be named');
+            assert.ok(o.escapeEvidence.lastClosedAt, 'the last closed reading must be named');
             assert.strictEqual(o.escapeEvidence.corroborated, true);
             assert.strictEqual(o.escapeEvidence.graceS, GRACE_S);
             assert.strictEqual(o.escapeEvidence.deferralCount, 1);
@@ -350,10 +398,33 @@ describe('AT5 barrier drill: the observe-phase gate (row 46)', function () {
         });
 
         it('still contradicts a watermark escape that fired before the grace', async function () {
-            const [o] = await liveObservations([GRACE_S - 1]);
+            // A hub whose stream watermark is already past blockTime + grace while
+            // barely any wall time has passed: the escape is genuinely OBSERVED
+            // open, so it is reported, and the stall that is too short to justify
+            // it is reported beside it rather than asserted away.
+            const [o] = await liveObservations([GRACE_S - 1], {
+                barrierSamples: (blockTime, firstSeenAt) => [{
+                    at: firstSeenAt, source: 'status', bootstrapped: true,
+                    priceSyncMaxTimestamp: blockTime - 5000,
+                    streamWatermark: blockTime + GRACE_S
+                }]
+            });
             assert.strictEqual(o.usable, true, 'the block was live; the barrier is what is in question');
             assert.strictEqual(o.escape, 'watermark');
             assert.strictEqual(o.escapeEvidence.corroborated, false);
+        });
+
+        it('records an unattributed block as unknown WITH its reason, never as a pass', async function () {
+            // The same live block, with the barrier never sampled: the honest
+            // answer is that nobody knows which escape opened it.
+            const [o] = await liveObservations([GRACE_S + 30], { barrierSamples: () => [] });
+            assert.strictEqual(o.usable, true);
+            assert.strictEqual(o.escape, 'unknown');
+            assert.ok(o.escapeEvidence.reason && o.escapeEvidence.reason.length > 0);
+            assert.strictEqual(o.escapeEvidence.permittedAt, null);
+            // And the reading it replaces is still there to compare against: the
+            // old code would have called this one 'watermark' on no evidence.
+            assert.strictEqual(o.escapeEvidence.deferralLineReading, 'watermark');
         });
     });
 
@@ -372,7 +443,9 @@ describe('AT5 barrier drill: the observe-phase gate (row 46)', function () {
             // The clauses the run already carried are untouched: run 3's own six
             // observations, its own escape histogram, its own 0-of-6 bound count.
             assert.strictEqual(s.blocksObserved, 6);
-            assert.deepStrictEqual(s.escapes, { none: 6 });
+            // 'unknown' where run 3 wrote 'none' (row 56): nothing sampled the
+            // barrier, so nothing is attributed, and the histogram says so.
+            assert.deepStrictEqual(s.escapes, { unknown: 6 });
             assert.strictEqual(s.stallsWithinGracePlusConfirm, 0);
             assert.strictEqual(s.maxStallS, 4453);
             assert.strictEqual(s.minStallS, 4303);
@@ -391,6 +464,50 @@ describe('AT5 barrier drill: the observe-phase gate (row 46)', function () {
             assert.strictEqual(s.gradedMaxStallS, GRACE_S + 40);
             assert.deepStrictEqual(s.gradedEscapes, { watermark: 3 });
             assert.strictEqual(s.maxAgeAtFirstSeenS, 18);
+            // Row 56's own numbers: every graded block was attributed, none was
+            // seen processed before the barrier permitted it.
+            assert.strictEqual(s.gradedEscapesAttributed, 3);
+            assert.strictEqual(s.gradedEscapesUnattributed, 0);
+            assert.strictEqual(s.escapeAttributionMeasured, true);
+            assert.strictEqual(s.gradedProcessedBeforePermission, 0);
+            assert.strictEqual(s.gradedEscapesUncorroborated, 0);
+            assert.strictEqual(s.gradedBarrierApplied, 3);
+            assert.strictEqual(s.gradedBarrierNotApplicable, 0);
+        });
+
+        it('does not score a transaction-free block as an escape either way', async function () {
+            // The barrier is never entered for a block with no transaction, so it
+            // can carry no escape and cannot break the TA5 bound. On this chain
+            // those are nearly all the blocks, so counting them either way would
+            // bury the handful the barrier really held.
+            const obs = await liveObservations([GRACE_S + 5, GRACE_S + 40],
+                { blockTransactionCount: 0 });
+            const s = drill.summarize({ observations: obs, originLagSeries: [] });
+            assert.strictEqual(s.blocksGraded, 2);
+            assert.deepStrictEqual(s.gradedEscapes, { 'not-applicable': 2 });
+            assert.strictEqual(s.gradedBarrierApplied, 0);
+            assert.strictEqual(s.gradedBarrierNotApplicable, 2);
+            assert.strictEqual(s.gradedEscapesAttributed, 0);
+            assert.strictEqual(s.gradedEscapesUnattributed, 0);
+            assert.strictEqual(s.gradedProcessedBeforePermission, 0);
+            assert.strictEqual(s.escapeAttributionMeasured, false,
+                'a run that only ever saw empty blocks has measured no escape');
+        });
+
+        it('refuses to call the escape half measured when nothing was attributed', async function () {
+            // Three live blocks, graded on every other axis, with the barrier
+            // never sampled. The stall numbers still read fine; the escape half
+            // must NOT, which is the difference run 5 could not express.
+            const obs = await liveObservations([GRACE_S + 5, GRACE_S + 40, GRACE_S + 12],
+                { barrierSamples: () => [] });
+            const s = drill.summarize({ observations: obs, originLagSeries: [] });
+            assert.strictEqual(s.barrierMeasured, true, 'the blocks did arrive live');
+            assert.strictEqual(s.gradedStallsWithinGracePlusConfirm, 3);
+            assert.strictEqual(s.escapeAttributionMeasured, false,
+                'no escape was attributed, so the escape half was not measured');
+            assert.strictEqual(s.gradedEscapesAttributed, 0);
+            assert.strictEqual(s.gradedEscapesUnattributed, 3);
+            assert.deepStrictEqual(s.gradedEscapes, { unknown: 3 });
         });
 
         it('keeps the bound a REAL check on the blocks it does grade', async function () {
