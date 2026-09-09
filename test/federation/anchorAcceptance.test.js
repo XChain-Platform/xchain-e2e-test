@@ -20,7 +20,7 @@
  * parses them, and the indexer's ANCHOR handler verifies + stores them.
  *
  * This is acceptance test AT1 of anchor-bundle-per-network.md, driven: with
- * BTC/LTC/DOGE regtest checkpoints pending, one flush lands ONE ANCHOR v7 on
+ * BTC/LTC/DOGE regtest checkpoints pending, one flush lands ONE ANCHOR v0 on
  * DOGE regtest with THREE sections, the indexer holds three anchor_actions rows
  * sharing one action_index at section_index 0..2 all `valid`, and every
  * state_checkpoints row carries the same anchor_txid. The DOGE section is the
@@ -30,13 +30,20 @@
  * three sections verify against the same mirrored oracle_publish set rather
  * than one section being real and two being 'invalid: SECTION n'.
  *
- * The CHECKPOINT leg has exactly one version now: v7. The per-chain wires
- * v0/v3/v4/v5 were deleted with the bundle (D2), and a degraded publisher
- * attestation falls back WITHIN v7 to ATTEST_SIG_COUNT 0 rather than to an
- * older version. The ARCHIVE leg is untouched and still picks v1/v6 from the
- * flag-days active at the resolved snapshot_block, so this suite still derives
- * that one from the hub's own frozen modules via
- * test/helpers/anchorVersionHelper.js.
+ * The ANCHOR version set RESTARTED (anchor-v0-single-wire.md D2): the checkpoint
+ * bundle is byte-for-byte what this suite used to call v7, only renumbered to
+ * v0; the OLD per-chain wires (a different, already-retired numbering that once
+ * used the digits v0/v3/v4/v5 for something else entirely) stay deleted, and
+ * v7 itself retires alongside them. The CHECKPOINT leg still has exactly one
+ * version, just a new digit for it, and a degraded publisher attestation still
+ * falls back WITHIN it to ATTEST_SIG_COUNT 0 rather than to an older version.
+ * The ARCHIVE leg is renumbered the same way: v1 is byte-for-byte the old v6
+ * (tail always appended), and the tail-less legacy v1 and the old v6 both
+ * retire. Neither leg has a cross-version fallback left to derive; both are
+ * still read from the hub's own frozen modules via
+ * test/helpers/anchorVersionHelper.js so an armed ANCHOR_ACTIVATION height (0
+ * on regtest, so every anchor on this chain is already past it) moves the test
+ * and the publisher together.
  *
  * Pre-requisites (driven by the operator/runner, NOT this file):
  *   - dogecoin-regtest stack up (node, utxo-tracker, encoder, decoder,
@@ -139,6 +146,26 @@ const HUB_DB_NAME = 'xchain-anchor-acceptance-hubdb-' + process.pid;
 const SNAPSHOT_BLOCK = Number(process.env.ANCHOR_ACCEPTANCE_SNAPSHOT_BLOCK) || (200000 + (Date.now() % 700000));
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// The archive's own LEDGER_HASH field, read off the real v1 wire rather than
+// assumed. StateAnchorPublisher elects the archive's WRAPPER checkpoint over
+// every chain's state_checkpoints row for this network, preferring a BTC row
+// when one exists (src/StateAnchorPublisher.js: "ORDER BY (chain = 'BTC')
+// DESC, checkpoint_seq DESC, ..."), so on this suite's multi-chain flush the
+// archive wraps the SYNTHETIC BTC checkpoint, not the DOGE one AT1 ticked.
+// Narrowing the read-back lookup by the DOGE tick's own ledger_hash therefore
+// never matches the row the indexer actually stored for the archive; reading
+// the wrapper's ledger_hash straight off the broadcast payload (field 6 on
+// the pipe-split wire: ANCHOR|1|CHAIN|NETWORK|BLOCK_INDEX|BLOCK_HASH|
+// LEDGER_HASH|..., the field order _publishArchive emits and anchor.js
+// parses) is what makes the narrowing key match the wrapper, whichever chain
+// it turns out to be.
+function archiveWrapperLedgerHash(payload){
+    let f = String(payload || '').split('|');
+    let hash = f[6];
+    assert.match(String(hash), /^[0-9a-f]{64}$/i, 'v1 payload LEDGER_HASH field (index 6) is a 64-hex hash');
+    return hash;
+}
 
 describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
     this.timeout(15 * 60 * 1000);
@@ -324,14 +351,18 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
         // reject seqs at-or-below the on-chain max, and this driver's hub DB is
         // fresh (seqs restart at 0). Seed the hub's counters past whatever a
         // prior run already anchored.
-        // Version lists cover the WHOLE family on each leg (checkpoint 0/3/4/5,
-        // archive 1/6): a post-flag-day venue's prior run anchored v5/v6 rows,
-        // and a (0,1)-only scan would miss them and restart the seqs low enough
-        // for the indexer's replay guard to reject this run's anchors.
+        // Version lists cover the WHOLE family on each leg, retired digits included:
+        // checkpoint 0/3/4/5 (the old per-chain wires, retired before the bundle ever
+        // existed) plus 7 (the interim bundle this spec's restart itself retired,
+        // renumbering the live bundle to 0); archive 1/6 (1 tail-less legacy, 6 the
+        // interim tailed archive this spec's restart renumbered to today's v1). A
+        // dirty regtest chain can carry a prior run's rows under ANY of these, and a
+        // scan narrowed to today's (0,1) would miss them and restart the seqs low
+        // enough for the indexer's replay guard to reject this run's anchors.
         let prior = await indexerQuery(
             `SELECT MAX(checkpoint_seq) AS max_cp,
                     (SELECT MAX(match_batch_seq) FROM anchor_actions WHERE version IN (1, 6)) AS max_batch
-             FROM anchor_actions WHERE version IN (0, 1, 3, 4, 5, 6)`);
+             FROM anchor_actions WHERE version IN (0, 1, 3, 4, 5, 6, 7)`);
         let maxCp    = (prior.length && prior[0].max_cp    != null) ? Number(prior[0].max_cp)    : null;
         let maxBatch = (prior.length && prior[0].max_batch != null) ? Number(prior[0].max_batch) : null;
         if (maxCp !== null) {
@@ -362,14 +393,14 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
         delete process.env.HUB_SIGNER_MODULE;
     });
 
-    it('AT1: checkpoints REAL indexer state and lands ONE quorum-signed v7 bundle with three sections on the DOGE chain', async function () {
+    it('AT1: checkpoints REAL indexer state and lands ONE quorum-signed v0 bundle with three sections on the DOGE chain', async function () {
         await hub.stateCheckpoints._tick();
         let cps = await hub.db.doQuery(
             "SELECT * FROM state_checkpoints WHERE chain = 'DOGE' AND network = 'regtest' ORDER BY checkpoint_seq DESC LIMIT 1");
         assert.strictEqual(cps.length, 1, 'hub holds a DOGE checkpoint after the tick');
         let cp = cps[0];
         assert.match(String(cp.ledger_hash), /^[0-9a-f]{64}$/);
-        // A v7 section is root-bearing by construction (D8). Regtest arms
+        // A v0 section is root-bearing by construction (D8). Regtest arms
         // CHECKPOINT_COMMITMENT at genesis, so a real engine-cut row without roots
         // means the SPV leg is broken, not that the anchor should fall back.
         assert.ok(anchorVersions.checkpointCarriesRoots(cp),
@@ -456,8 +487,10 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
                 [snapBlock, cap, identity.getPubkeyHex().toLowerCase(), '1', identity.getPubkeyHex().toLowerCase()]);
         }
 
-        // The checkpoint leg is v7 and nothing else (D2). Only the ARCHIVE leg still
-        // has a version to derive from the flag-days at the resolved snapshot_block.
+        // Neither leg has a version to derive any more (D2/D4): the checkpoint leg
+        // is v0 and nothing else, the archive leg v1 and nothing else. Both helpers
+        // still report `rewardActive`/`rootBearing` off the flag-days at the
+        // resolved snapshot_block, which is what `describe` below is showing.
         let cpExpect  = anchorVersions.expectedCheckpointAnchor(cp);
         let arcExpect = anchorVersions.expectedArchiveAnchor(cp);
         console.log('    expecting ' + cpExpect.describe + ' + ' + arcExpect.describe);
@@ -466,30 +499,30 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
         assert.ok(broadcasts.length >= 2,
             'expected a bundle + archive broadcast, got ' + broadcasts.length);
 
-        // ONE v7 for the network, carrying all three chains. Three separate
+        // ONE v0 for the network, carrying all three chains. Three separate
         // checkpoint transactions is exactly the shape the bundle replaced.
         let bundleWires = anchorVersions.bundleBroadcasts(broadcasts);
         assert.strictEqual(bundleWires.length, 1,
-            'exactly one ANCHOR v7 bundle, got ' + bundleWires.length + '; saw versions ' +
+            'exactly one ANCHOR v0 bundle, got ' + bundleWires.length + '; saw versions ' +
             JSON.stringify(broadcasts.map(b => anchorVersions.anchorPayloadVersion(b.payload))));
-        let v7 = bundleWires[0];
+        let v0 = bundleWires[0];
         let v1 = anchorVersions.findAnchorBroadcast(broadcasts, arcExpect.accepted);
-        assert.ok(v7.txid, 'the bundle published with a real txid');
+        assert.ok(v0.txid, 'the bundle published with a real txid');
         assert.ok(v1 && v1.txid, arcExpect.describe + ' published with a real txid; saw versions ' +
             JSON.stringify(broadcasts.map(b => anchorVersions.anchorPayloadVersion(b.payload))));
 
-        assert.strictEqual(v7.bundle.section_count, 3, 'three sections: BTC, DOGE, LTC');
-        assert.deepStrictEqual(v7.bundle.chains, ['BTC', 'DOGE', 'LTC'], 'sections ride CHAIN ascending (D5)');
-        assert.strictEqual(v7.bundle.network, 'regtest', 'the wire NETWORK on regtest is the literal "regtest"');
-        assert.strictEqual(v7.bundle.snapshot_block, snapBlock, 'header SNAPSHOT_BLOCK is the MAX over sections (D6)');
-        for (let s of v7.bundle.sections)
+        assert.strictEqual(v0.bundle.section_count, 3, 'three sections: BTC, DOGE, LTC');
+        assert.deepStrictEqual(v0.bundle.chains, ['BTC', 'DOGE', 'LTC'], 'sections ride CHAIN ascending (D5)');
+        assert.strictEqual(v0.bundle.network, 'regtest', 'the wire NETWORK on regtest is the literal "regtest"');
+        assert.strictEqual(v0.bundle.snapshot_block, snapBlock, 'header SNAPSHOT_BLOCK is the MAX over sections (D6)');
+        for (let s of v0.bundle.sections)
             assert.ok(s.state_root && s.block_merkle_root, s.chain + ': the section carries its roots');
 
         // The two-phase property the walletSign-only gap used to hide: each
         // publish must produce a DISTINCT phase-1 funding tx and phase-2
         // reveal tx (the decodable one). A single-tx publish here means the
         // reveal leg silently vanished, which is exactly the production bug class.
-        for (let b of [v7, v1]) {
+        for (let b of [v0, v1]) {
             assert.ok(b.phase1_txid, 'publish went two-phase (phase-1 txid present)');
             assert.notStrictEqual(b.phase1_txid, b.txid, 'phase-2 reveal txid differs from phase-1');
         }
@@ -497,18 +530,24 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
         // SECTION, all naming the one bundle transaction.
         assert.strictEqual(summary.anchored.length, 3, 'flush summary names all three anchored sections');
         for (let a of summary.anchored)
-            assert.strictEqual(a.txid, v7.txid, a.chain + ': every section names the one bundle txid');
+            assert.strictEqual(a.txid, v0.txid, a.chain + ': every section names the one bundle txid');
         assert.strictEqual(summary.archive, 'published');
         let arcVersion = anchorVersions.anchorPayloadVersion(v1.payload);
-        bundleTxid = v7.txid;
-        console.log('    on-chain: bundle v7 [' + v7.bundle.chains.join(',') + '] ' + v7.txid +
-                    ' (' + v7.bundle.attest_sig_count + ' attesting sig(s)) / archive v' + arcVersion +
-                    ' ' + v1.txid + ' (phase-1: ' + v7.phase1_txid + ' / ' + v1.phase1_txid + ')');
+        // The archive's own wrapper identity, off the wire it actually published (see
+        // archiveWrapperLedgerHash above): the wrapper checkpoint the archive rides is
+        // elected over every chain's state_checkpoints row for this network and can
+        // land on BTC or LTC rather than the DOGE row `cp` names, so `cp.ledger_hash`
+        // is the wrong key to read this row back by.
+        let arcLedgerHash = archiveWrapperLedgerHash(v1.payload);
+        bundleTxid = v0.txid;
+        console.log('    on-chain: bundle v0 [' + v0.bundle.chains.join(',') + '] ' + v0.txid +
+                    ' (' + v0.bundle.attest_sig_count + ' attesting sig(s)) / archive v' + arcVersion +
+                    ' ' + v1.txid + ' (phase-1: ' + v0.phase1_txid + ' / ' + v1.phase1_txid + ')');
 
         // The three checkpoint rows the bundle carried, for the AT4 read-back below.
         bundleSections = await hub.db.doQuery(
             'SELECT * FROM state_checkpoints WHERE network = ? AND snapshot_block = ? AND anchor_txid = ? ORDER BY chain ASC',
-            ['regtest', snapBlock, v7.txid]);
+            ['regtest', snapBlock, v0.txid]);
         assert.strictEqual(bundleSections.length, 3,
             'every section row is stamped with the bundle txid on the publisher');
 
@@ -524,7 +563,10 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
             // Seeded off OUR DOGE section's ledger_hash, so a prior run's bundle on
             // this dirty chain cannot satisfy the assert.
             sections = anchorVersions.findBundleSectionRows(rows, cp.ledger_hash);
-            r1 = anchorVersions.findAnchorRow(rows, [arcVersion], cp.ledger_hash);
+            // Seeded off the archive's OWN wrapper ledger_hash (arcLedgerHash), never
+            // off `cp.ledger_hash`: the wrapper checkpoint the archive names is elected
+            // over every chain in play, not pinned to the chain AT1 happens to tick.
+            r1 = anchorVersions.findAnchorRow(rows, [arcVersion], arcLedgerHash);
             if (sections.length !== 3 || !r1) await sleep(2000);
         }
         assert.strictEqual(sections.length, 3, 'the indexer stored three section rows for our bundle');
@@ -567,7 +609,7 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
         assert.strictEqual(archive.matches[0].match_id, matchId);
         assert.ok(archive.capability_snapshots.some(s => s.capability === 'cross_chain'));
         assert.ok(archive.capability_snapshots.some(s => s.capability === 'oracle_publish'));
-        console.log('    parsed: bundle v7 + archive v' + arcVersion +
+        console.log('    parsed: bundle v0 + archive v' + arcVersion +
                     ' valid, archive carries match ' + matchId.slice(0, 16) + '...');
     });
 
@@ -606,7 +648,7 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
                     block_index: Number(s.block_index), checkpoint_seq: Number(s.checkpoint_seq)
                 });
                 assert.ok(r && r.exists, t.label + ' / ' + s.chain + ': getanchoraction finds the section');
-                assert.strictEqual(Number(r.version), 7, t.label + ' / ' + s.chain + ': served as a v7 section');
+                assert.strictEqual(Number(r.version), 0, t.label + ' / ' + s.chain + ': served as a v0 section');
                 assert.strictEqual(String(r.status), 'valid', t.label + ' / ' + s.chain + ': section is valid');
                 assert.strictEqual(String(r.txid).toLowerCase(), String(bundleTxid).toLowerCase(),
                     t.label + ' / ' + s.chain + ': every section resolves to the ONE bundle transaction');
