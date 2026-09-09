@@ -49,14 +49,45 @@
  * so it runs at the frozen protocol value and the wait it measures is the real
  * one.
  *
+ * WHY THERE IS A CATCH-UP PHASE BETWEEN THE REPLAY AND THE OBSERVATION (row 46).
+ * The replay targets the decoder tip AS IT WAS WHEN THE REPLAY STARTED, and on
+ * this chain that replay runs for over an hour, during which the chain produces
+ * a hundred and fifty more blocks. Run 3 (2026-09-09) began observing the moment
+ * the node reached that stale target, so the six blocks it graded were already
+ * 4,303-4,453 s old when it first saw them: every one carried `waitS: 0`,
+ * `escape: "none"` and `deferralCount: 0`, because the barrier had been open on
+ * the watermark for over an hour before the node ever got there. A stall that is
+ * really block AGE is not the quantity TA5 asks for. So the run now converges on
+ * the LIVE tip first (`evaluateCatchUp`), stamps nothing that was already sitting
+ * in the decoder when observation opened, and grades only blocks whose age when
+ * first seen is inside `AT5_MAX_BLOCK_AGE_S` (`classifyBlockFreshness`). A block
+ * that fails that test is still recorded, with its age and the reason, and is
+ * counted as UNUSABLE rather than scored: the failure mode this replaces is a
+ * backlog silently reported as a barrier measurement.
+ *
+ * WHAT "CAUGHT UP" MEANS FOR A NODE THE BARRIER HOLDS BACK. It cannot mean "at
+ * the tip". D61 says a chain-only node can only leave a tip block on the
+ * watermark escape, which fires `PRICE_WATERMARK_GRACE_S` after the block's own
+ * time, so at its working point this node is PERMANENTLY about a grace behind
+ * the chain and reaching the tip is not something to wait for. What ends the
+ * catch-up phase is therefore either of the two conditions that mean the node
+ * has stopped burning backlog: it is within `AT5_CATCHUP_SLACK_BLOCKS` of the
+ * decoder tip (which is what a node with no barrier in its way looks like), or
+ * the block it is working on is no older than the grace plus
+ * `AT5_CATCHUP_TOLERANCE_S` (which is what a node held by the barrier looks
+ * like). Both are upper bounds, so neither can mistake a node still replaying
+ * for one at its working point.
+ *
  * RUNNING IT (plain node, not mocha; hours of wall clock):
  *
  *   node test/drills/oracleBatchBarrierTestnet.drill.js
  *
  * Exit 0 when the observation completed, 2 when the node never reached the
- * chain tip inside AT5_MAX_MINUTES, 1 on any other failure. The JSON result at
- * AT5_RESULT is written either way, so a timed-out run still carries its
- * evidence.
+ * chain tip or its working point inside AT5_MAX_MINUTES, 3 when it observed
+ * blocks but not one of them arrived live enough to grade (the backlog case
+ * above, which must never read as a pass), 1 on any other failure. The JSON
+ * result at AT5_RESULT is written either way, so a timed-out run still carries
+ * its evidence.
  ********************************************************************/
 
 const fs   = require('fs');
@@ -76,6 +107,31 @@ const PRICE_WATERMARK_GRACE_S = 4800;
 // block is about a minute, and every wait here is a poll that exits on its
 // condition, so this only bounds the resolution of firstSeenAt/processedAt.
 const POLL_MS = 15_000;
+
+// One leg of the catch-up chase. The node is told to reach the tip it can see
+// right now; the chain moves while it does, so the leg is bounded and the
+// working-point test at the top of the loop, not the leg, is what ends the
+// phase. A leg that expires is normal for a node the barrier holds back.
+const CATCHUP_LEG_MS = 600_000;
+
+// Defaults for the observe-phase gate; every one is overridable by environment
+// so a chain with a different block cadence can be measured without an edit.
+//
+// MAX_BLOCK_AGE_S is the whole of "did this block arrive live": a block is only
+// graded if the drill first saw it within this many seconds of its own block
+// time. It has to cover the decoder's own ingest lag plus one POLL_MS, and
+// nothing more, because everything above that is what row 46 exists to reject.
+const DEFAULT_MAX_BLOCK_AGE_S = 120;
+
+// How near the decoder tip counts as "at the tip" for a node with nothing
+// holding it back. Two blocks, as the row asks.
+const DEFAULT_CATCHUP_SLACK_BLOCKS = 2;
+
+// How far past the grace the node's working block may be and still count as the
+// barrier's steady state rather than leftover backlog. One DOGE block is about
+// a minute and the deferral retry cadence is coarse, so ten minutes is slack
+// for the mechanics without admitting a node that is still an hour behind.
+const DEFAULT_CATCHUP_TOLERANCE_S = 600;
 
 // The explorer's coin path for the chain under observation. TDOGE is Dogecoin
 // testnet, which is the only chain this drill is written for: the barrier is
@@ -103,6 +159,16 @@ function iso(sec)  { return new Date(sec * 1000).toISOString(); }
 // MariaDB hands back BIGINT as BigInt, which neither JSON.stringify nor
 // arithmetic with a Number tolerates.
 function num(v) { return v === null || v === undefined ? null : Number(v); }
+
+// A number, or null: anything that is absent, empty or not finite becomes null
+// rather than NaN or a coerced zero. The observe-phase gate below compares
+// heights and clocks that can each legitimately be unavailable for one poll,
+// and an unavailable reading must not be able to look like a satisfied bound.
+function finite(v) {
+    if (v === null || v === undefined || v === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+}
 
 // ---------------------------------------------------------------------------
 // The environment contract
@@ -192,6 +258,11 @@ function readSettings(env) {
         basePort:      int('AT5_BASE_PORT', 61000),
         observeBlocks: int('AT5_OBSERVE_BLOCKS', 6),
         maxMinutes:    int('AT5_MAX_MINUTES', 240),
+        // The observe-phase gate (row 46). Read here rather than at the point of
+        // use so the values a run reasoned about are in its result file.
+        maxBlockAgeS:       int('AT5_MAX_BLOCK_AGE_S', DEFAULT_MAX_BLOCK_AGE_S),
+        catchUpSlackBlocks: int('AT5_CATCHUP_SLACK_BLOCKS', DEFAULT_CATCHUP_SLACK_BLOCKS),
+        catchUpToleranceS:  int('AT5_CATCHUP_TOLERANCE_S', DEFAULT_CATCHUP_TOLERANCE_S),
         resultPath:    String(env.AT5_RESULT || './at5-result.json'),
         // The hub-connected node this run is compared against. Its getlatestblock
         // lag is the control: a stall on BOTH sides is the chain, a stall on the
@@ -532,6 +603,110 @@ function parseDeferral(line) {
 }
 
 // ---------------------------------------------------------------------------
+// The observe phase's own gate (row 46)
+// ---------------------------------------------------------------------------
+
+/**
+ * Has the node stopped burning BACKLOG?
+ *
+ * Pure, and the only thing that ends the catch-up phase, so it can be driven
+ * with real readings instead of being trusted after a four-hour run.
+ *
+ * Two ways to be done, and they are deliberately different shapes:
+ *
+ *   at-tip                 the node is within `slackBlocks` of the decoder tip.
+ *                          This is the node whose barrier never held it: nothing
+ *                          in the code guarantees a chain-only node reaches it,
+ *                          and D61 says it will not, but a run that DID reach it
+ *                          has caught up by any reading and must not be made to
+ *                          wait for the second condition.
+ *   barrier-working-point  the block the node is working on is no older than
+ *                          `graceS + toleranceS`. That is the steady state the
+ *                          watermark escape imposes: the node sits a grace
+ *                          behind the chain and advances at chain rate. A node
+ *                          still replaying is further back than that, and the
+ *                          gap only closes when the backlog is gone.
+ *
+ * Both are UPPER bounds on how far back the node is, so neither can be
+ * satisfied by a node that is still catching up, and a missing reading returns
+ * `caughtUp: false` rather than defaulting to satisfied.
+ */
+function evaluateCatchUp(s) {
+    s = s || {};
+    const nodeHeight    = finite(s.nodeHeight);
+    const decoderTip    = finite(s.decoderTip);
+    const nodeBlockTime = finite(s.nodeBlockTime);
+    const nowSec        = finite(s.nowSec);
+    const slackBlocks   = finite(s.slackBlocks);
+    const graceS        = finite(s.graceS);
+    const toleranceS    = finite(s.toleranceS);
+
+    const blocksBehind  = (nodeHeight !== null && decoderTip !== null) ? decoderTip - nodeHeight : null;
+    const frontierAgeS  = (nodeBlockTime !== null && nowSec !== null) ? nowSec - nodeBlockTime : null;
+    const workingPointS = (graceS !== null && toleranceS !== null) ? graceS + toleranceS : null;
+    const base = { blocksBehind: blocksBehind, frontierAgeS: frontierAgeS, workingPointS: workingPointS };
+
+    if (blocksBehind === null) {
+        // Neither height could be read this round. Nothing is known, so nothing
+        // is concluded.
+        return Object.assign({ caughtUp: false, reason: 'unknown' }, base);
+    }
+    if (slackBlocks !== null && blocksBehind <= slackBlocks) {
+        return Object.assign({ caughtUp: true, reason: 'at-tip' }, base);
+    }
+    if (frontierAgeS !== null && workingPointS !== null && frontierAgeS <= workingPointS) {
+        return Object.assign({ caughtUp: true, reason: 'barrier-working-point' }, base);
+    }
+    return Object.assign({ caughtUp: false, reason: 'replaying-backlog' }, base);
+}
+
+/**
+ * Did this block arrive LIVE, or was it already sitting in the decoder?
+ *
+ * `firstSeenAt` is when the drill's poll first found the block in the decoder,
+ * so `firstSeenAt - blockTime` is the block's age at that moment: a handful of
+ * seconds for a block that was just mined, and however long the node was busy
+ * for one that was waiting. Only the first kind can carry a barrier
+ * measurement, because the second one's barrier opened before the drill was
+ * even looking.
+ *
+ *   live                        graded.
+ *   stale-backlog               older than `maxAgeS` when first seen: the row 46
+ *                               defect, recorded and NOT scored.
+ *   block-time-ahead-of-clock   the block claims a time further in the future
+ *                               than the tolerance allows. Coin headers may run
+ *                               slightly ahead, but a large negative age means
+ *                               this host's clock and the chain's disagree, and
+ *                               every stall measured against that block time
+ *                               would be wrong by the same amount.
+ *   unknown-arrival             a reading was missing; nothing can be graded.
+ */
+function classifyBlockFreshness(s) {
+    s = s || {};
+    const blockTime   = finite(s.blockTime);
+    const firstSeenAt = finite(s.firstSeenAt);
+    const maxAgeS     = finite(s.maxAgeS);
+    if (blockTime === null || firstSeenAt === null || maxAgeS === null) {
+        return { ageAtFirstSeenS: null, usable: false, reason: 'unknown-arrival', maxAgeS: maxAgeS };
+    }
+    const age = firstSeenAt - blockTime;
+    if (age > maxAgeS) {
+        return { ageAtFirstSeenS: age, usable: false, reason: 'stale-backlog', maxAgeS: maxAgeS };
+    }
+    if (age < -maxAgeS) {
+        return { ageAtFirstSeenS: age, usable: false, reason: 'block-time-ahead-of-clock', maxAgeS: maxAgeS };
+    }
+    return { ageAtFirstSeenS: age, usable: true, reason: 'live', maxAgeS: maxAgeS };
+}
+
+// The observations that may be scored. Written once and used by both the
+// observe loop's stopping condition and the summary, so a run can never stop on
+// a count the summary then grades differently.
+function usableObservations(observations) {
+    return (observations || []).filter((o) => o && o.usable === true);
+}
+
+// ---------------------------------------------------------------------------
 // The drill
 // ---------------------------------------------------------------------------
 
@@ -558,10 +733,15 @@ async function main(env) {
             originIndexerUrl: settings.originIndexerUrl,
             explorerUrl: settings.explorerUrl,
             priceWatermarkGraceS: PRICE_WATERMARK_GRACE_S,
-            priceGraceOverride: null       // AT5 runs at the frozen value; see the header
+            priceGraceOverride: null,      // AT5 runs at the frozen value; see the header
+            maxBlockAgeS: settings.maxBlockAgeS,
+            catchUpSlackBlocks: settings.catchUpSlackBlocks,
+            catchUpToleranceS: settings.catchUpToleranceS
         },
         node: null,
         replay: null,
+        catchUp: null,
+        observe: null,
         observations: [],
         originLagSeries: [],
         summary: null
@@ -667,12 +847,112 @@ async function main(env) {
             result.replay.coverage.roundsCarried + ' round(s), hub holds ' + result.replay.coverage.roundsInHub +
             ', mirror ' + result.replay.coverage.roundsInMirror);
 
+        // --- 1b. converge on the LIVE tip before grading anything (row 46) ---
+        //
+        // `startTip` is where the chain was when the replay STARTED, and the
+        // replay takes long enough that the chain has moved on by a hundred
+        // blocks or more. Observing from here grades that movement, which was
+        // already hours old and had cleared the barrier long before the node
+        // arrived. So the node keeps chasing the tip it can currently see until
+        // `evaluateCatchUp` says it has stopped burning backlog.
+        const catchUp = {
+            slackBlocks: settings.catchUpSlackBlocks,
+            toleranceS:  settings.catchUpToleranceS,
+            graceS:      PRICE_WATERMARK_GRACE_S,
+            startedAt:   iso(nowS()),
+            reachedAt:   null,
+            durationS:   null,
+            converged:   false,
+            reason:      null,
+            lastLegError: null,
+            rounds:      []
+        };
+        result.catchUp = catchUp;
+        const catchUpStartedAt = nowS();
+        write();
+
+        while (Date.now() < deadline) {
+            const tipNow  = (await node.decoderHeight()).height;
+            const atNow   = (await node.chainHeight()).height;
+            // The block time of the block the NODE is on, off the decoder: the
+            // chain's own clock for that height, never one this process computes.
+            const frontier = atNow === null ? null
+                : await decoderBlock(decoderConn, liveChain.decoder.name, atNow);
+            const verdict = evaluateCatchUp({
+                nodeHeight:    atNow,
+                nodeBlockTime: frontier ? frontier.blockTime : null,
+                decoderTip:    tipNow,
+                nowSec:        nowS(),
+                slackBlocks:   catchUp.slackBlocks,
+                graceS:        PRICE_WATERMARK_GRACE_S,
+                toleranceS:    catchUp.toleranceS
+            });
+            catchUp.rounds.push(Object.assign({ at: iso(nowS()), nodeHeight: atNow, decoderTip: tipNow }, verdict));
+            // A long chase writes one round per leg; the first and last carry the
+            // trajectory, so the middle is dropped rather than grown unbounded.
+            if (catchUp.rounds.length > 200) catchUp.rounds.splice(100, catchUp.rounds.length - 200);
+            write();
+            console.log('at5: catch-up: node at ' + atNow + ', decoder tip ' + tipNow + ' (' +
+                verdict.blocksBehind + ' behind, working block ' + verdict.frontierAgeS + 's old, ' +
+                'working point ' + verdict.workingPointS + 's): ' + verdict.reason);
+            if (verdict.caughtUp) {
+                catchUp.converged = true;
+                catchUp.reason = verdict.reason;
+                break;
+            }
+            if (tipNow === null) { await sleep(POLL_MS); continue; }
+            const legMs = Math.max(60_000, Math.min(CATCHUP_LEG_MS, deadline - Date.now()));
+            try {
+                await node.waitForHeight(tipNow, { timeoutMs: legMs, intervalMs: POLL_MS });
+            } catch (e) {
+                // Expected, and not a failure: under the barrier this node is held
+                // about a grace behind the chain and can never reach the tip, so a
+                // leg that expires is the normal shape of the working point. The
+                // loop re-reads both heights and the test above decides.
+                catchUp.lastLegError = String(e && e.message).slice(0, 400);
+            }
+        }
+        if (!catchUp.converged) {
+            catchUp.durationS = nowS() - catchUpStartedAt;
+            result.status = 'catchup-timeout';
+            result.error  = 'the node never reached the live tip or the barrier working point inside the budget' +
+                (catchUp.lastLegError ? '; last leg: ' + catchUp.lastLegError : '');
+            result.summary = summarize(result);
+            console.error('at5: the node never caught up to the live chain inside the budget');
+            exitCode = 2;
+            return exitCode;
+        }
+        catchUp.reachedAt = iso(nowS());
+        catchUp.durationS = nowS() - catchUpStartedAt;
+        write();
+        console.log('at5: caught up in ' + catchUp.durationS + 's (' + catchUp.reason + ')');
+
         // --- 2. observe the tip, block by block ---
         const tables = await verdictTables(conn, node.indexerDbName);
         const pending = new Map();      // height -> {blockTime, firstSeenAt}
-        let lastDecoderSeen = startTip;
+        // Observation opens at the tip the decoder holds NOW, never at the one the
+        // replay targeted: every height in between was mined while the replay and
+        // the catch-up ran, and stamping those as newly arrived is precisely the
+        // defect row 46 records. They are skipped, and the count of them is
+        // recorded so the result says what was passed over rather than hiding it.
+        const observeStartTip = (await node.decoderHeight()).height;
+        let lastDecoderSeen = observeStartTip === null ? startTip : observeStartTip;
+        result.observe = {
+            startedAt: iso(nowS()),
+            startTip: lastDecoderSeen,
+            replayTargetTip: startTip,
+            backlogSkipped: lastDecoderSeen - startTip,
+            maxBlockAgeS: settings.maxBlockAgeS,
+            wantedBlocks: settings.observeBlocks,
+            gradedBlocks: 0,
+            unusableBlocks: 0
+        };
+        write();
+        console.log('at5: observing from tip ' + lastDecoderSeen + ' (skipping ' +
+            result.observe.backlogSkipped + ' block(s) mined during the replay and catch-up); ' +
+            'grading only blocks first seen within ' + settings.maxBlockAgeS + 's of their block time');
 
-        while (result.observations.length < settings.observeBlocks && Date.now() < deadline) {
+        while (usableObservations(result.observations).length < settings.observeBlocks && Date.now() < deadline) {
             // New chain blocks: noted the moment the DECODER has them, which is
             // what makes waitS a measure of the node's own hold rather than of
             // how long the chain took to produce a block.
@@ -698,23 +978,49 @@ async function main(env) {
                     node, conn, origin, tables, height: h,
                     blockTime: seen.blockTime, firstSeenAt: seen.firstSeenAt, processedAt,
                     deferrals: deferralsByHeight.get(h) || [],
-                    originNow: originNow
+                    originNow: originNow,
+                    maxBlockAgeS: settings.maxBlockAgeS
                 });
                 result.observations.push(observation);
+                const graded = usableObservations(result.observations).length;
+                result.observe.gradedBlocks = graded;
+                result.observe.unusableBlocks = result.observations.length - graded;
                 write();
                 console.log('at5: block ' + h + ' processed after ' + observation.stallS + 's of block time (' +
                     observation.escape + '), ' + observation.actions.length + ' action(s), ' +
                     observation.verdictAgreements + ' agreeing / ' + observation.verdictDisagreements.length +
-                    ' diverging; observed ' + result.observations.length + ' of ' + settings.observeBlocks);
-                if (result.observations.length >= settings.observeBlocks) break;
+                    ' diverging; ' + (observation.usable
+                        ? 'GRADED (' + observation.ageAtFirstSeenS + 's old when first seen)'
+                        : 'NOT GRADED: ' + observation.unusableReason + ' (' +
+                          observation.ageAtFirstSeenS + 's old when first seen, limit ' +
+                          settings.maxBlockAgeS + 's)') +
+                    '; graded ' + graded + ' of ' + settings.observeBlocks);
+                if (graded >= settings.observeBlocks) break;
             }
-            if (result.observations.length >= settings.observeBlocks) break;
+            if (usableObservations(result.observations).length >= settings.observeBlocks) break;
             await sleep(POLL_MS);
         }
 
-        result.status = result.observations.length >= settings.observeBlocks ? 'completed' : 'budget-exhausted';
+        const gradedTotal = usableObservations(result.observations).length;
+        result.observe.gradedBlocks = gradedTotal;
+        result.observe.unusableBlocks = result.observations.length - gradedTotal;
+        if (gradedTotal >= settings.observeBlocks) {
+            result.status = 'completed';
+            exitCode = 0;
+        } else if (gradedTotal === 0) {
+            // LOUD, because this is the run 3 shape: blocks were observed and not
+            // one of them arrived live, so there is no barrier measurement here at
+            // all and a zero exit would report a backlog as a result.
+            result.status = 'no-live-blocks-observed';
+            result.error  = 'observed ' + result.observations.length + ' block(s), none of which arrived within ' +
+                settings.maxBlockAgeS + 's of its block time, so none could be graded';
+            console.error('at5: NOTHING was graded: every observed block was already stale when first seen');
+            exitCode = 3;
+        } else {
+            result.status = 'budget-exhausted';
+            exitCode = 0;
+        }
         result.summary = summarize(result);
-        exitCode = 0;
     } catch (e) {
         result.status = 'error';
         result.error = String((e && e.stack) || e).slice(0, 8000);
@@ -748,6 +1054,14 @@ async function main(env) {
  */
 async function observeBlock(ctx) {
     const { node, conn, origin, tables, height, blockTime, firstSeenAt, processedAt, deferrals, originNow } = ctx;
+
+    // Whether this block may be SCORED at all, decided before anything is
+    // measured about it: a block that was already old when the drill first saw
+    // it carries a stall that is mostly its own age, and reporting that number as
+    // a barrier wait is the defect row 46 records.
+    const freshness = classifyBlockFreshness({
+        blockTime: blockTime, firstSeenAt: firstSeenAt, maxAgeS: ctx.maxBlockAgeS
+    });
 
     const mirrorNewest = await mirrorNewestRound(conn, node.mirrorDbName, blockTime);
     const hubNewest    = await mirrorNewestRound(conn, node.hubDbName, blockTime);
@@ -798,6 +1112,13 @@ async function observeBlock(ctx) {
         processedAt: iso(processedAt),
         stallS: stallS,
         waitS: processedAt - firstSeenAt,
+        // The row 46 gate. `usable` says whether `stallS` is a barrier
+        // measurement or just this block's age, and the summary scores only the
+        // observations where it is true.
+        ageAtFirstSeenS: freshness.ageAtFirstSeenS,
+        usable: freshness.usable,
+        unusableReason: freshness.usable ? null : freshness.reason,
+        maxBlockAgeS: freshness.maxAgeS,
         escape: escape.escape,
         escapeEvidence: {
             corroborated: escape.corroborated,
@@ -830,6 +1151,13 @@ function summarize(result) {
     const escapes = obs.reduce((h, o) => { h[o.escape] = (h[o.escape] || 0) + 1; return h; }, {});
     const holes = obs.length > 0 ? obs[obs.length - 1].holes : (result.replay && result.replay.coverage) || null;
     const lags = (result.originLagSeries || []).map((s) => s.lag).filter((n) => Number.isFinite(n));
+    // The row 46 split. Everything above is over EVERY observation, unchanged;
+    // everything below is over the ones that arrived live and may therefore
+    // carry a barrier number at all.
+    const graded = usableObservations(obs);
+    const unusable = obs.filter((o) => !(o && o.usable === true));
+    const gradedStalls = graded.map((o) => o.stallS).filter((n) => Number.isFinite(n));
+    const ages = obs.map((o) => o && o.ageAtFirstSeenS).filter((n) => Number.isFinite(n));
     return {
         blocksObserved: obs.length,
         maxStallS: stalls.length > 0 ? Math.max(...stalls) : null,
@@ -838,6 +1166,24 @@ function summarize(result) {
         // The bound TA5 was reworded to (D62): the watermark escape cannot open
         // before the grace, and nothing observed may claim to have opened earlier.
         stallsWithinGracePlusConfirm: stalls.filter((s) => s >= PRICE_WATERMARK_GRACE_S).length,
+        // Whether the run measured the BARRIER at all. A run that graded nothing
+        // observed a backlog, whatever the numbers above say, and TA5's bound
+        // clause cannot be read off it (row 46).
+        barrierMeasured: graded.length > 0,
+        blocksGraded: graded.length,
+        blocksUnusable: unusable.length,
+        unusableReasons: unusable.reduce((h, o) => {
+            const k = String((o && o.unusableReason) || 'unknown');
+            h[k] = (h[k] || 0) + 1;
+            return h;
+        }, {}),
+        maxAgeAtFirstSeenS: ages.length > 0 ? Math.max(...ages) : null,
+        gradedEscapes: graded.reduce((h, o) => { h[o.escape] = (h[o.escape] || 0) + 1; return h; }, {}),
+        gradedMaxStallS: gradedStalls.length > 0 ? Math.max(...gradedStalls) : null,
+        gradedMinStallS: gradedStalls.length > 0 ? Math.min(...gradedStalls) : null,
+        // The same bound as `stallsWithinGracePlusConfirm`, over the blocks whose
+        // stall is a wait rather than an age. This is the number TA5 reads.
+        gradedStallsWithinGracePlusConfirm: gradedStalls.filter((s) => s >= PRICE_WATERMARK_GRACE_S).length,
         holesTotal: holes ? (holes.missingFromHub.count + holes.missingFromMirror.count) : null,
         holesInHub: holes ? holes.missingFromHub.count : null,
         holesInMirror: holes ? holes.missingFromMirror.count : null,
@@ -846,6 +1192,12 @@ function summarize(result) {
         verdictsAgreed: obs.reduce((n, o) => n + o.verdictAgreements, 0),
         verdictsDiverged: obs.reduce((n, o) => n + o.verdictDisagreements.length, 0),
         divergences: obs.reduce((all, o) => all.concat(o.verdictDisagreements), []).slice(0, 50),
+        // How the observe phase came to be pointed at live blocks, so a reader can
+        // see whether the node was at the tip or at the barrier's working point
+        // when the grading started, and how much backlog was passed over.
+        caughtUpBy: result.catchUp ? result.catchUp.reason : null,
+        catchUpS: result.catchUp ? result.catchUp.durationS : null,
+        backlogSkipped: result.observe ? result.observe.backlogSkipped : null,
         originLagSamples: lags.length,
         originMaxLag: lags.length > 0 ? Math.max(...lags) : null,
         originIndexerUnavailable: (result.originLagSeries || []).some((s) => s.unavailable)
@@ -855,6 +1207,12 @@ function summarize(result) {
 
 module.exports = {
     composeLiveChainFromEnv, readSettings, classifyEscape, parseDeferral, summarize, main,
+    // The observe phase's gate (row 46), exported because it is the whole of the
+    // difference between measuring the barrier and measuring a backlog: it is
+    // pure, it is driven with real readings by
+    // test/unit/oracleBatchBarrierTestnet.observe.test.js, and a run that gets it
+    // wrong costs four hours to find out.
+    evaluateCatchUp, classifyBlockFreshness, usableObservations, observeBlock,
     // Exported so the origin side of every comparison can be driven on its own,
     // against the real public API, without building a node or spending the run's
     // wall clock. It is the half most likely to rot: it reads someone else's HTTP.
