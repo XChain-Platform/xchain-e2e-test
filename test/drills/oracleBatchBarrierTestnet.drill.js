@@ -78,6 +78,18 @@
  * like). Both are upper bounds, so neither can mistake a node still replaying
  * for one at its working point.
  *
+ * HOW THE TWO SIDES ARE LINED UP (row 55). Every verdict comparison needs the
+ * two nodes to be talking about the SAME action, and the only coordinate the
+ * CHAIN supplies is the transaction hash (with `tx_vout` where an action is
+ * vout-scoped). `action_index` and `tx_index` are per-node counters assigned as
+ * each node parses, so a chain-only node that started mid-chain is misaligned
+ * from origin by construction: run 5 (2026-09-09) graded 290 blocks carrying 20
+ * actions, and every single pair was discarded because origin had filed as
+ * `tx_index` 666 the transaction this node called 263. Aligning the same 20
+ * pairs on tx_hash by hand compared all 20 (7 agreeing, 13 diverging). The
+ * alignment is therefore on the hash, the refusals are named in the result, and
+ * a pair that genuinely cannot be aligned is still counted neither way.
+ *
  * RUNNING IT (plain node, not mocha; hours of wall clock):
  *
  *   node test/drills/oracleBatchBarrierTestnet.drill.js
@@ -132,6 +144,14 @@ const DEFAULT_CATCHUP_SLACK_BLOCKS = 2;
 // a minute and the deferral retry cadence is coarse, so ten minutes is slack
 // for the mechanics without admitting a node that is still an hour behind.
 const DEFAULT_CATCHUP_TOLERANCE_S = 600;
+
+// How many of origin's newest actions one block is aligned against. The explorer
+// ignores `block_index` on this endpoint, so the page IS the window. It also
+// caps the page: asking for 200 returns 100 today. 200 is asked for anyway, so a
+// raised cap is taken automatically, and the 100 rows the cap allows spanned
+// 1,416 blocks of this chain when measured, against a node that sits one grace
+// (4,800 s, roughly 80 blocks) behind the tip.
+const DEFAULT_ORIGIN_ACTION_PAGE = 200;
 
 // The explorer's coin path for the chain under observation. TDOGE is Dogecoin
 // testnet, which is the only chain this drill is written for: the barrier is
@@ -262,6 +282,11 @@ function readSettings(env) {
         // The observe-phase gate (row 46). Read here rather than at the point of
         // use so the values a run reasoned about are in its result file.
         maxBlockAgeS:       int('AT5_MAX_BLOCK_AGE_S', DEFAULT_MAX_BLOCK_AGE_S),
+        // How many of origin's newest actions each block's alignment is matched
+        // against (row 55). The endpoint caps what it returns, and the window each
+        // block was ACTUALLY matched against is recorded in the observation, so a
+        // window too short for the node's lag is visible rather than silent.
+        originActionPage:   int('AT5_ORIGIN_ACTION_PAGE', DEFAULT_ORIGIN_ACTION_PAGE),
         catchUpSlackBlocks: int('AT5_CATCHUP_SLACK_BLOCKS', DEFAULT_CATCHUP_SLACK_BLOCKS),
         catchUpToleranceS:  int('AT5_CATCHUP_TOLERANCE_S', DEFAULT_CATCHUP_TOLERANCE_S),
         resultPath:    String(env.AT5_RESULT || './at5-result.json'),
@@ -351,10 +376,19 @@ class OriginView {
         }
     }
 
-    // Origin's verdict for one action, plus enough of its coordinate to prove the
-    // two sides are talking about the SAME action: action_index is a per-node
-    // counter, and comparing two nodes' counters without checking the block and
-    // transaction they land on would compare each node's bookkeeping to itself.
+    /**
+     * Origin's verdict for ONE OF ORIGIN'S OWN action indexes.
+     *
+     * `actionIndex` here must be the index `recentActions()` gave back for the
+     * transaction hash under comparison, never the node's own `action_index`:
+     * the counter is assigned per node, so passing the node's number in reads
+     * whichever unrelated action origin happens to have filed under it. That is
+     * the defect row 55 records, and it is why the caller aligns first and only
+     * then asks this method for a status.
+     *
+     * The coordinate comes back with the status so the pair can be re-checked at
+     * the point of comparison and recorded in the result.
+     */
     async action(actionIndex) {
         try {
             const res = await axios.get(this.explorer + '/action/' + encodeURIComponent(String(actionIndex)),
@@ -373,6 +407,40 @@ class OriginView {
             };
         } catch (e) {
             return { found: false, status: null, error: String(e && e.message) };
+        }
+    }
+
+    /**
+     * Origin's most recent actions, newest first, as the raw material for the
+     * tx_hash alignment (row 55).
+     *
+     * WHY THE WHOLE LIST AND NOT THE BLOCK. `/COIN/api/actions?block_index=N`
+     * accepts the parameter and ignores it: it answers with the newest actions on
+     * the chain whatever block is asked for, so a per-block fetch would look
+     * precise and silently compare the wrong block. `?limit=N` is the filter this
+     * endpoint honours, up to a cap it applies without saying so: asking for 200
+     * returns 100 today. That is not a problem for this comparison but it is a
+     * fact the reader needs, because 100 rows is however many blocks the chain's
+     * action traffic makes it. Measured on 2026-09-09 it was 1,416 blocks, against
+     * a node that sits one grace (about 80 blocks) behind the tip, and `limit`
+     * comes back in the record so a run that read fewer rows than it asked for
+     * says so.
+     *
+     * Every numeric field arrives as a STRING from this API, so each is coerced
+     * here rather than at the four places that compare them.
+     */
+    async recentActions(limit) {
+        const want = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 200;
+        try {
+            const res = await axios.get(this.explorer + '/actions?limit=' + want,
+                { timeout: 30_000, validateStatus: () => true });
+            if (res.status !== 200 || !res.data || res.data.error) {
+                return { rows: [], error: 'http ' + res.status, limit: want };
+            }
+            const raw = (res.data && res.data.data) || [];
+            return { rows: raw.map(normalizeOriginRow), error: null, limit: want };
+        } catch (e) {
+            return { rows: [], error: String(e && e.message), limit: want };
         }
     }
 
@@ -413,6 +481,173 @@ class OriginView {
         }
         return { round: null, blockTimestamp: null, rowsScanned: scanned, note: 'no eligible row in ' + scanned + ' rows' };
     }
+}
+
+// ---------------------------------------------------------------------------
+// Aligning the two sides on the coordinate the CHAIN supplies (row 55)
+// ---------------------------------------------------------------------------
+
+/**
+ * WHY NEITHER COUNTER CAN BE USED. `action_index` and `tx_index` are assigned by
+ * each node as it parses, from its own starting point. A node that begins its
+ * replay mid-chain therefore numbers every transaction differently from a node
+ * that has been running since genesis: on run 5 (2026-09-09) origin filed as
+ * `tx_index` 666 the transaction this node called 263, for all 20 actions in the
+ * 290 blocks it graded, so every pair was discarded and `verdictsCompared` was 0
+ * while both sides held a verdict for every one of them.
+ *
+ * WHAT IS LEFT. `tx_hash` is the transaction's identity on the chain itself, so
+ * it is the same string on every node that parsed the same block, and `tx_vout`
+ * distinguishes two actions carried by one transaction. Those two, plus the
+ * block height and the action's own name, are the whole coordinate.
+ *
+ * WHAT IS DELIBERATELY NOT CONSULTED. Origin's `tx_index` is not compared, not
+ * even when both sides have one: it is the counter that caused the defect, and a
+ * row where it is null (a derived action such as ORDER_MATCH, which no
+ * transaction of its own carries) must neither be excluded for the null nor
+ * silently matched because a null compared equal to something. It is recorded in
+ * the result beside the node's, as evidence of the skew, and it decides nothing.
+ */
+function normalizeHash(h) {
+    if (h === null || h === undefined) return null;
+    const s = String(h).trim().toLowerCase();
+    return s === '' ? null : s;
+}
+
+function normalizeName(n) {
+    if (n === null || n === undefined) return null;
+    const s = String(n).trim().toUpperCase();
+    return s === '' ? null : s;
+}
+
+/**
+ * One row of origin's action list, in either of the two shapes it can arrive in.
+ *
+ * The explorer sends EVERY number as a string ("action_index":"685"), and a
+ * comparison against a Number is then quietly false, so the coercion happens
+ * once, here, rather than at each of the places that compare. Accepting both the
+ * raw snake_case row and an already-normalized one is what lets a unit test feed
+ * the endpoint's own JSON verbatim instead of a hand-tidied copy of it.
+ */
+function normalizeOriginRow(r) {
+    r = r || {};
+    const pick = (a, b) => (r[a] !== undefined ? r[a] : r[b]);
+    return {
+        actionIndex: finite(pick('action_index', 'actionIndex')),
+        blockIndex:  finite(pick('block_index', 'blockIndex')),
+        // Recorded and never compared: it is the counter row 55 is about.
+        txIndex:     finite(pick('tx_index', 'txIndex')),
+        // Absent from this endpoint today; read anyway so a vout-scoped action can
+        // be told apart the day the field appears.
+        txVout:      finite(pick('tx_vout', 'txVout')),
+        txHash:      normalizeHash(pick('tx_hash', 'txHash')),
+        action:      normalizeName(pick('action', 'action'))
+    };
+}
+
+/**
+ * Origin's recent actions, keyed by the chain coordinate, plus the block span the
+ * window actually covers.
+ *
+ * The span matters as much as the rows: a lookup that misses inside the window is
+ * origin genuinely holding no such action, and a lookup that misses outside it is
+ * this drill having asked for too few rows. Those are different findings, and
+ * collapsing them would report a short window as a divergence in the chain.
+ */
+function buildOriginActionIndex(rows) {
+    const byHash = new Map();
+    let oldest = null;
+    let newest = null;
+    for (const raw of rows || []) {
+        const r = normalizeOriginRow(raw);
+        if (r.blockIndex !== null) {
+            oldest = oldest === null ? r.blockIndex : Math.min(oldest, r.blockIndex);
+            newest = newest === null ? r.blockIndex : Math.max(newest, r.blockIndex);
+        }
+        if (r.txHash === null) continue;
+        if (!byHash.has(r.txHash)) byHash.set(r.txHash, []);
+        byHash.get(r.txHash).push(r);
+    }
+    return {
+        byHash: byHash,
+        rowCount: (rows || []).length,
+        hashCount: byHash.size,
+        oldestBlock: oldest,
+        newestBlock: newest
+    };
+}
+
+/**
+ * One node action against origin's window: the same chain action, or a named
+ * reason it is not.
+ *
+ * Pure, so the predicate that decides every comparison in a four-hour run can be
+ * driven in a second. Refusal is a first-class answer here: an unalignable pair
+ * is reported with its reason and counted neither as an agreement nor as a
+ * divergence, exactly as before. What changes is that a pair the chain says is
+ * the same action now aligns.
+ */
+function alignOnTxHash(nodeAction, index, height) {
+    const refuse = (reason, extra) =>
+        Object.assign({ aligned: false, origin: null, reason: reason }, extra || {});
+    if (!index || !(index.byHash instanceof Map)) return refuse('origin-actions-unavailable');
+    const hash = normalizeHash(nodeAction && nodeAction.txHash);
+    if (hash === null) return refuse('node-action-has-no-tx-hash');
+    const h = finite(height);
+    const span = { oldestBlock: index.oldestBlock, newestBlock: index.newestBlock, rows: index.rowCount };
+
+    const onHash = index.byHash.get(hash) || [];
+    if (onHash.length === 0) {
+        if (index.rowCount === 0) return refuse('origin-actions-unavailable', { originWindow: span });
+        // Outside the window is this drill's own short read, not a chain fact.
+        if (h !== null && index.oldestBlock !== null && h < index.oldestBlock) {
+            return refuse('origin-window-does-not-cover-block', { originWindow: span });
+        }
+        if (h !== null && index.newestBlock !== null && h > index.newestBlock) {
+            return refuse('origin-has-not-reached-this-block', { originWindow: span });
+        }
+        return refuse('origin-has-no-action-on-this-tx', { originWindow: span });
+    }
+
+    // The same transaction filed under a different height is two different
+    // parses of the chain, which is a finding rather than a pair to compare.
+    const inBlock = h === null ? onHash : onHash.filter((c) => finite(c.blockIndex) === h);
+    if (inBlock.length === 0) {
+        return refuse('origin-filed-this-tx-in-another-block',
+            { originBlocks: [...new Set(onHash.map((c) => finite(c.blockIndex)))] });
+    }
+
+    // One transaction can carry more than one action. The name is compared only
+    // when both sides carry one, and a mismatch refuses rather than falling back
+    // to whatever else is on the transaction.
+    let narrowed = inBlock;
+    const name  = normalizeName(nodeAction && nodeAction.action);
+    const named = inBlock.filter((c) => normalizeName(c.action) !== null);
+    if (name !== null && named.length > 0) {
+        const same = named.filter((c) => normalizeName(c.action) === name);
+        if (same.length === 0) {
+            return refuse('origin-has-no-such-action-on-this-tx', {
+                nodeActionName: name,
+                originActionNames: [...new Set(named.map((c) => normalizeName(c.action)))]
+            });
+        }
+        narrowed = same;
+    }
+
+    // Only where it discriminates: this endpoint carries no tx_vout today, and a
+    // side that has none must not be excluded by one that has.
+    const vout = finite(nodeAction && nodeAction.txVout);
+    if (narrowed.length > 1 && vout !== null) {
+        const sameVout = narrowed.filter((c) => finite(c.txVout) === vout);
+        if (sameVout.length > 0) narrowed = sameVout;
+    }
+
+    if (narrowed.length > 1) {
+        return refuse('ambiguous-tx-hash-candidates', {
+            candidates: narrowed.map((c) => finite(c.actionIndex))
+        });
+    }
+    return { aligned: true, origin: narrowed[0], reason: 'aligned' };
 }
 
 // ---------------------------------------------------------------------------
@@ -512,12 +747,23 @@ async function batchCoverage(conn, indexerDb, hubDb, mirrorDb) {
  * against every table the schema records verdicts in, discovered the way the rig
  * discovers them. One action can be recorded in more than one such table, so the
  * statuses are collected rather than assumed unique, and the record says so.
+ *
+ * THE TRANSACTION HASH IS CARRIED (row 55). `action_index` and `tx_index` are
+ * both per-node counters, so neither can name the same action on two nodes: on
+ * the run that found this, origin numbered the very transaction this node called
+ * `tx_index` 263 as 666. The hash is what the CHAIN supplies, so it is what the
+ * comparison has to align on, and it lives one join away: `transactions` carries
+ * `tx_hash_id` (there is no `tx_hash` column) into `index_transactions.hash`.
+ * Both joins are LEFT, because an action whose transaction row cannot be reached
+ * must still be reported, as one that cannot be aligned, rather than dropped.
  */
 async function blockActions(conn, indexerDb, tables, height) {
     const db = ident(indexerDb, 'database name');
     const rows = await conn.query(
-        'SELECT a.action_index, a.tx_index, a.tx_vout, ia.action AS action ' +
+        'SELECT a.action_index, a.tx_index, a.tx_vout, ia.action AS action, itx.hash AS tx_hash ' +
         'FROM `' + db + '`.actions a JOIN `' + db + '`.index_actions ia ON ia.id = a.action_id ' +
+        'LEFT JOIN `' + db + '`.transactions t ON t.tx_index = a.tx_index ' +
+        'LEFT JOIN `' + db + '`.index_transactions itx ON itx.id = t.tx_hash_id ' +
         'WHERE a.block_index = ? ORDER BY a.tx_index, a.tx_vout', [height]);
     const byIndex = new Map();
     for (const r of rows) {
@@ -526,6 +772,7 @@ async function blockActions(conn, indexerDb, tables, height) {
             action: String(r.action),
             txIndex: num(r.tx_index),
             txVout:  num(r.tx_vout),
+            txHash:  r.tx_hash === null || r.tx_hash === undefined ? null : String(r.tx_hash),
             verdicts: []
         });
     }
@@ -745,7 +992,8 @@ async function main(env) {
             priceGraceOverride: null,      // AT5 runs at the frozen value; see the header
             maxBlockAgeS: settings.maxBlockAgeS,
             catchUpSlackBlocks: settings.catchUpSlackBlocks,
-            catchUpToleranceS: settings.catchUpToleranceS
+            catchUpToleranceS: settings.catchUpToleranceS,
+            originActionPage: settings.originActionPage
         },
         node: null,
         replay: null,
@@ -992,7 +1240,8 @@ async function main(env) {
                     blockTime: seen.blockTime, firstSeenAt: seen.firstSeenAt, processedAt,
                     deferrals: deferralsByHeight.get(h) || [],
                     originNow: originNow,
-                    maxBlockAgeS: settings.maxBlockAgeS
+                    maxBlockAgeS: settings.maxBlockAgeS,
+                    originActionPage: settings.originActionPage
                 });
                 result.observations.push(observation);
                 const graded = usableObservations(result.observations).length;
@@ -1068,6 +1317,18 @@ async function main(env) {
     return exitCode;
 }
 
+// Origin's action window, or a named reason there is none. An origin view that
+// cannot supply one yields an EMPTY window rather than an exception, so every
+// action in the block is refused with `origin-actions-unavailable` and the
+// result says so: a missing window must read as nothing compared, never as a
+// crashed observation and never as agreement.
+async function readOriginWindow(origin, limit) {
+    if (!origin || typeof origin.recentActions !== 'function') {
+        return { rows: [], error: 'origin view exposes no recentActions()', limit: null };
+    }
+    return origin.recentActions(limit);
+}
+
 /**
  * One tip block, measured on every axis TA5 names.
  *
@@ -1096,6 +1357,14 @@ async function observeBlock(ctx) {
     const escape = classifyEscape(deferrals, mirrorNewest.blockTimestamp, blockTime, stallS);
 
     const actions = await blockActions(conn, node.indexerDbName, tables, height);
+    // Origin's window is read ONCE per block, and only for a block that carries
+    // something to align: the per-block filter this endpoint appears to offer is
+    // ignored server-side, so asking per action would be N requests for the same
+    // answer, and most blocks on this chain carry no action at all.
+    const originList  = actions.length > 0
+        ? await readOriginWindow(origin, ctx.originActionPage)
+        : { rows: [], error: null, limit: null };
+    const originIndex = buildOriginActionIndex(originList.rows);
     const rows = [];
     let agreements = 0;
     const disagreements = [];
@@ -1103,17 +1372,21 @@ async function observeBlock(ctx) {
         const statuses = [...new Set(a.verdicts.map((v) => v.status))];
         const nodeStatus = statuses.length === 1 ? statuses[0]
             : (statuses.length === 0 ? null : a.verdicts.map((v) => v.table + '=' + v.status).join(' | '));
-        const o = await origin.action(a.actionIndex);
-        // Same action, or the same COUNTER pointing at two different actions? The
-        // index is assigned per node, so a coordinate check is what makes the
-        // comparison about the chain. A misaligned pair is reported as such and
-        // counted neither way.
-        const aligned = o.found && o.blockIndex === height && (o.txIndex === null || o.txIndex === a.txIndex);
+        // The same action on the chain, or two nodes' bookkeeping? Decided on
+        // tx_hash and tx_vout, which the chain supplies, never on either side's
+        // counters (row 55). A pair that cannot be aligned is reported with its
+        // reason and counted neither way.
+        const match = alignOnTxHash(a, originIndex, height);
+        // Only now, and only with ORIGIN's own index, is origin's verdict read.
+        const o = match.aligned ? await origin.action(match.origin.actionIndex)
+            : { found: false, status: null, blockIndex: null, txIndex: null };
+        const aligned = match.aligned && o.found;
         const agree = aligned && nodeStatus !== null && o.status !== null && nodeStatus === o.status;
         if (agree) agreements++;
         else if (aligned) {
             disagreements.push({
                 actionIndex: a.actionIndex, action: a.action,
+                txHash: a.txHash, originActionIndex: match.origin.actionIndex,
                 nodeStatus: nodeStatus, originStatus: o.status,
                 // WHICH ROUND EACH SIDE PRICED AGAINST, which is the whole point of
                 // recording a divergence: D61's claim is that the two node types
@@ -1125,6 +1398,13 @@ async function observeBlock(ctx) {
         }
         rows.push({
             actionIndex: a.actionIndex, action: a.action, txIndex: a.txIndex, txVout: a.txVout,
+            // The chain's own coordinate, and beside it the two counters that
+            // cannot align: a reader can see the skew (origin 666 against the
+            // node's 263 for one transaction) instead of inferring it.
+            txHash: a.txHash,
+            originActionIndex: match.aligned ? match.origin.actionIndex : null,
+            originTxIndex: match.aligned ? match.origin.txIndex : null,
+            alignment: match.reason,
             nodeStatus: nodeStatus, originStatus: o.status,
             originFound: !!o.found, coordinateAligned: !!aligned, agree: agree
         });
@@ -1164,6 +1444,23 @@ async function observeBlock(ctx) {
         originTipAtProcess: originNow && originNow.blockIndex !== undefined ? originNow.blockIndex : null,
         holes: await batchCoverage(conn, node.indexerDbName, node.hubDbName, node.mirrorDbName),
         actions: rows,
+        // What the alignment had to work with, so a block that compared nothing
+        // says WHY: too short a window, origin behind this height, or a chain that
+        // genuinely files the transaction elsewhere (row 55).
+        originActions: {
+            rowsRead: originIndex.rowCount,
+            limit: originList.limit,
+            error: originList.error,
+            oldestBlock: originIndex.oldestBlock,
+            newestBlock: originIndex.newestBlock,
+            coversThisBlock: originIndex.oldestBlock !== null &&
+                height >= originIndex.oldestBlock && height <= originIndex.newestBlock
+        },
+        alignmentReasons: rows.reduce((h, r) => {
+            const k = String(r.alignment || 'unknown');
+            h[k] = (h[k] || 0) + 1;
+            return h;
+        }, {}),
         verdictAgreements: agreements,
         verdictDisagreements: disagreements
     };
@@ -1215,6 +1512,15 @@ function summarize(result) {
         holesInMirror: holes ? holes.missingFromMirror.count : null,
         roundsCarriedByParsedBatches: holes ? holes.roundsCarried : null,
         verdictsCompared: obs.reduce((n, o) => n + o.actions.filter((a) => a.coordinateAligned).length, 0),
+        // Why the pairs that were NOT compared were refused (row 55). A run that
+        // compares nothing must name the reason: run 5 compared 0 of 20 and the
+        // result said only `coordinateAligned: false`, which cost a re-measurement
+        // by hand to turn into a cause.
+        alignmentReasons: obs.reduce((h, o) => {
+            for (const [k, n] of Object.entries((o && o.alignmentReasons) || {})) h[k] = (h[k] || 0) + n;
+            return h;
+        }, {}),
+        actionsSeen: obs.reduce((n, o) => n + ((o && o.actions) || []).length, 0),
         verdictsAgreed: obs.reduce((n, o) => n + o.verdictAgreements, 0),
         verdictsDiverged: obs.reduce((n, o) => n + o.verdictDisagreements.length, 0),
         divergences: obs.reduce((all, o) => all.concat(o.verdictDisagreements), []).slice(0, 50),
@@ -1242,6 +1548,11 @@ module.exports = {
     // The parity clause's own gate: comparisons, not blocks. A run that grades its
     // block quota while comparing nothing reads green and proves nothing.
     comparedVerdicts,
+    // The predicate every comparison in a four-hour run turns on (row 55). It is
+    // pure and it is driven with the real shapes both sides return by
+    // test/unit/oracleBatchBarrierTestnetAlignment.test.js: the version it
+    // replaces compared two per-node counters and discarded 20 of 20 real pairs.
+    buildOriginActionIndex, alignOnTxHash,
     // Exported so the origin side of every comparison can be driven on its own,
     // against the real public API, without building a node or spending the run's
     // wall clock. It is the half most likely to rot: it reads someone else's HTTP.
