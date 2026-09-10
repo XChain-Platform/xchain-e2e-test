@@ -93,6 +93,13 @@ const { waitFor }              = require('./consensusWait');
 const { loadHubModule, ValidatorIdentity, pickFreePorts } = require('./multiValidatorHubHelper');
 const xchainPrice = require('./xchainPriceConstants');
 const { computeResponsibleSigners }  = require('./attestationHelper');
+// The credential layer, shared with the AT2 replay rig rather than copied: both
+// resolve the same stores in the same order, and two copies of that order drift.
+const {
+    readHubConfigTree,
+    resolveServiceCredential,
+    HUB_CONFIG_REDACTION
+} = require('./oracleBatchReplay');
 const XChainHubConnector     = require('../../src/XChainHubConnector.js');
 const XChainIndexerConnector = require('../../src/XChainIndexerConnector.js');
 
@@ -210,59 +217,20 @@ const LOG_TAIL_LINES = 1200;
 // plain identifier rather than to escape it.
 const SAFE_IDENT = /^[A-Za-z0-9_]+$/;
 
-// What the hub's config oracle puts where a password would go.
-//
-// `getallconfigs` REDACTS every credential it serves, returning this literal for the
-// node RPC, the decoder database and the indexer database alike. So the oracle is a
-// source of COORDINATES and never of credentials, and a helper that reads `pass` off it
-// is holding the string '[redacted]', which fails authentication and reports itself as
-// ER_ACCESS_DENIED_ERROR: indistinguishable, from the outside, from a rotated password.
-// Recognising the sentinel is what turns that into a message naming the real cause.
-const HUB_CONFIG_REDACTION = '[redacted]';
-
-// Where a per-coin credential actually lives: the xchain-node config sidecar the
-// containers themselves are built from. Tried relative to this checkout the same way
-// the hub source is resolved, because the harness runs both from the monorepo and from
-// an image where the layout differs.
-function resolveCoinConfigSidecar(coin, network, needKey) {
-    const rel = 'xchain-node/config/' + coin + '-' + network + '.local';
-    // The `.local` sidecar first, then the coin config itself: on the regtest stack
-    // the DOGE decoder password sits in `dogecoin-regtest` with no `.local` beside
-    // it (2026-09-05), and a resolver that only knew the sidecar name found nothing.
-    const candidates = [
-        process.env.XCHAIN_NODE_CONFIG_DIR && path.join(process.env.XCHAIN_NODE_CONFIG_DIR, coin + '-' + network + '.local'),
-        process.env.XCHAIN_NODE_CONFIG_DIR && path.join(process.env.XCHAIN_NODE_CONFIG_DIR, coin + '-' + network),
-        path.resolve(__dirname, '../../..', rel),
-        path.resolve(__dirname, '../../../..', rel)
-    ].filter(Boolean);
-    // With `needKey`, the first EXISTING candidate that carries that key wins, and
-    // the first existing one at all is the fallback (so the error can name it). The
-    // regtest stack's `dogecoin-regtest.local` exists and holds only the indexer
-    // credential; stopping at it hid the `dogecoin-regtest` beside it (pass 16).
-    let firstExisting = null;
-    for (const p of candidates) {
-        if (!fs.existsSync(p)) continue;
-        if (!needKey) return p;
-        if (firstExisting === null) firstExisting = p;
-        try {
-            if (require('dotenv').parse(fs.readFileSync(p))[needKey]) return p;
-        } catch (_) { /* unreadable: keep looking */ }
-    }
-    return firstExisting;
-}
-
 /**
  * The decoder database credential, from the first store that actually holds one.
  *
- * THREE STORES DISAGREE ON THIS VALUE and only one of them is ever right, so the order
- * is deliberate rather than a cascade of fallbacks:
+ * A THIN WRAPPER ON PURPOSE. The stores, their order and the redaction sentinel are
+ * defined once in `oracleBatchReplay.js` (`resolveServiceCredential`) and shared,
+ * because this venue and that rig resolve the SAME credential from the SAME stores
+ * and a second copy of the order is a second thing to drift. Kept as its own function
+ * because its call sites, and its unit tests, name the decoder specifically.
  *
- *   1. An explicit `DECODER_DB_PASS` in the environment. An operator running the drill
- *      against a venue whose credential they hold should not have to edit a file.
- *   2. The per-coin config sidecar, which is the documented single source of truth and
- *      the file the containers are built from.
- *   3. The hub's config oracle, which cannot supply one at all (see the sentinel above)
- *      and is kept only so the failure below can say so precisely.
+ * Order, and why: an explicit `DECODER_DB_PASS` in the environment wins (an operator
+ * overriding on purpose); then the hub's config oracle, which serves the LIVE value
+ * once the call is authorized for its credential tier; then the per-coin sidecar,
+ * which holds whatever the decoder used before its last recreate. The redaction
+ * sentinel is refused by name at every step.
  *
  * Returns `{user, pass, source}`, or `{problem}` naming the store to fix. It never logs
  * a value and never puts one on a command line.
@@ -274,37 +242,11 @@ function resolveDecoderCredential(dec, coin, network, allowEnv = true) {
     // ER_TABLEACCESS_DENIED on that coin's decoder database (2026-09-05, AT5).
     // An option rather than a coin comparison, because the rail switch swaps COIN
     // while leaving the credentials alone, so COIN cannot be trusted here.
-    const user = (allowEnv && process.env.DECODER_DB_USER) || dec.user;
-
-    if (allowEnv && process.env.DECODER_DB_PASS) {
-        return { user, pass: process.env.DECODER_DB_PASS, source: 'DECODER_DB_PASS in the environment' };
-    }
-
-    const sidecar = resolveCoinConfigSidecar(coin, network, 'DECODER_DB_PASS');
-    if (sidecar) {
-        let parsed = {};
-        try { parsed = require('dotenv').parse(fs.readFileSync(sidecar)); }
-        catch (_) { /* an unreadable sidecar is treated as absent */ }
-        if (parsed.DECODER_DB_PASS) {
-            return { user, pass: parsed.DECODER_DB_PASS, source: sidecar };
-        }
-    }
-
-    if (dec.pass && dec.pass !== HUB_CONFIG_REDACTION) {
-        return { user, pass: dec.pass, source: "the standing hub's config oracle" };
-    }
-
-    return {
-        problem: 'no usable ' + coin + '/' + network + ' decoder database credential. The standing ' +
-            "hub's config oracle redacts every password it serves (it returned " +
-            JSON.stringify(HUB_CONFIG_REDACTION) + '), so it can only supply coordinates' +
-            (sidecar
-                ? ', and the config sidecar ' + sidecar + ' carries no DECODER_DB_PASS'
-                : ', and no ' + coin + '-' + network + '.local config sidecar was found') +
-            '. Set DECODER_DB_PASS in the harness environment, or reconcile the sidecar with the ' +
-            'credential the running decoder actually uses; the two are known to drift apart ' +
-            'whenever a container is recreated and nothing propagates the new value back.'
-    };
+    return resolveServiceCredential({
+        oracle: dec || {}, coin: coin, network: network, allowEnv: allowEnv,
+        passKey: 'DECODER_DB_PASS', userKey: 'DECODER_DB_USER',
+        what: 'decoder database credential'
+    });
 }
 
 // Prefix for every database this venue creates, and it is NOT cosmetic.
@@ -1514,6 +1456,12 @@ class AttestMirrorVenue {
         // (see resolveDecoderCredential). Default true, because the common venue is
         // the coin the harness .env describes; a venue for another coin passes false.
         this.useEnvDecoderCredential = opts.useEnvDecoderCredential !== false;
+        // Which store the decoder credential came from, and whether the oracle
+        // answered at its credential tier or served the redaction sentinel. Both
+        // are store NAMES, never values: a venue that fails to authenticate needs
+        // to know which store to reconcile, and nothing more.
+        this.decoderCredentialSource = null;
+        this.configSecretsRedacted   = null;
         if (this.attachHubs) this.hubCount = this.attachHubs.length;
         this.network      = opts.network || 'regtest';
         this.basePort     = opts.basePort || 41000;
@@ -2238,7 +2186,13 @@ class AttestMirrorVenue {
                 this.unavailable = 'stack hub unreachable, cannot discover the ' + this.coin + ' decoder database';
                 return null;
             }
-            cfg = await hub.getAllConfig();
+            // Asked at the CREDENTIAL TIER: `getallconfigs` serves the real passwords
+            // only when the call sets include_secrets and is authorized for it, and
+            // that is what lets the decoder credential below come from the oracle
+            // itself rather than from a sidecar copy that drifts. See readHubConfigTree.
+            const tree = await readHubConfigTree(hub);
+            cfg = tree && tree.configs;
+            this.configSecretsRedacted = !tree || tree.secretsRedacted;
         } catch (e) {
             this.unavailable = 'stack hub config lookup failed: ' + (e && e.message);
             return null;
@@ -2261,9 +2215,10 @@ class AttestMirrorVenue {
             return null;
         }
 
-        // Resolved rather than read straight off the oracle, which serves a redaction
-        // sentinel in place of every password. Refusing here, with the store named, beats
-        // spawning seven children that each die on ER_ACCESS_DENIED four minutes later.
+        // Resolved rather than read straight off the tree: the oracle serves a redaction
+        // sentinel in place of every password whenever the call was not authorized for its
+        // credential tier. Refusing here, with the store named, beats spawning seven
+        // children that each die on ER_ACCESS_DENIED four minutes later.
         const cred = resolveDecoderCredential(dec, this.coin, this.network, this.useEnvDecoderCredential);
         if (cred.problem) { this.unavailable = cred.problem; return null; }
         this.decoderCredentialSource = cred.source;
