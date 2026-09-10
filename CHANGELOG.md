@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.17.0] - 2026-09-10
+
+### Added
+- The AT5 oracle barrier drill grades live blocks against the barrier's own inputs and clock, aligns verdicts on tx_hash, and stops on verdict comparisons rather than block count.
+- A federation drill drives a degraded ARCHIVE attestation round across two validators, and anchor acceptance targets the v0 bundle with the v1 archive head.
+- The attest-mirror AT5 run seats a key the harness cannot sign for, and the llm pre-check judges the credential the hubs will actually receive.
+
+### Fixed
+- Every deployed contract fixture carries `meta` for the CONTRACT_META_REQUIRED flag day, and the seed contract pin moves to its new hash.
+- The staged sibling snapshots recorded in the lockfile track the versions the siblings carry.
+- The hub-topology coherence guard keys on the indexer's disclosure rather than on a read equalling local.
+- The history scrub exempts a pre-scrub backup ref, the manual twin of the filter-branch backup.
+
 ## [0.16.0] - 2026-09-08
 
 ### Added
