@@ -30,6 +30,16 @@
 // order-independent: it only has to happen before the first `new Database()`.
 function mariadbDriver(){ return require('mariadb'); }
 
+// Parses an integer-valued tunable from an env var, falling back to `def`
+// only when the var is unset/empty/non-numeric. Plain `parseInt(x) || def`
+// swallows an explicit "0" (0 is falsy), which silently reinstates a wait
+// floor a caller asked to disable; this treats a valid non-negative integer
+// (0 included) as authoritative and only falls back otherwise.
+function parseWaitTunable(raw, def){
+    const n = raw === undefined || raw === '' ? NaN : Number(raw);
+    return Number.isInteger(n) && n >= 0 ? n : def;
+}
+
 class Database {
     constructor(host, port, dbName, user, pass){
         this.sqlPath  = __dirname+'/sql';
@@ -41,22 +51,18 @@ class Database {
         // 2 blocks` with two extensions unused, the row landing seconds later;
         // the v0.15.0 rehearsal's bitcoin leg died the same way in before()).
         // Parsed so an explicit 0 is honoured: `parseInt('0') || 2` is 2.
-        this.WAIT_MAX_EXTENSIONS = parseInt(process.env.E2E_WAIT_MAX_EXTENSIONS) || 3;
-        this.WAIT_LAG_BLOCKS     = (() => {
-            const raw = process.env.E2E_WAIT_LAG_BLOCKS;
-            const n = raw === undefined || raw === '' ? NaN : Number(raw);
-            return Number.isInteger(n) && n >= 0 ? n : 0;
-        })();
-        this.WAIT_LAG_PROBE_MS   = parseInt(process.env.E2E_WAIT_LAG_PROBE_MS) || 2000;
-        this.WAIT_MIN_FOR_EXTENSION = parseInt(process.env.E2E_WAIT_MIN_FOR_EXTENSION) || 5000;
+        this.WAIT_MAX_EXTENSIONS = parseWaitTunable(process.env.E2E_WAIT_MAX_EXTENSIONS, 3);
+        this.WAIT_LAG_BLOCKS     = parseWaitTunable(process.env.E2E_WAIT_LAG_BLOCKS, 0);
+        this.WAIT_LAG_PROBE_MS   = parseWaitTunable(process.env.E2E_WAIT_LAG_PROBE_MS, 2000);
+        this.WAIT_MIN_FOR_EXTENSION = parseWaitTunable(process.env.E2E_WAIT_MIN_FOR_EXTENSION, 5000);
         // The second progress signal (see _waitFor): how often a long wait samples
         // pipeline progress, and how recently action rows must have landed for the
         // indexer to count as "still writing". The sample interval is floored so a
         // wait cannot spend its budget probing, and the idle window is at least two
         // intervals so two samples taken moments apart cannot read as a stall.
-        this.WAIT_PROBE_INTERVAL_MS = parseInt(process.env.E2E_WAIT_PROBE_INTERVAL_MS) || 10000;
-        this.WAIT_PROBE_MIN_MS      = parseInt(process.env.E2E_WAIT_PROBE_MIN_MS) || 1000;
-        this.WAIT_WRITE_IDLE_MS     = parseInt(process.env.E2E_WAIT_WRITE_IDLE_MS) || 20000;
+        this.WAIT_PROBE_INTERVAL_MS = parseWaitTunable(process.env.E2E_WAIT_PROBE_INTERVAL_MS, 10000);
+        this.WAIT_PROBE_MIN_MS      = parseWaitTunable(process.env.E2E_WAIT_PROBE_MIN_MS, 1000);
+        this.WAIT_WRITE_IDLE_MS     = parseWaitTunable(process.env.E2E_WAIT_WRITE_IDLE_MS, 20000);
         // Connect-retry budget (see getConnection). Bounded by BOTH an attempt count
         // and a wall-clock deadline, because the two failure shapes have wildly
         // different per-attempt costs: a pool that rejects instantly burns attempts
@@ -654,8 +660,12 @@ class Database {
             whereValues.push(fee)
         }
         if (memo != null){
-            whereClauses.push("im.memo = ?")
-            whereValues.push(memo)
+            if (memo == ''){
+                whereClauses.push("im.memo IS NULL")
+            } else {
+                whereClauses.push("im.memo = ?")
+                whereValues.push(memo)
+            }
         }
         if (broadcastActionIndex != null){
             whereClauses.push("b.broadcast_action_index = ?")
@@ -956,8 +966,12 @@ class Database {
             whereValues.push(listActionIndex)
         }
         if (memo != null){
-            whereClauses.push("im.memo = ?")
-            whereValues.push(memo)
+            if (memo == ''){
+                whereClauses.push("im.memo IS NULL")
+            } else {
+                whereClauses.push("im.memo = ?")
+                whereValues.push(memo)
+            }
         }
         if (status != null){
             whereClauses.push("ist.status = ?")
@@ -1508,7 +1522,10 @@ class Database {
         if (source != null){ w.push("ia.address = ?"); v.push(source) }
         if (tick != null){ w.push("itick.tick = ?"); v.push(tick) }
         if (amount != null){ w.push("d.amount = ?"); v.push(amount) }
-        if (memo != null){ w.push("im.memo = ?"); v.push(memo) }
+        if (memo != null){
+            if (memo == ''){ w.push("im.memo IS NULL") }
+            else { w.push("im.memo = ?"); v.push(memo) }
+        }
         if (status != null){ w.push("ist.status = ?"); v.push(status) }
         const query = `
             SELECT d.*, itx.hash AS tx_hash, ia.address AS source, itick.tick AS tick, im.memo AS memo, ist.status AS status
