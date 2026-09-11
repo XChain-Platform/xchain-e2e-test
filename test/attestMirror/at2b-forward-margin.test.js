@@ -117,6 +117,7 @@ const PROMPT  = 0
 
 const CONTRACT_CODE = `
 module.exports = {
+    meta: { name: 'Mirror Margin Asker', description: 'Requests an attestation used to measure the mirror forward margin.', version: '1.0.0' },
     ask: function(xchain) {
         var requestId = xchain.attestation.request(
             xchain.getInputParam(0),

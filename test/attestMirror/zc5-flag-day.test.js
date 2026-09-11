@@ -267,6 +267,7 @@ const TRACKER_UNDO_BLOCKS = 12
 
 const CONTRACT_CODE = `
 module.exports = {
+    meta: { name: 'Zero Conf Flag Day Asker', description: 'Requests an attestation across the zero-conf flag day boundary.', version: '1.0.0' },
     ask: function(xchain) {
         var requestId = xchain.attestation.request(
             xchain.getInputParam(0),

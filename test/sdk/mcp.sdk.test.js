@@ -153,9 +153,18 @@ describe(`MCP server write path: stdio submit_action (${MCP_COIN})`, function ()
         // Agent key: native-funded + gas-minted so ISSUE can pay the protocol fee.
         agent = await fundedGasAddress(sdk, 1);
 
+        // The server now refuses to start a wallet policy with no binding
+        // amount ceiling (fail-closed, server.js hasAmountCap check): a real
+        // operator policy must set maxPerAction or maxPerWindow.perTick, so
+        // the fixture carries a wildcard SEND cap. ISSUE has no
+        // value-derivability (no amount/tick the evaluator can read from its
+        // params), so this cap does not gate test 2's ISSUE call; it exists
+        // only to satisfy the server's startup guard the way a real policy
+        // would.
         policyPath = path.join(stateRoot, 'policy.json');
         fs.writeFileSync(policyPath, JSON.stringify({
             allowedActions: ['ISSUE'],
+            maxPerAction: { SEND: { '*': '1000' } },
             stateFile: path.join(stateRoot, 'usage.json'),
         }));
     });

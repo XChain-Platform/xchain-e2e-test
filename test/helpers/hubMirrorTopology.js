@@ -69,6 +69,11 @@
 
 // Pinned by discoverReadParams(); overrides the env model everywhere below.
 let _discovered = null
+// What the indexer said about HAVING a hub database, kept apart from where that
+// database is: on the ordinary regtest stack the indexer's hub database IS its own
+// database (hub_db_sync lands the mirror tables there), so "read equals local" does not
+// mean "no mirror", and assertCoherent must key on this flag rather than on equality.
+let _discoveredHubDb = null
 
 function localParams(){
     let idb = global.indexerDatabase
@@ -164,6 +169,7 @@ async function discoverReadParams(connector, opts){
         let local = localParams()
         if (!local) return null
         _discovered = local
+        _discoveredHubDb = false
         console.log('hubMirrorTopology: indexer reads prices from its OWN database ('
             + local.database + '); price fixtures pinned there')
         return _discovered
@@ -187,6 +193,7 @@ async function discoverReadParams(connector, opts){
         try { ok = await probe(cand) } catch (e){ ok = false }
         if (!ok) continue
         _discovered = cand
+        _discoveredHubDb = true
         console.log('hubMirrorTopology: indexer reads prices from hub database ' + database
             + '; price fixtures pinned there (' + cand.host + ':' + cand.port
             + ' as ' + (cand.user || 'no user') + ')')
@@ -197,6 +204,7 @@ async function discoverReadParams(connector, opts){
     // fail while NAMING the database the indexer reads, because a silent fall-back to the
     // indexer's own database is exactly the bug this function exists to remove.
     _discovered = candidates[0]
+    _discoveredHubDb = true
     console.log('hubMirrorTopology: WARN the indexer reads prices from hub database ' + database
         + ' but none of the ' + candidates.length + ' candidate connection(s) could read '
         + 'price_snapshots there. Pinning it regardless so the failure names the right '
@@ -254,7 +262,7 @@ async function probeTarget(params){
 function discoveredReadParams(){ return _discovered }
 
 // Drop the pinned answer. For tests, and for a suite that reconfigures a venue mid-run.
-function resetDiscovery(){ _discovered = null }
+function resetDiscovery(){ _discovered = null; _discoveredHubDb = null }
 
 function sameTarget(a, b){
     if (!a || !b) return false
@@ -279,12 +287,17 @@ function seedsThroughMirror(){
 // from its cause.
 function assertCoherent(){
     if (!process.env.HUB_SOURCE_DB_NAME) return
-    // Keyed on the RESOLVED read target, not the raw env, so a discovery that pinned the
-    // indexer's own database is caught by the same guard: seeding upstream of a mirror
-    // that is not there could only ever hang, however that fact was established.
-    let read  = readParams()
-    let local = localParams()
-    let hubRead = !!read && !(local && sameTarget(read, local))
+    // Keyed on what the indexer DISCLOSED when discovery ran, else on the raw env; never
+    // on whether the read target equals the local database. A discovery that pinned the
+    // indexer's own database because the indexer said it has NO hub database is the hang
+    // this guards against; a hub database that happens to BE the indexer's own database
+    // (the ordinary regtest stack, where hub_db_sync lands the mirror tables in the indexer
+    // DB) is a mirror all the same, and seeding upstream of it is exactly what the
+    // replay-safe fee seed does. Measured 2026-09-08 on that stack: the guard as first
+    // written refused every seed there.
+    let hubRead = (_discovered)
+        ? _discoveredHubDb === true
+        : !!(process.env.HUB_DB_HOST && process.env.HUB_DB_NAME)
     if (!hubRead){
         throw new Error(
             'hubMirrorTopology: HUB_SOURCE_DB_NAME is set but HUB_DB_HOST/HUB_DB_NAME are not. '

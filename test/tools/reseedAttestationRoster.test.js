@@ -55,6 +55,19 @@
  * is documented in
  * xchain-documentation/components/e2e-test/staking-venue-policy.md.
  *
+ * SEEDING BESIDE A NAMED KEY, `RESEED_ALLOW_SEATED`, and why the empty-set rule
+ * did not simply get relaxed. The BTC regtest chain re-genesised on 2026-09-08
+ * came back seating exactly one attestation key, which is the STANDING hub's own
+ * identity: its seed lives in that hub's container, so nothing here can derive
+ * it, and a venue hub running the same key beside the live one would equivocate
+ * and get the real validator slashed. So it can be neither adopted nor unstaked
+ * by this lane, and a tool that refuses any non-empty set refuses that chain
+ * forever. What the hatch does NOT do is relax the rule: every seated key must
+ * still be accounted for, either as one `_knownSignerSeeds()` derives or as one
+ * the operator NAMED, and any other seated key refuses exactly as before. Naming
+ * it is the point: an unnamed stranger in the set is still the dilution fc52bcc
+ * banned, and a blanket "allow whatever is there" would readmit it.
+ *
  * USAGE, on a venue whose attestation capability is EMPTY:
  *
  *   E2E_STAKE_TEARDOWN=off npx mocha --timeout 0 --exit \
@@ -63,7 +76,9 @@
  *
  * Env: RESEED_COUNT (default 5), RESEED_STAKE_XCHAIN (default 50000, which
  * clears both ProviderRegistry floors: http_get 10000, llm 25000),
- * RESEED_GAS_XCHAIN (default 60000, which must exceed the stake plus its fee).
+ * RESEED_GAS_XCHAIN (default 60000, which must exceed the stake plus its fee),
+ * RESEED_ALLOW_SEATED (comma-separated pubkey hex prefixes, at least 16 hex
+ * characters each, naming seated keys this run may seed beside).
  ********************************************************************/
 
 const assert = require('assert')
@@ -78,6 +93,19 @@ const fixture       = require('../attestMirror/mirrorDrillFixture')
 const RESEED_COUNT        = Number(process.env.RESEED_COUNT || 5)
 const RESEED_STAKE_XCHAIN = String(process.env.RESEED_STAKE_XCHAIN || '50000.00000000')
 const RESEED_GAS_XCHAIN   = String(process.env.RESEED_GAS_XCHAIN || '60000')
+const RESEED_ALLOW_SEATED = String(process.env.RESEED_ALLOW_SEATED || '')
+
+// The shortest prefix `RESEED_ALLOW_SEATED` will accept.
+//
+// SIXTEEN HEX CHARACTERS, which is 64 bits, and the bound is the whole safety of
+// the hatch. Every log line and every refusal in this tree prints a pubkey
+// truncated to 16 characters, so an operator copying an identifier out of one of
+// them lands exactly on the bound rather than under it. Shorter than that and a
+// typo stops naming ONE key and starts naming a class: an 8-character prefix has
+// a real chance of matching some future seated stranger, and the guard would then
+// wave through the dilution it exists to catch, silently and only once it
+// mattered.
+const ALLOW_PREFIX_MIN_HEX = 16
 
 // How many derivable keys to pass over before picking.
 //
@@ -143,6 +171,62 @@ async function readSeatedOrEmpty () {
     return { set: set, tipBlock: Number(tip.block_index), buriedBlock: buried }
 }
 
+/**
+ * Split a seated set into what this tool may seed beside and what it must refuse.
+ *
+ * PURE, AND EXPORTED, so the rule can be driven without a chain. The thing that
+ * makes this worth separating is that its failure is invisible: a guard that
+ * accidentally admits an unaccounted seated key does not fail here, it fails
+ * forty minutes into an acceptance drill as a round that never finalized.
+ *
+ * THREE OUTCOMES, and only the middle one is new:
+ *
+ *   - DERIVABLE: `_knownSignerSeeds()` holds its seed, so the harness can run a
+ *     hub for it and it was never a problem.
+ *   - ALLOWED: the operator NAMED it through RESEED_ALLOW_SEATED. Nothing here
+ *     can sign for it; the run is declaring that it knows and accepts that.
+ *   - BLOCKING: neither. Refused, exactly as a non-empty set was refused before
+ *     the hatch existed.
+ *
+ * A MALFORMED PREFIX THROWS RATHER THAN MATCHING NOTHING. The quiet failure is
+ * the dangerous direction in only one of the two: a prefix that is too SHORT
+ * matches too much, so it is refused; a prefix that is simply wrong matches
+ * nothing and lands in `blocking`, which already refuses loudly.
+ *
+ * @param {string[]} seatedPubkeys  the seated attestation pubkeys, hex
+ * @param {Map}      known          a `_knownSignerSeeds()` result
+ * @param {string}   allowRaw       the raw RESEED_ALLOW_SEATED value
+ * @returns {{prefixes: string[], derivable: string[], allowed: string[], blocking: string[]}}
+ */
+function classifySeatedForReseed (seatedPubkeys, known, allowRaw) {
+    const prefixes = String(allowRaw || '').split(',')
+        .map((s) => s.trim().toLowerCase())
+        .filter((s) => s !== '')
+    for (const p of prefixes) {
+        assert.ok(new RegExp('^[0-9a-f]{' + ALLOW_PREFIX_MIN_HEX + ',64}$').test(p),
+            'reseedAttestationRoster: RESEED_ALLOW_SEATED entry "' + p + '" is not a usable pubkey ' +
+            'prefix. Each entry must be ' + ALLOW_PREFIX_MIN_HEX + ' to 64 hexadecimal characters. ' +
+            'A shorter one stops naming one key and starts naming a class, which would wave through ' +
+            'the next seated stranger instead of refusing on it.')
+    }
+
+    const derivable = []
+    const allowed   = []
+    const blocking  = []
+    for (const raw of seatedPubkeys || []) {
+        const pk = String(raw).toLowerCase()
+        if (known && known.get(pk)) { derivable.push(pk); continue }
+        if (prefixes.some((p) => pk.startsWith(p))) { allowed.push(pk); continue }
+        blocking.push(pk)
+    }
+    return { prefixes: prefixes, derivable: derivable, allowed: allowed, blocking: blocking }
+}
+
+// Exported for the unit tier. The suite below stakes on a live venue, so a unit
+// test must reach this function WITHOUT registering that suite; see
+// test/unit/tools/reseedAttestationRoster.test.js for how it does that.
+module.exports = { classifySeatedForReseed, ALLOW_PREFIX_MIN_HEX }
+
 describe('seed the attestation roster on a reset chain', function () {
     this.timeout(0)
 
@@ -168,16 +252,31 @@ describe('seed the attestation roster on a reset chain', function () {
             'XC_ROLLCALL_FEDERATION_MNEMONIC to widen the pool (it contributes the idle generations, ' +
             'which are most of it), lower RESEED_COUNT, or lower RESEED_SKIP.')
 
-        // ── REFUSE ON A NON-EMPTY SET ────────────────────────────────────────
+        // ── REFUSE ON AN UNACCOUNTED SEATED KEY ──────────────────────────────
         const before = await readSeatedOrEmpty()
-        assert.strictEqual(before.set.pubkeys.length, 0,
+        const split  = classifySeatedForReseed(before.set.pubkeys, known, RESEED_ALLOW_SEATED)
+        assert.deepStrictEqual(split.blocking, [],
             'reseedAttestationRoster: the attestation set at buried block ' + before.buriedBlock +
-            ' already seats ' + before.set.pubkeys.length + ' validator(s): ' +
-            before.set.pubkeys.map((p) => p.slice(0, 16)).join(', ') + '.\n' +
-            'This tool seeds an EMPTY set only. Staking into a set that already exists is the ' +
-            'dilution fc52bcc removed the old prologue for: the responsible set is drawn from every ' +
-            'staked validator and ranked by hash, so these stakes would not displace what is there, ' +
-            'they would be drawn alongside it. Reset the chain first, or adopt the roster as it is.')
+            ' seats ' + split.blocking.length + ' validator(s) this run cannot account for: ' +
+            split.blocking.map((p) => p.slice(0, 16)).join(', ') + '.\n' +
+            'This tool seeds beside keys it can DERIVE or that the operator NAMED, and nothing else. ' +
+            'Staking beside an unaccounted key is the dilution fc52bcc removed the old prologue for: ' +
+            'the responsible set is drawn from every staked validator and ranked by hash, so these ' +
+            'stakes would not displace what is there, they would be drawn alongside it and every draw ' +
+            'containing it would stall to timeout.\n' +
+            'Reset the chain, have the owning lane unstake it, or, if it is a validator this venue ' +
+            'must run BESIDE rather than impersonate, name it in RESEED_ALLOW_SEATED (at least ' +
+            ALLOW_PREFIX_MIN_HEX + ' hex characters) and scope the drills to providers whose stake ' +
+            'floor it misses.')
+        if (split.derivable.length || split.allowed.length) {
+            console.log('reseedAttestationRoster: seeding BESIDE ' +
+                split.derivable.length + ' derivable seated key(s) [' +
+                split.derivable.map((p) => p.slice(0, 16)).join(', ') + '] and ' +
+                split.allowed.length + ' operator-named key(s) [' +
+                split.allowed.map((p) => p.slice(0, 16)).join(', ') +
+                ']. A named key is one nothing here can sign for, so it counts as a set member on ' +
+                'every draw and every batch window while signing none of them.')
+        }
 
         // ── NEVER SPEND A ROLL-CALL ROSTER KEY ───────────────────────────────
         //
@@ -204,17 +303,26 @@ describe('seed the attestation roster on a reset chain', function () {
             console.log('reseedAttestationRoster: no roll-call roster to reserve (' + err.message + ')')
         }
 
-        const candidates = [...known.entries()].filter(([pk]) => !reserved.has(pk.toLowerCase()))
+        // AND NEVER RE-SPEND A KEY THIS CHAIN ALREADY SEATS. `stake.js` admits a v1
+        // STAKE only when `getActiveStakeByPubkey(pk, null)` finds no valid row at
+        // any height, so a derivable key that is already in the set is refused
+        // outright, and the run dies on `invalid: SIGNING_PUBKEY (already in use)`
+        // partway through with some stakes placed and some not. It could not happen
+        // while this tool refused every non-empty set; seeding BESIDE a set is
+        // exactly when it can.
+        const alreadySeated = new Set(split.derivable)
+        const candidates = [...known.entries()]
+            .filter(([pk]) => !reserved.has(pk.toLowerCase()) && !alreadySeated.has(pk.toLowerCase()))
         const excluded = known.size - candidates.length
         if (excluded > 0)
-            console.log('reseedAttestationRoster: reserved ' + excluded + ' roll-call roster key(s), ' +
-                'which this tool must never spend: those four entries are fixed and have no ' +
-                'alternatives, while this tool can use any derivable key')
+            console.log('reseedAttestationRoster: set aside ' + excluded + ' derivable key(s): the ' +
+                'roll-call roster (fixed four entries with no alternatives, while this tool can use ' +
+                'any derivable key) and any key this chain already seats')
 
         assert.ok(candidates.length >= RESEED_SKIP + RESEED_COUNT,
             'reseedAttestationRoster: only ' + candidates.length + ' derivable key(s) remain after ' +
-            'reserving the roll-call roster, but ' + RESEED_COUNT + ' were asked for after skipping ' +
-            RESEED_SKIP + '.')
+            'reserving the roll-call roster and the keys already seated, but ' + RESEED_COUNT +
+            ' were asked for after skipping ' + RESEED_SKIP + '.')
 
         const picked = candidates.slice(RESEED_SKIP, RESEED_SKIP + RESEED_COUNT)
         const staked = []
@@ -285,6 +393,11 @@ describe('seed the attestation roster on a reset chain', function () {
         // this needs depends on how far apart the stakes landed, which depends
         // on how long the funding and minting took. That is not knowable up
         // front, and guessing it is what made the first run report a set of two.
+        // EVERY STAKED KEY VISIBLE, and the keys that were already there still
+        // there. Written as a containment rather than an equality because the set
+        // is no longer required to be exactly what this run staked: the accounted
+        // keys from before the run stay seated by design, and an equality would
+        // fail on precisely the case the hatch exists for.
         const want = new Set(staked.map((s) => s.pubkeyHex.toLowerCase()))
         let after = null
         for (let round = 0; round < VISIBILITY_ROUNDS; round++) {
@@ -293,30 +406,38 @@ describe('seed the attestation roster on a reset chain', function () {
             await fixture.settleStack()
             after = await readSeatedOrEmpty()
             const seatedNow = new Set(after.set.pubkeys.map((p) => p.toLowerCase()))
-            if (seatedNow.size === want.size && [...want].every((p) => seatedNow.has(p))) break
+            if ([...want].every((p) => seatedNow.has(p))) break
             console.log('reseedAttestationRoster: round ' + (round + 1) + '/' + VISIBILITY_ROUNDS +
-                ': ' + seatedNow.size + '/' + want.size + ' visible at buried block ' +
-                after.buriedBlock + ', mining on')
+                ': ' + [...want].filter((p) => seatedNow.has(p)).length + '/' + want.size +
+                ' visible at buried block ' + after.buriedBlock + ', mining on')
         }
 
-        const seated = new Set(after.set.pubkeys.map((p) => p.toLowerCase()))
-        assert.deepStrictEqual([...seated].sort(), [...want].sort(),
-            'reseedAttestationRoster: after ' + VISIBILITY_ROUNDS + ' rounds the seated set at ' +
-            'buried block ' + after.buriedBlock + ' is still not the set that was staked. Seated: ' +
-            [...seated].map((p) => p.slice(0, 16)).join(', ') + '; staked: ' +
-            [...want].map((p) => p.slice(0, 16)).join(', ') + '. A stake that never becomes visible ' +
+        const seated  = new Set(after.set.pubkeys.map((p) => p.toLowerCase()))
+        const missing = [...want].filter((p) => !seated.has(p))
+        assert.deepStrictEqual(missing, [],
+            'reseedAttestationRoster: after ' + VISIBILITY_ROUNDS + ' rounds ' + missing.length +
+            ' staked key(s) are still not visible at buried block ' + after.buriedBlock + ': ' +
+            missing.map((p) => p.slice(0, 16)).join(', ') + '. Seated: ' +
+            [...seated].map((p) => p.slice(0, 16)).join(', ') + '. A stake that never becomes visible ' +
             'is a chain or indexer problem, not a timing one.')
 
-        // Adoptability is the actual goal, so assert it through the same
-        // function the drills use rather than re-deriving the answer here.
-        const readopt = fixture._knownSignerSeeds()
-        const orphans = after.set.pubkeys.filter((pk) => !readopt.get(pk))
-        assert.deepStrictEqual(orphans, [],
-            'reseedAttestationRoster: seeded a roster this harness still cannot sign for: ' +
-            orphans.map((p) => p.slice(0, 16)).join(', '))
+        // NOTHING UNACCOUNTED ARRIVED WHILE THIS RAN, judged by the same rule the
+        // opening guard used. The roster activates on a delay, so a stake made
+        // before this run can seat DURING it, and a key that lands here unnoticed
+        // is the orphan every drill would then refuse on.
+        const closing = classifySeatedForReseed(after.set.pubkeys, fixture._knownSignerSeeds(),
+            RESEED_ALLOW_SEATED)
+        assert.deepStrictEqual(closing.blocking, [],
+            'reseedAttestationRoster: the set now seats ' + closing.blocking.length + ' key(s) this ' +
+            'run cannot account for: ' + closing.blocking.map((p) => p.slice(0, 16)).join(', ') +
+            '. Either one seated while this ran, or a key this tool staked is not derivable, and ' +
+            'either way every draw containing it stalls its round to timeout.')
 
         console.log('reseedAttestationRoster: seated ' + after.set.pubkeys.length + ' validator(s) ' +
-            'at buried block ' + after.buriedBlock + ' (tip ' + after.tipBlock + '), every one ' +
-            'adoptable: ' + staked.map((s) => s.pubkeyHex.slice(0, 16) + ' via ' + s.origin).join('; '))
+            'at buried block ' + after.buriedBlock + ' (tip ' + after.tipBlock + '): ' +
+            closing.derivable.length + ' adoptable [' +
+            staked.map((s) => s.pubkeyHex.slice(0, 16) + ' via ' + s.origin).join('; ') + '] and ' +
+            closing.allowed.length + ' operator-named [' +
+            closing.allowed.map((p) => p.slice(0, 16)).join(', ') + ']')
     })
 })

@@ -58,6 +58,7 @@ const HUB_DB      = process.env.HUB_DB_NAME      || 'XChain_Hub';
 
 const CONTRACT_B = `
     module.exports = {
+        meta: { name: 'XCall Target', description: 'Answers cross-chain calls arriving from another chain.', version: '1.0.0' },
         crossCallable: ['onArrival', 'doRevert', 'bigReturn'],
         onArrival: function(xchain) {
             xchain.state.set('lastPing', xchain.getInputParam(0));
@@ -81,6 +82,7 @@ const CONTRACT_B = `
 // goes out at hops=2, exactly the XCALL_MAX_HOPS cap.
 const CONTRACT_C = `
     module.exports = {
+        meta: { name: 'XCall Bouncer', description: 'Bounces a cross-chain call back to its origin chain.', version: '1.0.0' },
         crossCallable: ['bounce'],
         bounce: function(xchain) {
             var backId = xchain.emit.crossExecute({

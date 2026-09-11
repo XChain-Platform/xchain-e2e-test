@@ -23,6 +23,16 @@
 
 module.exports = {
 
+    // Required at/after CONTRACT_META_REQUIRED: a DEPLOY whose
+    // contract exports no meta.name and meta.description is refused at
+    // consensus. Bump the version on any source edit below - the bytes are the
+    // contract's identity, and the resume lookup finds it by code hash.
+    meta: {
+        name: 'SPV Arming Seed',
+        description: 'Writes a shaped contract_state key set so the arming block commits a real SPV sub-root instead of the empty one.',
+        version: '1.0.0'
+    },
+
     initialize: function (xchain) {
         xchain.state.set('owner', xchain.getSourceAddress());
         xchain.state.set('seed/version', '1');

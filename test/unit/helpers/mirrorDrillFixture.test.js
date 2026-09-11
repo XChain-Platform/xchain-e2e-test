@@ -582,6 +582,130 @@ describe('mirrorDrillFixture: the provider floor is INCLUSIVE at equality', func
     })
 })
 
+describe('mirrorDrillFixture: resolveAdoptionPlan scopes the orphan rule by declared provider', function () {
+    const { resolveAdoptionPlan } = require('../../attestMirror/mirrorDrillFixture')
+
+    // A synthetic capability snapshot in the shape `readCapabilitySet` returns:
+    // the raw `getstakeweightsbycapability` rows, keyed by pubkey. Weights are
+    // decimal STRINGS because that is what the chain answers with and what both
+    // the provider-floor comparator and the stake-weighted quorum are written to
+    // handle exactly; a JS number here would test a rounding path nothing uses.
+    const seatedSet = (rows) => ({
+        pubkeys:  rows.map((r) => r.pubkey),
+        byPubkey: new Map(rows.map((r) => [r.pubkey, r])),
+    })
+    const member = (tag, weight) => ({ pubkey: tag.repeat(64).slice(0, 64), source: 'source-' + tag, weight: weight })
+    const signersFor = (rows) => new Map(rows.map((r, i) => [r.pubkey, { seedHex: String(i), origin: 'test seed ' + i }]))
+
+    // THE MEASURED SITUATION THIS OPTION WAS BUILT FOR, 2026-09-08: the re-genesised
+    // BTC regtest chain seats one key at 10000 which is the STANDING hub's own
+    // identity. Its seed lives in that hub's container, so the harness cannot sign
+    // for it, and a venue hub running the same key beside the live one would
+    // equivocate and get it slashed. It clears the http_get floor (10000) and misses
+    // the llm floor (25000).
+    const FOREIGN = member('a', '10000.00000000')
+    const VENUE   = [member('1', '50000.00000000'), member('2', '50000.00000000'),
+                     member('3', '50000.00000000'), member('4', '50000.00000000')]
+    const plan = (rows, opts) => resolveAdoptionPlan(seatedSet(rows), signersFor(rows.filter((r) => r !== FOREIGN)),
+        Object.assign({ redundancy: 3, buriedBlock: 5000, network: 'regtest' }, opts))
+
+    it('passes a below-floor foreign key OVER rather than refusing on it', function () {
+        const out = plan(VENUE.concat([FOREIGN]), { providers: ['llm'] })
+        assert.deepStrictEqual(out.belowFloor, [FOREIGN.pubkey],
+            'the seated key that misses every declared floor must be listed, not silently dropped: it ' +
+            'still counts against the batch co-sign quorum and a reader has to be able to see it')
+        assert.deepStrictEqual(out.adopted.map((a) => a.pubkeyHex), VENUE.map((v) => v.pubkey))
+        assert.deepStrictEqual(out.orphans, [], 'a key no draw can contain is not this drill\'s orphan')
+        assert.deepStrictEqual(out.floorReport, [{ providerId: 'llm', floor: '25000', eligible: 4 }])
+    })
+
+    it('REFUSES the identical key when the drill declares a provider whose floor it clears', function () {
+        // The same set and the same signers: only the declared provider moves. This
+        // is the pair that proves the scoping is doing the work rather than a
+        // loosened rule quietly admitting everything.
+        assert.throws(() => plan(VENUE.concat([FOREIGN]), { providers: ['http_get'] }), (e) => {
+            assert.ok(e.message.indexOf(FOREIGN.pubkey.slice(0, 16)) >= 0,
+                'the refusal must name the key it refused on, got: ' + e.message)
+            assert.ok(/declares \(http_get\)/.test(e.message),
+                'the refusal must name the provider scope it judged against, got: ' + e.message)
+            return true
+        })
+    })
+
+    it('defaults to EVERY registry provider, which is what every caller had before the option', function () {
+        // Omitting `providers` must not quietly become the permissive case: the
+        // drills that ask for http_get still have to refuse on this key.
+        assert.throws(() => plan(VENUE.concat([FOREIGN]), {}), /have NO signing key this harness can run/)
+    })
+
+    it('still refuses a declared provider whose floor leaves fewer keys than the redundancy', function () {
+        // Two venue keys and the foreign one, llm declared: the foreign key is
+        // filtered out of the draw as before, and what is left is short. The round
+        // is then skipped as unfinalizable and the request expires with nothing
+        // anywhere near the floor that caused it, so this must fail here.
+        assert.throws(() => plan(VENUE.slice(0, 2).concat([FOREIGN]), { providers: ['llm'] }),
+            /only 2 of 3 seated validator\(s\) clear it .* below the redundancy of 3/s)
+    })
+
+    it('refuses a venue that cannot reach the BATCH quorum beside its silent set members', function () {
+        // THE HALF THE PROVIDER FLOOR DOES NOT COVER. `_verifyBatchQuorum` measures
+        // a window's signatures against the whole capability snapshot, so keys the
+        // draw filters out still raise the batch bar. Three adoptable keys at 25000
+        // against three silent ones just under the llm floor: eligible 3 of 6 clears
+        // the redundancy, and 3 x 75000 does not exceed 2 x 149999.99999997.
+        const ours    = ['1', '2', '3'].map((t) => member(t, '25000.00000000'))
+        const silent  = ['x', 'y', 'z'].map((t) => member(t, '24999.99999999'))
+        const rows    = ours.concat(silent)
+        assert.throws(() => resolveAdoptionPlan(seatedSet(rows), signersFor(ours),
+            { providers: ['llm'], redundancy: 3, buriedBlock: 5000, network: 'regtest' }),
+        (e) => {
+            assert.ok(/cannot reach the batch co-sign quorum/.test(e.message), e.message)
+            assert.ok(/3 x 75000 must exceed 2 x 149999\.99999997/.test(e.message),
+                'the refusal must carry the arithmetic it refused on, got: ' + e.message)
+            assert.ok(e.message.indexOf(silent[0].pubkey.slice(0, 16)) >= 0,
+                'the refusal must name the silent members that raised the bar, got: ' + e.message)
+            return true
+        })
+    })
+
+    it('reports NO SPARE when losing one venue signer would lose the batch quorum', function () {
+        // Three adoptable at 25000 beside one silent at 24999.99999999: the quorum
+        // holds with all three (225000 > 199999.99999998) and fails with any two
+        // (150000). Not fatal, because such a venue still publishes when nothing
+        // goes wrong, but a window that fails the first time a hub child is slow
+        // must be recognisable rather than new.
+        const ours   = ['1', '2', '3'].map((t) => member(t, '25000.00000000'))
+        const silent = [member('x', '24999.99999999')]
+        const out = resolveAdoptionPlan(seatedSet(ours.concat(silent)), signersFor(ours),
+            { providers: ['llm'], redundancy: 3, buriedBlock: 5000, network: 'regtest' })
+        assert.strictEqual(out.quorum.weighted, true)
+        assert.strictEqual(out.quorum.spare, false)
+
+        // And the roster the reseed tool is sized for DOES carry the spare, which is
+        // the whole reason that count is what it is.
+        const sized = plan(VENUE.concat([FOREIGN]), { providers: ['llm'] })
+        assert.strictEqual(sized.quorum.spare, true)
+        assert.strictEqual(sized.quorum.totalStake, '210000')
+        assert.strictEqual(sized.quorum.oursStake, '200000')
+    })
+
+    it('falls to the COUNT rule where stake-weighted quorum is not active', function () {
+        // The batch verifier branches on `isStakeWeightedQuorumActive(anchor, network)`
+        // and an unknown network answers false (safe direction), so this pins that the
+        // check follows the hub rather than assuming the weighted rule everywhere.
+        const out = plan(VENUE.concat([FOREIGN]), { providers: ['llm'], network: 'nosuchnetwork' })
+        assert.strictEqual(out.quorum.weighted, false)
+        assert.strictEqual(out.quorum.spare, true, '4 of 5 with a count quorum of 3 has a spare')
+    })
+
+    it('refuses an unknown or empty provider list rather than scoping the rule to nothing', function () {
+        assert.throws(() => plan(VENUE.concat([FOREIGN]), { providers: ['not_a_provider'] }),
+            /unknown provider not_a_provider/)
+        assert.throws(() => plan(VENUE.concat([FOREIGN]), { providers: [] }),
+            /must name at least one provider/)
+    })
+})
+
 describe('mirrorDrillFixture: assertResponsibleSetIsVenueOnly', function () {
     const { assertResponsibleSetIsVenueOnly } = require('../../attestMirror/mirrorDrillFixture')
 

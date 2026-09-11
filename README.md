@@ -5,7 +5,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/version-0.16.0-blue" alt="Version">
-  <img src="https://img.shields.io/badge/tests-2%2C680%2B%20passing-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-3%2C019%2B%20passing-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/node-%3E%3D22-green" alt="Node">
   <img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue" alt="License">
 </p>
@@ -128,7 +128,7 @@ says so; it never overwrites real content. Remove a symlink it created with
 | Command | Description |
 |---|---|
 | `npm test` | Full action test suite (27 ACTION types, `--timeout 0`, requires live stack, 305 tests) |
-| `npm run test:unit` | Unit tests (1,215 tests, no services required) |
+| `npm run test:unit` | Unit tests (1,374 tests, no services required) |
 | `npm run test:integration` | Integration tests (260 tests: 117 stubbed I/O + 142 live) |
 | `npm run test:e2e` | E2E meta-tests (38 tests, validates suite against live services) |
 | `npm run test:smoke` | Smoke tests (18 tests, quick bootstrap and connectivity checks) |
@@ -137,9 +137,9 @@ says so; it never overwrites real content. Remove a symlink it created with
 | `npm run test:fuzz:quick` | Quick fuzz (30s timeout, 170 tests) |
 | `npm run test:chaos` | Chaos engineering tests (80 tests, failure injection) |
 | `npm run test:chaos:quick` | P0 chaos only (23 tests) |
-| `npm run test:regression` | Full regression suite (176 tests, P0+P1+P2) |
-| `npm run test:regression:p0` | Regression P0: critical gate (136 tests, < 500ms) |
-| `npm run test:regression:p0p1` | Regression P0+P1: merge gate (156 tests, < 500ms) |
+| `npm run test:regression` | Full regression suite (177 tests, P0+P1+P2) |
+| `npm run test:regression:p0` | Regression P0: critical gate (137 tests, < 500ms) |
+| `npm run test:regression:p0p1` | Regression P0+P1: merge gate (157 tests, < 500ms) |
 | `npm run test:perf` | Performance tests with custom reporter (18 tests) |
 | `npm run test:perf:actions` | Performance-instrumented action tests (305 tests) |
 | `npm run test:perf:e2e` | Performance-instrumented E2E tests (38 tests) |

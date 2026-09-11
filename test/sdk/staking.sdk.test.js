@@ -31,6 +31,7 @@ function newSigningPubkey() {
 
 const STAKE_GATED_CONTRACT = `
     module.exports = {
+        meta: { name: 'SDK Stake Gate', description: 'Reports whether the calling pubkey has staked against this contract.', version: '1.0.0' },
         isStaked: function() {
             let pubkey = xchain.getInputParam(0)
             let amount = xchain.contract.getStake(pubkey, 'XCHAIN')

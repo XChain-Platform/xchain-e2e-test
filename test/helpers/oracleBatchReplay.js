@@ -160,6 +160,191 @@ const REPLAY_WAIT_MS = 30 * 60 * 1000;
 // failure into "the node did not come up".
 const LOG_TAIL_LINES = 200;
 
+// ---------------------------------------------------------------------------
+// Credential resolution
+//
+// WHY THIS EXISTS, AND WHY IT LIVES IN THIS FILE. This rig discovers every
+// coordinate from the standing stack's config oracle, and for a long time it
+// read `pass` off that tree too. It could never have authenticated: the hub
+// REDACTS every secret-named param by default (xchain-hub/src/lib/
+// config_redaction.js), substituting the sentinel below, so an indexer spawned
+// with that value dies on ER_ACCESS_DENIED, which reads from the outside as a
+// rotated password and sends the reader hunting a rotation that never happened.
+//
+// The oracle is not, however, credential-free: `getallconfigs` serves the real
+// values when the call sets `include_secrets: true`, authorized on its own
+// against HUB_CONFIG_SECRETS_API_KEY (falling back to the bulk HUB_API_KEY when
+// that is unset, and open on a declared-keyless regtest hub). That is the tier
+// xchain-explorer and xchain-sync already use, and it is what makes the
+// documented "read coordinates AND credentials from the oracle" path real.
+// `readHubConfigTree` asks for it and reports which tier came back.
+//
+// The stores are then tried in a deliberate order rather than as a cascade,
+// because they are known to disagree and only one of them is ever right:
+//   1. an explicit value in the harness environment, which is an operator
+//      overriding on purpose and must beat every discovered value;
+//   2. the oracle's UNREDACTED value, which is the live authority: it is the
+//      value the running container was configured from;
+//   3. the per-coin config sidecar, last because it holds whatever the service
+//      used before its most recent recreate and nothing propagates the new
+//      value back (measured stale on the regtest decoder, 2026-09-04).
+// The sentinel is refused BY NAME at every step, so a hub that answered the
+// redacted tier produces a message naming the tier to authorize rather than a
+// fake password that fails four minutes later inside a child process.
+//
+// attestMirrorVenue.js imports these: this file is the lighter of the two (the
+// venue requires the indexer's hub_db_sync, this requires nothing outside the
+// harness), so the shared implementation lives here and the dependency runs one
+// way only.
+// ---------------------------------------------------------------------------
+
+// What the hub's config oracle puts where a password would go when the call was
+// not authorized for the credential tier.
+const HUB_CONFIG_REDACTION = '[redacted]';
+
+/**
+ * The config tree, asked for at the CREDENTIAL TIER.
+ *
+ * Returns `{configs, secretsRedacted}` or null when no tree could be read at
+ * all. `secretsRedacted` is true whenever a value was withheld or would have
+ * been, which is the hub's own `secrets_redacted` flag; a hub too old to carry
+ * the flag is treated as redacting, since assuming otherwise would hand a
+ * sentinel onward as a password.
+ *
+ * The unredacted ask goes through the connector's JSON-RPC transport directly
+ * because `getAllConfig()` sends `params: []` and there is nowhere on an array
+ * to put the flag. Falling back to `getAllConfig()` keeps this working against
+ * a hub that refuses the credential tier (unauthorized, or older than it).
+ */
+async function readHubConfigTree(hub) {
+    if (hub && typeof hub._call === 'function') {
+        let envelope = null;
+        try {
+            envelope = await hub._call({
+                jsonrpc: '2.0', method: 'getallconfigs',
+                params: { include_secrets: true }, id: 1
+            });
+        } catch (_) { envelope = null; }
+        // Only the enveloped form can be trusted here: without `secrets_redacted`
+        // there is no way to tell a served credential from a withheld one.
+        if (envelope && typeof envelope === 'object' && envelope.error === undefined &&
+            envelope.configs && typeof envelope.configs === 'object' && 'seq' in envelope) {
+            return { configs: envelope.configs, secretsRedacted: envelope.secrets_redacted !== false };
+        }
+    }
+    const plain = await hub.getAllConfig();
+    return plain ? { configs: plain, secretsRedacted: true } : null;
+}
+
+/**
+ * The per-coin config sidecar: the xchain-node config file the containers
+ * themselves are built from. Tried relative to this checkout the same way the
+ * hub source is resolved, because the harness runs both from the monorepo and
+ * from an image where the layout differs.
+ *
+ * With `needKey`, the first EXISTING candidate that carries that key wins and
+ * the first existing one at all is the fallback, so a refusal can still name a
+ * file. The regtest stack's `dogecoin-regtest.local` exists and holds only the
+ * indexer credential, and stopping at it hid the `dogecoin-regtest` beside it.
+ */
+function resolveCoinConfigSidecar(coin, network, needKey) {
+    const rel = 'xchain-node/config/' + coin + '-' + network + '.local';
+    const candidates = [
+        process.env.XCHAIN_NODE_CONFIG_DIR && path.join(process.env.XCHAIN_NODE_CONFIG_DIR, coin + '-' + network + '.local'),
+        process.env.XCHAIN_NODE_CONFIG_DIR && path.join(process.env.XCHAIN_NODE_CONFIG_DIR, coin + '-' + network),
+        path.resolve(__dirname, '../../..', rel),
+        path.resolve(__dirname, '../../../..', rel)
+    ].filter(Boolean);
+    let firstExisting = null;
+    for (const p of candidates) {
+        if (!fs.existsSync(p)) continue;
+        if (!needKey) return p;
+        if (firstExisting === null) firstExisting = p;
+        try {
+            if (require('dotenv').parse(fs.readFileSync(p))[needKey]) return p;
+        } catch (_) { /* unreadable: keep looking */ }
+    }
+    return firstExisting;
+}
+
+/**
+ * One service credential, from the first store that actually holds one.
+ *
+ * @param o.oracle      the service's entry in the config tree (`{user, pass}`)
+ * @param o.coin/network which chain's sidecar to read
+ * @param o.passKey     env var AND sidecar key holding the password
+ * @param o.userKey     env var holding the account name (optional)
+ * @param o.allowEnv    false IGNORES the environment for this resolution. The
+ *                      harness `.env` describes exactly ONE coin, so a venue for
+ *                      another coin that takes them authenticates as that coin's
+ *                      account and then fails ER_TABLEACCESS_DENIED on a database
+ *                      it holds no grant for. An option rather than a comparison
+ *                      of coin names, because a rail switch swaps the coin while
+ *                      leaving the credentials alone.
+ * @param o.what        human name of the credential, for the refusal message
+ *
+ * Returns `{user, pass, source}`, or `{problem}` naming what to fix. It never
+ * logs a value and never puts one on a command line.
+ */
+function resolveServiceCredential(o) {
+    const allowEnv = o.allowEnv !== false;
+    const oracle   = o.oracle || {};
+    const what     = o.what || o.passKey;
+    const user     = (allowEnv && o.userKey && process.env[o.userKey]) || oracle.user;
+
+    if (allowEnv && process.env[o.passKey]) {
+        return { user, pass: process.env[o.passKey], source: o.passKey + ' in the environment' };
+    }
+
+    // The oracle's own value, ahead of the sidecar: when the credential tier
+    // answered, this is the live authority and the sidecar is the stale copy.
+    if (oracle.pass && oracle.pass !== HUB_CONFIG_REDACTION) {
+        return { user, pass: oracle.pass, source: "the standing hub's config oracle" };
+    }
+
+    const sidecar = resolveCoinConfigSidecar(o.coin, o.network, o.passKey);
+    if (sidecar) {
+        let parsed = {};
+        try { parsed = require('dotenv').parse(fs.readFileSync(sidecar)); }
+        catch (_) { /* an unreadable sidecar is treated as absent */ }
+        if (parsed[o.passKey]) {
+            const u = (allowEnv && o.userKey && process.env[o.userKey]) ||
+                (o.userKey && parsed[o.userKey]) || oracle.user;
+            return { user: u, pass: parsed[o.passKey], source: sidecar };
+        }
+    }
+
+    return {
+        problem: 'no usable ' + o.coin + '/' + o.network + ' ' + what + '. The standing ' +
+            "hub's config oracle redacts every password it serves unless the call is authorized " +
+            'for its credential tier (it returned ' + JSON.stringify(HUB_CONFIG_REDACTION) + '), so ' +
+            'it supplied coordinates only' +
+            (sidecar
+                ? ', and the config sidecar ' + sidecar + ' carries no ' + o.passKey
+                : ', and no ' + o.coin + '-' + o.network + '.local config sidecar was found') +
+            '. Authorize the credential tier (HUB_CONFIG_SECRETS_API_KEY, or the bulk HUB_API_KEY ' +
+            'when that is unset) so `getallconfigs` can serve the live value, or set ' + o.passKey +
+            ' in the harness environment, or reconcile the sidecar with the credential the running ' +
+            'service actually uses; the sidecar and the container drift apart whenever a container ' +
+            'is recreated and nothing propagates the new value back.'
+    };
+}
+
+/**
+ * Does the harness environment describe THIS coin?
+ *
+ * The `.env` a harness run is given carries exactly one coin's credentials and
+ * says which in `COIN`. Taking them for a different coin is not a harmless
+ * fallback: the account authenticates and then fails ER_TABLEACCESS_DENIED on a
+ * database it holds no grant for, which reads as a broken decoder rather than as
+ * the wrong account. An environment that declares no coin is treated as
+ * describing none, because guessing is the failure this exists to prevent.
+ */
+function envDescribesCoin(coin) {
+    const declared = String(process.env.COIN || process.env.INDEXER_COIN || '').trim().toUpperCase();
+    return declared !== '' && declared === coinCode(coin);
+}
+
 function ident(name, what) {
     if (!SAFE_IDENT.test(String(name || ''))) {
         throw new Error('oracleBatchReplay: refusing to interpolate an unsafe ' + what + ': ' + name);
@@ -441,6 +626,18 @@ class OracleBatchReplayNode {
      *                            documents it as test tunability; see the note on
      *                            `_startIndexer` for what setting it trades away, and
      *                            NEVER give two nodes in one comparison different values.
+     * @param opts.liveChain      the live-chain endpoints, supplied instead of discovered.
+     *                            Same shape `_resolveLiveChain` returns; see there for why
+     *                            a host may have to supply them and what is validated.
+     * @param opts.useEnvCredentials  whether the harness environment's DECODER_DB_*,
+     *                            INDEXER_DB_* and NODE_* describe this rig's coin.
+     *                            Defaults to what the environment's own `COIN`
+     *                            declares; see envDescribesCoin for why a wrong-coin
+     *                            credential is worse than no credential.
+     * @param opts.onLog          fn(which, line) called for every stdout/stderr line the
+     *                            hub and indexer emit, so a long-running caller can keep
+     *                            its own history of a line class (the price barrier's
+     *                            deferrals, say) instead of racing the LOG_TAIL_LINES ring.
      */
     constructor(opts) {
         opts = opts || {};
@@ -450,6 +647,21 @@ class OracleBatchReplayNode {
         this.basePort = opts.basePort || 61000;
         this.repoRoot = opts.repoRoot || path.resolve(__dirname, '../../..');
         this.priceGraceS = opts.priceGraceS === undefined ? null : opts.priceGraceS;
+        this.liveChain   = opts.liveChain || null;
+        this._onLog      = typeof opts.onLog === 'function' ? opts.onLog : null;
+
+        // Whether the harness environment's credentials apply to THIS rig's coin.
+        // Defaulted by what the environment declares rather than assumed, because
+        // this rig's default coin is not the harness's (see envDescribesCoin).
+        this.useEnvCredentials = opts.useEnvCredentials === undefined
+            ? envDescribesCoin(this.coin)
+            : !!opts.useEnvCredentials;
+        // Which store each credential actually came from, and whether the oracle
+        // answered at its credential tier. Reported rather than logged as values:
+        // a drill that fails on authentication needs the store name, never the value.
+        this.credentialSources     = null;
+        this.configSecretsRedacted = null;
+        this.liveIndexerUnavailable = null;
 
         // Why the node could not be built, when it could not be. Non-null means the
         // caller should SKIP: a node that never booted proves nothing either way.
@@ -631,6 +843,17 @@ class OracleBatchReplayNode {
     // A query(sql, args) against the Bitcoin oracle's own database, opened once and
     // pinned to that schema so the row helpers never have to name it.
     async _btcOracleQuery() {
+        // Only a drill that publishes through oracleBatchVenue seeds a signer set
+        // into the oracle, and only such a drill can name the oracle's database. A
+        // node whose Bitcoin view is a REAL federation's indexer (the live-chain
+        // override case) reads a real stake and seeds nothing, so reaching here
+        // with no database means a seed was attempted against an oracle this node
+        // has no write path to; say that rather than dying inside the driver.
+        if (!this._live.btcOracle.db) {
+            throw new Error('oracleBatchReplay[' + this.label + ']: this node\'s Bitcoin capability oracle was ' +
+                'given no database, so a `price` capability seed cannot be applied to it. Only a drill that ' +
+                'publishes its own federation through oracleBatchVenue needs that seed.');
+        }
         if (!this._btcOracleConn) {
             this._btcOracleConn = await connectTo(this._live.btcOracle.db);
             await this._btcOracleConn.query('USE `' + ident(this._live.btcOracle.db.name, 'database name') + '`');
@@ -687,6 +910,16 @@ class OracleBatchReplayNode {
     // See readFeeCoordinates for why the set has to come from a node with a
     // complete price history rather than from either side of the comparison.
     async liveChainFeeCoordinates(opts) {
+        // The ONE reader of `liveIndexer`, which is why the field is optional: a
+        // cross-node comparison (AT2) cannot run without a standing node to take
+        // the fee-bearing coordinate set from, while a single-node observation
+        // (the barrier drill) never asks. Refusing here names which of the two
+        // this node was built for, instead of failing as a null host in the driver.
+        if (!this._live || !this._live.liveIndexer) {
+            throw new Error('oracleBatchReplay[' + this.label + ']: this node was built with a live-chain override ' +
+                'that names no `liveIndexer`, so the standing chain\'s fee-bearing coordinates cannot be read. ' +
+                'A cross-node verdict comparison needs them; a single-node barrier observation does not.');
+        }
         if (!this._liveIndexerConn) this._liveIndexerConn = await connectTo(this._live.liveIndexer);
         return readFeeCoordinates(this._liveIndexerConn, this._live.liveIndexer.name, opts);
     }
@@ -747,7 +980,19 @@ class OracleBatchReplayNode {
     //
     // Endpoints come from the hub the standing stack already serves, exactly as
     // chainRail does, so no credential is written to a file or a command line.
+    //
+    // WHEN A CALLER HAS TO SUPPLY THEM INSTEAD (`opts.liveChain`). The discovery
+    // below is one auth-gated read: `getAllConfig` is a sensitive hub call, and a
+    // host whose standing hub carries no key (a shared CI host's may not) can answer
+    // nothing, so a node could not be built there at all. The override is the same
+    // shape this method returns, so nothing downstream can tell the two apart, and
+    // it is VALIDATED rather than trusted: a half-filled override otherwise
+    // surfaces as an indexer that boots and then indexes nothing, hours later.
+    // A caller sources it from its own process environment, which keeps every
+    // credential out of a file, a command line and this rig's log.
     async _resolveLiveChain() {
+        if (this.liveChain) return this._validateLiveChain(this.liveChain);
+
         let cfg = null;
         try {
             const hub = new XChainHubConnector(XChainHubConnector.parseEndpoints());
@@ -755,7 +1000,11 @@ class OracleBatchReplayNode {
                 this.unavailable = 'stack hub unreachable, cannot discover the ' + this.coin + ' decoder database';
                 return null;
             }
-            cfg = await hub.getAllConfig();
+            // Asked at the CREDENTIAL TIER, so the passwords below can come from the
+            // oracle itself rather than from a copy of it. See readHubConfigTree.
+            const tree = await readHubConfigTree(hub);
+            cfg = tree && tree.configs;
+            this.configSecretsRedacted = !tree || tree.secretsRedacted;
         } catch (e) {
             this.unavailable = 'stack hub config lookup failed: ' + (e && e.message);
             return null;
@@ -766,20 +1015,114 @@ class OracleBatchReplayNode {
         const code = coinCode(this.coin);
         const dec  = svc['xchain-decoder'] || {};
         const ixr  = svc['xchain-indexer'] || {};
+        const nod  = svc['node'] || {};
         if (!dec.name) { this.unavailable = 'stack hub config carries no decoder database for ' + this.coin; return null; }
+
+        // RESOLVED, never read straight off the tree. A redacted tier serves the
+        // sentinel in place of every password here, and handing that to a child is
+        // an indexer that boots, authenticates as nobody and sits at height 0 until
+        // the drill times out. Refusing now, naming the store to fix, is the whole
+        // difference between a diagnosable failure and a manufactured barrier result.
+        const allowEnv = this.useEnvCredentials;
+        const decCred = resolveServiceCredential({
+            oracle: dec, coin: this.coin, network: this.network, allowEnv: allowEnv,
+            passKey: 'DECODER_DB_PASS', userKey: 'DECODER_DB_USER',
+            what: 'decoder database credential'
+        });
+        if (decCred.problem) { this.unavailable = decCred.problem; return null; }
+
+        // The coin node's RPC credential. Same treatment, different store keys: this
+        // one is what the replaying indexer dials the chain with.
+        const nodeCred = resolveServiceCredential({
+            oracle: nod, coin: this.coin, network: this.network, allowEnv: allowEnv,
+            passKey: 'NODE_PASSWORD', userKey: 'NODE_USER',
+            what: 'node RPC credential'
+        });
+        if (nodeCred.problem) { this.unavailable = nodeCred.problem; return null; }
+
+        this.credentialSources = {
+            decoder: decCred.source,
+            node: nodeCred.source
+        };
 
         // The hub stores the CONTAINER-internal database host; a host-side process
         // must use the published one, which is the same substitution chainRail makes.
         const dbHost = process.env.DATABASE_URL || '127.0.0.1';
         const dbPort = parseInt(process.env.DATABASE_PORT, 10) || 13306;
-        const liveIndexer = { host: dbHost, port: dbPort, name: ixr.name, user: ixr.user, pass: ixr.pass };
+
+        // The standing indexer is read ONLY by a cross-node comparison, so an
+        // unresolvable credential drops it to null with a reason rather than
+        // failing the whole node: a drill that never opens it must not be blocked
+        // by a store it does not need.
+        let liveIndexer = null;
+        if (ixr.name) {
+            const ixrCred = resolveServiceCredential({
+                oracle: ixr, coin: this.coin, network: this.network, allowEnv: allowEnv,
+                passKey: 'INDEXER_DB_PASS', userKey: 'INDEXER_DB_USER',
+                what: 'live indexer database credential'
+            });
+            if (ixrCred.problem) this.liveIndexerUnavailable = ixrCred.problem;
+            else {
+                liveIndexer = { host: dbHost, port: dbPort, name: ixr.name, user: ixrCred.user, pass: ixrCred.pass };
+                this.credentialSources.liveIndexer = ixrCred.source;
+            }
+        }
+
         return {
             feeDestination: await this._resolveFeeDestination(code, ixr),
-            decoder: { host: dbHost, port: dbPort, name: dec.name, user: dec.user, pass: dec.pass },
+            decoder: { host: dbHost, port: dbPort, name: dec.name, user: decCred.user, pass: decCred.pass },
             liveIndexer: liveIndexer,
             btcOracle: this._resolveBtcOracle(cfg, dbHost, dbPort),
-            node: svc['node'] || {},
+            node: Object.assign({}, nod, { user: nodeCred.user, pass: nodeCred.pass }),
             tracker: svc['xchain-utxo-tracker'] || {}
+        };
+    }
+
+    /**
+     * Check a caller-supplied live chain against the shape `_resolveLiveChain`
+     * discovers, and normalize it to exactly that shape.
+     *
+     * FAIL HERE OR FAIL IN SIX HOURS. Every field below is read once, deep inside
+     * a child process's environment: a missing decoder password is an indexer that
+     * boots, connects to nothing and sits at height 0, and a missing btcOracle key
+     * is a hub that refuses every signer-set read. Both read as "the barrier never
+     * opened" in a drill's result, which is the one conclusion that must never be
+     * manufactured by a typo in a launcher. So the shape is asserted before a
+     * process is spawned, and the message names the field rather than the shape.
+     *
+     * `feeDestination` may be null (a chain whose fee destination is the pinned
+     * default) but the KEY has to be present, because an omitted one is far more
+     * likely a launcher that forgot it, and a node replaying with the wrong fee
+     * destination rejects every fee the chain accepted (see _resolveFeeDestination).
+     * `liveIndexer` is genuinely optional: only a cross-node comparison reads it.
+     */
+    _validateLiveChain(live) {
+        const at = (what) => 'oracleBatchReplay[' + this.label + ']: liveChain override is missing ' + what;
+        const need = (obj, where, keys) => {
+            if (!obj || typeof obj !== 'object') throw new Error(at('`' + where + '`'));
+            for (const k of keys) {
+                const v = obj[k];
+                if (v === undefined || v === null || String(v) === '') throw new Error(at('`' + where + '.' + k + '`'));
+            }
+        };
+        if (!live || typeof live !== 'object') throw new Error(at('everything: it is not an object'));
+        need(live.decoder,   'decoder',   ['host', 'port', 'name', 'user', 'pass']);
+        need(live.node,      'node',      ['host', 'port', 'user', 'pass']);
+        need(live.tracker,   'tracker',   ['host', 'port']);
+        need(live.btcOracle, 'btcOracle', ['host', 'port', 'url', 'apiKey']);
+        if (!Object.prototype.hasOwnProperty.call(live, 'feeDestination')) throw new Error(at('`feeDestination`'));
+        if (live.feeDestination !== null && typeof live.feeDestination !== 'string') {
+            throw new Error(at('a usable `feeDestination`: it must be an address string or null, not ' +
+                typeof live.feeDestination));
+        }
+        if (live.liveIndexer) need(live.liveIndexer, 'liveIndexer', ['host', 'port', 'name', 'user', 'pass']);
+        return {
+            feeDestination: live.feeDestination,
+            decoder:     live.decoder,
+            liveIndexer: live.liveIndexer || null,
+            btcOracle:   Object.assign({ db: null }, live.btcOracle),
+            node:        live.node,
+            tracker:     live.tracker
         };
     }
 
@@ -1088,6 +1431,15 @@ class OracleBatchReplayNode {
             const log = this._logs[which];
             log.push(...lines);
             if (log.length > LOG_TAIL_LINES) log.splice(0, log.length - LOG_TAIL_LINES);
+            // The hook sees every line as it arrives, before the ring drops it. A
+            // run measured in hours produces far more than LOG_TAIL_LINES, so a
+            // caller that needs a line class kept whole cannot get it from _tail.
+            // Its failure is its own: a throwing hook must not kill the node.
+            if (this._onLog) {
+                for (const line of lines) {
+                    try { this._onLog(which, line); } catch (_) { /* a log hook cannot break the run */ }
+                }
+            }
         };
         proc.stdout.on('data', keep);
         proc.stderr.on('data', keep);
@@ -1320,5 +1672,13 @@ module.exports = {
     diffSnapshots,
     diffVerdicts,
     connectTo,
-    pickFreePorts
+    pickFreePorts,
+    // The credential layer, exported because it is pure and can be falsified
+    // without a hub, a chain or a database, and because attestMirrorVenue.js
+    // builds its own decoder resolution on exactly this.
+    readHubConfigTree,
+    resolveServiceCredential,
+    resolveCoinConfigSidecar,
+    envDescribesCoin,
+    HUB_CONFIG_REDACTION
 };

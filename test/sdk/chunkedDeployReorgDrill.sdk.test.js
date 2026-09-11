@@ -138,6 +138,7 @@ const SRC = [
     'var PAD = "' + PAD + '";',
     'var RUN = "' + RUN + '";',
     'module.exports = {',
+    "  meta: { name: 'Chunked Counter Reorg', description: 'Per-run padded counter whose chunked DEPLOY group is reorged.', version: '1.0.0' },",
     '  initialize: function (xchain) {',
     '    var start = xchain.getInputParam(0);',
     '    xchain.state.set("count", String(parseInt(start) || 0));',

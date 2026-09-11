@@ -60,6 +60,7 @@ describe('Phase B: multi-hub PBFT for LLM attestation (redundancy=3)', function 
     // the PBFT byte-equality consensus over the responses converges.
     const CONTRACT_CODE = `
 module.exports = {
+    meta: { name: 'Multi Hub LLM Asker', description: 'Requests an LLM attestation answered by several hubs.', version: '1.0.0' },
     askLlm: function(xchain) {
         var envelope = xchain.getInputParam(0);
         var requestId = xchain.attestation.request(

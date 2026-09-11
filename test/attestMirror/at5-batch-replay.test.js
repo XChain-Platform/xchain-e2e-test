@@ -47,6 +47,23 @@
  * The drill pushes it to every hub itself, because on this venue no production BTC
  * indexer is pointed at these hubs to do it.
  *
+ * WHY THIS DRILL ASKS `llm` AND NOT `http_get`, which is a property of the chain
+ * rather than a preference about providers. The BTC regtest chain re-genesised on
+ * 2026-09-08 came back seating ONE attestation validator, and it is the standing
+ * xchain-node hub's own identity at 10000 stake. Its signing seed lives only in
+ * that hub's container, so no drill can adopt it; and a venue hub carrying the
+ * same key beside the live one would equivocate and get the real validator
+ * slashed, so no drill may adopt it even if it could. Every draw containing it
+ * stalls to timeout, and at redundancy 3 on a small set that is a guarantee
+ * rather than a risk. The provider stake floor is the only lever that removes it
+ * from a draw without touching it at all: `_computeResponsibleSet` filters on
+ * `_meetsProviderFloor` BEFORE the hash ranking, and `llm` declares
+ * min_stake_xchain 25000 against `http_get`'s 10000, so an llm request cannot
+ * draw that key while an http_get request cannot avoid it. THAT IS WHY THIS IS
+ * NOT A FALLBACK AND MUST NOT BECOME ONE: on a box that cannot serve llm this
+ * drill skips loudly rather than asking http_get, because an http_get drive here
+ * would not measure the batch, it would measure a round that cannot finalize.
+ *
  * THE ELECTION IS WHY THIS DRILL IS PATIENT. Publication is elected by
  * `sha256(batch_key + pubkey)` rank against the window's age, so on a five-hub
  * federation the rank-0 hub publishes the first window, and any other hub only
@@ -61,19 +78,20 @@ const assert = require('assert')
 const dotenv = require('dotenv')
 dotenv.config()
 
-const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
+const fs = require('fs')
+
+const { AttestMirrorVenue, assertLlmAvailable, llmProbes, hubCredentialEnv } = require('../helpers/attestMirrorVenue')
 const {
-    provisionDrillIdentities, waitForVenueIndexersAtTip, startAttestTestServer, deployRequestContract, queryVenueDb, withWedgeClear,
+    provisionDrillIdentities, waitForVenueIndexersAtTip, deployRequestContract, queryVenueDb, withWedgeClear,
     mineWhile,
 } = require("./mirrorDrillFixture")
 const {
-    untilOrClearDogeStall, waitForMirrorRowEverywhere, waitForAppliedEverywhere,
+    untilOrClearDogeStall, waitForMirrorRowEverywhere,
     venueTipProbe, mineDogeBlocks, findEmittedAttestRequest,
     clearBeforeBroadcast,
     allHubTails,
     attestRequestWatermark,
     settleOrReport,
-    widenArithmetic,
     jsonSafe,
 } = require('./mirrorDrillWaits')
 const vmHelper     = require('../helpers/vmHelper')
@@ -115,23 +133,26 @@ const PUBLISHER_FUND_OUTPUTS = 40
 
 // THE PROVIDER'S CEILING, and it is a ceiling rather than a preference: the
 // registry admits a request only while `deadline - block <= deadline_window_blocks`
-// (attestation/providerRegistry.js), which is 100 for http_get, and the VM gateway
-// rejects an over-limit value at CALL time, so the EXECUTE that emits the request
-// comes back `failed` rather than the request landing and expiring. Pass 25 proved
-// that the expensive way at 150: `EXECUTE : contract=1791 : method=ask : failed`.
+// (attestation/providerRegistry.js), and the VM gateway rejects an over-limit value
+// at CALL time, so the EXECUTE that emits the request comes back `failed` rather
+// than the request landing and expiring. Pass 25 proved that the expensive way at
+// 150 against http_get's 100: `EXECUTE : contract=1791 : method=ask : failed`.
 //
-// Sixty was too tight and cost three passes before that. The cost is not the
-// widening ladder, which needs 65 blocks here; it is that a row becomes applicable
-// on PROTOCOL time while the deadline is spent in BLOCKS, and off mainnet protocol
-// time is median-time-past. So the applied stage has to mine slowly enough for a
-// median over eleven blocks to climb past a signed stamp that sits a forward margin
-// in the future, and every transaction this drill sends mines a block of its own
-// meanwhile. Measured on pass 24: the stamp came due 269 seconds before the chain
-// reached the deadline and the rows were still unbound, because every block in the
-// median window had been mined seconds apart. So this sits AT the ceiling, which is
-// the most wall-clock room the protocol allows a drill to buy.
-const DEADLINE_BLOCKS = 100
+// `llm` DECLARES 20, not 100, so switching provider moved this ceiling by a factor
+// of five and that is the single largest consequence of the switch. It is also why
+// this drill no longer waits for the response to be APPLIED: see the first case.
+const DEADLINE_BLOCKS = 20
 const BURIAL_BLOCKS   = 6
+
+// The request every round here answers.
+//
+// DETERMINISTIC ARITHMETIC, byte for byte, because that is what the round
+// converges on: every responsible hub asks its own model and `AttestationConsensus`
+// needs 2f+1 IDENTICAL proposals, so a prompt with any latitude in its answer ends
+// `no consensus (proposals diverged)` and the mirror skips a no-quorum round by
+// design. This is AT1's llm payload verbatim, which is the one that has been
+// driven green on this venue.
+const LLM_PAYLOAD = JSON.stringify({ prompt: 'What is 2+2? Reply with only the number.' })
 
 // The DOGE encoder this venue publishes through, taken from the rail's own port map
 // so the drill and the rail cannot disagree about where that service lives.
@@ -142,30 +163,46 @@ const DOGE_ENCODER_PORT = chainRail.DEFAULT_PORTS.DOGE.encoder
 const BATCH_HEAD_VERSION         = 5
 const BATCH_CONTINUATION_VERSION = 6
 
-// The bodies are deliberately incompressible so that two responses exceed one
-// 8189-byte wire and the batch must chunk, which is the only way a v6 appears at
-// all. Compressible filler would ride in a single head and the continuation half of
-// this clause would silently never be exercised. Entropy bytes per body; carried as
-// base64 (6 bits per character, so deflate recovers little), which puts two bodies
-// at roughly 12 KB on the wire against the 8189-byte ceiling.
-const INCOMPRESSIBLE_BYTES = 6000
+/**
+ * Can THIS box serve the llm provider, asked with the venue's own predicate?
+ *
+ * Copied in shape from AT1 for the reason AT1 gives: the two halves the provider
+ * needs live on different boxes, so declaring `needsLlm` unconditionally refuses
+ * the whole drill on either of them. Probed, the venue still refuses if the probe
+ * and reality ever disagree, because `start()` re-checks with this same predicate
+ * rather than trusting the flag.
+ *
+ * THE SKIP IS LOUD AND NAMES THE MISSING HALF, and it never degrades to http_get:
+ * on this chain an http_get round draws a validator nothing here can sign for, so
+ * a "fallback" would report a failure of the batch rail that is really a failure
+ * of the draw. See the header.
+ */
+// The credential this drill forwards to its hub children: the OAuth token when the
+// harness environment carries one, nothing otherwise. One function, called by the
+// pre-check and by the venue construction, so both see the identical object.
+function forwardedHubCredentialEnv () {
+    return process.env.HUB_CLAUDE_CODE_OAUTH_TOKEN
+        ? { HUB_CLAUDE_CODE_OAUTH_TOKEN: process.env.HUB_CLAUDE_CODE_OAUTH_TOKEN } : {}
+}
 
-/** SHA-256 chain seeded on `seed`, base64, INCOMPRESSIBLE_BYTES of entropy. */
-function deterministicFiller (seed) {
-    const crypto = require('crypto')
-    const chunks = []
-    let h = crypto.createHash('sha256').update('at5:' + seed).digest()
-    let n = 0
-    while (n < INCOMPRESSIBLE_BYTES) {
-        chunks.push(h)
-        n += h.length
-        h = crypto.createHash('sha256').update(h).digest()
+function llmRunnableHere () {
+    const dir = process.env.HUB_CLAUDE_CONFIG_DIR || null
+    try {
+        // The credential clause judges the env the hubs will GET: the object forwarded below.
+        assertLlmAvailable({
+            claudeConfigDir: dir,
+            pathEnv: process.env.PATH,
+            hubEnv: hubCredentialEnv(dir, forwardedHubCredentialEnv())
+        }, llmProbes())
+        return { ok: true, why: null }
+    } catch (e) {
+        return { ok: false, why: (e && e.message) || String(e) }
     }
-    return Buffer.concat(chunks).subarray(0, INCOMPRESSIBLE_BYTES).toString('base64')
 }
 
 const CONTRACT_CODE = `
 module.exports = {
+    meta: { name: 'Mirror Replay Asker', description: 'Requests an attestation used to replay a mirrored response batch.', version: '1.0.0' },
     ask: function(xchain) {
         var requestId = xchain.attestation.request(
             xchain.getInputParam(0),
@@ -325,11 +362,10 @@ describe('AT5: the responses of a window land on chain as one batch', function (
     let venue      = null
     let dogeVenue  = null   // the attached DOGE reader, see the before-hook
     let up         = false
-    let testServer = null
-    let testUrl    = null
     let contract   = null
     let publisher  = null
     let dogeRail   = null
+    let llm        = { ok: false, why: 'not probed' }
     // The live BTC tip feeder (see the before-hook), and its re-entrancy latch so a
     // slow push never stacks a second one behind it.
     let tipFeeder   = null
@@ -340,6 +376,13 @@ describe('AT5: the responses of a window land on chain as one batch', function (
 
     before(async function () {
         btcNode = nodeConnector
+        llm = llmRunnableHere()
+        if (!llm.ok) {
+            console.log('AT5: the response-carrying window case will SKIP on this box.\n' + llm.why +
+                '\nIt does NOT fall back to http_get: on this chain the only key an http_get draw can ' +
+                'reach beside the venue is the standing hub\'s own, which nothing here may sign for, ' +
+                'so such a round can never finalize and the batch would never have a row to carry.')
+        }
         // The DOGE rail first: the signer's wallet is funded on it, and every wait
         // below confirms batches through it.
         try {
@@ -354,34 +397,30 @@ describe('AT5: the responses of a window land on chain as one batch', function (
 
         publisher = await stageDogeSigner('at5', dogeRail)
 
-        // REAL TLS, not http. The provider refuses a non-https payload before any
-        // network work, so a plain-HTTP server resolves every round provider_error
-        // and no batch would ever have a terminal response to carry.
-        testServer = await startAttestTestServer({
-            path: '/blob',
-            handler: (req, res) => {
-                // Incompressible AND DETERMINISTIC PER URL. Every responsible hub
-                // fetches this URL for itself and the round needs 2f+1 IDENTICAL
-                // bodies; `randomBytes` per request (passes 6 and 7, 2026-09-05) gave
-                // each hub its own body, so every round ended `no consensus (3
-                // proposals diverged)`, `status=no_quorum`, and the mirror skips a
-                // no-quorum round by design. A SHA-256 chain seeded on the URL is
-                // as incompressible as random bytes and the same on every fetch.
-                res.writeHead(200, { 'Content-Type': 'application/json' })
-                res.end(JSON.stringify({ path: String(req.url), filler: deterministicFiller(String(req.url)) }))
-            },
+        // SCOPED TO `llm`, which is what lets this run at all on the re-genesised
+        // chain: the one seated validator this venue does not run sits at 10000 and
+        // misses the llm floor of 25000, so it is filtered out of every draw before
+        // the ranking and `provisionDrillIdentities` passes it over instead of
+        // refusing on it. Declaring http_get here would put it back in the draw.
+        const staked = await provisionDrillIdentities({
+            label: 'at5', count: 5, redundancy: 3, providers: ['llm'],
         })
-        testUrl = testServer.url
 
-        const staked = await provisionDrillIdentities({ label: 'at5', count: 5, redundancy: 3 })
+        // THE HUB CREDENTIAL TRAVELS WITH THE DRILL, not with the venue, and AT1
+        // paid for that lesson: the venue builds each hub child's environment from
+        // scratch (HUB_CLAUDE_CONFIG_DIR only, by policy), while on the venue box
+        // the hub credential is an OAuth token in the harness environment. Every
+        // hub's fetch failed with `llm: Set HUB_CLAUDE_CONFIG_DIR` until the token
+        // reached the children. Forwarded only when present, never written anywhere.
         venue = new AttestMirrorVenue({
             label: 'at5',
             identities: staked.identities,
+            needsLlm: llm.ok,
             forwardS: FORWARD_S,
             batchWindowS: BATCH_WINDOW_S,
-            // BOTH, merged: the signer's WIF and the TLS trust root are needed by
+            // BOTH, merged: the signer's WIF and the model credential are needed by
             // the same hub children, and passing either alone silently drops the other.
-            hubExtraEnv: Object.assign({}, publisher.env, testServer.hubEnv),
+            hubExtraEnv: Object.assign({}, publisher.env, forwardedHubCredentialEnv()),
         })
         up = await venue.start()
         if (!up) {
@@ -501,7 +540,6 @@ describe('AT5: the responses of a window land on chain as one batch', function (
 
     after(async function () {
         if (tipFeeder) { clearInterval(tipFeeder); tipFeeder = null }
-        if (testServer) await testServer.close()
         // The attached venue first: its indexer follows a hub the owner is about to kill.
         if (dogeVenue) await dogeVenue.stop()
         if (venue) await venue.stop()
@@ -581,87 +619,73 @@ describe('AT5: the responses of a window land on chain as one batch', function (
     }
 
     it('lands a window of responses on DOGE as a valid v5 head with its continuations', async function () {
-        // Two large responses in one window: enough compressed bytes to exceed a
-        // single 8189-byte wire, so the batch has to chunk.
+        if (!llm.ok) {
+            // Skipped, not passed, and not silently re-aimed at http_get. AT5's
+            // response-carrying clause is unproven by a run that reports this case
+            // pending, and the reason is printed in the before-hook rather than left
+            // to whoever reads a pending dot.
+            this.skip()
+        }
+        // Two responses in one window, so the head declares more than one row and
+        // the batch carries a real set rather than a single value.
+        //
+        // TWO IDENTICAL PAYLOADS ARE STILL TWO REQUESTS: the request id is
+        // sha256 over (txHash, rootActionIndex, callPath, contractIndex,
+        // emissionIndex) and never over the payload (xchain-vm gateway.js), so two
+        // EXECUTEs of `ask` with the same prompt get different ids. Identical
+        // prompts are in fact the safer choice here, because every responsible hub
+        // must converge byte for byte on each answer.
         const ids = []
-        const emitted = []
         for (const tag of ['b1', 'b2']) {
             const sinceAction = await attestRequestWatermark(contract.contractIndex)
             await clearBeforeBroadcast()
             const exec = await mineWhile(() => vmHelper.sendExecuteV0(
-                contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl + '?' + tag, tag]))
+                contract.owner, contract.contractIndex, 'ask', ['llm', LLM_PAYLOAD, tag]))
             assert.strictEqual(exec.execution.status, 'valid',
-                tag + ': the EXECUTE that emits the request came back ' + exec.execution.status)
+                tag + ': the EXECUTE that emits the request came back ' + exec.execution.status +
+                '. A deadline above the provider\'s own window is rejected by the VM gateway at CALL ' +
+                'time, and llm allows only ' + DEADLINE_BLOCKS + ', so this is the shape an over-long ' +
+                'deadline takes as well as the shape a short responsible set takes.')
             // Correlated on the emitting action, never on the broadcast txid: for a
             // P2SH-encoded EXECUTE that hash is not the one recorded against the row.
             const request = await findEmittedAttestRequest(
                 contract.contractIndex, sinceAction + 1, { label: tag })
             ids.push(request.requestId)
-            emitted.push(request)
         }
 
         await regtestMinerConnector.generateBlocks(BURIAL_BLOCKS)
         await settleOrReport('at5')
-        // ONE mining budget for every wait below, measured against the EARLIEST
-        // request deadline from the chain tip at the moment each wait starts. A
-        // per-wait cap of safeCap (47 blocks at a 60-block deadline) let four waits
-        // mine up to 188 blocks against that deadline: pass 20 mined b2 past its
-        // own deadline_block while its round was still finalizing, the expiry sweep
-        // fired at 8403, and a row that finalized 40 s later could never bind.
-        // The same half-segment headroom safeCap keeps is kept here, below the
-        // deadline rather than below a fixed count.
-        const earliestDeadline = Math.min(...emitted.map((r) => r.deadlineBlock))
-        // THE APPLIED STAGE NEEDS BLOCKS THE MIRROR STAGE MUST NOT SPEND, and the
-        // reason is protocol time rather than arithmetic. A row binds at the first
-        // block whose PROTOCOL time reaches its signed effective_time, and off
-        // mainnet that is median-time-past, which trails the tip by half an
-        // eleven-block window. So a row can be present on every node, verified and
-        // valid, and still unappliable until several more blocks are mined. Pass 21
-        // proved it the expensive way: the mirror stage mined to nine blocks of the
-        // deadline, the applied stage was left nothing to mine, and the applier
-        // logged "considered 1 pending request(s) and 0 mirror row(s)" at every
-        // block until the wait timed out.
-        // Sized against BOTH constraints rather than picked. The mirror stage needs
-        // enough blocks for the widening ladder to climb, which is 98 at a 150-block
-        // deadline (widenArithmetic: span 147, segment 49, two slots). The applied
-        // stage needs enough blocks that a median over eleven of them can climb past
-        // a stamp set a forward margin in the future, and it mines one per poll at a
-        // 2s interval, so 40 blocks buys about 80 seconds of wall clock. 110 for the
-        // ladder and 40 here satisfies both with room, where 12 did not: pass 24's
-        // applied stage spent its whole allowance inside half a minute.
-        const APPLY_RESERVE = 30
-        // The ladder half of that sizing, CHECKED rather than asserted in prose,
-        // because a later edit to either constant would otherwise quietly starve
-        // the widening ladder and the drill would fail somewhere far from here.
-        const ladder = widenArithmetic(DEADLINE_BLOCKS)
-        assert.ok(DEADLINE_BLOCKS - APPLY_RESERVE >= ladder.toFullWiden,
-            'the mirror stage would be left ' + (DEADLINE_BLOCKS - APPLY_RESERVE) +
-            ' block(s) to climb a widening ladder that needs ' + ladder.toFullWiden +
-            '; raise DEADLINE_BLOCKS or lower APPLY_RESERVE')
-        const budgetProbe = venueTipProbe(venue, 0)
-        // Blocks left BELOW the deadline when a stage stops mining. The applied
-        // stage keeps only one, because a row satisfied AT the deadline block still
-        // binds: the expiry sweep's own predicate is `deadline_block < B` (§4.1).
-        const mineOpts = async (reserve) => {
-            const t = await budgetProbe()
-            const tip = Number.isFinite(t.decoder) ? t.decoder : (Number.isFinite(t.height) ? t.height : 0)
-            const budget = earliestDeadline - reserve - tip
-            // maxBlocks 0 reads as UNCAPPED to the wait, so an exhausted budget passes
-            // no mining option at all rather than a zero.
-            return budget > 0 ? { mineWhileWaiting: { perPoll: 1, maxBlocks: budget } } : {}
-        }
-        for (const id of ids) await waitForMirrorRowEverywhere(venue, id, null, await mineOpts(APPLY_RESERVE))
-        // Mined under, as AT1's applied wait is: the applier runs inside the block
-        // loop, so an idle chain never applies a row that is already valid.
-        // Reserve NOTHING here: the applied stage may mine up to and INCLUDING the
-        // deadline block, because a row satisfied at that block still binds (the
-        // expiry sweep's predicate is `deadline_block < B`). Pass 24 lost on this
-        // exact off-by-one - it stopped mining at the block before the deadline
-        // with the rows eligible by time and unbound, because block time is
-        // median-time-past and the blocks it had already mined were all stamped
-        // within seconds of one another.
-        for (const id of ids) await waitForAppliedEverywhere(venue, id, null, await mineOpts(0))
-        console.log('AT5: ' + ids.length + ' responses finalized and applied; waiting for their window to close')
+        // NOTHING IS MINED UNDER THE MIRROR WAIT, and that is AT1's llm lesson
+        // rather than a saving. The blocks would buy the widening ladder room to
+        // climb, which this venue has never needed: the roster is adopted, every
+        // draw is venue-only, and every finalized round on it has closed at widen 0.
+        // What they DO buy is the request's own expiry, and at llm's 20-block
+        // ceiling there is barely a ladder's worth of chain between the burial
+        // blocks above and the deadline, so a wait that mines here spends the
+        // window before the round can finish.
+        for (const id of ids) await waitForMirrorRowEverywhere(venue, id)
+
+        // AND THE DRILL STOPS AT THE MIRROR ROW, DELIBERATELY: it no longer waits
+        // for the response to be APPLIED on the venue indexers, which the http_get
+        // form of this drill did.
+        //
+        // The clause AT5 owns is that a window of responses reaches DOGE as a v5
+        // head and the link comes back onto the mirrored row. Every step of that
+        // reads `attestation_responses`, which the hub writes at FINALIZATION;
+        // application is a BTC-indexer act on the far side of the mirror and is
+        // AT1's subject, driven green there 2026-09-05. So the applied wait proved
+        // nothing here and cost the whole block budget.
+        //
+        // At llm's deadline it could not be paid for in any case, and the
+        // arithmetic is worth keeping because it is the thing that changed with the
+        // provider. A row binds at the first block whose PROTOCOL time reaches its
+        // signed effective_time; off mainnet protocol time is median-time-past, so
+        // six of the last eleven blocks must be stamped past a signature set
+        // FORWARD_S (90 s) in the future. At a 20-block deadline, minus the burial
+        // blocks, there is no room to mine six blocks over ninety seconds of wall
+        // clock before the expiry sweep fires. Pass 24 lost that race with five
+        // times the budget.
+        console.log('AT5: ' + ids.length + ' responses finalized and mirrored; waiting for their window to close')
 
         // The window has to close, be elected, be signed and be broadcast. Several
         // windows of patience, because rank decides who publishes and when.
@@ -726,11 +750,17 @@ describe('AT5: the responses of a window land on chain as one batch', function (
                 ' continuation(s) landed, so the window cannot be reassembled from chain alone')
             console.log('AT5: window landed as a v5 head plus ' + conts.length + ' v6 continuation(s)')
         } else {
-            // Said out loud rather than passed over: the continuation half of this
-            // clause did not get exercised on this run.
+            // Said out loud rather than passed over, and on the llm rail it is the
+            // EXPECTED outcome rather than an unlucky one. The http_get form of this
+            // drill served 6000 bytes of incompressible filler per response so that
+            // two of them exceeded one 8189-byte wire and the batch had to chunk;
+            // an llm answer of "4" fits in a head many times over, and the payload
+            // is not the drill's to inflate because every responsible hub must
+            // converge on it byte for byte. So the v6 half of this clause is not
+            // exercised by an llm window and needs its own item.
             console.log('AT5 NOTE: the window fitted in ONE wire, so no v6 continuation was produced ' +
-                'and the continuation half of this clause was not exercised. Raise INCOMPRESSIBLE_BYTES ' +
-                'or the number of responses per window to force chunking.')
+                'and the continuation half of this clause was NOT exercised. An llm response is too ' +
+                'small to chunk, and forcing it would mean a payload the federation cannot agree on.')
         }
 
         // AND THE LINK COMES BACK. The DOGE side pushes the batch to the hub, the hub

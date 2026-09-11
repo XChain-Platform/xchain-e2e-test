@@ -92,6 +92,7 @@ const DEADLINE_BLOCKS = 30
 
 const CONTRACT_CODE = `
 module.exports = {
+    meta: { name: 'Mirror Deadline Asker', description: 'Requests an attestation left to run past its mirror deadline.', version: '1.0.0' },
     ask: function(xchain) {
         var requestId = xchain.attestation.request(
             xchain.getInputParam(0),

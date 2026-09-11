@@ -124,6 +124,7 @@ const ACTIVATION_DELAY_BLOCKS = 6;
 // prove the relayed callback is INDISTINGUISHABLE from a local one.
 const ORIGIN_CONTRACT = `
 module.exports = {
+    meta: { name: 'Relay Loop Origin', description: 'Requests an attestation across chains for the relay-loop drill.', version: '1.0.0' },
     askAcrossChains: function(xchain) {
         var url = xchain.getInputParam(0);
         var requestId = xchain.attestation.request(

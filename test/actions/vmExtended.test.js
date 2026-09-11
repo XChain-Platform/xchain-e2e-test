@@ -36,6 +36,7 @@ describe('VM Extended: on-chain capabilities', function () {
 
     const COUNTER = `
         module.exports = {
+            meta: { name: 'Extended Counter', description: 'Increments a stored counter and returns its new value.', version: '1.0.0' },
             increment: function() {
                 var c = parseInt(xchain.state.get('count') || '0');
                 xchain.state.set('count', String(c + 1));
@@ -45,17 +46,22 @@ describe('VM Extended: on-chain capabilities', function () {
     `
 
     // Writes state AND emits an action, then reverts; both must be discarded.
+    // The function-export form carries its identity as a property (spec R1),
+    // because CONTRACT_META_REQUIRED reads meta off a function export too.
     const REVERT_ATOMIC = `
-        module.exports = function() {
+        function contract() {
             xchain.state.set('ghost', 'should-not-persist');
             xchain.emit.destroy({ tick: 'XCHAIN', quantity: '1' });
             xchain.revert('intentional revert');
-        };
+        }
+        contract.meta = { name: 'Atomic Reverter', description: 'Writes state and emits an action, then reverts, so both must be discarded.', version: '1.0.0' };
+        module.exports = contract;
     `
 
     // Loop that burns well past the 1,000,000 gas ceiling (fast in wall-clock).
     const GAS_BOMB = `
         module.exports = {
+            meta: { name: 'Gas Bomb', description: 'Burns gas in a tight loop until the meter stops it.', version: '1.0.0' },
             burn: function() {
                 var x = 0;
                 for (var i = 0; i < 5000000; i++) { x = x + i; }
@@ -67,6 +73,7 @@ describe('VM Extended: on-chain capabilities', function () {
     // Mints a brand-new token to the contract's own derived address.
     const MINTER = `
         module.exports = {
+            meta: { name: 'Minter', description: 'Issues a token from a contract method.', version: '1.0.0' },
             mintToken: function() {
                 var tick = xchain.getInputParam(0);
                 xchain.emit.issue({
@@ -81,6 +88,7 @@ describe('VM Extended: on-chain capabilities', function () {
     // Pays out deposited tokens: payout(destination, amount, tick)
     const SENDER = `
         module.exports = {
+            meta: { name: 'Extended Sender', description: 'Emits a SEND to a destination read from the call params.', version: '1.0.0' },
             payout: function() {
                 var dest = xchain.getInputParam(0);
                 var amt  = xchain.getInputParam(1);

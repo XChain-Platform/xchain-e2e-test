@@ -42,7 +42,7 @@ const vmHelper          = require('../helpers/vmHelper')
 const transactionHelper = require('../transactionHelper')
 
 // Deny a SEND of the bound token to give the binding observable teeth pre-reorg.
-const SEND_GATE = `module.exports = { guard: function(){
+const SEND_GATE = `module.exports = { meta: { name: 'Send Gate Reorg', description: 'Controller guard denying SEND, used to observe a binding across a reorg.', version: '1.0.0' }, guard: function(){
     var at = xchain.getInputParam(0);
     if (at === 'SEND') { xchain.revert('send blocked'); }
     return {};

@@ -32,6 +32,7 @@ describe('VM Contract Reorg: EXECUTE state rolls back across an on-chain reorg',
 
     const COUNTER = `
         module.exports = {
+            meta: { name: 'Reorg Counter', description: 'Increments a stored counter so a reorg can roll its state back.', version: '1.0.0' },
             increment: function() {
                 var c = parseInt(xchain.state.get('count') || '0');
                 xchain.state.set('count', String(c + 1));

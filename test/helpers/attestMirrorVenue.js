@@ -93,6 +93,13 @@ const { waitFor }              = require('./consensusWait');
 const { loadHubModule, ValidatorIdentity, pickFreePorts } = require('./multiValidatorHubHelper');
 const xchainPrice = require('./xchainPriceConstants');
 const { computeResponsibleSigners }  = require('./attestationHelper');
+// The credential layer, shared with the AT2 replay rig rather than copied: both
+// resolve the same stores in the same order, and two copies of that order drift.
+const {
+    readHubConfigTree,
+    resolveServiceCredential,
+    HUB_CONFIG_REDACTION
+} = require('./oracleBatchReplay');
 const XChainHubConnector     = require('../../src/XChainHubConnector.js');
 const XChainIndexerConnector = require('../../src/XChainIndexerConnector.js');
 
@@ -210,59 +217,20 @@ const LOG_TAIL_LINES = 1200;
 // plain identifier rather than to escape it.
 const SAFE_IDENT = /^[A-Za-z0-9_]+$/;
 
-// What the hub's config oracle puts where a password would go.
-//
-// `getallconfigs` REDACTS every credential it serves, returning this literal for the
-// node RPC, the decoder database and the indexer database alike. So the oracle is a
-// source of COORDINATES and never of credentials, and a helper that reads `pass` off it
-// is holding the string '[redacted]', which fails authentication and reports itself as
-// ER_ACCESS_DENIED_ERROR: indistinguishable, from the outside, from a rotated password.
-// Recognising the sentinel is what turns that into a message naming the real cause.
-const HUB_CONFIG_REDACTION = '[redacted]';
-
-// Where a per-coin credential actually lives: the xchain-node config sidecar the
-// containers themselves are built from. Tried relative to this checkout the same way
-// the hub source is resolved, because the harness runs both from the monorepo and from
-// an image where the layout differs.
-function resolveCoinConfigSidecar(coin, network, needKey) {
-    const rel = 'xchain-node/config/' + coin + '-' + network + '.local';
-    // The `.local` sidecar first, then the coin config itself: on the regtest stack
-    // the DOGE decoder password sits in `dogecoin-regtest` with no `.local` beside
-    // it (2026-09-05), and a resolver that only knew the sidecar name found nothing.
-    const candidates = [
-        process.env.XCHAIN_NODE_CONFIG_DIR && path.join(process.env.XCHAIN_NODE_CONFIG_DIR, coin + '-' + network + '.local'),
-        process.env.XCHAIN_NODE_CONFIG_DIR && path.join(process.env.XCHAIN_NODE_CONFIG_DIR, coin + '-' + network),
-        path.resolve(__dirname, '../../..', rel),
-        path.resolve(__dirname, '../../../..', rel)
-    ].filter(Boolean);
-    // With `needKey`, the first EXISTING candidate that carries that key wins, and
-    // the first existing one at all is the fallback (so the error can name it). The
-    // regtest stack's `dogecoin-regtest.local` exists and holds only the indexer
-    // credential; stopping at it hid the `dogecoin-regtest` beside it (pass 16).
-    let firstExisting = null;
-    for (const p of candidates) {
-        if (!fs.existsSync(p)) continue;
-        if (!needKey) return p;
-        if (firstExisting === null) firstExisting = p;
-        try {
-            if (require('dotenv').parse(fs.readFileSync(p))[needKey]) return p;
-        } catch (_) { /* unreadable: keep looking */ }
-    }
-    return firstExisting;
-}
-
 /**
  * The decoder database credential, from the first store that actually holds one.
  *
- * THREE STORES DISAGREE ON THIS VALUE and only one of them is ever right, so the order
- * is deliberate rather than a cascade of fallbacks:
+ * A THIN WRAPPER ON PURPOSE. The stores, their order and the redaction sentinel are
+ * defined once in `oracleBatchReplay.js` (`resolveServiceCredential`) and shared,
+ * because this venue and that rig resolve the SAME credential from the SAME stores
+ * and a second copy of the order is a second thing to drift. Kept as its own function
+ * because its call sites, and its unit tests, name the decoder specifically.
  *
- *   1. An explicit `DECODER_DB_PASS` in the environment. An operator running the drill
- *      against a venue whose credential they hold should not have to edit a file.
- *   2. The per-coin config sidecar, which is the documented single source of truth and
- *      the file the containers are built from.
- *   3. The hub's config oracle, which cannot supply one at all (see the sentinel above)
- *      and is kept only so the failure below can say so precisely.
+ * Order, and why: an explicit `DECODER_DB_PASS` in the environment wins (an operator
+ * overriding on purpose); then the hub's config oracle, which serves the LIVE value
+ * once the call is authorized for its credential tier; then the per-coin sidecar,
+ * which holds whatever the decoder used before its last recreate. The redaction
+ * sentinel is refused by name at every step.
  *
  * Returns `{user, pass, source}`, or `{problem}` naming the store to fix. It never logs
  * a value and never puts one on a command line.
@@ -274,37 +242,11 @@ function resolveDecoderCredential(dec, coin, network, allowEnv = true) {
     // ER_TABLEACCESS_DENIED on that coin's decoder database (2026-09-05, AT5).
     // An option rather than a coin comparison, because the rail switch swaps COIN
     // while leaving the credentials alone, so COIN cannot be trusted here.
-    const user = (allowEnv && process.env.DECODER_DB_USER) || dec.user;
-
-    if (allowEnv && process.env.DECODER_DB_PASS) {
-        return { user, pass: process.env.DECODER_DB_PASS, source: 'DECODER_DB_PASS in the environment' };
-    }
-
-    const sidecar = resolveCoinConfigSidecar(coin, network, 'DECODER_DB_PASS');
-    if (sidecar) {
-        let parsed = {};
-        try { parsed = require('dotenv').parse(fs.readFileSync(sidecar)); }
-        catch (_) { /* an unreadable sidecar is treated as absent */ }
-        if (parsed.DECODER_DB_PASS) {
-            return { user, pass: parsed.DECODER_DB_PASS, source: sidecar };
-        }
-    }
-
-    if (dec.pass && dec.pass !== HUB_CONFIG_REDACTION) {
-        return { user, pass: dec.pass, source: "the standing hub's config oracle" };
-    }
-
-    return {
-        problem: 'no usable ' + coin + '/' + network + ' decoder database credential. The standing ' +
-            "hub's config oracle redacts every password it serves (it returned " +
-            JSON.stringify(HUB_CONFIG_REDACTION) + '), so it can only supply coordinates' +
-            (sidecar
-                ? ', and the config sidecar ' + sidecar + ' carries no DECODER_DB_PASS'
-                : ', and no ' + coin + '-' + network + '.local config sidecar was found') +
-            '. Set DECODER_DB_PASS in the harness environment, or reconcile the sidecar with the ' +
-            'credential the running decoder actually uses; the two are known to drift apart ' +
-            'whenever a container is recreated and nothing propagates the new value back.'
-    };
+    return resolveServiceCredential({
+        oracle: dec || {}, coin: coin, network: network, allowEnv: allowEnv,
+        passKey: 'DECODER_DB_PASS', userKey: 'DECODER_DB_USER',
+        what: 'decoder database credential'
+    });
 }
 
 // Prefix for every database this venue creates, and it is NOT cosmetic.
@@ -531,33 +473,59 @@ function resolveWindowKeying() {
     return resolveWindowKeyingFrom(loadHubModule('src/AttestationBatchPublisher.js'));
 }
 
+// The environment keys the hub's credential resolver reads (`xchain-hub/src/lib/
+// hub-credentials.js resolveHubLlmAuth`). Only these are handed to the probe, so a
+// signer WIF or an API key for another vendor riding in the same extra env never
+// travels further than it has to.
+const HUB_LLM_CREDENTIAL_KEYS = [
+    'HUB_CLAUDE_CONFIG_DIR', 'HUB_CLAUDE_CODE_OAUTH_TOKEN', 'HUB_CLAUDE_DEFAULT_CONFIG_DIR',
+    'CLAUDE_CONFIG_DIR', 'CLAUDE_CODE_OAUTH_TOKEN', 'HUB_ANTHROPIC_API_KEY', 'ANTHROPIC_API_KEY'
+];
+
 /**
- * Refuse an llm drill on a box that cannot serve one, and SAY WHICH HALF is missing.
+ * The credential-bearing part of a hub child's environment, built from the same two inputs
+ * `buildHubEnv` merges so the llm precondition and the children agree by construction.
  *
- * The llm provider needs two independent things and they live in different places, so a
- * box can have exactly one of them and look broken in the other's direction:
+ * @param {string|null} claudeConfigDir  what the venue will set as HUB_CLAUDE_CONFIG_DIR
+ * @param {object|null} extraEnv         the drill's `hubExtraEnv`, or the subset it will forward
+ * @returns {object} a fresh env object; never logged, never written
+ */
+function hubCredentialEnv(claudeConfigDir, extraEnv) {
+    const env = {};
+    if (claudeConfigDir) env.HUB_CLAUDE_CONFIG_DIR = String(claudeConfigDir);
+    for (const k of HUB_LLM_CREDENTIAL_KEYS) {
+        if (extraEnv && extraEnv[k] != null && String(extraEnv[k]).trim() !== '') env[k] = String(extraEnv[k]);
+    }
+    return env;
+}
+
+/**
+ * The real probes for `assertLlmAvailable`, one set for every drill's pre-check and the
+ * venue's start-time check. The credential probe IS the hub's resolver: restating what
+ * counts as a credential here would be a second copy that drifts.
+ */
+function llmProbes() {
+    return {
+        dirExists: (p) => { try { return fs.statSync(p).isDirectory(); } catch (_) { return false; } },
+        isExecutable: (p) => { try { fs.accessSync(p, fs.constants.X_OK); return true; } catch (_) { return false; } },
+        resolveCredential: (env) => loadHubModule('src/lib/hub-credentials.js').resolveHubLlmAuth({ env: env })
+    };
+}
+
+/**
+ * Refuse an llm drill on a box that cannot serve one, naming which of the three things the
+ * provider needs is missing: the credential directory (`HUB_CLAUDE_CONFIG_DIR`), a credential
+ * the hub's own resolver accepts from the env the children receive (a directory that exists
+ * is not one), and the `claude` binary on the PATH the children inherit, not an interactive one.
+ * Pure, every probe injected; `llmProbes()` is the real set.
  *
- *   - a credential directory, which the hub reads through `HUB_CLAUDE_CONFIG_DIR`;
- *   - the `claude` binary, on the PATH THE HUBS WILL ACTUALLY RECEIVE.
- *
- * The PATH clause is the subtle half. A hub child inherits the harness's
- * `process.env.PATH`, and for a non-interactive shell that is not the PATH a human sees,
- * so a binary that runs fine when typed by hand can be absent from every hub in the
- * federation. Probing an interactive PATH would pass here and fail in the children.
- *
- * NAMING THE MISSING HALF is the point of this function rather than a nicety. A bare
- * "llm unavailable" sends the reader hunting for credentials when the answer is a PATH,
- * which is the wrong direction and has already cost this train time.
- *
- * PURE, with both probes injected, so a refusal can be driven for a box this run is not
- * on and neither branch depends on the machine the suite happens to execute on.
- *
- * @param {object} spec   `{claudeConfigDir, pathEnv}` exactly as the hubs will receive them
- * @param {object} probes `{dirExists(path), isExecutable(path)}`
+ * @param {object} spec   `{claudeConfigDir, pathEnv, hubEnv}` as the hubs will receive them
+ * @param {object} probes `{dirExists(path), isExecutable(path), resolveCredential(env) -> {ok}}`
  */
 function assertLlmAvailable(spec, probes) {
     const dir     = spec && spec.claudeConfigDir;
     const pathEnv = String((spec && spec.pathEnv) || '');
+    const hubEnv  = (spec && spec.hubEnv) || {};
     const missing = [];
 
     if (!dir) {
@@ -571,6 +539,19 @@ function assertLlmAvailable(spec, probes) {
             'correct in a place where it is not');
     }
 
+    // The hub's own verdict over the env its children get. A throwing resolver is a
+    // missing credential, not a pass: the hub would have thrown at fetch time too.
+    let resolved = null;
+    try { resolved = typeof probes.resolveCredential === 'function' ? probes.resolveCredential(hubEnv) : null; }
+    catch (_) { resolved = null; }
+    if (!resolved || resolved.ok !== true) {
+        missing.push('no credential the hub can resolve from the environment its children receive ' +
+            '(keys present: ' + (Object.keys(hubEnv).join(', ') || '<none>') + '). A directory ' +
+            'that exists is not a credential: HUB_CLAUDE_CONFIG_DIR must hold a `.credentials.json` ' +
+            'that carries a token, or HUB_CLAUDE_CODE_OAUTH_TOKEN must ride in the hub env (on ' +
+            'the venue box: source the hub token env file before the drill)');
+    }
+
     // Every PATH entry, in order, exactly as a child would resolve it.
     const entries = pathEnv.split(':').filter((p) => p.length > 0);
     if (!entries.some((p) => probes.isExecutable(p.replace(/\/+$/, '') + '/claude'))) {
@@ -581,9 +562,9 @@ function assertLlmAvailable(spec, probes) {
 
     if (missing.length === 0) return;
     throw new Error('attestMirrorVenue: refusing to boot an llm drill. ' + missing.length +
-        ' of the 2 halves the llm provider needs ' + (missing.length === 1 ? 'is' : 'are') +
+        ' of the 3 things the llm provider needs ' + (missing.length === 1 ? 'is' : 'are') +
         ' missing here:\n  - ' + missing.join('\n  - ') +
-        '\nRun this drill on a box that has BOTH, or extend the PATH the harness passes to its ' +
+        '\nRun this drill on a box that has ALL THREE, or extend the PATH the harness passes to its ' +
         'children. Do not copy credentials to make it work somewhere else.');
 }
 
@@ -1475,6 +1456,12 @@ class AttestMirrorVenue {
         // (see resolveDecoderCredential). Default true, because the common venue is
         // the coin the harness .env describes; a venue for another coin passes false.
         this.useEnvDecoderCredential = opts.useEnvDecoderCredential !== false;
+        // Which store the decoder credential came from, and whether the oracle
+        // answered at its credential tier or served the redaction sentinel. Both
+        // are store NAMES, never values: a venue that fails to authenticate needs
+        // to know which store to reconcile, and nothing more.
+        this.decoderCredentialSource = null;
+        this.configSecretsRedacted   = null;
         if (this.attachHubs) this.hubCount = this.attachHubs.length;
         this.network      = opts.network || 'regtest';
         this.basePort     = opts.basePort || 41000;
@@ -1554,13 +1541,15 @@ class AttestMirrorVenue {
         // Same posture, for the other thing a drill can declare. The PATH probed is the
         // one the CHILDREN will inherit, not an interactive one, because that is the only
         // PATH that decides whether a hub can reach the provider.
+        // Judged over the env the children will actually get, the merge buildHubEnv performs.
         if (this.needsLlm) {
             assertLlmAvailable(
-                { claudeConfigDir: this.claudeConfigDir, pathEnv: process.env.PATH },
                 {
-                    dirExists: (p) => { try { return fs.statSync(p).isDirectory(); } catch (_) { return false; } },
-                    isExecutable: (p) => { try { fs.accessSync(p, fs.constants.X_OK); return true; } catch (_) { return false; } }
-                });
+                    claudeConfigDir: this.claudeConfigDir,
+                    pathEnv: process.env.PATH,
+                    hubEnv: hubCredentialEnv(this.claudeConfigDir, this.hubExtraEnv)
+                },
+                llmProbes());
         }
 
         this._live = await this._resolveStandingStack();
@@ -2197,7 +2186,13 @@ class AttestMirrorVenue {
                 this.unavailable = 'stack hub unreachable, cannot discover the ' + this.coin + ' decoder database';
                 return null;
             }
-            cfg = await hub.getAllConfig();
+            // Asked at the CREDENTIAL TIER: `getallconfigs` serves the real passwords
+            // only when the call sets include_secrets and is authorized for it, and
+            // that is what lets the decoder credential below come from the oracle
+            // itself rather than from a sidecar copy that drifts. See readHubConfigTree.
+            const tree = await readHubConfigTree(hub);
+            cfg = tree && tree.configs;
+            this.configSecretsRedacted = !tree || tree.secretsRedacted;
         } catch (e) {
             this.unavailable = 'stack hub config lookup failed: ' + (e && e.message);
             return null;
@@ -2220,9 +2215,10 @@ class AttestMirrorVenue {
             return null;
         }
 
-        // Resolved rather than read straight off the oracle, which serves a redaction
-        // sentinel in place of every password. Refusing here, with the store named, beats
-        // spawning seven children that each die on ER_ACCESS_DENIED four minutes later.
+        // Resolved rather than read straight off the tree: the oracle serves a redaction
+        // sentinel in place of every password whenever the call was not authorized for its
+        // credential tier. Refusing here, with the store named, beats spawning seven
+        // children that each die on ER_ACCESS_DENIED four minutes later.
         const cred = resolveDecoderCredential(dec, this.coin, this.network, this.useEnvDecoderCredential);
         if (cred.problem) { this.unavailable = cred.problem; return null; }
         this.decoderCredentialSource = cred.source;
@@ -3116,6 +3112,9 @@ module.exports = {
     assertTimingInvariants,
     resolveWindowKeying,
     assertLlmAvailable,
+    llmProbes,
+    hubCredentialEnv,
+    HUB_LLM_CREDENTIAL_KEYS,
     resolveWindowKeyingFrom,
     resolveDecoderCredential,
     HUB_CONFIG_REDACTION,

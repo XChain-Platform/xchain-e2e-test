@@ -45,6 +45,7 @@ describe('VM Contract Custody: emitted entities belong to the contract, not the 
     // edit). Both emissions carry the contract as SOURCE, so the contract (not the EXECUTE
     // caller) must become and remain the token OWNER.
     const ISSUER = `module.exports = {
+        meta: { name: 'Custody Issuer', description: 'Issues a token owned by the contract to exercise contract custody.', version: '1.0.0' },
         create: function(){
             xchain.emit.issue({ tick: xchain.getInputParam(0), maxSupply: '1000', maxMint: '1000',
                 decimals: '0', description: 'v1-contract-owned', mintSupply: '500' });
@@ -56,7 +57,7 @@ describe('VM Contract Custody: emitted entities belong to the contract, not the 
 
     // Native-coin dispenser with an escrow AND a caller-supplied EXPIRATION (input param 2), so
     // the test can make it expire and assert the remaining escrow refunds to the CONTRACT.
-    const EXPIRING_DISPENSER = `module.exports = { mkexpdisp: function(){
+    const EXPIRING_DISPENSER = `module.exports = { meta: { name: 'Custody Dispenser', description: 'Emits an expiring dispenser held in contract custody.', version: '1.0.0' }, mkexpdisp: function(){
         xchain.emit.dispenser({ giveCoin: '${CHAIN}', giveTick: xchain.getInputParam(0), giveAmount: '10',
             giveEscrow: '100', getCoin: '${CHAIN}', getTick: '', getAmount: '1',
             getAddress: xchain.getInputParam(1), expiration: xchain.getInputParam(2) });
@@ -65,7 +66,7 @@ describe('VM Contract Custody: emitted entities belong to the contract, not the 
     // Self-addressed token order: GIVE 40 `tick`, GET 5 XCHAIN, GET_ADDRESS defaults to the
     // contract itself. Escrows 40 out of the contract. Used to prove the EXECUTE caller cannot
     // cancel the contract's order (the order's SOURCE is the contract, not the caller).
-    const SELF_ORDERER = `module.exports = { mkselforder: function(){
+    const SELF_ORDERER = `module.exports = { meta: { name: 'Custody Self Orderer', description: 'Emits an order the contract itself is the counterparty to.', version: '1.0.0' }, mkselforder: function(){
         xchain.emit.order({ giveCoin: '${CHAIN}', giveTick: xchain.getInputParam(0), giveAmount: '40',
             getCoin: '${CHAIN}', getTick: 'XCHAIN', getAmount: '5' });
     } };`

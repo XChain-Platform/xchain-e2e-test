@@ -39,6 +39,7 @@ const { makeSdk, submit, fundedGasAddress, mine, submitOpts } = require('./sdkHe
 // emit.crossExecute pre-pay (500+2000+30000+20000 = 52500); use 100000.
 const CONTRACT_A = `
     module.exports = {
+        meta: { name: 'XCall Hop Origin', description: 'Sends a cross-chain call and handles the returning hop.', version: '1.0.0' },
         crossCallable: ['onPong'],
         callOut: function(xchain) {
             var id = xchain.emit.crossExecute({

@@ -260,6 +260,49 @@ describe('getConnection() gives up loudly on an unreachable pool', function () {
     })
 })
 
+describe('adaptive-wait tunable env parsing', function () {
+    // `parseInt(env) || default` swallows an explicit "0" because 0 is falsy,
+    // silently reinstating the default and undoing a caller's request to
+    // disable the wait floor (this is what fixed for WAIT_LAG_BLOCKS
+    // alone). These six siblings had the same bug; each case below sets the
+    // env var to "0" and asserts the property is really 0, not the default.
+    const cases = [
+        ['E2E_WAIT_MAX_EXTENSIONS',     'WAIT_MAX_EXTENSIONS'],
+        ['E2E_WAIT_LAG_PROBE_MS',       'WAIT_LAG_PROBE_MS'],
+        ['E2E_WAIT_MIN_FOR_EXTENSION',  'WAIT_MIN_FOR_EXTENSION'],
+        ['E2E_WAIT_PROBE_INTERVAL_MS',  'WAIT_PROBE_INTERVAL_MS'],
+        ['E2E_WAIT_PROBE_MIN_MS',       'WAIT_PROBE_MIN_MS'],
+        ['E2E_WAIT_WRITE_IDLE_MS',      'WAIT_WRITE_IDLE_MS']
+    ]
+
+    for (const [envVar, prop] of cases) {
+        it(`honours an explicit 0 for ${envVar} instead of falling back to the default`, function () {
+            const before = process.env[envVar]
+            process.env[envVar] = '0'
+            try {
+                const fresh = new Database('h', 3306, 'd', 'u', 'p')
+                assert.strictEqual(fresh[prop], 0)
+            } finally {
+                if (before === undefined) delete process.env[envVar]
+                else process.env[envVar] = before
+            }
+        })
+
+        it(`still falls back to the default for ${envVar} when unset`, function () {
+            const before = process.env[envVar]
+            delete process.env[envVar]
+            try {
+                const fresh = new Database('h', 3306, 'd', 'u', 'p')
+                assert.ok(Number.isInteger(fresh[prop]) && fresh[prop] > 0,
+                    `${prop} should retain a positive default when ${envVar} is unset`)
+            } finally {
+                if (before === undefined) delete process.env[envVar]
+                else process.env[envVar] = before
+            }
+        })
+    }
+})
+
 describe('ping() on an unreachable pool', function () {
     it('surfaces the unreachable-database error rather than reporting a plain false', async function () {
         // ping() is the suite's first contact with the venue (initialCheck's
@@ -479,6 +522,15 @@ describe('checkBroadcast()', function () {
         const result = await db.checkBroadcast({ txHash: 'hash1' })
         assert.strictEqual(result, null)
     })
+
+    it('memo="" produces IS NULL clause with no extra placeholder', async function () {
+        await db.checkBroadcast({ memo: '' })
+        const sql    = mockConnection.query.firstCall.args[0]
+        const params = mockConnection.query.firstCall.args[1]
+        assert.ok(sql.includes('im.memo IS NULL'))
+        assert.strictEqual(countPlaceholders(sql), 0)
+        assert.strictEqual(params.length, 0)
+    })
 })
 
 describe('checkAirdrop()', function () {
@@ -508,6 +560,15 @@ describe('checkAirdrop()', function () {
         mockConnection.query.resolves([])
         const result = await db.checkAirdrop({ source: 'addr1' })
         assert.strictEqual(result, null)
+    })
+
+    it('memo="" produces IS NULL clause with no extra placeholder', async function () {
+        await db.checkAirdrop({ memo: '' })
+        const sql    = mockConnection.query.firstCall.args[0]
+        const params = mockConnection.query.firstCall.args[1]
+        assert.ok(sql.includes('im.memo IS NULL'))
+        assert.strictEqual(countPlaceholders(sql), 0)
+        assert.strictEqual(params.length, 0)
     })
 })
 
@@ -657,6 +718,15 @@ describe('checkDestroy()', function () {
         mockConnection.query.resolves([])
         const result = await db.checkDestroy({ source: 'addr1' })
         assert.strictEqual(result, null)
+    })
+
+    it('memo="" produces IS NULL clause with no extra placeholder', async function () {
+        await db.checkDestroy({ memo: '' })
+        const sql    = mockConnection.query.firstCall.args[0]
+        const params = mockConnection.query.firstCall.args[1]
+        assert.ok(sql.includes('im.memo IS NULL'))
+        assert.strictEqual(countPlaceholders(sql), 0)
+        assert.strictEqual(params.length, 0)
     })
 })
 

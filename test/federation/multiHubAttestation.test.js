@@ -107,6 +107,7 @@ describe('Phase B: multi-hub PBFT for ATTEST v0 (request) (redundancy=3)', funct
 
     const CONTRACT_CODE = `
 module.exports = {
+    meta: { name: 'Multi Hub Asker', description: 'Requests a URL attestation answered by several hubs.', version: '1.0.0' },
     askOracle: function(xchain) {
         var url = xchain.getInputParam(0);
         var requestId = xchain.attestation.request(

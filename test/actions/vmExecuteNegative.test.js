@@ -24,7 +24,7 @@ const transactionHelper = require('../transactionHelper')
 describe('VM Execute Negative: deposit/withdraw failure paths', function () {
 
     const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
-    const NOOP = `module.exports = { ping: function(){ return 'ok'; } };`
+    const NOOP = `module.exports = { meta: { name: 'Noop', description: 'Returns a constant, used as the target of negative execute cases.', version: '1.0.0' }, ping: function(){ return 'ok'; } };`
 
     let deployer = null
 

@@ -133,33 +133,33 @@ async function waitAddressController(address, predicate, timeMax = 20000) {
 // guard params (positional, via getInputParam): 0 actionType, 1 from, 2 to,
 // 3 tick, 4 amount, 5 price, 6 proceedsTick. Deny = xchain.revert(). Allow =
 // return (optionally { payoutLegs }).
-const TRADE_GATE = `module.exports = { guard: function(){
+const TRADE_GATE = `module.exports = { meta: { name: 'Trade Gate', description: 'Controller guard that denies order and swap creation.', version: '1.0.0' }, guard: function(){
     var at = xchain.getInputParam(0);
     if (at === 'ORDER_CREATE' || at === 'SWAP_CREATE') { xchain.revert('trade blocked'); }
     return {};
 }};`
 
-const SEND_GATE = `module.exports = { guard: function(){
+const SEND_GATE = `module.exports = { meta: { name: 'Send Gate', description: 'Controller guard that denies SEND transfers.', version: '1.0.0' }, guard: function(){
     var at = xchain.getInputParam(0);
     if (at === 'SEND') { xchain.revert('send blocked'); }
     return {};
 }};`
 
-const RECIP_GATE = `module.exports = { guard: function(){
+const RECIP_GATE = `module.exports = { meta: { name: 'Recipient Gate', description: 'Controller guard that denies every inbound transfer.', version: '1.0.0' }, guard: function(){
     xchain.revert('inbound denied');
 }};`
 
 // Denies EVERY action it gates. Used on the 'all' class to prove one binding
 // gates multiple concrete classes (transfer + trade) via the fallback.
-const ALL_DENY_GATE = `module.exports = { guard: function(){
+const ALL_DENY_GATE = `module.exports = { meta: { name: 'All Deny Gate', description: 'Controller guard that denies every action class it is bound to.', version: '1.0.0' }, guard: function(){
     xchain.revert('all-class denied');
 }};`
 
 // Allows whatever it gates. Used as a class-specific OVERRIDE on top of 'all'.
-const ALLOW_GATE = `module.exports = { guard: function(){ return {}; }};`
+const ALLOW_GATE = `module.exports = { meta: { name: 'Allow Gate', description: 'Controller guard that allows every action class it is bound to.', version: '1.0.0' }, guard: function(){ return {}; }};`
 
 function royaltyGate(creator, market) {
-    return `module.exports = { guard: function(){
+    return `module.exports = { meta: { name: 'Royalty Gate', description: 'Controller guard that attaches creator and market royalty legs to a trade.', version: '1.0.0' }, guard: function(){
         var at = xchain.getInputParam(0);
         if (at === 'ORDER_CREATE' || at === 'SWAP_CREATE') {
             return { payoutLegs: [ { to: '${creator}', bps: 250 }, { to: '${market}', bps: 100 } ] };
@@ -171,7 +171,7 @@ function royaltyGate(creator, market) {
 // Emits a SEND of its OWN controlled token (from the contract's deposited
 // balance) back to the original sender. Exercises the guard-of-guard skip
 // (IS_GUARD_EMISSION) + depth cap. Allows the action.
-const SELF_EMIT_GATE = `module.exports = { guard: function(){
+const SELF_EMIT_GATE = `module.exports = { meta: { name: 'Self Emit Gate', description: 'Controller guard that emits a SEND of its own token back to the sender.', version: '1.0.0' }, guard: function(){
     var from = xchain.getInputParam(1);
     var tick = xchain.getInputParam(3);
     xchain.emit.send({ tick: tick, quantity: '1', destination: from });
@@ -183,6 +183,7 @@ const SELF_EMIT_GATE = `module.exports = { guard: function(){
 // only ISSUE. The emission must be rejected fail-closed (action denied) before
 // the SEND handler ever runs.
 const MANIFEST_FORBIDS_SEND = `module.exports = {
+    meta: { name: 'Issue Only Gate', description: 'Controller guard whose manifest permits ISSUE only while it emits a SEND.', version: '1.0.0' },
     permissions: ['ISSUE'],
     guard: function(){
         var from = xchain.getInputParam(1);
@@ -196,6 +197,7 @@ const MANIFEST_FORBIDS_SEND = `module.exports = {
 // maxTakeBps passed in. Lets one scenario flip allow/deny purely on the manifest.
 function royaltyGateManifest(creator, market, maxTakeBps) {
     return `module.exports = {
+        meta: { name: 'Royalty Gate Capped', description: 'Royalty guard that declares its own maxTakeBps alongside its payout legs.', version: '1.0.0' },
         maxTakeBps: ${maxTakeBps},
         guard: function(){
             var at = xchain.getInputParam(0);

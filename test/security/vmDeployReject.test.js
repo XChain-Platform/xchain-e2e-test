@@ -52,6 +52,11 @@ describe('VM Deploy Reject: malformed/abusive contracts', function () {
 
     it('rejects a contract with a JavaScript syntax error', async function () {
         const atk = await freshDeployer('vmdr-syntax')
+        // The ONE fixture in this file that cannot carry a meta manifest: the
+        // source does not parse, so there is nothing for the manifest read to
+        // read. That is also why it needs none - validateSyntax runs before the
+        // manifest read (deploy.js), so CONTRACT_META_REQUIRED can never be the
+        // verdict here and the assertion below still proves the syntax gate.
         await deployRaw(atk, `module.exports = function(){ return ( ; };`)
         const row = await waitContractAny(atk.address)
         assert(row, 'a rejected contract row should be recorded')
@@ -61,7 +66,12 @@ describe('VM Deploy Reject: malformed/abusive contracts', function () {
 
     it('rejects use of the reserved __gas identifier', async function () {
         const atk = await freshDeployer('vmdr-gas')
-        await deployRaw(atk, `module.exports = function(){ var __gas = 1; return __gas; };`)
+        // Carries a valid meta manifest on purpose: meta is judged AFTER the
+        // syntax gate, so a green assertion here proves the __gas rule fired
+        // rather than CONTRACT_META_REQUIRED standing in for it.
+        await deployRaw(atk, `function contract(){ var __gas = 1; return __gas; } `
+            + `contract.meta = { name: 'Reserved Identifier', description: 'Declares the reserved __gas identifier, which the syntax gate refuses.', version: '1.0.0' }; `
+            + `module.exports = contract;`)
         const row = await waitContractAny(atk.address)
         assert(row, 'a rejected contract row should be recorded')
         assert.notStrictEqual(row.status, 'valid')
@@ -70,7 +80,11 @@ describe('VM Deploy Reject: malformed/abusive contracts', function () {
 
     it('rejects a banned non-deterministic Math member (Math.pow)', async function () {
         const atk = await freshDeployer('vmdr-math')
-        await deployRaw(atk, `module.exports = function(){ return Math.pow(2, 3); };`)
+        // Meta present for the same reason as above: the banned-member verdict
+        // must be what fails this deploy, not a missing manifest.
+        await deployRaw(atk, `function contract(){ return Math.pow(2, 3); } `
+            + `contract.meta = { name: 'Banned Math Member', description: 'Calls a banned non-deterministic Math member, which the syntax gate refuses.', version: '1.0.0' }; `
+            + `module.exports = contract;`)
         const row = await waitContractAny(atk.address)
         assert(row, 'a rejected contract row should be recorded')
         assert.notStrictEqual(row.status, 'valid')

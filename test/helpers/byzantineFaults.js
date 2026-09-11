@@ -62,6 +62,34 @@ function silenceOracleValidator(hub) {
     return () => { oc._handleMessage = orig; };
 }
 
+// Silence a validator on the ARCHIVE PUBLISHER-ATTESTATION round ONLY: it stops
+// answering XANCARCHPUB_SIGN_REQ, so an archive publisher can never collect the
+// oracle_publish quorum that earns the anchor_archive reward, and its v1 head lands
+// with ATTEST_SIG_COUNT 0 (the degraded-but-live shape the archive leg promises).
+//
+// The narrow seam is the point. ANCHOR_ROUND_TIMEOUT_MS, the obvious knob, is SHARED
+// by the bundle attestation round, the archive wrapper co-sign round and this one, and
+// the v0 bundle tail REQUIRES attestCount >= 1 (xchain-indexer anchor.js: it throws
+// where the v1 archive tail accepts 0). Degrading the rounds by the timer therefore
+// lands `invalid: ATTEST_SIG_COUNT` on the bundle and proves the wrong thing. Replacing
+// this one per-instance handler leaves the bundle attestation, the wrapper co-sign
+// quorum and config/oracle/DEX consensus answering normally.
+//
+// Binds on hub.stateAnchorPublisher, which XChainHub.startCrossChain() constructs and
+// starts (the harness toggle is MultiValidatorHub's startCrossChain: true), and on the
+// handler the publisher's own message switch dispatches by name at call time, so
+// replacing it on the instance mutes the response without detaching any listener. The
+// stand-in is async because that switch calls it as `handler(env).catch(...)`; a plain
+// function returning undefined would throw inside the dispatcher instead of staying quiet.
+function silenceArchiveAttestor(hub) {
+    const sap = hub && hub.stateAnchorPublisher;
+    if (!sap || typeof sap._handleArchiveAttestSignReq !== 'function')
+        throw new Error('silenceArchiveAttestor: hub has no started StateAnchorPublisher with an archive-attestation handler; start the harness with startCrossChain: true before injecting');
+    const orig = sap._handleArchiveAttestSignReq;
+    sap._handleArchiveAttestSignReq = async () => {};
+    return () => { sap._handleArchiveAttestSignReq = orig; };
+}
+
 // Build a PRE_PREPARE envelope with a deliberately WRONG digest for its config
 // (a forged proposal). A correct follower must reject it on the digest check and
 // create no pending proposal. `seq` should be above any already-applied seq.
@@ -86,4 +114,4 @@ function forgedPrePrepare(seq, config, blockIndex, signer) {
     };
 }
 
-module.exports = { silenceValidator, silenceDexValidator, silenceOracleValidator, forgedPrePrepare };
+module.exports = { silenceValidator, silenceDexValidator, silenceOracleValidator, silenceArchiveAttestor, forgedPrePrepare };

@@ -23,6 +23,7 @@ const { makeSdk, submit, fundedGasAddress, mine, submitOpts } = require('./sdkHe
 
 const COUNTER_CONTRACT = `
     module.exports = {
+        meta: { name: 'SDK Counter', description: 'Increments a stored counter, deployed through the SDK.', version: '1.0.0' },
         initialize: function() {
             xchain.state.set('count', '0');
         },

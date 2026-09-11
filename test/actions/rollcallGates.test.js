@@ -478,6 +478,7 @@ describe('ROLLCALL acceptance: the rules-aware attestation set (ZC7)', function 
         // chosen: the contract is written after ZC7b has counted the venue.
         const code = `
 module.exports = {
+    meta: { name: 'Rollcall Asker', description: 'Requests an attestation and records a marker for the roll-call gate drill.', version: '1.0.0' },
     ask: function(xchain) {
         xchain.state.set('zc7_marker', xchain.getInputParam(0));
         xchain.attestation.request('http_get', 'https://example.com/zc7/' + xchain.getInputParam(0),

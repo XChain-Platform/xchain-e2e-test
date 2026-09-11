@@ -76,6 +76,7 @@ describe('Attestation framework: round-trip request → response → callback', 
 
     const CONTRACT_CODE = `
 module.exports = {
+    meta: { name: 'Attest Asker', description: 'Requests a URL attestation from the oracle federation.', version: '1.0.0' },
     askOracle: function(xchain) {
         var url = xchain.getInputParam(0);
         var requestId = xchain.attestation.request(

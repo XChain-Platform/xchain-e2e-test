@@ -64,6 +64,7 @@ const federation = require('./xcallFederationPlan');
 // Short-deadline caller: deadlineBlocks 10 is the protocol minimum.
 const CONTRACT_A = `
     module.exports = {
+        meta: { name: 'XCall Expiry Origin', description: 'Sends a cross-chain call that is left to expire unanswered.', version: '1.0.0' },
         crossCallable: [],
         callOut: function(xchain) {
             var id = xchain.emit.crossExecute({

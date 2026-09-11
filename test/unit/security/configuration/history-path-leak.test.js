@@ -292,7 +292,7 @@ describe('Security: no developer-machine paths in git history @regression @tier4
             // that something is being skipped. Skipping silently would be a way
             // to go green by looking away, so each skipped ref must arrive with
             // the rule that claimed it and that rule must be a known one.
-            const known = new Set(['stash', 'original', 'prefetch', 'ci-venue', 'wip-rescue']);
+            const known = new Set(['stash', 'original', 'prefetch', 'ci-venue', 'wip-rescue', 'scrub-backup']);
             for (const e of result.selection.excluded) {
                 assert.ok(known.has(e.rule), `ref ${e.ref} skipped by unknown rule ${e.rule}`);
             }

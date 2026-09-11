@@ -99,6 +99,7 @@ const FEE_XCHAIN = '6'
 
 const CONTRACT_CODE = `
 module.exports = {
+    meta: { name: 'Zero Conf Remine Asker', description: 'Requests an attestation whose zero-conf response is remined into a new block.', version: '1.0.0' },
     ask: function(xchain) {
         var requestId = xchain.attestation.request(
             xchain.getInputParam(0),

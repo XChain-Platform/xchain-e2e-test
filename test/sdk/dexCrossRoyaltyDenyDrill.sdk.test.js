@@ -129,7 +129,7 @@ describe('[sdk] CROSS_CHAIN_ROYALTY create-gate deny drill (mode=' + MODE + ')',
     });
 
     it('DEPLOY the royalty guard, ISSUE the token, BIND its trade class', async function () {
-        const guardSrc = "module.exports={ guard:function(){ return { payoutLegs: [{ to: '" +
+        const guardSrc = "module.exports={ meta: { name: 'Royalty Deny Guard', description: 'Returns a royalty payout leg for the cross-chain royalty deny drill.', version: '1.0.0' }, guard:function(){ return { payoutLegs: [{ to: '" +
             legAddr + "', bps: " + ROYALTY_BPS + " }] }; } };";
         const dep = await submit(sdk,
             { action: 'DEPLOY', params: { code: guardSrc, gasLimit: 300000, constructorParams: [] } },

@@ -50,6 +50,7 @@ const MAX_WINDOW_BLOCKS = 1000000
 const PRICE_BET = `var MAX_ROUND = ${MAX_ROUND};
 var MAX_WINDOW_BLOCKS = ${MAX_WINDOW_BLOCKS};
 module.exports = {
+    meta: { name: 'Price Bet', description: 'Settles a two-sided bet on an oracle price round.', version: '1.0.0' },
     initialize: function (xchain) {
         var maker = xchain.getInputParam(0), coinPair = xchain.getInputParam(1),
             strike = xchain.getInputParam(2), side = xchain.getInputParam(3),

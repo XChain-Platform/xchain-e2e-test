@@ -41,6 +41,7 @@ const CAP   = 25;
 
 const CONTRACT_A = `
     module.exports = {
+        meta: { name: 'XCall Burst', description: 'Sends a burst of cross-chain calls to exercise the per-block cap.', version: '1.0.0' },
         crossCallable: [],
         burst: function(xchain) {
             var target = Number(xchain.getInputParam(0));

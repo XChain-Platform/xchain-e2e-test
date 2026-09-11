@@ -31,6 +31,7 @@ const { makeSdk, submit, fundedGasAddress, mine, uniqueTick, submitOpts } = requ
 // contract state so the test can assert it through getContractState.
 const POLL_READER_CONTRACT = `
     module.exports = {
+        meta: { name: 'Poll Reader', description: 'Reads a poll result into contract state.', version: '1.0.0' },
         initialize: function() {
             xchain.state.set('status', 'none');
             xchain.state.set('winner', 'none');

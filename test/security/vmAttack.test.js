@@ -24,18 +24,23 @@ const transactionHelper = require('../transactionHelper')
 describe('VM Attack: hostile contracts on-chain', function () {
 
     // Classic sandbox-escape attempt via the Function constructor chain.
-    const ESCAPE = `module.exports = function(){
+    // The function-export form carries its identity as a property (spec R1):
+    // CONTRACT_META_REQUIRED reads meta off a function export too, and this
+    // fixture has to DEPLOY valid for its EXECUTE to be the thing under test.
+    const ESCAPE = `function contract(){
         return [].constructor.constructor('return process.env')();
-    };`
+    }
+    contract.meta = { name: 'Escape Attempt', description: 'Tries to reach the host realm through the Function constructor chain.', version: '1.0.0' };
+    module.exports = contract;`
 
     // Burns past the gas ceiling.
-    const LOOP = `module.exports = { run: function(){ var x=0; while(true){ x++; } } };`
+    const LOOP = `module.exports = { meta: { name: 'Infinite Loop', description: 'Spins forever so the gas meter has to stop it.', version: '1.0.0' }, run: function(){ var x=0; while(true){ x++; } } };`
 
     // Blows the call stack.
-    const RECURSE = `module.exports = { run: function(){ function f(n){ return f(n+1); } return f(0); } };`
+    const RECURSE = `module.exports = { meta: { name: 'Deep Recursion', description: 'Recurses with no base case to blow the call stack.', version: '1.0.0' }, run: function(){ function f(n){ return f(n+1); } return f(0); } };`
 
     // Tries to emit more actions than the per-execution cap.
-    const EMIT_BOMB = `module.exports = { run: function(){
+    const EMIT_BOMB = `module.exports = { meta: { name: 'Emission Bomb', description: 'Emits past the per-execution action cap.', version: '1.0.0' }, run: function(){
         for (var i = 0; i < 60; i++) { xchain.emit.send({ tick: 'AAA', quantity: '1', destination: 'x' }); }
     } };`
 
@@ -45,7 +50,7 @@ describe('VM Attack: hostile contracts on-chain', function () {
     // never even reaches the out-of-process executor's host-abort containment (which
     // remains the load-bearing defense for paths F3 can't wrap). Either way the
     // hostile contract is contained: a non-valid execution, no emissions, block advances.
-    const MEMORY_BOMB = `module.exports = { run: function(){ var a = new Array(100000000).fill('x'); return a.length; } };`
+    const MEMORY_BOMB = `module.exports = { meta: { name: 'Allocation Bomb', description: 'Allocates a huge array so allocation metering has to bind it.', version: '1.0.0' }, run: function(){ var a = new Array(100000000).fill('x'); return a.length; } };`
 
     // The SAME bulk allocation, but in the contract's constructor (initialize).
     // Exercises the DEPLOY status path: a failed constructor deletes the contract
@@ -53,7 +58,7 @@ describe('VM Attack: hostile contracts on-chain', function () {
     // intern as a normalized token (F1), NOT the raw VM error string. Under F3 the
     // constructor fill is gas-bounded; the consensus token is the collapsed
     // 'out_of_resource' (with the raw out_of_gas detail kept in error_message).
-    const CONSTRUCTOR_BOMB = `module.exports = { initialize: function(){ var a = new Array(100000000).fill('x'); return a.length; } };`
+    const CONSTRUCTOR_BOMB = `module.exports = { meta: { name: 'Constructor Bomb', description: 'Allocates a huge array from its constructor.', version: '1.0.0' }, initialize: function(){ var a = new Array(100000000).fill('x'); return a.length; } };`
 
     let deployer = null
 
@@ -186,7 +191,10 @@ describe('VM Attack: hostile contracts on-chain', function () {
     it('the indexer is still alive and processing after the attacks', async function () {
         const before = await tip()
         // A normal deploy must still succeed; proves block processing did not halt.
-        const dep = await vmHelper.sendDeployV0(deployer, `module.exports = function(){ return 'ok'; };`, 200000)
+        const dep = await vmHelper.sendDeployV0(deployer,
+            `function contract(){ return 'ok'; } contract.meta = { name: 'Liveness Probe', `
+            + `description: 'Returns ok, deployed to prove the indexer still processes blocks.', `
+            + `version: '1.0.0' }; module.exports = contract;`, 200000)
         assert(dep.contract, 'a normal contract should still deploy after the attacks')
         assert.strictEqual(dep.contract.status, 'valid')
         const after = await tip()
