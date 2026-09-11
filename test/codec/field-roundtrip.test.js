@@ -79,12 +79,29 @@ function discoverActions() {
     return actions;
 }
 
+/**
+ * The alias table has lived in two shapes in the indexer: per-property
+ * assignment (`this.actionAliases['X'] = 'Y'`) and, since the fee-quote
+ * classifier started sharing it, a module-level `const ACTION_ALIASES = {...}`
+ * that the constructor Object.assigns in. Read BOTH shapes: matching only one
+ * makes this suite silently discover an empty table, which turns the alias
+ * assertion into a false red and the round-trip corpora into an un-aliased
+ * parse. The caller asserts the result is non-empty, so a third shape screams
+ * rather than passing vacuously.
+ */
 function discoverAliases() {
     const source = fs.readFileSync(path.join(INDEXER_PATH, 'src/actions.js'), 'utf8');
     const aliases = {};
-    const re = /this\.actionAliases\['([A-Z0-9_]+)'\]\s*=\s*'([A-Z0-9_]+)'/g;
+
+    const assigned = /this\.actionAliases\['([A-Z0-9_]+)'\]\s*=\s*'([A-Z0-9_]+)'/g;
     let m;
-    while ((m = re.exec(source)) !== null) aliases[m[1]] = m[2];
+    while ((m = assigned.exec(source)) !== null) aliases[m[1]] = m[2];
+
+    const literal = /(?:const|let|var)\s+ACTION_ALIASES\s*=\s*\{([\s\S]*?)\}\s*;/.exec(source);
+    if (literal) {
+        const pair = /'([A-Z0-9_]+)'\s*:\s*'([A-Z0-9_]+)'/g;
+        while ((m = pair.exec(literal[1])) !== null) aliases[m[1]] = m[2];
+    }
     return aliases;
 }
 
