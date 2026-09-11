@@ -21,6 +21,16 @@
 
 // Load required libraries
 const axios = require('axios');
+const coins = require('./coins');
+
+// Local { coin -> consensusHash } per network, computed on first use. The vendored
+// bundle cannot change under a running process, so re-hashing it on every config
+// fetch would be pure waste.
+const LOCAL_CONSENSUS_HASHES = {};
+function localConsensusHashes(network){
+    if(!LOCAL_CONSENSUS_HASHES[network]) LOCAL_CONSENSUS_HASHES[network] = coins.consensusHashes(network);
+    return LOCAL_CONSENSUS_HASHES[network];
+}
 
 class XChainHubConnector {
 
@@ -105,10 +115,43 @@ class XChainHubConnector {
     // [service][param], so unwrap the envelope when present.
     _applyConfigResult(result){
         if(result === null) return null;
+        this._checkHubConsensusHash(result && typeof result === 'object' ? result.coin_consensus_hashes : null);
         if(result && typeof result === 'object' && result.configs && typeof result.configs === 'object' && ('seq' in result)){
             return result.configs;
         }
         return result;
+    }
+
+    // Transport-integrity check: compare the consensus-config hashes the hub serves
+    // on getallconfigs against our OWN vendored ones. Hub-served consensus values are
+    // never applied (the suite derives them from the vendored src/coins bundle), so
+    // this only logs; what it buys is that a hub built from a divergent bundle names
+    // itself at the first config fetch instead of surfacing as an unexplained
+    // action-level failure deep in a run. Widened to every coin and network because
+    // the suite drives whatever chain set the venue's hub hands it.
+    _checkHubConsensusHash(hubHashes){
+        if(!hubHashes || typeof hubHashes !== 'object') return;   // older hub: field absent
+        let mismatches = [];
+        for(const network of coins.NETWORKS){
+            let served = hubHashes[network];
+            if(!served || typeof served !== 'object') continue;
+            let local = localConsensusHashes(network);
+            for(const tick of Object.keys(local)){
+                // A coin the hub does not serve is version skew, not drift; only a
+                // hash the hub DOES serve and that differs counts as a mismatch.
+                if(served[tick] && served[tick] !== local[tick])
+                    mismatches.push(tick + '/' + network + ': hub ' + served[tick] + ' vs vendored ' + local[tick]);
+            }
+        }
+        // Callers re-fetch config freely, so log only when the mismatch SET changes:
+        // a standing divergence must not flood a test run's output, and a drift that
+        // widens or clears must still report.
+        let key = mismatches.join('|');
+        if(key === (this._lastConsensusMismatchKey || '')) return;
+        this._lastConsensusMismatchKey = key;
+        if(mismatches.length)
+            console.error('CONSENSUS HASH MISMATCH: the hub serves consensus config differing from this suite\'s vendored coin files (' +
+                mismatches.join('; ') + '). Hub consensus values are never applied (they are pinned locally); upgrade the lagging side.');
     }
 }
 
