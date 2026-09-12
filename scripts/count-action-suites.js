@@ -56,7 +56,7 @@ const FALLBACK_ACTION_NAMES = [
     'DIVIDEND', 'EXECUTE', 'FILE', 'ISSUE', 'LINK', 'LIST', 'MESSAGE', 'MINT',
     'NODEPROOF', 'ORDER', 'PRICE', 'ROLLCALL', 'SEND', 'SLASH', 'SLEEP', 'STAKE',
     'SWAP',
-    'SWEEP', 'UNSTAKE', 'VOTE', 'WITHDRAW'
+    'SWEEP', 'UNSTAKE', 'VOTE', 'WITHDRAW', 'XBRIDGE'
 ]
 
 // Fallback alias table, same contract as FALLBACK_ACTION_NAMES: used only when

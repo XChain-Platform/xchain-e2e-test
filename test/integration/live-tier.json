@@ -162,6 +162,21 @@
             "file": "test/integration/oracleBatchVenue.integration.test.js",
             "run": false,
             "why": "Oracle batch acceptance venue drill. It publishes real PRICE actions to the single-lane DOGE regtest stack (one fixed MariaDB port, one funded publisher wallet), so two runs cannot overlap and wiring it into every push would serialize the whole repo behind a chain drill. Driven deliberately when the oracle-price-batching spec is worked, not per push."
+        },
+        {
+            "file": "test/integration/bridgeTransferE2E.integration.test.js",
+            "run": true,
+            "why": "24 cases in 8s on the venue with Docker (2026-09-12): the cross-repo canonical and settle-pass cases need only the hub and indexer siblings, and the multi-hub PBFT case boots a disposable hub DB and finalizes a 2f+1 bundle."
+        },
+        {
+            "file": "test/integration/bridgePolicyE2E.integration.test.js",
+            "run": true,
+            "why": "22 cases in 10s on the venue with Docker (2026-09-12): policy snapshot canonical, quorum and apply cases against the hub and indexer siblings."
+        },
+        {
+            "file": "test/integration/distributionRailE2E.integration.test.js",
+            "run": true,
+            "why": "9 cases in under a second (2026-09-12): the distribution procedure runs in-process through the real issue, airdrop and invariant code with no chain or hub DB."
         }
     ]
 }
