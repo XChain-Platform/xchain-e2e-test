@@ -26,7 +26,7 @@ describe('ORDER', () => {
             await issueHelper.sendIssueV0(addr, giveTick, 100, 50, 0, "Order give token", 50)
             await issueHelper.sendIssueV0(addr, getTick, 100, 50, 0, "Order get token", 50)
 
-            await gasHelper.mintGas(addr, 100)
+            await gasHelper.ensureGasBalance(addr, 100)
 
             let expirationDate = new Date()
             expirationDate.setMonth(expirationDate.getMonth() + 3)
@@ -53,7 +53,7 @@ describe('ORDER', () => {
 
             await issueHelper.sendIssueV0(addr, giveTick, 100, 50, 0, "Order cancel give token", 50)
             await issueHelper.sendIssueV0(addr, getTick, 100, 50, 0, "Order cancel get token", 50)
-            await gasHelper.mintGas(addr, 100)
+            await gasHelper.ensureGasBalance(addr, 100)
 
             let expirationDate = new Date()
             expirationDate.setMonth(expirationDate.getMonth() + 3)
@@ -98,8 +98,8 @@ describe('ORDER', () => {
             // give addr2 some tokenB so it can offer it
             await sendHelper.sendSendV0(addr1, tokenB, 20, address2, "Fund addr2 with tokenB")
 
-            await gasHelper.mintGas(addr1, 100)
-            await gasHelper.mintGas(addr2, 100)
+            await gasHelper.ensureGasBalance(addr1, 100)
+            await gasHelper.ensureGasBalance(addr2, 100)
 
             let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90 // 90 days
 
@@ -161,8 +161,8 @@ describe('ORDER', () => {
             await issueHelper.sendIssueV0(addr1, tokenA, 1000, 500, 0, "FP token A", 500)
             await issueHelper.sendIssueV0(addr1, tokenB, 1000, 500, 0, "FP token B", 500)
             await sendHelper.sendSendV0(addr1, tokenB, 300, address2, "Fund addr2 tokenB")
-            await gasHelper.mintGas(addr1, 100)
-            await gasHelper.mintGas(addr2, 100)
+            await gasHelper.ensureGasBalance(addr1, 100)
+            await gasHelper.ensureGasBalance(addr2, 100)
 
             let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
 
@@ -218,8 +218,8 @@ describe('ORDER', () => {
             await issueHelper.sendIssueV0(addr1, tokenA, 1000, 500, 0, "PF token A", 500)
             await issueHelper.sendIssueV0(addr1, tokenB, 1000, 500, 0, "PF token B", 500)
             await sendHelper.sendSendV0(addr1, tokenB, 100, address2, "Fund addr2 tokenB")
-            await gasHelper.mintGas(addr1, 100)
-            await gasHelper.mintGas(addr2, 100)
+            await gasHelper.ensureGasBalance(addr1, 100)
+            await gasHelper.ensureGasBalance(addr2, 100)
 
             let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
 
@@ -275,8 +275,8 @@ describe('ORDER', () => {
             await issueHelper.sendIssueV0(addr1, tokenA, 1000, 500, 8, "HP token A", 500)
             await issueHelper.sendIssueV0(addr1, tokenB, 1000, 500, 8, "HP token B", 500)
             await sendHelper.sendSendV0(addr1, tokenB, "1.23456789", address2, "Fund addr2 tokenB")
-            await gasHelper.mintGas(addr1, 100)
-            await gasHelper.mintGas(addr2, 100)
+            await gasHelper.ensureGasBalance(addr1, 100)
+            await gasHelper.ensureGasBalance(addr2, 100)
 
             let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
 
@@ -326,7 +326,7 @@ describe('ORDER', () => {
 
             await issueHelper.sendIssueV0(addr, giveTick, 100, 50, 0, "Order edit give token", 50)
             await issueHelper.sendIssueV0(addr, getTick, 100, 50, 0, "Order edit get token", 50)
-            await gasHelper.mintGas(addr, 100)
+            await gasHelper.ensureGasBalance(addr, 100)
 
             let expirationDate = new Date()
             expirationDate.setMonth(expirationDate.getMonth() + 3)

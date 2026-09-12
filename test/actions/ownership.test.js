@@ -39,8 +39,8 @@ describe('OWNERSHIP', () => {
             await issueHelper.sendIssueV0(addr1, jdog,   100, 50, 0, "Ownership-sale subject", 50)
             await issueHelper.sendIssueV0(addr1, settle, 100, 50, 0, "Settlement currency",   50)
             await sendHelper.sendSendV0(addr1, settle, 25, address2, "Fund buyer with SETTLE")
-            await gasHelper.mintGas(addr1, 100)
-            await gasHelper.mintGas(addr2, 100)
+            await gasHelper.ensureGasBalance(addr1, 100)
+            await gasHelper.ensureGasBalance(addr2, 100)
 
             let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
 
@@ -103,7 +103,7 @@ describe('OWNERSHIP', () => {
 
             await issueHelper.sendIssueV0(addr, jdog,   100, 50, 0, "Ownership cancel subject", 50)
             await issueHelper.sendIssueV0(addr, settle, 100, 50, 0, "Cancel settlement tick",   50)
-            await gasHelper.mintGas(addr, 100)
+            await gasHelper.ensureGasBalance(addr, 100)
 
             let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
 
@@ -156,7 +156,7 @@ describe('OWNERSHIP', () => {
 
             await issueHelper.sendIssueV0(addr, parent, 100, 50, 0, "Parent for guard test", 50)
             await issueHelper.sendIssueV0(addr, settle, 100, 50, 0, "Settle for guard test", 50)
-            await gasHelper.mintGas(addr, 100)
+            await gasHelper.ensureGasBalance(addr, 100)
 
             let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
 
@@ -206,7 +206,7 @@ describe('OWNERSHIP', () => {
 
             await issueHelper.sendIssueV0(sourceAddr, jdog,   100, 50, 0, "Sweep ownership subject", 50)
             await issueHelper.sendIssueV0(sourceAddr, settle, 100, 50, 0, "Sweep settle tick",       50)
-            await gasHelper.mintGas(sourceAddr, 100)
+            await gasHelper.ensureGasBalance(sourceAddr, 100)
 
             let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
 

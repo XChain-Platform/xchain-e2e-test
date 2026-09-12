@@ -22,7 +22,7 @@ describe('SWEEP', () => {
             let tick = "SWEEPv0"+sourceAddr["address"].substring(sourceAddr["address"].length-8)
 
             await issueHelper.sendIssueV0(sourceAddr, tick, 100, 50, 0, "Sweep v0 test token", 50)
-            await gasHelper.mintGas(sourceAddr, 100)
+            await gasHelper.ensureGasBalance(sourceAddr, 100)
 
             let result = await sweepHelper.sendSweepV0(
                 sourceAddr,

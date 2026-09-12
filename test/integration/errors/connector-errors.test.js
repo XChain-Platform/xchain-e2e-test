@@ -66,7 +66,7 @@ describe('Error Propagation: Connector Errors', function () {
             }
 
             await assert.rejects(
-                () => issueHelper.sendIssueV0(addressInfo, 'TOK', 1000, 100, 8, 'desc', 50),
+                () => issueHelper.sendIssueV0(addressInfo, 'TOKX', 1000, 100, 8, 'desc', 50),
                 /ECONNREFUSED encoder/
             )
         })
@@ -126,7 +126,7 @@ describe('Error Propagation: Connector Errors', function () {
             }
 
             await assert.rejects(
-                () => issueHelper.sendIssueV0(addressInfo, 'TOK', 1000, 100, 8, 'desc', 50),
+                () => issueHelper.sendIssueV0(addressInfo, 'TOKX', 1000, 100, 8, 'desc', 50),
                 /ETIMEDOUT/
             )
         })

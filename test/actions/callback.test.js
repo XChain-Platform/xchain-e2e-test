@@ -40,7 +40,7 @@ describe('CALLBACK', () => {
             await sendHelper.sendSendV0(addr, mainTick, 2, holder1["address"], "Callback holder 1")
             await sendHelper.sendSendV0(addr, mainTick, 3, holder2["address"], "Callback holder 2")
 
-            await gasHelper.mintGas(addr, 100)
+            await gasHelper.ensureGasBalance(addr, 100)
 
             let result = await callbackHelper.sendCallbackV0(addr, mainTick, "Callback test v0")
             assert(result.callback, "Callback v0 should exist in DB")

@@ -176,13 +176,13 @@ describe('[regression:p0] Service Connectors', function () {
                 const encoder = new XChainEncoderConnector('localhost', 3031)
                 await encoder.createTx(
                     ['utxo1'], 'pk', [{ addr: 'a', value: 1000 }],
-                    'ISSUE|0|TOK', Buffer.from('raw'), 546, true, 'P2SH',
+                    'ISSUE|0|TOKC', Buffer.from('raw'), 546, true, 'P2SH',
                     'changeAddr', 'p2shHash', 'p2shHex', 'compKey'
                 )
                 const params = stub.firstCall.args[1].params
                 assert.deepStrictEqual(params.utxos, ['utxo1'])
                 assert.strictEqual(params.pubkey, 'pk')
-                assert.strictEqual(params.data, 'ISSUE|0|TOK')
+                assert.strictEqual(params.data, 'ISSUE|0|TOKC')
                 assert.strictEqual(params.fee, 546)
                 assert.strictEqual(params.rbf, true)
                 assert.strictEqual(params.encoding, 'P2SH')

@@ -544,7 +544,7 @@ describe('[drill] cross-chain attestation relay loop (origin -> BTC -> origin)',
             const mintStarted = Date.now();
             for (let i = 0; i < chunks; i++) {
                 await resilientSend('gas mint ' + (i + 1) + '/' + chunks, homeRail, () =>
-                    gasHelper.mintGas(relayStakeSource, String(MINT_CHUNK)));
+                    gasHelper.ensureGasBalance(relayStakeSource, String(MINT_CHUNK)));
                 if ((i + 1) % 5 === 0 || i + 1 === chunks)
                     console.log('    [relay-loop] minted ' + ((i + 1) * MINT_CHUNK) + '/' + relayStakeAmount +
                                 ' XCHAIN (' + Math.round((Date.now() - mintStarted) / 1000) + 's)');

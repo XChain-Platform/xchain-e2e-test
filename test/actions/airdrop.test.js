@@ -23,7 +23,7 @@ describe('AIRDROP', () => {
             let airdropAddress = airdropAddressInfo["address"]
             let airdropTick = "AIRDROPADDv0"+airdropAddress.substring(airdropAddress.length-8)
 
-            await gasHelper.mintGas(airdropAddressInfo, 100)
+            await gasHelper.ensureGasBalance(airdropAddressInfo, 100)
 
             await issueHelper.sendIssueV0(airdropAddressInfo, airdropTick, 100, 100, 0, "Airdrop address v0 test", 100)
 
@@ -54,7 +54,7 @@ describe('AIRDROP', () => {
             let address = addr["address"]
             let tick = "AIRBALv0"+address.substring(address.length-8)
 
-            await gasHelper.mintGas(addr, 100)
+            await gasHelper.ensureGasBalance(addr, 100)
             await issueHelper.sendIssueV0(addr, tick, 1000, 100, 0, "Airdrop balance test", 100)
 
             let r1 = await cryptoHelper.getNewAddress("AIRDROP.BAL.V0", COIN, NETWORK, null, "legacy", 1)
@@ -101,7 +101,7 @@ describe('AIRDROP', () => {
                 )
             }
 
-            await gasHelper.mintGas(airdropAddressInfo, 100)
+            await gasHelper.ensureGasBalance(airdropAddressInfo, 100)
 
             let listAddressInfo1 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy", 1)
             let listAddressInfo2 = await cryptoHelper.getNewAddress("AIRDROP.ADDRESSES.V0", COIN, NETWORK, null, "legacy", 2)
@@ -149,7 +149,7 @@ describe('AIRDROP', () => {
             let airdropTick1 = "AIRDROP1ADDv1"+airdropAddress.substring(airdropAddress.length-8)
             let airdropTick2 = "AIRDROP2ADDv1"+airdropAddress.substring(airdropAddress.length-8)
 
-            await gasHelper.mintGas(airdropAddressInfo, 100)
+            await gasHelper.ensureGasBalance(airdropAddressInfo, 100)
 
             await issueHelper.sendIssueV0(airdropAddressInfo, airdropTick1, 100, 100, 0, "Airdrop1 address v1 test", 100)
             await issueHelper.sendIssueV0(airdropAddressInfo, airdropTick2, 100, 100, 0, "Airdrop2 address v1 test", 100)
@@ -184,7 +184,7 @@ describe('AIRDROP', () => {
             let airdropTick1 = "AIRDROP1ADDv2"+airdropAddress.substring(airdropAddress.length-8)
             let airdropTick2 = "AIRDROP2ADDv2"+airdropAddress.substring(airdropAddress.length-8)
 
-            await gasHelper.mintGas(airdropAddressInfo, 100)
+            await gasHelper.ensureGasBalance(airdropAddressInfo, 100)
 
             await issueHelper.sendIssueV0(airdropAddressInfo, airdropTick1, 100, 100, 0, "Airdrop1 address v2 test", 100)
             await issueHelper.sendIssueV0(airdropAddressInfo, airdropTick2, 100, 100, 0, "Airdrop2 address v2 test", 100)
@@ -226,7 +226,7 @@ describe('AIRDROP', () => {
             let airdropTick1 = "AIRDROP1ADDv3"+airdropAddress.substring(airdropAddress.length-8)
             let airdropTick2 = "AIRDROP2ADDv3"+airdropAddress.substring(airdropAddress.length-8)
 
-            await gasHelper.mintGas(airdropAddressInfo, 100)
+            await gasHelper.ensureGasBalance(airdropAddressInfo, 100)
 
             await issueHelper.sendIssueV0(airdropAddressInfo, airdropTick1, 100, 100, 0, "Airdrop1 address v3 test", 100)
             await issueHelper.sendIssueV0(airdropAddressInfo, airdropTick2, 100, 100, 0, "Airdrop2 address v3 test", 100)

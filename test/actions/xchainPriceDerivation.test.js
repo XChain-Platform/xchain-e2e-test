@@ -209,11 +209,13 @@ describe('XCHAIN price derivation from real fills (spec step 7)', function () {
         it('prices a real XCHAIN dispense at its realized rate', async function () {
             this.timeout(300000)
 
-            // XCHAIN is freely mintable on regtest, which is what makes this proof
-            // possible at all: mainnet supply is 0 with the mint disabled.
+            // XCHAIN is acquirable on regtest (minted from the open BTC faucet, or
+            // bridged in from BTC off it since D62 closed the local ISSUE/MINT path),
+            // which is what makes this proof possible at all: mainnet supply is 0 with
+            // the mint disabled.
             const sellerInfo = await cryptoHelper.getNewFundedAddress(
                 'XCPRICE.DISP.SELLER', COIN, NETWORK, null, 'legacy', 0, 1)
-            await gasHelper.mintGas(sellerInfo, '100')
+            await gasHelper.ensureGasBalance(sellerInfo, '100')
 
             // 1 XCHAIN for 0.05 coin, escrowing 10. The rate under test is therefore
             // 0.05 coin per XCHAIN, and it must come back out of the derivation
@@ -300,7 +302,7 @@ describe('XCHAIN price derivation from real fills (spec step 7)', function () {
                 'XCPRICE.DEX.SELLER', COIN, NETWORK, null, 'legacy', 0, 2)
             const buyerInfo = await cryptoHelper.getNewFundedAddress(
                 'XCPRICE.DEX.BUYER', COIN, NETWORK, null, 'legacy', 0, 2)
-            await gasHelper.mintGas(sellerInfo, '200')
+            await gasHelper.ensureGasBalance(sellerInfo, '200')
 
             const db = queryAdapter(indexerDatabase)
 
@@ -452,7 +454,7 @@ describe('XCHAIN price derivation from real fills (spec step 7)', function () {
                 'XCPRICE.VALSTAKE', COIN, NETWORK, null, 'legacy', 0, 1)
             // MAX_MINT caps a single MINT at 100000; mint once at the cap and
             // stake well above the price capability MIN_STAKE.
-            await gasHelper.mintGas(staker, '100000')
+            await gasHelper.ensureGasBalance(staker, '100000')
             const res = await stakeHelper.sendStakeV1(staker, '50000', pubkey)
             assert(res.stake, 'validator stake should be re-created on the fresh chain')
         })
@@ -531,7 +533,7 @@ describe('XCHAIN price derivation from real fills (spec step 7)', function () {
             // 4a. Dispense leg: 30 XCHAIN realized at rate1Btc coin per XCHAIN.
             const seller = await cryptoHelper.getNewFundedAddress(
                 'XCPRICE.SUP.DISP.SELLER', COIN, NETWORK, null, 'legacy', 0, 1)
-            await gasHelper.mintGas(seller, '200')
+            await gasHelper.ensureGasBalance(seller, '200')
             const disp = await dispenserHelper.sendDispenserV0(
                 seller, COIN_CODE, GAS_TICK, 1, 30,
                 COIN_CODE, null, Number(rate1Btc), seller['address'],
@@ -558,7 +560,7 @@ describe('XCHAIN price derivation from real fills (spec step 7)', function () {
                 'XCPRICE.SUP.DEX.BUYER', COIN, NETWORK, null, 'legacy', 0, 2)
             const dexSeller = await cryptoHelper.getNewFundedAddress(
                 'XCPRICE.SUP.DEX.SELLER', COIN, NETWORK, null, 'legacy', 0, 2)
-            await gasHelper.mintGas(dexSeller, '200')
+            await gasHelper.ensureGasBalance(dexSeller, '200')
 
             const clock = await db.doQuery('SELECT MAX(block_time) AS t FROM blocks')
             const expiration = Number(clock[0].t) + 86400
@@ -686,7 +688,7 @@ describe('XCHAIN price derivation from real fills (spec step 7)', function () {
                 'XCPRICE.T4T.SELLER', COIN, NETWORK, null, 'legacy', 0, 1)
             const buyer = await cryptoHelper.getNewFundedAddress(
                 'XCPRICE.T4T.BUYER', COIN, NETWORK, null, 'legacy', 0, 1)
-            await gasHelper.mintGas(seller, '200')
+            await gasHelper.ensureGasBalance(seller, '200')
             await gasHelper.ensureGasBalance(buyer, '100')
 
             const payTick = 'XCPT4T' + seller['address'].substring(seller['address'].length - 6).toUpperCase()
@@ -739,7 +741,7 @@ describe('XCHAIN price derivation from real fills (spec step 7)', function () {
 
             const seller = await cryptoHelper.getNewFundedAddress(
                 'XCPRICE.XCHAIN.SELLER', COIN, NETWORK, null, 'legacy', 0, 2)
-            await gasHelper.mintGas(seller, '200')
+            await gasHelper.ensureGasBalance(seller, '200')
 
             // (a) The dispenser layer: refused, so the exclusion has nothing to
             //     exclude there. Asserted as a REJECTED create rather than skipped,

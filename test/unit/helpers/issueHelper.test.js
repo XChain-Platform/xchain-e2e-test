@@ -45,7 +45,7 @@ describe('issueHelper', () => {
 
         it('should build correct message with all optional params', async () => {
             const result = await helper.sendIssueV0(
-                addressInfo, 'TOK', '2000', '200', '4', 'desc', '100',
+                addressInfo, 'TOKH', '2000', '200', '4', 'desc', '100',
                 '1', '50', 'lockMax', 'lockMint', 'lockDesc',
                 'lockSleep', 'lockCb', '500', 'CBTOKEN', '10',
                 'allow1', 'block1', '5', '100', '200', 'lockMintFlag', 'lockMintSup'
@@ -53,13 +53,13 @@ describe('issueHelper', () => {
 
             const msg = createTxStub.firstCall.args[1]
             assert.strictEqual(msg,
-                'ISSUE|0|TOK|2000|200|4|desc|100|1|50|lockMax|lockMint|lockDesc|lockSleep|lockCb|500|CBTOKEN|10|allow1|block1|5|100|200|lockMintFlag|lockMintSup'
+                'ISSUE|0|TOKH|2000|200|4|desc|100|1|50|lockMax|lockMint|lockDesc|lockSleep|lockCb|500|CBTOKEN|10|allow1|block1|5|100|200|lockMintFlag|lockMintSup'
             )
             assert.strictEqual(result.txHash, 'abc123')
         })
 
         it('should call waitForIssue and waitForCredit', async () => {
-            await helper.sendIssueV0(addressInfo, 'TOK', '1000', '100', '8', 'desc', '50')
+            await helper.sendIssueV0(addressInfo, 'TOKH', '1000', '100', '8', 'desc', '50')
             assert(global.indexerDatabase.waitForIssue.calledOnce)
             assert(global.indexerDatabase.waitForCredit.calledOnce)
         })
@@ -77,7 +77,7 @@ describe('issueHelper', () => {
         })
 
         it('should only call waitForIssue, not waitForCredit', async () => {
-            await helper.sendIssueV1(addressInfo, 'TOK', 'desc')
+            await helper.sendIssueV1(addressInfo, 'TOKH', 'desc')
             assert(global.indexerDatabase.waitForIssue.calledOnce)
             assert(global.indexerDatabase.waitForCredit.notCalled)
         })
@@ -86,69 +86,69 @@ describe('issueHelper', () => {
     describe('sendIssueV2', () => {
         it('should build correct message with all params', async () => {
             const result = await helper.sendIssueV2(
-                addressInfo, 'TOK', '100', '50', '25', '3', '200', '300', 'memo'
+                addressInfo, 'TOKH', '100', '50', '25', '3', '200', '300', 'memo'
             )
 
             const msg = createTxStub.firstCall.args[1]
-            assert.strictEqual(msg, 'ISSUE|2|TOK|100|50|25|3|200|300|memo')
+            assert.strictEqual(msg, 'ISSUE|2|TOKH|100|50|25|3|200|300|memo')
             assert.strictEqual(result.txHash, 'abc123')
         })
 
         it('should replace null params with empty string', async () => {
-            await helper.sendIssueV2(addressInfo, 'TOK', '100', '50', null, null, null, null, null)
+            await helper.sendIssueV2(addressInfo, 'TOKH', '100', '50', null, null, null, null, null)
 
             const msg = createTxStub.firstCall.args[1]
-            assert.strictEqual(msg, 'ISSUE|2|TOK|100|50|||||')
+            assert.strictEqual(msg, 'ISSUE|2|TOKH|100|50|||||')
         })
     })
 
     describe('sendIssueV3', () => {
         it('should build correct message', async () => {
             await helper.sendIssueV3(
-                addressInfo, 'TOK', '1', '1', '1', '1', '1', '1', '1', 'memo'
+                addressInfo, 'TOKH', '1', '1', '1', '1', '1', '1', '1', 'memo'
             )
 
             const msg = createTxStub.firstCall.args[1]
-            assert.strictEqual(msg, 'ISSUE|3|TOK|1|1|1|1|1|1|1|memo')
+            assert.strictEqual(msg, 'ISSUE|3|TOKH|1|1|1|1|1|1|1|memo')
         })
 
         it('should replace null params with empty string', async () => {
-            await helper.sendIssueV3(addressInfo, 'TOK', null, null, null, null, null, null, null, null)
+            await helper.sendIssueV3(addressInfo, 'TOKH', null, null, null, null, null, null, null, null)
 
             const msg = createTxStub.firstCall.args[1]
-            assert.strictEqual(msg, 'ISSUE|3|TOK||||||||')
+            assert.strictEqual(msg, 'ISSUE|3|TOKH||||||||')
         })
     })
 
     describe('sendIssueV4', () => {
         it('should build correct message', async () => {
-            await helper.sendIssueV4(addressInfo, 'TOK', '500', 'CBTOKEN', '10', 'memo')
+            await helper.sendIssueV4(addressInfo, 'TOKH', '500', 'CBTOKEN', '10', 'memo')
 
             const msg = createTxStub.firstCall.args[1]
-            assert.strictEqual(msg, 'ISSUE|4|TOK|500|CBTOKEN|10|memo')
+            assert.strictEqual(msg, 'ISSUE|4|TOKH|500|CBTOKEN|10|memo')
         })
 
         it('should replace null params with empty string', async () => {
-            await helper.sendIssueV4(addressInfo, 'TOK', null, null, null, null)
+            await helper.sendIssueV4(addressInfo, 'TOKH', null, null, null, null)
 
             const msg = createTxStub.firstCall.args[1]
-            assert.strictEqual(msg, 'ISSUE|4|TOK||||')
+            assert.strictEqual(msg, 'ISSUE|4|TOKH||||')
         })
     })
 
     describe('sendIssueV5', () => {
         it('should build correct message', async () => {
-            await helper.sendIssueV5(addressInfo, 'TOK', 'allowList1', 'blockList1', 'memo')
+            await helper.sendIssueV5(addressInfo, 'TOKH', 'allowList1', 'blockList1', 'memo')
 
             const msg = createTxStub.firstCall.args[1]
-            assert.strictEqual(msg, 'ISSUE|5|TOK|allowList1|blockList1|memo')
+            assert.strictEqual(msg, 'ISSUE|5|TOKH|allowList1|blockList1|memo')
         })
 
         it('should replace null params with empty string', async () => {
-            await helper.sendIssueV5(addressInfo, 'TOK', null, null, null)
+            await helper.sendIssueV5(addressInfo, 'TOKH', null, null, null)
 
             const msg = createTxStub.firstCall.args[1]
-            assert.strictEqual(msg, 'ISSUE|5|TOK|||')
+            assert.strictEqual(msg, 'ISSUE|5|TOKH|||')
         })
     })
 })

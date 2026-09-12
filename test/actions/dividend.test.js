@@ -33,7 +33,7 @@ describe('DIVIDEND', () => {
 
             await issueHelper.sendIssueV0(addr, dividendTick, 1000, 100, 0, "Dividend payout token", 100)
 
-            await gasHelper.mintGas(addr, 100)
+            await gasHelper.ensureGasBalance(addr, 100)
 
             let result = await dividendHelper.sendDividendV0(
                 addr, holderTick, dividendTick, 1, "Dividend test v0"
@@ -61,7 +61,7 @@ describe('DIVIDEND', () => {
             // 10 per unit held: holder1(2)->20, holder2(3)->30, addr(5)->50
             await issueHelper.sendIssueV0(addr, dividendTick, 1000, 100, 0, "Dividend balance payout", 100)
 
-            await gasHelper.mintGas(addr, 100)
+            await gasHelper.ensureGasBalance(addr, 100)
 
             let result = await dividendHelper.sendDividendV0(
                 addr, holderTick, dividendTick, 10, "Dividend balance test"

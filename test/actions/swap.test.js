@@ -26,7 +26,7 @@ describe('SWAP', () => {
             await issueHelper.sendIssueV0(addr, giveTick, 100, 50, 0, "Swap give token", 50)
             await issueHelper.sendIssueV0(addr, getTick, 100, 50, 0, "Swap get token", 50)
 
-            await gasHelper.mintGas(addr, 100)
+            await gasHelper.ensureGasBalance(addr, 100)
 
             let expirationDate = new Date()
             expirationDate.setMonth(expirationDate.getMonth() + 3)
@@ -53,7 +53,7 @@ describe('SWAP', () => {
 
             await issueHelper.sendIssueV0(addr, giveTick, 100, 50, 0, "Swap cancel give token", 50)
             await issueHelper.sendIssueV0(addr, getTick, 100, 50, 0, "Swap cancel get token", 50)
-            await gasHelper.mintGas(addr, 100)
+            await gasHelper.ensureGasBalance(addr, 100)
 
             let expirationDate = new Date()
             expirationDate.setMonth(expirationDate.getMonth() + 3)
@@ -98,8 +98,8 @@ describe('SWAP', () => {
             // give addr2 some tokenB so it can offer it
             await sendHelper.sendSendV0(addr1, tokenB, 20, address2, "Fund addr2 with tokenB")
 
-            await gasHelper.mintGas(addr1, 100)
-            await gasHelper.mintGas(addr2, 100)
+            await gasHelper.ensureGasBalance(addr1, 100)
+            await gasHelper.ensureGasBalance(addr2, 100)
 
             let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90 // 90 days
 
@@ -156,7 +156,7 @@ describe('SWAP', () => {
 
             await issueHelper.sendIssueV0(addr, giveTick, 100, 50, 0, "Swap edit give token", 50)
             await issueHelper.sendIssueV0(addr, getTick, 100, 50, 0, "Swap edit get token", 50)
-            await gasHelper.mintGas(addr, 100)
+            await gasHelper.ensureGasBalance(addr, 100)
 
             let expirationDate = new Date()
             expirationDate.setMonth(expirationDate.getMonth() + 3)
