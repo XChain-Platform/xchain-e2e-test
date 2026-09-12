@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-09-11
+
+### Added
+- `XChainHubConnector` cross-checks the hub-served coin consensus hashes against the vendored registry and logs any disagreement.
+
+### Fixed
+- The field round-trip golden vectors are regenerated from the indexer-derived encoding and alias discovery is fixed, clearing three pre-existing failures.
+
 ## [0.17.0] - 2026-09-10
 
 ### Added
