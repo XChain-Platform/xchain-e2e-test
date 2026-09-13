@@ -113,24 +113,37 @@ function makeSettleContext(opts){
     };
     let nextAction = o.firstActionIndex || 5000;
 
-    // The mirror side, read through indexerDb._mirrorDb(). Honours an ORDER BY only when
-    // the SQL actually carries one, so an ordering drill proves the QUERY carries the
-    // consensus order instead of proving this fixture was handed a sorted array.
+    // The mirror side, read through indexerDb._mirrorDb(). These reads live in xchain-indexer
+    // src/db/bridge_settlements.js as named methods, so the fixture answers those methods and
+    // returns each result set in the order its method documents. The ORDER BY belongs to the
+    // mixin and is graded in the indexer's own suite.
     const mirror = {
+        // Consensus order, applied here rather than taken as seeded, so a caller that depends
+        // on it gets it from the read and not from the order a drill happened to list rows in.
+        getFinalizedBridgeTransfersForChain: async () =>
+            state.mirrorTransfers.slice()
+                 .sort((a, b) => (Number(a.snapshot_block) - Number(b.snapshot_block)) ||
+                                 (String(a.transfer_id) < String(b.transfer_id) ? -1 : 1)),
+
+        // Unsorted on purpose: the real read carries no ORDER BY because duePolicySnapshots
+        // builds the total order itself, and sorting here would hide a caller that stopped.
+        getFinalizedPolicySnapshots: async () => state.mirrorPolicies.slice(),
+
+        // Seeded rows model what the mirror holds for the row under test, so only the seq bound
+        // is applied; a drill states the network, origin and tick it means by seeding the rows
+        // it wants this read to see.
+        getEarlierFinalizedPolicySnapshots: async (network, originChain, tick, seq) =>
+            state.mirrorPolicies.filter(r => Number(r.policy_seq) < Number(seq))
+                 .sort((a, b) => Number(a.policy_seq) - Number(b.policy_seq)),
+
+        // The pass reaches the mirror only through the methods above. Raw SQL for either
+        // mirrored table means a read slipped back out of the db mixin, and answering it with
+        // an empty set would green every drill built on that read.
         doQuery: async (sql) => {
-            if(/FROM bridge_transfers/.test(sql)){
-                const rows = state.mirrorTransfers.slice();
-                if(/ORDER BY snapshot_block ASC, transfer_id ASC/.test(sql))
-                    rows.sort((a, b) => (Number(a.snapshot_block) - Number(b.snapshot_block)) ||
-                                        (String(a.transfer_id) < String(b.transfer_id) ? -1 : 1));
-                return rows;
-            }
-            if(/FROM policy_snapshots/.test(sql)){
-                const rows = state.mirrorPolicies.slice();
-                if(/ORDER BY policy_seq ASC/.test(sql))
-                    rows.sort((a, b) => Number(a.policy_seq) - Number(b.policy_seq));
-                return rows;
-            }
+            if(/bridge_transfers|policy_snapshots/.test(sql))
+                throw new Error('bridgeSettleContext: raw mirror SQL reached the stub ('
+                    + String(sql).replace(/\s+/g, ' ').slice(0, 80)
+                    + '). That read belongs in xchain-indexer src/db/bridge_settlements.js.');
             return [];
         }
     };
@@ -138,25 +151,61 @@ function makeSettleContext(opts){
     const indexerDb = {
         config: config,
         _mirrorDb: () => mirror,
-        doQuery: async (sql, args) => {
-            args = args || [];
-            if(/FROM bridge_settlements/.test(sql) && /LIMIT 1/.test(sql))
-                return state.settled.has(String(args[0]) + '|' + String(args[1]))
-                    ? [{ transfer_id: args[0] }] : [];
-            if(/FROM bridge_settlements/.test(sql)){
-                const kind = /kind = 'policy'/.test(sql) ? 'policy' : 'transfer';
-                return args.filter(id => state.settled.has(String(id) + '|' + kind))
-                           .map(id => ({ transfer_id: id }));
-            }
-            if(/INSERT IGNORE INTO bridge_settlements/.test(sql)){
-                state.settlements.push({
-                    action_index: args[0], transfer_id: args[1], kind: args[2],
-                    block_index: args[3], src_chain: args[4], src_action_index: args[5],
-                    dest_chain: args[6], dest_address: args[7], tick: args[8]
-                });
-                state.settled.add(String(args[1]) + '|' + String(args[2]));
-                return [];
-            }
+        // The settle pass's bridge_settlements reads and writes live in xchain-indexer
+        // src/db/bridge_settlements.js as named methods, so the fixture implements the ones the
+        // pass calls. Every one answers from `state` and decides nothing; a stub that answered
+        // a guard would pass each drill built on it against broken code.
+
+        // The LOCAL ledger's id-keyed read. `kind` is inside the key, so a transfer id and a
+        // snapshot id may collide in the id column without colliding as settlements.
+        isBridgeSettlementRecorded: async (id, kind) =>
+            state.settled.has(String(id) + '|' + String(kind)),
+
+        // Keyed on the source leg alone and never on transfer_id. Answered from the settlements
+        // this run RECORDED, because that is the only place the fixture holds source columns: a
+        // seeded `settled` key names an id and a kind and says nothing about a leg.
+        isBridgeSourceLegSettled: async (srcChain, srcActionIndex) =>
+            state.settlements.some(s => s.kind === 'transfer'
+                && s.src_chain !== null && s.src_chain !== undefined
+                && s.src_action_index !== null && s.src_action_index !== undefined
+                && String(s.src_chain) === String(srcChain)
+                && Number(s.src_action_index) === Number(srcActionIndex)),
+
+        getRecordedTransferSettlementIds: async (ids) =>
+            (ids || []).filter(id => state.settled.has(String(id) + '|transfer'))
+                       .map(id => ({ transfer_id: id })),
+
+        getRecordedPolicySettlementIds: async (ids) =>
+            (ids || []).filter(id => state.settled.has(String(id) + '|policy'))
+                       .map(id => ({ transfer_id: id })),
+
+        // The CROSS PRODUCT of the candidate chains and indexes, exactly the shape the real
+        // query's two IN lists select. The caller matches the pair itself, so returning
+        // pre-matched pairs here would hide a caller that stopped matching them.
+        getSettledBridgeSourceLegs: async (legChains, legIndexes) =>
+            state.settlements.filter(s => s.kind === 'transfer'
+                && (legChains  || []).some(c => String(c) === String(s.src_chain))
+                && (legIndexes || []).some(i => Number(i) === Number(s.src_action_index)))
+                .map(s => ({ src_chain: s.src_chain, src_action_index: s.src_action_index })),
+
+        recordBridgeSettlement: async (actionIndex, id, kind, blockIndex, srcChain,
+                                       srcActionIndex, destChain, destAddress, tick) => {
+            state.settlements.push({
+                action_index: actionIndex, transfer_id: String(id), kind: String(kind),
+                block_index: blockIndex, src_chain: srcChain, src_action_index: srcActionIndex,
+                dest_chain: destChain, dest_address: destAddress, tick: tick
+            });
+            state.settled.add(String(id) + '|' + String(kind));
+        },
+
+        // The pass reaches its own ledger only through the methods above. Raw bridge_settlements
+        // SQL arriving here means a read sits outside the db mixin, and that has to be loud:
+        // answering it with an empty set would green every drill built on that read.
+        doQuery: async (sql) => {
+            if(/bridge_settlements/.test(sql))
+                throw new Error('bridgeSettleContext: raw bridge_settlements SQL reached the stub ('
+                    + String(sql).replace(/\s+/g, ' ').slice(0, 80)
+                    + '). That read belongs in xchain-indexer src/db/bridge_settlements.js.');
             return [];
         },
         // Both quorum doors answer the same seeded set: which one the pass reaches is
