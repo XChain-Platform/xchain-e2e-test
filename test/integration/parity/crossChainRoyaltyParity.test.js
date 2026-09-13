@@ -40,7 +40,7 @@ const idxCcr = require(path.join(ROOT, 'xchain-indexer/src/cross_chain_royalty_a
 const CrossChainDexEngine  = require(path.join(ROOT, 'xchain-hub/src/CrossChainDexEngine.js'));
 const StateAnchorPublisher = require(path.join(ROOT, 'xchain-hub/src/StateAnchorPublisher.js'));
 const Cross_Settle         = require(path.join(ROOT, 'xchain-indexer/src/actions/cross_settle.js'));
-const AnchorRecovery       = require(path.join(ROOT, 'xchain-indexer/src/recovery.js'));
+const AnchorRecovery       = require(path.join(ROOT, 'xchain-indexer/bin/recovery.js'));
 
 // All four builders read only their argument (no `this`), so invoke them directly
 // off the prototype, each through its own service's eq + ccr copies. The engine's
