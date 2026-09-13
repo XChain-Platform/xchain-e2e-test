@@ -178,7 +178,10 @@ const MIRROR_BARRIERS = Object.freeze(Object.keys(HUB_SYNC_WATERMARK_GRACE_S));
 // table, and the gap between the two is exported rather than papered over. The
 // two `_barrier` reasons deliberately NOT in the family are `bridge_proof_barrier`
 // and `call_presence_barrier`: neither is keyed on the mirror stream watermark.
-const INDEXER_SRC_DIR = path.dirname(require.resolve('../../../xchain-indexer/src/hub_db_sync.js'));
+// Anchored on the file this directory is actually read for, XChainIndexer.js,
+// rather than on the mirror module: the mirror moved into src/hub/ and taking its
+// dirname would point the barrier scan one directory below the tree it wants.
+const INDEXER_SRC_DIR = path.dirname(require.resolve('../../../xchain-indexer/src/XChainIndexer.js'));
 const MIRROR_BARRIER_REASON_RE = /'([a-z0-9_]+_sync_barrier|anchor_attest_barrier)'/g;
 let _mirrorBarrierReasons = null;
 

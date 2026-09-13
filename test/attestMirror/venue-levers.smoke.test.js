@@ -492,7 +492,7 @@ describe('attestMirror venue levers (pure: no venue, no children, no database, n
                 'the set of barriers the venue CANNOT pin a grace for changed; a leg that leaves one ' +
                 'of them at its frozen grace parks every block behind it')
             assert.ok(!Object.prototype.hasOwnProperty.call(
-                require('../../../xchain-indexer/src/hub_db_sync.js').HUB_SYNC_WATERMARK_GRACE_S, 'snapshot'),
+                require('../../../xchain-indexer/src/hub/hub_db_sync.js').HUB_SYNC_WATERMARK_GRACE_S, 'snapshot'),
                 'a grace key was added for the snapshot member; the venue must stop treating it as ' +
                 'the ungraced one')
         })
