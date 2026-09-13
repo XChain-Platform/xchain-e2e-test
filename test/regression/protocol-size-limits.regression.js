@@ -148,10 +148,9 @@ describe('Protocol size-limit drift guard', () => {
             )
         })
 
-        // Previously only asserted by the explorer's own unit test
-        // (xchain-explorer/test/unit/vm-query.test.js), not this central
-        // tripwire; a skipped explorer suite in the cross-service CI lane
-        // could let this copy drift unnoticed (uuid 269217d2).
+        // Pins the same MAX_CODE_SIZE limit the explorer's own unit test
+        // (xchain-explorer/test/unit/vm_query.test.js) checks, from the
+        // protocol side, so a skipped explorer suite cannot let it drift.
         it('[regression:p0] explorer vm-query MAX_CODE_SIZE === canonical', () => {
             assert.strictEqual(
                 explorerVmQuery.MAX_CODE_SIZE,

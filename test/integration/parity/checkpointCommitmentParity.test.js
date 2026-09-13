@@ -33,7 +33,7 @@
  *      post-flag-day (the presence-aware gate), so old signatures still verify.
  *
  * The explorer's inline copy is exercised against the SDK in the explorer's own unit
- * suite (explorer.checkpoints.test.js); here we cover the three callable builders.
+ * suite (explorer_checkpoints.test.js); here we cover the three callable builders.
  *
  * Spec: SPV light-client spec s6; Phase 2 handover.
  ********************************************************************/
