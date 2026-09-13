@@ -1906,17 +1906,29 @@ function assertShallowOrphan(height, tip, maxDepth) {
  * from 1938 at tip 1953 is 16 blocks deep" against a 12-block window). Freezing BTC for
  * exactly the span that does not need it removes the drift without touching the window.
  *
+ * The miner's own pause only stops its auto-mine loop: `generate_blocks` is exposed with no
+ * pause gate, so a drive that mines BTC through an external loop keeps moving the tip. That
+ * loop honours a flag file instead: when `BRIDGE_RAIL_MINER_PAUSE_FILE` names one, it is
+ * created for the span and removed in the same finally, and the loop skips its call while
+ * the file exists.
+ *
  * @param {{pauseMining: function, resumeMining: function}} miner  the regtest miner connector
  * @param {function(): Promise<*>} fn
+ * @param {{pauseFile?: string}} [opts]  the flag path, defaulting to the environment variable
  * @returns {Promise<*>} fn's resolved value
  */
-async function withMiningPaused(miner, fn) {
+async function withMiningPaused(miner, fn, opts) {
     assert.ok(miner && typeof miner.pauseMining === 'function' && typeof miner.resumeMining === 'function',
         'withMiningPaused: needs a connector with pauseMining()/resumeMining()');
+    const pauseFile = (opts && opts.pauseFile !== undefined) ? opts.pauseFile
+        : (process.env.BRIDGE_RAIL_MINER_PAUSE_FILE || '');
+    const fs = require('fs');
     await miner.pauseMining();
+    if (pauseFile) fs.writeFileSync(pauseFile, String(process.pid) + '\n');
     try {
         return await fn();
     } finally {
+        if (pauseFile) { try { fs.unlinkSync(pauseFile); } catch (e) { /* already gone */ } }
         await miner.resumeMining();
     }
 }

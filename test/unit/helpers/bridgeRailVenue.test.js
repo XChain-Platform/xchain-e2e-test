@@ -498,6 +498,23 @@ describe('bridgeRailVenue: the pure layer', function () {
             assert.deepStrictEqual(miner.calls, ['pause', 'resume']);
         });
 
+        it('holds the flag file the external block loop honours for exactly the span of fn, even when fn throws', async function () {
+            const os = require('os');
+            const fs = require('fs');
+            const path = require('path');
+            const flag = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bridge-rail-pause-')), 'btc-loop.pause');
+            const miner = fakeMiner();
+            let seenDuring = null;
+            await withMiningPaused(miner, async () => { seenDuring = fs.existsSync(flag); }, { pauseFile: flag });
+            assert.strictEqual(seenDuring, true, 'the flag must exist while fn runs');
+            assert.strictEqual(fs.existsSync(flag), false, 'the flag must be gone after fn returns');
+            await assert.rejects(
+                () => withMiningPaused(miner, async () => { throw new Error('boom'); }, { pauseFile: flag }),
+                /boom/);
+            assert.strictEqual(fs.existsSync(flag), false, 'the flag must be gone after fn throws');
+            assert.deepStrictEqual(miner.calls, ['pause', 'resume', 'pause', 'resume']);
+        });
+
         it('refuses a connector missing either half of the pair, before touching either', async function () {
             const partial = { pauseMining: async () => {} };
             await assert.rejects(() => withMiningPaused(partial, async () => {}),
