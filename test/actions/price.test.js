@@ -16,7 +16,7 @@
  * PRICE v0 is the validator PBFT snapshot (driven by the in-process
  * federation suites). PRICE v1 is the permissionless path: any address may
  * publish a TOKEN/FIAT quote on-chain, no stake required. Its indexer handler
- * (`xchain-indexer/src/actions/price/index.js` `_parseV1`) validates the fields and
+ * (`xchain-indexer/src/actions/price/index.js` `parseV1`) validates the fields and
  * records the action into the `prices` table (valid or invalid), then
  * fire-and-forgets a hub push for cross-chain aggregation. No e2e driver
  * exercised this on-chain path; this suite drives the happy path plus every

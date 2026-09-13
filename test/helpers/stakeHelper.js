@@ -324,7 +324,7 @@ module.exports = {
     // STAKE v3 expected to be REJECTED. The valid-only waitForContractStake can never
     // observe an intentionally-invalid stake, so broadcast and poll the row
     // status-agnostically (invalid contract stakes still write a contract_stakes row
-    // carrying the rejection status (see xchain-indexer stake.js _parseContractStake,
+    // carrying the rejection status (see xchain-indexer stake.js parseContractStake,
     // which calls createContractStake unconditionally). Filters on the unique
     // (source, pubkey, target, tick) tuple, not txHash, so it stays robust to encoding.
     async sendStakeV3Invalid(addressInfo, amount, signingPubkey, contractIndex, tick, timeMax = 60000){

@@ -12,7 +12,7 @@
 //
 // Validates the indexer reward-source resolver against REAL on-chain
 // delegated-key data, covering the fixes in:
-//   - xchain-indexer src/api/stake-source.js   (d0abcfd: archive/recovery leg)
+//   - xchain-indexer src/api/stake_source.js   (d0abcfd: archive/recovery leg)
 //   - xchain-indexer src/db.js             (828db2d: reward-writer leg shares
 //                                            the identical active-row predicates)
 //
@@ -35,7 +35,7 @@
 // contrast it with the pre-fix delegations SQL inline. This proves the fix on
 // real data regardless of the running indexer service's code version. The
 // writer leg (_resolveActiveStakeSourceId) uses these identical predicates,
-// locked by xchain-indexer/test/unit/reward-source-resolution.test.js.
+// locked by xchain-indexer/test/unit/reward_source_resolution.test.js.
 
 const assert = require('assert')
 const crypto = require('crypto')
@@ -55,13 +55,13 @@ function loadStakeSourceModule() {
     const localFixture = path.resolve(__dirname, 'stakeSourceMaster.fixture.js')
     if (fs.existsSync(localFixture)) return require(localFixture)
     const candidates = [
-        process.env.XCHAIN_INDEXER_PATH && path.join(process.env.XCHAIN_INDEXER_PATH, 'src/api/stake-source.js'),
-        path.resolve(__dirname, '../../../xchain-indexer/src/api/stake-source.js'),
-        path.resolve(__dirname, '../../../../xchain-indexer/src/api/stake-source.js'),
-        path.resolve(__dirname, '../../../../../modules/xchain-indexer/src/api/stake-source.js')
+        process.env.XCHAIN_INDEXER_PATH && path.join(process.env.XCHAIN_INDEXER_PATH, 'src/api/stake_source.js'),
+        path.resolve(__dirname, '../../../xchain-indexer/src/api/stake_source.js'),
+        path.resolve(__dirname, '../../../../xchain-indexer/src/api/stake_source.js'),
+        path.resolve(__dirname, '../../../../../modules/xchain-indexer/src/api/stake_source.js')
     ].filter(Boolean)
     for (const p of candidates) if (fs.existsSync(p)) return require(p)
-    throw new Error('cannot load master stake-source.js; place stakeSourceMaster.fixture.js beside this test or set XCHAIN_INDEXER_PATH')
+    throw new Error('cannot load master stake_source.js; place stakeSourceMaster.fixture.js beside this test or set XCHAIN_INDEXER_PATH')
 }
 const { getStakeSourceByPubkey } = loadStakeSourceModule()
 

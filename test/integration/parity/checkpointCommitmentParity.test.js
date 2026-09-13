@@ -60,12 +60,12 @@ const StateCheckpointEngine = require(path.join(ROOT, 'xchain-hub/src/StateCheck
 const sdkCheckpoint         = require(path.join(ROOT, 'xchain-sdk/src/checkpoint.js'));
 const Anchor                = require(path.join(ROOT, 'xchain-indexer/src/actions/anchor/index.js'));
 
-// The indexer ANCHOR _canonical is a plain method that reads only its `d` argument
+// The indexer ANCHOR canonical is a plain method that reads only its `d` argument
 // (no `this`), so invoke it directly off the prototype. `d` is ONE v0 bundle section,
 // already rebuilt with the header NETWORK and carrying its own SECTION_SNAPSHOT_BLOCK
 // as SNAPSHOT_BLOCK, which is the shape the parser hands it.
 function anchorSectionCanonical(d) {
-    return Anchor.prototype._canonical.call({}, d);
+    return Anchor.prototype.canonical.call({}, d);
 }
 
 // One logical checkpoint, expressed in BOTH the hub/SDK row shape and the indexer
@@ -137,7 +137,7 @@ describe('SPV Phase 2: CHECKPOINT_COMMITMENT cross-service parity', function () 
     it('pre-flag-day: hub == SDK == indexer canonical, and the root suffix is absent', function () {
         // mainnet flag-day is the far-future placeholder, so snapshot_block 1000 is inactive
         // and the row carries null roots. No v0 section is ever cut here (a rootless row is
-        // skipped, D8), so the indexer side is _canonical's shared rootless base, which the
+        // skipped, D8), so the indexer side is canonical's shared rootless base, which the
         // archive leg still signs and which the v0 branch extends.
         const { cp, d, STATE_ROOT, BLOCK_MERKLE } = fixtures('mainnet', 1000, false);
         const hubC = StateCheckpointEngine.canonicalCheckpoint(cp);

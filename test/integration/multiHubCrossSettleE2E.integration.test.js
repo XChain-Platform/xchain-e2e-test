@@ -18,7 +18,7 @@
  * capability snapshot and releases escrow) was only unit-tested with SYNTHETIC
  * rows/sigs. This closes the gap by feeding a REAL multi-hub-finalized match row
  * into the real indexer handler, proving the cross-repo canonical alignment
- * (hub _canonicalMatch vs indexer _canonical) and the multi-sig quorum end to end:
+ * (hub _canonicalMatch vs indexer canonical) and the multi-sig quorum end to end:
  *   - POSITIVE: the federated row passes signature + weighted-quorum verification
  *     → cross_settle reaches STATUS='valid' and records the settlement;
  *   - NEGATIVE: a tampered signature bundle fails quorum → no settlement.

@@ -701,7 +701,7 @@ async function decoderBlock(conn, dbName, height) {
  *
  * The indexer only enters the time barrier when `blockMayReadPrice` is true, and
  * that predicate is `blockTransactions.length > 0` over the decoder rows for the
- * block (priceReadPredicate.js, reached through `_evaluatePriceBarrier`). A block
+ * block (price_read_predicate.js, reached through `_evaluatePriceBarrier`). A block
  * carrying no transaction is committed without ever consulting the barrier, so
  * "which escape opened it" has no answer for it, and a sampled attribution that
  * did not know this would report every empty block as processed while the barrier

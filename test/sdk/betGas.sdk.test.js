@@ -35,7 +35,7 @@
  * Assertions read `fees.xchain_amount` (gas x GAS_PRICE) rather than a balance
  * delta, so they hold under BOTH payment modes (native coin and XCHAIN
  * balance). ORDER byte-identity for the shared arithmetic is pinned at unit
- * level in xchain-indexer/test/unit/bet-duration-fee.test.js.
+ * level in xchain-indexer/test/unit/bet_duration_fee.test.js.
  *
  ********************************************************************/
 

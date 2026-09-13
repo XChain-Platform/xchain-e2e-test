@@ -37,7 +37,7 @@
  * height, so the guard is the only thing standing there.
  *
  * WHY THIS RUNS AGAINST THE REAL DATABASE. The guard lives in SQL. A stubbed
- * connection (xchain-indexer/test/unit/bet-pass-bounding.test.js) can only
+ * connection (xchain-indexer/test/unit/bet_pass_bounding.test.js) can only
  * assert that the pass calls latchBetFeedClosed once per due feed; it cannot
  * prove that MariaDB evaluates the WHERE clause the way the guard intends, and
  * that evaluation IS the property. This is the same reasoning the indexer's

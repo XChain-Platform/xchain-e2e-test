@@ -454,7 +454,7 @@ describe('AT5 barrier drill: which escape opened the block (row 56)', function (
     describe('a block the barrier never gated', function () {
 
         // `blockMayReadPrice` is `blockTransactions.length > 0`
-        // (src/chain/priceReadPredicate.js), reached through
+        // (src/chain/price_read_predicate.js), reached through
         // `_evaluatePriceBarrier`. A
         // transaction-free block is committed without the barrier ever being
         // consulted, and on TDOGE that is nearly every block: 289 of run 5's 290.
@@ -462,7 +462,7 @@ describe('AT5 barrier drill: which escape opened the block (row 56)', function (
             .map((s) => Object.assign({}, s, { streamWatermark: 1788982085, priceSyncMaxTimestamp: 0 }));
 
         it('mirrors the shipped predicate on what "applies" means', function () {
-            const pred = sibling('chain/priceReadPredicate.js');
+            const pred = sibling('chain/price_read_predicate.js');
             if (!pred) return this.skip();
             assert.strictEqual(pred.blockMayReadPrice([]), false, 'an empty block reads no price');
             assert.strictEqual(pred.blockMayReadPrice([{}]), true);

@@ -14,7 +14,7 @@
  * fixed role keys reused across every chain.
  *
  * This is the LIVE-stack analogue of the indexer scenario 14 corpus
- * (xchain-indexer/test/integration/scenarios/14-multi-chain-parity.test.js):
+ * (xchain-indexer/test/integration/scenarios/14_multi_chain_parity.test.js):
  * the SAME action sequence is replayed through the FULL pipeline (encoder →
  * broadcast → coin node → decoder → indexer) on BTC, LTC and DOGE, and the
  * resulting indexer state must agree (compare.js).

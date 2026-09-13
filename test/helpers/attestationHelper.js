@@ -82,7 +82,7 @@ function getSessionStakedValidators() {
     return sessionStakedValidators.slice();
 }
 
-// Mirror of xchain-indexer attest.js _computeResponsibleSet: picks the request's
+// Mirror of xchain-indexer attest.js computeResponsibleSet: picks the request's
 // deterministic responsible signer set so the test signs with exactly the keys the
 // indexer will accept. Sorts the staked validator pool by SHA256(request_id || pubkey);
 // at/above SWQ activation (regtest/testnet → block 0) dedupes by staking source (one

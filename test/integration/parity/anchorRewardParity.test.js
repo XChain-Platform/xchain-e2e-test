@@ -62,7 +62,7 @@ function hubXancpub(b, publisher) {
     return StateAnchorPublisher.prototype._attestationCanonical.call({}, b, publisher);
 }
 function idxXancpub(d) {
-    return Anchor.prototype._rewardCanonical.call({}, d);
+    return Anchor.prototype.rewardCanonical.call({}, d);
 }
 
 // One logical bundle attestation in BOTH the hub `b` shape (the bundle header the

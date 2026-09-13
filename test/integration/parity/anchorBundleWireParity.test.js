@@ -19,7 +19,7 @@
  *
  *   producer  xchain-hub      StateAnchorPublisher._buildV7Payload (method name
  *                             unchanged; only the version byte it writes moved)
- *   parser    xchain-indexer  actions/anchor.js _parseBundle (formats[0])
+ *   parser    xchain-indexer  actions/anchor.js parseBundle (formats[0])
  *   parser    xchain-sdk      light.parseAnchorV0
  *
  * A one-field drift between any two forks consensus silently: the indexer rebuilds

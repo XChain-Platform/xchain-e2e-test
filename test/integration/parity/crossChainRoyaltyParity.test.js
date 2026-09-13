@@ -15,8 +15,8 @@
  * stay byte-identical or the federation forks on the first royalty-bearing match:
  *   hub CrossChainDexEngine._canonicalMatch   (live signing)
  *   hub StateAnchorPublisher._matchCanonical  (archive verification)
- *   indexer cross_settle._canonical           (settlement verification)
- *   indexer recovery._matchCanonical          (full-parse recovery)
+ *   indexer cross_settle.canonical           (settlement verification)
+ *   indexer recovery.matchCanonical          (full-parse recovery)
  * The activation gate itself is a 2-repo twin module (like anchor_reward_activation)
  * whose map is registered in the canonical xchain-documentation/protocol/constants.js;
  * this suite pins twin byte-identity, map equality against the canonical SoT, verdict
@@ -49,8 +49,8 @@ function canonicals(m) {
     return {
         hubEngine:   CrossChainDexEngine.prototype._canonicalMatch.call({}, m, m.finalizing_view || 0),
         hubArchive:  StateAnchorPublisher.prototype._matchCanonical.call({}, m),
-        idxSettle:   Cross_Settle.prototype._canonical.call({}, m),
-        idxRecovery: AnchorRecovery.prototype._matchCanonical.call({}, m),
+        idxSettle:   Cross_Settle.prototype.canonical.call({}, m),
+        idxRecovery: AnchorRecovery.prototype.matchCanonical.call({}, m),
     };
 }
 
