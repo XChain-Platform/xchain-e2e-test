@@ -17,7 +17,7 @@
 # repository you already have: it mirror-clones the source into a throwaway
 # directory, rewrites THAT, and verifies the result. The force-push that makes
 # the rewrite real is a deliberate manual step, printed at the end and spelled
-# out in claude/reports/launch/HISTORY-SCRUB-RUNBOOK.md in the platform repo.
+# out in the platform repo's launch history-scrub runbook.
 #
 # The rehearsal is the point of the script, not a limitation of it. A history
 # rewrite changes every commit SHA from the earliest rewritten commit forward,
@@ -221,10 +221,10 @@ another script: every commit SHA downstream of the earliest rewritten commit
 changes, so every clone, every open branch, and every SHA cited in the platform
 ledger or in a report stops resolving.
 
-Do not run the following from here. Work through
-claude/reports/launch/HISTORY-SCRUB-RUNBOOK.md, which covers the backup ref, the
-collaborator freeze, the sibling repos that vendor this one, and the GitHub-side
-cleanup that a force-push alone does not do:
+Do not run the following from here. Work through the platform repo's launch
+history-scrub runbook, which covers the backup ref, the collaborator freeze, the
+sibling repos that vendor this one, and the GitHub-side cleanup that a
+force-push alone does not do:
 
   git -C ${MIRROR} push --force --mirror <origin-url>
 
