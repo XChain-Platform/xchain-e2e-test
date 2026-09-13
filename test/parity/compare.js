@@ -62,7 +62,7 @@ const GLOBAL_COLUMN_EXCLUSIONS = [
 ];
 
 // Per-coin protocol role addresses (regtest constants from
-// xchain-indexer/src/configs/<CODE>.js, case 'regtest'). These are the ONLY
+// xchain-indexer/src/coins/<CODE>.js, network 'regtest'). These are the ONLY
 // addresses that legitimately differ across chains for an identical corpus
 // (e.g. the xchain-fee-mode issuance fee is credited to the chain's DONATE1, so
 // index_addresses grows a per-coin row). Normalised to role tags before

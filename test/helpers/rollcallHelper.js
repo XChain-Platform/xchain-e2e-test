@@ -2055,7 +2055,9 @@ async function driveEpoch(ctx, epoch, opts){
 async function protocolRewardAddress(ctx){
     const coin = (global.COIN_CODE || 'BTC');
     const net  = (global.NETWORK || 'regtest');
-    const rel  = 'src/configs/' + coin + '.js';
+    // One adapter for every chain: the per-coin config shims are gone, and the
+    // coin bundle is now the source the indexer itself reads through.
+    const rel  = 'src/coins/to_indexer_config.js';
 
     // ABSENCE MAY SKIP, PRESENT-BUT-BROKEN MUST BE RED, which is why the
     // resolve and the require are separated. Wrapping the require in a
@@ -2067,7 +2069,7 @@ async function protocolRewardAddress(ctx){
     // as "no reward address configured", and the drill would then decline to
     // fund the pool and pass having tested nothing.
     const cfg = require(_resolveSibling('xchain-indexer', rel));
-    const c   = (cfg && typeof cfg.getConfig === 'function') ? cfg.getConfig(net) : null;
+    const c   = (cfg && typeof cfg.toIndexerConfig === 'function') ? cfg.toIndexerConfig(coin, net) : null;
     if(c && c.ADDRESS && c.ADDRESS.REWARD) return String(c.ADDRESS.REWARD);
     return null;
 }
