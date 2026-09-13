@@ -154,7 +154,13 @@ const WINDOW_KEY_WALL_CLOCK = 'finalized_at';
 // Every mirror barrier the indexer has a grace for, read from the indexer itself so
 // this venue cannot fall behind a barrier being added. The names are the keys; the
 // frozen values are irrelevant here because the venue sets all of them to zero.
-const { HUB_SYNC_WATERMARK_GRACE_S } = require('../../../xchain-indexer/src/hub_db_sync.js');
+// Resolved from BRIDGE_RAIL_REPO_ROOT when a drive has pinned one, because this venue spawns
+// the indexer out of that root and reading the barrier names from the SHARED checkout instead
+// would describe a different build than the one running. Unset keeps the relative path exactly.
+const { HUB_SYNC_WATERMARK_GRACE_S } = require(
+    process.env.BRIDGE_RAIL_REPO_ROOT
+        ? require('path').join(process.env.BRIDGE_RAIL_REPO_ROOT, 'xchain-indexer', 'src', 'hub_db_sync.js')
+        : '../../../xchain-indexer/src/hub_db_sync.js');
 const MIRROR_BARRIERS = Object.freeze(Object.keys(HUB_SYNC_WATERMARK_GRACE_S));
 
 // THE GRACE TABLE IS NOT THE FAMILY, and the difference is one whole member.
@@ -1871,6 +1877,13 @@ class AttestMirrorVenue {
         // attestation BATCH publisher, which needs a signer module, a DOGE encoder and
         // a funded DOGE address that only a drill can supply; see the buildHubEnv call.
         this.hubExtraEnv     = opts.hubExtraEnv || null;
+        // The same seam for every INDEXER child, and it exists for the bridge rail: the
+        // destination indexer's D2 escrow-proof client resolves the ORIGIN chain's
+        // endpoint from `<COIN>_INDEXER_URL` in its own environment, which no venue
+        // indexer can be told about any other way (a child's environment is built from
+        // scratch here, never inherited). Null for every existing caller, so their
+        // children's environments are byte-identical to what they were.
+        this.indexerExtraEnv = opts.indexerExtraEnv || null;
         // Lower-only knobs; a caller raising the round timeout must raise the
         // request-seen window with it, so the venue refuses that below.
         this.attestationPollMs = opts.attestationPollMs === undefined
@@ -1894,6 +1907,33 @@ class AttestMirrorVenue {
         // Opt out of the reusable indexer databases; see the naming site for why
         // nothing should want this without saying so.
         this.freshIndexers   = opts.freshIndexers === true;
+        // REPLAY THE CHAIN INSTEAD OF COPYING THE STANDING NODE'S LEDGER, and it is a
+        // different request from `freshIndexers`: that one asks for a fresh DATABASE and
+        // then seeds it from the standing node all the same, so the ledger it produces is
+        // the standing node's ledger either way. This one asks for a different LEDGER:
+        // the venue indexer builds its own by parsing every block under the code in this
+        // tree, which is the only way to observe a rule that came in AFTER the standing
+        // node parsed its history grading the actions that predate it.
+        //
+        // The bridge rail is why it exists (spec xchain-bridge.md, dq 5, ruled (a)
+        // 2026-09-12). DOGE regtest carries an XCHAIN token row from a pre-D62 `mintGas`
+        // self-seed, a broadcast ISSUE the shipped rules now refuse unconditionally off
+        // BTC. A clone inherits that row and AT1's stated precondition (no XCHAIN row on
+        // the destination ledger) cannot be asserted; a replay refuses the historical
+        // ISSUE and holds no row, which is the ledger AT1 describes.
+        //
+        // IT IS EXPENSIVE AND IT RE-GRADES, which is why it is opt-in and named. Every
+        // block is parsed again (DOGE regtest was 10648 blocks on 2026-09-12), and every
+        // action downstream of the refused one is graded under today's rules rather than
+        // the rules that were live when it was first parsed. Both effects are confined to
+        // this venue's disposable database; no standing container and no standing database
+        // is touched either way.
+        this.replayChain     = opts.replayChain === true;
+        // Seed THIS venue's own COIN/USD pair into the hub databases it borrowed; see
+        // the attach branch in start() for the barrier this unblocks and why it is not
+        // the default. Meaningless without `attachHubs`, since a venue that owns its
+        // hubs already seeds them.
+        this.seedAttachedHubPrices = opts.seedAttachedHubPrices === true;
         this.oracleEpochStart = opts.oracleEpochStart || (Date.now() - 60_000);
         this.btcIndexerApiUrl = opts.btcIndexerApiUrl || null;
 
@@ -2005,6 +2045,22 @@ class AttestMirrorVenue {
             // Borrowed, not owned: the records carry the apiPort, apiUrl, index and
             // pubkey the indexer plumbing reads; procs and proxies stay the owner's.
             this.hubs = this.attachHubs.slice();
+            // AND THE BORROWED HUBS WERE SEEDED FOR THE OWNER'S COIN, NOT THIS ONE.
+            // `_seedHubPrices` runs inside `_startHubs`, so an attached venue on a
+            // DIFFERENT coin inherits hub databases holding the owner's COIN/USD and no
+            // row at all for its own. Its mirror then carries only whatever the venue
+            // oracle published for that pair, and `waitForVenuePrices` judges every
+            // COIN/USD against one BTC-sized canonical: a real DOGE price of about 0.085
+            // is outside that band by six orders of magnitude, so the barrier waits out
+            // its whole budget and fails as "the venue hubs never published a usable
+            // oracle price" when the real fact is that nobody seeded this coin's pair.
+            // Measured on the bridge rail 2026-09-12, where the DOGE venue attached to
+            // the four BTC venue hubs.
+            //
+            // OPT-IN rather than automatic, because seeding a pair moves the fee every
+            // priced action on that chain computes, and an existing attach-mode drill
+            // that is passing against the live price must keep getting exactly that.
+            if (this.seedAttachedHubPrices) await this._seedHubPrices();
         } else {
             await this._startHubs(ports, stamp);
         }
@@ -2164,7 +2220,14 @@ class AttestMirrorVenue {
                 // Pass `freshIndexers: true` for a drill that genuinely needs a node
                 // with no history. Nothing needs it today, and a drill reaching for
                 // it should say why, because it is buying back the whole replay.
-                indexerDbName: DB_PREFIX + this.label + (this.freshIndexers ? '_' + stamp : '') + '_Ixr' + i,
+                // A REPLAYED ledger gets its own STABLE name rather than a stamp. It has to
+                // be separate from the cloned one, because the two disagree about the same
+                // chain by construction and mixing them is the divergence this naming exists
+                // to prevent. It has to be stable because the replay is the whole chain from
+                // genesis and a stamped name would pay for it again on every run; resuming
+                // one costs only the blocks added since.
+                indexerDbName: DB_PREFIX + this.label + (this.freshIndexers ? '_' + stamp : '') +
+                    (this.replayChain ? '_Rpl' : '') + '_Ixr' + i,
                 mirrorDbName:  DB_PREFIX + this.label + (this.freshIndexers ? '_' + stamp : '') + '_Mirror' + i,
                 proc: null,
                 connector: null
@@ -2241,6 +2304,21 @@ class AttestMirrorVenue {
     }
 
     async _cloneChainDbFromStanding(ix) {
+        // THE REPLAY PATH: make the database and hand it over empty. `XChainIndexer.start()`
+        // calls verifyTables() on its own indexer database, so it builds its schema and then
+        // parses the chain from genesis under this tree's rules. See the `replayChain`
+        // comment in the constructor for what that buys and what it costs.
+        if (this.replayChain) {
+            await this._conn.query('CREATE DATABASE IF NOT EXISTS `' +
+                ident(ix.indexerDbName, 'database name') + '`');
+            console.log('attestMirrorVenue[' + this.label + ']: indexer ' + ix.index +
+                        ' REPLAYS the chain into ' + ix.indexerDbName + ' rather than cloning the ' +
+                        'standing node. Its ledger is this tree\'s grading of every block, so it ' +
+                        'may disagree with the standing node about actions a shipped rule now ' +
+                        'refuses, and the first run pays the whole replay.');
+            return;
+        }
+
         const srcName = process.env.INDEXER_DB_NAME;
         if (!srcName || !process.env.INDEXER_DB_USER || !process.env.INDEXER_DB_PASS)
             throw new Error(
@@ -2428,6 +2506,9 @@ class AttestMirrorVenue {
             // attribution also needs an unaffected peer to advance past the parked node.
             graces:  Object.assign({}, this.graces, this.indexerGraces[i] || {}),
             feeDestination: this._live.feeDestination,
+            // Applied LAST by buildIndexerEnv, so a drill can override anything above
+            // deliberately. See the constructor for the one subsystem that needs it.
+            extraEnv: this.indexerExtraEnv,
             path: process.env.PATH,
             home: process.env.HOME,
             // PER-INDEX env, layered over everything above, and null when no overlay was
@@ -2910,10 +2991,21 @@ class AttestMirrorVenue {
      * a row shaped unlike the ones under test. Pass a row read back off a hub, minus its
      * `id`, with the fields the drill wants changed.
      *
+     * WHICH MIRRORED TABLE, and why it is a parameter rather than the one name this method
+     * was born with. Every mirrored hub table travels the same path, and a drill that has to
+     * inject a row the federation would never sign needs whichever table its own leg lives in:
+     * the bridge rail's AT4 perturbs a `bridge_transfers` row (a bad signature, a pubkey
+     * outside the snapshot, a foreign network, an out leg over the escrow) and asserts the
+     * destination applies none of them. Defaulting to `attestation_responses` with its own
+     * natural key keeps every existing caller byte-identical; the first run of AT4 wrote
+     * `bridge_transfers` columns into `attestation_responses` and died on
+     * `Unknown column 'transfer_id' in 'INSERT INTO'`, which is what this closes.
+     *
      * @param {object} row      column name -> value; keys are validated as identifiers
-     * @param {object} [opts]   `{hubs: [i], reconnect: false}`; hubs defaults to every
-     *                          hub an indexer actually follows, which is the only set
-     *                          that can reach a follower at all
+     * @param {object} [opts]   `{hubs: [i], reconnect: false, table, key}`; hubs defaults to
+     *                          every hub an indexer actually follows, which is the only set
+     *                          that can reach a follower at all; `table` defaults to
+     *                          `attestation_responses` and `key` to that table's natural key
      * @returns {Promise<Array>} one `{hub, inserted, id}` per hub written
      */
     async injectMirrorRow(row, opts) {
@@ -2923,6 +3015,17 @@ class AttestMirrorVenue {
             throw new Error('attestMirrorVenue: injectMirrorRow was given no columns to write');
         }
         for (const c of cols) ident(c, 'mirror row column');
+        const table = ident(String(o.table || 'attestation_responses'), 'mirror table');
+        const keyCols = (Array.isArray(o.key) && o.key.length)
+            ? o.key.map((c) => ident(c, 'mirror key column'))
+            : ['network', 'request_id', 'effective_time'];
+        for (const c of keyCols) {
+            if (!cols.includes(c)) {
+                throw new Error('attestMirrorVenue: injectMirrorRow cannot read back a ' + table +
+                    ' row without its key column ' + c + ', so it cannot say whether the row ' +
+                    'is reachable at all');
+            }
+        }
 
         const hubIndexes = (Array.isArray(o.hubs) && o.hubs.length)
             ? o.hubs.slice()
@@ -2938,7 +3041,7 @@ class AttestMirrorVenue {
             // hub that already holds the row must be ordinary traffic rather than an
             // error the caller has to distinguish from a real failure.
             const res = await this._conn.query(
-                'INSERT IGNORE INTO `' + db + '`.attestation_responses ' +
+                'INSERT IGNORE INTO `' + db + '`.`' + table + '` ' +
                 '(' + cols.map((c) => '`' + c + '`').join(', ') + ') ' +
                 'VALUES (' + cols.map(() => '?').join(', ') + ')',
                 cols.map((c) => (row[c] === undefined ? null : row[c])));
@@ -2946,9 +3049,9 @@ class AttestMirrorVenue {
             // insert. The id is what the follower pages on, so a drill that cannot name
             // it cannot say the row was reachable at all.
             const back = await this._conn.query(
-                'SELECT id FROM `' + db + '`.attestation_responses ' +
-                'WHERE network = ? AND request_id = ? AND effective_time = ? LIMIT 1',
-                [row.network, row.request_id, row.effective_time]);
+                'SELECT id FROM `' + db + '`.`' + table + '` ' +
+                'WHERE ' + keyCols.map((c) => '`' + c + '` = ?').join(' AND ') + ' LIMIT 1',
+                keyCols.map((c) => row[c]));
             written.push({
                 hub:      hubIndex,
                 inserted: !!(res && Number(res.affectedRows) > 0),
