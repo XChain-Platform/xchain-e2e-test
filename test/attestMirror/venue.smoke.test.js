@@ -48,7 +48,7 @@ const { AttestMirrorVenue, DEFAULT_HUB_COUNT, DEFAULT_INDEXER_COUNT } = require(
 // The version the mirror consumer demands. Read from the indexer's own copy
 // rather than typed here: the number moves with the schema, and a literal would
 // have to be remembered at every bump while the code that matters would not.
-const HUB_SCHEMA_VERSION = require('../../../xchain-indexer/src/hub-schema-version.js').HUB_SCHEMA_VERSION
+const HUB_SCHEMA_VERSION = require('../../../xchain-indexer/src/hub/hub-schema-version.js').HUB_SCHEMA_VERSION
 
 describe('attest-response mirror venue: it stands up', function () {
     // Five hub processes and two indexers, each bootstrapping a schema on an

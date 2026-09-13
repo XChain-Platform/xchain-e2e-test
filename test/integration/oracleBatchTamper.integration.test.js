@@ -109,7 +109,7 @@ const {
 const INDEXER_ROOT = path.resolve(__dirname, '../../../xchain-indexer');
 const Slash   = require(path.join(INDEXER_ROOT, 'src', 'actions', 'slash.js'));
 const eq      = require(path.join(INDEXER_ROOT, 'src', 'equivocation_header.js'));
-const ed25519 = require(path.join(INDEXER_ROOT, 'src', 'ed25519.js'));
+const ed25519 = require(path.join(INDEXER_ROOT, 'src', 'consensus', 'ed25519.js'));
 
 // ---------------------------------------------------------------------------
 // The drill's own numbers

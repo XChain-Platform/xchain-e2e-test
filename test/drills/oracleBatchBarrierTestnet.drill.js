@@ -141,7 +141,7 @@ const axios = require('axios');
 const { OracleBatchReplayNode, connectTo, verdictTables } = require('../helpers/oracleBatchReplay');
 
 // The price barrier's watermark grace, in seconds, as
-// xchain-indexer/src/hub_db_sync.js freezes it (HUB_SYNC_WATERMARK_GRACE_S.price
+// xchain-indexer/src/hub/hub_db_sync.js freezes it (HUB_SYNC_WATERMARK_GRACE_S.price
 // = 4800). Copied rather than imported so this drill does not pull the whole
 // indexer module into its process, and recorded in the result so a reader can
 // see which value the run reasoned about if the constant ever moves.
@@ -774,7 +774,7 @@ function loadProtocolTime(repoRoot) {
     // Resolving and loading are therefore separate steps: only the resolve is
     // guarded, and the load is unguarded so a module that exists and throws stops
     // the run instead of quietly downgrading every block to "clock unavailable".
-    const modulePath = path.join(key, 'xchain-indexer', 'src', 'protocol_time.js');
+    const modulePath = path.join(key, 'xchain-indexer', 'src', 'consensus', 'protocol_time.js');
     let present = true;
     try {
         require.resolve(modulePath);
@@ -806,7 +806,7 @@ async function resolveBarrierBlockTime(conn, dbName, height, rawBlockTime, netwo
     const mod = loadProtocolTime(repoRoot);
     if (!mod) {
         return { blockTime: null, source: 'unavailable',
-                 note: 'xchain-indexer/src/protocol_time.js could not be loaded from ' + repoRoot +
+                 note: 'xchain-indexer/src/consensus/protocol_time.js could not be loaded from ' + repoRoot +
                        ', so the clock the barrier gates on is unknown' };
     }
     if (!mod.isProtocolTimeMtpActive(network)) {

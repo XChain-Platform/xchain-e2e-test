@@ -40,8 +40,8 @@ const { NO_PRICE_SEED } = require('../helpers/xchainPriceConstants')
 // skip, matching the cross-repo guard convention used elsewhere.
 const INDEXER_DIR = process.env.XCHAIN_INDEXER_DIR ||
     path.join(__dirname, '..', '..', '..', 'xchain-indexer')
-const QUERY_PATH = path.join(INDEXER_DIR, 'src', 'xchainPriceQuery.js')
-const PRICE_PATH = path.join(INDEXER_DIR, 'src', 'xchainPrice.js')
+const QUERY_PATH = path.join(INDEXER_DIR, 'src', 'consensus', 'xchainPriceQuery.js')
+const PRICE_PATH = path.join(INDEXER_DIR, 'src', 'consensus', 'xchainPrice.js')
 const HAVE_DERIVATION = fs.existsSync(QUERY_PATH) && fs.existsSync(PRICE_PATH)
 
 const GAS_TICK = 'XCHAIN'

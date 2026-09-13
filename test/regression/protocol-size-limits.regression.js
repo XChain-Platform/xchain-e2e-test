@@ -30,24 +30,30 @@ const protocol = require('../../../xchain-documentation/protocol/constants.js')
 const encoderValidator = require('../../../xchain-encoder/src/validator.js')
 const XChainDecoder     = require('../../../xchain-decoder/src/XChainDecoder.js')
 const sdkValidator      = require('../../../xchain-sdk/src/validator.js')
-const indexerDeploy     = require('../../../xchain-indexer/src/actions/deploy.js')
-const indexerXcall      = require('../../../xchain-indexer/src/actions/xcall.js')
+const indexerDeploy     = require('../../../xchain-indexer/src/actions/deploy/index.js')
+const indexerXcall      = require('../../../xchain-indexer/src/actions/xcall/index.js')
 const indexerXexec      = require('../../../xchain-indexer/src/actions/xexec.js')
 const hubConstants      = require('../../../xchain-hub/src/constants.js')
 const XChainVM          = require('../../../xchain-vm/src/index.js')
 const explorerVmQuery   = require('../../../xchain-explorer/src/vm-query.js')
 
-// The indexer's execute.js re-validates VM_MAX_CALL_DEPTH/VM_MIN_CALL_GAS host-side
+// The indexer's EXECUTE handler re-validates VM_MAX_CALL_DEPTH/VM_MIN_CALL_GAS host-side
 // as un-exported `const`s. Those consts derive from the vendored
-// ../protocol/constants.js rather than bare literals, so assert the source is
+// src/protocol/constants.js rather than bare literals, so assert the source is
 // wired to the vendored module (no bare literal can re-enter) and read the effective
 // values from that same vendored copy. Byte-identity of the vendored copy to the
 // canonical source is asserted separately below.
+//
+// The `../` run in the require is matched rather than counted: the handler moved from
+// src/actions/execute.js to src/actions/execute/index.js and reaches the same vendored
+// module one directory further up. Pinning the exact run would fail on a pure move,
+// which is not what this guard is for; what it must catch is the require disappearing
+// in favour of a bare literal, and any depth of `../` still catches that.
 function readIndexerExecuteCallCaps() {
     const src = fs.readFileSync(
-        path.join(__dirname, '../../../xchain-indexer/src/actions/execute.js'), 'utf8')
-    assert.ok(/require\((['"])\.\.\/protocol\/constants(?:\.js)?\1\)/.test(src),
-        'indexer execute.js no longer requires the vendored ../protocol/constants module')
+        path.join(__dirname, '../../../xchain-indexer/src/actions/execute/index.js'), 'utf8')
+    assert.ok(/require\((['"])(?:\.\.\/)+protocol\/constants(?:\.js)?\1\)/.test(src),
+        'indexer EXECUTE handler no longer requires the vendored protocol/constants module')
     assert.ok(/MAX_CALL_DEPTH\s*=\s*[A-Za-z_$][\w$]*\.VM_MAX_CALL_DEPTH/.test(src),
         'indexer execute.js MAX_CALL_DEPTH is not derived from the vendored VM_MAX_CALL_DEPTH constant')
     assert.ok(/MIN_CALL_GAS\s*=\s*[A-Za-z_$][\w$]*\.VM_MIN_CALL_GAS/.test(src),
@@ -333,7 +339,7 @@ describe('Protocol size-limit drift guard', () => {
     describe('Chunked DEPLOY caps (MAX_DEPLOY_CHUNKS / MAX_DEPLOYCHUNK_PART_BYTES)', () => {
 
         const chunkHelper        = require('../../../xchain-sdk/src/chunkHelper.js')
-        const indexerDeployChunk = require('../../../xchain-indexer/src/actions/deploy_chunk.js')
+        const indexerDeployChunk = require('../../../xchain-indexer/src/actions/deploy/deploy_chunk.js')
 
         it('[regression:p0] MAX_DEPLOY_CHUNKS === canonical across SDK + indexer', () => {
             assert.strictEqual(chunkHelper.MAX_DEPLOY_CHUNKS, protocol.MAX_DEPLOY_CHUNKS,

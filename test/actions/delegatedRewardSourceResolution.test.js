@@ -12,7 +12,7 @@
 //
 // Validates the indexer reward-source resolver against REAL on-chain
 // delegated-key data, covering the fixes in:
-//   - xchain-indexer src/stake-source.js   (d0abcfd: archive/recovery leg)
+//   - xchain-indexer src/api/stake-source.js   (d0abcfd: archive/recovery leg)
 //   - xchain-indexer src/db.js             (828db2d: reward-writer leg shares
 //                                            the identical active-row predicates)
 //
@@ -55,10 +55,10 @@ function loadStakeSourceModule() {
     const localFixture = path.resolve(__dirname, 'stakeSourceMaster.fixture.js')
     if (fs.existsSync(localFixture)) return require(localFixture)
     const candidates = [
-        process.env.XCHAIN_INDEXER_PATH && path.join(process.env.XCHAIN_INDEXER_PATH, 'src/stake-source.js'),
-        path.resolve(__dirname, '../../../xchain-indexer/src/stake-source.js'),
-        path.resolve(__dirname, '../../../../xchain-indexer/src/stake-source.js'),
-        path.resolve(__dirname, '../../../../../modules/xchain-indexer/src/stake-source.js')
+        process.env.XCHAIN_INDEXER_PATH && path.join(process.env.XCHAIN_INDEXER_PATH, 'src/api/stake-source.js'),
+        path.resolve(__dirname, '../../../xchain-indexer/src/api/stake-source.js'),
+        path.resolve(__dirname, '../../../../xchain-indexer/src/api/stake-source.js'),
+        path.resolve(__dirname, '../../../../../modules/xchain-indexer/src/api/stake-source.js')
     ].filter(Boolean)
     for (const p of candidates) if (fs.existsSync(p)) return require(p)
     throw new Error('cannot load master stake-source.js; place stakeSourceMaster.fixture.js beside this test or set XCHAIN_INDEXER_PATH')
@@ -70,16 +70,16 @@ const { getStakeSourceByPubkey } = loadStakeSourceModule()
 // That method only uses this.doQuery + this.getStatusId, so we bind it to the
 // same adapter rather than constructing a full Database. Requires the master
 // src dir to be present (XCHAIN_INDEXER_PATH inside the e2e image, or adjacent
-// in the monorepo); db.js's only non-builtin deps are mariadb + ./stateHash.
+// in the monorepo); src/db/index.js's only non-builtin deps are mariadb + ./stateHash.
 function loadIndexerDbModule() {
     const candidates = [
-        process.env.XCHAIN_INDEXER_PATH && path.join(process.env.XCHAIN_INDEXER_PATH, 'src/db.js'),
-        path.resolve(__dirname, '../../../xchain-indexer/src/db.js'),
-        path.resolve(__dirname, '../../../../xchain-indexer/src/db.js'),
-        path.resolve(__dirname, '../../../../../modules/xchain-indexer/src/db.js')
+        process.env.XCHAIN_INDEXER_PATH && path.join(process.env.XCHAIN_INDEXER_PATH, 'src/db/index.js'),
+        path.resolve(__dirname, '../../../xchain-indexer/src/db/index.js'),
+        path.resolve(__dirname, '../../../../xchain-indexer/src/db/index.js'),
+        path.resolve(__dirname, '../../../../../modules/xchain-indexer/src/db/index.js')
     ].filter(Boolean)
     for (const p of candidates) if (fs.existsSync(p)) return require(p)
-    throw new Error('cannot load master xchain-indexer db.js; set XCHAIN_INDEXER_PATH or run in the monorepo')
+    throw new Error('cannot load master xchain-indexer src/db/index.js; set XCHAIN_INDEXER_PATH or run in the monorepo')
 }
 const MasterIndexerDb = loadIndexerDbModule()
 

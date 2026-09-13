@@ -39,7 +39,7 @@
  *   asserts, so the fault is provably in delivery to this node.
  *
  *   THE GRACE makes the stall ATTRIBUTABLE. Measured in
- *   `xchain-indexer/src/hub_db_sync.js`: every mirror barrier tests
+ *   `xchain-indexer/src/hub/hub_db_sync.js`: every mirror barrier tests
  *   `streamWatermark >= blockTime + grace`, against one GLOBAL watermark, so the
  *   grace is the only per-barrier term in the system. With `attestResponse` raised
  *   on this indexer and every other barrier left at 0, the attest-response barrier

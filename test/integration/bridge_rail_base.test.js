@@ -613,8 +613,8 @@ describe('XBRIDGE acceptance drive on the BTC/DOGE regtest rail (AT1, AT2, AT5, 
             // compare one build's output against another build's expectations. Unset keeps the
             // relative path, so a drive that pins nothing behaves exactly as before.
             const genesisPath  = process.env.BRIDGE_RAIL_REPO_ROOT
-                ? require('path').join(process.env.BRIDGE_RAIL_REPO_ROOT, 'xchain-indexer', 'src', 'genesis.js')
-                : '../../../xchain-indexer/src/genesis.js';
+                ? require('path').join(process.env.BRIDGE_RAIL_REPO_ROOT, 'xchain-indexer', 'src', 'chain', 'genesis.js')
+                : '../../../xchain-indexer/src/chain/genesis.js';
             const Genesis      = require(genesisPath);
             // THE FILE THIS CASE'S EXPECTATIONS CAME FROM, resolved rather than described,
             // because drive 13 read them out of the shared checkout while the row under test

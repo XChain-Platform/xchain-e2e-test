@@ -26,7 +26,7 @@ const assert = require('assert');
 const path   = require('path');
 const ROOT   = path.resolve(__dirname, '../../../..');
 
-const M       = require(path.join(ROOT, 'xchain-indexer/src/merkle.js'));
+const M       = require(path.join(ROOT, 'xchain-indexer/src/consensus/merkle.js'));
 const idxSC   = require(path.join(ROOT, 'xchain-indexer/src/stateCommitment.js'));
 const syncSC  = require(path.join(ROOT, 'xchain-sync/src/stateCommitment.js'));
 const CC      = require(path.join(ROOT, 'xchain-sync/src/consensus-constants.js'));

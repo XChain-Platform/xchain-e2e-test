@@ -360,7 +360,7 @@ function gatesForEpoch(epochHeight, network){
 
 // sha256 of the GATES field EXACTLY as carried, which is what the v1 canonical
 // commits to. Spelled here rather than borrowed from
-// xchain-indexer/src/rollcall_canonical.js on purpose: the point of this harness
+// xchain-indexer/src/actions/rollcall/rollcall_canonical.js on purpose: the point of this harness
 // is to be an INDEPENDENT implementation of the bytes the three shipped sites
 // build, pinned against the frozen vector, so borrowing the very function under
 // test would make the vector check tautological.

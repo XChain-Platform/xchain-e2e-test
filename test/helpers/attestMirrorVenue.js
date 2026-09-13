@@ -159,8 +159,8 @@ const WINDOW_KEY_WALL_CLOCK = 'finalized_at';
 // would describe a different build than the one running. Unset keeps the relative path exactly.
 const { HUB_SYNC_WATERMARK_GRACE_S } = require(
     process.env.BRIDGE_RAIL_REPO_ROOT
-        ? require('path').join(process.env.BRIDGE_RAIL_REPO_ROOT, 'xchain-indexer', 'src', 'hub_db_sync.js')
-        : '../../../xchain-indexer/src/hub_db_sync.js');
+        ? require('path').join(process.env.BRIDGE_RAIL_REPO_ROOT, 'xchain-indexer', 'src', 'hub', 'hub_db_sync.js')
+        : '../../../xchain-indexer/src/hub/hub_db_sync.js');
 const MIRROR_BARRIERS = Object.freeze(Object.keys(HUB_SYNC_WATERMARK_GRACE_S));
 
 // THE GRACE TABLE IS NOT THE FAMILY, and the difference is one whole member.
@@ -1072,7 +1072,7 @@ class P2pDelayProxy {
  * WHERE IT HAS TO SIT. An indexer reaches its hub's mirror through exactly one
  * coordinate, `HUB_API_URL`: the snapshot route is `<hubUrl>/hub-db/snapshot/<table>`
  * and the live stream is `ws://<host>/hub-db/subscribe` derived from the same value
- * (`xchain-indexer/src/hub_db_sync.js`). One proxy in front of that value therefore
+ * (`xchain-indexer/src/hub/hub_db_sync.js`). One proxy in front of that value therefore
  * governs the whole mirror for one indexer, and pointing only that indexer at it is
  * what makes the fault per-edge rather than per-hub: indexer 0's feed of hub 2 can
  * be starved while indexer 1 reads the same hub normally.
@@ -2981,7 +2981,7 @@ class AttestMirrorVenue {
      * a row that appears in the table by other means is announced to nobody, so a
      * follower sitting on a live WebSocket never hears about it. What delivers it is the
      * BOOTSTRAP: `attestation_responses` is a FULL_REPAGE table on the indexer side
-     * (xchain-indexer/src/hub_db_sync.js FULL_REPAGE_TABLES), so every reconnect
+     * (xchain-indexer/src/hub/hub_db_sync.js FULL_REPAGE_TABLES), so every reconnect
      * re-pages it from `since_id=0` and the injected row arrives with the rest.
      * Dropping each follower's proxied sockets is therefore part of the injection, not
      * a tidy-up, and it is the same mechanism `releaseMirrorTable` already relies on.

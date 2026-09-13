@@ -35,7 +35,9 @@
  *      review the fixture diff like a consensus change.
  *
  * Formats are discovered from the indexer SOURCE (this.formats[N] = '...' in
- * src/actions/*.js + the alias table in src/actions.js), so this suite can
+ * src/actions/<action>.js, or src/actions/<action>/index.js for an action that
+ * has grown its own directory, + the alias table in src/actions/index.js), so
+ * this suite can
  * never drift from the real parser tables. The indexer checkout is resolved
  * from XCHAIN_INDEXER_PATH or the monorepo sibling; the suite skips cleanly
  * when neither is present (standalone CI checkout).
@@ -55,7 +57,7 @@ const path = require('path');
 
 const INDEXER_PATH = process.env.XCHAIN_INDEXER_PATH
     || path.resolve(__dirname, '../../../xchain-indexer');
-const HAVE_INDEXER = fs.existsSync(path.join(INDEXER_PATH, 'src/actions.js'));
+const HAVE_INDEXER = fs.existsSync(path.join(INDEXER_PATH, 'src/actions/index.js'));
 
 const GOLDEN_PATH = path.join(__dirname, 'fixtures', 'field-golden-vectors.json');
 const GEN = process.env.GEN_FIELD_GOLDEN === '1';
@@ -71,10 +73,28 @@ function extractFormats(source) {
 function discoverActions() {
     const dir = path.join(INDEXER_PATH, 'src/actions');
     const actions = {};
-    for (const file of fs.readdirSync(dir).filter(f => f.endsWith('.js')).sort()) {
-        const formats = extractFormats(fs.readFileSync(path.join(dir, file), 'utf8'));
+    // An action is EITHER a flat <action>.js OR a directory <action>/index.js
+    // holding the handler plus its own helpers. Walking only the flat files
+    // would silently drop every action that has grown a directory, and the
+    // count assertions below would read that as a removal.
+    for (const ent of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+        let name, file;
+        if (ent.isDirectory()) {
+            name = ent.name;
+            file = path.join(dir, ent.name, 'index.js');
+            if (!fs.existsSync(file)) continue;            // not an action directory
+        } else if (ent.name.endsWith('.js')) {
+            // src/actions/index.js is the action REGISTRY and alias table, not
+            // an action; discoverAliases reads it instead.
+            if (ent.name === 'index.js') continue;
+            name = path.basename(ent.name, '.js');
+            file = path.join(dir, ent.name);
+        } else {
+            continue;
+        }
+        const formats = extractFormats(fs.readFileSync(file, 'utf8'));
         if (Object.keys(formats).length === 0) continue;   // system-synthesized action, no wire format
-        actions[path.basename(file, '.js').toUpperCase()] = formats;
+        actions[name.toUpperCase()] = formats;
     }
     return actions;
 }
@@ -90,7 +110,7 @@ function discoverActions() {
  * rather than passing vacuously.
  */
 function discoverAliases() {
-    const source = fs.readFileSync(path.join(INDEXER_PATH, 'src/actions.js'), 'utf8');
+    const source = fs.readFileSync(path.join(INDEXER_PATH, 'src/actions/index.js'), 'utf8');
     const aliases = {};
 
     const assigned = /this\.actionAliases\['([A-Z0-9_]+)'\]\s*=\s*'([A-Z0-9_]+)'/g;

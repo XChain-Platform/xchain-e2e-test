@@ -729,7 +729,7 @@ describe('attestMirrorVenue: mirror barrier graces', function () {
     // Turning down a subset is therefore not a partial win, it is a wedge, and it made
     // the attest-response barrier unobservable behind anchor_attest_barrier.
     const { HUB_SYNC_WATERMARK_GRACE_S } =
-        require('../../../../xchain-indexer/src/hub_db_sync.js')
+        require('../../../../xchain-indexer/src/hub/hub_db_sync.js')
 
     function indexerEnv(graces) {
         return buildIndexerEnv({

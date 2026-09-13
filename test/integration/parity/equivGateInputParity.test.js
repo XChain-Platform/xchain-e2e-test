@@ -137,7 +137,7 @@ describe('EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', function () 
         it('CHECKPOINT: both sides gate on snapshot_block (height)', function () {
             const hubArg = gateInputArg(srcOf('xchain-hub/src/StateCheckpointEngine.js'),
                 /isEquivHeaderActive\(cp\.snapshot_block/);
-            const idxArg = gateInputArg(srcOf('xchain-indexer/src/actions/anchor.js'),
+            const idxArg = gateInputArg(srcOf('xchain-indexer/src/actions/anchor/index.js'),
                 /isEquivHeaderActive\(d\['SNAPSHOT_BLOCK'\]/);
             assert.ok(hubArg, 'hub checkpoint gate input not found');
             assert.ok(idxArg, 'indexer checkpoint gate input not found');
@@ -149,7 +149,7 @@ describe('EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', function () 
         it('DEX: both sides gate on the match row snapshot_block (height)', function () {
             const hubArg = gateInputArg(srcOf('xchain-hub/src/CrossChainDexEngine.js'),
                 /isEquivHeaderActive\(r\.snapshot_block/);
-            const idxArg = gateInputArg(srcOf('xchain-indexer/src/actions/cross_settle.js'),
+            const idxArg = gateInputArg(srcOf('xchain-indexer/src/actions/cross_settle/index.js'),
                 /isEquivHeaderActive\(m\.snapshot_block/);
             assert.ok(hubArg && idxArg, 'DEX gate inputs must be found on both sides');
             assert.match(hubArg, /snapshot_block/);
@@ -162,7 +162,7 @@ describe('EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', function () 
                 /isEquivHeaderActive\(r\.snapshot_block/);
             const idxArgExec = gateInputArg(srcOf('xchain-indexer/src/actions/xexec.js'),
                 /isEquivHeaderActive\(c\.snapshot_block/);
-            const idxArgCall = gateInputArg(srcOf('xchain-indexer/src/actions/xcall.js'),
+            const idxArgCall = gateInputArg(srcOf('xchain-indexer/src/actions/xcall/index.js'),
                 /isEquivHeaderActive\(r\.snapshot_block/);
             assert.ok(hubArg, 'hub xcall gate input not found');
             assert.ok(idxArgExec && idxArgCall, 'indexer xcall/xexec gate inputs not found');
@@ -179,8 +179,8 @@ describe('EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', function () 
             // handler, so the gate call and the handler are in different files. Both
             // are read here: what the case asserts is the INPUT the gate receives, not
             // which file spells it.
-            const idxSrc = srcOf('xchain-indexer/src/actions/attest.js')
-                + '\n' + srcOf('xchain-indexer/src/attest_response_verify.js');
+            const idxSrc = srcOf('xchain-indexer/src/actions/attest/index.js')
+                + '\n' + srcOf('xchain-indexer/src/actions/attest/attest_response_verify.js');
             const idxArg = gateInputArg(idxSrc, /isEquivHeaderActive\(declaredBlock/);
             assert.ok(hubArg && idxArg, 'ATTEST gate inputs must be found on both sides');
             // Hub: requestBlock (the REQUEST's block_index). Indexer: declaredBlock
@@ -275,10 +275,10 @@ describe('EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', function () 
             // whole point of this suite: the indexer must parse the BTC height off the
             // wire and feed that same value into the canonical the gate keys on.
             // Batch wire: PRICE|0|FIRST_ROUND|LAST_ROUND|BTC_BLOCK_HEIGHT|ROUND_COUNT|...
-            const edSrc = srcOf('xchain-indexer/src/ed25519.js');
+            const edSrc = srcOf('xchain-indexer/src/consensus/ed25519.js');
             assert.match(edSrc, /isEquivHeaderActive\(btcBlockHeight,\s*network\)/,
                 'indexer ed25519 must gate the price canonical on btcBlockHeight');
-            const priceSrc = srcOf('xchain-indexer/src/actions/price.js');
+            const priceSrc = srcOf('xchain-indexer/src/actions/price/index.js');
             assert.match(priceSrc, /btcBlockHeight\s*=\s*parseInt\(fields\[3\]\)/,
                 'indexer must parse BTC_BLOCK_HEIGHT off the PRICE batch wire (fields[3])');
             // The builder also takes the network as a trailing argument (the mirror-admission

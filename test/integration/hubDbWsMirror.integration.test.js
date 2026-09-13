@@ -38,7 +38,7 @@ const mariadb = require('mariadb');
 const { WebSocketServer } = require('ws');
 
 const HubDbBroadcaster = require('../../../xchain-hub/src/HubDbBroadcaster');
-const HubDbSync        = require('../../../xchain-indexer/src/hub_db_sync');
+const HubDbSync        = require('../../../xchain-indexer/src/hub/hub_db_sync');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 
 // Every table HubDbSync bootstraps must be here, not merely the ones a case

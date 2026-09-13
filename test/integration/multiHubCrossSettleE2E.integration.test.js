@@ -45,7 +45,7 @@ const { seedWeightSnapshot }     = require('../helpers/seededWeightSnapshot');
 const { MockCrossChainOfferBook, makeOrder } = require('../helpers/mockCrossChainOfferBook');
 const { waitForMesh, waitFor } = require('../helpers/consensusWait');
 
-const CrossSettle    = require(path.resolve(__dirname, '../../../xchain-indexer/src/actions/cross_settle.js'));
+const CrossSettle    = require(path.resolve(__dirname, '../../../xchain-indexer/src/actions/cross_settle/index.js'));
 const IndexerUtility = require(path.resolve(__dirname, '../../../xchain-indexer/src/utility.js'));
 
 const COUNT        = 4;

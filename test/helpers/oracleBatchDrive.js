@@ -72,7 +72,7 @@ const OracleBatchSigner = loadHubModule('src/OracleBatchSigner.js');
 // byte-identical twin and the parity tests in both repos fail on a one-sided edit,
 // so either copy is the same module; the indexer's is the one a landing chain
 // actually runs, which is the side every drill here is making a claim about.
-const priceBatch = require(path.resolve(__dirname, '../../../xchain-indexer/src/price_batch_compression.js'));
+const priceBatch = require(path.resolve(__dirname, '../../../xchain-indexer/src/actions/price/price_batch_compression.js'));
 
 // How long a finalized round has to appear in every hub's own price_snapshots.
 // This is pure in-process consensus plus one INSERT per hub; it is nowhere near

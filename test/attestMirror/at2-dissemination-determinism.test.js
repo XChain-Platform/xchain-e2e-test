@@ -375,7 +375,7 @@ describe('AT2: a hub outside the responsible set disseminates the response, iden
      * leaves the hub's `/hub-db/*` surface serving), so the injection is available.
      * The BARRIER is what cannot respond to it.
      *
-     * Measured in `xchain-indexer/src/hub_db_sync.js`: the barrier's predicate is
+     * Measured in `xchain-indexer/src/hub/hub_db_sync.js`: the barrier's predicate is
      *
      *     streamWatermark >= blockTime + attestResponseWatermarkGraceS
      *

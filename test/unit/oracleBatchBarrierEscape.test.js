@@ -69,10 +69,10 @@ function sibling(rel) {
     try { require.resolve(p); } catch (e) { return null; }
     return require(p);
 }
-const protocolTime = sibling('protocol_time.js');
+const protocolTime = sibling('consensus/protocol_time.js');
 // hub_db_sync.js exports the CLASS itself (module.exports = HubDbSync), with the
 // constants hung off it as properties.
-const HubDbSync    = sibling('hub_db_sync.js');
+const HubDbSync    = sibling('hub/hub_db_sync.js');
 const haveHubDbSync = typeof HubDbSync === 'function' &&
     typeof HubDbSync.prototype._priceTimeSyncSatisfied === 'function';
 
@@ -454,14 +454,15 @@ describe('AT5 barrier drill: which escape opened the block (row 56)', function (
     describe('a block the barrier never gated', function () {
 
         // `blockMayReadPrice` is `blockTransactions.length > 0`
-        // (priceReadPredicate.js), reached through `_evaluatePriceBarrier`. A
+        // (src/chain/priceReadPredicate.js), reached through
+        // `_evaluatePriceBarrier`. A
         // transaction-free block is committed without the barrier ever being
         // consulted, and on TDOGE that is nearly every block: 289 of run 5's 290.
         const CLOSED_THROUGHOUT = statusSeries(1788987133, B.processedAt + 60, 15)
             .map((s) => Object.assign({}, s, { streamWatermark: 1788982085, priceSyncMaxTimestamp: 0 }));
 
         it('mirrors the shipped predicate on what "applies" means', function () {
-            const pred = sibling('priceReadPredicate.js');
+            const pred = sibling('chain/priceReadPredicate.js');
             if (!pred) return this.skip();
             assert.strictEqual(pred.blockMayReadPrice([]), false, 'an empty block reads no price');
             assert.strictEqual(pred.blockMayReadPrice([{}]), true);

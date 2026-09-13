@@ -27,7 +27,7 @@
  * two venues, each fast at what it does.
  *
  * WHAT MAKES THE HOLD HAPPEN, and this is the part that had to be measured rather
- * than assumed. Every mirror barrier in `xchain-indexer/src/hub_db_sync.js` tests
+ * than assumed. Every mirror barrier in `xchain-indexer/src/hub/hub_db_sync.js` tests
  * one thing:
  *
  *     streamWatermark >= blockTime + grace

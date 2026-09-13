@@ -182,7 +182,7 @@ function bridgeEngineHubEnv(spec) {
  * PURE, and this is the constraint that stalled the whole acceptance set on drive 8, so it
  * is written out in full. The destination's D2 cross-check will not mint against a
  * transfer without a quorum-established state checkpoint of the ORIGIN chain at or after
- * that transfer's `snapshot_block` (xchain-indexer/src/bridge_proof_client.js
+ * that transfer's `snapshot_block` (xchain-indexer/src/consensus/bridge_proof_client.js
  * `selectCheckpoint`, which requires `block_index >= snapshot_block`). Both numbers are
  * derived from the same BTC tip and both sit BELOW it:
  *
@@ -234,7 +234,7 @@ function venueCheckpointEnv(spec) {
  *
  * PURE. The destination indexer's settle pass resolves the origin chain's endpoint as
  * `<COIN>_INDEXER_API_URL` then `<COIN>_INDEXER_URL` then config
- * (xchain-indexer/src/bridge_proof_client.js `resolveOriginEndpoint`). With none of
+ * (xchain-indexer/src/consensus/bridge_proof_client.js `resolveOriginEndpoint`). With none of
  * them set every in leg raises BridgeProofUnavailableError and the block loop DEFERS
  * under `bridge_proof_barrier` rather than refusing, so the symptom of forgetting this
  * is a DOGE indexer that stops advancing at the transfer's block and never says

@@ -58,7 +58,7 @@ const syncCkpt = require(path.join(ROOT, 'xchain-sync/src/checkpoint_commitment_
 
 const StateCheckpointEngine = require(path.join(ROOT, 'xchain-hub/src/StateCheckpointEngine.js'));
 const sdkCheckpoint         = require(path.join(ROOT, 'xchain-sdk/src/checkpoint.js'));
-const Anchor                = require(path.join(ROOT, 'xchain-indexer/src/actions/anchor.js'));
+const Anchor                = require(path.join(ROOT, 'xchain-indexer/src/actions/anchor/index.js'));
 
 // The indexer ANCHOR _canonical is a plain method that reads only its `d` argument
 // (no `this`), so invoke it directly off the prototype. `d` is ONE v0 bundle section,
@@ -153,7 +153,7 @@ describe('SPV Phase 2: CHECKPOINT_COMMITMENT cross-service parity', function () 
         // The Phase 3 proof server builds SMT/block proofs with an explorer-local copy
         // of merkle.js; a client recomputes with the SDK's merkle logic and binds to the
         // indexer-committed root. A single byte of drift makes server proofs unverifiable.
-        const idx = fs.readFileSync(path.join(ROOT, 'xchain-indexer/src/merkle.js'), 'utf8');
+        const idx = fs.readFileSync(path.join(ROOT, 'xchain-indexer/src/consensus/merkle.js'), 'utf8');
         const exp = fs.readFileSync(path.join(ROOT, 'xchain-explorer/src/merkle.js'), 'utf8');
         assert.strictEqual(exp, idx, 'xchain-explorer/src/merkle.js drifted from the indexer merkle.js');
     });
@@ -163,7 +163,7 @@ describe('SPV Phase 2: CHECKPOINT_COMMITMENT cross-service parity', function () 
         // and the state-root sub-path with an sdk-local copy of merkle.js, binding to
         // the indexer-committed root. A single byte of drift makes a valid server proof
         // fail to verify (or, worse, lets a forged one pass), so it must match exactly.
-        const idx = fs.readFileSync(path.join(ROOT, 'xchain-indexer/src/merkle.js'), 'utf8');
+        const idx = fs.readFileSync(path.join(ROOT, 'xchain-indexer/src/consensus/merkle.js'), 'utf8');
         const sdk = fs.readFileSync(path.join(ROOT, 'xchain-sdk/src/merkle.js'), 'utf8');
         assert.strictEqual(sdk, idx, 'xchain-sdk/src/merkle.js drifted from the indexer merkle.js');
     });

@@ -16,7 +16,7 @@
  * E2E test helper: an indexer settle-pass context for the XBRIDGE drills.
  *
  * The bridge drills feed a REAL hub-signed record into the REAL indexer settle pass
- * (xchain-indexer/src/bridge_settle.js), the way multiHubCrossSettleE2E feeds a real
+ * (xchain-indexer/src/consensus/bridge_settle.js), the way multiHubCrossSettleE2E feeds a real
  * federated match into the real cross_settle handler. That pass needs an indexer
  * database and an actions object; a live indexer needs a chain rail, which the bridge
  * drills deliberately do not depend on, so the ledger is held in memory here and every
@@ -60,9 +60,9 @@ function resolveIndexerFile(rel){
 function loadIndexerModule(rel){ return require(resolveIndexerFile(rel)); }
 
 const IndexerUtility = loadIndexerModule('src/utility.js');
-const bridgeSettle   = loadIndexerModule('src/bridge_settle.js');
-const checkpointCheck = loadIndexerModule('src/bridge_checkpoint_check.js');
-const merkle         = loadIndexerModule('src/merkle.js');
+const bridgeSettle   = loadIndexerModule('src/consensus/bridge_settle.js');
+const checkpointCheck = loadIndexerModule('src/consensus/bridge_checkpoint_check.js');
+const merkle         = loadIndexerModule('src/consensus/merkle.js');
 const subtree        = loadIndexerModule('src/state_subtree_activation.js');
 
 // Placeholder keyless role addresses. The settle pass only ever reads these out of the
