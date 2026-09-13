@@ -90,7 +90,7 @@ function buildTransferRow(fields){
         btc_chain_id:     f.btcChainId === undefined ? null : f.btcChainId
     };
     row.transfer_id = eng._deriveTransferId(row.network, row.src_chain, row.src_action_index,
-                                            row.dest_chain, row.dest_address, row.snapshot_block);
+                                            row.dest_chain, row.dest_address);
     return row;
 }
 

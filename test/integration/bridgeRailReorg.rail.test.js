@@ -66,6 +66,8 @@ const {
     escrowOf,
     journalCase,
     minimalQuorumSigners,
+    assertShallowOrphan,
+    withMiningPaused,
 } = require('../helpers/bridgeRailVenue');
 
 const GAS_TICK = 'XCHAIN';
@@ -196,11 +198,9 @@ describe('XBRIDGE acceptance drive: reorg and falsification (AT3, AT4)', functio
         // same correction: the block was mined seconds ago and an indexer answers
         // `block not indexed: <height>` until it has parsed it.
         const tipBefore = Number(await nodeConnector.getBlockCount());
-        const depth = tipBefore - Number(height) + 1;
-        assert.ok(depth <= TRACKER_UNDO_BLOCKS,
-            'orphaning from ' + height + ' at tip ' + tipBefore + ' is ' + depth + ' blocks deep, ' +
-            'past the standing utxo-tracker\'s ' + TRACKER_UNDO_BLOCKS + '-block undo window; the ' +
-            'tracker would halt and need a resync, and it is shared with every other rail lane');
+        // THE WINDOW GUARD, pulled into the shared pure layer so it has one unit-tested
+        // home instead of a copy per reorg drill; the message stays byte-identical.
+        assertShallowOrphan(Number(height), tipBefore, TRACKER_UNDO_BLOCKS);
         const hash = await nodeConnector.getBlockHash(Number(height));
         assert.ok(hash, 'the BTC node could not name the block at height ' + height + ' to orphan');
         await nodeConnector.invalidateBlock(hash);
@@ -309,17 +309,29 @@ describe('XBRIDGE acceptance drive: reorg and falsification (AT3, AT4)', functio
             const minedAt = Number((await indexerConnector.call('getblockhashes', {})).block_index);
             const row = await venue.waitForFinalizedTransfer((r) => String(r.dest_address) === dest.address);
             assert.ok(row, 'the AT3c lock never finalized');
-            // Wait for the mint to APPLY before the orphan; orphaning first would be AT3b.
-            const deadline = Date.now() + 240000;
-            while (Date.now() < deadline &&
-                   Number(await venue.addressBalance('DOGE', dest.address, GAS_TICK)) < 1) {
-                await new Promise((r) => setTimeout(r, 3000));
-            }
-            assert.strictEqual(await venue.addressBalance('DOGE', dest.address, GAS_TICK), '1',
-                'the mint never applied on DOGE, so this case cannot orphan "after the mint"');
 
-            const dogeHashBefore = await venue.blockHashes('DOGE');
-            const orphaned = await reorgBtcFrom(minedAt, 4);
+            // FREEZE BTC from here, not sooner: the source leg is already finalized, and
+            // every step left is a wait on the DESTINATION's own clock (the hub stamps
+            // effective_time off wall time and DOGE applies at its own next block past
+            // it), so no further BTC block buys this case anything. Left unfrozen, the
+            // standing miner keeps mining BTC on its own ambient cadence regardless of
+            // this case, and a multi-minute mint wait burns through the tracker's undo
+            // window before the orphan is even attempted (measured: 16 deep against a
+            // 12-block window). Mining resumes in every path out of this block.
+            let dogeHashBefore;
+            const orphaned = await withMiningPaused(regtestMinerConnector, async () => {
+                // Wait for the mint to APPLY before the orphan; orphaning first would be AT3b.
+                const deadline = Date.now() + 240000;
+                while (Date.now() < deadline &&
+                       Number(await venue.addressBalance('DOGE', dest.address, GAS_TICK)) < 1) {
+                    await new Promise((r) => setTimeout(r, 3000));
+                }
+                assert.strictEqual(await venue.addressBalance('DOGE', dest.address, GAS_TICK), '1',
+                    'the mint never applied on DOGE, so this case cannot orphan "after the mint"');
+
+                dogeHashBefore = await venue.blockHashes('DOGE');
+                return reorgBtcFrom(minedAt, 4);
+            });
 
             const inv = await venue.bridgeInvariant(GAS_TICK);
             const entry = inv[GAS_TICK].DOGE;
@@ -354,8 +366,14 @@ describe('XBRIDGE acceptance drive: reorg and falsification (AT3, AT4)', functio
         const CASES = [
             { name: 'a bad signature',                mutate: (r) => ({ validator_signatures: flipLastHexNibble(r.validator_signatures) }) },
             { name: 'a pubkey outside the snapshot',  mutate: (r) => ({ validator_signatures: resignWithStranger(r) }) },
-            { name: 'a foreign network',              mutate: () => ({ network: 'testnet' }) },
-            { name: 'a foreign btc_chain_id',         mutate: () => ({ btc_chain_id: 'ffffffff' }) },
+            // The two FOREIGN rows are refused before the settle pass ever examines them, so
+            // no per-row line exists to count and the case asserts the refusal's own witness
+            // instead: a foreign btc_chain_id is turned away at ingest by the chain-identity
+            // guard (counted by table and hash by design, never per row) and never reaches the
+            // mirror; a foreign network lands in the mirror and is never selected by the due
+            // read's network scope, so it sits there unsettled through every pass.
+            { name: 'a foreign network',              mutate: () => ({ network: 'testnet' }),     refusedBefore: 'due' },
+            { name: 'a foreign btc_chain_id',         mutate: () => ({ btc_chain_id: 'ffffffff' }), refusedBefore: 'ingest' },
             { name: 'an unwrapped canonical',         mutate: (r) => ({ finalizing_view: String(Number(r.finalizing_view || 0) + 1) }) },
             { name: 'an out leg over the escrow',     mutate: (r) => ({ src_chain: 'DOGE', dest_chain: 'BTC',
                                                                         amount: String(Number(r.amount) + 1000000) }) },
@@ -376,7 +394,8 @@ describe('XBRIDGE acceptance drive: reorg and falsification (AT3, AT4)', functio
         }
 
         for (const c of CASES) {
-            it('applies nothing and logs exactly one refusal naming the id for ' + c.name, async function () {
+            it((c.refusedBefore ? 'applies nothing and is refused before the settle pass for '
+                               : 'applies nothing and logs exactly one refusal naming the id for ') + c.name, async function () {
                 this.timeout(0);
                 if (needsFederation(this, 'AT4 (' + c.name + ')')) return;
 
@@ -430,8 +449,25 @@ describe('XBRIDGE acceptance drive: reorg and falsification (AT3, AT4)', functio
                 const idPrefix = row.transfer_id.slice(0, 16);
                 const refusalsNow = () => venue.indexerTails(400)
                     .split('\n').filter((l) => l.includes(idPrefix));
-                await venue.waitUntil('the destination to log a refusal naming ' + idPrefix,
-                    () => refusalsNow().length >= 1, { timeoutMs: 180000 });
+                const mirrorHolds = async () => (await venue.queryMirrorDb('DOGE',
+                    'SELECT transfer_id FROM bridge_transfers WHERE transfer_id = ?', [row.transfer_id])).length;
+                if (c.refusedBefore === 'due') {
+                    // The witness that the row REACHED the destination is the mirror itself.
+                    await venue.waitUntil('the destination mirror to hold ' + idPrefix,
+                        async () => (await mirrorHolds()) === 1, { timeoutMs: 180000 });
+                } else if (c.refusedBefore === 'ingest') {
+                    // The chain-identity guard reports its refusals per table and foreign hash,
+                    // so the witness is that summary line naming the hash this case planted.
+                    await venue.waitUntil('the destination to report a refused bridge_transfers row carrying ' +
+                        row.btc_chain_id,
+                        () => venue.indexerTails(400).split('\n').some((l) =>
+                            l.includes('refused') && l.includes('bridge_transfers row') &&
+                            l.includes('btc_chain_id ' + row.btc_chain_id)),
+                        { timeoutMs: 180000 });
+                } else {
+                    await venue.waitUntil('the destination to log a refusal naming ' + idPrefix,
+                        () => refusalsNow().length >= 1, { timeoutMs: 180000 });
+                }
                 const atRefusal = Number((await venue.venueTips()).DOGE);
                 await venue.waitUntil('two more DOGE blocks after the refusal, so the settle pass ' +
                     'has run again over a record it already refused',
@@ -445,6 +481,20 @@ describe('XBRIDGE acceptance drive: reorg and falsification (AT3, AT4)', functio
 
                 assert.strictEqual(balance, '0',
                     dest.address + ' was credited from a record carrying ' + c.name);
+                const settled = await venue.queryIndexerDb('DOGE',
+                    'SELECT transfer_id FROM bridge_settlements WHERE transfer_id = ?', [row.transfer_id]);
+                assert.strictEqual(settled.length, 0,
+                    'the destination recorded a settlement for a record carrying ' + c.name);
+                if (c.refusedBefore === 'due') {
+                    assert.strictEqual(await mirrorHolds(), 1,
+                        'the foreign-network row must sit in the mirror, unselected, through every pass');
+                    return;
+                }
+                if (c.refusedBefore === 'ingest') {
+                    assert.strictEqual(await mirrorHolds(), 0,
+                        'a foreign btc_chain_id row must be turned away at ingest and never reach the mirror');
+                    return;
+                }
                 assert.strictEqual(refusals.length, 1,
                     'the destination logged ' + refusals.length + ' line(s) naming ' +
                     row.transfer_id.slice(0, 16) + '; the spec asks for exactly one, because a ' +

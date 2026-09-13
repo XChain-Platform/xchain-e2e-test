@@ -1852,6 +1852,75 @@ function overFinalizedSourceLegs(rows) {
     return dupes;
 }
 
+/**
+ * How many blocks deep an orphan at `height` would reach, given the chain's current tip.
+ *
+ * Pure so the window guard below can be unit-tested without a chain: `height` and `tip`
+ * are both heights already read from a node, and this one line of arithmetic is the
+ * whole defect class the AT3c case hit on the rail 2026-09-13 - a wait between reading
+ * the lock's height and taking the orphan let the tip drift out from under it, and
+ * nothing caught that until the guard fired mid-drive.
+ *
+ * @param {number} height  the height being orphaned
+ * @param {number} tip     the chain's current height
+ * @returns {number} depth; 1 when `height` IS the tip
+ */
+function orphanDepth(height, tip) {
+    return Number(tip) - Number(height) + 1;
+}
+
+/**
+ * Refuse an orphan deeper than a reorg-recovery window, naming the numbers rather than
+ * just failing. Factored out of the reorg suite's own reorg helper so the one piece of
+ * arithmetic - and the one guard built on it - has ONE unit-tested home; the message is
+ * kept byte-identical to the inline copies the attestation reorg drills still carry
+ * (xchain-utxo-tracker/src/undo-blocks.js names the window itself), so a drive scanning
+ * a log for "blocks deep" is never looking at two different sentences for the same fault.
+ *
+ * @param {number} height    the height being orphaned
+ * @param {number} tip       the chain's current height
+ * @param {number} maxDepth  the standing tracker's undo window (12 for BTC)
+ * @returns {number} the depth, once it is shown to clear the window
+ */
+function assertShallowOrphan(height, tip, maxDepth) {
+    const depth = orphanDepth(height, tip);
+    assert.ok(depth <= maxDepth,
+        'orphaning from ' + height + ' at tip ' + tip + ' is ' + depth + ' blocks deep, ' +
+        'past the standing utxo-tracker\'s ' + maxDepth + '-block undo window; the ' +
+        'tracker would halt and need a resync, and it is shared with every other rail lane');
+    return depth;
+}
+
+/**
+ * Run `fn` with the regtest miner's adaptive auto-mine loop paused, always resuming
+ * even when `fn` throws.
+ *
+ * WHY AT3C NEEDED THIS, measured on the rail 2026-09-13. The case waits for a mint to
+ * land on the DESTINATION chain before it orphans the SOURCE lock, and that wait is
+ * bounded by the destination's own clock, never by BTC: xchain-hub/src/lib/relay_margin.js
+ * stamps `effective_time` off wall-clock time, and the destination indexer applies the
+ * leg at the first destination block whose time reaches it. No part of that wait needs
+ * another BTC block. But the standing miner keeps mining BTC on its own ambient cadence
+ * regardless (measured near 20s on the shared rail), so a wait of a few minutes quietly
+ * pushed the orphan target past `assertShallowOrphan`'s window every time ("orphaning
+ * from 1938 at tip 1953 is 16 blocks deep" against a 12-block window). Freezing BTC for
+ * exactly the span that does not need it removes the drift without touching the window.
+ *
+ * @param {{pauseMining: function, resumeMining: function}} miner  the regtest miner connector
+ * @param {function(): Promise<*>} fn
+ * @returns {Promise<*>} fn's resolved value
+ */
+async function withMiningPaused(miner, fn) {
+    assert.ok(miner && typeof miner.pauseMining === 'function' && typeof miner.resumeMining === 'function',
+        'withMiningPaused: needs a connector with pauseMining()/resumeMining()');
+    await miner.pauseMining();
+    try {
+        return await fn();
+    } finally {
+        await miner.resumeMining();
+    }
+}
+
 // The pins the federation-free half MEASURES and the federated half compares against.
 // Module state rather than a file, because the two halves are two suites in one run.
 const WITNESS_VERDICTS = {};
@@ -1874,6 +1943,9 @@ module.exports = {
     bridgeSettled,
     escrowOf,
     overFinalizedSourceLegs,
+    orphanDepth,
+    assertShallowOrphan,
+    withMiningPaused,
     minimalQuorumSigners,
     classifyFundingWait,
     fundingBudgetMessage,

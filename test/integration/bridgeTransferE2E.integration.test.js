@@ -109,11 +109,13 @@ describe('XBRIDGE transfer: hub-signed record to indexer settle pass (base AT1, 
             // The preimage is written out here rather than read back from the hub helper:
             // asserting the engine's id against the engine's own derivation would pass
             // however the preimage was rewritten, which is the one thing that must not move.
+            // No snapshot_block in the preimage: the id names the LEG, so every hub in the
+            // federation opens one round for it whatever tip its own poll read.
             const expected = sha256([
+                'XBRIDGE',
                 NETWORK,
                 'BTC:4242',
-                'DOGE:' + DEST_ADDR,
-                String(SNAPSHOT)
+                'DOGE:' + DEST_ADDR
             ].join('|'));
             assert.strictEqual(row.transfer_id, expected,
                 'the hub derives a transfer_id the base spec preimage does not produce');
@@ -474,7 +476,7 @@ describe('XBRIDGE transfer: hub-signed record to indexer settle pass (base AT1, 
             // And the leg resolves to the id the hub would finalize for it, which is what
             // ties this read to the record the drills above apply.
             const derived = eng._deriveTransferId(res.network, 'BTC', leg.src_action_index,
-                                                  leg.dest_chain, leg.dest_address, SNAPSHOT);
+                                                  leg.dest_chain, leg.dest_address);
             assert.strictEqual(derived, inLeg(ids).transfer_id,
                 'a leg served here derives a different transfer_id than the record under test');
         });

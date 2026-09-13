@@ -43,6 +43,9 @@ const {
     escrowOf,
     minimalQuorumSigners,
     overFinalizedSourceLegs,
+    orphanDepth,
+    assertShallowOrphan,
+    withMiningPaused,
     classifyFundingWait,
     fundingBudgetMessage,
     interpretFundingNode,
@@ -437,6 +440,68 @@ describe('bridgeRailVenue: the pure layer', function () {
             assert.strictEqual(escrowOf({}, 'DOGE'), null);
             assert.strictEqual(escrowOf(null, 'DOGE'), null);
             assert.strictEqual(escrowOf({ escrow: { DOGE: '0' } }, 'DOGE'), '0');
+        });
+    });
+
+    describe('orphanDepth and assertShallowOrphan', function () {
+
+        it('reads a depth of 1 when the height IS the tip', function () {
+            assert.strictEqual(orphanDepth(1953, 1953), 1);
+        });
+
+        it('reads the AT3c defect\'s own numbers: 16 blocks deep', function () {
+            // The exact reading the rail produced 2026-09-13: orphaning from 1938 at tip
+            // 1953. Kept literal so a future change to the arithmetic is checked against
+            // the reading that motivated it, not just against invented numbers.
+            assert.strictEqual(orphanDepth(1938, 1953), 16);
+        });
+
+        it('passes a depth at exactly the window', function () {
+            assert.strictEqual(assertShallowOrphan(1942, 1953, 12), 12);
+        });
+
+        it('refuses a depth one past the window, naming height, tip and the window', function () {
+            assert.throws(() => assertShallowOrphan(1938, 1953, 12),
+                /orphaning from 1938 at tip 1953 is 16 blocks deep, past the standing utxo-tracker's 12-block undo window/);
+        });
+    });
+
+    describe('withMiningPaused', function () {
+
+        function fakeMiner() {
+            const calls = [];
+            return {
+                calls: calls,
+                pauseMining: async () => { calls.push('pause'); },
+                resumeMining: async () => { calls.push('resume'); },
+            };
+        }
+
+        it('pauses before fn runs and resumes after, returning fn\'s value', async function () {
+            const miner = fakeMiner();
+            const seenAtRun = [];
+            const result = await withMiningPaused(miner, async () => {
+                seenAtRun.push(miner.calls.slice());
+                return 'orphaned-hash';
+            });
+            assert.strictEqual(result, 'orphaned-hash');
+            assert.deepStrictEqual(miner.calls, ['pause', 'resume']);
+            // fn ran strictly between the pause and the resume, not before either.
+            assert.deepStrictEqual(seenAtRun, [['pause']]);
+        });
+
+        it('still resumes when fn throws, and lets the error through unchanged', async function () {
+            const miner = fakeMiner();
+            await assert.rejects(
+                () => withMiningPaused(miner, async () => { throw new Error('mint never applied'); }),
+                /mint never applied/);
+            assert.deepStrictEqual(miner.calls, ['pause', 'resume']);
+        });
+
+        it('refuses a connector missing either half of the pair, before touching either', async function () {
+            const partial = { pauseMining: async () => {} };
+            await assert.rejects(() => withMiningPaused(partial, async () => {}),
+                /needs a connector with pauseMining\(\)\/resumeMining\(\)/);
         });
     });
 
