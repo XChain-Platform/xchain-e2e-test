@@ -281,7 +281,10 @@ describe('EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', function () 
             const priceSrc = srcOf('xchain-indexer/src/actions/price.js');
             assert.match(priceSrc, /btcBlockHeight\s*=\s*parseInt\(fields\[3\]\)/,
                 'indexer must parse BTC_BLOCK_HEIGHT off the PRICE batch wire (fields[3])');
-            assert.match(priceSrc, /buildPriceBatchPayload\(firstRound,\s*lastRound,\s*btcBlockHeight,\s*rounds\)/,
+            // The builder also takes the network as a trailing argument (the mirror-admission
+            // era is keyed per round on that network); the height stays the third argument,
+            // which is the property pinned here.
+            assert.match(priceSrc, /buildPriceBatchPayload\(firstRound,\s*lastRound,\s*btcBlockHeight,\s*rounds(,\s*[^)]+)?\)/,
                 'indexer must feed the parsed btcBlockHeight into the batch canonical builder');
 
             assertHeightParity('ORACLE', 500);
