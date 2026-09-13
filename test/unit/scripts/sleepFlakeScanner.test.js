@@ -143,6 +143,75 @@ describe('check-sleep-flake scanner', function () {
         })
     })
 
+    describe('only a loop that re-checks a condition exempts its waits', function () {
+        // A "lexically inside any loop" exemption is not the rule the header
+        // states. Each case below counts 0 under that looser rule and each is a
+        // plain fixed settle: the loop re-checks nothing, or the wait is not part
+        // of the loop at all.
+
+        it('counts a settle inside a data-iteration loop', function () {
+            assert.deepStrictEqual(linesOf([
+                'async function t() {',
+                '    for (const c of cases) {',
+                '        await send(c)',
+                '        await sleep(5000)',
+                '    }',
+                '}',
+            ].join('\n')), [4])
+        })
+
+        it('counts the settle that FOLLOWS a brace-less poll loop on one line', function () {
+            // The poll interval is the loop body and ends at its own `;`; the
+            // second wait is a separate statement and separate debt.
+            assert.deepStrictEqual(linesOf([
+                'async function t() {',
+                '    while (!ready) await sleep(100); await sleep(5000)',
+                '}',
+            ].join('\n')), [2])
+        })
+
+        it('counts a settle in a callback that merely sits in a loop body', function () {
+            // Crossing into a function body ends the exemption: the callback does
+            // not run as an iteration of the loop enclosing its definition.
+            assert.deepStrictEqual(linesOf([
+                'async function t() {',
+                '    while (!done) {',
+                '        if (await check()) break',
+                '        register(async () => { await sleep(3000) })',
+                '        await sleep(100)',
+                '    }',
+                '}',
+            ].join('\n')), [4])
+        })
+
+        it('counts a `while (true)` body that can never leave', function () {
+            assert.strictEqual(countOf([
+                'async function t() {',
+                '    while (true) { await sleep(1000) }',
+                '}',
+            ].join('\n')), 1)
+        })
+
+        it('still exempts the real poll shapes', function () {
+            const poll = (src) => countOf(src.join('\n'))
+            assert.strictEqual(poll([
+                'async function t() {',
+                '    while (true) { await sleep(1000); if (await check()) break }',
+                '}',
+            ]), 0, 'while (true) with an exit is a poll')
+            assert.strictEqual(poll([
+                'async function t() {',
+                '    for (let i = 0; i < 20; i++) { if (await ok()) break; await sleep(500) }',
+                '}',
+            ]), 0, 'bounded retry loop with an exit is a poll')
+            assert.strictEqual(poll([
+                'async function t() {',
+                '    do { await sleep(500) } while (!(await ok()))',
+                '}',
+            ]), 0, 'do/while reads its test from the tail')
+        })
+    })
+
     describe('the ratchet gate', function () {
 
         it('counts every site in a file whose braces do not balance', function () {

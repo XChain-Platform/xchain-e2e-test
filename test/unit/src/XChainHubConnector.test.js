@@ -133,7 +133,11 @@ describe('XChainHubConnector', function () {
     });
 
     describe('getAllConfig', function () {
-        it('calls _call with method getallconfigs and empty params array', async function () {
+        // The hub withholds every password unless the call asks for the credential
+        // tier, substituting the literal '[redacted]'. Asking with an empty params
+        // array hands the harness that sentinel wherever a node or indexer database
+        // password belongs, so the ask itself is the contract under test.
+        it('asks for the credential tier, not a bare params array', async function () {
             const conn = new XChainHubConnector(['http://hub1:10000']);
             const callStub = sinon.stub(conn, '_call').resolves({ bitcoin: {} });
 
@@ -141,7 +145,92 @@ describe('XChainHubConnector', function () {
 
             const [data] = callStub.firstCall.args;
             assert.strictEqual(data.method, 'getallconfigs');
-            assert.deepStrictEqual(data.params, []);
+            assert.deepStrictEqual(data.params, { include_secrets: true });
+        });
+
+        it('falls back to the bare params array when the tiered ask yields nothing', async function () {
+            // A hub that denies the tier, or predates it, must still serve
+            // coordinates; only the credentials are lost.
+            const conn = new XChainHubConnector(['http://hub1:10000']);
+            const callStub = sinon.stub(conn, '_call');
+            // An endpoint answered and refused, which is what a hub denying the
+            // credential tier looks like; that is the only state worth a retry.
+            callStub.onFirstCall().callsFake(async () => { conn.lastHttpRefusal = true; return null; });
+            callStub.onSecondCall().resolves({ bitcoin: { regtest: {} } });
+
+            const result = await conn.getAllConfig();
+
+            assert.deepStrictEqual(callStub.secondCall.args[0].params, []);
+            assert.deepStrictEqual(result, { bitcoin: { regtest: {} } });
+            assert.strictEqual(conn.lastConfigSecretsRedacted, true);
+        });
+
+        it('does not retry when nothing answered, so the endpoint attempt count holds', async function () {
+            // test/boundary/globalState.boundary.js counts the attempts a
+            // dead-hub run makes; a blind retry doubles them.
+            const conn = new XChainHubConnector(['http://hub1:10000']);
+            const callStub = sinon.stub(conn, '_call').resolves(null);
+
+            assert.strictEqual(await conn.getAllConfig(), null);
+            assert.strictEqual(callStub.callCount, 1);
+        });
+
+        it('records that secrets were served when the envelope says so', async function () {
+            const conn = new XChainHubConnector(['http://hub1:10000']);
+            const configs = { bitcoin: { regtest: { node: { pass: 'rpcpass' } } } };
+            sinon.stub(conn, '_call').resolves({ configs, seq: 7, watermark: 7, secrets_redacted: false });
+
+            await conn.getAllConfig();
+            assert.strictEqual(conn.lastConfigSecretsRedacted, false);
+        });
+
+        it('treats an envelope with no secrets_redacted flag as redacted', async function () {
+            const conn = new XChainHubConnector(['http://hub1:10000']);
+            sinon.stub(conn, '_call').resolves({ configs: { bitcoin: {} }, seq: 1, watermark: 1 });
+
+            await conn.getAllConfig();
+            assert.strictEqual(conn.lastConfigSecretsRedacted, true);
+        });
+
+        it('sends the credential-tier key on a secrets ask and the bulk key otherwise', async function () {
+            const conn = new XChainHubConnector(['http://hub1:10000']);
+            process.env.HUB_API_KEY = 'bulk-key';
+            process.env.HUB_CONFIG_SECRETS_API_KEY = 'secrets-key';
+            try {
+                axiosPostStub.resolves({ data: { result: { bitcoin: {} } } });
+
+                await conn._call({ method: 'getallconfigs', params: { include_secrets: true }, id: 1 });
+                assert.strictEqual(axiosPostStub.firstCall.args[2].headers['x-api-key'], 'secrets-key');
+
+                await conn._call({ method: 'ping', params: [], id: 1 });
+                assert.strictEqual(axiosPostStub.secondCall.args[2].headers['x-api-key'], 'bulk-key');
+            } finally {
+                delete process.env.HUB_API_KEY;
+                delete process.env.HUB_CONFIG_SECRETS_API_KEY;
+            }
+        });
+
+        it('falls back to the bulk key for a secrets ask when no tier key is set', async function () {
+            const conn = new XChainHubConnector(['http://hub1:10000']);
+            process.env.HUB_API_KEY = 'bulk-key';
+            delete process.env.HUB_CONFIG_SECRETS_API_KEY;
+            try {
+                axiosPostStub.resolves({ data: { result: { bitcoin: {} } } });
+                await conn._call({ method: 'getallconfigs', params: { include_secrets: true }, id: 1 });
+                assert.strictEqual(axiosPostStub.firstCall.args[2].headers['x-api-key'], 'bulk-key');
+            } finally {
+                delete process.env.HUB_API_KEY;
+            }
+        });
+
+        it('refuses the redaction sentinel where a credential is expected', function () {
+            assert.strictEqual(XChainHubConnector.REDACTED, '[redacted]');
+            assert.strictEqual(
+                XChainHubConnector.assertUnredactedCredential('realpass', 'the node RPC password'),
+                'realpass');
+            assert.throws(
+                () => XChainHubConnector.assertUnredactedCredential('[redacted]', 'the node RPC password'),
+                /HUB_CONFIG_SECRETS_API_KEY/);
         });
 
         it('returns whatever _call returns', async function () {

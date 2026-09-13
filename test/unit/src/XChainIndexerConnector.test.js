@@ -79,4 +79,66 @@ describe('XChainIndexerConnector', function () {
             assert.strictEqual(data.id, 1);
         });
     });
+
+    // A gated method is refused with a non-2xx status whose body is still a
+    // JSON-RPC error envelope, and axios rejects it. call() must tell that apart
+    // from a dead socket: rollcallHelper.assertGatedReadsReachable only prints
+    // its INDEXER_API_KEY sentence for a throw, so a null here erases it.
+    describe('service refusals versus transport failures', function () {
+
+        function refusal() {
+            return Object.assign(new Error('Request failed with status code 401'), {
+                response: {
+                    status: 401, statusText: 'Unauthorized',
+                    data: { jsonrpc: '2.0', id: 1,
+                        error: { code: -32001, message: 'Unauthorized: this method requires INDEXER_API_KEY' } }
+                }
+            });
+        }
+
+        it('call() throws the service message on a gated 401', async function () {
+            axiosPostStub.rejects(refusal());
+            await assert.rejects(
+                () => connector.call('getcapabilityvalidators', { capability: 'oracle_publish', block_index: 100 }),
+                /Unauthorized: this method requires INDEXER_API_KEY/);
+        });
+
+        it('call() names the method it was refused', async function () {
+            axiosPostStub.rejects(refusal());
+            await assert.rejects(
+                () => connector.call('getcapabilityvalidators', {}),
+                /getcapabilityvalidators/);
+        });
+
+        it('call() still returns null when nothing answered the socket', async function () {
+            axiosPostStub.rejects(Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }));
+            assert.strictEqual(await connector.call('getcapabilityvalidators', {}), null);
+        });
+
+        it('call() falls back to an HTTP status when the body carries no RPC error', async function () {
+            axiosPostStub.rejects(Object.assign(new Error('Request failed with status code 502'), {
+                response: { status: 502, statusText: 'Bad Gateway', data: '<html>' }
+            }));
+            await assert.rejects(() => connector.call('health', {}), /HTTP 502 Bad Gateway/);
+        });
+
+        it('health() keeps its null sentinel so waitForIndexedBlock can ride out a refusal', async function () {
+            const warn = sinon.stub(console, 'warn');
+            try {
+                axiosPostStub.rejects(refusal());
+                assert.strictEqual(await connector.health(), null);
+                assert.strictEqual(warn.callCount, 1);
+                assert.match(warn.firstCall.args[0], /refused health: Unauthorized/);
+            } finally { warn.restore(); }
+        });
+
+        it('ping() keeps returning false and names the refusal', async function () {
+            const warn = sinon.stub(console, 'warn');
+            try {
+                axiosPostStub.rejects(refusal());
+                assert.strictEqual(await connector.ping(), false);
+                assert.match(warn.firstCall.args[0], /refused ping: Unauthorized/);
+            } finally { warn.restore(); }
+        });
+    });
 });

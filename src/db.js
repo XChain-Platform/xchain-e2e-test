@@ -2401,13 +2401,26 @@ class Database {
         }
     }
 
+    // Read the current value of one contract state key, with the SAME key
+    // semantics the serving indexer uses.
+    // contract_state is COLLATE=utf8_general_ci, so matching on state_key folds
+    // "Key" and "key" into one key and an assertion can read another key's row
+    // (or read a stale row and hide a write that never landed). The schema
+    // carries state_key_bin, a utf8_bin generated shadow of state_key backed by
+    // idx_latest_bin, and that is what the indexer keys current state on
+    // (xchain-indexer/src/db.js getContractState, armed from genesis on regtest
+    // by state_key_collation_activation.js). Match the shadow column here for the
+    // same reason xchain-explorer's proof reader does.
+    // Latest row is id DESC, the tiebreak the writer and the schema's own
+    // read-current comment use; block_index/action_index is a second ordering of
+    // the same append-only sequence, so aligning removes a needless divergence.
     async getContractState(contractIndex, stateKey){
-        let query = `SELECT * FROM contract_state WHERE contract_index = ? AND state_key = ? ORDER BY block_index DESC, action_index DESC LIMIT 1`
+        let query = `SELECT * FROM contract_state WHERE contract_index = ? AND state_key_bin = ? ORDER BY id DESC LIMIT 1`
         let connection = await this.getConnection()
         try {
             const rows = await connection.query(query, [contractIndex, stateKey])
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ return null } finally { await connection.release() }
+        } catch(err){ this._warnOnSchemaError('getContractState', err); return null } finally { await connection.release() }
     }
 
     async waitForDelegation(params, timeMax = 60000){ return this._waitFor(this.checkDelegation, params, timeMax) }

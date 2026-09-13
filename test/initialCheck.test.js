@@ -142,6 +142,18 @@ function maskSecret(value){
     return '(set)'
 }
 
+// One credential out of the hub's config tree, or a named refusal.
+// The oracle serves '[redacted]' for every password unless the getallconfigs
+// call was authorized for its credential tier, and that sentinel authenticates
+// nothing: passing it on surfaces minutes later as ER_ACCESS_DENIED or a 401 on
+// a service that looks misconfigured. An explicitly supplied environment value
+// still wins, because discovery only runs at all when some variable was missing.
+function hubCredential(hubValue, envValue, whatItIsFor){
+    if(hubValue !== XChainHubConnector.REDACTED) return hubValue
+    if(envValue) return envValue
+    return XChainHubConnector.assertUnredactedCredential(hubValue, whatItIsFor)
+}
+
 function printAllEnvironmentalVariables(){
     console.log({
       node_url:NODE_URL,
@@ -200,7 +212,8 @@ exports.mochaHooks = {
                         NODE_URL = "localhost"
                         NODE_PORT = coinNet["node"]["port"]
                         NODE_USER = coinNet["node"]["user"]
-                        NODE_PASS = coinNet["node"]["pass"]
+                        NODE_PASS = hubCredential(coinNet["node"]["pass"], process.env.NODE_PASS,
+                            'the node RPC password (NODE_PASS)')
 
                         // DB config comes from the indexer's db_host/db_port fields
                         // (hub has no top-level "database" section).
@@ -220,7 +233,8 @@ exports.mochaHooks = {
                         INDEXER_PORT = coinNet["xchain-indexer"]["port"]
                         INDEXER_DATABASE_NAME = coinNet["xchain-indexer"]["name"]
                         INDEXER_DATABASE_USER = coinNet["xchain-indexer"]["user"]
-                        INDEXER_DATABASE_PASS = coinNet["xchain-indexer"]["pass"]
+                        INDEXER_DATABASE_PASS = hubCredential(coinNet["xchain-indexer"]["pass"],
+                            process.env.INDEXER_DATABASE_PASS, 'the indexer database password (INDEXER_DATABASE_PASS)')
 
                         REGTEST_MINER_URL = "localhost"
                         REGTEST_MINER_PORT = coinNet["xchain-regtest-miner"] && coinNet["xchain-regtest-miner"]["port"]

@@ -126,53 +126,169 @@ function blankNonCode(src) {
     return out.join('')
 }
 
-// Walk the code and mark, per character offset, whether it sits inside a loop
-// body. Only brace-bodied while/for/do loops are tracked; a one-line loop body
-// is handled by the same-line fallback in scanFile.
+// Index of the `(` matching the `)` at `close`, or -1. Counted over blanked code.
+function openParenOf(code, close) {
+    let d = 0
+    for (let i = close; i >= 0; i--) {
+        if (code[i] === ')') d++
+        else if (code[i] === '(') { d--; if (d === 0) return i }
+    }
+    return -1
+}
+
+// Index of the `}` matching the `{` at `open`, or the end of the code.
+function closeBraceOf(code, open) {
+    let d = 0
+    for (let i = open; i < code.length; i++) {
+        if (code[i] === '{') d++
+        else if (code[i] === '}') { d--; if (d === 0) return i }
+    }
+    return code.length
+}
+
+// Split a `for` header on its top-level semicolons: `i = 0`, the test, the step.
+function forClauses(header) {
+    const out = []
+    let d = 0, from = 0
+    for (let i = 0; i < header.length; i++) {
+        const c = header[i]
+        if (c === '(' || c === '[' || c === '{') d++
+        else if (c === ')' || c === ']' || c === '}') d--
+        else if (c === ';' && d === 0) { out.push(header.slice(from, i)); from = i + 1 }
+    }
+    out.push(header.slice(from))
+    return out
+}
+
+// A loop earns the poll-interval exemption only when it RE-CHECKS something: a
+// real (non-literal) test, or an early exit in its own body. Two shapes sit in a
+// loop without being polls, so they count:
+//   - data iteration, `for (const c of cases) { ... await sleep(n) }`: the loop
+//     re-checks nothing, so the wait inside it is an ordinary fixed settle;
+//   - `while (true) { await sleep(n) }` with no way out, which re-checks nothing
+//     either and would spin forever if it were really a poll.
+function loopPolls(kind, header, body) {
+    if (kind === 'iteration') return false
+    let test = header
+    if (kind === 'for') {
+        const clauses = forClauses(header)
+        test = clauses.length >= 2 ? clauses[1] : ''
+    }
+    const t = test.trim()
+    if (t && !/^(?:true|1|!0)$/.test(t)) return true
+    // `for (;;)` / `while (true)` poll only if the body can leave.
+    return /\b(?:break|return|throw)\b/.test(body)
+}
+
+// Classify the loop a header `(`..`)` pair belongs to, from its own text.
+function loopKind(before, header) {
+    if (!/\bfor(?:\s+await)?\s*$/.test(before)) return 'while'
+    if (forClauses(header).length >= 2) return 'for'
+    return 'iteration'   // for-of / for-in
+}
+
+// Walk the code and mark, per character offset, whether it sits inside the body
+// of a POLLING loop. Three boundaries are load-bearing and each was a false
+// negative before:
+//   - a non-polling loop does not exempt (see loopPolls);
+//   - a nested function body ends the exemption, so a callback that merely sits
+//     in a loop body is not treated as part of the poll;
+//   - a brace-less body stops at its own statement end, so the settle in
+//     `while (!ready) await sleep(100); await sleep(5000)` is not swallowed by
+//     the loop header that precedes it on the line.
 function loopMask(code) {
     const mask = new Uint8Array(code.length)
-    const openLoopBodies = []   // brace depths at which a loop body opened
-    const pendingLoop    = []   // paren depths of loop headers being consumed
-    let depth = 0
-    let paren = 0
+    const stack = []          // one frame per open brace, carrying its effective state
+    let depth  = 0
+    let inLoop = false
+
+    // What does the `{` at `i` open? Returns the effective in-a-polling-loop
+    // state for everything inside it.
+    const classify = (i) => {
+        let p = i - 1
+        while (p >= 0 && /\s/.test(code[p])) p--
+        if (p >= 0 && code[p] === '>' && code[p - 1] === '=') return false          // arrow body
+        const kw = code.slice(Math.max(0, p - 11), p + 1)
+        if (p >= 0 && code[p] === ')') {
+            const open = openParenOf(code, p)
+            if (open === -1) return inLoop
+            const before = code.slice(Math.max(0, open - 12), open)
+            if (/\b(?:while|for)(?:\s+await)?\s*$/.test(before)) {
+                const header = code.slice(open + 1, p)
+                const body   = code.slice(i + 1, closeBraceOf(code, i))
+                return loopPolls(loopKind(before, header), header, body)
+            }
+            // `if`/`else if`/`switch`/`catch` are transparent; anything else
+            // ending in a parameter list is a function and ends the exemption.
+            return /\b(?:if|switch|catch|with)\s*$/.test(before) ? inLoop : false
+        }
+        if (/\bdo\s*$/.test(kw)) {
+            // `do { ... } while (test)`: the test sits AFTER the body, so read it
+            // from the tail rather than from a header this loop shape has not got.
+            const end  = closeBraceOf(code, i)
+            const body = code.slice(i + 1, end)
+            const tail = /^\s*while\s*\(/.exec(code.slice(end + 1))
+            let test = ''
+            if (tail) {
+                const tOpen = end + tail[0].length          // index of the `(`
+                let d = 0
+                for (let j = tOpen; j < code.length; j++) {
+                    if (code[j] === '(') d++
+                    else if (code[j] === ')') { d--; if (d === 0) { test = code.slice(tOpen + 1, j); break } }
+                }
+            }
+            return loopPolls('while', test, body)
+        }
+        if (/\b(?:else|try|finally)\s*$/.test(kw)) return inLoop
+        return inLoop          // bare block, object literal, class body
+    }
+
     for (let i = 0; i < code.length; i++) {
         const c = code[i]
-        if (c === '(') {
-            const before = code.slice(Math.max(0, i - 12), i)
-            if (/\b(?:while|for)\s*$/.test(before)) pendingLoop.push(paren)
-            paren++
-            continue
-        }
-        if (c === ')') {
-            paren--
-            if (pendingLoop.length && pendingLoop[pendingLoop.length - 1] === paren) {
-                // Header consumed; the next `{` (if any) opens this loop's body.
-                pendingLoop.pop()
-                const rest = code.slice(i + 1)
-                const nextTok = /^\s*\{/.exec(rest)
-                if (nextTok) openLoopBodies.push({ depth, armed: false })
-            }
-            continue
-        }
         if (c === '{') {
+            const eff = classify(i)
+            stack.push(eff)
             depth++
-            const top = openLoopBodies[openLoopBodies.length - 1]
-            if (top && !top.armed && top.depth === depth - 1) top.armed = true
+            inLoop = eff
             continue
         }
         if (c === '}') {
-            const top = openLoopBodies[openLoopBodies.length - 1]
-            if (top && top.armed && top.depth === depth - 1) openLoopBodies.pop()
+            stack.pop()
             depth--
+            inLoop = stack.length ? stack[stack.length - 1] : false
             continue
         }
-        // `do {` has no header parens: arm it when the brace follows the keyword.
-        if (c === 'd' && /^do\s*\{/.test(code.slice(i, i + 8)) && !/\w/.test(code[i - 1] || ' ')) {
-            openLoopBodies.push({ depth, armed: false })
-            continue
-        }
-        if (openLoopBodies.some((l) => l.armed)) mask[i] = 1
+        if (inLoop) mask[i] = 1
     }
+
+    // Brace-less loop bodies, marked as their own spans: `while (...) await x()`.
+    for (let i = 0; i < code.length; i++) {
+        if (code[i] !== '(') continue
+        const before = code.slice(Math.max(0, i - 12), i)
+        if (!/\b(?:while|for)(?:\s+await)?\s*$/.test(before)) continue
+        let d = 0, close = -1
+        for (let j = i; j < code.length; j++) {
+            if (code[j] === '(') d++
+            else if (code[j] === ')') { d--; if (d === 0) { close = j; break } }
+        }
+        if (close === -1) continue
+        let b = close + 1
+        while (b < code.length && /\s/.test(code[b])) b++
+        if (code[b] === '{') continue                       // braced body, handled above
+        // The body is one statement: it ends at the first `;` or newline at
+        // nesting depth zero, and NOT at the end of the line it started on.
+        let nest = 0, end = b
+        for (; end < code.length; end++) {
+            const ch = code[end]
+            if ('([{'.includes(ch)) nest++
+            else if (')]}'.includes(ch)) { if (nest === 0) break; nest-- }
+            else if (nest === 0 && (ch === ';' || ch === '\n')) break
+        }
+        const header = code.slice(i + 1, close)
+        if (!loopPolls(loopKind(before, header), header, code.slice(b, end))) continue
+        for (let k = b; k < end; k++) mask[k] = 1
+    }
+
     return { mask, balanced: depth === 0 }
 }
 
@@ -224,14 +340,12 @@ function scanSource(src, name) {
     for (const off of offsets) {
         const line = lineOf(off)
         const text = lines[line - 1] || ''
-        // Same-line brace-less loop body: `while (...) await sleep(n)`. The
-        // prefix is cut at this hit's own offset, so a second wait later on the
-        // same line reads its own prefix and not the first one's.
-        const prefix = text.slice(0, off - lineStarts[line - 1])
-        const sameLineLoop = /\b(?:while|for)\s*\(/.test(prefix)
+        // Brace-less loop bodies are spans in the mask now, not a same-line
+        // prefix test: a prefix test cannot tell the body of `while (...) await
+        // sleep(100);` from the separate settle that follows it on the line.
         // An unbalanced parse means the mask cannot be trusted, so count the
         // site rather than let a scanner defect quietly lower the baseline.
-        const inLoop = balanced && (mask[off] === 1 || sameLineLoop)
+        const inLoop = balanced && mask[off] === 1
         if (!inLoop) hits.push({ file: name, line, text: text.trim() })
     }
     return { hits, balanced }

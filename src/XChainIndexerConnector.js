@@ -20,6 +20,21 @@
 
 const axios = require('axios');
 
+// What the SERVICE said, when it said anything at all.
+// The indexer refuses a gated call with a non-2xx status whose body is still a
+// JSON-RPC envelope (api.js: 401 + {error:{code:-32001,message:'Unauthorized...'}}).
+// Axios rejects on any non-2xx, so a catch that never reads err.response cannot
+// tell "the indexer refused this" from "nothing answered the socket".
+// Returns null for a responseless failure (ECONNREFUSED, timeout, DNS), which is
+// the only case the connectors' null/false sentinel is meant to cover.
+function serviceRefusal(err){
+    const res = err && err.response
+    if(!res) return null
+    const body = res.data && res.data.error
+    if(body) return typeof body === 'object' ? (body.message || JSON.stringify(body)) : String(body)
+    return 'HTTP ' + res.status + (res.statusText ? ' ' + res.statusText : '')
+}
+
 class XChainIndexerConnector {
     constructor(url, port, apiKey) {
         this.url = "http://"+url+":"+port
@@ -42,7 +57,11 @@ class XChainIndexerConnector {
         try {
             response = await axios.post(this.url, data)
         } catch (err) {
-            console.log(err)
+            // A probe keeps its boolean sentinel: callers poll on false. Name the
+            // refusal in the log so a gated port is not read as a dead one.
+            const refusal = serviceRefusal(err)
+            if(refusal) console.warn('Indexer ' + this.url + ' refused ping: ' + refusal)
+            else console.log(err)
             return false
         }
 
@@ -66,7 +85,12 @@ class XChainIndexerConnector {
         try {
             response = await axios.post(this.url, data)
         } catch (err) {
-            console.log(err)
+            // health() keeps its null sentinel deliberately: waitForIndexedBlock
+            // polls it in a loop and must ride out a restarting indexer's non-2xx
+            // window rather than abort the run. Name the refusal instead.
+            const refusal = serviceRefusal(err)
+            if(refusal) console.warn('Indexer ' + this.url + ' refused health: ' + refusal)
+            else console.log(err)
             return null
         }
 
@@ -78,8 +102,12 @@ class XChainIndexerConnector {
     }
 
     // Generic JSON-RPC call (object params). Returns the result on success, and
-    // null only when the request never completed (transport failure). Both error
-    // shapes THROW instead of reaching the caller as a value:
+    // null only when the request never completed (transport failure). All three
+    // error shapes THROW instead of reaching the caller as a value:
+    //   - a non-2xx response carrying a JSON-RPC error body, which is how a gated
+    //     method refuses an unauthorized call (401, code -32001). Axios rejects
+    //     that response, so it arrives at the catch rather than the branches
+    //     below; null there made an authentication refusal read as a dead socket.
     //   - a top-level response.data.error, which the router emits for an unknown
     //     method (version skew), a handler that threw outside its own try/catch,
     //     or a malformed body. Coercing it to null made a rejected RPC
@@ -102,6 +130,13 @@ class XChainIndexerConnector {
             const config = this.apiKey ? { headers: { 'x-api-key': this.apiKey } } : {}
             response = await axios.post(this.url, data, config)
         } catch (err) {
+            // A gated method answers 401 with an RPC error BODY, and axios rejects
+            // it. Coercing that to null broke this method's own contract two lines
+            // up and disarmed rollcallHelper.assertGatedReadsReachable, whose catch
+            // is what prints the INDEXER_API_KEY sentence; the generic null-result
+            // assertion that fired instead never named authentication.
+            const refusal = serviceRefusal(err)
+            if(refusal) throw new Error('Indexer refused ' + method + ': ' + refusal)
             console.log(err)
             return null
         }

@@ -742,6 +742,39 @@ describe('Protocol size-limit drift guard', () => {
             assert.strictEqual(protocol.ROLLCALL_STREAK_LOOKBACK, 2 * protocol.ROLLCALL_EVICT_MISSES,
                 'canonical ROLLCALL_STREAK_LOOKBACK is no longer exactly 2 x ROLLCALL_EVICT_MISSES')
         })
+
+        // The ROLLCALL GATES rail is a second, later pair of twins: canonical declares
+        // ROLLCALL_GATES_REGTEST_ARMED_HEIGHT and its opt-in env key, and
+        // xchain-hub/src/rollcall_gates_activation.js and
+        // xchain-indexer/src/rollcall_gates_activation.js each re-declare both as bare
+        // literals of their own. Neither repo compares its copy to canonical, and the
+        // block above covers rollcall_activation.js only, so the gates twins could be
+        // edited in step and leave the map of record behind with nothing red. The
+        // height is what arms the rail on regtest and the env key is what opts a venue
+        // in, so a drift in either silently changes which epochs the venue publishes
+        // gates for while the hub and the indexer still agree with each other.
+        it('[regression:p0] ROLLCALL_GATES_REGTEST_ARMED_HEIGHT / _ENV === canonical across hub + indexer', () => {
+            const hubGates     = require('../../../xchain-hub/src/rollcall_gates_activation.js')
+            const indexerGates = require('../../../xchain-indexer/src/rollcall_gates_activation.js')
+
+            // A dropped export on all three sides would compare undefined to undefined
+            // and pass, which is the shape this whole file exists to refuse.
+            assert.ok(Number.isFinite(protocol.ROLLCALL_GATES_REGTEST_ARMED_HEIGHT),
+                'ROLLCALL_GATES_REGTEST_ARMED_HEIGHT is not a finite value on the canonical protocol constants module')
+            assert.ok(typeof protocol.ROLLCALL_GATES_REGTEST_ENV === 'string'
+                && protocol.ROLLCALL_GATES_REGTEST_ENV.length > 0,
+                'ROLLCALL_GATES_REGTEST_ENV is not a non-empty string on the canonical protocol constants module')
+
+            const names = ['ROLLCALL_GATES_REGTEST_ARMED_HEIGHT', 'ROLLCALL_GATES_REGTEST_ENV']
+            names.forEach((name) => {
+                assert.strictEqual(hubGates[name], protocol[name],
+                    'hub rollcall_gates_activation ' + name + ' drifted from the canonical protocol constant; ' +
+                    'the hub decides which epochs it publishes gates for')
+                assert.strictEqual(indexerGates[name], protocol[name],
+                    'indexer rollcall_gates_activation ' + name + ' drifted from the canonical protocol constant; ' +
+                    'the indexer is where the gates predicate is judged, so its copy decides what is accepted')
+            })
+        })
     })
 
     describe('Vendored protocol-constants byte-identity', () => {

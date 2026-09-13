@@ -32,6 +32,24 @@ function localConsensusHashes(network){
     return LOCAL_CONSENSUS_HASHES[network];
 }
 
+// What the hub's config oracle puts where a password would go when the call was
+// not authorized for the credential tier. The same string test/helpers/
+// oracleBatchReplay.js refuses by name; one definition, not two.
+const HUB_CONFIG_REDACTION = '[redacted]';
+
+// Refuse the sentinel where a credential is expected.
+// A redacted value is not a password: forwarding one authenticates nothing and
+// dies minutes later as ER_ACCESS_DENIED or a 401, which reads as a rotation
+// that never happened rather than as an unauthorized config fetch.
+function assertUnredactedCredential(value, whatItIsFor){
+    if(value !== HUB_CONFIG_REDACTION) return value;
+    throw new Error('The hub served a REDACTED value for ' + whatItIsFor + ': its config oracle ' +
+        'withholds every password unless the getallconfigs call is authorized for the credential ' +
+        'tier. Set HUB_CONFIG_SECRETS_API_KEY (or the bulk HUB_API_KEY when no separate key is ' +
+        'configured) to the hub\'s key, or supply the credential explicitly in the harness ' +
+        'environment.');
+}
+
 class XChainHubConnector {
 
     // Accept an array of endpoint URLs or a single host+port for backward compatibility
@@ -45,6 +63,9 @@ class XChainHubConnector {
         // "url → code|message" strings for each unreachable endpoint so callers
         // can report exactly what was tried and why, instead of a bare null.
         this.lastFailures = [];
+        // Whether the most recent getAllConfig() tree had its passwords withheld.
+        // Starts true: nothing has been fetched, so nothing has been served.
+        this.lastConfigSecretsRedacted = true;
     }
 
     async sleep(ms) {
@@ -61,10 +82,25 @@ class XChainHubConnector {
         // trying the remaining endpoints in case one is fully healthy.
         let degraded = null;
         this.lastFailures = [];
+        // Did any endpoint ANSWER with an HTTP error, as opposed to not answering
+        // at all? Only an answer can be a refusal, and getAllConfig retries the
+        // pre-credential-tier call shape on a refusal alone: re-running every
+        // endpoint after a round where nothing responded doubles the attempt count
+        // for no new information.
+        this.lastHttpRefusal = false;
         // Attach x-api-key when HUB_API_KEY is configured (keyed venues): the
         // hub gates writes AND getallconfigs behind it; other reads ignore it.
+        // A call that asks for `include_secrets` is checked against the CREDENTIAL
+        // tier instead (api.js: HUB_CONFIG_SECRETS_API_KEY, or the bulk key when
+        // no separate one is set), and one request carries one x-api-key header,
+        // so sending the bulk key on a secrets ask 401s the whole request wherever
+        // the two keys differ.
         let headers = {};
-        if(process.env.HUB_API_KEY) headers['x-api-key'] = process.env.HUB_API_KEY;
+        let wantsSecrets = !!(data && data.params && data.params.include_secrets);
+        let key = wantsSecrets
+            ? (process.env.HUB_CONFIG_SECRETS_API_KEY || process.env.HUB_API_KEY)
+            : process.env.HUB_API_KEY;
+        if(key) headers['x-api-key'] = key;
         for(let url of this.urls){
             try {
                 let response = await axios.post(url, data, { timeout, headers });
@@ -74,6 +110,7 @@ class XChainHubConnector {
                 if(err.response && err.response.data && err.response.data.result !== undefined){
                     degraded = err.response.data.result;
                 } else {
+                    if(err.response) this.lastHttpRefusal = true;
                     this.lastFailures.push(url + ' → ' + (err.code || err.message));
                     console.warn('Hub endpoint ' + url + ' failed: ', err);
                 }
@@ -96,17 +133,49 @@ class XChainHubConnector {
         return result !== null;
     }
 
+    // The config tree, asked for at the CREDENTIAL tier.
+    //
+    // The hub redacts every secret-bearing param unless the call sets
+    // `include_secrets` AND is authorized for it, substituting the literal
+    // '[redacted]'. Asking with `params: []` therefore hands the harness a
+    // sentinel wherever a node or indexer-database password belongs, and every
+    // discovery-driven bootstrap then authenticates with it.
+    //
+    // Falls back to the old bare-array form when the tiered ask yields nothing: a
+    // hub that denies the tier, or predates it, must still supply coordinates.
+    // `lastConfigSecretsRedacted` says which of the two happened; a hub too old
+    // to send `secrets_redacted` counts as redacting, since assuming otherwise is
+    // exactly how a sentinel gets forwarded as a password.
     async getAllConfig(){
-        let result = await this._call({ jsonrpc: '2.0', method: 'getallconfigs', params: [], id: 1 });
-        // A degraded hub returns {status:"degraded"} and a failed config fetch
-        // returns {error:...}; neither is a config tree. Don't let those
-        // masquerade as config. Return null so the caller takes its
-        // "couldn't get configs" path instead of indexing into a non-config object.
-        if(result && typeof result === 'object' && (result.status === 'degraded' || result.error !== undefined)){
-            console.warn('Hub did not return usable config: ', result);
-            return null;
+        let result = await this._call({ jsonrpc: '2.0', method: 'getallconfigs',
+                                        params: { include_secrets: true }, id: 1 });
+        if(!this._usableConfigResult(result)){
+            // Retry the old shape only when an endpoint actually answered and
+            // refused: an HTTP error (the auth middleware denying the credential
+            // tier) or a JSON-RPC error body. A round where nothing answered, or
+            // where the hub reported itself degraded, gets the same answer twice,
+            // so a second round would only double the endpoint attempts callers
+            // count on.
+            let refused = this.lastHttpRefusal ||
+                (result && typeof result === 'object' && result.error !== undefined);
+            if(!refused) return null;
+            result = await this._call({ jsonrpc: '2.0', method: 'getallconfigs', params: [], id: 1 });
+            if(!this._usableConfigResult(result)) return null;
         }
         return this._applyConfigResult(result);
+    }
+
+    // A degraded hub returns {status:"degraded"} and a failed config fetch
+    // returns {error:...}; neither is a config tree. Don't let those
+    // masquerade as config, so the caller takes its "couldn't get configs" path
+    // instead of indexing into a non-config object.
+    _usableConfigResult(result){
+        if(result === null || result === undefined) return false;
+        if(typeof result === 'object' && (result.status === 'degraded' || result.error !== undefined)){
+            console.warn('Hub did not return usable config: ', result);
+            return false;
+        }
+        return true;
     }
 
     // Normalize the getallconfigs result to the flat coin→network→service tree.
@@ -117,8 +186,12 @@ class XChainHubConnector {
         if(result === null) return null;
         this._checkHubConsensusHash(result && typeof result === 'object' ? result.coin_consensus_hashes : null);
         if(result && typeof result === 'object' && result.configs && typeof result.configs === 'object' && ('seq' in result)){
+            // Only the enveloped form can say whether a value was withheld.
+            this.lastConfigSecretsRedacted = (result.secrets_redacted !== false);
             return result.configs;
         }
+        // A bare tree carries no flag, so it is treated as redacted.
+        this.lastConfigSecretsRedacted = true;
         return result;
     }
 
@@ -168,5 +241,8 @@ XChainHubConnector.parseEndpoints = function(){
     let port = process.env.HUB_PORT || '10000';
     return ['http://' + host + ':' + port];
 };
+
+XChainHubConnector.REDACTED = HUB_CONFIG_REDACTION;
+XChainHubConnector.assertUnredactedCredential = assertUnredactedCredential;
 
 module.exports = XChainHubConnector

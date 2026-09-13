@@ -160,6 +160,11 @@ function buildReport(report, options = {}) {
 
   const overallScore = coveredScore({ killed, timeout, survived })
 
+  // Detected means Killed or Timeout, counted up from those two statuses so a
+  // status added to the schema later cannot silently join the detected side.
+  const detected    = killed + timeout
+  const allDetected = totalMutants > 0 && detected === totalMutants
+
   // Critical files first, then worst score first, with 'N/A' last: parseFloat('N/A')
   // is NaN and a NaN comparator leaves the WHOLE ranking undefined, not one row.
   perFile.sort((a, b) => {
@@ -229,7 +234,20 @@ function buildReport(report, options = {}) {
   } else {
     lines.push('## Survived Mutants')
     lines.push('')
-    lines.push('None! All mutants were detected by the test suite.')
+    // Zero Survived is not all-detected. A run whose mutants are entirely
+    // NoCoverage / Ignored / RuntimeError / CompileError, and an empty report,
+    // both reach here having killed nothing, so the claim is gated on DETECTED
+    // (Killed + Timeout), counted UP the way coveredScore counts its numerator.
+    if (totalMutants === 0) {
+      lines.push('This report contained no mutants, so it makes no claim about the test suite.')
+    } else if (allDetected) {
+      lines.push('None! All mutants were detected by the test suite.')
+    } else {
+      lines.push('No mutants have Survived status, but this is NOT an all-detected result: '
+        + `${totalMutants - detected} of ${totalMutants} mutant(s) were never exercised by the test suite `
+        + `(No Coverage ${noCoverage}, Ignored ${ignored}, Runtime Error ${runtimeError}, `
+        + `Compile Error ${compileError}).`)
+    }
     lines.push('')
   }
 
@@ -240,6 +258,7 @@ function buildReport(report, options = {}) {
     totals: { totalMutants, killed, survived, timeout, noCoverage, runtimeError, compileError, ignored },
     perFile,
     survivedCount: survivedList.length,
+    allDetected,
     unextractable,
   }
 }
