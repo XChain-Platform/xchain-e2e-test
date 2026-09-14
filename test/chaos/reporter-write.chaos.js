@@ -39,11 +39,13 @@ function writeResultsSafe(outputDir, results) {
     }
 }
 
+function restoreReporterStubs() {
+    sinon.restore()
+}
+
 describe('Chaos Experiment 9: Performance Reporter Write Failure @P2', function () {
 
-    afterEach(function () {
-        sinon.restore()
-    })
+    afterEach(restoreReporterStubs)
 
     describe('fs.writeFileSync failure', function () {
 
@@ -74,6 +76,11 @@ describe('Chaos Experiment 9: Performance Reporter Write Failure @P2', function 
             )
         })
     })
+})
+
+describe('Chaos Experiment 9: Performance Reporter Write Failure @P2', function () {
+
+    afterEach(restoreReporterStubs)
 
     describe('fs.mkdirSync failure', function () {
 
@@ -94,6 +101,11 @@ describe('Chaos Experiment 9: Performance Reporter Write Failure @P2', function 
             assert.strictEqual(result, null)
         })
     })
+})
+
+describe('Chaos Experiment 9: Performance Reporter Write Failure @P2', function () {
+
+    afterEach(restoreReporterStubs)
 
     describe('successful write', function () {
 
