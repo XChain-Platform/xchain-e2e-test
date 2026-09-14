@@ -13,6 +13,40 @@ const cryptoHelper = require('../cryptoHelper')
 const transactionHelper = require('../transactionHelper')
 const issueHelper = require('../helpers/issueHelper')
 
+// P2WSH embeds payload chunks in the witness scripts of segwit outputs:
+// tx1 creates the P2WSH outputs, tx2 spends them to reveal the data.
+// Each chunk is pushed as a single script element, so it is bound by the
+// 520-byte consensus push limit (476 usable after script overhead), so an
+// ~8 KB payload therefore fans out across ~17 P2WSH outputs/inputs. This
+// case exercises (a) the encoder's fee sizing for a multi-output P2WSH
+// transaction under real node relay rules, (b) the node accepting the
+// two-tx PSBT without a dust/fee/push-size rejection, and (c) the
+// decoder reassembling every chunk back into a byte-intact ACTION. A
+// FILE carries the bulk binary blob; a corrupted or fee-starved reveal
+// would either fail to broadcast or land a garbled/absent FILE row, so a
+// valid FILE with the exact name+title proves the full payload
+// round-tripped.
+//
+// Segwit-only: skipped on chains without segwit support (e.g. Dogecoin).
+const SEGWIT = !(NETWORK_OBJECT && NETWORK_OBJECT.supportsSegwit === false)
+
+// The protocol caps a compiled on-chain ACTION push at 8192 bytes. This
+// ceiling is enforced at TWO layers that share the same constant:
+//   - the encoder (XChainEncoder MAX_COMPILED_ACTION_DATA_LENGTH) rejects
+//     an over-length payload at build time with a RangeError, so an
+//     over-length transaction is never broadcast through the pipeline;
+//   - the decoder (XChainDecoder MAX_ACTION_DATA_LENGTH) re-checks the
+//     reassembled push inside its live block-parsing loop and skips any
+//     transaction that exceeds it (defense-in-depth against a tx crafted
+//     outside the encoder).
+// Because both ceilings are identical, the decoder's in-loop guard is
+// unreachable through the legitimate encoder pipeline (every tx the
+// encoder will build is <= 8192 and the decoder accepts it). The
+// operationally meaningful, live-exercisable enforcement is therefore the
+// encoder boundary, plus proof that the decoder loop keeps processing
+// valid blocks immediately afterward (it never stalls on the rejected
+// payload because that payload never reaches a block).
+
 describe('E2E: Transaction Pipeline Machinery', () => {
     describe('E2E-EXEC-001: OP_RETURN encoding path', () => {
         let addressInfo
@@ -59,7 +93,9 @@ describe('E2E: Transaction Pipeline Machinery', () => {
             assert(utxo.confirmations > 0, 'UTXO confirmations should be > 0')
         })
     })
+})
 
+describe('E2E: Transaction Pipeline Machinery', () => {
     describe('E2E-EXEC-002: P2SH two-transaction encoding path', () => {
         it('should verify the encoder selects P2SH for a long message', async () => {
             const addr = await cryptoHelper.getNewFundedAddress('E2E.PIPE.P2SH.CHK', COIN, NETWORK, null, 'legacy', 0, 1)
@@ -98,7 +134,9 @@ describe('E2E: Transaction Pipeline Machinery', () => {
             assert(result.credit, 'Credit should exist after P2SH pipeline')
         })
     })
+})
 
+describe('E2E: Transaction Pipeline Machinery', () => {
     describe('E2E-EXEC-003: MULTISIGN (bare multisig) encoding path', () => {
         // The MULTISIGN encoding embeds payload bytes in the pubkeys of a bare
         // 1-of-3 multisig output. The rest of the suite always passes a null
@@ -134,25 +172,10 @@ describe('E2E: Transaction Pipeline Machinery', () => {
             assert.strictEqual(result.credit.tx_hash, txHash, 'Credit tx_hash should match ISSUE tx_hash')
         })
     })
+})
 
+describe('E2E: Transaction Pipeline Machinery', () => {
     describe('E2E-EXEC-004: P2WSH large-payload (multi-chunk) encoding path', () => {
-        // P2WSH embeds payload chunks in the witness scripts of segwit outputs:
-        // tx1 creates the P2WSH outputs, tx2 spends them to reveal the data.
-        // Each chunk is pushed as a single script element, so it is bound by the
-        // 520-byte consensus push limit (476 usable after script overhead), so an
-        // ~8 KB payload therefore fans out across ~17 P2WSH outputs/inputs. This
-        // case exercises (a) the encoder's fee sizing for a multi-output P2WSH
-        // transaction under real node relay rules, (b) the node accepting the
-        // two-tx PSBT without a dust/fee/push-size rejection, and (c) the
-        // decoder reassembling every chunk back into a byte-intact ACTION. A
-        // FILE carries the bulk binary blob; a corrupted or fee-starved reveal
-        // would either fail to broadcast or land a garbled/absent FILE row, so a
-        // valid FILE with the exact name+title proves the full payload
-        // round-tripped.
-        //
-        // Segwit-only: skipped on chains without segwit support (e.g. Dogecoin).
-        const SEGWIT = !(NETWORK_OBJECT && NETWORK_OBJECT.supportsSegwit === false)
-
         it('should encode a ~8 KB FILE as a multi-chunk P2WSH tx, broadcast, mine, and round-trip it intact', async function(){
             if (!SEGWIT){
                 console.log('Skipping P2WSH case: '+COIN+' does not support segwit')
@@ -206,24 +229,10 @@ describe('E2E: Transaction Pipeline Machinery', () => {
             assert.strictEqual(fileRow.status, 'valid', 'FILE status should be valid')
         })
     })
+})
 
+describe('E2E: Transaction Pipeline Machinery', () => {
     describe('E2E-EXEC-005: MAX_ACTION_DATA_LENGTH enforcement (live decoder loop)', () => {
-        // The protocol caps a compiled on-chain ACTION push at 8192 bytes. This
-        // ceiling is enforced at TWO layers that share the same constant:
-        //   - the encoder (XChainEncoder MAX_COMPILED_ACTION_DATA_LENGTH) rejects
-        //     an over-length payload at build time with a RangeError, so an
-        //     over-length transaction is never broadcast through the pipeline;
-        //   - the decoder (XChainDecoder MAX_ACTION_DATA_LENGTH) re-checks the
-        //     reassembled push inside its live block-parsing loop and skips any
-        //     transaction that exceeds it (defense-in-depth against a tx crafted
-        //     outside the encoder).
-        // Because both ceilings are identical, the decoder's in-loop guard is
-        // unreachable through the legitimate encoder pipeline (every tx the
-        // encoder will build is <= 8192 and the decoder accepts it). The
-        // operationally meaningful, live-exercisable enforcement is therefore the
-        // encoder boundary, plus proof that the decoder loop keeps processing
-        // valid blocks immediately afterward (it never stalls on the rejected
-        // payload because that payload never reaches a block).
         it('should reject an over-length payload at the encoder and keep the decoder loop healthy', async () => {
             const addr = await cryptoHelper.getNewFundedAddress('E2E.PIPE.MAXLEN', COIN, NETWORK, null, 'legacy', 0, 1)
             assert(addr.address, 'Funded address should be truthy')
