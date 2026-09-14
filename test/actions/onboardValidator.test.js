@@ -28,60 +28,63 @@ const cryptoHelper = require('../cryptoHelper')
 const stakeHelper = require('../helpers/stakeHelper')
 const gasHelper = require('../helpers/gasHelper')
 
-describe('Validator onboarding - STAKE the hub signing pubkey into the active capability set', function () {
+// Hub Ed25519 signing pubkey (32-byte / 64-hex), from `xchain-node validator status`.
+const VALIDATOR_PUBKEY = (process.env.VALIDATOR_PUBKEY || '').trim().toLowerCase()
 
-    // Hub Ed25519 signing pubkey (32-byte / 64-hex), from `xchain-node validator status`.
-    const VALIDATOR_PUBKEY = (process.env.VALIDATOR_PUBKEY || '').trim().toLowerCase()
+// 2500 XCHAIN clears every default capability threshold (price/cross_chain/
+// attestation = 1000, oracle_publish = 500) and also full_node (2000).
+const STAKE_AMOUNT = '2500.00000000'
 
-    // 2500 XCHAIN clears every default capability threshold (price/cross_chain/
-    // attestation = 1000, oracle_publish = 500) and also full_node (2000).
-    const STAKE_AMOUNT = '2500.00000000'
+// getcapabilityvalidators honours the caller-supplied threshold over the
+// venue's local MIN_STAKE config - assert against each documented minimum.
+const CAPABILITIES = [
+    { name: 'price',          minStake: '1000' },
+    { name: 'cross_chain',    minStake: '1000' },
+    { name: 'oracle_publish', minStake: '500'  },
+    { name: 'attestation',    minStake: '1000' }
+]
 
-    // getcapabilityvalidators honours the caller-supplied threshold over the
-    // venue's local MIN_STAKE config - assert against each documented minimum.
-    const CAPABILITIES = [
-        { name: 'price',          minStake: '1000' },
-        { name: 'cross_chain',    minStake: '1000' },
-        { name: 'oracle_publish', minStake: '500'  },
-        { name: 'attestation',    minStake: '1000' }
-    ]
+let stakerAddr = null
+let stakeBlock = null   // indexer height at which the STAKE was indexed
 
-    let stakerAddr = null
-    let stakeBlock = null   // indexer height at which the STAKE was indexed
+// Effective signer set for `capability` at the indexer's latest indexed block.
+async function membership(capability, minStake) {
+    const health = await indexerConnector.health()
+    assert(health && health.lastIndexedBlock !== null, 'indexer health should report lastIndexedBlock')
+    const result = await indexerConnector.getCapabilityValidators(capability, health.lastIndexedBlock, minStake)
+    assert(result, 'getcapabilityvalidators should answer')
+    assert(!result.error, 'getcapabilityvalidators should not error; got: ' + result.error)
+    return result.validators.map(v => String(v.pubkey).toLowerCase())
+}
 
-    // Effective signer set for `capability` at the indexer's latest indexed block.
-    async function membership(capability, minStake) {
-        const health = await indexerConnector.health()
-        assert(health && health.lastIndexedBlock !== null, 'indexer health should report lastIndexedBlock')
-        const result = await indexerConnector.getCapabilityValidators(capability, health.lastIndexedBlock, minStake)
-        assert(result, 'getcapabilityvalidators should answer')
-        assert(!result.error, 'getcapabilityvalidators should not error; got: ' + result.error)
-        return result.validators.map(v => String(v.pubkey).toLowerCase())
+async function setupValidator(ctx) {
+    // STAKE / capability staking is BTC-only by protocol design (the indexer
+    // action handlers reject COIN !== 'BTC').
+    if (COIN_CODE !== 'BTC') {
+        console.log('Validator staking is BTC-only - skipping onboarding on ' + COIN_CODE)
+        ctx.skip()
+        return
     }
+    if (!VALIDATOR_PUBKEY) {
+        console.log('VALIDATOR_PUBKEY not set - skipping validator onboarding. Get it with ' +
+            '`xchain-node validator status`, then add VALIDATOR_PUBKEY=<hex> to the ' +
+            'bitcoin-regtest config file so it reaches the e2e container.')
+        ctx.skip()
+        return
+    }
+    assert.strictEqual(VALIDATOR_PUBKEY.length, 64,
+        'VALIDATOR_PUBKEY must be a 32-byte (64-hex) Ed25519 key; got length ' + VALIDATOR_PUBKEY.length)
 
+    stakerAddr = await cryptoHelper.getNewFundedAddress(
+        'validator-onboard', COIN, NETWORK, null, 'legacy', 0, 1
+    )
+    // Mint enough XCHAIN to cover the 2500 stake + the STAKE protocol fee.
+    await gasHelper.ensureGasBalance(stakerAddr, '3000')
+}
+
+describe('Validator onboarding - STAKE the hub signing pubkey into the active capability set', function () {
     before(async function () {
-        // STAKE / capability staking is BTC-only by protocol design (the indexer
-        // action handlers reject COIN !== 'BTC').
-        if (COIN_CODE !== 'BTC') {
-            console.log('Validator staking is BTC-only - skipping onboarding on ' + COIN_CODE)
-            this.skip()
-            return
-        }
-        if (!VALIDATOR_PUBKEY) {
-            console.log('VALIDATOR_PUBKEY not set - skipping validator onboarding. Get it with ' +
-                '`xchain-node validator status`, then add VALIDATOR_PUBKEY=<hex> to the ' +
-                'bitcoin-regtest config file so it reaches the e2e container.')
-            this.skip()
-            return
-        }
-        assert.strictEqual(VALIDATOR_PUBKEY.length, 64,
-            'VALIDATOR_PUBKEY must be a 32-byte (64-hex) Ed25519 key; got length ' + VALIDATOR_PUBKEY.length)
-
-        stakerAddr = await cryptoHelper.getNewFundedAddress(
-            'validator-onboard', COIN, NETWORK, null, 'legacy', 0, 1
-        )
-        // Mint enough XCHAIN to cover the 2500 stake + the STAKE protocol fee.
-        await gasHelper.ensureGasBalance(stakerAddr, '3000')
+        await setupValidator(this)
     })
 
     it('stakes the hub pubkey and the indexer records it as a valid stake', async function () {
