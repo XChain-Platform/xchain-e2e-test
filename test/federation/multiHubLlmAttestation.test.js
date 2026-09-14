@@ -48,17 +48,14 @@ async function _settleStack() {
     await utxoTrackerConnector.quiesce({ timeoutMs: 30000, pollMs: 250, regtestMiner: regtestMinerConnector })
 }
 
-describe('Phase B: multi-hub PBFT for LLM attestation (redundancy=3)', function () {
-    this.timeout(15 * 60 * 1000)
+let mvh           = null
+let contractIndex = null
+let owner         = null
+let stakers       = []
 
-    let mvh           = null
-    let contractIndex = null
-    let owner         = null
-    let stakers       = []
-
-    // Deterministic arithmetic prompt: every hub's model must answer "4", so
-    // the PBFT byte-equality consensus over the responses converges.
-    const CONTRACT_CODE = `
+// Deterministic arithmetic prompt: every hub's model must answer "4", so
+// the PBFT byte-equality consensus over the responses converges.
+const CONTRACT_CODE = `
 module.exports = {
     meta: { name: 'Multi Hub LLM Asker', description: 'Requests an LLM attestation answered by several hubs.', version: '1.0.0' },
     askLlm: function(xchain) {
@@ -83,74 +80,99 @@ module.exports = {
 };
 `
 
+async function setUpMultiHubLlm(context) {
+    if (!requireFederationEnv(context, { needsClaudeConfig: true })) return
+    // Responsible-set selection spans ALL staked validators; a polluted chain
+    // makes the three hubs unreliable to select. Fail fast.
+    await assertCleanValidatorSet(indexerDatabase)
+
+    mvh = new MultiValidatorHub({ count: 3 })
+    await mvh.start()
+    const pubkeys = mvh.getPubkeys()
+
+    // Stake each hub's pubkey from a separate funded source. 30000 clears BOTH the
+    // attestation capability min_stake (1000 XCHAIN) and the llm PROVIDER floor
+    // (25000), which the responsible-set derivation enforces at/above
+    // STAKE_WEIGHTED_QUORUM (armed at genesis on regtest).
+    for (let i = 0; i < pubkeys.length; i++) {
+        const addr = await cryptoHelper.getNewFundedAddress(
+            'llm-mvh-staker-' + i, COIN, NETWORK, null, 'legacy', 0, 0.02
+        )
+        await _settleStack()
+        await gasHelper.ensureGasBalance(addr, '35000')
+        await _settleStack()
+        const result = await stakeHelper.sendStakeV1(addr, '30000.00000000', pubkeys[i])
+        assert.strictEqual(result.stake.status, 'valid', 'stake ' + i + ' should be valid')
+        stakers.push({ addressInfo: addr, pubkey: pubkeys[i] })
+    }
+
+    // Activation delay AND snapshot burial: the responsible set resolves at the
+    // request's block minus CANONICAL_REORG_BUFFER, so the delay alone is 6 short.
+    await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
+    await _settleStack()
+
+    owner = await cryptoHelper.getNewFundedAddress(
+        'llm-mvh-owner', COIN, NETWORK, null, 'legacy', 0, 0.02
+    )
+    await regtestMinerConnector.generateBlocks(2)
+    await _settleStack()
+    await gasHelper.ensureGasBalance(owner, '5000')
+
+    const deploy = await vmHelper.sendDeployV0(owner, CONTRACT_CODE, 500000)
+    assert.strictEqual(deploy.contract.status, 'valid', 'deploy should be valid')
+    contractIndex = deploy.contract.action_index
+
+    // Publisher hook (only the round leader invokes it; followers no-op, so a
+    // single shared funded address is safe across all 3 hubs).
+    const publisherAddr = await cryptoHelper.getNewFundedAddress(
+        'llm-mvh-publisher', COIN, NETWORK, null, 'legacy', 0, 0.02
+    )
+    await regtestMinerConnector.generateBlocks(2)
+    await _settleStack()
+    mvh.setBroadcastHook(async (wirePayload) => {
+        const txHash = await transactionHelper.createAndSendTransaction(publisherAddr, wirePayload)
+        return { txid: txHash }
+    })
+}
+
+async function tearDownMultiHubLlm() {
+    if (mvh) {
+        await mvh.stop()
+        await mvh.dropDatabases()
+    }
+}
+
+async function executeMultiHubLlmRequest() {
+    const envelope = JSON.stringify({
+        prompt: 'What is 2 plus 2? Reply with only the number, nothing else.',
+        max_tokens: 16
+    })
+    return vmHelper.sendExecuteV0(owner, contractIndex, 'askLlm', [envelope])
+}
+
+async function waitForMultiHubLlmResponse(requestId) {
+    // Past CONFIRMATIONS so the hubs fetch.
+    await regtestMinerConnector.generateBlocks(6)
+
+    // Generous wait: 3x claude CLI cold-start + PBFT + on-chain broadcast.
+    return indexerDatabase.waitForAttestationResponse({
+        requestId:      requestId,
+        responseStatus: 'ok',
+        status:         'valid'
+    }, 300_000)
+}
+
+describe('Phase B: multi-hub PBFT for LLM attestation (redundancy=3)', function () {
+    this.timeout(15 * 60 * 1000)
+
     before(async function () {
-        if (!requireFederationEnv(this, { needsClaudeConfig: true })) return
-        // Responsible-set selection spans ALL staked validators; a polluted chain
-        // makes the three hubs unreliable to select. Fail fast.
-        await assertCleanValidatorSet(indexerDatabase)
-
-        mvh = new MultiValidatorHub({ count: 3 })
-        await mvh.start()
-        const pubkeys = mvh.getPubkeys()
-
-        // Stake each hub's pubkey from a separate funded source. 30000 clears BOTH the
-        // attestation capability min_stake (1000 XCHAIN) and the llm PROVIDER floor
-        // (25000), which the responsible-set derivation enforces at/above
-        // STAKE_WEIGHTED_QUORUM (armed at genesis on regtest).
-        for (let i = 0; i < pubkeys.length; i++) {
-            const addr = await cryptoHelper.getNewFundedAddress(
-                'llm-mvh-staker-' + i, COIN, NETWORK, null, 'legacy', 0, 0.02
-            )
-            await _settleStack()
-            await gasHelper.ensureGasBalance(addr, '35000')
-            await _settleStack()
-            const result = await stakeHelper.sendStakeV1(addr, '30000.00000000', pubkeys[i])
-            assert.strictEqual(result.stake.status, 'valid', 'stake ' + i + ' should be valid')
-            stakers.push({ addressInfo: addr, pubkey: pubkeys[i] })
-        }
-
-        // Activation delay AND snapshot burial: the responsible set resolves at the
-        // request's block minus CANONICAL_REORG_BUFFER, so the delay alone is 6 short.
-        await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
-        await _settleStack()
-
-        owner = await cryptoHelper.getNewFundedAddress(
-            'llm-mvh-owner', COIN, NETWORK, null, 'legacy', 0, 0.02
-        )
-        await regtestMinerConnector.generateBlocks(2)
-        await _settleStack()
-        await gasHelper.ensureGasBalance(owner, '5000')
-
-        const deploy = await vmHelper.sendDeployV0(owner, CONTRACT_CODE, 500000)
-        assert.strictEqual(deploy.contract.status, 'valid', 'deploy should be valid')
-        contractIndex = deploy.contract.action_index
-
-        // Publisher hook (only the round leader invokes it; followers no-op, so a
-        // single shared funded address is safe across all 3 hubs).
-        const publisherAddr = await cryptoHelper.getNewFundedAddress(
-            'llm-mvh-publisher', COIN, NETWORK, null, 'legacy', 0, 0.02
-        )
-        await regtestMinerConnector.generateBlocks(2)
-        await _settleStack()
-        mvh.setBroadcastHook(async (wirePayload) => {
-            const txHash = await transactionHelper.createAndSendTransaction(publisherAddr, wirePayload)
-            return { txid: txHash }
-        })
+        await setUpMultiHubLlm(this)
     })
 
-    after(async function () {
-        if (mvh) {
-            await mvh.stop()
-            await mvh.dropDatabases()
-        }
-    })
+    after(tearDownMultiHubLlm)
 
     it('drives a redundancy=3 LLM attestation through real PBFT and fires the callback', async function () {
-        const envelope = JSON.stringify({
-            prompt: 'What is 2 plus 2? Reply with only the number, nothing else.',
-            max_tokens: 16
-        })
-        const exec = await vmHelper.sendExecuteV0(owner, contractIndex, 'askLlm', [envelope])
+        const exec = await executeMultiHubLlmRequest()
         assert.strictEqual(exec.execution.status, 'valid', 'execute should be valid')
 
         const request = await indexerDatabase.waitForAttestationRequest({
@@ -161,15 +183,7 @@ module.exports = {
         assert.strictEqual(Number(request.redundancy), 3)
         const requestId = request.request_id
 
-        // Past CONFIRMATIONS so the hubs fetch.
-        await regtestMinerConnector.generateBlocks(6)
-
-        // Generous wait: 3x claude CLI cold-start + PBFT + on-chain broadcast.
-        const response = await indexerDatabase.waitForAttestationResponse({
-            requestId:      requestId,
-            responseStatus: 'ok',
-            status:         'valid'
-        }, 300_000)
+        const response = await waitForMultiHubLlmResponse(requestId)
         assert(response, 'attestation_responses row should land with status=ok')
 
         // >=3 verified signatures, one per hub: the multi-hub PBFT proof.
