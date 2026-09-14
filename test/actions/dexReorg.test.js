@@ -70,20 +70,35 @@ async function mine(n) { try { await regtestMinerConnector.generateBlocks(n) } c
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 function randTick(p) { let s = p; for (let i = 0; i < 6; i++) s += String.fromCharCode(65 + Math.floor(Math.random() * 26)); return s }
 
+async function prepareDexReorg() {
+    const maker = await cryptoHelper.getNewFundedAddress('dexr-maker', COIN, NETWORK, null, 'legacy', 0, 2)
+    await gasHelper.ensureGasBalance(maker, '2000')
+    const tick = randTick('DEXR')
+
+    // ISSUE (mint 100 to maker) in an EARLIER block, then bury it.
+    await issueHelper.sendIssueV0(maker, tick, '100', '0', '0', 'dex-reorg give token', '100')
+    return { maker, tick }
+}
+
+async function waitForDexRollback(orderActionIndex, maker, tick) {
+    let gone = false, bal = '70'
+    const deadline = Date.now() + 180000
+    while (Date.now() < deadline) {
+        gone = (await orderRow(orderActionIndex)) === null
+        bal  = await balanceOf(maker.address, tick)
+        if (gone && bal === '100') break
+        await sleep(2000)
+    }
+    return { gone, bal }
+}
+
 describe('DEX Reorg: an open ORDER (and its escrow) rolls back across an on-chain reorg', function () {
     this.timeout(0)
-
     before(async function () {
         if (global.COIN_CODE === 'DOGE') this.skip()   // generateblock unavailable on Core 1.14
     })
-
     it('orphaning the ORDER block rolls back the order and releases the escrow', async function () {
-        const maker = await cryptoHelper.getNewFundedAddress('dexr-maker', COIN, NETWORK, null, 'legacy', 0, 2)
-        await gasHelper.ensureGasBalance(maker, '2000')
-        const tick = randTick('DEXR')
-
-        // ISSUE (mint 100 to maker) in an EARLIER block, then bury it.
-        await issueHelper.sendIssueV0(maker, tick, '100', '0', '0', 'dex-reorg give token', '100')
+        const { maker, tick } = await prepareDexReorg()
         assert.strictEqual(await balanceOf(maker.address, tick), '100', 'maker holds the full mint pre-order')
         await mine(2)
 
@@ -125,14 +140,7 @@ describe('DEX Reorg: an open ORDER (and its escrow) rolls back across an on-chai
             assert(await nodeConnector.getBlockCount() > tipBefore, 'competing chain overtakes the original')
 
             // Wait for rollback.js to delete the block-scoped order + release the escrow.
-            let gone = false, bal = '70'
-            const deadline = Date.now() + 180000
-            while (Date.now() < deadline) {
-                gone = (await orderRow(orderActionIndex)) === null
-                bal  = await balanceOf(maker.address, tick)
-                if (gone && bal === '100') break
-                await sleep(2000)
-            }
+            const { gone, bal } = await waitForDexRollback(orderActionIndex, maker, tick)
             console.log('   indexer tip after reorg', await tip(), 'node tip', await nodeConnector.getBlockCount())
             assert.strictEqual(gone, true, 'orders row rolled back (order gone)')
             assert.strictEqual(await orderCount(tick), 0, 'no order row remains for the tick')
