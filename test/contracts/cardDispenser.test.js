@@ -111,8 +111,6 @@ function fold(xchain, s, MOD) {
     return acc;
 }`
 
-describe('Card Dispenser: random in-set card from contract inventory (emit.send, no mint)', function () {
-
     const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
     const PAY = 'XCHAIN'     // buyers pay in the gas token; no separate pay token to fund
     const PRICE = '1'
@@ -124,6 +122,7 @@ describe('Card Dispenser: random in-set card from contract inventory (emit.send,
     let cards = null         // [tickA, tickB, tickC]
     let ci = null            // contract action_index of the main dispenser
     let contractAddr = null
+    let cardDispenserSetup = null
 
     async function q(sql, params) {
         const conn = await indexerDatabase.getConnection()
@@ -148,12 +147,20 @@ describe('Card Dispenser: random in-set card from contract inventory (emit.send,
     }
     function randTick(p) { let s = p; for (let i = 0; i < 5; i++) s += String.fromCharCode(65 + Math.floor(Math.random() * 26)); return s }
 
-    before(async function () {
-        operator = await cryptoHelper.getNewFundedAddress('carddisp-op', COIN, NETWORK, null, 'legacy', 0, 1)
-        buyer = await cryptoHelper.getNewFundedAddress('carddisp-buyer', COIN, NETWORK, null, 'legacy', 0, 1)
-        await gasHelper.ensureGasBalance(operator, '3000')
-        await gasHelper.ensureGasBalance(buyer, '500')
-    })
+    async function prepareCardDispenser() {
+        if (!cardDispenserSetup) {
+            cardDispenserSetup = (async function () {
+                operator = await cryptoHelper.getNewFundedAddress('carddisp-op', COIN, NETWORK, null, 'legacy', 0, 1)
+                buyer = await cryptoHelper.getNewFundedAddress('carddisp-buyer', COIN, NETWORK, null, 'legacy', 0, 1)
+                await gasHelper.ensureGasBalance(operator, '3000')
+                await gasHelper.ensureGasBalance(buyer, '500')
+            })()
+        }
+        return cardDispenserSetup
+    }
+
+describe('Card Dispenser: random in-set card from contract inventory (emit.send, no mint)', function () {
+    before(prepareCardDispenser)
 
     it('deploys the dispenser and funds its card inventory (operator deposits cards)', async function () {
         cards = [randTick('CRDA'), randTick('CRDB'), randTick('CRDC')]
@@ -174,6 +181,10 @@ describe('Card Dispenser: random in-set card from contract inventory (emit.send,
             assert.strictEqual(await balanceOf(contractAddr, c), STOCK,
                 'contract should hold ' + STOCK + ' of ' + c)
     })
+})
+
+describe('Card Dispenser: random in-set card from contract inventory (emit.send, no mint)', function () {
+    before(prepareCardDispenser)
 
     it('paid draws send the buyer one in-set card each and decrement the pool', async function () {
         const DRAWS = 3
@@ -203,6 +214,10 @@ describe('Card Dispenser: random in-set card from contract inventory (emit.send,
         assert.strictEqual(poolLeft, Number(STOCK) * cards.length - DRAWS,
             'contract pool should have dropped by ' + DRAWS)
     })
+})
+
+describe('Card Dispenser: random in-set card from contract inventory (emit.send, no mint)', function () {
+    before(prepareCardDispenser)
 
     it('refunds the payment instead of stranding it when sold out', async function () {
         // A fresh dispenser with a single card and a single copy.
@@ -224,6 +239,10 @@ describe('Card Dispenser: random in-set card from contract inventory (emit.send,
         assert(second.execution && second.execution.status === 'valid', 'sold-out draw still indexes valid (refund path)')
         assert.strictEqual(await balanceOf(buyer.address, solo), '1', 'no second card dispensed when sold out')
     })
+})
+
+describe('Card Dispenser: random in-set card from contract inventory (emit.send, no mint)', function () {
+    before(prepareCardDispenser)
 
     it('only the owner can withdraw the accumulated proceeds', async function () {
         // A non-owner withdraw must be rejected.
