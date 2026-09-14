@@ -94,6 +94,20 @@ describe('Chaos Experiment 6: Teardown Failure @P0', function () {
         assert(seed.every(b => b === 0), 'seed should be zeroed')
         assert(privKey.every(b => b === 0), 'privateKey should be zeroed')
     })
+})
+
+describe('Chaos Experiment 6: Teardown Failure @P0', function () {
+
+    let saved
+
+    beforeEach(function () {
+        saved = saveGlobals(GLOBAL_KEYS)
+    })
+
+    afterEach(function () {
+        restoreGlobals(saved)
+        sinon.restore()
+    })
 
     it('clears wallet keys even when setDefaultMiningTime throws', async function () {
         const seed = Buffer.alloc(64, 0xDD)
@@ -111,6 +125,20 @@ describe('Chaos Experiment 6: Teardown Failure @P0', function () {
 
         assert(seed.every(b => b === 0), 'seed should be zeroed')
         assert(privKey.every(b => b === 0), 'privateKey should be zeroed')
+    })
+})
+
+describe('Chaos Experiment 6: Teardown Failure @P0', function () {
+
+    let saved
+
+    beforeEach(function () {
+        saved = saveGlobals(GLOBAL_KEYS)
+    })
+
+    afterEach(function () {
+        restoreGlobals(saved)
+        sinon.restore()
     })
 
     it('handles multiple wallet labels during cleanup', async function () {
@@ -136,6 +164,20 @@ describe('Chaos Experiment 6: Teardown Failure @P0', function () {
                 assert(addr.privateKey.every(b => b === 0), `${label} privateKey should be zeroed`)
             }
         }
+    })
+})
+
+describe('Chaos Experiment 6: Teardown Failure @P0', function () {
+
+    let saved
+
+    beforeEach(function () {
+        saved = saveGlobals(GLOBAL_KEYS)
+    })
+
+    afterEach(function () {
+        restoreGlobals(saved)
+        sinon.restore()
     })
 
     it('handles null/undefined wallet fields gracefully', async function () {
