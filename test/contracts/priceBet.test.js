@@ -198,8 +198,6 @@ function requireIntInRange(xchain, v, min, max, name) {
     xchain.require(n >= min && n <= max, msg);
 }`
 
-describe('Price Bet: binary option settled by the PRICE oracle (getPriceAtRound wiring)', function () {
-
     const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
     const TICK = 'XCHAIN'      // stakes in the gas token; nothing extra to issue
     const STAKE = '100'
@@ -213,6 +211,7 @@ describe('Price Bet: binary option settled by the PRICE oracle (getPriceAtRound 
     let taker = null
     let ci = null              // contract action_index
     let contractAddr = null
+    let priceBetSetup = null
 
     async function q(sql, params) {
         const conn = await indexerDatabase.getConnection()
@@ -238,14 +237,22 @@ describe('Price Bet: binary option settled by the PRICE oracle (getPriceAtRound 
         return v
     }
 
-    before(async function () {
-        maker = await cryptoHelper.getNewFundedAddress('pricebet-maker', COIN, NETWORK, null, 'legacy', 0, 1)
-        taker = await cryptoHelper.getNewFundedAddress('pricebet-taker', COIN, NETWORK, null, 'legacy', 0, 1)
-        await gasHelper.ensureGasBalance(maker, '2000')
-        await gasHelper.ensureGasBalance(taker, '2000')
-        // No leftover snapshots for our pair from a previous run.
-        if (await priceSnapshotHelper.isAvailable()) await priceSnapshotHelper.clearPair(PAIR)
-    })
+    async function preparePriceBet() {
+        if (!priceBetSetup) {
+            priceBetSetup = (async function () {
+                maker = await cryptoHelper.getNewFundedAddress('pricebet-maker', COIN, NETWORK, null, 'legacy', 0, 1)
+                taker = await cryptoHelper.getNewFundedAddress('pricebet-taker', COIN, NETWORK, null, 'legacy', 0, 1)
+                await gasHelper.ensureGasBalance(maker, '2000')
+                await gasHelper.ensureGasBalance(taker, '2000')
+                // No leftover snapshots for our pair from a previous run.
+                if (await priceSnapshotHelper.isAvailable()) await priceSnapshotHelper.clearPair(PAIR)
+            })()
+        }
+        return priceBetSetup
+    }
+
+describe('Price Bet: binary option settled by the PRICE oracle (getPriceAtRound wiring)', function () {
+    before(preparePriceBet)
 
     it('deploys the bet and the maker escrows their stake (fund)', async function () {
         const params = [maker.address, PAIR, STRIKE, 'OVER', TICK, STAKE, String(ROUND), '50'].join('|')
@@ -269,6 +276,10 @@ describe('Price Bet: binary option settled by the PRICE oracle (getPriceAtRound 
         assert.strictEqual(await stateOf('status'), 'MATCHED')
         assert.strictEqual(await stateOf('taker'), taker.address)
     })
+})
+
+describe('Price Bet: binary option settled by the PRICE oracle (getPriceAtRound wiring)', function () {
+    before(preparePriceBet)
 
     it('settle before the oracle round exists is rejected on-chain', async function () {
         const ex = await vmHelper.sendExecuteV0Invalid(taker, ci, 'settle', [])
