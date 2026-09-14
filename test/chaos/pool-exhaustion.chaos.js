@@ -21,12 +21,14 @@ const sinon = require('sinon')
 const { createDb, makeMockConnection, makeMockPool, mockMariadb } = require('./chaos-helpers')
 const Database = require('../../src/db')
 
+function restorePoolStubs() {
+    sinon.restore()
+    mockMariadb.createPool.resetHistory()
+}
+
 describe('Chaos Experiment 2: Pool Exhaustion @P0', function () {
 
-    afterEach(function () {
-        sinon.restore()
-        mockMariadb.createPool.resetHistory()
-    })
+    afterEach(restorePoolStubs)
 
     describe('getConnection retry under exhaustion', function () {
 
@@ -62,6 +64,11 @@ describe('Chaos Experiment 2: Pool Exhaustion @P0', function () {
             assert.strictEqual(db.sleep.firstCall.args[0], 1000)
         })
     })
+})
+
+describe('Chaos Experiment 2: Pool Exhaustion @P0', function () {
+
+    afterEach(restorePoolStubs)
 
     describe('waitForIssue under pool exhaustion', function () {
 
@@ -91,6 +98,11 @@ describe('Chaos Experiment 2: Pool Exhaustion @P0', function () {
             assert(mockConn.release.callCount >= 1, 'connection must be released')
         })
     })
+})
+
+describe('Chaos Experiment 2: Pool Exhaustion @P0', function () {
+
+    afterEach(restorePoolStubs)
 
     describe('pool.end() resilience', function () {
 
