@@ -25,6 +25,39 @@ const ECPair = ECPairFactory(ecc)
 const { saveGlobals, restoreGlobals, GLOBAL_KEYS } = require('./chaos-helpers')
 const transactionHelper = require('../transactionHelper')
 
+function createAddressInfo() {
+    const keyPair = ECPair.makeRandom({ network: bitcoin.networks.regtest })
+    const { address } = bitcoin.payments.p2pkh({
+        pubkey: keyPair.publicKey,
+        network: bitcoin.networks.regtest
+    })
+    return {
+        address: address,
+        privateKey: keyPair.privateKey,
+        publicKey: keyPair.publicKey
+    }
+}
+
+function setUpTestState() {
+    const saved = saveGlobals(GLOBAL_KEYS)
+    const broadcastStub = sinon.stub()
+    global.NETWORK_OBJECT = bitcoin.networks.regtest
+    global.nodeConnector = {
+        broadcastTx: broadcastStub,
+        waitForTx: sinon.stub().resolves(true),
+        getTransactionHex: sinon.stub().resolves('aabb')
+    }
+    global.utxoTrackerConnector = {
+        getUtxosFromAddress: sinon.stub().resolves({ utxos: [] })
+    }
+    return { saved, broadcastStub }
+}
+
+function tearDownTestState(saved) {
+    restoreGlobals(saved)
+    sinon.restore()
+}
+
 describe('Chaos Experiment 4: Malformed Encoder Response @P1', function () {
 
     let saved
@@ -32,35 +65,15 @@ describe('Chaos Experiment 4: Malformed Encoder Response @P1', function () {
     let broadcastStub
 
     before(function () {
-        const keyPair = ECPair.makeRandom({ network: bitcoin.networks.regtest })
-        const { address } = bitcoin.payments.p2pkh({
-            pubkey: keyPair.publicKey,
-            network: bitcoin.networks.regtest
-        })
-        addressInfo = {
-            address: address,
-            privateKey: keyPair.privateKey,
-            publicKey: keyPair.publicKey
-        }
+        addressInfo = createAddressInfo()
     })
 
     beforeEach(function () {
-        saved = saveGlobals(GLOBAL_KEYS)
-        global.NETWORK_OBJECT = bitcoin.networks.regtest
-        broadcastStub = sinon.stub()
-        global.nodeConnector = {
-            broadcastTx: broadcastStub,
-            waitForTx: sinon.stub().resolves(true),
-            getTransactionHex: sinon.stub().resolves('aabb')
-        }
-        global.utxoTrackerConnector = {
-            getUtxosFromAddress: sinon.stub().resolves({ utxos: [] })
-        }
+        ({ saved, broadcastStub } = setUpTestState())
     })
 
     afterEach(function () {
-        restoreGlobals(saved)
-        sinon.restore()
+        tearDownTestState(saved)
     })
 
     it('throws when encoder returns completely invalid hex', async function () {
@@ -94,6 +107,25 @@ describe('Chaos Experiment 4: Malformed Encoder Response @P1', function () {
         )
         assert(broadcastStub.notCalled, 'broadcastTx must not be called with truncated PSBT')
     })
+})
+
+describe('Chaos Experiment 4: Malformed Encoder Response @P1', function () {
+
+    let saved
+    let addressInfo
+    let broadcastStub
+
+    before(function () {
+        addressInfo = createAddressInfo()
+    })
+
+    beforeEach(function () {
+        ({ saved, broadcastStub } = setUpTestState())
+    })
+
+    afterEach(function () {
+        tearDownTestState(saved)
+    })
 
     it('throws when encoder returns empty string as PSBT', async function () {
         global.encoderConnector = {
@@ -121,6 +153,25 @@ describe('Chaos Experiment 4: Malformed Encoder Response @P1', function () {
             () => transactionHelper.createAndSendTransaction(addressInfo, 'ISSUE|0|CHAOS')
         )
         assert(broadcastStub.notCalled)
+    })
+})
+
+describe('Chaos Experiment 4: Malformed Encoder Response @P1', function () {
+
+    let saved
+    let addressInfo
+    let broadcastStub
+
+    before(function () {
+        addressInfo = createAddressInfo()
+    })
+
+    beforeEach(function () {
+        ({ saved, broadcastStub } = setUpTestState())
+    })
+
+    afterEach(function () {
+        tearDownTestState(saved)
     })
 
     it('throws when encoder itself rejects', async function () {
