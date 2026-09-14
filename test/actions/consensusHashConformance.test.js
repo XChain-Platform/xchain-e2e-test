@@ -56,76 +56,100 @@ const COMMITTED_HASH_SQL =
     'LEFT JOIN index_transactions t3 ON (t3.id = b.contract_hash_id) ' +
     'WHERE b.block_index = ?';
 
+async function ensureSpecialAddressLedgerRecord(dbAdapter) {
+    // Native-fee venues (LTC/DOGE) pay protocol fees as chain outputs, so a
+    // whole run can index without ONE ledger row touching a special address;
+    // both recompute loops and the coverage guard at the bottom of this file
+    // would then run without ever exercising special-address canonicalization.
+    // Give the run one deliberately: a 1 XCHAIN SEND to this chain's DONATE1
+    // treasury, indexed BEFORE the block lists are snapshotted so the loops
+    // cover the block that carries it.
+    const special = Object.keys(ROLE_BY_ADDRESS || {});
+    if (!special.length) return;
+    const placeholders = special.map(() => '?').join(', ');
+    const seen = await dbAdapter.doQuery(
+        'SELECT ia.address FROM credits c JOIN index_addresses ia ON ia.id = c.address_id ' +
+        'WHERE ia.address IN (' + placeholders + ') LIMIT 1', special);
+    if (seen.length) return;
+    let donate1 = null;
+    try {
+        const { getCoinConfig } = require(path.join(__dirname, '../../../xchain-hub/src/coins'));
+        donate1 = getCoinConfig(COIN_CODE, NETWORK).addresses.DONATE1;
+    } catch (e) {
+        console.log('sibling xchain-hub coin bundle not loadable (' + e.message + '); ' +
+            'cannot resolve DONATE1 - the coverage guard below will report the gap');
+    }
+    if (donate1) {
+        console.log('no special-address ledger record on this venue yet; sending 1 XCHAIN to DONATE1 ' + donate1);
+        const cryptoHelper = require('../cryptoHelper');
+        const sendHelper   = require('../helpers/sendHelper');
+        const gasTick      = (typeof GAS_TICK !== 'undefined' && GAS_TICK) ? GAS_TICK : 'XCHAIN';
+        const addr = await cryptoHelper.getNewFundedAddress('CONF.DONATE', COIN, NETWORK, null, 'legacy', 0, 1);
+        await sendHelper.sendSendV0(addr, gasTick, 1, donate1, 'canonicalization coverage');
+    }
+}
+
+// The skip checks stay outside the memo and run fresh on every call, so each
+// sibling describe's own before() gets its OWN context.skip() call tied to its
+// OWN hook (a cached skip from one context re-thrown into another hook reports
+// as a hard failure instead of pending). Only the expensive DB/coverage work
+// below is memoized, so the two sibling describes share exactly one fixture
+// build (one DB snapshot, one possible coverage SEND).
+let consensusFixtureResult = null;
+async function consensusFixture(context) {
+    if (!BlockHasher || !SyncUtility) {
+        console.log('xchain-sync not present alongside e2e; skipping conformance drift-lock');
+        context.skip();
+    }
+    if (!global.indexerDatabase || !global.indexerDatabase.pool) {
+        console.log('indexer DB not available; skipping conformance drift-lock');
+        context.skip();
+    }
+    if (consensusFixtureResult === null) {
+        consensusFixtureResult = (async () => {
+            const pool = global.indexerDatabase.pool;
+            // BlockHasher needs a `doQuery(sql, params)` over the INDEXER db.
+            //
+            // doQueryStrict is the same read here on purpose. The follower Database draws
+            // the distinction so a swallowed error cannot commit a partial row set, and
+            // this adapter never swallows: conn.query rejects straight through. Carrying
+            // both names means a sync read that moves from one to the other (M-17 did
+            // exactly that) does not take this probe out with a TypeError.
+            const read = async (sql, params) => {
+                const conn = await pool.getConnection();
+                try { return await conn.query(sql, params); }
+                finally { conn.release(); }
+            };
+            const dbAdapter = { doQuery: read, doQueryStrict: read };
+            const hasher = new BlockHasher(dbAdapter, new SyncUtility());
+            await ensureSpecialAddressLedgerRecord(dbAdapter);
+            const rows = await dbAdapter.doQuery('SELECT block_index FROM blocks ORDER BY block_index ASC', []);
+            return { dbAdapter, hasher, blockIndexes: rows.map(r => Number(r.block_index)) };
+        })();
+    }
+    return consensusFixtureResult;
+}
+
 describe('consensus hash conformance: sync BlockHasher == indexer committed hashes @regression', function () {
     this.timeout(0);
-
-    let dbAdapter, hasher, blockIndexes;
+    let blockIndexes;
 
     before(async function () {
-        if (!BlockHasher || !SyncUtility) {
-            console.log('xchain-sync not present alongside e2e; skipping conformance drift-lock');
-            this.skip();
-        }
-        if (!global.indexerDatabase || !global.indexerDatabase.pool) {
-            console.log('indexer DB not available; skipping conformance drift-lock');
-            this.skip();
-        }
-        const pool = global.indexerDatabase.pool;
-        // BlockHasher needs a `doQuery(sql, params)` over the INDEXER db.
-        //
-        // doQueryStrict is the same read here on purpose. The follower Database draws
-        // the distinction so a swallowed error cannot commit a partial row set, and
-        // this adapter never swallows: conn.query rejects straight through. Carrying
-        // both names means a sync read that moves from one to the other (M-17 did
-        // exactly that) does not take this probe out with a TypeError.
-        const read = async (sql, params) => {
-            const conn = await pool.getConnection();
-            try { return await conn.query(sql, params); }
-            finally { conn.release(); }
-        };
-        dbAdapter = { doQuery: read, doQueryStrict: read };
-        hasher = new BlockHasher(dbAdapter, new SyncUtility());
-
-        // Native-fee venues (LTC/DOGE) pay protocol fees as chain outputs, so a
-        // whole run can index without ONE ledger row touching a special address;
-        // both recompute loops and the coverage guard at the bottom of this file
-        // would then run without ever exercising special-address canonicalization.
-        // Give the run one deliberately: a 1 XCHAIN SEND to this chain's DONATE1
-        // treasury, indexed BEFORE the block lists are snapshotted so the loops
-        // cover the block that carries it.
-        const special = Object.keys(ROLE_BY_ADDRESS || {});
-        if (special.length) {
-            const placeholders = special.map(() => '?').join(', ');
-            const seen = await dbAdapter.doQuery(
-                'SELECT ia.address FROM credits c JOIN index_addresses ia ON ia.id = c.address_id ' +
-                'WHERE ia.address IN (' + placeholders + ') LIMIT 1', special);
-            if (!seen.length) {
-                let donate1 = null;
-                try {
-                    const { getCoinConfig } = require(path.join(__dirname, '../../../xchain-hub/src/coins'));
-                    donate1 = getCoinConfig(COIN_CODE, NETWORK).addresses.DONATE1;
-                } catch (e) {
-                    console.log('sibling xchain-hub coin bundle not loadable (' + e.message + '); ' +
-                        'cannot resolve DONATE1 - the coverage guard below will report the gap');
-                }
-                if (donate1) {
-                    console.log('no special-address ledger row on this venue yet; sending 1 XCHAIN to DONATE1 ' + donate1);
-                    const cryptoHelper = require('../cryptoHelper');
-                    const sendHelper   = require('../helpers/sendHelper');
-                    const gasTick      = (typeof GAS_TICK !== 'undefined' && GAS_TICK) ? GAS_TICK : 'XCHAIN';
-                    const addr = await cryptoHelper.getNewFundedAddress('CONF.DONATE', COIN, NETWORK, null, 'legacy', 0, 1);
-                    await sendHelper.sendSendV0(addr, gasTick, 1, donate1, 'canonicalization coverage');
-                }
-            }
-        }
-
-        const rows = await dbAdapter.doQuery('SELECT block_index FROM blocks ORDER BY block_index ASC', []);
-        blockIndexes = rows.map(r => Number(r.block_index));
+        ({ blockIndexes } = await consensusFixture(this));
     });
 
     it('has indexed blocks to verify', function () {
         assert.ok(blockIndexes && blockIndexes.length > 0,
             'no blocks indexed: the e2e stack must have processed blocks before this runs');
+    });
+});
+
+describe('consensus hash conformance: sync BlockHasher == indexer committed hashes @regression', function () {
+    this.timeout(0);
+    let dbAdapter, hasher, blockIndexes;
+
+    before(async function () {
+        ({ dbAdapter, hasher, blockIndexes } = await consensusFixture(this));
     });
 
     it('every indexed block recomputes to its committed ledger/actions/contract hash', async function () {
@@ -163,6 +187,44 @@ try {
     if (syncPresent) throw e;
 }
 
+// The skip checks stay outside the memo and run fresh on every call, so each
+// sibling describe's own before() gets its OWN context.skip() call tied to its
+// OWN hook (a cached skip from one context re-thrown into another hook reports
+// as a hard failure instead of pending). Only the expensive DB work below is
+// memoized, so all three sibling describes share exactly one fixture build
+// (one DB snapshot).
+let stateFixtureResult = null;
+async function stateFixture(context) {
+    if (!SyncStateCommitment || !SyncDatabase) {
+        console.log('xchain-sync not present alongside e2e; skipping state-commitment drift-lock');
+        context.skip();
+    }
+    if (!global.indexerDatabase || !global.indexerDatabase.pool) {
+        console.log('indexer DB not available; skipping state-commitment drift-lock');
+        context.skip();
+    }
+    if (stateFixtureResult === null) {
+        stateFixtureResult = (async () => {
+            const pool = global.indexerDatabase.pool;
+            const read = async (sql, params) => {
+                const conn = await pool.getConnection();
+                try { return await conn.query(sql, params); }
+                finally { conn.release(); }
+            };
+            // Both names, for the reason given on the first adapter above.
+            const dbAdapter = { doQuery: read, doQueryStrict: read };
+            // computeBlockMerkleRoot reads its rows via db.getBlockLeafRows, which reads
+            // through doQueryStrict since the M-17 hardening; bind the follower Database
+            // method onto the read-only adapter.
+            dbAdapter.getBlockLeafRows = SyncDatabase.prototype.getBlockLeafRows.bind(dbAdapter);
+            const rootRows = await dbAdapter.doQuery(
+                'SELECT block_index, block_merkle_root FROM state_tree_roots ORDER BY block_index ASC', []);
+            return { dbAdapter, rootRows };
+        })();
+    }
+    return stateFixtureResult;
+}
+
 // Light-client state-commitment conformance (SPV spec sec.4-5). The follower
 // recomputes block_merkle_root from src/stateCommitment.js + db.getBlockLeafRows
 // (a copy of BlockHasher's 10 content queries) and HALTs if it disagrees with the
@@ -173,32 +235,10 @@ try {
 // halt drill; stakes_root/state_root verification are deferred in Phase 1.)
 describe('state commitment conformance: sync block_merkle_root == indexer committed roots @regression', function () {
     this.timeout(0);
-
-    let dbAdapter, rootRows;
+    let rootRows;
 
     before(async function () {
-        if (!SyncStateCommitment || !SyncDatabase) {
-            console.log('xchain-sync not present alongside e2e; skipping state-commitment drift-lock');
-            this.skip();
-        }
-        if (!global.indexerDatabase || !global.indexerDatabase.pool) {
-            console.log('indexer DB not available; skipping state-commitment drift-lock');
-            this.skip();
-        }
-        const pool = global.indexerDatabase.pool;
-        const read = async (sql, params) => {
-            const conn = await pool.getConnection();
-            try { return await conn.query(sql, params); }
-            finally { conn.release(); }
-        };
-        // Both names, for the reason given on the first adapter above.
-        dbAdapter = { doQuery: read, doQueryStrict: read };
-        // computeBlockMerkleRoot reads its rows via db.getBlockLeafRows, which reads
-        // through doQueryStrict since the M-17 hardening; bind the follower Database
-        // method onto the read-only adapter.
-        dbAdapter.getBlockLeafRows = SyncDatabase.prototype.getBlockLeafRows.bind(dbAdapter);
-        rootRows = await dbAdapter.doQuery(
-            'SELECT block_index, block_merkle_root FROM state_tree_roots ORDER BY block_index ASC', []);
+        ({ rootRows } = await stateFixture(this));
     });
 
     it('has committed state_tree_roots to verify', function () {
@@ -207,6 +247,15 @@ describe('state commitment conformance: sync block_merkle_root == indexer commit
             this.skip();
         }
         assert.ok(rootRows.length > 0);
+    });
+});
+
+describe('state commitment conformance: sync block_merkle_root == indexer committed roots @regression', function () {
+    this.timeout(0);
+    let dbAdapter, rootRows;
+
+    before(async function () {
+        ({ dbAdapter, rootRows } = await stateFixture(this));
     });
 
     it('every block block_merkle_root recomputes to the indexer committed value', async function () {
@@ -224,6 +273,15 @@ describe('state commitment conformance: sync block_merkle_root == indexer commit
             'sync block_merkle_root diverged from indexer committed roots (block-content conformance pair drifted). ' +
             'Update BOTH xchain-sync/src/db.js getBlockLeafRows / stateCommitment.js and the indexer side, then ' +
             'regenerate the golden:\n' + JSON.stringify(mismatches.slice(0, 10), null, 2));
+    });
+});
+
+describe('state commitment conformance: sync block_merkle_root == indexer committed roots @regression', function () {
+    this.timeout(0);
+    let dbAdapter, rootRows;
+
+    before(async function () {
+        ({ dbAdapter, rootRows } = await stateFixture(this));
     });
 
     // Guard that the canonicalization path was actually exercised. Without at least
