@@ -25,14 +25,13 @@ const ECPair = ECPairFactory(ecc)
 const transactionHelper = require('../../../test/transactionHelper')
 const fixtures = require('../fixtures/services')
 
-describe('Transaction Pipeline: standard OP_RETURN flow', function () {
+let savedGlobals
+let testKeyPair
+let testAddress
+let addressInfo
 
-    let savedGlobals
-    let testKeyPair
-    let testAddress
-    let addressInfo
-
-    before(function () {
+function setUpAddressInfo() {
+    if (!addressInfo) {
         testKeyPair = ECPair.makeRandom({ network: bitcoin.networks.regtest })
         const { address } = bitcoin.payments.p2pkh({
             pubkey: testKeyPair.publicKey,
@@ -44,52 +43,113 @@ describe('Transaction Pipeline: standard OP_RETURN flow', function () {
             privateKey: testKeyPair.privateKey,
             publicKey: testKeyPair.publicKey
         }
+    }
+}
+
+function setUpTransactionFlow() {
+    savedGlobals = {
+        NETWORK_OBJECT: global.NETWORK_OBJECT,
+        encoderConnector: global.encoderConnector,
+        nodeConnector: global.nodeConnector,
+        utxoTrackerConnector: global.utxoTrackerConnector,
+    }
+    global.NETWORK_OBJECT = { ...bitcoin.networks.regtest, dustThreshold: 546 }
+}
+
+function tearDownTransactionFlow() {
+    Object.assign(global, savedGlobals)
+    sinon.restore()
+}
+
+// Build a real PSBT that can actually be signed by testKeyPair
+function buildMockPsbt() {
+    const psbt = new bitcoin.Psbt({ network: bitcoin.networks.regtest })
+
+    const fundingTx = new bitcoin.Transaction()
+    fundingTx.version = 2
+    fundingTx.addInput(Buffer.alloc(32, 0), 0)
+    fundingTx.addOutput(
+        bitcoin.payments.p2pkh({
+            pubkey: testKeyPair.publicKey,
+            network: bitcoin.networks.regtest
+        }).output,
+        100000
+    )
+
+    psbt.addInput({
+        hash: fundingTx.getHash(),
+        index: 0,
+        nonWitnessUtxo: fundingTx.toBuffer(),
     })
 
-    beforeEach(function () {
-        savedGlobals = {
-            NETWORK_OBJECT: global.NETWORK_OBJECT,
-            encoderConnector: global.encoderConnector,
-            nodeConnector: global.nodeConnector,
-            utxoTrackerConnector: global.utxoTrackerConnector,
-        }
-        global.NETWORK_OBJECT = { ...bitcoin.networks.regtest, dustThreshold: 546 }
-    })
+    const data = Buffer.from('ISSUE|0|TEST', 'utf8')
+    const opReturnScript = bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, data])
+    psbt.addOutput({ script: opReturnScript, value: 0 })
 
-    afterEach(function () {
-        Object.assign(global, savedGlobals)
-        sinon.restore()
-    })
+    psbt.addOutput({ address: testAddress, value: 90000 })
 
-    // Build a real PSBT that can actually be signed by testKeyPair
-    function buildMockPsbt() {
+    return psbt.toHex()
+}
+
+function buildIsolationContext() {
+    const txid1 = 'aaaa' + '00'.repeat(30)
+
+    // Create a second key pair and build PSBTs for each
+    const keyPair2 = ECPair.makeRandom({ network: bitcoin.networks.regtest })
+    const { address: address2 } = bitcoin.payments.p2pkh({
+        pubkey: keyPair2.publicKey,
+        network: bitcoin.networks.regtest
+    })
+    const addressInfo2 = {
+        address: address2,
+        privateKey: keyPair2.privateKey,
+        publicKey: keyPair2.publicKey
+    }
+
+    function buildPsbtFor(kp, addr) {
         const psbt = new bitcoin.Psbt({ network: bitcoin.networks.regtest })
-
-        const fundingTx = new bitcoin.Transaction()
-        fundingTx.version = 2
-        fundingTx.addInput(Buffer.alloc(32, 0), 0)
-        fundingTx.addOutput(
-            bitcoin.payments.p2pkh({
-                pubkey: testKeyPair.publicKey,
-                network: bitcoin.networks.regtest
-            }).output,
+        const fundTx = new bitcoin.Transaction()
+        fundTx.version = 2
+        fundTx.addInput(Buffer.alloc(32, 0), 0)
+        fundTx.addOutput(
+            bitcoin.payments.p2pkh({ pubkey: kp.publicKey, network: bitcoin.networks.regtest }).output,
             100000
         )
-
-        psbt.addInput({
-            hash: fundingTx.getHash(),
-            index: 0,
-            nonWitnessUtxo: fundingTx.toBuffer(),
-        })
-
-        const data = Buffer.from('ISSUE|0|TEST', 'utf8')
-        const opReturnScript = bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, data])
-        psbt.addOutput({ script: opReturnScript, value: 0 })
-
-        psbt.addOutput({ address: testAddress, value: 90000 })
-
+        psbt.addInput({ hash: fundTx.getHash(), index: 0, nonWitnessUtxo: fundTx.toBuffer() })
+        const data = Buffer.from('TEST', 'utf8')
+        psbt.addOutput({ script: bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, data]), value: 0 })
+        psbt.addOutput({ address: addr, value: 90000 })
         return psbt.toHex()
     }
+
+    const psbt1Hex = buildPsbtFor(testKeyPair, testAddress)
+    const psbt2Hex = buildPsbtFor(keyPair2, address2)
+
+    let encoderCalls = []
+    global.encoderConnector = {
+        createTx: async function (utxos, pubkey) {
+            encoderCalls.push({ utxos, address: pubkey })
+            // Return the PSBT matching the requesting address's key
+            if (pubkey === testAddress) return { encoding: 'opreturn', psbt: psbt1Hex }
+            return { encoding: 'opreturn', psbt: psbt2Hex }
+        }
+    }
+    global.nodeConnector = {
+        broadcastTx: async () => txid1,
+        waitForTx: async () => true,
+    }
+    global.utxoTrackerConnector = {
+        getUtxosFromAddress: async () => ({
+            utxos: [{ txid: txid1, vout: 0, value: 50000, confirmations: 1 }]
+        })
+    }
+    return { addressInfo2, encoderCalls }
+}
+
+describe('Transaction Pipeline: standard OP_RETURN flow', function () {
+    before(setUpAddressInfo)
+    beforeEach(setUpTransactionFlow)
+    afterEach(tearDownTransactionFlow)
 
     describe('Scenario 3.2.1: Standard OP_RETURN transaction', function () {
 
@@ -135,6 +195,15 @@ describe('Transaction Pipeline: standard OP_RETURN flow', function () {
             assert.strictEqual(txHash, expectedTxId)
         })
 
+    })
+})
+
+describe('Transaction Pipeline: standard OP_RETURN flow', function () {
+    before(setUpAddressInfo)
+    beforeEach(setUpTransactionFlow)
+    afterEach(tearDownTransactionFlow)
+
+    describe('Scenario 3.2.1: Standard OP_RETURN transaction', function () {
         it('passes empty utxo list to encoder on first call (no cache)', async function () {
             const freshKeyPair = ECPair.makeRandom({ network: bitcoin.networks.regtest })
             const { address: freshAddress } = bitcoin.payments.p2pkh({
@@ -185,6 +254,12 @@ describe('Transaction Pipeline: standard OP_RETURN flow', function () {
             assert.deepStrictEqual(encoderUtxoArg, [], 'first call sends empty utxo list')
         })
     })
+})
+
+describe('Transaction Pipeline: standard OP_RETURN flow', function () {
+    before(setUpAddressInfo)
+    beforeEach(setUpTransactionFlow)
+    afterEach(tearDownTransactionFlow)
 
     describe('Scenario 3.2.3: UTXO cache reuse across sequential transactions', function () {
 
@@ -221,61 +296,17 @@ describe('Transaction Pipeline: standard OP_RETURN flow', function () {
             assert.strictEqual(encoderCalls[1][0].txid, txid1, 'cached utxo has correct txid')
         })
     })
+})
+
+describe('Transaction Pipeline: standard OP_RETURN flow', function () {
+    before(setUpAddressInfo)
+    beforeEach(setUpTransactionFlow)
+    afterEach(tearDownTransactionFlow)
 
     describe('Scenario 3.2.4: UTXO cache isolation between addresses', function () {
 
         it('does not use address A cache for address B', async function () {
-            const txid1 = 'aaaa' + '00'.repeat(30)
-
-            // Create a second key pair and build PSBTs for each
-            const keyPair2 = ECPair.makeRandom({ network: bitcoin.networks.regtest })
-            const { address: address2 } = bitcoin.payments.p2pkh({
-                pubkey: keyPair2.publicKey,
-                network: bitcoin.networks.regtest
-            })
-            const addressInfo2 = {
-                address: address2,
-                privateKey: keyPair2.privateKey,
-                publicKey: keyPair2.publicKey
-            }
-
-            function buildPsbtFor(kp, addr) {
-                const psbt = new bitcoin.Psbt({ network: bitcoin.networks.regtest })
-                const fundTx = new bitcoin.Transaction()
-                fundTx.version = 2
-                fundTx.addInput(Buffer.alloc(32, 0), 0)
-                fundTx.addOutput(
-                    bitcoin.payments.p2pkh({ pubkey: kp.publicKey, network: bitcoin.networks.regtest }).output,
-                    100000
-                )
-                psbt.addInput({ hash: fundTx.getHash(), index: 0, nonWitnessUtxo: fundTx.toBuffer() })
-                const data = Buffer.from('TEST', 'utf8')
-                psbt.addOutput({ script: bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, data]), value: 0 })
-                psbt.addOutput({ address: addr, value: 90000 })
-                return psbt.toHex()
-            }
-
-            const psbt1Hex = buildPsbtFor(testKeyPair, testAddress)
-            const psbt2Hex = buildPsbtFor(keyPair2, address2)
-
-            let encoderCalls = []
-            global.encoderConnector = {
-                createTx: async function (utxos, pubkey) {
-                    encoderCalls.push({ utxos, address: pubkey })
-                    // Return the PSBT matching the requesting address's key
-                    if (pubkey === testAddress) return { encoding: 'opreturn', psbt: psbt1Hex }
-                    return { encoding: 'opreturn', psbt: psbt2Hex }
-                }
-            }
-            global.nodeConnector = {
-                broadcastTx: async () => txid1,
-                waitForTx: async () => true,
-            }
-            global.utxoTrackerConnector = {
-                getUtxosFromAddress: async () => ({
-                    utxos: [{ txid: txid1, vout: 0, value: 50000, confirmations: 1 }]
-                })
-            }
+            const { addressInfo2, encoderCalls } = buildIsolationContext()
 
             await transactionHelper.createAndSendTransaction(addressInfo, 'ISSUE|0|TEST')
 
