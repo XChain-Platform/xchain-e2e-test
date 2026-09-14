@@ -371,7 +371,7 @@ function gatesHash(gates){
 // The signed preimage. The EQUIV wrapper comes from the SHIPPED indexer module
 // (an engine tag and a round id are not this harness's to invent); the content
 // is spelled here. Byte-identical to what RollcallRound signs, what
-// actions/rollcall.js rebuilds from the carried fields, and what the BTC close
+// actions/rollcall/index.js rebuilds from the carried fields, and what the BTC close
 // rebuilds from its own ledger_hash.
 //
 //   v0:  network|epochHeight|ledgerHash
@@ -1062,7 +1062,7 @@ async function assertBtcProofWiring(nodeConn, idxConn, idxQuery, network){
         assert.strictEqual(gaps.length, 0,
             'ROLLCALL precondition FAILED: the BTC indexer has indexed past close block(s) ' +
             gaps.join(', ') + ' but wrote no `rollcalls` row for them. Either this indexer predates ' +
-            'src/rollcall_close.js, or those blocks were indexed while ROLLCALL was inert on IT. The ' +
+            'src/consensus/rollcall_close.js, or those blocks were indexed while ROLLCALL was inert on IT. The ' +
             'deployed indexer needs ' + ROLLCALL_REGTEST_ARMING_ENV + '=armed in its own environment ' +
             '(this harness sets that variable only for itself, and the activation map is read once at ' +
             'startup) as well as DOGE_INDEXER_API_URL. Set both, restart, and reindex from below block ' +
@@ -1095,7 +1095,7 @@ async function probePublicRollcallReads(conn){
 function assertPublicRollcallRead(probe, method){
     assert.ok(probe[method] && probe[method].present,
         'ROLLCALL precondition FAILED: the BTC indexer does not serve `' + method + '` (' +
-        (probe[method] && probe[method].why) + '). Its DB half is landed (xchain-indexer src/db.js ' +
+        (probe[method] && probe[method].why) + '). Its DB half is landed (xchain-indexer src/db/rollcalls.js ' +
         (method === 'getrollcalls' ? 'getRollcalls' : 'getRollcallAbsencesBySource') + ') but the JSON-RPC ' +
         'method is not deployed on this indexer. Deploy the public-read push, or run with ' +
         'XC_ROLLCALL_SKIP_PUBLIC_READS=1 to assert the same facts from the indexer DB only.')

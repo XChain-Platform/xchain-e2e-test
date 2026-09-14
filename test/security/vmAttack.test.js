@@ -175,7 +175,7 @@ describe('VM Attack: hostile contracts on-chain', function () {
             await new Promise(r => setTimeout(r, 1000))
         }
         assert(row, 'constructor execution should be recorded (indexer survived the constructor failure)')
-        // Under F3 the constructor fill is gas-bounded; deploy.js must record the
+        // Under F3 the constructor fill is gas-bounded; deploy/index.js must record the
         // normalized, host-independent resource-exhaustion token (not the raw
         // 'invalid: constructor failed: ...' string, and not a distinct out_of_gas
         // token that would fork against a slow validator's wall-clock timeout).

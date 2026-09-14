@@ -13,7 +13,7 @@
 // Validates the indexer reward-source resolver against REAL on-chain
 // delegated-key data, covering the fixes in:
 //   - xchain-indexer src/api/stake_source.js   (d0abcfd: archive/recovery leg)
-//   - xchain-indexer src/db.js             (828db2d: reward-writer leg shares
+//   - xchain-indexer src/db/capabilities.js (828db2d: reward-writer leg shares
 //                                            the identical active-row predicates)
 //
 // The hub's StateAnchorPublisher pins each reward's earn-time staking source
@@ -48,7 +48,7 @@ const gasHelper = require('../helpers/gasHelper')
 // Load the MASTER (fixed) xchain-indexer stake-source resolver. Prefer a
 // co-located copy (used inside the e2e image, where the monorepo layout is not
 // present); otherwise fall back to the adjacent xchain-indexer source for
-// host/monorepo runs. stake-source.js is pure SQL over a passed db, so it has
+// host/monorepo runs. stake_source.js is pure SQL over a passed db, so it has
 // no deps and runs against the live indexer DB through the e2e connection,
 // independent of the deployed indexer service's code version.
 function loadStakeSourceModule() {
@@ -97,7 +97,7 @@ describe('Delegated reward SOURCE RESOLUTION on real on-chain data (d0abcfd / 82
     let blockB = null       // block at which we resolve (latest indexed)
     let createdSlashTable = false  // true if this drill created capability_slash_events (older DB)
 
-    // Minimal db adapter satisfying stake-source.js's contract, backed by the
+    // Minimal db adapter satisfying stake_source.js's contract, backed by the
     // e2e indexer DB connection. Mirrors the master Database getPubkeyId /
     // getStatusId / doQuery exactly.
     const idxDb = {
@@ -114,7 +114,7 @@ describe('Delegated reward SOURCE RESOLUTION on real on-chain data (d0abcfd / 82
             const r = await this.doQuery('SELECT id FROM index_statuses WHERE status=? LIMIT 1', [status])
             return r.length > 0 ? Number(r[0].id) : null
         },
-        // stake-source.js resolves through apiView() so federation READS draw an
+        // stake_source.js resolves through apiView() so federation READS draw an
         // independent pooled connection and never adopt an open block transaction
         // (H2). This adapter already has that property by construction:
         // every doQuery takes a fresh connection from the pool and releases it, so
@@ -212,7 +212,7 @@ describe('Delegated reward SOURCE RESOLUTION on real on-chain data (d0abcfd / 82
     })
 
     it('FIXED resolver resolves the delegated key to its staking source (and agrees with the live RPC)', async function () {
-        // Master stake-source.js (the archive/recovery leg d0abcfd fixed),
+        // Master stake_source.js (the archive/recovery leg d0abcfd fixed),
         // run directly against the real indexer DB.
         let viaStake = await getStakeSourceByPubkey(indexerLike, { pubkey: pubkeyA, block_index: blockB })
         assert(!viaStake.error, 'pubkeyA resolution should not error: ' + viaStake.error)
@@ -233,7 +233,7 @@ describe('Delegated reward SOURCE RESOLUTION on real on-chain data (d0abcfd / 82
     it('recovery byte-identity: the reward-writer leg and the archive/recovery leg resolve the SAME source (828db2d)', async function () {
         // Archive/recovery leg: getStakeSourceByPubkey is what the hub pins into
         // the ANCHOR archive, and what recovery.js restores as source_id via
-        // createAddress(r.source) (xchain-indexer/src/recovery.js:280-288).
+        // createAddress(r.source) (xchain-indexer/bin/recovery.js).
         let archive = await getStakeSourceByPubkey(indexerLike, { pubkey: pubkeyB, block_index: blockB })
         assert(!archive.error, 'archive-leg resolution should not error: ' + archive.error)
         assert.strictEqual(archive.source, addrA.address, 'archive leg resolves delegated pubkeyB to addrA')

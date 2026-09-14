@@ -70,7 +70,7 @@
  * WHY NOT ANCHOR_ROUND_TIMEOUT_MS. It is the SHARED round timer: the v0 bundle
  * attestation round, the archive wrapper co-sign round and the archive
  * attestation round all read StateAnchorPublisher.roundTimeoutMs. The v0 bundle
- * tail REQUIRES ATTEST_SIG_COUNT >= 1 (xchain-indexer anchor.js throws on 0,
+ * tail REQUIRES ATTEST_SIG_COUNT >= 1 (xchain-indexer anchor/index.js throws on 0,
  * where the v1 archive tail accepts it), so a cycle degraded by the clock lands
  * `invalid: ATTEST_SIG_COUNT` on the bundle and proves the opposite of AT-F3's
  * last clause. The fault is therefore the narrow one -
@@ -661,7 +661,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
     //         |CONTRACT_HASH|CHECKPOINT_SEQ|SNAPSHOT_BLOCK|MATCH_BATCH_SEQ
     //         |MATCH_COUNT|CRC|TOTAL_CHUNKS|CHUNK0|SIG_COUNT|PUBKEY|SIG|...
     //         |PUBLISHER|ATTEST_SIG_COUNT|APUBKEY|ASIG|...
-    // (StateAnchorPublisher._publishArchive builds it; xchain-indexer anchor.js
+    // (StateAnchorPublisher._publishArchive builds it; xchain-indexer anchor/index.js
     // formats[1] reads it back at the same offsets.)
     function parseArchiveHead(payload){
         let f = String(payload).split('|');

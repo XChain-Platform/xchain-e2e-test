@@ -14,7 +14,7 @@
  *
  * The in-process DEX PBFT tests prove a match finalizes with a 2f+1 signature
  * bundle, but they stop at the hub's cross_chain_matches row. The indexer's
- * cross_settle.js (which RE-verifies those signatures against the locked
+ * cross_settle/index.js (which RE-verifies those signatures against the locked
  * capability snapshot and releases escrow) was only unit-tested with SYNTHETIC
  * rows/sigs. This closes the gap by feeding a REAL multi-hub-finalized match row
  * into the real indexer handler, proving the cross-repo canonical alignment

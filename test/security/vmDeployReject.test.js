@@ -15,7 +15,7 @@ const transactionHelper = require('../transactionHelper')
 
 /**
  * VM Deploy Reject: confirms the indexer rejects malformed/abusive DEPLOYs at the
- * syntax-validation gate (deploy.js -> vm.validateSyntax), recording a contract row
+ * syntax-validation gate (deploy/index.js -> vm.validateSyntax), recording a contract row
  * with an invalid status. The encoder happily carries any bytes; rejection happens
  * at indexing. (The 64KB code-size limit is exercised in the library suite, not here;
  * a >64KB payload is impractical to broadcast through the P2SH path.)
@@ -55,7 +55,7 @@ describe('VM Deploy Reject: malformed/abusive contracts', function () {
         // The ONE fixture in this file that cannot carry a meta manifest: the
         // source does not parse, so there is nothing for the manifest read to
         // read. That is also why it needs none - validateSyntax runs before the
-        // manifest read (deploy.js), so CONTRACT_META_REQUIRED can never be the
+        // manifest read (deploy/index.js), so CONTRACT_META_REQUIRED can never be the
         // verdict here and the assertion below still proves the syntax gate.
         await deployRaw(atk, `module.exports = function(){ return ( ; };`)
         const row = await waitContractAny(atk.address)

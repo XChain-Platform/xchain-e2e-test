@@ -69,7 +69,7 @@ function silenceOracleValidator(hub) {
 //
 // The narrow seam is the point. ANCHOR_ROUND_TIMEOUT_MS, the obvious knob, is SHARED
 // by the bundle attestation round, the archive wrapper co-sign round and this one, and
-// the v0 bundle tail REQUIRES attestCount >= 1 (xchain-indexer anchor.js: it throws
+// the v0 bundle tail REQUIRES attestCount >= 1 (xchain-indexer anchor/index.js: it throws
 // where the v1 archive tail accepts 0). Degrading the rounds by the timer therefore
 // lands `invalid: ATTEST_SIG_COUNT` on the bundle and proves the wrong thing. Replacing
 // this one per-instance handler leaves the bundle attestation, the wrapper co-sign

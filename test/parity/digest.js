@@ -29,7 +29,7 @@
  *
  * The resolved hash chain is read here (not in compare) because it requires
  * the live JOIN into index_transactions. readHashChain mirrors the indexer's
- * own getBlockHashes provenance (xchain-indexer/src/db.js:1019) and the
+ * own getBlockHashes provenance (xchain-indexer/src/db/actions.js:39) and the
  * cross-node oracle (xchain-indexer/.../setup/equivalence.js).
  *********************************************************************/
 

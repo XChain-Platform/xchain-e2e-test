@@ -231,7 +231,7 @@ describe('Federation: full-node tier (NODEPROOF) possession proof', function () 
     it('accrues passing verdicts for the FULL hubs while the LIGHT one earns none', async function () {
         // Reward-only model: there is NO slashing. The full-node reward tranche is
         // gated on a PARTICIPATION RATE over a trailing window (db.getFullNodeParticipation
-        // -> price.js). The LIGHT validator never answers, so it accrues ZERO passing
+        // -> price/index.js). The LIGHT validator never answers, so it accrues ZERO passing
         // full_node_verifications, giving it a pass-rate of 0 and earning no tranche (never
         // penalised). The honest FULL hubs answer across epochs and accumulate
         // DISTINCT-epoch passes for a positive pass-rate. Mine across several epochs and

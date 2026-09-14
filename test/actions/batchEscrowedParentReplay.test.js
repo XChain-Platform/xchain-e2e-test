@@ -16,7 +16,7 @@
 // the state its predecessors left and a replay reconstructs the same view. The ONE
 // exception is issue.js's ownership-escrow guard: it calls
 // indexerDb.isOwnershipEscrowed(parent), which reads `tokens.escrow_action_index`
-// with NO action-index bound at all (xchain-indexer/src/db.js getTokenEscrow). R1's
+// with NO action-index bound at all (xchain-indexer/src/db/tokens.js getTokenEscrow). R1's
 // dotted-TICK exemption makes a batch that opens the escrow and issues a child in one
 // transaction possible, so the unscoped read becomes reachable mid-batch and is
 // exactly where a live run and a replay could disagree.

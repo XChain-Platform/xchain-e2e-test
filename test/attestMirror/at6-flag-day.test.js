@@ -95,7 +95,7 @@ const ALREADY_VERDICT_PREFIX = 'invalid: REQUEST already'
 const DEADLINE_BLOCKS = 60
 const BURIAL_BLOCKS   = 6
 
-// The per-signer split floors at the GAS token's ISSUE decimals (attest.js
+// The per-signer split floors at the GAS token's ISSUE decimals (attest/index.js
 // `feeCap = min(8, gasDecimals)`), so the pool keeps a remainder of at most one
 // unit in the last place per signer. Anything beyond that is a carve-out.
 // MEASURED 2026-09-05 on the standing BTC regtest indexer: XCHAIN's one valid

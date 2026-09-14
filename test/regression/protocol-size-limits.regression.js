@@ -55,9 +55,9 @@ function readIndexerExecuteCallCaps() {
     assert.ok(/require\((['"])(?:\.\.\/)+protocol\/constants(?:\.js)?\1\)/.test(src),
         'indexer EXECUTE handler no longer requires the vendored protocol/constants module')
     assert.ok(/MAX_CALL_DEPTH\s*=\s*[A-Za-z_$][\w$]*\.VM_MAX_CALL_DEPTH/.test(src),
-        'indexer execute.js MAX_CALL_DEPTH is not derived from the vendored VM_MAX_CALL_DEPTH constant')
+        'indexer execute/index.js MAX_CALL_DEPTH is not derived from the vendored VM_MAX_CALL_DEPTH constant')
     assert.ok(/MIN_CALL_GAS\s*=\s*[A-Za-z_$][\w$]*\.VM_MIN_CALL_GAS/.test(src),
-        'indexer execute.js MIN_CALL_GAS is not derived from the vendored VM_MIN_CALL_GAS constant')
+        'indexer execute/index.js MIN_CALL_GAS is not derived from the vendored VM_MIN_CALL_GAS constant')
     const vendored = require('../../../xchain-indexer/src/protocol/constants.js')
     return { MAX_CALL_DEPTH: vendored.VM_MAX_CALL_DEPTH, MIN_CALL_GAS: vendored.VM_MIN_CALL_GAS }
 }
@@ -230,7 +230,7 @@ describe('Protocol size-limit drift guard', () => {
 
     describe('XCALL consensus bounds (indexer is the arbiter)', () => {
 
-        // The indexer xcall.js values gate cross-chain calls on chain. They are
+        // The indexer xcall/index.js values gate cross-chain calls on chain. They are
         // literal-copied into the canonical module; assert they have not drifted.
         const XCALL_FIELDS = [
             'XCALL_MIN_GAS', 'XCALL_MAX_GAS', 'XCALL_MAX_HOPS',
@@ -259,7 +259,7 @@ describe('Protocol size-limit drift guard', () => {
         })
 
         // XCALL_MAX_RETURN_BYTES is enforced in a different indexer module
-        // (xexec.js, not xcall.js): an oversize return becomes status
+        // (xexec.js, not xcall/index.js): an oversize return becomes status
         // 'payload_too_large' with an empty payload. Asserted separately since it
         // does not live on indexerXcall (uuid 333).
         it('[regression:p0] indexer xexec XCALL_MAX_RETURN_BYTES === canonical (uuid 333)', () => {
@@ -304,7 +304,7 @@ describe('Protocol size-limit drift guard', () => {
 
         // VM_MAX_CALL_DEPTH / VM_MIN_CALL_GAS are literal-copied into the VM
         // (emit-time enforcement, now exported) and the indexer's host-side
-        // re-validation copy (inline consts in execute.js, read via source scan
+        // re-validation copy (inline consts in execute/index.js, read via source scan
         // since they are not exported). A drift between VM emit-time and indexer
         // re-validation would fork execution outcomes (uuid 334).
         it('[regression:p0] VM MAX_CALL_DEPTH / MIN_CALL_GAS === canonical', () => {
@@ -320,17 +320,17 @@ describe('Protocol size-limit drift guard', () => {
             )
         })
 
-        it('[regression:p0] indexer execute.js re-validation MAX_CALL_DEPTH / MIN_CALL_GAS === canonical', () => {
+        it('[regression:p0] indexer execute/index.js re-validation MAX_CALL_DEPTH / MIN_CALL_GAS === canonical', () => {
             const indexerCaps = readIndexerExecuteCallCaps()
             assert.strictEqual(
                 indexerCaps.MAX_CALL_DEPTH,
                 protocol.VM_MAX_CALL_DEPTH,
-                'indexer execute.js MAX_CALL_DEPTH drifted from the canonical VM_MAX_CALL_DEPTH protocol constant'
+                'indexer execute/index.js MAX_CALL_DEPTH drifted from the canonical VM_MAX_CALL_DEPTH protocol constant'
             )
             assert.strictEqual(
                 indexerCaps.MIN_CALL_GAS,
                 protocol.VM_MIN_CALL_GAS,
-                'indexer execute.js MIN_CALL_GAS drifted from the canonical VM_MIN_CALL_GAS protocol constant'
+                'indexer execute/index.js MIN_CALL_GAS drifted from the canonical VM_MIN_CALL_GAS protocol constant'
             )
         })
     })
@@ -511,7 +511,7 @@ describe('Protocol size-limit drift guard', () => {
             assert.strictEqual(
                 indexerXcall.XCALL_RESULT_ORPHAN_GRACE_SECONDS,
                 protocol.XCALL_RESULT_ORPHAN_GRACE_SECONDS,
-                'indexer xcall.js XCALL_RESULT_ORPHAN_GRACE_SECONDS drifted from the canonical protocol constant'
+                'indexer xcall/index.js XCALL_RESULT_ORPHAN_GRACE_SECONDS drifted from the canonical protocol constant'
             )
             assertVendored('XCALL_RESULT_ORPHAN_GRACE_SECONDS', ['xchain-indexer'])
         })
@@ -582,7 +582,7 @@ describe('Protocol size-limit drift guard', () => {
         it('[regression:p0] CANONICAL_REORG_BUFFER === canonical across hub + indexer + sdk (uuid 96193535)', () => {
             // Every consumer buries exactly once, locally: the hub resolves a capability
             // snapshot at H - CANONICAL_REORG_BUFFER, and the three verifier families that
-            // re-derive that set from on-chain state (indexer attest.js, indexer
+            // re-derive that set from on-chain state (indexer attest/index.js, indexer
             // recovery.js, sdk light.js) must bury by the identical depth or they resolve
             // a different signer set than the hub that signed the artifact. Each repo
             // holds its own bare literal; the indexer's snapshot_reorg_buffer.test.js pins
@@ -634,7 +634,7 @@ describe('Protocol size-limit drift guard', () => {
         // BATCH_COMMAND_LIMIT caps the commands one BATCH may carry. The indexer's
         // actions/batch.js is the on-chain arbiter and holds its copy as an instance
         // field (`this.commandLimit`), not an export, so it is read from source the same
-        // way the execute.js call caps above are. The SDK exports its own literal from
+        // way the execute/index.js call caps above are. The SDK exports its own literal from
         // batchLimits.js, and four further SDK sites (validator, batchBuilder,
         // decoder/parse, preflight/checks/batch) follow that one (uuid 500f2f11).
         it('[regression:p0] BATCH_COMMAND_LIMIT === canonical across SDK batchLimits + indexer batch.js (uuid 500f2f11)', () => {

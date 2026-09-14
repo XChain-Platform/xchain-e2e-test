@@ -33,7 +33,7 @@
  *
  * WHY A HUB AND NOT "NO HUB" (decision D33). `price_snapshots` is hub-mirrored:
  * `XChainIndexer.js` only opens `hubDb` when HUB_DB_HOST and HUB_DB_NAME are
- * both set, and `actions/price.js` reconstructs history by pushing
+ * both set, and `actions/price/index.js` reconstructs history by pushing
  * `price_round` / `price_batch` onto the durable outbox, which delivers to a HUB
  * over JSON-RPC. A hub-less indexer is therefore not a configuration that can
  * rebuild anything; it is not a configuration at all. The replaying node has a
@@ -1486,7 +1486,7 @@ class OracleBatchReplayNode {
      * Block until this node has no push left to deliver.
      *
      * WHY A DRAIN AND NOT A FIXED PAUSE. The reconstruction is asynchronous
-     * relative to the block loop: `actions/price.js` write-aheads a durable
+     * relative to the block loop: `actions/price/index.js` write-aheads a durable
      * `pending_hub_pushes` row inside the block transaction and HubPushQueue
      * delivers it afterwards, retrying on a backoff. Reading the hub after a fixed
      * pause therefore measures whichever of the two won a race, and a queue still

@@ -15,7 +15,7 @@
  *
  *   TIER 1 (the hard proof): the resolved consensus hash chain is
  *   byte-identical across every chain. The hash (getBlockHashes,
- *   xchain-indexer/src/db.js:1019) folds SURROGATE ids + protocol amounts +
+ *   xchain-indexer/src/db/actions.js:39) folds SURROGATE ids + protocol amounts +
  *   block_index + the previous hash (never txids, never block hashes, never
  *   raw address strings). So identical action input in identical order yields
  *   identical hashes on BTC, LTC and DOGE even though every chain's

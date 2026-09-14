@@ -38,8 +38,8 @@ const capRule = require('../../../xchain-indexer/src/attest_request_cap_activati
  * finding worth keeping in front of a reader. The note describes a per-request
  * refusal: an over-cap request "REJECTED ('rejected' request_status, terminal at
  * creation, fee never escrowed)", with the author's remedy being to retry in a
- * later block. Live, the refusal is a WHOLE-EXECUTE REVERT: attest.js records
- * the rejection on the emission's data, execute.js processEmission sees a
+ * later block. Live, the refusal is a WHOLE-EXECUTE REVERT: attest/index.js records
+ * the rejection on the emission's data, execute/index.js processEmission sees a
  * non-'valid' emission status and throws, the emitting EXECUTE's savepoint rolls
  * back, and NOTHING of that execution survives - not the over-cap request, not
  * the under-cap siblings admitted moments earlier in the same transaction, not
@@ -179,7 +179,7 @@ module.exports = {
         assert.notStrictEqual(exec.execution.status, 'valid',
             'an over-cap ATTEST emission must not leave the EXECUTE valid')
 
-        // The cap's own message, carried verbatim from attest.js through
+        // The cap's own message, carried verbatim from attest/index.js through
         // processEmission's throw onto the execution row. This string IS the
         // observation the ledger asked for: the rule fired on a live chain.
         const why = String(exec.execution.error_message || '')

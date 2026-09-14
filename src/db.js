@@ -2408,7 +2408,7 @@ class Database {
     // (or read a stale row and hide a write that never landed). The schema
     // carries state_key_bin, a utf8_bin generated shadow of state_key backed by
     // idx_latest_bin, and that is what the indexer keys current state on
-    // (xchain-indexer/src/db.js getContractState, armed from genesis on regtest
+    // (xchain-indexer/src/db/contracts.js getContractState, armed from genesis on regtest
     // by state_key_collation_activation.js). Match the shadow column here for the
     // same reason xchain-explorer's proof reader does.
     // Latest row is id DESC, the tiebreak the writer and the schema's own

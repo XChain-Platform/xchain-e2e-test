@@ -971,7 +971,7 @@ describe('BATCH issuance limits (BATCH_ISSUANCE_LIMITS)', function () {
 
     // ─── A5 (DISPENSE half: spec frontier rows 18, 19, 20, 23 and 35) ──────────
     //
-    // Two claims, both money-bearing, both previously proven only by unit tests.
+    // Two claims, both money-bearing, that unit tests alone do not prove on a chain.
     //
     //   ROW 23 - one payment funds ONE fill, with no batch anywhere in sight.
     //     findMatchingDispensers returns EVERY open dispenser sitting behind the paid
@@ -1012,7 +1012,7 @@ describe('BATCH issuance limits (BATCH_ISSUANCE_LIMITS)', function () {
     // GENESIS-ACTIVE on regtest, so there is no below-flag block on this chain to send
     // a transaction into. The replay half - one payment still fills all N below the
     // flag, byte for byte - is pinned in
-    // xchain-indexer/test/unit/dispenserValueAccounting.test.js, which drives the
+    // xchain-indexer/test/unit/dispenser_value_accounting.test.js, which drives the
     // handler with the gate forced off. That is the honest boundary: these are
     // at-flag witnesses only.
     describe('A5: one payment fills ONE dispenser (rows 19/20/23) and a batched create dispenses (row 35)', function () {

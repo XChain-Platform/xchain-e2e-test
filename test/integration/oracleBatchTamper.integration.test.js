@@ -142,7 +142,7 @@ const PRICE_GRACE_S = 600;
 const CAPABILITY_GAP_STATUS = 'invalid: insufficient signer stake';
 
 // The status a header-anchor tamper can ONLY earn from the tamper: it is thrown
-// in the structural rules (`price.js`, "batch anchor does not match the last
+// in the structural rules (`price/index.js`, "batch anchor does not match the last
 // round"), upstream of every capability, gate and signature.
 const ANCHOR_TAMPER_STATUS = 'invalid: batch anchor does not match the last round';
 
@@ -276,7 +276,7 @@ function tamperPriceDigit(body) {
  * THE TAMPER THAT CANNOT BE CONFUSED WITH ANYTHING ELSE: move the batch header's
  * anchor off the last included round's anchor.
  *
- * Section 4 pins the two to be numerically equal and `price.js` checks it
+ * Section 4 pins the two to be numerically equal and `price/index.js` checks it
  * structurally, BEFORE the straddle rule and before either quorum gate resolves,
  * so the rejection is reached without resolving a capability, a stake weight or a
  * signature. Its status string is therefore attributable to this tamper and to
@@ -889,7 +889,7 @@ describe('AT4: a post-signing tamper is refused identically by two nodes, and an
             'the replaying node recorded NO PRICE action at block ' + landed.headerAnchor.height);
         assert.strictEqual(live, ANCHOR_TAMPER_STATUS,
             'the live node recorded "' + live + '" for a batch whose header anchor was moved off the ' +
-            'last round\'s anchor. Section 4 pins those equal and price.js checks it structurally, ' +
+            'last round\'s anchor. Section 4 pins those equal and price/index.js checks it structurally, ' +
             'BEFORE the straddle rule and both quorum gates, so the expected verdict is "' +
             ANCHOR_TAMPER_STATUS + '". Anything else means the check moved or stopped running.');
         assert.strictEqual(replay, live,

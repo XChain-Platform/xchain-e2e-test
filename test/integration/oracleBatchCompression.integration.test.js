@@ -196,7 +196,7 @@ function splitWire(wire) {
     };
 }
 
-// Field order is `actions/price.js:_parseV0`'s, read out of the same body the
+// Field order is `actions/price/index.js:_parseV0`'s, read out of the same body the
 // parser reads: FIRST_ROUND, LAST_ROUND, BTC_BLOCK_HEIGHT, ROUND_COUNT, then
 // ROUND/TIMESTAMP/ANCHOR_HEIGHT/PAIR_COUNT + pairs per round, then the sig set.
 function splitBody(body) {

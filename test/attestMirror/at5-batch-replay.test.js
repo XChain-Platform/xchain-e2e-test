@@ -861,7 +861,7 @@ describe('AT5: the responses of a window land on chain as one batch', function (
      * `HUB_DB_SYNC_ENABLED=true`; there is no option for a mirror-disabled member,
      * and adding one is not a one-line change, because such a node also needs its
      * own DOGE-side indexer to do the parsing and a hub to push the parsed rows to.
-     * The road is real and shipped (`price.js`'s batch parse enqueues a hub push,
+     * The road is real and shipped (`price/index.js`'s batch parse enqueues a hub push,
      * the hub validates and inserts, the ordinary mirror broadcast follows), so
      * what is missing is venue construction, not product.
      *

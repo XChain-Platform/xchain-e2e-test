@@ -13,7 +13,7 @@
  * XChain Platform E2E - Chunked DEPLOY reorg drill
  *
  * Proves the chunked-DEPLOY reorg-safety property the handler relies on
- * (deploy.js): "assembly never consumes a chunk that does not precede it ->
+ * (deploy/index.js): "assembly never consumes a chunk that does not precede it ->
  * any reorg dropping a chunk also drops the dependent DEPLOY, so rollback
  * needs no bespoke logic." A v2 assembling DEPLOY reads only VALID v4 chunk
  * carriers at a LOWER action_index, so the carriers are strictly below the

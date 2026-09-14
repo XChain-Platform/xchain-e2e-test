@@ -15,7 +15,7 @@
  * ANCHOR v7 bundle: reward type `anchor_bundle`, round_reference SNAPSHOT_BLOCK,
  * the frozen ANCHOR_REWARD_AMOUNT. The attested canonical (XANCPUB) is built
  * INLINE in two services (the hub producer StateAnchorPublisher._attestationCanonical
- * and the indexer verifier actions/anchor.js _rewardCanonical), and the flag-day map
+ * and the indexer verifier actions/anchor/index.js _rewardCanonical), and the flag-day map
  * plus the frozen reward amount live as LOCAL COPIES in both services AND the
  * canonical xchain-documentation/protocol/constants.js. A single byte of drift
  * between any two of these silently FORKS the derived validator_rewards row (a

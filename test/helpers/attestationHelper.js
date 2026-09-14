@@ -14,7 +14,7 @@
 const crypto = require('crypto');
 const axios = require('axios');
 const transactionHelper = require('../transactionHelper');
-// Sibling modules: same EQUIV header + SWQ gate the indexer's verifier uses (attest.js).
+// Sibling modules: same EQUIV header + SWQ gate the indexer's verifier uses (attest/index.js).
 const eq  = require('../../../xchain-indexer/src/equivocation_header.js');
 const swq = require('../../../xchain-indexer/src/stake_weighted_quorum.js');
 const mathjs = require('mathjs');
@@ -33,7 +33,7 @@ class MockAttestationValidator {
         this.source = null;
     }
 
-    // Canonical message that the indexer's attest.js v1 handler reconstructs:
+    // Canonical message that the indexer's attest/index.js v1 handler reconstructs:
     //   request_id || provider_id || sha256(response_payload) || status || meta
     // At/above the EQUIV flag-day the indexer wraps that raw string in the uniform
     // header (TAG=XATTEST, ROUND_ID=request_id, VIEW=0); we must wrap identically or
@@ -82,7 +82,7 @@ function getSessionStakedValidators() {
     return sessionStakedValidators.slice();
 }
 
-// Mirror of xchain-indexer attest.js computeResponsibleSet: picks the request's
+// Mirror of xchain-indexer attest/index.js computeResponsibleSet: picks the request's
 // deterministic responsible signer set so the test signs with exactly the keys the
 // indexer will accept. Sorts the staked validator pool by SHA256(request_id || pubkey);
 // at/above SWQ activation (regtest/testnet → block 0) dedupes by staking source (one
@@ -98,7 +98,7 @@ function getSessionStakedValidators() {
 // responsible, which surfaces as "insufficient valid signatures" rather than as
 // anything pointing at the stake amount.
 //
-// CONSENSUS-MIRROR: must match attest.js._computeResponsibleSet byte-for-byte, else the
+// CONSENSUS-MIRROR: must match attest/index.js._computeResponsibleSet byte-for-byte, else the
 // chosen signers won't be the ones the indexer deems responsible and validSigs falls
 // short of REDUNDANCY. `validators` must be the FULL staked attestation set (the indexer
 // computes over every staked key at the block, not just the ones a given test tracks).

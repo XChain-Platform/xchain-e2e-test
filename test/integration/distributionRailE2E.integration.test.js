@@ -34,7 +34,7 @@
  *   - The XBRIDGE v0 lock -> mirror -> destination-chain credit is bridge-specific and IS
  *     driven for real, reusing bridgeHubRecord.js / bridgeSettleContext.js exactly as L18's
  *     own AT1 drill does: a hub-signed record verified and applied by the real indexer
- *     settle pass (src/bridge_settle.js).
+ *     settle pass (src/consensus/bridge_settle.js).
  *   - The AIRDROP that redistributes the credited balance on DOGE to three recipients IS
  *     driven for real: the actual xchain-indexer Airdrop class (src/actions/airdrop.js),
  *     including its native-fee tolerance-band math, over an in-memory ledger.

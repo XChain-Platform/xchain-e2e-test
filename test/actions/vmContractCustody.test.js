@@ -20,9 +20,9 @@ const { waitForTxIndexed } = require('../helpers/indexerWait')
  * VM Contract Custody: proves that a contract's own emitted entities are attributed to the
  * CONTRACT (its derived `C:CHAIN:N` address), not to the EXECUTE caller who triggered them.
  *
- * Background: an action's SOURCE used to be re-derived from its transaction
- * (`transactions.source_id`). A VM emission rides the caller's EXECUTE tx and has no tx of its
- * own, so the derivation returned the EXECUTE caller, letting the caller masquerade as the
+ * Background: re-deriving an action's SOURCE from its transaction
+ * (`transactions.source_id`) is wrong for a VM emission: it rides the caller's EXECUTE tx and has no tx of its
+ * own, so that derivation returns the EXECUTE caller, letting the caller masquerade as the
  * owner of the contract's tokens/orders/dispensers (a fund-custody + authorization bug). The
  * fix (`xchain-indexer@1ee6413`) persists the true source on `actions.source_id` at creation and
  * reads it everywhere. `vmEmissions.test.js` proves the ORDER-expiry refund leg directly; this
@@ -32,7 +32,7 @@ const { waitForTxIndexed } = require('../helpers/indexerWait')
  *   3. cancel auth      - getOrderInfo(SOURCE) ownership gate
  *
  * NOTE ON SWAP: the handover listed "swap expiry refund to the contract" as a sibling surface,
- * but the VM has NO `emit.swap` (see xchain-vm/src/gateway-emit.js) and execute.js has no SWAP
+ * but the VM has NO `emit.swap` (see xchain-vm/src/gateway-emit.js) and execute/index.js has no SWAP
  * emission handler. A contract can never create or own a SWAP, so the source_id fix is a no-op
  * for swaps (a swap's source is always its on-chain signer). There is nothing to e2e-test there;
  * the swap leg is intentionally omitted.

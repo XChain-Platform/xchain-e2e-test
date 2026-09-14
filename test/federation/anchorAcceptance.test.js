@@ -157,7 +157,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // never matches the row the indexer actually stored for the archive; reading
 // the wrapper's ledger_hash straight off the broadcast payload (field 6 on
 // the pipe-split wire: ANCHOR|1|CHAIN|NETWORK|BLOCK_INDEX|BLOCK_HASH|
-// LEDGER_HASH|..., the field order _publishArchive emits and anchor.js
+// LEDGER_HASH|..., the field order _publishArchive emits and anchor/index.js
 // parses) is what makes the narrowing key match the wrapper, whichever chain
 // it turns out to be.
 function archiveWrapperLedgerHash(payload){

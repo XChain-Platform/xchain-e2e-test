@@ -32,7 +32,7 @@
  *      get DOGE/<SWAP_DOGE_TICK> 100, with a DOGE get_address.
  *   3. the hub's CrossChainDexEngine finalizes a 2f+1-signed cross_chain_matches
  *      row over both legs, tagged a_kind/b_kind='swap';
- *   4. each chain's indexer processes the mirrored match through cross_settle.js
+ *   4. each chain's indexer processes the mirrored match through cross_settle/index.js
  *      (verify sigs vs the locked cross_chain capability_snapshots ->
  *      recordCrossChainSettlement -> updateBalances). The SWAP leg takes
  *      cross_settle's Phase-A full-release branch: the BTC leg releases the

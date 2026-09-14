@@ -17,7 +17,7 @@
  * drill places a crossing BTC<->DOGE ORDER pair, lets the hub finalize a
  * cross_chain_matches row, then stops PRE-settlement (orphans the source
  * block) - this drill lets the match SETTLE and asserts the indexer's
- * cross_settle.js actually RELEASES THE ESCROW on both legs:
+ * cross_settle/index.js actually RELEASES THE ESCROW on both legs:
  *
  *   1. (setup, dexDogeSetup.js) a DOGE maker has an OPEN cross-chain ORDER:
  *      give DOGE/<DEX_DOGE_TICK> 100, want BTC/<DEX_BTC_TICK> 100, with a
@@ -27,7 +27,7 @@
  *      price gate always crosses), and records the BTC maker's get_address.
  *   3. the hub's CrossChainDexEngine finalizes a 2f+1-signed cross_chain_matches
  *      row covering both legs;
- *   4. each chain's indexer processes the mirrored match through cross_settle.js
+ *   4. each chain's indexer processes the mirrored match through cross_settle/index.js
  *      (verify sigs vs the locked cross_chain capability_snapshots ->
  *      recordCrossChainSettlement -> updateBalances): the BTC leg releases the
  *      maker's escrowed 100 BTC/<DEX_BTC_TICK> to the DOGE maker's BTC
