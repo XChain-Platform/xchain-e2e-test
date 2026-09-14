@@ -21,33 +21,42 @@ const sinon = require('sinon')
 const bitcoin = require('bitcoinjs-lib')
 const { saveGlobals, restoreGlobals } = require('./chaos-helpers')
 
+function setupWalletTest() {
+    const saved = {
+        wallets: global.wallets,
+        network: global.NETWORK,
+        coin: global.COIN,
+        networkObject: global.NETWORK_OBJECT,
+    }
+
+    global.NETWORK = 'regtest'
+    global.COIN = 'bitcoin'
+    global.NETWORK_OBJECT = bitcoin.networks.regtest
+    global.wallets = {}
+
+    // Fresh require to reset module state
+    delete require.cache[require.resolve('../cryptoHelper')]
+    return { saved, cryptoHelper: require('../cryptoHelper') }
+}
+
+function teardownWalletTest(saved) {
+    global.wallets = saved.wallets
+    global.NETWORK = saved.network
+    global.COIN = saved.coin
+    global.NETWORK_OBJECT = saved.networkObject
+    sinon.restore()
+}
+
 describe('Chaos Experiment 11: Concurrent Wallet Access @P2', function () {
 
-    let savedWallets, savedNetwork, savedCoin, savedNetworkObj
-    let cryptoHelper
+    let saved, cryptoHelper
 
     beforeEach(function () {
-        savedWallets = global.wallets
-        savedNetwork = global.NETWORK
-        savedCoin = global.COIN
-        savedNetworkObj = global.NETWORK_OBJECT
-
-        global.NETWORK = 'regtest'
-        global.COIN = 'bitcoin'
-        global.NETWORK_OBJECT = bitcoin.networks.regtest
-        global.wallets = {}
-
-        // Fresh require to reset module state
-        delete require.cache[require.resolve('../cryptoHelper')]
-        cryptoHelper = require('../cryptoHelper')
+        ({ saved, cryptoHelper } = setupWalletTest())
     })
 
     afterEach(function () {
-        global.wallets = savedWallets
-        global.NETWORK = savedNetwork
-        global.COIN = savedCoin
-        global.NETWORK_OBJECT = savedNetworkObj
-        sinon.restore()
+        teardownWalletTest(saved)
     })
 
     describe('concurrent getNewAddress for same label', function () {
@@ -85,6 +94,22 @@ describe('Chaos Experiment 11: Concurrent Wallet Access @P2', function () {
             const uniqueAddresses = new Set(addresses)
             assert.strictEqual(uniqueAddresses.size, 5, 'all addresses should be unique')
         })
+    })
+})
+
+describe('Chaos Experiment 11: Concurrent Wallet Access @P2', function () {
+
+    let saved, cryptoHelper
+
+    beforeEach(function () {
+        ({ saved, cryptoHelper } = setupWalletTest())
+    })
+
+    afterEach(function () {
+        teardownWalletTest(saved)
+    })
+
+    describe('concurrent getNewAddress for same label', function () {
 
         it('mnemonic is consistent across concurrent calls', async function () {
             const promises = []
@@ -102,6 +127,19 @@ describe('Chaos Experiment 11: Concurrent Wallet Access @P2', function () {
             const uniqueMnemonics = new Set(mnemonics)
             assert.strictEqual(uniqueMnemonics.size, 1, 'all mnemonics should be identical')
         })
+    })
+})
+
+describe('Chaos Experiment 11: Concurrent Wallet Access @P2', function () {
+
+    let saved, cryptoHelper
+
+    beforeEach(function () {
+        ({ saved, cryptoHelper } = setupWalletTest())
+    })
+
+    afterEach(function () {
+        teardownWalletTest(saved)
     })
 
     describe('different labels are fully isolated', function () {
@@ -137,6 +175,19 @@ describe('Chaos Experiment 11: Concurrent Wallet Access @P2', function () {
             assert.strictEqual(global.wallets['CHAOS.ISOLATED_A'].addresses.length, 2)
             assert.strictEqual(global.wallets['CHAOS.ISOLATED_B'].addresses.length, 1)
         })
+    })
+})
+
+describe('Chaos Experiment 11: Concurrent Wallet Access @P2', function () {
+
+    let saved, cryptoHelper
+
+    beforeEach(function () {
+        ({ saved, cryptoHelper } = setupWalletTest())
+    })
+
+    afterEach(function () {
+        teardownWalletTest(saved)
     })
 
     describe('wallet state after failure', function () {
