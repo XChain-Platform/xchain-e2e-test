@@ -14,6 +14,68 @@ const cryptoHelper = require('../cryptoHelper')
 const stakeHelper = require('../helpers/stakeHelper')
 const gasHelper = require('../helpers/gasHelper')
 
+let stakerAddr = null
+let signingPubkey = null
+
+async function setupStakeReorg() {
+    // STAKE/UNSTAKE are BTC-only by protocol design. The indexer action
+    // handlers reject COIN !== 'BTC'. The reorg is also driven by `generateBlock`
+    // (Bitcoin Core 0.19 RPC), which DOGE/LTC node bases may lack, but capability
+    // staking only runs on BTC anyway, so the BTC-only gate covers both.
+    if (COIN_CODE !== 'BTC') {
+        console.log('STAKE/UNSTAKE are BTC-only, skipping stake-reorg drill on ' + COIN_CODE)
+        this.skip()
+        return
+    }
+    stakerAddr = await cryptoHelper.getNewFundedAddress(
+        'stakereorg-staker', COIN, NETWORK, null, 'legacy', 0, 1
+    )
+    await gasHelper.ensureGasBalance(stakerAddr, '3000')
+
+    // Ed25519 signing keypair (64 hex chars = 32-byte pubkey; strip 12-byte SPKI prefix).
+    let { publicKey } = crypto.generateKeyPairSync('ed25519')
+    signingPubkey = publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('hex')
+}
+
+async function q(sql, params) {
+    const conn = await indexerDatabase.getConnection()
+    try { return await conn.query(sql, params) }
+    finally { await conn.release() }
+}
+
+async function deactivationOf(pubkey) {
+    const rows = await q(
+        `SELECT s.deactivation_block AS d, st.status AS status
+         FROM stakes s
+         JOIN index_pubkeys p ON p.id = s.signing_pubkey_id
+         JOIN index_statuses st ON st.id = s.status_id
+         WHERE LOWER(p.pubkey) = LOWER(?)
+         ORDER BY s.action_index DESC LIMIT 1`,
+        [pubkey]
+    )
+    return rows.length ? { deactivation: rows[0].d === null ? null : Number(rows[0].d), status: rows[0].status } : null
+}
+
+async function blockOfAction(actionIndex) {
+    const rows = await q(
+        `SELECT t.block_index AS b FROM actions a
+         JOIN transactions t ON t.tx_index = a.tx_index WHERE a.action_index = ?`,
+        [actionIndex]
+    )
+    return rows.length ? Number(rows[0].b) : null
+}
+
+async function waitForDeactivationReset(pubkey) {
+    let after = null
+    const deadline = Date.now() + 120000
+    while (Date.now() < deadline) {
+        after = await deactivationOf(pubkey)
+        if (after && after.deactivation === null) break
+        await new Promise(r => setTimeout(r, 2000))
+    }
+    return after
+}
+
 /**
  * Stake active-set reorg convergence (on-chain): proves the indexer's rollback
  * re-NULLs the `deactivation_block` that an orphaned UNSTAKE wrote IN PLACE on a
@@ -38,58 +100,9 @@ const gasHelper = require('../helpers/gasHelper')
  * and the indexer's rollback.js runs.
  */
 describe('Stake Reorg: UNSTAKE rolls back, deactivation_block re-NULLs on the surviving stake row', function () {
-
-    let stakerAddr = null
-    let signingPubkey = null
-
-    before(async function () {
-        // STAKE/UNSTAKE are BTC-only by protocol design. The indexer action
-        // handlers reject COIN !== 'BTC'. The reorg is also driven by `generateBlock`
-        // (Bitcoin Core 0.19 RPC), which DOGE/LTC node bases may lack, but capability
-        // staking only runs on BTC anyway, so the BTC-only gate covers both.
-        if (COIN_CODE !== 'BTC') {
-            console.log('STAKE/UNSTAKE are BTC-only, skipping stake-reorg drill on ' + COIN_CODE)
-            this.skip()
-            return
-        }
-        stakerAddr = await cryptoHelper.getNewFundedAddress(
-            'stakereorg-staker', COIN, NETWORK, null, 'legacy', 0, 1
-        )
-        await gasHelper.ensureGasBalance(stakerAddr, '3000')
-
-        // Ed25519 signing keypair (64 hex chars = 32-byte pubkey; strip 12-byte SPKI prefix).
-        let { publicKey } = crypto.generateKeyPairSync('ed25519')
-        signingPubkey = publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('hex')
-    })
-
-    async function q(sql, params) {
-        const conn = await indexerDatabase.getConnection()
-        try { return await conn.query(sql, params) }
-        finally { await conn.release() }
-    }
+    before(setupStakeReorg)
 
     // deactivation_block on the stakes row for this signing pubkey (NULL when active).
-    async function deactivationOf(pubkey) {
-        const rows = await q(
-            `SELECT s.deactivation_block AS d, st.status AS status
-             FROM stakes s
-             JOIN index_pubkeys p ON p.id = s.signing_pubkey_id
-             JOIN index_statuses st ON st.id = s.status_id
-             WHERE LOWER(p.pubkey) = LOWER(?)
-             ORDER BY s.action_index DESC LIMIT 1`,
-            [pubkey]
-        )
-        return rows.length ? { deactivation: rows[0].d === null ? null : Number(rows[0].d), status: rows[0].status } : null
-    }
-    async function blockOfAction(actionIndex) {
-        const rows = await q(
-            `SELECT t.block_index AS b FROM actions a
-             JOIN transactions t ON t.tx_index = a.tx_index WHERE a.action_index = ?`,
-            [actionIndex]
-        )
-        return rows.length ? Number(rows[0].b) : null
-    }
-
     it('orphaning the UNSTAKE block clears the stale deactivation_block and keeps the stake valid', async function () {
         // STAKE in an early block. The helper waits for confirmation+indexing, so it
         // lands in a surviving block below the UNSTAKE we will orphan.
@@ -131,13 +144,7 @@ describe('Stake Reorg: UNSTAKE rolls back, deactivation_block re-NULLs on the su
             assert(await nodeConnector.getBlockCount() > tipBefore, 'competing chain must be longer than the original')
 
             // Wait for node → decoder → indexer rollback.js to re-NULL the stale stamp.
-            let after = null
-            const deadline = Date.now() + 120000
-            while (Date.now() < deadline) {
-                after = await deactivationOf(signingPubkey)
-                if (after && after.deactivation === null) break
-                await new Promise(r => setTimeout(r, 2000))
-            }
+            const after = await waitForDeactivationReset(signingPubkey)
 
             // The surviving STAKE row must be back to active (deactivation_block NULL) and still valid,
             // exactly what a from-genesis replay (with the UNSTAKE never mined) would produce.
