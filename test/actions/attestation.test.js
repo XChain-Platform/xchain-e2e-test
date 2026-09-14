@@ -439,7 +439,7 @@ module.exports = {
     // federation round may still reach `ok` before the deadline) and must NOT
     // inject a callback EXECUTE. Only `ok` (fulfilled) closes the request and
     // fires the callback. These tests exercise the RETRYABLE_STATUSES branch of
-    // _parseResponse across the full hub-to-indexer wire, guarding the
+    // parseResponse across the full hub-to-indexer wire, guarding the
     // no-callback / no-status-flip invariant against regression.
     const RETRYABLE_STATUSES = ['no_quorum', 'timeout', 'provider_error']
 

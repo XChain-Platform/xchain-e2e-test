@@ -324,7 +324,7 @@ async function waitForPublications(venue, opts) {
 
 /**
  * Split a PRICE v0 wire into its parts, handling BOTH forms exactly as the
- * indexer's `_parseV0` distinguishes them: `Z` in the FIRST_ROUND slot means the
+ * indexer's `parseV0` distinguishes them: `Z` in the FIRST_ROUND slot means the
  * remainder is base64 deflate-raw, anything else means the body is already there.
  *
  * The inflate goes through the CONSENSUS module, not through zlib directly, so a

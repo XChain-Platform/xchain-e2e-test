@@ -113,7 +113,7 @@ function makeSettleContext(opts){
     };
     let nextAction = o.firstActionIndex || 5000;
 
-    // The mirror side, read through indexerDb._mirrorDb(). These reads live in xchain-indexer
+    // The mirror side, read through indexerDb.mirrorDb(). These reads live in xchain-indexer
     // src/db/bridge_settlements.js as named methods, so the fixture answers those methods and
     // returns each result set in the order its method documents. The ORDER BY belongs to the
     // mixin and is graded in the indexer's own suite.

@@ -23,7 +23,7 @@
  * table; the block's apply count is 1.
  *
  * THE DEFECT, before §5. `selectApplicableAttestationResponses` picked ONE row per
- * request, the smallest `effective_time`, and `_applyMirroredResponse` wrote
+ * request, the smallest `effective_time`, and `applyMirroredResponse` wrote
  * nothing at all when the verifier refused it: no action, no verdict, no mark on
  * the request. The refusal is deterministic, so the next block selected the same
  * inert row again, and again, until the deadline. A request with a perfectly good
@@ -44,7 +44,7 @@
  * WHAT MAKES THE INJECTED ROW WRONG, and it is exactly one thing. It is a CLONE of
  * the honest row: same network, same payload, same response hash, same provider,
  * same status. Only the signers and the stamp differ. Every cheaper skip in
- * `_applyMirroredResponse` (provider mismatch, non-terminal status, signature
+ * `applyMirroredResponse` (provider mismatch, non-terminal status, signature
  * format, body cap, response_hash echo) is therefore passed, and the row reaches
  * the verifier and is refused there, on the responsible-set gate, with the string
  * §10 names. A row carrying garbage would be refused too, with the same string,
@@ -294,7 +294,7 @@ describe('ZC4: the applier falls through an inert row to the honest one', functi
             // ---- the inert row was skipped, on BOTH nodes ---------------------
             //
             // The reason string is consensus state: every node skips the same row for the
-            // same reason, and `_applyMirroredResponse` logs it once per attempt. Matched
+            // same reason, and `applyMirroredResponse` logs it once per attempt. Matched
             // on the request id AND the reason, because a skip for any other reason (a
             // provider mismatch, a bad hash) would mean the injected row was refused
             // before it ever reached the responsible-set gate and the drill would be

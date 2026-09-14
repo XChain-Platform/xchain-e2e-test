@@ -455,7 +455,7 @@ describe('AT5 barrier drill: which escape opened the block (row 56)', function (
 
         // `blockMayReadPrice` is `blockTransactions.length > 0`
         // (src/chain/price_read_predicate.js), reached through
-        // `_evaluatePriceBarrier`. A
+        // `evaluatePriceBarrier`. A
         // transaction-free block is committed without the barrier ever being
         // consulted, and on TDOGE that is nearly every block: 289 of run 5's 290.
         const CLOSED_THROUGHOUT = statusSeries(1788987133, B.processedAt + 60, 15)

@@ -138,7 +138,7 @@ describe('Contract Staking: STAKE v3 / UNSTAKE v1 / DELEGATE v1 + slashing', fun
             let deploy = await vmHelper.sendDeployV0(deployer, STAKE_GATED_CONTRACT, 300000, '')
             assert(deploy.contract && deploy.contract.status === 'valid', 'baseline DEPLOY v0 must succeed')
 
-            // Try to stake against it; it should be rejected by stake.js _parseContractStake
+            // Try to stake against it; it should be rejected by stake.js parseContractStake
             let staker = await cryptoHelper.getNewFundedAddress(
                 "rejected-staker", COIN, NETWORK, null, "legacy", 0, 1
             )

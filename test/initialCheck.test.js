@@ -386,7 +386,7 @@ exports.mochaHooks = {
                 // across with an XBRIDGE v0 (xchain-bridge.md section 4); the tiny
                 // throwaway amount only needs to be enough to trip the lazy,
                 // idempotent token-row creation on THIS chain (section 9) - its
-                // parameters are byte-identical to _injectGasToken regardless of the
+                // parameters are byte-identical to injectGasToken regardless of the
                 // amount bridged.
                 let gasAddressInfo = await cryptoHelper.getNewFundedAddress("GAS.TOKEN", COIN, NETWORK, null, "legacy", 0, 1, false)
                 await gasHelper.ensureGasBalance(gasAddressInfo, 1)

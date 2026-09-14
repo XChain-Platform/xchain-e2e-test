@@ -2847,7 +2847,7 @@ class AttestMirrorVenue {
      *
      * A MIRROR, and named as one: it re-applies the shared ranking in
      * `attestationHelper.computeResponsibleSigners`, which is itself pinned against
-     * the indexer's `_computeResponsibleSet`.
+     * the indexer's `computeResponsibleSet`.
      *
      * PREFER `responsibleSetFromHub` WHERE IT CAN ANSWER: the hub's
      * `getattestationresponsibleset` RPC resolves the set through the hub's own

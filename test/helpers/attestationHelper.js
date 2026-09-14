@@ -98,7 +98,7 @@ function getSessionStakedValidators() {
 // responsible, which surfaces as "insufficient valid signatures" rather than as
 // anything pointing at the stake amount.
 //
-// CONSENSUS-MIRROR: must match attest/index.js._computeResponsibleSet byte-for-byte, else the
+// CONSENSUS-MIRROR: must match attest/index.js.computeResponsibleSet byte-for-byte, else the
 // chosen signers won't be the ones the indexer deems responsible and validSigs falls
 // short of REDUNDANCY. `validators` must be the FULL staked attestation set (the indexer
 // computes over every staked key at the block, not just the ones a given test tracks).

@@ -907,7 +907,7 @@ describe('XCHAIN price derivation from real fills (spec step 7)', function () {
         })
 
         // The case above goes through `feequote`, which is the ADVISORY path and
-        // anchors staleness on WALL CLOCK (`_priceFeeQuote` passes refTime =
+        // anchors staleness on WALL CLOCK (`priceFeeQuote` passes refTime =
         // nowEpoch, deliberately: a pre-flight is not tied to a future block).
         // That makes it unrunnable on any venue whose chain clock runs ahead of
         // real time - every hub round is then stamped in the future and the

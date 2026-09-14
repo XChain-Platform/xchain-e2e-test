@@ -33,7 +33,7 @@ module.exports = {
     // section 4), the same recipe the real distribution rail drives (AT7). The
     // bridge's supply-path closure (D62) refuses a broadcast ISSUE of the GAS tick
     // off BTC unconditionally, even on regtest, and the token row a v2 credit
-    // lazily creates off BTC carries _injectGasToken's mint-disabled parameters
+    // lazily creates off BTC carries injectGasToken's mint-disabled parameters
     // (section 9), so a DOGE/LTC run can no longer self-seed XCHAIN with a local
     // ISSUE or open MINT once the bridge lands.
     async bridgeGasIn(addressInfo, amount){

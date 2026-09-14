@@ -20,7 +20,7 @@ const gasHelper = require('../helpers/gasHelper')
  * VM Contract SLASH: proves the fund-movement of a contract slashing one of its own stakers.
  * `contractStaking.test.js` deploys a stakeable contract with a ready `doSlash` method but never
  * invokes it; this exercises the full SLASH emission path end-to-end:
- *   contract emits SLASH → indexer _processSlashEmission → staker's stake deducted (LIFO) →
+ *   contract emits SLASH → indexer processSlashEmission → staker's stake deducted (LIFO) →
  *   slashed tokens credited to the contract's slash_destination (BURN) → slash_events row.
  *
  * Verified against the indexer DB: contract_stakes (remaining), slash_events, and the

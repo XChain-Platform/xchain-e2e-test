@@ -70,7 +70,7 @@ function hubBuild(sections) {
 }
 
 // Drive the indexer's real parser over a wire string and collect the anchor_actions
-// rows it would write. The DB stub answers the three reads _parseBundle makes:
+// rows it would write. The DB stub answers the three reads parseBundle makes:
 //   - getMaxAnchorCheckpointSeq: no watermark, so the stale-seq guard admits the wire;
 //   - the oracle_publish set: EMPTY, which makes the verdict 'unverified' and skips
 //     both signature verification and the reward, because the frozen vector carries

@@ -196,7 +196,7 @@ function splitWire(wire) {
     };
 }
 
-// Field order is `actions/price/index.js:_parseV0`'s, read out of the same body the
+// Field order is `actions/price/index.js:parseV0`'s, read out of the same body the
 // parser reads: FIRST_ROUND, LAST_ROUND, BTC_BLOCK_HEIGHT, ROUND_COUNT, then
 // ROUND/TIMESTAMP/ANCHOR_HEIGHT/PAIR_COUNT + pairs per round, then the sig set.
 function splitBody(body) {
@@ -339,7 +339,7 @@ function ident(name) {
  * HELPER GAP, worked around here: `oracleBatchReplay.readPriceActions` selects
  * neither the four v2 batch columns nor the transaction hash, and filters only
  * by round or block. A wire rejected at decompression never records a round
- * number at all (`_parseV0` sets `data['ROUND']` from an undefined
+ * number at all (`parseV0` sets `data['ROUND']` from an undefined
  * `firstRound`), so a round filter cannot find the rows this drill is about.
  * Keyed on the transaction hash through the same join `indexerWait.js` uses.
  */
@@ -869,7 +869,7 @@ describe('AT9 PRICE batch compression: round trip, consensus caps, canonical bas
     });
 
     it('nothing from a breached wire is absorbed: no structural fields, no snapshots, on either node', function () {
-        // A wire refused at decompression must never record structure. `_parseV0`
+        // A wire refused at decompression must never record structure. `parseV0`
         // reaches its storage step with `firstRound` undefined and `roundsWire`
         // empty, so a batch column carrying anything here means a node parsed a
         // body it had already refused to inflate.
