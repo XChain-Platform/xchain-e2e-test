@@ -34,53 +34,53 @@ const stakeHelper = require('../helpers/stakeHelper')
 const gasHelper = require('../helpers/gasHelper')
 const transactionHelper = require('../transactionHelper')
 
-describe('DELEGATE rotation: additive effective signer set (F8) + collision guards (F9)', function () {
+const CAPABILITY = 'price'
+// Caller-supplied threshold (the getcapabilityvalidators RPC honours it
+// over the venue's local MIN_STAKE config), keeping the suite independent
+// of per-venue staking thresholds. All stakes below are sized to it.
+const MIN_STAKE = '1000'
+const STAKE_AMOUNT = '1000.00000000'
 
-    const CAPABILITY = 'price'
-    // Caller-supplied threshold (the getcapabilityvalidators RPC honours it
-    // over the venue's local MIN_STAKE config), keeping the suite independent
-    // of per-venue staking thresholds. All stakes below are sized to it.
-    const MIN_STAKE = '1000'
-    const STAKE_AMOUNT = '1000.00000000'
+let ownerAddr = null   // stakes K1, delegates K2
+let otherAddr = null   // independent staker (K3) for the collision legs
+let K1 = null          // ownerAddr's original stake signing key
+let K2 = null          // ownerAddr's delegated signing key
+let K3 = null          // otherAddr's stake signing key
+let rotationSetup = null
 
-    let ownerAddr = null   // stakes K1, delegates K2
-    let otherAddr = null   // independent staker (K3) for the collision legs
-    let K1 = null          // ownerAddr's original stake signing key
-    let K2 = null          // ownerAddr's delegated signing key
-    let K3 = null          // otherAddr's stake signing key
+function newPubkey() {
+    let { publicKey } = crypto.generateKeyPairSync('ed25519')
+    // Strip the 12-byte SPKI prefix → 32-byte raw Ed25519 pubkey (64 hex)
+    return publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('hex')
+}
 
-    function newPubkey() {
-        let { publicKey } = crypto.generateKeyPairSync('ed25519')
-        // Strip the 12-byte SPKI prefix → 32-byte raw Ed25519 pubkey (64 hex)
-        return publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('hex')
+// The effective signer set for CAPABILITY at the indexer's latest block.
+async function effectivePubkeys() {
+    let health = await indexerConnector.health()
+    assert(health && health.lastIndexedBlock !== null, 'indexer health should report lastIndexedBlock')
+    let result = await indexerConnector.getCapabilityValidators(CAPABILITY, health.lastIndexedBlock, MIN_STAKE)
+    assert(result, 'getcapabilityvalidators should answer')
+    assert(!result.error, 'getcapabilityvalidators should not error; got: ' + result.error)
+    return result.validators.map(v => String(v.pubkey).toLowerCase())
+}
+
+// Mine past an activation/deactivation boundary and wait for the indexer
+// to index it. Effective-set queries are block-scoped, so reading the set
+// before the boundary is indexed would assert against the OLD set.
+async function syncPast(blockIndex) {
+    await regtestMinerConnector.generateBlocks(7)
+    let ok = await indexerConnector.waitForIndexedBlock(Number(blockIndex), 90000)
+    assert(ok, 'indexer did not reach block ' + blockIndex + ' in time')
+}
+
+async function prepareRotation() {
+    // Capability staking (STAKE/DELEGATE v0/v2) is BTC-only by protocol design.
+    if (COIN_CODE !== 'BTC') {
+        console.log('STAKE/DELEGATE capability rotation is BTC-only, skipping on ' + COIN_CODE)
+        this.skip()
+        return
     }
-
-    // The effective signer set for CAPABILITY at the indexer's latest block.
-    async function effectivePubkeys() {
-        let health = await indexerConnector.health()
-        assert(health && health.lastIndexedBlock !== null, 'indexer health should report lastIndexedBlock')
-        let result = await indexerConnector.getCapabilityValidators(CAPABILITY, health.lastIndexedBlock, MIN_STAKE)
-        assert(result, 'getcapabilityvalidators should answer')
-        assert(!result.error, 'getcapabilityvalidators should not error; got: ' + result.error)
-        return result.validators.map(v => String(v.pubkey).toLowerCase())
-    }
-
-    // Mine past an activation/deactivation boundary and wait for the indexer
-    // to index it. Effective-set queries are block-scoped, so reading the set
-    // before the boundary is indexed would assert against the OLD set.
-    async function syncPast(blockIndex) {
-        await regtestMinerConnector.generateBlocks(7)
-        let ok = await indexerConnector.waitForIndexedBlock(Number(blockIndex), 90000)
-        assert(ok, 'indexer did not reach block ' + blockIndex + ' in time')
-    }
-
-    before(async function () {
-        // Capability staking (STAKE/DELEGATE v0/v2) is BTC-only by protocol design.
-        if (COIN_CODE !== 'BTC') {
-            console.log('STAKE/DELEGATE capability rotation is BTC-only, skipping on ' + COIN_CODE)
-            this.skip()
-            return
-        }
+    if (!rotationSetup) rotationSetup = (async () => {
         ownerAddr = await cryptoHelper.getNewFundedAddress(
             "rotation-owner", COIN, NETWORK, null, "legacy", 0, 1
         )
@@ -94,7 +94,12 @@ describe('DELEGATE rotation: additive effective signer set (F8) + collision guar
         K1 = newPubkey()
         K2 = newPubkey()
         K3 = newPubkey()
-    })
+    })()
+    await rotationSetup
+}
+
+describe('DELEGATE rotation: additive effective signer set (F8) + collision guards (F9)', function () {
+    before(prepareRotation)
 
     it('STAKE v1 puts the stake key in the effective signer set', async function () {
         let result = await stakeHelper.sendStakeV1(ownerAddr, STAKE_AMOUNT, K1)
@@ -116,7 +121,10 @@ describe('DELEGATE rotation: additive effective signer set (F8) + collision guar
         assert(set.includes(K1), 'original stake key K1 must REMAIN effective after delegation')
         assert(set.includes(K2), 'delegated key K2 must be effective after activation')
     })
+})
 
+describe('DELEGATE rotation: additive effective signer set (F8) + collision guards (F9)', function () {
+    before(prepareRotation)
     it('getstakesourcebypubkey resolves both the stake key and the delegated key to the staking source', async function () {
         let health = await indexerConnector.health()
         let block = Number(health.lastIndexedBlock)
@@ -144,7 +152,10 @@ describe('DELEGATE rotation: additive effective signer set (F8) + collision guar
         assert.match(result.delegation.status, /already delegated/i,
             'rejection reason should mention "already delegated"; got: ' + result.delegation.status)
     })
+})
 
+describe('DELEGATE rotation: additive effective signer set (F8) + collision guards (F9)', function () {
+    before(prepareRotation)
     it('STAKE v1 rejects a pubkey currently held by an active delegation (mirror collision)', async function () {
         // stake-teardown-ok: rejected as "already delegated", so K2 never gains a
         // stake of its own and no capability set grows by it.
@@ -173,7 +184,10 @@ describe('DELEGATE rotation: additive effective signer set (F8) + collision guar
         assert(!set.includes(K1), 'revoked stake key K1 must leave the effective set')
         assert(set.includes(K2), 'delegated key K2 must remain effective')
     })
+})
 
+describe('DELEGATE rotation: additive effective signer set (F8) + collision guards (F9)', function () {
+    before(prepareRotation)
     // A refused DELEGATE v2 leaves NO row to read a rejection status off. The
     // stake-key branch is not taken (that needs an UNrevoked stake key) and the
     // delegation branch inserts nothing under DEL-1 (DELEGATE_REVOKE_NO_REINSERT,
@@ -207,7 +221,10 @@ describe('DELEGATE rotation: additive effective signer set (F8) + collision guar
         let set = await effectivePubkeys()
         assert(!set.includes(K1), 'K1 must stay out of the effective set')
     })
+})
 
+describe('DELEGATE rotation: additive effective signer set (F8) + collision guards (F9)', function () {
+    before(prepareRotation)
     it('STAKE v2 re-stake of the revoked key restores it to the effective set', async function () {
         // A revocation suppresses only stake rows with action_index < its own.
         // The re-stake row postdates it, so K1 re-qualifies on the new amount
