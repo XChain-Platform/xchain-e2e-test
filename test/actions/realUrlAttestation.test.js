@@ -94,62 +94,107 @@ module.exports = {
 };
 `
 
-describe('REAL-URL attestation: 3-validator quorum over a live https GET', function () {
-    this.timeout(10 * 60 * 1000)
+let operatorAddr  = null
+let contractIndex = null
+const stakedValidators = []   // full set, mirrors the indexer's responsible-set input
 
-    let operatorAddr  = null
-    let contractIndex = null
-    const stakedValidators = []   // full set, mirrors the indexer's responsible-set input
+// Stake a validator from its OWN distinct funded source (SWQ source-dedup
+// collapses same-source keys into one responsible-set slot).
+async function stakeValidatorFromOwnSource(v) {
+    let stakeSource = await cryptoHelper.getNewFundedAddress(
+        'realurl-val', COIN, NETWORK, null, 'legacy', stakedValidators.length, 0.02
+    )
+    // 15000 clears BOTH the attestation capability min_stake (1000) and the
+    // http_get PROVIDER floor (10000), enforced on the responsible set
+    // at/above STAKE_WEIGHTED_QUORUM (armed at genesis on regtest).
+    await gasHelper.ensureGasBalance(stakeSource, '20000')
+    await stakeHelper.sendStakeV1(stakeSource, '15000.00000000', v.pubkey)
+    v.source = stakeSource.address
+    stakedValidators.push(v)
+    // Session-wide registration; the signer computation below ranks over the
+    // WHOLE session set, not this suite's slice (see attestationHelper).
+    attestationHelper.registerStakedValidator(v)
+    return v
+}
 
-    // Stake a validator from its OWN distinct funded source (SWQ source-dedup
-    // collapses same-source keys into one responsible-set slot).
-    async function stakeValidatorFromOwnSource(v) {
-        let stakeSource = await cryptoHelper.getNewFundedAddress(
-            'realurl-val', COIN, NETWORK, null, 'legacy', stakedValidators.length, 0.02
-        )
-        // 15000 clears BOTH the attestation capability min_stake (1000) and the
-        // http_get PROVIDER floor (10000), enforced on the responsible set
-        // at/above STAKE_WEIGHTED_QUORUM (armed at genesis on regtest).
-        await gasHelper.ensureGasBalance(stakeSource, '20000')
-        await stakeHelper.sendStakeV1(stakeSource, '15000.00000000', v.pubkey)
-        v.source = stakeSource.address
-        stakedValidators.push(v)
-        // Session-wide registration; the signer computation below ranks over the
-        // WHOLE session set, not this suite's slice (see attestationHelper).
-        attestationHelper.registerStakedValidator(v)
-        return v
+async function setupRealUrlAttestation() {
+    if (COIN_CODE !== 'BTC') {
+        console.log('Attestation rides on BTC-only STAKE + EXECUTE; skipping on ' + COIN_CODE)
+        this.skip()
+        return
     }
 
-    before(async function () {
-        if (COIN_CODE !== 'BTC') {
-            console.log('Attestation rides on BTC-only STAKE + EXECUTE; skipping on ' + COIN_CODE)
-            this.skip()
-            return
-        }
+    operatorAddr = await cryptoHelper.getNewFundedAddress(
+        'realurl-op', COIN, NETWORK, null, 'legacy', 0, 0.02
+    )
+    await gasHelper.ensureGasBalance(operatorAddr, '5000')
 
-        operatorAddr = await cryptoHelper.getNewFundedAddress(
-            'realurl-op', COIN, NETWORK, null, 'legacy', 0, 0.02
-        )
-        await gasHelper.ensureGasBalance(operatorAddr, '5000')
+    // Stake three validators of our own. The chain is SHARED with every suite
+    // that ran before this one, so these are NOT assumed to be the only
+    // qualifying keys: signer selection ranks over the session-wide registry.
+    for (let i = 0; i < 3; i++) {
+        await stakeValidatorFromOwnSource(new attestationHelper.MockAttestationValidator())
+    }
+    // Activation delay AND snapshot burial: a request at height H resolves its
+    // responsible set at H-6, so mining only the delay leaves all three invisible
+    // and every redundancy=3 request is rejected at admission.
+    await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
+    // The encoder refuses UTXO selection while the tracker trails the node, so the
+    // next tx build races these blocks unless the tracker is caught up first.
+    await utxoTrackerConnector.waitForSync()
 
-        // Stake three validators of our own. The chain is SHARED with every suite
-        // that ran before this one, so these are NOT assumed to be the only
-        // qualifying keys: signer selection ranks over the session-wide registry.
-        for (let i = 0; i < 3; i++) {
-            await stakeValidatorFromOwnSource(new attestationHelper.MockAttestationValidator())
-        }
-        // Activation delay AND snapshot burial: a request at height H resolves its
-        // responsible set at H-6, so mining only the delay leaves all three invisible
-        // and every redundancy=3 request is rejected at admission.
-        await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
-        // The encoder refuses UTXO selection while the tracker trails the node, so the
-        // next tx build races these blocks unless the tracker is caught up first.
-        await utxoTrackerConnector.waitForSync()
+    const deploy = await vmHelper.sendDeployV0(operatorAddr, CONTRACT_CODE, 500000)
+    assert.strictEqual(deploy.contract.status, 'valid', 'deploy status: ' + deploy.contract.status)
+    contractIndex = deploy.contract.action_index
+}
 
-        const deploy = await vmHelper.sendDeployV0(operatorAddr, CONTRACT_CODE, 500000)
-        assert.strictEqual(deploy.contract.status, 'valid', 'deploy status: ' + deploy.contract.status)
-        contractIndex = deploy.contract.action_index
+async function fetchRealUrl() {
+    // 2. REAL fetch through the production http_get provider. This is the
+    //    actual outbound HTTPS GET - no mock, no local server.
+    const fetched = await http_get.fetch(REAL_URL, { maxResponseBytes: 32768, timeoutMs: 10000 })
+    const realBody = fetched.body.toString('utf8')
+    const realMeta = String(fetched.meta)   // HTTP status code, part of the signing message
+    console.log('LIVE FETCH  status=' + realMeta + '  bytes=' + Buffer.byteLength(realBody, 'utf8'))
+    console.log('LIVE BODY   ' + JSON.stringify(realBody))
+    return { realBody, realMeta }
+}
+
+async function broadcastRealUrlResponse(requestId, realBody, realMeta, signers) {
+    return attestationHelper.broadcastAttestationResponse(operatorAddr, {
+        requestId:       requestId,
+        providerId:      'http_get',
+        responsePayload: realBody,
+        status:          'ok',
+        meta:            realMeta,
+        validators:      signers
     })
+}
+
+async function waitForValidResponse(requestId) {
+    return indexerDatabase.waitForAttestationResponse({
+        requestId:      requestId,
+        responseStatus: 'ok',
+        status:         'valid'
+    }, 120000)
+}
+
+async function findFulfilledRequest(requestId) {
+    return indexerDatabase.checkAttestationRequest({
+        requestId:     requestId,
+        requestStatus: 'fulfilled'
+    })
+}
+
+async function readCallbackState() {
+    const cbStatus  = await indexerDatabase.getContractState(contractIndex, 'callback_status')
+    const cbPayload = await indexerDatabase.getContractState(contractIndex, 'callback_payload')
+    const cbContext = await indexerDatabase.getContractState(contractIndex, 'callback_context')
+    return { cbStatus, cbPayload, cbContext }
+}
+
+describe('REAL-URL attestation: 3-validator quorum over a live https GET', function () {
+    this.timeout(10 * 60 * 1000)
+    before(setupRealUrlAttestation)
 
     it('fetches the real URL, reaches 3/3 quorum, and writes the live body to state', async function () {
         if (skipIfResponseMirrorEra(this, NETWORK)) return
@@ -167,13 +212,7 @@ describe('REAL-URL attestation: 3-validator quorum over a live https GET', funct
         assert.strictEqual(request.payload, REAL_URL, 'the real URL should be stored as the request payload')
         const requestId = request.request_id
 
-        // 2. REAL fetch through the production http_get provider. This is the
-        //    actual outbound HTTPS GET - no mock, no local server.
-        const fetched = await http_get.fetch(REAL_URL, { maxResponseBytes: 32768, timeoutMs: 10000 })
-        const realBody = fetched.body.toString('utf8')
-        const realMeta = String(fetched.meta)   // HTTP status code, part of the signing message
-        console.log('LIVE FETCH  status=' + realMeta + '  bytes=' + Buffer.byteLength(realBody, 'utf8'))
-        console.log('LIVE BODY   ' + JSON.stringify(realBody))
+        const { realBody, realMeta } = await fetchRealUrl()
         assert.strictEqual(realMeta, '200', 'expected HTTP 200 from the live endpoint')
 
         // 3. Sign the REAL body with the request's responsible validators and
@@ -184,21 +223,10 @@ describe('REAL-URL attestation: 3-validator quorum over a live https GET', funct
         const signers = attestationHelper.computeResponsibleSigners(
             requestId, 3, attestationHelper.getSessionStakedValidators())
         assert.strictEqual(signers.length, 3, 'expected 3 responsible signers from the session set')
-        await attestationHelper.broadcastAttestationResponse(operatorAddr, {
-            requestId:       requestId,
-            providerId:      'http_get',
-            responsePayload: realBody,
-            status:          'ok',
-            meta:            realMeta,
-            validators:      signers
-        })
+        await broadcastRealUrlResponse(requestId, realBody, realMeta, signers)
 
         // 4. Indexer accepts 3/3, response lands valid.
-        const response = await indexerDatabase.waitForAttestationResponse({
-            requestId:      requestId,
-            responseStatus: 'ok',
-            status:         'valid'
-        }, 120000)
+        const response = await waitForValidResponse(requestId)
         assert(response, 'attestation response row should land status=ok / valid')
         assert.strictEqual(response.response_payload, realBody, 'on-chain response_payload should be the live body')
 
@@ -206,17 +234,12 @@ describe('REAL-URL attestation: 3-validator quorum over a live https GET', funct
         assert.strictEqual(sigs.length, 3, 'should have exactly 3 verified validator signatures, got ' + sigs.length)
 
         // 5. Request flips to fulfilled and the callback fires.
-        const fulfilled = await indexerDatabase.checkAttestationRequest({
-            requestId:     requestId,
-            requestStatus: 'fulfilled'
-        })
+        const fulfilled = await findFulfilledRequest(requestId)
         assert(fulfilled, 'request_status should flip to fulfilled')
         assert(response.callback_execute_action_index, 'callback_execute_action_index should be set')
 
         // 6. Contract state holds the REAL body byte-for-byte.
-        const cbStatus  = await indexerDatabase.getContractState(contractIndex, 'callback_status')
-        const cbPayload = await indexerDatabase.getContractState(contractIndex, 'callback_payload')
-        const cbContext = await indexerDatabase.getContractState(contractIndex, 'callback_context')
+        const { cbStatus, cbPayload, cbContext } = await readCallbackState()
         assert.strictEqual(JSON.parse(cbStatus.state_value),  'ok')
         assert.strictEqual(JSON.parse(cbPayload.state_value), realBody)
         assert.strictEqual(JSON.parse(cbContext.state_value), 'ctx-realurl')
