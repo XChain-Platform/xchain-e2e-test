@@ -29,12 +29,10 @@ const nativeFeeHelper = require('../helpers/nativeFeeHelper')
  * Every assertion is made against the authoritative indexer DB, not VM return
  * values (which are not persisted on-chain).
  */
-describe('VM Extended: on-chain capabilities', function () {
+// Coin symbol used in the contract derived address: C:<CHAIN>:<action_index>
+const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
 
-    // Coin symbol used in the contract derived address: C:<CHAIN>:<action_index>
-    const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
-
-    const COUNTER = `
+const COUNTER = `
         module.exports = {
             meta: { name: 'Extended Counter', description: 'Increments a stored counter and returns its new value.', version: '1.0.0' },
             increment: function() {
@@ -45,10 +43,10 @@ describe('VM Extended: on-chain capabilities', function () {
         };
     `
 
-    // Writes state AND emits an action, then reverts; both must be discarded.
-    // The function-export form carries its identity as a property (spec R1),
-    // because CONTRACT_META_REQUIRED reads meta off a function export too.
-    const REVERT_ATOMIC = `
+// Writes state AND emits an action, then reverts; both must be discarded.
+// The function-export form carries its identity as a property (spec R1),
+// because CONTRACT_META_REQUIRED reads meta off a function export too.
+const REVERT_ATOMIC = `
         function contract() {
             xchain.state.set('ghost', 'should-not-persist');
             xchain.emit.destroy({ tick: 'XCHAIN', quantity: '1' });
@@ -58,8 +56,8 @@ describe('VM Extended: on-chain capabilities', function () {
         module.exports = contract;
     `
 
-    // Loop that burns well past the 1,000,000 gas ceiling (fast in wall-clock).
-    const GAS_BOMB = `
+// Loop that burns well past the 1,000,000 gas ceiling (fast in wall-clock).
+const GAS_BOMB = `
         module.exports = {
             meta: { name: 'Gas Bomb', description: 'Burns gas in a tight loop until the meter stops it.', version: '1.0.0' },
             burn: function() {
@@ -70,8 +68,8 @@ describe('VM Extended: on-chain capabilities', function () {
         };
     `
 
-    // Mints a brand-new token to the contract's own derived address.
-    const MINTER = `
+// Mints a brand-new token to the contract's own derived address.
+const MINTER = `
         module.exports = {
             meta: { name: 'Minter', description: 'Issues a token from a contract method.', version: '1.0.0' },
             mintToken: function() {
@@ -85,8 +83,8 @@ describe('VM Extended: on-chain capabilities', function () {
         };
     `
 
-    // Pays out deposited tokens: payout(destination, amount, tick)
-    const SENDER = `
+// Pays out deposited tokens: payout(destination, amount, tick)
+const SENDER = `
         module.exports = {
             meta: { name: 'Extended Sender', description: 'Emits a SEND to a destination read from the call params.', version: '1.0.0' },
             payout: function() {
@@ -98,79 +96,82 @@ describe('VM Extended: on-chain capabilities', function () {
         };
     `
 
-    let deployer = null
+let deployer = null
 
-    // Raw indexer-DB helpers (no waitFor* exists for these tables).
-    async function q(sql, params) {
-        const conn = await indexerDatabase.getConnection()
-        try { return await conn.query(sql, params) }
-        finally { await conn.release() }
+// Raw indexer-DB helpers (no waitFor* exists for these tables).
+async function q(sql, params) {
+    const conn = await indexerDatabase.getConnection()
+    try { return await conn.query(sql, params) }
+    finally { await conn.release() }
+}
+async function latestState(contractIndex, key) {
+    const rows = await q(
+        `SELECT state_value FROM contract_state
+         WHERE contract_index=? AND state_key=?
+         ORDER BY action_index DESC LIMIT 1`, [contractIndex, key])
+    return rows.length ? rows[0].state_value : null
+}
+async function emissionsFor(executionIndex) {
+    return await q(
+        `SELECT emitted_action, position FROM contract_emissions
+         WHERE execution_index=? ORDER BY position`, [executionIndex])
+}
+async function balanceOf(address, tick) {
+    const rows = await q(
+        `SELECT b.amount FROM balances b
+         JOIN index_addresses ia ON ia.id=b.address_id
+         JOIN index_tickers it ON it.id=b.tick_id
+         WHERE ia.address=? AND it.tick=?`, [address, tick])
+    return rows.length ? String(rows[0].amount) : null
+}
+async function gasDebitFor(actionIndex) {
+    return await q(
+        `SELECT d.amount FROM debits d
+         JOIN index_tickers it ON it.id=d.tick_id
+         WHERE d.action_index=? AND it.tick='XCHAIN'`, [actionIndex])
+}
+// The caller is charged for the execution either as an XCHAIN gas debit
+// (xchain-gas mode) or via a native-coin fee output. EXECUTE records gas in
+// contract_executions, not the fees table. Where native fees are ENABLED an
+// unpaid fee rejects the action pre-VM, so reaching a VM-outcome status with
+// metered gas (gas_used > 0) proves the fee was paid. Keyed on the venue's
+// fee mode rather than the coin: a regtest BTC stack configured with a
+// FEE_DESTINATION charges natively and writes no XCHAIN debit, and a gas-mode
+// venue still must show the explicit debit (the no-debit-on-failure guard).
+async function feePaidFor(actionIndex, row) {
+    const xchain = await gasDebitFor(actionIndex)
+    if (xchain.length > 0) return true
+    const feeMode = await nativeFeeHelper.discoverFeeMode()
+    if (feeMode && feeMode.enabled) return Number(row && row.gas_used) > 0
+    return false
+}
+async function tickExists(tick) {
+    const rows = await q(`SELECT id FROM index_tickers WHERE tick=? LIMIT 1`, [tick])
+    return rows.length > 0
+}
+// Poll for an execution row regardless of status (failed runs never reach status='valid').
+async function waitForAnyExecution(contractIndex, caller, method, timeMax = 60000) {
+    const end = Date.now() + timeMax
+    while (Date.now() < end) {
+        const row = await indexerDatabase.checkExecution({ contractIndex, caller, methodName: method })
+        if (row) return row
+        await new Promise(r => setTimeout(r, 1000))
     }
-    async function latestState(contractIndex, key) {
-        const rows = await q(
-            `SELECT state_value FROM contract_state
-             WHERE contract_index=? AND state_key=?
-             ORDER BY action_index DESC LIMIT 1`, [contractIndex, key])
-        return rows.length ? rows[0].state_value : null
-    }
-    async function emissionsFor(executionIndex) {
-        return await q(
-            `SELECT emitted_action, position FROM contract_emissions
-             WHERE execution_index=? ORDER BY position`, [executionIndex])
-    }
-    async function balanceOf(address, tick) {
-        const rows = await q(
-            `SELECT b.amount FROM balances b
-             JOIN index_addresses ia ON ia.id=b.address_id
-             JOIN index_tickers it ON it.id=b.tick_id
-             WHERE ia.address=? AND it.tick=?`, [address, tick])
-        return rows.length ? String(rows[0].amount) : null
-    }
-    async function gasDebitFor(actionIndex) {
-        return await q(
-            `SELECT d.amount FROM debits d
-             JOIN index_tickers it ON it.id=d.tick_id
-             WHERE d.action_index=? AND it.tick='XCHAIN'`, [actionIndex])
-    }
-    // The caller is charged for the execution either as an XCHAIN gas debit
-    // (xchain-gas mode) or via a native-coin fee output. EXECUTE records gas in
-    // contract_executions, not the fees table. Where native fees are ENABLED an
-    // unpaid fee rejects the action pre-VM, so reaching a VM-outcome status with
-    // metered gas (gas_used > 0) proves the fee was paid. Keyed on the venue's
-    // fee mode rather than the coin: a regtest BTC stack configured with a
-    // FEE_DESTINATION charges natively and writes no XCHAIN debit, and a gas-mode
-    // venue still must show the explicit debit (the no-debit-on-failure guard).
-    async function feePaidFor(actionIndex, row) {
-        const xchain = await gasDebitFor(actionIndex)
-        if (xchain.length > 0) return true
-        const feeMode = await nativeFeeHelper.discoverFeeMode()
-        if (feeMode && feeMode.enabled) return Number(row && row.gas_used) > 0
-        return false
-    }
-    async function tickExists(tick) {
-        const rows = await q(`SELECT id FROM index_tickers WHERE tick=? LIMIT 1`, [tick])
-        return rows.length > 0
-    }
-    // Poll for an execution row regardless of status (failed runs never reach status='valid').
-    async function waitForAnyExecution(contractIndex, caller, method, timeMax = 60000) {
-        const end = Date.now() + timeMax
-        while (Date.now() < end) {
-            const row = await indexerDatabase.checkExecution({ contractIndex, caller, methodName: method })
-            if (row) return row
-            await new Promise(r => setTimeout(r, 1000))
-        }
-        return null
-    }
-    function randTick(prefix) {
-        let s = prefix
-        for (let i = 0; i < 5; i++) s += String.fromCharCode(65 + Math.floor(Math.random() * 26))
-        return s
-    }
+    return null
+}
+function randTick(prefix) {
+    let s = prefix
+    for (let i = 0; i < 5; i++) s += String.fromCharCode(65 + Math.floor(Math.random() * 26))
+    return s
+}
 
-    before(async function () {
-        deployer = await cryptoHelper.getNewFundedAddress('vmx-deployer', COIN, NETWORK, null, 'legacy', 0, 1)
-        await gasHelper.ensureGasBalance(deployer, '500')
-    })
+async function setupDeployer() {
+    deployer = await cryptoHelper.getNewFundedAddress('vmx-deployer', COIN, NETWORK, null, 'legacy', 0, 1)
+    await gasHelper.ensureGasBalance(deployer, '500')
+}
+
+describe('VM Extended: on-chain capabilities', function () {
+    before(setupDeployer)
 
     describe('A. State persistence across executions', function () {
         it('increments persist across separate on-chain EXECUTEs', async function () {
@@ -214,6 +215,10 @@ describe('VM Extended: on-chain capabilities', function () {
             assert(await feePaidFor(row.action_index, row), 'caller should be charged GAS (xchain debit or native fee) for the reverted execution')
         })
     })
+})
+
+describe('VM Extended: on-chain capabilities', function () {
+    before(setupDeployer)
 
     describe('C. Gas exhaustion', function () {
         it('over-budget loop fails out-of-gas with no side effects', async function () {
@@ -263,6 +268,10 @@ describe('VM Extended: on-chain capabilities', function () {
                 `contract address ${contractAddr} should hold the minted supply (got ${bal})`)
         })
     })
+})
+
+describe('VM Extended: on-chain capabilities', function () {
+    before(setupDeployer)
 
     describe('E. DEPOSIT / WITHDRAW custody round trip', function () {
         it('deposits then withdraws a token through the contract address', async function () {
