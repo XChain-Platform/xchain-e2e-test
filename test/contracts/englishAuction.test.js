@@ -100,9 +100,6 @@ const ENGLISH_AUCTION = `module.exports = {
     }
 };`
 
-describe('English Auction: ascending bids with instant outbid refunds, deadline settlement', function () {
-    this.timeout(10 * 60 * 1000)
-
     const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
     const BID = 'XCHAIN' // gas token doubles as the bidding currency; 0 decimals in this stack
     const MIN_BID = '50'
@@ -173,6 +170,9 @@ describe('English Auction: ascending bids with instant outbid refunds, deadline 
         return ex
     }
 
+describe('English Auction: ascending bids with instant outbid refunds, deadline settlement', function () {
+    this.timeout(10 * 60 * 1000)
+
     it('a higher bid instantly refunds the previous leader, and settle() pays the winner + seller', async function () {
         const { ci, contractAddr, itemTick, seller } = await deployAndFund('10')
 
@@ -204,6 +204,10 @@ describe('English Auction: ascending bids with instant outbid refunds, deadline 
         assert.strictEqual(await balanceOf(contractAddr, itemTick), 0, 'the contract should hold no item afterward')
         assert.strictEqual(await balanceOf(contractAddr, BID), 0, 'the contract should hold no bid tokens afterward')
     })
+})
+
+describe('English Auction: ascending bids with instant outbid refunds, deadline settlement', function () {
+    this.timeout(10 * 60 * 1000)
 
     it('no bids: settle() returns the item to the seller (UNSOLD)', async function () {
         const { ci, contractAddr, itemTick, seller } = await deployAndFund('7')
@@ -218,6 +222,10 @@ describe('English Auction: ascending bids with instant outbid refunds, deadline 
         assert.strictEqual((await balanceOf(seller.address, itemTick)) - sellerItemBefore, 7, 'seller should get the unsold item back in full')
         assert.strictEqual(await balanceOf(contractAddr, itemTick), 0)
     })
+})
+
+describe('English Auction: ascending bids with instant outbid refunds, deadline settlement', function () {
+    this.timeout(10 * 60 * 1000)
 
     it('seller cancels before any bid and reclaims the item', async function () {
         const { ci, contractAddr, itemTick, seller } = await deployAndFund('4')
