@@ -48,8 +48,15 @@ function resolveIndexerFile(rel){
         path.resolve(__dirname, '../../../../xchain-indexer', rel),
         path.resolve(__dirname, '../../../../../modules/xchain-indexer', rel)
     ].filter(Boolean);
+    // Each root is tried at both spellings of a module: the flat file, and the directory
+    // entry it becomes once the indexer splits a long module all the way (an action handler
+    // hashed by the sdk drift gate has to be src/actions/<name>/ with NO flat file beside
+    // it). Without the second spelling this throws "cannot resolve xchain-indexer source"
+    // on a checkout that simply split the module.
     for(const p of candidates){
         if(fs.existsSync(p)) return p;
+        const inDirectory = p.replace(/\.js$/, path.sep + 'index.js');
+        if(inDirectory !== p && fs.existsSync(inDirectory)) return inDirectory;
     }
     throw new Error(
         'bridgeSettleContext: cannot resolve xchain-indexer source. Set XCHAIN_INDEXER_PATH ' +

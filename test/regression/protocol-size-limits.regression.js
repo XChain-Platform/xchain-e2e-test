@@ -34,6 +34,21 @@ const indexerDeploy     = require('../../../xchain-indexer/src/actions/deploy/in
 const indexerXcall      = require('../../../xchain-indexer/src/actions/xcall/index.js')
 const indexerXexec      = require('../../../xchain-indexer/src/actions/xexec.js')
 const hubConstants      = require('../../../xchain-hub/src/constants.js')
+
+// An indexer action handler is either src/actions/<name>.js or, once it is split, the
+// directory src/actions/<name>/ with the entry at index.js and the logic in parts beside
+// it (the shape the sdk drift gate pins, which forbids a flat file next to the directory).
+// These tripwires read the handler as SOURCE TEXT, so they read every file of it: reading
+// index.js alone would miss a literal that moved into a part and report the guard
+// "no longer assigns" it, which reads as drift when nothing drifted.
+function readIndexerHandler(handlerPath) {
+    const asDirectory = handlerPath.replace(/\.js$/, '')
+    if (fs.existsSync(asDirectory) && fs.statSync(asDirectory).isDirectory())
+        return fs.readdirSync(asDirectory).filter(f => f.endsWith('.js')).sort()
+            .map(f => fs.readFileSync(path.join(asDirectory, f), 'utf8')).join('\n')
+    return fs.existsSync(handlerPath) ? fs.readFileSync(handlerPath, 'utf8') : null
+}
+
 const XChainVM          = require('../../../xchain-vm/src/index.js')
 const explorerVmQuery   = require('../../../xchain-explorer/src/contract/vm_query.js')
 
@@ -647,12 +662,13 @@ describe('Protocol size-limit drift guard', () => {
             )
             const batchPath = path.join(
                 __dirname, '../../../xchain-indexer/src/actions/batch.js')
-            assert.ok(fs.existsSync(batchPath),
-                'xchain-indexer src/actions/batch.js is missing; this tripwire needs the full sibling tree')
+            const batchSource = readIndexerHandler(batchPath)
+            assert.ok(batchSource,
+                'xchain-indexer src/actions/batch.js is missing at both spellings (flat file and '
+                + 'directory); this tripwire needs the full sibling tree')
             // Read the indexer copy from source: it is an instance field on the action
             // class, and requiring that module drags in the whole indexer action tree.
-            const commandLimit = /this\.commandLimit\s*=\s*(\d+)\s*;/.exec(
-                fs.readFileSync(batchPath, 'utf8'))
+            const commandLimit = /this\.commandLimit\s*=\s*(\d+)\s*;/.exec(batchSource)
             assert.ok(commandLimit,
                 'indexer actions/batch.js no longer assigns this.commandLimit as a literal; re-point this guard')
             assert.strictEqual(Number(commandLimit[1]), protocol.BATCH_COMMAND_LIMIT,
@@ -685,10 +701,11 @@ describe('Protocol size-limit drift guard', () => {
 
             const batchPath = path.join(
                 __dirname, '../../../xchain-indexer/src/actions/batch.js')
-            assert.ok(fs.existsSync(batchPath),
-                'xchain-indexer src/actions/batch.js is missing; this tripwire needs the full sibling tree')
-            const weightBudget = /this\.weightBudget\s*=\s*(\d+)\s*;/.exec(
-                fs.readFileSync(batchPath, 'utf8'))
+            const batchSource = readIndexerHandler(batchPath)
+            assert.ok(batchSource,
+                'xchain-indexer src/actions/batch.js is missing at both spellings (flat file and '
+                + 'directory); this tripwire needs the full sibling tree')
+            const weightBudget = /this\.weightBudget\s*=\s*(\d+)\s*;/.exec(batchSource)
             assert.ok(weightBudget,
                 'indexer actions/batch.js no longer assigns this.weightBudget as a literal; re-point this guard')
             assert.strictEqual(Number(weightBudget[1]), protocol.BATCH_WEIGHT_BUDGET,
