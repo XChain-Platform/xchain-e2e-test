@@ -67,6 +67,9 @@ describe('[regression:p2] Configuration & Cross-Chain', function () {
         assert.ok(services['xchain-indexer'], 'should have indexer config')
         assert.ok(services['xchain-regtest-miner'], 'should have miner config')
     })
+})
+
+describe('[regression:p2] Configuration & Cross-Chain', function () {
 
     it('[regression:p2] R-CFG-005: getFirstBlock returns 0 for bitcoin-regtest', function () {
         assert.strictEqual(CryptoNetworks.getFirstBlock('bitcoin-regtest'), 0)
@@ -134,6 +137,13 @@ describe('[regression:p2] Fuzz & Boundary Anchors', function () {
         assert.ok(!sql.includes('DROP TABLE'), 'SQL injection should not appear in query string')
         assert.ok(params.includes("'; DROP TABLE issues; --"), 'injection string should be in params array')
     })
+})
+
+describe('[regression:p2] Fuzz & Boundary Anchors', function () {
+
+    afterEach(function () {
+        sinon.restore()
+    })
 
     it('[regression:p2] R-FUZZ-004: isNullOrNullString with edge types', function () {
         const conn = { query: sinon.stub(), release: sinon.stub() }
@@ -152,6 +162,13 @@ describe('[regression:p2] Fuzz & Boundary Anchors', function () {
         assert.strictEqual(db.isNullOrNullString('hello'), false)
         assert.strictEqual(db.isNullOrNullString(123), false)
         assert.strictEqual(db.isNullOrNullString(' '), false)
+    })
+})
+
+describe('[regression:p2] Fuzz & Boundary Anchors', function () {
+
+    afterEach(function () {
+        sinon.restore()
     })
 
     it('[regression:p2] R-BNDRY-001: getConnection retries on pool exhaustion', async function () {
@@ -189,6 +206,13 @@ describe('[regression:p2] Fuzz & Boundary Anchors', function () {
 
         const result = await db.waitForIssue({ tick: 'TOK' }, 30000)
         assert.ok(result, 'should recover and return the row')
+    })
+})
+
+describe('[regression:p2] Fuzz & Boundary Anchors', function () {
+
+    afterEach(function () {
+        sinon.restore()
     })
 
     it('[regression:p2] R-FUZZ-002b: parseEndpoints handles empty HUB_VALIDATORS', function () {
@@ -237,6 +261,13 @@ describe('[regression:p2] Performance & Observability', function () {
         assert.strictEqual(metric.polls, 3)
         assert.strictEqual(metric.resolved, true)
         assert.strictEqual(metric.durationMs, 2000)
+    })
+})
+
+describe('[regression:p2] Performance & Observability', function () {
+
+    beforeEach(function () {
+        PerfCollector.reset()
     })
 
     it('[regression:p2] R-PERF-003: toJSON serializes all collected data', async function () {
