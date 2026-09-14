@@ -42,19 +42,16 @@ async function _settleStack() {
     await utxoTrackerConnector.quiesce({ timeoutMs: 30000, pollMs: 250, regtestMiner: regtestMinerConnector })
 }
 
-describe('LLM attestation provider: redundancy=1 via claude_spawn', function () {
-    this.timeout(10 * 60 * 1000)
+let mvh           = null
+let contractIndex = null
+let owner         = null
 
-    let mvh           = null
-    let contractIndex = null
-    let owner         = null
-
-    // The contract embeds a deterministic arithmetic prompt. A model that
-    // answers anything other than "4" is broken. The single-hub path runs the
-    // provider's `agree([proposal])` (which trivially returns that proposal
-    // when redundancy=1), so we don't need exact-string equivalence across
-    // multiple model calls.
-    const CONTRACT_CODE = `
+// The contract embeds a deterministic arithmetic prompt. A model that
+// answers anything other than "4" is broken. The single-hub path runs the
+// provider's `agree([proposal])` (which trivially returns that proposal
+// when redundancy=1), so we don't need exact-string equivalence across
+// multiple model calls.
+const CONTRACT_CODE = `
 module.exports = {
     meta: { name: 'LLM Asker', description: 'Requests an LLM attestation over a prompt envelope.', version: '1.0.0' },
     askLlm: function(xchain) {
@@ -79,74 +76,99 @@ module.exports = {
 };
 `
 
+async function setUpLlmHub(context) {
+    // Loud-fail (in CI / the federation phase) or graceful-skip (ad-hoc dev)
+    // on missing prerequisites, including the claude_spawn config dir.
+    if (!requireFederationEnv(context, { needsClaudeConfig: true })) return
+    // redundancy=1 → the single hub must be the sole responsible validator,
+    // so the chain must have no other active stakes. Fail fast if it does.
+    await assertCleanValidatorSet(indexerDatabase)
+
+    mvh = new MultiValidatorHub({ count: 1 })
+    await mvh.start()
+    const pubkey = mvh.getPubkeys()[0]
+
+    // Stake the single hub. Two floors apply: the `attestation` capability
+    // min_stake is 1000 XCHAIN (see xchain-indexer/src/coins/BTC.js), and the llm
+    // PROVIDER floor is 25000, which the responsible-set derivation
+    // enforces at/above STAKE_WEIGHTED_QUORUM (armed at genesis on regtest).
+    // 30000 clears both.
+    const staker = await cryptoHelper.getNewFundedAddress(
+        'llm-staker', COIN, NETWORK, null, 'legacy', 0, 0.02
+    )
+    await _settleStack()
+    await gasHelper.ensureGasBalance(staker, '35000')
+    await _settleStack()
+    const stakeResult = await stakeHelper.sendStakeV1(staker, '30000.00000000', pubkey)
+    assert.strictEqual(stakeResult.stake.status, 'valid', 'stake should be valid')
+
+    // Activation window AND snapshot burial: the responsible set resolves at the
+    // request's block minus CANONICAL_REORG_BUFFER, so the delay alone is 6 short.
+    await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
+    await _settleStack()
+
+    // Fund + deploy
+    owner = await cryptoHelper.getNewFundedAddress(
+        'llm-owner', COIN, NETWORK, null, 'legacy', 0, 0.02
+    )
+    await regtestMinerConnector.generateBlocks(2)
+    await _settleStack()
+    await gasHelper.ensureGasBalance(owner, '5000')
+
+    const deploy = await vmHelper.sendDeployV0(owner, CONTRACT_CODE, 500000)
+    assert.strictEqual(deploy.contract.status, 'valid', 'deploy should be valid')
+    contractIndex = deploy.contract.action_index
+
+    // Publisher address for the broadcast hook.
+    const publisherAddr = await cryptoHelper.getNewFundedAddress(
+        'llm-publisher', COIN, NETWORK, null, 'legacy', 0, 0.02
+    )
+    await regtestMinerConnector.generateBlocks(2)
+    await _settleStack()
+    mvh.setBroadcastHook(async (wirePayload) => {
+        const txHash = await transactionHelper.createAndSendTransaction(publisherAddr, wirePayload)
+        return { txid: txHash }
+    })
+}
+
+async function tearDownLlmHub() {
+    if (mvh) {
+        await mvh.stop()
+        await mvh.dropDatabases()
+    }
+}
+
+async function executeLlmRequest() {
+    const envelope = JSON.stringify({
+        prompt: 'What is 2 plus 2? Reply with only the number, nothing else.',
+        max_tokens: 16
+    })
+    return vmHelper.sendExecuteV0(owner, contractIndex, 'askLlm', [envelope])
+}
+
+async function waitForLlmResponse(requestId) {
+    // Past CONFIRMATIONS
+    await regtestMinerConnector.generateBlocks(6)
+
+    // Generous wait: claude CLI cold-start + completion + on-chain broadcast.
+    return indexerDatabase.waitForAttestationResponse({
+        requestId:      requestId,
+        responseStatus: 'ok',
+        status:         'valid'
+    }, 240_000)
+}
+
+describe('LLM attestation provider: redundancy=1 via claude_spawn', function () {
+    this.timeout(10 * 60 * 1000)
+
     before(async function () {
-        // Loud-fail (in CI / the federation phase) or graceful-skip (ad-hoc dev)
-        // on missing prerequisites, including the claude_spawn config dir.
-        if (!requireFederationEnv(this, { needsClaudeConfig: true })) return
-        // redundancy=1 → the single hub must be the sole responsible validator,
-        // so the chain must have no other active stakes. Fail fast if it does.
-        await assertCleanValidatorSet(indexerDatabase)
-
-        mvh = new MultiValidatorHub({ count: 1 })
-        await mvh.start()
-        const pubkey = mvh.getPubkeys()[0]
-
-        // Stake the single hub. Two floors apply: the `attestation` capability
-        // min_stake is 1000 XCHAIN (see xchain-indexer/src/coins/BTC.js), and the llm
-        // PROVIDER floor is 25000, which the responsible-set derivation
-        // enforces at/above STAKE_WEIGHTED_QUORUM (armed at genesis on regtest).
-        // 30000 clears both.
-        const staker = await cryptoHelper.getNewFundedAddress(
-            'llm-staker', COIN, NETWORK, null, 'legacy', 0, 0.02
-        )
-        await _settleStack()
-        await gasHelper.ensureGasBalance(staker, '35000')
-        await _settleStack()
-        const stakeResult = await stakeHelper.sendStakeV1(staker, '30000.00000000', pubkey)
-        assert.strictEqual(stakeResult.stake.status, 'valid', 'stake should be valid')
-
-        // Activation window AND snapshot burial: the responsible set resolves at the
-        // request's block minus CANONICAL_REORG_BUFFER, so the delay alone is 6 short.
-        await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
-        await _settleStack()
-
-        // Fund + deploy
-        owner = await cryptoHelper.getNewFundedAddress(
-            'llm-owner', COIN, NETWORK, null, 'legacy', 0, 0.02
-        )
-        await regtestMinerConnector.generateBlocks(2)
-        await _settleStack()
-        await gasHelper.ensureGasBalance(owner, '5000')
-
-        const deploy = await vmHelper.sendDeployV0(owner, CONTRACT_CODE, 500000)
-        assert.strictEqual(deploy.contract.status, 'valid', 'deploy should be valid')
-        contractIndex = deploy.contract.action_index
-
-        // Publisher address for the broadcast hook.
-        const publisherAddr = await cryptoHelper.getNewFundedAddress(
-            'llm-publisher', COIN, NETWORK, null, 'legacy', 0, 0.02
-        )
-        await regtestMinerConnector.generateBlocks(2)
-        await _settleStack()
-        mvh.setBroadcastHook(async (wirePayload) => {
-            const txHash = await transactionHelper.createAndSendTransaction(publisherAddr, wirePayload)
-            return { txid: txHash }
-        })
+        await setUpLlmHub(this)
     })
 
-    after(async function () {
-        if (mvh) {
-            await mvh.stop()
-            await mvh.dropDatabases()
-        }
-    })
+    after(tearDownLlmHub)
 
     it('fetches via claude_spawn and fires the callback', async function () {
-        const envelope = JSON.stringify({
-            prompt: 'What is 2 plus 2? Reply with only the number, nothing else.',
-            max_tokens: 16
-        })
-        const exec = await vmHelper.sendExecuteV0(owner, contractIndex, 'askLlm', [envelope])
+        const exec = await executeLlmRequest()
         assert.strictEqual(exec.execution.status, 'valid', 'execute should be valid')
 
         const request = await indexerDatabase.waitForAttestationRequest({
@@ -157,15 +179,7 @@ module.exports = {
         assert.strictEqual(Number(request.redundancy), 1)
         const requestId = request.request_id
 
-        // Past CONFIRMATIONS
-        await regtestMinerConnector.generateBlocks(6)
-
-        // Generous wait: claude CLI cold-start + completion + on-chain broadcast.
-        const response = await indexerDatabase.waitForAttestationResponse({
-            requestId:      requestId,
-            responseStatus: 'ok',
-            status:         'valid'
-        }, 240_000)
+        const response = await waitForLlmResponse(requestId)
         assert(response, 'attestation_responses row should land with status=ok')
 
         // Single validator → single signature
