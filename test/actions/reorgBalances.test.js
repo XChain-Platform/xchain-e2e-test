@@ -19,6 +19,48 @@ const mintHelper = require('../helpers/mintHelper')
 // no fee), so a fresh issuer grabs gas via a MINT before it can ISSUE.
 const GAS_TICK = 'XCHAIN'
 
+async function q(sql, params) {
+    const conn = await indexerDatabase.getConnection()
+    try { return await conn.query(sql, params) }
+    finally { await conn.release() }
+}
+
+async function balanceOf(address, tick) {
+    const rows = await q(`SELECT b.amount FROM balances b
+        JOIN index_addresses ia ON ia.id=b.address_id
+        JOIN index_tickers   it ON it.id=b.tick_id
+        WHERE ia.address=? AND it.tick=?`, [address, tick])
+    return rows.length ? String(rows[0].amount) : null
+}
+
+async function supplyOf(tick) {
+    const rows = await q(`SELECT t.supply FROM tokens t
+        JOIN index_tickers it ON it.id=t.tick_id WHERE it.tick=?`, [tick])
+    return rows.length ? String(rows[0].supply) : null
+}
+
+async function blockOfAction(actionIndex) {
+    const rows = await q(`SELECT t.block_index AS b FROM actions a
+        JOIN transactions t ON t.tx_index=a.tx_index WHERE a.action_index=?`, [actionIndex])
+    return rows.length ? Number(rows[0].b) : null
+}
+
+async function createMoneyReorgFixture() {
+    const sender = await cryptoHelper.getNewFundedAddress('moneyreorg-sender', COIN, NETWORK, null, 'legacy', 0, 1)
+    const dest   = await cryptoHelper.getNewAddress('moneyreorg-dest', COIN, NETWORK, null, 'legacy', 0)
+    const tick   = 'MRG' + sender['address'].substring(sender['address'].length - 8)
+
+    // Grab GAS first: the sender needs an XCHAIN balance to pay the ISSUANCE_FEE.
+    // XCHAIN is an open faucet on testnet/regtest: anyone MINTs it (no owner check, no fee).
+    await mintHelper.sendMintV0(sender, GAS_TICK, 10)
+
+    // ISSUE in an early block: mintSupply credited to the sender.
+    const MINT = 100
+    await issueHelper.sendIssueV0(sender, tick, MINT, MINT, 0, 'money-reorg test token', MINT)
+    const issueSupply = await supplyOf(tick)
+    return { sender, dest, tick, MINT, issueSupply }
+}
+
 /**
  * Money-path reorg convergence (on-chain): proves the decoder + indexer roll back
  * LEDGER state (credits/debits → balances, token supply) across a real chain reorg.
@@ -38,50 +80,14 @@ const GAS_TICK = 'XCHAIN'
  * and the token supply is unchanged (conserved).
  */
 describe('Money Reorg: SEND rolls back, balances + supply converge across an on-chain reorg', function () {
-
     // Driven by `generateBlock(addr, [])` (mine an EMPTY competing chain so the orphaned SEND is NOT
     // re-included). `generateblock` is a Bitcoin Core 0.19 RPC. Dogecoin Core 1.14.x (0.13/0.14 base)
     // lacks it and answers HTTP 404, so this scenario can't be driven on DOGE regtest. The indexer's
     // ledger reorg-rollback path is chain-agnostic (rollback.js works on DB rows by block_index) and is
     // proven on BTC + LTC; skip on DOGE as a node capability gap, not a protocol gap.
     before(function () { if (global.COIN_CODE === 'DOGE') this.skip() })
-
-    async function q(sql, params) {
-        const conn = await indexerDatabase.getConnection()
-        try { return await conn.query(sql, params) }
-        finally { await conn.release() }
-    }
-    async function balanceOf(address, tick) {
-        const rows = await q(`SELECT b.amount FROM balances b
-            JOIN index_addresses ia ON ia.id=b.address_id
-            JOIN index_tickers   it ON it.id=b.tick_id
-            WHERE ia.address=? AND it.tick=?`, [address, tick])
-        return rows.length ? String(rows[0].amount) : null
-    }
-    async function supplyOf(tick) {
-        const rows = await q(`SELECT t.supply FROM tokens t
-            JOIN index_tickers it ON it.id=t.tick_id WHERE it.tick=?`, [tick])
-        return rows.length ? String(rows[0].supply) : null
-    }
-    async function blockOfAction(actionIndex) {
-        const rows = await q(`SELECT t.block_index AS b FROM actions a
-            JOIN transactions t ON t.tx_index=a.tx_index WHERE a.action_index=?`, [actionIndex])
-        return rows.length ? Number(rows[0].b) : null
-    }
-
     it('orphaning the SEND block restores the sender, drops the recipient credit, conserves supply', async function () {
-        const sender = await cryptoHelper.getNewFundedAddress('moneyreorg-sender', COIN, NETWORK, null, 'legacy', 0, 1)
-        const dest   = await cryptoHelper.getNewAddress('moneyreorg-dest', COIN, NETWORK, null, 'legacy', 0)
-        const tick   = 'MRG' + sender['address'].substring(sender['address'].length - 8)
-
-        // Grab GAS first: the sender needs an XCHAIN balance to pay the ISSUANCE_FEE.
-        // XCHAIN is an open faucet on testnet/regtest: anyone MINTs it (no owner check, no fee).
-        await mintHelper.sendMintV0(sender, GAS_TICK, 10)
-
-        // ISSUE in an early block: mintSupply credited to the sender.
-        const MINT = 100
-        await issueHelper.sendIssueV0(sender, tick, MINT, MINT, 0, 'money-reorg test token', MINT)
-        const issueSupply = await supplyOf(tick)
+        const { sender, dest, tick, MINT, issueSupply } = await createMoneyReorgFixture()
         assert.strictEqual(await balanceOf(sender['address'], tick), String(MINT), 'sender holds full mint pre-send')
 
         // SEND part of it to dest; lands in a later block H.
