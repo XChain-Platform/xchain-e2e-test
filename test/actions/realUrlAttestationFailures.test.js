@@ -119,62 +119,145 @@ module.exports = {
 };
 `
 
-describe('REAL-URL attestation FAILURE paths: expired + no_quorum over a 3-validator quorum', function () {
-    this.timeout(10 * 60 * 1000)
+let operatorAddr  = null
+let contractIndex = null
 
-    let operatorAddr  = null
-    let contractIndex = null
-    const stakedValidators = []   // full set, mirrors the indexer's responsible-set input
+// Stake a validator from its OWN distinct funded source (SWQ source-dedup
+// collapses same-source keys into one responsible-set slot).
+async function stakeValidatorFromOwnSource(v, stakedValidators) {
+    let stakeSource = await cryptoHelper.getNewFundedAddress(
+        'realurl-fail-val', COIN, NETWORK, null, 'legacy', stakedValidators.length, 0.02
+    )
+    // 15000 clears BOTH the attestation capability min_stake (1000) and the
+    // http_get PROVIDER floor (10000), enforced on the responsible set
+    // at/above STAKE_WEIGHTED_QUORUM (armed at genesis on regtest).
+    await gasHelper.ensureGasBalance(stakeSource, '20000')
+    await stakeHelper.sendStakeV1(stakeSource, '15000.00000000', v.pubkey)
+    v.source = stakeSource.address
+    stakedValidators.push(v)
+    // Session-wide registration; the signer computation below ranks over the
+    // WHOLE session set, not this suite's slice (see attestationHelper).
+    attestationHelper.registerStakedValidator(v)
+    return v
+}
 
-    // Stake a validator from its OWN distinct funded source (SWQ source-dedup
-    // collapses same-source keys into one responsible-set slot).
-    async function stakeValidatorFromOwnSource(v) {
-        let stakeSource = await cryptoHelper.getNewFundedAddress(
-            'realurl-fail-val', COIN, NETWORK, null, 'legacy', stakedValidators.length, 0.02
-        )
-        // 15000 clears BOTH the attestation capability min_stake (1000) and the
-        // http_get PROVIDER floor (10000), enforced on the responsible set
-        // at/above STAKE_WEIGHTED_QUORUM (armed at genesis on regtest).
-        await gasHelper.ensureGasBalance(stakeSource, '20000')
-        await stakeHelper.sendStakeV1(stakeSource, '15000.00000000', v.pubkey)
-        v.source = stakeSource.address
-        stakedValidators.push(v)
-        // Session-wide registration; the signer computation below ranks over the
-        // WHOLE session set, not this suite's slice (see attestationHelper).
-        attestationHelper.registerStakedValidator(v)
-        return v
+// Both sibling describe blocks below share this one-time setup. Memoizing it
+// keeps the staking and deploy steps to at most one run no matter how many
+// blocks call setupFailureAttestation, and caching the skip decision lets
+// each block's own hook skip its own tests on a shared coin-mismatch verdict.
+let failureSetupResult = null
+
+async function runFailureSetupOnce() {
+    if (COIN_CODE !== 'BTC') {
+        return { skip: true }
     }
 
-    before(async function () {
-        if (COIN_CODE !== 'BTC') {
-            console.log('Attestation rides on BTC-only STAKE + EXECUTE; skipping on ' + COIN_CODE)
-            this.skip()
-            return
+    operatorAddr = await cryptoHelper.getNewFundedAddress(
+        'realurl-fail-op', COIN, NETWORK, null, 'legacy', 0, 0.02
+    )
+    await gasHelper.ensureGasBalance(operatorAddr, '5000')
+
+    // Stake three source-distinct validators of our own. The chain is SHARED with
+    // every suite that ran before this one, so these are NOT assumed to be the
+    // only qualifying keys: signer selection ranks over the session-wide registry.
+    const stakedValidators = []   // full set, mirrors the indexer's responsible-set input
+    for (let i = 0; i < 3; i++) {
+        await stakeValidatorFromOwnSource(
+            new attestationHelper.MockAttestationValidator(), stakedValidators)
+    }
+    // Activation delay AND snapshot burial: a request at height H resolves its
+    // responsible set at H-6, so mining only the delay leaves all three invisible
+    // and every redundancy=3 request is rejected at admission.
+    await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
+    // The encoder refuses UTXO selection while the tracker trails the node, so the
+    // next tx build races these blocks unless the tracker is caught up first.
+    await utxoTrackerConnector.waitForSync()
+
+    const deploy = await vmHelper.sendDeployV0(operatorAddr, CONTRACT_CODE, 500000)
+    assert.strictEqual(deploy.contract.status, 'valid', 'deploy status: ' + deploy.contract.status)
+    contractIndex = deploy.contract.action_index
+    return { skip: false }
+}
+
+async function setupFailureAttestation() {
+    if (!failureSetupResult) failureSetupResult = runFailureSetupOnce()
+    const { skip } = await failureSetupResult
+    if (skip) {
+        console.log('Attestation rides on BTC-only STAKE + EXECUTE; skipping on ' + COIN_CODE)
+        this.skip()
+    }
+}
+
+async function fetchDroppedRealUrl() {
+    // 2. REAL fetch through the production http_get provider - the bytes the
+    //    federation WOULD have signed. We deliberately do NOT broadcast the
+    //    ATTEST v1 (modelling a lost/late response tx), so the deadline lapses.
+    try {
+        const fetched = await http_get.fetch(REAL_URL, { maxResponseBytes: 32768, timeoutMs: 10000 })
+        console.log('LIVE FETCH (will be dropped) status=' + String(fetched.meta) +
+            '  bytes=' + Buffer.byteLength(fetched.body.toString('utf8'), 'utf8'))
+    } catch (e) {
+        console.log('Live fetch unavailable (' + e.message + '); irrelevant - the expiry path needs no response')
+    }
+}
+
+async function fetchNondeterministicUrl() {
+    // 2. DEMONSTRATE why quorum is unreachable: two live fetches of the
+    //    non-deterministic endpoint return different bodies, so byte-equality
+    //    consensus is impossible and the federation must report no_quorum.
+    //    Best-effort - the core assertions below exercise the indexer's
+    //    handling of the no_quorum SIGNAL and don't depend on the fetch.
+    try {
+        const a = await http_get.fetch(NONDET_URL, { maxResponseBytes: 8192, timeoutMs: 10000 })
+        const b = await http_get.fetch(NONDET_URL, { maxResponseBytes: 8192, timeoutMs: 10000 })
+        const bodyA = a.body.toString('utf8')
+        const bodyB = b.body.toString('utf8')
+        console.log('NONDET FETCH #1 ' + JSON.stringify(bodyA))
+        console.log('NONDET FETCH #2 ' + JSON.stringify(bodyB))
+        if (bodyA !== bodyB) {
+            console.log('DIVERGENCE confirmed: two live fetches differ -> byte-equality quorum is unreachable -> no_quorum')
+        } else {
+            console.log('NOTE: endpoint returned identical bodies this round; proceeding with the no_quorum signal anyway')
         }
+    } catch (e) {
+        console.log('Non-deterministic endpoint unavailable (' + e.message + '); proceeding with the no_quorum signal regardless')
+    }
+}
 
-        operatorAddr = await cryptoHelper.getNewFundedAddress(
-            'realurl-fail-op', COIN, NETWORK, null, 'legacy', 0, 0.02
-        )
-        await gasHelper.ensureGasBalance(operatorAddr, '5000')
+function responsibleSigners(requestId) {
+    return attestationHelper.computeResponsibleSigners(
+        requestId, 3, attestationHelper.getSessionStakedValidators())
+}
 
-        // Stake three source-distinct validators of our own. The chain is SHARED with
-        // every suite that ran before this one, so these are NOT assumed to be the
-        // only qualifying keys: signer selection ranks over the session-wide registry.
-        for (let i = 0; i < 3; i++) {
-            await stakeValidatorFromOwnSource(new attestationHelper.MockAttestationValidator())
-        }
-        // Activation delay AND snapshot burial: a request at height H resolves its
-        // responsible set at H-6, so mining only the delay leaves all three invisible
-        // and every redundancy=3 request is rejected at admission.
-        await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
-        // The encoder refuses UTXO selection while the tracker trails the node, so the
-        // next tx build races these blocks unless the tracker is caught up first.
-        await utxoTrackerConnector.waitForSync()
-
-        const deploy = await vmHelper.sendDeployV0(operatorAddr, CONTRACT_CODE, 500000)
-        assert.strictEqual(deploy.contract.status, 'valid', 'deploy status: ' + deploy.contract.status)
-        contractIndex = deploy.contract.action_index
+async function broadcastNoQuorum(operatorAddr, requestId, signers) {
+    return attestationHelper.broadcastAttestationResponse(operatorAddr, {
+        requestId:       requestId,
+        providerId:      'http_get',
+        responsePayload: '',
+        status:          'no_quorum',
+        meta:            '',
+        validators:      signers
     })
+}
+
+async function waitForNoQuorumResponse(requestId) {
+    return indexerDatabase.waitForAttestationResponse({
+        requestId:      requestId,
+        responseStatus: 'no_quorum',
+        status:         'valid'
+    }, 120000)
+}
+
+async function findPendingRequest(requestId) {
+    return indexerDatabase.checkAttestationRequest({
+        requestId:     requestId,
+        requestStatus: 'pending'
+    })
+}
+
+describe('REAL-URL attestation FAILURE paths: expired + no_quorum over a 3-validator quorum', function () {
+    this.timeout(10 * 60 * 1000)
+    before(setupFailureAttestation)
 
     it('auto-expires a real-URL request when no federation response lands before DEADLINE_BLOCK', async function () {
         // 1. EXECUTE -> pending ATTEST v0 request (the real URL is the payload).
@@ -191,16 +274,7 @@ describe('REAL-URL attestation FAILURE paths: expired + no_quorum over a 3-valid
         assert.strictEqual(request.payload, REAL_URL, 'the real URL should be stored as the request payload')
         const expiringRequestId = request.request_id
 
-        // 2. REAL fetch through the production http_get provider - the bytes the
-        //    federation WOULD have signed. We deliberately do NOT broadcast the
-        //    ATTEST v1 (modelling a lost/late response tx), so the deadline lapses.
-        try {
-            const fetched = await http_get.fetch(REAL_URL, { maxResponseBytes: 32768, timeoutMs: 10000 })
-            console.log('LIVE FETCH (will be dropped) status=' + String(fetched.meta) +
-                '  bytes=' + Buffer.byteLength(fetched.body.toString('utf8'), 'utf8'))
-        } catch (e) {
-            console.log('Live fetch unavailable (' + e.message + '); irrelevant - the expiry path needs no response')
-        }
+        await fetchDroppedRealUrl()
 
         // 3. Advance past DEADLINE_BLOCK. deadlineBlocks=2 + margin so the per-block
         //    expiry pipeline definitely runs at deadline+1.
@@ -229,6 +303,11 @@ describe('REAL-URL attestation FAILURE paths: expired + no_quorum over a 3-valid
         assert.strictEqual(JSON.parse(expiryPayload.state_value),    '')
         assert.strictEqual(JSON.parse(expiryContext.state_value),    'ctx-realurl-expire')
     })
+})
+
+describe('REAL-URL attestation FAILURE paths: expired + no_quorum over a 3-validator quorum', function () {
+    this.timeout(10 * 60 * 1000)
+    before(setupFailureAttestation)
 
     it('keeps a real-URL request pending under a no_quorum round from a non-deterministic source', async function () {
         if (skipIfResponseMirrorEra(this, NETWORK)) return
@@ -246,26 +325,7 @@ describe('REAL-URL attestation FAILURE paths: expired + no_quorum over a 3-valid
         assert.strictEqual(request.payload, NONDET_URL, 'the real URL should be stored as the request payload')
         const requestId = request.request_id
 
-        // 2. DEMONSTRATE why quorum is unreachable: two live fetches of the
-        //    non-deterministic endpoint return different bodies, so byte-equality
-        //    consensus is impossible and the federation must report no_quorum.
-        //    Best-effort - the core assertions below exercise the indexer's
-        //    handling of the no_quorum SIGNAL and don't depend on the fetch.
-        try {
-            const a = await http_get.fetch(NONDET_URL, { maxResponseBytes: 8192, timeoutMs: 10000 })
-            const b = await http_get.fetch(NONDET_URL, { maxResponseBytes: 8192, timeoutMs: 10000 })
-            const bodyA = a.body.toString('utf8')
-            const bodyB = b.body.toString('utf8')
-            console.log('NONDET FETCH #1 ' + JSON.stringify(bodyA))
-            console.log('NONDET FETCH #2 ' + JSON.stringify(bodyB))
-            if (bodyA !== bodyB) {
-                console.log('DIVERGENCE confirmed: two live fetches differ -> byte-equality quorum is unreachable -> no_quorum')
-            } else {
-                console.log('NOTE: endpoint returned identical bodies this round; proceeding with the no_quorum signal anyway')
-            }
-        } catch (e) {
-            console.log('Non-deterministic endpoint unavailable (' + e.message + '); proceeding with the no_quorum signal regardless')
-        }
+        await fetchNondeterministicUrl()
 
         // 3. The federation signs a no_quorum ATTEST v1 (empty payload) with the
         //    request's responsible set (all 3 on a clean chain). The signatures are
@@ -274,34 +334,19 @@ describe('REAL-URL attestation FAILURE paths: expired + no_quorum over a 3-valid
         // Ranked over the SESSION set: on the shared action-suite chain the
         // responsible 3 may include earlier suites' validators, all signable
         // in-process (see attestationHelper).
-        const signers = attestationHelper.computeResponsibleSigners(
-            requestId, 3, attestationHelper.getSessionStakedValidators())
+        const signers = responsibleSigners(requestId)
         assert.strictEqual(signers.length, 3, 'expected 3 responsible signers from the session set')
-        await attestationHelper.broadcastAttestationResponse(operatorAddr, {
-            requestId:       requestId,
-            providerId:      'http_get',
-            responsePayload: '',
-            status:          'no_quorum',
-            meta:            '',
-            validators:      signers
-        })
+        await broadcastNoQuorum(operatorAddr, requestId, signers)
 
         // 4. Response row lands valid with response_status='no_quorum'.
-        const response = await indexerDatabase.waitForAttestationResponse({
-            requestId:      requestId,
-            responseStatus: 'no_quorum',
-            status:         'valid'
-        }, 120000)
+        const response = await waitForNoQuorumResponse(requestId)
         assert(response, 'response row should land response_status=no_quorum / status=valid')
 
         const sigs = await indexerDatabase.getAttestationValidatorSignatures(response.action_index)
         assert.strictEqual(sigs.length, 3, 'should have exactly 3 verified validator signatures, got ' + sigs.length)
 
         // 5. Invariant 1: the request stays pending (another round may still reach ok).
-        const stillPending = await indexerDatabase.checkAttestationRequest({
-            requestId:     requestId,
-            requestStatus: 'pending'
-        })
+        const stillPending = await findPendingRequest(requestId)
         assert(stillPending, 'request must remain pending after a retryable no_quorum response')
 
         // 6. Invariant 2: NO callback EXECUTE was injected (no terminal resolution).
