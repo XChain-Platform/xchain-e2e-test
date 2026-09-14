@@ -13,6 +13,34 @@ const cryptoHelper = require('../cryptoHelper')
 const vmHelper = require('../helpers/vmHelper')
 const gasHelper = require('../helpers/gasHelper')
 
+// Coin symbol used in the contract derived address: C:<CHAIN>:<action_index>
+const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
+
+let deployer = null
+
+async function q(sql, params) {
+    const conn = await indexerDatabase.getConnection()
+    try { return await conn.query(sql, params) }
+    finally { await conn.release() }
+}
+async function tickExists(tick) {
+    const rows = await q(`SELECT id FROM index_tickers WHERE tick=? LIMIT 1`, [tick])
+    return rows.length > 0
+}
+async function balanceOf(address, tick) {
+    const rows = await q(
+        `SELECT b.amount FROM balances b
+         JOIN index_addresses ia ON ia.id=b.address_id
+         JOIN index_tickers it ON it.id=b.tick_id
+         WHERE ia.address=? AND it.tick=?`, [address, tick])
+    return rows.length ? String(rows[0].amount) : null
+}
+function randTick(prefix) {
+    let s = prefix
+    for (let i = 0; i < 5; i++) s += String.fromCharCode(65 + Math.floor(Math.random() * 26))
+    return s
+}
+
 /**
  * Issuance-fee exemption for VM-emitted ISSUE (constructor path).
  *
@@ -35,35 +63,6 @@ const gasHelper = require('../helpers/gasHelper')
  * constructor path cannot (a brand-new address cannot be pre-funded).
  */
 describe('Issuance fee: VM-emitted ISSUE from a constructor is fee-exempt', function () {
-
-    // Coin symbol used in the contract derived address: C:<CHAIN>:<action_index>
-    const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
-
-    let deployer = null
-
-    async function q(sql, params) {
-        const conn = await indexerDatabase.getConnection()
-        try { return await conn.query(sql, params) }
-        finally { await conn.release() }
-    }
-    async function tickExists(tick) {
-        const rows = await q(`SELECT id FROM index_tickers WHERE tick=? LIMIT 1`, [tick])
-        return rows.length > 0
-    }
-    async function balanceOf(address, tick) {
-        const rows = await q(
-            `SELECT b.amount FROM balances b
-             JOIN index_addresses ia ON ia.id=b.address_id
-             JOIN index_tickers it ON it.id=b.tick_id
-             WHERE ia.address=? AND it.tick=?`, [address, tick])
-        return rows.length ? String(rows[0].amount) : null
-    }
-    function randTick(prefix) {
-        let s = prefix
-        for (let i = 0; i < 5; i++) s += String.fromCharCode(65 + Math.floor(Math.random() * 26))
-        return s
-    }
-
     before(async function () {
         // The deployer funds DEPLOY gas (which covers the per-emission gas for the
         // constructor's emit.issue). The CONTRACT is deliberately never funded; the
