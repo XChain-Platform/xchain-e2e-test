@@ -61,16 +61,20 @@ async function feeAndActions(txHash){
     return { actions, fee }
 }
 
+async function requireNativeFeeMode(ctx) {
+    // Fixture-priced suite; unrunnable where the hub publishes
+    // the pair (the seed would shadow every derived round).
+    if (NO_PRICE_SEED) ctx.skip()
+    // Throws on LTC/DOGE when unresolvable; skips only on gas-mode stacks.
+    const mode = await nativeFeeHelper.discoverFeeMode()
+    if (!mode.enabled) ctx.skip()
+    assert(mode.destination, 'native fees enabled but no FEE_DESTINATION resolvable')
+    FEE_DEST = mode.destination
+}
+
 describe('Native-coin fee payment via DISPENSER expiration fee (live stack)', function () {
     before(async function () {
-        // Fixture-priced suite; unrunnable where the hub publishes
-        // the pair (the seed would shadow every derived round).
-        if (NO_PRICE_SEED) this.skip()
-        // Throws on LTC/DOGE when unresolvable; skips only on gas-mode stacks.
-        const mode = await nativeFeeHelper.discoverFeeMode()
-        if (!mode.enabled) this.skip()
-        assert(mode.destination, 'native fees enabled but no FEE_DESTINATION resolvable')
-        FEE_DEST = mode.destination
+        await requireNativeFeeMode(this)
     })
 
     it('charges the expiration fee in native coin (payment_mode=1), no XCHAIN balance', async function () {
