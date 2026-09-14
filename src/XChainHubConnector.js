@@ -22,6 +22,7 @@
 // Load required libraries
 const axios = require('axios');
 const coins = require('./coins');
+const config = require('./config');
 
 // Local { coin -> consensusHash } per network, computed on first use. The vendored
 // bundle cannot change under a running process, so re-hashing it on every config
@@ -97,9 +98,7 @@ class XChainHubConnector {
         // the two keys differ.
         let headers = {};
         let wantsSecrets = !!(data && data.params && data.params.include_secrets);
-        let key = wantsSecrets
-            ? (process.env.HUB_CONFIG_SECRETS_API_KEY || process.env.HUB_API_KEY)
-            : process.env.HUB_API_KEY;
+        let key = wantsSecrets ? config.HUB_SECRETS_API_KEY : config.HUB_API_KEY;
         if(key) headers['x-api-key'] = key;
         for(let url of this.urls){
             try {
@@ -230,15 +229,15 @@ class XChainHubConnector {
 
 // Parse hub endpoints from environment variables
 XChainHubConnector.parseEndpoints = function(){
-    if(process.env.HUB_VALIDATORS){
-        return process.env.HUB_VALIDATORS.split(',')
+    if(config.HUB_VALIDATORS){
+        return config.HUB_VALIDATORS.split(',')
             .map(e => e.trim())
             .filter(e => e)
             .map(e => e.startsWith('http') ? e : 'http://' + e);
     }
-    // Backward compat: e2e-test uses HUB_URL, other services use HUB_API_HOST
-    let host = process.env.HUB_URL || process.env.HUB_API_HOST || 'localhost';
-    let port = process.env.HUB_PORT || '10000';
+    // A single hub otherwise; src/config accepts both host spellings.
+    let host = config.HUB_HOST;
+    let port = config.HUB_PORT;
     return ['http://' + host + ':' + port];
 };
 

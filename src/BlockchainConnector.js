@@ -13,6 +13,7 @@
  ********************************************************************/
 
 const axios = require('axios')
+const config = require('./config')
 
 class BlockchainConnector {
     constructor(url, port, rpcUser, rpcPassword) {
@@ -124,7 +125,7 @@ class BlockchainConnector {
             // cap; Dogecoin Core 1.14 (2nd arg is a boolean allowhighfees, not a
             // maxfeerate) doesn't cap, so it never reaches this branch. Mirrors the
             // regtest-only psbt.setMaximumFeeRate(100000) the suite already uses.
-            const net = String(process.env.NETWORK || (typeof global !== 'undefined' && global.NETWORK) || '');
+            const net = String(config.NETWORK || (typeof global !== 'undefined' && global.NETWORK) || '');
             const msg = (error && error.message) || '';
             if (/maxfeerate|Fee exceeds maximum/i.test(msg) && /regtest/i.test(net)) {
                 return await this._sendRaw([txHex, 0]);
