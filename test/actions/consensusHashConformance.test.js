@@ -36,16 +36,16 @@ let BlockHasher, SyncUtility, SyncStateCommitment, SyncDatabase;
 const SYNC_SRC = path.join(__dirname, '../../../xchain-sync/src');
 let syncPresent = true;
 try {
-    require.resolve(path.join(SYNC_SRC, 'BlockHasher.js'));
+    require.resolve(path.join(SYNC_SRC, 'client/block_hasher.js'));
 } catch (e) {
     syncPresent = false;
     if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1') throw e;
 }
 if (syncPresent) {
-    BlockHasher         = require(path.join(SYNC_SRC, 'BlockHasher.js'));
-    SyncUtility         = require(path.join(SYNC_SRC, 'utility.js'));
+    BlockHasher         = require(path.join(SYNC_SRC, 'client/block_hasher.js'));
+    SyncUtility         = require(path.join(SYNC_SRC, 'util/index.js'));
     SyncStateCommitment = require(path.join(SYNC_SRC, 'stateCommitment.js'));
-    SyncDatabase        = require(path.join(SYNC_SRC, 'db.js'));
+    SyncDatabase        = require(path.join(SYNC_SRC, 'db/index.js'));
 }
 
 const COMMITTED_HASH_SQL =
@@ -146,7 +146,7 @@ describe('consensus hash conformance: sync BlockHasher == indexer committed hash
         }
         assert.strictEqual(mismatches.length, 0,
             'sync BlockHasher diverged from indexer committed hashes (conformance pair drifted). ' +
-            'Update BOTH xchain-sync/src/BlockHasher.js and xchain-indexer/src/db.js getBlockHashes + ' +
+            'Update BOTH xchain-sync/src/client/block_hasher.js and xchain-indexer/src/db/actions.js getBlockHashes + ' +
             'regenerate the golden, and bump CONSENSUS_VERSION:\n' +
             JSON.stringify(mismatches.slice(0, 10), null, 2));
     });
@@ -157,8 +157,11 @@ describe('consensus hash conformance: sync BlockHasher == indexer committed hash
 // IN-list that proves at least one canonicalized ledger row appeared during the run.
 let ROLE_BY_ADDRESS;
 try {
-    ({ ROLE_BY_ADDRESS } = require(path.join(__dirname, '../../../xchain-sync/src/protocolAddressRoles.js')));
-} catch (e) { /* handled in before() alongside the other sync guards */ }
+    ({ ROLE_BY_ADDRESS } = require(path.join(SYNC_SRC, 'util/protocol_address_roles.js')));
+} catch (e) {
+    // Same contract as the loads above: a present checkout that will not load is red.
+    if (syncPresent) throw e;
+}
 
 // Light-client state-commitment conformance (SPV spec sec.4-5). The follower
 // recomputes block_merkle_root from src/stateCommitment.js + db.getBlockLeafRows

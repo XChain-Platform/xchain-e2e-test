@@ -124,8 +124,12 @@ let syncBuildStateHashData, SyncUtility;
 try {
     ({ buildStateHashData: syncBuildStateHashData } =
         require(path.join(__dirname, '../../../xchain-sync/src/stateHash.js')));
-    SyncUtility = require(path.join(__dirname, '../../../xchain-sync/src/utility.js'));
-} catch (e) { /* handled at the call site */ }
+    SyncUtility = require(path.join(__dirname, '../../../xchain-sync/src/util/index.js'));
+} catch (e) {
+    // Strict runs lay every sibling, so a load failure there is a moved or broken
+    // file, never an absent checkout, and must not reach the call site as a skip.
+    if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1') throw e;
+}
 
 // BTC's frozen ACTIVATION_DELAY_BLOCKS (src/coins/BTC.js). Only reaches the
 // staking-deactivation class of the preimage, which is empty for these blocks,
