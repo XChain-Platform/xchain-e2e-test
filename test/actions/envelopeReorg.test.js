@@ -74,6 +74,99 @@ async function waitForIndexerToCatchUp(timeoutMs = 180000) {
     return false
 }
 
+async function buildReorgFixture() {
+    const fileName = 'envelope-reorg-' + Date.now().toString().slice(-6) + '.txt'
+    const addr = await cryptoHelper.getNewFundedAddress('envreorg', COIN, NETWORK, null, 'segwit', 0, 1)
+
+    const pair = await envelopeHelper.buildEnvelopePair(addr, {
+        name: fileName,
+        type: 'text/plain',
+        title: 'Envelope reorg',
+        memo: 'split across blocks, then orphaned',
+        rawData: BODY,
+        compress: true
+    })
+    console.log('   commit', pair.commitTxid.slice(0, 16) + '...', 'reveal', pair.revealTxid.slice(0, 16) + '...')
+    return { fileName, pair }
+}
+
+async function confirmCommit(pair) {
+    const miner = (await cryptoHelper.getNewAddress('envreorg-miner', COIN, NETWORK, null, 'legacy', 0)).address
+
+    // 1. Commit alone, confirmed. No action may exist.
+    await nodeConnector.broadcastTx(pair.commitHex)
+    await nodeConnector.generateBlock(miner, [pair.commitTxid])
+    const commitBlock = await nodeConnector.getBlockCount()
+    return { miner, commitBlock }
+}
+
+async function confirmReveal(pair, miner) {
+    // 2. Reveal in the NEXT block: the split pair.
+    await nodeConnector.broadcastTx(pair.revealHex)
+    await nodeConnector.generateBlock(miner, [pair.revealTxid])
+    return await nodeConnector.getBlockCount()
+}
+
+async function waitForFileAppearance(fileName) {
+    let rows = []
+    const appear = Date.now() + 180000
+    while (Date.now() < appear) {
+        rows = await fileRowsByName(fileName)
+        if (rows.length) break
+        await sleep(2000)
+    }
+    return rows
+}
+
+async function orphanReveal(revealBlock) {
+    // 3. Orphan the reveal's block, leaving the commit confirmed.
+    const tipBefore = await nodeConnector.getBlockCount()
+    const revealHash = await nodeConnector.getBlockHash(revealBlock)
+    await nodeConnector.invalidateBlock(revealHash)
+    return tipBefore
+}
+
+async function overtakeOrphan(miner, tipBefore, revealBlock) {
+    // EMPTY competing blocks: the orphaned reveal must NOT be swept back in
+    // while we are asserting that its action is gone.
+    const need = tipBefore - (revealBlock - 1) + 2
+    for (let i = 0; i < need; i++) await nodeConnector.generateBlock(miner, [])
+}
+
+async function waitForFileRemoval(fileName) {
+    let after = [{}]
+    const gone = Date.now() + 180000
+    while (Date.now() < gone) {
+        after = await fileRowsByName(fileName)
+        if (after.length === 0) break
+        await sleep(2000)
+    }
+    return after
+}
+
+async function remineReveal(pair, fileName) {
+    // 4. Let the reveal re-enter from the mempool.
+    await regtestMinerConnector.resumeMining()
+    const reBroadcast = async () => {
+        // invalidateblock returns the orphan to the mempool, but a node that
+        // already evicted it needs it again; re-broadcasting a transaction the
+        // mempool still holds is a no-op, so this is safe either way.
+        try { await nodeConnector.broadcastTx(pair.revealHex) } catch (e) { /* already there */ }
+    }
+    await reBroadcast()
+    await regtestMinerConnector.generateBlocks(1)
+
+    let back = []
+    const returned = Date.now() + 180000
+    while (Date.now() < returned) {
+        back = await fileRowsByName(fileName)
+        if (back.length) break
+        await sleep(2000)
+        await reBroadcast()
+    }
+    return back
+}
+
 describe('Taproot Envelope Reorg: a split pair, and a reveal orphaned off a live commit (§3.7)', function () {
     this.timeout(0)
 
@@ -83,113 +176,47 @@ describe('Taproot Envelope Reorg: a split pair, and a reveal orphaned off a live
     })
 
     it('rolls the action back with its reveal, then re-indexes it exactly once', async function () {
-        const fileName = 'envelope-reorg-' + Date.now().toString().slice(-6) + '.txt'
-        const addr = await cryptoHelper.getNewFundedAddress('envreorg', COIN, NETWORK, null, 'segwit', 0, 1)
-
-        const pair = await envelopeHelper.buildEnvelopePair(addr, {
-            name: fileName,
-            type: 'text/plain',
-            title: 'Envelope reorg',
-            memo: 'split across blocks, then orphaned',
-            rawData: BODY,
-            compress: true
-        })
-        console.log('   commit', pair.commitTxid.slice(0, 16) + '...', 'reveal', pair.revealTxid.slice(0, 16) + '...')
-
+        const { fileName, pair } = await buildReorgFixture()
         // Mining is paused for the whole drill: the two halves must land in blocks we
         // chose, and an auto-mined block in the middle of the competing chain would
         // re-include the orphan we are trying to keep out.
         await regtestMinerConnector.pauseMining()
         try {
-            const miner = (await cryptoHelper.getNewAddress('envreorg-miner', COIN, NETWORK, null, 'legacy', 0)).address
-
-            // 1. Commit alone, confirmed. No action may exist.
-            await nodeConnector.broadcastTx(pair.commitHex)
-            await nodeConnector.generateBlock(miner, [pair.commitTxid])
-            const commitBlock = await nodeConnector.getBlockCount()
+            const { miner, commitBlock } = await confirmCommit(pair)
             assert(await waitForIndexerToCatchUp(), 'indexer caught up to the commit block')
-
             assert.strictEqual((await fileRowsByName(fileName)).length, 0,
                 'a confirmed commit with no reveal must produce NO action: it is only a P2TR output')
             console.log('   commit confirmed alone at', commitBlock, '- no action, as §3.7 requires')
-
-            // 2. Reveal in the NEXT block: the split pair.
-            await nodeConnector.broadcastTx(pair.revealHex)
-            await nodeConnector.generateBlock(miner, [pair.revealTxid])
-            const revealBlock = await nodeConnector.getBlockCount()
+            const revealBlock = await confirmReveal(pair, miner)
             assert.strictEqual(revealBlock, commitBlock + 1, 'the pair is split across two blocks')
-
-            let rows = []
-            const appear = Date.now() + 180000
-            while (Date.now() < appear) {
-                rows = await fileRowsByName(fileName)
-                if (rows.length) break
-                await sleep(2000)
-            }
+            const rows = await waitForFileAppearance(fileName)
             assert.strictEqual(rows.length, 1, 'the split pair indexes exactly one action')
             assert.strictEqual(Number(rows[0].block_index), revealBlock,
                 'the action belongs to the REVEAL block, not the commit block (§3.1)')
             const actionIndex = rows[0].action_index
             console.log('   split pair indexed at action_index', actionIndex, 'block', revealBlock)
-
             const servedBefore = await envelopeHelper.waitForServedFile(actionIndex)
             assert.strictEqual(envelopeHelper.sha256(servedBefore.body), envelopeHelper.sha256(BODY),
                 'the payload serves byte-exactly before the reorg')
-
-            // 3. Orphan the reveal's block, leaving the commit confirmed.
-            const tipBefore = await nodeConnector.getBlockCount()
-            const revealHash = await nodeConnector.getBlockHash(revealBlock)
-            await nodeConnector.invalidateBlock(revealHash)
+            const tipBefore = await orphanReveal(revealBlock)
             assert.strictEqual(await nodeConnector.getBlockCount(), revealBlock - 1,
                 'rolled back to the block before the reveal')
-
-            // EMPTY competing blocks: the orphaned reveal must NOT be swept back in
-            // while we are asserting that its action is gone.
-            const need = tipBefore - (revealBlock - 1) + 2
-            for (let i = 0; i < need; i++) await nodeConnector.generateBlock(miner, [])
+            await overtakeOrphan(miner, tipBefore, revealBlock)
             assert(await nodeConnector.getBlockCount() > tipBefore, 'the competing chain overtakes the original')
-
-            let after = [{}]
-            const gone = Date.now() + 180000
-            while (Date.now() < gone) {
-                after = await fileRowsByName(fileName)
-                if (after.length === 0) break
-                await sleep(2000)
-            }
+            const after = await waitForFileRemoval(fileName)
             assert.strictEqual(after.length, 0,
                 'the action rolled back with its reveal, even though the commit is still confirmed')
-
             // The commit really did survive: this is what makes the case distinct from
             // orphaning a same-block pair, where both halves vanish together.
             const commitStill = await nodeConnector.getTransaction(pair.commitTxid)
             assert(commitStill && commitStill.blockhash, 'the commit is still confirmed on the surviving chain')
             console.log('   reveal orphaned, action gone, commit still confirmed at', commitBlock)
-
-            // 4. Let the reveal re-enter from the mempool.
-            await regtestMinerConnector.resumeMining()
-            const reBroadcast = async () => {
-                // invalidateblock returns the orphan to the mempool, but a node that
-                // already evicted it needs it again; re-broadcasting a transaction the
-                // mempool still holds is a no-op, so this is safe either way.
-                try { await nodeConnector.broadcastTx(pair.revealHex) } catch (e) { /* already there */ }
-            }
-            await reBroadcast()
-            await regtestMinerConnector.generateBlocks(1)
-
-            let back = []
-            const returned = Date.now() + 180000
-            while (Date.now() < returned) {
-                back = await fileRowsByName(fileName)
-                if (back.length) break
-                await sleep(2000)
-                await reBroadcast()
-            }
+            const back = await remineReveal(pair, fileName)
             assert.strictEqual(back.length, 1,
                 'the action comes back EXACTLY once: a second row would mean the rollback left a duplicate')
             assert(Number(back[0].block_index) > revealBlock,
                 'it comes back at its NEW height, not the orphaned one')
             console.log('   reveal re-mined; action re-indexed once at block', Number(back[0].block_index))
-
             const servedAfter = await envelopeHelper.waitForServedFile(back[0].action_index)
             assert.strictEqual(envelopeHelper.sha256(servedAfter.body), envelopeHelper.sha256(BODY),
                 'the payload survives the round trip through the reorg, byte for byte')
