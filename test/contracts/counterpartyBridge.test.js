@@ -168,15 +168,13 @@ module.exports = {
     }
 };`
 
-describe('Counterparty Bridge: a REAL tokenscan.io burn check driving a mint or a safe no-op', function () {
-    this.timeout(10 * 60 * 1000)
-
     const rand = () => String.fromCharCode(65 + Math.floor(Math.random() * 26))
     const CP_ASSET = 'CPBRIDGETEST'
     const XCHAIN_TICK = 'CPB' + rand() + rand() + rand()
     const MAX_SUPPLY = '1000000'
     const DECIMALS = '8'
     const stakedValidators = []
+    let counterpartyBridgeSetup = null
 
     async function q(sql, params) {
         const conn = await indexerDatabase.getConnection()
@@ -229,12 +227,17 @@ describe('Counterparty Bridge: a REAL tokenscan.io burn check driving a mint or 
         return realBody
     }
 
-    before(async function () {
+    async function prepareCounterpartyBridge() {
         if (COIN_CODE !== 'BTC') {
             console.log('Attestation rides on BTC-only STAKE + EXECUTE; skipping on ' + COIN_CODE)
             this.skip()
             return
         }
+        if (!counterpartyBridgeSetup) counterpartyBridgeSetup = prepareBridgeValidators()
+        return counterpartyBridgeSetup
+    }
+
+    async function prepareBridgeValidators() {
         for (let i = 0; i < 3; i++) {
             await stakeValidatorFromOwnSource(new attestationHelper.MockAttestationValidator())
         }
@@ -242,42 +245,37 @@ describe('Counterparty Bridge: a REAL tokenscan.io burn check driving a mint or 
         // responsible set at H-6, so mining only the delay leaves the stakes invisible
         // and the request is rejected at admission.
         await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
-    })
+    }
 
-    it('a fresh regtest address settles a REAL tokenscan.io burn-history check and is a harmless no-op (never burned anything)', async function () {
+    async function deployBridge() {
         const claimer = await cryptoHelper.getNewFundedAddress('cpbridge-claimer', COIN, NETWORK, null, 'legacy', 0, 0.02)
         await gasHelper.ensureGasBalance(claimer, '5000')
-
         const params = [CP_ASSET, XCHAIN_TICK, MAX_SUPPLY, DECIMALS].join('|')
         const dep = await vmHelper.sendDeployV0(claimer, COUNTERPARTY_BRIDGE, 500000, params)
-        assert.strictEqual(dep.contract.status, 'valid', 'deploy status: ' + dep.contract.status)
-        const ci = dep.contract.action_index
-        assert.strictEqual(await stateOf(ci, 'totalClaimed'), '0')
+        return { claimer, dep }
+    }
 
-        const expectedUrl = 'https://cp20.tokenscan.io/api/sends/' + BURN_ADDRESS + '/1/15'
-        const req = await vmHelper.sendExecuteV0(claimer, ci, 'requestClaim', [])
-        assert(req.execution && req.execution.status === 'valid', 'requestClaim should index a valid execution')
+    async function requestBridgeClaim(claimer, ci) {
+        return vmHelper.sendExecuteV0(claimer, ci, 'requestClaim', [])
+    }
 
-        const request = await indexerDatabase.waitForAttestationRequest({
+    async function waitForBridgeRequest(req) {
+        return indexerDatabase.waitForAttestationRequest({
             txHash: req.txHash, requestStatus: 'pending'
         })
-        assert(request, 'pending attestation request row should exist')
-        assert.strictEqual(request.provider_id, 'http_get')
-        assert.strictEqual(request.payload, expectedUrl, 'the real burn-address tokenscan.io URL should be the request payload')
+    }
 
-        const realBody = await fetchSignAndBroadcast(claimer, request.request_id, expectedUrl)
-
+    function parseBridgeBody(realBody) {
         // BURN_ADDRESS is a real, shared, actively-used Counterparty burn
         // address - the live body's data array is NOT expected to be empty
         // (other holders' unrelated burns land there constantly). What must
         // hold is that a freshly-minted regtest address, which has never
         // sent anything to BURN_ADDRESS on Counterparty mainnet, has no rows
         // reporting IT as the source.
-        const parsed = JSON.parse(realBody)
-        assert(Array.isArray(parsed.data), 'live body should have a data array (documented shape)')
-        assert(parsed.data.every(row => row.source !== claimer.address),
-            'a fresh regtest address should never appear as the source of a real burn')
+        return JSON.parse(realBody)
+    }
 
+    async function waitForClaimClear(ci, claimer) {
         // onClaim fires automatically as the attestation callback - nobody
         // EXECUTEs a claim confirmation.
         let cleared = false
@@ -286,10 +284,45 @@ describe('Counterparty Bridge: a REAL tokenscan.io burn check driving a mint or 
             if ((await stateOf(ci, 'pending:' + claimer.address)) === null) { cleared = true; break }
             await new Promise(r => setTimeout(r, 1000))
         }
+        return cleared
+    }
+
+describe('Counterparty Bridge: a REAL tokenscan.io burn check driving a mint or a safe no-op', function () {
+    this.timeout(10 * 60 * 1000)
+    before(prepareCounterpartyBridge)
+
+    it('a fresh regtest address settles a REAL tokenscan.io burn-history check and is a harmless no-op (never burned anything)', async function () {
+        const { claimer, dep } = await deployBridge()
+        assert.strictEqual(dep.contract.status, 'valid', 'deploy status: ' + dep.contract.status)
+        const ci = dep.contract.action_index
+        assert.strictEqual(await stateOf(ci, 'totalClaimed'), '0')
+
+        const expectedUrl = 'https://cp20.tokenscan.io/api/sends/' + BURN_ADDRESS + '/1/15'
+        const req = await requestBridgeClaim(claimer, ci)
+        assert(req.execution && req.execution.status === 'valid', 'requestClaim should index a valid execution')
+
+        const request = await waitForBridgeRequest(req)
+        assert(request, 'pending attestation request row should exist')
+        assert.strictEqual(request.provider_id, 'http_get')
+        assert.strictEqual(request.payload, expectedUrl, 'the real burn-address tokenscan.io URL should be the request payload')
+
+        const realBody = await fetchSignAndBroadcast(claimer, request.request_id, expectedUrl)
+
+        const parsed = parseBridgeBody(realBody)
+        assert(Array.isArray(parsed.data), 'live body should have a data array (documented shape)')
+        assert(parsed.data.every(row => row.source !== claimer.address),
+            'a fresh regtest address should never appear as the source of a real burn')
+
+        const cleared = await waitForClaimClear(ci, claimer)
         assert(cleared, 'pending should clear once onClaim runs, even when no burns match')
         assert.strictEqual(await stateOf(ci, 'claimedTotal:' + claimer.address), null, 'no mint should have happened')
         assert.strictEqual(await stateOf(ci, 'totalClaimed'), '0', 'totalClaimed stays at zero')
     })
+})
+
+describe('Counterparty Bridge: a REAL tokenscan.io burn check driving a mint or a safe no-op', function () {
+    this.timeout(10 * 60 * 1000)
+    before(prepareCounterpartyBridge)
 
     it('the live sends API still matches the documented shape for a real burn on BURN_ADDRESS', async function () {
         // Standalone real GET (not through the contract - we don't control
