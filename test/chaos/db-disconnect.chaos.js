@@ -20,12 +20,14 @@ const assert = require('assert')
 const sinon = require('sinon')
 const { createDb, makeMockConnection, makeMockPool, mockMariadb } = require('./chaos-helpers')
 
+function restoreDbStubs() {
+    sinon.restore()
+    mockMariadb.createPool.resetHistory()
+}
+
 describe('Chaos Experiment 5: Database Mid-Query Disconnect @P1', function () {
 
-    afterEach(function () {
-        sinon.restore()
-        mockMariadb.createPool.resetHistory()
-    })
+    afterEach(restoreDbStubs)
 
     describe('checkIssue handles ER_CONNECTION_LOST', function () {
 
@@ -47,6 +49,11 @@ describe('Chaos Experiment 5: Database Mid-Query Disconnect @P1', function () {
             assert(mockConn.release.calledOnce, 'connection must be released in finally block')
         })
     })
+})
+
+describe('Chaos Experiment 5: Database Mid-Query Disconnect @P1', function () {
+
+    afterEach(restoreDbStubs)
 
     describe('waitForIssue recovers after mid-query disconnect', function () {
 
@@ -89,6 +96,11 @@ describe('Chaos Experiment 5: Database Mid-Query Disconnect @P1', function () {
             assert(mockConn.release.callCount >= 3, 'every poll should release its connection')
         })
     })
+})
+
+describe('Chaos Experiment 5: Database Mid-Query Disconnect @P1', function () {
+
+    afterEach(restoreDbStubs)
 
     describe('checkSend handles connection drops', function () {
 
@@ -102,6 +114,11 @@ describe('Chaos Experiment 5: Database Mid-Query Disconnect @P1', function () {
             assert(mockConn.release.calledOnce)
         })
     })
+})
+
+describe('Chaos Experiment 5: Database Mid-Query Disconnect @P1', function () {
+
+    afterEach(restoreDbStubs)
 
     describe('different error types during polling', function () {
 
