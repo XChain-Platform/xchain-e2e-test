@@ -103,231 +103,230 @@ async function fundAggregate(address, amount){
     }
 }
 
-describe('Taproot Envelope under MuSig2 co-signing (§3.9)', function () {
-    this.timeout(0)
+function loadMuSig2Modules(){
+    return {
+        MuSig2: sdkModule('src/musig2.js'),
+        CoSigner: sdkModule('src/cosigner/coSigner.js'),
+        CoSignerClient: sdkModule('src/cosigner/client.js'),
+        WindowStore: sdkModule('src/cosigner/windowStore.js'),
+        deriveMuSig2P2TR: sdkModule('src/cosigner/account.js').deriveMuSig2P2TR,
+        deriveEnvelopeCommit: sdkModule('src/cosigner/envelope.js').deriveEnvelopeCommit
+    }
+}
 
-    before(function (){
-        if (!envelopeHelper.envelopeSupported()) this.skip()   // no segwit, no envelope
+async function buildMuSig2Pair(modules){
+    // Fresh keys per run: a fixed pair would reuse one account across runs and
+    // leave earlier UTXOs lying in it, which turns a funding mistake into a test
+    // that passes on the wrong coin.
+    const agentSk = crypto.randomBytes(32)
+    const daemonSk = crypto.randomBytes(32)
+    const agentPk = Buffer.from(ecc.pointFromScalar(agentSk, true))
+    const daemonPk = Buffer.from(ecc.pointFromScalar(daemonSk, true))
+    const publicKeys = [agentPk, daemonPk]
+
+    const account = modules.deriveMuSig2P2TR(publicKeys, NETWORK_OBJECT)
+    console.log('   MuSig2 aggregate account', account.address)
+    const utxo = await fundAggregate(account.address, 0.05)
+
+    // Build the pair through the deployed encoder.
+    const fileName = 'envelope-musig2-' + Date.now().toString().slice(-6) + '.txt'
+    const action = 'FILE|0|' + fileName + '|text/plain|MuSig2 envelope|co-signed commit and reveal'
+    const feeOutput = await nativeFeeHelper.getNativeFeeOutput()
+    const built = await encoderConnector.createTx(
+        [utxo], account.address, feeOutput ? [feeOutput] : [], action,
+        BODY.toString('binary'), null, false, 'TAPROOT', account.address, null, null,
+        // The envelope's internal key is the account aggregate, so the commit
+        // output is a tree-committed P2TR the co-signer can re-derive.
+        Buffer.concat([Buffer.from([0x02]), account.aggregateXOnly]).toString('hex'),
+        false, true
+    )
+    return { agentSk, daemonSk, publicKeys, account, fileName, feeOutput, built }
+}
+
+function deriveMuSig2Envelope(modules, account, built){
+    const commitPsbt = bitcoin.Psbt.fromHex(built['psbt'], { network: NETWORK_OBJECT })
+    const revealPsbt = bitcoin.Psbt.fromHex(built['revealPsbt'], { network: NETWORK_OBJECT })
+    const envelopeScript = revealPsbt.data.inputs[0].tapLeafScript[0].script
+
+    // The co-signer derives the commit from the envelope script alone. If this
+    // disagrees, the daemon would be authorizing a spend into an output it cannot
+    // reconstruct, which is the stranded-funds shape §3.5 exists to prevent.
+    const derived = modules.deriveEnvelopeCommit({
+        internalXOnly: account.aggregateXOnly,
+        envelopeScript,
+        network: NETWORK_OBJECT
     })
+    return { commitPsbt, revealPsbt, envelopeScript, derived }
+}
 
-    it('publishes a co-signed commit/reveal pair and attributes it to the aggregate account', async function () {
-        const MuSig2 = sdkModule('src/musig2.js')
-        const CoSigner = sdkModule('src/cosigner/coSigner.js')
-        const CoSignerClient = sdkModule('src/cosigner/client.js')
-        const WindowStore = sdkModule('src/cosigner/windowStore.js')
-        const { deriveMuSig2P2TR } = sdkModule('src/cosigner/account.js')
-        const { deriveEnvelopeCommit } = sdkModule('src/cosigner/envelope.js')
+function createMuSig2Signer(modules, daemonSk, publicKeys, feeOutput){
+    // The policy daemon: real policy, real window, real fee cap.
+    //
+    // The allow-list entry is the composition requirement §3.9 did not name, and
+    // it exists because of §3.5: the native fee-destination output rides the
+    // COMMIT. The co-signer's anti-drain gate authorizes exactly three kinds of
+    // output - change back to the account, the one envelope commit output, and
+    // operator-allow-listed payment legs - so on a native-fee chain the fee
+    // output is a fourth kind and the whole pair is refused without this. An
+    // operator running a MuSig2 publisher must allow-list FEE_DESTINATION, and
+    // the negative below pins that so the requirement cannot be lost again.
+    const allowedOutputs = feeOutput ? [{ address: feeOutput.address, maxValue: feeOutput.value }] : []
+    const policy = { allowedActions: new Set(['FILE']), maxPerWindow: { hours: 24, maxActions: 10 } }
+    const windowPath = path.join(os.tmpdir(), 'envelope-musig2-window-' + process.pid + '-' + Date.now() + '.json')
+    try { fs.unlinkSync(windowPath) } catch (e) { /* fresh run */ }
+    const store = new modules.WindowStore(windowPath, 24, null, { init: true })
+    const daemon = new modules.CoSigner({
+        secretKey: daemonSk, publicKeys, tweaks: [], policy, allowedOutputs,
+        windowStore: store, maxFeeSats: 500000, network: NETWORK_OBJECT
+    })
+    const client = new modules.CoSignerClient({
+        transport: modules.CoSignerClient.inProcessTransport(daemon), publicKeys, tweaks: []
+    })
+    return { policy, windowPath, store, client }
+}
 
-        // Fresh keys per run: a fixed pair would reuse one account across runs and
-        // leave earlier UTXOs lying in it, which turns a funding mistake into a test
-        // that passes on the wrong coin.
-        const agentSk = crypto.randomBytes(32)
-        const daemonSk = crypto.randomBytes(32)
-        const agentPk = Buffer.from(ecc.pointFromScalar(agentSk, true))
-        const daemonPk = Buffer.from(ecc.pointFromScalar(daemonSk, true))
-        const publicKeys = [agentPk, daemonPk]
-
-        const account = deriveMuSig2P2TR(publicKeys, NETWORK_OBJECT)
-        console.log('   MuSig2 aggregate account', account.address)
-
-        const utxo = await fundAggregate(account.address, 0.05)
-
-        // Build the pair through the deployed encoder.
-        const fileName = 'envelope-musig2-' + Date.now().toString().slice(-6) + '.txt'
-        const action = 'FILE|0|' + fileName + '|text/plain|MuSig2 envelope|co-signed commit and reveal'
-        const feeOutput = await nativeFeeHelper.getNativeFeeOutput()
-
-        const built = await encoderConnector.createTx(
-            [utxo],
-            account.address,
-            feeOutput ? [feeOutput] : [],
-            action,
-            BODY.toString('binary'),
-            null,
-            false,
-            'TAPROOT',
-            account.address,
-            null,
-            null,
-            // The envelope's internal key is the account aggregate, so the commit
-            // output is a tree-committed P2TR the co-signer can re-derive.
-            Buffer.concat([Buffer.from([0x02]), account.aggregateXOnly]).toString('hex'),
-            false,
-            true
-        )
-        assert.strictEqual(built['encoding'], 'TAPROOT', 'the encoder should have built an envelope')
-
-        const commitPsbt = bitcoin.Psbt.fromHex(built['psbt'], { network: NETWORK_OBJECT })
-        const revealPsbt = bitcoin.Psbt.fromHex(built['revealPsbt'], { network: NETWORK_OBJECT })
-        const envelopeScript = revealPsbt.data.inputs[0].tapLeafScript[0].script
-
-        // The co-signer derives the commit from the envelope script alone. If this
-        // disagrees, the daemon would be authorizing a spend into an output it cannot
-        // reconstruct, which is the stranded-funds shape §3.5 exists to prevent.
-        const derived = deriveEnvelopeCommit({
-            internalXOnly: account.aggregateXOnly,
-            envelopeScript,
-            network: NETWORK_OBJECT
-        })
-        assert(commitPsbt.txOutputs.some(o => o.script.equals(derived.output)),
-            'the encoder-built commit output must be the one the co-signer derives independently')
-
-        // The policy daemon: real policy, real window, real fee cap.
-        //
-        // The allow-list entry is the composition requirement §3.9 did not name, and
-        // it exists because of §3.5: the native fee-destination output rides the
-        // COMMIT. The co-signer's anti-drain gate authorizes exactly three kinds of
-        // output - change back to the account, the one envelope commit output, and
-        // operator-allow-listed payment legs - so on a native-fee chain the fee
-        // output is a fourth kind and the whole pair is refused without this. An
-        // operator running a MuSig2 publisher must allow-list FEE_DESTINATION, and
-        // the negative below pins that so the requirement cannot be lost again.
-        const allowedOutputs = feeOutput ? [{ address: feeOutput.address, maxValue: feeOutput.value }] : []
-        const policy = { allowedActions: new Set(['FILE']), maxPerWindow: { hours: 24, maxActions: 10 } }
-
-        const windowPath = path.join(os.tmpdir(), 'envelope-musig2-window-' + process.pid + '-' + Date.now() + '.json')
-        try { fs.unlinkSync(windowPath) } catch (e) { /* fresh run */ }
-        const store = new WindowStore(windowPath, 24, null, { init: true })
-        const daemon = new CoSigner({
-            secretKey: daemonSk,
-            publicKeys,
-            tweaks: [],
-            policy,
-            allowedOutputs,
-            windowStore: store,
-            maxFeeSats: 500000,
-            network: NETWORK_OBJECT
-        })
-        const client = new CoSignerClient({
-            transport: CoSignerClient.inProcessTransport(daemon),
+async function attemptStrictPolicy(modules, signer, daemonSk, publicKeys, built, agentSk, envelopeScript){
+    // The negative half of the same requirement, on a chain that charges a native
+    // fee: an otherwise identical daemon with no allow-list refuses this exact
+    // commit. Free to assert (the PSBT is already built) and it is the difference
+    // between "we configured it right" and "it has to be configured this way".
+    const strictPath = signer.windowPath.replace('.json', '-strict.json')
+    const strictStore = new modules.WindowStore(strictPath, 24, null, { init: true })
+    try {
+        const strictClient = new modules.CoSignerClient({
+            transport: modules.CoSignerClient.inProcessTransport(new modules.CoSigner({
+                secretKey: daemonSk, publicKeys, tweaks: [], policy: signer.policy,
+                windowStore: strictStore, maxFeeSats: 500000, network: NETWORK_OBJECT
+            })),
             publicKeys,
             tweaks: []
         })
+        try {
+            await strictClient.signAll({
+                psbt: built['psbt'], secretKey: agentSk, inputIndexes: [0],
+                envelopeScript: envelopeScript.toString('hex'), network: NETWORK_OBJECT
+            })
+            return null
+        } catch (err){ return err }
+    } finally {
+        strictStore.release()
+        try { fs.unlinkSync(strictPath) } catch (e) { /* best effort */ }
+    }
+}
 
-        // The negative half of the same requirement, on a chain that charges a native
-        // fee: an otherwise identical daemon with no allow-list refuses this exact
-        // commit. Free to assert (the PSBT is already built) and it is the difference
-        // between "we configured it right" and "it has to be configured this way".
+async function signMuSig2Commit(client, built, agentSk, commitPsbt, envelopeScript){
+    // Commit: key-path spend of the account, authorized off the leaf.
+    return await client.signAll({
+        psbt: built['psbt'], secretKey: agentSk,
+        inputIndexes: commitPsbt.data.inputs.map((_, i) => i),
+        envelopeScript: envelopeScript.toString('hex'), network: NETWORK_OBJECT
+    })
+}
+
+function finalizeMuSig2Commit(commitPsbt, commitRes){
+    for (const s of commitRes.signatures){
+        commitPsbt.updateInput(s.index, { tapKeySig: Buffer.from(s.signature) })
+        commitPsbt.finalizeInput(s.index)
+    }
+    commitPsbt.setMaximumFeeRate(100000)
+    return commitPsbt.extractTransaction()
+}
+
+async function signMuSig2Reveal(client, built, agentSk, envelopeScript){
+    // Reveal: script-path spend of the envelope leaf.
+    return await client.sign({
+        psbt: built['revealPsbt'], secretKey: agentSk, inputIndex: 0,
+        envelopeScript: envelopeScript.toString('hex'), network: NETWORK_OBJECT
+    })
+}
+
+function finalizeMuSig2Reveal(revealPsbt, revealRes, account, derived){
+    // A signature that verifies under the LEAF's bare aggregate key is the
+    // proof that the message was the tapleaf sighash and the session carried
+    // no tap tweak. Verified locally first because a node rejection alone
+    // would not say which of the two went wrong.
+    revealPsbt.updateInput(0, {
+        tapScriptSig: [{
+            pubkey: account.aggregateXOnly,
+            leafHash: derived.leafHash,
+            signature: Buffer.from(revealRes.signature)
+        }]
+    })
+    revealPsbt.finalizeInput(0)
+    revealPsbt.setMaximumFeeRate(100000)
+    const revealTx = revealPsbt.extractTransaction()
+    return { revealTx, revealTxid: revealTx.getId() }
+}
+
+async function broadcastMuSig2Pair(commitTx, revealTx, revealTxid){
+    // The chain is the verifier.
+    await nodeConnector.broadcastTx(commitTx.toHex())
+    await nodeConnector.broadcastTx(revealTx.toHex())
+    console.log('   node accepted the co-signed pair: commit', commitTx.getId().slice(0, 16) + '...',
+                'reveal', revealTxid.slice(0, 16) + '...')
+}
+
+function skipUnsupportedEnvelope(){
+    if (!envelopeHelper.envelopeSupported()) this.skip()   // no segwit, no envelope
+}
+
+describe('Taproot Envelope under MuSig2 co-signing (§3.9)', function () {
+    it('publishes a co-signed commit/reveal pair and attributes it to the aggregate account', async function () {
+        const modules = loadMuSig2Modules()
+        const { agentSk, daemonSk, publicKeys, account, fileName, feeOutput, built } = await buildMuSig2Pair(modules)
+        assert.strictEqual(built['encoding'], 'TAPROOT', 'the encoder should have built an envelope')
+        const { commitPsbt, revealPsbt, envelopeScript, derived } = deriveMuSig2Envelope(modules, account, built)
+        assert(commitPsbt.txOutputs.some(o => o.script.equals(derived.output)),
+            'the encoder-built commit output must be the one the co-signer derives independently')
+        const signer = createMuSig2Signer(modules, daemonSk, publicKeys, feeOutput)
+        const { windowPath, store, client } = signer
         if (feeOutput){
-            const strictPath = windowPath.replace('.json', '-strict.json')
-            const strictStore = new WindowStore(strictPath, 24, null, { init: true })
-            try {
-                const strictClient = new CoSignerClient({
-                    transport: CoSignerClient.inProcessTransport(new CoSigner({
-                        secretKey: daemonSk, publicKeys, tweaks: [], policy,
-                        windowStore: strictStore, maxFeeSats: 500000, network: NETWORK_OBJECT
-                    })),
-                    publicKeys,
-                    tweaks: []
-                })
-                let refusal = null
-                try {
-                    await strictClient.signAll({
-                        psbt: built['psbt'], secretKey: agentSk, inputIndexes: [0],
-                        envelopeScript: envelopeScript.toString('hex'), network: NETWORK_OBJECT
-                    })
-                } catch (err){ refusal = err }
-                assert(refusal, 'a daemon with no allow-list must refuse the fee-bearing commit')
-                assert(/UNAUTHORIZED_OUTPUT/.test(refusal.message + ' ' + (refusal.code || '')),
+            const refusal = await attemptStrictPolicy(modules, signer, daemonSk, publicKeys, built, agentSk, envelopeScript)
+            assert(refusal, 'a daemon with no allow-list must refuse the fee-bearing commit')
+            assert(/UNAUTHORIZED_OUTPUT/.test(refusal.message + ' ' + (refusal.code || '')),
                     'the refusal should name the unauthorized output, not fail obscurely: ' + refusal.message)
-            } finally {
-                strictStore.release()
-                try { fs.unlinkSync(strictPath) } catch (e) { /* best effort */ }
-            }
         }
-
         let revealTxid = null
         try {
-            // Commit: key-path spend of the account, authorized off the leaf.
-            const commitRes = await client.signAll({
-                psbt: built['psbt'],
-                secretKey: agentSk,
-                inputIndexes: commitPsbt.data.inputs.map((_, i) => i),
-                envelopeScript: envelopeScript.toString('hex'),
-                network: NETWORK_OBJECT
-            })
-            assert.strictEqual(commitRes.action, 'FILE',
-                'the daemon must read the intended ACTION out of the envelope PSBT (§3.9 delta c)')
+            const commitRes = await signMuSig2Commit(client, built, agentSk, commitPsbt, envelopeScript)
+            assert.strictEqual(commitRes.action, 'FILE', 'the daemon must read the intended ACTION out of the envelope PSBT (§3.9 delta c)')
             assert.strictEqual(store.snapshot().count, 1, 'the window should be charged once for the commit')
-
-            for (const s of commitRes.signatures){
-                commitPsbt.updateInput(s.index, { tapKeySig: Buffer.from(s.signature) })
-                commitPsbt.finalizeInput(s.index)
-            }
-            commitPsbt.setMaximumFeeRate(100000)
-            const commitTx = commitPsbt.extractTransaction()
-
-            // Reveal: script-path spend of the envelope leaf.
-            const revealRes = await client.sign({
-                psbt: built['revealPsbt'],
-                secretKey: agentSk,
-                inputIndex: 0,
-                envelopeScript: envelopeScript.toString('hex'),
-                network: NETWORK_OBJECT
-            })
-            assert.strictEqual(revealRes.action, 'FILE',
-                'the daemon must recognize the reveal as the same FILE')
+            const commitTx = finalizeMuSig2Commit(commitPsbt, commitRes)
+            const revealRes = await signMuSig2Reveal(client, built, agentSk, envelopeScript)
+            assert.strictEqual(revealRes.action, 'FILE', 'the daemon must recognize the reveal as the same FILE')
             assert.strictEqual(store.snapshot().count, 1,
                 'the reveal is the second half of one authorization, not a second action: the window must NOT be charged again')
-
-            // A signature that verifies under the LEAF's bare aggregate key is the
-            // proof that the message was the tapleaf sighash and the session carried
-            // no tap tweak. Verified locally first because a node rejection alone
-            // would not say which of the two went wrong.
             assert(ecc.verifySchnorr(revealRes.msg, account.aggregateXOnly, revealRes.signature),
                 'the aggregated reveal signature must verify under the envelope leaf key')
-
-            revealPsbt.updateInput(0, {
-                tapScriptSig: [{
-                    pubkey: account.aggregateXOnly,
-                    leafHash: derived.leafHash,
-                    signature: Buffer.from(revealRes.signature)
-                }]
-            })
-            revealPsbt.finalizeInput(0)
-            revealPsbt.setMaximumFeeRate(100000)
-            const revealTx = revealPsbt.extractTransaction()
-            revealTxid = revealTx.getId()
-
+            const revealResult = finalizeMuSig2Reveal(revealPsbt, revealRes, account, derived)
+            revealTxid = revealResult.revealTxid
             assert.strictEqual(
                 Buffer.from(revealPsbt.txInputs[0].hash).reverse().toString('hex'), commitTx.getId(),
                 'reveal input 0 must be the commit outpoint (§3.5)')
-
-            // The chain is the verifier.
-            await nodeConnector.broadcastTx(commitTx.toHex())
-            await nodeConnector.broadcastTx(revealTx.toHex())
-            console.log('   node accepted the co-signed pair: commit', commitTx.getId().slice(0, 16) + '...',
-                        'reveal', revealTxid.slice(0, 16) + '...')
+            await broadcastMuSig2Pair(commitTx, revealResult.revealTx, revealTxid)
         } finally {
             store.release()
             try { fs.unlinkSync(windowPath) } catch (e) { /* best effort */ }
         }
-
         // Indexed, attributed and served.
         const row = await indexerDatabase.waitForFile({
-            txHash: revealTxid,
-            source: account.address,
-            name: fileName,
-            title: 'MuSig2 envelope',
-            status: 'valid'
+            txHash: revealTxid, source: account.address, name: fileName,
+            title: 'MuSig2 envelope', status: 'valid'
         }, 180000)
         assert(row, 'the co-signed envelope action should be indexed')
-
         // §3.4 on a co-signed publisher: the source is the address that funded the
         // COMMIT, which here is the aggregate account itself. Attributing to the
         // one-time commit address would leave a MuSig2 publisher unable to hold the
         // tokens its own gated files are gated on.
         assert.strictEqual(row.source, account.address,
             'the action must be attributed to the MuSig2 aggregate account')
-
         const served = await envelopeHelper.waitForServedFile(row.action_index)
         assert.strictEqual(served.status, 200)
         assert.strictEqual(envelopeHelper.sha256(served.body), envelopeHelper.sha256(BODY),
             'the payload a co-signed envelope carries must serve byte-exactly, like any other')
-
         const onChain = await envelopeHelper.readEnvelopeFromChain(revealTxid)
         assert(onChain.grammarOk && onChain.terminated,
             'a co-signed reveal carries the same frozen §3.2 grammar as any other')
         console.log('   indexed at action_index', row.action_index, 'source', row.source)
     })
-})
+}).timeout(0).beforeAll(skipUnsupportedEnvelope)
