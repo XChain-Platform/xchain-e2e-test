@@ -134,6 +134,14 @@ describe('CryptoNetworks', () => {
         const path = require('path'), fs = require('fs')
         const SIBLINGS = ['xchain-encoder', 'xchain-decoder', 'xchain-utxo-tracker', 'xchain-regtest-miner']
         const FIRST_BLOCK_SIBLINGS = ['xchain-encoder', 'xchain-decoder']
+        // repo -> its own CryptoNetworks.js location, repo-relative. Each sibling
+        // keeps this file in its own feature directory, so the template below
+        // cannot assume one shared path. A repo absent from the table falls back
+        // to the older top-level 'src/CryptoNetworks.js'.
+        const DEFAULT_CRYPTO_NETWORKS_PATH = path.join('src', 'CryptoNetworks.js')
+        const CRYPTO_NETWORKS_PATH = {
+            'xchain-decoder': path.join('src', 'chain', 'crypto_networks.js'),
+        }
         const NETS = ['bitcoin-mainnet', 'bitcoin-testnet', 'bitcoin-regtest',
                       'dogecoin-mainnet', 'dogecoin-testnet', 'dogecoin-regtest',
                       'litecoin-mainnet', 'litecoin-testnet', 'litecoin-regtest']
@@ -152,7 +160,7 @@ describe('CryptoNetworks', () => {
 
         SIBLINGS.forEach((repo) => {
             it(`${repo} getBitcoinJsNetwork matches this copy for every network`, function () {
-                const p = path.resolve(__dirname, '../../../../' + repo + '/src/CryptoNetworks.js')
+                const p = path.resolve(__dirname, '../../../../' + repo, (CRYPTO_NETWORKS_PATH[repo] || DEFAULT_CRYPTO_NETWORKS_PATH))
                 if (!fs.existsSync(p)) return this.skip()
                 const Sib = require(p)
                 for (const net of NETS) {
@@ -165,7 +173,7 @@ describe('CryptoNetworks', () => {
 
         FIRST_BLOCK_SIBLINGS.forEach((repo) => {
             it(`${repo} getFirstBlock matches this copy for every network`, function () {
-                const p = path.resolve(__dirname, '../../../../' + repo + '/src/CryptoNetworks.js')
+                const p = path.resolve(__dirname, '../../../../' + repo, (CRYPTO_NETWORKS_PATH[repo] || DEFAULT_CRYPTO_NETWORKS_PATH))
                 if (!fs.existsSync(p)) return this.skip()
                 const Sib = require(p)
                 for (const net of NETS) {
@@ -210,7 +218,7 @@ describe('CryptoNetworks', () => {
 
         Object.entries(UNKNOWN_CONTRACT).forEach(([repo, contract]) => {
             it(`${repo} getBitcoinJsNetwork honors its unknown-network contract (${contract})`, function () {
-                const p = path.resolve(__dirname, '../../../../' + repo + '/src/CryptoNetworks.js')
+                const p = path.resolve(__dirname, '../../../../' + repo, (CRYPTO_NETWORKS_PATH[repo] || DEFAULT_CRYPTO_NETWORKS_PATH))
                 if (!fs.existsSync(p)) return this.skip()
                 const Sib = require(p)
                 for (const bad of UNKNOWN_INPUTS) {

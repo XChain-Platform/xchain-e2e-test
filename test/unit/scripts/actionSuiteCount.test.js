@@ -41,7 +41,7 @@ const counter = require('../../../scripts/count-action-suites')
 
 const REPO_ROOT   = path.join(__dirname, '../../..')
 const DECODER_SRC = path.join(REPO_ROOT, '../xchain-decoder/src/XChainDecoder.js')
-const ALIAS_SRC   = path.join(REPO_ROOT, '../xchain-decoder/src/actionAliases.js')
+const ALIAS_SRC   = path.join(REPO_ROOT, '../xchain-decoder/src/protocol/action_aliases.js')
 const DOCS_ROOT   = process.env.XCHAIN_DOCS_ROOT || path.join(REPO_ROOT, '../xchain-documentation')
 const DOCS_E2E    = path.join(DOCS_ROOT, 'components/e2e-test')
 
@@ -87,7 +87,7 @@ describe('published ACTION test-suite count', () => {
             const decoderAliases = require(ALIAS_SRC)
             assert.deepStrictEqual(counter.vocabulary().aliases, { ...decoderAliases },
                 'the alias table this script reads has drifted from ' +
-                'xchain-decoder/src/actionAliases.js. It went empty once before, when the table ' +
+                'xchain-decoder/src/protocol/action_aliases.js. It went empty once before, when the table ' +
                 'moved out of XChainDecoder.js and the inline-literal regex stopped matching; ' +
                 'an unfolded alias is dropped from the published count with no error')
         })
@@ -99,7 +99,7 @@ describe('published ACTION test-suite count', () => {
             assert.ok(Object.keys(vocab.aliases).length > 0,
                 'alias folding is dead: the script reported a vocabulary with no aliases while ' +
                 'the sibling decoder checkout is present')
-            assert.strictEqual(vocab.aliasSource, 'xchain-decoder actionAliases.js',
+            assert.strictEqual(vocab.aliasSource, 'xchain-decoder action_aliases.js',
                 'the alias table silently degraded to ' + vocab.aliasSource +
                 ' while the decoder checkout is present')
         })

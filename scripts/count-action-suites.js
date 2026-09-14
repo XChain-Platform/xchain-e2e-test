@@ -36,7 +36,7 @@ const DECODER_SRC = path.join(REPO_ROOT, '../xchain-decoder/src/XChainDecoder.js
 // The alias table moved out of XChainDecoder.js into its own leaf module to
 // break a require cycle with batchSubCommandCapture.js. Read it where it lives
 // now; the inline-literal parse below is kept only for an older sibling.
-const ALIAS_SRC = path.join(REPO_ROOT, '../xchain-decoder/src/actionAliases.js')
+const ALIAS_SRC = path.join(REPO_ROOT, '../xchain-decoder/src/protocol/action_aliases.js')
 
 // Leading token of an ACTION payload literal: "ISSUE|0|...", `SEND|${v}|...`,
 // "BATCH|" + version + ... . The delimiter class after the pipe keeps ordinary
@@ -72,7 +72,7 @@ const FALLBACK_ACTION_ALIASES = {
 }
 
 // Loads the decoder's short-form alias table. Requiring is safe here where
-// requiring the decoder itself is not: actionAliases.js is a leaf (one object
+// requiring the decoder itself is not: action_aliases.js is a leaf (one object
 // literal and a module.exports, no requires, no side effects), while
 // XChainDecoder.js would pull in its whole dependency tree.
 //
@@ -84,7 +84,7 @@ function readDecoderAliases(decoderSrc) {
     if (fs.existsSync(ALIAS_SRC)) {
         const table = require(ALIAS_SRC)
         if (table && typeof table === 'object' && Object.keys(table).length > 0) {
-            return { aliases: { ...table }, aliasSource: 'xchain-decoder actionAliases.js' }
+            return { aliases: { ...table }, aliasSource: 'xchain-decoder action_aliases.js' }
         }
     }
 
