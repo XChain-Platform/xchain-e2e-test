@@ -97,6 +97,12 @@ need_sib xchain-hub xchain-indexer
 # Needed by the local-only parity tier at the end (the five vendored-constant
 # references `npm run ci` covers and GitHub does not).
 need_sib xchain-documentation xchain-explorer xchain-sdk xchain-sync
+# The rest of the .ci-siblings roster. The unit and parity tiers below run with
+# XCHAIN_REQUIRE_SIBLINGS=1, under which test/unit/sibling-coverage.test.js fails
+# on ANY declared sibling that is missing, so name them here and fail up front
+# with the reason rather than as a red unit tier.
+need_sib xchain-contracts xchain-decoder xchain-encoder xchain-vm \
+  xchain-utxo-tracker xchain-regtest-miner xchain-wallet
 
 # The live-tier job self-provisions its database through Docker, which
 # ubuntu-latest supplies. Probe it up front so a venue without one says so in
@@ -106,7 +112,12 @@ docker info >/dev/null 2>&1 || { echo "ci:full: VENUE LACKS DOCKER for live-tier
 # --- job: unit -------------------------------------------------------------
 # The hermetic unit tier, the full glob rather than the subset `npm run ci`
 # names. A handful of cases skip for want of a .env, which CI lacks too.
-run_tier "unit (test:unit)" npm run test:unit
+# XCHAIN_REQUIRE_SIBLINGS=1 turns every cross-repo guard's "sibling absent, skip"
+# into a failure, so a sibling-reading unit suite can never gate green by skip.
+# This is stricter than the workflow's unit job, which checks out only hub and
+# indexer; the venue lays the full .ci-siblings roster, so it can afford it.
+run_tier "unit (test:unit, siblings required)" \
+  env XCHAIN_REQUIRE_SIBLINGS=1 npm run test:unit
 
 # --- job: live-tier --------------------------------------------------------
 # `npm run ci:live` -> scripts/run-live-tier.js over test/integration/
@@ -136,7 +147,8 @@ run_tier "drift: coin consensus-pin conformance" node -e '
 # constants out of five more siblings, which would be five more deploy-key
 # secrets. The venue has all five, so the gate keeps covering them.
 run_tier "local: sleep-flake lint (lint:sleep-flake)" npm run lint:sleep-flake
-run_tier "local: cross-repo parity suites" \
+run_tier "local: cross-repo parity suites (siblings required)" \
+  env XCHAIN_REQUIRE_SIBLINGS=1 \
   ./node_modules/.bin/mocha --no-config --timeout 30000 --exit 'test/integration/parity/**/*.test.js'
 
 echo
