@@ -68,6 +68,18 @@ describe('Boundary: Identifiers & Strings', function () {
             assert.strictEqual(first, second)
         })
     })
+})
+
+describe('Boundary: Identifiers & Strings', function () {
+
+    beforeEach(function () {
+        global.wallets = {}
+    })
+
+    afterEach(function () {
+        sinon.restore()
+        global.wallets = {}
+    })
 
     describe('IS-03: getWallet with special characters in label', function () {
 
@@ -107,6 +119,18 @@ describe('Boundary: Identifiers & Strings', function () {
             assert.strictEqual(wallet.mnemonic, null)
         })
     })
+})
+
+describe('Boundary: Identifiers & Strings', function () {
+
+    beforeEach(function () {
+        global.wallets = {}
+    })
+
+    afterEach(function () {
+        sinon.restore()
+        global.wallets = {}
+    })
 
     describe('IS-05: Similar labels do not collide', function () {
 
@@ -136,6 +160,18 @@ describe('Boundary: Identifiers & Strings', function () {
             assert.ok(Buffer.isBuffer(result.publicKey))
         })
     })
+})
+
+describe('Boundary: Identifiers & Strings', function () {
+
+    beforeEach(function () {
+        global.wallets = {}
+    })
+
+    afterEach(function () {
+        sinon.restore()
+        global.wallets = {}
+    })
 
     describe('IS-12: getNewAddress with large addressIndex', function () {
 
@@ -164,6 +200,18 @@ describe('Boundary: Identifiers & Strings', function () {
 
             assert.strictEqual(r1.address, r2.address, 'same mnemonic + index should produce same address')
         })
+    })
+})
+
+describe('Boundary: Identifiers & Strings', function () {
+
+    beforeEach(function () {
+        global.wallets = {}
+    })
+
+    afterEach(function () {
+        sinon.restore()
+        global.wallets = {}
     })
 
     describe('IS-14: Multiple addresses accumulate in wallet', function () {
