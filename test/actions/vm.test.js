@@ -15,10 +15,8 @@ const issueHelper = require('../helpers/issueHelper')
 const mintHelper = require('../helpers/mintHelper')
 const gasHelper = require('../helpers/gasHelper')
 
-describe('VM: Smart Contracts', function () {
-
-    // Simple counter contract for testing
-    const COUNTER_CONTRACT = `
+// Simple counter contract for testing
+const COUNTER_CONTRACT = `
         module.exports = {
             meta: { name: 'Counter', description: 'Increments a stored counter and returns its new value.', version: '1.0.0' },
             initialize: function() {
@@ -35,6 +33,10 @@ describe('VM: Smart Contracts', function () {
         };
     `
 
+let deployerAddr = null
+
+describe('VM: Smart Contracts', function () {
+
     // Contract that reverts
     // The function-export form carries its identity as a property (spec R1),
     // because CONTRACT_META_REQUIRED reads meta off a function export too.
@@ -45,8 +47,6 @@ describe('VM: Smart Contracts', function () {
         contract.meta = { name: 'Reverter', description: 'Reverts on every call, on purpose.', version: '1.0.0' };
         module.exports = contract;
     `
-
-    let deployerAddr = null
 
     before(async function () {
         deployerAddr = await cryptoHelper.getNewFundedAddress(
