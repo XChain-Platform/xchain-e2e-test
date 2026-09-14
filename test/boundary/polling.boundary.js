@@ -89,6 +89,13 @@ describe('Boundary: Polling Timeouts', function () {
             assert.strictEqual(mockConn.query.callCount, 0)
         })
     })
+})
+
+describe('Boundary: Polling Timeouts', function () {
+
+    afterEach(function () {
+        sinon.restore()
+    })
 
     describe('PT-02: waitForIssue with timeMax = 1', function () {
 
@@ -122,6 +129,13 @@ describe('Boundary: Polling Timeouts', function () {
             assert.strictEqual(result, null)
             assert.strictEqual(mockConn.query.callCount, 0)
         })
+    })
+})
+
+describe('Boundary: Polling Timeouts', function () {
+
+    afterEach(function () {
+        sinon.restore()
     })
 
     describe('PT-04: waitForIssue returns record found just before timeout', function () {
@@ -169,6 +183,13 @@ describe('Boundary: Polling Timeouts', function () {
             assert(mockConn.query.callCount >= 1, 'should execute at least one query')
         })
     })
+})
+
+describe('Boundary: Polling Timeouts', function () {
+
+    afterEach(function () {
+        sinon.restore()
+    })
 
     describe('PT-05: BlockchainConnector.waitForTx with timeMax = 0', function () {
 
@@ -211,6 +232,13 @@ describe('Boundary: Polling Timeouts', function () {
             assert.strictEqual(connector.getTransactionHex.callCount, 1)
             assert.strictEqual(connector.sleep.callCount, 0)
         })
+    })
+})
+
+describe('Boundary: Polling Timeouts', function () {
+
+    afterEach(function () {
+        sinon.restore()
     })
 
     describe('PT-06: UtxoTracker.waitForUtxos with timeMax = 0', function () {
@@ -256,6 +284,13 @@ describe('Boundary: Polling Timeouts', function () {
             assert.strictEqual(tracker.getUtxosFromAddress.callCount, 1)
             assert.strictEqual(tracker.sleep.callCount, 0)
         })
+    })
+})
+
+describe('Boundary: Polling Timeouts', function () {
+
+    afterEach(function () {
+        sinon.restore()
     })
 
     describe('PT-09: waitForIssue with error and timeMax = 0', function () {
