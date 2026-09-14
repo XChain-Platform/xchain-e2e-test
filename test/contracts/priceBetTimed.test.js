@@ -176,8 +176,6 @@ xchain.emit.send({ destination: xchain.state.get('taker'), tick: tick, quantity:
 }
 }`
 
-describe('Price Bet Timed: binary option settled by the first round at/after settleTime', function () {
-
     const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
     const TICK = 'XCHAIN'      // stakes in the gas token; nothing extra to issue
     const STAKE = '100'
@@ -194,6 +192,7 @@ describe('Price Bet Timed: binary option settled by the first round at/after set
     let settleTime = null      // unix seconds; chain-clock anchored
     let ci = null              // contract action_index
     let contractAddr = null
+    let priceBetTimedSetup = null
 
     async function q(sql, params) {
         const conn = await indexerDatabase.getConnection()
@@ -219,21 +218,29 @@ describe('Price Bet Timed: binary option settled by the first round at/after set
         return v
     }
 
-    before(async function () {
-        maker = await cryptoHelper.getNewFundedAddress('pricebettimed-maker', COIN, NETWORK, null, 'legacy', 0, 1)
-        taker = await cryptoHelper.getNewFundedAddress('pricebettimed-taker', COIN, NETWORK, null, 'legacy', 0, 1)
-        stranger = await cryptoHelper.getNewFundedAddress('pricebettimed-stranger', COIN, NETWORK, null, 'legacy', 0, 1)
-        await gasHelper.ensureGasBalance(maker, '2000')
-        await gasHelper.ensureGasBalance(taker, '2000')
-        await gasHelper.ensureGasBalance(stranger, '2000')
-        assert(await priceSnapshotHelper.isAvailable(), 'price_snapshots must be reachable for this suite')
-        await priceSnapshotHelper.clearPair(PAIR)
-        // Far enough out that deploy/fund/accept all land while the chain
-        // clock is still before T (initialize and accept both require it);
-        // the deciding round is SEEDED with timestamp = T, so the test never
-        // waits for the chain to actually reach it.
-        settleTime = (await priceSnapshotHelper.latestBlockTime()) + 3600
-    })
+    async function preparePriceBetTimed() {
+        if (!priceBetTimedSetup) {
+            priceBetTimedSetup = (async function () {
+                maker = await cryptoHelper.getNewFundedAddress('pricebettimed-maker', COIN, NETWORK, null, 'legacy', 0, 1)
+                taker = await cryptoHelper.getNewFundedAddress('pricebettimed-taker', COIN, NETWORK, null, 'legacy', 0, 1)
+                stranger = await cryptoHelper.getNewFundedAddress('pricebettimed-stranger', COIN, NETWORK, null, 'legacy', 0, 1)
+                await gasHelper.ensureGasBalance(maker, '2000')
+                await gasHelper.ensureGasBalance(taker, '2000')
+                await gasHelper.ensureGasBalance(stranger, '2000')
+                assert(await priceSnapshotHelper.isAvailable(), 'price_snapshots must be reachable for this suite')
+                await priceSnapshotHelper.clearPair(PAIR)
+                // Far enough out that deploy/fund/accept all land while the chain
+                // clock is still before T (initialize and accept both require it);
+                // the deciding round is SEEDED with timestamp = T, so the test never
+                // waits for the chain to actually reach it.
+                settleTime = (await priceSnapshotHelper.latestBlockTime()) + 3600
+            })()
+        }
+        return priceBetTimedSetup
+    }
+
+describe('Price Bet Timed: binary option settled by the first round at/after settleTime', function () {
+    before(preparePriceBetTimed)
 
     it('deploys the timed bet and the maker escrows their stake (fund)', async function () {
         const params = [maker.address, PAIR, STRIKE, 'OVER', TICK, STAKE, String(settleTime), '500'].join('|')
@@ -269,6 +276,10 @@ describe('Price Bet Timed: binary option settled by the first round at/after set
         assert.strictEqual(await stateOf('cursor'), String(EARLY_ROUND),
             'cursor must anchor at the latest round at match time (oracle getPrice round metadata)')
     })
+})
+
+describe('Price Bet Timed: binary option settled by the first round at/after settleTime', function () {
+    before(preparePriceBetTimed)
 
     it('settle before any round reaches settleTime is a VALID no-op (PENDING)', async function () {
         // The latest round (EARLY_ROUND) is before T, so settle() returns
