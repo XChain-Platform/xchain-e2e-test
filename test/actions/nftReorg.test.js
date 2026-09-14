@@ -62,12 +62,37 @@ async function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 function randTick(p) { let s = p; for (let i = 0; i < 6; i++) s += String.fromCharCode(65 + Math.floor(Math.random() * 26)); return s }
 const j = (x) => JSON.stringify(x, (k, v) => typeof v === 'bigint' ? Number(v) : v)
 
+async function findParentBlock(parent) {
+    const parentRows = await q(`SELECT a.action_index FROM issues i
+        JOIN actions a ON a.action_index=i.action_index
+        JOIN index_tickers it ON it.id=i.tick_id WHERE it.tick=? LIMIT 1`, [parent])
+    return parentRows.length ? blockOfAction(parentRows[0].action_index) : null
+}
+
+async function findChildBlock(child) {
+    const childRows = await q(`SELECT i.action_index FROM issues i
+        JOIN index_tickers it ON it.id=i.tick_id WHERE it.tick=? ORDER BY i.action_index DESC LIMIT 1`, [child])
+    const childActionIndex = childRows.length ? childRows[0].action_index : null
+    return blockOfAction(childActionIndex)
+}
+
+async function waitForIndexedTip() {
+    let settle = 0
+    while ((await tip()) < (await nodeConnector.getBlockCount()) && settle++ < 60) { await sleep(1000) }
+}
+
+async function prepareChildReorg(childBlock) {
+    const tipBefore = await nodeConnector.getBlockCount()
+    const childHash = await nodeConnector.getBlockHash(childBlock)
+    const miner = (await cryptoHelper.getNewAddress('nftr-miner', COIN, NETWORK, null, 'legacy', 0)).address
+    await nodeConnector.invalidateBlock(childHash)
+    return { miner, tipBefore }
+}
+
 describe('NFT Reorg: a collection child issuance rolls back across an on-chain reorg', function () {
     this.timeout(0)
 
-    before(async function () {
-        if (global.COIN_CODE === 'DOGE') this.skip()   // generateblock unavailable on Core 1.14
-    })
+    before(function () { if (global.COIN_CODE === 'DOGE') this.skip() })   // generateblock unavailable on Core 1.14
 
     it('orphaning the CHILD block rolls back the child token while the parent survives', async function () {
         const owner = await cryptoHelper.getNewFundedAddress('nftr-owner', COIN, NETWORK, null, 'legacy', 0, 2)
@@ -78,36 +103,25 @@ describe('NFT Reorg: a collection child issuance rolls back across an on-chain r
         await issueHelper.sendIssueV0(owner, parent, '100', '0', '0', 'nft-reorg parent', '100')
         assert.strictEqual(await tokenExists(parent), true, 'parent token created')
         await mine(2)
-        const parentRows = await q(`SELECT a.action_index FROM issues i
-            JOIN actions a ON a.action_index=i.action_index
-            JOIN index_tickers it ON it.id=i.tick_id WHERE it.tick=? LIMIT 1`, [parent])
-        const parentBlock = parentRows.length ? await blockOfAction(parentRows[0].action_index) : null
+        const parentBlock = await findParentBlock(parent)
 
         // CHILD ISSUE (valid NFT) alone in block H.
         await issueHelper.sendIssueV0(owner, child, '1', '0', '0', 'nft-reorg child', '1', '', '', '1')
         assert.strictEqual(await tokenExists(child), true, 'child token created pre-reorg')
         assert.strictEqual(await balanceOf(owner.address, child), '1', 'owner holds the child pre-reorg')
-        const childRows = await q(`SELECT i.action_index FROM issues i
-            JOIN index_tickers it ON it.id=i.tick_id WHERE it.tick=? ORDER BY i.action_index DESC LIMIT 1`, [child])
-        const childActionIndex = childRows.length ? childRows[0].action_index : null
-        const childBlock = await blockOfAction(childActionIndex)
+        const childBlock = await findChildBlock(child)
         assert(childBlock && parentBlock && childBlock > parentBlock,
             `CHILD must be in a later block than PARENT (parent=${parentBlock} child=${childBlock})`)
         console.log('   child', child, 'issued at block', childBlock, '(parent', parentBlock + ')')
 
         // Gate on the indexer catching up to the node tip before reorging.
-        let settle = 0
-        while ((await tip()) < (await nodeConnector.getBlockCount()) && settle++ < 60) { await sleep(1000) }
+        await waitForIndexedTip()
         console.log('   indexer tip', await tip(), 'node tip', await nodeConnector.getBlockCount())
 
         // Reorg out the CHILD block.
         await regtestMinerConnector.pauseMining()
         try {
-            const tipBefore = await nodeConnector.getBlockCount()
-            const childHash = await nodeConnector.getBlockHash(childBlock)
-            const miner = (await cryptoHelper.getNewAddress('nftr-miner', COIN, NETWORK, null, 'legacy', 0)).address
-
-            await nodeConnector.invalidateBlock(childHash)
+            const { miner, tipBefore } = await prepareChildReorg(childBlock)
             assert.strictEqual(await nodeConnector.getBlockCount(), childBlock - 1, 'rolled back to before the CHILD')
 
             const need = tipBefore - (childBlock - 1) + 2
