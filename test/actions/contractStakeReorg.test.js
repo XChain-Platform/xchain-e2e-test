@@ -76,24 +76,35 @@ async function mine(n){ try { await regtestMinerConnector.generateBlocks(n) } ca
 async function sleep(ms){ return new Promise(r => setTimeout(r, ms)) }
 const j = (x) => JSON.stringify(x, (k, v) => typeof v === 'bigint' ? Number(v) : v)
 
+async function deployStakeableContract(){
+    const deployer = await cryptoHelper.getNewFundedAddress('csreorg-deployer', COIN, NETWORK, null, 'legacy', 0, 1)
+    await gasHelper.ensureGasBalance(deployer, '1000')
+    return await vmHelper.sendDeployV1(deployer, STAKE_GATED_CONTRACT, 300000, '', 20, 'BURN')
+}
+async function prepareStaker(){
+    const staker = await cryptoHelper.getNewFundedAddress('csreorg-staker', COIN, NETWORK, null, 'legacy', 0, 1)
+    await gasHelper.ensureGasBalance(staker, '2000')
+    return { staker, pubkey: newSigningPubkey() }
+}
+async function waitForIndexerTip(){
+    // Make sure the INDEXER has caught up to the node tip before we reorg, so the
+    // stake block is definitely processed and the rollback has something to undo.
+    let settle = 0
+    while ((await tip()) < (await nodeConnector.getBlockCount()) && settle++ < 60) { await sleep(1000) }
+    console.log('   indexer tip', await tip(), 'node tip', await nodeConnector.getBlockCount())
+}
+
 describe('Contract Staking Reorg: a STAKE v3 row rolls back when its block is orphaned', function () {
     this.timeout(0)
-
     before(async function () {
         if (global.COIN_CODE === 'DOGE') this.skip()   // generateblock unavailable on Core 1.14
     })
-
     it('orphaning the STAKE block rolls back contract_stakes while the contract survives', async function () {
-        const deployer = await cryptoHelper.getNewFundedAddress('csreorg-deployer', COIN, NETWORK, null, 'legacy', 0, 1)
-        await gasHelper.ensureGasBalance(deployer, '1000')
-        const dep = await vmHelper.sendDeployV1(deployer, STAKE_GATED_CONTRACT, 300000, '', 20, 'BURN')
+        const dep = await deployStakeableContract()
         assert(dep.contract && dep.contract.status === 'valid', 'stakeable contract deploys clean')
         const ci = dep.contract.action_index
         await mine(2)   // bury the DEPLOY so the STAKE is isolatable in a later block
-
-        const staker = await cryptoHelper.getNewFundedAddress('csreorg-staker', COIN, NETWORK, null, 'legacy', 0, 1)
-        await gasHelper.ensureGasBalance(staker, '2000')
-        const pubkey = newSigningPubkey()
+        const { staker, pubkey } = await prepareStaker()
 
         const s = await stakeHelper.sendStakeV3(staker, '400.00000000', pubkey, ci, 'XCHAIN')
         assert.strictEqual(s.stake.status, 'valid', 'STAKE v3 valid pre-reorg')
@@ -110,11 +121,7 @@ describe('Contract Staking Reorg: a STAKE v3 row rolls back when its block is or
             `STAKE must be in a later block than DEPLOY (deploy=${deployBlock} stake=${stakeBlock} rowBlock=${rowBlock} txBlock=${txBlock})`)
         console.log('   staked 400; rowBlock', rowBlock, 'txBlock', txBlock, '-> invalidate', stakeBlock, '(deploy', deployBlock + ')')
 
-        // Make sure the INDEXER has caught up to the node tip before we reorg, so the
-        // stake block is definitely processed and the rollback has something to undo.
-        let settle = 0
-        while ((await tip()) < (await nodeConnector.getBlockCount()) && settle++ < 60) { await sleep(1000) }
-        console.log('   indexer tip', await tip(), 'node tip', await nodeConnector.getBlockCount())
+        await waitForIndexerTip()
 
         // Reorg out the STAKE block.
         await regtestMinerConnector.pauseMining()
