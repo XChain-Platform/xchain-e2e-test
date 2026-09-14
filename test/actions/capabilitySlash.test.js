@@ -52,183 +52,190 @@ const srb = require('../../../xchain-indexer/src/snapshot_reorg_buffer.js')
  * the key from every set permanently - so the run leaves the venue no larger than it
  * found it, which is why the teardown ledger is settled by hand below.
  */
-describe('Capability SLASH: an equivocation proof burns a bond and releases its escrow', function () {
+const CAPABILITY_SLASH_TITLE = 'Capability SLASH: an equivocation proof burns a bond and releases its escrow'
 
-    const GAS  = 'XCHAIN'
-    // Under oracle_publish's 500 MIN_STAKE (the lowest of the five capabilities), so
-    // this bond qualifies for the whole-federation set and for no capability set.
-    const BOND = '400.00000000'
-    // XCONFIG's signed content is `snapshot_block|config_digest`, the shortest
-    // slashable canonical there is, which keeps the two proofs inside one
-    // comfortable transaction.
-    const CAPABILITY = 'config'
-    const ROUND_ID   = 'e2e1'
-    const VIEW       = 0
+const GAS  = 'XCHAIN'
+// Under oracle_publish's 500 MIN_STAKE (the lowest of the five capabilities), so
+// this bond qualifies for the whole-federation set and for no capability set.
+const BOND = '400.00000000'
+// XCONFIG's signed content is `snapshot_block|config_digest`, the shortest
+// slashable canonical there is, which keeps the two proofs inside one
+// comfortable transaction.
+const CAPABILITY = 'config'
+const ROUND_ID   = 'e2e1'
+const VIEW       = 0
 
-    let staker = null, submitter = null, offender = null
-    let snapshotBlock = null, slashActionIndex = null, slashTxHash = null
-    let event = null
-    let supplyBefore = null, supplyAfter = null, baselineMaxAction = null
+let staker = null, submitter = null, offender = null
+let snapshotBlock = null, slashActionIndex = null, slashTxHash = null
+let event = null
+let supplyBefore = null, supplyAfter = null, baselineMaxAction = null
 
-    function newOffender() {
-        const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519')
-        // SPKI DER for Ed25519 is a 12-byte prefix + the 32-byte raw key.
-        return { privateKey, pubkey: publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('hex') }
+function newOffender() {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519')
+    // SPKI DER for Ed25519 is a 12-byte prefix + the 32-byte raw key.
+    return { privateKey, pubkey: publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('hex') }
+}
+const sign = (msg) => crypto.sign(null, Buffer.from(msg, 'utf8'), offender.privateKey).toString('hex')
+const b64  = (msg) => Buffer.from(msg, 'utf8').toString('base64url')
+
+async function q(sql, params) {
+    const conn = await indexerDatabase.getConnection()
+    try { return await conn.query(sql, params) }
+    finally { await conn.release() }
+}
+async function gasSupply() {
+    const rows = await q(`SELECT t.supply FROM tokens t
+        JOIN index_tickers it ON it.id = t.tick_id WHERE it.tick=?`, [GAS])
+    return rows.length ? Number(rows[0].supply) : 0
+}
+async function maxActionIndex() {
+    const rows = await q('SELECT COALESCE(MAX(action_index),0) AS m FROM actions')
+    return Number(rows[0].m)
+}
+// Signed ledger rows for one action: credits positive, debits negative, escrows
+// as written (a release is a negative row). Their sum is that action's effect on
+// total supply, which is the quantity this whole suite is about.
+async function ledgerFor(actionIndex) {
+    const one = async (table) => {
+        const rows = await q(`SELECT COALESCE(SUM(CAST(l.amount AS DECIMAL(30,8))),0) AS amt
+            FROM ${table} l JOIN index_tickers it ON it.id = l.tick_id
+            WHERE l.action_index=? AND it.tick=?`, [Number(actionIndex), GAS])
+        return Number(rows[0].amt)
     }
-    const sign = (msg) => crypto.sign(null, Buffer.from(msg, 'utf8'), offender.privateKey).toString('hex')
-    const b64  = (msg) => Buffer.from(msg, 'utf8').toString('base64url')
-
-    async function q(sql, params) {
-        const conn = await indexerDatabase.getConnection()
-        try { return await conn.query(sql, params) }
-        finally { await conn.release() }
+    const credits = await one('credits'), debits = await one('debits'), escrows = await one('escrows')
+    return { credits, debits, escrows, net: credits - debits + escrows }
+}
+// Everything OTHER actions did to XCHAIN supply while this test was running. The
+// venue is shared, so the supply figure is only attributable once this is netted
+// out; without it a stray action elsewhere would read as a slash defect.
+async function otherLedgerNet(sinceActionIndex, exceptActionIndex) {
+    const one = async (table) => {
+        const rows = await q(`SELECT COALESCE(SUM(CAST(l.amount AS DECIMAL(30,8))),0) AS amt
+            FROM ${table} l JOIN index_tickers it ON it.id = l.tick_id
+            WHERE l.action_index > ? AND l.action_index <> ? AND it.tick=?`,
+            [Number(sinceActionIndex), Number(exceptActionIndex), GAS])
+        return Number(rows[0].amt)
     }
-    async function gasSupply() {
-        const rows = await q(`SELECT t.supply FROM tokens t
-            JOIN index_tickers it ON it.id = t.tick_id WHERE it.tick=?`, [GAS])
-        return rows.length ? Number(rows[0].supply) : 0
+    return (await one('credits')) - (await one('debits')) + (await one('escrows'))
+}
+async function escrowRow(actionIndex, address) {
+    const rows = await q(`SELECT e.amount FROM escrows e
+        JOIN index_addresses ia ON ia.id = e.address_id
+        JOIN index_tickers it ON it.id = e.tick_id
+        WHERE e.action_index=? AND ia.address=? AND it.tick=?`,
+        [Number(actionIndex), address, GAS])
+    return rows.length ? Number(rows[0].amount) : null
+}
+async function creditRow(actionIndex, address) {
+    const rows = await q(`SELECT c.amount FROM credits c
+        JOIN index_addresses ia ON ia.id = c.address_id
+        JOIN index_tickers it ON it.id = c.tick_id
+        WHERE c.action_index=? AND ia.address=? AND it.tick=?`,
+        [Number(actionIndex), address, GAS])
+    return rows.length ? Number(rows[0].amount) : null
+}
+async function stakeAmounts(pubkey) {
+    const rows = await q(`SELECT s.amount FROM stakes s
+        JOIN index_pubkeys ip ON ip.id = s.signing_pubkey_id WHERE ip.pubkey=?`, [pubkey])
+    return rows.map(r => Number(r.amount))
+}
+// The audit row IS the verdict: the SLASH handler writes it only on the valid
+// path, so its absence means the proof was refused and the reason is in the
+// indexer log for this action.
+async function waitForSlashEvent(pubkey, ms = 60000) {
+    const deadline = Date.now() + ms
+    for (;;) {
+        const rows = await q(`SELECT cse.* FROM capability_slash_events cse
+            JOIN index_pubkeys ip ON ip.id = cse.signing_pubkey_id WHERE ip.pubkey=?`, [pubkey])
+        if (rows.length) return rows[0]
+        if (Date.now() >= deadline)
+            throw new Error('the SLASH was indexed but wrote no capability_slash_events row for ' +
+                pubkey + ' (tx ' + slashTxHash + ', action ' + slashActionIndex + '): the proof was ' +
+                'REFUSED, and the indexer log for that action carries the reason')
+        await new Promise(r => setTimeout(r, 1000))
     }
-    async function maxActionIndex() {
-        const rows = await q('SELECT COALESCE(MAX(action_index),0) AS m FROM actions')
-        return Number(rows[0].m)
+}
+
+async function setupCapabilitySlash(testContext) {
+    // Capability staking is BTC-only by protocol design: STAKE off Bitcoin is
+    // rejected outright (`invalid: ACTION (BTC only)`), so the bond this whole
+    // suite is built on can never land on LTC or DOGE. Measured in the
+    // 2026-09-05 release matrix, where this suite failed identically on both
+    // and the indexer had already written that verdict. Same skip the COLLECT
+    // suite carries for the same reason.
+    if (COIN_CODE !== 'BTC') {
+        console.log('capability SLASH rides on STAKE, which is BTC-only; skipping on ' + COIN_CODE)
+        testContext.skip()
+        return
     }
-    // Signed ledger rows for one action: credits positive, debits negative, escrows
-    // as written (a release is a negative row). Their sum is that action's effect on
-    // total supply, which is the quantity this whole suite is about.
-    async function ledgerFor(actionIndex) {
-        const one = async (table) => {
-            const rows = await q(`SELECT COALESCE(SUM(CAST(l.amount AS DECIMAL(30,8))),0) AS amt
-                FROM ${table} l JOIN index_tickers it ON it.id = l.tick_id
-                WHERE l.action_index=? AND it.tick=?`, [Number(actionIndex), GAS])
-            return Number(rows[0].amt)
-        }
-        const credits = await one('credits'), debits = await one('debits'), escrows = await one('escrows')
-        return { credits, debits, escrows, net: credits - debits + escrows }
-    }
-    // Everything OTHER actions did to XCHAIN supply while this test was running. The
-    // venue is shared, so the supply figure is only attributable once this is netted
-    // out; without it a stray action elsewhere would read as a slash defect.
-    async function otherLedgerNet(sinceActionIndex, exceptActionIndex) {
-        const one = async (table) => {
-            const rows = await q(`SELECT COALESCE(SUM(CAST(l.amount AS DECIMAL(30,8))),0) AS amt
-                FROM ${table} l JOIN index_tickers it ON it.id = l.tick_id
-                WHERE l.action_index > ? AND l.action_index <> ? AND it.tick=?`,
-                [Number(sinceActionIndex), Number(exceptActionIndex), GAS])
-            return Number(rows[0].amt)
-        }
-        return (await one('credits')) - (await one('debits')) + (await one('escrows'))
-    }
-    async function escrowRow(actionIndex, address) {
-        const rows = await q(`SELECT e.amount FROM escrows e
-            JOIN index_addresses ia ON ia.id = e.address_id
-            JOIN index_tickers it ON it.id = e.tick_id
-            WHERE e.action_index=? AND ia.address=? AND it.tick=?`,
-            [Number(actionIndex), address, GAS])
-        return rows.length ? Number(rows[0].amount) : null
-    }
-    async function creditRow(actionIndex, address) {
-        const rows = await q(`SELECT c.amount FROM credits c
-            JOIN index_addresses ia ON ia.id = c.address_id
-            JOIN index_tickers it ON it.id = c.tick_id
-            WHERE c.action_index=? AND ia.address=? AND it.tick=?`,
-            [Number(actionIndex), address, GAS])
-        return rows.length ? Number(rows[0].amount) : null
-    }
-    async function stakeAmounts(pubkey) {
-        const rows = await q(`SELECT s.amount FROM stakes s
-            JOIN index_pubkeys ip ON ip.id = s.signing_pubkey_id WHERE ip.pubkey=?`, [pubkey])
-        return rows.map(r => Number(r.amount))
-    }
-    // The audit row IS the verdict: the SLASH handler writes it only on the valid
-    // path, so its absence means the proof was refused and the reason is in the
-    // indexer log for this action.
-    async function waitForSlashEvent(pubkey, ms = 60000) {
-        const deadline = Date.now() + ms
-        for (;;) {
-            const rows = await q(`SELECT cse.* FROM capability_slash_events cse
-                JOIN index_pubkeys ip ON ip.id = cse.signing_pubkey_id WHERE ip.pubkey=?`, [pubkey])
-            if (rows.length) return rows[0]
-            if (Date.now() >= deadline)
-                throw new Error('the SLASH was indexed but wrote no capability_slash_events row for ' +
-                    pubkey + ' (tx ' + slashTxHash + ', action ' + slashActionIndex + '): the proof was ' +
-                    'REFUSED, and the indexer log for that action carries the reason')
-            await new Promise(r => setTimeout(r, 1000))
-        }
+    staker = await cryptoHelper.getNewFundedAddress('cap-slash-staker', COIN, NETWORK, null, 'legacy', 0, 1)
+    await gasHelper.ensureGasBalance(staker, '600')
+    submitter = await cryptoHelper.getNewFundedAddress('cap-slash-submitter', COIN, NETWORK, null, 'legacy', 0, 1)
+    await gasHelper.ensureGasBalance(submitter, '200')
+    offender = newOffender()
+
+    const st = await stakeHelper.sendStakeV1(staker, BOND, offender.pubkey)
+    assert.strictEqual(st.stake.status, 'valid', 'the bond must be staked before it can be slashed')
+
+    // Membership resolves at the proof's own snapshot_block BURIED by
+    // CANONICAL_REORG_BUFFER, which is where the hub that locked the slot resolved its
+    // own signer set. So the declared height has to sit a buffer ABOVE the first block
+    // this bond is active at, or the buried read lands before activation, finds no
+    // member, and the proof is refused. Mine the chain up to the declared height: the
+    // equivocation being proved has to be one the chain could actually have witnessed.
+    const activation = Number(st.stake.activation_block)
+    assert.ok(Number.isFinite(activation) && activation > 0,
+        'the stake row carries no activation_block; nothing can be proved against it')
+    // Derived through the gate rather than hard-added, so this reads correctly on a
+    // network where burial is still inert and the declared height IS the resolved one.
+    snapshotBlock = srb.isSnapshotBurialActive(activation + srb.CANONICAL_REORG_BUFFER, NETWORK)
+        ? activation + srb.CANONICAL_REORG_BUFFER
+        : activation
+    assert.strictEqual(srb.buriedSnapshotBlock(snapshotBlock, NETWORK), activation,
+        'the declared snapshot_block must resolve onto the activation block on this network')
+    const tip = await nodeConnector.getBlockCount()
+    if (tip < snapshotBlock) {
+        await regtestMinerConnector.generateBlocks(snapshotBlock - tip)
+        // The encoder refuses to pick UTXOs while the tracker trails the node, so the
+        // SLASH below cannot be built until the mining above has been absorbed.
+        const synced = await utxoTrackerConnector.waitForSync(120000)
+        assert.ok(synced && synced.synced,
+            'the utxo-tracker never caught up with the blocks mined for the activation delay')
     }
 
-    before(async function () {
-        // Capability staking is BTC-only by protocol design: STAKE off Bitcoin is
-        // rejected outright (`invalid: ACTION (BTC only)`), so the bond this whole
-        // suite is built on can never land on LTC or DOGE. Measured in the
-        // 2026-09-05 release matrix, where this suite failed identically on both
-        // and the indexer had already written that verdict. Same skip the COLLECT
-        // suite carries for the same reason.
-        if (COIN_CODE !== 'BTC') {
-            console.log('capability SLASH rides on STAKE, which is BTC-only; skipping on ' + COIN_CODE)
-            this.skip()
-            return
-        }
-        staker = await cryptoHelper.getNewFundedAddress('cap-slash-staker', COIN, NETWORK, null, 'legacy', 0, 1)
-        await gasHelper.ensureGasBalance(staker, '600')
-        submitter = await cryptoHelper.getNewFundedAddress('cap-slash-submitter', COIN, NETWORK, null, 'legacy', 0, 1)
-        await gasHelper.ensureGasBalance(submitter, '200')
-        offender = newOffender()
+    await submitSlashProof()
+}
 
-        const st = await stakeHelper.sendStakeV1(staker, BOND, offender.pubkey)
-        assert.strictEqual(st.stake.status, 'valid', 'the bond must be staked before it can be slashed')
+async function submitSlashProof() {
+    baselineMaxAction = await maxActionIndex()
+    supplyBefore = await gasSupply()
 
-        // Membership resolves at the proof's own snapshot_block BURIED by
-        // CANONICAL_REORG_BUFFER, which is where the hub that locked the slot resolved its
-        // own signer set. So the declared height has to sit a buffer ABOVE the first block
-        // this bond is active at, or the buried read lands before activation, finds no
-        // member, and the proof is refused. Mine the chain up to the declared height: the
-        // equivocation being proved has to be one the chain could actually have witnessed.
-        const activation = Number(st.stake.activation_block)
-        assert.ok(Number.isFinite(activation) && activation > 0,
-            'the stake row carries no activation_block; nothing can be proved against it')
-        // Derived through the gate rather than hard-added, so this reads correctly on a
-        // network where burial is still inert and the declared height IS the resolved one.
-        snapshotBlock = srb.isSnapshotBurialActive(activation + srb.CANONICAL_REORG_BUFFER, NETWORK)
-            ? activation + srb.CANONICAL_REORG_BUFFER
-            : activation
-        assert.strictEqual(srb.buriedSnapshotBlock(snapshotBlock, NETWORK), activation,
-            'the declared snapshot_block must resolve onto the activation block on this network')
-        const tip = await nodeConnector.getBlockCount()
-        if (tip < snapshotBlock) {
-            await regtestMinerConnector.generateBlocks(snapshotBlock - tip)
-            // The encoder refuses to pick UTXOs while the tracker trails the node, so the
-            // SLASH below cannot be built until the mining above has been absorbed.
-            const synced = await utxoTrackerConnector.waitForSync(120000)
-            assert.ok(synced && synced.synced,
-                'the utxo-tracker never caught up with the blocks mined for the activation delay')
-        }
+    // The offence: two conflicting XCONFIG canonicals for one (engine, round, view).
+    const contentA = String(snapshotBlock) + '|a1a1a1a1a1a1a1a1'
+    const contentB = String(snapshotBlock) + '|b2b2b2b2b2b2b2b2'
+    const msgA = eq.buildEquivCanonical(eq.ENGINE_TAGS.CONFIG, ROUND_ID, VIEW, contentA)
+    const msgB = eq.buildEquivCanonical(eq.ENGINE_TAGS.CONFIG, ROUND_ID, VIEW, contentB)
+    // SLASH|0|CAPABILITY|OFFENDER_PUBKEY|MSG_A|SIG_A|MSG_B|SIG_B. The EQUIV key is not
+    // a wire field: it contains '|' and the verifier re-derives it from MSG_A's header.
+    const wire = `SLASH|0|${CAPABILITY}|${offender.pubkey}|` +
+        `${b64(msgA)}|${sign(msgA)}|${b64(msgB)}|${sign(msgB)}`
 
-        baselineMaxAction = await maxActionIndex()
-        supplyBefore = await gasSupply()
+    console.log('Creating and sending SLASH V0 tx (equivocation proof)...')
+    slashTxHash = await transactionHelper.createAndSendTransaction(submitter, wire)
+    const indexed = await waitForTxIndexed(slashTxHash, { timeoutMs: 180000 })
+    slashActionIndex = Number(indexed[0].action_index)
 
-        // The offence: two conflicting XCONFIG canonicals for one (engine, round, view).
-        const contentA = String(snapshotBlock) + '|a1a1a1a1a1a1a1a1'
-        const contentB = String(snapshotBlock) + '|b2b2b2b2b2b2b2b2'
-        const msgA = eq.buildEquivCanonical(eq.ENGINE_TAGS.CONFIG, ROUND_ID, VIEW, contentA)
-        const msgB = eq.buildEquivCanonical(eq.ENGINE_TAGS.CONFIG, ROUND_ID, VIEW, contentB)
-        // SLASH|0|CAPABILITY|OFFENDER_PUBKEY|MSG_A|SIG_A|MSG_B|SIG_B. The EQUIV key is not
-        // a wire field: it contains '|' and the verifier re-derives it from MSG_A's header.
-        const wire = `SLASH|0|${CAPABILITY}|${offender.pubkey}|` +
-            `${b64(msgA)}|${sign(msgA)}|${b64(msgB)}|${sign(msgB)}`
+    event = await waitForSlashEvent(offender.pubkey)
+    supplyAfter = await gasSupply()
 
-        console.log('Creating and sending SLASH V0 tx (equivocation proof)...')
-        slashTxHash = await transactionHelper.createAndSendTransaction(submitter, wire)
-        const rows = await waitForTxIndexed(slashTxHash, { timeoutMs: 180000 })
-        slashActionIndex = Number(rows[0].action_index)
+    // The bond is burned to zero and the key is barred from every signer set for
+    // good, so there is no UNSTAKE left to owe the venue. Settle the fixture ledger
+    // by hand rather than let the sweep broadcast an UNSTAKE that must be rejected.
+    stakeTeardown.noteUnstake({ signingPubkey: offender.pubkey })
+}
 
-        event = await waitForSlashEvent(offender.pubkey)
-        supplyAfter = await gasSupply()
-
-        // The bond is burned to zero and the key is barred from every signer set for
-        // good, so there is no UNSTAKE left to owe the venue. Settle the fixture ledger
-        // by hand rather than let the sweep broadcast an UNSTAKE that must be rejected.
-        stakeTeardown.noteUnstake({ signingPubkey: offender.pubkey })
-    })
+describe(CAPABILITY_SLASH_TITLE, function () {
+    before(async function () { await setupCapabilitySlash(this) })
 
     it('burns the offender\'s entire capability bond', async function () {
         assert.strictEqual(Number(event.amount), Number(BOND),
