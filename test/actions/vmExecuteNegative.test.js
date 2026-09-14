@@ -21,55 +21,54 @@ const transactionHelper = require('../transactionHelper')
  * must move no balances. (EXECUTE on a nonexistent contract index is covered in the
  * library suite to avoid risking the live indexer's per-block transaction.)
  */
+const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
+const NOOP = `module.exports = { meta: { name: 'Noop', description: 'Returns a constant, used as the target of negative execute cases.', version: '1.0.0' }, ping: function(){ return 'ok'; } };`
+
+let deployer = null
+
+async function q(sql, params) {
+    const conn = await indexerDatabase.getConnection()
+    try { return await conn.query(sql, params) }
+    finally { await conn.release() }
+}
+async function balanceOf(address, tick) {
+    const rows = await q(`SELECT b.amount FROM balances b
+        JOIN index_addresses ia ON ia.id=b.address_id
+        JOIN index_tickers it ON it.id=b.tick_id
+        WHERE ia.address=? AND it.tick=?`, [address, tick])
+    return rows.length ? String(rows[0].amount) : null
+}
+async function rawDeposit(addr, ci, tick, qty) {
+    return await transactionHelper.createAndSendTransaction(addr, `DEPOSIT|0|${ci}|${tick}|${qty}`)
+}
+async function rawWithdraw(addr, ci, tick, qty) {
+    return await transactionHelper.createAndSendTransaction(addr, `WITHDRAW|0|${ci}|${tick}|${qty}`)
+}
+async function waitDeposit(source, ci, tick, timeMax = 50000) {
+    const end = Date.now() + timeMax
+    while (Date.now() < end) {
+        const r = await indexerDatabase.checkDeposit({ source, contractIndex: ci, tick })
+        if (r) return r
+        await new Promise(res => setTimeout(res, 1000))
+    }
+    return null
+}
+async function waitWithdrawal(source, ci, tick, timeMax = 50000) {
+    const end = Date.now() + timeMax
+    while (Date.now() < end) {
+        const r = await indexerDatabase.checkWithdrawal({ source, contractIndex: ci, tick })
+        if (r) return r
+        await new Promise(res => setTimeout(res, 1000))
+    }
+    return null
+}
+function randTick(p) { let s = p; for (let i = 0; i < 5; i++) s += String.fromCharCode(65 + Math.floor(Math.random() * 26)); return s }
+
+let contractIndex = null
+let contractAddr = null
+let heldTick = null
+
 describe('VM Execute Negative: deposit/withdraw failure paths', function () {
-
-    const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
-    const NOOP = `module.exports = { meta: { name: 'Noop', description: 'Returns a constant, used as the target of negative execute cases.', version: '1.0.0' }, ping: function(){ return 'ok'; } };`
-
-    let deployer = null
-
-    async function q(sql, params) {
-        const conn = await indexerDatabase.getConnection()
-        try { return await conn.query(sql, params) }
-        finally { await conn.release() }
-    }
-    async function balanceOf(address, tick) {
-        const rows = await q(`SELECT b.amount FROM balances b
-            JOIN index_addresses ia ON ia.id=b.address_id
-            JOIN index_tickers it ON it.id=b.tick_id
-            WHERE ia.address=? AND it.tick=?`, [address, tick])
-        return rows.length ? String(rows[0].amount) : null
-    }
-    async function rawDeposit(addr, ci, tick, qty) {
-        return await transactionHelper.createAndSendTransaction(addr, `DEPOSIT|0|${ci}|${tick}|${qty}`)
-    }
-    async function rawWithdraw(addr, ci, tick, qty) {
-        return await transactionHelper.createAndSendTransaction(addr, `WITHDRAW|0|${ci}|${tick}|${qty}`)
-    }
-    async function waitDeposit(source, ci, tick, timeMax = 50000) {
-        const end = Date.now() + timeMax
-        while (Date.now() < end) {
-            const r = await indexerDatabase.checkDeposit({ source, contractIndex: ci, tick })
-            if (r) return r
-            await new Promise(res => setTimeout(res, 1000))
-        }
-        return null
-    }
-    async function waitWithdrawal(source, ci, tick, timeMax = 50000) {
-        const end = Date.now() + timeMax
-        while (Date.now() < end) {
-            const r = await indexerDatabase.checkWithdrawal({ source, contractIndex: ci, tick })
-            if (r) return r
-            await new Promise(res => setTimeout(res, 1000))
-        }
-        return null
-    }
-    function randTick(p) { let s = p; for (let i = 0; i < 5; i++) s += String.fromCharCode(65 + Math.floor(Math.random() * 26)); return s }
-
-    let contractIndex = null
-    let contractAddr = null
-    let heldTick = null
-
     before(async function () {
         deployer = await cryptoHelper.getNewFundedAddress('vmneg-deployer', COIN, NETWORK, null, 'legacy', 0, 1)
         await gasHelper.ensureGasBalance(deployer, '500')
