@@ -86,7 +86,9 @@ describe('MINT chaining', () => {
                 ' the first one did, moved ' + deltas[i] + ' (deltas: ' + deltas.join(', ') + ')')
         }
     })
+})
 
+describe('MINT chaining', () => {
     // The case above chains on CONFIRMED state, which is what the platform's own
     // driver does, and on that path even a broken encoder looks fine. This one
     // reproduces the window the defect actually lived in: the caller re-supplies
