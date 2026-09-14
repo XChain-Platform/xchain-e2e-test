@@ -27,14 +27,12 @@ const gasHelper = require('../helpers/gasHelper')
 // contract-facing path. Likely the SWEEP handler's fee-payment validation has no valid mode in an
 // emission context. Un-skip once that's resolved, or reframe as a rejection assertion if contract
 // SWEEP is intentionally unsupported.
-describe('VM Contract SWEEP: a contract sweeps its own order escrow', function () {
+const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
 
-    const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
-
-    // Opens a self-addressed token ORDER (escrows 40 of the test tick out of the contract), then
-    // exposes a sweep that routes the contract's own order escrow to a destination. BALANCES and
-    // OWNERSHIPS are explicitly 0 so only the ORDER-escrow path (source_id reader) is exercised.
-    const SWEEPER = `module.exports = {
+// Opens a self-addressed token ORDER (escrows 40 of the test tick out of the contract), then
+// exposes a sweep that routes the contract's own order escrow to a destination. BALANCES and
+// OWNERSHIPS are explicitly 0 so only the ORDER-escrow path (source_id reader) is exercised.
+const SWEEPER = `module.exports = {
         meta: { name: 'Sweeper', description: 'Emits an order so contract-held balances can be swept.', version: '1.0.0' },
         mkorder: function(){
             xchain.emit.order({ giveCoin: '${CHAIN}', giveTick: xchain.getInputParam(0), giveAmount: '40',
@@ -45,39 +43,40 @@ describe('VM Contract SWEEP: a contract sweeps its own order escrow', function (
         }
     };`
 
-    let deployer = null
+let deployer = null
 
-    async function q(sql, params) {
-        const conn = await indexerDatabase.getConnection()
-        try { return await conn.query(sql, params) }
-        finally { await conn.release() }
-    }
-    async function balanceOf(address, tick) {
-        const rows = await q(`SELECT b.amount FROM balances b
-            JOIN index_addresses ia ON ia.id=b.address_id
-            JOIN index_tickers it ON it.id=b.tick_id
-            WHERE ia.address=? AND it.tick=?`, [address, tick])
-        return rows.length ? String(rows[0].amount) : null
-    }
-    async function emissionsFor(executionIndex) {
-        return await q(`SELECT emitted_action, action_index FROM contract_emissions
-            WHERE execution_index=? ORDER BY position`, [executionIndex])
-    }
-    async function orderStatus(orderActionIndex) {
-        const rows = await q(`SELECT s.status AS st FROM order_statuses os
-            JOIN index_statuses s ON s.id=os.status_id
-            WHERE os.order_action_index=? ORDER BY os.action_index DESC LIMIT 1`, [orderActionIndex])
-        return rows.length ? rows[0].st : null
-    }
-    function randTick(p) { let s = p; for (let i = 0; i < 5; i++) s += String.fromCharCode(65 + Math.floor(Math.random() * 26)); return s }
-    async function fundedContract(code, tick, depositAmt) {
-        await issueHelper.sendIssueV0(deployer, tick, '1000', '1000', '0', 'vm sweep', '1000')
-        const dep = await vmHelper.sendDeployV0(deployer, code, 250000)
-        const ci = dep.contract.action_index
-        await vmHelper.sendDepositV0(deployer, ci, tick, depositAmt)
-        return ci
-    }
+async function q(sql, params) {
+    const conn = await indexerDatabase.getConnection()
+    try { return await conn.query(sql, params) }
+    finally { await conn.release() }
+}
+async function balanceOf(address, tick) {
+    const rows = await q(`SELECT b.amount FROM balances b
+        JOIN index_addresses ia ON ia.id=b.address_id
+        JOIN index_tickers it ON it.id=b.tick_id
+        WHERE ia.address=? AND it.tick=?`, [address, tick])
+    return rows.length ? String(rows[0].amount) : null
+}
+async function emissionsFor(executionIndex) {
+    return await q(`SELECT emitted_action, action_index FROM contract_emissions
+        WHERE execution_index=? ORDER BY position`, [executionIndex])
+}
+async function orderStatus(orderActionIndex) {
+    const rows = await q(`SELECT s.status AS st FROM order_statuses os
+        JOIN index_statuses s ON s.id=os.status_id
+        WHERE os.order_action_index=? ORDER BY os.action_index DESC LIMIT 1`, [orderActionIndex])
+    return rows.length ? rows[0].st : null
+}
+function randTick(p) { let s = p; for (let i = 0; i < 5; i++) s += String.fromCharCode(65 + Math.floor(Math.random() * 26)); return s }
+async function fundedContract(code, tick, depositAmt) {
+    await issueHelper.sendIssueV0(deployer, tick, '1000', '1000', '0', 'vm sweep', '1000')
+    const dep = await vmHelper.sendDeployV0(deployer, code, 250000)
+    const ci = dep.contract.action_index
+    await vmHelper.sendDepositV0(deployer, ci, tick, depositAmt)
+    return ci
+}
 
+describe('VM Contract SWEEP: a contract sweeps its own order escrow', function () {
     before(async function () {
         deployer = await cryptoHelper.getNewFundedAddress('vmsweep-deployer', COIN, NETWORK, null, 'legacy', 0, 1)
         await gasHelper.ensureGasBalance(deployer, '500')
