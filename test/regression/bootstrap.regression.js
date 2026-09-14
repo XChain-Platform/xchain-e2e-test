@@ -54,6 +54,13 @@ describe('[regression:p0] Bootstrap Orchestration', function () {
             assert.strictEqual(parts[1], 'regtest')
         })
     })
+})
+
+describe('[regression:p0] Bootstrap Orchestration', function () {
+
+    afterEach(function () {
+        sinon.restore()
+    })
 
     describe('Hub discovery fallback', function () {
 
@@ -89,6 +96,13 @@ describe('[regression:p0] Bootstrap Orchestration', function () {
             assert.strictEqual(DATABASE_URL, 'localhost')
         })
     })
+})
+
+describe('[regression:p0] Bootstrap Orchestration', function () {
+
+    afterEach(function () {
+        sinon.restore()
+    })
 
     describe('Connector instantiation', function () {
 
@@ -112,6 +126,13 @@ describe('[regression:p0] Bootstrap Orchestration', function () {
             assert.ok(db.pool)
         })
     })
+})
+
+describe('[regression:p0] Bootstrap Orchestration', function () {
+
+    afterEach(function () {
+        sinon.restore()
+    })
 
     describe('Mining time configuration', function () {
 
@@ -128,6 +149,13 @@ describe('[regression:p0] Bootstrap Orchestration', function () {
             assert.strictEqual(body.params.max_time, 1000)
             assert.strictEqual(body.params.tx_added_time, 1000)
         })
+    })
+})
+
+describe('[regression:p0] Bootstrap Orchestration', function () {
+
+    afterEach(function () {
+        sinon.restore()
     })
 
     describe('Global config resolution', function () {
@@ -156,6 +184,13 @@ describe('[regression:p0] Bootstrap Orchestration', function () {
                 assert.strictEqual(network.dustThreshold, dust, `${combo} dustThreshold should be ${dust}`)
             }
         })
+    })
+})
+
+describe('[regression:p0] Bootstrap Orchestration', function () {
+
+    afterEach(function () {
+        sinon.restore()
     })
 
     describe('Graceful failure on missing service', function () {
