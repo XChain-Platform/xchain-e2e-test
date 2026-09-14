@@ -40,6 +40,12 @@ function parseWaitTunable(raw, def){
     return Number.isInteger(n) && n >= 0 ? n : def;
 }
 
+/**
+ * A named-method wrapper around one mariadb connection pool: every query the
+ * e2e suites need lives here as a method, never as a literal SQL string at
+ * the call site, and the waitFor* helpers below poll these methods for a row
+ * the indexer has not written yet.
+ */
 class Database {
     constructor(host, port, dbName, user, pass){
         this.sqlPath  = __dirname+'/sql';
@@ -2350,9 +2356,15 @@ class Database {
         let connection = await this.getConnection()
         try {
             const rows = await connection.query(query, [responseActionIndex])
+            // No response row yet, or one with nothing recorded: report no
+            // signatures rather than throw, so a caller can keep polling.
             if(rows.length === 0 || !rows[0].validator_signatures) return []
             let parsed
+            // Malformed JSON in the column is a data problem, not a
+            // missing-row one; treat it the same as "no signatures".
             try { parsed = JSON.parse(rows[0].validator_signatures) } catch(e){ return [] }
+            // The column is JSON-typed but not schema-enforced to hold an
+            // array; guard the shape before mapping it below.
             if(!Array.isArray(parsed)) return []
             return parsed.map(s => ({ validator_pubkey: s.pubkey, validator_sig: s.sig }))
         } catch(err){ this._warnOnSchemaError('getAttestationValidatorSignatures', err); return [] } finally { await connection.release() }
