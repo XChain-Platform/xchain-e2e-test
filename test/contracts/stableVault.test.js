@@ -160,8 +160,6 @@ function ok(x, c, d, p) {
         x.math.multiply(d, x.state.get('minRatioPct')));
 }`
 
-describe('Stable Vault: mini-MakerDAO (contract-emitted ISSUE/MINT/DESTROY + oracle getPrice)', function () {
-
     const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
     const COLL = 'XCHAIN'      // collateral = the gas token; nothing extra to issue
     const RATIO = '150'
@@ -183,6 +181,7 @@ describe('Stable Vault: mini-MakerDAO (contract-emitted ISSUE/MINT/DESTROY + ora
     let liq = null             // second vault owner acting as liquidator
     let ci = null              // contract action_index
     let contractAddr = null
+    let stableVaultSetup = null
 
     async function q(sql, params) {
         const conn = await indexerDatabase.getConnection()
@@ -219,14 +218,22 @@ describe('Stable Vault: mini-MakerDAO (contract-emitted ISSUE/MINT/DESTROY + ora
         })
     }
 
-    before(async function () {
-        alice = await cryptoHelper.getNewFundedAddress('vault-alice', COIN, NETWORK, null, 'legacy', 0, 1)
-        liq = await cryptoHelper.getNewFundedAddress('vault-liq', COIN, NETWORK, null, 'legacy', 0, 1)
-        await gasHelper.ensureGasBalance(alice, '2000')
-        await gasHelper.ensureGasBalance(liq, '2000')
-        assert(await priceSnapshotHelper.isAvailable(), 'price_snapshots must be reachable for this suite')
-        await priceSnapshotHelper.clearPair(PAIR)
-    })
+    async function prepareStableVault() {
+        if (!stableVaultSetup) {
+            stableVaultSetup = (async function () {
+                alice = await cryptoHelper.getNewFundedAddress('vault-alice', COIN, NETWORK, null, 'legacy', 0, 1)
+                liq = await cryptoHelper.getNewFundedAddress('vault-liq', COIN, NETWORK, null, 'legacy', 0, 1)
+                await gasHelper.ensureGasBalance(alice, '2000')
+                await gasHelper.ensureGasBalance(liq, '2000')
+                assert(await priceSnapshotHelper.isAvailable(), 'price_snapshots must be reachable for this suite')
+                await priceSnapshotHelper.clearPair(PAIR)
+            })()
+        }
+        return stableVaultSetup
+    }
+
+describe('Stable Vault: mini-MakerDAO (contract-emitted ISSUE/MINT/DESTROY + oracle getPrice)', function () {
+    before(prepareStableVault)
 
     it('deploys the vault system and ISSUEs its own stable token', async function () {
         const params = [COLL, STABLE, PAIR, RATIO, BONUS, MAXAGE].join('|')
@@ -272,6 +279,10 @@ describe('Stable Vault: mini-MakerDAO (contract-emitted ISSUE/MINT/DESTROY + ora
         assert(over.execution, 'empty-vault borrow should still record an execution row')
         assert.notStrictEqual(over.execution.status, 'valid', 'empty-vault borrow must not be valid')
     })
+})
+
+describe('Stable Vault: mini-MakerDAO (contract-emitted ISSUE/MINT/DESTROY + oracle getPrice)', function () {
+    before(prepareStableVault)
 
     it('repay burns the stable against the debt (emitted DESTROY)', async function () {
         await vmHelper.sendDepositV0(alice, ci, STABLE, '50')
@@ -292,6 +303,10 @@ describe('Stable Vault: mini-MakerDAO (contract-emitted ISSUE/MINT/DESTROY + ora
         assert.notStrictEqual(ex.execution.status, 'valid', 'liquidating a healthy vault must not be valid')
         assert.strictEqual(await stateOf('v:' + alice.address + ':debt'), '150', 'vault must be untouched')
     })
+})
+
+describe('Stable Vault: mini-MakerDAO (contract-emitted ISSUE/MINT/DESTROY + oracle getPrice)', function () {
+    before(prepareStableVault)
 
     it('price drop: a second vault borrows the stable and liquidates the first', async function () {
         // The liquidator sources stable the honest way: their own vault.
