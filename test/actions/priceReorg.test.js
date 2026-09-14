@@ -55,12 +55,14 @@ async function tip() { const r = await q(`SELECT MAX(block_index) h FROM blocks`
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 function randTick(p) { let s = p; for (let i = 0; i < 6; i++) s += String.fromCharCode(65 + Math.floor(Math.random() * 26)); return s }
 
+function skipUnsupportedReorg(ctx) {
+    if (global.COIN_CODE === 'DOGE') ctx.skip()   // generateblock unavailable on Core 1.14
+}
+
 describe('PRICE v1 Reorg: a published oracle quote rolls back across an on-chain reorg', function () {
     this.timeout(0)
 
-    before(async function () {
-        if (global.COIN_CODE === 'DOGE') this.skip()   // generateblock unavailable on Core 1.14
-    })
+    before(function () { skipUnsupportedReorg(this) })
 
     it('orphaning the PRICE block rolls back the prices row', async function () {
         const addr = await cryptoHelper.getNewFundedAddress('pricer-pub', COIN, NETWORK, null, 'legacy', 0, 2)
