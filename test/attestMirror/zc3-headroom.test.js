@@ -110,203 +110,217 @@ module.exports = {
 };
 `
 
+let venue      = null
+let up         = false
+let testServer = null
+let testUrl    = null
+let contract   = null
+let stoppedHub = null
+
+async function setupZc3() {
+    testServer = await startAttestTestServer({ body: FIXED_BODY })
+    testUrl    = testServer.url
+
+    const staked = await provisionDrillIdentities({ label: 'zc3', count: 5, redundancy: REDUNDANCY })
+    venue = new AttestMirrorVenue({
+        label: 'zc3', identities: staked.identities, hubExtraEnv: testServer.hubEnv,
+        attestationPollMs: POLL_MS, forwardS: FORWARD_S,
+    })
+    up = await venue.start()
+    if (!up) {
+        console.log('ZC3 SKIPPED: ' + venue.unavailable)
+        this.skip()
+        return
+    }
+    await waitForVenueIndexersAtTip(venue)
+    contract = await deployRequestContract({ label: 'zc3', code: CONTRACT_CODE })
+}
+
+async function teardownZc3() {
+    // The hub goes back whatever happened, so the venue teardown kills a process it
+    // started rather than leaking one, and a re-run finds five hubs.
+    if (venue && stoppedHub !== null) {
+        try { await venue.startHub(stoppedHub) } catch (e) {
+            console.log('ZC3 teardown: hub ' + stoppedHub + ' did not restart (' + (e && e.message) + ')')
+        }
+    }
+    if (testServer) await testServer.close()
+    if (venue) await venue.stop()
+}
+
+async function issueRequest() {
+    const sinceAction = await attestRequestWatermark(contract.contractIndex)
+    await clearBeforeBroadcast()
+    const exec = await mineWhile(() => vmHelper.sendExecuteV0(
+        contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl]))
+    return { exec, sinceAction }
+}
+
+async function readDraw(sinceAction) {
+    const request   = await findEmittedAttestRequest(
+        contract.contractIndex, sinceAction + 1, { label: 'zc3' })
+    const requestId = request.requestId
+    await settleOrReport('zc3')
+
+    // ---- the draw, AFTER the request is mined -----------------------------
+    //
+    // Read from a hub rather than re-ranked here: `getattestationresponsibleset`
+    // resolves the capability snapshot, the provider floor and the widening step
+    // through the hub's own engines, so it cannot drift from what a live round
+    // does. It answers for PENDING requests only, which is exactly the window this
+    // drill has to act inside.
+    let draw = null
+    let drawFrom = null
+    for (const hub of venue.hubs) {
+        const got = await venue.responsibleSetFromHub(hub.index, requestId)
+        if (!got.error) { draw = got; drawFrom = hub.index; break }
+    }
+    return { requestId, draw, drawFrom }
+}
+
+function selectVictim(draw) {
+    // THE HEADROOM SLOT IS PRESENT, and this is the precondition the rest rests on.
+    // Above the zero-conf height V2 returns `headroom` at elapsed 0 rather than 0
+    // (§4.1, D27), so the set is redundancy + 1 from the request's own block. If it
+    // were redundancy, stopping a member would leave two live signers and no round
+    // could finalize at all: the failure would look like a mirror fault and would
+    // in fact be a missing ladder.
+
+    // Rank 1: inside the first `redundancy` slots so the headroom member is what
+    // supplies the third signature, and not rank 0, which is the leader at step 0.
+    const victimKey = draw.responsible[1]
+    const victimHub = venue.hubIndexForPubkey(victimKey)
+    return { victimKey, victimHub }
+}
+
+async function stopVictim(victimHub, victimKey, requestId) {
+    await venue.stopHub(victimHub)
+    stoppedHub = victimHub
+    console.log('ZC3: stopped hub ' + victimHub + ' (' + victimKey.slice(0, 16) + '...), rank 1 of the draw')
+
+    // THE PRECONDITION, ASSERTED. "Stopped AFTER the draw, before it served" is the
+    // whole construction, and a poll that fired first would quietly turn this into a
+    // round that four members ran and three finished, which is a different claim.
+    // The round-start line is written once per started round on a responsible hub,
+    // so its absence on the victim is the evidence.
+    return venue.logTail('hub' + victimHub)
+        .includes('AttestationRound: starting ' + requestId.slice(0, 16) + '...')
+}
+
+async function waitForSignedResult(requestId, draw) {
+    // ---- the round finalizes without it -----------------------------------
+    const mirrorRows = await waitForMirrorRowEverywhere(venue, requestId, 15 * 60 * 1000, {
+        // The ladder is height-driven, so a still chain never climbs it. Capped well
+        // inside the first segment: this drill's whole claim is that no climbing is
+        // needed, and mining past the segment would let a LATER slot rescue the round
+        // and pass for the wrong reason.
+        mineWhileWaiting: { perPoll: 1, maxBlocks: 4 },
+    })
+
+    // EXACTLY REDUNDANCY VALID SIGNATURES. Not "at least": the indexer's verifier
+    // admits `validSigs >= redundancy`, and the interesting number is how many the
+    // federation could actually produce with one drawn member dark. Three is the
+    // arithmetic §4.4 states (quorum is measured on the PRE-widening size, so
+    // needed stays at redundancy); four would mean the stopped hub signed anyway.
+    let signers = mirrorRows[0].signer_pubkeys
+    if (typeof signers === 'string') signers = JSON.parse(signers)
+    signers = signers.map((s) => String(s).toLowerCase())
+
+    // THE HEADROOM MEMBER IS ONE OF THEM. This is what makes the case about §4.1
+    // rather than about a three-member set that happened to have three live hubs:
+    // without the widened slot the third signature has nowhere to come from.
+    const headroomKey = String(draw.responsible[REDUNDANCY]).toLowerCase()
+    const drawn = new Set(draw.responsible.map((p) => String(p).toLowerCase()))
+    const strays = signers.filter((s) => !drawn.has(s))
+    return { mirrorRows, signers, headroomKey, strays }
+}
+
+async function applyResult(requestId) {
+    // ---- and binds at the same block on both indexers ---------------------
+    const applied = await waitForAppliedEverywhere(venue, requestId, 15 * 60 * 1000, {
+        // The applier runs in the block loop, so on a chain nobody is mining a
+        // delivered, valid, applicable response is never applied. Capped inside the
+        // first segment for the same reason as above.
+        mineWhileWaiting: { perPoll: 1, maxBlocks: 6 },
+    })
+    const diffs = diffRows(applied[0], applied[1], APPLIED_FIELDS)
+    return { applied, diffs }
+}
+
+async function bindingWindow(requestId, applied) {
+    const local        = await readRequestRow(venue, 0, requestId)
+    const requestBlock = Number(local.block_index)
+    const deadline     = Number(local.deadline_block)
+    const bindBlock    = Number(applied[0].block_index)
+
+    // ladder starts at the REQUEST's own block above the height (startOffset 0), the
+    // span runs to the deadline, and the segment is span / (maxSlots + 1). Below the
+    // height it started at request + 3 and the first widen arrived a segment later,
+    // which is the six-block wait measured on the public testnet. Spelled here rather than taken
+    // from `widenArithmetic`, which computes the STAGE-1 geometry and would give a
+    // different, wrong boundary.
+    const span    = deadline - requestBlock
+    const segment = span / 3
+    const cutoff  = requestBlock + segment
+    return { requestBlock, deadline, bindBlock, span, cutoff }
+}
+
 describe('ZC3: a drawn member that cannot sign is covered by the headroom slot', function () {
     this.timeout(75 * 60 * 1000)
-
-    let venue      = null
-    let up         = false
-    let testServer = null
-    let testUrl    = null
-    let contract   = null
-    let stoppedHub = null
-
-    before(async function () {
-        testServer = await startAttestTestServer({ body: FIXED_BODY })
-        testUrl    = testServer.url
-
-        const staked = await provisionDrillIdentities({ label: 'zc3', count: 5, redundancy: REDUNDANCY })
-        venue = new AttestMirrorVenue({
-            label: 'zc3', identities: staked.identities, hubExtraEnv: testServer.hubEnv,
-            attestationPollMs: POLL_MS, forwardS: FORWARD_S,
-        })
-        up = await venue.start()
-        if (!up) {
-            console.log('ZC3 SKIPPED: ' + venue.unavailable)
-            this.skip()
-            return
-        }
-        await waitForVenueIndexersAtTip(venue)
-        contract = await deployRequestContract({ label: 'zc3', code: CONTRACT_CODE })
-    })
-
-    after(async function () {
-        // The hub goes back whatever happened, so the venue teardown kills a process it
-        // started rather than leaking one, and a re-run finds five hubs.
-        if (venue && stoppedHub !== null) {
-            try { await venue.startHub(stoppedHub) } catch (e) {
-                console.log('ZC3 teardown: hub ' + stoppedHub + ' did not restart (' + (e && e.message) + ')')
-            }
-        }
-        if (testServer) await testServer.close()
-        if (venue) await venue.stop()
-    })
+    before(setupZc3)
+    after(teardownZc3)
 
     it('finalizes with exactly redundancy signatures inside the first ladder segment', async function () {
-        const sinceAction = await attestRequestWatermark(contract.contractIndex)
-        await clearBeforeBroadcast()
-        const exec = await mineWhile(() => vmHelper.sendExecuteV0(
-            contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl]))
+        const { exec, sinceAction } = await issueRequest()
         assert.strictEqual(exec.execution.status, 'valid',
             'the EXECUTE that emits the request came back ' + exec.execution.status)
-
-        const request   = await findEmittedAttestRequest(
-            contract.contractIndex, sinceAction + 1, { label: 'zc3' })
-        const requestId = request.requestId
-        await settleOrReport('zc3')
-
-        // ---- the draw, AFTER the request is mined -----------------------------
-        //
-        // Read from a hub rather than re-ranked here: `getattestationresponsibleset`
-        // resolves the capability snapshot, the provider floor and the widening step
-        // through the hub's own engines, so it cannot drift from what a live round
-        // does. It answers for PENDING requests only, which is exactly the window this
-        // drill has to act inside.
-        let draw = null
-        let drawFrom = null
-        for (const hub of venue.hubs) {
-            const got = await venue.responsibleSetFromHub(hub.index, requestId)
-            if (!got.error) { draw = got; drawFrom = hub.index; break }
-        }
+        const { requestId, draw, drawFrom } = await readDraw(sinceAction)
         assert.ok(draw, 'no venue hub could resolve the responsible set for ' + requestId +
             ' while it was pending\n' + allHubTails(venue))
-        console.log('ZC3: hub ' + drawFrom + ' drew ' + jsonSafe(draw.responsible.map((p) => p.slice(0, 16))) +
-            ' (redundancy ' + draw.redundancy + ', widen ' + draw.widen + ') for request ' +
-            requestId.slice(0, 12))
-
-        // THE HEADROOM SLOT IS PRESENT, and this is the precondition the rest rests on.
-        // Above the zero-conf height V2 returns `headroom` at elapsed 0 rather than 0
-        // (§4.1, D27), so the set is redundancy + 1 from the request's own block. If it
-        // were redundancy, stopping a member would leave two live signers and no round
-        // could finalize at all: the failure would look like a mirror fault and would
-        // in fact be a missing ladder.
+        console.log('ZC3: hub ' + drawFrom + ' drew ' + jsonSafe(draw.responsible.map((p) => p.slice(0, 16))) + ' (redundancy ' + draw.redundancy + ', widen ' + draw.widen + ') for request ' + requestId.slice(0, 12))
         assert.strictEqual(draw.widen, 1,
-            'the draw carries widen ' + draw.widen + ' rather than 1. At the request\'s own block ' +
-            'the V2 ladder returns its headroom slot and nothing more, so 0 means the stage-2 early ' +
-            'return is not armed and 2 or more means blocks went by before the draw was read.')
+            'the draw carries widen ' + draw.widen + ' rather than 1. At the request\'s own block ' + 'the V2 ladder returns its headroom slot and nothing more, so 0 means the stage-2 early ' + 'return is not armed and 2 or more means blocks went by before the draw was read.')
         assert.strictEqual(draw.responsible.length, REDUNDANCY + 1,
-            'the responsible set holds ' + draw.responsible.length + ' member(s) rather than ' +
-            (REDUNDANCY + 1) + ' (redundancy ' + REDUNDANCY + ' plus one headroom slot): ' +
-            jsonSafe(draw.responsible.map((p) => p.slice(0, 16))))
-
-        // Rank 1: inside the first `redundancy` slots so the headroom member is what
-        // supplies the third signature, and not rank 0, which is the leader at step 0.
-        const victimKey = draw.responsible[1]
-        const victimHub = venue.hubIndexForPubkey(victimKey)
+            'the responsible set holds ' + draw.responsible.length + ' member(s) rather than ' + (REDUNDANCY + 1) + ' (redundancy ' + REDUNDANCY + ' plus one headroom slot): ' + jsonSafe(draw.responsible.map((p) => p.slice(0, 16))))
+        const { victimKey, victimHub } = selectVictim(draw)
         assert.ok(victimHub >= 0,
-            'the drawn member at rank 1 (' + victimKey.slice(0, 16) + '...) belongs to no venue hub. ' +
-            'The venue adopts the roster precisely so every drawn key has a live hub here.')
-
-        await venue.stopHub(victimHub)
-        stoppedHub = victimHub
-        console.log('ZC3: stopped hub ' + victimHub + ' (' + victimKey.slice(0, 16) + '...), rank 1 of the draw')
-
-        // THE PRECONDITION, ASSERTED. "Stopped AFTER the draw, before it served" is the
-        // whole construction, and a poll that fired first would quietly turn this into a
-        // round that four members ran and three finished, which is a different claim.
-        // The round-start line is written once per started round on a responsible hub,
-        // so its absence on the victim is the evidence.
-        const victimStarted = venue.logTail('hub' + victimHub)
-            .includes('AttestationRound: starting ' + requestId.slice(0, 16) + '...')
+            'the drawn member at rank 1 (' + victimKey.slice(0, 16) + '...) belongs to no venue hub. ' + 'The venue adopts the roster precisely so every drawn key has a live hub here.')
+        const victimStarted = await stopVictim(victimHub, victimKey, requestId)
         assert.strictEqual(victimStarted, false,
-            'hub ' + victimHub + ' had already started a round for ' + requestId.slice(0, 16) +
-            '... before it was stopped, so it is not a member that never signed and ZC3 is measuring ' +
-            'something else. Its poll fired inside the window; re-run (the poll interval is the ' +
-            'window, see the header).\n' + venue.logTail('hub' + victimHub))
-
-        // ---- the round finalizes without it -----------------------------------
-        const mirrorRows = await waitForMirrorRowEverywhere(venue, requestId, 15 * 60 * 1000, {
-            // The ladder is height-driven, so a still chain never climbs it. Capped well
-            // inside the first segment: this drill's whole claim is that no climbing is
-            // needed, and mining past the segment would let a LATER slot rescue the round
-            // and pass for the wrong reason.
-            mineWhileWaiting: { perPoll: 1, maxBlocks: 4 },
-        })
+            'hub ' + victimHub + ' had already started a round for ' + requestId.slice(0, 16) + '... before it was stopped, so it is not a member that never signed and ZC3 is measuring ' + 'something else. Its poll fired inside the window; re-run (the poll interval is the ' + 'window, see the header).\n' + venue.logTail('hub' + victimHub))
+        const { mirrorRows, signers, headroomKey, strays } = await waitForSignedResult(requestId, draw)
         for (const [i, row] of mirrorRows.entries()) {
             assert.strictEqual(String(row.status), 'ok',
                 'the mirror row on indexer ' + i + ' carries status ' + row.status +
                 ' rather than ok, so the round finalized a non-ok outcome')
         }
-
-        // EXACTLY REDUNDANCY VALID SIGNATURES. Not "at least": the indexer's verifier
-        // admits `validSigs >= redundancy`, and the interesting number is how many the
-        // federation could actually produce with one drawn member dark. Three is the
-        // arithmetic §4.4 states (quorum is measured on the PRE-widening size, so
-        // needed stays at redundancy); four would mean the stopped hub signed anyway.
-        let signers = mirrorRows[0].signer_pubkeys
-        if (typeof signers === 'string') signers = JSON.parse(signers)
-        signers = signers.map((s) => String(s).toLowerCase())
         assert.strictEqual(signers.length, REDUNDANCY,
             'the finalized row carries ' + signers.length + ' signature(s) rather than exactly ' +
             REDUNDANCY + ': ' + jsonSafe(signers.map((s) => s.slice(0, 16))) + '\n' + allHubTails(venue))
         assert.ok(!signers.includes(String(victimKey).toLowerCase()),
             'the stopped hub\'s key ' + victimKey.slice(0, 16) + '... signed the row, so it was not ' +
             'actually dark and the round did not have to reach past it')
-
-        // THE HEADROOM MEMBER IS ONE OF THEM. This is what makes the case about §4.1
-        // rather than about a three-member set that happened to have three live hubs:
-        // without the widened slot the third signature has nowhere to come from.
-        const headroomKey = String(draw.responsible[REDUNDANCY]).toLowerCase()
         assert.ok(signers.includes(headroomKey),
-            'the headroom member ' + headroomKey.slice(0, 16) + '... did not sign, so the three ' +
-            'signatures came from somewhere other than the widened slot: ' +
-            jsonSafe(signers.map((s) => s.slice(0, 16))))
-
+            'the headroom member ' + headroomKey.slice(0, 16) + '... did not sign, so the three ' + 'signatures came from somewhere other than the widened slot: ' + jsonSafe(signers.map((s) => s.slice(0, 16))))
         // Every signer was drawn. A signature from outside the set is refused by the
         // verifier, so a row carrying one would be inert and this drill would be
         // asserting against a row no node can admit.
-        const drawn = new Set(draw.responsible.map((p) => String(p).toLowerCase()))
-        const strays = signers.filter((s) => !drawn.has(s))
         assert.deepStrictEqual(strays, [],
             'the row carries signature(s) from outside the responsible set: ' +
             jsonSafe(strays.map((s) => s.slice(0, 16))))
-
-        // ---- and binds at the same block on both indexers ---------------------
-        const applied = await waitForAppliedEverywhere(venue, requestId, 15 * 60 * 1000, {
-            // The applier runs in the block loop, so on a chain nobody is mining a
-            // delivered, valid, applicable response is never applied. Capped inside the
-            // first segment for the same reason as above.
-            mineWhileWaiting: { perPoll: 1, maxBlocks: 6 },
-        })
-        const diffs = diffRows(applied[0], applied[1], APPLIED_FIELDS)
+        const { applied, diffs } = await applyResult(requestId)
         assert.deepStrictEqual(diffs, [],
             'the two indexers bound the response differently: ' + diffs.join('; ') +
             '. The applier is deterministic by construction, so a difference here is a fork between ' +
             'two nodes reading the same mirror row.')
-
-        const local        = await readRequestRow(venue, 0, requestId)
-        const requestBlock = Number(local.block_index)
-        const deadline     = Number(local.deadline_block)
-        const bindBlock    = Number(applied[0].block_index)
-
         // THE FIRST LADDER SEGMENT, computed from the V2 shape the spec states: the
-        // ladder starts at the REQUEST's own block above the height (startOffset 0), the
-        // span runs to the deadline, and the segment is span / (maxSlots + 1). Below the
-        // height it started at request + 3 and the first widen arrived a segment later,
-        // which is the six-block wait measured on the public testnet. Spelled here rather than taken
-        // from `widenArithmetic`, which computes the STAGE-1 geometry and would give a
-        // different, wrong boundary.
-        const span    = deadline - requestBlock
-        const segment = span / 3
-        const cutoff  = requestBlock + segment
+        const { requestBlock, deadline, bindBlock, span, cutoff } = await bindingWindow(requestId, applied)
         assert.ok(bindBlock < cutoff,
             'the response bound at block ' + bindBlock + ', at or past the end of the first ladder ' +
             'segment (' + requestBlock + ' + ' + span + '/3 = ' + cutoff.toFixed(2) + '). Inside the ' +
             'first segment is the point: headroom makes a round with one dark member finalize with no ' +
             'clock at all, and a bind past the cutoff means it waited for the ladder to open a slot ' +
             'instead, which is exactly the delay this spec removes.')
-        console.log('ZC3 GREEN: hub ' + victimHub + ' dark, round finalized with ' + signers.length +
-            ' signature(s) including the headroom member, bound at ' + bindBlock +
-            ' on both indexers (request ' + requestBlock + ', deadline ' + deadline +
-            ', first segment ends ' + cutoff.toFixed(2) + ')')
+        console.log('ZC3 GREEN: hub ' + victimHub + ' dark, round finalized with ' + signers.length + ' signature(s) including the headroom member, bound at ' + bindBlock + ' on both indexers (request ' + requestBlock + ', deadline ' + deadline + ', first segment ends ' + cutoff.toFixed(2) + ')')
     })
 })
