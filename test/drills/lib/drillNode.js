@@ -156,7 +156,7 @@ function makeHubNode(id) {
 
         async boot() {
             const XChainHub         = resolveHubModule('src/XChainHub.js');
-            const ValidatorIdentity = resolveHubModule('src/ValidatorIdentity.js');
+            const ValidatorIdentity = resolveHubModule('src/validators/identity.js');
 
             const privkeyHex = process.env.DRILL_PRIVKEY_HEX;
             if (!privkeyHex) throw new Error('drillNode: DRILL_PRIVKEY_HEX is required');

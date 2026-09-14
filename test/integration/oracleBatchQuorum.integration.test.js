@@ -76,7 +76,7 @@
  * overrides `queuePath` only afterwards, so an unmodified run buffers into the
  * repo's own `data/publisher-queue.buffer.jsonl`, shared by all four hubs and
  * carrying every previous drill's rounds. That file is the input to
- * `_hydrateBuffer()` and therefore to the restart catch-up this drill's second
+ * `hydrateBuffer()` and therefore to the restart catch-up this drill's second
  * half depends on: a stale window in it would be re-proposed on restart and
  * counted into "exactly one wire". So `PUBLISHER_QUEUE_PATH` is pinned to a temp
  * directory BEFORE the venue comes up (which makes every hub start with an empty

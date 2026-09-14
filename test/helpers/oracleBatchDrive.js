@@ -229,7 +229,7 @@ function attachBatchSigners(venue, opts) {
  *
  * Waiting for the row on EVERY hub is not politeness, it is a precondition of the
  * signing round: a follower co-signs only what it can rebuild from its own
- * `price_snapshots` (`OracleBatchSigner._deriveWindow`), and the leader withholds
+ * `price_snapshots` (`OracleBatchSigner.deriveWindow`), and the leader withholds
  * a window whose rounds it cannot self-check (`_windowCoverageComplete`). Opening
  * the window before the rows exist is how a drill produces a silent refusal that
  * looks like a signing bug.

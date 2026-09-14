@@ -108,8 +108,8 @@ async function driveDispatch(mvh, validators, seedBase, requireLiveLeader) {
     // every canonical matches.
     await Promise.all(engines.map((e) => e.consensus.propose(roundId, { row, snapshot: { validators, count: validators.length } }).catch(() => {})));
     // Poll the PERSISTED cross_chain_calls row, not the finalize event: the event is
-    // emitted synchronously by CrossChainDexConsensus._finalize, and the row is
-    // written by CrossChainCallEngine's un-awaited `this._writeFinalizedRow(ev)`
+    // emitted synchronously by CrossChainDexConsensus.finalize, and the row is
+    // written by CrossChainCallEngine's un-awaited `this.writeFinalizedRow(ev)`
     // listener on that same emit, so an event-count poll clears while the INSERT is
     // still in flight and both cases below read the row. Keyed on (call_id, phase)
     // exactly as they key it. The stake-minority case writes no row, so it still

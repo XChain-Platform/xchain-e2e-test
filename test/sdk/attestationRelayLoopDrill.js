@@ -38,7 +38,7 @@
  * test/actions/realUrlAttestation.test.js stands in for AttestationRound +
  * AttestationPublisher on the single-chain path. The BYTES are not stood in for:
  * the v3/v4 canonicals and wire strings are built by the HUB'S OWN
- * AttestationRelay methods (`xchain-hub/src/AttestationRelay.js`), so a
+ * AttestationRelay methods (`xchain-hub/src/attestation/relay.js`), so a
  * hub↔indexer canonical drift fails this drill rather than hiding in it. Every
  * verdict is the deployed indexer's.
  *
@@ -99,7 +99,7 @@ const HUB_BASE = (function () {
         _path.resolve(__dirname, '../../../xchain-hub'),
     ].filter(Boolean);
     for (const c of candidates) {
-        if (_fs.existsSync(_path.join(c, 'src/AttestationRelay.js'))) return c;
+        if (_fs.existsSync(_path.join(c, 'src/attestation/relay.js'))) return c;
     }
     return null;
 })();
@@ -154,7 +154,7 @@ module.exports = {
 // producing signatures the indexer silently drops as unquorate.
 function relayCodec() {
     if (!HUB_BASE) throw new Error('xchain-hub checkout not found; the drill signs with the hub\'s own canonical builders');
-    const AttestationRelay = require(_path.join(HUB_BASE, 'src/AttestationRelay.js'));
+    const AttestationRelay = require(_path.join(HUB_BASE, 'src/attestation/relay.js'));
     const p = AttestationRelay.prototype;
     const codec = {
         _sha256: p._sha256,

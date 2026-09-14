@@ -58,7 +58,7 @@
  *
  * THE ORDER OF BRING-UP IS FORCED, and this is the one piece of real machinery here.
  * `CrossChainBridgeEngine` reads `<COIN>_INDEXER_URL` out of its environment IN ITS
- * CONSTRUCTOR (xchain-hub/src/CrossChainBridgeEngine.js), and the constructor runs
+ * CONSTRUCTOR (xchain-hub/src/cross_chain/bridge_engine.js), and the constructor runs
  * inside `hub.startCrossChain()` at hub boot. The venue indexers do not exist until
  * after the hubs are up, because an indexer needs a hub to follow and because
  * `AttestMirrorVenue` probes its ports in one pass at `start()`. So the hubs boot
@@ -1384,7 +1384,7 @@ class BridgeRailVenue {
      * AND IT IS MEASURED ON THE SETTLEMENT ROWS, NOT ON `in_flight`, because that term is
      * broken on this rail and waiting for it would hang forever. Measured 2026-09-12: the
      * hub adds every row `getpendingbridgetransfers` returns to its in-flight view on each
-     * poll (CrossChainBridgeEngine._recordPending, called before the finalization dedup),
+     * poll (CrossChainBridgeEngine.recordPending, called before the finalization dedup),
      * and the indexer read has no settled filter at all (db.js getPendingBridgeTransfers
      * selects every valid XBRIDGE leg forever). So a leg that finalized and applied months
      * ago is still counted in flight, and `delta = escrow - (supply + in_flight)` sits

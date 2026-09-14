@@ -123,7 +123,7 @@ async function driveDispatch(mvh, validators, seedBase) {
     await Promise.all(engines.map((e) => e.consensus.propose(roundId, { row, snapshot: { validators, count: validators.length } }).catch(() => {})));
     // The caller asserts the PERSISTED cross_chain_calls row on every hub, and the
     // finalize event only STARTS that write: CrossChainCallEngine subscribes to
-    // 'match:finalized' with an un-awaited `this._writeFinalizedRow(ev)`, so an
+    // 'match:finalized' with an un-awaited `this.writeFinalizedRow(ev)`, so an
     // event-count poll clears while the INSERT is still in flight. Poll the row,
     // keyed on (call_id, phase) exactly as the assertions key it.
     await waitFor(async () => {

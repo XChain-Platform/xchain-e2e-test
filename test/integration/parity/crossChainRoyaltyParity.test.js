@@ -37,8 +37,8 @@ const protocolConstants = require(path.join(ROOT, 'xchain-documentation/protocol
 const hubCcr = require(path.join(ROOT, 'xchain-hub/src/cross_chain_royalty_activation.js'));
 const idxCcr = require(path.join(ROOT, 'xchain-indexer/src/cross_chain_royalty_activation.js'));
 
-const CrossChainDexEngine  = require(path.join(ROOT, 'xchain-hub/src/CrossChainDexEngine.js'));
-const StateAnchorPublisher = require(path.join(ROOT, 'xchain-hub/src/StateAnchorPublisher.js'));
+const CrossChainDexEngine  = require(path.join(ROOT, 'xchain-hub/src/cross_chain/dex_engine.js'));
+const StateAnchorPublisher = require(path.join(ROOT, 'xchain-hub/src/anchor/publisher.js'));
 const Cross_Settle         = require(path.join(ROOT, 'xchain-indexer/src/actions/cross_settle/index.js'));
 const AnchorRecovery       = require(path.join(ROOT, 'xchain-indexer/bin/recovery.js'));
 

@@ -34,7 +34,7 @@ function stubHub() {
     return {
         calls,
         original,
-        hub: { stateAnchorPublisher: { _handleArchiveAttestSignReq: original } }
+        hub: { stateAnchorPublisher: { handleArchiveAttestSignReq: original } }
     }
 }
 
@@ -44,11 +44,11 @@ describe('silenceArchiveAttestor', function () {
         const s = stubHub()
         silenceArchiveAttestor(s.hub)
 
-        const result = await s.hub.stateAnchorPublisher._handleArchiveAttestSignReq({ data: { batch_seq: 7 } })
+        const result = await s.hub.stateAnchorPublisher.handleArchiveAttestSignReq({ data: { batch_seq: 7 } })
 
         assert.strictEqual(s.calls.length, 0, 'the original handler was never invoked')
         assert.strictEqual(result, undefined, 'the stand-in answers nothing, so no XANCARCHPUB_SIGN goes out')
-        assert.notStrictEqual(s.hub.stateAnchorPublisher._handleArchiveAttestSignReq, s.original,
+        assert.notStrictEqual(s.hub.stateAnchorPublisher.handleArchiveAttestSignReq, s.original,
             'the instance method really was replaced')
     })
 
@@ -59,7 +59,7 @@ describe('silenceArchiveAttestor', function () {
     it('answers with a promise, the shape the publisher message switch calls .catch() on', () => {
         const s = stubHub()
         silenceArchiveAttestor(s.hub)
-        const answer = s.hub.stateAnchorPublisher._handleArchiveAttestSignReq({ data: {} })
+        const answer = s.hub.stateAnchorPublisher.handleArchiveAttestSignReq({ data: {} })
         assert.strictEqual(typeof (answer && answer.catch), 'function', 'the stand-in returns a thenable')
         return answer
     })
@@ -67,13 +67,13 @@ describe('silenceArchiveAttestor', function () {
     it('restore() reinstates the EXACT original function and co-signing resumes', async () => {
         const s = stubHub()
         const restore = silenceArchiveAttestor(s.hub)
-        await s.hub.stateAnchorPublisher._handleArchiveAttestSignReq({ data: { batch_seq: 1 } })
+        await s.hub.stateAnchorPublisher.handleArchiveAttestSignReq({ data: { batch_seq: 1 } })
 
         restore()
 
-        assert.strictEqual(s.hub.stateAnchorPublisher._handleArchiveAttestSignReq, s.original,
+        assert.strictEqual(s.hub.stateAnchorPublisher.handleArchiveAttestSignReq, s.original,
             'the original function reference is back, not a wrapper around it')
-        const result = await s.hub.stateAnchorPublisher._handleArchiveAttestSignReq({ data: { batch_seq: 2 } })
+        const result = await s.hub.stateAnchorPublisher.handleArchiveAttestSignReq({ data: { batch_seq: 2 } })
         assert.strictEqual(result, 'co-signed', 'the restored handler answers again')
         assert.deepStrictEqual(s.calls.map(c => c.data.batch_seq), [2],
             'only the post-restore request reached the handler')
@@ -84,11 +84,11 @@ describe('silenceArchiveAttestor', function () {
         const bundleCalls = []
         // The bundle leg's twin. AT-F3 hinges on it still answering while the
         // archive leg is mute, so a broad injector would invalidate the drive.
-        s.hub.stateAnchorPublisher._handleAttestSignReq = async (e) => { bundleCalls.push(e); return 'bundle-co-signed' }
+        s.hub.stateAnchorPublisher.handleAttestSignReq = async (e) => { bundleCalls.push(e); return 'bundle-co-signed' }
 
         silenceArchiveAttestor(s.hub)
 
-        const r = await s.hub.stateAnchorPublisher._handleAttestSignReq({ data: {} })
+        const r = await s.hub.stateAnchorPublisher.handleAttestSignReq({ data: {} })
         assert.strictEqual(r, 'bundle-co-signed', 'the v0 bundle attestation handler is untouched')
         assert.strictEqual(bundleCalls.length, 1)
     })

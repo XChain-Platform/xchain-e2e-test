@@ -90,7 +90,7 @@ async function driveRound(mvh, settleMs = SETTLE_MS) {
     });
     await Promise.all(dexes.map((d) => d._discoverAndMatch().catch(() => {})));
     // Poll the PERSISTED cross_chain_matches row, not the finalize event: the event is
-    // emitted synchronously by CrossChainDexConsensus._finalize, and the row is written
+    // emitted synchronously by CrossChainDexConsensus.finalize, and the row is written
     // by CrossChainDexEngine's un-awaited `this._writeFinalizedMatch(ev)` listener on
     // that same emit, so an event-count poll clears while the INSERT is still in flight
     // and both cases below read the row. Keyed by match_id exactly as they key it. The

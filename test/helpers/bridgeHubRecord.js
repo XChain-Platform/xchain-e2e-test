@@ -37,8 +37,8 @@
 
 const { loadHubModule } = require('./multiValidatorHubHelper');
 
-const CrossChainBridgeEngine = loadHubModule('src/CrossChainBridgeEngine.js');
-const ValidatorIdentity      = loadHubModule('src/ValidatorIdentity.js');
+const CrossChainBridgeEngine = loadHubModule('src/cross_chain/bridge_engine.js');
+const ValidatorIdentity      = loadHubModule('src/validators/identity.js');
 
 // A bare instance for the pure derivation methods. Object.create leaves every field
 // undefined on purpose: if one of these methods ever starts reading instance state, the
@@ -133,7 +133,7 @@ function hubCanonical(row){
 
 /**
  * Sign `row` with each identity over the HUB's canonical and attach the bundle, the way
- * _writeFinalizedTransfer / _writeFinalizedPolicy attach the PBFT signature set.
+ * writeFinalizedTransfer / writeFinalizedPolicy attach the PBFT signature set.
  *
  * `opts.message` overrides the signed payload, which is how a drill forges a bundle that
  * is well formed and cryptographically valid but is over the WRONG bytes: that is the

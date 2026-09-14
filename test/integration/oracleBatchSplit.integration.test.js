@@ -36,7 +36,7 @@
  *   round is isolated rather than poisoning the hour around it.
  *
  * HOW THE OVERFLOW IS FORCED, and why it is not a mock. `PRICE_WIRE_MAX_BYTES`
- * is a module-level const in `xchain-hub/src/OraclePublisher.js:92`; neither the
+ * is a module-level const in `xchain-hub/src/oracle/publisher.js:92`; neither the
  * constructor nor any of the four `ORACLE_BATCH_*` knobs exposes it, and the two
  * env knobs that DO exist (`ORACLE_BATCH_WINDOW_ROUNDS`, `ORACLE_BATCH_GRACE_MS`)
  * change cadence, not capacity. So there is no limit to inject, and lowering one
@@ -197,7 +197,7 @@ function submissionSet(pairCount) {
 }
 
 // What the calibration measures: the same pairs in the shape
-// `OraclePublisher._bufferEntryFromEvent` produces ({pair, price}), carrying the
+// `OraclePublisher.bufferEntryFromEvent` produces ({pair, price}), carrying the
 // FINALIZED eight-decimal spelling rather than the submitted one.
 function bufferedPairSet(pairCount) {
     const out = [];

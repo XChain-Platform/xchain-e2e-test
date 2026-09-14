@@ -53,7 +53,7 @@ const protocolConstants = require(path.join(ROOT, 'xchain-documentation/protocol
 const hubAr = require(path.join(ROOT, 'xchain-hub/src/anchor_reward_activation.js'));
 const idxAr = require(path.join(ROOT, 'xchain-indexer/src/anchor_reward_activation.js'));
 
-const StateAnchorPublisher = require(path.join(ROOT, 'xchain-hub/src/StateAnchorPublisher.js'));
+const StateAnchorPublisher = require(path.join(ROOT, 'xchain-hub/src/anchor/publisher.js'));
 const Anchor               = require(path.join(ROOT, 'xchain-indexer/src/actions/anchor/index.js'));
 
 // Both canonical builders read only their argument (no `this`), so invoke them

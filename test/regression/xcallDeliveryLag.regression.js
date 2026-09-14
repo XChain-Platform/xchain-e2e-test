@@ -43,9 +43,9 @@ const path       = require('path');
 // integration suite; skips cleanly if the hub source isn't reachable.
 function loadEngine(){
     const candidates = [
-        process.env.XCHAIN_HUB_PATH && path.join(process.env.XCHAIN_HUB_PATH, 'src/CrossChainCallEngine.js'),
-        path.join(__dirname, '../../../xchain-hub/src/CrossChainCallEngine.js'),
-        path.join(__dirname, '../../xchain-hub/src/CrossChainCallEngine.js')
+        process.env.XCHAIN_HUB_PATH && path.join(process.env.XCHAIN_HUB_PATH, 'src/cross_chain/call_engine.js'),
+        path.join(__dirname, '../../../xchain-hub/src/cross_chain/call_engine.js'),
+        path.join(__dirname, '../../xchain-hub/src/cross_chain/call_engine.js')
     ].filter(Boolean);
     for(const c of candidates){
         try { return require(c); } catch(e){ /* try next */ }

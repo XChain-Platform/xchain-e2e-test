@@ -49,7 +49,7 @@ const COUNT         = 10;
 // the first passing poll, so the 45-connection mesh and the 10-hub COMMIT fan-out
 // each cost what they cost instead of what the venue's load makes them cost.
 const PEER_WAIT_MS  = 60_000;  // every hub holds an OPEN socket to all 9 others
-const APPLY_WAIT_MS = 60_000;  // COMMIT propagation + _applyConfig across 10 hubs
+const APPLY_WAIT_MS = 60_000;  // COMMIT propagation + applyConfig across 10 hubs
 
 describe('MultiValidatorHub: N=10 config-change PBFT scale probe (C.2)', function () {
     this.timeout(300_000);

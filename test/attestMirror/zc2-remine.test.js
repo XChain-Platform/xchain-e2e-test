@@ -26,7 +26,7 @@
  * D40). The durable `attestation_fetch_cache` is time-windowed at `retryAfterMs`,
  * 123 s at this train's defaults, which is shorter than one live block; on mainnet
  * it is empty long before a reorg is noticed. What refuses the second round is the
- * hub's `finalized` ring (10000 rids, `AttestationConsensus.js:495`), which is
+ * hub's `finalized` ring (10000 rids, `attestation/consensus.js:495`), which is
  * keyed on the request id, and the request id is content-derived from the
  * transaction hash and is therefore REORG-STABLE (D3). So the re-mined request is
  * the same request, the ring refuses to start a second round for it, and no second

@@ -53,8 +53,8 @@ const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
 const { waitForMesh, waitFor } = require('../helpers/consensusWait');
 
 function hubRequire(rel) { return require(path.resolve(__dirname, '../../../xchain-hub', rel)); }
-const OracleConsensus = hubRequire('src/OracleConsensus.js');
-const OracleRound     = hubRequire('src/OracleRound.js');
+const OracleConsensus = hubRequire('src/oracle/consensus.js');
+const OracleRound     = hubRequire('src/oracle/round.js');
 
 // Deadlines, not settles: mesh formation and the C1 finalize are both observable,
 // so each wait polls its post-condition and returns on the first passing poll.

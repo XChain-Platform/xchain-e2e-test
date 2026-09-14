@@ -49,7 +49,7 @@ const { waitForMesh, waitForConfigEverywhere, assertNeverApplied } = require('..
 // quiet venue and stops a busy one failing on the clock. A stall past the
 // deadline reports which hub held what, instead of hiding inside a settle window.
 const MESH_WAIT_MS  = 60_000;  // every hub peered with every other hub
-const APPLY_WAIT_MS = 60_000;  // COMMIT propagation + follower _applyConfig
+const APPLY_WAIT_MS = 60_000;  // COMMIT propagation + follower applyConfig
 // The negative case has no event to wait for, so its window stays fixed; it is
 // spent polling, so a hub that finalizes fails the test at that moment.
 const STALL_WAIT_MS = 6000;    // long enough to confirm a round does NOT finalize

@@ -24,7 +24,7 @@
  *
  * Two enforcement points, both exercised here at federation scale:
  *   1. propose() refuses to CREATE a CAPABILITY_*_MIN_STAKE proposal
- *      (Governance.js #4352 guard), so an honest proposer can't even
+ *      (validators/governance.js #4352 guard), so an honest proposer can't even
  *      start a round.
  *   2. _handlePropose() DROPS an inbound CAPABILITY_*_MIN_STAKE proposal
  *      gossiped by a malicious or pre-#4352 peer, so no honest hub records
@@ -156,7 +156,7 @@ describe('MultiValidatorHub: governance capability MIN_STAKE pin (#4352)', funct
 
         // Simulate a malicious or pre-#4352 peer that bypasses propose()'s guard
         // and gossips a CAPABILITY_*_MIN_STAKE proposal directly onto the mesh.
-        // GOV_PROPOSE is the governance proposal message type (Governance.js).
+        // GOV_PROPOSE is the governance proposal message type (validators/governance.js).
         const rogueId = 'gov:CAPABILITY_PRICE_MIN_STAKE:rogue-' + Date.now();
         proposer.peerManager.broadcast('GOV_PROPOSE', {
             proposalId:      rogueId,

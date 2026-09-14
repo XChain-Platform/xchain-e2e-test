@@ -1213,8 +1213,8 @@ class OracleBatchReplayNode {
      *
      * WHY A NODE MUST HAVE THIS TO JUDGE ANYTHING. A hub that has started its
      * capability registry and has NO threshold for a capability refuses to build a
-     * snapshot for it at all (`CapabilitySnapshot._resolveMinStake` returns null
-     * while `_registryReady()` is true, which is a deliberate fail-closed: omitting
+     * snapshot for it at all (`CapabilitySnapshot.resolveMinStake` returns null
+     * while `registryReady()` is true, which is a deliberate fail-closed: omitting
      * min_stake would let each indexer apply its own local floor and fork the
      * qualified set). `xchain-hub/src/api.js` calls startCapabilities on every hub,
      * standalone included, so a node launched with no HUB_CAPABILITY_CONFIG resolves

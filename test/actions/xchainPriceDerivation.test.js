@@ -91,7 +91,7 @@ async function hubPriceSnapshots() {
 }
 
 // Finalized rows for a pair, ascending by round. The reference reads mirror the
-// hub's _lastFinalized: the newest finalized row STRICTLY BELOW a round.
+// hub's lastFinalized: the newest finalized row STRICTLY BELOW a round.
 function pairRows(rows, pair) {
     return rows.filter(r => r.coin_pair === pair)
         .sort((a, b) => Number(a.round_number) - Number(b.round_number))

@@ -148,7 +148,7 @@ describe('MultiValidatorHub: cross-chain DEX match PBFT (L2)', function () {
         await Promise.all(dexes.map((d) => d._discoverAndMatch().catch(() => {})));
         // The post-condition of the positive case is the PERSISTED cross_chain_matches
         // row on every hub, which the finalize event only STARTS: the event is emitted
-        // synchronously by CrossChainDexConsensus._finalize, and the row is written by
+        // synchronously by CrossChainDexConsensus.finalize, and the row is written by
         // CrossChainDexEngine's un-awaited `this._writeFinalizedMatch(ev)` listener on
         // that same emit, so an event-count poll clears while the INSERT is still in
         // flight. Poll the row, keyed by the match_id this round finalized exactly as

@@ -16,8 +16,8 @@
  * The sibling of anchorAcceptance.test.js: same venue, same env contract, same
  * production signer path, one validator more. What the single-hub suite cannot
  * reach is the branch that only exists when the archive publisher NEEDS a peer:
- * _runArchiveAttestationRound short-circuits `met: true` at snapCount <= 1
- * (StateAnchorPublisher.js), so a one-hub venue proves the ATTESTED path and
+ * runArchiveAttestationRound short-circuits `met: true` at snapCount <= 1
+ * (anchor/publisher.js), so a one-hub venue proves the ATTESTED path and
  * nothing about what happens when the co-signer goes quiet.
  *
  *   AT-F1 (attested baseline): one flush lands ONE ANCHOR v0 bundle (indexed
@@ -209,7 +209,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
                                        (process.env.ENCODER_API_PORT || '3023');
         process.env.HUB_SIGNER_MODULE = path.join(signerDir, 'signer.js');
 
-        const { loadSignerHooks } = loadHubModule('src/lib/signer-loader.js');
+        const { loadSignerHooks } = loadHubModule('src/lib/signer_loader.js');
         const hooks = loadSignerHooks(process.env);
         assert.ok(hooks && hooks.broadcastFn, 'signer-loader wired the example signer\'s broadcast hook');
         return hooks;
@@ -325,7 +325,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
             sap.network = 'regtest';
             sap.roundTimeoutMs = ROUND_TIMEOUT_MS;
             sap.electionToleranceBlocks = 100000;
-            // _verifyAnchorOnChain's ONLY path to the chain. Without it the reward
+            // verifyAnchorOnChain's ONLY path to the chain. Without it the reward
             // drain answers 'no-indexer' forever and AT-F1's reward record never lands,
             // which would read as a degraded round rather than an unwired test.
             sap.indexers = sap.indexers || {};
@@ -809,7 +809,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
     // which keys on the hub-mirrored anchor_reward_attestations row (capability stake
     // is BTC-side; ANCHOR is DOGE-only). On a DOGE-only venue that row IS the reward
     // derivation, and it is written only once the attestation quorum was met AND
-    // _verifyAnchorOnChain has bound this exact txid at version 1, dogeConfirmations
+    // verifyAnchorOnChain has bound this exact txid at version 1, dogeConfirmations
     // deep. Drives the real drain the flush head calls rather than reimplementing it.
     async function waitForRewardRecord(hubIndex, batchSeq, timeMax){
         const deadline = Date.now() + timeMax;
@@ -987,8 +987,8 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
         hubDb = await startDisposableHubDb({ forceDocker: true, port: HUB_DB_PORT, name: HUB_DB_NAME });
         if (!hubDb) { console.log('Skipping degraded-archive acceptance: no Docker available for the disposable hub DB'); this.skip(); }
 
-        SAP = loadHubModule('src/StateAnchorPublisher.js');
-        SCE = loadHubModule('src/StateCheckpointEngine.js');
+        SAP = loadHubModule('src/anchor/publisher.js');
+        SCE = loadHubModule('src/anchor/checkpoint_engine.js');
 
         // One funded publisher wallet and one staged signer for the whole suite;
         // publishes are serialized by runCycle's flush order throughout. Funded for

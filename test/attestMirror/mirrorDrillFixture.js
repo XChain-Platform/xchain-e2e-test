@@ -46,7 +46,7 @@
  *     `provisionDrillIdentities` refuses rather than running that lottery.
  *   - The PROVIDER floor filters the seated set per provider BEFORE the ranking,
  *     and the two providers do not share a floor: `http_get` is 10000 and `llm`
- *     is 25000 (ProviderRegistry.js DEFAULTS). Filtering only ever removes
+ *     is 25000 (validators/provider_registry.js DEFAULTS). Filtering only ever removes
  *     members, so it cannot introduce a foreign one, but it can shrink the set
  *     below redundancy, and then the round is skipped as unfinalizable and the
  *     request expires at its deadline with nothing anywhere near the floor that
@@ -1260,7 +1260,7 @@ async function deployRequestContract (opts) {
  * WHY A GUARD AND NOT A MECHANISM. The responsible set is drawn from EVERY
  * staked validator carrying the attestation capability and ranked by
  * `sha256(requestId || pubkey)`, with stake acting only as a pre-filter
- * (`AttestationRound.js`). The venue stakes its identities INTO a shared roster
+ * (`attestation/round.js`). The venue stakes its identities INTO a shared roster
  * that already holds others, so nothing makes its own hubs win: measured
  * 2026-09-04, an all-venue draw of three from five venue identities among eleven
  * is C(5,3)/C(11,3), about 6%. Retrying until the draw is clean is therefore not

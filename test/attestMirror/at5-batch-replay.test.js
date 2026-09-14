@@ -327,7 +327,7 @@ async function stageDogeSigner (label, rail) {
     // rather than by inspection: a signer that cannot fulfil its contract throws at
     // load, and discovering that from five dead children four minutes later costs
     // the whole prologue.
-    const { loadSignerHooks } = loadHubModule('src/lib/signer-loader.js')
+    const { loadSignerHooks } = loadHubModule('src/lib/signer_loader.js')
     // THE SIGNER READS process.env, NOT THE OBJECT THE LOADER IS HANDED: the
     // loader uses its env argument only to find HUB_SIGNER_MODULE, then
     // `require`s it, and the module reads DOGE_WIF and friends off process.env
@@ -469,7 +469,7 @@ describe('AT5: the responses of a window land on chain as one batch', function (
         //
         // AND KEPT LIVE, NOT PINNED. The same `chain_tips` row is the FIRST source
         // `XChainHub._resolveBtcLatestBlock` consults for every attestation round
-        // (Consensus.js), preferred over the live indexer while its block_time is
+        // (consensus/pbft.js), preferred over the live indexer while its block_time is
         // younger than MAX_TIP_AGE_S (default twice the oracle round interval, 20
         // min). Pass 6 (2026-09-05) pushed the tip ONCE at 7405: the responsible
         // hubs then measured every request against a height the 6 s miner left

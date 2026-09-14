@@ -43,9 +43,9 @@ const { forceCountModeQuorum } = require('../helpers/forceCountModeQuorum');
 const { waitForMesh }          = require('../helpers/consensusWait');
 
 function hubRequire(rel) { return require(path.resolve(__dirname, '../../../xchain-hub', rel)); }
-const OracleConsensus  = hubRequire('src/OracleConsensus.js');
-const OracleRound      = hubRequire('src/OracleRound.js');
-const ValidatorIdentity = hubRequire('src/ValidatorIdentity.js');
+const OracleConsensus  = hubRequire('src/oracle/consensus.js');
+const OracleRound      = hubRequire('src/oracle/round.js');
+const ValidatorIdentity = hubRequire('src/validators/identity.js');
 
 const COUNT        = 4;
 // A deadline, not a settle: waitForMesh returns the moment every hub holds an open

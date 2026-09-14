@@ -75,7 +75,7 @@ async function _settleStack() {
 
 // ---------------------------------------------------------------------------
 // Credential control. All hubs share this process's env; the llm provider
-// resolves creds AT CALL TIME (hub-credentials.js), so flipping env vars is an
+// resolves creds AT CALL TIME (lib/hub_credentials.js), so flipping env vars is an
 // immediate, fleet-wide outage/recovery switch.
 // ---------------------------------------------------------------------------
 const CRED_KEYS = ['HUB_CLAUDE_CONFIG_DIR', 'CLAUDE_CONFIG_DIR',
@@ -140,7 +140,7 @@ function slot0HubIndex(mvh, requestId){
 // readers (judge fallback chain).
 async function applyLlmGovernance(mvh, activationBlock, additionalConfig){
     for (const hub of mvh.hubs){
-        await hub._applyProviderGovernanceChange({
+        await hub.applyProviderGovernanceChange({
             parameter:       'ATTESTATION_PROVIDER:llm',
             activationBlock: activationBlock,
             newValue:        JSON.stringify({ additional_config: additionalConfig })

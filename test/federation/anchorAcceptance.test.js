@@ -318,7 +318,7 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
         // Defensive mirror of the proven StateCheckpointEngine gotcha (see
         // multiHubStateAnchorWeighted.integration.test.js): every consensus engine,
         // StateAnchorPublisher included, caches `this.network = hub.network` ONCE AT
-        // CONSTRUCTION (StateAnchorPublisher.js:170), before seedWeightSnapshot ever
+        // CONSTRUCTION (anchor/publisher.js:170), before seedWeightSnapshot ever
         // runs. HUB_NETWORK is threaded through MultiValidatorHub's p2pConfig
         // (defaults to regtest) so this is likely already correct by construction,
         // but setting it again here costs nothing and removes the dependency on that
@@ -466,7 +466,7 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
              m.effective_time, sigs]);
 
         // Persist cross_chain AND oracle_publish into the HUB's own local
-        // capability_snapshots: what CrossChainDexConsensus._broadcastPropose
+        // capability_snapshots: what CrossChainDexConsensus.broadcastPropose
         // persists for cross_chain when a real match finalizes (the synthetic
         // match here bypassed the engine), extended to oracle_publish too.
         // Without an oracle_publish row here, the publisher-attestation round has

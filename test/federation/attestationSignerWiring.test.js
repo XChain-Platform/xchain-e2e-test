@@ -98,8 +98,8 @@ describe('[federation] AttestationPublisher operator-signer wiring (F13)', funct
             'broadcast hook should be wired from HUB_SIGNER_MODULE (F13: was never wired)')
         assert.strictEqual(typeof publisher.walletSignFn, 'function',
             'wallet-sign hook should be wired from HUB_SIGNER_MODULE')
-        assert.ok(publisher._getBroadcaster(),
-            'publisher must have a broadcast pipeline at boot (F13: _getBroadcaster() was null)')
+        assert.ok(publisher.getBroadcaster(),
+            'publisher must have a broadcast pipeline at boot (F13: getBroadcaster() was null)')
     })
 
     it('a finalized response broadcasts through the operator module and leaves the WAL queue', async function () {

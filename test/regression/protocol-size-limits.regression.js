@@ -246,7 +246,7 @@ describe('Protocol size-limit drift guard', () => {
             })
         })
 
-        // The hub keeps its own defense-in-depth copy (CrossChainCallEngine.js
+        // The hub keeps its own defense-in-depth copy (cross_chain/call_engine.js
         // rejects any relay whose cross_hops exceeds it before ever reaching the
         // indexer arbiter). If the hub relaxed while the indexer stayed strict, the
         // hub would PBFT-sign a relay row the indexer then rejects (wasted round).
@@ -550,7 +550,7 @@ describe('Protocol size-limit drift guard', () => {
         // test/unit/xcall-constants-cross-repo.test.js) gates only MAX_CODE_SIZE
         // and three XCALL bounds, and its participating repo list is vm, indexer
         // and sdk, so the decoder and explorer copies sit outside it entirely.
-        // xchain-hub test/unit/constants-conformance.test.js records the missing
+        // xchain-hub test/unit/constants_conformance.test.js records the missing
         // twin as pending coordinated work; this is that twin, on the side that
         // can see every sibling at once (uuid ae66b1df).
         it('[regression:p0] PRICE_MAX / ORACLE_DEVIATION_THRESHOLD === canonical in every vendored copy', () => {

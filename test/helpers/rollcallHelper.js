@@ -353,7 +353,7 @@ function gatesArmed(epochHeight, network){
 }
 
 // The GATES field for an epoch: this build's full list on an armed epoch, null
-// on a v0 one. Mirrors RollcallRound._gatesFor.
+// on a v0 one. Mirrors RollcallRound.gatesFor.
 function gatesForEpoch(epochHeight, network){
     return gatesArmed(epochHeight, network) ? knownGates() : null
 }
@@ -400,7 +400,7 @@ const ROLLCALL_WIRE_V1 = 'ROLLCALL|1'
 // v0: ROLLCALL|0|EPOCH_HEIGHT|LEDGER_HASH|PUBLISHER|SIG_COUNT|PUBKEY_1|SIG_1|...
 // v1: ROLLCALL|1|EPOCH_HEIGHT|LEDGER_HASH|PUBLISHER|GATES|SIG_COUNT|PUBKEY_1|SIG_1|...
 //
-// Mirrors RollcallRound._buildWire. Used by the sweeper and self-publish legs,
+// Mirrors RollcallRound.buildWire. Used by the sweeper and self-publish legs,
 // which have to land an action the hub engine deliberately would not, and by the
 // frozen-vector check that pins this builder against the three implementations.
 // `gates` follows the same rule canonical() does - omitted takes the epoch's own
@@ -1252,9 +1252,9 @@ function rollcallRounds(mvh){
         'the likelier cause is a STALE xchain-hub checkout, because MultiValidatorHub resolves the sibling by ' +
         'a path ladder and a monorepo checkout shared with other sessions can sit behind origin without saying ' +
         'so. Measured 2026-08-30: the sibling was 12 commits behind origin/develop and simply had no ' +
-        'RollcallRound.js, and this assertion was the only symptom. Check ' +
+        'rollcall/round.js, and this assertion was the only symptom. Check ' +
         JSON.stringify(process.env.XCHAIN_HUB_PATH || '(XCHAIN_HUB_PATH unset; resolved by the sibling ladder)') +
-        ' and point XCHAIN_HUB_PATH at a checkout that carries src/RollcallRound.js.')
+        ' and point XCHAIN_HUB_PATH at a checkout that carries src/rollcall/round.js.')
     return rounds
 }
 
@@ -1293,7 +1293,7 @@ async function electedLeaderIndex(ctx, epoch){
         && typeof eng._electionKey === 'function'){
         try {
             const { resolveHubFile } = require('./multiValidatorHubHelper')
-            const sap = require(resolveHubFile('src/StateAnchorPublisher.js'))
+            const sap = require(resolveHubFile('src/anchor/publisher.js'))
             if (sap && typeof sap.hashOrder === 'function')
                 order = sap.hashOrder(eng._electionKey(Number(epoch)), ctx.roster.map(r => r.pubkey))
         } catch (e) { order = null }
@@ -1859,7 +1859,7 @@ async function traceRounds(ctx, label){
 // does, and stop as soon as the DOGE side actually holds every signature we
 // expect rather than after a fixed number of ticks.
 function electionTolerance(network){
-    const mod = require(_resolveSibling('xchain-hub', 'src/RollcallRound.js'))
+    const mod = require(_resolveSibling('xchain-hub', 'src/rollcall/round.js'))
     const t = mod.ELECTION_TOLERANCE_DEFAULTS && mod.ELECTION_TOLERANCE_DEFAULTS[network]
     assert.ok(Number.isFinite(Number(t)) && Number(t) > 0,
         'cannot read ELECTION_TOLERANCE_DEFAULTS.' + network + ' from the shipped RollcallRound; the ladder ' +

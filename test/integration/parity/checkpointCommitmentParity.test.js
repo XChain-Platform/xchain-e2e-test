@@ -56,7 +56,7 @@ const expCkpt  = require(path.join(ROOT, 'xchain-explorer/src/checkpoint_commitm
 // loop (uuid 77/229/326).
 const syncCkpt = require(path.join(ROOT, 'xchain-sync/src/checkpoint_commitment_activation.js'));
 
-const StateCheckpointEngine = require(path.join(ROOT, 'xchain-hub/src/StateCheckpointEngine.js'));
+const StateCheckpointEngine = require(path.join(ROOT, 'xchain-hub/src/anchor/checkpoint_engine.js'));
 const sdkCheckpoint         = require(path.join(ROOT, 'xchain-sdk/src/checkpoint.js'));
 const Anchor                = require(path.join(ROOT, 'xchain-indexer/src/actions/anchor/index.js'));
 

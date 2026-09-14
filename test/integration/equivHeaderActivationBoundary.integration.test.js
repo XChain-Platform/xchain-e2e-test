@@ -130,7 +130,7 @@ function checkpointRows(hub) {
         ['BTC', 'regtest', TIP.block_index]);
 }
 
-// Byte-for-byte mirror of StateCheckpointEngine._rawCanonicalCheckpoint.
+// Byte-for-byte mirror of StateCheckpointEngine.rawCanonicalCheckpoint.
 function rawCanonical(row, snapshotBlock) {
     return ['XCHECKPOINT', 'BTC', 'regtest', String(TIP.block_index), TIP.block_hash,
             TIP.ledger_hash, TIP.actions_hash, TIP.contract_hash,

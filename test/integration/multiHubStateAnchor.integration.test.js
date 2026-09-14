@@ -78,7 +78,7 @@ const TIP = {
     block_merkle_root: 'e5'.repeat(32), block_merkle_version: 1
 };
 
-// Mirror StateCheckpointEngine._checkpointRootSuffix: the post-flag-day SPV root
+// Mirror StateCheckpointEngine.checkpointRootSuffix: the post-flag-day SPV root
 // suffix appended to the raw v0 checkpoint canonical BEFORE the EQUIV wrap.
 const ROOT_SUFFIX = '|' + [TIP.state_root.toLowerCase(), String(TIP.state_root_version),
                            TIP.block_merkle_root.toLowerCase(), String(TIP.block_merkle_version)].join('|');

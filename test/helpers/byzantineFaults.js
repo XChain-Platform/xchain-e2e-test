@@ -83,11 +83,11 @@ function silenceOracleValidator(hub) {
 // function returning undefined would throw inside the dispatcher instead of staying quiet.
 function silenceArchiveAttestor(hub) {
     const sap = hub && hub.stateAnchorPublisher;
-    if (!sap || typeof sap._handleArchiveAttestSignReq !== 'function')
+    if (!sap || typeof sap.handleArchiveAttestSignReq !== 'function')
         throw new Error('silenceArchiveAttestor: hub has no started StateAnchorPublisher with an archive-attestation handler; start the harness with startCrossChain: true before injecting');
-    const orig = sap._handleArchiveAttestSignReq;
-    sap._handleArchiveAttestSignReq = async () => {};
-    return () => { sap._handleArchiveAttestSignReq = orig; };
+    const orig = sap.handleArchiveAttestSignReq;
+    sap.handleArchiveAttestSignReq = async () => {};
+    return () => { sap.handleArchiveAttestSignReq = orig; };
 }
 
 // Build a PRE_PREPARE envelope with a deliberately WRONG digest for its config

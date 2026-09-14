@@ -28,7 +28,7 @@
 
 'use strict';
 
-// Consensus traffic is exactly the PBFT_* envelope family (Consensus.js
+// Consensus traffic is exactly the PBFT_* envelope family (consensus/pbft.js
 // broadcasts PRE_PREPARE / PREPARE / COMMIT / VIEW_CHANGE / NEW_VIEW).
 // Heartbeats, handshakes and gossip are deliberately NOT forged: corrupting
 // those would get the victim disconnected, and a disconnected node is a crash

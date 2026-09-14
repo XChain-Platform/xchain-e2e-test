@@ -47,8 +47,8 @@ const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
 const { waitForMesh, waitFor } = require('../helpers/consensusWait');
 
 function hubRequire(rel) { return require(path.resolve(__dirname, '../../../xchain-hub', rel)); }
-const OracleConsensus = hubRequire('src/OracleConsensus.js');
-const OracleRound     = hubRequire('src/OracleRound.js');
+const OracleConsensus = hubRequire('src/oracle/consensus.js');
+const OracleRound     = hubRequire('src/oracle/round.js');
 
 // The REAL dispenser-side consumption logic lives in the indexer's Utility.
 // reversePriceMatch + its bignumber helpers are pure (mathjs, never touch

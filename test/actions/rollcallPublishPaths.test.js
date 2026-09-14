@@ -214,7 +214,7 @@ describe('ROLLCALL acceptance: sweeper, self-publish and the below-threshold epo
             leaderWire.sigCount)
         // WAIT for the leader's action to be on chain, do not mine a fixed few
         // blocks and hope. The sweeper's whole job is to publish only what is
-        // MISSING, and _maybePublish decides that by asking the DOGE side what it
+        // MISSING, and maybePublish decides that by asking the DOGE side what it
         // already holds - so a sweeper that ticks first sees an empty chain, has
         // nothing to filter, and republishes the whole set.
         await rc.waitForOnChainSigners(ctx, EA,
@@ -233,7 +233,7 @@ describe('ROLLCALL acceptance: sweeper, self-publish and the below-threshold epo
         const sweeperIdx = [0, 1, 2].find(i => i !== leaderIdx && i !== OMITTED_HUB)
 
         // UNLOCK THE SWEEPER'S RANK BEFORE TICKING IT. publishDelayBlocks is only
-        // the first gate in _maybePublish; the second is the rank ladder, which
+        // the first gate in maybePublish; the second is the rank ladder, which
         // climbs with BTC HEIGHT (rank r publishes once tip - E >= r * tolerance)
         // and a tick at a fixed height cannot pass it. This leg ticks at about
         // E + 6, so a rank-3 sweeper on a four-key roster never publishes and the
@@ -258,7 +258,7 @@ describe('ROLLCALL acceptance: sweeper, self-publish and the below-threshold epo
 
         const sweepWire = rc.parseWire(ctx.publishedWires[ctx.publishedWires.length - 1].payload)
         assert.strictEqual(sweepWire.sigCount, 1,
-            'a sweeper publishes ONLY what is missing: _maybePublish filters out every pair already on chain, so ' +
+            'a sweeper publishes ONLY what is missing: maybePublish filters out every pair already on chain, so ' +
             'SIG_COUNT must be 1, got ' + sweepWire.sigCount)
         assert.strictEqual(sweepWire.pairs[0].pubkey, ctx.roster[OMITTED_HUB].pubkey,
             'the swept pair must be the omitted hub\'s')
@@ -329,7 +329,7 @@ describe('ROLLCALL acceptance: sweeper, self-publish and the below-threshold epo
             'the leader\'s action must carry both running hubs\' signatures, or the epoch cannot roll on the ' +
             'self-publish alone; SIG_COUNT=' + leaderWire.sigCount)
         // The leader's action must be ON CHAIN before the omitted hub decides to
-        // self-publish: _maybeSelfPublish asks the DOGE side whether its own
+        // self-publish: maybeSelfPublish asks the DOGE side whether its own
         // signature is already there, and an unresolved read publishes anyway.
         await rc.waitForOnChainSigners(ctx, EB,
             ctx.roster.slice(0, ctx.rounds.length)

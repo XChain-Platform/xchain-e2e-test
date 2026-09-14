@@ -60,7 +60,7 @@ function _loadHubModule(rel){
 }
 
 const XChainHub        = _loadHubModule('src/XChainHub.js');
-const ValidatorIdentity = _loadHubModule('src/ValidatorIdentity.js');
+const ValidatorIdentity = _loadHubModule('src/validators/identity.js');
 
 // Check whether a TCP port is free. Used for picking unused P2P ports
 // at startup so concurrent test runs don't collide.

@@ -55,8 +55,8 @@ const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
 const { waitForMesh, waitFor } = require('../helpers/consensusWait');
 
 function hubRequire(rel) { return require(path.resolve(__dirname, '../../../xchain-hub', rel)); }
-const OracleConsensus = hubRequire('src/OracleConsensus.js');
-const OracleRound     = hubRequire('src/OracleRound.js');
+const OracleConsensus = hubRequire('src/oracle/consensus.js');
+const OracleRound     = hubRequire('src/oracle/round.js');
 
 // A deadline, not a settle: waitForMesh returns on the first fully-peered poll.
 const PEER_WAIT_MS = 60_000;

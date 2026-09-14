@@ -557,11 +557,11 @@ function resolveWindowKeying() {
     // A hub without src/db/index.js keeps the SQL inline and needs no second read.
     let dbProto = null;
     try { dbProto = loadHubModule('src/db/index.js').prototype; } catch (_) { dbProto = null; }
-    return resolveWindowKeyingFrom(loadHubModule('src/AttestationBatchPublisher.js'), dbProto);
+    return resolveWindowKeyingFrom(loadHubModule('src/attestation/batch_publisher.js'), dbProto);
 }
 
 // The environment keys the hub's credential resolver reads (`xchain-hub/src/lib/
-// hub-credentials.js resolveHubLlmAuth`). Only these are handed to the probe, so a
+// lib/hub_credentials.js resolveHubLlmAuth`). Only these are handed to the probe, so a
 // signer WIF or an API key for another vendor riding in the same extra env never
 // travels further than it has to.
 const HUB_LLM_CREDENTIAL_KEYS = [
@@ -595,7 +595,7 @@ function llmProbes() {
     return {
         dirExists: (p) => { try { return fs.statSync(p).isDirectory(); } catch (_) { return false; } },
         isExecutable: (p) => { try { fs.accessSync(p, fs.constants.X_OK); return true; } catch (_) { return false; } },
-        resolveCredential: (env) => loadHubModule('src/lib/hub-credentials.js').resolveHubLlmAuth({ env: env })
+        resolveCredential: (env) => loadHubModule('src/lib/hub_credentials.js').resolveHubLlmAuth({ env: env })
     };
 }
 
@@ -710,7 +710,7 @@ function resolveWindowKeyingFrom(pub, dbProto) {
  * Three things in here are load-bearing and not obvious:
  *
  *   - `SIGNING_PRIVKEY_SECRET`, not `SIGNING_PRIVKEY_HEX`. Both names resolve
- *     (`xchain-hub/src/secret-env.js`), but the `_SECRET` spelling is the one an
+ *     (`xchain-hub/src/secret_env.js`), but the `_SECRET` spelling is the one an
  *     operator's redaction filter catches, and setting BOTH to different values
  *     is a hard error in the hub, so only one is set.
  *   - `HUB_API_KEY` is deliberately ABSENT. The `/hub-db/snapshot` middleware
@@ -1756,7 +1756,7 @@ class HubDbMirrorProxy {
  * and `<repoRoot>/xchain-indexer/src/api.js`, so `repoRoot` decides whose BYTES the
  * acceptance evidence is about. Defaulting to the checkout this file lives in is
  * what keeps a lane's evidence inside the lane: a peer measured the other outcome,
- * a mid-drive rewrite of `xchain-hub/src/db.js` in a shared tree leaving four
+ * a mid-drive rewrite of `xchain-hub/src/db/index.js` in a shared tree leaving four
  * running venue children on different code than the leg believed it was testing.
  *
  * Precedence: an explicit `opts.repoRoot` (a leg that knows), then
@@ -3534,7 +3534,7 @@ function coinCode(coin) {
  * @returns {{signer_pubkeys: string, signatures: string, canonical: string}}
  */
 function signMirrorRowAs(row, signers, requestBlock, network) {
-    const canon = loadHubModule('src/attest_response_canonical.js');
+    const canon = loadHubModule('src/attestation/attest_response_canonical.js');
     const eq    = loadHubModule('src/equivocation_header.js');
     const rid   = String(row.request_id).toLowerCase();
 

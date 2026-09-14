@@ -43,7 +43,7 @@
  * REQUIRES a non-zero regtest activation height (regtest is 0 by default =
  * always weighted, so the COUNT side cannot be reached). The suite is STANDING:
  * when the shipped regtest height is <2 it overrides the in-process
- * hub swq map (the SAME module instance Consensus.js reads, resolved via the
+ * hub swq map (the SAME module instance consensus/pbft.js reads, resolved via the
  * MultiValidatorHub helper) to SWQ_BOUNDARY_REGTEST_ACTIVATION (default 120)
  * for the duration of the run and restores it afterward. Regtest-only, runtime
  * only; no source edit, so the byte-identity conformance gate is untouched.
@@ -61,7 +61,7 @@ const { MultiValidatorHub, loadHubModule } = require('../helpers/multiValidatorH
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { waitForMesh, waitForConfigEverywhere } = require('../helpers/consensusWait');
 // Load swq through the SAME resolver the hub harness uses, so this module
-// instance is the one Consensus.js reads and a runtime override reaches it.
+// instance is the one consensus/pbft.js reads and a runtime override reaches it.
 const swq = loadHubModule('src/stake_weighted_quorum.js');
 
 // Effective activation height for this run: the shipped regtest height when it
@@ -76,7 +76,7 @@ const ACT = (Number.isFinite(FILE_ACT) && FILE_ACT >= 2) ? FILE_ACT : ENV_ACT;
 // (every socket open / every hub's config row written) and returns on the first
 // passing poll, so a generous bound costs nothing and removes the venue-load bet.
 const PEER_WAIT_MS  = 60_000;
-const APPLY_WAIT_MS = 60_000;  // COMMIT propagation + follower _applyConfig
+const APPLY_WAIT_MS = 60_000;  // COMMIT propagation + follower applyConfig
 // The stall case has no event to wait for (non-occurrence), so its window stays a
 // fixed observation window rather than a deadline.
 const STALL_WAIT_MS = 6000;   // long enough to confirm a round does NOT finalize

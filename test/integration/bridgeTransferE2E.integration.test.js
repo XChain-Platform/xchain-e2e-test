@@ -424,7 +424,7 @@ describe('XBRIDGE transfer: hub-signed record to indexer settle pass (base AT1, 
     describe('the federation client and the pending read it polls', function(){
 
         // These drive the REAL engine client (CrossChainBridgeEngine._indexerCall,
-        // _recordPending, _effectiveDepth) over real HTTP against the pending source, with
+        // recordPending, _effectiveDepth) over real HTTP against the pending source, with
         // no hub, no database and no mesh. Without them the federated block below would be
         // the only thing standing between a mock that drifted from api.js and a round that
         // is silently vacuous on every venue that can run it.
@@ -510,7 +510,7 @@ describe('XBRIDGE transfer: hub-signed record to indexer settle pass (base AT1, 
 
             const tip = await eng._indexerCall('BTC', 'getlatestblock', {});
             assert.strictEqual(Number(tip.block_index), SNAPSHOT,
-                'the tip read does not answer block_index, so _policyOriginBlock would abstain forever');
+                'the tip read does not answer block_index, so policyOriginBlock would abstain forever');
         });
     });
 

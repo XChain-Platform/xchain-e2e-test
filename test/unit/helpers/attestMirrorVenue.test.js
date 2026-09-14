@@ -709,7 +709,7 @@ describe('attestMirrorVenue: the llm precondition', function () {
         // The hub's resolver, given the env a hub child will receive, must agree with the
         // probe on the same env: same module, same answer. A token-only env resolves; an
         // env with a directory that has no credentials file and no token does not.
-        const { resolveHubLlmAuth } = require('../../../../xchain-hub/src/lib/hub-credentials.js')
+        const { resolveHubLlmAuth } = require('../../../../xchain-hub/src/lib/hub_credentials.js')
         const probes = llmProbes()
         const tokenEnv = { HUB_CLAUDE_CONFIG_DIR: '/nonexistent/venue-fixture', HUB_CLAUDE_CODE_OAUTH_TOKEN: 'fixture-token' }
         const bareEnv  = { HUB_CLAUDE_CONFIG_DIR: '/nonexistent/venue-fixture' }

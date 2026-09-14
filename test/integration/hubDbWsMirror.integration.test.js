@@ -37,7 +37,7 @@ const path    = require('path');
 const mariadb = require('mariadb');
 const { WebSocketServer } = require('ws');
 
-const HubDbBroadcaster = require('../../../xchain-hub/src/HubDbBroadcaster');
+const HubDbBroadcaster = require('../../../xchain-hub/src/peers/hub_db_broadcaster');
 const HubDbSync        = require('../../../xchain-indexer/src/hub/hub_db_sync');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 

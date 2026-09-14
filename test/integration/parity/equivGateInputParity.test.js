@@ -135,7 +135,7 @@ describe('EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', function () 
     describe('engines that feed a BTC block height on both sides (assert green)', function () {
 
         it('CHECKPOINT: both sides gate on snapshot_block (height)', function () {
-            const hubArg = gateInputArg(srcOf('xchain-hub/src/StateCheckpointEngine.js'),
+            const hubArg = gateInputArg(srcOf('xchain-hub/src/anchor/checkpoint_engine.js'),
                 /isEquivHeaderActive\(cp\.snapshot_block/);
             const idxArg = gateInputArg(srcOf('xchain-indexer/src/actions/anchor/index.js'),
                 /isEquivHeaderActive\(d\['SNAPSHOT_BLOCK'\]/);
@@ -147,7 +147,7 @@ describe('EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', function () 
         });
 
         it('DEX: both sides gate on the match row snapshot_block (height)', function () {
-            const hubArg = gateInputArg(srcOf('xchain-hub/src/CrossChainDexEngine.js'),
+            const hubArg = gateInputArg(srcOf('xchain-hub/src/cross_chain/dex_engine.js'),
                 /isEquivHeaderActive\(r\.snapshot_block/);
             const idxArg = gateInputArg(srcOf('xchain-indexer/src/actions/cross_settle/index.js'),
                 /isEquivHeaderActive\(m\.snapshot_block/);
@@ -158,7 +158,7 @@ describe('EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', function () 
         });
 
         it('XCALL: both sides gate on the call/result row snapshot_block (height)', function () {
-            const hubArg = gateInputArg(srcOf('xchain-hub/src/CrossChainCallEngine.js'),
+            const hubArg = gateInputArg(srcOf('xchain-hub/src/cross_chain/call_engine.js'),
                 /isEquivHeaderActive\(r\.snapshot_block/);
             const idxArgExec = gateInputArg(srcOf('xchain-indexer/src/actions/xexec.js'),
                 /isEquivHeaderActive\(c\.snapshot_block/);
@@ -173,7 +173,7 @@ describe('EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', function () 
         });
 
         it('ATTEST: both sides gate on the REQUEST block (height)', function () {
-            const hubArg = gateInputArg(srcOf('xchain-hub/src/AttestationConsensus.js'),
+            const hubArg = gateInputArg(srcOf('xchain-hub/src/attestation/consensus.js'),
                 /isEquivHeaderActive\(requestBlock/);
             // The indexer's response verification lives in its own module beside the
             // handler, so the gate call and the handler are in different files. Both
@@ -202,7 +202,7 @@ describe('EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', function () 
         });
 
         it('NODEPROOF: both sides gate on the epoch HEIGHT', function () {
-            const hubArg = gateInputArg(srcOf('xchain-hub/src/FullNodeChallengeRound.js'),
+            const hubArg = gateInputArg(srcOf('xchain-hub/src/consensus/full_node_challenge_round.js'),
                 /isEquivHeaderActive\(epoch/);
             const idxArg = gateInputArg(srcOf('xchain-indexer/src/actions/nodeproof.js'),
                 /isEquivHeaderActive\(snapshotBlock/);
@@ -221,7 +221,7 @@ describe('EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', function () 
             // so config equivocation stays slashable. The hub gate input is the PBFT
             // block height. Assert the hub feeds a HEIGHT and document the indexer
             // side is a content-carried-height contract (verified via slash.js).
-            const hubArg = gateInputArg(srcOf('xchain-hub/src/Consensus.js'),
+            const hubArg = gateInputArg(srcOf('xchain-hub/src/consensus/pbft.js'),
                 /isEquivHeaderActive\(blockHeight/);
             assert.ok(hubArg, 'hub CONFIG gate input not found');
             assert.match(hubArg, /blockHeight/, 'hub CONFIG gate input must be the PBFT block height');
@@ -240,12 +240,12 @@ describe('EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', function () 
     describe('ORACLE gate input (fix: gate on the BTC block height)', function () {
 
         it('the hub ORACLE gate now feeds the BTC block height, distinct from the round counter', function () {
-            const hubArg = gateInputArg(srcOf('xchain-hub/src/OracleConsensus.js'),
+            const hubArg = gateInputArg(srcOf('xchain-hub/src/oracle/consensus.js'),
                 /isEquivHeaderActive\(btcBlockHeight/);
             assert.ok(hubArg, 'hub ORACLE gate input not found');
             assert.match(hubArg, /^btcBlockHeight$/, 'hub ORACLE gate input must be btcBlockHeight');
 
-            const roundSrc = srcOf('xchain-hub/src/OracleRound.js');
+            const roundSrc = srcOf('xchain-hub/src/oracle/round.js');
             // currentRound is wall-clock derived...
             assert.match(roundSrc, /currentRound\s*=\s*newRound/);
             assert.match(roundSrc, /newRound\s*=\s*Math\.floor\(\(Date\.now\(\)\s*-\s*this\.epochStart\)/,
@@ -257,13 +257,13 @@ describe('EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', function () 
         });
 
         it('hub ORACLE gate input is a BTC block height, matching every other engine', function () {
-            const hubArg = gateInputArg(srcOf('xchain-hub/src/OracleConsensus.js'),
+            const hubArg = gateInputArg(srcOf('xchain-hub/src/oracle/consensus.js'),
                 /isEquivHeaderActive\(/);
             assert.match(hubArg, /(btcBlockHeight|referenceBlock|blockHeight|snapshot_block)/,
                 'hub ORACLE gate input must be a BTC block height; got `' + hubArg + '`');
 
             // Hub re-verify (PriceAggregator) gates on the pushed btc_block_height.
-            const aggArg = gateInputArg(srcOf('xchain-hub/src/PriceAggregator.js'),
+            const aggArg = gateInputArg(srcOf('xchain-hub/src/oracle/price_aggregator.js'),
                 /isEquivHeaderActive\(btcBlockHeight/);
             assert.match(aggArg, /^btcBlockHeight$/, 'hub PriceAggregator must gate on btcBlockHeight');
 
