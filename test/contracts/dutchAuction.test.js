@@ -108,9 +108,6 @@ function cp(x) {
     return x.math.subtract(sp, decayed);
 }`
 
-describe('Dutch Auction: descending price, first acceptance wins', function () {
-    this.timeout(10 * 60 * 1000)
-
     const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
     const BID = 'XCHAIN' // gas token doubles as the bidding currency; 0 decimals in this stack
     const START_PRICE = '1000'
@@ -164,6 +161,9 @@ describe('Dutch Auction: descending price, first acceptance wins', function () {
         return { ci, contractAddr, itemTick, seller }
     }
 
+describe('Dutch Auction: descending price, first acceptance wins', function () {
+    this.timeout(10 * 60 * 1000)
+
     it('buying right after funding charges (at most) startPrice, and settles item + payment atomically', async function () {
         const { ci, contractAddr, itemTick, seller } = await deployAndFund('10', 200)
 
@@ -184,6 +184,10 @@ describe('Dutch Auction: descending price, first acceptance wins', function () {
         assert.strictEqual(await balanceOf(contractAddr, itemTick), 0)
         assert.strictEqual(await balanceOf(contractAddr, BID), 0, 'no bid tokens (price or excess) should be left in custody')
     })
+})
+
+describe('Dutch Auction: descending price, first acceptance wins', function () {
+    this.timeout(10 * 60 * 1000)
 
     it('forcing extra blocks between funding and buying lowers the price, and the floor holds past the full duration', async function () {
         // Short duration so a handful of forced blocks clearly land at the floor.
@@ -219,6 +223,10 @@ describe('Dutch Auction: descending price, first acceptance wins', function () {
 
         assert(priceB <= priceA, 'more elapsed blocks before buying should never yield a HIGHER price (' + priceB + ' vs ' + priceA + ')')
     })
+})
+
+describe('Dutch Auction: descending price, first acceptance wins', function () {
+    this.timeout(10 * 60 * 1000)
 
     it('seller cancels before any purchase and reclaims the item', async function () {
         const { ci, contractAddr, itemTick, seller } = await deployAndFund('6', 200)
