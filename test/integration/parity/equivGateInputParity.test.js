@@ -69,6 +69,7 @@
 const assert = require('assert');
 const fs     = require('fs');
 const path   = require('path');
+const { readModuleSource } = require('../../support/indexer_source.js');
 
 const HUB_EQ_PATH = path.resolve(__dirname, '../../../../xchain-hub/src/equivocation_header.js');
 const IDX_EQ_PATH = path.resolve(__dirname, '../../../../xchain-indexer/src/equivocation_header.js');
@@ -81,7 +82,9 @@ const idxEq = require(IDX_EQ_PATH);
 // monorepo root (two up from test/integration/parity).
 const ROOT = path.resolve(__dirname, '../../../..');
 function srcOf(rel) {
-    return fs.readFileSync(path.join(ROOT, rel), 'utf8');
+    // An indexer module is read with every part it was split into (support/indexer_source.js).
+    const abs = path.join(ROOT, rel);
+    return rel.startsWith('xchain-indexer/') ? readModuleSource(abs) : fs.readFileSync(abs, 'utf8');
 }
 
 function gateInputArg(source, anchorRegex) {
@@ -279,12 +282,12 @@ describe('EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', function () 
             assert.match(edSrc, /isEquivHeaderActive\(btcBlockHeight,\s*network\)/,
                 'indexer ed25519 must gate the price canonical on btcBlockHeight');
             const priceSrc = srcOf('xchain-indexer/src/actions/price/index.js');
-            assert.match(priceSrc, /btcBlockHeight\s*=\s*parseInt\(fields\[3\]\)/,
+            assert.match(priceSrc, /btcBlockHeight\s*[=:]\s*parseInt\(fields\[3\]\)/,
                 'indexer must parse BTC_BLOCK_HEIGHT off the PRICE batch wire (fields[3])');
             // The builder also takes the network as a trailing argument (the mirror-admission
             // era is keyed per round on that network); the height stays the third argument,
-            // which is the property pinned here.
-            assert.match(priceSrc, /buildPriceBatchPayload\(firstRound,\s*lastRound,\s*btcBlockHeight,\s*rounds(,\s*[^)]+)?\)/,
+            // which is the property pinned here. The parsed header may ride as locals or on one batch object.
+            assert.match(priceSrc, /buildPriceBatchPayload\((?:batch\.)?firstRound,\s*(?:batch\.)?lastRound,\s*(?:batch\.)?btcBlockHeight,\s*(?:batch\.)?rounds(,\s*[^)]+)?\)/,
                 'indexer must feed the parsed btcBlockHeight into the batch canonical builder');
 
             assertHeightParity('ORACLE', 500);
