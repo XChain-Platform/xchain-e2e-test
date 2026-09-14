@@ -70,7 +70,9 @@ describe('E2E: Result Accuracy & Reporting Fidelity', () => {
             assert.strictEqual(Number(mintResult.credit.amount), 20, 'Mint credit amount must match')
         })
     })
+})
 
+describe('E2E: Result Accuracy & Reporting Fidelity', () => {
     describe('E2E-REPORT-003: No false positives when polling times out', () => {
         it('should produce null from waitForIssue on a non-existent tick', async () => {
             const fakeTick = 'NVREXST' + Date.now().toString().slice(-7)
