@@ -95,6 +95,24 @@ describe('Chaos Experiment 8: GAS Token Bootstrap Failure @P0', function () {
         )
         assert(mockIssueHelper.sendIssueV0.notCalled, 'should not attempt issue when funding fails')
     })
+})
+
+describe('Chaos Experiment 8: GAS Token Bootstrap Failure @P0', function () {
+
+    let saved
+
+    beforeEach(function () {
+        saved = saveGlobals(GLOBAL_KEYS)
+        global.COIN = 'bitcoin'
+        global.NETWORK = 'regtest'
+        global.NETWORK_OBJECT = bitcoin.networks.regtest
+        global.wallets = {}
+    })
+
+    afterEach(function () {
+        restoreGlobals(saved)
+        sinon.restore()
+    })
 
     it('skips creation when GAS token already exists', async function () {
         const existingRow = { tick: GAS_TICK, status: 'valid', max_supply: '1000000000' }
