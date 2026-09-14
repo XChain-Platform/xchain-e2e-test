@@ -40,6 +40,7 @@ const transactionHelper = require('../transactionHelper')
 
 const mockMariadb = require('../integration/fixtures/mockMariadb')
 const Database = require('../../src/db')
+const MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
 
 function makeMockConnection(queryResult) {
     return {
@@ -57,36 +58,37 @@ function createDb() {
     return { db, mockConn, mockPool }
 }
 
+function resetTestGlobals() {
+    global.wallets = {}
+    // Sibling boundary files (globalState, identifiers) also assign these connector
+    // globals at module-load time, and the last require wins, clobbering the mocks
+    // defined above (notably dropping getSyncStatus). Re-establish them per test so
+    // these error-propagation cases are immune to cross-file load order.
+    global.regtestMinerConnector = { sendFunds: async () => 'txid-stub' }
+    global.nodeConnector = {
+        waitForTx: async () => true,
+        broadcastTx: async () => 'txhash-stub',
+        getFeePerKilobyte: async () => 0.001,
+        getTransactionHex: async () => ''
+    }
+    global.utxoTrackerConnector = {
+        waitForUtxos: async () => true,
+        getUtxosFromAddress: async () => ({ utxos: [] }),
+        getSyncStatus: async () => null
+    }
+    global.encoderConnector = { createTx: async () => {} }
+}
+
+function cleanUpTestGlobals() {
+    sinon.restore()
+    global.wallets = {}
+    mockMariadb.createPool.resetHistory()
+}
+
 describe('Boundary: Error Propagation', function () {
 
-    const MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
-
-    beforeEach(function () {
-        global.wallets = {}
-        // Sibling boundary files (globalState, identifiers) also assign these connector
-        // globals at module-load time, and the last require wins, clobbering the mocks
-        // defined above (notably dropping getSyncStatus). Re-establish them per test so
-        // these error-propagation cases are immune to cross-file load order.
-        global.regtestMinerConnector = { sendFunds: async () => 'txid-stub' }
-        global.nodeConnector = {
-            waitForTx: async () => true,
-            broadcastTx: async () => 'txhash-stub',
-            getFeePerKilobyte: async () => 0.001,
-            getTransactionHex: async () => ''
-        }
-        global.utxoTrackerConnector = {
-            waitForUtxos: async () => true,
-            getUtxosFromAddress: async () => ({ utxos: [] }),
-            getSyncStatus: async () => null
-        }
-        global.encoderConnector = { createTx: async () => {} }
-    })
-
-    afterEach(function () {
-        sinon.restore()
-        global.wallets = {}
-        mockMariadb.createPool.resetHistory()
-    })
+    beforeEach(resetTestGlobals)
+    afterEach(cleanUpTestGlobals)
 
     describe('EP-01: regtestMinerConnector.sendFunds returns null', function () {
 
@@ -127,6 +129,12 @@ describe('Boundary: Error Propagation', function () {
             )
         })
     })
+})
+
+describe('Boundary: Error Propagation', function () {
+
+    beforeEach(resetTestGlobals)
+    afterEach(cleanUpTestGlobals)
 
     describe('EP-04: waitForTx throws an error', function () {
 
@@ -169,6 +177,12 @@ describe('Boundary: Error Propagation', function () {
             )
         })
     })
+})
+
+describe('Boundary: Error Propagation', function () {
+
+    beforeEach(resetTestGlobals)
+    afterEach(cleanUpTestGlobals)
 
     describe('EP-07: Database check* SQL errors return null', function () {
 
@@ -204,6 +218,12 @@ describe('Boundary: Error Propagation', function () {
             assert.strictEqual(result, null)
         })
     })
+})
+
+describe('Boundary: Error Propagation', function () {
+
+    beforeEach(resetTestGlobals)
+    afterEach(cleanUpTestGlobals)
 
     describe('EP-08: waitFor* times out when check* never finds a row', function () {
 
@@ -239,6 +259,12 @@ describe('Boundary: Error Propagation', function () {
             assert.strictEqual(result, null)
         })
     })
+})
+
+describe('Boundary: Error Propagation', function () {
+
+    beforeEach(resetTestGlobals)
+    afterEach(cleanUpTestGlobals)
 
     describe('EP-09: waitFor* continues polling after intermittent check* errors', function () {
 
@@ -281,6 +307,12 @@ describe('Boundary: Error Propagation', function () {
             assert.strictEqual(mockConn.query.callCount, 0, 'loop body never entered with timeMax=0')
         })
     })
+})
+
+describe('Boundary: Error Propagation', function () {
+
+    beforeEach(resetTestGlobals)
+    afterEach(cleanUpTestGlobals)
 
     describe('EP-11: Failed funding does not corrupt wallet cache', function () {
 
