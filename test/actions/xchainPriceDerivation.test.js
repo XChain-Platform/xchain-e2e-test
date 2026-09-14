@@ -38,11 +38,11 @@ const { NO_PRICE_SEED } = require('../helpers/xchainPriceConstants')
 // a local copy in the e2e repo would be a THIRD implementation to drift, and the
 // whole point is to exercise the one production actually runs. Absent sibling ->
 // skip, matching the cross-repo guard convention used elsewhere.
-const INDEXER_DIR = process.env.XCHAIN_INDEXER_DIR ||
-    path.join(__dirname, '..', '..', '..', 'xchain-indexer')
-const QUERY_PATH = path.join(INDEXER_DIR, 'src', 'consensus', 'xchainPriceQuery.js')
-const PRICE_PATH = path.join(INDEXER_DIR, 'src', 'consensus', 'xchainPrice.js')
-const HAVE_DERIVATION = fs.existsSync(QUERY_PATH) && fs.existsSync(PRICE_PATH)
+const INDEXER_DIR = process.env.XCHAIN_INDEXER_DIR || path.join(__dirname, '..', '..', '..', 'xchain-indexer')
+// Snake_case first (the indexer's names since its twin rename), then the camelCase an older indexer origin still carries.
+const inConsensus = (...names) => names.map((n) => path.join(INDEXER_DIR, 'src', 'consensus', n)).find((p) => fs.existsSync(p))
+const QUERY_PATH = inConsensus('xchain_price_query.js', 'xchainPriceQuery.js')
+const PRICE_PATH = inConsensus('xchain_price.js', 'xchainPrice.js')
 
 const GAS_TICK = 'XCHAIN'
 
@@ -182,7 +182,7 @@ describe('XCHAIN price derivation from real fills (spec step 7)', function () {
     let bcmath = null
 
     before(function () {
-        if (!HAVE_DERIVATION) {
+        if (!QUERY_PATH || !PRICE_PATH) {
             console.log('xchainPriceDerivation: sibling xchain-indexer not checked out; skipping')
             this.skip()
             return
