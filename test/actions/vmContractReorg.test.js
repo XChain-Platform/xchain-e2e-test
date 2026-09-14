@@ -13,6 +13,55 @@ const cryptoHelper = require('../cryptoHelper')
 const vmHelper = require('../helpers/vmHelper')
 const gasHelper = require('../helpers/gasHelper')
 
+const COUNTER = `
+        module.exports = {
+            meta: { name: 'Reorg Counter', description: 'Increments a stored counter so a reorg can roll its state back.', version: '1.0.0' },
+            increment: function() {
+                var c = parseInt(xchain.state.get('count') || '0');
+                xchain.state.set('count', String(c + 1));
+                return String(c + 1);
+            }
+        };
+    `
+
+let deployer = null
+
+async function q(sql, params) {
+    const conn = await indexerDatabase.getConnection()
+    try { return await conn.query(sql, params) }
+    finally { await conn.release() }
+}
+
+async function latestState(contractIndex, key) {
+    const rows = await q(`SELECT state_value FROM contract_state
+        WHERE contract_index=? AND state_key=? ORDER BY action_index DESC LIMIT 1`, [contractIndex, key])
+    return rows.length ? rows[0].state_value : null
+}
+
+// Block height (= node chain height on regtest) of the block that mined a given action.
+async function blockOfAction(actionIndex) {
+    const rows = await q(`SELECT t.block_index AS b FROM actions a
+        JOIN transactions t ON t.tx_index=a.tx_index WHERE a.action_index=?`, [actionIndex])
+    return rows.length ? Number(rows[0].b) : null
+}
+
+async function contractExists(ci) {
+    const rows = await q(`SELECT 1 FROM contracts WHERE action_index=?`, [ci])
+    return rows.length > 0
+}
+
+async function setupVmContractReorg() {
+    // The reorg is driven by `generateblock(addr, [])` (mine an EMPTY competing chain so the
+    // orphaned tx is NOT re-included), an RPC added in Bitcoin Core 0.19. Dogecoin Core 1.14.x
+    // (a 0.13/0.14 base) lacks it and answers HTTP 404 "method not found", so this scenario can't
+    // be driven on DOGE regtest. The indexer's reorg-rollback path is chain-agnostic (rollback.js
+    // operates on DB rows by block_index) and is proven on BTC + LTC; skip on DOGE as a node
+    // capability gap, not a protocol gap.
+    if (global.COIN_CODE === 'DOGE') this.skip()
+    deployer = await cryptoHelper.getNewFundedAddress('vmreorg-deployer', COIN, NETWORK, null, 'legacy', 0, 1)
+    await gasHelper.ensureGasBalance(deployer, '500')
+}
+
 /**
  * VM Contract Reorg (on-chain): proves the indexer rolls back EXECUTE-produced contract state
  * across a real chain reorg. Integration tests cover DEPLOY/STAKE/DEPOSIT rollback but cannot run
@@ -29,52 +78,7 @@ const gasHelper = require('../helpers/gasHelper')
  * getBlockCount / generateBlock): nodeConnector in the e2e harness.
  */
 describe('VM Contract Reorg: EXECUTE state rolls back across an on-chain reorg', function () {
-
-    const COUNTER = `
-        module.exports = {
-            meta: { name: 'Reorg Counter', description: 'Increments a stored counter so a reorg can roll its state back.', version: '1.0.0' },
-            increment: function() {
-                var c = parseInt(xchain.state.get('count') || '0');
-                xchain.state.set('count', String(c + 1));
-                return String(c + 1);
-            }
-        };
-    `
-
-    let deployer = null
-
-    async function q(sql, params) {
-        const conn = await indexerDatabase.getConnection()
-        try { return await conn.query(sql, params) }
-        finally { await conn.release() }
-    }
-    async function latestState(contractIndex, key) {
-        const rows = await q(`SELECT state_value FROM contract_state
-            WHERE contract_index=? AND state_key=? ORDER BY action_index DESC LIMIT 1`, [contractIndex, key])
-        return rows.length ? rows[0].state_value : null
-    }
-    // Block height (= node chain height on regtest) of the block that mined a given action.
-    async function blockOfAction(actionIndex) {
-        const rows = await q(`SELECT t.block_index AS b FROM actions a
-            JOIN transactions t ON t.tx_index=a.tx_index WHERE a.action_index=?`, [actionIndex])
-        return rows.length ? Number(rows[0].b) : null
-    }
-    async function contractExists(ci) {
-        const rows = await q(`SELECT 1 FROM contracts WHERE action_index=?`, [ci])
-        return rows.length > 0
-    }
-
-    before(async function () {
-        // The reorg is driven by `generateblock(addr, [])` (mine an EMPTY competing chain so the
-        // orphaned tx is NOT re-included), an RPC added in Bitcoin Core 0.19. Dogecoin Core 1.14.x
-        // (a 0.13/0.14 base) lacks it and answers HTTP 404 "method not found", so this scenario can't
-        // be driven on DOGE regtest. The indexer's reorg-rollback path is chain-agnostic (rollback.js
-        // operates on DB rows by block_index) and is proven on BTC + LTC; skip on DOGE as a node
-        // capability gap, not a protocol gap.
-        if (global.COIN_CODE === 'DOGE') this.skip()
-        deployer = await cryptoHelper.getNewFundedAddress('vmreorg-deployer', COIN, NETWORK, null, 'legacy', 0, 1)
-        await gasHelper.ensureGasBalance(deployer, '500')
-    })
+    before(setupVmContractReorg)
 
     it('orphaning the EXECUTE block via invalidateblock + empty competing chain rolls back contract_state', async function () {
         // Deploy the counter and run one increment under normal (auto-mined) conditions.
