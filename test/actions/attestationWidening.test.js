@@ -48,26 +48,26 @@ const { skipIfResponseMirrorEra } = require('../helpers/attestLegacyResponsePath
  * phases. The only difference is chain height, which is the whole claim.
  */
 
-describe('Attestation: responsible-set widening rescues a set with a non-serving member', function () {
+const ATTESTATION_WIDENING_TITLE = 'Attestation: responsible-set widening rescues a set with a non-serving member'
 
-    // deadlineBlocks 30 with confirmations 3 leaves a 27-block serviceable span,
-    // split into three 9-block segments (maxSlots 2 + 1). Long enough that both
-    // phases are comfortably observable without racing a segment boundary; the
-    // live incident's 10-block window is proven in the unit suites instead.
-    const DEADLINE_BLOCKS = 30
-    const CONFIRMATIONS   = 3
-    const MAX_SLOTS       = 2
-    const REDUNDANCY      = 3
-    // How many validators of our own to stake. The chain also carries validators
-    // from earlier suites whose keys we do not hold; those are real non-signers and
-    // the ranking below accounts for them.
-    const OWNED           = 6
+// deadlineBlocks 30 with confirmations 3 leaves a 27-block serviceable span,
+// split into three 9-block segments (maxSlots 2 + 1). Long enough that both
+// phases are comfortably observable without racing a segment boundary; the
+// live incident's 10-block window is proven in the unit suites instead.
+const DEADLINE_BLOCKS = 30
+const CONFIRMATIONS   = 3
+const MAX_SLOTS       = 2
+const REDUNDANCY      = 3
+// How many validators of our own to stake. The chain also carries validators
+// from earlier suites whose keys we do not hold; those are real non-signers and
+// the ranking below accounts for them.
+const OWNED           = 6
 
-    let operatorAddr  = null
-    let contractIndex = null
-    const owned = []            // MockAttestationValidator[], keys we can sign with
+let operatorAddr  = null
+let contractIndex = null
+const owned = []            // MockAttestationValidator[], keys we can sign with
 
-    const CONTRACT_CODE = `
+const CONTRACT_CODE = `
 module.exports = {
     meta: { name: 'Attest Widening Asker', description: 'Requests an attestation whose responder set widens as deadlines pass.', version: '1.0.0' },
     askWidening: function(xchain) {
@@ -90,191 +90,213 @@ module.exports = {
 };
 `
 
-    // Mirror of attest_responsible_widening_activation.widenSlots, so the suite
-    // predicts the ladder from chain height instead of trusting it.
-    function widenSlots(atBlock, requestBlock, deadlineBlock) {
-        const start = requestBlock + CONFIRMATIONS
-        const span  = deadlineBlock - start
-        if (!(span > 0)) return 0
-        const elapsed = atBlock - start
-        if (!(elapsed > 0)) return 0
-        return Math.max(0, Math.min(Math.floor(elapsed / (span / (MAX_SLOTS + 1))), MAX_SLOTS))
-    }
+// Mirror of attest_responsible_widening_activation.widenSlots, so the suite
+// predicts the ladder from chain height instead of trusting it.
+function widenSlots(atBlock, requestBlock, deadlineBlock) {
+    const start = requestBlock + CONFIRMATIONS
+    const span  = deadlineBlock - start
+    if (!(span > 0)) return 0
+    const elapsed = atBlock - start
+    if (!(elapsed > 0)) return 0
+    return Math.max(0, Math.min(Math.floor(elapsed / (span / (MAX_SLOTS + 1))), MAX_SLOTS))
+}
 
-    // Rank the FULL live attestation set the indexer will rank over, not just our
-    // own keys: a foreign key that outranks ours takes a real slot, and predicting
-    // the set from our own validators alone is a mistake these suites have made
-    // before, which surfaces as an unexplained shortfall in valid signatures.
-    function rank(requestId, validators) {
-        const withHash = validators.map(v => ({
-            pubkey: String(v.pubkey).toLowerCase(),
-            source: (v.source != null ? String(v.source) : null),
-            hash: crypto.createHash('sha256').update(String(requestId), 'utf8')
-                .update(String(v.pubkey).toLowerCase(), 'utf8').digest('hex')
-        }))
-        withHash.sort((a, b) => (a.hash < b.hash) ? -1 : (a.hash > b.hash ? 1 : 0))
-        // SWQ source-dedup (armed at genesis on regtest): one slot per staking source.
-        const seen = new Set()
-        return withHash.filter(v => {
-            if (v.source === null) return true
-            if (seen.has(v.source)) return false
-            seen.add(v.source)
-            return true
-        })
-    }
+// Rank the FULL live attestation set the indexer will rank over, not just our
+// own keys: a foreign key that outranks ours takes a real slot, and predicting
+// the set from our own validators alone is a mistake these suites have made
+// before, which surfaces as an unexplained shortfall in valid signatures.
+function rank(requestId, validators) {
+    const withHash = validators.map(v => ({
+        pubkey: String(v.pubkey).toLowerCase(),
+        source: (v.source != null ? String(v.source) : null),
+        hash: crypto.createHash('sha256').update(String(requestId), 'utf8')
+            .update(String(v.pubkey).toLowerCase(), 'utf8').digest('hex')
+    }))
+    withHash.sort((a, b) => (a.hash < b.hash) ? -1 : (a.hash > b.hash ? 1 : 0))
+    // SWQ source-dedup (armed at genesis on regtest): one slot per staking source.
+    const seen = new Set()
+    return withHash.filter(v => {
+        if (v.source === null) return true
+        if (seen.has(v.source)) return false
+        seen.add(v.source)
+        return true
+    })
+}
 
-    async function stakeOwnedValidator() {
-        const v = new attestationHelper.MockAttestationValidator()
-        const stakeSource = await cryptoHelper.getNewFundedAddress(
-            'widen-val', COIN, NETWORK, null, 'legacy', owned.length, 0.02
-        )
-        // 15000 clears both the attestation capability floor (1000) and the
-        // http_get provider floor (10000) the weighted path enforces.
-        await gasHelper.ensureGasBalance(stakeSource, '20000')
-        await stakeHelper.sendStakeV1(stakeSource, '15000.00000000', v.pubkey)
-        v.source = stakeSource.address
-        owned.push(v)
-        attestationHelper.registerStakedValidator(v)
-        return v
-    }
+async function stakeOwnedValidator() {
+    const v = new attestationHelper.MockAttestationValidator()
+    const stakeSource = await cryptoHelper.getNewFundedAddress(
+        'widen-val', COIN, NETWORK, null, 'legacy', owned.length, 0.02
+    )
+    // 15000 clears both the attestation capability floor (1000) and the
+    // http_get provider floor (10000) the weighted path enforces.
+    await gasHelper.ensureGasBalance(stakeSource, '20000')
+    await stakeHelper.sendStakeV1(stakeSource, '15000.00000000', v.pubkey)
+    v.source = stakeSource.address
+    owned.push(v)
+    attestationHelper.registerStakedValidator(v)
+    return v
+}
 
-    before(async function () {
-        if (COIN_CODE !== 'BTC') {
-            console.log('Attestation widening requires BTC chain; skipping on ' + COIN_CODE)
-            this.skip()
-            return
+async function setupAttestationWidening(testContext) {
+    if (COIN_CODE !== 'BTC') {
+        console.log('Attestation widening requires BTC chain; skipping on ' + COIN_CODE)
+        testContext.skip()
+        return
+    }
+    operatorAddr = await cryptoHelper.getNewFundedAddress(
+        'widen-op', COIN, NETWORK, null, 'legacy', 0, 0.02
+    )
+    await gasHelper.ensureGasBalance(operatorAddr, '8000')
+
+    for (let i = 0; i < OWNED; i++) await stakeOwnedValidator()
+    await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
+    await utxoTrackerConnector.waitForSync()
+
+    const deploy = await vmHelper.sendDeployV0(operatorAddr, CONTRACT_CODE, 500000)
+    assert.strictEqual(deploy.contract.status, 'valid', 'deploy status: ' + deploy.contract.status)
+    contractIndex = deploy.contract.action_index
+}
+
+function buildRequestGeometry(r, ownedKeys) {
+    const base = r.slice(0, REDUNDANCY).map(x => x.pubkey)
+    const widen = r.slice(0, REDUNDANCY + MAX_SLOTS).map(x => x.pubkey)
+    const inBase = base.filter(pk => ownedKeys.has(pk))
+    const extra = widen.slice(REDUNDANCY).filter(pk => ownedKeys.has(pk))
+    return { base, widen, inBase, extra }
+}
+
+function chooseRequestGeometry(geometry, attempt) {
+    const { base, widen, inBase, extra } = geometry
+    if (inBase.length >= REDUNDANCY - 1 && extra.length >= 1) {
+        // Deliberately short of the base set by one, made up from a widened slot:
+        // exactly the shape of a set holding one member that never signs.
+        return {
+            signers: inBase.slice(0, REDUNDANCY - 1).concat(extra.slice(0, 1)),
+            ranked: { base, widen }
         }
-        operatorAddr = await cryptoHelper.getNewFundedAddress(
-            'widen-op', COIN, NETWORK, null, 'legacy', 0, 0.02
-        )
-        await gasHelper.ensureGasBalance(operatorAddr, '8000')
+    }
+    console.log('  geometry attempt ' + attempt + ': ownedInBase=' + inBase.length +
+                ' ownedInWidenedTail=' + extra.length + '; re-executing for a fresh ranking')
+    return null
+}
 
-        for (let i = 0; i < OWNED; i++) await stakeOwnedValidator()
-        await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
+function logSignerSets(ranked, signers) {
+    console.log('  base set   : ' + ranked.base.map(p => p.slice(0, 12)).join(' '))
+    console.log('  widened set: ' + ranked.widen.map(p => p.slice(0, 12)).join(' '))
+    console.log('  signing as : ' + signers.map(p => p.slice(0, 12)).join(' ') + '  (one is outside the base set)')
+}
+
+async function reachPhaseA(requestBlock) {
+    // ---- PHASE A: inside the first segment, the ladder has granted nothing ----
+    let tip = await nodeConnector.getBlockCount()
+    const phaseATarget = requestBlock + CONFIRMATIONS + 1
+    if (tip < phaseATarget) {
+        await regtestMinerConnector.generateBlocks(phaseATarget - tip)
         await utxoTrackerConnector.waitForSync()
+    }
+    return nodeConnector.getBlockCount()
+}
 
-        const deploy = await vmHelper.sendDeployV0(operatorAddr, CONTRACT_CODE, 500000)
-        assert.strictEqual(deploy.contract.status, 'valid', 'deploy status: ' + deploy.contract.status)
-        contractIndex = deploy.contract.action_index
+async function broadcastPhaseResponse(request, signerObjs, phase) {
+    await attestationHelper.broadcastAttestationResponse(operatorAddr, {
+        requestId:       request.request_id,
+        providerId:      'http_get',
+        responsePayload: '{"widen":"' + phase + '"}',
+        status:          'ok',
+        meta:            '200',
+        validators:      signerObjs
     })
+}
 
-    it('rejects an out-of-set signature before the ladder opens, then accepts the SAME set after it', async function () {
-        if (skipIfResponseMirrorEra(this, NETWORK)) return
-        const ownedKeys = new Set(owned.map(v => String(v.pubkey).toLowerCase()))
-        let request = null
-        let signers = null
-        let ranked  = null
+async function reachPhaseB(requestBlock, deadlineBlock) {
+    // ---- PHASE B: past the segment boundary, the same signers are in the set ----
+    const phaseBTarget = requestBlock + CONFIRMATIONS +
+        Math.ceil((deadlineBlock - (requestBlock + CONFIRMATIONS)) / (MAX_SLOTS + 1)) + 1
+    let tip = await nodeConnector.getBlockCount()
+    if (tip < phaseBTarget) {
+        await regtestMinerConnector.generateBlocks(phaseBTarget - tip)
+        await utxoTrackerConnector.waitForSync()
+    }
+    return nodeConnector.getBlockCount()
+}
 
-        // Find a request whose geometry demonstrates the ladder: at least one of our
-        // signable keys must sit OUTSIDE the base REDUNDANCY slots but INSIDE the
-        // widened set, or phase A has nothing to reject. Each EXECUTE mints a fresh
-        // request_id and therefore a fresh ranking, so this converges quickly.
-        for (let attempt = 0; attempt < 8 && !signers; attempt++) {
-            const exec = await vmHelper.sendExecuteV0(operatorAddr, contractIndex, 'askWidening',
-                ['https://example.com/widen/' + attempt])
-            assert.strictEqual(exec.execution.status, 'valid', 'execute status: ' + exec.execution.status)
-            const row = await indexerDatabase.waitForAttestationRequest({
-                txHash: exec.txHash, requestStatus: 'pending'
-            })
-            assert(row, 'request row should exist as pending')
-            assert.strictEqual(Number(row.redundancy), REDUNDANCY)
+async function waitForPhaseResponse(request, options = {}) {
+    return indexerDatabase.waitForAttestationResponse({ requestId: request.request_id, ...options })
+}
 
-            const pool = await indexerConnector.getCapabilityValidators('attestation', Number(row.block_index))
-            const r = rank(row.request_id, pool.validators || pool)
-            const base   = r.slice(0, REDUNDANCY).map(x => x.pubkey)
-            const widen  = r.slice(0, REDUNDANCY + MAX_SLOTS).map(x => x.pubkey)
-            const inBase = base.filter(pk => ownedKeys.has(pk))
-            const extra  = widen.slice(REDUNDANCY).filter(pk => ownedKeys.has(pk))
+async function checkRequestStatus(request, requestStatus) {
+    return indexerDatabase.checkAttestationRequest({ requestId: request.request_id, requestStatus })
+}
 
-            if (inBase.length >= REDUNDANCY - 1 && extra.length >= 1) {
-                // Deliberately short of the base set by one, made up from a widened slot:
-                // exactly the shape of a set holding one member that never signs.
-                signers = inBase.slice(0, REDUNDANCY - 1).concat(extra.slice(0, 1))
-                request = row
-                ranked  = { base, widen }
-            } else {
-                console.log('  geometry attempt ' + attempt + ': ownedInBase=' + inBase.length +
-                            ' ownedInWidenedTail=' + extra.length + '; re-executing for a fresh ranking')
-            }
+async function getCallbackState() {
+    const cbStatus = await indexerDatabase.getContractState(contractIndex, 'widen_callback_status')
+    const cbContext = await indexerDatabase.getContractState(contractIndex, 'widen_callback_context')
+    return { cbStatus, cbContext }
+}
+
+async function testResponsibleSetWidening() {
+    if (skipIfResponseMirrorEra(this, NETWORK)) return
+    const ownedKeys = new Set(owned.map(v => String(v.pubkey).toLowerCase()))
+    let request = null
+    let signers = null
+    let ranked  = null
+    // Find a request whose geometry demonstrates the ladder: at least one of our
+    // signable keys must sit OUTSIDE the base REDUNDANCY slots but INSIDE the
+    // widened set, or phase A has nothing to reject. Each EXECUTE mints a fresh
+    // request_id and therefore a fresh ranking, so this converges quickly.
+    for (let attempt = 0; attempt < 8 && !signers; attempt++) {
+        const exec = await vmHelper.sendExecuteV0(operatorAddr, contractIndex, 'askWidening',
+            ['https://example.com/widen/' + attempt])
+        assert.strictEqual(exec.execution.status, 'valid', 'execute status: ' + exec.execution.status)
+        const row = await indexerDatabase.waitForAttestationRequest({
+            txHash: exec.txHash, requestStatus: 'pending'
+        })
+        assert(row, 'request row should exist as pending')
+        assert.strictEqual(Number(row.redundancy), REDUNDANCY)
+        const pool = await indexerConnector.getCapabilityValidators('attestation', Number(row.block_index))
+        const r = rank(row.request_id, pool.validators || pool)
+        const choice = chooseRequestGeometry(buildRequestGeometry(r, ownedKeys), attempt)
+        if (choice) {
+            signers = choice.signers
+            request = row
+            ranked = choice.ranked
         }
-        assert(signers, 'could not find a request geometry with an owned key outside the base set')
+    }
+    assert(signers, 'could not find a request geometry with an owned key outside the base set')
+    const requestBlock  = Number(request.block_index)
+    const deadlineBlock = Number(request.deadline_block)
+    const signerObjs = signers.map(pk => owned.find(v => String(v.pubkey).toLowerCase() === pk))
+    assert.strictEqual(signerObjs.filter(Boolean).length, REDUNDANCY, 'all signers must be keys we hold')
+    logSignerSets(ranked, signers)
+    let tip = await reachPhaseA(requestBlock)
+    assert.strictEqual(widenSlots(tip, requestBlock, deadlineBlock), 0,
+        'phase A must run at widen 0 (tip ' + tip + ', request ' + requestBlock + ')')
+    await broadcastPhaseResponse(request, signerObjs, 'phaseA')
+    const rejected = await waitForPhaseResponse(request)
+    assert(rejected, 'phase A response row should exist')
+    assert.match(String(rejected.status), /insufficient valid signatures/,
+        'phase A must be rejected for insufficient signatures, got: ' + rejected.status)
+    const stillPending = await checkRequestStatus(request, 'pending')
+    assert(stillPending, 'the request must still be pending after the rejected response')
+    tip = await reachPhaseB(requestBlock, deadlineBlock)
+    assert.ok(widenSlots(tip, requestBlock, deadlineBlock) >= 1,
+        'phase B must run at widen >= 1 (tip ' + tip + ')')
+    assert.ok(tip < deadlineBlock, 'phase B must still be inside the deadline window')
+    await broadcastPhaseResponse(request, signerObjs, 'phaseB')
+    const accepted = await waitForPhaseResponse(request, { responseStatus: 'ok', status: 'valid' })
+    assert(accepted, 'phase B response must land valid: the widened set admits the same signers')
+    const sigs = await indexerDatabase.getAttestationValidatorSignatures(accepted.action_index)
+    assert.strictEqual(sigs.length, REDUNDANCY, 'all ' + REDUNDANCY + ' signatures must count once widened')
+    const fulfilled = await checkRequestStatus(request, 'fulfilled')
+    assert(fulfilled, 'request must flip to fulfilled')
+    const { cbStatus, cbContext } = await getCallbackState()
+    assert(cbStatus, 'callback must have fired')
+    assert.strictEqual(JSON.parse(cbStatus.state_value), 'ok')
+    assert.strictEqual(JSON.parse(cbContext.state_value), 'ctx-widen')
+}
 
-        const requestBlock  = Number(request.block_index)
-        const deadlineBlock = Number(request.deadline_block)
-        const signerObjs = signers.map(pk => owned.find(v => String(v.pubkey).toLowerCase() === pk))
-        assert.strictEqual(signerObjs.filter(Boolean).length, REDUNDANCY, 'all signers must be keys we hold')
-        console.log('  base set   : ' + ranked.base.map(p => p.slice(0, 12)).join(' '))
-        console.log('  widened set: ' + ranked.widen.map(p => p.slice(0, 12)).join(' '))
-        console.log('  signing as : ' + signers.map(p => p.slice(0, 12)).join(' ') + '  (one is outside the base set)')
-
-        // ---- PHASE A: inside the first segment, the ladder has granted nothing ----
-        let tip = await nodeConnector.getBlockCount()
-        const phaseATarget = requestBlock + CONFIRMATIONS + 1
-        if (tip < phaseATarget) {
-            await regtestMinerConnector.generateBlocks(phaseATarget - tip)
-            await utxoTrackerConnector.waitForSync()
-        }
-        tip = await nodeConnector.getBlockCount()
-        assert.strictEqual(widenSlots(tip, requestBlock, deadlineBlock), 0,
-            'phase A must run at widen 0 (tip ' + tip + ', request ' + requestBlock + ')')
-
-        await attestationHelper.broadcastAttestationResponse(operatorAddr, {
-            requestId:       request.request_id,
-            providerId:      'http_get',
-            responsePayload: '{"widen":"phaseA"}',
-            status:          'ok',
-            meta:            '200',
-            validators:      signerObjs
-        })
-        const rejected = await indexerDatabase.waitForAttestationResponse({
-            requestId: request.request_id
-        })
-        assert(rejected, 'phase A response row should exist')
-        assert.match(String(rejected.status), /insufficient valid signatures/,
-            'phase A must be rejected for insufficient signatures, got: ' + rejected.status)
-        const stillPending = await indexerDatabase.checkAttestationRequest({
-            requestId: request.request_id, requestStatus: 'pending'
-        })
-        assert(stillPending, 'the request must still be pending after the rejected response')
-
-        // ---- PHASE B: past the segment boundary, the same signers are in the set ----
-        const phaseBTarget = requestBlock + CONFIRMATIONS +
-            Math.ceil((deadlineBlock - (requestBlock + CONFIRMATIONS)) / (MAX_SLOTS + 1)) + 1
-        tip = await nodeConnector.getBlockCount()
-        if (tip < phaseBTarget) {
-            await regtestMinerConnector.generateBlocks(phaseBTarget - tip)
-            await utxoTrackerConnector.waitForSync()
-        }
-        tip = await nodeConnector.getBlockCount()
-        assert.ok(widenSlots(tip, requestBlock, deadlineBlock) >= 1,
-            'phase B must run at widen >= 1 (tip ' + tip + ')')
-        assert.ok(tip < deadlineBlock, 'phase B must still be inside the deadline window')
-
-        await attestationHelper.broadcastAttestationResponse(operatorAddr, {
-            requestId:       request.request_id,
-            providerId:      'http_get',
-            responsePayload: '{"widen":"phaseB"}',
-            status:          'ok',
-            meta:            '200',
-            validators:      signerObjs
-        })
-        const accepted = await indexerDatabase.waitForAttestationResponse({
-            requestId: request.request_id, responseStatus: 'ok', status: 'valid'
-        })
-        assert(accepted, 'phase B response must land valid: the widened set admits the same signers')
-
-        const sigs = await indexerDatabase.getAttestationValidatorSignatures(accepted.action_index)
-        assert.strictEqual(sigs.length, REDUNDANCY, 'all ' + REDUNDANCY + ' signatures must count once widened')
-
-        const fulfilled = await indexerDatabase.checkAttestationRequest({
-            requestId: request.request_id, requestStatus: 'fulfilled'
-        })
-        assert(fulfilled, 'request must flip to fulfilled')
-
-        const cbStatus  = await indexerDatabase.getContractState(contractIndex, 'widen_callback_status')
-        const cbContext = await indexerDatabase.getContractState(contractIndex, 'widen_callback_context')
-        assert(cbStatus, 'callback must have fired')
-        assert.strictEqual(JSON.parse(cbStatus.state_value), 'ok')
-        assert.strictEqual(JSON.parse(cbContext.state_value), 'ctx-widen')
-    })
+describe(ATTESTATION_WIDENING_TITLE, function () {
+    before(async function () { await setupAttestationWidening(this) })
+    it('rejects an out-of-set signature before the ladder opens, then accepts the SAME set after it', testResponsibleSetWidening)
 })
