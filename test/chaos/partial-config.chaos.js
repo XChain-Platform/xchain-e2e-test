@@ -52,11 +52,11 @@ function accessConfigUnsafe(hubConfigs, coin, network) {
     }
 }
 
-describe('Chaos Experiment 12: Partial Hub Config @P1', function () {
+function cloneConfig() {
+    return JSON.parse(JSON.stringify(hubFixtures.validConfig))
+}
 
-    function cloneConfig() {
-        return JSON.parse(JSON.stringify(hubFixtures.validConfig))
-    }
+describe('Chaos Experiment 12: Partial Hub Config @P1', function () {
 
     describe('validated bootstrap catches missing keys', function () {
 
@@ -99,6 +99,12 @@ describe('Chaos Experiment 12: Partial Hub Config @P1', function () {
                 /xchain-utxo-tracker/
             )
         })
+    })
+})
+
+describe('Chaos Experiment 12: Partial Hub Config @P1', function () {
+
+    describe('validated bootstrap catches missing keys', function () {
 
         it('throws when xchain-indexer key is missing', function () {
             const config = cloneConfig()
@@ -128,6 +134,9 @@ describe('Chaos Experiment 12: Partial Hub Config @P1', function () {
             )
         })
     })
+})
+
+describe('Chaos Experiment 12: Partial Hub Config @P1', function () {
 
     describe('unvalidated access produces TypeError', function () {
 
@@ -151,6 +160,9 @@ describe('Chaos Experiment 12: Partial Hub Config @P1', function () {
             )
         })
     })
+})
+
+describe('Chaos Experiment 12: Partial Hub Config @P1', function () {
 
     describe('missing coin or network', function () {
 
