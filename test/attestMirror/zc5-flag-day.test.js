@@ -143,7 +143,7 @@ describe('ZC5 below the height: the flag day leaves every rule where it was', fu
         })
 
     it('confirmationsFor returns the constructor value below the height and 0 above it', function () {
-        const AttestationRound = loadHubModule('src/AttestationRound.js')
+        const AttestationRound = loadHubModule('src/attestation/round.js')
         // A STUB HUB, not a live one: `confirmationsFor` reads exactly two things, the
         // constructor's tunable and the hub's network, and standing up a hub to ask it a
         // question about a synthetic height would make the answer depend on a venue.

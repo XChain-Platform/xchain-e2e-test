@@ -236,7 +236,7 @@ describe('ANCHOR bundle live: multi-validator per-NETWORK publisher (DOGE regtes
         process.env.CHECKPOINT_CHAINS    = 'DOGE';
         process.env.ANCHOR_ELECTION_TOLERANCE_BLOCKS = '100000';   // phase 1: only rank 0 unlocks
 
-        SAP = loadHubModule('src/StateAnchorPublisher.js');
+        SAP = loadHubModule('src/anchor/publisher.js');
         sdk = makeSdk();
 
         mvh = new MultiValidatorHub({

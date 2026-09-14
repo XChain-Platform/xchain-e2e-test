@@ -52,8 +52,8 @@ const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
 const { MockCrossChainOfferBook, makeOrder } = require('../helpers/mockCrossChainOfferBook');
 const { waitForMesh, waitFor } = require('../helpers/consensusWait');
 
-const OracleConsensus = loadHubModule('src/OracleConsensus.js');
-const OracleRound     = loadHubModule('src/OracleRound.js');
+const OracleConsensus = loadHubModule('src/oracle/consensus.js');
+const OracleRound     = loadHubModule('src/oracle/round.js');
 
 const COUNT        = 10;
 const QUORUM_SIGS  = 7;          // tally > 2S/3 with equal weights => >=7 of 10 sources

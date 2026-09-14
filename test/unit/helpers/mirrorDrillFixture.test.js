@@ -465,7 +465,7 @@ describe('mirrorDrillFixture: the venue adopts the roll-call roster', function (
         // Cross-checked against the hub's own identity class rather than against
         // a literal, so a change in the hub's derivation fails here instead of
         // producing hubs whose pubkeys nobody can match to a seat.
-        const ValidatorIdentity = loadHubModule('src/ValidatorIdentity.js')
+        const ValidatorIdentity = loadHubModule('src/validators/identity.js')
         const seed = '11'.repeat(32)
         assert.strictEqual(_pubkeyForSeed(seed),
             new ValidatorIdentity(seed).getPubkeyHex().toLowerCase())
@@ -558,7 +558,7 @@ describe('mirrorDrillFixture: the provider floor is INCLUSIVE at equality', func
     // because a second implementation of a consensus filter in the test tree is
     // the thing this fixture exists to avoid.
     it('admits a validator whose weight equals the floor exactly', function () {
-        const AttestationRound = loadHubModule('src/AttestationRound.js')
+        const AttestationRound = loadHubModule('src/attestation/round.js')
         const meets = AttestationRound.prototype._meetsProviderFloor
         assert.strictEqual(typeof meets, 'function',
             'the hub no longer exposes _meetsProviderFloor; the adoption precondition checks the ' +
@@ -572,7 +572,7 @@ describe('mirrorDrillFixture: the provider floor is INCLUSIVE at equality', func
     })
 
     it('reads the llm floor from the registry rather than a literal here', function () {
-        const defaults = loadHubModule('src/ProviderRegistry.js').DEFAULTS || {}
+        const defaults = loadHubModule('src/validators/provider_registry.js').DEFAULTS || {}
         assert.ok(defaults.llm && defaults.llm.min_stake_xchain !== undefined,
             'could not read the llm provider floor; this guard must not pass vacuously')
         assert.strictEqual(String(defaults.llm.min_stake_xchain), '25000',

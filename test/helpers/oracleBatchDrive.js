@@ -66,7 +66,7 @@ const { submissionsForRound } = require('./oracleBatchVenue');
 const { loadHubModule }       = require('./multiValidatorHubHelper');
 const { waitFor }             = require('./consensusWait');
 
-const OracleBatchSigner = loadHubModule('src/OracleBatchSigner.js');
+const OracleBatchSigner = loadHubModule('src/oracle/batch_signer.js');
 
 // The consensus compression module, read from the INDEXER copy. The hub vendors a
 // byte-identical twin and the parity tests in both repos fail on a one-sided edit,

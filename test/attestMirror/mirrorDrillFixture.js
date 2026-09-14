@@ -725,7 +725,7 @@ async function waitForVenuePrices (venue, opts) {
  * identity module rather than a second derivation written here.
  */
 function _pubkeyForSeed (seedHex) {
-    const ValidatorIdentity = loadHubModule('src/ValidatorIdentity.js')
+    const ValidatorIdentity = loadHubModule('src/validators/identity.js')
     return String(new ValidatorIdentity(String(seedHex).toLowerCase()).getPubkeyHex()).toLowerCase()
 }
 
@@ -873,7 +873,7 @@ function resolveAdoptionPlan (seated, known, opts) {
     // Checked through the hub's OWN comparator, never a second one written here,
     // because a test-side `>=` on decimal strings is exactly the kind of second
     // implementation this fixture exists to avoid.
-    const providerDefaults = loadHubModule('src/ProviderRegistry.js').DEFAULTS || {}
+    const providerDefaults = loadHubModule('src/validators/provider_registry.js').DEFAULTS || {}
     const declared = (o.providers === undefined || o.providers === null)
         ? Object.keys(providerDefaults)
         : [].concat(o.providers).map((p) => String(p))
@@ -888,7 +888,7 @@ function resolveAdoptionPlan (seated, known, opts) {
             'to a provider nothing serves rather than failing.')
     }
 
-    const AttestationRound = loadHubModule('src/AttestationRound.js')
+    const AttestationRound = loadHubModule('src/attestation/round.js')
     const meetsFloor = AttestationRound.prototype._meetsProviderFloor
     assert.strictEqual(typeof meetsFloor, 'function',
         'mirrorDrillFixture: the hub no longer exposes _meetsProviderFloor, so the provider-floor ' +
@@ -1146,7 +1146,7 @@ async function provisionDrillIdentities (opts) {
     // one: its whole claim is that an indexer following a hub OUTSIDE the set
     // derives the identical rows, and a venue whose every hub is responsible
     // cannot state that claim at all.
-    const ValidatorIdentity = loadHubModule('src/ValidatorIdentity.js')
+    const ValidatorIdentity = loadHubModule('src/validators/identity.js')
     const identities = adopted.map((a) => ({ pubkeyHex: a.pubkeyHex, privkeyHex: a.privkeyHex }))
     const observers  = []
     for (let i = adopted.length; i < count; i++) {

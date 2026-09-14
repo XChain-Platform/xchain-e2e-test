@@ -241,7 +241,7 @@ describe('AT2: a fresh indexer with its own empty hub and no peers rebuilds pric
         // message handler registered, no follower answers XPRICEB_SIGN_REQ, the
         // leader's signing round times out and the window never publishes. Wiring
         // them here is additive and touches nothing the venue owns.
-        const OracleBatchSigner = loadHubModule('src/OracleBatchSigner.js');
+        const OracleBatchSigner = loadHubModule('src/oracle/batch_signer.js');
         for (const hub of venue.mvh.hubs) {
             if (hub.oracleBatchSigner) continue;
             hub.oracleBatchSigner = new OracleBatchSigner(hub);

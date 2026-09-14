@@ -213,7 +213,7 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
                                        (process.env.ENCODER_API_PORT || '3023');
         process.env.HUB_SIGNER_MODULE = path.join(signerDir, 'signer.js');
 
-        const { loadSignerHooks } = loadHubModule('src/lib/signer-loader.js');
+        const { loadSignerHooks } = loadHubModule('src/lib/signer_loader.js');
         const hooks = loadSignerHooks(process.env);
         assert.ok(hooks && hooks.broadcastFn, 'signer-loader wired the example signer\'s broadcast hook');
         return hooks;
@@ -303,7 +303,7 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
         // signed over byte-identical bytes to what the indexer rebuilds. Never
         // re-implemented in the test: a drifting copy would fail closed as
         // 'invalid: SECTION n' and read as a publisher bug.
-        SCE = loadHubModule('src/StateCheckpointEngine.js');
+        SCE = loadHubModule('src/anchor/checkpoint_engine.js');
 
         // Gap (b): the local indexer is DOGE, not BTC, so hub.capabilitySnapshot's
         // live getSnapshot/getWeightSnapshot calls fail (wrong-chain indexer), and
