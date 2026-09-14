@@ -69,6 +69,13 @@ describe('Chaos Experiment 1: Connector Timeout Cascade @P0', function () {
             assert.strictEqual(stub.callCount, 3)
         })
     })
+})
+
+describe('Chaos Experiment 1: Connector Timeout Cascade @P0', function () {
+
+    afterEach(function () {
+        sinon.restore()
+    })
 
     describe('Database.waitForIssue', function () {
 
@@ -102,6 +109,13 @@ describe('Chaos Experiment 1: Connector Timeout Cascade @P0', function () {
 
             assert.deepStrictEqual(result, mockRow)
         })
+    })
+})
+
+describe('Chaos Experiment 1: Connector Timeout Cascade @P0', function () {
+
+    afterEach(function () {
+        sinon.restore()
     })
 
     describe('XChainUtxoTrackerConnector.waitForUtxos', function () {
