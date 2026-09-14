@@ -27,7 +27,7 @@ const bitcoin = require('bitcoinjs-lib')
 
 const protocol = require('../../../xchain-documentation/protocol/constants.js')
 
-const encoderValidator = require('../../../xchain-encoder/src/validator.js')
+const encoderValidator = require('../../../xchain-encoder/src/common/validator.js')
 const XChainDecoder     = require('../../../xchain-decoder/src/XChainDecoder.js')
 const sdkValidator      = require('../../../xchain-sdk/src/validator.js')
 const indexerDeploy     = require('../../../xchain-indexer/src/actions/deploy/index.js')
@@ -518,7 +518,7 @@ describe('Protocol size-limit drift guard', () => {
 
         // COMPRESSION_MAX_RATIO is the inflation bound that makes a compressed
         // payload safe to stream: a decompressor that stops later than the encoder
-        // planned is a zip-bomb surface. The encoder (src/validator.js) and the
+        // planned is a zip-bomb surface. The encoder (src/common/validator.js) and the
         // explorer compression reader (src/http/compression.js) each declare a bare
         // literal; the explorer's only guard compared itself to the encoder, so the
         // pair could drift from canonical together and stay green (uuid 3499).
