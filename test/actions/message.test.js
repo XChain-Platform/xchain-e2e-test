@@ -27,7 +27,9 @@ describe('MESSAGE', () => {
             assert(result.message, "Message v0 (sender key) should exist in DB")
         })
     })
+})
 
+describe('MESSAGE', () => {
     describe('v1 - receiver key', () => {
         it('should complete a key exchange with v0 and v1', async () => {
             let senderAddr = await cryptoHelper.getNewFundedAddress("MESSAGE.V1.SENDER", COIN, NETWORK, null, "legacy", 0, 1)
@@ -50,7 +52,9 @@ describe('MESSAGE', () => {
             assert(v1Result.message, "Message v1 (receiver key) should exist in DB")
         })
     })
+})
 
+describe('MESSAGE', () => {
     describe('v2 - encrypted message', () => {
         it('should send an encrypted message v2', async () => {
             let senderAddr = await cryptoHelper.getNewFundedAddress("MESSAGE.V2.SENDER", COIN, NETWORK, null, "legacy", 0, 1)
@@ -77,7 +81,9 @@ describe('MESSAGE', () => {
             assert(result.message, "Message v2 (encrypted) should exist in DB")
         })
     })
+})
 
+describe('MESSAGE', () => {
     describe('v3 - plaintext', () => {
         it('should send a plaintext message v3', async () => {
             let senderAddr = await cryptoHelper.getNewFundedAddress("MESSAGE.V3", COIN, NETWORK, null, "legacy", 0, 1)
