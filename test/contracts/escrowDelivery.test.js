@@ -144,13 +144,11 @@ function settle(x, roles, role, term, dl) {
     pay(x, role, term);
 }`
 
-describe('Escrow Delivery: custody + a REAL delivery attestation driving on-chain settlement', function () {
-    this.timeout(10 * 60 * 1000)
-
     const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
     const TICK = 'XCHAIN'
     const AMOUNT = '500'
     const stakedValidators = []
+    let escrowDeliverySetup = null
 
     async function q(sql, params) {
         const conn = await indexerDatabase.getConnection()
@@ -248,12 +246,17 @@ describe('Escrow Delivery: custody + a REAL delivery attestation driving on-chai
         return realBody
     }
 
-    before(async function () {
+    async function prepareEscrowDelivery() {
         if (COIN_CODE !== 'BTC') {
             console.log('Attestation rides on BTC-only STAKE + EXECUTE; skipping on ' + COIN_CODE)
             this.skip()
             return
         }
+        if (!escrowDeliverySetup) escrowDeliverySetup = prepareEscrowValidators()
+        return escrowDeliverySetup
+    }
+
+    async function prepareEscrowValidators() {
         for (let i = 0; i < 3; i++) {
             await stakeValidatorFromOwnSource(new attestationHelper.MockAttestationValidator())
         }
@@ -261,7 +264,11 @@ describe('Escrow Delivery: custody + a REAL delivery attestation driving on-chai
         // responsible set at H-6, so mining only the delay leaves the stakes invisible
         // and the request is rejected at admission.
         await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
-    })
+    }
+
+describe('Escrow Delivery: custody + a REAL delivery attestation driving on-chain settlement', function () {
+    this.timeout(10 * 60 * 1000)
+    before(prepareEscrowDelivery)
 
     it('a matching delivery body auto-releases the escrow to the seller - no release() call', async function () {
         const { ci, contractAddr, requestId, buyer, seller } = await deployFundAndRequest(MARKER_MATCH, 0)
@@ -288,6 +295,11 @@ describe('Escrow Delivery: custody + a REAL delivery attestation driving on-chai
         const held = await balanceOf(contractAddr, TICK)
         assert(held === null || Number(held) === 0, 'the contract holds nothing after auto-settlement')
     })
+})
+
+describe('Escrow Delivery: custody + a REAL delivery attestation driving on-chain settlement', function () {
+    this.timeout(10 * 60 * 1000)
+    before(prepareEscrowDelivery)
 
     it('a non-matching delivery body is a no-op; the arbiter then settles the dispute manually', async function () {
         const { ci, contractAddr, requestId, arbiter, buyer } = await deployFundAndRequest(MARKER_NO_MATCH, 1)
