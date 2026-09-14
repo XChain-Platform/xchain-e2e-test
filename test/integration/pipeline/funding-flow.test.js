@@ -21,27 +21,29 @@ const CryptoNetworks = require('../../../src/CryptoNetworks')
 
 const cryptoHelper = require('../../../test/cryptoHelper')
 
+let savedGlobals
+
+function setUpFundingFlow() {
+    savedGlobals = {
+        NETWORK_OBJECT: global.NETWORK_OBJECT,
+        wallets: global.wallets,
+        regtestMinerConnector: global.regtestMinerConnector,
+        nodeConnector: global.nodeConnector,
+        utxoTrackerConnector: global.utxoTrackerConnector,
+    }
+
+    global.NETWORK_OBJECT = CryptoNetworks.getBitcoinJsNetwork('bitcoin-regtest')
+    global.wallets = {}
+}
+
+function tearDownFundingFlow() {
+    Object.assign(global, savedGlobals)
+    sinon.restore()
+}
+
 describe('Funding Flow: cryptoHelper.getNewFundedAddress', function () {
-
-    let savedGlobals
-
-    beforeEach(function () {
-        savedGlobals = {
-            NETWORK_OBJECT: global.NETWORK_OBJECT,
-            wallets: global.wallets,
-            regtestMinerConnector: global.regtestMinerConnector,
-            nodeConnector: global.nodeConnector,
-            utxoTrackerConnector: global.utxoTrackerConnector,
-        }
-
-        global.NETWORK_OBJECT = CryptoNetworks.getBitcoinJsNetwork('bitcoin-regtest')
-        global.wallets = {}
-    })
-
-    afterEach(function () {
-        Object.assign(global, savedGlobals)
-        sinon.restore()
-    })
+    beforeEach(setUpFundingFlow)
+    afterEach(tearDownFundingFlow)
 
     describe('Scenario 3.2.5: Full address funding flow', function () {
 
@@ -97,6 +99,14 @@ describe('Funding Flow: cryptoHelper.getNewFundedAddress', function () {
             assert.strictEqual(global.wallets['FUNDING.TEST'].mnemonic, result.mnemonic)
         })
 
+    })
+})
+
+describe('Funding Flow: cryptoHelper.getNewFundedAddress', function () {
+    beforeEach(setUpFundingFlow)
+    afterEach(tearDownFundingFlow)
+
+    describe('Scenario 3.2.5: Full address funding flow', function () {
         it('throws when waitForTx returns false', async function () {
             global.regtestMinerConnector = {
                 sendFunds: async () => 'sometxid'
@@ -134,6 +144,11 @@ describe('Funding Flow: cryptoHelper.getNewFundedAddress', function () {
             )
         })
     })
+})
+
+describe('Funding Flow: cryptoHelper.getNewFundedAddress', function () {
+    beforeEach(setUpFundingFlow)
+    afterEach(tearDownFundingFlow)
 
     describe('Scenario: Wallet cache persistence across calls', function () {
 
