@@ -25,11 +25,27 @@ const RegtestMinerConnector = require('../../src/RegtestMinerConnector')
 const XChainEncoderConnector = require('../../src/XChainEncoderConnector')
 const XChainIndexerConnector = require('../../src/XChainIndexerConnector')
 
+let savedHubEnv
+
+function saveHubEnv() {
+    savedHubEnv = {
+        HUB_VALIDATORS: process.env.HUB_VALIDATORS,
+        HUB_URL: process.env.HUB_URL,
+        HUB_API_HOST: process.env.HUB_API_HOST,
+        HUB_PORT: process.env.HUB_PORT,
+    }
+}
+
+function restoreHubEnv() {
+    Object.entries(savedHubEnv).forEach(([key, val]) => {
+        if (val === undefined) delete process.env[key]
+        else process.env[key] = val
+    })
+}
+
 describe('Boundary: Connectors', function () {
 
-    afterEach(function () {
-        sinon.restore()
-    })
+    afterEach(function () { sinon.restore() })
 
     describe('BlockchainConnector', function () {
 
@@ -80,6 +96,11 @@ describe('Boundary: Connectors', function () {
             })
         })
     })
+})
+
+describe('Boundary: Connectors', function () {
+
+    afterEach(function () { sinon.restore() })
 
     describe('XChainUtxoTrackerConnector', function () {
 
@@ -132,6 +153,11 @@ describe('Boundary: Connectors', function () {
             })
         })
     })
+})
+
+describe('Boundary: Connectors', function () {
+
+    afterEach(function () { sinon.restore() })
 
     describe('XChainHubConnector', function () {
 
@@ -157,26 +183,19 @@ describe('Boundary: Connectors', function () {
                 assert.deepStrictEqual(hub.urls, ['http://hub1:10000'])
             })
         })
+    })
+})
+
+describe('Boundary: Connectors', function () {
+
+    afterEach(function () { sinon.restore() })
+
+    describe('XChainHubConnector', function () {
 
         describe('parseEndpoints: env var parsing', function () {
 
-            let savedEnv
-
-            beforeEach(function () {
-                savedEnv = {
-                    HUB_VALIDATORS: process.env.HUB_VALIDATORS,
-                    HUB_URL: process.env.HUB_URL,
-                    HUB_API_HOST: process.env.HUB_API_HOST,
-                    HUB_PORT: process.env.HUB_PORT,
-                }
-            })
-
-            afterEach(function () {
-                Object.entries(savedEnv).forEach(([key, val]) => {
-                    if (val === undefined) delete process.env[key]
-                    else process.env[key] = val
-                })
-            })
+            beforeEach(saveHubEnv)
+            afterEach(restoreHubEnv)
 
             it('parses comma-separated HUB_VALIDATORS', function () {
                 process.env.HUB_VALIDATORS = 'http://hub1:10000,http://hub2:10000'
@@ -214,6 +233,20 @@ describe('Boundary: Connectors', function () {
 
                 assert.deepStrictEqual(endpoints, ['http://hub1:10000', 'http://hub2:10000'])
             })
+        })
+    })
+})
+
+describe('Boundary: Connectors', function () {
+
+    afterEach(function () { sinon.restore() })
+
+    describe('XChainHubConnector', function () {
+
+        describe('parseEndpoints: env var parsing', function () {
+
+            beforeEach(saveHubEnv)
+            afterEach(restoreHubEnv)
 
             it('empty string HUB_VALIDATORS falls through to default (falsy check)', function () {
                 process.env.HUB_VALIDATORS = ''
@@ -260,6 +293,14 @@ describe('Boundary: Connectors', function () {
                 assert.deepStrictEqual(endpoints, ['http://localhost:10000'])
             })
         })
+    })
+})
+
+describe('Boundary: Connectors', function () {
+
+    afterEach(function () { sinon.restore() })
+
+    describe('XChainHubConnector', function () {
 
         describe('ping: with empty endpoint list', function () {
 
@@ -281,6 +322,11 @@ describe('Boundary: Connectors', function () {
             })
         })
     })
+})
+
+describe('Boundary: Connectors', function () {
+
+    afterEach(function () { sinon.restore() })
 
     describe('RegtestMinerConnector', function () {
 
