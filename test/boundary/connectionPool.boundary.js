@@ -35,12 +35,13 @@ function createDb() {
     return { db, mockConn, mockPool }
 }
 
-describe('Boundary: Connection Pool', function () {
+function restoreMocks() {
+    sinon.restore()
+    mockMariadb.createPool.resetHistory()
+}
 
-    afterEach(function () {
-        sinon.restore()
-        mockMariadb.createPool.resetHistory()
-    })
+describe('Boundary: Connection Pool', function () {
+    afterEach(restoreMocks)
 
     describe('CP-01: Concurrent getConnection calls', function () {
 
@@ -65,6 +66,10 @@ describe('Boundary: Connection Pool', function () {
             })
         })
     })
+})
+
+describe('Boundary: Connection Pool', function () {
+    afterEach(restoreMocks)
 
     describe('CP-02: getConnection retries on consecutive failures', function () {
 
@@ -89,6 +94,10 @@ describe('Boundary: Connection Pool', function () {
             })
         })
     })
+})
+
+describe('Boundary: Connection Pool', function () {
+    afterEach(restoreMocks)
 
     describe('CP-03: Connection failure mid-poll recovers', function () {
 
@@ -111,6 +120,10 @@ describe('Boundary: Connection Pool', function () {
             assert(successConn.release.calledOnce, 'success connection released')
         })
     })
+})
+
+describe('Boundary: Connection Pool', function () {
+    afterEach(restoreMocks)
 
     describe('CP-04: Connection always released regardless of query outcome', function () {
 
@@ -149,7 +162,13 @@ describe('Boundary: Connection Pool', function () {
 
             assert(mockConn.release.calledOnce)
         })
+    })
+})
 
+describe('Boundary: Connection Pool', function () {
+    afterEach(restoreMocks)
+
+    describe('CP-04: Connection always released regardless of query outcome', function () {
         it('releases connection after checkSend query error', async function () {
             const { db, mockConn } = createDb()
             mockConn.query.rejects(new Error('table missing'))
@@ -177,6 +196,10 @@ describe('Boundary: Connection Pool', function () {
             assert(mockConn.release.calledOnce)
         })
     })
+})
+
+describe('Boundary: Connection Pool', function () {
+    afterEach(restoreMocks)
 
     describe('CP-05: transactionConnection takes precedence over pool', function () {
 
@@ -191,6 +214,10 @@ describe('Boundary: Connection Pool', function () {
             assert(mockPool.getConnection.notCalled, 'pool should not be used when txConn is set')
         })
     })
+})
+
+describe('Boundary: Connection Pool', function () {
+    afterEach(restoreMocks)
 
     describe('CP-06: Database constructor passes correct pool params', function () {
 
@@ -207,6 +234,10 @@ describe('Boundary: Connection Pool', function () {
             assert.strictEqual(poolParams.password, 'pass')
         })
     })
+})
+
+describe('Boundary: Connection Pool', function () {
+    afterEach(restoreMocks)
 
     describe('CP-07: ping boundary, connection management', function () {
 
