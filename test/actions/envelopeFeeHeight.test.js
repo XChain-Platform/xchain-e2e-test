@@ -125,6 +125,42 @@ function freshTick(prefix, address){
     return (prefix + address.substring(address.length - 8)).toUpperCase().slice(0, 12)
 }
 
+async function setupFeeDestination(mochaContext){
+    if (!envelopeHelper.envelopeSupported()) mochaContext.skip()   // no segwit, no envelope
+
+    // The fee destination has to be the one the decoder and indexer were
+    // configured with, so it is discovered rather than assumed.
+    const mode = await nativeFeeHelper.discoverFeeMode()
+    if (!mode.enabled) mochaContext.skip()                          // a gas-only venue cannot carry this
+    assert(mode.destination, 'native fees enabled but no FEE_DESTINATION resolvable')
+    FEE_DEST = mode.destination
+}
+
+async function buildFeeSpikePair(){
+    const addr = await cryptoHelper.getNewFundedAddress('ENVELOPE.FEESPIKE', COIN, NETWORK, null, 'segwit', 0, 1, false)
+    const tick = freshTick('EFS', addr['address'])
+
+    // The very same fee output the accepted case used. Nothing about this pair
+    // is different; only the world it reveals into is.
+    return await envelopeHelper.buildEnvelopePair(addr, {
+        action: issueAction(tick),
+        rawData: null,
+        customOutputs: [{ address: FEE_DEST, value: nativeFeeHelper.FLAT_FEE_SATS }]
+    })
+}
+
+async function seedFeeSpike(commitHeight){
+    const chainTime = await priceSnapshotHelper.latestBlockTime()
+    const anchor = Math.max(chainTime, Math.floor(Date.now() / 1000)) - 60
+    await priceSnapshotHelper.seedSnapshot({
+        coinPair: COIN_CODE + '/USD',
+        price: CHEAP_COIN_USD,
+        blockTimestamp: anchor,
+        roundNumber: FEE_SPIKE_ROUND,
+        referenceBlock: commitHeight
+    })
+}
+
 // Publish a pre-built pair with a deliberate gap between the halves, and return
 // the reveal's height. Mining is not paused: nothing here depends on which block
 // a half lands in, only on the distance between them.
@@ -154,14 +190,7 @@ describe('Taproot Envelope fee lifecycle across a block gap (§3.5)', function (
     this.timeout(0)
 
     before(async function (){
-        if (!envelopeHelper.envelopeSupported()) this.skip()   // no segwit, no envelope
-
-        // The fee destination has to be the one the decoder and indexer were
-        // configured with, so it is discovered rather than assumed.
-        const mode = await nativeFeeHelper.discoverFeeMode()
-        if (!mode.enabled) this.skip()                          // a gas-only venue cannot carry this
-        assert(mode.destination, 'native fees enabled but no FEE_DESTINATION resolvable')
-        FEE_DEST = mode.destination
+        await setupFeeDestination(this)
     })
 
     it('pays a fee-bearing action from an output on the COMMIT, ' + GAP_BLOCKS + ' blocks before the reveal', async function () {
@@ -207,6 +236,14 @@ describe('Taproot Envelope fee lifecycle across a block gap (§3.5)', function (
         assert(fee.native_coin_amount, 'the native amount taken from the commit output must be recorded')
         console.log('   fee row:', JSON.stringify(fee, (k, v) => typeof v === 'bigint' ? Number(v) : v))
     })
+})
+
+describe('Taproot Envelope fee lifecycle across a block gap (§3.5)', function () {
+    this.timeout(0)
+
+    before(async function (){
+        await setupFeeDestination(this)
+    })
 
     it('rejects the same action when the commit carries no fee output', async function () {
         // Same shape, same gap, one thing removed. Without this the case above
@@ -238,6 +275,14 @@ describe('Taproot Envelope fee lifecycle across a block gap (§3.5)', function (
             'the rejection should name the fee, not fail for an unrelated reason: ' + rows[0].status)
         console.log('   correctly rejected:', rows[0].status)
     })
+})
+
+describe('Taproot Envelope fee lifecycle across a block gap (§3.5)', function () {
+    this.timeout(0)
+
+    before(async function (){
+        await setupFeeDestination(this)
+    })
 
     it('grades the fee against the requirement in force at the REVEAL height, not the commit height', async function () {
         // §9.2's last regtest bullet, and the sharpest form of the §3.5 rule: the
@@ -250,16 +295,7 @@ describe('Taproot Envelope fee lifecycle across a block gap (§3.5)', function (
         // every derived round rather than simulate anything.
         if (NO_PRICE_SEED) this.skip()
 
-        const addr = await cryptoHelper.getNewFundedAddress('ENVELOPE.FEESPIKE', COIN, NETWORK, null, 'segwit', 0, 1, false)
-        const tick = freshTick('EFS', addr['address'])
-
-        // The very same fee output the accepted case used. Nothing about this pair
-        // is different; only the world it reveals into is.
-        const pair = await envelopeHelper.buildEnvelopePair(addr, {
-            action: issueAction(tick),
-            rawData: null,
-            customOutputs: [{ address: FEE_DEST, value: nativeFeeHelper.FLAT_FEE_SATS }]
-        })
+        const pair = await buildFeeSpikePair()
 
         let commitHeight = null
         try {
@@ -271,15 +307,7 @@ describe('Taproot Envelope fee lifecycle across a block gap (§3.5)', function (
             // Seeded as an ADDITIONAL row at a higher round rather than a replacement:
             // getLatestPrice takes the highest round a block may see, so this is a new
             // quote arriving, which is what a real price move looks like.
-            const chainTime = await priceSnapshotHelper.latestBlockTime()
-            const anchor = Math.max(chainTime, Math.floor(Date.now() / 1000)) - 60
-            await priceSnapshotHelper.seedSnapshot({
-                coinPair: COIN_CODE + '/USD',
-                price: CHEAP_COIN_USD,
-                blockTimestamp: anchor,
-                roundNumber: FEE_SPIKE_ROUND,
-                referenceBlock: commitHeight
-            })
+            await seedFeeSpike(commitHeight)
             console.log('   requirement raised after the commit at', commitHeight,
                         '(' + COIN_CODE + '/USD ->', CHEAP_COIN_USD + ')')
 
