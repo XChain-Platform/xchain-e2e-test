@@ -91,74 +91,88 @@ function parsePriceV0Wire(wire) {
     };
 }
 
+let venue = null;
+let rounds = [];
+let indexed = [];   // [{ publication, row, block }]
+let venueSetup = null;
+let venueFailure = null;
+
+async function initializeVenue() {
+    venue = new OracleBatchVenue({
+        coin:            'dogecoin',
+        network:         'regtest',
+        validatorCount:  VALIDATORS,
+        basePort:        33800,
+        expectWireVersion: 0
+    });
+    let up = false;
+    try {
+        up = await venue.up();
+    } catch (err) {
+        // A venue that cannot be built is a skip, not a red test, but the
+        // reason has to be printed or the skip is indistinguishable from a
+        // pass that proved nothing.
+        console.log('Oracle publish venue unavailable: ' + (err && err.message));
+        await venue.down();
+        venue = null;
+        return false;
+    }
+    if (!up) {
+        console.log('Oracle publish venue unavailable: ' + venue.unavailable);
+        await venue.down();
+        venue = null;
+        return false;
+    }
+
+    rounds = await venue.finalizeRounds(ROUNDS);
+
+    for (const pub of venue.publications) {
+        const row   = await venue.readIndexedPrice(pub.txid);
+        const block = await venue.blockOf(pub.txid);
+        indexed.push({ publication: pub, row: row, block: block });
+    }
+
+    // The run's evidence, printed once: this is a live-venue suite, and a
+    // green tick with no txids proves nothing to an operator reading CI.
+    console.log('\n  --- oracle publish venue: what actually landed ---');
+    for (const r of rounds) {
+        const p = r.publication;
+        console.log('  round ' + r.round + '  leader hub ' + p.hubIndex + '  v' + p.wireVersion +
+            '  ' + p.wireBytes + 'B  ' + p.encoding + '  quorum ' + r.signatures.length + '/' +
+            VALIDATORS + '  validator_count ' + r.validatorCount + '  tx ' + p.txid);
+    }
+    for (const i of indexed) {
+        console.log('  tx ' + i.publication.txid.slice(0, 16) + '...  block ' +
+            (i.block ? i.block.height : '?') + '  action ' + i.row.action_index +
+            '  round ' + i.row.round_number + '  sigs ' + i.row.sig_count +
+            '  -> ' + i.row.status);
+    }
+    console.log('  -------------------------------------------------\n');
+    return true;
+}
+
+async function setUpVenue() {
+    if (venueFailure) this.skip();
+    if (!venueSetup) venueSetup = initializeVenue();
+    try {
+        if (!await venueSetup) this.skip();
+    } catch (err) {
+        venueFailure = err;
+        throw err;
+    }
+}
+
+async function tearDownVenue() {
+    if (venue) await venue.down();
+}
+
 describe('Oracle publish venue: quorum federation on the live DOGE regtest publish rail (L3)', function () {
     // Every round is a full PBFT round plus an encoder build, a signature, a
     // broadcast and a confirmation on a real chain, so the budget is per-suite
     // rather than per-round; the venue's own waits are polls that return early.
     this.timeout(30 * 60 * 1000);
 
-    let venue = null;
-    let rounds = [];
-    let indexed = [];   // [{ publication, row, block }]
-
-    before(async function () {
-        venue = new OracleBatchVenue({
-            coin:            'dogecoin',
-            network:         'regtest',
-            validatorCount:  VALIDATORS,
-            basePort:        33800,
-            expectWireVersion: 0
-        });
-        let up = false;
-        try {
-            up = await venue.up();
-        } catch (err) {
-            // A venue that cannot be built is a skip, not a red test, but the
-            // reason has to be printed or the skip is indistinguishable from a
-            // pass that proved nothing.
-            console.log('Oracle publish venue unavailable: ' + (err && err.message));
-            await venue.down();
-            venue = null;
-            this.skip();
-            return;
-        }
-        if (!up) {
-            console.log('Oracle publish venue unavailable: ' + venue.unavailable);
-            await venue.down();
-            venue = null;
-            this.skip();
-            return;
-        }
-
-        rounds = await venue.finalizeRounds(ROUNDS);
-
-        for (const pub of venue.publications) {
-            const row   = await venue.readIndexedPrice(pub.txid);
-            const block = await venue.blockOf(pub.txid);
-            indexed.push({ publication: pub, row: row, block: block });
-        }
-
-        // The run's evidence, printed once: this is a live-venue suite, and a
-        // green tick with no txids proves nothing to an operator reading CI.
-        console.log('\n  --- oracle publish venue: what actually landed ---');
-        for (const r of rounds) {
-            const p = r.publication;
-            console.log('  round ' + r.round + '  leader hub ' + p.hubIndex + '  v' + p.wireVersion +
-                '  ' + p.wireBytes + 'B  ' + p.encoding + '  quorum ' + r.signatures.length + '/' +
-                VALIDATORS + '  validator_count ' + r.validatorCount + '  tx ' + p.txid);
-        }
-        for (const i of indexed) {
-            console.log('  tx ' + i.publication.txid.slice(0, 16) + '...  block ' +
-                (i.block ? i.block.height : '?') + '  action ' + i.row.action_index +
-                '  round ' + i.row.round_number + '  sigs ' + i.row.sig_count +
-                '  -> ' + i.row.status);
-        }
-        console.log('  -------------------------------------------------\n');
-    });
-
-    after(async function () {
-        if (venue) await venue.down();
-    });
+    before(setUpVenue);
 
     it('every round finalizes on a real multi-signature quorum across the whole federation', function () {
         assert.strictEqual(rounds.length, ROUNDS, 'expected ' + ROUNDS + ' finalized rounds');
@@ -200,6 +214,11 @@ describe('Oracle publish venue: quorum federation on the live DOGE regtest publi
                 'the wire but the federation finalized on ' + r.signatures.length);
         }
     });
+});
+
+describe('Oracle publish venue: quorum federation on the live DOGE regtest publish rail (L3)', function () {
+    this.timeout(30 * 60 * 1000);
+    before(setUpVenue);
 
     it('each finalized round produced exactly one publish, inside the wire ceiling', function () {
         assert.strictEqual(venue.publications.length, ROUNDS,
@@ -224,6 +243,11 @@ describe('Oracle publish venue: quorum federation on the live DOGE regtest publi
             ' consecutive rounds, saw hub(s) ' + [...leaders].join(', ') +
             '; a single publisher doing every round means the rotation is not being read');
     });
+});
+
+describe('Oracle publish venue: quorum federation on the live DOGE regtest publish rail (L3)', function () {
+    this.timeout(30 * 60 * 1000);
+    before(setUpVenue);
 
     it('every publish was mined into a real block on the landing chain', function () {
         for (const i of indexed) {
@@ -250,6 +274,12 @@ describe('Oracle publish venue: quorum federation on the live DOGE regtest publi
                 'the signatures the indexer stored are not the signatures on the wire');
         }
     });
+});
+
+describe('Oracle publish venue: quorum federation on the live DOGE regtest publish rail (L3)', function () {
+    this.timeout(30 * 60 * 1000);
+    before(setUpVenue);
+    after(tearDownVenue);
 
     it('the landing chain reached a verdict that is either an accept or the known capability gap', function () {
         for (const i of indexed) {
