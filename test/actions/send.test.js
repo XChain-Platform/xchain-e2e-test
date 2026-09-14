@@ -28,7 +28,9 @@ describe('SEND', () => {
             assert(result.debit, "Send v0 debit should exist in DB")
         })
     })
+})
 
+describe('SEND', () => {
     describe('v1', () => {
         it('should create a SEND Message v1', async () => {
             let senderAddress = await cryptoHelper.getNewFundedAddress("SEND.V1", COIN, NETWORK, null, "legacy", 0, 1)
@@ -46,7 +48,9 @@ describe('SEND', () => {
             assert(result.debit, "Send v1 debit should exist in DB")
         })
     })
+})
 
+describe('SEND', () => {
     describe('v2', () => {
         it('should create a SEND Message v2', async () => {
             let senderAddress = await cryptoHelper.getNewFundedAddress("SEND.V2", COIN, NETWORK, null, "legacy", 0, 1)
@@ -67,7 +71,9 @@ describe('SEND', () => {
             assert(result.debit2, "Send v2 second debit should exist in DB")
         })
     })
+})
 
+describe('SEND', () => {
     describe('v3', () => {
         it('should create a SEND Message v3', async () => {
             let senderAddress = await cryptoHelper.getNewFundedAddress("SEND.V3", COIN, NETWORK, null, "legacy", 0, 1)
