@@ -21,49 +21,51 @@ const ECPair = ECPairFactory(ecc)
 
 const transactionHelper = require('../../../test/transactionHelper')
 
+let savedGlobals
+
+function setUpUtxoCache() {
+    savedGlobals = {
+        NETWORK_OBJECT: global.NETWORK_OBJECT,
+        encoderConnector: global.encoderConnector,
+        nodeConnector: global.nodeConnector,
+        utxoTrackerConnector: global.utxoTrackerConnector,
+    }
+    global.NETWORK_OBJECT = { ...bitcoin.networks.regtest, dustThreshold: 546 }
+}
+
+function tearDownUtxoCache() {
+    Object.assign(global, savedGlobals)
+    sinon.restore()
+}
+
+function makeAddressInfo() {
+    const keyPair = ECPair.makeRandom({ network: bitcoin.networks.regtest })
+    const { address } = bitcoin.payments.p2pkh({
+        pubkey: keyPair.publicKey,
+        network: bitcoin.networks.regtest
+    })
+    return { address, privateKey: keyPair.privateKey, publicKey: keyPair.publicKey }
+}
+
+function buildMockPsbt(publicKey, address) {
+    const psbt = new bitcoin.Psbt({ network: bitcoin.networks.regtest })
+    const fundingTx = new bitcoin.Transaction()
+    fundingTx.version = 2
+    fundingTx.addInput(Buffer.alloc(32, 0), 0)
+    fundingTx.addOutput(
+        bitcoin.payments.p2pkh({ pubkey: publicKey, network: bitcoin.networks.regtest }).output,
+        100000
+    )
+    psbt.addInput({ hash: fundingTx.getHash(), index: 0, nonWitnessUtxo: fundingTx.toBuffer() })
+    const data = Buffer.from('TEST', 'utf8')
+    psbt.addOutput({ script: bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, data]), value: 0 })
+    psbt.addOutput({ address, value: 90000 })
+    return psbt.toHex()
+}
+
 describe('State Management: UTXO Cache', function () {
-
-    let savedGlobals
-
-    beforeEach(function () {
-        savedGlobals = {
-            NETWORK_OBJECT: global.NETWORK_OBJECT,
-            encoderConnector: global.encoderConnector,
-            nodeConnector: global.nodeConnector,
-            utxoTrackerConnector: global.utxoTrackerConnector,
-        }
-        global.NETWORK_OBJECT = { ...bitcoin.networks.regtest, dustThreshold: 546 }
-    })
-
-    afterEach(function () {
-        Object.assign(global, savedGlobals)
-        sinon.restore()
-    })
-
-    function makeAddressInfo() {
-        const keyPair = ECPair.makeRandom({ network: bitcoin.networks.regtest })
-        const { address } = bitcoin.payments.p2pkh({
-            pubkey: keyPair.publicKey,
-            network: bitcoin.networks.regtest
-        })
-        return { address, privateKey: keyPair.privateKey, publicKey: keyPair.publicKey }
-    }
-
-    function buildMockPsbt(publicKey, address) {
-        const psbt = new bitcoin.Psbt({ network: bitcoin.networks.regtest })
-        const fundingTx = new bitcoin.Transaction()
-        fundingTx.version = 2
-        fundingTx.addInput(Buffer.alloc(32, 0), 0)
-        fundingTx.addOutput(
-            bitcoin.payments.p2pkh({ pubkey: publicKey, network: bitcoin.networks.regtest }).output,
-            100000
-        )
-        psbt.addInput({ hash: fundingTx.getHash(), index: 0, nonWitnessUtxo: fundingTx.toBuffer() })
-        const data = Buffer.from('TEST', 'utf8')
-        psbt.addOutput({ script: bitcoin.script.compile([bitcoin.opcodes.OP_RETURN, data]), value: 0 })
-        psbt.addOutput({ address, value: 90000 })
-        return psbt.toHex()
-    }
+    beforeEach(setUpUtxoCache)
+    afterEach(tearDownUtxoCache)
 
     describe('Scenario: Cache consumed after use', function () {
 
@@ -99,6 +101,11 @@ describe('State Management: UTXO Cache', function () {
             assert.strictEqual(encoderCalls[2].length, 1, 'call 3: re-cached from call 2')
         })
     })
+})
+
+describe('State Management: UTXO Cache', function () {
+    beforeEach(setUpUtxoCache)
+    afterEach(tearDownUtxoCache)
 
     describe('Scenario: Cache miss for different addresses', function () {
 
