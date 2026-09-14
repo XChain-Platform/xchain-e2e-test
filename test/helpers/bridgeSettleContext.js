@@ -150,7 +150,7 @@ function makeSettleContext(opts){
 
     const indexerDb = {
         config: config,
-        _mirrorDb: () => mirror,
+        mirrorDb: () => mirror,
         // The settle pass's bridge_settlements reads and writes live in xchain-indexer
         // src/db/bridge_settlements.js as named methods, so the fixture implements the ones the
         // pass calls. Every one answers from `state` and decides nothing; a stub that answered
