@@ -9,6 +9,7 @@
 // contact legal@dankest.llc.
 //
 // TAPROOT ENVELOPE + PAYLOAD COMPRESSION
+// spec: Taproot envelope and payload compression, cited below by § number
 //
 // The envelope was proven end to end during the build (BTC and LTC regtest,
 // testnet4, mainnet arming) by one-off scripts run during development. Those

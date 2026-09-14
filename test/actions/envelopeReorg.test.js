@@ -12,6 +12,7 @@
  *
  **********************************************************************
  * TAPROOT ENVELOPE REORG (§3.7)
+ * spec: Taproot envelope and payload compression, cited below by § number
  *
  * envelope.test.js publishes the pair the fee-optimal way, both halves in one
  * block. This file drives the case the spec calls out separately and that the

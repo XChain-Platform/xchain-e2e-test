@@ -10,6 +10,7 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
+ **********************************************************************
  * E2E test: AttestationPublisher operator-signer wiring (F13 regression)
  *
  * Finding F13: XChainHub.startAttestation() constructed AttestationPublisher
@@ -24,6 +25,8 @@
  *   1. the publisher's hooks were wired by startAttestation() itself, and
  *   2. a finalized response actually broadcasts THROUGH the operator
  *      module's broadcast(payload) and is then removed from the WAL queue.
+ *
+ * Spec: the 2026-06-12 phase 5 attestation validator review.
  *
  ********************************************************************/
 

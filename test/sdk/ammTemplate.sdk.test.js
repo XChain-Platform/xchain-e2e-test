@@ -10,6 +10,8 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
+ **********************************************************************
+ *
  * XChain Platform E2E - Contract Template Library: AMM (on-chain)
  *
  * Drives the REAL constant-product AMM template from xchain-contracts
@@ -81,6 +83,9 @@ describe('[sdk] template:amm (LP-as-real-tick round trip)', function () {
         // with a clear reason rather than throwing at file load and aborting the
         // entire test:sdk run.
         try {
+            // The DEPLOY payload is the action string itself: the source with comments and
+            // blank lines stripped so it carries only code, base64-encoded (the SDK encodes
+            // CODE_ENCODING as base64, ~1.33 bytes/char).
             AMM_SRC = loadCompactTemplate('amm');
         } catch (e) {
             console.log('    [amm] SKIP: ' + e.message.split('\n')[0]);

@@ -12,6 +12,7 @@
  *
  **********************************************************************
  * TAPROOT ENVELOPE FEE LIFECYCLE (§3.5)
+ * spec: Taproot envelope and payload compression, cited below by § number
  *
  * §3.5 makes two claims about money that no other envelope test can reach:
  *

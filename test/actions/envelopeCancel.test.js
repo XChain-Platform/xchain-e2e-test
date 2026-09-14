@@ -12,6 +12,7 @@
  *
  **********************************************************************
  * ENVELOPE CANCEL FROM PERSISTED STATE (§3.5)
+ * spec: Taproot envelope and payload compression, cited below by § number
  *
  * The commit output is a P2TR whose tweak commits to the envelope leaf. Spending
  * it back out by the key path needs the internal key AND the tapleaf hash to

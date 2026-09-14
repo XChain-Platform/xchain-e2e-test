@@ -24,6 +24,9 @@
  *
  * Unlike MockAttestationValidator (which signs in-process but bypasses
  * the hub entirely), this harness exercises the full validator pipeline.
+ *
+ * Spec: the external attestation framework design, Phase 3.
+ *
  ********************************************************************/
 
 'use strict';

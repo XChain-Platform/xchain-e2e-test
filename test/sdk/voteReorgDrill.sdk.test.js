@@ -10,6 +10,8 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
+ **********************************************************************
+ *
  * XChain Platform E2E - VOTE re-ballot reorg drill
  *
  * Proves the append-only votes design is reorg-safe end to end. The original

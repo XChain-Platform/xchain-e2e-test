@@ -10,6 +10,8 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
+ **********************************************************************
+ *
  * XChain Platform E2E - BET latch atomicity and idempotence (spec §12 E17)
  *
  * The `closed` latch is the one BET write that mutates a row created in an

@@ -10,6 +10,8 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
+ **********************************************************************
+ *
  * XChain Platform E2E - SDK-driven SWAP (atomic token exchange)
  *
  * Drives the SWAP lifecycle through the public xchain-sdk API:

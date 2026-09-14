@@ -86,6 +86,7 @@ describe('PRICE v1 Reorg: a published oracle quote rolls back across an on-chain
         while ((await tip()) < (await nodeConnector.getBlockCount()) && settle++ < 60) { await sleep(1000) }
         console.log('   indexer tip', await tip(), 'node tip', await nodeConnector.getBlockCount())
 
+        // Reorg out the PRICE block.
         await regtestMinerConnector.pauseMining()
         try {
             const tipBefore = await nodeConnector.getBlockCount()

@@ -110,6 +110,7 @@ describe('DEX Reorg: an open ORDER (and its escrow) rolls back across an on-chai
         while ((await tip()) < (await nodeConnector.getBlockCount()) && settle++ < 60) { await sleep(1000) }
         console.log('   indexer tip', await tip(), 'node tip', await nodeConnector.getBlockCount())
 
+        // Reorg out the ORDER block.
         await regtestMinerConnector.pauseMining()
         try {
             const tipBefore = await nodeConnector.getBlockCount()

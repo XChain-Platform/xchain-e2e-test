@@ -10,6 +10,8 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
+ **********************************************************************
+ *
  * Guards for the XCALL quorum-drop planner.
  *
  * HERMETIC: pure arithmetic over fixture snapshots, no venue, no docker, no
