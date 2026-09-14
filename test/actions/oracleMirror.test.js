@@ -48,30 +48,68 @@ const transactionHelper = require('../transactionHelper')
 const priceSnapshotHelper = require('../helpers/priceSnapshotHelper')
 const oraclePriceHelper   = require('../helpers/oraclePriceHelper')
 
+// Its own fiat: every FIAT case prices in a currency no other
+// case or helper touches, so none of them can clear or reseed a pair another
+// is mid-way through using. MXN is unused elsewhere in the tree.
+const FIAT_MIRROR = 'MXN'
+
+// The mirror is the thing under test here, so unlike the settlement cases
+// this skips on its ABSENCE rather than on the price tables being unreachable.
+async function requireMirror(ctx){
+    if (!oraclePriceHelper.seedsThroughMirror()){
+        console.log('hub_db_sync mirror not configured (no HUB_SOURCE_DB_NAME + HUB_DB_NAME); '
+            + 'skipping the mirror leg. This is the expected state on a single-host stack.')
+        ctx.skip()
+        return false
+    }
+    if (!(await oraclePriceHelper.isAvailable())){
+        console.log('oracle_prices unreachable on one side of the mirror; skipping')
+        ctx.skip()
+        return false
+    }
+    return true
+}
+
+async function buildSettlementFixture() {
+    const dispenserAddr = await cryptoHelper.getNewFundedAddress('DISP.MIRROR', COIN, NETWORK, null, 'legacy', 0, 1)
+    const buyerAddr     = await cryptoHelper.getNewFundedAddress('DISP.MIRROR.BUYER', COIN, NETWORK, null, 'legacy', 0, 1)
+    const oracleAddr    = await cryptoHelper.getNewFundedAddress('DISP.MIRROR.SRC', COIN, NETWORK, null, 'legacy', 0, 1)
+    const dispenserAddress = dispenserAddr['address']
+    const buyerAddress     = buyerAddr['address']
+    const oracleAddress    = oracleAddr['address']
+    const tick = 'DISPMIR' + dispenserAddress.substring(dispenserAddress.length - 7)
+
+    await issueHelper.sendIssueV0(dispenserAddr, tick, 100, 100, 0, 'oracle mirror dispenser', 100)
+
+    const expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
+    const pair       = COIN_CODE + '/' + FIAT_MIRROR
+    const coinPrice  = 50000   // 1 coin = 50,000 fiat (validator)
+    const tokenPrice = 100     // 1 token = 100 fiat   (user oracle)
+    const chainNow   = await priceSnapshotHelper.latestBlockTime()
+
+    await priceSnapshotHelper.clearPair(pair)
+    await priceSnapshotHelper.seedSnapshot({
+        coinPair: pair,
+        price: coinPrice.toFixed(8),
+        blockTimestamp: chainNow - 120,
+        roundNumber: 999000708
+    })
+    await oraclePriceHelper.clearQuotes({
+        sourceAddress: oracleAddress, coin: COIN_CODE, tick: tick, fiat: FIAT_MIRROR
+    })
+    await oraclePriceHelper.seedQuote({
+        sourceAddress: oracleAddress, sourceChain: COIN_CODE,
+        coin: COIN_CODE, tick: tick, fiat: FIAT_MIRROR,
+        value: tokenPrice.toFixed(8), fee: '0',
+        effectiveAt: chainNow - 60, actionIndex: 999000708
+    })
+
+    return { buyerAddr, buyerAddress, coinPrice, dispenserAddr, dispenserAddress,
+        expiration, oracleAddress, tick, tokenPrice }
+}
+
 describe('PRICE v1 hub -> indexer mirror', function () {
     this.timeout(0)
-
-    // Its own fiat: every FIAT case prices in a currency no other
-    // case or helper touches, so none of them can clear or reseed a pair another
-    // is mid-way through using. MXN is unused elsewhere in the tree.
-    const FIAT_MIRROR = 'MXN'
-
-    // The mirror is the thing under test here, so unlike the settlement cases
-    // this skips on its ABSENCE rather than on the price tables being unreachable.
-    async function requireMirror(ctx){
-        if (!oraclePriceHelper.seedsThroughMirror()){
-            console.log('hub_db_sync mirror not configured (no HUB_SOURCE_DB_NAME + HUB_DB_NAME); '
-                + 'skipping the mirror leg. This is the expected state on a single-host stack.')
-            ctx.skip()
-            return false
-        }
-        if (!(await oraclePriceHelper.isAvailable())){
-            console.log('oracle_prices unreachable on one side of the mirror; skipping')
-            ctx.skip()
-            return false
-        }
-        return true
-    }
 
     describe('replication of a real on-chain publish', function () {
         it('carries an on-chain PRICE v1 quote through the hub into the indexer mirror', async function () {
@@ -120,6 +158,10 @@ describe('PRICE v1 hub -> indexer mirror', function () {
             console.log('oracle mirror: quote mirrored in ' + mirrored.waitedMs + 'ms')
         })
     })
+})
+
+describe('PRICE v1 hub -> indexer mirror', function () {
+    this.timeout(0)
 
     describe('settlement against a replicated quote', function () {
         it('settles a Mode 2 dispense from a quote that arrived by replication', async function () {
@@ -130,44 +172,14 @@ describe('PRICE v1 hub -> indexer mirror', function () {
                 return
             }
 
-            const dispenserAddr = await cryptoHelper.getNewFundedAddress('DISP.MIRROR', COIN, NETWORK, null, 'legacy', 0, 1)
-            const buyerAddr     = await cryptoHelper.getNewFundedAddress('DISP.MIRROR.BUYER', COIN, NETWORK, null, 'legacy', 0, 1)
-            const oracleAddr    = await cryptoHelper.getNewFundedAddress('DISP.MIRROR.SRC', COIN, NETWORK, null, 'legacy', 0, 1)
-            const dispenserAddress = dispenserAddr['address']
-            const buyerAddress     = buyerAddr['address']
-            const oracleAddress    = oracleAddr['address']
-            const tick = 'DISPMIR' + dispenserAddress.substring(dispenserAddress.length - 7)
-
-            await issueHelper.sendIssueV0(dispenserAddr, tick, 100, 100, 0, 'oracle mirror dispenser', 100)
-
-            const expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
-            const pair       = COIN_CODE + '/' + FIAT_MIRROR
-            const coinPrice  = 50000   // 1 coin = 50,000 fiat (validator)
-            const tokenPrice = 100     // 1 token = 100 fiat   (user oracle)
-            const chainNow   = await priceSnapshotHelper.latestBlockTime()
-
             // The validator leg is a local fixture by necessity (no federation on
             // regtest, see the file header). The ORACLE leg is the one under test
             // and travels the real path: seedQuote routes through the hub's
             // `pushoracleprice` whenever a mirror is in play, then waits for
             // hub_db_sync to carry the row down. The caller's contract is
             // unchanged, which is why the existing Mode 2 cases need no edit.
-            await priceSnapshotHelper.clearPair(pair)
-            await priceSnapshotHelper.seedSnapshot({
-                coinPair: pair,
-                price: coinPrice.toFixed(8),
-                blockTimestamp: chainNow - 120,
-                roundNumber: 999000708
-            })
-            await oraclePriceHelper.clearQuotes({
-                sourceAddress: oracleAddress, coin: COIN_CODE, tick: tick, fiat: FIAT_MIRROR
-            })
-            await oraclePriceHelper.seedQuote({
-                sourceAddress: oracleAddress, sourceChain: COIN_CODE,
-                coin: COIN_CODE, tick: tick, fiat: FIAT_MIRROR,
-                value: tokenPrice.toFixed(8), fee: '0',
-                effectiveAt: chainNow - 60, actionIndex: 999000708
-            })
+            const { buyerAddr, buyerAddress, coinPrice, dispenserAddr, dispenserAddress,
+                expiration, oracleAddress, tick, tokenPrice } = await buildSettlementFixture()
 
             // Prove the quote is in the MIRROR specifically, not merely somewhere.
             // Without this the case could pass on a stale row and still be called
