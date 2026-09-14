@@ -97,10 +97,59 @@ async function waitTokenController(tick, predicate, timeMax = 20000) {
     return ev
 }
 
+async function createControllerBinding(owner) {
+    const tick = randTick('CRR')
+
+    // ISSUE + DEPLOY in EARLIER blocks, then bury them so the BIND is cleanly isolatable.
+    await issueHelper.sendIssueV0(owner, tick, '100000', '100000', '0', 'ctl-reorg', '100000')
+    const dep = await vmHelper.sendDeployV0(owner, SEND_GATE, 250000)
+    const ctrl = dep.contract.action_index
+    const deployBlock = await blockOfAction(ctrl)
+    await mine(2)
+
+    // BIND transfer -> SEND_GATE, alone in block H.
+    await transactionHelper.createAndSendTransaction(owner, issueBindWire(tick, ctrl, 'transfer', 0, 0))
+    await mine(1)
+    const ev = await waitTokenController(tick, e => Number(e.is_unbind) === 0)
+    return { tick, ctrl, deployBlock, ev }
+}
+
+async function sendGuardedTransfer(owner, tick) {
+    const bob = await cryptoHelper.getNewFundedAddress('creorg-bob', COIN, NETWORK, null, 'legacy', 0, 1)
+    const bobBefore = await balanceOf(bob.address, tick)
+    const deniedTxHash = await transactionHelper.createAndSendTransaction(owner, `SEND|0|${tick}|10|${bob.address}|pre-reorg`)
+    await mine(1)
+    return { bob, bobBefore, deniedTxHash }
+}
+
+async function waitForGuardDecision(owner, tick, deniedTxHash) {
+    return await indexerDatabase.waitForSend({
+        source: owner.address, txHash: deniedTxHash, tick: tick
+    }, 120000)
+}
+
+async function invalidateBinding(bindBlock) {
+    const tipBefore = await nodeConnector.getBlockCount()
+    const bindHash = await nodeConnector.getBlockHash(bindBlock)
+    const miner = (await cryptoHelper.getNewAddress('creorg-miner', COIN, NETWORK, null, 'legacy', 0)).address
+    await nodeConnector.invalidateBlock(bindHash)
+    return { tipBefore, miner }
+}
+
+async function waitForBindingRemoval(tick) {
+    let rolled = null
+    const deadline = Date.now() + 120000
+    while (Date.now() < deadline) {
+        rolled = await tokenControllerEvents(tick)
+        if (rolled.length === 0) break
+        await sleep(2000)
+    }
+    return rolled
+}
+
 describe('Controller Reorg: a token binding rolls back across an on-chain reorg', function () {
     this.timeout(0)
     let owner
-
     before(async function () {
         // generateblock(addr, []) (empty competing chain) is required and absent on
         // Dogecoin Core 1.14.x → 404 "method not found". rollback.js is chain-agnostic
@@ -111,39 +160,21 @@ describe('Controller Reorg: a token binding rolls back across an on-chain reorg'
     })
 
     it('orphaning the BIND block rolls back token_controllers while ISSUE + DEPLOY survive', async function () {
-        const tick = randTick('CRR')
-
-        // ISSUE + DEPLOY in EARLIER blocks, then bury them so the BIND is cleanly isolatable.
-        await issueHelper.sendIssueV0(owner, tick, '100000', '100000', '0', 'ctl-reorg', '100000')
-        const dep = await vmHelper.sendDeployV0(owner, SEND_GATE, 250000)
-        const ctrl = dep.contract.action_index
-        const deployBlock = await blockOfAction(ctrl)
-        await mine(2)
-
-        // BIND transfer -> SEND_GATE, alone in block H.
-        await transactionHelper.createAndSendTransaction(owner, issueBindWire(tick, ctrl, 'transfer', 0, 0))
-        await mine(1)
-        let ev = await waitTokenController(tick, e => Number(e.is_unbind) === 0)
+        const { tick, ctrl, deployBlock, ev } = await createControllerBinding(owner)
         assert(ev.length === 1 && Number(ev[0].is_unbind) === 0, 'bind row present pre-reorg')
-        const bindActionIndex = ev[0].action_index
-        const bindBlock = await blockOfAction(bindActionIndex)
+        const bindBlock = await blockOfAction(ev[0].action_index)
         assert(bindBlock && deployBlock && bindBlock > deployBlock,
             `BIND must be in a later block than DEPLOY (deploy=${deployBlock} bind=${bindBlock}) to isolate the rollback`)
         console.log('   bound transfer->guard', ctrl, 'at block', bindBlock, '(deploy', deployBlock + ')')
 
         // The binding has teeth: a SEND of the bound token is DENIED pre-reorg.
-        const bob = await cryptoHelper.getNewFundedAddress('creorg-bob', COIN, NETWORK, null, 'legacy', 0, 1)
-        const bobBefore = await balanceOf(bob.address, tick)
-        const deniedTxHash = await transactionHelper.createAndSendTransaction(owner, `SEND|0|${tick}|10|${bob.address}|pre-reorg`)
-        await mine(1)
+        const { bob, bobBefore, deniedTxHash } = await sendGuardedTransfer(owner, tick)
         // Wait for the indexer's DECISION on this SEND, not a fixed window. actions/send.js
         // calls createSend for every SEND it judges, denied ones included, so the arrival of
         // the `sends` row IS the event that says the transfer guard has finished ruling. A
         // blind sleep could only ever assert "nothing has happened YET", and passed for free
         // if the tx was never judged at all.
-        const deniedRow = await indexerDatabase.waitForSend({
-            source: owner.address, txHash: deniedTxHash, tick: tick
-        }, 120000)
+        const deniedRow = await waitForGuardDecision(owner, tick, deniedTxHash)
         assert(deniedRow, 'the indexer recorded a decision row for the guarded SEND')
         assert.match(String(deniedRow.status), /^invalid/,
             `SEND rejected by the transfer guard pre-reorg (status: ${deniedRow.status})`)
@@ -152,11 +183,7 @@ describe('Controller Reorg: a token binding rolls back across an on-chain reorg'
 
         await regtestMinerConnector.pauseMining()
         try {
-            const tipBefore = await nodeConnector.getBlockCount()
-            const bindHash = await nodeConnector.getBlockHash(bindBlock)
-            const miner = (await cryptoHelper.getNewAddress('creorg-miner', COIN, NETWORK, null, 'legacy', 0)).address
-
-            await nodeConnector.invalidateBlock(bindHash)
+            const { tipBefore, miner } = await invalidateBinding(bindBlock)
             assert.strictEqual(await nodeConnector.getBlockCount(), bindBlock - 1,
                 'node rolled back to the block before the BIND')
 
@@ -167,13 +194,7 @@ describe('Controller Reorg: a token binding rolls back across an on-chain reorg'
             assert(await nodeConnector.getBlockCount() > tipBefore, 'competing chain overtakes the original')
 
             // Wait for node -> decoder -> indexer + rollback.js to delete the block-scoped row.
-            let rolled = null
-            const deadline = Date.now() + 120000
-            while (Date.now() < deadline) {
-                rolled = await tokenControllerEvents(tick)
-                if (rolled.length === 0) break
-                await sleep(2000)
-            }
+            const rolled = await waitForBindingRemoval(tick)
             console.log('   token_controllers after reorg:', j(rolled))
             assert.strictEqual(rolled.length, 0, 'token_controllers BIND row rolled back (token reverts to uncontrolled)')
 
