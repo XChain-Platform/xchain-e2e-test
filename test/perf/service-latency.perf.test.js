@@ -103,6 +103,10 @@ describe('Performance: live-stack service latency (regression budgets, not SLOs)
         const s = await measure('explorer ping', () => explorerConnector.ping(), isTrue)
         assert.ok(s.median < PING_BUDGET_MS, `median ${s.median.toFixed(1)}ms exceeds ${PING_BUDGET_MS}ms`)
     })
+})
+
+describe('Performance: live-stack service latency (regression budgets, not SLOs)', function () {
+    this.timeout(120000)
 
     it('indexer health report stays within the read budget', async function () {
         assert.ok(isObject(await indexerConnector.health()), 'indexer health unavailable')
