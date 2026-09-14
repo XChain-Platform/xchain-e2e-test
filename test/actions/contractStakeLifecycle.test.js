@@ -105,19 +105,30 @@ async function waitActivation(activationBlock){
     let guard = 0
     while ((await tip()) < activationBlock && guard++ < 120) { await mine(1); await sleep(800) }
 }
+const COOLDOWN = 20
+// Memoized so both sibling describes below share exactly one on-chain deploy:
+// each calls this from its own before(), but only the first call does the work.
+let deployedContractIndex = null
+async function deployStakeableContract(){
+    if (deployedContractIndex === null) {
+        deployedContractIndex = (async () => {
+            const deployer = await cryptoHelper.getNewFundedAddress('cstake-deployer', COIN, NETWORK, null, 'legacy', 0, 1)
+            await gasHelper.ensureGasBalance(deployer, '1000')
+            const dep = await vmHelper.sendDeployV1(deployer, STAKE_GATED_CONTRACT, 300000, '', COOLDOWN, 'BURN')
+            assert(dep.contract && dep.contract.status === 'valid', 'stakeable contract must deploy clean')
+            console.log('   stakeable contract', dep.contract.action_index, 'cooldown', COOLDOWN)
+            return dep.contract.action_index
+        })()
+    }
+    return deployedContractIndex
+}
 
 describe('Contract Staking Lifecycle: UNSTAKE cooldown sweep + live SLASH', function () {
     this.timeout(0)
-    const COOLDOWN = 20
     let contractIndex
 
     before(async function () {
-        const deployer = await cryptoHelper.getNewFundedAddress('cstake-deployer', COIN, NETWORK, null, 'legacy', 0, 1)
-        await gasHelper.ensureGasBalance(deployer, '1000')
-        const dep = await vmHelper.sendDeployV1(deployer, STAKE_GATED_CONTRACT, 300000, '', COOLDOWN, 'BURN')
-        assert(dep.contract && dep.contract.status === 'valid', 'stakeable contract must deploy clean')
-        contractIndex = dep.contract.action_index
-        console.log('   stakeable contract', contractIndex, 'cooldown', COOLDOWN)
+        contractIndex = await deployStakeableContract()
     })
 
     it('UNSTAKE v1 → cooldown → sweep returns the staked tokens to the staker', async function () {
@@ -151,6 +162,15 @@ describe('Contract Staking Lifecycle: UNSTAKE cooldown sweep + live SLASH', func
         const delta = credited - balDuringCooldown
         console.log(`   sweep credited +${delta} XCHAIN (during=${balDuringCooldown} after=${credited})`)
         assert.strictEqual(delta, 500, 'sweep returns exactly the unstaked 500 XCHAIN to the staker')
+    })
+})
+
+describe('Contract Staking Lifecycle: UNSTAKE cooldown sweep + live SLASH', function () {
+    this.timeout(0)
+    let contractIndex
+
+    before(async function () {
+        contractIndex = await deployStakeableContract()
     })
 
     it('live SLASH: an EXECUTE doSlash writes a slash_events row and reduces the active stake', async function () {
