@@ -16,6 +16,80 @@ const transactionHelper = require('../transactionHelper')
 
 const GAS_TICK = 'XCHAIN'
 
+async function q(sql, params) {
+    const conn = await indexerDatabase.getConnection()
+    try { return await conn.query(sql, params) }
+    finally { await conn.release() }
+}
+
+async function tickerIdByName(tick) {
+    const rows = await q('SELECT id FROM index_tickers WHERE LOWER(tick)=? LIMIT 1', [String(tick).toLowerCase()])
+    return rows.length ? Number(rows[0].id) : null
+}
+
+async function tickById(id) {
+    const rows = await q('SELECT tick FROM index_tickers WHERE id=? LIMIT 1', [Number(id)])
+    return rows.length ? rows[0].tick : null
+}
+
+async function tokenRowExists(tick) {
+    const rows = await q(`SELECT 1 FROM tokens t JOIN index_tickers it ON it.id=t.tick_id
+        WHERE it.tick=? LIMIT 1`, [tick])
+    return rows.length > 0
+}
+
+async function blockOfAction(actionIndex) {
+    const rows = await q(`SELECT t.block_index AS b FROM actions a
+        JOIN transactions t ON t.tx_index=a.tx_index WHERE a.action_index=?`, [actionIndex])
+    return rows.length ? Number(rows[0].b) : null
+}
+
+async function prepareTickIdIssuers() {
+    // Two independent funded issuers. issuerB issues TOKENB after the reorg; using a
+    // SEPARATE issuer keeps TOKENB's inputs out of conflict with issuerA's orphaned
+    // ISSUE/MINT txs that sit in the mempool after invalidateblock. Both are funded
+    // (and gas-minted) BEFORE the reorg so their setup lands in surviving blocks.
+    const issuerA = await cryptoHelper.getNewFundedAddress('tickiddet-issuerA', COIN, NETWORK, null, 'legacy', 0, 1)
+    const issuerB = await cryptoHelper.getNewFundedAddress('tickiddet-issuerB', COIN, NETWORK, null, 'legacy', 0, 1)
+    const suffix = issuerA['address'].substring(issuerA['address'].length - 6).toUpperCase().replace(/[^A-Z0-9]/g, 'X')
+    const TOKENA = 'TDA' + suffix
+    const TOKENB = 'TDB' + suffix
+
+    await mintHelper.sendMintV0(issuerA, GAS_TICK, 10)
+    await mintHelper.sendMintV0(issuerB, GAS_TICK, 10)
+    return { issuerA, issuerB, TOKENA, TOKENB }
+}
+
+async function orphanIssueBlock(issueABlock) {
+    const tipBefore = await nodeConnector.getBlockCount()
+    const issueHash = await nodeConnector.getBlockHash(issueABlock)
+    const miner     = (await cryptoHelper.getNewAddress('tickiddet-miner', COIN, NETWORK, null, 'legacy', 0)).address
+    await nodeConnector.invalidateBlock(issueHash)
+    return { tipBefore, issueHash, miner }
+}
+
+async function waitForTokenRemoval(tick) {
+    let tokenAGone = false
+    const deadline = Date.now() + 120000
+    while (Date.now() < deadline) {
+        if (!(await tokenRowExists(tick))) { tokenAGone = true; break }
+        await new Promise(r => setTimeout(r, 2000))
+    }
+    return tokenAGone
+}
+
+async function issueCanonicalToken(issuerB, TOKENB, miner) {
+    const issueBMessage = 'ISSUE|0|' + TOKENB + '|1000|1000|0|tick-id deterministic B|1000' + '|'.repeat(17)
+    const issueBTxid = await transactionHelper.createAndSendTransaction(issuerB, issueBMessage)
+    await nodeConnector.generateBlock(miner, [issueBTxid])
+
+    return indexerDatabase.waitForIssue({
+        source: issuerB['address'], tick: TOKENB, txHash: issueBTxid,
+        description: 'tick-id deterministic B', maxSupply: 1000, maxMint: 1000,
+        decimals: 0, mintSupply: 1000, status: 'valid'
+    })
+}
+
 /**
  * Phase 5 ACCEPTANCE GATE for the deterministic index-id fix
  * (plan: address `^id` compaction + deterministic index-id consensus fix).
@@ -58,114 +132,50 @@ const GAS_TICK = 'XCHAIN'
  * competing-chain mechanism is the node-capability gate).
  */
 describe('Tick ^id reorg DETERMINISTIC (Phase 5 gate): orphaned index_tickers id is reclaimed, ^id no longer forks', function () {
-
     this.timeout(0)
-
     before(function () { if (global.COIN_CODE === 'DOGE') this.skip() })
-
-    async function q(sql, params) {
-        const conn = await indexerDatabase.getConnection()
-        try { return await conn.query(sql, params) }
-        finally { await conn.release() }
-    }
-    async function tickerIdByName(tick) {
-        const rows = await q('SELECT id FROM index_tickers WHERE LOWER(tick)=? LIMIT 1', [String(tick).toLowerCase()])
-        return rows.length ? Number(rows[0].id) : null
-    }
-    async function tickById(id) {
-        const rows = await q('SELECT tick FROM index_tickers WHERE id=? LIMIT 1', [Number(id)])
-        return rows.length ? rows[0].tick : null
-    }
-    async function tokenRowExists(tick) {
-        const rows = await q(`SELECT 1 FROM tokens t JOIN index_tickers it ON it.id=t.tick_id
-            WHERE it.tick=? LIMIT 1`, [tick])
-        return rows.length > 0
-    }
-    async function blockOfAction(actionIndex) {
-        const rows = await q(`SELECT t.block_index AS b FROM actions a
-            JOIN transactions t ON t.tx_index=a.tx_index WHERE a.action_index=?`, [actionIndex])
-        return rows.length ? Number(rows[0].b) : null
-    }
-
     it('an orphaned ISSUE id is reclaimed by rollback, so a later DIFFERENT issue reuses it (no ^id divergence)', async function () {
         // Precondition: the deterministic fix requires the block_index column. If the
         // indexer under test predates the migration, fail loud rather than false-green.
         const cols = await q("SHOW COLUMNS FROM index_tickers LIKE 'block_index'")
         assert.strictEqual(cols.length, 1, 'index_tickers.block_index must exist (deterministic-id migration applied)')
-
-        // Two independent funded issuers. issuerB issues TOKENB after the reorg; using a
-        // SEPARATE issuer keeps TOKENB's inputs out of conflict with issuerA's orphaned
-        // ISSUE/MINT txs that sit in the mempool after invalidateblock. Both are funded
-        // (and gas-minted) BEFORE the reorg so their setup lands in surviving blocks.
-        const issuerA = await cryptoHelper.getNewFundedAddress('tickiddet-issuerA', COIN, NETWORK, null, 'legacy', 0, 1)
-        const issuerB = await cryptoHelper.getNewFundedAddress('tickiddet-issuerB', COIN, NETWORK, null, 'legacy', 0, 1)
-        const suffix = issuerA['address'].substring(issuerA['address'].length - 6).toUpperCase().replace(/[^A-Z0-9]/g, 'X')
-        const TOKENA = 'TDA' + suffix
-        const TOKENB = 'TDB' + suffix
-
-        await mintHelper.sendMintV0(issuerA, GAS_TICK, 10)
-        await mintHelper.sendMintV0(issuerB, GAS_TICK, 10)
-
+        const { issuerA, issuerB, TOKENA, TOKENB } = await prepareTickIdIssuers()
         // 1. ISSUE TOKENA -> idA, stamped with its block_index.
         const issueA = await issueHelper.sendIssueV0(issuerA, TOKENA, 1000, 1000, 0, 'tick-id deterministic A', 1000)
         assert(issueA && issueA.issue, 'TOKENA must be indexed pre-reorg')
         const idA = await tickerIdByName(TOKENA)
         assert(idA, 'TOKENA resolved an index_tickers id pre-reorg')
         assert.strictEqual(await tickById(idA), TOKENA, 'idA maps to TOKENA pre-reorg')
-
         const issueABlock = await blockOfAction(issueA.issue.action_index)
         assert(issueABlock, 'TOKENA ISSUE block height resolved')
-
         // 2. Pause auto-mining so the orphaned ISSUE cannot be re-mined from the mempool.
         await regtestMinerConnector.pauseMining()
         try {
-            const tipBefore = await nodeConnector.getBlockCount()
-            const issueHash = await nodeConnector.getBlockHash(issueABlock)
-            const miner     = (await cryptoHelper.getNewAddress('tickiddet-miner', COIN, NETWORK, null, 'legacy', 0)).address
-
-            await nodeConnector.invalidateBlock(issueHash)
+            const { tipBefore, issueHash, miner } = await orphanIssueBlock(issueABlock)
             assert.strictEqual(await nodeConnector.getBlockCount(), issueABlock - 1, 'node rolled back below the TOKENA ISSUE')
-
             const need = tipBefore - (issueABlock - 1) + 2
             for (let i = 0; i < need; i++) await nodeConnector.generateBlock(miner, [])
             assert(await nodeConnector.getBlockCount() > tipBefore, 'competing chain overtakes the original tip')
             assert.notStrictEqual(await nodeConnector.getBlockHash(issueABlock), issueHash, 'the chain actually reorged')
-
             // 3. Wait for node -> decoder -> indexer rollback to drop the orphaned token.
-            let tokenAGone = false
-            const deadline = Date.now() + 120000
-            while (Date.now() < deadline) {
-                if (!(await tokenRowExists(TOKENA))) { tokenAGone = true; break }
-                await new Promise(r => setTimeout(r, 2000))
-            }
+            const tokenAGone = await waitForTokenRemoval(TOKENA)
             assert.strictEqual(tokenAGone, true, 'the orphaned TOKENA tokens row must be rolled back')
-
             // THE FIX (part 1): index_tickers idA was ROLLED BACK and NOT resurrected by the
             // rollback refresh phase, so it no longer maps to the orphaned TOKENA. Under the
             // old behaviour this row survived (Phase 1); a pre-fix run also re-created it with
             // a NULL/stale block_index via updateTokens/updateBalances, both of which poison ^id.
             assert.strictEqual(await tickById(idA), null,
                 'index_tickers id ' + idA + ' must be reclaimed (deleted) after the orphaning reorg')
-
             // 4. ISSUE TOKENB on the canonical chain WITHOUT re-mining the orphaned TOKENA.
             //    Auto-mining stays paused: broadcast TOKENB from issuerB (no mempool conflict
             //    with issuerA's orphaned txs) and mine ONLY that tx, so the orphaned TOKENA
             //    ISSUE stays in the mempool unmined and the freed idA is available for TOKENB.
             //    Message mirrors issueHelper.sendIssueV0's ISSUE v0 template (maxSupply 1000,
             //    maxMint 1000, decimals 0, description, mintSupply 1000, then 17 empty fields).
-            const issueBMessage = 'ISSUE|0|' + TOKENB + '|1000|1000|0|tick-id deterministic B|1000' + '|'.repeat(17)
-            const issueBTxid = await transactionHelper.createAndSendTransaction(issuerB, issueBMessage)
-            await nodeConnector.generateBlock(miner, [issueBTxid])
-
-            const issueBRow = await indexerDatabase.waitForIssue({
-                source: issuerB['address'], tick: TOKENB, txHash: issueBTxid,
-                description: 'tick-id deterministic B', maxSupply: 1000, maxMint: 1000,
-                decimals: 0, mintSupply: 1000, status: 'valid'
-            })
+            const issueBRow = await issueCanonicalToken(issuerB, TOKENB, miner)
             assert(issueBRow, 'TOKENB must be indexed on the canonical chain')
             const idB = await tickerIdByName(TOKENB)
             assert(idB, 'TOKENB resolved an index_tickers id')
-
             // THE FIX (part 2): no divergence. TOKENB (a DIFFERENT token than the orphaned
             // TOKENA) reclaimed idA, so a wire `^idA` resolves to TOKENB here exactly as it
             // would on a fresh canonical-only node that never saw TOKENA.
@@ -173,7 +183,6 @@ describe('Tick ^id reorg DETERMINISTIC (Phase 5 gate): orphaned index_tickers id
                 'post-reorg TOKENB must reclaim id ' + idA + ' (got ' + idB + '); a fresh canonical-only node assigns the same, so ^' + idA + ' no longer forks')
             assert.strictEqual(await tickById(idA), TOKENB,
                 'wire ^' + idA + ' now resolves to TOKENB on this reorged node, matching a fresh node (no consensus fork)')
-
             console.log('    [tickid-det] CONFIRMED FIX: orphaned id ' + idA + ' was reclaimed by rollback (not resurrected); ' +
                 'a DIFFERENT canonical token TOKENB took ' + idB + ' (== idA). Wire ^' + idA + ' resolves identically everywhere.')
         } finally {
