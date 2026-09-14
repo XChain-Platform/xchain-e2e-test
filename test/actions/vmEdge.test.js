@@ -26,105 +26,106 @@ const transactionHelper = require('../transactionHelper')
  *   J. Executing an unknown method fails cleanly with no side effects
  *   K. State delete persists across executions
  */
+const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
+
+// Sets initial state from a constructor param at deploy time.
+const CONSTRUCTED = `
+    module.exports = {
+        meta: { name: 'Constructed', description: 'Writes its initial state from the constructor.', version: '1.0.0' },
+        initialize: function() {
+            xchain.state.set('initialized', xchain.getInputParam(0) || 'yes');
+        },
+        read: function() { return xchain.state.get('initialized'); }
+    };
+`
+
+// Pays out tokens it does not hold. The emitted SEND must fail and roll back.
+const SENDER = `
+    module.exports = {
+        meta: { name: 'Edge Sender', description: 'Emits a SEND of a contract-held balance.', version: '1.0.0' },
+        payout: function() {
+            xchain.emit.send({
+                tick: xchain.getInputParam(2),
+                quantity: xchain.getInputParam(1),
+                destination: xchain.getInputParam(0)
+            });
+        }
+    };
+`
+
+const PUT_DELETE = `
+    module.exports = {
+        meta: { name: 'Put Delete', description: 'Writes a state key and deletes it again.', version: '1.0.0' },
+        put: function()    { xchain.state.set('k', 'v'); },
+        remove: function() { xchain.state.delete('k'); }
+    };
+`
+
+let deployer = null
+
+async function q(sql, params) {
+    const conn = await indexerDatabase.getConnection()
+    try { return await conn.query(sql, params) }
+    finally { await conn.release() }
+}
+async function latestState(contractIndex, key) {
+    const rows = await q(
+        `SELECT state_value FROM contract_state
+         WHERE contract_index=? AND state_key=?
+         ORDER BY action_index DESC LIMIT 1`, [contractIndex, key])
+    return rows.length ? rows[0].state_value : null
+}
+async function emissionsFor(executionIndex) {
+    return await q(`SELECT emitted_action FROM contract_emissions WHERE execution_index=?`, [executionIndex])
+}
+async function balanceOf(address, tick) {
+    const rows = await q(
+        `SELECT b.amount FROM balances b
+         JOIN index_addresses ia ON ia.id=b.address_id
+         JOIN index_tickers it ON it.id=b.tick_id
+         WHERE ia.address=? AND it.tick=?`, [address, tick])
+    return rows.length ? String(rows[0].amount) : null
+}
+// Broadcast an EXECUTE without waiting for a valid row (negative paths never reach 'valid').
+async function rawExecute(addr, ci, method, params) {
+    let msg = `EXECUTE|0|${ci}|${method}`
+    if (params && params.length) msg += '|' + params.join('|')
+    return await transactionHelper.createAndSendTransaction(addr, msg)
+}
+async function rawWithdraw(addr, ci, tick, amount) {
+    return await transactionHelper.createAndSendTransaction(addr, `WITHDRAW|0|${ci}|${tick}|${amount}`)
+}
+async function waitForAnyExecution(ci, caller, method, timeMax = 40000) {
+    const end = Date.now() + timeMax
+    while (Date.now() < end) {
+        const row = await indexerDatabase.checkExecution({ contractIndex: ci, caller, methodName: method })
+        if (row) return row
+        await new Promise(r => setTimeout(r, 1000))
+    }
+    return null
+}
+async function waitForAnyWithdrawal(ci, source, tick, timeMax = 40000) {
+    const end = Date.now() + timeMax
+    while (Date.now() < end) {
+        const row = await indexerDatabase.checkWithdrawal({ contractIndex: ci, source, tick })
+        if (row) return row
+        await new Promise(r => setTimeout(r, 1000))
+    }
+    return null
+}
+function randTick(prefix) {
+    let s = prefix
+    for (let i = 0; i < 5; i++) s += String.fromCharCode(65 + Math.floor(Math.random() * 26))
+    return s
+}
+
+async function setupDeployer() {
+    deployer = await cryptoHelper.getNewFundedAddress('vme-deployer', COIN, NETWORK, null, 'legacy', 0, 1)
+    await gasHelper.ensureGasBalance(deployer, '500')
+}
+
 describe('VM Edge: negative paths and boundaries', function () {
-
-    const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
-
-    // Sets initial state from a constructor param at deploy time.
-    const CONSTRUCTED = `
-        module.exports = {
-            meta: { name: 'Constructed', description: 'Writes its initial state from the constructor.', version: '1.0.0' },
-            initialize: function() {
-                xchain.state.set('initialized', xchain.getInputParam(0) || 'yes');
-            },
-            read: function() { return xchain.state.get('initialized'); }
-        };
-    `
-
-    // Pays out tokens it does not hold. The emitted SEND must fail and roll back.
-    const SENDER = `
-        module.exports = {
-            meta: { name: 'Edge Sender', description: 'Emits a SEND of a contract-held balance.', version: '1.0.0' },
-            payout: function() {
-                xchain.emit.send({
-                    tick: xchain.getInputParam(2),
-                    quantity: xchain.getInputParam(1),
-                    destination: xchain.getInputParam(0)
-                });
-            }
-        };
-    `
-
-    const PUT_DELETE = `
-        module.exports = {
-            meta: { name: 'Put Delete', description: 'Writes a state key and deletes it again.', version: '1.0.0' },
-            put: function()    { xchain.state.set('k', 'v'); },
-            remove: function() { xchain.state.delete('k'); }
-        };
-    `
-
-    let deployer = null
-
-    async function q(sql, params) {
-        const conn = await indexerDatabase.getConnection()
-        try { return await conn.query(sql, params) }
-        finally { await conn.release() }
-    }
-    async function latestState(contractIndex, key) {
-        const rows = await q(
-            `SELECT state_value FROM contract_state
-             WHERE contract_index=? AND state_key=?
-             ORDER BY action_index DESC LIMIT 1`, [contractIndex, key])
-        return rows.length ? rows[0].state_value : null
-    }
-    async function emissionsFor(executionIndex) {
-        return await q(`SELECT emitted_action FROM contract_emissions WHERE execution_index=?`, [executionIndex])
-    }
-    async function balanceOf(address, tick) {
-        const rows = await q(
-            `SELECT b.amount FROM balances b
-             JOIN index_addresses ia ON ia.id=b.address_id
-             JOIN index_tickers it ON it.id=b.tick_id
-             WHERE ia.address=? AND it.tick=?`, [address, tick])
-        return rows.length ? String(rows[0].amount) : null
-    }
-    // Broadcast an EXECUTE without waiting for a valid row (negative paths never reach 'valid').
-    async function rawExecute(addr, ci, method, params) {
-        let msg = `EXECUTE|0|${ci}|${method}`
-        if (params && params.length) msg += '|' + params.join('|')
-        return await transactionHelper.createAndSendTransaction(addr, msg)
-    }
-    async function rawWithdraw(addr, ci, tick, amount) {
-        return await transactionHelper.createAndSendTransaction(addr, `WITHDRAW|0|${ci}|${tick}|${amount}`)
-    }
-    async function waitForAnyExecution(ci, caller, method, timeMax = 40000) {
-        const end = Date.now() + timeMax
-        while (Date.now() < end) {
-            const row = await indexerDatabase.checkExecution({ contractIndex: ci, caller, methodName: method })
-            if (row) return row
-            await new Promise(r => setTimeout(r, 1000))
-        }
-        return null
-    }
-    async function waitForAnyWithdrawal(ci, source, tick, timeMax = 40000) {
-        const end = Date.now() + timeMax
-        while (Date.now() < end) {
-            const row = await indexerDatabase.checkWithdrawal({ contractIndex: ci, source, tick })
-            if (row) return row
-            await new Promise(r => setTimeout(r, 1000))
-        }
-        return null
-    }
-    function randTick(prefix) {
-        let s = prefix
-        for (let i = 0; i < 5; i++) s += String.fromCharCode(65 + Math.floor(Math.random() * 26))
-        return s
-    }
-
-    before(async function () {
-        deployer = await cryptoHelper.getNewFundedAddress('vme-deployer', COIN, NETWORK, null, 'legacy', 0, 1)
-        await gasHelper.ensureGasBalance(deployer, '500')
-    })
+    before(setupDeployer)
 
     describe('G. Deploy-time constructor', function () {
         it('runs initialize with constructor params and persists state', async function () {
@@ -161,6 +162,10 @@ describe('VM Edge: negative paths and boundaries', function () {
             assert.strictEqual(await balanceOf(attacker.address, tick), null, 'attacker must not receive tokens')
         })
     })
+})
+
+describe('VM Edge: negative paths and boundaries', function () {
+    before(setupDeployer)
 
     describe('I. Emission failure rolls back atomically', function () {
         it('a failed emitted SEND aborts the whole execution', async function () {
