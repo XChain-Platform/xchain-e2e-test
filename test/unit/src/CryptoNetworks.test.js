@@ -142,6 +142,7 @@ describe('CryptoNetworks', () => {
         const CRYPTO_NETWORKS_PATH = {
             'xchain-decoder': path.join('src', 'chain', 'crypto_networks.js'),
             'xchain-utxo-tracker': path.join('src', 'chain', 'crypto_networks.js'),
+            'xchain-regtest-miner': path.join('src', 'networks', 'crypto_networks.js'),
         }
         const NETS = ['bitcoin-mainnet', 'bitcoin-testnet', 'bitcoin-regtest',
                       'dogecoin-mainnet', 'dogecoin-testnet', 'dogecoin-regtest',
