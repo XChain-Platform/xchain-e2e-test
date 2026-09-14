@@ -19,11 +19,19 @@ const sinon = require('sinon')
 const CryptoNetworks = require('../../src/CryptoNetworks')
 const XChainHubConnector = require('../../src/XChainHubConnector')
 
+let cryptoHelper
+
+function setUpWalletCache() {
+    global.wallets = {}
+    global.regtestMinerConnector = { sendFunds: async () => 'txid-stub' }
+    global.nodeConnector = { waitForTx: async () => true }
+    global.utxoTrackerConnector = { waitForUtxos: async () => true }
+    cryptoHelper = require('../cryptoHelper')
+}
+
 describe('Boundary: Global State & Service Discovery', function () {
 
-    afterEach(function () {
-        sinon.restore()
-    })
+    afterEach(function () { sinon.restore() })
 
     describe('CryptoNetworks.getBitcoinJsNetwork', function () {
 
@@ -65,6 +73,14 @@ describe('Boundary: Global State & Service Discovery', function () {
             assert.ok(network)
             assert.strictEqual(network.dustThreshold, 100000)
         })
+    })
+})
+
+describe('Boundary: Global State & Service Discovery', function () {
+
+    afterEach(function () { sinon.restore() })
+
+    describe('CryptoNetworks.getBitcoinJsNetwork', function () {
 
         it('returns network for litecoin-mainnet', function () {
             const network = CryptoNetworks.getBitcoinJsNetwork('litecoin-mainnet')
@@ -104,6 +120,14 @@ describe('Boundary: Global State & Service Discovery', function () {
             const network = CryptoNetworks.getBitcoinJsNetwork('Bitcoin-Regtest')
             assert.strictEqual(network, undefined)
         })
+    })
+})
+
+describe('Boundary: Global State & Service Discovery', function () {
+
+    afterEach(function () { sinon.restore() })
+
+    describe('CryptoNetworks.getBitcoinJsNetwork', function () {
 
         it('all networks have the correct per-chain dustThreshold', function () {
             // Per-chain dust floors differ: Bitcoin 546 sats; Litecoin 5460
@@ -148,18 +172,15 @@ describe('Boundary: Global State & Service Discovery', function () {
             assert.strictEqual(CryptoNetworks.getFirstBlock(''), 0)
         })
     })
+})
+
+describe('Boundary: Global State & Service Discovery', function () {
+
+    afterEach(function () { sinon.restore() })
 
     describe('Wallet cache global state', function () {
 
-        let cryptoHelper
-
-        before(function () {
-            global.wallets = {}
-            global.regtestMinerConnector = { sendFunds: async () => 'txid-stub' }
-            global.nodeConnector = { waitForTx: async () => true }
-            global.utxoTrackerConnector = { waitForUtxos: async () => true }
-            cryptoHelper = require('../cryptoHelper')
-        })
+        before(setUpWalletCache)
 
         beforeEach(function () {
             global.wallets = {}
@@ -194,6 +215,24 @@ describe('Boundary: Global State & Service Discovery', function () {
             const unique = new Set(wallets)
             assert.strictEqual(unique.size, 100, 'all 100 wallets should be distinct objects')
         })
+    })
+})
+
+describe('Boundary: Global State & Service Discovery', function () {
+
+    afterEach(function () { sinon.restore() })
+
+    describe('Wallet cache global state', function () {
+
+        before(setUpWalletCache)
+
+        beforeEach(function () {
+            global.wallets = {}
+        })
+
+        afterEach(function () {
+            global.wallets = {}
+        })
 
         it('wallets persist across multiple getWallet calls', async function () {
             await cryptoHelper.getWallet('alice')
@@ -206,6 +245,11 @@ describe('Boundary: Global State & Service Discovery', function () {
             assert.ok('charlie' in global.wallets)
         })
     })
+})
+
+describe('Boundary: Global State & Service Discovery', function () {
+
+    afterEach(function () { sinon.restore() })
 
     describe('Hub multi-endpoint fallback boundaries', function () {
 
@@ -247,6 +291,11 @@ describe('Boundary: Global State & Service Discovery', function () {
             assert.strictEqual(postStub.callCount, 1, 'should not try second endpoint')
         })
     })
+})
+
+describe('Boundary: Global State & Service Discovery', function () {
+
+    afterEach(function () { sinon.restore() })
 
     describe('Database.isNullOrNullString boundary values', function () {
 
