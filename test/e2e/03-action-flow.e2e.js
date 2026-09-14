@@ -71,7 +71,9 @@ describe('E2E: Action Flow Orchestration', () => {
                 'Send and debit tx_hash should match')
         })
     })
+})
 
+describe('E2E: Action Flow Orchestration', () => {
     describe('E2E-EXEC-004: Negative status detection', () => {
         it('should detect an ISSUE edit from a non-owner with invalid status', async () => {
             const owner = await cryptoHelper.getNewFundedAddress('E2E.NEG.OWNER', COIN, NETWORK, null, 'legacy', 0, 1)
@@ -118,7 +120,9 @@ describe('E2E: Action Flow Orchestration', () => {
             assert(!noCredit, 'No credit should be created for an invalid send')
         })
     })
+})
 
+describe('E2E: Action Flow Orchestration', () => {
     describe('E2E-EXEC-005: Batch action unpacking', () => {
         it('should process a batch of two SENDs and expose individual send records', async () => {
             const addr = await cryptoHelper.getNewFundedAddress('E2E.BATCH', COIN, NETWORK, null, 'legacy', 0, 1)
