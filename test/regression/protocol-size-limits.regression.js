@@ -35,7 +35,7 @@ const indexerXcall      = require('../../../xchain-indexer/src/actions/xcall/ind
 const indexerXexec      = require('../../../xchain-indexer/src/actions/xexec.js')
 const hubConstants      = require('../../../xchain-hub/src/constants.js')
 const XChainVM          = require('../../../xchain-vm/src/index.js')
-const explorerVmQuery   = require('../../../xchain-explorer/src/vm-query.js')
+const explorerVmQuery   = require('../../../xchain-explorer/src/contract/vm_query.js')
 
 // The indexer's EXECUTE handler re-validates VM_MAX_CALL_DEPTH/VM_MIN_CALL_GAS host-side
 // as un-exported `const`s. Those consts derive from the vendored
@@ -519,11 +519,11 @@ describe('Protocol size-limit drift guard', () => {
         // COMPRESSION_MAX_RATIO is the inflation bound that makes a compressed
         // payload safe to stream: a decompressor that stops later than the encoder
         // planned is a zip-bomb surface. The encoder (src/validator.js) and the
-        // explorer compression reader (src/compression.js) each declare a bare
+        // explorer compression reader (src/http/compression.js) each declare a bare
         // literal; the explorer's only guard compared itself to the encoder, so the
         // pair could drift from canonical together and stay green (uuid 3499).
         it('[regression:p0] COMPRESSION_MAX_RATIO === canonical across encoder + explorer + sdk', () => {
-            const explorerCompression = require('../../../xchain-explorer/src/compression.js')
+            const explorerCompression = require('../../../xchain-explorer/src/http/compression.js')
             const sdkCompression      = require('../../../xchain-sdk/src/compression.js')
             assert.strictEqual(
                 encoderValidator.COMPRESSION_MAX_RATIO,
