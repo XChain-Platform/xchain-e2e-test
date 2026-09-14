@@ -93,19 +93,14 @@ async function _settleStack() {
 
 const FIXED_BODY = '{"score":42,"meta":"multihub"}'
 
-describe('Phase B: multi-hub PBFT for ATTEST v0 (request) (redundancy=3)', function () {
-    // Big budget: 3 hubs × (start + DB init) + on-chain staking + activation wait
-    // + contract deploy/execute + PBFT round-trip + block confirmations.
-    this.timeout(10 * 60 * 1000)
+let mvh           = null
+let httpServer    = null
+let testUrl       = null
+let contractIndex = null
+let owner         = null
+let stakers       = []   // [{addressInfo, pubkey}]
 
-    let mvh           = null
-    let httpServer    = null
-    let testUrl       = null
-    let contractIndex = null
-    let owner         = null
-    let stakers       = []   // [{addressInfo, pubkey}]
-
-    const CONTRACT_CODE = `
+const CONTRACT_CODE = `
 module.exports = {
     meta: { name: 'Multi Hub Asker', description: 'Requests a URL attestation answered by several hubs.', version: '1.0.0' },
     askOracle: function(xchain) {
@@ -130,100 +125,137 @@ module.exports = {
 };
 `
 
+async function startHttpServer() {
+    // 1) Start a local HTTP server returning a fixed body. All three hubs
+    //    fetch the same URL; byte_equality consensus converges trivially.
+    await new Promise((resolve) => {
+        httpServer = http.createServer((_req, res) => {
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(FIXED_BODY)
+        })
+        httpServer.listen(0, '127.0.0.1', () => {
+            const port = httpServer.address().port
+            testUrl = 'http://127.0.0.1:' + port + '/score'
+            resolve()
+        })
+    })
+}
+
+async function startAndStakeHubs() {
+    // 2) Bring up three in-process hubs. Each gets its own DB + P2P port
+    //    + Ed25519 signing key.
+    mvh = new MultiValidatorHub({ count: 3 })
+    await mvh.start()
+    const pubkeys = mvh.getPubkeys()
+
+    // 3) Fund three operator addresses and stake each hub's pubkey from
+    //    a separate source. The hubs poll the indexer for stake state,
+    //    so once stakes confirm + activate, capability snapshots include
+    //    all three pubkeys. Quiesce between fund and mint each iteration
+    //    so the encoder's unconfirmed=false UTXO lookup sees a clean
+    //    confirmed view (otherwise it sporadically crashes when the
+    //    tracker is mid-batch).
+    for (let i = 0; i < pubkeys.length; i++) {
+        const addr = await cryptoHelper.getNewFundedAddress(
+            'mvh-staker-' + i, COIN, NETWORK, null, 'legacy', 0, 0.02
+        )
+        await _settleStack()
+        // 15000 clears BOTH the attestation capability min_stake (1000) and the
+        // http_get PROVIDER floor (10000), enforced on the responsible set
+        // at/above STAKE_WEIGHTED_QUORUM (armed at genesis on regtest).
+        await gasHelper.ensureGasBalance(addr, '20000')
+        await _settleStack()
+        const result = await stakeHelper.sendStakeV1(addr, '15000.00000000', pubkeys[i])
+        assert.strictEqual(result.stake.status, 'valid', 'stake ' + i + ' should be valid')
+        stakers.push({ addressInfo: addr, pubkey: pubkeys[i] })
+    }
+}
+
+async function prepareContract() {
+    // 4) Advance past the activation window AND the snapshot burial, so all three
+    //    stakes are SELECTABLE when the hubs query the capability snapshot: that
+    //    lookup resolves at the request's block minus CANONICAL_REORG_BUFFER, so
+    //    the activation delay alone is 6 blocks short. Then wait for the stack to
+    //    fully settle so the owner's funding doesn't land into a contended mempool.
+    await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
+    await _settleStack()
+
+    // 5) Fund a separate contract owner + deploy the request contract.
+    owner = await cryptoHelper.getNewFundedAddress(
+        'mvh-owner', COIN, NETWORK, null, 'legacy', 0, 0.02
+    )
+    // Make sure the funding tx is fully confirmed (not mempool-only)
+    // before MINT: the encoder's unconfirmed=false lookup needs confirmed
+    // UTXOs. Quiesce after explicitly mining a block forces this.
+    await regtestMinerConnector.generateBlocks(2)
+    await _settleStack()
+    await gasHelper.ensureGasBalance(owner, '5000')
+
+    const deploy = await vmHelper.sendDeployV0(owner, CONTRACT_CODE, 500000)
+    assert.strictEqual(deploy.contract.status, 'valid', 'deploy should be valid')
+    contractIndex = deploy.contract.action_index
+
+    // 6) Fund a publisher address and wire it as each hub's broadcast hook.
+    //    Only the round leader actually invokes the hook (followers no-op),
+    //    so a single shared funded address is safe across all 3 hubs.
+    const publisherAddr = await cryptoHelper.getNewFundedAddress(
+        'mvh-publisher', COIN, NETWORK, null, 'legacy', 0, 0.02
+    )
+    await regtestMinerConnector.generateBlocks(2)
+    await _settleStack()
+    mvh.setBroadcastHook(async (wirePayload) => {
+        const txHash = await transactionHelper.createAndSendTransaction(publisherAddr, wirePayload)
+        return { txid: txHash }
+    })
+}
+
+async function setUpMultiHub(context) {
+    // Loud-fail (in CI / the federation phase) or graceful-skip (ad-hoc dev)
+    // on missing prerequisites; never silently green.
+    if (!requireFederationEnv(context)) return
+    // Responsible-set selection spans ALL staked validators. A polluted
+    // chain makes this test's hubs unreliable to select. Fail fast.
+    await assertCleanValidatorSet(indexerDatabase)
+    await startHttpServer()
+    await startAndStakeHubs()
+    await prepareContract()
+}
+
+async function tearDownMultiHub() {
+    if (httpServer) await new Promise((r) => httpServer.close(() => r()))
+    if (mvh) {
+        await mvh.stop()
+        await mvh.dropDatabases()
+    }
+}
+
+async function waitForMultiHubResponse(requestId) {
+    // Hubs need CONFIRMATIONS (default 3) blocks past the request before
+    // they fetch. Mine extras so the round actually fires within polling.
+    await regtestMinerConnector.generateBlocks(6)
+
+    // The hubs poll the indexer every 15s for new pending requests, then
+    // run PBFT and the leader publishes ATTEST v1 (response) on-chain.
+    // Allow generous time for the full cycle: poll latency + fetch + PBFT
+    // PROPOSE/PREPARE/COMMIT + on-chain broadcast + indexer-side response
+    // handling + callback EXECUTE.
+    return indexerDatabase.waitForAttestationResponse({
+        requestId:      requestId,
+        responseStatus: 'ok',
+        status:         'valid'
+    }, 180_000)
+}
+
+describe('Phase B: multi-hub PBFT for ATTEST v0 (request) (redundancy=3)', function () {
+    // Big budget: 3 hubs × (start + DB init) + on-chain staking + activation wait
+    // + contract deploy/execute + PBFT round-trip + block confirmations.
+    this.timeout(10 * 60 * 1000)
+
     before(async function () {
-        // Loud-fail (in CI / the federation phase) or graceful-skip (ad-hoc dev)
-        // on missing prerequisites; never silently green.
-        if (!requireFederationEnv(this)) return
-        // Responsible-set selection spans ALL staked validators. A polluted
-        // chain makes this test's hubs unreliable to select. Fail fast.
-        await assertCleanValidatorSet(indexerDatabase)
-
-        // 1) Start a local HTTP server returning a fixed body. All three hubs
-        //    fetch the same URL; byte_equality consensus converges trivially.
-        await new Promise((resolve) => {
-            httpServer = http.createServer((_req, res) => {
-                res.writeHead(200, { 'Content-Type': 'application/json' })
-                res.end(FIXED_BODY)
-            })
-            httpServer.listen(0, '127.0.0.1', () => {
-                const port = httpServer.address().port
-                testUrl = 'http://127.0.0.1:' + port + '/score'
-                resolve()
-            })
-        })
-
-        // 2) Bring up three in-process hubs. Each gets its own DB + P2P port
-        //    + Ed25519 signing key.
-        mvh = new MultiValidatorHub({ count: 3 })
-        await mvh.start()
-        const pubkeys = mvh.getPubkeys()
-
-        // 3) Fund three operator addresses and stake each hub's pubkey from
-        //    a separate source. The hubs poll the indexer for stake state,
-        //    so once stakes confirm + activate, capability snapshots include
-        //    all three pubkeys. Quiesce between fund and mint each iteration
-        //    so the encoder's unconfirmed=false UTXO lookup sees a clean
-        //    confirmed view (otherwise it sporadically crashes when the
-        //    tracker is mid-batch).
-        for (let i = 0; i < pubkeys.length; i++) {
-            const addr = await cryptoHelper.getNewFundedAddress(
-                'mvh-staker-' + i, COIN, NETWORK, null, 'legacy', 0, 0.02
-            )
-            await _settleStack()
-            // 15000 clears BOTH the attestation capability min_stake (1000) and the
-            // http_get PROVIDER floor (10000), enforced on the responsible set
-            // at/above STAKE_WEIGHTED_QUORUM (armed at genesis on regtest).
-            await gasHelper.ensureGasBalance(addr, '20000')
-            await _settleStack()
-            const result = await stakeHelper.sendStakeV1(addr, '15000.00000000', pubkeys[i])
-            assert.strictEqual(result.stake.status, 'valid', 'stake ' + i + ' should be valid')
-            stakers.push({ addressInfo: addr, pubkey: pubkeys[i] })
-        }
-
-        // 4) Advance past the activation window AND the snapshot burial, so all three
-        //    stakes are SELECTABLE when the hubs query the capability snapshot: that
-        //    lookup resolves at the request's block minus CANONICAL_REORG_BUFFER, so
-        //    the activation delay alone is 6 blocks short. Then wait for the stack to
-        //    fully settle so the owner's funding doesn't land into a contended mempool.
-        await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
-        await _settleStack()
-
-        // 5) Fund a separate contract owner + deploy the request contract.
-        owner = await cryptoHelper.getNewFundedAddress(
-            'mvh-owner', COIN, NETWORK, null, 'legacy', 0, 0.02
-        )
-        // Make sure the funding tx is fully confirmed (not mempool-only)
-        // before MINT: the encoder's unconfirmed=false lookup needs confirmed
-        // UTXOs. Quiesce after explicitly mining a block forces this.
-        await regtestMinerConnector.generateBlocks(2)
-        await _settleStack()
-        await gasHelper.ensureGasBalance(owner, '5000')
-
-        const deploy = await vmHelper.sendDeployV0(owner, CONTRACT_CODE, 500000)
-        assert.strictEqual(deploy.contract.status, 'valid', 'deploy should be valid')
-        contractIndex = deploy.contract.action_index
-
-        // 6) Fund a publisher address and wire it as each hub's broadcast hook.
-        //    Only the round leader actually invokes the hook (followers no-op),
-        //    so a single shared funded address is safe across all 3 hubs.
-        const publisherAddr = await cryptoHelper.getNewFundedAddress(
-            'mvh-publisher', COIN, NETWORK, null, 'legacy', 0, 0.02
-        )
-        await regtestMinerConnector.generateBlocks(2)
-        await _settleStack()
-        mvh.setBroadcastHook(async (wirePayload) => {
-            const txHash = await transactionHelper.createAndSendTransaction(publisherAddr, wirePayload)
-            return { txid: txHash }
-        })
+        await setUpMultiHub(this)
     })
 
-    after(async function () {
-        if (httpServer) await new Promise((r) => httpServer.close(() => r()))
-        if (mvh) {
-            await mvh.stop()
-            await mvh.dropDatabases()
-        }
-    })
+    after(tearDownMultiHub)
 
     it('drives a redundancy=3 request through real PBFT and fires the callback', async function () {
         // EXECUTE the contract. This emits ATTEST v0 (request)(redundancy=3).
@@ -238,20 +270,7 @@ module.exports = {
         assert.strictEqual(Number(request.redundancy), 3)
         const requestId = request.request_id
 
-        // Hubs need CONFIRMATIONS (default 3) blocks past the request before
-        // they fetch. Mine extras so the round actually fires within polling.
-        await regtestMinerConnector.generateBlocks(6)
-
-        // The hubs poll the indexer every 15s for new pending requests, then
-        // run PBFT and the leader publishes ATTEST v1 (response) on-chain.
-        // Allow generous time for the full cycle: poll latency + fetch + PBFT
-        // PROPOSE/PREPARE/COMMIT + on-chain broadcast + indexer-side response
-        // handling + callback EXECUTE.
-        const response = await indexerDatabase.waitForAttestationResponse({
-            requestId:      requestId,
-            responseStatus: 'ok',
-            status:         'valid'
-        }, 180_000)
+        const response = await waitForMultiHubResponse(requestId)
         assert(response, 'attestation_responses row should land with status=ok')
 
         const sigs = await indexerDatabase.getAttestationValidatorSignatures(response.action_index)
