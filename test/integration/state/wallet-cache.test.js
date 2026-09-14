@@ -17,32 +17,34 @@ const sinon = require('sinon')
 const bitcoin = require('bitcoinjs-lib')
 const CryptoNetworks = require('../../../src/CryptoNetworks')
 
+let cryptoHelper
+let savedGlobals
+
+function setUpWalletCache() {
+    savedGlobals = {
+        wallets: global.wallets,
+        NETWORK_OBJECT: global.NETWORK_OBJECT,
+        regtestMinerConnector: global.regtestMinerConnector,
+        nodeConnector: global.nodeConnector,
+        utxoTrackerConnector: global.utxoTrackerConnector,
+    }
+
+    global.wallets = {}
+    global.NETWORK_OBJECT = CryptoNetworks.getBitcoinJsNetwork('bitcoin-regtest')
+
+    // Clear module cache for a clean cryptoHelper
+    delete require.cache[require.resolve('../../../test/cryptoHelper')]
+    cryptoHelper = require('../../../test/cryptoHelper')
+}
+
+function tearDownWalletCache() {
+    Object.assign(global, savedGlobals)
+    sinon.restore()
+}
+
 describe('State Management: Wallet Cache', function () {
-
-    let cryptoHelper
-    let savedGlobals
-
-    beforeEach(function () {
-        savedGlobals = {
-            wallets: global.wallets,
-            NETWORK_OBJECT: global.NETWORK_OBJECT,
-            regtestMinerConnector: global.regtestMinerConnector,
-            nodeConnector: global.nodeConnector,
-            utxoTrackerConnector: global.utxoTrackerConnector,
-        }
-
-        global.wallets = {}
-        global.NETWORK_OBJECT = CryptoNetworks.getBitcoinJsNetwork('bitcoin-regtest')
-
-        // Clear module cache for a clean cryptoHelper
-        delete require.cache[require.resolve('../../../test/cryptoHelper')]
-        cryptoHelper = require('../../../test/cryptoHelper')
-    })
-
-    afterEach(function () {
-        Object.assign(global, savedGlobals)
-        sinon.restore()
-    })
+    beforeEach(setUpWalletCache)
+    afterEach(tearDownWalletCache)
 
     describe('Scenario 3.6.1: Wallet cache persistence across test cases', function () {
 
@@ -71,6 +73,11 @@ describe('State Management: Wallet Cache', function () {
             )
         })
     })
+})
+
+describe('State Management: Wallet Cache', function () {
+    beforeEach(setUpWalletCache)
+    afterEach(tearDownWalletCache)
 
     describe('Scenario 3.6.2: Different labels are isolated', function () {
 
@@ -89,6 +96,11 @@ describe('State Management: Wallet Cache', function () {
             )
         })
     })
+})
+
+describe('State Management: Wallet Cache', function () {
+    beforeEach(setUpWalletCache)
+    afterEach(tearDownWalletCache)
 
     describe('Scenario: Explicit mnemonic is reused', function () {
 
