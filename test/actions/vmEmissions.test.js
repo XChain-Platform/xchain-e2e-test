@@ -21,140 +21,141 @@ const orderHelper = require('../helpers/orderHelper')
  * single execution. Verified against the indexer DB (balances, supply,
  * contract_emissions, and the emitted action's own table row).
  */
-describe('VM Emissions: emitted action variety', function () {
+const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
 
-    const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
-
-    // Sends two different amounts to two recipients in one execution.
-    const MULTI_SEND = `module.exports = { meta: { name: 'Multi Sender', description: 'Emits several SEND actions from a single execution.', version: '1.0.0' }, payout: function(){
+// Sends two different amounts to two recipients in one execution.
+const MULTI_SEND = `module.exports = { meta: { name: 'Multi Sender', description: 'Emits several SEND actions from a single execution.', version: '1.0.0' }, payout: function(){
         var t = xchain.getInputParam(0);
         xchain.emit.send({ tick: t, quantity: '10', destination: xchain.getInputParam(1) });
         xchain.emit.send({ tick: t, quantity: '20', destination: xchain.getInputParam(2) });
     } };`
 
-    const DESTROYER = `module.exports = { meta: { name: 'Destroyer', description: 'Emits a DESTROY of a contract-held token.', version: '1.0.0' }, burn: function(){
+const DESTROYER = `module.exports = { meta: { name: 'Destroyer', description: 'Emits a DESTROY of a contract-held token.', version: '1.0.0' }, burn: function(){
         xchain.emit.destroy({ tick: xchain.getInputParam(0), quantity: '30' });
     } };`
 
-    const CASTER = `module.exports = { meta: { name: 'Broadcaster', description: 'Emits a BROADCAST message from a contract.', version: '1.0.0' }, announce: function(){
+const CASTER = `module.exports = { meta: { name: 'Broadcaster', description: 'Emits a BROADCAST message from a contract.', version: '1.0.0' }, announce: function(){
         xchain.emit.broadcast({ message: 'hello-from-contract', value: '' });
     } };`
 
-    // Token-for-token order: give the test tick (a ${CHAIN}-network token) for XCHAIN.
-    // GIVE_COIN must be a supported network. GET_ADDRESS must be an explicit real address;
-    // a contract's synthetic C:${CHAIN}:N address fails the isCryptoAddress format check, so
-    // it cannot default GET_ADDRESS to itself.
-    const ORDERER = `module.exports = { meta: { name: 'Orderer', description: 'Emits an ORDER from a contract.', version: '1.0.0' }, mkorder: function(){
+// Token-for-token order: give the test tick (a ${CHAIN}-network token) for XCHAIN.
+// GIVE_COIN must be a supported network. GET_ADDRESS must be an explicit real address;
+// a contract's synthetic C:${CHAIN}:N address fails the isCryptoAddress format check, so
+// it cannot default GET_ADDRESS to itself.
+const ORDERER = `module.exports = { meta: { name: 'Orderer', description: 'Emits an ORDER from a contract.', version: '1.0.0' }, mkorder: function(){
         xchain.emit.order({ giveCoin: '${CHAIN}', giveTick: xchain.getInputParam(0), giveAmount: '40',
             getCoin: '${CHAIN}', getTick: 'XCHAIN', getAmount: '5',
             getAddress: xchain.getInputParam(1) });
     } };`
 
-    // Token-for-token order with NO explicit GET_ADDRESS. It defaults to the contract's
-    // own derived address (C:${CHAIN}:N). Proves a contract can be the GET_ADDRESS recipient
-    // of its own same-chain token ORDER: proceeds settle on the XChain ledger to the
-    // contract's balance. Before this was allowed, the default-to-SOURCE produced the
-    // contract's synthetic address, which failed isCryptoAddress and aborted the execution.
-    const SELF_ORDERER = `module.exports = { meta: { name: 'Self Orderer', description: 'Emits an order the contract is itself the counterparty to.', version: '1.0.0' }, mkselforder: function(){
+// Token-for-token order with NO explicit GET_ADDRESS. It defaults to the contract's
+// own derived address (C:${CHAIN}:N). Proves a contract can be the GET_ADDRESS recipient
+// of its own same-chain token ORDER: proceeds settle on the XChain ledger to the
+// contract's balance. Before this was allowed, the default-to-SOURCE produced the
+// contract's synthetic address, which failed isCryptoAddress and aborted the execution.
+const SELF_ORDERER = `module.exports = { meta: { name: 'Self Orderer', description: 'Emits an order the contract is itself the counterparty to.', version: '1.0.0' }, mkselforder: function(){
         xchain.emit.order({ giveCoin: '${CHAIN}', giveTick: xchain.getInputParam(0), giveAmount: '40',
             getCoin: '${CHAIN}', getTick: 'XCHAIN', getAmount: '5' });
     } };`
 
-    // Self-addressed token order with a caller-supplied EXPIRATION (input param 1), so the
-    // test can make it expire and assert the escrow refunds to the contract.
-    const EXPIRING_ORDERER = `module.exports = { meta: { name: 'Expiring Orderer', description: 'Emits an order that carries an expiration.', version: '1.0.0' }, mkexporder: function(){
+// Self-addressed token order with a caller-supplied EXPIRATION (input param 1), so the
+// test can make it expire and assert the escrow refunds to the contract.
+const EXPIRING_ORDERER = `module.exports = { meta: { name: 'Expiring Orderer', description: 'Emits an order that carries an expiration.', version: '1.0.0' }, mkexporder: function(){
         xchain.emit.order({ giveCoin: '${CHAIN}', giveTick: xchain.getInputParam(0), giveAmount: '40',
             getCoin: '${CHAIN}', getTick: 'XCHAIN', getAmount: '5',
             expiration: xchain.getInputParam(1) });
     } };`
 
-    // Self-addressed order whose GET side is NATIVE coin (getTick empty). A contract cannot
-    // receive native coin at its synthetic address, so this emission must be rejected and the
-    // whole execution must roll back (the GIVE side must NOT be escrowed). Proves the
-    // intended half of the GET_ADDRESS rule: contract addresses are allowed for token
-    // proceeds only, never native coin.
-    const NATIVE_ORDERER = `module.exports = { meta: { name: 'Native Orderer', description: 'Emits an order that gives native coin.', version: '1.0.0' }, mknativeorder: function(){
+// Self-addressed order whose GET side is NATIVE coin (getTick empty). A contract cannot
+// receive native coin at its synthetic address, so this emission must be rejected and the
+// whole execution must roll back (the GIVE side must NOT be escrowed). Proves the
+// intended half of the GET_ADDRESS rule: contract addresses are allowed for token
+// proceeds only, never native coin.
+const NATIVE_ORDERER = `module.exports = { meta: { name: 'Native Orderer', description: 'Emits an order that gives native coin.', version: '1.0.0' }, mknativeorder: function(){
         xchain.emit.order({ giveCoin: '${CHAIN}', giveTick: xchain.getInputParam(0), giveAmount: '40',
             getCoin: '${CHAIN}', getTick: '', getAmount: '1' });
     } };`
 
-    // Native-coin dispenser: dispense 10 of the test tick per trigger for 1 ${CHAIN}.
-    // GET_ADDRESS must be a fresh real address (anti-replay: no prior on-chain activity).
-    const DISPENSERR = `module.exports = { meta: { name: 'Dispenser Maker', description: 'Emits a dispenser from a contract.', version: '1.0.0' }, mkdisp: function(){
+// Native-coin dispenser: dispense 10 of the test tick per trigger for 1 ${CHAIN}.
+// GET_ADDRESS must be a fresh real address (anti-replay: no prior on-chain activity).
+const DISPENSERR = `module.exports = { meta: { name: 'Dispenser Maker', description: 'Emits a dispenser from a contract.', version: '1.0.0' }, mkdisp: function(){
         xchain.emit.dispenser({ giveCoin: '${CHAIN}', giveTick: xchain.getInputParam(0), giveAmount: '10',
             giveEscrow: '100', getCoin: '${CHAIN}', getTick: '', getAmount: '1',
             getAddress: xchain.getInputParam(1) });
     } };`
 
-    // Coin-scoped message to a real address. Exercises the MESSAGE emission's leading
-    // COIN field: without it the DESTINATION would land in the COIN slot and the handler
-    // would reject it as 'invalid: COIN (value)', aborting the whole execution.
-    const MESSENGER = `module.exports = { meta: { name: 'Messenger', description: 'Emits a MESSAGE action from a contract.', version: '1.0.0' }, ping: function(){
+// Coin-scoped message to a real address. Exercises the MESSAGE emission's leading
+// COIN field: without it the DESTINATION would land in the COIN slot and the handler
+// would reject it as 'invalid: COIN (value)', aborting the whole execution.
+const MESSENGER = `module.exports = { meta: { name: 'Messenger', description: 'Emits a MESSAGE action from a contract.', version: '1.0.0' }, ping: function(){
         xchain.emit.message({ coin: '${CHAIN}', destination: xchain.getInputParam(0) });
     } };`
 
-    // Public (non-gated) file. A contract can only emit a public FILE; gated files
-    // require SOURCE to be the GATE_TICKER issuer, which a contract address is not. So
-    // this covers the emit.file -> FILE handler -> files-row plumbing.
-    const FILER = `module.exports = { meta: { name: 'Filer', description: 'Emits a FILE action carrying a small note.', version: '1.0.0' }, publish: function(){
+// Public (non-gated) file. A contract can only emit a public FILE; gated files
+// require SOURCE to be the GATE_TICKER issuer, which a contract address is not. So
+// this covers the emit.file -> FILE handler -> files-row plumbing.
+const FILER = `module.exports = { meta: { name: 'Filer', description: 'Emits a FILE action carrying a small note.', version: '1.0.0' }, publish: function(){
         xchain.emit.file({ name: 'contract-note.txt', type: 'text/plain', title: 'Note', memo: 'from contract' });
     } };`
 
-    let deployer = null
+let deployer = null
 
-    async function q(sql, params) {
-        const conn = await indexerDatabase.getConnection()
-        try { return await conn.query(sql, params) }
-        finally { await conn.release() }
+async function q(sql, params) {
+    const conn = await indexerDatabase.getConnection()
+    try { return await conn.query(sql, params) }
+    finally { await conn.release() }
+}
+async function emissionsFor(executionIndex) {
+    return await q(`SELECT emitted_action, action_index FROM contract_emissions
+                    WHERE execution_index=? ORDER BY position`, [executionIndex])
+}
+async function balanceOf(address, tick) {
+    const rows = await q(`SELECT b.amount FROM balances b
+        JOIN index_addresses ia ON ia.id=b.address_id
+        JOIN index_tickers it ON it.id=b.tick_id
+        WHERE ia.address=? AND it.tick=?`, [address, tick])
+    return rows.length ? String(rows[0].amount) : null
+}
+async function tokenSupply(tick) {
+    const rows = await q(`SELECT t.supply FROM tokens t JOIN index_tickers it ON it.id=t.tick_id WHERE it.tick=?`, [tick])
+    return rows.length ? String(rows[0].supply) : null
+}
+async function rowCount(table, actionIndex) {
+    const rows = await q(`SELECT COUNT(*) AS c FROM ${table} WHERE action_index=?`, [actionIndex])
+    return Number(rows[0].c)
+}
+async function orderGetAddress(actionIndex) {
+    const rows = await q(`SELECT ia.address AS addr FROM orders o
+        JOIN index_addresses ia ON ia.id=o.get_address_id WHERE o.action_index=?`, [actionIndex])
+    return rows.length ? rows[0].addr : null
+}
+async function pollBalance(address, tick, want, timeMax = 30000) {
+    const end = Date.now() + timeMax
+    let v = null
+    while (Date.now() < end) {
+        v = await balanceOf(address, tick)
+        if (v === want) return v
+        await new Promise(r => setTimeout(r, 1000))
     }
-    async function emissionsFor(executionIndex) {
-        return await q(`SELECT emitted_action, action_index FROM contract_emissions
-                        WHERE execution_index=? ORDER BY position`, [executionIndex])
-    }
-    async function balanceOf(address, tick) {
-        const rows = await q(`SELECT b.amount FROM balances b
-            JOIN index_addresses ia ON ia.id=b.address_id
-            JOIN index_tickers it ON it.id=b.tick_id
-            WHERE ia.address=? AND it.tick=?`, [address, tick])
-        return rows.length ? String(rows[0].amount) : null
-    }
-    async function tokenSupply(tick) {
-        const rows = await q(`SELECT t.supply FROM tokens t JOIN index_tickers it ON it.id=t.tick_id WHERE it.tick=?`, [tick])
-        return rows.length ? String(rows[0].supply) : null
-    }
-    async function rowCount(table, actionIndex) {
-        const rows = await q(`SELECT COUNT(*) AS c FROM ${table} WHERE action_index=?`, [actionIndex])
-        return Number(rows[0].c)
-    }
-    async function orderGetAddress(actionIndex) {
-        const rows = await q(`SELECT ia.address AS addr FROM orders o
-            JOIN index_addresses ia ON ia.id=o.get_address_id WHERE o.action_index=?`, [actionIndex])
-        return rows.length ? rows[0].addr : null
-    }
-    async function pollBalance(address, tick, want, timeMax = 30000) {
-        const end = Date.now() + timeMax
-        let v = null
-        while (Date.now() < end) {
-            v = await balanceOf(address, tick)
-            if (v === want) return v
-            await new Promise(r => setTimeout(r, 1000))
-        }
-        return v
-    }
-    async function fundedContract(code, tick, depositAmt) {
-        // Issue tick to deployer, deploy the contract, deposit `tick` into it.
-        await issueHelper.sendIssueV0(deployer, tick, '1000', '1000', '0', 'vm emit', '1000')
-        const dep = await vmHelper.sendDeployV0(deployer, code, 250000)
-        const ci = dep.contract.action_index
-        await vmHelper.sendDepositV0(deployer, ci, tick, depositAmt)
-        return ci
-    }
-    function randTick(p) { let s = p; for (let i = 0; i < 5; i++) s += String.fromCharCode(65 + Math.floor(Math.random() * 26)); return s }
+    return v
+}
+async function fundedContract(code, tick, depositAmt) {
+    // Issue tick to deployer, deploy the contract, deposit `tick` into it.
+    await issueHelper.sendIssueV0(deployer, tick, '1000', '1000', '0', 'vm emit', '1000')
+    const dep = await vmHelper.sendDeployV0(deployer, code, 250000)
+    const ci = dep.contract.action_index
+    await vmHelper.sendDepositV0(deployer, ci, tick, depositAmt)
+    return ci
+}
+function randTick(p) { let s = p; for (let i = 0; i < 5; i++) s += String.fromCharCode(65 + Math.floor(Math.random() * 26)); return s }
 
-    before(async function () {
-        deployer = await cryptoHelper.getNewFundedAddress('vmemit-deployer', COIN, NETWORK, null, 'legacy', 0, 1)
-        await gasHelper.ensureGasBalance(deployer, '500')
-    })
+async function setupDeployer() {
+    deployer = await cryptoHelper.getNewFundedAddress('vmemit-deployer', COIN, NETWORK, null, 'legacy', 0, 1)
+    await gasHelper.ensureGasBalance(deployer, '500')
+}
+
+describe('VM Emissions: emitted action variety', function () {
+    before(setupDeployer)
 
     it('emits two SENDs in one execution; both land in order', async function () {
         const tick = randTick('VES')
@@ -173,6 +174,10 @@ describe('VM Emissions: emitted action variety', function () {
         assert.strictEqual(await balanceOf(b.address, tick), '20')
         assert.strictEqual(await balanceOf(contractAddr, tick), '70', 'contract debited 30 total')
     })
+})
+
+describe('VM Emissions: emitted action variety', function () {
+    before(setupDeployer)
 
     it('emits DESTROY; contract balance and token supply drop', async function () {
         const tick = randTick('VED')
@@ -187,6 +192,10 @@ describe('VM Emissions: emitted action variety', function () {
         assert.strictEqual(await balanceOf(contractAddr, tick), '70', 'contract burned 30')
         assert.strictEqual(await tokenSupply(tick), String(Number(supplyBefore) - 30), 'supply dropped by 30')
     })
+})
+
+describe('VM Emissions: emitted action variety', function () {
+    before(setupDeployer)
 
     it('emits BROADCAST; a broadcast row is created from the contract', async function () {
         const dep = await vmHelper.sendDeployV0(deployer, CASTER, 200000)
@@ -197,6 +206,10 @@ describe('VM Emissions: emitted action variety', function () {
         assert.strictEqual(em[0].emitted_action, 'BROADCAST')
         assert.strictEqual(await rowCount('broadcasts', em[0].action_index), 1, 'broadcast row should exist')
     })
+})
+
+describe('VM Emissions: emitted action variety', function () {
+    before(setupDeployer)
 
     it('emits ORDER; an order row is created from the contract', async function () {
         const tick = randTick('VEO')
@@ -209,6 +222,10 @@ describe('VM Emissions: emitted action variety', function () {
         assert.strictEqual(em[0].emitted_action, 'ORDER')
         assert.strictEqual(await rowCount('orders', em[0].action_index), 1, 'order row should exist')
     })
+})
+
+describe('VM Emissions: emitted action variety', function () {
+    before(setupDeployer)
 
     it('emits a self-addressed token ORDER; GET_ADDRESS defaults to the contract itself', async function () {
         const tick = randTick('VES')
@@ -227,6 +244,10 @@ describe('VM Emissions: emitted action variety', function () {
         // ...and the GIVE side (40) must be escrowed out of the contract's balance (100 -> 60).
         assert.strictEqual(await balanceOf(contractAddr, tick), '60', 'contract GIVE_AMOUNT should be escrowed')
     })
+})
+
+describe('VM Emissions: emitted action variety', function () {
+    before(setupDeployer)
 
     it('rejects a self-addressed ORDER whose GET side is native coin', async function () {
         const tick = randTick('VEN')
@@ -242,6 +263,10 @@ describe('VM Emissions: emitted action variety', function () {
         // The whole execution rolled back; the GIVE side must NOT have been escrowed.
         assert.strictEqual(await balanceOf(contractAddr, tick), '100', 'contract balance must be unchanged')
     })
+})
+
+describe('VM Emissions: emitted action variety', function () {
+    before(setupDeployer)
 
     it("a contract's self-addressed token ORDER gets matched; proceeds credit the contract (option A payoff)", async function () {
         const tick = randTick('VEM')
@@ -278,6 +303,10 @@ describe('VM Emissions: emitted action variety', function () {
         assert.strictEqual(await balanceOf(contractAddr, tick), '60', 'contract GIVE released (100 deposited - 40 given)')
         assert.strictEqual(await balanceOf(buyer.address, tick), '40', 'buyer received the contract tick')
     })
+})
+
+describe('VM Emissions: emitted action variety', function () {
+    before(setupDeployer)
 
     it("a contract's self-addressed token ORDER refunds the escrow to the contract on expiry", async function () {
         const tick = randTick('VEX')
@@ -305,6 +334,10 @@ describe('VM Emissions: emitted action variety', function () {
         // order_expire.js credits the refunded GIVE back to the order SOURCE (the contract): 60 -> 100.
         assert.strictEqual(refunded, '100', 'escrow refunded to the contract on order expiry')
     })
+})
+
+describe('VM Emissions: emitted action variety', function () {
+    before(setupDeployer)
 
     it('emits DISPENSER; a dispenser row is created from the contract', async function () {
         const tick = randTick('VEP')
@@ -318,6 +351,10 @@ describe('VM Emissions: emitted action variety', function () {
         assert.strictEqual(em[0].emitted_action, 'DISPENSER')
         assert.strictEqual(await rowCount('dispensers', em[0].action_index), 1, 'dispenser row should exist')
     })
+})
+
+describe('VM Emissions: emitted action variety', function () {
+    before(setupDeployer)
 
     it('emits MESSAGE; a message row is created from the contract', async function () {
         const dep = await vmHelper.sendDeployV0(deployer, MESSENGER, 200000)
@@ -330,6 +367,10 @@ describe('VM Emissions: emitted action variety', function () {
         assert.strictEqual(em[0].emitted_action, 'MESSAGE')
         assert.strictEqual(await rowCount('messages', em[0].action_index), 1, 'message row should exist')
     })
+})
+
+describe('VM Emissions: emitted action variety', function () {
+    before(setupDeployer)
 
     it('emits FILE; a file row is created from the contract', async function () {
         const dep = await vmHelper.sendDeployV0(deployer, FILER, 200000)
