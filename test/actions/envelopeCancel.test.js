@@ -84,6 +84,57 @@ async function waitForIndexerToCatchUp(timeoutMs = 180000) {
     return false
 }
 
+async function buildRecoveryState() {
+    const fileName = 'envelope-cancelled-' + Date.now().toString().slice(-6) + '.txt'
+    const addr = await cryptoHelper.getNewFundedAddress('envcancel', COIN, NETWORK, null, 'segwit', 0, 1)
+    const recovery = (await cryptoHelper.getNewAddress('envcancel-recovery', COIN, NETWORK, null, 'legacy', 0)).address
+
+    const pair = await envelopeHelper.buildEnvelopePair(addr, {
+        name: fileName,
+        type: 'text/plain',
+        title: 'Cancelled envelope',
+        memo: 'the reveal never happens',
+        rawData: BODY,
+        compress: true
+    })
+
+    // §3.5's persistence contract, asserted as a contract: these five fields are
+    // what the encoder hands back for the wallet to durably write BEFORE the
+    // commit goes out, and they are all that survives into the recovery below.
+    const record = {
+        commitTxid: pair.envelope.commitTxid,
+        commitVout: pair.envelope.commitVout,
+        commitValue: pair.envelope.commitValue,
+        internalPubkey: pair.envelope.internalPubkey,
+        tapleafHash: pair.envelope.tapleafHash
+    }
+    return { fileName, addr, recovery, pair, record }
+}
+
+async function buildCancelTransaction(addr, recovery, record) {
+    // Everything else about the build is now gone. Rebuild from the record.
+    const cancel = await encoderConnector.createEnvelopeCancelTx({
+        commitTxid: record.commitTxid,
+        commitVout: record.commitVout,
+        commitValue: record.commitValue,
+        internalPubkey: record.internalPubkey,
+        tapleafHash: record.tapleafHash,
+        destination: recovery,
+        feePerKb: 2000
+    })
+
+    const cancelPsbt = bitcoin.Psbt.fromHex(cancel.psbt, { network: NETWORK_OBJECT })
+    const tweakedPriv = tweakPrivateKey(addr['privateKey'], Buffer.from(record.tapleafHash, 'hex'))
+    const tweakedPub = Buffer.from(ecc.pointFromScalar(tweakedPriv, true))
+    cancelPsbt.signInput(0, {
+        publicKey: tweakedPub,
+        signSchnorr: (hash) => Buffer.from(ecc.signSchnorr(hash, tweakedPriv))
+    })
+    cancelPsbt.finalizeAllInputs()
+    cancelPsbt.setMaximumFeeRate(100000)
+    return cancelPsbt.extractTransaction()
+}
+
 describe('Envelope Cancel: recovering an unrevealed commit from persisted state alone (§3.5)', function () {
     this.timeout(0)
 
@@ -92,29 +143,7 @@ describe('Envelope Cancel: recovering an unrevealed commit from persisted state 
     })
 
     it('spends the commit back by the key path, and the reveal can no longer be broadcast', async function () {
-        const fileName = 'envelope-cancelled-' + Date.now().toString().slice(-6) + '.txt'
-        const addr = await cryptoHelper.getNewFundedAddress('envcancel', COIN, NETWORK, null, 'segwit', 0, 1)
-        const recovery = (await cryptoHelper.getNewAddress('envcancel-recovery', COIN, NETWORK, null, 'legacy', 0)).address
-
-        const pair = await envelopeHelper.buildEnvelopePair(addr, {
-            name: fileName,
-            type: 'text/plain',
-            title: 'Cancelled envelope',
-            memo: 'the reveal never happens',
-            rawData: BODY,
-            compress: true
-        })
-
-        // §3.5's persistence contract, asserted as a contract: these five fields are
-        // what the encoder hands back for the wallet to durably write BEFORE the
-        // commit goes out, and they are all that survives into the recovery below.
-        const record = {
-            commitTxid: pair.envelope.commitTxid,
-            commitVout: pair.envelope.commitVout,
-            commitValue: pair.envelope.commitValue,
-            internalPubkey: pair.envelope.internalPubkey,
-            tapleafHash: pair.envelope.tapleafHash
-        }
+        const { fileName, addr, recovery, pair, record } = await buildRecoveryState()
         for (const field of Object.keys(record)) {
             assert(record[field] !== undefined && record[field] !== null,
                 'the recovery record must carry ' + field + '; without it the commit is unrecoverable')
@@ -127,27 +156,7 @@ describe('Envelope Cancel: recovering an unrevealed commit from persisted state 
         const confirmedCommit = await nodeConnector.getTransaction(record.commitTxid)
         assert(confirmedCommit && confirmedCommit.blockhash, 'the commit confirmed')
 
-        // Everything else about the build is now gone. Rebuild from the record.
-        const cancel = await encoderConnector.createEnvelopeCancelTx({
-            commitTxid: record.commitTxid,
-            commitVout: record.commitVout,
-            commitValue: record.commitValue,
-            internalPubkey: record.internalPubkey,
-            tapleafHash: record.tapleafHash,
-            destination: recovery,
-            feePerKb: 2000
-        })
-
-        const cancelPsbt = bitcoin.Psbt.fromHex(cancel.psbt, { network: NETWORK_OBJECT })
-        const tweakedPriv = tweakPrivateKey(addr['privateKey'], Buffer.from(record.tapleafHash, 'hex'))
-        const tweakedPub = Buffer.from(ecc.pointFromScalar(tweakedPriv, true))
-        cancelPsbt.signInput(0, {
-            publicKey: tweakedPub,
-            signSchnorr: (hash) => Buffer.from(ecc.signSchnorr(hash, tweakedPriv))
-        })
-        cancelPsbt.finalizeAllInputs()
-        cancelPsbt.setMaximumFeeRate(100000)
-        const cancelTx = cancelPsbt.extractTransaction()
+        const cancelTx = await buildCancelTransaction(addr, recovery, record)
 
         // A key-path spend is one 64-byte signature and nothing else. A script-path
         // spend would carry three witness elements, so this distinguishes the cancel
