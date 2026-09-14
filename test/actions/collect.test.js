@@ -25,16 +25,17 @@ const cryptoHelper = require('../cryptoHelper')
 const stakeHelper = require('../helpers/stakeHelper')
 const gasHelper = require('../helpers/gasHelper')
 
-describe('COLLECT v0 (claim accrued validator rewards)', function () {
+function requireBitcoin(context) {
+    // COLLECT is BTC-only by protocol design; the indexer handler rejects any
+    // other chain outright, so these on-chain assertions only run on bitcoin.
+    if (COIN_CODE !== 'BTC') {
+        console.log('COLLECT is BTC-only, skipping on ' + COIN_CODE)
+        context.skip()
+    }
+}
 
-    before(function () {
-        // COLLECT is BTC-only by protocol design; the indexer handler rejects any
-        // other chain outright, so these on-chain assertions only run on bitcoin.
-        if (COIN_CODE !== 'BTC') {
-            console.log('COLLECT is BTC-only, skipping on ' + COIN_CODE)
-            this.skip()
-        }
-    })
+describe('COLLECT v0 (claim accrued validator rewards)', function () {
+    before(function () { requireBitcoin(this) })
 
     describe('rejects when the source has no active stake', function () {
         it('records the reward_claims row with a "no active stake" status', async function () {
@@ -52,6 +53,10 @@ describe('COLLECT v0 (claim accrued validator rewards)', function () {
                 'rejection reason should mention "no active stake"; got: ' + result.claim.status)
         })
     })
+})
+
+describe('COLLECT v0 (claim accrued validator rewards)', function () {
+    before(function () { requireBitcoin(this) })
 
     describe('rejects when the staker has no unclaimed rewards', function () {
         it('records the reward_claims row with a "no unclaimed rewards" status', async function () {
