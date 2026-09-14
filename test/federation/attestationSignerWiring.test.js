@@ -40,27 +40,24 @@ const path   = require('path')
 
 const { MultiValidatorHub } = require('../helpers/multiValidatorHubHelper')
 
-describe('[federation] AttestationPublisher operator-signer wiring (F13)', function () {
-    this.timeout(0)
+let mvh = null
+let tmpDir = null
+let savedSignerModule, savedQueuePath
 
-    let mvh = null
-    let tmpDir = null
-    let savedSignerModule, savedQueuePath
+async function setUpSigner(context) {
+    if (!process.env.HUB_DB_USER || !process.env.HUB_DB_PASS) {
+        console.log('        (skipping: HUB_DB_USER/HUB_DB_PASS not set)')
+        context.skip()
+    }
 
-    before(async function () {
-        if (!process.env.HUB_DB_USER || !process.env.HUB_DB_PASS) {
-            console.log('        (skipping: HUB_DB_USER/HUB_DB_PASS not set)')
-            this.skip()
-        }
-
-        // Operator-style signer module in a temp dir. The hub requires it
-        // in-process, so the stub records broadcasts on a global the test
-        // can read back. walletSign is REQUIRED by the loader contract;
-        // broadcast replaces the encoder pipeline (same shape fed-signer.js
-        // uses on the live federation).
-        tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'attest-signer-e2e-'))
-        const signerPath = path.join(tmpDir, 'stub-signer.js')
-        fs.writeFileSync(signerPath, `
+    // Operator-style signer module in a temp dir. The hub requires it
+    // in-process, so the stub records broadcasts on a global the test
+    // can read back. walletSign is REQUIRED by the loader contract;
+    // broadcast replaces the encoder pipeline (same shape fed-signer.js
+    // uses on the live federation).
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'attest-signer-e2e-'))
+    const signerPath = path.join(tmpDir, 'stub-signer.js')
+    fs.writeFileSync(signerPath, `
             'use strict';
             global.__f13SignerBroadcasts = [];
             module.exports = {
@@ -72,25 +69,34 @@ describe('[federation] AttestationPublisher operator-signer wiring (F13)', funct
             };
         `)
 
-        savedSignerModule = process.env.HUB_SIGNER_MODULE
-        savedQueuePath    = process.env.ATTESTATION_QUEUE_PATH
-        process.env.HUB_SIGNER_MODULE      = signerPath
-        process.env.ATTESTATION_QUEUE_PATH = path.join(tmpDir, 'attestation-queue.jsonl')
+    savedSignerModule = process.env.HUB_SIGNER_MODULE
+    savedQueuePath    = process.env.ATTESTATION_QUEUE_PATH
+    process.env.HUB_SIGNER_MODULE      = signerPath
+    process.env.ATTESTATION_QUEUE_PATH = path.join(tmpDir, 'attestation-queue.jsonl')
 
-        mvh = new MultiValidatorHub({ count: 1 })
-        await mvh.start()
+    mvh = new MultiValidatorHub({ count: 1 })
+    await mvh.start()
+}
+
+async function tearDownSigner() {
+    if (savedSignerModule === undefined) delete process.env.HUB_SIGNER_MODULE
+    else process.env.HUB_SIGNER_MODULE = savedSignerModule
+    if (savedQueuePath === undefined) delete process.env.ATTESTATION_QUEUE_PATH
+    else process.env.ATTESTATION_QUEUE_PATH = savedQueuePath
+
+    if (mvh) await mvh.stop()
+    if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true })
+    delete global.__f13SignerBroadcasts
+}
+
+describe('[federation] AttestationPublisher operator-signer wiring (F13)', function () {
+    this.timeout(0)
+
+    before(async function () {
+        await setUpSigner(this)
     })
 
-    after(async function () {
-        if (savedSignerModule === undefined) delete process.env.HUB_SIGNER_MODULE
-        else process.env.HUB_SIGNER_MODULE = savedSignerModule
-        if (savedQueuePath === undefined) delete process.env.ATTESTATION_QUEUE_PATH
-        else process.env.ATTESTATION_QUEUE_PATH = savedQueuePath
-
-        if (mvh) await mvh.stop()
-        if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true })
-        delete global.__f13SignerBroadcasts
-    })
+    after(tearDownSigner)
 
     it('startAttestation() wires the operator signer into AttestationPublisher (no test hook injection)', function () {
         const publisher = mvh.hubs[0].getAttestationPublisher()
@@ -104,6 +110,16 @@ describe('[federation] AttestationPublisher operator-signer wiring (F13)', funct
         assert.ok(publisher.getBroadcaster(),
             'publisher must have a broadcast pipeline at boot (F13: getBroadcaster() was null)')
     })
+})
+
+describe('[federation] AttestationPublisher operator-signer wiring (F13)', function () {
+    this.timeout(0)
+
+    before(async function () {
+        await setUpSigner(this)
+    })
+
+    after(tearDownSigner)
 
     it('a finalized response broadcasts through the operator module and leaves the WAL queue', async function () {
         const publisher = mvh.hubs[0].getAttestationPublisher()
