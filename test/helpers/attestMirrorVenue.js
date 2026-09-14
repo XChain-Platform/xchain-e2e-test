@@ -552,7 +552,12 @@ function assertTimingInvariants(forwardS, batchWindowS, keying, hopBudgetS = GOS
  * the invariant exists to prevent.
  */
 function resolveWindowKeying() {
-    return resolveWindowKeyingFrom(loadHubModule('src/AttestationBatchPublisher.js'));
+    // A hub whose SQL lives under src/db/ reads its window through a named Database method,
+    // so the column it filters on sits in that method's text rather than in _selectWindowRows.
+    // A hub without src/db/index.js keeps the SQL inline and needs no second read.
+    let dbProto = null;
+    try { dbProto = loadHubModule('src/db/index.js').prototype; } catch (_) { dbProto = null; }
+    return resolveWindowKeyingFrom(loadHubModule('src/AttestationBatchPublisher.js'), dbProto);
 }
 
 // The environment keys the hub's credential resolver reads (`xchain-hub/src/lib/
@@ -657,11 +662,19 @@ function assertLlmAvailable(spec, probes) {
  * exactly one hub, so a guard that could only call `resolveWindowKeying()` would be able
  * to test whichever shape that checkout happens to have and nothing else.
  *
- * @param {Function} pub  the hub's `AttestationBatchPublisher` module export
+ * @param {Function} pub      the hub's `AttestationBatchPublisher` module export
+ * @param {object}   [dbProto] the hub's `Database.prototype`, when its SQL lives under src/db/
  */
-function resolveWindowKeyingFrom(pub) {
+function resolveWindowKeyingFrom(pub, dbProto) {
     const select = pub && pub.prototype && pub.prototype._selectWindowRows;
-    const src    = typeof select === 'function' ? String(select) : '';
+    let src      = typeof select === 'function' ? String(select) : '';
+    // Follow every db method the window read delegates to, so a query that lives in the db
+    // layer is still judged by the column it actually filters on.
+    if (dbProto) {
+        for (const m of src.matchAll(/\bdb\.([A-Za-z_$][\w$]*)\s*\(/g)) {
+            if (typeof dbProto[m[1]] === 'function') src += '\n' + String(dbProto[m[1]]);
+        }
+    }
     const onSigned = /effective_time\s*>=\s*\?/.test(src);
     const onWall   = /finalized_at\s*>=\s*\?/.test(src);
 
