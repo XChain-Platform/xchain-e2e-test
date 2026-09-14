@@ -65,6 +65,13 @@ function stubEncryptedMessage(keyHashHex) {
     return blob.toString('hex')
 }
 
+function encryptWithKey(key, plaintext) {
+    const iv = crypto.randomBytes(12)
+    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv)
+    const encrypted = Buffer.concat([cipher.update(plaintext), cipher.final()])
+    return Buffer.concat([iv, cipher.getAuthTag(), encrypted])
+}
+
 // Query the indexer's gated_files table directly. Returns null when
 // no row exists for the given action_index.
 async function fetchGatedFileRow(actionIndex) {
@@ -82,6 +89,25 @@ async function fetchGatedFileRow(actionIndex) {
     }
 }
 
+const TICK = 'GATEDTEST' + Date.now().toString().slice(-6)
+const plaintext = Buffer.from('top secret holder-only content')
+const { ciphertext, keyHash } = makeGatedCiphertext(plaintext)
+// The encoder validator requires a string for rawData and the on-chain
+// path treats the string as opaque bytes (Latin-1). Send the AES-GCM
+// ciphertext bytes byte-identically via the 'binary' string encoding.
+const ciphertextRaw = ciphertext.toString('binary')
+
+let issuer
+let recipient
+let outsider
+
+async function setupGatedActors() {
+    if (issuer) return
+    issuer    = await cryptoHelper.getNewFundedAddress('GATED.ISSUER',    COIN, NETWORK, null, 'legacy', 0, 5)
+    recipient = await cryptoHelper.getNewFundedAddress('GATED.RECIPIENT', COIN, NETWORK, null, 'legacy', 0, 1)
+    outsider  = await cryptoHelper.getNewFundedAddress('GATED.OUTSIDER',  COIN, NETWORK, null, 'legacy', 0, 1)
+}
+
 describe('FILE: token-gated content', function () {
     // Set at the describe level: the bare-SEND test below intentionally waits
     // out three 60s waitFor* calls (≈180s plus tx-confirm) to verify the
@@ -90,23 +116,7 @@ describe('FILE: token-gated content', function () {
     // being killed at the describe-level 120s.
     this.timeout(240000)
 
-    const TICK = 'GATEDTEST' + Date.now().toString().slice(-6)
-    const plaintext = Buffer.from('top secret holder-only content')
-    const { ciphertext, keyHash } = makeGatedCiphertext(plaintext)
-    // The encoder validator requires a string for rawData and the on-chain
-    // path treats the string as opaque bytes (Latin-1). Send the AES-GCM
-    // ciphertext bytes byte-identically via the 'binary' string encoding.
-    const ciphertextRaw = ciphertext.toString('binary')
-
-    let issuer
-    let recipient
-    let outsider
-
-    before(async function () {
-        issuer    = await cryptoHelper.getNewFundedAddress('GATED.ISSUER',    COIN, NETWORK, null, 'legacy', 0, 5)
-        recipient = await cryptoHelper.getNewFundedAddress('GATED.RECIPIENT', COIN, NETWORK, null, 'legacy', 0, 1)
-        outsider  = await cryptoHelper.getNewFundedAddress('GATED.OUTSIDER',  COIN, NETWORK, null, 'legacy', 0, 1)
-    })
+    before(setupGatedActors)
 
     it('issuer can publish a gated FILE inside BATCH(FILE, MESSAGE-to-self)', async function () {
         // Create the token the file gates against.
@@ -155,6 +165,11 @@ describe('FILE: token-gated content', function () {
         assert.strictEqual(Number(gatedRow.raw_data_length), ciphertext.length,
             'raw_data column should mirror the ciphertext bytes from the decoder')
     })
+})
+
+describe('FILE: token-gated content', function () {
+    this.timeout(240000)
+    before(setupGatedActors)
 
     it('issuer can transfer the gated token in BATCH(SEND, MESSAGE-to-recipient)', async function () {
         const sendCmd = ['SEND', '0', TICK, '1', recipient.address, ''].join('|')
@@ -180,6 +195,11 @@ describe('FILE: token-gated content', function () {
         })
         assert(sendRow, 'the gated token transfer should land a valid SEND row')
     })
+})
+
+describe('FILE: token-gated content', function () {
+    this.timeout(240000)
+    before(setupGatedActors)
 
     it('rejects bare SEND of the gated token with no sibling MESSAGE', async function () {
         // The encoder picks the P2SH 2-tx path for this SEND (gated-token
@@ -199,6 +219,11 @@ describe('FILE: token-gated content', function () {
             assert.fail('bare SEND of a gated token unexpectedly succeeded')
         }
     })
+})
+
+describe('FILE: token-gated content', function () {
+    this.timeout(240000)
+    before(setupGatedActors)
 
     it('pack: two gated FILEs sharing one KEY_HASH unlock together', async function () {
         // A pack is just multiple gated FILEs that reuse the same key.
@@ -209,15 +234,8 @@ describe('FILE: token-gated content', function () {
         const packKey = crypto.randomBytes(32)
         const packHash = crypto.createHash('sha256').update(packKey).digest('hex')
 
-        function encWith(key, pt) {
-            const iv = crypto.randomBytes(12)
-            const c = crypto.createCipheriv('aes-256-gcm', key, iv)
-            const enc = Buffer.concat([c.update(pt), c.final()])
-            return Buffer.concat([iv, c.getAuthTag(), enc])
-        }
-
-        const ct1 = encWith(packKey, Buffer.from('pack file 1'))
-        const ct2 = encWith(packKey, Buffer.from('pack file 2'))
+        const ct1 = encryptWithKey(packKey, Buffer.from('pack file 1'))
+        const ct2 = encryptWithKey(packKey, Buffer.from('pack file 2'))
 
         // Publish member 1 atomically with the self-handoff.
         const f1 = ['FILE', '0', 'pack-1.txt', 'text/plain', 'Pack 1', '',
@@ -246,6 +264,11 @@ describe('FILE: token-gated content', function () {
         assert.strictEqual(String(g1.key_hash).toLowerCase(), packHash)
         assert.strictEqual(String(g2.key_hash).toLowerCase(), packHash)
     })
+})
+
+describe('FILE: token-gated content', function () {
+    this.timeout(240000)
+    before(setupGatedActors)
 
     it('rejects gated FILE published by a non-issuer for the same ticker', async function () {
         // Outsider tries to gate spam content to GATEDTEST. Token is
