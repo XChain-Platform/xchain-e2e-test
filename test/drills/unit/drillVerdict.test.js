@@ -59,6 +59,10 @@ describe('drillVerdict: liveness', function () {
         assert.strictEqual(v.status, V.FAIL);
         assert.match(v.reasons.join(' '), /fault injection did not take/);
     });
+});
+
+describe('drillVerdict: liveness', function () {
+    const quorum = 5, value = '7B';
 
     it('fails a plan that cannot reach quorum instead of quietly passing it', function () {
         const observations = [obs('v0', 'honest', value), obs('v1', 'honest', value), obs('v2', 'byzantine', null)];
