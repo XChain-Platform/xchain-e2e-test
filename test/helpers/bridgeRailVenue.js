@@ -1874,7 +1874,7 @@ function orphanDepth(height, tip) {
  * just failing. Factored out of the reorg suite's own reorg helper so the one piece of
  * arithmetic - and the one guard built on it - has ONE unit-tested home; the message is
  * kept byte-identical to the inline copies the attestation reorg drills still carry
- * (xchain-utxo-tracker/src/undo-blocks.js names the window itself), so a drive scanning
+ * (xchain-utxo-tracker/src/chain/undo_blocks.js names the window itself), so a drive scanning
  * a log for "blocks deep" is never looking at two different sentences for the same fault.
  *
  * @param {number} height    the height being orphaned

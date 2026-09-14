@@ -88,7 +88,7 @@ const SIBLINGS = [
       marker: 'src',
       guards: 'the SPV seed contract and the protocol size limits' },
     { repo: 'xchain-utxo-tracker', envs: [],
-      marker: path.join('src', 'CryptoNetworks.js'),
+      marker: path.join('src', 'chain', 'crypto_networks.js'),
       guards: 'CryptoNetworks getBitcoinJsNetwork parity' },
     { repo: 'xchain-regtest-miner', envs: [],
       marker: path.join('src', 'CryptoNetworks.js'),
