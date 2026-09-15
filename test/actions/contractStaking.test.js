@@ -22,16 +22,14 @@ function newSigningPubkey(){
     return spkiDer.subarray(12).toString('hex')
 }
 
-describe('Contract Staking: STAKE v3 / UNSTAKE v1 / DELEGATE v1 + slashing', function () {
+// Contract staking is multi-chain; exercised against the XCHAIN token that
+// initialCheck.test.js ISSUEs on every chain at suite startup. Capability
+// staking (STAKE v1/v2 / UNSTAKE v0 / DELEGATE v0/v2 / COLLECT) remains
+// BTC-only at the protocol level.
 
-    // Contract staking is multi-chain; exercised against the XCHAIN token that
-    // initialCheck.test.js ISSUEs on every chain at suite startup. Capability
-    // staking (STAKE v1/v2 / UNSTAKE v0 / DELEGATE v0/v2 / COLLECT) remains
-    // BTC-only at the protocol level.
-
-    // STAKE-GATED contract: lets the test exercise getStake/getTotalStaked/getStakers/slash
-    // through real method invocations. Stored as a small string so the e2e log stays readable.
-    const STAKE_GATED_CONTRACT = `
+// STAKE-GATED contract: lets the test exercise getStake/getTotalStaked/getStakers/slash
+// through real method invocations. Stored as a small string so the e2e log stays readable.
+const STAKE_GATED_CONTRACT = `
         module.exports = {
             meta: { name: 'Stake Gate', description: 'Reports whether the calling pubkey has staked against this contract.', version: '1.0.0' },
             isStaked: function() {
@@ -50,6 +48,8 @@ describe('Contract Staking: STAKE v3 / UNSTAKE v1 / DELEGATE v1 + slashing', fun
             }
         };
     `
+
+describe('Contract Staking: STAKE v3 / UNSTAKE v1 / DELEGATE v1 + slashing', function () {
 
     describe('DEPLOY v1: Stakeable contract metadata', function () {
 
@@ -82,7 +82,9 @@ describe('Contract Staking: STAKE v3 / UNSTAKE v1 / DELEGATE v1 + slashing', fun
             assert(/COOLDOWN_BLOCKS/i.test(result.contract.status), `status should cite COOLDOWN_BLOCKS (got: ${result.contract.status})`)
         })
     })
+})
 
+describe('Contract Staking: STAKE v3 / UNSTAKE v1 / DELEGATE v1 + slashing', function () {
     describe('STAKE v3 + getStake + slash + UNSTAKE v1: Full lifecycle', function () {
 
         let contractIndex = null
@@ -128,7 +130,9 @@ describe('Contract Staking: STAKE v3 / UNSTAKE v1 / DELEGATE v1 + slashing', fun
                 'gas_used should at least cover VM_STATE_READ (100)')
         })
     })
+})
 
+describe('Contract Staking: STAKE v3 / UNSTAKE v1 / DELEGATE v1 + slashing', function () {
     describe('Validation: Non-stakeable contracts reject STAKE v3', function () {
 
         it('should reject STAKE v3 targeting a non-stakeable (DEPLOY v0) contract', async function () {
