@@ -22,6 +22,7 @@ global.nodeConnector          = { waitForTx: async () => true };
 global.utxoTrackerConnector   = { waitForUtxos: async () => true, getSyncStatus: async () => null };
 
 const cryptoHelper = require('../../test/cryptoHelper');
+const MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 
 describe('cryptoHelper', function () {
 
@@ -61,6 +62,18 @@ describe('cryptoHelper', function () {
             assert.ok('alice' in global.wallets);
         });
     });
+});
+
+describe('cryptoHelper', function () {
+
+    beforeEach(function () {
+        global.wallets = {};
+    });
+
+    afterEach(function () {
+        sinon.restore();
+        global.wallets = {};
+    });
 
     describe('getNewAddress', function () {
         it('returns an object with mnemonic, privateKey, publicKey, address', async function () {
@@ -96,7 +109,21 @@ describe('cryptoHelper', function () {
             assert.strictEqual(global.wallets['alice'].mnemonic, firstMnemonic,
                 'wallet mnemonic must not change after second call');
         });
+    });
+});
 
+describe('cryptoHelper', function () {
+
+    beforeEach(function () {
+        global.wallets = {};
+    });
+
+    afterEach(function () {
+        sinon.restore();
+        global.wallets = {};
+    });
+
+    describe('getNewAddress', function () {
         it('caches the wallet in global.wallets with correct coin/network', async function () {
             await cryptoHelper.getNewAddress('alice', 'bitcoin', 'regtest');
             const wallet = global.wallets['alice'];
@@ -127,10 +154,20 @@ describe('cryptoHelper', function () {
             assert.notStrictEqual(r0.address, r1.address);
         });
     });
+});
+
+describe('cryptoHelper', function () {
+
+    beforeEach(function () {
+        global.wallets = {};
+    });
+
+    afterEach(function () {
+        sinon.restore();
+        global.wallets = {};
+    });
 
     describe('getNewFundedAddress', function () {
-        const MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
-
         it('calls regtestMinerConnector.sendFunds with the new address and amount', async function () {
             const sendFundsStub   = sinon.stub(global.regtestMinerConnector, 'sendFunds').resolves('txid-abc');
             const waitForTxStub   = sinon.stub(global.nodeConnector, 'waitForTx').resolves(true);
@@ -172,7 +209,21 @@ describe('cryptoHelper', function () {
             assert.ok(waitForUtxosStub.calledOnce);
             assert.strictEqual(waitForUtxosStub.firstCall.args[0], result.address);
         });
+    });
+});
 
+describe('cryptoHelper', function () {
+
+    beforeEach(function () {
+        global.wallets = {};
+    });
+
+    afterEach(function () {
+        sinon.restore();
+        global.wallets = {};
+    });
+
+    describe('getNewFundedAddress', function () {
         it('returns the address info on success', async function () {
             sinon.stub(global.regtestMinerConnector, 'sendFunds').resolves('txid-abc');
             sinon.stub(global.nodeConnector, 'waitForTx').resolves(true);
