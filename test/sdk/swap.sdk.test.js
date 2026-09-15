@@ -58,36 +58,40 @@ function ninetyDaysOut() {
     return Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90;
 }
 
-describe('[sdk] SWAP (atomic token exchange)', function () {
-    this.timeout(0);
+let sdk, coin, addr1, addr2;
 
-    let sdk, coin, addr1, addr2;
+// Issue a fresh token from `owner` with ample supply for swap tests.
+async function issueToken(owner, tick) {
+    const res = await submit(sdk,
+        { action: 'ISSUE', params: { tick, maxSupply: 1000000, maxMint: 100000, decimals: 0, description: 'sdk swap token', mintSupply: 1000 } },
+        { pubkey: owner.address, change: owner.address },
+        submitOpts({ wif: owner.wif })
+    );
+    expect(res.indexed.status, 'ISSUE ' + tick + ' should be valid').to.equal('valid');
+    return tick;
+}
 
-    // Issue a fresh token from `owner` with ample supply for swap tests.
-    async function issueToken(owner, tick) {
-        const res = await submit(sdk,
-            { action: 'ISSUE', params: { tick, maxSupply: 1000000, maxMint: 100000, decimals: 0, description: 'sdk swap token', mintSupply: 1000 } },
-            { pubkey: owner.address, change: owner.address },
-            submitOpts({ wif: owner.wif })
-        );
-        expect(res.indexed.status, 'ISSUE ' + tick + ' should be valid').to.equal('valid');
-        return tick;
+async function setupSwap() {
+    const coinCode = global.COIN_CODE || 'BTC';
+    if (coinCode !== 'BTC') {
+        console.log('    [sdk] swap suite pinned to BTC, skipping on ' + coinCode);
+        this.skip();
+        return;
     }
+    coin = coinCode;
+    sdk = makeSdk();
+    addr1 = await fundedGasAddress(sdk, 5);
+    addr2 = await fundedGasAddress(sdk, 5);
+    console.log('    [sdk] addr1=' + addr1.address + ' addr2=' + addr2.address);
+}
 
-    before(async function () {
-        const coinCode = global.COIN_CODE || 'BTC';
-        if (coinCode !== 'BTC') {
-            console.log('    [sdk] swap suite pinned to BTC, skipping on ' + coinCode);
-            this.skip();
-            return;
-        }
-        coin = coinCode;
-        sdk = makeSdk();
-        addr1 = await fundedGasAddress(sdk, 5);
-        addr2 = await fundedGasAddress(sdk, 5);
-        console.log('    [sdk] addr1=' + addr1.address + ' addr2=' + addr2.address);
-    });
+async function submitSwap(owner, params) {
+    return submit(sdk, { action: 'SWAP', params },
+        { pubkey: owner.address, change: owner.address },
+        submitOpts({ wif: owner.wif }));
+}
 
+function registerSwapCreationTest() {
     it('SWAP v0 creates an open offer, readable via sdk.getSwaps with swap_status', async function () {
         const giveTick = uniqueTick('SWPG');
         const getTick  = uniqueTick('SWPT');
@@ -125,7 +129,9 @@ describe('[sdk] SWAP (atomic token exchange)', function () {
 
         this.test.parent.ctx.swap = { swapIndex, giveTick, getTick };
     });
+}
 
+function registerSwapLifecycleTests() {
     it('SWAP v2 edits the offer (extends expiration)', async function () {
         const s = this.test.parent.ctx.swap;
         expect(s, 'swap from prior test').to.exist;
@@ -176,7 +182,9 @@ describe('[sdk] SWAP (atomic token exchange)', function () {
         expect(row, 'cancelled offer still listed').to.exist;
         expect(row.swap_status).to.equal('cancelled');
     });
+}
 
+function registerSwapMatchingTest() {
     it('two exact counter-swaps auto-match and both settle to complete', async function () {
         const tokenA = uniqueTick('SWMA');
         const tokenB = uniqueTick('SWMB');
@@ -192,35 +200,21 @@ describe('[sdk] SWAP (atomic token exchange)', function () {
 
         const expiration = ninetyDaysOut();
 
-        const swap1 = await submit(sdk,
-            {
-                action: 'SWAP',
-                params: {
-                    version: 0,
-                    giveCoin: coin, giveTick: tokenA, giveAmount: 10,
-                    getCoin: coin, getTick: tokenB, getAmount: 5,
-                    getAddress: addr1.address, expiration, memo: 'sell A for B',
-                },
-            },
-            { pubkey: addr1.address, change: addr1.address },
-            submitOpts({ wif: addr1.wif })
-        );
+        const swap1 = await submitSwap(addr1, {
+            version: 0,
+            giveCoin: coin, giveTick: tokenA, giveAmount: 10,
+            getCoin: coin, getTick: tokenB, getAmount: 5,
+            getAddress: addr1.address, expiration, memo: 'sell A for B',
+        });
         expect(swap1.indexed.status).to.equal('valid');
         const swap1Index = swapIndexOf(swap1.indexed);
 
-        const swap2 = await submit(sdk,
-            {
-                action: 'SWAP',
-                params: {
-                    version: 0,
-                    giveCoin: coin, giveTick: tokenB, giveAmount: 5,
-                    getCoin: coin, getTick: tokenA, getAmount: 10,
-                    getAddress: addr2.address, expiration, memo: 'buy A with B',
-                },
-            },
-            { pubkey: addr2.address, change: addr2.address },
-            submitOpts({ wif: addr2.wif })
-        );
+        const swap2 = await submitSwap(addr2, {
+            version: 0,
+            giveCoin: coin, giveTick: tokenB, giveAmount: 5,
+            getCoin: coin, getTick: tokenA, getAmount: 10,
+            getAddress: addr2.address, expiration, memo: 'buy A with B',
+        });
         expect(swap2.indexed.status).to.equal('valid');
         const swap2Index = swapIndexOf(swap2.indexed);
 
@@ -243,4 +237,12 @@ describe('[sdk] SWAP (atomic token exchange)', function () {
             expect((matches && matches.data) || [], 'sdk.getSwapMatches should return rows for the block').to.be.an('array');
         }
     });
+}
+
+describe('[sdk] SWAP (atomic token exchange)', function () {
+    this.timeout(0);
+    before(setupSwap);
+    registerSwapCreationTest();
+    registerSwapLifecycleTests();
+    registerSwapMatchingTest();
 });
