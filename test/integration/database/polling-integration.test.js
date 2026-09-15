@@ -76,6 +76,14 @@ describe('Database Polling Integration', function () {
             assert(db.sleep.callCount >= 2, 'should sleep between retries')
         })
     })
+})
+
+describe('Database Polling Integration', function () {
+
+    afterEach(function () {
+        sinon.restore()
+        mockMariadb.createPool.resetHistory()
+    })
 
     describe('Scenario: Timeout (check never succeeds)', function () {
 
