@@ -111,46 +111,35 @@ async function _waitForRows(sql, args, timeoutMs = 120000, label = 'rows') {
     throw new Error('timed out waiting for ' + label)
 }
 
-describe('Federation: full-node tier (NODEPROOF) possession proof', function () {
-    // 3 hubs x (start + DB) + staking + activation + epoch mining + sign round
-    // + on-chain verdict + indexer processing.
-    this.timeout(12 * 60 * 1000)
+let mvh        = null
+let identities = null
+let fullPubkeys = []   // hubs 0,1
+let lightPubkey = null // hub 2
 
-    let mvh        = null
-    let identities = null
-    let fullPubkeys = []   // hubs 0,1
-    let lightPubkey = null // hub 2
+async function startNodeProofHubs() {
+    // Fixed (deterministic) identities so GENESIS_VERIFIERS can name the two
+    // full hubs AND match the regtest indexer's FULLNODE_GENESIS_VERIFIERS env.
+    identities  = FIXED_SEEDS.map((seed) => {
+        const vi = new ValidatorIdentity(seed)
+        return { pubkeyHex: vi.getPubkeyHex(), privkeyHex: seed }
+    })
+    fullPubkeys = [identities[0].pubkeyHex, identities[1].pubkeyHex]
+    lightPubkey = identities[2].pubkeyHex
+    console.log('NODEPROOF genesis verifiers (set indexer FULLNODE_GENESIS_VERIFIERS to these):')
+    console.log('  ' + fullPubkeys.join(','))
 
-    before(async function () {
-        if (!requireFederationEnv(this)) return
-        if (!COIN_RPC) {
-            console.warn('SKIP: FULLNODE_BTC_RPC_URL not set (regtest bitcoind RPC endpoint required)')
-            this.skip()
-            return
-        }
-        await assertCleanValidatorSet(indexerDatabase)
+    mvh = new MultiValidatorHub({
+        count: 3,
+        identities,
+        fullnode: Object.assign({}, FULLNODE_CFG, { GENESIS_VERIFIERS: fullPubkeys }),
+        // Hubs 0,1 = full (coin RPC); hub 2 = light (no coin node).
+        coinRpcUrls: [COIN_RPC, COIN_RPC, null],
+    })
+    await mvh.start()
+}
 
-        // Fixed (deterministic) identities so GENESIS_VERIFIERS can name the two
-        // full hubs AND match the regtest indexer's FULLNODE_GENESIS_VERIFIERS env.
-        identities  = FIXED_SEEDS.map((seed) => {
-            const vi = new ValidatorIdentity(seed)
-            return { pubkeyHex: vi.getPubkeyHex(), privkeyHex: seed }
-        })
-        fullPubkeys = [identities[0].pubkeyHex, identities[1].pubkeyHex]
-        lightPubkey = identities[2].pubkeyHex
-        console.log('NODEPROOF genesis verifiers (set indexer FULLNODE_GENESIS_VERIFIERS to these):')
-        console.log('  ' + fullPubkeys.join(','))
-
-        mvh = new MultiValidatorHub({
-            count: 3,
-            identities,
-            fullnode: Object.assign({}, FULLNODE_CFG, { GENESIS_VERIFIERS: fullPubkeys }),
-            // Hubs 0,1 = full (coin RPC); hub 2 = light (no coin node).
-            coinRpcUrls: [COIN_RPC, COIN_RPC, null],
-        })
-        await mvh.start()
-
-        // Stake every pubkey above the full_node MIN_STAKE (2000) so all three are
+async function stakeNodeProofClaimants() {
+    // Stake every pubkey above the full_node MIN_STAKE (2000) so all three are
         // claimants in the capability snapshot. The light hub is a claimant that
         // cannot answer, which is exactly the case the proof must catch.
         for (let i = 0; i < identities.length; i++) {
@@ -177,9 +166,11 @@ describe('Federation: full-node tier (NODEPROOF) possession proof', function () 
             assert.strictEqual(res.stake.status, 'valid', 'stake ' + i + ' should be valid')
         }
         await regtestMinerConnector.generateBlocks(7)   // activation window
-        await _settleStack()
+    await _settleStack()
+}
 
-        // Fund a publisher and wire it as the NODEPROOF verdict broadcaster (only
+async function configureNodeProofPublisher() {
+    // Fund a publisher and wire it as the NODEPROOF verdict broadcaster (only
         // the elected leader invokes it per epoch, so one shared address is fine).
         const publisherAddr = await cryptoHelper.getNewFundedAddress('np-publisher', COIN, NETWORK, null, 'legacy', 0, 0.02)
         await regtestMinerConnector.generateBlocks(2)
@@ -187,17 +178,30 @@ describe('Federation: full-node tier (NODEPROOF) possession proof', function () 
         mvh.setNodeProofBroadcastHook(async (wirePayload) => {
             const txHash = await transactionHelper.createAndSendTransaction(publisherAddr, wirePayload)
             return { txid: txHash }
-        })
     })
+}
 
-    after(async function () {
-        if (mvh) {
-            await mvh.stop()
-            await mvh.dropDatabases()
-        }
-    })
+async function setupNodeProof() {
+    if (!requireFederationEnv(this)) return
+    if (!COIN_RPC) {
+        console.warn('SKIP: FULLNODE_BTC_RPC_URL not set (regtest bitcoind RPC endpoint required)')
+        this.skip()
+        return
+    }
+    await assertCleanValidatorSet(indexerDatabase)
+    await startNodeProofHubs()
+    await stakeNodeProofClaimants()
+    await configureNodeProofPublisher()
+}
 
-    it('verifies the FULL validators and excludes the LIGHT one', async function () {
+async function teardownNodeProof() {
+    if (mvh) {
+        await mvh.stop()
+        await mvh.dropDatabases()
+    }
+}
+
+async function verifiesFullValidators() {
         // Cross an epoch boundary; the engines poll the tip, answer, sign, and the
         // leader publishes a NODEPROOF verdict that the indexer records.
         await regtestMinerConnector.generateBlocks(6)
@@ -226,9 +230,9 @@ describe('Federation: full-node tier (NODEPROOF) possession proof', function () 
         }
         assert(!verified.has(lightPubkey.toLowerCase()),
             'LIGHT validator (no coin node) must NOT be verified')
-    })
+}
 
-    it('accrues passing verdicts for the FULL hubs while the LIGHT one earns none', async function () {
+async function accruesFullHubVerdicts() {
         // Reward-only model: there is NO slashing. The full-node reward tranche is
         // gated on a PARTICIPATION RATE over a trailing window (db.getFullNodeParticipation
         // -> price/index.js). The LIGHT validator never answers, so it accrues ZERO passing
@@ -258,5 +262,14 @@ describe('Federation: full-node tier (NODEPROOF) possession proof', function () 
         }
         assert(!byPubkey.has(lightPubkey.toLowerCase()),
             'LIGHT validator (never answers) must accrue NO passing verdicts, earning no full-node tranche')
-    })
+}
+
+describe('Federation: full-node tier (NODEPROOF) possession proof', function () {
+    // 3 hubs x (start + DB) + staking + activation + epoch mining + sign round
+    // + on-chain verdict + indexer processing.
+    this.timeout(12 * 60 * 1000)
+    before(setupNodeProof)
+    after(teardownNodeProof)
+    it('verifies the FULL validators and excludes the LIGHT one', verifiesFullValidators)
+    it('accrues passing verdicts for the FULL hubs while the LIGHT one earns none', accruesFullHubVerdicts)
 })
