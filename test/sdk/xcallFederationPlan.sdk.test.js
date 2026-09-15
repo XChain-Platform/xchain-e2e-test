@@ -76,6 +76,10 @@ describe('[sdk] XCALL federation quorum-drop planner', function () {
         });
     });
 
+});
+
+describe('[sdk] XCALL federation quorum-drop planner', function () {
+
     describe('parseFederationSpec', function () {
         it('reads container=pubkey pairs off XCALL_HUB_CONTAINERS', function () {
             const spec = plan.parseFederationSpec({
@@ -108,6 +112,10 @@ describe('[sdk] XCALL federation quorum-drop planner', function () {
             expect(() => plan.parseFederationSpec({ XCALL_HUB_CONTAINERS: 'hub-2,hub-2' })).to.throw(/listed twice/);
         });
     });
+
+});
+
+describe('[sdk] XCALL federation quorum-drop planner', function () {
 
     describe('planQuorumDrop on an N=3 equal-stake federation', function () {
         const snap = snapshot([{ pubkey: PK(1) }, { pubkey: PK(2) }, { pubkey: PK(3) }]);
@@ -145,6 +153,10 @@ describe('[sdk] XCALL federation quorum-drop planner', function () {
             expect(plan.meetsStakeThreshold(plan.toUnits('5000.00000000'), total)).to.equal(false);
         });
     });
+
+});
+
+describe('[sdk] XCALL federation quorum-drop planner', function () {
 
     describe('planQuorumDrop when part of the federation cannot be stopped', function () {
         // A common venue shape: relay hub 1 is a HOST process, hubs 2 and 3 are containers.
@@ -197,6 +209,10 @@ describe('[sdk] XCALL federation quorum-drop planner', function () {
             })).to.throw(/2 container\(s\) unattributed: hub-2, hub-3/);
         });
     });
+
+});
+
+describe('[sdk] XCALL federation quorum-drop planner', function () {
 
     describe('planQuorumDrop refuses to plan off a snapshot it cannot trust', function () {
         it('rejects an empty validator set rather than reading it as "nobody can dispatch"', function () {
