@@ -37,7 +37,6 @@
 
 const dotenv = require('dotenv');
 dotenv.config();
-
 const assert = require('assert');
 const { MultiValidatorHub }   = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
@@ -64,7 +63,6 @@ const APPLY_WAIT_MS = 60_000;  // COMMIT propagation + follower applyConfig
 // The negative case has no event to wait for, so its window stays fixed; it is
 // spent polling, so a hub that finalizes fails the test at that moment.
 const STALL_WAIT_MS = 6000;    // long enough to confirm a round does NOT finalize
-
 // Find the hub that is the round leader for the next sequence (all hubs share the
 // same sorted validator set + seq, so exactly one matches).
 function findLeader(mvh) {
@@ -76,10 +74,8 @@ function findLeader(mvh) {
 
 describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM config-change PBFT (WI-1, L2)', function () {
     this.timeout(240_000);
-
     describe('a stake-minority (count-majority) of live hubs cannot apply a config', function () {
         let db, mvh, seed;
-
         before(async function () {
             db = await startDisposableHubDb();
             if (!db) { console.log('Skipping weighted-PBFT L2 (negative): no env DB and Docker unavailable'); this.skip(); }
@@ -128,10 +124,12 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM config-change PBFT (WI-1, L2)
                 { windowMs: STALL_WAIT_MS });
         });
     });
+});
 
+describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM config-change PBFT (WI-1, L2)', function () {
+    this.timeout(240_000);
     describe('a healthy weighted federation (whale online) applies the config on every hub', function () {
         let db, mvh, seed;
-
         before(async function () {
             db = await startDisposableHubDb();
             if (!db) { console.log('Skipping weighted-PBFT L2 (positive): no env DB and Docker unavailable'); this.skip(); }

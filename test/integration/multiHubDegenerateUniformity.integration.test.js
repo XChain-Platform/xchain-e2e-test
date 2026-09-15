@@ -44,7 +44,6 @@
 
 const dotenv = require('dotenv');
 dotenv.config();
-
 const path   = require('path');
 const assert = require('assert');
 const { MultiValidatorHub }    = require('../helpers/multiValidatorHubHelper');
@@ -55,7 +54,6 @@ const { waitForMesh, waitFor } = require('../helpers/consensusWait');
 function hubRequire(rel) { return require(path.resolve(__dirname, '../../../xchain-hub', rel)); }
 const OracleConsensus = hubRequire('src/oracle/consensus.js');
 const OracleRound     = hubRequire('src/oracle/round.js');
-
 // Deadlines, not settles: mesh formation and the C1 finalize are both observable,
 // so each wait polls its post-condition and returns on the first passing poll.
 const PEER_WAIT_MS = 60_000;
@@ -154,10 +152,8 @@ async function checkpointFinalized(hub) {
 
 describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM R-1 degenerate uniformity (WI-1 Suite C, L2)', function () {
     this.timeout(300_000);
-
     describe('C1 (N=1): every engine finalizes on the single staker', function () {
         let db, mvh, seed, engines;
-
         before(async function () {
             db = await startDisposableHubDb();
             if (!db) { console.log('Skipping C1: no env DB and Docker unavailable'); this.skip(); }
@@ -204,10 +200,12 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM R-1 degenerate uniformity (WI
                 assert.strictEqual(ok, true, 'engine ' + engine + ' did NOT finalize at N=1 (expected single-staker finalize)');
         });
     });
+});
 
+describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM R-1 degenerate uniformity (WI-1 Suite C, L2)', function () {
+    this.timeout(300_000);
     describe('C2 (S=0): no engine finalizes under zero total stake', function () {
         let db, mvh, seed, engines;
-
         before(async function () {
             db = await startDisposableHubDb();
             if (!db) { console.log('Skipping C2: no env DB and Docker unavailable'); this.skip(); }

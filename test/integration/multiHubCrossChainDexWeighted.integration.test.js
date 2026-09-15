@@ -43,7 +43,6 @@
 
 const dotenv = require('dotenv');
 dotenv.config();
-
 const assert = require('assert');
 const { MultiValidatorHub, ValidatorIdentity } = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
@@ -114,7 +113,6 @@ async function driveRound(mvh, settleMs = SETTLE_MS) {
 
 describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM cross-chain DEX match (WI-1 Suite A4, L2)', function () {
     this.timeout(240_000);
-
     describe('a stake-minority (count-majority) of live hubs cannot finalize a match', function () {
         let db, mvh, seed, book;
 
@@ -150,7 +148,6 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM cross-chain DEX match (WI-1 S
             if (mvh)  { await mvh.stop(); await mvh.dropDatabases(); }
             if (db)   { await db.stop(); }
         });
-
         it('no match finalizes and no settleable row is written on any hub', async function () {
             const events = await driveRound(mvh);
             assert.strictEqual(events.length, 0,
@@ -163,10 +160,12 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM cross-chain DEX match (WI-1 S
             }
         });
     });
+});
 
+describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM cross-chain DEX match (WI-1 Suite A4, L2)', function () {
+    this.timeout(240_000);
     describe('a healthy weighted federation finalizes the match on every hub', function () {
         let db, mvh, seed, book;
-
         before(async function () {
             db = await startDisposableHubDb();
             if (!db) { console.log('Skipping A4 (positive): no env DB and Docker unavailable'); this.skip(); }
@@ -191,21 +190,16 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM cross-chain DEX match (WI-1 S
                     { pubkey: ids[3].pubkeyHex, source: 'sD', weight: '1000' },
                 ],
             });
-        });
-
-        after(async function () {
+        }); after(async function () {
             if (seed) seed.restore();
             if (book) await book.stop();
             if (mvh)  { await mvh.stop(); await mvh.dropDatabases(); }
             if (db)   { await db.stop(); }
-        });
-
-        it('the weighted quorum is reached: the identical match finalizes on EVERY hub', async function () {
+        }); it('the weighted quorum is reached: the identical match finalizes on EVERY hub', async function () {
             const events = await driveRound(mvh);
             assert.strictEqual(events.length, 4, 'expected all 4 hubs to finalize, got ' + events.length);
             const matchIds = new Set(events.map((e) => e.matchId));
             assert.strictEqual(matchIds.size, 1, 'hubs finalized different match_ids: ' + JSON.stringify([...matchIds]));
-
             // Each finalize carries >=2 DISTINCT verifying sigs (no single source >=2/3),
             // and persists a finalized row on every hub.
             const dexes = mvh.getCrossChainDexes();
