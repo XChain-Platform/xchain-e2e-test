@@ -50,7 +50,9 @@ describe('check-stake-teardown gate', () => {
         ].join('\n'))
         assert.strictEqual(hits.length, 0)
     })
+})
 
+describe('check-stake-teardown gate', () => {
     it('accepts the marker on the payload\'s own line', () => {
         assert.strictEqual(scan("let msg = 'STAKE|1|0|' + p // stake-teardown-ok: zero amount, always rejected").length, 0)
     })
@@ -70,7 +72,9 @@ describe('check-stake-teardown gate', () => {
         ].join('\n'))
         assert.strictEqual(hits.length, 0)
     })
+})
 
+describe('check-stake-teardown gate', () => {
     it('does not flag a payload quoted in a comment', () => {
         const hits = scan([
             "// the wire form is 'STAKE|1|<amount>|<pubkey>'",
