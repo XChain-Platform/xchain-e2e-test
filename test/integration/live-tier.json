@@ -1,7 +1,7 @@
 {
     "_comment": [
         "The live integration tier's roster. scripts/run-live-tier.js runs the",
-        "run:true suites; test/unit/scripts/liveTierRoster.test.js fails the hermetic unit",
+        "run:true suites; test/unit/scripts/live_tier_roster.test.js fails the hermetic unit",
         "tier when this file stops matching test/integration/, so a new *.integration.test.js",
         "cannot join the tier without somebody deciding whether a venue can actually run it.",
         "Every run:false entry states why in prose, and the runner prints them on green runs",
