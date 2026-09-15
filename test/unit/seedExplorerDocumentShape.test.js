@@ -72,9 +72,28 @@ const STATUS_DOC = {
 
 const TXID = 'b'.repeat(64);
 const quiet = () => {};
+const ActionWaiter = loadActionWaiter();
+const TX = 'c'.repeat(64);
+
+// A genuine CONFIRMATION_TIMEOUT: the waiter polls an explorer that
+// does not carry the transaction, and its own clock runs out.
+async function realTimeout() {
+    const waiter = new ActionWaiter({}, { explorer: { getTransaction: async () => null } });
+    try {
+        await waiter.waitForTxid(TX, { timeout: 60, pollInterval: 20 });
+    } catch (e) {
+        return e;
+    }
+    throw new Error('the waiter resolved; no timeout to test with');
+}
 
 describe('seed-contract-state explorerField: documents, not scalars', function () {
+    registerTokenDocumentCasesA();
+    registerTokenDocumentCasesB();
+    registerTokenDocumentCaseC();
+});
 
+function registerTokenDocumentCasesA() {
     describe('the token document', function () {
 
         it('pins the shape the tool got wrong: there is NO top-level tick', function () {
@@ -112,6 +131,11 @@ describe('seed-contract-state explorerField: documents, not scalars', function (
             assert.strictEqual(r.value, 'XCHAIN');
             assert.strictEqual(r.at, 'info.tick');
         });
+    });
+}
+
+function registerTokenDocumentCasesB() {
+    describe('the token document', function () {
 
         it('separates "the explorer said nothing" from "the field moved"', function () {
             // Nothing to read: an absent token, legitimately.
@@ -142,6 +166,11 @@ describe('seed-contract-state explorerField: documents, not scalars', function (
                 assert.strictEqual(explorerField(doc, 'tick').value, 'XCHAIN', env);
             }
         });
+    });
+}
+
+function registerTokenDocumentCaseC() {
+    describe('the token document', function () {
 
         it('ignores the OTHER tick in the live document (callback.tick, which is null)', function () {
             // Read from https://explorer.xchain.io/TBTC/api/token/XCHAIN on
@@ -163,6 +192,9 @@ describe('seed-contract-state explorerField: documents, not scalars', function (
             assert.strictEqual(r.at, 'info.tick');
         });
     });
+}
+
+describe('seed-contract-state explorerField: documents, not scalars', function () {
 
     describe('the fleet status document (the map-valued read)', function () {
 
@@ -193,6 +225,9 @@ describe('seed-contract-state explorerField: documents, not scalars', function (
             assert.strictEqual(r.at, 'data.last_block.TBTC');
         });
     });
+});
+
+describe('seed-contract-state explorerField: documents, not scalars', function () {
 
     describe('isExplorerError', function () {
 
@@ -209,6 +244,9 @@ describe('seed-contract-state explorerField: documents, not scalars', function (
             assert.strictEqual(isExplorerError([{ error: 'x' }]), false);
         });
     });
+});
+
+describe('seed-contract-state explorerField: documents, not scalars', function () {
 
     describe('the timeout recovery reads through the same helper', function () {
 
@@ -254,6 +292,9 @@ describe('seed-contract-state explorerField: documents, not scalars', function (
             await assert.rejects(() => makeSubmitChecked(sdk, quiet)({}, {}, {}, 'MINT'), e => e === err);
         });
     });
+});
+
+describe('seed-contract-state explorerField: documents, not scalars', function () {
 
     // The falsification this guards against, driven off a REAL
     // CONFIRMATION_TIMEOUT rather than a hand-written one.
@@ -266,25 +307,15 @@ describe('seed-contract-state explorerField: documents, not scalars', function (
     // milliseconds. If the SDK ever renames the code or drops the txid, these
     // fail rather than the next testnet run.
     // -----------------------------------------------------------------------
+    registerForcedTimeoutCasesA();
+    registerForcedTimeoutCasesB();
+});
+
+function registerForcedTimeoutCasesA() {
     describe('forced against the SDK\'s own timeout (leg b falsification)', function () {
 
-        const ActionWaiter = loadActionWaiter();
-        const TX = 'c'.repeat(64);
-
-        // A genuine CONFIRMATION_TIMEOUT: the waiter polls an explorer that
-        // does not carry the transaction, and its own clock runs out.
-        async function realTimeout() {
-            const waiter = new ActionWaiter({}, { explorer: { getTransaction: async () => null } });
-            try {
-                await waiter.waitForTxid(TX, { timeout: 60, pollInterval: 20 });
-            } catch (e) {
-                return e;
-            }
-            throw new Error('the waiter resolved; no timeout to test with');
-        }
-
         beforeEach(function () {
-            if (!ActionWaiter) this.skip();   // sibling SDK checkout not present
+            if (!ActionWaiter) this.skip();
         });
 
         it('the SDK still raises the code and the txid this recovery is built on', async function () {
@@ -320,6 +351,15 @@ describe('seed-contract-state explorerField: documents, not scalars', function (
             assert.strictEqual(res.indexed.block_index, 146981);
             assert.strictEqual(asked, 1, 'the chain is asked once, not polled again');
         });
+    });
+}
+
+function registerForcedTimeoutCasesB() {
+    describe('forced against the SDK\'s own timeout (leg b falsification)', function () {
+
+        beforeEach(function () {
+            if (!ActionWaiter) this.skip();   // sibling SDK checkout not present
+        });
 
         it('a transaction that is NOT indexed: it still FAILS, with the original error', async function () {
             const err = await realTimeout();
@@ -350,4 +390,4 @@ describe('seed-contract-state explorerField: documents, not scalars', function (
             await assert.rejects(() => makeSubmitChecked(sdk, quiet)({}, {}, {}, 'DEPLOY'), e => e === err);
         });
     });
-});
+}
