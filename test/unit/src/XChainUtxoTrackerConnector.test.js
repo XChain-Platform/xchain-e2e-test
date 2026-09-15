@@ -26,23 +26,24 @@ function makeHttpError(status) {
     return err;
 }
 
+const URL  = 'localhost';
+const PORT = 3000;
+
+let tracker;
+let axiosPostStub;
+
+function setupTracker() {
+    axiosPostStub = sinon.stub(axios, 'post');
+    tracker = new UtxoTracker(URL, PORT);
+}
+
+function teardownTracker() {
+    sinon.restore();
+}
+
 describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
-
-    const URL  = 'localhost';
-    const PORT = 3000;
-
-    let tracker;
-    let axiosPostStub;
-
-    beforeEach(function () {
-        axiosPostStub = sinon.stub(axios, 'post');
-        tracker = new UtxoTracker(URL, PORT);
-    });
-
-    afterEach(function () {
-        sinon.restore();
-    });
-
+    beforeEach(setupTracker);
+    afterEach(teardownTracker);
     describe('constructor', function () {
         it('builds the URL as http://{url}:{port}', function () {
             assert.strictEqual(tracker.url, `http://${URL}:${PORT}`);
@@ -52,7 +53,11 @@ describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
             assert.strictEqual(tracker.port, PORT);
         });
     });
+});
 
+describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
+    beforeEach(setupTracker);
+    afterEach(teardownTracker);
     describe('ping', function () {
         it('returns true when responseData.result is truthy', async function () {
             axiosPostStub.resolves(makeResponse({ result: 'pong' }));
@@ -93,7 +98,11 @@ describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
             assert.strictEqual(opts.headers['Content-Type'], 'application/json');
         });
     });
+});
 
+describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
+    beforeEach(setupTracker);
+    afterEach(teardownTracker);
     describe('getUtxosFromAddress', function () {
         const ADDRESS = 'bcrt1qtest';
         const fakeResult = { utxos: [{ txid: 'abc', vout: 0, value: 5000 }] };
@@ -131,11 +140,15 @@ describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
             );
         });
     });
+});
 
-    // The barrier used to discard a failed nudge mine outright
-    // (`catch (e) {}`), so a stack that never settled came back as a bare
-    // ready=false with no cause attached and the hooks that only awaited it
-    // let the unsettled state leak into the next test.
+// Discarding a failed nudge mine outright (`catch (e) {}`) turns a stack
+// that never settles into a bare ready=false with no cause attached, and
+// hooks that only await it let the unsettled state leak into the next
+// test. This guards against that failure mode.
+describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
+    beforeEach(setupTracker);
+    afterEach(teardownTracker);
     describe('quiesce', function () {
         it('reports the settled status with a zero nudge-failure tally', async function () {
             sinon.stub(tracker, 'getQuiescentStatus').resolves({ ready: true, mempool_size: 0 });
@@ -175,10 +188,14 @@ describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
             assert.strictEqual(await tracker.quiesce({ timeoutMs: 20, pollMs: 1 }), null);
         });
     });
+});
 
-    // The barrier has to hold on exactly the condition the encoder refuses on:
-    // it gates tx construction, and the encoder answers UTXO_TRACKER_NOT_READY
-    // whenever mempool_ready === false, which block sync alone does not imply.
+// The barrier has to hold on exactly the condition the encoder refuses on:
+// it gates tx construction, and the encoder answers UTXO_TRACKER_NOT_READY
+// whenever mempool_ready === false, which block sync alone does not imply.
+describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
+    beforeEach(setupTracker);
+    afterEach(teardownTracker);
     describe('waitForSync', function () {
         it('holds while the tracker is synced but its mempool has not reconverged', async function () {
             const status = sinon.stub(tracker, 'getSyncStatus');
@@ -225,7 +242,11 @@ describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
             assert.deepStrictEqual(result, { synced: true, mempool_ready: false });
         });
     });
+});
 
+describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
+    beforeEach(setupTracker);
+    afterEach(teardownTracker);
     describe('waitForUtxos', function () {
         const ADDRESS = 'bcrt1qwait';
 
