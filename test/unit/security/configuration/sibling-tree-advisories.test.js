@@ -120,7 +120,7 @@ function* walkTree(dir, depth) {
 describe('Security: staged sibling trees carry no vulnerable copies @regression @tier4', function () {
     it('ADV-6: the floors here match the ones the lockfile guard enforces', function () {
         const companion = fs.readFileSync(
-            path.join(__dirname, 'dependency-advisories.test.js'), 'utf8');
+            path.join(__dirname, 'dependency_advisories.test.js'), 'utf8');
 
         // Pulls `{ name: 'x', minSafe: [a, b, c], ... }` out of the shared file
         // so a floor raised there and not here is a failure rather than a

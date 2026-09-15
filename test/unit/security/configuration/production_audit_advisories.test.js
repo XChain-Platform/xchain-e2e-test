@@ -134,7 +134,7 @@ function advisoryChecks() {
 
         it(`ADV-19: the shared guard's ${adv.name} floor is not above the one enforced here`, function () {
             const companion = fs.readFileSync(
-                path.join(__dirname, 'dependency-advisories.test.js'), 'utf8');
+                path.join(__dirname, 'dependency_advisories.test.js'), 'utf8');
             const re = new RegExp(
                 `\\{\\s*name:\\s*'${adv.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}',`
                 + '\\s*minSafe:\\s*\\[\\s*(\\d+),\\s*(\\d+),\\s*(\\d+)\\s*\\]');

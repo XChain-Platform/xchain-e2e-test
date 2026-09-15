@@ -123,7 +123,7 @@ describe('seed-sentinel coverage', () => {
         // still counts as "found": the split is a location change, not a
         // coverage loss.
         for (const expected of ['helpers/nativeFeeHelper.js', 'actions/dispenser.test.js',
-                                'actions/nativeFeeLive.test.js']){
+                                'actions/native_fee_live.test.js']){
             const splitDir = expected.replace(/\.js$/, '') + '/'
             assert.ok(files.some(f => f === expected || f.startsWith(splitDir)),
                 expected + ' seeds price_snapshots but the scan missed it')
