@@ -74,24 +74,25 @@ function haveConnectors() {
     return global.regtestMinerConnector && global.utxoTrackerConnector && global.nodeConnector;
 }
 
+let sdk, deployer, plan, contractIndex;
+
+async function setupChunkedDeploy() {
+    if (!haveConnectors()) this.skip();
+    sdk = makeSdk();
+    deployer = await fundedGasAddress(sdk, 1);
+
+    // Plan must require chunking, or this test proves nothing.
+    plan = chunkHelper.planDeploy(SRC, { gasLimit: GAS_LIMIT, constructorParams: [String(START)] });
+    expect(plan.single, 'source must NOT fit a single DEPLOY (else not testing chunking)').to.equal(false);
+    expect(plan.totalChunks, 'expected ≥2 chunks').to.be.greaterThan(1);
+
+    console.log('    [chunked] deployer=' + deployer.address);
+    console.log('    [chunked] source=' + Buffer.byteLength(SRC, 'utf8') + ' B → ' + plan.totalChunks + ' chunks, hash=' + plan.codeHash.slice(0, 12));
+}
+
 describe('[sdk] chunked DEPLOY (large contract assembled from DEPLOY v4 carriers)', function () {
     this.timeout(0);
-
-    let sdk, deployer, plan, contractIndex;
-
-    before(async function () {
-        if (!haveConnectors()) this.skip();
-        sdk = makeSdk();
-        deployer = await fundedGasAddress(sdk, 1);
-
-        // Plan must require chunking, or this test proves nothing.
-        plan = chunkHelper.planDeploy(SRC, { gasLimit: GAS_LIMIT, constructorParams: [String(START)] });
-        expect(plan.single, 'source must NOT fit a single DEPLOY (else not testing chunking)').to.equal(false);
-        expect(plan.totalChunks, 'expected ≥2 chunks').to.be.greaterThan(1);
-
-        console.log('    [chunked] deployer=' + deployer.address);
-        console.log('    [chunked] source=' + Buffer.byteLength(SRC, 'utf8') + ' B → ' + plan.totalChunks + ' chunks, hash=' + plan.codeHash.slice(0, 12));
-    });
+    before(setupChunkedDeploy);
 
     it('uploads each base64 slice as a DEPLOY v4 carrier', async function () {
         for (let i = 0; i < plan.parts.length; i++) {
