@@ -171,6 +171,8 @@ function auditReachability(suiteFiles, specs, allowlist){
     return problems;
 }
 
+const spec = (script, s) => ({ script, spec: s });
+
 describe('every suite file is reachable from some npm script', function(){
 
     const pkg        = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'));
@@ -203,9 +205,6 @@ describe('every suite file is reachable from some npm script', function(){
 });
 
 describe('the reachability audit reports the misses it is built for', function(){
-
-    const spec = (script, s) => ({ script, spec: s });
-
     it('names a suite no spec matches', function(){
         const problems = auditReachability(
             ['test/a/one.test.js', 'test/a/two.test.js'],
@@ -240,7 +239,9 @@ describe('the reachability audit reports the misses it is built for', function()
                 []),
             []);
     });
+});
 
+describe('the reachability audit reports the misses it is built for', function(){
     it('reports an exemption a script has started running', function(){
         const problems = auditReachability(
             ['test/a/one.test.js'],
