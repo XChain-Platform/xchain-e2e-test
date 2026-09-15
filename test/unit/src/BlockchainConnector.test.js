@@ -30,25 +30,26 @@ function expectedAuth(user, pass) {
     return 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64');
 }
 
-describe('BlockchainConnector', function () {
+const URL  = 'localhost';
+const PORT = 8332;
+const USER = 'rpcuser';
+const PASS = 'rpcpass';
 
-    const URL  = 'localhost';
-    const PORT = 8332;
-    const USER = 'rpcuser';
-    const PASS = 'rpcpass';
+let connector;
+let axiosPostStub;
 
-    let connector;
-    let axiosPostStub;
-
+function connectorHooks() {
     beforeEach(function () {
         axiosPostStub = sinon.stub(axios, 'post');
         connector = new BlockchainConnector(URL, PORT, USER, PASS);
     });
-
     afterEach(function () {
         sinon.restore();
     });
+}
 
+describe('BlockchainConnector', function () {
+    connectorHooks();
     describe('constructor', function () {
         it('builds the URL as http://{url}:{port}', function () {
             assert.strictEqual(connector.url, `http://${URL}:${PORT}`);
@@ -59,7 +60,10 @@ describe('BlockchainConnector', function () {
             assert.strictEqual(connector.rpcPassword, PASS);
         });
     });
+});
 
+describe('BlockchainConnector', function () {
+    connectorHooks();
     describe('getNetworkInfo', function () {
         it('sends the correct JSON-RPC payload with method getnetworkinfo', async function () {
             const fakeResult = { version: 210000 };
@@ -106,7 +110,10 @@ describe('BlockchainConnector', function () {
             );
         });
     });
+});
 
+describe('BlockchainConnector', function () {
+    connectorHooks();
     describe('getTransactionHex', function () {
         const TXID = 'abc123';
         const HEX  = 'deadbeef';
@@ -143,7 +150,10 @@ describe('BlockchainConnector', function () {
             );
         });
     });
+});
 
+describe('BlockchainConnector', function () {
+    connectorHooks();
     describe('broadcastTx', function () {
         const TX_HEX  = 'cafebabe';
         const TX_HASH = 'txhash999';
@@ -189,7 +199,10 @@ describe('BlockchainConnector', function () {
             );
         });
     });
+});
 
+describe('BlockchainConnector', function () {
+    connectorHooks();
     describe('waitForTx', function () {
         const TXID = 'txid-abc';
 
@@ -219,7 +232,10 @@ describe('BlockchainConnector', function () {
             }
         });
     });
+});
 
+describe('BlockchainConnector', function () {
+    connectorHooks();
     describe('setMockTime', function () {
         it('sends setmocktime with the numeric timestamp', async function () {
             axiosPostStub.resolves(makeResponse({ result: null }));
@@ -266,9 +282,12 @@ describe('BlockchainConnector', function () {
             );
         });
     });
+});
 
+describe('BlockchainConnector', function () {
     // Reorg-drill primitives: enumerate a block's transactions, put an orphaned
     // transaction back, and tell "in the mempool" apart from "already re-mined".
+    connectorHooks();
     describe('getBlock', function () {
         it('sends getblock with the hash and default verbosity 1', async function () {
             axiosPostStub.resolves(makeResponse({ result: { tx: ['a', 'b'] } }));
@@ -294,7 +313,10 @@ describe('BlockchainConnector', function () {
             await assert.rejects(() => connector.getBlock('nope'), /getblock RPC error/);
         });
     });
+});
 
+describe('BlockchainConnector', function () {
+    connectorHooks();
     describe('sendRawTransaction', function () {
         it('sends sendrawtransaction with the raw hex and returns the txid', async function () {
             axiosPostStub.resolves(makeResponse({ result: 'txid-1' }));
@@ -317,7 +339,10 @@ describe('BlockchainConnector', function () {
             );
         });
     });
+});
 
+describe('BlockchainConnector', function () {
+    connectorHooks();
     describe('getTransaction', function () {
         it('sends getrawtransaction verbose and returns the object', async function () {
             axiosPostStub.resolves(makeResponse({ result: { txid: 'txid-1', confirmations: 3 } }));
@@ -342,7 +367,10 @@ describe('BlockchainConnector', function () {
             assert.strictEqual(await connector.getTransaction('boom'), null);
         });
     });
+});
 
+describe('BlockchainConnector', function () {
+    connectorHooks();
     describe('getFeePerKilobyte', function () {
         it('returns feerate when present in response', async function () {
             const feerate = 0.00012345;
