@@ -98,6 +98,13 @@ describe('XChainHubConnector hub-served consensus-hash cross-check', function(){
         assert.ok(lines[0].includes(vendored), 'quotes the vendored hash it was compared against');
         assert.ok(!lines[0].includes('LTC/regtest'), 'does not report coins that match');
     });
+});
+
+describe('XChainHubConnector hub-served consensus-hash cross-check', function(){
+
+    afterEach(function(){
+        nock.cleanAll();
+    });
 
     it('is silent against an older hub that serves no hashes at all', async function(){
         let hub = new XChainHubConnector([HUB_BASE]);
