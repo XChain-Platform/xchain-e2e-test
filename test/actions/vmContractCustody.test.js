@@ -37,9 +37,7 @@ const { waitForTxIndexed } = require('../helpers/indexerWait')
  * for swaps (a swap's source is always its on-chain signer). There is nothing to e2e-test there;
  * the swap leg is intentionally omitted.
  */
-describe('VM Contract Custody: emitted entities belong to the contract, not the caller', function () {
-
-    const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
+const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
 
     // Issues a brand-new token from inside the contract, then exposes a re-issue (description
     // edit). Both emissions carry the contract as SOURCE, so the contract (not the EXECUTE
@@ -154,12 +152,12 @@ describe('VM Contract Custody: emitted entities belong to the contract, not the 
     }
     function randTick(p) { let s = p; for (let i = 0; i < 5; i++) s += String.fromCharCode(65 + Math.floor(Math.random() * 26)); return s }
 
-    before(async function () {
-        deployer = await cryptoHelper.getNewFundedAddress('vmcust-deployer', COIN, NETWORK, null, 'legacy', 0, 1)
-        await gasHelper.ensureGasBalance(deployer, '500')
-    })
+async function setupContractCustody() {
+    deployer = await cryptoHelper.getNewFundedAddress('vmcust-deployer', COIN, NETWORK, null, 'legacy', 0, 1)
+    await gasHelper.ensureGasBalance(deployer, '500')
+}
 
-    it('a contract-issued token is OWNED by the contract, not the EXECUTE caller', async function () {
+async function provesContractTokenOwnership() {
         const tick = randTick('VCO')
         const dep = await vmHelper.sendDeployV0(deployer, ISSUER, 300000)
         const ci = dep.contract.action_index
@@ -183,9 +181,9 @@ describe('VM Contract Custody: emitted entities belong to the contract, not the 
         // And the MINT_SUPPLY landed in the contract's balance, not the caller's.
         assert.strictEqual(await balanceOf(contractAddr, tick), '500', 'minted supply credited to the contract')
         assert.strictEqual(await balanceOf(deployer.address, tick), null, 'caller holds none of the token')
-    })
+}
 
-    it('the EXECUTE caller CANNOT re-issue (edit) the contract-owned token', async function () {
+async function rejectsCallerReissue() {
         const tick = randTick('VCR')
         const dep = await vmHelper.sendDeployV0(deployer, ISSUER, 300000)
         const ci = dep.contract.action_index
@@ -216,9 +214,9 @@ describe('VM Contract Custody: emitted entities belong to the contract, not the 
             "the caller's re-issue must be rejected as 'issued by another address', got: " + st)
         assert.strictEqual(await descOf(tick), 'v1-contract-owned', 'description must be unchanged by the caller')
         assert.strictEqual(await ownerOf(tick), contractAddr, 'ownership must remain with the contract')
-    })
+}
 
-    it('the CONTRACT itself CAN re-issue (edit) its own token', async function () {
+async function acceptsContractReissue() {
         const tick = randTick('VCE')
         const dep = await vmHelper.sendDeployV0(deployer, ISSUER, 300000)
         const ci = dep.contract.action_index
@@ -240,9 +238,9 @@ describe('VM Contract Custody: emitted entities belong to the contract, not the 
 
         assert.strictEqual(await descOf(tick), 'v2-by-contract', 'owning contract successfully edited the description')
         assert.strictEqual(await ownerOf(tick), contractAddr, 'ownership stays with the contract after re-issue')
-    })
+}
 
-    it("a contract's dispenser refunds its remaining escrow to the contract on expiry", async function () {
+async function refundsDispenserEscrow() {
         const tick = randTick('VCD')
         // Issue tick to deployer, deploy, deposit exactly the escrow amount (100) into the contract.
         await issueHelper.sendIssueV0(deployer, tick, '1000', '1000', '0', 'vm cust disp', '1000')
@@ -278,9 +276,9 @@ describe('VM Contract Custody: emitted entities belong to the contract, not the 
         // contract, via source_id): 0 -> 100. Pre-fix it would have refunded the EXECUTE caller.
         assert.strictEqual(refunded, '100', 'remaining escrow refunded to the contract on dispenser expiry')
         assert.strictEqual(await balanceOf(fresh.address, tick), null, 'the EXECUTE caller / recipient got no refund')
-    })
+}
 
-    it('the EXECUTE caller CANNOT cancel the contract\'s own order', async function () {
+async function rejectsCallerCancellation() {
         const tick = randTick('VCC')
         await issueHelper.sendIssueV0(deployer, tick, '1000', '1000', '0', 'vm cust cancel', '1000')
         const dep = await vmHelper.sendDeployV0(deployer, SELF_ORDERER, 250000)
@@ -310,5 +308,13 @@ describe('VM Contract Custody: emitted entities belong to the contract, not the 
         assert.strictEqual(await orderStatus(orderIndex), 'open', "the contract's order must remain open")
         assert.strictEqual(await balanceOf(contractAddr, tick), '60',
             'escrow must remain held; the non-owner caller cannot cancel the contract order')
-    })
+}
+
+describe('VM Contract Custody: emitted entities belong to the contract, not the caller', function () {
+    before(setupContractCustody)
+    it('a contract-issued token is OWNED by the contract, not the EXECUTE caller', provesContractTokenOwnership)
+    it('the EXECUTE caller CANNOT re-issue (edit) the contract-owned token', rejectsCallerReissue)
+    it('the CONTRACT itself CAN re-issue (edit) its own token', acceptsContractReissue)
+    it("a contract's dispenser refunds its remaining escrow to the contract on expiry", refundsDispenserEscrow)
+    it('the EXECUTE caller CANNOT cancel the contract\'s own order', rejectsCallerCancellation)
 })
