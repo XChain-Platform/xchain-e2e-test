@@ -77,9 +77,7 @@ async function waitForActiveValidators(wantPubkeys, attempts = 40) {
     return byPubkey;
 }
 
-describe('[sdk] stake additional XCALL federation validators', function () {
-    this.timeout(0);
-
+function registerStakeValidatorTest() {
     it('stakes every pubkey in XCALL_STAKE_PUBKEYS and registers them as active cross_chain validators', async function () {
         // Each entry is `pubkey` (defaults to 5000) or `pubkey:amount` for an
         // uneven federation. Stake-weighted quorum dedupes by SOURCE, so each pubkey
@@ -92,7 +90,6 @@ describe('[sdk] stake additional XCALL federation validators', function () {
             expect(s.pubkey, 'signingPubkey must be a 64-hex Ed25519 key').to.match(/^[0-9a-f]{64}$/);
             expect(s.amount, 'stake amount must be numeric').to.match(/^[0-9]+(\.[0-9]+)?$/);
         }
-
         const sdk = makeSdk();
         for (const { pubkey, amount } of specs) {
             const staker = await fundedGasAddress(sdk, 1);
@@ -139,4 +136,9 @@ describe('[sdk] stake additional XCALL federation validators', function () {
 
         console.log('    [stake-validators] done (' + specs.length + ' pubkeys, ' + seenSources.size + ' active source(s) verified)');
     });
+}
+
+describe('[sdk] stake additional XCALL federation validators', function () {
+    this.timeout(0);
+    registerStakeValidatorTest();
 });
