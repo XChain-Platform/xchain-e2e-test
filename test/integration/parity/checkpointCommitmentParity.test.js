@@ -153,9 +153,19 @@ describe('SPV Phase 2: CHECKPOINT_COMMITMENT cross-service parity', function () 
         // The Phase 3 proof server builds SMT/block proofs with an explorer-local copy
         // of merkle.js; a client recomputes with the SDK's merkle logic and binds to the
         // indexer-committed root. A single byte of drift makes server proofs unverifiable.
+        //
+        // The explorer carries this twin at src/consensus/merkle.js, its layout-pass home,
+        // and at src/merkle.js before that move lands. Either spelling is read so the
+        // guard holds on both sides of the move; a checkout with neither fails naming
+        // both paths rather than skipping, because a skipped twin guard is how a copy
+        // drifts without a red run.
         const idx = fs.readFileSync(path.join(ROOT, 'xchain-indexer/src/consensus/merkle.js'), 'utf8');
-        const exp = fs.readFileSync(path.join(ROOT, 'xchain-explorer/src/merkle.js'), 'utf8');
-        assert.strictEqual(exp, idx, 'xchain-explorer/src/merkle.js drifted from the indexer merkle.js');
+        const candidates = ['xchain-explorer/src/consensus/merkle.js', 'xchain-explorer/src/merkle.js'];
+        const rel = candidates.find((p) => fs.existsSync(path.join(ROOT, p)));
+        assert.ok(rel, 'the explorer merkle.js twin resolved at neither '
+            + candidates.map((p) => path.join(ROOT, p)).join(' nor '));
+        const exp = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+        assert.strictEqual(exp, idx, rel + ' drifted from the indexer merkle.js');
     });
 
     it('sdk merkle.js is a byte-identical twin of the indexer merkle.js (Phase 4 light client)', function () {
