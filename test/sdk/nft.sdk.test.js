@@ -68,18 +68,46 @@ async function classifyNft(sdk, res) {
     return sdk.nft.isNft(await sdk.getAction(idx));
 }
 
-describe('[sdk] NFT pattern (ISSUE DECIMALS=0 + LOCK_MAX_SUPPLY=1)', function () {
-    this.timeout(0);
+let sdk, issuer, other;
+let tick, issueActionIndex, fileActionIndex;
+let contentSetupComplete = false;
 
-    let sdk, issuer, other;
+async function setupNft() {
+    sdk    = makeSdk();
+    issuer = await fundedGasAddress(sdk, 1);
+    other  = await fundedGasAddress(sdk, 1);
+    console.log('    [sdk] issuer=' + issuer.address + ' other=' + other.address);
+}
 
-    before(async function () {
-        sdk    = makeSdk();
-        issuer = await fundedGasAddress(sdk, 1);
-        other  = await fundedGasAddress(sdk, 1);
-        console.log('    [sdk] issuer=' + issuer.address + ' other=' + other.address);
-    });
+async function setupContent() {
+    if (contentSetupComplete) return;
+    tick = uniqueTick('NFTC');
+    const issued = await submit(sdk,
+        { action: 'ISSUE', params: sdk.nft.unique({ tick }) },
+        { pubkey: issuer.address, change: issuer.address },
+        submitOpts({ wif: issuer.wif })
+    );
+    expect(statusOf(issued), 'NFT ISSUE').to.equal('valid');
+    issueActionIndex = actionIndexOf(issued.indexed);
 
+    // A real (decodable) 24x24 PNG (an orange square) so the
+    // explorer's raw endpoint serves a renderable image and visual
+    // passes of the NFT surfaces show actual artwork.
+    const ART_PNG = Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAIAAABvFaqvAAAAJ0lEQVR4nGNYECBCFcSwIEDk+2QpCtGoQaMGjRo0atCoQSPXIKogAHcNd64kvBMEAAAAAElFTkSuQmCC',
+        'base64'
+    );
+    const file = await submit(sdk,
+        { action: 'FILE', params: { name: 'art.png', type: 'image/png', title: 'Cover' } },
+        { pubkey: issuer.address, change: issuer.address, rawData: ART_PNG.toString('binary') },
+        submitOpts({ wif: issuer.wif })
+    );
+    expect(statusOf(file), 'FILE upload').to.equal('valid');
+    fileActionIndex = actionIndexOf(file.indexed);
+    contentSetupComplete = true;
+}
+
+function registerNftCoreTests() {
     it('issues a unique 1-of-1 and classifies it as an NFT', async function () {
         const tick = uniqueTick('NFT1');
         const res = await submit(sdk,
@@ -136,7 +164,9 @@ describe('[sdk] NFT pattern (ISSUE DECIMALS=0 + LOCK_MAX_SUPPLY=1)', function ()
         );
         expect(statusOf(res), 'fractional NFT SEND').to.match(/^invalid/);
     });
+}
 
+function registerNftCollectionTests() {
     describe('collections (parent/child sub-TICKs)', function () {
         let parent;
 
@@ -169,35 +199,11 @@ describe('[sdk] NFT pattern (ISSUE DECIMALS=0 + LOCK_MAX_SUPPLY=1)', function ()
             expect(statusOf(res), 'child ISSUE from non-owner').to.match(/^invalid/);
         });
     });
+}
 
+function registerNftContentOwnershipTests() {
     describe('content attachment (FILE + owner-validated LINK)', function () {
-        let tick, issueActionIndex, fileActionIndex;
-
-        before(async function () {
-            tick = uniqueTick('NFTC');
-            const issued = await submit(sdk,
-                { action: 'ISSUE', params: sdk.nft.unique({ tick }) },
-                { pubkey: issuer.address, change: issuer.address },
-                submitOpts({ wif: issuer.wif })
-            );
-            expect(statusOf(issued), 'NFT ISSUE').to.equal('valid');
-            issueActionIndex = actionIndexOf(issued.indexed);
-
-            // A real (decodable) 24x24 PNG (an orange square) so the
-            // explorer's raw endpoint serves a renderable image and visual
-            // passes of the NFT surfaces show actual artwork.
-            const ART_PNG = Buffer.from(
-                'iVBORw0KGgoAAAANSUhEUgAAABgAAAAYCAIAAABvFaqvAAAAJ0lEQVR4nGNYECBCFcSwIEDk+2QpCtGoQaMGjRo0atCoQSPXIKogAHcNd64kvBMEAAAAAElFTkSuQmCC',
-                'base64'
-            );
-            const file = await submit(sdk,
-                { action: 'FILE', params: { name: 'art.png', type: 'image/png', title: 'Cover' } },
-                { pubkey: issuer.address, change: issuer.address, rawData: ART_PNG.toString('binary') },
-                submitOpts({ wif: issuer.wif })
-            );
-            expect(statusOf(file), 'FILE upload').to.equal('valid');
-            fileActionIndex = actionIndexOf(file.indexed);
-        });
+        before(setupContent);
 
         it('the token owner can LINK a FILE to the token', async function () {
             const res = await submit(sdk,
@@ -216,6 +222,12 @@ describe('[sdk] NFT pattern (ISSUE DECIMALS=0 + LOCK_MAX_SUPPLY=1)', function ()
             );
             expect(statusOf(res), 'non-owner LINK').to.match(/^invalid/);
         });
+    });
+}
+
+function registerNftContentDocumentTest() {
+    describe('content attachment (FILE + owner-validated LINK)', function () {
+        before(setupContent);
 
         // On-chain TIS document (TIS On-Chain Format): the token's
         // information JSON itself lives in a FILE action and DESCRIPTION
@@ -253,10 +265,12 @@ describe('[sdk] NFT pattern (ISSUE DECIMALS=0 + LOCK_MAX_SUPPLY=1)', function ()
             expect(doc.images[0].data_ref).to.equal('action:' + fileActionIndex);
         });
     });
+}
 
-    // Exercises the order_match indivisibility fix on a real DEX trade: an NFT sold
-    // through ORDER must settle an INTEGER amount (the matcher quantizes fills to the
-    // tick's 0 decimals). DB-confirmed so the assertion is deterministic.
+// Exercises the order_match indivisibility fix on a real DEX trade: an NFT sold
+// through ORDER must settle an INTEGER amount (the matcher quantizes fills to the
+// tick's 0 decimals). DB-confirmed so the assertion is deterministic.
+function registerNftTradingTest() {
     describe('trading (order_match settles NFTs as integers)', function () {
         let tick;
         const expiry = () => Math.floor(Date.now() / 1000) + 90 * 86400;
@@ -306,4 +320,14 @@ describe('[sdk] NFT pattern (ISSUE DECIMALS=0 + LOCK_MAX_SUPPLY=1)', function ()
             expect(bal.includes('.'), 'no fractional NFT settled').to.equal(false);
         });
     });
+}
+
+describe('[sdk] NFT pattern (ISSUE DECIMALS=0 + LOCK_MAX_SUPPLY=1)', function () {
+    this.timeout(0);
+    before(setupNft);
+    registerNftCoreTests();
+    registerNftCollectionTests();
+    registerNftContentOwnershipTests();
+    registerNftContentDocumentTest();
+    registerNftTradingTest();
 });
