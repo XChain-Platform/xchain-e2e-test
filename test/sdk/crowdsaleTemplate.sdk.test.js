@@ -55,41 +55,39 @@ function haveConnectors() {
     return global.regtestMinerConnector && global.utxoTrackerConnector && global.nodeConnector;
 }
 
-describe('[sdk] template:crowdsale (on-chain custody)', function () {
-    this.timeout(0);
+let SRC;                      // loaded in before() so a missing xchain-contracts skips this suite instead of aborting the whole run
+const RATE = 2, SOFT = 100, HARD = 200, DURATION = 1000, DEC = 0;
+const PAY_IN = HARD; // buy exactly the hard cap so finalize() succeeds immediately
 
-    let SRC;                      // loaded in before() so a missing xchain-contracts skips this suite instead of aborting the whole run
-    const RATE = 2, SOFT = 100, HARD = 200, DURATION = 1000, DEC = 0;
-    const PAY_IN = HARD; // buy exactly the hard cap so finalize() succeeds immediately
+let sdk, owner, payTick, saleTick, contractIndex;
 
-    let sdk, owner, payTick, saleTick, contractIndex;
+async function setupCrowdsaleTests() {
+    if (!haveConnectors()) this.skip();
+    // Load the contract template lazily so a missing xchain-contracts checkout
+    // skips this suite with a clear reason instead of aborting the whole run.
+    try {
+        SRC = loadCompactTemplate('crowdsale');
+    } catch (e) {
+        console.log('    [crowdsale] SKIP: ' + e.message.split('\n')[0]);
+        this.skip();
+    }
+    sdk = makeSdk();
 
-    before(async function () {
-        if (!haveConnectors()) this.skip();
-        // Load the contract template lazily so a missing xchain-contracts checkout
-        // skips this suite with a clear reason instead of aborting the whole run.
-        try {
-            SRC = loadCompactTemplate('crowdsale');
-        } catch (e) {
-            console.log('    [crowdsale] SKIP: ' + e.message.split('\n')[0]);
-            this.skip();
-        }
-        sdk = makeSdk();
+    // Single actor is owner + buyer: simplest deterministic SUCCESS path.
+    owner = await fundedGasAddress(sdk, 1);
+    payTick = uniqueTick('PAY');
+    saleTick = uniqueTick('SALE');
 
-        // Single actor is owner + buyer: simplest deterministic SUCCESS path.
-        owner = await fundedGasAddress(sdk, 1);
-        payTick = uniqueTick('PAY');
-        saleTick = uniqueTick('SALE');
+    const issue = await submit(sdk,
+        { action: 'ISSUE', params: { tick: payTick, maxSupply: 1000000, maxMint: 100000, decimals: DEC, description: 'pay token', mintSupply: PAY_IN } },
+        { pubkey: owner.address, change: owner.address }, submitOpts({ wif: owner.wif }));
+    expect(issue.indexed.status, 'ISSUE payTick').to.equal('valid');
 
-        const issue = await submit(sdk,
-            { action: 'ISSUE', params: { tick: payTick, maxSupply: 1000000, maxMint: 100000, decimals: DEC, description: 'pay token', mintSupply: PAY_IN } },
-            { pubkey: owner.address, change: owner.address }, submitOpts({ wif: owner.wif }));
-        expect(issue.indexed.status, 'ISSUE payTick').to.equal('valid');
+    console.log('    [crowdsale] owner=' + owner.address);
+    console.log('    [crowdsale] payTick=' + payTick + ' saleTick=' + saleTick + ' rate=' + RATE + ' soft=' + SOFT + ' hard=' + HARD);
+}
 
-        console.log('    [crowdsale] owner=' + owner.address);
-        console.log('    [crowdsale] payTick=' + payTick + ' saleTick=' + saleTick + ' rate=' + RATE + ' soft=' + SOFT + ' hard=' + HARD);
-    });
-
+function registerCrowdsaleDeploymentTest() {
     it('DEPLOY crowdsale issues the sale token in its constructor (chunked carriers + assembling DEPLOY)', async function () {
         const res = await deployContract(sdk,
             {
@@ -109,6 +107,12 @@ describe('[sdk] template:crowdsale (on-chain custody)', function () {
         expect(await readState(sdk, contractIndex, 'saleTick'), 'saleTick recorded').to.equal(saleTick);
         console.log('    [crowdsale] contractIndex=' + contractIndex);
     });
+}
+
+describe('[sdk] template:crowdsale (on-chain custody)', function () {
+    this.timeout(0);
+    before(setupCrowdsaleTests);
+    registerCrowdsaleDeploymentTest();
 
     it('BATCH(DEPOSIT, EXECUTE buy) records the contribution via getBalance', async function () {
         const built = await sdk.batch()
