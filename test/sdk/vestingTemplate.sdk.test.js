@@ -103,40 +103,47 @@ function haveConnectors() {
     return global.regtestMinerConnector && global.utxoTrackerConnector && global.nodeConnector;
 }
 
+let VESTING_SRC;              // loaded in before() so a missing xchain-contracts skips this suite instead of aborting the whole run
+const TOTAL = 1000;
+const CLIFF = 0;
+const DURATION = 5;   // blocks; we mine well past this so the claim is fully vested
+let sdk, grantor, beneficiary, tick, contractIndex;
+let vestingSetupComplete = false;
+
+async function setupVesting(context) {
+    if (!haveConnectors()) {
+        context.skip();
+        return;
+    }
+    if (vestingSetupComplete) return;
+    // Load lazily so a missing xchain-contracts checkout skips this suite
+    // instead of aborting the whole run.
+    try {
+        VESTING_SRC = compactSource(loadTemplate('vesting'));
+    } catch (e) {
+        console.log('    [vesting] SKIP: ' + e.message.split('\n')[0]);
+        context.skip();
+        return;
+    }
+    sdk = makeSdk();
+
+    grantor = await fundedGasAddress(sdk, 1);          // deploys + funds the grant
+    beneficiary = await fundedGasAddress(sdk, 1);      // submits claim() (must be the caller)
+
+    tick = uniqueTick('VST');
+    const issue = await submit(sdk,
+        { action: 'ISSUE', params: { tick, maxSupply: 1000000, maxMint: 100000, decimals: 0, description: 'vesting asset', mintSupply: TOTAL } },
+        { pubkey: grantor.address, change: grantor.address }, submitOpts({ wif: grantor.wif }));
+    expect(issue.indexed.status, 'ISSUE indexed').to.equal('valid');
+
+    console.log('    [vesting] grantor=' + grantor.address + ' beneficiary=' + beneficiary.address);
+    console.log('    [vesting] tick=' + tick + ' total=' + TOTAL + ' cliff=' + CLIFF + ' duration=' + DURATION);
+    vestingSetupComplete = true;
+}
+
 describe('[sdk] template:vesting (on-chain custody)', function () {
     this.timeout(0);
-
-    let VESTING_SRC;              // loaded in before() so a missing xchain-contracts skips this suite instead of aborting the whole run
-    const TOTAL = 1000;
-    const CLIFF = 0;
-    const DURATION = 5;   // blocks; we mine well past this so the claim is fully vested
-
-    let sdk, grantor, beneficiary, tick, contractIndex;
-
-    before(async function () {
-        if (!haveConnectors()) this.skip();
-        // Load lazily so a missing xchain-contracts checkout skips this suite
-        // instead of aborting the whole run.
-        try {
-            VESTING_SRC = compactSource(loadTemplate('vesting'));
-        } catch (e) {
-            console.log('    [vesting] SKIP: ' + e.message.split('\n')[0]);
-            this.skip();
-        }
-        sdk = makeSdk();
-
-        grantor = await fundedGasAddress(sdk, 1);          // deploys + funds the grant
-        beneficiary = await fundedGasAddress(sdk, 1);      // submits claim() (must be the caller)
-
-        tick = uniqueTick('VST');
-        const issue = await submit(sdk,
-            { action: 'ISSUE', params: { tick, maxSupply: 1000000, maxMint: 100000, decimals: 0, description: 'vesting asset', mintSupply: TOTAL } },
-            { pubkey: grantor.address, change: grantor.address }, submitOpts({ wif: grantor.wif }));
-        expect(issue.indexed.status, 'ISSUE indexed').to.equal('valid');
-
-        console.log('    [vesting] grantor=' + grantor.address + ' beneficiary=' + beneficiary.address);
-        console.log('    [vesting] tick=' + tick + ' total=' + TOTAL + ' cliff=' + CLIFF + ' duration=' + DURATION);
-    });
+    before(function () { return setupVesting(this); });
 
     it('DEPLOY vesting with the grant terms', async function () {
         const res = await submit(sdk,
@@ -156,7 +163,6 @@ describe('[sdk] template:vesting (on-chain custody)', function () {
         expect(await readState(sdk, contractIndex, 'total'), 'total recorded').to.equal(String(TOTAL));
         console.log('    [vesting] contractIndex=' + contractIndex);
     });
-
     it('BATCH(DEPOSIT, EXECUTE fund) starts the clock via getBalance', async function () {
         const built = await sdk.batch()
             .deposit({ contractActionIndex: contractIndex, tick, quantity: TOTAL })
