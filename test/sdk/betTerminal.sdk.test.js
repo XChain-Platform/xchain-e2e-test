@@ -90,9 +90,7 @@ async function assertOneTerminalCreditPerBet(feedIndex) {
     return rows;
 }
 
-describe('[sdk] BET terminal-path guards (§12 E16/E12)', function () {
-
-    before(async function () {
+async function setupTerminalGuards() {
         // See bet.sdk.test.js: ^id compaction outruns the indexer's wire acceptance.
         sdk = makeSdk({ compactAddresses: false });
 
@@ -111,49 +109,51 @@ describe('[sdk] BET terminal-path guards (§12 E16/E12)', function () {
         tickSleep = await issueWagerToken(sdk, oracle, [
             [p1.address, '8.00000000'], [p2.address, '2.00000000']
         ], 1000000, 'B12');
-    });
+}
 
-    after(async function () {
-        await releaseClock();
-    });
+async function prepareSameBlockRace() {
+    const { feedIndex, deadline } = await openMarket(tickSameBlock, 'E16 same-block cancel+resolve');
+    await place(p1, feedIndex, 0, '6.00000000');
+    await place(p2, feedIndex, 1, '4.00000000');
 
-    it('E16a: cancel and resolve in the SAME block settle the book exactly once', async function () {
-        const { feedIndex, deadline } = await openMarket(tickSameBlock, 'E16 same-block cancel+resolve');
-        await place(p1, feedIndex, 0, '6.00000000');
-        await place(p2, feedIndex, 1, '4.00000000');
+    // Past the deadline, so a resolve is legal; cancel stays legal on a
+    // `closed` feed too, which is what lets both compete in one block.
+    await jumpTo(deadline + 60, 2);
+    await waitFeedStatus(feedIndex, 'closed');
 
-        // Past the deadline, so a resolve is legal; cancel stays legal on a
-        // `closed` feed too, which is what lets both compete in one block.
-        await jumpTo(deadline + 60, 2);
-        await waitFeedStatus(feedIndex, 'closed');
+    const oracleBefore = await balanceOf(oracle.address, tickSameBlock);
 
-        const oracleBefore = await balanceOf(oracle.address, tickSameBlock);
+    // Broadcast BOTH without waiting, then seal one block over them. The
+    // resolve spends the cancel's change, so it must ride the same block and
+    // strictly after it: deterministic ordering, cancel first.
+    await submit(sdk,
+        { action: 'BET', params: sdk.betting.cancelMarketParams({ feedActionIndex: feedIndex }) },
+        { pubkey: oracle.address, change: oracle.address },
+        submitOpts({ wif: oracle.wif, waitForIndexer: false }));
 
-        // Broadcast BOTH without waiting, then seal one block over them. The
-        // resolve spends the cancel's change, so it must ride the same block and
-        // strictly after it: deterministic ordering, cancel first.
-        await submit(sdk,
-            { action: 'BET', params: sdk.betting.cancelMarketParams({ feedActionIndex: feedIndex }) },
-            { pubkey: oracle.address, change: oracle.address },
-            submitOpts({ wif: oracle.wif, waitForIndexer: false }));
+    await submit(sdk,
+        { action: 'BET', params: sdk.betting.resolveMarketParams({ feedActionIndex: feedIndex, outcome: 0 }) },
+        { pubkey: oracle.address, change: oracle.address, unconfirmed: true },
+        submitOpts({ wif: oracle.wif, waitForIndexer: false }));
 
-        await submit(sdk,
-            { action: 'BET', params: sdk.betting.resolveMarketParams({ feedActionIndex: feedIndex, outcome: 0 }) },
-            { pubkey: oracle.address, change: oracle.address, unconfirmed: true },
-            submitOpts({ wif: oracle.wif, waitForIndexer: false }));
-
+    await mineAtFrozenClock(1);
+    // Wait for a TERMINAL status specifically. waitFeedStatus(..., null)
+    // returns on any non-`open` status, and this feed is already `closed`
+    // from the latch, so it would return instantly before either tx confirms.
+    let feed = null;
+    for (let i = 0; i < 40; i++) {
+        feed = await getFeed(feedIndex);
+        if (feed && ['cancelled', 'resolved', 'resolved_void', 'expired'].includes(feed.feed_status)) break;
         await mineAtFrozenClock(1);
-        // Wait for a TERMINAL status specifically. waitFeedStatus(..., null)
-        // returns on any non-`open` status, and this feed is already `closed`
-        // from the latch, so it would return instantly before either tx confirms.
-        let feed = null;
-        for (let i = 0; i < 40; i++) {
-            feed = await getFeed(feedIndex);
-            if (feed && ['cancelled', 'resolved', 'resolved_void', 'expired'].includes(feed.feed_status)) break;
-            await mineAtFrozenClock(1);
-            await new Promise(r => setTimeout(r, 1500));
-        }
-        await resumeMiningAtFrozenClock();
+        await new Promise(r => setTimeout(r, 1500));
+    }
+    await resumeMiningAtFrozenClock();
+    return { feedIndex, oracleBefore, feed };
+}
+
+function registerSameBlockTest() {
+    it('E16a: cancel and resolve in the SAME block settle the book exactly once', async function () {
+        const { feedIndex, oracleBefore, feed } = await prepareSameBlockRace();
 
         // EXACTLY ONE terminal path may execute. Which one is decided by tx order
         // in the block; what matters is that the loser is a no-op, not a second
@@ -185,7 +185,9 @@ describe('[sdk] BET terminal-path guards (§12 E16/E12)', function () {
                   + (Number(await balanceOf(oracle.address, tickSameBlock)) - Number(oracleBefore));
         amtEq(out, '10', 'sum(credits out) == sum(escrows in) == T, exactly once');
     });
+}
 
+function registerExpiryTest() {
     it('E16b: the expiry pass does not re-refund a feed that was already cancelled', async function () {
         const { feedIndex, deadline } = await openMarket(tickExpireAfterCancel, 'E16 expire-after-cancel');
         await place(p1, feedIndex, 0, '5.00000000');
@@ -216,7 +218,9 @@ describe('[sdk] BET terminal-path guards (§12 E16/E12)', function () {
         amtEq(await balanceOf(p2.address, tickExpireAfterCancel), '5', 'p2 was NOT refunded twice');
         await assertOneTerminalCreditPerBet(feedIndex);
     });
+}
 
+function registerSleepingTickTest() {
     it('E12: a sleeping wager tick cannot block terminal credits', async function () {
         const { feedIndex, deadline } = await openMarket(tickSleep, 'E12 sleeping tick', '1.00');
         await place(p1, feedIndex, 0, '8.00000000');
@@ -252,4 +256,12 @@ describe('[sdk] BET terminal-path guards (§12 E16/E12)', function () {
             'the oracle fee lands too');
         await assertOneTerminalCreditPerBet(feedIndex);
     });
+}
+
+describe('[sdk] BET terminal-path guards (§12 E16/E12)', function () {
+    before(setupTerminalGuards);
+    after(releaseClock);
+    registerSameBlockTest();
+    registerExpiryTest();
+    registerSleepingTickTest();
 });
