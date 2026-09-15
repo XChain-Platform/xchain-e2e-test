@@ -20,69 +20,68 @@ require('../fixtures/mockMariadb')
 
 const CryptoNetworks = require('../../../src/CryptoNetworks')
 
-describe('Error Propagation: Setup Errors', function () {
+let savedGlobals
 
-    let savedGlobals
+function saveGlobals() {
+    savedGlobals = {
+        COIN: global.COIN,
+        NETWORK: global.NETWORK,
+        NETWORK_OBJECT: global.NETWORK_OBJECT,
+        COIN_CODE: global.COIN_CODE,
+        nodeConnector: global.nodeConnector,
+        utxoTrackerConnector: global.utxoTrackerConnector,
+        encoderConnector: global.encoderConnector,
+        indexerConnector: global.indexerConnector,
+        indexerDatabase: global.indexerDatabase,
+        regtestMinerConnector: global.regtestMinerConnector,
+    }
+}
 
-    beforeEach(function () {
-        savedGlobals = {
-            COIN: global.COIN,
-            NETWORK: global.NETWORK,
-            NETWORK_OBJECT: global.NETWORK_OBJECT,
-            COIN_CODE: global.COIN_CODE,
-            nodeConnector: global.nodeConnector,
-            utxoTrackerConnector: global.utxoTrackerConnector,
-            encoderConnector: global.encoderConnector,
-            indexerConnector: global.indexerConnector,
-            indexerDatabase: global.indexerDatabase,
-            regtestMinerConnector: global.regtestMinerConnector,
+function restoreGlobals() {
+    Object.assign(global, savedGlobals)
+    sinon.restore()
+}
+
+// Replicate the service ping sequence from initialCheck.test.js lines 160-195
+async function runPingSequence() {
+    try {
+        let pingNode = await nodeConnector.getNetworkInfo()
+        if (!pingNode) {
+            throw new Error("Can't connect to the node")
         }
-    })
-
-    afterEach(function () {
-        Object.assign(global, savedGlobals)
-        sinon.restore()
-    })
-
-    // Replicate the service ping sequence from initialCheck.test.js lines 160-195
-    async function runPingSequence() {
-        try {
-            let pingNode = await nodeConnector.getNetworkInfo()
-            if (!pingNode) {
-                throw new Error("Can't connect to the node")
-            }
-        } catch (err) {
-            throw new Error('There was an error trying to connect to the node')
-        }
-
-        let pingUtxoTracker = await utxoTrackerConnector.ping()
-        if (!pingUtxoTracker) {
-            throw new Error("Can't connect to the XChain Utxo Tracker module")
-        }
-
-        let pingEncoder = await encoderConnector.ping()
-        if (!pingEncoder) {
-            throw new Error("Can't connect to the XChain Encoder module")
-        }
-
-        let pingIndexer = await indexerConnector.ping()
-        if (!pingIndexer) {
-            throw new Error("Can't connect to the XChain Indexer module")
-        }
-
-        let pingIndexerDatabase = await indexerDatabase.ping()
-        if (!pingIndexerDatabase) {
-            throw new Error("Can't connect to the XChain Indexer Database")
-        }
-
-        let pingRegtestMiner = await regtestMinerConnector.ping()
-        if (!pingRegtestMiner) {
-            throw new Error("Can't connect to the XChain Regtest Miner module")
-        } else {
-            await regtestMinerConnector.setMiningTime(1000, 1000)
-        }
+    } catch (err) {
+        throw new Error('There was an error trying to connect to the node')
     }
 
+    let pingUtxoTracker = await utxoTrackerConnector.ping()
+    if (!pingUtxoTracker) {
+        throw new Error("Can't connect to the XChain Utxo Tracker module")
+    }
+
+    let pingEncoder = await encoderConnector.ping()
+    if (!pingEncoder) {
+        throw new Error("Can't connect to the XChain Encoder module")
+    }
+
+    let pingIndexer = await indexerConnector.ping()
+    if (!pingIndexer) {
+        throw new Error("Can't connect to the XChain Indexer module")
+    }
+
+    let pingIndexerDatabase = await indexerDatabase.ping()
+    if (!pingIndexerDatabase) {
+        throw new Error("Can't connect to the XChain Indexer Database")
+    }
+
+    let pingRegtestMiner = await regtestMinerConnector.ping()
+    if (!pingRegtestMiner) {
+        throw new Error("Can't connect to the XChain Regtest Miner module")
+    } else {
+        await regtestMinerConnector.setMiningTime(1000, 1000)
+    }
+}
+
+function registerPingFailuresOne() {
     describe('Scenario 3.1.3: Service ping failures', function () {
 
         it('throws when node ping fails', async function () {
@@ -128,7 +127,11 @@ describe('Error Propagation: Setup Errors', function () {
                 { message: "Can't connect to the XChain Encoder module" }
             )
         })
+    })
+}
 
+function registerPingFailuresTwo() {
+    describe('Scenario 3.1.3: Service ping failures', function () {
         it('throws when indexer ping returns false', async function () {
             global.nodeConnector = { getNetworkInfo: async () => ({ version: 1 }) }
             global.utxoTrackerConnector = { ping: async () => true }
@@ -170,7 +173,11 @@ describe('Error Propagation: Setup Errors', function () {
                 { message: "Can't connect to the XChain Regtest Miner module" }
             )
         })
+    })
+}
 
+function registerPingSuccess() {
+    describe('Scenario 3.1.3: Service ping failures', function () {
         it('calls setMiningTime(1000, 1000) on successful miner ping', async function () {
             const setMiningTimeStub = sinon.stub().resolves(true)
             global.nodeConnector = { getNetworkInfo: async () => ({ version: 1 }) }
@@ -186,7 +193,9 @@ describe('Error Propagation: Setup Errors', function () {
             assert.deepStrictEqual(setMiningTimeStub.firstCall.args, [1000, 1000])
         })
     })
+}
 
+function registerGasBootstrapTests() {
     describe('Scenario 3.7.5: Gas token bootstrap failure', function () {
 
         it('throws when gas token issue fails', async function () {
@@ -236,4 +245,32 @@ describe('Error Propagation: Setup Errors', function () {
             assert(sendIssueV0.notCalled, 'sendIssueV0 should not be called when gas exists')
         })
     })
+}
+
+describe('Error Propagation: Setup Errors', function () {
+
+    beforeEach(function () {
+        saveGlobals()
+    })
+
+    afterEach(function () {
+        restoreGlobals()
+    })
+
+    registerPingFailuresOne()
+    registerPingFailuresTwo()
+    registerPingSuccess()
+})
+
+describe('Error Propagation: Setup Errors', function () {
+
+    beforeEach(function () {
+        saveGlobals()
+    })
+
+    afterEach(function () {
+        restoreGlobals()
+    })
+
+    registerGasBootstrapTests()
 })
