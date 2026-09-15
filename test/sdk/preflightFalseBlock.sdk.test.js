@@ -105,28 +105,32 @@ function actionIndexOf(indexed) {
     return a ? a.action_index : null;
 }
 
+let sdk, issuer, tick;
+let falseBlockSetupComplete = false;
+
+async function setupFalseBlock(context) {
+    if (!global.regtestMinerConnector || !global.utxoTrackerConnector || !global.nodeConnector) {
+        context.skip();
+        return;
+    }
+    if (falseBlockSetupComplete) return;
+    sdk = makeSdk({ preflight: 'report' });
+    // ISSUE charges an XCHAIN gas fee on create, so the issuer needs
+    // both native coin (tx fee) and gas.
+    issuer = await fundedGasAddress(sdk, 1);
+    tick = uniqueTick('PF');
+    // Create + seed a token so accepted actions have real state.
+    const issue = await submit(sdk,
+        { action: 'ISSUE', params: { tick, maxSupply: 1000000, maxMint: 1000000, decimals: 0, mintSupply: 1000 } },
+        { pubkey: issuer.address, change: issuer.address }, submitOpts({ wif: issuer.wif }));
+    expect(issue.indexed.status, 'ISSUE indexed valid').to.equal('valid');
+    await mine(1);
+    falseBlockSetupComplete = true;
+}
+
 describe('[sdk] pre-flight false-block invariant @preflight', function () {
     this.timeout(0);
-
-    let sdk, issuer, tick;
-
-    before(async function () {
-        if (!global.regtestMinerConnector || !global.utxoTrackerConnector || !global.nodeConnector) {
-            this.skip();
-            return;
-        }
-        sdk = makeSdk({ preflight: 'report' });
-        // ISSUE charges an XCHAIN gas fee on create, so the issuer needs
-        // both native coin (tx fee) and gas.
-        issuer = await fundedGasAddress(sdk, 1);
-        tick = uniqueTick('PF');
-        // Create + seed a token so accepted actions have real state.
-        const issue = await submit(sdk,
-            { action: 'ISSUE', params: { tick, maxSupply: 1000000, maxMint: 1000000, decimals: 0, mintSupply: 1000 } },
-            { pubkey: issuer.address, change: issuer.address }, submitOpts({ wif: issuer.wif }));
-        expect(issue.indexed.status, 'ISSUE indexed valid').to.equal('valid');
-        await mine(1);
-    });
+    before(function () { return setupFalseBlock(this); });
 
     describe('class (a): accepted actions must not be hard-blocked', function () {
 
@@ -158,14 +162,17 @@ describe('[sdk] pre-flight false-block invariant @preflight', function () {
             expect(nonOverridableErrors(report), 'SWEEP must not be hard-blocked').to.deep.equal([]);
         });
     });
+});
 
+describe('[sdk] pre-flight false-block invariant @preflight', function () {
+    this.timeout(0);
+    before(function () { return setupFalseBlock(this); });
     // These are the §4.4 rows Tier 1 cannot adjudicate, which makes the client
     // tier the ONLY pre-sign protection on them - and every one was broken
     // while this suite was green, because this suite did not look.
     // Each case builds the referenced object ON CHAIN first, so a finding of
     // "does not exist" is provably false rather than arguably so.
     describe('class (c): actions referencing REAL on-chain objects', function () {
-
         it('a DISPENSE against a real open dispenser raises no error at all', async function () {
             const giveTick = uniqueTick('PFD');
             const iss = await submit(sdk,
@@ -193,7 +200,6 @@ describe('[sdk] pre-flight false-block invariant @preflight', function () {
             expect(anyErrors(report),
                 'a dispense against a dispenser that exists and is open must not be flagged').to.deep.equal([]);
         });
-
         it('a DISPENSER cancel by its owner raises no error at all', async function () {
             const giveTick = uniqueTick('PFC');
             await submit(sdk,
@@ -216,6 +222,14 @@ describe('[sdk] pre-flight false-block invariant @preflight', function () {
                 { source: issuer.address, chain: sdk.config.network, preflight: 'report' });
             expect(anyErrors(report), 'the owner cancelling their own open dispenser must not be flagged').to.deep.equal([]);
         });
+    });
+});
+
+describe('[sdk] pre-flight false-block invariant @preflight', function () {
+    this.timeout(0);
+    before(function () { return setupFalseBlock(this); });
+
+    describe('class (c): actions referencing REAL on-chain objects', function () {
 
         it('an AIRDROP against a real LIST raises no LIST_NOT_FOUND', async function () {
             const member = await fundedSdkAddress(sdk, 1);
@@ -248,7 +262,11 @@ describe('[sdk] pre-flight false-block invariant @preflight', function () {
                 'a nonexistent list must still be flagged').to.equal(true);
         });
     });
+});
 
+describe('[sdk] pre-flight false-block invariant @preflight', function () {
+    this.timeout(0);
+    before(function () { return setupFalseBlock(this); });
     // The MIRROR of class (c). Class (c) catches a client check that fires when
     // it should not; this catches one that CANNOT fire at all.
     //
@@ -266,7 +284,6 @@ describe('[sdk] pre-flight false-block invariant @preflight', function () {
     // dead explorer the client tier is all there is.
     describe('class (d): certified client checks must actually FIRE', function () {
         let capTick;
-
         before(async function () {
             capTick = uniqueTick('PFM');
             const iss = await submit(sdk,
@@ -274,7 +291,6 @@ describe('[sdk] pre-flight false-block invariant @preflight', function () {
                 { pubkey: issuer.address, change: issuer.address }, submitOpts({ wif: issuer.wif }));
             expect(iss.indexed.status, 'ISSUE with known caps indexed valid').to.equal('valid');
         });
-
         const clientFinding = (report, code) =>
             report.findings.find(f => f.code === code && f.source === 'client');
 
@@ -307,6 +323,11 @@ describe('[sdk] pre-flight false-block invariant @preflight', function () {
                 .map(f => f.code), 'a mint inside both caps must not be flagged').to.deep.equal([]);
         });
     });
+});
+
+describe('[sdk] pre-flight false-block invariant @preflight', function () {
+    this.timeout(0);
+    before(function () { return setupFalseBlock(this); });
 
     describe('class (b): intra-BATCH sequential projection', function () {
         it('MINT-then-SEND-the-minted is accepted AND the SEND leg is not hard-blocked', async function () {
@@ -324,6 +345,11 @@ describe('[sdk] pre-flight false-block invariant @preflight', function () {
                 'MINT-then-SEND batch must not hard-block the SEND leg').to.deep.equal([]);
         });
     });
+});
+
+describe('[sdk] pre-flight false-block invariant @preflight', function () {
+    this.timeout(0);
+    before(function () { return setupFalseBlock(this); });
 
     describe('positive control: pre-flight DOES flag a genuinely bad action', function () {
         it('a SEND far exceeding balance is flagged (error), proving the harness has teeth', async function () {
