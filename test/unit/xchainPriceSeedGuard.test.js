@@ -73,10 +73,9 @@ function localRequires(file, body) {
     return out
 }
 
+const files = walk(TEST_ROOT)
+
 describe('XCHAIN/USD seed guard', function () {
-
-    const files = walk(TEST_ROOT)
-
     it('finds test files to scan at all, so a broken walk cannot pass vacuously', function () {
         // A guard that scans nothing passes forever. This is the tripwire for that.
         assert.ok(files.length > 50, 'expected to scan the e2e test tree, found ' + files.length + ' files')
@@ -106,7 +105,9 @@ describe('XCHAIN/USD seed guard', function () {
             'test/helpers/xchainPriceConstants instead of pasting a literal:\n  ' +
             offenders.join('\n  '))
     })
+})
 
+describe('XCHAIN/USD seed guard', function () {
     it('keeps every XCHAIN/USD seed site suppressible on a publishing venue', function () {
         // A seed site is a file that either pairs 'XCHAIN/USD' with a decimal
         // literal or the bootstrap constant on one line, or names both the pair and
@@ -136,7 +137,9 @@ describe('XCHAIN/USD seed guard', function () {
             'refuseSeedIfSuppressed (setup refusal), both from test/helpers/xchainPriceConstants:\n  ' +
             offenders.join('\n  '))
     })
+})
 
+describe('XCHAIN/USD seed guard', function () {
     it('keeps the bootstrap constant byte-equal to the hub that publishes it', function () {
         // Cross-repo pin. If the operator retunes the bootstrap on a flag-day and this
         // repo is not updated, every native-fee assertion here silently prices against
