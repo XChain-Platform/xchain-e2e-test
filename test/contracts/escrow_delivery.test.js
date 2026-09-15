@@ -35,7 +35,7 @@
 // xchain-contracts/escrowDelivery/escrowDelivery.js (kept inline so the test
 // is self-contained inside the e2e container, same convention as
 // stableVault.test.js). Behaviour is identical; the VM unit test
-// (escrowDelivery.test.js in xchain-contracts) covers the full matrix
+// (escrow_delivery.test.js in xchain-contracts) covers the full matrix
 // including the adversarial paths (replay, unauthorized settlement,
 // double-settle). This e2e proves the wiring is real: a genuine off-chain
 // HTTPS GET, signed by a genuine 3-validator quorum, driving a genuine

@@ -29,7 +29,7 @@
 // The contract source below is a compacted copy of the canonical template at
 // xchain-contracts/stableVault/stableVault.js (kept inline so the test is
 // self-contained inside the e2e container). Behaviour is identical; the VM
-// unit test (stableVault.test.js in xchain-contracts) covers the full matrix.
+// unit test (stable_vault.test.js in xchain-contracts) covers the full matrix.
 
 const assert = require('assert')
 const cryptoHelper = require('../cryptoHelper')

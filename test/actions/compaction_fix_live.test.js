@@ -30,7 +30,7 @@
 //      leaves a non-resolvable ref unchanged so the format check rejects it;
 //      no silent drop).
 //
-// Run: ~/action-run-btc.sh test/actions/compactionFixLive.test.js
+// Run: ~/action-run-btc.sh test/actions/compaction_fix_live.test.js
 
 const assert            = require('assert')
 const cryptoHelper      = require('../cryptoHelper')

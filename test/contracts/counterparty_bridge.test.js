@@ -51,7 +51,7 @@
 // at xchain-contracts/counterpartyBridge/counterpartyBridge.js (kept inline
 // so the test is self-contained inside the e2e container, same convention
 // as escrowDelivery.test.js / stableVault.test.js). Behaviour is identical;
-// the VM unit test (counterpartyBridge.test.js in xchain-contracts) covers
+// the VM unit test (counterparty_bridge.test.js in xchain-contracts) covers
 // the full matrix including the adversarial paths (replay, double-crediting
 // a burn, cap enforcement, multi-burn summing).
 

@@ -27,7 +27,7 @@
 // The contract source below is a compacted copy of the canonical template at
 // xchain-contracts/priceBet/priceBet.js (kept inline so the test is
 // self-contained inside the e2e container). Behaviour is identical; the VM
-// unit test (priceBet.test.js in xchain-contracts) covers the full matrix.
+// unit test (price_bet.test.js in xchain-contracts) covers the full matrix.
 //
 // "Behaviour is identical" is a claim that rots: this copy silently missed the
 // accept() betting-window guard when it landed canonically, so the e2e was

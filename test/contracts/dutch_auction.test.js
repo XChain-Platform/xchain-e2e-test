@@ -35,7 +35,7 @@
 // xchain-contracts/dutchAuction/dutchAuction.js (kept inline so the test is
 // self-contained inside the e2e container, same convention as
 // stableVault.test.js / englishAuction.test.js). Behaviour is identical; the
-// VM unit test (dutchAuction.test.js in xchain-contracts) covers the full
+// VM unit test (dutch_auction.test.js in xchain-contracts) covers the full
 // matrix including the adversarial paths.
 
 const assert = require('assert')

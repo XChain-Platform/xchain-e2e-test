@@ -37,7 +37,7 @@
 // The contract source below is a compacted copy of the canonical template at
 // xchain-contracts/priceBetTimed/priceBetTimed.js (abi/info trimmed to stay
 // well under the 8192-byte DEPLOY payload cap). Behaviour is identical; the
-// VM unit test (priceBetTimed.test.js in xchain-contracts) covers the full
+// VM unit test (price_bet_timed.test.js in xchain-contracts) covers the full
 // matrix (push, reclaim, SCANNING paging, etc.).
 
 const assert = require('assert')

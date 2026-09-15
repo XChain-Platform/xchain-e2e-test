@@ -14,9 +14,9 @@
 
 /*********************************************************************
  * Force-seed fresh oracle prices before a contract-heavy action suite on a
- * fee chain. NOT a feature test (it is a venue preamble). Run it FIRST in the same
- * mocha process (its leading underscore also sorts it ahead alphabetically):
- *   mocha … test/actions/_ctlseed.test.js test/actions/controllerPolicy.test.js
+ * fee chain. NOT a feature test (it is a venue preamble). Run it FIRST, ahead
+ * of the suites that need the seed:
+ *   mocha … test/actions/ctlseed.test.js test/actions/controllerPolicy.test.js
  *
  * Why: contract fee validation needs a fresh {COIN}/USD snapshot for EVERY
  * DEPLOY/EXECUTE, but the in-suite auto-seed (nativeFeeHelper.seedGlobalPrices,
@@ -25,14 +25,12 @@
  * contract DEPLOY indexes "invalid: no current oracle price for {COIN}/USD".
  * (Known harness flake.)
  *
- * Anchoring: priceSnapshotHelper.usableSeedAnchors(). This preamble used to seed
- * max(tip, now) + 7200 on the theory that the staleness guard is one-sided, so
- * future-dating bought headroom. That stopped being true when H-3 landed: on every
- * chain but BTC, getLatestPrice SELECTS with `block_timestamp <= <block time>`, so
- * a future-dated row is not fresh for longer, it is invisible, and this preamble
- * silently seeded nothing on exactly the LTC/DOGE fee chains it exists to unblock
- * (measured on LTC regtest 2026-07-28). Headroom now comes from re-seeding
- * as the chain advances, which is what nativeFeeHelper does per SEED_REFRESH_MS.
+ * Anchoring: priceSnapshotHelper.usableSeedAnchors(), which bounds every
+ * seeded anchor at or before the chain tip. On every chain but BTC,
+ * getLatestPrice SELECTS with `block_timestamp <= <block time>`, so a
+ * future-dated row is invisible rather than merely stale; headroom comes
+ * from re-seeding as the chain advances, which is what nativeFeeHelper does
+ * per SEED_REFRESH_MS.
  ********************************************************************/
 
 const assert = require('assert')
