@@ -53,6 +53,32 @@ function stubSdk(thrown, txDoc) {
 
 const quiet = () => {};
 
+function ledgerSpy() {
+    const seen = { remembered: [], forgotten: [] };
+    return {
+        seen,
+        rememberPending: (l, t) => seen.remembered.push([l, t]),
+        forgetPending:   (l)    => seen.forgotten.push(l)
+    };
+}
+
+// A stub that fires the SDK's own progress('waiting', {txid}) callback
+// before settling, which is what the real lifecycleManager does.
+function broadcastingSdk(outcome, txDoc) {
+    const calls = { getTransaction: 0 };
+    return {
+        calls,
+        submitAction: async (a, io, opts) => {
+            if (opts && opts.onProgress) opts.onProgress('waiting', { txid: TXID });
+            if (outcome instanceof Error) throw outcome;
+            return outcome;
+        },
+        explorer: {
+            getTransaction: async () => { calls.getTransaction++; return txDoc; }
+        }
+    };
+}
+
 describe('seed-contract-state submitChecked: the timeout is not evidence', function () {
 
     it('passes a successful submit straight through and never asks the explorer', async function () {
@@ -97,6 +123,9 @@ describe('seed-contract-state submitChecked: the timeout is not evidence', funct
         await assert.rejects(() => makeSubmitChecked(sdk, quiet)({}, {}, {}, 'MINT'), e => e === boom);
         assert.strictEqual(sdk.calls.getTransaction, 0, 'a non-timeout error never reaches the re-check');
     });
+});
+
+describe('seed-contract-state submitChecked: the timeout is not evidence', function () {
 
     it('RECOVERS when the chain shows the transaction indexed and valid', async function () {
         const sdk = stubSdk(timeoutErr(), {
@@ -124,6 +153,9 @@ describe('seed-contract-state submitChecked: the timeout is not evidence', funct
         const res = await makeSubmitChecked(sdk, quiet)({}, {}, {}, 'DEPLOY');
         assert.strictEqual(contractIndexOf(res.indexed), 77);
     });
+});
+
+describe('seed-contract-state submitChecked: the timeout is not evidence', function () {
 
     it('still FAILS when the explorer does not carry the transaction', async function () {
         const err = timeoutErr();
@@ -167,38 +199,31 @@ describe('seed-contract-state submitChecked: the timeout is not evidence', funct
         const res = await makeSubmitChecked(sdk, quiet)({}, {}, {}, 'MINT');
         assert.strictEqual(res.txid, TXID);
     });
+});
+
+describe('seed-contract-state submitChecked: the timeout is not evidence', function () {
+
+    it('fails rather than guessing when no txid can be recovered at all', async function () {
+        const err = new Error('Timed out waiting for transaction  to be indexed');
+        err.code = 'CONFIRMATION_TIMEOUT';
+        const sdk = stubSdk(err, { tx_hash: TXID, actions: [{ status: 'valid' }] });
+        await assert.rejects(() => makeSubmitChecked(sdk, quiet)({}, {}, {}, 'MINT'), e => e === err);
+        assert.strictEqual(sdk.calls.getTransaction, 0);
+    });
+});
+
+describe('seed-contract-state submitChecked: the timeout is not evidence', function () {
 
     // The in-flight ledger. A chain read cannot see a transaction that is
     // broadcast but not yet mined, so the step that made it reads as "not done"
     // and a re-run duplicates it. The txid is recorded at the broadcast
     // boundary and cleared only once the chain has settled the question.
+    registerLedgerCasesA();
+    registerLedgerCasesB();
+});
+
+function registerLedgerCasesA() {
     describe('the in-flight ledger', function () {
-
-        function ledgerSpy() {
-            const seen = { remembered: [], forgotten: [] };
-            return {
-                seen,
-                rememberPending: (l, t) => seen.remembered.push([l, t]),
-                forgetPending:   (l)    => seen.forgotten.push(l)
-            };
-        }
-
-        // A stub that fires the SDK's own progress('waiting', {txid}) callback
-        // before settling, which is what the real lifecycleManager does.
-        function broadcastingSdk(outcome, txDoc) {
-            const calls = { getTransaction: 0 };
-            return {
-                calls,
-                submitAction: async (a, io, opts) => {
-                    if (opts && opts.onProgress) opts.onProgress('waiting', { txid: TXID });
-                    if (outcome instanceof Error) throw outcome;
-                    return outcome;
-                },
-                explorer: {
-                    getTransaction: async () => { calls.getTransaction++; return txDoc; }
-                }
-            };
-        }
 
         it('records the txid at BROADCAST, before the outcome is known', async function () {
             const L = ledgerSpy();
@@ -231,6 +256,11 @@ describe('seed-contract-state submitChecked: the timeout is not evidence', funct
             assert.deepStrictEqual(L.seen.remembered, [['MINT', TXID]]);
             assert.deepStrictEqual(L.seen.forgotten, [], 'an unsettled broadcast must stay recorded');
         });
+    });
+}
+
+function registerLedgerCasesB() {
+    describe('the in-flight ledger', function () {
 
         it('KEEPS it when the transaction is indexed but invalid', async function () {
             const L = ledgerSpy();
@@ -255,12 +285,4 @@ describe('seed-contract-state submitChecked: the timeout is not evidence', funct
             assert.strictEqual(res.txid, TXID);
         });
     });
-
-    it('fails rather than guessing when no txid can be recovered at all', async function () {
-        const err = new Error('Timed out waiting for transaction  to be indexed');
-        err.code = 'CONFIRMATION_TIMEOUT';
-        const sdk = stubSdk(err, { tx_hash: TXID, actions: [{ status: 'valid' }] });
-        await assert.rejects(() => makeSubmitChecked(sdk, quiet)({}, {}, {}, 'MINT'), e => e === err);
-        assert.strictEqual(sdk.calls.getTransaction, 0);
-    });
-});
+}
