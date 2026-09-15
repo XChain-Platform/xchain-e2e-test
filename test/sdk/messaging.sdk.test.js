@@ -22,17 +22,18 @@ const { makeSdk, submit, fundedGasAddress, submitOpts, isTransientStackError, mi
 
 const COIN = (typeof global.COIN_CODE !== 'undefined' && global.COIN_CODE) || 'BTC';
 
-describe('[sdk] messaging', function () {
-    this.timeout(0);
+let sdk, sender;
+let messagingReady = false;
 
-    let sdk, sender;
+async function prepareMessaging() {
+    if (messagingReady) return;
+    sdk = makeSdk();
+    sender = await fundedGasAddress(sdk, 1);
+    console.log('    [sdk] sender=' + sender.address);
+    messagingReady = true;
+}
 
-    before(async function () {
-        sdk = makeSdk();
-        sender = await fundedGasAddress(sdk, 1);
-        console.log('    [sdk] sender=' + sender.address);
-    });
-
+function registerPlaintextCheck() {
     it('MESSAGE v3 (plaintext) to self', async function () {
         const res = await submit(sdk,
             { action: 'MESSAGE', params: { version: 3, coin: COIN, destination: sender.address, plaintextMessage: 'hello from the sdk' } },
@@ -42,7 +43,9 @@ describe('[sdk] messaging', function () {
         console.log('    [sdk] MESSAGE v3 status=' + res.indexed.status);
         expect(res.indexed.status).to.equal('valid');
     });
+}
 
+function registerEncryptedCheck() {
     it('MESSAGE v2 (encrypted) via messaging.send() to self', async function () {
         // Real ECIES send: no stub ciphertext, no explicit version. send() resolves
         // the recipient pubkey, ECIES-encrypts a binary payload, and lets the format
@@ -92,4 +95,11 @@ describe('[sdk] messaging', function () {
         expect(Buffer.isBuffer(found.bytes)).to.equal(true);
         expect(found.bytes.equals(payload)).to.equal(true);
     });
+}
+
+describe('[sdk] messaging', function () {
+    this.timeout(0);
+    before(prepareMessaging);
+    registerPlaintextCheck();
+    registerEncryptedCheck();
 });
