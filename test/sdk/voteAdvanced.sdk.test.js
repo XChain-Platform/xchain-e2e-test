@@ -85,100 +85,107 @@ async function setDelegation(sdk, delegator, tick, delegateAddr) {
     return actionIndexOf(res);
 }
 
+let sdk, issuer, A, B, C, advancedSetup;
+
+async function prepareAdvancedVote() {
+    if (advancedSetup) return advancedSetup;
+    // compactAddresses off: the SDK's ^id destination compaction is ahead of the
+    // indexer's wire acceptance (P4 arming / F3 gate open) and can invalidate the
+    // setup SENDs; these suites test VOTE semantics, not address compaction.
+    sdk = makeSdk({ compactAddresses: false });
+    // Modest per-address funding (change returns to each address, so the
+    // issuer's many txs stay covered); keeps the suite within a lean faucet.
+    const FUND = 0.08;
+    issuer = await fundedGasAddress(sdk, FUND);
+    A = await fundedGasAddress(sdk, FUND);
+    B = await fundedGasAddress(sdk, FUND);
+    C = await fundedGasAddress(sdk, FUND);
+    advancedSetup = { sdk, issuer, A, B, C };
+    return advancedSetup;
+}
+
+async function verifyQuadraticWeight() {
+    // issuer (whale) keeps 10000, A=100, B=100. Whale->YES, A,B->NO.
+    // quadratic: YES=sqrt(10000)=100, NO=sqrt(100)+sqrt(100)=20. YES wins by 5x, not 100x.
+    const tick = await issueGov(sdk, issuer, 10200);
+    await sendTick(sdk, issuer, tick, A.address, 100);
+    await sendTick(sdk, issuer, tick, B.address, 100);
+    await mine(1);
+    const endBlock = (await height()) + 8;
+    const pollIndex = await createPoll(sdk, issuer, {
+        tick, endBlock, options: 'YES,NO', maxSelections: 1, tallyMode: 'approval',
+        weightMode: 'quadratic', minVoteBalance: 1, question: 'Quadratic?'
+    });
+    await castBallot(sdk, issuer, pollIndex, '0'); // whale YES
+    await castBallot(sdk, A, pollIndex, '1');      // NO
+    await castBallot(sdk, B, pollIndex, '1');      // NO
+
+    const poll = await waitFinalized(pollIndex);
+    expect(poll.poll_status, 'status').to.equal('finalized');
+    const r = await resultsFor(pollIndex);
+    expect(r[0], 'YES = sqrt(10000) = 100').to.equal('100');
+    expect(r[1], 'NO = sqrt(100)*2 = 20').to.equal('20');
+    expect(Number(poll.winning_option), 'winner YES').to.equal(0);
+    console.log('    [sdk] quadratic poll #' + pollIndex + ' YES=100 NO=20 (whale held 10000, weight only 100)');
+}
+
+async function verifyTimeWeight() {
+    const tick = await issueGov(sdk, issuer, 1000);
+    await sendTick(sdk, issuer, tick, A.address, 300);
+    await sendTick(sdk, issuer, tick, B.address, 100);
+    await mine(2);
+    const endBlock = (await height()) + 8;
+    const pollIndex = await createPoll(sdk, issuer, {
+        tick, endBlock, options: 'YES,NO', maxSelections: 1, tallyMode: 'approval',
+        weightMode: 'time_weighted', question: 'Time-weighted?'
+    });
+    await castBallot(sdk, A, pollIndex, '0'); // 300 -> YES
+    await castBallot(sdk, B, pollIndex, '1'); // 100 -> NO
+
+    const poll = await waitFinalized(pollIndex);
+    expect(poll.poll_status, 'status').to.equal('finalized');
+    const r = await resultsFor(pollIndex);
+    // Balances steady across the window, so avg == balance.
+    expect(Number(r[0]), 'YES ~= 300').to.equal(300);
+    expect(Number(r[1]), 'NO ~= 100').to.equal(100);
+    expect(Number(poll.winning_option), 'winner YES').to.equal(0);
+    console.log('    [sdk] time_weighted poll #' + pollIndex + ' YES=' + r[0] + ' NO=' + r[1]);
+}
+
+async function verifyDelegation() {
+    // issuer keeps 100 (to create), A=300, B=100, C=200.
+    const tick = await issueGov(sdk, issuer, 700);
+    await sendTick(sdk, issuer, tick, A.address, 300);
+    await sendTick(sdk, issuer, tick, B.address, 100);
+    await sendTick(sdk, issuer, tick, C.address, 200);
+    await mine(1);
+
+    // A delegates its weight to B, then does NOT vote.
+    const delIndex = await setDelegation(sdk, A, tick, B.address);
+    const delRows = await dbQuery('SELECT * FROM vote_delegations WHERE action_index = ?', [delIndex]);
+    expect(delRows.length, 'delegation row written').to.equal(1);
+
+    const endBlock = (await height()) + 8;
+    const pollIndex = await createPoll(sdk, issuer, {
+        tick, endBlock, options: 'YES,NO', maxSelections: 1, tallyMode: 'approval',
+        weightMode: 'balance', question: 'Delegation?'
+    });
+    await castBallot(sdk, B, pollIndex, '0'); // B votes YES (carries A's 300 + own 100)
+    await castBallot(sdk, C, pollIndex, '1'); // C votes NO (200)
+
+    const poll = await waitFinalized(pollIndex);
+    expect(poll.poll_status, 'status').to.equal('finalized');
+    const r = await resultsFor(pollIndex);
+    expect(r[0], 'YES = B(100) + A delegated(300) = 400').to.equal('400');
+    expect(r[1], 'NO = C(200)').to.equal('200');
+    expect(Number(poll.winning_option), 'winner YES').to.equal(0);
+    console.log('    [sdk] delegation poll #' + pollIndex + ' YES=400 (B 100 + A delegated 300) NO=200');
+}
+
 describe('[sdk] VOTE Phase 3 (weight modes + delegation)', function () {
     this.timeout(0);
-
-    let sdk, issuer, A, B, C;
-
-    before(async function () {
-        // compactAddresses off: the SDK's ^id destination compaction is ahead of the
-        // indexer's wire acceptance (P4 arming / F3 gate open) and can invalidate the
-        // setup SENDs; these suites test VOTE semantics, not address compaction.
-        sdk = makeSdk({ compactAddresses: false });
-        // Modest per-address funding (change returns to each address, so the
-        // issuer's many txs stay covered); keeps the suite within a lean faucet.
-        const FUND = 0.08;
-        issuer = await fundedGasAddress(sdk, FUND);
-        A = await fundedGasAddress(sdk, FUND);
-        B = await fundedGasAddress(sdk, FUND);
-        C = await fundedGasAddress(sdk, FUND);
-    });
-
-    it('quadratic weight flattens a whale (sqrt of close balance)', async function () {
-        // issuer (whale) keeps 10000, A=100, B=100. Whale->YES, A,B->NO.
-        // quadratic: YES=sqrt(10000)=100, NO=sqrt(100)+sqrt(100)=20. YES wins by 5x, not 100x.
-        const tick = await issueGov(sdk, issuer, 10200);
-        await sendTick(sdk, issuer, tick, A.address, 100);
-        await sendTick(sdk, issuer, tick, B.address, 100);
-        await mine(1);
-        const endBlock = (await height()) + 8;
-        const pollIndex = await createPoll(sdk, issuer, {
-            tick, endBlock, options: 'YES,NO', maxSelections: 1, tallyMode: 'approval',
-            weightMode: 'quadratic', minVoteBalance: 1, question: 'Quadratic?'
-        });
-        await castBallot(sdk, issuer, pollIndex, '0'); // whale YES
-        await castBallot(sdk, A, pollIndex, '1');      // NO
-        await castBallot(sdk, B, pollIndex, '1');      // NO
-
-        const poll = await waitFinalized(pollIndex);
-        expect(poll.poll_status, 'status').to.equal('finalized');
-        const r = await resultsFor(pollIndex);
-        expect(r[0], 'YES = sqrt(10000) = 100').to.equal('100');
-        expect(r[1], 'NO = sqrt(100)*2 = 20').to.equal('20');
-        expect(Number(poll.winning_option), 'winner YES').to.equal(0);
-        console.log('    [sdk] quadratic poll #' + pollIndex + ' YES=100 NO=20 (whale held 10000, weight only 100)');
-    });
-
-    it('time_weighted weight (steady balances => average equals close balance)', async function () {
-        const tick = await issueGov(sdk, issuer, 1000);
-        await sendTick(sdk, issuer, tick, A.address, 300);
-        await sendTick(sdk, issuer, tick, B.address, 100);
-        await mine(2);
-        const endBlock = (await height()) + 8;
-        const pollIndex = await createPoll(sdk, issuer, {
-            tick, endBlock, options: 'YES,NO', maxSelections: 1, tallyMode: 'approval',
-            weightMode: 'time_weighted', question: 'Time-weighted?'
-        });
-        await castBallot(sdk, A, pollIndex, '0'); // 300 -> YES
-        await castBallot(sdk, B, pollIndex, '1'); // 100 -> NO
-
-        const poll = await waitFinalized(pollIndex);
-        expect(poll.poll_status, 'status').to.equal('finalized');
-        const r = await resultsFor(pollIndex);
-        // Balances steady across the window, so avg == balance.
-        expect(Number(r[0]), 'YES ~= 300').to.equal(300);
-        expect(Number(r[1]), 'NO ~= 100').to.equal(100);
-        expect(Number(poll.winning_option), 'winner YES').to.equal(0);
-        console.log('    [sdk] time_weighted poll #' + pollIndex + ' YES=' + r[0] + ' NO=' + r[1]);
-    });
-
-    it('delegation: a delegator weight flows to the delegate ballot (VOTE v3)', async function () {
-        // issuer keeps 100 (to create), A=300, B=100, C=200.
-        const tick = await issueGov(sdk, issuer, 700);
-        await sendTick(sdk, issuer, tick, A.address, 300);
-        await sendTick(sdk, issuer, tick, B.address, 100);
-        await sendTick(sdk, issuer, tick, C.address, 200);
-        await mine(1);
-
-        // A delegates its weight to B, then does NOT vote.
-        const delIndex = await setDelegation(sdk, A, tick, B.address);
-        const delRows = await dbQuery('SELECT * FROM vote_delegations WHERE action_index = ?', [delIndex]);
-        expect(delRows.length, 'delegation row written').to.equal(1);
-
-        const endBlock = (await height()) + 8;
-        const pollIndex = await createPoll(sdk, issuer, {
-            tick, endBlock, options: 'YES,NO', maxSelections: 1, tallyMode: 'approval',
-            weightMode: 'balance', question: 'Delegation?'
-        });
-        await castBallot(sdk, B, pollIndex, '0'); // B votes YES (carries A's 300 + own 100)
-        await castBallot(sdk, C, pollIndex, '1'); // C votes NO (200)
-
-        const poll = await waitFinalized(pollIndex);
-        expect(poll.poll_status, 'status').to.equal('finalized');
-        const r = await resultsFor(pollIndex);
-        expect(r[0], 'YES = B(100) + A delegated(300) = 400').to.equal('400');
-        expect(r[1], 'NO = C(200)').to.equal('200');
-        expect(Number(poll.winning_option), 'winner YES').to.equal(0);
-        console.log('    [sdk] delegation poll #' + pollIndex + ' YES=400 (B 100 + A delegated 300) NO=200');
-    });
+    before(prepareAdvancedVote);
+    it('quadratic weight flattens a whale (sqrt of close balance)', verifyQuadraticWeight);
+    it('time_weighted weight (steady balances => average equals close balance)', verifyTimeWeight);
+    it('delegation: a delegator weight flows to the delegate ballot (VOTE v3)', verifyDelegation);
 });
