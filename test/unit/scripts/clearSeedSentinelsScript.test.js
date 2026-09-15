@@ -26,6 +26,18 @@ const script = require('../../../scripts/clear-seed-sentinels')
 
 describe('clear-seed-sentinels script guards', () => {
 
+    it('prints no credential', () => {
+        // The script logs the target and the round list; the only env names it may
+        // emit are the KEYS it filled, never a value.
+        const src = require('fs').readFileSync(require.resolve('../../../scripts/clear-seed-sentinels'), 'utf8')
+        const logged = [...src.matchAll(/console\.(?:log|error)\(([^\n]*)\)/g)].map(m => m[1])
+        for (const line of logged)
+            assert.ok(!/PASS|password/i.test(line), 'log line may not reference a password: ' + line)
+    })
+})
+
+describe('clear-seed-sentinels script guards', () => {
+
     describe('publishing-venue gate', () => {
         it('refuses without the venue declaration', () => {
             assert.throws(() => script.assertPublishingVenue({}), /XCHAIN_E2E_NO_PRICE_SEED=1/)
@@ -44,7 +56,9 @@ describe('clear-seed-sentinels script guards', () => {
             assert.doesNotThrow(() => script.assertPublishingVenue({ XCHAIN_E2E_NO_PRICE_SEED: '1' }))
         })
     })
+})
 
+describe('clear-seed-sentinels script guards', () => {
     describe('topology mapping', () => {
         it('fills HUB_DB_* from the indexer coordinates the venue env carries', () => {
             const env = { INDEXER_DB_HOST: '127.0.0.1', INDEXER_DB_PORT: '13306',
@@ -100,7 +114,9 @@ describe('clear-seed-sentinels script guards', () => {
             assert.strictEqual(env.HUB_DB_NAME, undefined)
         })
     })
+})
 
+describe('clear-seed-sentinels script guards', () => {
     describe('argument parsing', () => {
         it('reads the env file and pair', () => {
             assert.deepStrictEqual(script.parseArgs(['--env', '.env.ltc', '--pair', 'XCHAIN/USD']),
@@ -115,14 +131,5 @@ describe('clear-seed-sentinels script guards', () => {
             // A typo'd --pair would otherwise widen the delete from one pair to all.
             assert.throws(() => script.parseArgs(['--pairs', 'XCHAIN/USD']), /unrecognised argument/)
         })
-    })
-
-    it('prints no credential', () => {
-        // The script logs the target and the round list; the only env names it may
-        // emit are the KEYS it filled, never a value.
-        const src = require('fs').readFileSync(require.resolve('../../../scripts/clear-seed-sentinels'), 'utf8')
-        const logged = [...src.matchAll(/console\.(?:log|error)\(([^\n]*)\)/g)].map(m => m[1])
-        for (const line of logged)
-            assert.ok(!/PASS|password/i.test(line), 'log line may not reference a password: ' + line)
     })
 })
