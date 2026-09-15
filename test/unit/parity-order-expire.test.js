@@ -40,10 +40,9 @@ const Y2038_CEILING = 2147483647;
 // A loose wall-clock floor: PIN_T0 must be a genuinely future timestamp so the
 // jump off the real-time baseline is forward. 2026-01-01 UTC.
 const WALLCLOCK_FLOOR = 1767225600;
+const steps = corpus('BTC');
 
 describe('parity corpus ORDER_EXPIRE determinism contract', function () {
-    const steps = corpus('BTC');
-
     it('pins every step to the fixed PIN_T0 + i*PIN_STEP schedule (monotonic)', function () {
         expect(PIN_STEP).to.be.greaterThan(0);
         steps.forEach((s, i) => {
@@ -64,7 +63,9 @@ describe('parity corpus ORDER_EXPIRE determinism contract', function () {
         expect(FAR_FUTURE, 'FAR_FUTURE must stay under the decoder Y2038 ceiling')
             .to.be.at.most(Y2038_CEILING);
     });
+});
 
+describe('parity corpus ORDER_EXPIRE determinism contract', function () {
     it('has exactly one unmatchable ORDER, at UNMATCHABLE_ORDER_INDEX, carrying ORDER_EXPIRE_AT', function () {
         const expiring = steps.filter(s => s.action === 'ORDER' && s.params.expiration === ORDER_EXPIRE_AT);
         expect(expiring.length, 'expected exactly one order with the ORDER_EXPIRE_AT expiration').to.equal(1);
@@ -96,7 +97,9 @@ describe('parity corpus ORDER_EXPIRE determinism contract', function () {
         expect(priorGap, 'the crossing block must be the immediate successor of the last pre-expiry block')
             .to.equal(PIN_STEP);
     });
+});
 
+describe('parity corpus ORDER_EXPIRE determinism contract', function () {
     it('the unmatchable order is born OPEN (its own block time is below the expiry)', function () {
         const step = steps[UNMATCHABLE_ORDER_INDEX];
         expect(step.time, 'the order must be placed before its expiration, not born expired')
