@@ -110,6 +110,9 @@ describe('seed-contract-state resolveContractIndex: the chain outranks the cache
         assert.match(log.text(), /not deployed yet/);
         assert.doesNotMatch(log.text(), /STALE/);
     });
+});
+
+describe('seed-contract-state resolveContractIndex: the chain outranks the cache', function () {
 
     // A reindex can renumber actions. Silently keeping the cached number would
     // point every later EXECUTE at whatever now sits at that index.
