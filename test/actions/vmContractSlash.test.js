@@ -26,13 +26,11 @@ const gasHelper = require('../helpers/gasHelper')
  * Verified against the indexer DB: contract_stakes (remaining), slash_events, and the
  * burn-address balance. (contract_executions has no return_value, so we assert via DB state.)
  */
-describe('VM Contract SLASH: a contract slashes its own staker', function () {
-
-    // Ed25519 pubkey as a 64-hex string (same pattern as contractStaking.test.js / staking.test.js).
-    function newSigningPubkey(){
-        let { publicKey } = crypto.generateKeyPairSync('ed25519')
-        return publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('hex')
-    }
+// Ed25519 pubkey as a 64-hex string (same pattern as contractStaking.test.js / staking.test.js).
+function newSigningPubkey(){
+    let { publicKey } = crypto.generateKeyPairSync('ed25519')
+    return publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('hex')
+}
 
     // Stakeable contract exposing a single slash primitive: slash(pubkey, amount) of XCHAIN.
     const SLASHER = `
@@ -152,7 +150,7 @@ describe('VM Contract SLASH: a contract slashes its own staker', function () {
             '(credits ' + led.credits + ', escrows ' + led.escrows + ', gas ' + led.debits + ')')
     }
 
-    before(async function () {
+async function setupContractSlash() {
         const deployer = await cryptoHelper.getNewFundedAddress('slash-deployer', COIN, NETWORK, null, 'legacy', 0, 1)
         await gasHelper.ensureGasBalance(deployer, '500')
         // DEPLOY v1: stakeable, cooldown 50 blocks, slash destination BURN.
@@ -166,24 +164,24 @@ describe('VM Contract SLASH: a contract slashes its own staker', function () {
 
         const st = await stakeHelper.sendStakeV3(staker, '200.00000000', pubkey, contractIndex, 'XCHAIN')
         assert(st.stake && st.stake.status === 'valid', 'STAKE v3 of 200 XCHAIN must be valid')
-    })
+}
 
     // A stake this suite slashed to zero owes the venue no UNSTAKE: there is nothing left
     // to hand back, and the sweep's doomed broadcast costs the run a minute and prints a
     // FAILED line that reads like a defect. Settle the fixture ledger only when the chain
     // agrees the stake is empty, so a suite that stopped early still gets swept normally.
-    after(async function () {
-        if (contractIndex === null || pubkey === null) return
-        if (await activeStake(contractIndex, pubkey, 'XCHAIN') === 0)
-            stakeTeardown.noteUnstake({ signingPubkey: pubkey, contractIndex, tick: 'XCHAIN' })
-    })
+async function teardownContractSlash() {
+    if (contractIndex === null || pubkey === null) return
+    if (await activeStake(contractIndex, pubkey, 'XCHAIN') === 0)
+        stakeTeardown.noteUnstake({ signingPubkey: pubkey, contractIndex, tick: 'XCHAIN' })
+}
 
-    it('records a 200 XCHAIN stake before any slash', async function () {
+async function recordsInitialStake() {
         assert.strictEqual(await activeStake(contractIndex, pubkey, 'XCHAIN'), 200,
             'active stake should be 200 before slashing')
-    })
+}
 
-    it('slashes 50: stake drops to 150, 50 credited to the burn destination, slash_events written', async function () {
+async function slashesPartialStake() {
         // BURN is a global, shared destination that accumulates across every slash on the stack,
         // so assert a +50 delta rather than an absolute balance (the DB is not pristine).
         const burnAddr = await slashDestAddress(contractIndex)
@@ -206,9 +204,9 @@ describe('VM Contract SLASH: a contract slashes its own staker', function () {
             'burn destination should be credited exactly the slashed 50 XCHAIN')
 
         await assertSlashIsARedirect(ex.execution.action_index, 50)
-    })
+}
 
-    it('over-slash is capped at the available stake (slash 300 of 150 → 150, stake → 0)', async function () {
+async function capsOverslash() {
         // Burn dest currently holds 50 from the previous slash; capping should add exactly 150 more.
         const ev0 = await latestSlashEvent(contractIndex, pubkey)
         const destBefore = Number(await balanceOf(ev0.dest, 'XCHAIN')) // 50
@@ -225,5 +223,12 @@ describe('VM Contract SLASH: a contract slashes its own staker', function () {
         // The cap changes how much is taken, not the shape: the release still equals what
         // was actually slashed, not what the contract asked for.
         await assertSlashIsARedirect(ex.execution.action_index, 150)
-    })
+}
+
+describe('VM Contract SLASH: a contract slashes its own staker', function () {
+    before(setupContractSlash)
+    after(teardownContractSlash)
+    it('records a 200 XCHAIN stake before any slash', recordsInitialStake)
+    it('slashes 50: stake drops to 150, 50 credited to the burn destination, slash_events written', slashesPartialStake)
+    it('over-slash is capped at the available stake (slash 300 of 150 → 150, stake → 0)', capsOverslash)
 })
