@@ -129,49 +129,54 @@ function haveConnectors() {
     return global.regtestMinerConnector && global.utxoTrackerConnector && global.nodeConnector;
 }
 
+let ESCROW_SRC;               // loaded in before() so a missing xchain-contracts skips this suite instead of aborting the whole run
+const AMOUNT = 1000;          // escrowed quantity (decimals 0 token)
+const DEADLINE_BLOCKS = 100;  // far enough out that timeout() is irrelevant here
+let sdk, buyer, seller, arbiter, tick, contractIndex, contractAddr;
+let escrowReady;
+
+async function prepareEscrow() {
+    if (escrowReady !== undefined) return escrowReady;
+    if (!haveConnectors()) return (escrowReady = false);
+    // Load the contract template lazily so a missing xchain-contracts checkout
+    // skips this suite with a clear reason instead of aborting the whole run.
+    try {
+        ESCROW_SRC = compactSource(loadTemplate('escrow'));
+    } catch (e) {
+        console.log('    [escrow] SKIP: ' + e.message.split('\n')[0]);
+        return (escrowReady = false);
+    }
+    sdk = makeSdk();
+
+    buyer = await fundedGasAddress(sdk, 1);
+    // Seller + arbiter only need to exist on-chain as destinations / roles.
+    seller  = newAddress(sdk);
+    arbiter = newAddress(sdk);
+
+    tick = uniqueTick('ESC');
+    const issue = await submit(sdk,
+        { action: 'ISSUE', params: { tick, maxSupply: 1000000, maxMint: 100000, decimals: 0, description: 'escrow asset', mintSupply: AMOUNT } },
+        { pubkey: buyer.address, change: buyer.address },
+        submitOpts({ wif: buyer.wif }));
+    expect(issue.indexed.status, 'ISSUE indexed').to.equal('valid');
+    // This read is deliberate, and it is also what made the stale-read defect look like a
+    // consensus bug: it is the only balance read any template suite takes
+    // BEFORE the deposit, so it was the only one that could be answered from
+    // a stale cache afterwards. Keep it - the suite should keep exercising
+    // read-then-move-then-read on one address (fixed explorer-side in
+    // xchain-explorer src/db.js _resultCacheGeneration).
+    expect(balanceFor(await sdk.getBalances(buyer.address), tick), 'buyer holds the minted supply').to.equal(AMOUNT);
+
+    console.log('    [escrow] buyer=' + buyer.address);
+    console.log('    [escrow] seller=' + seller.address + ' arbiter=' + arbiter.address);
+    console.log('    [escrow] tick=' + tick + ' amount=' + AMOUNT);
+    return (escrowReady = true);
+}
+
 describe('[sdk] template:escrow (on-chain custody)', function () {
     this.timeout(0);
-
-    let ESCROW_SRC;               // loaded in before() so a missing xchain-contracts skips this suite instead of aborting the whole run
-    const AMOUNT = 1000;          // escrowed quantity (decimals 0 token)
-    const DEADLINE_BLOCKS = 100;  // far enough out that timeout() is irrelevant here
-
-    let sdk, buyer, seller, arbiter, tick, contractIndex, contractAddr;
-
     before(async function () {
-        if (!haveConnectors()) this.skip();
-        // Load the contract template lazily so a missing xchain-contracts checkout
-        // skips this suite with a clear reason instead of aborting the whole run.
-        try {
-            ESCROW_SRC = compactSource(loadTemplate('escrow'));
-        } catch (e) {
-            console.log('    [escrow] SKIP: ' + e.message.split('\n')[0]);
-            this.skip();
-        }
-        sdk = makeSdk();
-
-        buyer = await fundedGasAddress(sdk, 1);
-        // Seller + arbiter only need to exist on-chain as destinations / roles.
-        seller  = newAddress(sdk);
-        arbiter = newAddress(sdk);
-
-        tick = uniqueTick('ESC');
-        const issue = await submit(sdk,
-            { action: 'ISSUE', params: { tick, maxSupply: 1000000, maxMint: 100000, decimals: 0, description: 'escrow asset', mintSupply: AMOUNT } },
-            { pubkey: buyer.address, change: buyer.address },
-            submitOpts({ wif: buyer.wif }));
-        expect(issue.indexed.status, 'ISSUE indexed').to.equal('valid');
-        // This read is deliberate, and it is also what made the stale-read defect look like a
-        // consensus bug: it is the only balance read any template suite takes
-        // BEFORE the deposit, so it was the only one that could be answered from
-        // a stale cache afterwards. Keep it - the suite should keep exercising
-        // read-then-move-then-read on one address (fixed explorer-side in
-        // xchain-explorer src/db.js _resultCacheGeneration).
-        expect(balanceFor(await sdk.getBalances(buyer.address), tick), 'buyer holds the minted supply').to.equal(AMOUNT);
-
-        console.log('    [escrow] buyer=' + buyer.address);
-        console.log('    [escrow] seller=' + seller.address + ' arbiter=' + arbiter.address);
-        console.log('    [escrow] tick=' + tick + ' amount=' + AMOUNT);
+        if (!(await prepareEscrow())) this.skip();
     });
 
     it('DEPLOY escrow with the contract terms', async function () {
@@ -201,6 +206,13 @@ describe('[sdk] template:escrow (on-chain custody)', function () {
         } catch (e) { console.log('    [escrow] getContract threw: ' + e.message); }
         expect(await readState(sdk, contractIndex, 'status'), 'initial status').to.equal('INIT');
         console.log('    [escrow] address=' + contractAddr);
+    });
+});
+
+describe('[sdk] template:escrow (on-chain custody)', function () {
+    this.timeout(0);
+    before(async function () {
+        if (!(await prepareEscrow())) this.skip();
     });
 
     it('BATCH(DEPOSIT, EXECUTE fund) arms the escrow via getBalance', async function () {
@@ -244,6 +256,13 @@ describe('[sdk] template:escrow (on-chain custody)', function () {
         // vacuously green: release pays out "the full held balance", which proves
         // nothing unless the held balance is known to be the whole deposit.
         expect(await contractBalance(sdk, contractIndex, tick), 'contract holds the deposit').to.equal(AMOUNT);
+    });
+});
+
+describe('[sdk] template:escrow (on-chain custody)', function () {
+    this.timeout(0);
+    before(async function () {
+        if (!(await prepareEscrow())) this.skip();
     });
 
     it('EXECUTE release pays the seller the full held balance', async function () {
