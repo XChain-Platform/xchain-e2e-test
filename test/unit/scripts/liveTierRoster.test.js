@@ -62,7 +62,9 @@ describe('live integration tier roster', () => {
             assert.ok(roster.timeoutMs >= 120000, 'timeoutMs is too small for a live suite')
         })
     })
+})
 
+describe('live integration tier roster', () => {
     describe('auditRoster refuses the drift a glob would swallow', () => {
 
         const entry = (file, run, why) => ({ file, run, why })
@@ -117,7 +119,9 @@ describe('live integration tier roster', () => {
             assert.match(lane.auditRoster([], {})[0], /no `suites` array/)
         })
     })
+})
 
+describe('live integration tier roster', () => {
     describe('classify catches the green-having-run-nothing lane', () => {
 
         const FILE = 'test/integration/a.integration.test.js'
@@ -151,7 +155,9 @@ describe('live integration tier roster', () => {
             assert.match(p.detail, /2 failing/)
         })
     })
+})
 
+describe('live integration tier roster', () => {
     describe('tallyByFile folds a mocha report onto roster paths', () => {
 
         it('keys on the repo-relative path mocha reports absolutely', () => {
@@ -170,7 +176,9 @@ describe('live integration tier roster', () => {
             assert.strictEqual(lane.tallyByFile({}, '/x').size, 0)
         })
     })
+})
 
+describe('live integration tier roster', () => {
     describe('a host that cannot run the tier is not the commit\'s fault', () => {
 
         it('accepts a pre-provisioned database without consulting docker', () => {
@@ -192,7 +200,9 @@ describe('live integration tier roster', () => {
             assert.match(blocker, /HUB_DB_USER/)
         })
     })
+})
 
+describe('live integration tier roster', () => {
     describe('the lane is actually wired into the gate', () => {
 
         // The whole item is that a suite existed and no lane ran it. A roster
