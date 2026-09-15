@@ -50,12 +50,36 @@ function jsFilesUnder(dir, skip) {
 }
 
 /**
+ * The entry as the sibling checkout actually spells it.
+ *
+ * A split leaves `<name>.js` in place while the parts move under `<name>/`, but the
+ * split can go one step further and take the entry into the directory as well (the
+ * indexer's action handlers and db mixins did, so `actions/slash.js` became
+ * `actions/slash/index.js`). A caller naming the flat path then names a file that
+ * is not there, so it is followed to `<name>/index.js`. The flat path wins whenever
+ * it exists, so nothing changes on a tree that still has it. Neither spelling
+ * present is a THROW naming both, never a silent skip: this suite's assertions
+ * anchor on real production code, and a sibling that cannot be found must read as
+ * a failure to look, not as a passing comparison against nothing.
+ *
+ * @param {string} entry absolute path of `<name>.js` or `<dir>/index.js`
+ * @returns {string} the spelling that exists
+ */
+function moduleEntry(entry) {
+    if (fs.existsSync(entry)) return entry;
+    const inDirectory = path.join(entry.replace(/\.js$/, ''), 'index.js');
+    if (inDirectory !== entry && fs.existsSync(inDirectory)) return inDirectory;
+    throw new Error(`sibling module not found at either spelling: ${entry} or ${inDirectory}`);
+}
+
+/**
  * The files one module is made of: the entry first, then its parts.
  *
  * @param {string} entry absolute path of `<name>.js` or `<dir>/index.js`
  * @returns {string[]} the entry, then every part in sorted order
  */
-function modulePaths(entry) {
+function modulePaths(entryPath) {
+    const entry = moduleEntry(entryPath);
     const dir = path.basename(entry) === 'index.js' ? path.dirname(entry) : entry.replace(/\.js$/, '');
     if (dir === entry) return [entry];
     // Exact spelling, checked by listing the parent: a case-insensitive
@@ -66,9 +90,9 @@ function modulePaths(entry) {
     return named ? [entry, ...jsFilesUnder(dir, entry)] : [entry];
 }
 
-/** The module's text, entry then parts, newline-joined. Throws as readFileSync does when the entry is missing. */
+/** The module's text, entry then parts, newline-joined. Throws naming both spellings when the entry is at neither. */
 function readModuleSource(entry) {
     return modulePaths(entry).map((p) => fs.readFileSync(p, 'utf8')).join('\n');
 }
 
-module.exports = { modulePaths, readModuleSource };
+module.exports = { moduleEntry, modulePaths, readModuleSource };

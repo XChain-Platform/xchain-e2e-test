@@ -24,6 +24,7 @@ const assert  = require('assert')
 const fs      = require('fs')
 const path    = require('path')
 const bitcoin = require('bitcoinjs-lib')
+const { moduleEntry } = require('../support/sibling_source.js')
 
 const protocol = require('../../../xchain-documentation/protocol/constants.js')
 
@@ -32,7 +33,10 @@ const XChainDecoder     = require('../../../xchain-decoder/src/XChainDecoder.js'
 const sdkValidator      = require('../../../xchain-sdk/src/validator.js')
 const indexerDeploy     = require('../../../xchain-indexer/src/actions/deploy/index.js')
 const indexerXcall      = require('../../../xchain-indexer/src/actions/xcall/index.js')
-const indexerXexec      = require('../../../xchain-indexer/src/actions/xexec.js')
+// xexec is the one handler here that may still be flat: `actions/xexec.js` on an older
+// indexer, `actions/xexec/index.js` once it moved into its parts directory. moduleEntry
+// loads whichever exists and throws naming both when neither does.
+const indexerXexec      = require(moduleEntry(path.join(__dirname, '../../../xchain-indexer/src/actions/xexec.js')))
 const hubConstants      = require('../../../xchain-hub/src/constants.js')
 
 // An indexer action handler is either src/actions/<name>.js or, once it is split, the
