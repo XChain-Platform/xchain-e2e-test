@@ -97,6 +97,9 @@ describe('seed-contract-state findDeployedContract: resume from the chain, not t
         const sdk = stubSdk([row({ code_hash: OTHER, action_index: '3' })]);
         assert.strictEqual(await findDeployedContract(sdk, CODE, ADDR), null);
     });
+});
+
+describe('seed-contract-state findDeployedContract: resume from the chain, not the file', function () {
 
     it('ignores a non-valid DEPLOY of the very same code', async function () {
         const sdk = stubSdk([row({ status: 'invalid' })]);
