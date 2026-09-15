@@ -34,7 +34,7 @@
 // file needs no VM, so it runs and reports on every platform, including the
 // ones where the VM-dependent suites are red.
 //
-//   npx mocha --no-config test/unit/vmFalseGreen.test.js
+//   npx mocha --no-config test/unit/vm_false_green.test.js
 
 const assert = require('assert');
 const fs     = require('fs');

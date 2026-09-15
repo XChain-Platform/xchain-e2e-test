@@ -26,7 +26,7 @@
 //
 // Judge a run by what it did not run. This file makes "did not run" loud.
 //
-//   npx mocha --no-config test/unit/suiteParses.test.js
+//   npx mocha --no-config test/unit/suite_parses.test.js
 
 const assert = require('assert');
 const fs     = require('fs');

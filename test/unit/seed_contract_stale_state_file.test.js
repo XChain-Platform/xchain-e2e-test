@@ -1,3 +1,6 @@
+// Copyright © 2025-2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC - https://dankest.llc
+//
 /*
  * seed-contract-state: a REMEMBERED contract index is a claim about the chain,
  * and the chain is allowed to disagree.

@@ -38,7 +38,7 @@
  * the node's (245, 249, 260). A predicate that is correct but wired to the wrong
  * index would otherwise pass, and cost another four-hour run to find.
  *
- *   npx mocha --no-config test/unit/oracleBatchBarrierTestnetAlignment.test.js
+ *   npx mocha --no-config test/unit/oracle_batch_barrier_testnet_alignment.test.js
  ********************************************************************/
 
 const assert = require('assert');

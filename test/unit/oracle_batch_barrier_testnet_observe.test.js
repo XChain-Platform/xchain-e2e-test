@@ -39,7 +39,7 @@
  * database connection is a reader that finds no rows, which is the honest shape
  * for a node whose mirror is empty, and no socket is opened anywhere.
  *
- *   npx mocha --no-config test/unit/oracleBatchBarrierTestnet.observe.test.js
+ *   npx mocha --no-config test/unit/oracle_batch_barrier_testnet_observe.test.js
  ********************************************************************/
 
 const assert = require('assert');

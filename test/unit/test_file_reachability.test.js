@@ -22,7 +22,7 @@
 //
 // Runs in the hermetic unit tier so a suite nobody wired is caught on the
 // machine that added it:
-//   npx mocha --no-config test/unit/testFileReachability.test.js
+//   npx mocha --no-config test/unit/test_file_reachability.test.js
 
 const assert = require('assert');
 const fs     = require('fs');
@@ -43,19 +43,19 @@ const INTENTIONALLY_UNRUN = [
         why: 'Hand-driven Byzantine drill against a live multi-host stack; test/drills/README.md carries the invocation and the operator preconditions it needs.'
     },
     {
-        file: 'test/drills/unit/drillPlan.test.js',
+        file: 'test/drills/unit/drill_plan.test.js',
         why: 'Hermetic cover for the drill library, run by the npx line in test/drills/README.md. Folding the drill lane into test:unit would change what the CI unit job runs, which is a decision to take deliberately rather than a side effect of this guard.'
     },
     {
-        file: 'test/drills/unit/drillRunner.test.js',
+        file: 'test/drills/unit/drill_runner.test.js',
         why: 'Hermetic cover for the drill library, run by the npx line in test/drills/README.md. Folding the drill lane into test:unit would change what the CI unit job runs, which is a decision to take deliberately rather than a side effect of this guard.'
     },
     {
-        file: 'test/drills/unit/drillVerdict.test.js',
+        file: 'test/drills/unit/drill_verdict.test.js',
         why: 'Hermetic cover for the drill library, run by the npx line in test/drills/README.md. Folding the drill lane into test:unit would change what the CI unit job runs, which is a decision to take deliberately rather than a side effect of this guard.'
     },
     {
-        file: 'test/drills/unit/liveByzantineFaults.test.js',
+        file: 'test/drills/unit/live_byzantine_faults.test.js',
         why: 'Hermetic cover for the drill library, run by the npx line in test/drills/README.md. Folding the drill lane into test:unit would change what the CI unit job runs, which is a decision to take deliberately rather than a side effect of this guard.'
     },
     {
