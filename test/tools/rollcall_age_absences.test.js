@@ -46,7 +46,7 @@
  *
  *   E2E_REQUIRE_FEDERATION=1 XC_ROLLCALL_REGTEST_ACTIVATION=armed \
  *     npx mocha --timeout 0 --exit --require ./test/initialCheck.test.js \
- *     test/tools/rollcallAgeAbsences.test.js
+ *     test/tools/rollcall_age_absences.test.js
  *
  * with the federation mnemonic and idle generation the venue was seeded from
  * in the environment, and XC_ROLLCALL_GATES_REGTEST_ACTIVATION matching the

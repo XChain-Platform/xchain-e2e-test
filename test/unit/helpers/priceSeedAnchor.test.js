@@ -120,7 +120,7 @@ describe('price seed anchoring', () => {
         // The retired rule, in the shape it actually appeared in: max(tip, now) plus
         // a buffer. It survived in _ctlseed for months after H-3 made it wrong,
         // because nothing failed when a preamble seeded rows nobody could select.
-        const src = fs.readFileSync(require.resolve('../../actions/_ctlseed.test.js'), 'utf8')
+        const src = fs.readFileSync(require.resolve('../../actions/ctlseed.test.js'), 'utf8')
         assert.ok(!/Math\.max\(\s*tip\s*,\s*now\s*\)\s*\+/.test(src),
             '_ctlseed must not future-date its anchor; use usableSeedAnchors()')
         assert.ok(/usableSeedAnchors\(\)/.test(src),

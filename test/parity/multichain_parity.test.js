@@ -28,7 +28,7 @@
  * Run (per chain, after `npm run test:sdk` env is set up):
  *   PARITY_OUT_DIR=/tmp/parity \
  *   ./node_modules/.bin/mocha --timeout 0 \
- *     --require ./test/initialCheck.test.js test/parity/multichain-parity.test.js
+ *     --require ./test/initialCheck.test.js test/parity/multichain_parity.test.js
  *********************************************************************/
 
 'use strict';
