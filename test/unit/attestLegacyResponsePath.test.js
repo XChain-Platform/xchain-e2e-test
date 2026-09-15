@@ -42,7 +42,9 @@ describe('the legacy on-chain ATTEST response path guard', function () {
             'that lands on one side only makes this guard skip cases that now CAN run, ' +
             'or run cases that now cannot. Copy the indexer value across.')
     })
+})
 
+describe('the legacy on-chain ATTEST response path guard', function () {
     describe('isLegacyResponsePathUnreachable', function () {
 
         it('is false on an unratified network, where the legacy path runs byte for byte', function () {
@@ -73,7 +75,9 @@ describe('the legacy on-chain ATTEST response path guard', function () {
             }
         })
     })
+})
 
+describe('the legacy on-chain ATTEST response path guard', function () {
     describe('skipIfResponseMirrorEra', function () {
 
         it('skips and reports true on a mirror-era network', function () {
