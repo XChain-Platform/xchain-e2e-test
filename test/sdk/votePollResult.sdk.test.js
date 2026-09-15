@@ -152,77 +152,83 @@ async function execRecord(sdk, deployer, contractIndex, pollIndex) {
     expect(res.indexed.status, 'EXECUTE status').to.equal('valid');
 }
 
+let sdk, issuer, voterA, voterB, readerSetup;
+
+async function preparePollReader() {
+    if (readerSetup) return readerSetup;
+    // compactAddresses off: the SDK's ^id destination compaction is ahead of the
+    // indexer's wire acceptance (P4 arming / F3 gate open) and can invalidate the
+    // setup SENDs; these suites test VOTE semantics, not address compaction.
+    sdk = makeSdk({ compactAddresses: false });
+    issuer = await fundedGasAddress(sdk, 0.05);
+    voterA = await fundedGasAddress(sdk, 0.03);
+    voterB = await fundedGasAddress(sdk, 0.03);
+    readerSetup = { sdk, issuer, voterA, voterB };
+    return readerSetup;
+}
+
+async function verifyFinalizedPollRead() {
+    // GOV supply 1000: A=300, B=100, issuer keeps 600.
+    const tick = await issueGov(sdk, issuer, 1000);
+    await sendTick(sdk, issuer, tick, voterA.address, 300);
+    await sendTick(sdk, issuer, tick, voterB.address, 100);
+    await mine(1);
+
+    const endBlock = (await height()) + 8;
+    const pollIndex = await createPoll(sdk, issuer, {
+        tick, endBlock, options: 'YES,NO', maxSelections: 1,
+        tallyMode: 'approval', weightMode: 'balance', question: 'Contract-read winner?'
+    });
+    // A -> NO(1) weight 300; B -> YES(0) weight 100. NO (option 1) wins.
+    await castBallot(sdk, voterA, pollIndex, '1');
+    await castBallot(sdk, voterB, pollIndex, '0');
+
+    const poll = await waitFinalized(pollIndex);
+    expect(poll, 'poll row').to.not.be.null;
+    expect(poll.poll_status, 'poll_status').to.equal('finalized');
+    expect(Number(poll.winning_option), 'winning_option (NO)').to.equal(1);
+
+    // Deploy the reader contract, then mine well past the finalization block
+    // so the EXECUTE sees the poll (getPollResultsForVM: resolved_block < block).
+    const contractIndex = await deployReader(sdk, issuer);
+    await mine(3);
+    await execRecord(sdk, issuer, contractIndex, pollIndex);
+
+    const status = await waitState(sdk, contractIndex, 'status');
+    const winner = await readState(sdk, contractIndex, 'winner');
+    const voters = await readState(sdk, contractIndex, 'voters');
+    expect(status, 'contract read status').to.equal('finalized');
+    expect(winner, 'contract read winner (NO=1)').to.equal('1');
+    expect(voters, 'contract read total_voters').to.equal('2');
+    console.log('    [sdk] contract #' + contractIndex + ' read poll #' + pollIndex +
+                ': status=' + status + ' winner=' + winner + ' voters=' + voters);
+}
+
+async function verifyOpenPollRead() {
+    // A long-running poll that is still open: the contract must see null.
+    const tick = await issueGov(sdk, issuer, 1000);
+    await sendTick(sdk, issuer, tick, voterA.address, 300);
+    await mine(1);
+
+    const endBlock = (await height()) + 200; // far future, stays open
+    const pollIndex = await createPoll(sdk, issuer, {
+        tick, endBlock, options: 'YES,NO', maxSelections: 1,
+        tallyMode: 'approval', weightMode: 'balance', question: 'Still open'
+    });
+    await castBallot(sdk, voterA, pollIndex, '0');
+
+    const contractIndex = await deployReader(sdk, issuer);
+    await mine(2);
+    await execRecord(sdk, issuer, contractIndex, pollIndex);
+
+    const status = await waitState(sdk, contractIndex, 'status');
+    expect(status, 'open poll reads unseen').to.equal('unseen');
+    console.log('    [sdk] contract #' + contractIndex + ' read open poll #' + pollIndex + ': ' + status);
+}
+
 describe('[sdk] contract reads a finalized VOTE poll', function () {
     this.timeout(0);
-
-    let sdk, issuer, voterA, voterB;
-
-    before(async function () {
-        // compactAddresses off: the SDK's ^id destination compaction is ahead of the
-        // indexer's wire acceptance (P4 arming / F3 gate open) and can invalidate the
-        // setup SENDs; these suites test VOTE semantics, not address compaction.
-        sdk = makeSdk({ compactAddresses: false });
-        issuer = await fundedGasAddress(sdk, 0.05);
-        voterA = await fundedGasAddress(sdk, 0.03);
-        voterB = await fundedGasAddress(sdk, 0.03);
-    });
-
-    it('reads the frozen winner + status of a finalized poll', async function () {
-        // GOV supply 1000: A=300, B=100, issuer keeps 600.
-        const tick = await issueGov(sdk, issuer, 1000);
-        await sendTick(sdk, issuer, tick, voterA.address, 300);
-        await sendTick(sdk, issuer, tick, voterB.address, 100);
-        await mine(1);
-
-        const endBlock = (await height()) + 8;
-        const pollIndex = await createPoll(sdk, issuer, {
-            tick, endBlock, options: 'YES,NO', maxSelections: 1,
-            tallyMode: 'approval', weightMode: 'balance', question: 'Contract-read winner?'
-        });
-        // A -> NO(1) weight 300; B -> YES(0) weight 100. NO (option 1) wins.
-        await castBallot(sdk, voterA, pollIndex, '1');
-        await castBallot(sdk, voterB, pollIndex, '0');
-
-        const poll = await waitFinalized(pollIndex);
-        expect(poll, 'poll row').to.not.be.null;
-        expect(poll.poll_status, 'poll_status').to.equal('finalized');
-        expect(Number(poll.winning_option), 'winning_option (NO)').to.equal(1);
-
-        // Deploy the reader contract, then mine well past the finalization block
-        // so the EXECUTE sees the poll (getPollResultsForVM: resolved_block < block).
-        const contractIndex = await deployReader(sdk, issuer);
-        await mine(3);
-        await execRecord(sdk, issuer, contractIndex, pollIndex);
-
-        const status = await waitState(sdk, contractIndex, 'status');
-        const winner = await readState(sdk, contractIndex, 'winner');
-        const voters = await readState(sdk, contractIndex, 'voters');
-        expect(status, 'contract read status').to.equal('finalized');
-        expect(winner, 'contract read winner (NO=1)').to.equal('1');
-        expect(voters, 'contract read total_voters').to.equal('2');
-        console.log('    [sdk] contract #' + contractIndex + ' read poll #' + pollIndex +
-                    ': status=' + status + ' winner=' + winner + ' voters=' + voters);
-    });
-
-    it('reads null (unseen) for a poll that has not finalized', async function () {
-        // A long-running poll that is still open: the contract must see null.
-        const tick = await issueGov(sdk, issuer, 1000);
-        await sendTick(sdk, issuer, tick, voterA.address, 300);
-        await mine(1);
-
-        const endBlock = (await height()) + 200; // far future, stays open
-        const pollIndex = await createPoll(sdk, issuer, {
-            tick, endBlock, options: 'YES,NO', maxSelections: 1,
-            tallyMode: 'approval', weightMode: 'balance', question: 'Still open'
-        });
-        await castBallot(sdk, voterA, pollIndex, '0');
-
-        const contractIndex = await deployReader(sdk, issuer);
-        await mine(2);
-        await execRecord(sdk, issuer, contractIndex, pollIndex);
-
-        const status = await waitState(sdk, contractIndex, 'status');
-        expect(status, 'open poll reads unseen').to.equal('unseen');
-        console.log('    [sdk] contract #' + contractIndex + ' read open poll #' + pollIndex + ': ' + status);
-    });
+    before(preparePollReader);
+    it('reads the frozen winner + status of a finalized poll', verifyFinalizedPollRead);
+    it('reads null (unseen) for a poll that has not finalized', verifyOpenPollRead);
 });
