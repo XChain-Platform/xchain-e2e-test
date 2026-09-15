@@ -80,22 +80,23 @@ async function mineTo(h) {
     return cur;
 }
 
-describe('[drill] flag-day transition traffic', function () {
-    this.timeout(0);
+let sdk, issuer, tick;
+let trafficReady = false;
 
-    let sdk, issuer, tick;
+async function prepareTraffic() {
+    if (trafficReady) return;
+    expect(C_H, 'DRILL_C_H env').to.be.above(0);
+    expect(B_H, 'DRILL_B_H env').to.be.above(C_H);
+    expect(A_TS, 'DRILL_A_TS env').to.be.above(1700000000);
+    sdk = makeSdk();
+    issuer = await fundedGasAddress(sdk, 2);
+    tick = uniqueTick('DRL');
+    rec.tick = tick; rec.issuer = issuer.address;
+    console.log('    [drill] issuer=' + issuer.address + ' tick=' + tick + ' tip=' + await tip());
+    trafficReady = true;
+}
 
-    before(async function () {
-        expect(C_H, 'DRILL_C_H env').to.be.above(0);
-        expect(B_H, 'DRILL_B_H env').to.be.above(C_H);
-        expect(A_TS, 'DRILL_A_TS env').to.be.above(1700000000);
-        sdk = makeSdk();
-        issuer = await fundedGasAddress(sdk, 2);
-        tick = uniqueTick('DRL');
-        rec.tick = tick; rec.issuer = issuer.address;
-        console.log('    [drill] issuer=' + issuer.address + ' tick=' + tick + ' tip=' + await tip());
-    });
-
+function registerPreCommitmentTraffic() {
     it('P1 pre-C: ISSUE + SEND + sync DEPLOY + async DEPLOY broadcast', async function () {
         expect(await tip(), 'tip must sit below C_H at drill start').to.be.below(C_H - 2);
         let r = await submit(sdk,
@@ -123,7 +124,9 @@ describe('[drill] flag-day transition traffic', function () {
         await mine(2);
         console.log('    [drill] P1 done at tip=' + await tip());
     });
+}
 
+function registerCommitmentTraffic() {
     it('P2 cross C_H with supply-changing traffic', async function () {
         await mineTo(C_H - 1);
         // MINTs on both sides of the boundary: supply refreshes are exactly what
@@ -138,7 +141,9 @@ describe('[drill] flag-day transition traffic', function () {
         expect(t, 'C boundary must be crossed with MINT traffic').to.be.least(C_H);
         console.log('    [drill] P2 done at tip=' + t);
     });
+}
 
+function registerValidatorTraffic() {
     it('P3 cross B_H with traffic', async function () {
         await mineTo(B_H - 2);
         for (let i = 0; i < 3; i++) {
@@ -150,7 +155,9 @@ describe('[drill] flag-day transition traffic', function () {
         await mineTo(B_H + 4);
         console.log('    [drill] P3 done at tip=' + await tip());
     });
+}
 
+function registerContractTraffic() {
     it('P4 wait for A_TS, then post-A VM traffic', async function () {
         const wait = (A_TS + 3) * 1000 - Date.now();
         if (wait > 0) {
@@ -178,4 +185,13 @@ describe('[drill] flag-day transition traffic', function () {
         console.log('    [drill] P4 done at tip=' + await tip());
         fs.writeFileSync(OUT, JSON.stringify(rec, null, 2));
     });
+}
+
+describe('[drill] flag-day transition traffic', function () {
+    this.timeout(0);
+    before(prepareTraffic);
+    registerPreCommitmentTraffic();
+    registerCommitmentTraffic();
+    registerValidatorTraffic();
+    registerContractTraffic();
 });
