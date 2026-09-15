@@ -115,29 +115,27 @@ function ownershipOrderCmd(giveTick, getTick, getAddress, expiration){
            "|5||" + getAddress + "|" + expiration + "|||F12"
 }
 
-describe('BATCH: ORDER escrows the parent, then child ISSUEs (F12)', function () {
+// Shared issuer: one funded address, one settlement tick, several parents. Each
+// case gets its own parent so the escrow state of one cannot leak into another.
+let addr = null, address = null, settle = null
 
-    // Shared issuer: one funded address, one settlement tick, several parents. Each
-    // case gets its own parent so the escrow state of one cannot leak into another.
-    let addr = null, address = null, settle = null
+async function setupBatchEscrow() {
+    addr    = await cryptoHelper.getNewFundedAddress("F12", COIN, NETWORK, null, "legacy", 0, 2)
+    address = addr["address"]
+    settle  = "F12S" + address.substring(address.length - 8)
+    await issueHelper.sendIssueV0(addr, settle, 1000, 1000, 0, "F12 settlement tick", 100)
+}
 
-    before(async function () {
-        addr    = await cryptoHelper.getNewFundedAddress("F12", COIN, NETWORK, null, "legacy", 0, 2)
-        address = addr["address"]
-        settle  = "F12S" + address.substring(address.length - 8)
-        await issueHelper.sendIssueV0(addr, settle, 1000, 1000, 0, "F12 settlement tick", 100)
-    })
+async function newParent(suffix){
+    const tick = "F12P" + suffix + address.substring(address.length - 8)
+    await issueHelper.sendIssueV0(addr, tick, 100000, 100000, 0, "F12 parent " + suffix, 10)
+    const tk = await tokenRow(tick)
+    assert(tk, "parent " + tick + " should exist")
+    assert.strictEqual(tk.escrow_action_index, null, "a fresh parent is not escrowed")
+    return tick
+}
 
-    async function newParent(suffix){
-        const tick = "F12P" + suffix + address.substring(address.length - 8)
-        await issueHelper.sendIssueV0(addr, tick, 100000, 100000, 0, "F12 parent " + suffix, 10)
-        const tk = await tokenRow(tick)
-        assert(tk, "parent " + tick + " should exist")
-        assert.strictEqual(tk.escrow_action_index, null, "a fresh parent is not escrowed")
-        return tick
-    }
-
-    it('invalidates children that follow the escrowing ORDER in the same batch', async function () {
+async function invalidatesFollowingChildren() {
         const parent = await newParent("A")
         const exp    = (await chainTipTime()) + 30 * 86400
 
@@ -172,9 +170,9 @@ describe('BATCH: ORDER escrows the parent, then child ISSUEs (F12)', function ()
         caseState.caseA = { txHash: result.txHash, parent: parent,
                             orderActionIndex: Number(orders[0].action_index),
                             statuses: issues.map(r => r.status) }
-    })
+}
 
-    it('decides per sub-command POSITION: a child AHEAD of the ORDER is valid', async function () {
+async function decidesAtSubcommandPosition() {
         const parent = await newParent("B")
         const exp    = (await chainTipTime()) + 30 * 86400
 
@@ -206,9 +204,9 @@ describe('BATCH: ORDER escrows the parent, then child ISSUEs (F12)', function ()
         const tk = await tokenRow(parent + ".before")
         assert(tk, "the valid child is queryable")
         assert.strictEqual(tk.owner, address, "and owned by the issuer")
-    })
+}
 
-    it('keeps the stored verdict after the escrow is released, and reopens issuance', async function () {
+async function keepsStoredVerdict() {
         const caseA = caseState.caseA
         assert(caseA, "case A must have run first")
 
@@ -237,9 +235,9 @@ describe('BATCH: ORDER escrows the parent, then child ISSUEs (F12)', function ()
         assert.strictEqual(issues.length, 1)
         assert.strictEqual(issues[0].status, 'valid',
             "with the escrow released the same child shape is valid, got " + issues[0].status)
-    })
+}
 
-    it('reproduces the identical verdict for the same shape at a later height', async function () {
+async function reproducesVerdict() {
         const caseA  = caseState.caseA
         const parent = await newParent("D")
         const exp    = (await chainTipTime()) + 30 * 86400
@@ -256,5 +254,12 @@ describe('BATCH: ORDER escrows the parent, then child ISSUEs (F12)', function ()
             JSON.stringify(issues.map(r => r.tick + ' -> ' + r.status)))
         assert.deepStrictEqual(issues.map(r => r.status), caseA.statuses,
             "the same batch shape at a later height must produce the same status strings")
-    })
+}
+
+describe('BATCH: ORDER escrows the parent, then child ISSUEs (F12)', function () {
+    before(setupBatchEscrow)
+    it('invalidates children that follow the escrowing ORDER in the same batch', invalidatesFollowingChildren)
+    it('decides per sub-command POSITION: a child AHEAD of the ORDER is valid', decidesAtSubcommandPosition)
+    it('keeps the stored verdict after the escrow is released, and reopens issuance', keepsStoredVerdict)
+    it('reproduces the identical verdict for the same shape at a later height', reproducesVerdict)
 })
