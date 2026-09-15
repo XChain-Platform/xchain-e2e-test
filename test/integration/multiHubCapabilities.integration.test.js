@@ -71,30 +71,35 @@ const CAPS = {
     oracle_publish: { doge_address: 'nsTake195wjCuVwLHf26EsZnRjwpm2LJtb', doge_wallet: '/data/.dogecoin/wallet.dat' }
 };
 
+let mvh;
+let capsPath;
+let db;
+let dbSetup = null;
+
+// Was gated on HUB_DB_USER/HUB_DB_PASS being set, which nothing in CI sets,
+// so this suite skipped itself on every venue and the live tier reported it
+// as covered regardless. startDisposableHubDb self-provisions a throwaway
+// MariaDB in Docker exactly as the rest of the L2 suites do, so the only
+// remaining skip is a host with no Docker at all.
+async function prepareCapabilityStakingDb() {
+    this.timeout(180_000);
+    if (!dbSetup) {
+        dbSetup = (async function () {
+            const disposable = await startDisposableHubDb();
+            if (disposable) {
+                capsPath = path.join(os.tmpdir(), 'mvh_caps_' + process.pid + '.json');
+                fs.writeFileSync(capsPath, JSON.stringify(CAPS));
+            }
+            return disposable;
+        })();
+    }
+    db = await dbSetup;
+    if (!db) { console.log('Skipping capability staking test: no env DB and Docker unavailable'); this.skip(); }
+}
+
 describe('MultiValidatorHub: capability staking', function () {
     this.timeout(180_000);
-
-    let mvh;
-    let capsPath;
-    let db;
-
-    // Was gated on HUB_DB_USER/HUB_DB_PASS being set, which nothing in CI sets,
-    // so this suite skipped itself on every venue and the live tier reported it
-    // as covered regardless. startDisposableHubDb self-provisions a throwaway
-    // MariaDB in Docker exactly as the rest of the L2 suites do, so the only
-    // remaining skip is a host with no Docker at all.
-    before(async function () {
-        db = await startDisposableHubDb();
-        if (!db) { console.log('Skipping capability staking test: no env DB and Docker unavailable'); this.skip(); }
-        capsPath = path.join(os.tmpdir(), 'mvh_caps_' + process.pid + '.json');
-        fs.writeFileSync(capsPath, JSON.stringify(CAPS));
-    });
-
-    after(async function () {
-        if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
-        if (capsPath) { try { fs.unlinkSync(capsPath); } catch (_) {} }
-        if (db) await db.stop();
-    });
+    before(prepareCapabilityStakingDb);
 
     it('boots ' + COUNT + ' validators that peer-connect', async function () {
         mvh = new MultiValidatorHub({ count: COUNT, basePort: 30000 });
@@ -106,6 +111,11 @@ describe('MultiValidatorHub: capability staking', function () {
         assert.ok(peerCounts.every(c => c >= COUNT - 1),
             'each hub should see ' + (COUNT - 1) + ' peers; got ' + peerCounts.join(','));
     });
+});
+
+describe('MultiValidatorHub: capability staking', function () {
+    this.timeout(180_000);
+    before(prepareCapabilityStakingDb);
 
     it('runs startCapabilities and passes every self-test once config is present', async function () {
         for (const hub of mvh.hubs) {
@@ -135,6 +145,18 @@ describe('MultiValidatorHub: capability staking', function () {
             const row = state.find(r => r.capability === cap);
             assert.ok(row && Number(row.self_test_ok) === 1, cap + ' self-test should pass with config present');
         }
+    });
+});
+
+describe('MultiValidatorHub: capability staking', function () {
+    this.timeout(180_000);
+    before(prepareCapabilityStakingDb);
+
+    after(async function () {
+        this.timeout(180_000);
+        if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
+        if (capsPath) { try { fs.unlinkSync(capsPath); } catch (_) {} }
+        if (db) await db.stop();
     });
 
     it('gates qualification strictly at each capability MIN_STAKE', async function () {
