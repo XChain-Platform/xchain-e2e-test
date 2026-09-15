@@ -46,7 +46,7 @@ class RegtestMinerConnector {
     // a plain truthiness check on `result` would hand the caller the error
     // object as if it were the success payload. Every result-returning method
     // routes through this helper so that contract is enforced uniformly.
-    _unwrap(response) {
+    unwrap(response) {
         // Top-level JSON-RPC error member: express-json-rpc-router emits
         // response.data.error (not result) when the method is unknown (version
         // skew), a handler throws outside its own try/catch, or the body was
@@ -142,7 +142,7 @@ class RegtestMinerConnector {
         const response = await axios.post(this.url, data, this.reqConfig)
 
         // Verify if there is a result and return it (throws on an {error} envelope)
-        return this._unwrap(response)
+        return this.unwrap(response)
     }
 
     async setMiningTime(maxTime, txAddedTime){
@@ -161,7 +161,7 @@ class RegtestMinerConnector {
         // truthy, so a plain truthiness check would read a rejected input as
         // success; _unwrap() throws instead so callers stop believing the
         // cadence changed when it did not.
-        return this._unwrap(response)
+        return this.unwrap(response)
     }
 
     async setDefaultMiningTime(){
@@ -176,7 +176,7 @@ class RegtestMinerConnector {
         const response = await axios.post(this.url, data, this.reqConfig)
 
         // Verify if there is a result and return it (throws on an {error} envelope)
-        return this._unwrap(response)
+        return this.unwrap(response)
     }
 
     // Pin the coin node's clock to `timestamp` (unix seconds) through the miner,
@@ -199,7 +199,7 @@ class RegtestMinerConnector {
             // "ok" on success, {error:"..."} on refusal (mainnet / bad input); both
             // truthy, so _unwrap throws on the error envelope rather than reporting a
             // clock pin that never happened.
-            return this._unwrap(response)
+            return this.unwrap(response)
         } catch (e) {
             // Miner sidecars predating set_mock_time answer "Method not found", and a
             // long-lived venue routinely runs one chain's miner older than another's
@@ -208,7 +208,7 @@ class RegtestMinerConnector {
             // with the chain. setmocktime is a node-level control, so going straight to
             // the node produces the identical effect where its RPC port is published;
             // where it is not, the original miner error stands.
-            if (!this._isMissingMethod(e) || !global.nodeConnector)
+            if (!this.isMissingMethod(e) || !global.nodeConnector)
                 throw e
             if (!RegtestMinerConnector._mockTimeFallbackAnnounced) {
                 RegtestMinerConnector._mockTimeFallbackAnnounced = true
@@ -222,7 +222,7 @@ class RegtestMinerConnector {
     // A miner that does not implement the method, as opposed to one that refused the
     // call. Matched on the JSON-RPC message because the sidecar answers "Method not
     // found - set_mock_time" with a 200, so there is no status code to key on.
-    _isMissingMethod(e){
+    isMissingMethod(e){
         return /method not found/i.test(String(e && e.message))
     }
 
@@ -240,7 +240,7 @@ class RegtestMinerConnector {
 
         const response = await axios.post(this.url, data, this.reqConfig)
 
-        return this._unwrap(response)
+        return this.unwrap(response)
     }
 
     // Resume the adaptive auto-mine loop after a pauseMining() call.
@@ -254,7 +254,7 @@ class RegtestMinerConnector {
 
         const response = await axios.post(this.url, data, this.reqConfig)
 
-        return this._unwrap(response)
+        return this.unwrap(response)
     }
 
     // Mine `count` empty blocks via the regtest miner's generatetoaddress.
@@ -271,7 +271,7 @@ class RegtestMinerConnector {
 
         const response = await axios.post(this.url, data, this.reqConfig)
 
-        return this._unwrap(response)
+        return this.unwrap(response)
     }
 
     // Turn the miner's mine-empty heartbeat on (ms) or off (0). The miner is
@@ -291,7 +291,7 @@ class RegtestMinerConnector {
 
         const response = await axios.post(this.url, data, this.reqConfig)
 
-        return this._unwrap(response)
+        return this.unwrap(response)
     }
 }
 
