@@ -84,6 +84,7 @@ function loadVM() {
 }
 
 let XChainVM = null;
+let vm;
 
 // A raw ERR_DLOPEN_FAILED stack says the binding did not load; it does not say
 // what that costs or what to do about it. This banner does, printed from an
@@ -179,6 +180,29 @@ function applied(state, res) {
     return next;
 }
 
+function prepareVM(context) {
+    if (!VM_PATH) {
+        const why = 'no xchain-vm checkout resolvable from ' + __dirname +
+            ' (tried ' + VM_CANDIDATES.join(', ') + ')';
+        // Same switch the other sibling guards honour, so a venue that is
+        // supposed to carry the full checkout proves it rather than
+        // reporting pending and exiting 0.
+        if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1') {
+            throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but ' + why);
+        }
+        console.warn('[spvSeed] SKIPPING: ' + why +
+            '. This run proves NOTHING about bin/contracts/spvSeed.js.');
+        return context.skip();
+    }
+    if (vm) return;
+    // Deliberately unguarded: the checkout is here, so a load failure is a
+    // red run, never a pending one.
+    loadAttempted = true;
+    XChainVM = loadVM();
+    vm = createVM();
+    loadSucceeded = true;
+}
+
 // Skipping on an ABSENT xchain-vm checkout is legitimate (a single-repo clone
 // cannot run this at all). Skipping on a checkout that is present and unusable
 // is not: that is the false green this file used to produce. Skipping on a
@@ -196,27 +220,8 @@ describe('spvSeed contract (arming seed)', function () {
     // intermittently while the contract cases themselves finish in milliseconds,
     // so the ceiling is the harness cost rather than anything under assertion.
     this.timeout(180000);
-    let vm;
     before(function () {
-        if (!VM_PATH) {
-            const why = 'no xchain-vm checkout resolvable from ' + __dirname +
-                ' (tried ' + VM_CANDIDATES.join(', ') + ')';
-            // Same switch the other sibling guards honour, so a venue that is
-            // supposed to carry the full checkout proves it rather than
-            // reporting pending and exiting 0.
-            if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1') {
-                throw new Error('XCHAIN_REQUIRE_SIBLINGS=1 but ' + why);
-            }
-            console.warn('[spvSeed] SKIPPING: ' + why +
-                '. This run proves NOTHING about bin/contracts/spvSeed.js.');
-            return this.skip();
-        }
-        // Deliberately unguarded: the checkout is here, so a load failure is a
-        // red run, never a pending one.
-        loadAttempted = true;
-        XChainVM = loadVM();
-        vm = createVM();
-        loadSucceeded = true;
+        prepareVM(this);
     });
 
     it('initialize writes the base key set, so a DEPLOY alone leaves a non-empty tree', async function () {
@@ -232,6 +237,13 @@ describe('spvSeed contract (arming seed)', function () {
         assert.ok(c['seed/prefix/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/2'], 'prefix-sharing key 2');
         assert.strictEqual(Object.keys(c).length, 7, 'exactly the 7 documented base keys');
         assert.strictEqual(deletesOf(res).length, 0, 'initialize deletes nothing');
+    });
+});
+
+describe('spvSeed contract (arming seed)', function () {
+    this.timeout(180000);
+    before(function () {
+        prepareVM(this);
     });
 
     it('fill writes EXACTLY the requested number of keys (the arming budget depends on it)', async function () {
@@ -269,6 +281,13 @@ describe('spvSeed contract (arming seed)', function () {
         assert.strictEqual(s['seed/bulk/19'], '19', 'the second batch landed at its own offset');
         assert.strictEqual(s['seed/count'], '20');
     });
+});
+
+describe('spvSeed contract (arming seed)', function () {
+    this.timeout(180000);
+    before(function () {
+        prepareVM(this);
+    });
 
     it('remove emits a DELETE, not a write of an empty value (the SQL-NULL tombstone)', async function () {
         // Spec §3 Stage A: a tombstone maps to NO leaf. Writing '' instead would
@@ -291,6 +310,13 @@ describe('spvSeed contract (arming seed)', function () {
         const res = await vm.execute(opts('write', ['seed/manual', '7000'], s));
         assert.strictEqual(res.success, true, 'write should succeed: ' + (res.error || ''));
         assert.strictEqual(changesOf(res)['seed/manual'], '7000');
+    });
+});
+
+describe('spvSeed contract (arming seed)', function () {
+    this.timeout(180000);
+    before(function () {
+        prepareVM(this);
     });
 
     it('every mutating method is owner-gated (an open fill is an arming-budget hole)', async function () {
