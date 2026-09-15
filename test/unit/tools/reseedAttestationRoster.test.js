@@ -91,7 +91,9 @@ describe('reseedAttestationRoster: which seated keys a reseed may run beside', f
         assert.deepStrictEqual(out.blocking, [STRANGER_KEY],
             'naming one key must not wave through the next one')
     })
+})
 
+describe('reseedAttestationRoster: which seated keys a reseed may run beside', function () {
     it('sorts a derivable seated key as derivable, not as blocking', function () {
         const out = classifySeatedForReseed([DERIVABLE_KEY, STANDING_HUB_KEY],
             known([DERIVABLE_KEY]), STANDING_HUB_KEY.slice(0, 16))
