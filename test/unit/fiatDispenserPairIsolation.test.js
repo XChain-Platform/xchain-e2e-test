@@ -41,23 +41,28 @@ const DISPENSER_SUITE = process.env.XC693_SUITE_SRC
 const NATIVE_FEE_HELPER = process.env.XC693_HELPER_SRC
     || path.join(__dirname, '..', 'helpers', 'nativeFeeHelper.js')
 
+let suiteSrc, helperSrc
+
+function loadSources(){
+    if (suiteSrc !== undefined && helperSrc !== undefined) return
+    const nextSuiteSrc  = fs.readFileSync(DISPENSER_SUITE, 'utf8')
+    const nextHelperSrc = fs.readFileSync(NATIVE_FEE_HELPER, 'utf8')
+    suiteSrc  = nextSuiteSrc
+    helperSrc = nextHelperSrc
+}
+
+// Parses `const FIAT_X = 'EUR'` out of the suite rather than importing it:
+// requiring dispenser.test.js would register its live e2e cases with mocha.
+function declaredFiats(){
+    const out = {}
+    const re = /const\s+(FIAT_[A-Z0-9_]+)\s*=\s*'([A-Z]{3})'/g
+    let m
+    while ((m = re.exec(suiteSrc)) !== null) out[m[1]] = m[2]
+    return out
+}
+
 describe('FIAT dispenser price_snapshots pair isolation', () => {
-    let suiteSrc, helperSrc
-
-    before(() => {
-        suiteSrc  = fs.readFileSync(DISPENSER_SUITE, 'utf8')
-        helperSrc = fs.readFileSync(NATIVE_FEE_HELPER, 'utf8')
-    })
-
-    // Parses `const FIAT_X = 'EUR'` out of the suite rather than importing it:
-    // requiring dispenser.test.js would register its live e2e cases with mocha.
-    function declaredFiats(){
-        const out = {}
-        const re = /const\s+(FIAT_[A-Z0-9_]+)\s*=\s*'([A-Z]{3})'/g
-        let m
-        while ((m = re.exec(suiteSrc)) !== null) out[m[1]] = m[2]
-        return out
-    }
+    before(loadSources)
 
     it('declares a fiat constant for every FIAT dispenser case', () => {
         const fiats = declaredFiats()
@@ -93,6 +98,10 @@ describe('FIAT dispenser price_snapshots pair isolation', () => {
                 name + " = '" + code + "' is not in the indexer's FIATS allow-list")
         }
     })
+})
+
+describe('FIAT dispenser price_snapshots pair isolation', () => {
+    before(loadSources)
 
     it('no FIAT dispenser case seeds or clears a USD pair directly', () => {
         // Catches a case that hardcodes the pair instead of using its constant.
