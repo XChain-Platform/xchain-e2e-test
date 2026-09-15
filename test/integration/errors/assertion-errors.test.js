@@ -24,19 +24,23 @@ const sendHelper = require('../../../test/helpers/sendHelper')
 const transactionHelper = require('../../../test/transactionHelper')
 const dbRows = require('../fixtures/dbRows')
 
+let savedGlobals
+let addressInfo
+let createTxStub
+
+function createAddressInfo() {
+    const keyPair = ECPair.makeRandom({ network: bitcoin.networks.regtest })
+    const { address } = bitcoin.payments.p2pkh({
+        pubkey: keyPair.publicKey,
+        network: bitcoin.networks.regtest
+    })
+    addressInfo = { address, privateKey: keyPair.privateKey, publicKey: keyPair.publicKey }
+}
+
 describe('Error Propagation: Negative Test Assertions', function () {
 
-    let savedGlobals
-    let addressInfo
-    let createTxStub
-
     before(function () {
-        const keyPair = ECPair.makeRandom({ network: bitcoin.networks.regtest })
-        const { address } = bitcoin.payments.p2pkh({
-            pubkey: keyPair.publicKey,
-            network: bitcoin.networks.regtest
-        })
-        addressInfo = { address, privateKey: keyPair.privateKey, publicKey: keyPair.publicKey }
+        createAddressInfo()
     })
 
     beforeEach(function () {
@@ -76,6 +80,27 @@ describe('Error Propagation: Negative Test Assertions', function () {
             assert(row, 'row should exist for invalid status')
             assert.strictEqual(row.status, 'invalid: insufficient funds')
         })
+    })
+})
+
+describe('Error Propagation: Negative Test Assertions', function () {
+
+    before(function () {
+        createAddressInfo()
+    })
+
+    beforeEach(function () {
+        savedGlobals = {
+            NETWORK_OBJECT: global.NETWORK_OBJECT,
+            indexerDatabase: global.indexerDatabase,
+        }
+        global.NETWORK_OBJECT = { ...bitcoin.networks.regtest, dustThreshold: 546 }
+        createTxStub = sinon.stub(transactionHelper, 'createAndSendTransaction').resolves('txhash_neg')
+    })
+
+    afterEach(function () {
+        Object.assign(global, savedGlobals)
+        sinon.restore()
     })
 
     describe('Scenario 3.8.2: Timeout vs invalid status distinction', function () {
