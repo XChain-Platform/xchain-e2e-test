@@ -33,47 +33,41 @@ function createDb() {
     return new Database('localhost', 3306, 'test_db', 'user', 'pass')
 }
 
-describe('Fuzz: Config Parsing', function () {
+// Replicate the config destructuring pattern from initialCheck.test.js lines 113-140
+function extractNodeConfig(hubConfigs, coin, network) {
+    return {
+        nodeUrl: hubConfigs[coin][network]['node']['host'],
+        nodePort: hubConfigs[coin][network]['node']['server_port'],
+        nodeUser: hubConfigs[coin][network]['node']['user'],
+        nodePass: hubConfigs[coin][network]['node']['pass'],
+    }
+}
 
-    afterEach(function () {
-        sinon.restore()
-        mockMariadb.createPool.resetHistory()
-    })
+function extractAllConfigs(hubConfigs, coin, network) {
+    const cfg = hubConfigs[coin][network]
+    return {
+        nodeUrl: cfg['node']['host'],
+        nodePort: cfg['node']['server_port'],
+        nodeUser: cfg['node']['user'],
+        nodePass: cfg['node']['pass'],
+        dbUrl: cfg['database']['host'],
+        dbPort: cfg['database']['port'],
+        utxoUrl: cfg['xchain-utxo-tracker']['host'],
+        utxoPort: cfg['xchain-utxo-tracker']['server_port'],
+        encoderUrl: cfg['xchain-encoder']['host'],
+        encoderPort: cfg['xchain-encoder']['server_port'],
+        indexerUrl: cfg['xchain-indexer']['host'],
+        indexerPort: cfg['xchain-indexer']['server_port'],
+        indexerName: cfg['xchain-indexer']['name'],
+        indexerUser: cfg['xchain-indexer']['user'],
+        indexerPass: cfg['xchain-indexer']['pass'],
+        minerUrl: cfg['xchain-regtest-miner']['host'],
+        minerPort: cfg['xchain-regtest-miner']['server_port'],
+    }
+}
 
+function registerMissingConfigTests() {
     describe('Hub config response destructuring', function () {
-
-        // Replicate the config destructuring pattern from initialCheck.test.js lines 113-140
-        function extractNodeConfig(hubConfigs, coin, network) {
-            return {
-                nodeUrl: hubConfigs[coin][network]['node']['host'],
-                nodePort: hubConfigs[coin][network]['node']['server_port'],
-                nodeUser: hubConfigs[coin][network]['node']['user'],
-                nodePass: hubConfigs[coin][network]['node']['pass'],
-            }
-        }
-
-        function extractAllConfigs(hubConfigs, coin, network) {
-            const cfg = hubConfigs[coin][network]
-            return {
-                nodeUrl: cfg['node']['host'],
-                nodePort: cfg['node']['server_port'],
-                nodeUser: cfg['node']['user'],
-                nodePass: cfg['node']['pass'],
-                dbUrl: cfg['database']['host'],
-                dbPort: cfg['database']['port'],
-                utxoUrl: cfg['xchain-utxo-tracker']['host'],
-                utxoPort: cfg['xchain-utxo-tracker']['server_port'],
-                encoderUrl: cfg['xchain-encoder']['host'],
-                encoderPort: cfg['xchain-encoder']['server_port'],
-                indexerUrl: cfg['xchain-indexer']['host'],
-                indexerPort: cfg['xchain-indexer']['server_port'],
-                indexerName: cfg['xchain-indexer']['name'],
-                indexerUser: cfg['xchain-indexer']['user'],
-                indexerPass: cfg['xchain-indexer']['pass'],
-                minerUrl: cfg['xchain-regtest-miner']['host'],
-                minerPort: cfg['xchain-regtest-miner']['server_port'],
-            }
-        }
 
         it('throws when hubConfigs is null or undefined', function () {
             fc.assert(fc.property(
@@ -102,6 +96,11 @@ describe('Fuzz: Config Parsing', function () {
                 }
             ))
         })
+    })
+}
+
+function registerMissingNetworkTests() {
+    describe('Hub config response destructuring', function () {
 
         it('throws when network key is missing', function () {
             fc.assert(fc.property(
@@ -137,6 +136,11 @@ describe('Fuzz: Config Parsing', function () {
                 }
             ))
         })
+    })
+}
+
+function registerValidConfigTests() {
+    describe('Hub config response destructuring', function () {
 
         it('succeeds with valid complete config', function () {
             const validConfig = {
@@ -179,6 +183,26 @@ describe('Fuzz: Config Parsing', function () {
             }), FC_PARAMS)
         })
     })
+}
+
+describe('Fuzz: Config Parsing', function () {
+
+    afterEach(function () {
+        sinon.restore()
+        mockMariadb.createPool.resetHistory()
+    })
+
+    registerMissingConfigTests()
+    registerMissingNetworkTests()
+    registerValidConfigTests()
+})
+
+describe('Fuzz: Config Parsing', function () {
+
+    afterEach(function () {
+        sinon.restore()
+        mockMariadb.createPool.resetHistory()
+    })
 
     describe('isNullOrNullString with all JS types', function () {
 
@@ -214,6 +238,14 @@ describe('Fuzz: Config Parsing', function () {
                     `${JSON.stringify(val)} should NOT be null-like`)
             }
         })
+    })
+})
+
+describe('Fuzz: Config Parsing', function () {
+
+    afterEach(function () {
+        sinon.restore()
+        mockMariadb.createPool.resetHistory()
     })
 
     describe('Environment variable validation pattern', function () {
@@ -257,6 +289,14 @@ describe('Fuzz: Config Parsing', function () {
             assert.strictEqual(checkAllVars([false]), true)
             assert.strictEqual(checkAllVars([0, false, '']), true)
         })
+    })
+})
+
+describe('Fuzz: Config Parsing', function () {
+
+    afterEach(function () {
+        sinon.restore()
+        mockMariadb.createPool.resetHistory()
     })
 
     describe('Database constructor with fuzzed connection params', function () {
