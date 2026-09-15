@@ -69,6 +69,9 @@ describe('seed-contract-state helpers', function () {
             assert.strictEqual(contractIndexOf(DEPLOY_ROW), '2242');
         });
     });
+});
+
+describe('seed-contract-state helpers', function () {
 
     describe('contractIndexOf: refuses rather than adopting a wrong index', function () {
 
@@ -93,6 +96,9 @@ describe('seed-contract-state helpers', function () {
             assert.strictEqual(contractIndexOf({ actionIndex: '2242' }), null);
         });
     });
+});
+
+describe('seed-contract-state helpers', function () {
 
     describe('coinPrefix', function () {
         it('maps the explorer per-coin status keys', function () {
