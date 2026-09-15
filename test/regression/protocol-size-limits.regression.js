@@ -604,7 +604,7 @@ describe('Protocol size-limit drift guard', () => {
             // re-derive that set from on-chain state (indexer attest/index.js, indexer
             // recovery.js, sdk light.js) must bury by the identical depth or they resolve
             // a different signer set than the hub that signed the artifact. Each repo
-            // holds its own bare literal; the indexer's snapshot_reorg_buffer.test.js pins
+            // holds its own bare literal; the indexer's test/unit/recovery/snapshot_reorg_buffer.test.js pins
             // its copy to the literal 6 and cross-checks the hub copy, never canonical,
             // and the sdk copy had no guard anywhere.
             const reorgCopies = {

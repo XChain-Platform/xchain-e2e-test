@@ -35,7 +35,7 @@
 // contrast it with the pre-fix delegations SQL inline. This proves the fix on
 // real data regardless of the running indexer service's code version. The
 // writer leg (_resolveActiveStakeSourceId) uses these identical predicates,
-// locked by xchain-indexer/test/unit/reward_source_resolution.test.js.
+// locked by xchain-indexer/test/unit/anchor/reward_source_resolution.test.js.
 
 const assert = require('assert')
 const crypto = require('crypto')
