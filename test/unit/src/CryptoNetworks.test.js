@@ -11,18 +11,83 @@
 const assert = require('assert')
 const CryptoNetworks = require('../../../src/CryptoNetworks')
 
+// Per-chain dust floors: Bitcoin 546 sats; Litecoin 5460 litoshis
+// (10× Bitcoin's dust relay fee); Dogecoin 100000 koinu (Dogecoin Core
+// hard dust limit DEFAULT_HARD_DUST_LIMIT = COIN/100/10).
+const validNetworks = {
+    'bitcoin-mainnet': 546, 'bitcoin-testnet': 546, 'bitcoin-regtest': 546,
+    'dogecoin-mainnet': 100000, 'dogecoin-testnet': 100000, 'dogecoin-regtest': 100000,
+    'litecoin-mainnet': 5460, 'litecoin-testnet': 5460, 'litecoin-regtest': 5460
+}
+
+// Cross-repo drift guard. CryptoNetworks.getBitcoinJsNetwork is hand-copied into
+// several services; the per-network params it returns (address prefixes, dust
+// thresholds, relay-policy flags) MUST be identical across every copy or encode and
+// decode disagree. This compares each sibling copy's output to this one for every
+// network, AND anchors this local copy against the canonical coins registry
+// (xchain-encoder/src/coins) so two legacy copies drifting the same way from
+// canonical can no longer mutually agree and slip through. getFirstBlock is
+// compared too, against both the sibling copies and the canonical registry's
+// firstBlock field, for the siblings that vendor it (encoder/decoder; utxo-tracker
+// and regtest-miner never needed indexing start heights). Any sibling repo not
+// checked out is skipped.
+const path = require('path'), fs = require('fs')
+const SIBLINGS = ['xchain-encoder', 'xchain-decoder', 'xchain-utxo-tracker', 'xchain-regtest-miner']
+const FIRST_BLOCK_SIBLINGS = ['xchain-encoder', 'xchain-decoder']
+// repo -> its own CryptoNetworks.js location, repo-relative. Each sibling
+// keeps this file in its own feature directory, so the template below
+// cannot assume one shared path. A repo absent from the table falls back
+// to the older top-level 'src/CryptoNetworks.js'.
+const DEFAULT_CRYPTO_NETWORKS_PATH = path.join('src', 'CryptoNetworks.js')
+const CRYPTO_NETWORKS_PATH = {
+    'xchain-decoder': path.join('src', 'chain', 'crypto_networks.js'),
+    'xchain-utxo-tracker': path.join('src', 'chain', 'crypto_networks.js'),
+    'xchain-regtest-miner': path.join('src', 'networks', 'crypto_networks.js'),
+    'xchain-encoder': path.join('src', 'build', 'crypto_networks.js'),
+}
+const NETS = ['bitcoin-mainnet', 'bitcoin-testnet', 'bitcoin-regtest',
+              'dogecoin-mainnet', 'dogecoin-testnet', 'dogecoin-regtest',
+              'litecoin-mainnet', 'litecoin-testnet', 'litecoin-regtest']
+// net key -> canonical (tick, network) pair, per xchain-encoder/src/coins/index.js
+const NET_MAP = {
+    'bitcoin-mainnet':  { tick: 'BTC',  network: 'mainnet' },
+    'bitcoin-testnet':  { tick: 'BTC',  network: 'testnet' },
+    'bitcoin-regtest':  { tick: 'BTC',  network: 'regtest' },
+    'dogecoin-mainnet': { tick: 'DOGE', network: 'mainnet' },
+    'dogecoin-testnet': { tick: 'DOGE', network: 'testnet' },
+    'dogecoin-regtest': { tick: 'DOGE', network: 'regtest' },
+    'litecoin-mainnet': { tick: 'LTC',  network: 'mainnet' },
+    'litecoin-testnet': { tick: 'LTC',  network: 'testnet' },
+    'litecoin-regtest': { tick: 'LTC',  network: 'regtest' },
+}
+
+// Unknown-network error-path contract guard. The parity checks above iterate
+// only the 9 valid keys, so the unknown/empty/null path was never asserted even
+// though the copies DISAGREE on it: the legacy switch here and
+// xchain-regtest-miner return `undefined` (falsy, so consumers using the
+// `getBitcoinJsNetwork(x) || fallback` idiom keep working), while
+// xchain-encoder, xchain-decoder and now xchain-utxo-tracker
+// `throw new TypeError`. Standardizing that contract fleet-wide is an open
+// operator decision (touches encoder/decoder production code); until it is
+// made, lock each copy's CURRENT contract so any future drift on the error
+// path is caught instead of slipping through. `undefined` copies are also
+// asserted not to throw.
+//
+// utxo-tracker moved undefined -> throws on 2026-08-25, deliberately: bitcoinjs-lib
+// reads an undefined network as BTC MAINNET, so the falsy-fallback idiom turns a
+// typo'd network into real mainnet parameters. This guard caught that change,
+// which is what it is for; the row records the new contract rather than reverting it.
+const UNKNOWN_INPUTS = ['ethereum-mainnet', '', null]
+// repo -> current unknown-network contract: 'undefined' or 'throws'.
+const UNKNOWN_CONTRACT = {
+    'xchain-utxo-tracker': 'throws',
+    'xchain-regtest-miner': 'undefined',
+    'xchain-encoder': 'throws',
+    'xchain-decoder': 'throws',
+}
+
 describe('CryptoNetworks', () => {
-
     describe('getBitcoinJsNetwork', () => {
-        // Per-chain dust floors: Bitcoin 546 sats; Litecoin 5460 litoshis
-        // (10× Bitcoin's dust relay fee); Dogecoin 100000 koinu (Dogecoin Core
-        // hard dust limit DEFAULT_HARD_DUST_LIMIT = COIN/100/10).
-        const validNetworks = {
-            'bitcoin-mainnet': 546, 'bitcoin-testnet': 546, 'bitcoin-regtest': 546,
-            'dogecoin-mainnet': 100000, 'dogecoin-testnet': 100000, 'dogecoin-regtest': 100000,
-            'litecoin-mainnet': 5460, 'litecoin-testnet': 5460, 'litecoin-regtest': 5460
-        }
-
         Object.entries(validNetworks).forEach(([name, expectedDust]) => {
             it(`should return a valid config for "${name}"`, () => {
                 const config = CryptoNetworks.getBitcoinJsNetwork(name)
@@ -52,7 +117,11 @@ describe('CryptoNetworks', () => {
         it('should return undefined for null', () => {
             assert.strictEqual(CryptoNetworks.getBitcoinJsNetwork(null), undefined)
         })
+    })
+})
 
+describe('CryptoNetworks', () => {
+    describe('getBitcoinJsNetwork', () => {
         it('should return correct pubKeyHash for bitcoin-mainnet', () => {
             const config = CryptoNetworks.getBitcoinJsNetwork('bitcoin-mainnet')
             assert.strictEqual(config.pubKeyHash, 0x00)
@@ -89,7 +158,9 @@ describe('CryptoNetworks', () => {
             assert.strictEqual(regtest.wif, 0xef)
         })
     })
+})
 
+describe('CryptoNetworks', () => {
     describe('getFirstBlock', () => {
         it('should return the canonical mainnet start heights', () => {
             assert.strictEqual(CryptoNetworks.getFirstBlock('bitcoin-mainnet'), 950000)
@@ -118,49 +189,10 @@ describe('CryptoNetworks', () => {
             assert.strictEqual(CryptoNetworks.getFirstBlock('unknown'), 0)
         })
     })
+})
 
-    // Cross-repo drift guard. CryptoNetworks.getBitcoinJsNetwork is hand-copied into
-    // several services; the per-network params it returns (address prefixes, dust
-    // thresholds, relay-policy flags) MUST be identical across every copy or encode and
-    // decode disagree. This compares each sibling copy's output to this one for every
-    // network, AND anchors this local copy against the canonical coins registry
-    // (xchain-encoder/src/coins) so two legacy copies drifting the same way from
-    // canonical can no longer mutually agree and slip through. getFirstBlock is
-    // compared too, against both the sibling copies and the canonical registry's
-    // firstBlock field, for the siblings that vendor it (encoder/decoder; utxo-tracker
-    // and regtest-miner never needed indexing start heights). Any sibling repo not
-    // checked out is skipped.
+describe('CryptoNetworks', () => {
     describe('cross-repo getBitcoinJsNetwork parity', () => {
-        const path = require('path'), fs = require('fs')
-        const SIBLINGS = ['xchain-encoder', 'xchain-decoder', 'xchain-utxo-tracker', 'xchain-regtest-miner']
-        const FIRST_BLOCK_SIBLINGS = ['xchain-encoder', 'xchain-decoder']
-        // repo -> its own CryptoNetworks.js location, repo-relative. Each sibling
-        // keeps this file in its own feature directory, so the template below
-        // cannot assume one shared path. A repo absent from the table falls back
-        // to the older top-level 'src/CryptoNetworks.js'.
-        const DEFAULT_CRYPTO_NETWORKS_PATH = path.join('src', 'CryptoNetworks.js')
-        const CRYPTO_NETWORKS_PATH = {
-            'xchain-decoder': path.join('src', 'chain', 'crypto_networks.js'),
-            'xchain-utxo-tracker': path.join('src', 'chain', 'crypto_networks.js'),
-            'xchain-regtest-miner': path.join('src', 'networks', 'crypto_networks.js'),
-            'xchain-encoder': path.join('src', 'build', 'crypto_networks.js'),
-        }
-        const NETS = ['bitcoin-mainnet', 'bitcoin-testnet', 'bitcoin-regtest',
-                      'dogecoin-mainnet', 'dogecoin-testnet', 'dogecoin-regtest',
-                      'litecoin-mainnet', 'litecoin-testnet', 'litecoin-regtest']
-        // net key -> canonical (tick, network) pair, per xchain-encoder/src/coins/index.js
-        const NET_MAP = {
-            'bitcoin-mainnet':  { tick: 'BTC',  network: 'mainnet' },
-            'bitcoin-testnet':  { tick: 'BTC',  network: 'testnet' },
-            'bitcoin-regtest':  { tick: 'BTC',  network: 'regtest' },
-            'dogecoin-mainnet': { tick: 'DOGE', network: 'mainnet' },
-            'dogecoin-testnet': { tick: 'DOGE', network: 'testnet' },
-            'dogecoin-regtest': { tick: 'DOGE', network: 'regtest' },
-            'litecoin-mainnet': { tick: 'LTC',  network: 'mainnet' },
-            'litecoin-testnet': { tick: 'LTC',  network: 'testnet' },
-            'litecoin-regtest': { tick: 'LTC',  network: 'regtest' },
-        }
-
         SIBLINGS.forEach((repo) => {
             it(`${repo} getBitcoinJsNetwork matches this copy for every network`, function () {
                 const p = path.resolve(__dirname, '../../../../' + repo, (CRYPTO_NETWORKS_PATH[repo] || DEFAULT_CRYPTO_NETWORKS_PATH))
@@ -186,32 +218,11 @@ describe('CryptoNetworks', () => {
                 }
             })
         })
+    })
+})
 
-        // Unknown-network error-path contract guard. The parity checks above iterate
-        // only the 9 valid keys, so the unknown/empty/null path was never asserted even
-        // though the copies DISAGREE on it: the legacy switch here and
-        // xchain-regtest-miner return `undefined` (falsy, so consumers using the
-        // `getBitcoinJsNetwork(x) || fallback` idiom keep working), while
-        // xchain-encoder, xchain-decoder and now xchain-utxo-tracker
-        // `throw new TypeError`. Standardizing that contract fleet-wide is an open
-        // operator decision (touches encoder/decoder production code); until it is
-        // made, lock each copy's CURRENT contract so any future drift on the error
-        // path is caught instead of slipping through. `undefined` copies are also
-        // asserted not to throw.
-        //
-        // utxo-tracker moved undefined -> throws on 2026-08-25, deliberately: bitcoinjs-lib
-        // reads an undefined network as BTC MAINNET, so the falsy-fallback idiom turns a
-        // typo'd network into real mainnet parameters. This guard caught that change,
-        // which is what it is for; the row records the new contract rather than reverting it.
-        const UNKNOWN_INPUTS = ['ethereum-mainnet', '', null]
-        // repo -> current unknown-network contract: 'undefined' or 'throws'.
-        const UNKNOWN_CONTRACT = {
-            'xchain-utxo-tracker': 'throws',
-            'xchain-regtest-miner': 'undefined',
-            'xchain-encoder': 'throws',
-            'xchain-decoder': 'throws',
-        }
-
+describe('CryptoNetworks', () => {
+    describe('cross-repo getBitcoinJsNetwork parity', () => {
         it('this (legacy) copy returns undefined for unknown/empty/null network', function () {
             for (const bad of UNKNOWN_INPUTS) {
                 assert.strictEqual(CryptoNetworks.getBitcoinJsNetwork(bad), undefined,
@@ -235,7 +246,11 @@ describe('CryptoNetworks', () => {
                 }
             })
         })
+    })
+})
 
+describe('CryptoNetworks', () => {
+    describe('cross-repo getBitcoinJsNetwork parity', () => {
         it('getBitcoinJsNetwork and getFirstBlock match the canonical coins registry for every network', function () {
             const p = path.resolve(__dirname, '../../../../xchain-encoder/src/coins/index.js')
             if (!fs.existsSync(p)) return this.skip()
