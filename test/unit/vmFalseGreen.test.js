@@ -79,10 +79,9 @@ function swallowsSiblingLoad(code, sibling){
         '[\\s\\S]{0,400}?catch\\s*\\([^)]*\\)\\s*{(?![^}]*throw)[^}]*}').test(code);
 }
 
+const files = discoverTestFiles(TEST_ROOT).filter(f => f !== SELF);
+
 describe('VM false-green guard', function() {
-
-    const files = discoverTestFiles(TEST_ROOT).filter(f => f !== SELF);
-
     it('found the repo test tree to scan', function() {
         assert.ok(files.length > 50,
             'expected to scan the whole test tree, found only ' + files.length +
@@ -128,7 +127,9 @@ describe('VM false-green guard', function() {
             'than failing: ' + offenders.join(', ') + '. Detect absence with require.resolve ' +
             '(absence may skip) and require it unguarded (present-but-broken must be red).');
     });
+});
 
+describe('VM false-green guard', function() {
     it('no suite picks describe.skip off an xchain-vm load result', function() {
         const offenders = [];
         for (const file of files) {
