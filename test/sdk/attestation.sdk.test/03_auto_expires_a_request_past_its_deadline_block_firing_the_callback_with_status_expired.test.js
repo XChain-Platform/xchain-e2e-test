@@ -51,7 +51,7 @@
  *
  ********************************************************************/
 
-const support = require('./support.sdk.test');
+const support = require('./support.test');
 const {
     expect, submit, mine, submitOpts, attestationHelper, requireResponsibleValidator,
     AttestationHelpers, findAttestation, xchainEscrowSum, attestRewards

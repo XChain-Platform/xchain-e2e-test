@@ -51,7 +51,7 @@
  *
  ********************************************************************/
 
-const support = require('./attestation.sdk.test/support.sdk.test');
+const support = require('./attestation.sdk.test/support.test');
 const { expect, AttestationHelpers } = support;
 
 function testBuilders() {

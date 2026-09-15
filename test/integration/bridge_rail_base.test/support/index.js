@@ -16,13 +16,13 @@
 
 const assert = require('assert');
 
-const chainRail         = require('../../helpers/chainRail');
-const stakeTeardown     = require('../../helpers/stakeTeardown');
-const cryptoHelper      = require('../../cryptoHelper');
-const transactionHelper = require('../../transactionHelper');
-const issueHelper       = require('../../helpers/issueHelper');
-const mintHelper        = require('../../helpers/mintHelper');
-const fixture           = require('../../attestMirror/mirrorDrillFixture');
+const chainRail         = require('../../../helpers/chainRail');
+const stakeTeardown     = require('../../../helpers/stakeTeardown');
+const cryptoHelper      = require('../../../cryptoHelper');
+const transactionHelper = require('../../../transactionHelper');
+const issueHelper       = require('../../../helpers/issueHelper');
+const mintHelper        = require('../../../helpers/mintHelper');
+const fixture           = require('../../../attestMirror/mirrorDrillFixture');
 const {
     BridgeRailVenue,
     resolveVenueQuorum,
@@ -33,7 +33,7 @@ const {
     minimalQuorumSigners,
     driveVerdictWitness,
     journalCase,
-} = require('../../helpers/bridgeRailVenue');
+} = require('../../../helpers/bridgeRailVenue');
 
 const GAS_TICK = 'XCHAIN';
 
@@ -156,7 +156,7 @@ async function prepareQuorum() {
     // would keep passing after the roster changed.
     const tip = await indexerConnector.call('getblockhashes', {});
     const buried = Number(tip.block_index) -
-        Number(require('../../helpers/hubMirrorTopology').CANONICAL_REORG_BUFFER || 6);
+        Number(require('../../../helpers/hubMirrorTopology').CANONICAL_REORG_BUFFER || 6);
     const set = await stakeTeardown.readCapabilitySet({
         indexer: indexerConnector, capability: 'cross_chain', blockIndex: buried,
     });
