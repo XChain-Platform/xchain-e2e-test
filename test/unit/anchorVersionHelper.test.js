@@ -37,6 +37,21 @@ const ROOTED_CP   = {
     block_merkle_root: 'b'.repeat(64), block_merkle_version: 1
 };
 
+// Two sections at one signer each, one attesting signer. Field order is
+// the builder's (StateAnchorPublisher._buildV7Payload; the method name did
+// not move, only the version byte it writes).
+function section(chain, seq, sigs){
+    return [chain, '900', chain + '-blockhash', chain + '-ledger', chain + '-actions',
+            chain + '-contract', String(seq), '136',
+            'a'.repeat(64), '1', 'b'.repeat(64), '1', String(sigs.length)]
+           .concat(sigs.flatMap(s => [s.pubkey, s.sig])).join('|');
+}
+const TWO_SECTION =
+    ['ANCHOR', '0', 'regtest', '136', '2'].join('|') + '|' +
+    section('BTC', 11, [{ pubkey: 'pk1', sig: 'sig1' }]) + '|' +
+    section('LTC', 11, [{ pubkey: 'pk2', sig: 'sig2' }, { pubkey: 'pk3', sig: 'sig3' }]) + '|' +
+    ['pub0', '1', 'apk', 'asig'].join('|');
+
 describe('anchorVersionHelper', function () {
 
     describe('anchorPayloadVersion', function () {
@@ -52,7 +67,9 @@ describe('anchorVersionHelper', function () {
             assert.strictEqual(av.anchorPayloadVersion(undefined), null);
         });
     });
+});
 
+describe('anchorVersionHelper', function () {
     describe('checkpointCarriesRoots', function () {
         it('requires every root AND its scheme version', function () {
             assert.strictEqual(av.checkpointCarriesRoots(ROOTED_CP), true);
@@ -65,7 +82,9 @@ describe('anchorVersionHelper', function () {
                 Object.assign({}, ROOTED_CP, { block_merkle_root: null })), false);
         });
     });
+});
 
+describe('anchorVersionHelper', function () {
     describe('expectedCheckpointAnchor', function () {
         // The checkpoint leg has exactly one version now (D2): the OLD per-chain
         // v0/v3/v4/v5 wires (a different, now-retired numbering) were deleted
@@ -102,7 +121,9 @@ describe('anchorVersionHelper', function () {
             assert.strictEqual(e.rewardActive, false);
         });
     });
+});
 
+describe('anchorVersionHelper', function () {
     describe('expectedArchiveAnchor', function () {
         // The archive leg has exactly one version now too (D4): the tail is
         // ALWAYS appended, so the old tail-less wire and v6 are both retired.
@@ -136,7 +157,9 @@ describe('anchorVersionHelper', function () {
             assert.strictEqual(degraded.rewardActive, false, 'no identity to earn the reward, but the wire is still v1');
         });
     });
+});
 
+describe('anchorVersionHelper', function () {
     describe('findAnchorBroadcast / findAnchorRow', function () {
         const broadcasts = [
             { payload: 'ANCHOR|0|regtest|136|1', txid: 'aa' },
@@ -170,23 +193,10 @@ describe('anchorVersionHelper', function () {
             assert.strictEqual(av.findAnchorRow(rows, [1], 'ours'), null);
         });
     });
+});
 
+describe('anchorVersionHelper', function () {
     describe('parseAnchorV0', function () {
-        // Two sections at one signer each, one attesting signer. Field order is
-        // the builder's (StateAnchorPublisher._buildV7Payload; the method name did
-        // not move, only the version byte it writes).
-        function section(chain, seq, sigs){
-            return [chain, '900', chain + '-blockhash', chain + '-ledger', chain + '-actions',
-                    chain + '-contract', String(seq), '136',
-                    'a'.repeat(64), '1', 'b'.repeat(64), '1', String(sigs.length)]
-                   .concat(sigs.flatMap(s => [s.pubkey, s.sig])).join('|');
-        }
-        const TWO_SECTION =
-            ['ANCHOR', '0', 'regtest', '136', '2'].join('|') + '|' +
-            section('BTC', 11, [{ pubkey: 'pk1', sig: 'sig1' }]) + '|' +
-            section('LTC', 11, [{ pubkey: 'pk2', sig: 'sig2' }, { pubkey: 'pk3', sig: 'sig3' }]) + '|' +
-            ['pub0', '1', 'apk', 'asig'].join('|');
-
         it('walks variable-width sections without misreading a signature as a chain', function () {
             let b = av.parseAnchorV0(TWO_SECTION);
             assert.strictEqual(b.version, 0);
@@ -230,7 +240,9 @@ describe('anchorVersionHelper', function () {
                     'and pairs within a section ride PUBKEY-ascending (D5)');
         });
     });
+});
 
+describe('anchorVersionHelper', function () {
     describe('bundleBroadcasts / findBundleSectionRows', function () {
         it('keeps only the v0 wires out of a mixed broadcast list', function () {
             let out = av.bundleBroadcasts([
@@ -258,7 +270,9 @@ describe('anchorVersionHelper', function () {
             assert.deepStrictEqual(av.findBundleSectionRows(rows, 'nope'), []);
         });
     });
+});
 
+describe('anchorVersionHelper', function () {
     describe('hubFlagDays (live wiring)', function () {
         it('reads the hub\'s own frozen predicates when a checkout is resolvable', function () {
             let fd;
