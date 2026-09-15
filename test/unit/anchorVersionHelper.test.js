@@ -38,7 +38,7 @@ const ROOTED_CP   = {
 };
 
 // Two sections at one signer each, one attesting signer. Field order is
-// the builder's (StateAnchorPublisher._buildV7Payload; the method name did
+// the builder's (StateAnchorPublisher.buildV7Payload; the method name did
 // not move, only the version byte it writes).
 function section(chain, seq, sigs){
     return [chain, '900', chain + '-blockhash', chain + '-ledger', chain + '-actions',

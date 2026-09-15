@@ -802,7 +802,7 @@ async function assertOraclePublishFederation(conn, blockIndex, needSources, requ
     // running, and no hint anywhere that the venue rather than the protocol was
     // the problem. Two independent things break, and neither says so:
     //
-    //   ELECTION. RollcallRound._electionOrder is hashOrder over the WHOLE
+    //   ELECTION. RollcallRound.electionOrder is hashOrder over the WHOLE
     //   oracle_publish key set, so any staked key the harness does not run can
     //   win rank 0. It then never publishes (nobody is holding it), and AT6a/AT6b
     //   read the -1 above. With n outsiders among the eight keys the roster wins
@@ -857,7 +857,7 @@ async function assertOraclePublishFederation(conn, blockIndex, needSources, requ
         //   here with the real numbers and it still fails the run.
         //
         //   ELECTION only breaks the suites that assert WHO the leader is.
-        //   RollcallRound._electionOrder is hashOrder over the whole
+        //   RollcallRound.electionOrder is hashOrder over the whole
         //   oracle_publish key set, so an outsider can win rank 0 and then never
         //   publish (nobody holds it). That is fatal to AT6a/AT6b, which read
         //   `leader index -1`, and it makes AT10's leader-reward leg
@@ -1263,7 +1263,7 @@ function rollcallRounds(mvh){
 // copy of hashOrder that could disagree with it.
 //
 // Returns null when the engine cannot resolve the capability set for that epoch,
-// which is a real state rather than an error: _electionOrder resolves the set AT
+// which is a real state rather than an error: electionOrder resolves the set AT
 // the epoch, and a far-future epoch has no snapshot to resolve. A caller that
 // gets null must fall back rather than treat it as "no leader".
 //
@@ -1271,7 +1271,7 @@ function rollcallRounds(mvh){
 // venue cannot happen and elsewhere means an outsider won.
 async function electedLeaderIndex(ctx, epoch){
     const eng = ctx.rounds && ctx.rounds[0]
-    if (!eng || typeof eng._electionOrder !== 'function') return null
+    if (!eng || typeof eng.electionOrder !== 'function') return null
 
     // The engine's own resolver first, because it is the one the chain agrees
     // with. It resolves the capability set AT the epoch, so it answers for an
@@ -1279,10 +1279,10 @@ async function electedLeaderIndex(ctx, epoch){
     // 2026-09-03: every future epoch came back null, which is why the look-ahead
     // fell through to a draw and AT6a lost one.
     let order = null
-    try { order = await eng._electionOrder(Number(epoch)) } catch (e) { order = null }
+    try { order = await eng.electionOrder(Number(epoch)) } catch (e) { order = null }
 
     // FALL BACK TO THE HUB'S OWN ORDERING OVER A SET WE ALREADY KNOW, which is
-    // not a second copy of the election logic: _electionKey and hashOrder are the
+    // not a second copy of the election logic: electionKey and hashOrder are the
     // hub's own functions, called here with the roster keys instead of a snapshot
     // the chain cannot yet provide. Sound only where the set is certain, so it is
     // gated on an EXACT-ROSTER venue: assertOraclePublishFederation has already
@@ -1290,12 +1290,12 @@ async function electedLeaderIndex(ctx, epoch){
     // and a future epoch's set can only differ if someone stakes in between.
     if ((!Array.isArray(order) || !order.length)
         && ctx.fed && !ctx.fed.outsiders
-        && typeof eng._electionKey === 'function'){
+        && typeof eng.electionKey === 'function'){
         try {
             const { resolveHubFile } = require('./multiValidatorHubHelper')
             const sap = require(resolveHubFile('src/anchor/publisher.js'))
             if (sap && typeof sap.hashOrder === 'function')
-                order = sap.hashOrder(eng._electionKey(Number(epoch)), ctx.roster.map(r => r.pubkey))
+                order = sap.hashOrder(eng.electionKey(Number(epoch)), ctx.roster.map(r => r.pubkey))
         } catch (e) { order = null }
     }
 
@@ -1316,7 +1316,7 @@ function setRollcallBroadcastHook(mvh, fn){
 // on a wall clock the mining loop races.
 //
 // `skip` is how an outage is expressed, and it is NOT optional decoration.
-// RollcallRound.stop() only stops the engine's OWN timer; calling _tick()
+// RollcallRound.stop() only stops the engine's OWN timer; calling tick()
 // afterwards drives it anyway, so a "stopped" hub kept signing and gossiping
 // and a sweeper then landed its signature on chain, exactly as union semantics
 // says it should. AT2 measured that as "the silenced hub was present", which
@@ -1327,7 +1327,7 @@ async function tickAll(mvh, skip){
     const rounds  = rollcallRounds(mvh)
     for (let i = 0; i < rounds.length; i++){
         if (skipSet.has(i)) continue
-        await rounds[i]._tick()
+        await rounds[i].tick()
     }
 }
 
@@ -1849,7 +1849,7 @@ async function traceRounds(ctx, label){
 //
 // Measured on the venue: with hub 2 silenced, the elected LEADER was hub 2
 // (rank 0, never publishes), the hub holding BOTH signatures was rank 3, and the
-// only unlocked hub held just its own. _rankUnlocked allows rank <= floor(since /
+// only unlocked hub held just its own. rankUnlocked allows rank <= floor(since /
 // ELECTION_TOLERANCE), so at since = 6 with a regtest tolerance of 3 only ranks
 // 0..2 can ever publish - and every tick happened at since = 6. One signature
 // reached the chain, the epoch closed UNROLLED at present 1/4, and it read as a
@@ -1935,7 +1935,7 @@ async function waitForOnChainSigners(ctx, epoch, pubkeys, timeoutMs){
  * every expected signature.
  *
  * Rank unlock is `rank <= floor(sinceBlocks / ELECTION_TOLERANCE)` with
- * `sinceBlocks = btcTip - epoch` (`RollcallRound._rankUnlocked`), so which hubs
+ * `sinceBlocks = btcTip - epoch` (`RollcallRound.rankUnlocked`), so which hubs
  * may publish is decided by BTC HEIGHT and not by how many times the harness
  * ticks. Ticking in place therefore publishes the low ranks and leaves the high
  * ones locked for the life of the run - the run-5 failure, and again on

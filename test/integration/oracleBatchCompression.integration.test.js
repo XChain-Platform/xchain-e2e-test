@@ -66,7 +66,7 @@
  * 4/3 expansion cannot undo that. Measured across every shape a real federation
  * can emit, from a one-round one-pair one-signature body up, the packed form
  * always won. The emit-smaller branch is therefore exercised the only way it can
- * be exercised honestly: `_emitWire` (the real publisher's real decision) is
+ * be exercised honestly: `emitWire` (the real publisher's real decision) is
  * driven with an incompressible body and asserted to return the uncompressed
  * form, and the UNCOMPRESSED WIRE FORM is separately proven to be a first-class
  * citizen on the chain by broadcasting the honest batch's own plain twin and
@@ -538,7 +538,7 @@ describe('AT9 PRICE batch compression: round trip, consensus caps, canonical bas
         // The real publisher's real method. Called on the venue's own instance
         // rather than on a fresh one, so the decision measured is the decision the
         // rail makes.
-        emitReal = venue.publishers[0]._emitWire(
+        emitReal = venue.publishers[0].emitWire(
             parsedBody.firstRound, parsedBody.lastRound, parsedBody.anchor,
             parsedBody.rounds, parsedBody.sigs);
 
@@ -560,7 +560,7 @@ describe('AT9 PRICE batch compression: round trip, consensus caps, canonical bas
             pairs:          r.pairs.map(() => ({ coinPair: entropyString(32), price: entropyString(64) }))
         }));
         const entropySigs = parsedBody.sigs.map(() => ({ pubkey: entropyString(64), sig: entropyString(128) }));
-        emitEntropy = venue.publishers[0]._emitWire(
+        emitEntropy = venue.publishers[0].emitWire(
             parsedBody.firstRound, parsedBody.lastRound, parsedBody.anchor, entropyRounds, entropySigs);
         const entropyBody = venue.publishers[0].buildPriceBatchBody(
             parsedBody.firstRound, parsedBody.lastRound, parsedBody.anchor, entropyRounds, entropySigs);
@@ -952,10 +952,10 @@ describe('AT9 PRICE batch compression: round trip, consensus caps, canonical bas
 
     it('the publisher\'s emit-smaller decision is content-driven, not a constant', function () {
         assert.strictEqual(emitReal.compressed, true,
-            'OraclePublisher._emitWire declined to compress the real six-round batch, whose body is ' +
+            'OraclePublisher.emitWire declined to compress the real six-round batch, whose body is ' +
             parsedWire.bodyBytes + ' B and whose packed form is ' + parsedWire.wireBytes + ' B');
         assert.strictEqual(emitEntropy.compressed, false,
-            'OraclePublisher._emitWire compressed an INCOMPRESSIBLE body: the plain wire is ' +
+            'OraclePublisher.emitWire compressed an INCOMPRESSIBLE body: the plain wire is ' +
             entropyPlainBytes + ' B and the packed wire is ' + entropyPackedBytes + ' B, so ' +
             'compressing it spends bytes to buy nothing');
         assert.ok(entropyPackedBytes >= entropyPlainBytes,
@@ -963,14 +963,14 @@ describe('AT9 PRICE batch compression: round trip, consensus caps, canonical bas
             ' B packed vs ' + entropyPlainBytes + ' B plain), so this clause proves nothing. ' +
             'entropyString drew from too small an alphabet.');
         assert.strictEqual(emitEntropy.bytes, entropyPlainBytes,
-            '_emitWire returned ' + emitEntropy.bytes + ' B for a body whose plain wire is ' +
+            'emitWire returned ' + emitEntropy.bytes + ' B for a body whose plain wire is ' +
             entropyPlainBytes + ' B');
         const emittedFields = String(emitEntropy.wire).split('|');
         assert.strictEqual(emittedFields[0], 'PRICE');
         assert.strictEqual(parseInt(emittedFields[1], 10), BATCH_WIRE_VERSION);
         assert.notStrictEqual(emittedFields[2], priceBatch.PRICE_BATCH_COMPRESSION_MARKER,
             'the emitted wire carries the compression marker in the FIRST_ROUND slot even though ' +
-            '_emitWire reported the uncompressed form; the two halves of the decision disagree');
+            'emitWire reported the uncompressed form; the two halves of the decision disagree');
     });
 
     it('the uncompressed wire form is a first-class wire: the plain twin lands the identical batch', function () {

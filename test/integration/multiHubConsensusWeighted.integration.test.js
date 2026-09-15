@@ -69,7 +69,7 @@ const STALL_WAIT_MS = 6000;    // long enough to confirm a round does NOT finali
 // same sorted validator set + seq, so exactly one matches).
 function findLeader(mvh) {
     return mvh.hubs.find((h) => {
-        const l = h.consensus._getLeader(h.consensus.seq + 1);
+        const l = h.consensus.getLeader(h.consensus.seq + 1);
         return l && l.addr === h.consensus.peerManager.validatorAddr;
     });
 }

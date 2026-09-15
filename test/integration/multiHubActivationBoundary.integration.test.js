@@ -22,7 +22,7 @@
  *
  * Driver: the config-change PBFT engine (hub-internal, no indexer / no chain).
  * This is the same engine proven in multiHubConsensusWeighted.integration.test.js.
- * We drive it across the boundary by stubbing _resolveBtcLatestBlock to a synthetic
+ * We drive it across the boundary by stubbing resolveBtcLatestBlock to a synthetic
  * block on each round and stubbing BOTH the COUNT snapshot (getActiveValidator-
  * Snapshot) and the WEIGHT snapshot (getActiveWeightSnapshot) with the SAME
  * 4-member set, so only the activation gate (not the validator set) changes
@@ -85,7 +85,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function findLeader(mvh) {
     return mvh.hubs.find((h) => {
-        const l = h.consensus._getLeader(h.consensus.seq + 1);
+        const l = h.consensus.getLeader(h.consensus.seq + 1);
         return l && l.addr === h.consensus.peerManager.validatorAddr;
     });
 }
@@ -111,21 +111,21 @@ function seedBoundarySnapshot(mvh, members, getBlock) {
             getSnap: cs.getSnapshot,
             activeW: cs.getActiveWeightSnapshot,
             getW:    cs.getWeightSnapshot,
-            block:   hub._resolveBtcLatestBlock,
+            block:   hub.resolveBtcLatestBlock,
             net:     hub.network,
         };
         cs.getActiveValidatorSnapshot = async () => freshCount();
         cs.getSnapshot                = async () => freshCount();
         cs.getActiveWeightSnapshot    = async () => freshWeight();
         cs.getWeightSnapshot          = async () => freshWeight();
-        hub._resolveBtcLatestBlock    = async () => getBlock();
+        hub.resolveBtcLatestBlock    = async () => getBlock();
         hub.network                   = 'regtest';
         restores.push(() => {
             cs.getActiveValidatorSnapshot = orig.activeV;
             cs.getSnapshot                = orig.getSnap;
             cs.getActiveWeightSnapshot    = orig.activeW;
             cs.getWeightSnapshot          = orig.getW;
-            hub._resolveBtcLatestBlock    = orig.block;
+            hub.resolveBtcLatestBlock    = orig.block;
             hub.network                   = orig.net;
         });
     }

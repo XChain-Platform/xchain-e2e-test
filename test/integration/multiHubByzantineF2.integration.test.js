@@ -57,7 +57,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // The leader for the next sequence (all hubs agree on the same sorted set + seq).
 function findLeader(mvh) {
     return mvh.hubs.find((h) => {
-        const l = h.consensus._getLeader(h.consensus.seq + 1);
+        const l = h.consensus.getLeader(h.consensus.seq + 1);
         return l && l.addr === h.consensus.peerManager.validatorAddr;
     });
 }
@@ -220,7 +220,7 @@ function byzantineScaleSuite({ count, quorum, faults, basePort, peerWaitMs }) {
             const before = await target.db.getConfig(COIN, NET, MODULE);
             assert.notStrictEqual(before.GAS_PRICE, forgedValue, 'precondition: forged value not already set');
 
-            await target.consensus._handlePrePrepare(
+            await target.consensus.handlePrePrepare(
                 forgedPrePrepare(seq, { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: forgedValue } } } }, seed.blockIndex, target.consensus.validatorSet[0])
             );
 
@@ -239,8 +239,8 @@ function byzantineScaleSuite({ count, quorum, faults, basePort, peerWaitMs }) {
             const view = 0;
             const configA = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: String(count) + '111' } } } };
             const configB = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: String(count) + '222' } } } };
-            const digestA = follower.consensus._digest(configA);
-            const digestB = follower.consensus._digest(configB);
+            const digestA = follower.consensus.digest(configA);
+            const digestB = follower.consensus.digest(configB);
             // A PRE_PREPARE is only accepted from the rotation-designated leader for
             // (seq, view) with a registered sender. An equivocating leader is still
             // the LEGITIMATE leader; it just emits two conflicting configs for one seq.
@@ -256,12 +256,12 @@ function byzantineScaleSuite({ count, quorum, faults, basePort, peerWaitMs }) {
                 data: { seq, view, configDigest: digest, config, btcBlockHeight: seed.blockIndex }
             });
 
-            await follower.consensus._handlePrePrepare(env(digestA, configA));
+            await follower.consensus.handlePrePrepare(env(digestA, configA));
             assert.ok(follower.consensus.pendingProposals.has(seq), 'first PRE_PREPARE should create a proposal');
 
             // Equivocation: a second conflicting PRE_PREPARE for the SAME seq. Dedup-by-seq
             // is the safety mechanism; the follower must stay locked to the first config.
-            await follower.consensus._handlePrePrepare(env(digestB, configB));
+            await follower.consensus.handlePrePrepare(env(digestB, configB));
 
             const prop = follower.consensus.pendingProposals.get(seq);
             assert.strictEqual(prop.digest, digestA, 'follower switched to the equivocating second config');

@@ -43,7 +43,7 @@
  *   3. AT5 (failover race): ranks above 0 stay locked inside the tolerance
  *      window; rank 1 takes over after it elapses; a returning rank 0 that
  *      MISSED the announcement adopts the mined bundle through per-section
- *      `getanchoraction` (_findExistingBundle) instead of spending a second
+ *      `getanchoraction` (findExistingBundle) instead of spending a second
  *      time, and both hubs rebuild byte-identical bundle payloads (D5).
  *   4. Archive round (unchanged leg): the per-election-block leader collects
  *      2f+1 co-signatures, publishes ANCHOR v1 (the tail always appended now,
@@ -86,7 +86,7 @@ describe('ANCHOR bundle live: multi-validator per-NETWORK publisher (DOGE regtes
     let rewards   = [];   // { hub, type, round, pubkey }
     let cpRows    = [];   // synthetic checkpoints of the FIRST bundle
 
-    // The bundle election key (StateAnchorPublisher._bundleElectionKey): ONE per
+    // The bundle election key (StateAnchorPublisher.bundleElectionKey): ONE per
     // network per cycle, replacing the per-row XANCV0 key. The rank ladder is
     // otherwise unchanged, so the same hashOrder answers it.
     function bundleKey(network, snapshotBlock){
@@ -130,7 +130,7 @@ describe('ANCHOR bundle live: multi-validator per-NETWORK publisher (DOGE regtes
     }
 
     // Poll until the DOGE indexer has parsed and STORED every section of a bundle,
-    // which is what _findExistingBundle's per-section getanchoraction reads. AT5's
+    // which is what findExistingBundle's per-section getanchoraction reads. AT5's
     // adopt leg is only meaningful once this is true, and a fixed sleep here is the
     // difference between proving adoption and proving a race.
     async function waitForBundleIndexed(rows, timeMax = 120000){
@@ -173,7 +173,7 @@ describe('ANCHOR bundle live: multi-validator per-NETWORK publisher (DOGE regtes
     // for the decoder/indexer to catch up so failover-window math is exact.
     async function waitForTip(minBlock){
         for (let i = 0; i < 60; i++) {
-            let b = await mvh.hubs[0]._resolveBtcLatestBlock();
+            let b = await mvh.hubs[0].resolveBtcLatestBlock();
             if (Number.isFinite(b) && b >= minBlock) return b;
             await sleep(1000);
         }
@@ -258,10 +258,10 @@ describe('ANCHOR bundle live: multi-validator per-NETWORK publisher (DOGE regtes
                 // so the equal-stake count set mirrors getSnapshot.
                 async getActiveValidatorSnapshot(){ return { validators, count: validators.length }; },
             };
-            hub.capabilitySnapshot = snap;                    // _getActiveOraclePublishPubkeys
-            hub.stateAnchorPublisher.capSnapshot = snap;      // _resolveCapabilitySet (constructor-captured)
+            hub.capabilitySnapshot = snap;                    // getActiveOraclePublishPubkeys
+            hub.stateAnchorPublisher.capSnapshot = snap;      // resolveCapabilitySet (constructor-captured)
             // AT5 reads the mined bundle back through the DOGE indexer's
-            // getanchoraction, which is the ONLY path _findExistingBundle has. An
+            // getanchoraction, which is the ONLY path findExistingBundle has. An
             // unwired indexer makes every lookup "undetermined", and a returning
             // rank 0 would then spend a second time instead of adopting, which is
             // precisely what AT5 exists to disprove.
@@ -513,21 +513,21 @@ describe('ANCHOR bundle live: multi-validator per-NETWORK publisher (DOGE regtes
         assert.deepStrictEqual(failover[0].bundle.chains, ['BTC']);
 
         // BYTE DETERMINISM (D5): rank 0 rebuilds the same bundle from ITS OWN rows and
-        // must produce the same bytes rank 1 put on the wire. _parseSigs returns the
+        // must produce the same bytes rank 1 put on the wire. parseSigs returns the
         // stored JSON order unsorted, so without the inner PUBKEY sort two publishers
         // racing this bundle emit different bytes and the attestation round's DB
         // byte-match stops being deterministic.
         const mineRank0 = await mvh.hubs[order[0]].db.doQuery(
             'SELECT * FROM state_checkpoints WHERE chain = ? AND network = ? AND checkpoint_seq = ?',
             [row.chain, row.network, row.checkpoint_seq]);
-        const rebuilt = mvh.hubs[order[0]].stateAnchorPublisher._buildV7Payload(
+        const rebuilt = mvh.hubs[order[0]].stateAnchorPublisher.buildV7Payload(
             mineRank0, pubkeys[order[1]], failover[0].bundle.attestSigs);
         assert.strictEqual(rebuilt, failover[0].payload,
             'rank 0 rebuilds byte-identical bundle bytes for the same state');
 
         // Rank 0 "comes back" having MISSED the announcement: clear its stamp so the
         // back-fill cannot be what saves it, and make it flush. The only thing left to
-        // stop a second spend is _findExistingBundle's per-section getanchoraction
+        // stop a second spend is findExistingBundle's per-section getanchoraction
         // against the mined transaction, which is exactly what AT5 asserts.
         assert.ok(await waitForBundleIndexed([row], 120000),
             'the DOGE indexer parsed and stored the failover bundle\'s section row');
@@ -565,7 +565,7 @@ describe('ANCHOR bundle live: multi-validator per-NETWORK publisher (DOGE regtes
             b_filled_before: '0', b_ownership: 0, b_payout_addr: 'election_payout_b',
             effective_time: Math.floor(Date.now() / 1000)
         };
-        const canonical = mvh.hubs[0].getCrossChainDex()._canonicalMatch(m);
+        const canonical = mvh.hubs[0].getCrossChainDex().canonicalMatch(m);
         const sigs = JSON.stringify(identities.slice(0, 3).map(id =>
             ({ pubkey: id.getPubkeyHex().toLowerCase(), sig: id.sign(canonical) })));
         await allHubs(
@@ -586,16 +586,16 @@ describe('ANCHOR bundle live: multi-validator per-NETWORK publisher (DOGE regtes
         // refuses (deterministic single-leader election).
         for (const hub of mvh.hubs) hub.stateAnchorPublisher.electionToleranceBlocks = 100000;
 
-        // Elect the leader EXACTLY as _startArchiveRound does: hash-order over the
-        // oracle_publish set keyed on _archiveElectionKey(wrapperCp, nextBatchSeq).
+        // Elect the leader EXACTLY as startArchiveRound does: hash-order over the
+        // oracle_publish set keyed on archiveElectionKey(wrapperCp, nextBatchSeq).
         // The wrapper is the BTC-preferred latest checkpoint; batchSeq is a
         // non-consuming MAX+1 read, identical on every hub. The archive leg is
         // UNCHANGED by the bundle (it was already one head per network per cycle).
         const sap0 = mvh.hubs[0].stateAnchorPublisher;
         const cpRow = (await mvh.hubs[0].db.doQuery(
             "SELECT * FROM state_checkpoints ORDER BY (chain = 'BTC') DESC, id DESC LIMIT 1"))[0];
-        const batchSeq = await sap0._getNextBatchSeq();
-        const archiveKey = sap0._archiveElectionKey(
+        const batchSeq = await sap0.getNextBatchSeq();
+        const archiveKey = sap0.archiveElectionKey(
             { chain: cpRow.chain, network: cpRow.network, checkpoint_seq: cpRow.checkpoint_seq }, batchSeq);
         const archiveOrder = SAP.hashOrder(archiveKey, pubkeys);
         const leader = pubkeys.indexOf(archiveOrder[0]);

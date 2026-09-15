@@ -95,7 +95,7 @@ describe('ROLLCALL acceptance: sweeper, self-publish and the below-threshold epo
     // Tick exactly one hub. driveEpoch's tickAll is the normal path; the publish
     // legs need a single engine to act so the sweeper's filtered publish is
     // attributable to one hub.
-    async function tickOne(i){ await ctx.rounds[i]._tick() }
+    async function tickOne(i){ await ctx.rounds[i].tick() }
 
     // Wait until hub `i` ITSELF holds `n` signatures for `epoch`. waitForGossip
     // returns on the mesh-wide maximum, and the leg then ticks one specific hub

@@ -126,7 +126,7 @@ describe('XBRIDGE transfer: hub-signed record to indexer settle pass (base AT1, 
             const hubSide     = HUB.hubCanonical(row);
             const indexerSide = BS.transferCanonical(row);
             assert.strictEqual(indexerSide, hubSide,
-                'hub CrossChainBridgeEngine._canonicalMatch and indexer transferCanonical disagree');
+                'hub CrossChainBridgeEngine.canonicalMatch and indexer transferCanonical disagree');
             // Both halves of the wrap are pinned: the EQUIV header (which carries the
             // finalizing view, so a view change is not equivocation) and the content order.
             assert.ok(hubSide.startsWith('EQUIV|XBRIDGE|' + row.transfer_id + '|0||'),
@@ -423,8 +423,8 @@ describe('XBRIDGE transfer: hub-signed record to indexer settle pass (base AT1, 
 
     describe('the federation client and the pending read it polls', function(){
 
-        // These drive the REAL engine client (CrossChainBridgeEngine._indexerCall,
-        // recordPending, _effectiveDepth) over real HTTP against the pending source, with
+        // These drive the REAL engine client (CrossChainBridgeEngine.indexerCall,
+        // recordPending, effectiveDepth) over real HTTP against the pending source, with
         // no hub, no database and no mesh. Without them the federated block below would be
         // the only thing standing between a mock that drifted from api.js and a round that
         // is silently vacuous on every venue that can run it.
@@ -457,7 +457,7 @@ describe('XBRIDGE transfer: hub-signed record to indexer settle pass (base AT1, 
             const eng = HUB.hubEngine();
             eng.indexers = { BTC: { url: source.urlFor('shared', 'BTC'), key: '' } };
 
-            const res = await eng._indexerCall('BTC', 'getpendingbridgetransfers', { limit: 100 });
+            const res = await eng.indexerCall('BTC', 'getpendingbridgetransfers', { limit: 100 });
 
             assert.strictEqual(res.network, NETWORK, 'the engine reads no network and would drop the page');
             assert.strictEqual(Number(res.latest_block_index), SNAPSHOT);
@@ -475,7 +475,7 @@ describe('XBRIDGE transfer: hub-signed record to indexer settle pass (base AT1, 
 
             // And the leg resolves to the id the hub would finalize for it, which is what
             // ties this read to the record the drills above apply.
-            const derived = eng._deriveTransferId(res.network, 'BTC', leg.src_action_index,
+            const derived = eng.deriveTransferId(res.network, 'BTC', leg.src_action_index,
                                                   leg.dest_chain, leg.dest_address);
             assert.strictEqual(derived, inLeg(ids).transfer_id,
                 'a leg served here derives a different transfer_id than the record under test');
@@ -487,28 +487,28 @@ describe('XBRIDGE transfer: hub-signed record to indexer settle pass (base AT1, 
             // them to the engine.
             eng.confirmations = { BTC: 6, LTC: 12, DOGE: 60 };
 
-            assert.strictEqual(eng._effectiveDepth('BTC', 0), 6, 'an unset MIN_DEPTH moved the platform depth');
-            assert.strictEqual(eng._effectiveDepth('BTC', 3), 6,
+            assert.strictEqual(eng.effectiveDepth('BTC', 0), 6, 'an unset MIN_DEPTH moved the platform depth');
+            assert.strictEqual(eng.effectiveDepth('BTC', 3), 6,
                 'a MIN_DEPTH below the platform depth LOWERED the wait, which an issuer must never be able to do');
-            assert.strictEqual(eng._effectiveDepth('BTC', 12), 12, 'a MIN_DEPTH above the platform depth did not raise it');
-            assert.strictEqual(eng._effectiveDepth('DOGE', 3), 60, 'the DOGE platform depth was lowered');
-            assert.strictEqual(eng._effectiveDepth('BTC', 'nonsense'), 6, 'a junk MIN_DEPTH did not fall back to the platform depth');
+            assert.strictEqual(eng.effectiveDepth('BTC', 12), 12, 'a MIN_DEPTH above the platform depth did not raise it');
+            assert.strictEqual(eng.effectiveDepth('DOGE', 3), 60, 'the DOGE platform depth was lowered');
+            assert.strictEqual(eng.effectiveDepth('BTC', 'nonsense'), 6, 'a junk MIN_DEPTH did not fall back to the platform depth');
         });
 
         it('serves the origin policy read, and answers an unknown tick with an error the engine abstains on', async function(){
             const eng = HUB.hubEngine();
             eng.indexers = { BTC: { url: source.urlFor('shared', 'BTC'), key: '' } };
 
-            const known = await eng._indexerCall('BTC', 'gettokenpolicy', { tick: 'FUFU', origin_block: 1150 });
+            const known = await eng.indexerCall('BTC', 'gettokenpolicy', { tick: 'FUFU', origin_block: 1150 });
             assert.strictEqual(known.policy_hash, BS.policyHash(null, null, false));
             assert.strictEqual(known.origin_block, 1150, 'the read did not answer at the block it was asked for');
             assert.strictEqual(known.sleeping, false);
 
-            const unknown = await eng._indexerCall('BTC', 'gettokenpolicy', { tick: 'NOSUCH', origin_block: 1150 });
+            const unknown = await eng.indexerCall('BTC', 'gettokenpolicy', { tick: 'NOSUCH', origin_block: 1150 });
             assert.ok(unknown && unknown.error,
                 'a tick with no native row answered without an error, so the engine would sign a phantom policy');
 
-            const tip = await eng._indexerCall('BTC', 'getlatestblock', {});
+            const tip = await eng.indexerCall('BTC', 'getlatestblock', {});
             assert.strictEqual(Number(tip.block_index), SNAPSHOT,
                 'the tip read does not answer block_index, so policyOriginBlock would abstain forever');
         });
@@ -587,7 +587,7 @@ describe('XBRIDGE transfer: hub-signed record to indexer settle pass (base AT1, 
                 eng.indexers.DOGE = { url: source.urlFor('shared', 'DOGE'), key: '' };
             }
 
-            await Promise.all(mvh.hubs.map(h => h.crossChainBridge._poll().catch(() => {})));
+            await Promise.all(mvh.hubs.map(h => h.crossChainBridge.poll().catch(() => {})));
 
             // Poll the PERSISTED row on every hub rather than a finalize event: the write is
             // started by an un-awaited handler, so an event-count poll clears while the

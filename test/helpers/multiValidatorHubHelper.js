@@ -249,7 +249,7 @@ class MultiValidatorHub {
         }
         this.ports = await _pickFreePorts(this.count, this.basePort);
 
-        // The hub's _resolveBtcIndexerUrl() reads process.env.BTC_INDEXER_API_URL
+        // The hub's resolveBtcIndexerUrl() reads process.env.BTC_INDEXER_API_URL
         // on every 15s poll (not just at start). Set it for the lifetime of the
         // harness and restore once on stop(); otherwise polls after start()
         // return undefined and the hubs silently never see pending requests.
@@ -284,7 +284,7 @@ class MultiValidatorHub {
                 HUB_NETWORK:            (process.env.NETWORK || 'regtest'),
                 ORACLE_EPOCH_START:     this.oracleEpochStart,
                 // Long poll so the engine's auto-discovery timer never races the
-                // test's manual _discoverAndMatch() triggers. Rounds are driven
+                // test's manual discoverAndMatch() triggers. Rounds are driven
                 // deterministically, not on a 15s wall clock.
                 XDEX_POLL_MS:           600000,
                 // Pin the DEX give-side escrow confirmation floor to 1 for in-process

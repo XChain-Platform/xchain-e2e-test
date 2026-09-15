@@ -78,7 +78,7 @@ const TIP = {
     // SPV Phase 2 (xchain-hub 08228c8): post-flag-day the checkpoint canonical
     // signs the indexer light-client roots and StateCheckpointEngine fails closed
     // without them; regtest's commitment flag-day is genesis, so the stubbed
-    // indexer view must carry them or every _tick throws (0 checkpoint rows).
+    // indexer view must carry them or every tick throws (0 checkpoint rows).
     state_root: 'd4'.repeat(32), state_root_version: 1,
     block_merkle_root: 'e5'.repeat(32), block_merkle_version: 1
 };
@@ -91,7 +91,7 @@ async function attachEngines(mvh) {
         const round = new OracleRound(hub);
         const oc    = new OracleConsensus(hub, round);
         round.setConsensus(oc);
-        oc.setValidatorSet(await hub._loadValidatorSet());
+        oc.setValidatorSet(await hub.loadValidatorSet());
         await oc.start();
         hub._cOracle = oc;
         hub._cRound  = round;
@@ -102,7 +102,7 @@ async function attachEngines(mvh) {
         cps.chains        = ['BTC'];
         cps.confirmations = 0;
         cps.indexers.BTC  = { url: 'http://stubbed', key: '' };
-        cps._indexerCall  = async () => Object.assign({}, TIP);
+        cps.indexerCall  = async () => Object.assign({}, TIP);
     }
     return { stop() { stops.forEach((s) => { try { s(); } catch (_) {} }); } };
 }
@@ -124,7 +124,7 @@ async function driveConfig(mvh, value) {
     const config = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: value } } } };
     // Any hub can drive: N=1 self-finalizes (quorum 0); ≥2 routes through a leader.
     const leader = mvh.hubs.find((h) => {
-        const l = h.consensus._getLeader(h.consensus.seq + 1);
+        const l = h.consensus.getLeader(h.consensus.seq + 1);
         return l && l.addr === h.consensus.peerManager.validatorAddr;
     }) || mvh.hubs[0];
     await leader.addParametersFromJson(config).catch(() => {});
@@ -143,7 +143,7 @@ async function priceFinalized(hub) {
 }
 
 async function driveCheckpoint(mvh) {
-    await Promise.all(mvh.hubs.map((h) => h.stateCheckpoints._tick().catch(() => {})));
+    await Promise.all(mvh.hubs.map((h) => h.stateCheckpoints.tick().catch(() => {})));
 }
 async function checkpointFinalized(hub) {
     const r = await hub.db.doQuery(

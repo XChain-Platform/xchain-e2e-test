@@ -26,7 +26,7 @@
  *   1. propose() refuses to CREATE a CAPABILITY_*_MIN_STAKE proposal
  *      (validators/governance.js #4352 guard), so an honest proposer can't even
  *      start a round.
- *   2. _handlePropose() DROPS an inbound CAPABILITY_*_MIN_STAKE proposal
+ *   2. handlePropose() DROPS an inbound CAPABILITY_*_MIN_STAKE proposal
  *      gossiped by a malicious or pre-#4352 peer, so no honest hub records
  *      a row. With no local row a later GOV_RESULT UPDATE matches 0 rows
  *      and never emits proposal:finalized, so every hub's getMinStake()
@@ -36,7 +36,7 @@
  * change end-to-end and asserted all hubs hot-reloaded capConfig. #4352
  * removed that governance path; the follower-applies-GOV_RESULT regression
  * it guarded is now covered at unit scale in xchain-hub Governance.test.js
- * `_handleResult()` using a still-governable parameter.)
+ * `handleResult()` using a still-governable parameter.)
  *
  * Skips when HUB_DB_USER/HUB_DB_PASS are unset (same gate as multiHub).
  ********************************************************************/
@@ -168,7 +168,7 @@ describe('MultiValidatorHub: governance capability MIN_STAKE pin (#4352)', funct
             votingEnd:       new Date(Date.now() + 60_000).toISOString(),
             activationBlock: null
         });
-        await sleep(2500); // let the gossip reach every follower + _handlePropose run
+        await sleep(2500); // let the gossip reach every follower + handlePropose run
         for (const hub of mvh.hubs) {
             const rows = await hub.db.doQuery(
                 'SELECT proposal_id FROM governance_proposals WHERE proposal_id = ? OR parameter = ?',

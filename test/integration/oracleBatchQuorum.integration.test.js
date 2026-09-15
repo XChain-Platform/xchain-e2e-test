@@ -57,7 +57,7 @@
  * this hub)". So AT6's "later leader" is realized here as the shipped LATER
  * ATTEMPT: quorum is restored, one further round is finalized into the NEXT
  * window (which is what makes W a closed, non-newest buffered window), and the
- * leader's publisher is restarted. `start()`'s `_scheduleBufferCatchup()` then
+ * leader's publisher is restarted. `start()`'s `scheduleBufferCatchup()` then
  * re-queues exactly the windows a restart dropped, W among them. That path is
  * entirely shipped code: this file triggers it, it does not reimplement it and it
  * pokes no private memo to unstick the window. See the report for the gap.
@@ -67,7 +67,7 @@
  * is not a claim this drill may make about ranges in general; what D17 does bind,
  * and what AT6 names, is that a re-proposal of the SAME window produces
  * byte-identical canonical content. `oracleBatchDrive.attachBatchSigners` wraps
- * `_canonical` on each signer, so both attempts hand back the bytes the REAL
+ * `canonical` on each signer, so both attempts hand back the bytes the REAL
  * builder produced, and the comparison is between two runs of the producer rather
  * than between the producer and a test-side re-derivation of it.
  *
@@ -134,7 +134,7 @@ const KNOWN_CAPABILITY_GAP_STATUS = 'invalid: insufficient signer stake';
  * A LOCAL COPY ON PURPOSE, and the reason is a real defect, not a preference:
  * `oracleBatchDrive.parsePriceBatchWire` still gates on `version !== 2` and
  * returns `not-version-2` for every wire the publisher emits, because the batch
- * is now PRICE v0 (`OraclePublisher._emitWire` builds `'PRICE|0|' + body`). The
+ * is now PRICE v0 (`OraclePublisher.emitWire` builds `'PRICE|0|' + body`). The
  * helper is out of this drill's jail, so the version gate is corrected here and
  * named in the report; everything else, including the inflate, is the helper's
  * own logic and goes through the SAME consensus module the landing chain runs, so
@@ -197,7 +197,7 @@ function parseBatchWire(wire) {
 
 /**
  * The hub index that will lead `windowIndex`, computed the way
- * `OraclePublisher._assembleWindow` computes it: the sorted lowercase
+ * `OraclePublisher.assembleWindow` computes it: the sorted lowercase
  * oracle_publish pubkey list at the window's anchor, indexed by
  * `windowIndex % length`.
  *
@@ -356,7 +356,7 @@ describe('AT6 oracle batch signing round: quorum withheld, then the SAME window 
         signerSet.unsilence(silencedIndexes);
 
         // One round into the NEXT window. This is the precondition the shipped
-        // restart catch-up requires, not a nudge: `_scheduleBufferCatchup` re-queues
+        // restart catch-up requires, not a nudge: `scheduleBufferCatchup` re-queues
         // every buffered window EXCEPT the newest, on the reasoning that the newest may
         // still be open. With only window W buffered, W IS the newest and the catch-up
         // would correctly leave it alone. Round `windowFirst + WINDOW_ROUNDS` is the

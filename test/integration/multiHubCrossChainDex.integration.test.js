@@ -145,7 +145,7 @@ describe('MultiValidatorHub: cross-chain DEX match PBFT (L2)', function () {
             d.consensus.on('match:finalized', fn);
             return fn;
         });
-        await Promise.all(dexes.map((d) => d._discoverAndMatch().catch(() => {})));
+        await Promise.all(dexes.map((d) => d.discoverAndMatch().catch(() => {})));
         // The post-condition of the positive case is the PERSISTED cross_chain_matches
         // row on every hub, which the finalize event only STARTS: the event is emitted
         // synchronously by CrossChainDexConsensus.finalize, and the row is written by
@@ -175,7 +175,7 @@ describe('MultiValidatorHub: cross-chain DEX match PBFT (L2)', function () {
 
     function verifyingPubkeys(ev){
         const dex = mvh.getCrossChainDexes()[ev.hubIndex];
-        const canonical = dex._canonicalMatch(ev.row);
+        const canonical = dex.canonicalMatch(ev.row);
         const ok = new Set();
         for (const s of (ev.signatures || [])) {
             const pk = String(s.pubkey || '').toLowerCase();
@@ -253,9 +253,9 @@ describe('MultiValidatorHub: cross-chain DEX match PBFT (L2)', function () {
         const dex0 = mvh.getCrossChainDexes()[0];
         const lo = { home_network: NETWORK, home_coin: 'DOGE', action_index: 21 };
         const hi = { home_network: NETWORK, home_coin: 'LTC',  action_index: 11 };
-        const matchId = dex0._deriveMatchId(lo, hi, BLOCK_INDEX, '0', '0');
+        const matchId = dex0.deriveMatchId(lo, hi, BLOCK_INDEX, '0', '0');
         const validatorObjs = mvh.getPubkeys().map((pk) => ({ pubkey: pk }));
-        const leaderPubkey = dex0.consensus._leaderFor(matchId, validatorObjs, 0);
+        const leaderPubkey = dex0.consensus.leaderFor(matchId, validatorObjs, 0);
         const byzIdx = mvh.getPubkeys().findIndex((pk) => pk.toLowerCase() !== leaderPubkey);
         assert.ok(byzIdx >= 0, 'could not pick a non-leader byzantine hub');
         const byzPubkey = mvh.getPubkeys()[byzIdx].toLowerCase();

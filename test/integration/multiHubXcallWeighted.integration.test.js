@@ -25,7 +25,7 @@
  * There is no offer book / discovery for XCALL, so the round is driven by calling
  * consensus.propose directly on the deterministic round leader with a hand-built
  * dispatch row (every canonical field populated). Followers' validateProposedMatch
- * re-verifies against the source-chain indexer via _indexerCall, which is
+ * re-verifies against the source-chain indexer via indexerCall, which is
  * unavailable in-process, so it is overridden to accept (that path is covered by
  * CrossChainCallEngine.test.js); the quorum/signature aggregation under test is
  * unaffected. regtest activates weighting at height 0.
@@ -93,8 +93,8 @@ async function driveDispatch(mvh, validators, seedBase, requireLiveLeader) {
     let callId, roundId, leaderPubkey, leaderIdx, n = 0;
     do {
         callId = callIdFrom(seedBase + ':' + n);
-        roundId = engines[0]._roundId('dispatch', callId);
-        leaderPubkey = engines[0].consensus._leaderFor(roundId.toLowerCase(), validators, 0);
+        roundId = engines[0].roundId('dispatch', callId);
+        leaderPubkey = engines[0].consensus.leaderFor(roundId.toLowerCase(), validators, 0);
         leaderIdx = livePubkeys.findIndex((pk) => pk === String(leaderPubkey).toLowerCase());
         n++;
     } while (requireLiveLeader && leaderIdx < 0 && n < 64);
@@ -102,7 +102,7 @@ async function driveDispatch(mvh, validators, seedBase, requireLiveLeader) {
     const row = dispatchRow(roundId, callId);
     const events = [];
     const listeners = engines.map((e, i) => { const fn = (ev) => events.push(Object.assign({ hubIndex: i }, ev)); e.consensus.on('match:finalized', fn); return fn; });
-    // Every hub runs the round (mirrors _discoverAndMatch on all DEX engines):
+    // Every hub runs the round (mirrors discoverAndMatch on all DEX engines):
     // each creates its pending context, the deterministic leader broadcasts
     // PROPOSE, and followers validate + sign. The row is identical across hubs so
     // every canonical matches.
@@ -204,7 +204,7 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM XCALL dispatch relay (C.2)', 
 
             const engines = mvh.hubs.map((h) => h.crossChainCalls);
             for (const ev of events) {
-                const canonical = engines[ev.hubIndex]._canonicalMatch(ev.row);
+                const canonical = engines[ev.hubIndex].canonicalMatch(ev.row);
                 const ok = new Set();
                 for (const s of (ev.signatures || []))
                     if (ValidatorIdentity.verify(canonical, String(s.sig || ''), String(s.pubkey || '').toLowerCase()))

@@ -104,7 +104,7 @@ describe('MultiValidatorHub: N=10 config-change PBFT scale probe (C.2)', functio
         const config = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: VALUE } } } };
 
         const leader = mvh.hubs.find((h) => {
-            const l = h.consensus._getLeader(h.consensus.seq + 1);
+            const l = h.consensus.getLeader(h.consensus.seq + 1);
             return l && l.addr === h.consensus.peerManager.validatorAddr;
         });
         assert.ok(leader, 'no round leader could be identified');

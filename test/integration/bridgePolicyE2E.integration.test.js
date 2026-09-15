@@ -19,7 +19,7 @@
  *
  * THE BINDING UNDER TEST is narrower and sharper than the transfer one. Membership is
  * TRANSPORT: the allow and block arrays ride beside the row and are bound to it only
- * through policy_hash, so the hub's _policyHash and the indexer's policyHash are a
+ * through policy_hash, so the hub's policyHash and the indexer's policyHash are a
  * byte-match obligation over a canonical membership text, and the canonical they are
  * committed inside is a second one. If either drifts, a snapshot the whole federation
  * signed is refused by every destination, permanently, while both repositories' own suites
@@ -117,7 +117,7 @@ describe('XPOLICY: hub-signed policy snapshot to indexer settle pass (policy AT1
             const row = snapshot(ids, { allow: [MEMBER_A, MEMBER_B], block: [MEMBER_C], sleeping: true });
             const indexerSide = BS.policyHash([MEMBER_A, MEMBER_B], [MEMBER_C], true);
             assert.strictEqual(row.policy_hash, indexerSide,
-                'hub _policyHash and indexer policyHash disagree over the same membership');
+                'hub policyHash and indexer policyHash disagree over the same membership');
             // The canonical membership text itself, so the hash is pinned to the spec's
             // wording and not merely to whatever both sides happen to compute today.
             const expected = sha256(['ALLOW', '2', MEMBER_A, MEMBER_B,
@@ -131,8 +131,8 @@ describe('XPOLICY: hub-signed policy snapshot to indexer settle pass (policy AT1
             const absent = BS.policyHash(null, null, false);
             const empty  = BS.policyHash([],   [],   false);
             assert.notStrictEqual(absent, empty, 'an absent list hashes the same as an empty one');
-            assert.strictEqual(absent, HUB.hubEngine()._policyHash(null, null, false));
-            assert.strictEqual(empty,  HUB.hubEngine()._policyHash([],   [],   false));
+            assert.strictEqual(absent, HUB.hubEngine().policyHash(null, null, false));
+            assert.strictEqual(empty,  HUB.hubEngine().policyHash([],   [],   false));
         });
 
         it('signs the canonical the indexer rebuilds, byte for byte', function(){
@@ -140,7 +140,7 @@ describe('XPOLICY: hub-signed policy snapshot to indexer settle pass (policy AT1
             const hubSide     = HUB.hubCanonical(row);
             const indexerSide = BS.policyCanonical(row);
             assert.strictEqual(indexerSide, hubSide,
-                'hub _canonicalMatch (policy branch) and indexer policyCanonical disagree');
+                'hub canonicalMatch (policy branch) and indexer policyCanonical disagree');
             assert.ok(hubSide.startsWith('EQUIV|XPOLICY|' + row.snapshot_id + '|0||'),
                 'the EQUIV header is not the one the settle pass expects: ' + hubSide.slice(0, 90));
             assert.ok(hubSide.endsWith([
@@ -533,7 +533,7 @@ describe('XPOLICY: hub-signed policy snapshot to indexer settle pass (policy AT1
                 eng.indexers.DOGE = { url: source.urlFor('shared', 'DOGE'), key: '' };
             }
 
-            await Promise.all(mvh.hubs.map(h => h.crossChainBridge._poll().catch(() => {})));
+            await Promise.all(mvh.hubs.map(h => h.crossChainBridge.poll().catch(() => {})));
 
             const held = await waitFor(async () => {
                 let seen = 0;

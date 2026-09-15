@@ -30,8 +30,8 @@ function fakeHub() {
     const hub = {
         consensus: {
             handled: [],
-            _handleMessage(m) { this.handled.push(m); },
-            _digest: (c) => 'digest:' + JSON.stringify(c),
+            handleMessage(m) { this.handled.push(m); },
+            digest: (c) => 'digest:' + JSON.stringify(c),
             peerManager: { validatorAddr: '10.0.0.1:41000' }
         },
         peerManager: {
@@ -79,7 +79,7 @@ describe('liveByzantineFaults: signature corruption', function () {
 describe('liveByzantineFaults: silenceConsensus', function () {
     it('drops every consensus message while the listener stays attached', function () {
         const { hub } = fakeHub();
-        const listener = (m) => hub.consensus._handleMessage(m);   // the arrow Consensus.start registers
+        const listener = (m) => hub.consensus.handleMessage(m);   // the arrow Consensus.start registers
         listener({ type: 'PBFT_PREPARE' });
         assert.strictEqual(hub.consensus.handled.length, 1);
 
@@ -143,7 +143,7 @@ describe('liveByzantineFaults: proposal envelopes', function () {
         const { hub } = fakeHub();
         const config = { BTC: { regtest: { node: { GAS_PRICE: '2' } } } };
         const env = byz.prePrepareEnvelope(hub.consensus, 42, 0, config, 100);
-        assert.strictEqual(env.data.configDigest, hub.consensus._digest(config));
+        assert.strictEqual(env.data.configDigest, hub.consensus.digest(config));
         assert.strictEqual(env.sender, '10.0.0.1:41000');
         assert.strictEqual(env.data.view, 0);
     });

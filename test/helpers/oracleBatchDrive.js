@@ -45,7 +45,7 @@
  * by the hubs talking to each other over their real mesh, or it is not reached.
  *
  * WHY THE INSTRUMENTATION IS A WRAPPER AND NOT A FORK. `collectBatchSignatures`
- * and `_canonical` are wrapped on the signer instances THIS file constructs, so
+ * and `canonical` are wrapped on the signer instances THIS file constructs, so
  * a drill can read the exact proposal the leader made and the exact canonical
  * bytes it signed over. Wrapping is what keeps AT6's "byte-identical canonical
  * content" claim honest: the bytes compared are the bytes the real builder
@@ -166,8 +166,8 @@ function attachBatchSigners(venue, opts) {
         // re-derived in the drill, because AT6's claim is about the bytes the REAL
         // builder produced on two separate attempts; a test-side re-derivation would
         // be comparing the test to itself.
-        const origCanonical = signer._canonical.bind(signer);
-        signer._canonical = function (first, last, anchor, rounds) {
+        const origCanonical = signer.canonical.bind(signer);
+        signer.canonical = function (first, last, anchor, rounds) {
             const bytes = origCanonical(first, last, anchor, rounds);
             signer._lastCanonical = bytes;
             return bytes;
@@ -230,7 +230,7 @@ function attachBatchSigners(venue, opts) {
  * Waiting for the row on EVERY hub is not politeness, it is a precondition of the
  * signing round: a follower co-signs only what it can rebuild from its own
  * `price_snapshots` (`OracleBatchSigner.deriveWindow`), and the leader withholds
- * a window whose rounds it cannot self-check (`_windowCoverageComplete`). Opening
+ * a window whose rounds it cannot self-check (`windowCoverageComplete`). Opening
  * the window before the rows exist is how a drill produces a silent refusal that
  * looks like a signing bug.
  */

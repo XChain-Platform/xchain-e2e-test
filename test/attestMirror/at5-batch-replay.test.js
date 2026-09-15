@@ -41,7 +41,7 @@
  * The general shape, since it has caught more than one lane: "I cannot do X"
  * hardening into "the operator must do X" without a measurement in between.
  *
- * THE SECOND PRECONDITION is the anchor. `_resolveAnchor` reads a BTC chain tip
+ * THE SECOND PRECONDITION is the anchor. `resolveAnchor` reads a BTC chain tip
  * that arrives on the hub only through the `pushchaintip` JSON-RPC, and without one
  * the publisher defers every window with a latched warning and publishes nothing.
  * The drill pushes it to every hub itself, because on this venue no production BTC
@@ -56,8 +56,8 @@
  * slashed, so no drill may adopt it even if it could. Every draw containing it
  * stalls to timeout, and at redundancy 3 on a small set that is a guarantee
  * rather than a risk. The provider stake floor is the only lever that removes it
- * from a draw without touching it at all: `_computeResponsibleSet` filters on
- * `_meetsProviderFloor` BEFORE the hash ranking, and `llm` declares
+ * from a draw without touching it at all: `computeResponsibleSet` filters on
+ * `meetsProviderFloor` BEFORE the hash ranking, and `llm` declares
  * min_stake_xchain 25000 against `http_get`'s 10000, so an llm request cannot
  * draw that key while an http_get request cannot avoid it. THAT IS WHY THIS IS
  * NOT A FALLBACK AND MUST NOT BECOME ONE: on a box that cannot serve llm this
@@ -468,7 +468,7 @@ describe('AT5: the responses of a window land on chain as one batch', function (
         // that is broken. Pushed to every hub, since any of them may be elected.
         //
         // AND KEPT LIVE, NOT PINNED. The same `chain_tips` row is the FIRST source
-        // `XChainHub._resolveBtcLatestBlock` consults for every attestation round
+        // `XChainHub.resolveBtcLatestBlock` consults for every attestation round
         // (consensus/pbft.js), preferred over the live indexer while its block_time is
         // younger than MAX_TIP_AGE_S (default twice the oracle round interval, 20
         // min). Pass 6 (2026-09-05) pushed the tip ONCE at 7405: the responsible

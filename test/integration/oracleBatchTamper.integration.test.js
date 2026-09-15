@@ -53,7 +53,7 @@
  * be staked on the venue's chain at all. So this half drives the indexer's REAL
  * `Slash` handler in-process against REAL signed artifacts the venue produced:
  * the per-round canonical built by the hub's OWN producer
- * (`OracleConsensus._buildPriceV0Payload`, reached through `venue.priceCanonical`)
+ * (`OracleConsensus.buildPriceV0Payload`, reached through `venue.priceCanonical`)
  * and the batch canonical the REAL signing round built, each carrying a signature
  * that a REAL venue validator produced and that `ValidatorIdentity.verify`
  * confirms. Only the DB surface behind the handler is stubbed, and it is stubbed

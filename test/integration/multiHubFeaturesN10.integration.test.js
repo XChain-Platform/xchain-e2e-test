@@ -82,7 +82,7 @@ async function attachOracle(mvh) {
         const round = new OracleRound(hub);
         const oc    = new OracleConsensus(hub, round);
         round.setConsensus(oc);
-        oc.setValidatorSet(await hub._loadValidatorSet());
+        oc.setValidatorSet(await hub.loadValidatorSet());
         await oc.start();
         hub._wtOracle = oc;
         hub._wtRound  = round;
@@ -116,7 +116,7 @@ async function driveDispatch(mvh, validators, seedBase) {
     const engines = mvh.hubs.map((h) => h.crossChainCalls);
     engines.forEach((e) => { e.validateProposedMatch = async () => true; });
     const callId  = callIdFrom(seedBase);
-    const roundId = engines[0]._roundId('dispatch', callId);
+    const roundId = engines[0].roundId('dispatch', callId);
     const row = dispatchRow(roundId, callId);
     const events = [];
     const listeners = engines.map((e, i) => { const fn = (ev) => events.push(Object.assign({ hubIndex: i }, ev)); e.consensus.on('match:finalized', fn); return fn; });
@@ -154,7 +154,7 @@ async function driveDexRound(mvh) {
     const dexes = mvh.getCrossChainDexes();
     const events = [];
     const listeners = dexes.map((d, i) => { const fn = (ev) => events.push(Object.assign({ hubIndex: i }, ev)); d.consensus.on('match:finalized', fn); return fn; });
-    await Promise.all(dexes.map((d) => d._discoverAndMatch().catch(() => {})));
+    await Promise.all(dexes.map((d) => d.discoverAndMatch().catch(() => {})));
     // The caller asserts the PERSISTED cross_chain_matches row on every hub, and the
     // finalize event only STARTS that write: CrossChainDexEngine subscribes to
     // 'match:finalized' with an un-awaited `this._writeFinalizedMatch(ev)`, so an
@@ -275,7 +275,7 @@ describe('MultiValidatorHub: per-feature weighted quorum at N=10 (C.2)', functio
 
             const dexes = mvh.getCrossChainDexes();
             for (const ev of events) {
-                const n = countVerifyingSigs(dexes[ev.hubIndex]._canonicalMatch(ev.row), ev.signatures);
+                const n = countVerifyingSigs(dexes[ev.hubIndex].canonicalMatch(ev.row), ev.signatures);
                 assert.ok(n >= QUORUM_SIGS, 'hub ' + ev.hubIndex + ' finalized with < ' + QUORUM_SIGS + ' distinct verifying sigs (' + n + ')');
             }
             const matchId = [...matchIds][0];
@@ -316,7 +316,7 @@ describe('MultiValidatorHub: per-feature weighted quorum at N=10 (C.2)', functio
 
             const engines = mvh.hubs.map((h) => h.crossChainCalls);
             for (const ev of events) {
-                const n = countVerifyingSigs(engines[ev.hubIndex]._canonicalMatch(ev.row), ev.signatures);
+                const n = countVerifyingSigs(engines[ev.hubIndex].canonicalMatch(ev.row), ev.signatures);
                 assert.ok(n >= QUORUM_SIGS, 'hub ' + ev.hubIndex + ' finalized with < ' + QUORUM_SIGS + ' distinct verifying sigs (' + n + ')');
             }
             for (let i = 0; i < mvh.hubs.length; i++) {

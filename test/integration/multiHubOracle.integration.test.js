@@ -105,7 +105,7 @@ describe('MultiValidatorHub - oracle determinism (L2)', function () {
     });
 
     it('every hub computes the identical trimmed median from the same inputs', function () {
-        const maps = mvh.hubs.map((h, i) => priceMap(h._oracleConsensus._aggregateAll(subsFor(ORDERS[i]))));
+        const maps = mvh.hubs.map((h, i) => priceMap(h._oracleConsensus.aggregateAll(subsFor(ORDERS[i]))));
         for (let i = 1; i < maps.length; i++) {
             assert.deepStrictEqual(maps[i], maps[0], 'hub ' + i + ' diverged on the median');
         }
@@ -118,10 +118,10 @@ describe('MultiValidatorHub - oracle determinism (L2)', function () {
     it('every hub signs the IDENTICAL canonical payload, and all signatures cross-verify', function () {
         const round = 100, ts = 1700000000, btcHeight = 799000;  // the BTC block height is part of the signed canonical
         const signed = mvh.hubs.map((h, i) => {
-            const agg = h._oracleConsensus._aggregateAll(subsFor(ORDERS[i]));
+            const agg = h._oracleConsensus.aggregateAll(subsFor(ORDERS[i]));
             return {
-                payload: h._oracleConsensus._buildPriceV0Payload(round, ts, agg, btcHeight),
-                sig:     h._oracleConsensus._signPriceV0(round, ts, agg, btcHeight)
+                payload: h._oracleConsensus.buildPriceV0Payload(round, ts, agg, btcHeight),
+                sig:     h._oracleConsensus.signPriceV0(round, ts, agg, btcHeight)
             };
         });
 

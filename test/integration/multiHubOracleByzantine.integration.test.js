@@ -70,7 +70,7 @@ async function attachOracle(mvh) {
         const round = new OracleRound(hub);
         const oc    = new OracleConsensus(hub, round);
         round.setConsensus(oc);
-        oc.setValidatorSet(await hub._loadValidatorSet());
+        oc.setValidatorSet(await hub.loadValidatorSet());
         await oc.start();
         hub._wtOracle = oc;
         hub._wtRound  = round;
@@ -114,7 +114,7 @@ async function snapshotRows(hub) {
 // The deterministic round leader (every hub agrees: same validator set + round).
 function findOracleLeader(mvh) {
     return mvh.hubs.find((h) => {
-        const l = h._wtOracle._getLeader(ROUND);
+        const l = h._wtOracle.getLeader(ROUND);
         return l && l.addr === h.getPeerManager().validatorAddr;
     });
 }

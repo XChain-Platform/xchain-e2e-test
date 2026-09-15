@@ -14,8 +14,8 @@
  * The CROSS_CHAIN_ROYALTY flag-day gates whether the validator-signed XMATCH
  * canonical carries the matched orders' royalty payout legs. FOUR builders must
  * stay byte-identical or the federation forks on the first royalty-bearing match:
- *   hub CrossChainDexEngine._canonicalMatch   (live signing)
- *   hub StateAnchorPublisher._matchCanonical  (archive verification)
+ *   hub CrossChainDexEngine.canonicalMatch   (live signing)
+ *   hub StateAnchorPublisher.matchCanonical  (archive verification)
  *   indexer cross_settle.canonical           (settlement verification)
  *   indexer recovery.matchCanonical          (full-parse recovery)
  * The activation gate itself is a 2-repo twin module (like anchor_reward_activation)
@@ -49,8 +49,8 @@ const AnchorRecovery       = require(path.join(ROOT, 'xchain-indexer/bin/recover
 // live path signs at pending.view; the other three at the persisted finalizing_view.
 function canonicals(m) {
     return {
-        hubEngine:   CrossChainDexEngine.prototype._canonicalMatch.call({}, m, m.finalizing_view || 0),
-        hubArchive:  StateAnchorPublisher.prototype._matchCanonical.call({}, m),
+        hubEngine:   CrossChainDexEngine.prototype.canonicalMatch.call({}, m, m.finalizing_view || 0),
+        hubArchive:  StateAnchorPublisher.prototype.matchCanonical.call({}, m),
         idxSettle:   Cross_Settle.prototype.canonical.call({}, m),
         idxRecovery: AnchorRecovery.prototype.matchCanonical.call({}, m),
     };

@@ -148,7 +148,7 @@ module.exports = {
 `;
 
 // ── production canonical/wire codec, borrowed from the hub ────────────────────
-// The relay's canonical + wire builders depend on nothing but `this._sha256`, so
+// The relay's canonical + wire builders depend on nothing but `this.sha256`, so
 // binding them onto a bare object runs the SHIPPED hub implementation without
 // booting a hub. If these ever stop being pure, this throws here rather than
 // producing signatures the indexer silently drops as unquorate.
@@ -157,11 +157,11 @@ function relayCodec() {
     const AttestationRelay = require(_path.join(HUB_BASE, 'src/attestation/relay.js'));
     const p = AttestationRelay.prototype;
     const codec = {
-        _sha256: p._sha256,
-        requestCanonical:  function (r) { return p._relayRequestCanonical.call(codec, r); },
-        responseCanonical: function (r) { return p._relayResponseCanonical.call(codec, r); },
-        requestWire:       function (r, sigs) { return p._buildRequestWire.call(codec, r, sigs); },
-        responseWire:      function (r, sigs) { return p._buildResponseWire.call(codec, r, sigs); },
+        sha256: p.sha256,
+        requestCanonical:  function (r) { return p.relayRequestCanonical.call(codec, r); },
+        responseCanonical: function (r) { return p.relayResponseCanonical.call(codec, r); },
+        requestWire:       function (r, sigs) { return p.buildRequestWire.call(codec, r, sigs); },
+        responseWire:      function (r, sigs) { return p.buildResponseWire.call(codec, r, sigs); },
     };
     return codec;
 }
@@ -183,7 +183,7 @@ class RelaySigner {
 
 function sha256Hex(s) { return crypto.createHash('sha256').update(String(s), 'utf8').digest('hex'); }
 
-// Rank a pubkey the way _computeResponsibleSet does: SHA256(request_id || pubkey).
+// Rank a pubkey the way computeResponsibleSet does: SHA256(request_id || pubkey).
 function responsibleRank(requestId, pubkey) {
     return crypto.createHash('sha256')
         .update(String(requestId), 'utf8')

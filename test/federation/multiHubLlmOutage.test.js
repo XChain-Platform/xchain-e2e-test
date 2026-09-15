@@ -122,7 +122,7 @@ async function countV1Rows(requestId, responseStatus, onlyValid){
 }
 
 // Hash-rank the harness pubkeys for a request (same rule as the hub's
-// AttestationRound / indexer's _computeResponsibleSet: SHA256(rid || pubkey)
+// AttestationRound / indexer's computeResponsibleSet: SHA256(rid || pubkey)
 // ascending) and return the mvh hub index sitting at slot 0.
 function slot0HubIndex(mvh, requestId){
     const rid = String(requestId).toLowerCase()

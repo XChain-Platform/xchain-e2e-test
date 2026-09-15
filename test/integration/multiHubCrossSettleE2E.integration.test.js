@@ -18,7 +18,7 @@
  * capability snapshot and releases escrow) was only unit-tested with SYNTHETIC
  * rows/sigs. This closes the gap by feeding a REAL multi-hub-finalized match row
  * into the real indexer handler, proving the cross-repo canonical alignment
- * (hub _canonicalMatch vs indexer canonical) and the multi-sig quorum end to end:
+ * (hub canonicalMatch vs indexer canonical) and the multi-sig quorum end to end:
  *   - POSITIVE: the federated row passes signature + weighted-quorum verification
  *     → cross_settle reaches STATUS='valid' and records the settlement;
  *   - NEGATIVE: a tampered signature bundle fails quorum → no settlement.
@@ -143,7 +143,7 @@ describe('MultiValidatorHub: cross-chain DEX match to indexer CROSS_SETTLE e2e (
         const dexes = mvh.getCrossChainDexes();
         const events = [];
         const listeners = dexes.map((d, i) => { const fn = (ev) => events.push(Object.assign({ hubIndex: i }, ev)); d.consensus.on('match:finalized', fn); return fn; });
-        await Promise.all(dexes.map((d) => d._discoverAndMatch().catch(() => {})));
+        await Promise.all(dexes.map((d) => d.discoverAndMatch().catch(() => {})));
         // Every case below reads matchRow, a PERSISTED cross_chain_matches row, and
         // the finalize event only STARTS that write: CrossChainDexEngine subscribes
         // to 'match:finalized' with an un-awaited `this._writeFinalizedMatch(ev)`,

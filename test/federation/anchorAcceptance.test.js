@@ -83,8 +83,8 @@
  *       the venue's authenticating-but-can't-CREATE credential).
  *   (b) On a DOGE-only venue the hub resolves the local indexer as its BTC
  *       indexer, sees a DOGE indexer, and every live oracle_publish/cross_chain
- *       resolution fails; _getActiveOraclePublishPubkeys has NO local-DB
- *       fallback (only _resolveCapabilitySet does), so publisher election and
+ *       resolution fails; getActiveOraclePublishPubkeys has NO local-DB
+ *       fallback (only resolveCapabilitySet does), so publisher election and
  *       the fail-closed defer check both starve regardless of any row seeded
  *       into capability_snapshots. Fixed via test/helpers/seededWeightSnapshot.js,
  *       which monkeypatches hub.capabilitySnapshot.getWeightSnapshot /
@@ -157,7 +157,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // never matches the row the indexer actually stored for the archive; reading
 // the wrapper's ledger_hash straight off the broadcast payload (field 6 on
 // the pipe-split wire: ANCHOR|1|CHAIN|NETWORK|BLOCK_INDEX|BLOCK_HASH|
-// LEDGER_HASH|..., the field order _publishArchive emits and anchor/index.js
+// LEDGER_HASH|..., the field order publishArchive emits and anchor/index.js
 // parses) is what makes the narrowing key match the wrapper, whichever chain
 // it turns out to be.
 function archiveWrapperLedgerHash(payload){
@@ -307,8 +307,8 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
 
         // Gap (b): the local indexer is DOGE, not BTC, so hub.capabilitySnapshot's
         // live getSnapshot/getWeightSnapshot calls fail (wrong-chain indexer), and
-        // _getActiveOraclePublishPubkeys has NO local-table fallback (unlike
-        // _resolveCapabilitySet) -- it just returns [] and every anchor gets deferred
+        // getActiveOraclePublishPubkeys has NO local-table fallback (unlike
+        // resolveCapabilitySet) -- it just returns [] and every anchor gets deferred
         // "empty oracle_publish set (fail closed)". seedWeightSnapshot patches
         // getWeightSnapshot/getActiveWeightSnapshot directly (the one seam both
         // election and signing-set resolution share) and sets hub.network='regtest'
@@ -394,7 +394,7 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
     });
 
     it('AT1: checkpoints REAL indexer state and lands ONE quorum-signed v0 bundle with three sections on the DOGE chain', async function () {
-        await hub.stateCheckpoints._tick();
+        await hub.stateCheckpoints.tick();
         let cps = await hub.db.doQuery(
             "SELECT * FROM state_checkpoints WHERE chain = 'DOGE' AND network = 'regtest' ORDER BY checkpoint_seq DESC LIMIT 1");
         assert.strictEqual(cps.length, 1, 'hub holds a DOGE checkpoint after the tick');
@@ -451,7 +451,7 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
             b_filled_before: '0', b_ownership: 0, b_payout_addr: 'acceptance_payout_b',
             effective_time: Math.floor(Date.now() / 1000)
         };
-        let canonical = hub.crossChainDex._canonicalMatch(m);
+        let canonical = hub.crossChainDex.canonicalMatch(m);
         let sigs = JSON.stringify([{ pubkey: identity.getPubkeyHex().toLowerCase(), sig: identity.sign(canonical) }]);
         await hub.db.doQuery(
             `INSERT INTO cross_chain_matches
@@ -480,7 +480,7 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
         // both capabilities resolve correctly straight through the live method
         // (getWeightSnapshot), never touching this table. It's kept for any path
         // that reads capability_snapshots directly (recovery) rather than through
-        // _resolveCapabilitySet/_getActiveOraclePublishPubkeys.
+        // resolveCapabilitySet/getActiveOraclePublishPubkeys.
         for (let cap of ['cross_chain', 'oracle_publish']) {
             await hub.db.doQuery(
                 'INSERT IGNORE INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount, source) VALUES (?, ?, ?, ?, ?)',
@@ -617,7 +617,7 @@ describe('ANCHOR live acceptance: DOGE regtest on-chain pipeline', function () {
     // StateCheckpointEngine; no code path rebuilds it from anchors. What a node
     // recovers by parsing the chain IS the anchor_actions section rows, and
     // `getanchoraction` is the RPC that serves them by (chain, network, block_index,
-    // seq), the same lookup the hub's own _findExistingBundle makes per section and
+    // seq), the same lookup the hub's own findExistingBundle makes per section and
     // the SPV bootstrap reads.
     //
     // The record under test is the CHAIN-DERIVED one: these rows were written by

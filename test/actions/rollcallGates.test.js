@@ -99,7 +99,7 @@ const DEADLINE_BLOCKS = 10
 //   allowed_redundancy - a request whose redundancy is off this list is refused
 //     by `invalid: REDUNDANCY (not allowed for provider)` long before the
 //     admission gate this suite measures, which would read as the wrong rule;
-//   min_stake_xchain   - `_computeResponsibleSet` drops staking SOURCES below it
+//   min_stake_xchain   - `computeResponsibleSet` drops staking SOURCES below it
 //     on the weighted path before the ranking, so the pool this suite counts
 //     must be counted at the same threshold or its arithmetic describes a set
 //     the indexer never had.

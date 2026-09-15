@@ -553,7 +553,7 @@ class OracleBatchVenue {
             const round = new OracleRound(hub);
             const oc    = new OracleConsensus(hub, round);
             round.setConsensus(oc);
-            oc.setValidatorSet(await hub._loadValidatorSet());
+            oc.setValidatorSet(await hub.loadValidatorSet());
             await oc.start();
             hub.oracle          = round;
             hub.oracleConsensus = oc;
@@ -627,7 +627,7 @@ class OracleBatchVenue {
     // Finalize `count` rounds, one at a time, each one carried all the way to a
     // landed transaction before the next begins.
     //
-    // Strictly sequential on purpose, twice over. OraclePublisher._processQueue
+    // Strictly sequential on purpose, twice over. OraclePublisher.processQueue
     // holds a self-overlap guard: a second pass entered while the first is still
     // awaiting a broadcast is SKIPPED, and its round then sits on the durable
     // queue until that hub next leads, which on a K-round run means it may never
@@ -762,14 +762,14 @@ class OracleBatchVenue {
     }
 
     // The canonical bytes a v0 round was signed over, built by the hub's OWN
-    // producer (`OracleConsensus._buildPriceV0Payload`) rather than re-derived
+    // producer (`OracleConsensus.buildPriceV0Payload`) rather than re-derived
     // here. Re-deriving it in a test would silently drop the EQUIV header wrap,
     // which IS active on regtest (activation is genesis) once the weight seed has
     // set hub.network, and every signature would then read as bad for a reason
     // that has nothing to do with the rail. `prices` entries take `pair` or
     // `coinPair`, exactly as the producer does.
     priceCanonical(round, timestamp, prices, anchorHeight) {
-        return this._oracles[0].oc._buildPriceV0Payload(
+        return this._oracles[0].oc.buildPriceV0Payload(
             round, timestamp, prices, anchorHeight === undefined ? this.anchorHeight : anchorHeight);
     }
 

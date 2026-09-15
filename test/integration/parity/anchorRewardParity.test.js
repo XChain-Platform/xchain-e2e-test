@@ -14,7 +14,7 @@
  * on-chain publisher attestation. The checkpoint leg carries ONE attestation per
  * ANCHOR v7 bundle: reward type `anchor_bundle`, round_reference SNAPSHOT_BLOCK,
  * the frozen ANCHOR_REWARD_AMOUNT. The attested canonical (XANCPUB) is built
- * INLINE in two services (the hub producer StateAnchorPublisher._attestationCanonical
+ * INLINE in two services (the hub producer StateAnchorPublisher.attestationCanonical
  * and the indexer verifier actions/anchor/index.js rewardCanonical), and the flag-day map
  * plus the frozen reward amount live as LOCAL COPIES in both services AND the
  * canonical xchain-documentation/protocol/constants.js. A single byte of drift
@@ -59,7 +59,7 @@ const Anchor               = require(path.join(ROOT, 'xchain-indexer/src/actions
 // Both canonical builders read only their argument (no `this`), so invoke them
 // directly off the prototype, each through its own service's eq + ar copies.
 function hubXancpub(b, publisher) {
-    return StateAnchorPublisher.prototype._attestationCanonical.call({}, b, publisher);
+    return StateAnchorPublisher.prototype.attestationCanonical.call({}, b, publisher);
 }
 function idxXancpub(d) {
     return Anchor.prototype.rewardCanonical.call({}, d);
@@ -164,13 +164,13 @@ describe('ANCHOR_REWARD (XANCPUB) cross-service parity', function () {
 });
 
 // The ARCHIVE leg of the same contract. The archive XANCPUB canonical is built
-// inline in the hub producer (_archiveAttestationCanonical) and the indexer verifier
+// inline in the hub producer (archiveAttestationCanonical) and the indexer verifier
 // (rewardCanonical, FORMAT 6); the ARCHIVE_REWARD map + frozen amount live in the same
 // twin modules + the canonical SoT. Same fork argument, same guards.
 describe('ARCHIVE_REWARD (archive XANCPUB) cross-service parity', function () {
 
     function hubArchXancpub(cp, batchSeq, publisher) {
-        return StateAnchorPublisher.prototype._archiveAttestationCanonical.call({}, cp, batchSeq, publisher);
+        return StateAnchorPublisher.prototype.archiveAttestationCanonical.call({}, cp, batchSeq, publisher);
     }
     function archiveFixtures(net, snapshotBlock) {
         const PUBLISHER = '07'.repeat(32);

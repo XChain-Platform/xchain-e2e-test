@@ -25,8 +25,8 @@
  *
  * WHY AN HTTP MOCK rather than monkeypatching the engine, the reason
  * mockCrossChainOfferBook gives for the DEX: the federation proof rests on every FOLLOWER
- * independently re-fetching the leg in validateProposedMatch -> _validateTransfer ->
- * _indexerCall before it will co-sign a leader's proposed row. Serving real HTTP keeps the
+ * independently re-fetching the leg in validateProposedMatch -> validateTransfer ->
+ * indexerCall before it will co-sign a leader's proposed row. Serving real HTTP keeps the
  * engine's actual network path intact, and per-path sources let ONE validator be pointed at
  * a divergent source (the byzantine case) while the honest majority shares one.
  *

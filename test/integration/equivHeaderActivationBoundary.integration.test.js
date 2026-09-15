@@ -101,7 +101,7 @@ function wireCheckpointEngine(mvh) {
         cps.chains        = ['BTC'];
         cps.confirmations = 0;
         cps.indexers.BTC  = { url: 'http://stubbed', key: '' };
-        cps._indexerCall  = async () => Object.assign({}, TIP);
+        cps.indexerCall  = async () => Object.assign({}, TIP);
     }
 }
 
@@ -109,7 +109,7 @@ function wireCheckpointEngine(mvh) {
 // own finalized checkpoint row. That row IS what finalizeOnEveryHub asserts on, so
 // it is the post-condition to poll rather than a window to sleep through.
 async function tickAll(mvh) {
-    await Promise.all(mvh.hubs.map((h) => h.stateCheckpoints._tick().catch(() => {})));
+    await Promise.all(mvh.hubs.map((h) => h.stateCheckpoints.tick().catch(() => {})));
     const res = await waitFor(async () => {
         const counts = [];
         for (const hub of mvh.hubs) {

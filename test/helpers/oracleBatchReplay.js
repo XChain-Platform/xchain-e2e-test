@@ -758,7 +758,7 @@ class OracleBatchReplayNode {
     /**
      * Prove the endpoint this node's hub will trust is a BITCOIN indexer.
      *
-     * This is the same question `XChainHub._indexerCoinMismatch` asks before it
+     * This is the same question `XChainHub.indexerCoinMismatch` asks before it
      * lets a BTC-anchored read happen at all (`getblockhashes` is the one
      * federation read that names the chain it answers for), asked HERE as well so
      * the drill's evidence carries the answer instead of the operator having to
@@ -865,7 +865,7 @@ class OracleBatchReplayNode {
      * Ask the oracle the question the hub is about to ask, at the height the hub
      * will actually ask it at.
      *
-     * MEASURED, NEVER ASSUMED. `CapabilitySnapshot._buriedBlockIndex` subtracts
+     * MEASURED, NEVER ASSUMED. `CapabilitySnapshot.buriedBlockIndex` subtracts
      * CANONICAL_REORG_BUFFER before it resolves anything, so the height that
      * reaches the indexer is (anchor - buffer) and a set that exists only at the
      * anchor is invisible. Reading it back here turns "the seed should be visible"
@@ -1223,7 +1223,7 @@ class OracleBatchReplayNode {
      *
      * The values are lifted from the hub's OWN canonical coins registry rather than
      * typed here, so they cannot drift from the floor the hub asserts them against
-     * (`_assertCanonicalMinStakes`, which reads src/coins/BTC.js STAKING.CAPABILITIES).
+     * (`assertCanonicalMinStakes`, which reads src/coins/BTC.js STAKING.CAPABILITIES).
      */
     _writeCapabilityConfig() {
         const coins = loadHubModule('src/coins/index.js');
@@ -1278,9 +1278,9 @@ class OracleBatchReplayNode {
 
             // THE BITCOIN CAPABILITY ORACLE, wired the way a properly configured node
             // wires one: an explicit per-coin indexer URL, which is the first thing
-            // `XChainHub._resolveIndexerUrl` consults. The hub still VERIFIES the
+            // `XChainHub.resolveIndexerUrl` consults. The hub still VERIFIES the
             // endpoint is a Bitcoin indexer for itself before it trusts a
-            // BTC-anchored read (`_indexerCoinMismatch`), and nothing here switches
+            // BTC-anchored read (`indexerCoinMismatch`), and nothing here switches
             // that check off; _verifyBtcOracle asks the same question first so the
             // drill's own evidence carries the answer.
             BTC_INDEXER_API_URL: this._live.btcOracle.url,

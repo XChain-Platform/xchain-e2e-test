@@ -544,7 +544,7 @@ function assertTimingInvariants(forwardS, batchWindowS, keying, hopBudgetS = GOS
  * guard pinned to either spelling refuses to boot on the other for want of a constant
  * that belongs to only one of them. Absence of `BOUNDARY_SKEW_S` is therefore not by
  * itself the signal, and neither is its presence: the window read is, so the verdict comes from the
- * column `_selectWindowRows` actually filters on and the band is only collected once that
+ * column `selectWindowRows` actually filters on and the band is only collected once that
  * read says wall clock.
  *
  * Refused rather than defaulted when neither shape is recognizable. A third keying would
@@ -553,7 +553,7 @@ function assertTimingInvariants(forwardS, batchWindowS, keying, hopBudgetS = GOS
  */
 function resolveWindowKeying() {
     // A hub whose SQL lives under src/db/ reads its window through a named Database method,
-    // so the column it filters on sits in that method's text rather than in _selectWindowRows.
+    // so the column it filters on sits in that method's text rather than in selectWindowRows.
     // A hub without src/db/index.js keeps the SQL inline and needs no second read.
     let dbProto = null;
     try { dbProto = loadHubModule('src/db/index.js').prototype; } catch (_) { dbProto = null; }
@@ -666,7 +666,7 @@ function assertLlmAvailable(spec, probes) {
  * @param {object}   [dbProto] the hub's `Database.prototype`, when its SQL lives under src/db/
  */
 function resolveWindowKeyingFrom(pub, dbProto) {
-    const select = pub && pub.prototype && pub.prototype._selectWindowRows;
+    const select = pub && pub.prototype && pub.prototype.selectWindowRows;
     let src      = typeof select === 'function' ? String(select) : '';
     // Follow every db method the window read delegates to, so a query that lives in the db
     // layer is still judged by the column it actually filters on.
@@ -694,8 +694,8 @@ function resolveWindowKeyingFrom(pub, dbProto) {
 
     throw new Error('attestMirrorVenue: refusing to boot. The hub this venue resolves keys its ' +
         'batch window on neither effective_time alone nor finalized_at alone (' +
-        (select ? 'its _selectWindowRows matches ' + (onSigned && onWall ? 'both' : 'neither') :
-            'it exposes no _selectWindowRows') + '), so this venue\'s window invariant no longer ' +
+        (select ? 'its selectWindowRows matches ' + (onSigned && onWall ? 'both' : 'neither') :
+            'it exposes no selectWindowRows') + '), so this venue\'s window invariant no longer ' +
         'describes it. Re-derive the invariant against that hub, or point XCHAIN_HUB_PATH at the ' +
         'hub revision this venue is meant to drive.');
 }

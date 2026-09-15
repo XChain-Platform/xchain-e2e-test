@@ -76,12 +76,12 @@ function wireCheckpointEngine(mvh) {
         cps.chains         = ['BTC'];
         cps.confirmations  = 0;
         cps.indexers.BTC   = { url: 'http://stubbed', key: '' };
-        cps._indexerCall   = async () => Object.assign({}, TIP);
+        cps.indexerCall   = async () => Object.assign({}, TIP);
     }
 }
 
 async function tickAll(mvh) {
-    await Promise.all(mvh.hubs.map((h) => h.stateCheckpoints._tick().catch(() => {})));
+    await Promise.all(mvh.hubs.map((h) => h.stateCheckpoints.tick().catch(() => {})));
     await waitFor(async () => {
         let held = 0;
         for (const hub of mvh.hubs) {

@@ -80,7 +80,7 @@ async function attachOracle(mvh) {
         const round = new OracleRound(hub);
         const oc    = new OracleConsensus(hub, round);
         round.setConsensus(oc);
-        oc.setValidatorSet(await hub._loadValidatorSet());   // for leader rotation
+        oc.setValidatorSet(await hub.loadValidatorSet());   // for leader rotation
         await oc.start();                                    // registers P2P handlers (no cadence)
         hub._wtOracle = oc;
         hub._wtRound  = round;

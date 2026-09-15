@@ -17,7 +17,7 @@
  * publisher-attestation tail. Three services hold their own inline copy of that
  * field order:
  *
- *   producer  xchain-hub      StateAnchorPublisher._buildV7Payload (method name
+ *   producer  xchain-hub      StateAnchorPublisher.buildV7Payload (method name
  *                             unchanged; only the version byte it writes moved)
  *   parser    xchain-indexer  actions/anchor/index.js parseBundle (formats[0])
  *   parser    xchain-sdk      light.parseAnchorV0
@@ -59,13 +59,13 @@ const BUNDLE = GOLDEN.fixture.bundle;
 const WIRE   = GOLDEN.vectors.v0;
 
 // The builder reads validator_signatures as a JSON string off each state_checkpoints
-// row, and takes no `this` beyond _parseSigs.
-const hubStub = { _parseSigs: StateAnchorPublisher.prototype._parseSigs };
+// row, and takes no `this` beyond parseSigs.
+const hubStub = { parseSigs: StateAnchorPublisher.prototype.parseSigs };
 const hubSections = BUNDLE.sections.map(s =>
     Object.assign({}, s, { validator_signatures: JSON.stringify(s.validator_signatures) }));
 
 function hubBuild(sections) {
-    return StateAnchorPublisher.prototype._buildV7Payload.call(
+    return StateAnchorPublisher.prototype.buildV7Payload.call(
         hubStub, sections, BUNDLE.publisher, BUNDLE.attest_sigs);
 }
 
@@ -109,7 +109,7 @@ describe('ANCHOR v0 bundle wire cross-service parity', function () {
 
     it('the hub producer reproduces the frozen vector byte-for-byte', function () {
         assert.strictEqual(hubBuild(hubSections), WIRE,
-            'StateAnchorPublisher._buildV7Payload drifted from the frozen ANCHOR v0 vector');
+            'StateAnchorPublisher.buildV7Payload drifted from the frozen ANCHOR v0 vector');
     });
 
     it('the hub applies both ordering rules rather than echoing input order', function () {

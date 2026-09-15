@@ -1827,7 +1827,7 @@ async function driveVerdictWitness(deps, venue, label) {
  * become 120 XCHAIN minted on DOGE. The hub derives `transfer_id` with `snapshot_block`
  * inside the preimage, so the same lock yields a new id at every BTC height, and both
  * dedupes it passes through are keyed on that id or on a row not yet persisted; the
- * follower's `_validateTransfer` has no source-uniqueness test at all, so the mesh co-signs
+ * follower's `validateTransfer` has no source-uniqueness test at all, so the mesh co-signs
  * the duplicate. A retracted row is not a duplicate: retraction is the fence working.
  *
  * @param {Array} rows - bridge_transfers rows: {src_chain, src_action_index, amount, status,

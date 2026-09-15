@@ -36,7 +36,7 @@
  * seedWeightSnapshot sets hub.network), so we set cps.network='regtest' per hub.
  * Without this the engine resolves an unknown network and the weighted gate is OFF.
  *
- * No chain: the indexer view is stubbed (_indexerCall -> TIP); disposable Docker
+ * No chain: the indexer view is stubbed (indexerCall -> TIP); disposable Docker
  * MariaDB; skips when neither an env DB nor Docker is available. Runs with regtest
  * activation = 0 (always weighted), no constant edit needed.
  *
@@ -92,12 +92,12 @@ function wireCheckpointEngine(mvh) {
         cps.chains         = ['BTC'];
         cps.confirmations  = 0;
         cps.indexers.BTC   = { url: 'http://stubbed', key: '' };
-        cps._indexerCall   = async () => Object.assign({}, TIP);
+        cps.indexerCall   = async () => Object.assign({}, TIP);
     }
 }
 
 async function tickAll(mvh) {
-    await Promise.all(mvh.hubs.map((h) => h.stateCheckpoints._tick().catch(() => {})));
+    await Promise.all(mvh.hubs.map((h) => h.stateCheckpoints.tick().catch(() => {})));
     await waitFor(async () => {
         let held = 0;
         for (const hub of mvh.hubs) {

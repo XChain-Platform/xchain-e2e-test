@@ -37,8 +37,8 @@
  *
  * ONE FEDERATION PER TEST, AND WHY.
  *
- * The archive election key is _archiveElectionKey(wrapperCp, batchSeq), and
- * batchSeq is _getNextBatchSeq(): MAX+1 over that hub's OWN cross_chain_matches
+ * The archive election key is archiveElectionKey(wrapperCp, batchSeq), and
+ * batchSeq is getNextBatchSeq(): MAX+1 over that hub's OWN cross_chain_matches
  * / cross_chain_calls / validator_rewards. It is HUB-LOCAL. Two hubs agree on it
  * only while their tables are equal, which the XANC_FINALIZED back-fill of
  * batch_seq is what maintains. Once they are unequal the hubs compute DIFFERENT
@@ -62,7 +62,7 @@
  *
  * The election is therefore still resolved on EVERY hub through that hub's own
  * reads (archiveElectionView), and runCycle asserts the leader, the batch seq and
- * the leader's own _isRankZero BEFORE any flush, then asserts that leader's flush
+ * the leader's own isRankZero BEFORE any flush, then asserts that leader's flush
  * actually returned round_started/published. A mis-election fails as "the elected
  * hubN started its archive round ... flush said archive=none" with every view
  * printed, never as a missing archive head minutes later.
@@ -159,7 +159,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
     let identities = [], pubkeys = [];
     let broadcasts = [];               // { hub, payload, txid, phase1_txid }
     // XANCARCHPUB_SIGN_REQ envelopes each hub saw on the wire, by hub index. Counted
-    // ABOVE the injected handler (on _handleMessage), so a degraded cycle still
+    // ABOVE the injected handler (on handleMessage), so a degraded cycle still
     // observes the request arriving even though the response is silenced - which is
     // what tells a degraded ROUND apart from a round that never ran.
     let archiveSignReqSeen = [];
@@ -228,7 +228,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
 
     // Hubs holding an archive round that has not settled: one still collecting
     // signatures (_archiveRound) or one whose publish is still in flight
-    // (_archivePublishing). Both are the guards _startArchiveRound reads on its very
+    // (_archivePublishing). Both are the guards startArchiveRound reads on its very
     // first line, `if(this._archiveRound || this._archivePublishing) return
     // 'round_pending'`, so either one makes the next flush decline before it elects
     // anything at all.
@@ -246,7 +246,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
     //
     // The two-hub round is ASYNCHRONOUS in both halves: the flush returns
     // 'round_started' and the v1 publishes later when the co-signature lands, and
-    // even waitForArchiveHead returns while _publishArchive is still running (the
+    // even waitForArchiveHead returns while publishArchive is still running (the
     // wire is recorded from inside the broadcast hook, ahead of the batch back-fill,
     // the intent settle and the reward defer). So a SECOND cycle in one federation
     // that flushes immediately gets 'round_pending' and measures nothing. The right
@@ -286,7 +286,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
     }
 
     // A FRESH two-hub federation with EMPTY tables. Equal tables are what makes
-    // _getNextBatchSeq agree across hubs, so this is the only moment at which the
+    // getNextBatchSeq agree across hubs, so this is the only moment at which the
     // archive election is guaranteed well-defined; every test starts from one.
     async function bootFederation(label){
         federationCount++;
@@ -309,7 +309,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
 
         // Gap (b): on a DOGE-only venue every live capability resolution fails (the
         // hub reads the local indexer as its BTC one), and
-        // _getActiveOraclePublishPubkeys has no local-table fallback. seedWeightSnapshot
+        // getActiveOraclePublishPubkeys has no local-table fallback. seedWeightSnapshot
         // patches getWeightSnapshot/getActiveWeightSnapshot on the shared
         // hub.capabilitySnapshot object - the one seam both the election and the
         // signing-set resolution read - and sets hub.network so the WEIGHTED path runs.
@@ -333,12 +333,12 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
 
             // Wire-level observation of the archive attestation request, ABOVE the
             // handler silenceArchiveAttestor replaces. The publisher's listener reads
-            // _handleMessage at call time, so wrapping the instance method sees every
+            // handleMessage at call time, so wrapping the instance method sees every
             // envelope without detaching anything.
             archiveSignReqSeen.push(0);
             const idx  = i;
-            const orig = sap._handleMessage;
-            sap._handleMessage = function (envelope) {
+            const orig = sap.handleMessage;
+            sap.handleMessage = function (envelope) {
                 if (envelope && envelope.type === SAP.XANCARCHPUB_SIGN_REQ) archiveSignReqSeen[idx]++;
                 return orig.call(this, envelope);
             };
@@ -376,7 +376,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
         // The SAME rows in each hub's OWN capability_snapshots, which the indexer-side
         // seed above does not touch (separate databases).
         //
-        // The PINNED election path (_getActiveOraclePublishPubkeys, which gates the v0
+        // The PINNED election path (getActiveOraclePublishPubkeys, which gates the v0
         // bundle) asks hub.capabilitySnapshot first and falls back to this local table on
         // regtest. seedWeightSnapshot covers the accessor the SIGNING-set resolver uses,
         // but the third live drive of this suite showed the pinned path resolving neither:
@@ -419,16 +419,16 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
                 'off regtest the weighted accessor and the local capability_snapshots fallback are both bypassed');
             assert.strictEqual(String(mvh.hubs[i].network), 'regtest',
                 'hub' + i + ': the hub\'s network is regtest (got "' + mvh.hubs[i].network + '")');
-            // (1) The PINNED election set: the exact call _publishPendingCheckpoints makes
+            // (1) The PINNED election set: the exact call publishPendingCheckpoints makes
             // before it will elect a bundle publisher at all.
-            const eligible = await sap._getActiveOraclePublishPubkeys(snapshotBlock);
+            const eligible = await sap.getActiveOraclePublishPubkeys(snapshotBlock);
             assert.deepStrictEqual([...eligible].sort(), [...pubkeys].sort(),
                 'hub' + i + ': the PINNED oracle_publish election resolves to the whole federation at block ' +
                 snapshotBlock + ' (got ' + JSON.stringify(eligible) + '). An unresolved set makes the publisher ' +
                 'abstain from the bundle election, and no v0 ever reaches the chain.');
             // (2) The SIGNING set the attestation rounds tally, with the distinct
             // non-blank sources the weighted quorum needs.
-            const signingSet = await sap._resolveCapabilitySet('oracle_publish', snapshotBlock, 'regtest');
+            const signingSet = await sap.resolveCapabilitySet('oracle_publish', snapshotBlock, 'regtest');
             const sources    = signingSet.map(v => String(v.source));
             assert.strictEqual(signingSet.length, N,
                 'hub' + i + ': the signing set resolves to all ' + N + ' validators (got ' + signingSet.length + ')');
@@ -451,7 +451,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
         // Rerunnability on a dirty regtest chain: the indexer's replay guards reject a
         // seq at-or-below the on-chain max while these hub DBs restart their counters
         // at 0. Seed both hubs' counters past whatever earlier runs anchored. The
-        // baseline row is IDENTICAL on every hub (which is what keeps _getNextBatchSeq
+        // baseline row is IDENTICAL on every hub (which is what keeps getNextBatchSeq
         // equal at boot) and carries a batch_seq already, so no archive selector picks
         // it up.
         const prior = await indexerQuery(
@@ -471,7 +471,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
         // Equal tables are the precondition every election below rests on. Prove it
         // at boot rather than discovering a mismatch as a stalled round later.
         const seqs = [];
-        for (let i = 0; i < N; i++) seqs.push(Number(await mvh.hubs[i].stateAnchorPublisher._getNextBatchSeq()));
+        for (let i = 0; i < N; i++) seqs.push(Number(await mvh.hubs[i].stateAnchorPublisher.getNextBatchSeq()));
         assert.strictEqual(new Set(seqs).size, 1,
             'a fresh federation starts with every hub on the same next batch seq (got ' + JSON.stringify(seqs) + ')');
 
@@ -575,7 +575,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
             b_filled_before: '0', b_ownership: 0, b_payout_addr: 'degraded_payout_b',
             effective_time: Math.floor(Date.now() / 1000)
         };
-        let canonical = mvh.hubs[0].getCrossChainDex()._canonicalMatch(m);
+        let canonical = mvh.hubs[0].getCrossChainDex().canonicalMatch(m);
         let sigs = JSON.stringify(identities.map(id =>
             ({ pubkey: id.getPubkeyHex().toLowerCase(), sig: id.sign(canonical) })));
         await allHubs(
@@ -609,7 +609,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
         return m;
     }
 
-    // The archive pipeline as _startArchiveRound sees it: its three pending selectors,
+    // The archive pipeline as startArchiveRound sees it: its three pending selectors,
     // run verbatim against one hub.
     //
     // With matches, calls and rewards ALL empty the round returns 'none' (spec §1) no
@@ -637,7 +637,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
             // The publisher drops chain-derived rewards from the batch (the chain
             // re-derives them), so count what it would actually keep, through its own
             // predicate rather than a copy of the rule.
-            rewards: (rewards || []).filter(r => !sap._isChainDerivedReward(r)).length
+            rewards: (rewards || []).filter(r => !sap.isChainDerivedReward(r)).length
         };
     }
 
@@ -661,7 +661,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
     //         |CONTRACT_HASH|CHECKPOINT_SEQ|SNAPSHOT_BLOCK|MATCH_BATCH_SEQ
     //         |MATCH_COUNT|CRC|TOTAL_CHUNKS|CHUNK0|SIG_COUNT|PUBKEY|SIG|...
     //         |PUBLISHER|ATTEST_SIG_COUNT|APUBKEY|ASIG|...
-    // (StateAnchorPublisher._publishArchive builds it; xchain-indexer anchor/index.js
+    // (StateAnchorPublisher.publishArchive builds it; xchain-indexer anchor/index.js
     // formats[1] reads it back at the same offsets.)
     function parseArchiveHead(payload){
         let f = String(payload).split('|');
@@ -684,7 +684,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
     }
 
     // ONE hub's view of the archive election, assembled from the SAME reads
-    // _startArchiveRound makes on that hub: its own BTC tip, its own wrapper
+    // startArchiveRound makes on that hub: its own BTC tip, its own wrapper
     // checkpoint (the BTC-preferred latest row on the consensus key), its own next
     // batch seq, its own oracle_publish election set, its own key method. Nothing
     // here is taken from a peer or from the harness's identity list, because reading
@@ -692,22 +692,22 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
     async function archiveElectionView(i){
         const hub = mvh.hubs[i];
         const sap = hub.stateAnchorPublisher;
-        const electionBlock = await hub._resolveBtcLatestBlock();
+        const electionBlock = await hub.resolveBtcLatestBlock();
         const cpRow = (await hub.db.doQuery(
             "SELECT * FROM state_checkpoints WHERE network = ? " +
             "ORDER BY (chain = 'BTC') DESC, checkpoint_seq DESC, snapshot_block DESC, block_index DESC LIMIT 1",
             ['regtest']))[0];
-        const batchSeq = Number(await sap._getNextBatchSeq());
-        const key      = sap._archiveElectionKey(
+        const batchSeq = Number(await sap.getNextBatchSeq());
+        const key      = sap.archiveElectionKey(
             { chain: cpRow.chain, network: cpRow.network, checkpoint_seq: cpRow.checkpoint_seq }, batchSeq);
-        const order    = SAP.hashOrder(key, await sap._getActiveOraclePublishPubkeys(electionBlock));
+        const order    = SAP.hashOrder(key, await sap.getActiveOraclePublishPubkeys(electionBlock));
         return {
             hub: i, electionBlock, cpRow, batchSeq, key, order,
             leader: pubkeys.indexOf(order[0]),
-            // The hub's OWN verdict on itself, through the predicate _startArchiveRound
+            // The hub's OWN verdict on itself, through the predicate startArchiveRound
             // consults. A rank the test computed and a rank the hub computed disagreeing
             // is precisely the bug this function exists to catch.
-            selfRankZero: sap._isRankZero(order)
+            selfRankZero: sap.isRankZero(order)
         };
     }
 
@@ -764,13 +764,13 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
     // spelling deliberately did not move with the wire version, and a drifting copy
     // here would silently elect the wrong hub.
     function electBundle(){
-        let key = mvh.hubs[0].stateAnchorPublisher._bundleElectionKey(
+        let key = mvh.hubs[0].stateAnchorPublisher.bundleElectionKey(
             { network: 'regtest', snapshot_block: snapshotBlock });
         return pubkeys.indexOf(SAP.hashOrder(key, pubkeys)[0]);
     }
 
     // Wait for the archive head of this cycle. The two-hub archive round is
-    // ASYNCHRONOUS: _startArchiveRound returns 'round_started' and the v1 is
+    // ASYNCHRONOUS: startArchiveRound returns 'round_started' and the v1 is
     // published later, when the wrapper co-signature arrives - and in a degraded
     // cycle only after the attestation round times out. Polls for the wire rather
     // than settling for a fixed window.
@@ -814,7 +814,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
     async function waitForRewardRecord(hubIndex, batchSeq, timeMax){
         const deadline = Date.now() + timeMax;
         while (Date.now() < deadline) {
-            await mvh.hubs[hubIndex].stateAnchorPublisher._drainDeferredRewardAttest();
+            await mvh.hubs[hubIndex].stateAnchorPublisher.drainDeferredRewardAttest();
             let rows = await mvh.hubs[hubIndex].db.doQuery(
                 "SELECT * FROM anchor_reward_attestations " +
                 "WHERE reward_type = 'anchor_archive' AND round_reference = ? AND snapshot_block = ?",
@@ -883,7 +883,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
         let election = await electArchive();
         assert.ok(election.converged,
             label + ': the hubs do not agree on the archive election. Views: ' + describeViews(election.views) +
-            '. _getNextBatchSeq is MAX+1 over each hub\'s OWN tables, so unequal tables mean ' +
+            '. getNextBatchSeq is MAX+1 over each hub\'s OWN tables, so unequal tables mean ' +
             'different election keys and each hub can be rank 0 for its own; that is a SPLIT, ' +
             'not a lag, and no wait converges it.');
         assert.strictEqual(Number(election.cpRow.checkpoint_seq), seq,
@@ -905,13 +905,13 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
         if (opts.onElected) await opts.onElected(election);
 
         // THE CONTENT PRECONDITION, checked on the hub that is about to publish and
-        // as late as possible: an empty pipeline makes _startArchiveRound answer
+        // as late as possible: an empty pipeline makes startArchiveRound answer
         // 'none' however clean the election is, and that is indistinguishable from an
         // election fault once the flush has returned.
         const pipeline = await archivePipeline(election.leader);
         assert.ok(pipeline.matches >= 1,
             label + ': hub' + election.leader + ' holds unarchived content to publish (' +
-            describePipeline(pipeline) + '). All three empty means _startArchiveRound returns "none" ' +
+            describePipeline(pipeline) + '). All three empty means startArchiveRound returns "none" ' +
             'before it does anything else, so this cycle needs its own freshly seeded, unbatched row.');
 
         // Bundle first when it is wanted (it publishes synchronously inside the
@@ -928,7 +928,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
         // election, and the missing head minutes later was only the symptom.
         //
         // 'round_pending' is deliberately NOT accepted here. It means the guard at the
-        // top of _startArchiveRound refused because a round was already in flight, so
+        // top of startArchiveRound refused because a round was already in flight, so
         // every assertion after this point would be reading the PREVIOUS cycle's head:
         // a green that measures something easier than it claims. The quiesce wait above
         // is the fix; seeing this verdict despite it means a round started in between.
@@ -1024,7 +1024,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
         // snapshot_block, read through the publisher's OWN resolver. >= 2 DISTINCT
         // SOURCES containing the publisher is what makes snapCount <= 1's
         // self-satisfying short-circuit unreachable.
-        let signingSet = await leaderSap._resolveCapabilitySet('oracle_publish', snapshotBlock, 'regtest');
+        let signingSet = await leaderSap.resolveCapabilitySet('oracle_publish', snapshotBlock, 'regtest');
         let sources    = new Set(signingSet.map(v => String(v.source)));
         assert.ok(signingSet.length >= 2,
             'the oracle_publish set holds >= 2 members (got ' + signingSet.length + ')');

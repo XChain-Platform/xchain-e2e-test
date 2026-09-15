@@ -23,8 +23,8 @@
  * signs and verifies with its own canonical.
  *
  * So every record this helper produces is derived and signed with the HUB's modules:
- * CrossChainBridgeEngine._deriveTransferId, _deriveSnapshotId, _policyHash and
- * _canonicalMatch, signed by xchain-hub's ValidatorIdentity. The drills then hand those
+ * CrossChainBridgeEngine.deriveTransferId, deriveSnapshotId, policyHash and
+ * canonicalMatch, signed by xchain-hub's ValidatorIdentity. The drills then hand those
  * records to xchain-indexer's bridge_settle.js. A signature that verifies there is a
  * cross-repo agreement, not a fixture agreeing with itself.
  *
@@ -89,15 +89,15 @@ function buildTransferRow(fields){
         push_generation:  Number(f.pushGeneration || 0),
         btc_chain_id:     f.btcChainId === undefined ? null : f.btcChainId
     };
-    row.transfer_id = eng._deriveTransferId(row.network, row.src_chain, row.src_action_index,
+    row.transfer_id = eng.deriveTransferId(row.network, row.src_chain, row.src_action_index,
                                             row.dest_chain, row.dest_address);
     return row;
 }
 
 /**
  * A policy_snapshots row as the hub's engine derives and finalizes it. policy_hash comes
- * from the HUB's _policyHash over the same arrays that ride along as transport, which is
- * the binding the indexer re-derives; snapshot_id comes from the hub's _deriveSnapshotId.
+ * from the HUB's policyHash over the same arrays that ride along as transport, which is
+ * the binding the indexer re-derives; snapshot_id comes from the hub's deriveSnapshotId.
  */
 function buildPolicyRow(fields){
     const f = fields || {};
@@ -120,15 +120,15 @@ function buildPolicyRow(fields){
         push_generation: Number(f.pushGeneration || 0),
         btc_chain_id:   f.btcChainId === undefined ? null : f.btcChainId
     };
-    row.policy_hash = f.policyHash || eng._policyHash(allow, block, !!f.sleeping);
-    row.snapshot_id = eng._deriveSnapshotId(row.network, row.origin_chain, row.tick,
+    row.policy_hash = f.policyHash || eng.policyHash(allow, block, !!f.sleeping);
+    row.snapshot_id = eng.deriveSnapshotId(row.network, row.origin_chain, row.tick,
                                             row.policy_seq, row.snapshot_block);
     return row;
 }
 
 // The canonical the HUB signs for this row, at the row's own finalizing view.
 function hubCanonical(row){
-    return hubEngine()._canonicalMatch(row, row.finalizing_view != null ? row.finalizing_view : 0);
+    return hubEngine().canonicalMatch(row, row.finalizing_view != null ? row.finalizing_view : 0);
 }
 
 /**

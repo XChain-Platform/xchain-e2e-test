@@ -54,15 +54,15 @@ function corruptSignature(sigHex) {
 /**
  * CRASH / PARTITION. The victim stops reacting to every consensus message: it
  * never PREPAREs, COMMITs or applies. Consensus.start() registers an arrow
- * listener that reads `this._handleMessage` at call time, so replacing the
+ * listener that reads `this.handleMessage` at call time, so replacing the
  * method on the instance mutes the node without detaching the listener.
  */
 function silenceConsensus(hub) {
     const consensus = hub && hub.consensus;
     if (!consensus) throw new Error('silenceConsensus: hub has no started consensus engine');
-    const orig = consensus._handleMessage;
-    consensus._handleMessage = () => {};
-    return () => { consensus._handleMessage = orig; };
+    const orig = consensus.handleMessage;
+    consensus.handleMessage = () => {};
+    return () => { consensus.handleMessage = orig; };
 }
 
 /**
@@ -105,7 +105,7 @@ function prePrepareEnvelope(consensus, seq, view, config, btcBlockHeight) {
         data: {
             seq:            seq,
             view:           view,
-            configDigest:   consensus._digest(config),
+            configDigest:   consensus.digest(config),
             config:         config,
             btcBlockHeight: btcBlockHeight
         }

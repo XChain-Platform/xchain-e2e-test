@@ -23,31 +23,31 @@
 
 // Crash / partition a validator: it stops reacting to ALL consensus messages,
 // so it never PREPAREs, COMMITs, or applies. The consensus listener is an arrow
-// that reads `_handleMessage` at call time, so replacing it on the instance
+// that reads `handleMessage` at call time, so replacing it on the instance
 // silences the node without detaching the listener. Models a dead/partitioned
 // follower. The federation must still finalize on the honest majority.
 function silenceValidator(hub) {
-    const orig = hub.consensus._handleMessage;
-    hub.consensus._handleMessage = () => {};
-    return () => { hub.consensus._handleMessage = orig; };
+    const orig = hub.consensus.handleMessage;
+    hub.consensus.handleMessage = () => {};
+    return () => { hub.consensus.handleMessage = orig; };
 }
 
 // As silenceValidator, but for the cross-chain DEX PBFT engine (a separate
 // consensus instance from the config Consensus). CrossChainDexConsensus.start()
-// registers an arrow listener that calls `this._handleMessage` at call time, so
+// registers an arrow listener that calls `this.handleMessage` at call time, so
 // replacing it on the instance mutes the node's DEX votes (PROPOSE/PREPARE/
 // COMMIT/VIEW_CHANGE) while leaving its config/oracle consensus untouched.
 function silenceDexValidator(hub) {
     const dex = hub.getCrossChainDex && hub.getCrossChainDex();
     if (!dex || !dex.consensus) throw new Error('silenceDexValidator: hub has no started cross-chain DEX engine');
-    const orig = dex.consensus._handleMessage;
-    dex.consensus._handleMessage = () => {};
-    return () => { dex.consensus._handleMessage = orig; };
+    const orig = dex.consensus.handleMessage;
+    dex.consensus.handleMessage = () => {};
+    return () => { dex.consensus.handleMessage = orig; };
 }
 
 // As silenceValidator, but for the oracle PBFT engine (a separate consensus
 // instance from the config Consensus). OracleConsensus.start() registers an arrow
-// listener that calls `this._handleMessage` at call time, so replacing it on the
+// listener that calls `this.handleMessage` at call time, so replacing it on the
 // instance mutes the node's oracle votes (ORACLE_PROPOSE/PREPARE/COMMIT) while
 // leaving its config/DEX consensus untouched.
 //
@@ -57,9 +57,9 @@ function silenceDexValidator(hub) {
 function silenceOracleValidator(hub) {
     const oc = hub._wtOracle || hub.oracleConsensus;
     if (!oc) throw new Error('silenceOracleValidator: hub has no oracle consensus; attachOracle() or start the harness with startOracle: true first');
-    const orig = oc._handleMessage;
-    oc._handleMessage = () => {};
-    return () => { oc._handleMessage = orig; };
+    const orig = oc.handleMessage;
+    oc.handleMessage = () => {};
+    return () => { oc.handleMessage = orig; };
 }
 
 // Silence a validator on the ARCHIVE PUBLISHER-ATTESTATION round ONLY: it stops

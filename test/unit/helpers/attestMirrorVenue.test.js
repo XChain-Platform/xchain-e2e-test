@@ -465,7 +465,7 @@ describe('attestMirrorVenue: reading the hub\'s window keying', function () {
     // `whereClause` and every stand-in looking identical.
     const publisherWith = (whereClause, extra) => Object.assign(
         function AttestationBatchPublisher() {}, extra || {},
-        { prototype: { _selectWindowRows: new Function('a', 'b',
+        { prototype: { selectWindowRows: new Function('a', 'b',
             'return this.q(' + JSON.stringify(whereClause) + ', [a, b])') } })
 
     it('reads the shipped hub and calls its window signed, with no band', () => {

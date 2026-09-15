@@ -88,7 +88,7 @@ async function driveRound(mvh, settleMs = SETTLE_MS) {
         d.consensus.on('match:finalized', fn);
         return fn;
     });
-    await Promise.all(dexes.map((d) => d._discoverAndMatch().catch(() => {})));
+    await Promise.all(dexes.map((d) => d.discoverAndMatch().catch(() => {})));
     // Poll the PERSISTED cross_chain_matches row, not the finalize event: the event is
     // emitted synchronously by CrossChainDexConsensus.finalize, and the row is written
     // by CrossChainDexEngine's un-awaited `this._writeFinalizedMatch(ev)` listener on
@@ -210,7 +210,7 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM cross-chain DEX match (WI-1 S
             // and persists a finalized row on every hub.
             const dexes = mvh.getCrossChainDexes();
             for (const ev of events) {
-                const canonical = dexes[ev.hubIndex]._canonicalMatch(ev.row);
+                const canonical = dexes[ev.hubIndex].canonicalMatch(ev.row);
                 const ok = new Set();
                 for (const s of (ev.signatures || []))
                     if (ValidatorIdentity.verify(canonical, String(s.sig || ''), String(s.pubkey || '').toLowerCase()))

@@ -105,7 +105,7 @@ describe('MultiValidatorHub: config-change PBFT (L2)', function () {
         const config = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: VALUE } } } };
 
         const leader = mvh.hubs.find((h) => {
-            const l = h.consensus._getLeader(h.consensus.seq + 1);
+            const l = h.consensus.getLeader(h.consensus.seq + 1);
             return l && l.addr === h.consensus.peerManager.validatorAddr;
         });
         assert.ok(leader, 'no round leader could be identified');
@@ -141,7 +141,7 @@ describe('MultiValidatorHub: config-change PBFT (L2)', function () {
         const nonLeader = mvh.hubs.find((h) => {
             const c = h.consensus;
             const nextSeq = Math.max(c.seq, c.lastAppliedSeq) + 1;
-            const l = c._getLeader(nextSeq);
+            const l = c.getLeader(nextSeq);
             return l && l.addr !== c.peerManager.validatorAddr;
         });
         assert.ok(nonLeader, 'expected at least one non-leader');
