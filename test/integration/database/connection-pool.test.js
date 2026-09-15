@@ -93,6 +93,14 @@ describe('Database Connection Pool Integration', function () {
             assert.strictEqual(db.sleep.firstCall.args[0], 1000, 'slept 1 second')
         })
     })
+})
+
+describe('Database Connection Pool Integration', function () {
+
+    afterEach(function () {
+        sinon.restore()
+        mockMariadb.createPool.resetHistory()
+    })
 
     describe('Scenario 3.4.3: Query error during check*', function () {
 
@@ -115,6 +123,14 @@ describe('Database Connection Pool Integration', function () {
             assert.strictEqual(result, null)
             assert(mockConnection.release.calledOnce)
         })
+    })
+})
+
+describe('Database Connection Pool Integration', function () {
+
+    afterEach(function () {
+        sinon.restore()
+        mockMariadb.createPool.resetHistory()
     })
 
     describe('Scenario 3.4.4: Connection release on success', function () {
@@ -159,6 +175,14 @@ describe('Database Connection Pool Integration', function () {
             assert.strictEqual(result, false)
             assert(mockConnection.release.calledOnce)
         })
+    })
+})
+
+describe('Database Connection Pool Integration', function () {
+
+    afterEach(function () {
+        sinon.restore()
+        mockMariadb.createPool.resetHistory()
     })
 
     describe('Query builder integration: WHERE clause construction', function () {
