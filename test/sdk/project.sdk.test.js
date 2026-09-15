@@ -71,42 +71,40 @@ function statusOf(res) {
     return (a && a.status) || (res && res.indexed && res.indexed.status);
 }
 
-describe('[sdk] Project registry (TICK + tick-LIST + owner-validated LINK)', function () {
-    this.timeout(0);
+let sdk, owner, other;
+let projectTick, projectIssueIndex;
+let memberA, memberB;
 
-    let sdk, owner, other;
-    let projectTick, projectIssueIndex;
-    let memberA, memberB;
+async function setupProject() {
+    sdk   = makeSdk();
+    owner = await fundedGasAddress(sdk, 1);
+    other = await fundedGasAddress(sdk, 1);
+    console.log('    [sdk] owner=' + owner.address + ' other=' + other.address);
 
-    before(async function () {
-        sdk   = makeSdk();
-        owner = await fundedGasAddress(sdk, 1);
-        other = await fundedGasAddress(sdk, 1);
-        console.log('    [sdk] owner=' + owner.address + ' other=' + other.address);
+    projectTick = uniqueTick('PROJ');
+    memberA     = uniqueTick('MEMA');
+    memberB     = uniqueTick('MEMB');
 
-        projectTick = uniqueTick('PROJ');
-        memberA     = uniqueTick('MEMA');
-        memberB     = uniqueTick('MEMB');
+    const proj = await submit(sdk,
+        { action: 'ISSUE', params: { tick: projectTick, maxSupply: '1', decimals: '0', lockMaxSupply: '1', mintSupply: '1', description: 'Project registry tick' } },
+        { pubkey: owner.address, change: owner.address },
+        submitOpts({ wif: owner.wif })
+    );
+    expect(statusOf(proj), 'project ISSUE').to.equal('valid');
+    projectIssueIndex = actionIndexOf(proj.indexed);
+    expect(projectIssueIndex, 'project ISSUE action_index').to.not.equal(undefined);
 
-        const proj = await submit(sdk,
-            { action: 'ISSUE', params: { tick: projectTick, maxSupply: '1', decimals: '0', lockMaxSupply: '1', mintSupply: '1', description: 'Project registry tick' } },
-            { pubkey: owner.address, change: owner.address },
-            submitOpts({ wif: owner.wif })
+    for (const tick of [memberA, memberB]) {
+        const res = await submit(sdk,
+            { action: 'ISSUE', params: sdk.nft.unique({ tick }) },
+            { pubkey: other.address, change: other.address },
+            submitOpts({ wif: other.wif })
         );
-        expect(statusOf(proj), 'project ISSUE').to.equal('valid');
-        projectIssueIndex = actionIndexOf(proj.indexed);
-        expect(projectIssueIndex, 'project ISSUE action_index').to.not.equal(undefined);
+        expect(statusOf(res), tick + ' ISSUE').to.equal('valid');
+    }
+}
 
-        for (const tick of [memberA, memberB]) {
-            const res = await submit(sdk,
-                { action: 'ISSUE', params: sdk.nft.unique({ tick }) },
-                { pubkey: other.address, change: other.address },
-                submitOpts({ wif: other.wif })
-            );
-            expect(statusOf(res), tick + ' ISSUE').to.equal('valid');
-        }
-    });
-
+function registerProjectPublicationTests() {
     it('owner publishes a multi-item roster and attests it (setRoster recipe)', async function () {
         const { list, link } = await setRosterWithRetry(sdk, owner.wif, {
             coin:             COIN,
@@ -148,7 +146,9 @@ describe('[sdk] Project registry (TICK + tick-LIST + owner-validated LINK)', fun
         );
         expect(String(statusOf(link)), 'non-owner attestation rejected').to.include('invalid');
     });
+}
 
+function registerProjectUpdateTest() {
     it('a roster edit + re-attestation supersedes the previous roster (latest wins)', async function () {
         // Derive roster v2 from v1 by removing memberB, then re-attest
         const current = await sdk.getProject(projectTick);
@@ -168,5 +168,11 @@ describe('[sdk] Project registry (TICK + tick-LIST + owner-validated LINK)', fun
         const dropped = await sdk.getToken(memberB);
         expect(dropped.projects.map((p) => p.project)).to.not.include(projectTick);
     });
+}
 
+describe('[sdk] Project registry (TICK + tick-LIST + owner-validated LINK)', function () {
+    this.timeout(0);
+    before(setupProject);
+    registerProjectPublicationTests();
+    registerProjectUpdateTest();
 });
