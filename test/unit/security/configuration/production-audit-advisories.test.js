@@ -52,41 +52,48 @@ const path   = require('path');
 // chain. It has no patched release to move to, so it is an accepted residual
 // rather than a floor, and sdk-transitive-advisories.test.js guards its SHAPE
 // (ADV-14, ADV-15) instead of its version.
-describe('Security: advisories above the shared guard\'s floors @regression @tier4', function () {
-    const root = path.resolve(__dirname, '..', '..', '..', '..');
-    const pkg  = require(path.join(root, 'package.json'));
-    const lock = require(path.join(root, 'package-lock.json'));
+const root = path.resolve(__dirname, '..', '..', '..', '..');
+const pkg  = require(path.join(root, 'package.json'));
+const lock = require(path.join(root, 'package-lock.json'));
 
-    const advisories = [
-        { name: 'fast-uri', minSafe: [3, 1, 6], majorSeries: 3 },
-        { name: 'qs',       minSafe: [6, 16, 0], majorSeries: 6 }
-    ];
+const advisories = [
+    { name: 'fast-uri', minSafe: [3, 1, 6], majorSeries: 3 },
+    { name: 'qs',       minSafe: [6, 16, 0], majorSeries: 6 }
+];
 
-    // Compares dotted numeric version triples without pulling in semver.
-    function cmp(a, b) {
-        for (let i = 0; i < 3; i++) {
-            if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) < (b[i] || 0) ? -1 : 1;
-        }
-        return 0;
+// Compares dotted numeric version triples without pulling in semver.
+function cmp(a, b) {
+    for (let i = 0; i < 3; i++) {
+        if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) < (b[i] || 0) ? -1 : 1;
     }
+    return 0;
+}
 
-    function parse(version) {
-        return String(version).split('-')[0].split('.').map(Number);
-    }
+function parse(version) {
+    return String(version).split('-')[0].split('.').map(Number);
+}
 
-    // Non-dev lockfile entries only: `npm audit --omit=dev` is the gate this
-    // file documents, and a dev-only copy of either package does not fail it.
-    function runtimeLockEntries(name) {
-        return Object.entries(lock.packages)
-            .filter(([key, entry]) => key.split('node_modules/').pop() === name && !entry.dev);
-    }
+// Non-dev lockfile entries only: `npm audit --omit=dev` is the gate this
+// file documents, and a dev-only copy of either package does not fail it.
+function runtimeLockEntries(name) {
+    return Object.entries(lock.packages)
+        .filter(([key, entry]) => key.split('node_modules/').pop() === name && !entry.dev);
+}
 
-    function pinnedRange(name) {
-        return (pkg.overrides || {})[name]
-            || (pkg.dependencies || {})[name]
-            || (pkg.devDependencies || {})[name];
-    }
+function pinnedRange(name) {
+    return (pkg.overrides || {})[name]
+        || (pkg.dependencies || {})[name]
+        || (pkg.devDependencies || {})[name];
+}
 
+// An override alone does not move an entry npm has already locked: npm
+// re-resolves a lock entry only when the locked version falls outside
+// the range. Assert the resolved version rather than trusting the pin.
+// The point of the whole file: the shared guard lists fast-uri too, at a
+// floor the advisory range has since swallowed. If a twin-file sync ever
+// raises the shared floor past this one, this row is what stops the
+// weaker number from quietly becoming the operative one.
+function advisoryChecks() {
     advisories.forEach(function (adv) {
         const floor = adv.minSafe.join('.');
 
@@ -100,9 +107,6 @@ describe('Security: advisories above the shared guard\'s floors @regression @tie
                 `${adv.name} pin ${range} is below the patched version ${floor}`);
         });
 
-        // An override alone does not move an entry npm has already locked: npm
-        // re-resolves a lock entry only when the locked version falls outside
-        // the range. Assert the resolved version rather than trusting the pin.
         it(`ADV-17: every runtime ${adv.name} entry in package-lock.json is at or above ${floor}`, function () {
             const entries = runtimeLockEntries(adv.name);
             if (!entries.length) return this.skip();
@@ -128,10 +132,6 @@ describe('Security: advisories above the shared guard\'s floors @regression @tie
                 `installed ${adv.name} is ${installed}, inside the vulnerable range (fixed in ${floor})`);
         });
 
-        // The point of the whole file: the shared guard lists fast-uri too, at a
-        // floor the advisory range has since swallowed. If a twin-file sync ever
-        // raises the shared floor past this one, this row is what stops the
-        // weaker number from quietly becoming the operative one.
         it(`ADV-19: the shared guard's ${adv.name} floor is not above the one enforced here`, function () {
             const companion = fs.readFileSync(
                 path.join(__dirname, 'dependency-advisories.test.js'), 'utf8');
@@ -149,62 +149,64 @@ describe('Security: advisories above the shared guard\'s floors @regression @tie
                 + 'shared guard has fully absorbed it.');
         });
     });
+}
 
-    // The same staged-tree hazard sibling-tree-advisories.test.js describes, for
-    // the two floors that file cannot carry: xchain-hub and xchain-sdk are
-    // gitignored file: dependencies staged at build time, and once a staged
-    // directory has lost its package.json npm stops reconciling the node_modules
-    // inside it. A vulnerable copy there survives every later `npm ci` and is
-    // invisible to the lockfile assertions above, which describe what a fresh
-    // install WOULD produce rather than what is on disk.
-    function stagedSiblings() {
-        return Object.entries(pkg.dependencies || {})
-            .filter(([, range]) => /^file:/.test(String(range)))
-            .map(([name, range]) => ({
-                name,
-                dir: path.resolve(root, String(range).replace(/^file:/, ''))
-            }));
+// The same staged-tree hazard sibling-tree-advisories.test.js describes, for
+// the two floors that file cannot carry: xchain-hub and xchain-sdk are
+// gitignored file: dependencies staged at build time, and once a staged
+// directory has lost its package.json npm stops reconciling the node_modules
+// inside it. A vulnerable copy there survives every later `npm ci` and is
+// invisible to the lockfile assertions above, which describe what a fresh
+// install WOULD produce rather than what is on disk.
+function stagedSiblings() {
+    return Object.entries(pkg.dependencies || {})
+        .filter(([, range]) => /^file:/.test(String(range)))
+        .map(([name, range]) => ({
+            name,
+            dir: path.resolve(root, String(range).replace(/^file:/, ''))
+        }));
+}
+
+// Yields { name, version, path } for every package under a node_modules
+// tree, descending into scopes and nested node_modules. Depth is bounded so
+// a symlink cycle in a staged bundle cannot hang the suite.
+function* walkTree(dir, depth) {
+    if (depth > 8 || !fs.existsSync(dir)) return;
+
+    let entries;
+    try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+        return;
     }
 
-    // Yields { name, version, path } for every package under a node_modules
-    // tree, descending into scopes and nested node_modules. Depth is bounded so
-    // a symlink cycle in a staged bundle cannot hang the suite.
-    function* walkTree(dir, depth) {
-        if (depth > 8 || !fs.existsSync(dir)) return;
+    for (const entry of entries) {
+        if (!entry.isDirectory() || entry.name === '.bin') continue;
+        const full = path.join(dir, entry.name);
 
-        let entries;
-        try {
-            entries = fs.readdirSync(dir, { withFileTypes: true });
-        } catch {
-            return;
+        // A scope directory holds packages, not a package.
+        if (entry.name.startsWith('@')) {
+            yield* walkTree(full, depth + 1);
+            continue;
         }
 
-        for (const entry of entries) {
-            if (!entry.isDirectory() || entry.name === '.bin') continue;
-            const full = path.join(dir, entry.name);
-
-            // A scope directory holds packages, not a package.
-            if (entry.name.startsWith('@')) {
-                yield* walkTree(full, depth + 1);
-                continue;
-            }
-
-            const manifest = path.join(full, 'package.json');
-            if (fs.existsSync(manifest)) {
-                try {
-                    const parsed = JSON.parse(fs.readFileSync(manifest, 'utf8'));
-                    if (parsed.name && parsed.version) {
-                        yield { name: parsed.name, version: parsed.version, path: full };
-                    }
-                } catch {
-                    // An unreadable manifest is not this suite's problem.
+        const manifest = path.join(full, 'package.json');
+        if (fs.existsSync(manifest)) {
+            try {
+                const parsed = JSON.parse(fs.readFileSync(manifest, 'utf8'));
+                if (parsed.name && parsed.version) {
+                    yield { name: parsed.name, version: parsed.version, path: full };
                 }
+            } catch {
+                // An unreadable manifest is not this suite's problem.
             }
-
-            yield* walkTree(path.join(full, 'node_modules'), depth + 1);
         }
-    }
 
+        yield* walkTree(path.join(full, 'node_modules'), depth + 1);
+    }
+}
+
+function stagedTreeChecks() {
     stagedSiblings().forEach(function (sibling) {
         it(`ADV-20: ${sibling.name}'s staged node_modules carries no copy below these floors`, function () {
             this.timeout(30000);
@@ -234,4 +236,7 @@ describe('Security: advisories above the shared guard\'s floors @regression @tie
                 + offenders.join('\n  '));
         });
     });
-});
+}
+
+describe('Security: advisories above the shared guard\'s floors @regression @tier4', advisoryChecks);
+describe('Security: advisories above the shared guard\'s floors @regression @tier4', stagedTreeChecks);
