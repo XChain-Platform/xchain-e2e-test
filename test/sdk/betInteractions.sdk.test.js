@@ -61,8 +61,7 @@ async function openMarket(oracle, tick, label) {
     return { feedIndex: actionIndexOf(res), deadline };
 }
 
-describe('[sdk] BET interaction with SWEEP and DIVIDEND (§12 E13/E14)', function () {
-
+function registerBetInteractionHooks() {
     before(async function () {
         // See bet.sdk.test.js: ^id compaction outruns the indexer's wire acceptance.
         sdk = makeSdk({ compactAddresses: false });
@@ -98,8 +97,9 @@ describe('[sdk] BET interaction with SWEEP and DIVIDEND (§12 E13/E14)', functio
     after(async function () {
         await releaseClock();
     });
+}
 
-    it('E13: SWEEP moves the spendable balance but not the bet escrow, and payouts credit the ORIGINAL source', async function () {
+async function testSweepInteraction() {
         const { feedIndex, deadline } = await openMarket(oracleS, tickSweep, 'E13 sweep');
 
         const x = await submitBet(sdk, bettorX, sdk.betting.placeBetParams({
@@ -155,9 +155,9 @@ describe('[sdk] BET interaction with SWEEP and DIVIDEND (§12 E13/E14)', functio
 
         const rows = await getBets(feedIndex);
         expect(rows.find(r => r.source === bettorX.address).bet_status, 'bettorX won').to.equal('won');
-    });
+}
 
-    it('E14: a dividend skips escrowed stakes entirely', async function () {
+async function testDividendInteraction() {
         const { feedIndex, deadline } = await openMarket(oracleD, tickDiv, 'E14 dividend');
 
         // bettorW stakes their whole balance; holderY simply holds an identical
@@ -199,5 +199,10 @@ describe('[sdk] BET interaction with SWEEP and DIVIDEND (§12 E13/E14)', functio
         amtEq(await escrowOf(bettorW.address, tickDiv), '0', 'escrow released');
         amtEq(await balanceOf(bettorW.address, payoutTick), '0',
             'settling later does NOT retroactively earn the missed dividend');
-    });
+}
+
+describe('[sdk] BET interaction with SWEEP and DIVIDEND (§12 E13/E14)', function () {
+    registerBetInteractionHooks();
+    it('E13: SWEEP moves the spendable balance but not the bet escrow, and payouts credit the ORIGINAL source', testSweepInteraction);
+    it('E14: a dividend skips escrowed stakes entirely', testDividendInteraction);
 });
