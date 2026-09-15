@@ -189,7 +189,16 @@ describe('ROLLCALL acceptance: the rules-aware attestation set (ZC7)', function 
         // The fail-closed half of ZC7d is the ATTEST v0 admission gate. Inert, the
         // request would simply be admitted with an unservable set and the leg would
         // assert on a literal nothing was going to produce.
-        httpGet = rc.indexerModule('src/attestation/providerRegistry.js').PROVIDERS.http_get
+        // The indexer renamed its registry to snake_case; an indexer origin from before
+        // that rename carries the camelCase name, so that one is tried only when the
+        // snake_case file does not resolve at all.
+        let providerRegistry
+        try { providerRegistry = rc.indexerModule('src/attestation/provider_registry.js') }
+        catch (e) {
+            if (!/cannot resolve/.test(e.message)) throw e
+            providerRegistry = rc.indexerModule('src/attestation/providerRegistry.js')
+        }
+        httpGet = providerRegistry.PROVIDERS.http_get
         assert.ok(httpGet && Array.isArray(httpGet.allowed_redundancy) && httpGet.min_stake_xchain,
             'the shipped http_get provider entry carries no allowed_redundancy / min_stake_xchain; this suite ' +
             'reads both from it rather than spelling them, so a changed shape is a stop rather than a guess')

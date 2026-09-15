@@ -40,6 +40,8 @@
  ********************************************************************/
 
 const assert = require('assert')
+const fs     = require('fs')
+const path   = require('path')
 const dotenv = require('dotenv')
 dotenv.config()
 
@@ -48,7 +50,13 @@ const { AttestMirrorVenue, DEFAULT_HUB_COUNT, DEFAULT_INDEXER_COUNT } = require(
 // The version the mirror consumer demands. Read from the indexer's own copy
 // rather than typed here: the number moves with the schema, and a literal would
 // have to be remembered at every bump while the code that matters would not.
-const HUB_SCHEMA_VERSION = require('../../../xchain-indexer/src/hub/hub-schema-version.js').HUB_SCHEMA_VERSION
+// The indexer renamed the file to snake_case; the hyphenated name is what an indexer
+// origin from before that rename carries, so the first of the two that exists is read.
+const HUB_SCHEMA_VERSION_FILE = ['hub_schema_version.js', 'hub-schema-version.js']
+    .map((name) => path.join(__dirname, '..', '..', '..', 'xchain-indexer', 'src', 'hub', name))
+    .find((p) => fs.existsSync(p)) ||
+    path.join(__dirname, '..', '..', '..', 'xchain-indexer', 'src', 'hub', 'hub_schema_version.js')
+const HUB_SCHEMA_VERSION = require(HUB_SCHEMA_VERSION_FILE).HUB_SCHEMA_VERSION
 
 describe('attest-response mirror venue: it stands up', function () {
     // Five hub processes and two indexers, each bootstrapping a schema on an
