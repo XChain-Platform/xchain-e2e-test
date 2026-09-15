@@ -76,138 +76,150 @@ const OPT_IN = 'XC_ROLLCALL_CLEAR_OUTSIDERS'
 // carrying one absence.
 const EPOCHS_ENV = 'XC_ROLLCALL_DRIVE_EPOCHS'
 
+let ctx = null
+let outsiders = []
+let K = null, driveCount = null
+
+async function setUpClearContext(){
+    if (!rc.requireRollcallVenue(this)) return
+    if (!requireFederationEnv(this)) return
+    if (String(process.env[OPT_IN] || '') !== '1'){
+        console.log('    [skip] ' + OPT_IN + ' is not 1. This tool EVICTS every staked oracle_publish ' +
+                    'source outside the acceptance roster, and an evicted signing key can never be staked ' +
+                    'again on this chain. Set ' + OPT_IN + '=1 to opt in.')
+        this.skip()
+        return
+    }
+
+    // allowDirtyStreaks because this tool is the remedy for a dirty streak
+    // rather than a victim of one, and it is safe here for one measurable
+    // reason: every epoch below is driven with silentHubs EMPTY, so no roster
+    // source can gain an absence and no streak can complete.
+    ctx = await rc.bringUpVenue({ hubCount: 3, needSources: 4, allowDirtyStreaks: true })
+    K   = Number(rc.rca().ROLLCALL_EVICT_MISSES)
+    assert.ok(Number.isFinite(K) && K >= 1, 'ROLLCALL_EVICT_MISSES must be a positive integer, got ' + K)
+    const asked = parseInt(process.env[EPOCHS_ENV], 10)
+    driveCount = (Number.isFinite(asked) && asked >= 1) ? asked : K
+    console.log('\n    driving ' + driveCount + ' rolled epoch(s) (K = ' + K + ', lookback window 2K = ' +
+                (2 * K) + ' rolled epochs)')
+
+    const rosterSources = new Set(ctx.roster.map(r => String(ctx.fed.byPubkey.get(r.pubkey))))
+    const bySource = new Map()
+    for (const v of ctx.fed.weights)
+        if (!rosterSources.has(String(v.source)) && !bySource.has(String(v.source)))
+            bySource.set(String(v.source), Number(v.weight))
+    outsiders = Array.from(bySource.entries()).map(([source, weight]) => ({ source, weight }))
+
+    console.log('\n    roster sources : ' + Array.from(rosterSources).join(', '))
+    if (!outsiders.length){
+        console.log('    outsiders      : none. The venue is already exactly the roster; nothing to clear.')
+        return
+    }
+    console.log('    outsiders      : ' + outsiders.length + ', total weight ' +
+                outsiders.reduce((a, o) => a + o.weight, 0))
+    for (const o of outsiders) console.log('        ' + o.source + '   weight ' + o.weight)
+    console.log('    Each will be absent in ' + K + ' rolled epoch(s) and evicted by the close. Their ' +
+                'signing keys are retired for good on this chain.')
+}
+
+async function epochsToDrive(testContext){
+    if (!ctx) testContext.skip()
+    // With no outsiders AND no explicit epoch count there is nothing to do,
+    // and moving a venue for no reason is its own hazard. An explicit count is
+    // a window-ageing run, which is worth doing on a clean roster.
+    if (!outsiders.length && !parseInt(process.env[EPOCHS_ENV], 10)){
+        console.log('    no outsiders and no ' + EPOCHS_ENV + '; nothing to do, leaving the venue alone')
+        testContext.skip()
+        return
+    }
+
+    const tip = await ctx.btcTip()
+    const epochs = rc.epochsAfter(tip + 6, ctx.network, driveCount)
+    console.log('    driving epoch(s) ' + epochs.join(', ') + ' with all three hubs present')
+    return epochs
+}
+
+function reportCapabilities(caps, readAt){
+    console.log('\n    oracle_publish at ' + readAt + ': ' + (caps.validators || []).length + ' key(s), ' +
+                caps.source_count + ' source(s)')
+    for (const v of (caps.validators || []))
+        console.log('        ' + String(v.pubkey).slice(0, 16) + '...  weight ' + v.weight +
+                    '  source ' + v.source)
+
+    // The idle source was absent for the same K epochs, so it is evicted
+    // too. That is not a failure of this tool, it is the next step.
+    const idlePubkey = ctx.roster[rc.IDLE_SEED_INDEX].pubkey
+    const idleStillIn = (caps.validators || [])
+        .some(v => String(v.pubkey).toLowerCase() === idlePubkey)
+    console.log('\n    NEXT STEP: the idle source ' + ctx.idleSource + ' was absent in those epochs too and ' +
+                'is ' + (idleStillIn ? 'STILL in the set (unexpected: check its absence rows)' : 'EVICTED') +
+                '.\n    Bump XC_ROLLCALL_IDLE_GENERATION and re-run test/tools/rollcallSeedFederation.test.js ' +
+                'to mint a fresh idle key at a fresh source address, then run the acceptance suites. The ' +
+                'three signing sources were present throughout and carry no absences.')
+}
+
+async function clearOutsiders(){
+    const epochs = await epochsToDrive(this)
+
+    let lastClose = null
+    for (const epoch of epochs){
+        const row = await rc.driveEpoch(ctx, epoch, { silentHubs: [] })
+        // A close that does not ROLL counts for nobody (D39) and no streak
+        // forms, so an unrolled epoch here is a stall rather than progress:
+        // say which epoch and what the responsible set was, because the two
+        // causes (quorum arithmetic and a signature that never landed) are
+        // told apart by that field.
+        assert.strictEqual(Number(row.rolled), 1,
+            'epoch ' + epoch + ' closed UNROLLED, so it counts for nobody and no outsider streak forms. ' +
+            'responsible_set_json=' + String(row.responsible_set_json) +
+            '. Either the roster\'s weight does not clear 3 * present > 2 * total against the outsider ' +
+            'weight (re-seed heavier), or a hub\'s signature never reached the DOGE chain.')
+        lastClose = Number(row.close_block)
+        const absent = (await rc.absenceRows(ctx, epoch)).map(r =>
+            String(r.source) + (Number(r.evicted) === 1 ? ' EVICTED' : ''))
+        console.log('    epoch ' + epoch + ' ROLLED at ' + lastClose + '; absent: ' + absent.join(', '))
+    }
+
+    // The deactivation the eviction stamps takes effect at
+    // close + ACTIVATION_DELAY_BLOCKS, so the capability read has to be
+    // taken past it. Derived from a row the eviction itself wrote rather
+    // than from a constant this process cannot see; a pure window-ageing run
+    // evicted nothing and has no such row, so it uses the same delay the
+    // acceptance suites derive and simply reads one block past it.
+    let activationDelay = 6
+    if (outsiders.length){
+        const stakeRows = await rc.stakeDeactivations(ctx, outsiders[0].source)
+        const stamped = stakeRows.filter(r => r.deactivation_block !== null)
+        assert.ok(stamped.length >= 1,
+            'the close did not stamp deactivation_block on ' + outsiders[0].source + '\'s stake row(s), so no ' +
+            'eviction happened for it. Absence rows above say whether it was counted absent at all.')
+        activationDelay = Number(stamped[0].deactivation_block) - lastClose
+    }
+    const readAt = lastClose + activationDelay + 1
+    await rc.mineBtcTo(ctx, readAt, 'burial of the evictions')
+
+    const caps = await indexerConnector.call('getstakeweightsbycapability', {
+        capability: 'oracle_publish', block_index: readAt,
+    })
+    assert.ok(caps && !caps.error, 'getstakeweightsbycapability failed: ' + JSON.stringify(caps && caps.error))
+    const still = (caps.validators || [])
+        .filter(v => outsiders.some(o => o.source === String(v.source)))
+        .map(v => String(v.source))
+    assert.deepStrictEqual(still, [],
+        'these outsider source(s) are STILL in oracle_publish at block ' + readAt + ' (close + ' +
+        activationDelay + ' + 1): ' + JSON.stringify(still) + '. The acceptance suites cannot run until ' +
+        'they are gone.')
+
+    reportCapabilities(caps, readAt)
+}
+
 describe('ROLLCALL venue tool: let the protocol clear every oracle_publish source outside the roster', function () {
     // K rolled epochs of 30 BTC blocks with their closes, plus the DOGE publish
     // interleaving, plus burial for the deactivations to take effect.
     this.timeout(60 * 60 * 1000)
 
-    let ctx = null
-    let outsiders = []
-    let K = null, driveCount = null
-
-    before(async function () {
-        if (!rc.requireRollcallVenue(this)) return
-        if (!requireFederationEnv(this)) return
-        if (String(process.env[OPT_IN] || '') !== '1'){
-            console.log('    [skip] ' + OPT_IN + ' is not 1. This tool EVICTS every staked oracle_publish ' +
-                        'source outside the acceptance roster, and an evicted signing key can never be staked ' +
-                        'again on this chain. Set ' + OPT_IN + '=1 to opt in.')
-            this.skip()
-            return
-        }
-
-        // allowDirtyStreaks because this tool is the remedy for a dirty streak
-        // rather than a victim of one, and it is safe here for one measurable
-        // reason: every epoch below is driven with silentHubs EMPTY, so no roster
-        // source can gain an absence and no streak can complete.
-        ctx = await rc.bringUpVenue({ hubCount: 3, needSources: 4, allowDirtyStreaks: true })
-        K   = Number(rc.rca().ROLLCALL_EVICT_MISSES)
-        assert.ok(Number.isFinite(K) && K >= 1, 'ROLLCALL_EVICT_MISSES must be a positive integer, got ' + K)
-        const asked = parseInt(process.env[EPOCHS_ENV], 10)
-        driveCount = (Number.isFinite(asked) && asked >= 1) ? asked : K
-        console.log('\n    driving ' + driveCount + ' rolled epoch(s) (K = ' + K + ', lookback window 2K = ' +
-                    (2 * K) + ' rolled epochs)')
-
-        const rosterSources = new Set(ctx.roster.map(r => String(ctx.fed.byPubkey.get(r.pubkey))))
-        const bySource = new Map()
-        for (const v of ctx.fed.weights)
-            if (!rosterSources.has(String(v.source)) && !bySource.has(String(v.source)))
-                bySource.set(String(v.source), Number(v.weight))
-        outsiders = Array.from(bySource.entries()).map(([source, weight]) => ({ source, weight }))
-
-        console.log('\n    roster sources : ' + Array.from(rosterSources).join(', '))
-        if (!outsiders.length){
-            console.log('    outsiders      : none. The venue is already exactly the roster; nothing to clear.')
-            return
-        }
-        console.log('    outsiders      : ' + outsiders.length + ', total weight ' +
-                    outsiders.reduce((a, o) => a + o.weight, 0))
-        for (const o of outsiders) console.log('        ' + o.source + '   weight ' + o.weight)
-        console.log('    Each will be absent in ' + K + ' rolled epoch(s) and evicted by the close. Their ' +
-                    'signing keys are retired for good on this chain.')
-    })
-
+    before(setUpClearContext)
     after(async function () { await rc.tearDownVenue(ctx) })
 
-    it('drives the rolled epochs, evicting every outsider and ageing the absence window', async function () {
-        if (!ctx) this.skip()
-        // With no outsiders AND no explicit epoch count there is nothing to do,
-        // and moving a venue for no reason is its own hazard. An explicit count is
-        // a window-ageing run, which is worth doing on a clean roster.
-        if (!outsiders.length && !parseInt(process.env[EPOCHS_ENV], 10)){
-            console.log('    no outsiders and no ' + EPOCHS_ENV + '; nothing to do, leaving the venue alone')
-            this.skip()
-            return
-        }
-
-        const tip = await ctx.btcTip()
-        const epochs = rc.epochsAfter(tip + 6, ctx.network, driveCount)
-        console.log('    driving epoch(s) ' + epochs.join(', ') + ' with all three hubs present')
-
-        let lastClose = null
-        for (const epoch of epochs){
-            const row = await rc.driveEpoch(ctx, epoch, { silentHubs: [] })
-            // A close that does not ROLL counts for nobody (D39) and no streak
-            // forms, so an unrolled epoch here is a stall rather than progress:
-            // say which epoch and what the responsible set was, because the two
-            // causes (quorum arithmetic and a signature that never landed) are
-            // told apart by that field.
-            assert.strictEqual(Number(row.rolled), 1,
-                'epoch ' + epoch + ' closed UNROLLED, so it counts for nobody and no outsider streak forms. ' +
-                'responsible_set_json=' + String(row.responsible_set_json) +
-                '. Either the roster\'s weight does not clear 3 * present > 2 * total against the outsider ' +
-                'weight (re-seed heavier), or a hub\'s signature never reached the DOGE chain.')
-            lastClose = Number(row.close_block)
-            const absent = (await rc.absenceRows(ctx, epoch)).map(r =>
-                String(r.source) + (Number(r.evicted) === 1 ? ' EVICTED' : ''))
-            console.log('    epoch ' + epoch + ' ROLLED at ' + lastClose + '; absent: ' + absent.join(', '))
-        }
-
-        // The deactivation the eviction stamps takes effect at
-        // close + ACTIVATION_DELAY_BLOCKS, so the capability read has to be
-        // taken past it. Derived from a row the eviction itself wrote rather
-        // than from a constant this process cannot see; a pure window-ageing run
-        // evicted nothing and has no such row, so it uses the same delay the
-        // acceptance suites derive and simply reads one block past it.
-        let activationDelay = 6
-        if (outsiders.length){
-            const stakeRows = await rc.stakeDeactivations(ctx, outsiders[0].source)
-            const stamped = stakeRows.filter(r => r.deactivation_block !== null)
-            assert.ok(stamped.length >= 1,
-                'the close did not stamp deactivation_block on ' + outsiders[0].source + '\'s stake row(s), so no ' +
-                'eviction happened for it. Absence rows above say whether it was counted absent at all.')
-            activationDelay = Number(stamped[0].deactivation_block) - lastClose
-        }
-        const readAt = lastClose + activationDelay + 1
-        await rc.mineBtcTo(ctx, readAt, 'burial of the evictions')
-
-        const caps = await indexerConnector.call('getstakeweightsbycapability', {
-            capability: 'oracle_publish', block_index: readAt,
-        })
-        assert.ok(caps && !caps.error, 'getstakeweightsbycapability failed: ' + JSON.stringify(caps && caps.error))
-        const still = (caps.validators || [])
-            .filter(v => outsiders.some(o => o.source === String(v.source)))
-            .map(v => String(v.source))
-        assert.deepStrictEqual(still, [],
-            'these outsider source(s) are STILL in oracle_publish at block ' + readAt + ' (close + ' +
-            activationDelay + ' + 1): ' + JSON.stringify(still) + '. The acceptance suites cannot run until ' +
-            'they are gone.')
-
-        console.log('\n    oracle_publish at ' + readAt + ': ' + (caps.validators || []).length + ' key(s), ' +
-                    caps.source_count + ' source(s)')
-        for (const v of (caps.validators || []))
-            console.log('        ' + String(v.pubkey).slice(0, 16) + '...  weight ' + v.weight +
-                        '  source ' + v.source)
-
-        // The idle source was absent for the same K epochs, so it is evicted
-        // too. That is not a failure of this tool, it is the next step.
-        const idlePubkey = ctx.roster[rc.IDLE_SEED_INDEX].pubkey
-        const idleStillIn = (caps.validators || [])
-            .some(v => String(v.pubkey).toLowerCase() === idlePubkey)
-        console.log('\n    NEXT STEP: the idle source ' + ctx.idleSource + ' was absent in those epochs too and ' +
-                    'is ' + (idleStillIn ? 'STILL in the set (unexpected: check its absence rows)' : 'EVICTED') +
-                    '.\n    Bump XC_ROLLCALL_IDLE_GENERATION and re-run test/tools/rollcallSeedFederation.test.js ' +
-                    'to mint a fresh idle key at a fresh source address, then run the acceptance suites. The ' +
-                    'three signing sources were present throughout and carry no absences.')
-    })
+    it('drives the rolled epochs, evicting every outsider and ageing the absence window', clearOutsiders)
 })
