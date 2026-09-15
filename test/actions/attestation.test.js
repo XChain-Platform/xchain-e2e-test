@@ -12,7 +12,7 @@ const assert = require('assert')
 const vmHelper = require('../helpers/vmHelper')
 const attestationHelper = require('../helpers/attestationHelper')
 const { skipIfResponseMirrorEra } = require('../helpers/attestLegacyResponsePath')
-const { state, prepareAttestation } = require('./attestation.test/shared.cjs')
+const { state, prepareAttestation } = require('./attestation.test/support/shared')
 
 /**
  * Round-trip test for the External Attestation Framework.

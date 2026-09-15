@@ -13,7 +13,7 @@ const stakeHelper = require('../../helpers/stakeHelper')
 const vmHelper = require('../../helpers/vmHelper')
 const attestationHelper = require('../../helpers/attestationHelper')
 const { skipIfResponseMirrorEra } = require('../../helpers/attestLegacyResponsePath')
-const { state, prepareAttestation, stakeValidatorFromOwnSource } = require('./shared.cjs')
+const { state, prepareAttestation, stakeValidatorFromOwnSource } = require('./support/shared')
 
 const TITLE = 'Attestation framework: round-trip request → response → callback'
 
