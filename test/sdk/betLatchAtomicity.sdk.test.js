@@ -130,11 +130,9 @@ async function affectedRows(sql, params) {
     } finally { await connection.release(); }
 }
 
-describe('[sdk] BET latch atomicity and idempotence (§12 E17)', function () {
-    this.timeout(0);
+let sdk, oracle, punter, tick, openId, closedId;
 
-    let sdk, oracle, punter, tick, openId, closedId;
-
+function registerBetLatchHooks() {
     before(async function () {
         // See bet.sdk.test.js: ^id compaction outruns the indexer's wire acceptance.
         sdk = makeSdk({ compactAddresses: false });
@@ -150,8 +148,9 @@ describe('[sdk] BET latch atomicity and idempotence (§12 E17)', function () {
     after(async function () {
         await releaseClock();
     });
+}
 
-    it('replaying the latch write cannot re-stamp closed_block or latch twice', async function () {
+async function testGuardedLatchReplay() {
         const now = await blockTime();
         const deadline = now + 900;
 
@@ -195,9 +194,9 @@ describe('[sdk] BET latch atomicity and idempotence (§12 E17)', function () {
 
         this.test.feedIndex = feedIndex;
         this.test.stamp = stamp;
-    });
+}
 
-    it('without the guard the same write WOULD move the stamp (rolled back)', async function () {
+async function testUnguardedLatchWrite() {
         // Proves the previous leg's zeroes are the guard working rather than a
         // predicate that matches nothing. Everything here is undone: the
         // transaction is rolled back in a finally, and the row is re-read after.
@@ -238,9 +237,9 @@ describe('[sdk] BET latch atomicity and idempotence (§12 E17)', function () {
             try { await connection.rollback(); } catch (e) { /* already rolled back */ }
             await connection.release();
         }
-    });
+}
 
-    it('every feed on the venue agrees between its status column and its latch stamp', async function () {
+async function testLatchStampConsistency() {
         // The other half of E17: the status column and the durable stamp are two
         // writes in one statement, so a partially-applied latch shows up here as
         // a row where exactly one of them landed. Swept across the WHOLE venue,
@@ -279,5 +278,12 @@ describe('[sdk] BET latch atomicity and idempotence (§12 E17)', function () {
                 'no feed latched closed after it had already reached a terminal status')
                 .to.deep.equal([]);
         } finally { await connection.release(); }
-    });
+}
+
+describe('[sdk] BET latch atomicity and idempotence (§12 E17)', function () {
+    this.timeout(0);
+    registerBetLatchHooks();
+    it('replaying the latch write cannot re-stamp closed_block or latch twice', testGuardedLatchReplay);
+    it('without the guard the same write WOULD move the stamp (rolled back)', testUnguardedLatchWrite);
+    it('every feed on the venue agrees between its status column and its latch stamp', testLatchStampConsistency);
 });
