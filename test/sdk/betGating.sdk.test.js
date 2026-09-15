@@ -95,8 +95,7 @@ async function expectPlaceRejected(feedIndex, who, amount, pattern, message) {
         `${message}: the rejected stake must not join the pool`).to.equal(openBefore);
 }
 
-describe('[sdk] BET feed gating (§12 E15)', function () {
-
+function registerBetGatingHooks() {
     before(async function () {
         // See bet.sdk.test.js: ^id compaction outruns the indexer's wire acceptance.
         sdk = makeSdk({ compactAddresses: false });
@@ -130,8 +129,9 @@ describe('[sdk] BET feed gating (§12 E15)', function () {
     after(async function () {
         await releaseClock();
     });
+}
 
-    it('an ALLOW_LIST admits a member and rejects a non-member', async function () {
+async function testAllowList() {
         const { res, feedIndex } = await openMarket('E15 allow list', { allowList });
         expect(res.indexed.status, 'gated create is valid').to.equal('valid');
 
@@ -145,9 +145,9 @@ describe('[sdk] BET feed gating (§12 E15)', function () {
 
         await expectPlaceRejected(feedIndex, outsiderB, '5.00000000',
             /not authorized|SOURCE/i, 'a non-member betting on an allow-listed market');
-    });
+}
 
-    it('a BLOCK_LIST rejects a listed address and admits everyone else', async function () {
+async function testBlockList() {
         const { res, feedIndex } = await openMarket('E15 block list', { blockList });
         expect(res.indexed.status, 'gated create is valid').to.equal('valid');
 
@@ -158,9 +158,9 @@ describe('[sdk] BET feed gating (§12 E15)', function () {
 
         await expectPlaceRejected(feedIndex, blockedC, '5.00000000',
             /not authorized|SOURCE/i, 'a block-listed address betting');
-    });
+}
 
-    it('an address on BOTH lists is rejected: BLOCK_LIST wins', async function () {
+async function testBlockListPrecedence() {
         // Control first: with ONLY the allow list pinned, dualD is admitted. This
         // is what makes the next assertion mean "block won" rather than the much
         // weaker "dualD was not on the allow list".
@@ -183,7 +183,7 @@ describe('[sdk] BET feed gating (§12 E15)', function () {
         // returned early on the allow-list hit would admit this bet.
         await expectPlaceRejected(feedIndex, dualD, '3.00000000',
             /not authorized|SOURCE/i, 'an address on BOTH lists (block must win)');
-    });
+}
 
     // This drill uncovered a list-edit resolution bug and is un-skipped unchanged
     // now that it has landed. A LIST edit used to write its resulting items under the EDIT's own
@@ -193,7 +193,7 @@ describe('[sdk] BET feed gating (§12 E15)', function () {
     // membership. getList now resolves a reference to the head of the list's edit
     // chain (indexer list_edit_resolution_activation.js, armed from genesis on
     // regtest), so the assertions below are the spec behaviour end to end.
-    it('removing a member mid-market rejects new bets but still settles the placed one', async function () {
+async function testMidMarketRemoval() {
         const { feedIndex, deadline } = await openMarket('E15 mid-market removal', { allowList });
 
         // memberA bets while still a member.
@@ -230,9 +230,9 @@ describe('[sdk] BET feed gating (§12 E15)', function () {
 
         // Restore the list so the fixture is reusable if this file grows.
         await editAddressList(oracle, allowList, LIST_ADD, memberA.address);
-    });
+}
 
-    it('an unknown list reference is rejected at create', async function () {
+async function testUnknownListReference() {
         const label = 'E15 unknown list ref';
         // A syntactically fine action index that names no LIST at all. The SDK
         // cannot know it is bogus, so the INDEXER is what must reject it.
@@ -259,5 +259,13 @@ describe('[sdk] BET feed gating (§12 E15)', function () {
         console.log(`      [bet-gating] unknown ALLOW_LIST ref\n        indexer: ${rows[0].parse_status}`);
         expect(String(rows[0].parse_status),
             'a feed pinned to a nonexistent list must not open').to.match(/ALLOW_LIST|unknown/i);
-    });
+}
+
+describe('[sdk] BET feed gating (§12 E15)', function () {
+    registerBetGatingHooks();
+    it('an ALLOW_LIST admits a member and rejects a non-member', testAllowList);
+    it('a BLOCK_LIST rejects a listed address and admits everyone else', testBlockList);
+    it('an address on BOTH lists is rejected: BLOCK_LIST wins', testBlockListPrecedence);
+    it('removing a member mid-market rejects new bets but still settles the placed one', testMidMarketRemoval);
+    it('an unknown list reference is rejected at create', testUnknownListReference);
 });
