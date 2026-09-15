@@ -16,23 +16,24 @@ const axios  = require('axios');
 
 const RegtestMinerConnector = require('../../../src/RegtestMinerConnector');
 
+const URL  = 'localhost';
+const PORT = 18444;
+
+let connector;
+let axiosPostStub;
+
+function setupConnector() {
+    axiosPostStub = sinon.stub(axios, 'post');
+    connector = new RegtestMinerConnector(URL, PORT);
+}
+
+function teardownConnector() {
+    sinon.restore();
+}
+
 describe('RegtestMinerConnector', function () {
-
-    const URL  = 'localhost';
-    const PORT = 18444;
-
-    let connector;
-    let axiosPostStub;
-
-    beforeEach(function () {
-        axiosPostStub = sinon.stub(axios, 'post');
-        connector = new RegtestMinerConnector(URL, PORT);
-    });
-
-    afterEach(function () {
-        sinon.restore();
-    });
-
+    beforeEach(setupConnector);
+    afterEach(teardownConnector);
     describe('constructor', function () {
         it('builds the URL as http://{url}:{port}', function () {
             assert.strictEqual(connector.url, `http://${URL}:${PORT}`);
@@ -57,7 +58,11 @@ describe('RegtestMinerConnector', function () {
             assert.deepStrictEqual(axiosPostStub.firstCall.args[2], { headers: { 'x-api-key': 'secret-key' } });
         });
     });
+});
 
+describe('RegtestMinerConnector', function () {
+    beforeEach(setupConnector);
+    afterEach(teardownConnector);
     describe('ping', function () {
         it('returns true when response.data.result.ready is true', async function () {
             // ping() gates on result.ready (the df6a8f7 readiness gate), not bare
@@ -96,7 +101,13 @@ describe('RegtestMinerConnector', function () {
             assert.strictEqual(data.method, 'ping');
             assert.strictEqual(data.id, 1);
         });
+    });
+});
 
+describe('RegtestMinerConnector', function () {
+    beforeEach(setupConnector);
+    afterEach(teardownConnector);
+    describe('ping', function () {
         // Without a per-request cap a miner that accepts the socket and never
         // answers left the readiness probe pending forever, so waitForReady's
         // advertised timeout bounded nothing and a hung miner stalled CI.
@@ -123,7 +134,11 @@ describe('RegtestMinerConnector', function () {
             assert.strictEqual(typeof cfg.timeout, 'number');
         });
     });
+});
 
+describe('RegtestMinerConnector', function () {
+    beforeEach(setupConnector);
+    afterEach(teardownConnector);
     describe('waitForReady', function () {
         it('returns true as soon as the miner reports ready', async function () {
             sinon.stub(connector, 'ping').resolves(true);
@@ -144,7 +159,11 @@ describe('RegtestMinerConnector', function () {
             assert.ok(slept.every((ms) => ms <= 50), 'slept past the 50ms budget: ' + slept.join(','));
         });
     });
+});
 
+describe('RegtestMinerConnector', function () {
+    beforeEach(setupConnector);
+    afterEach(teardownConnector);
     describe('sendFunds', function () {
         const ADDRESS = 'bcrt1qtest';
         const AMOUNT  = 1.5;
@@ -177,7 +196,11 @@ describe('RegtestMinerConnector', function () {
             await assert.rejects(() => connector.sendFunds(ADDRESS, AMOUNT), /returned no result/);
         });
     });
+});
 
+describe('RegtestMinerConnector', function () {
+    beforeEach(setupConnector);
+    afterEach(teardownConnector);
     describe('setMiningTime', function () {
         it('sends the correct JSON-RPC payload', async function () {
             axiosPostStub.resolves({ data: { result: true } });
@@ -216,7 +239,11 @@ describe('RegtestMinerConnector', function () {
             );
         });
     });
+});
 
+describe('RegtestMinerConnector', function () {
+    beforeEach(setupConnector);
+    afterEach(teardownConnector);
     describe('setDefaultMiningTime', function () {
         it('sends the correct JSON-RPC payload with empty params', async function () {
             axiosPostStub.resolves({ data: { result: true } });
@@ -243,11 +270,16 @@ describe('RegtestMinerConnector', function () {
             await assert.rejects(() => connector.setDefaultMiningTime(), /returned no result/);
         });
     });
+});
+
 // setmocktime is a NODE-level control that the connector normally reaches
-    // through the miner, because some installs do not publish the node RPC port.
-    // Miner sidecars older than set_mock_time answer "Method not found", and a
-    // long-lived venue routinely runs one chain's miner behind another's, which
-    // would silently make every clock-driven drill family single-chain.
+// through the miner, because some installs do not publish the node RPC port.
+// Miner sidecars older than set_mock_time answer "Method not found", and a
+// long-lived venue routinely runs one chain's miner behind another's, which
+// would silently make every clock-driven drill family single-chain.
+describe('RegtestMinerConnector', function () {
+    beforeEach(setupConnector);
+    afterEach(teardownConnector);
     describe('setMockTime node fallback', function () {
 
         it('uses the miner when it implements set_mock_time', async function () {
