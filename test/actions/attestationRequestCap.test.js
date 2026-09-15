@@ -54,9 +54,7 @@ const capRule = require('../../../xchain-indexer/src/attest_request_cap_activati
  * after them.
  */
 
-describe('Attestation admission caps: an over-cap ATTEST v0 refusal on a live chain', function () {
-
-    // Short window: these requests are never meant to be answered, and a shorter
+// Short window: these requests are never meant to be answered, and a shorter
     // deadline lets the expiry sweep retire them promptly instead of leaving the
     // venue's pending pool full for the rest of the run.
     const DEADLINE_BLOCKS = 5
@@ -94,7 +92,7 @@ module.exports = {
 };
 `
 
-    before(async function () {
+async function setupAdmissionCaps() {
         // ATTEST rides on STAKE + EXECUTE, both BTC-only protocol features.
         if (COIN_CODE !== 'BTC') {
             console.log('Attestation admission caps require the BTC chain; skipping on ' + COIN_CODE)
@@ -139,9 +137,9 @@ module.exports = {
         const deploy = await vmHelper.sendDeployV0(operatorAddr, CONTRACT_CODE, 500000)
         assert.strictEqual(deploy.contract.status, 'valid', 'deploy status: ' + deploy.contract.status)
         contractIndex = deploy.contract.action_index
-    })
+}
 
-    it('admits a contract\'s full per-contract share in one block', async function () {
+async function admitsContractShare() {
         const exec = await vmHelper.sendExecuteV0(operatorAddr, contractIndex, 'askTwo', ['under'])
         assert.strictEqual(exec.execution.status, 'valid', 'execute status: ' + exec.execution.status)
 
@@ -168,9 +166,9 @@ module.exports = {
         // The second admission proves the count query saw the first one: with the
         // counter blind, byContract would have read 0 for both.
         this.test.parent.ctx.admittedBlock = Number(rows[0].block_index)
-    })
+}
 
-    it('refuses the third, and the refusal fails the whole EXECUTE rather than storing a rejected row', async function () {
+async function refusesThirdRequest() {
         const before = await indexerDatabase.getAttestationRequestsByContract(contractIndex)
         assert.strictEqual(before.length, 2, 'precondition: the contract starts this test with its 2 admitted rows')
 
@@ -209,7 +207,7 @@ module.exports = {
         const kept = await indexerDatabase.getContractState(contractIndex, 'two_marker')
         assert(kept, 'the earlier successful EXECUTE\'s state write must survive')
         assert.strictEqual(JSON.parse(kept.state_value), 'under')
-    })
+}
 
     /**
      * The OTHER cap, and the one that actually bounds validator spend: the
@@ -233,9 +231,7 @@ module.exports = {
      * regtest 2026-09-02; it is a defect in the request_id derivation for
      * emit.execute callees, unrelated to the caps, and it is why this is a BATCH.)
      */
-    describe('the network-wide block ceiling', function () {
-
-        // 5 contracts x perContract 2 fills the block to the ceiling; the 6th is
+// 5 contracts x perContract 2 fills the block to the ceiling; the 6th is
         // the one the ceiling has to refuse.
         const FILLERS = 6
 
@@ -258,7 +254,7 @@ module.exports = {
 };
 `
 
-        before(async function () {
+async function setupBlockCeiling() {
             if (COIN_CODE !== 'BTC') { this.skip(); return }
             assert.strictEqual(capRule.ATTEST_REQUEST_CAPS.perBlock, 10,
                 'this suite fills a block with 5 x 2 requests; perBlock must be 10')
@@ -269,9 +265,9 @@ module.exports = {
                     'filler ' + n + ' deploy status: ' + deploy.contract.status)
                 fillerIndexes.push(deploy.contract.action_index)
             }
-        })
+}
 
-        it('admits exactly ten requests in one block and refuses the eleventh', async function () {
+async function admitsBlockCeiling() {
             const batch = await batchHelper.sendBatchV0(operatorAddr,
                 fillerIndexes.map(i => 'EXECUTE|0|' + i + '|askTwo'))
             assert(batch.batch, 'the BATCH itself must be valid: one refused subcommand does not fail it')
@@ -323,6 +319,15 @@ module.exports = {
             const survivors = await indexerDatabase.getAttestationRequestsByContract(fillerIndexes[0])
             assert.strictEqual(survivors.length, 2,
                 'the earlier subcommands\' admissions must survive a later one\'s refusal')
-        })
+}
+
+describe('Attestation admission caps: an over-cap ATTEST v0 refusal on a live chain', function () {
+    before(setupAdmissionCaps)
+    it('admits a contract\'s full per-contract share in one block', admitsContractShare)
+    it('refuses the third, and the refusal fails the whole EXECUTE rather than storing a rejected row', refusesThirdRequest)
+
+    describe('the network-wide block ceiling', function () {
+        before(setupBlockCeiling)
+        it('admits exactly ten requests in one block and refuses the eleventh', admitsBlockCeiling)
     })
 })
