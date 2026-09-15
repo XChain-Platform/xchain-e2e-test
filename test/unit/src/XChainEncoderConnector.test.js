@@ -16,27 +16,51 @@ const axios  = require('axios');
 
 const XChainEncoderConnector = require('../../../src/XChainEncoderConnector');
 
+const URL  = 'localhost';
+const PORT = 8080;
+// The third positional arg is the optional encoder API key, so nothing stale
+// may be passed here: a leftover rpcUser string would silently become the key
+// and be sent as x-api-key on every request.
+const API_KEY = 'encoder-key';
+
+let connector;
+let axiosPostStub;
+
+function setupConnector() {
+    axiosPostStub = sinon.stub(axios, 'post');
+    connector = new XChainEncoderConnector(URL, PORT);
+}
+
+function teardownConnector() {
+    sinon.restore();
+}
+
+const utxosList       = [{ txid: 'abc', vout: 0, value: 10000 }];
+const pubkey          = 'mypubkey';
+const customOutputs   = [{ address: 'addr1', value: 500 }];
+const data            = { action: 'ISSUE' };
+const rawData         = 'deadbeef';
+const exactFee        = 1000;
+const rbf             = false;
+const outputType      = 'OP_RETURN';
+const changeAddress   = 'changeaddr';
+const p2shHash        = 'p2shHashHex';
+const p2shHex         = 'p2shHexValue';
+const compressedPubKey = 'compressedKey';
+
+const fakeResult = { psbt: 'psbtHex', encoding: 'OP_RETURN' };
+
+async function callCreateTx() {
+    return connector.createTx(
+        utxosList, pubkey, customOutputs, data, rawData,
+        exactFee, rbf, outputType, changeAddress,
+        p2shHash, p2shHex, compressedPubKey
+    );
+}
+
 describe('XChainEncoderConnector', function () {
-
-    const URL  = 'localhost';
-    const PORT = 8080;
-    // The third positional arg is the optional encoder API key, so nothing stale
-    // may be passed here: a leftover rpcUser string would silently become the key
-    // and be sent as x-api-key on every request.
-    const API_KEY = 'encoder-key';
-
-    let connector;
-    let axiosPostStub;
-
-    beforeEach(function () {
-        axiosPostStub = sinon.stub(axios, 'post');
-        connector = new XChainEncoderConnector(URL, PORT);
-    });
-
-    afterEach(function () {
-        sinon.restore();
-    });
-
+    beforeEach(setupConnector);
+    afterEach(teardownConnector);
     describe('constructor', function () {
         it('builds the URL as http://{url}:{port}', function () {
             assert.strictEqual(connector.url, `http://${URL}:${PORT}`);
@@ -68,11 +92,15 @@ describe('XChainEncoderConnector', function () {
             assert.deepStrictEqual(unkeyed.reqConfig, {});
         });
     });
+});
 
-    // The encoder 401s every JSON-RPC method when it is deployed with API_KEY set,
-    // ping included, so each request has to carry the header or the harness dies at
-    // bootstrap. These assert the third axios.post argument, which is where a
-    // regression would show up as undefined.
+// The encoder 401s every JSON-RPC method when it is deployed with API_KEY set,
+// ping included, so each request has to carry the header or the harness dies at
+// bootstrap. These assert the third axios.post argument, which is where a
+// regression would show up as undefined.
+describe('XChainEncoderConnector', function () {
+    beforeEach(setupConnector);
+    afterEach(teardownConnector);
     describe('api key header', function () {
         const methods = [
             ['ping', (c) => c.ping()],
@@ -100,7 +128,11 @@ describe('XChainEncoderConnector', function () {
             });
         });
     });
+});
 
+describe('XChainEncoderConnector', function () {
+    beforeEach(setupConnector);
+    afterEach(teardownConnector);
     describe('ping', function () {
         it('returns true when response.data.result is truthy', async function () {
             axiosPostStub.resolves({ data: { result: 'pong' } });
@@ -120,31 +152,12 @@ describe('XChainEncoderConnector', function () {
             assert.strictEqual(result, false);
         });
     });
+});
 
+describe('XChainEncoderConnector', function () {
+    beforeEach(setupConnector);
+    afterEach(teardownConnector);
     describe('createTx', function () {
-        const utxosList       = [{ txid: 'abc', vout: 0, value: 10000 }];
-        const pubkey          = 'mypubkey';
-        const customOutputs   = [{ address: 'addr1', value: 500 }];
-        const data            = { action: 'ISSUE' };
-        const rawData         = 'deadbeef';
-        const exactFee        = 1000;
-        const rbf             = false;
-        const outputType      = 'OP_RETURN';
-        const changeAddress   = 'changeaddr';
-        const p2shHash        = 'p2shHashHex';
-        const p2shHex         = 'p2shHexValue';
-        const compressedPubKey = 'compressedKey';
-
-        const fakeResult = { psbt: 'psbtHex', encoding: 'OP_RETURN' };
-
-        async function callCreateTx() {
-            return connector.createTx(
-                utxosList, pubkey, customOutputs, data, rawData,
-                exactFee, rbf, outputType, changeAddress,
-                p2shHash, p2shHex, compressedPubKey
-            );
-        }
-
         it('posts to the correct URL', async function () {
             axiosPostStub.resolves({ data: { result: fakeResult } });
             await callCreateTx();
@@ -158,7 +171,13 @@ describe('XChainEncoderConnector', function () {
             const [, payload] = axiosPostStub.firstCall.args;
             assert.strictEqual(payload.method, 'create_tx');
         });
+    });
+});
 
+describe('XChainEncoderConnector', function () {
+    beforeEach(setupConnector);
+    afterEach(teardownConnector);
+    describe('createTx', function () {
         it('maps all 12 parameters to the correct param keys', async function () {
             axiosPostStub.resolves({ data: { result: fakeResult } });
             await callCreateTx();
@@ -179,7 +198,13 @@ describe('XChainEncoderConnector', function () {
             assert.strictEqual(p.p2shHex,              p2shHex,        'p2shHex');
             assert.strictEqual(p.compressedPubKey,     compressedPubKey, 'compressedPubKey');
         });
+    });
+});
 
+describe('XChainEncoderConnector', function () {
+    beforeEach(setupConnector);
+    afterEach(teardownConnector);
+    describe('createTx', function () {
         it('returns result on success', async function () {
             axiosPostStub.resolves({ data: { result: fakeResult } });
             const result = await callCreateTx();
