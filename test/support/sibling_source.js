@@ -12,14 +12,20 @@
  *
  **********************************************************************
  *
- * Reads one xchain-indexer module's SOURCE TEXT the way the indexer lays it out.
+ * Reads one sibling service module's SOURCE TEXT the way the platform lays it out.
  *
- * WHY. The indexer splits a long module without moving its require path. The
+ * WHY. A service splits a long module without moving its require path. The
  * entry stays at `<name>.js` and its body moves into parts under a sibling
  * directory `<name>/`; a directory module keeps `<dir>/index.js` and puts its
  * parts beside it. A check that reads the entry alone goes red when the text it
  * wants moved into a part, and goes BLIND when it asserts the text is ABSENT,
  * because what it must not find now sits in a file it never opens.
+ *
+ * The convention is the platform's, not one repo's: xchain-indexer split this
+ * way first and xchain-hub now does too, so anything reading either service's
+ * source text reads it through here. Reading a hub entry directly is how the
+ * EQUIV gate-input parity suite went red when the hub moved four gate call
+ * sites into same-stem part files while every entry path still resolved.
  *
  * WHAT. The entry followed by every `.js` file under its part directory, at any
  * depth, in sorted order. Only a directory spelled exactly as the entry's own

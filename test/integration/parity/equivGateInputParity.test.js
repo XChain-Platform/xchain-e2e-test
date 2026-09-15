@@ -69,7 +69,7 @@
 const assert = require('assert');
 const fs     = require('fs');
 const path   = require('path');
-const { readModuleSource } = require('../../support/indexer_source.js');
+const { readModuleSource } = require('../../support/sibling_source.js');
 
 const HUB_EQ_PATH = path.resolve(__dirname, '../../../../xchain-hub/src/equivocation_header.js');
 const IDX_EQ_PATH = path.resolve(__dirname, '../../../../xchain-indexer/src/equivocation_header.js');
@@ -82,9 +82,13 @@ const idxEq = require(IDX_EQ_PATH);
 // monorepo root (two up from test/integration/parity).
 const ROOT = path.resolve(__dirname, '../../../..');
 function srcOf(rel) {
-    // An indexer module is read with every part it was split into (support/indexer_source.js).
-    const abs = path.join(ROOT, rel);
-    return rel.startsWith('xchain-indexer/') ? readModuleSource(abs) : fs.readFileSync(abs, 'utf8');
+    // Read through the part-aware reader, because a service splits a long module
+    // without moving its require path: the entry keeps the path this suite names
+    // and the body moves into same-stem part files beside it. Both services do
+    // this, so both are read the same way (support/sibling_source.js). Anchoring
+    // on the entry alone is what made four of these cases red against a hub whose
+    // every path still resolved.
+    return readModuleSource(path.join(ROOT, rel));
 }
 
 function gateInputArg(source, anchorRegex) {
