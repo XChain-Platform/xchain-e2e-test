@@ -64,17 +64,15 @@ function haveConnectors() {
     return global.regtestMinerConnector && global.utxoTrackerConnector && global.nodeConnector;
 }
 
-describe('[sdk] template:amm (LP-as-real-tick round trip)', function () {
-    this.timeout(0);
+let AMM_SRC;               // loaded in before() so a missing xchain-contracts skips this suite instead of aborting the whole run
+const DEC = 8;             // divisible pair so swap output (a fraction) is representable
+const LIQ = 10000;         // deposited per side for the initial liquidity
+const SWAP_IN = 1000;      // tokenA sold into the pool
+const MINT_A = LIQ + SWAP_IN; // provider also funds the swap from the same address
 
-    let AMM_SRC;               // loaded in before() so a missing xchain-contracts skips this suite instead of aborting the whole run
-    const DEC = 8;             // divisible pair so swap output (a fraction) is representable
-    const LIQ = 10000;         // deposited per side for the initial liquidity
-    const SWAP_IN = 1000;      // tokenA sold into the pool
-    const MINT_A = LIQ + SWAP_IN; // provider also funds the swap from the same address
+let sdk, lp, tokenA, tokenB, lpTick, contractIndex;
 
-    let sdk, lp, tokenA, tokenB, lpTick, contractIndex;
-
+function registerAmmSetup() {
     before(async function () {
         if (!haveConnectors()) this.skip();
 
@@ -117,8 +115,9 @@ describe('[sdk] template:amm (LP-as-real-tick round trip)', function () {
         console.log('    [amm] lp=' + lp.address);
         console.log('    [amm] tokenA=' + tokenA + ' tokenB=' + tokenB + ' lpTick=' + lpTick);
     });
+}
 
-    it('DEPLOY issues the LP tick in the constructor', async function () {
+async function testDeployIssuesLpTick() {
         const res = await deployContract(sdk,
             {
                 code: AMM_SRC,
@@ -139,9 +138,9 @@ describe('[sdk] template:amm (LP-as-real-tick round trip)', function () {
         expect(await readState(sdk, contractIndex, 'lpTick'), 'lpTick recorded in state').to.equal(lpTick);
         expect(await readState(sdk, contractIndex, 'totalShares'), 'starts with zero shares').to.equal('0');
         console.log('    [amm] contractIndex=' + contractIndex + ' lpTokenInfo=' + JSON.stringify(info));
-    });
+}
 
-    it('addLiquidity (BATCH: DEPOSIT A, DEPOSIT B, EXECUTE) mints LP shares', async function () {
+async function testAddLiquidityMintsShares() {
         const built = await sdk.batch()
             .deposit({ contractActionIndex: contractIndex, tick: tokenA, quantity: LIQ })
             .deposit({ contractActionIndex: contractIndex, tick: tokenB, quantity: LIQ })
@@ -162,9 +161,9 @@ describe('[sdk] template:amm (LP-as-real-tick round trip)', function () {
         expect(shares, 'totalShares = sqrt(depA*depB)').to.equal(LIQ);
         // The LP tick is a real tick credited to the provider.
         expect(await waitForBalance(sdk, lp.address, lpTick, LIQ), 'provider holds LP shares').to.equal(LIQ);
-    });
+}
 
-    it('swap (BATCH: DEPOSIT in, EXECUTE) returns the other token and grows k', async function () {
+async function testSwapReturnsToken() {
         const kBefore = Number(await readState(sdk, contractIndex, 'reserveA')) * Number(await readState(sdk, contractIndex, 'reserveB'));
 
         const built = await sdk.batch()
@@ -186,9 +185,9 @@ describe('[sdk] template:amm (LP-as-real-tick round trip)', function () {
         console.log('    [amm] k before=' + kBefore + ' after=' + kAfter + ' (delta=' + (kAfter - kBefore) + ')');
         expect(kAfter, 'k is non-decreasing across the swap').to.be.greaterThan(kBefore - 1e-6);
         expect(await waitForBalance(sdk, lp.address, tokenB, (v) => v > 0), 'swapper received tokenB').to.be.greaterThan(0);
-    });
+}
 
-    it('removeLiquidity (BATCH: DEPOSIT LP, EXECUTE) burns shares and returns both reserves', async function () {
+async function testRemoveLiquidityReturnsReserves() {
         const shares = await waitForBalance(sdk, lp.address, lpTick, LIQ);
         expect(shares, 'provider has LP shares to redeem').to.equal(LIQ);
 
@@ -208,5 +207,13 @@ describe('[sdk] template:amm (LP-as-real-tick round trip)', function () {
         expect(await waitForBalance(sdk, lp.address, lpTick, 0), 'LP shares burned').to.equal(0);
         // Provider got the full pool back: reserveA went in at LIQ + the swap's SWAP_IN.
         expect(await waitForBalance(sdk, lp.address, tokenA, LIQ + SWAP_IN), 'provider redeemed tokenA').to.equal(LIQ + SWAP_IN);
-    });
+}
+
+describe('[sdk] template:amm (LP-as-real-tick round trip)', function () {
+    this.timeout(0);
+    registerAmmSetup();
+    it('DEPLOY issues the LP tick in the constructor', testDeployIssuesLpTick);
+    it('addLiquidity (BATCH: DEPOSIT A, DEPOSIT B, EXECUTE) mints LP shares', testAddLiquidityMintsShares);
+    it('swap (BATCH: DEPOSIT in, EXECUTE) returns the other token and grows k', testSwapReturnsToken);
+    it('removeLiquidity (BATCH: DEPOSIT LP, EXECUTE) burns shares and returns both reserves', testRemoveLiquidityReturnsReserves);
 });
