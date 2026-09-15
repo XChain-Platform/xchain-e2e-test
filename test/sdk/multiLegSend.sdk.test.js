@@ -54,25 +54,31 @@ function assertDistinctLegs(actionString, addresses) {
         expect(segs.filter(s => s === address).length, address + ' appears once in ' + actionString).to.equal(1);
 }
 
+let sdk, issuer, tickA, tickB;
+let multiLegReady;
+
+async function prepareMultiLeg() {
+    if (multiLegReady !== undefined) return multiLegReady;
+    if (!haveConnectors()) return (multiLegReady = false);
+    sdk = makeSdk();
+    issuer = await fundedGasAddress(sdk, 1);
+    tickA = uniqueTick('MLA');
+    tickB = uniqueTick('MLB');
+    for (const tick of [tickA, tickB]) {
+        const res = await submit(sdk,
+            { action: 'ISSUE', params: { tick, maxSupply: 1000000, maxMint: 100000, decimals: 0, description: 'multi-leg send', mintSupply: 1000 } },
+            { pubkey: issuer.address, change: issuer.address },
+            submitOpts({ wif: issuer.wif }));
+        expect(res.indexed.status, 'ISSUE ' + tick).to.equal('valid');
+    }
+    console.log('    [sdk] issuer=' + issuer.address + ' ticks=' + tickA + ',' + tickB);
+    return (multiLegReady = true);
+}
+
 describe('[sdk] multi-leg SEND', function () {
     this.timeout(0);
-
-    let sdk, issuer, tickA, tickB;
-
     before(async function () {
-        if (!haveConnectors()) this.skip();
-        sdk = makeSdk();
-        issuer = await fundedGasAddress(sdk, 1);
-        tickA = uniqueTick('MLA');
-        tickB = uniqueTick('MLB');
-        for (const tick of [tickA, tickB]) {
-            const res = await submit(sdk,
-                { action: 'ISSUE', params: { tick, maxSupply: 1000000, maxMint: 100000, decimals: 0, description: 'multi-leg send', mintSupply: 1000 } },
-                { pubkey: issuer.address, change: issuer.address },
-                submitOpts({ wif: issuer.wif }));
-            expect(res.indexed.status, 'ISSUE ' + tick).to.equal('valid');
-        }
-        console.log('    [sdk] issuer=' + issuer.address + ' ticks=' + tickA + ',' + tickB);
+        if (!(await prepareMultiLeg())) this.skip();
     });
 
     it('v1: three legs on one tick credit three recipients their own amounts', async function () {
@@ -98,6 +104,13 @@ describe('[sdk] multi-leg SEND', function () {
         for (let i = 0; i < r.length; i++)
             expect(balanceFor(await sdk.getBalances(r[i].address), tickA), 'leg ' + i + ' credited once').to.equal(amounts[i]);
         expect(balanceFor(await sdk.getBalances(issuer.address), tickA), 'issuer debited the exact total').to.equal(1000 - 60);
+    });
+});
+
+describe('[sdk] multi-leg SEND', function () {
+    this.timeout(0);
+    before(async function () {
+        if (!(await prepareMultiLeg())) this.skip();
     });
 
     it('v2: two legs on two different ticks credit each recipient its own tick', async function () {
@@ -126,6 +139,13 @@ describe('[sdk] multi-leg SEND', function () {
         expect(balanceFor(await sdk.getBalances(r1.address), tickB), 'r1 got no tickB').to.equal(0);
         expect(balanceFor(await sdk.getBalances(r2.address), tickB), 'r2 got tickB').to.equal(22);
         expect(balanceFor(await sdk.getBalances(r2.address), tickA), 'r2 got no tickA').to.equal(0);
+    });
+});
+
+describe('[sdk] multi-leg SEND', function () {
+    this.timeout(0);
+    before(async function () {
+        if (!(await prepareMultiLeg())) this.skip();
     });
 
     it('v3: two legs carry their own memos and are recorded per leg', async function () {
@@ -166,6 +186,13 @@ describe('[sdk] multi-leg SEND', function () {
             expect(leg1, 'leg 1 sends row').to.not.equal(null);
             expect(leg2, 'leg 2 sends row').to.not.equal(null);
         }
+    });
+});
+
+describe('[sdk] multi-leg SEND', function () {
+    this.timeout(0);
+    before(async function () {
+        if (!(await prepareMultiLeg())) this.skip();
     });
 
     it('forcing a multi-leg version with a flat field map is refused, not silently doubled', async function () {
