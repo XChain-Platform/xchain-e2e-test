@@ -62,11 +62,77 @@ const assert = require('assert')
 const rc = require('../helpers/rollcallHelper')
 const { requireFederationEnv } = require('../helpers/federationGuards')
 
+let ctx = null
+let epochs = []
+
+function registerEpochDriveTest() {
+    it('every driven epoch ROLLS with every roster source present', async function () {
+        if (!ctx || !epochs.length) this.skip()
+
+        const idle = ctx.roster[rc.IDLE_SEED_INDEX]
+        assert.ok(idle && idle.seed && idle.pubkey, 'the roster carries no idle entry with a seed; cannot self-publish for it')
+
+        for (const E of epochs){
+            const windowEnd = Number(rc.rca().rollcallWindowEndHeight(E, ctx.network))
+            const row = await rc.driveEpoch(ctx, E, {
+                silentHubs: [],
+                // BEFORE the rank-ladder climb, not after it. The close counts a
+                // DOGE row only if its block is stamped no later than the BTC
+                // window-end block, and the climb mines BTC up to that block
+                // whenever a high rank has to unlock. Measured 2026-09-08: with
+                // the publish in afterPublish, epoch 4350 counted the idle key by
+                // one second and epoch 4380 (idle elected leader, so every engine
+                // was a sweeper up to rank 3) stamped the cut at 04:48:07 and
+                // parsed the idle's action at 04:48:33, ABSENT. Here BTC sits at
+                // about E + 6 and the cut is six blocks away.
+                beforePublish: async () => {
+                    const tip = await ctx.btcTip()
+                    assert.ok(tip < windowEnd - 1,
+                        'epoch ' + E + ': BTC tip ' + tip + ' is already at the window end ' + windowEnd +
+                        ', so a publish now would stamp after the cut and read as the absence this tool exists to age')
+                    // The idle key never signs through an engine (that is what
+                    // makes it idle), so it is present only through the
+                    // censorship escape hatch: its own one-pair action, over the
+                    // form this epoch takes on this venue (v1 with the full list
+                    // when the gates rail is armed, v0 otherwise).
+                    const bh = await indexerConnector.call('getblockhashes', { block_index: E })
+                    const ledgerHash = String(bh.ledger_hash).toLowerCase()
+                    const gates = rc.gatesForEpoch(E, ctx.network)
+                    const sig = rc.signCanonical(idle.seed, rc.canonical(ctx.network, E, ledgerHash, gates))
+                    const wire = rc.buildWire(E, ledgerHash, idle.pubkey, [{ pubkey: idle.pubkey, sig: sig }], gates)
+                    await rc.publishWire(ctx, wire)
+                    // Indexed BEFORE the window-end cut, or the close reads it as
+                    // the very absence this tool is here to age out.
+                    await rc.waitForOnChainSigners(ctx, E, [idle.pubkey])
+                },
+            })
+            assert.strictEqual(Number(row.rolled), 1,
+                'epoch ' + E + ' did not ROLL; an unrolled epoch is skipped by the streak walk and ages nothing')
+            const absent = await rc.absenceRows(ctx, E)
+            assert.strictEqual(absent.length, 0,
+                'epoch ' + E + ' rolled with ' + absent.length + ' absence(s) (' +
+                absent.map(a => String(a.source)).join(', ') + '); every source had to be present, ' +
+                'and a new absence here makes the window dirtier, not cleaner')
+            console.log('    [age] epoch ' + E + ' ROLLED, 0 absent')
+        }
+    })
+}
+
+function registerCleanPreconditionTest() {
+    it('the strict precondition is clean afterwards', async function () {
+        if (!ctx || !epochs.length) this.skip()
+        // The exact check every acceptance suite runs at bringUpVenue, in its
+        // strict form: it throws with the remaining absences if any is still
+        // inside the window, which is the only verdict that matters here.
+        const res = await rc.assertRosterStreaksClean(ctx, false)
+        assert.ok(res && Number(res.priorAbsences) === 0,
+            'the precondition read ' + JSON.stringify(res) + ' after the drive')
+        console.log('    [age] precondition clean: ' + res.sourcesRead + ' source(s) read, 0 inside the window')
+    })
+}
+
 describe('VENUE TOOL: age stale roll-call absences out of the streak window', function () {
     this.timeout(90 * 60 * 1000)
-
-    let ctx = null
-    let epochs = []
 
     before(async function () {
         if (!rc.requireRollcallVenue(this)) return
@@ -118,65 +184,6 @@ describe('VENUE TOOL: age stale roll-call absences out of the streak window', fu
 
     after(async function () { await rc.tearDownVenue(ctx) })
 
-    it('every driven epoch ROLLS with every roster source present', async function () {
-        if (!ctx || !epochs.length) this.skip()
-
-        const idle = ctx.roster[rc.IDLE_SEED_INDEX]
-        assert.ok(idle && idle.seed && idle.pubkey, 'the roster carries no idle entry with a seed; cannot self-publish for it')
-
-        for (const E of epochs){
-            const windowEnd = Number(rc.rca().rollcallWindowEndHeight(E, ctx.network))
-            const row = await rc.driveEpoch(ctx, E, {
-                silentHubs: [],
-                // BEFORE the rank-ladder climb, not after it. The close counts a
-                // DOGE row only if its block is stamped no later than the BTC
-                // window-end block, and the climb mines BTC up to that block
-                // whenever a high rank has to unlock. Measured 2026-09-08: with
-                // the publish in afterPublish, epoch 4350 counted the idle key by
-                // one second and epoch 4380 (idle elected leader, so every engine
-                // was a sweeper up to rank 3) stamped the cut at 04:48:07 and
-                // parsed the idle's action at 04:48:33, ABSENT. Here BTC sits at
-                // about E + 6 and the cut is six blocks away.
-                beforePublish: async () => {
-                    const tip = await ctx.btcTip()
-                    assert.ok(tip < windowEnd - 1,
-                        'epoch ' + E + ': BTC tip ' + tip + ' is already at the window end ' + windowEnd +
-                        ', so a publish now would stamp after the cut and read as the absence this tool exists to age')
-                    // The idle key never signs through an engine (that is what
-                    // makes it idle), so it is present only through the
-                    // censorship escape hatch: its own one-pair action, over the
-                    // form this epoch takes on this venue (v1 with the full list
-                    // when the gates rail is armed, v0 otherwise).
-                    const bh = await indexerConnector.call('getblockhashes', { block_index: E })
-                    const ledgerHash = String(bh.ledger_hash).toLowerCase()
-                    const gates = rc.gatesForEpoch(E, ctx.network)
-                    const sig = rc.signCanonical(idle.seed, rc.canonical(ctx.network, E, ledgerHash, gates))
-                    const wire = rc.buildWire(E, ledgerHash, idle.pubkey, [{ pubkey: idle.pubkey, sig: sig }], gates)
-                    await rc.publishWire(ctx, wire)
-                    // Indexed BEFORE the window-end cut, or the close reads it as
-                    // the very absence this tool is here to age out.
-                    await rc.waitForOnChainSigners(ctx, E, [idle.pubkey])
-                },
-            })
-            assert.strictEqual(Number(row.rolled), 1,
-                'epoch ' + E + ' did not ROLL; an unrolled epoch is skipped by the streak walk and ages nothing')
-            const absent = await rc.absenceRows(ctx, E)
-            assert.strictEqual(absent.length, 0,
-                'epoch ' + E + ' rolled with ' + absent.length + ' absence(s) (' +
-                absent.map(a => String(a.source)).join(', ') + '); every source had to be present, ' +
-                'and a new absence here makes the window dirtier, not cleaner')
-            console.log('    [age] epoch ' + E + ' ROLLED, 0 absent')
-        }
-    })
-
-    it('the strict precondition is clean afterwards', async function () {
-        if (!ctx || !epochs.length) this.skip()
-        // The exact check every acceptance suite runs at bringUpVenue, in its
-        // strict form: it throws with the remaining absences if any is still
-        // inside the window, which is the only verdict that matters here.
-        const res = await rc.assertRosterStreaksClean(ctx, false)
-        assert.ok(res && Number(res.priorAbsences) === 0,
-            'the precondition read ' + JSON.stringify(res) + ' after the drive')
-        console.log('    [age] precondition clean: ' + res.sourcesRead + ' source(s) read, 0 inside the window')
-    })
+    registerEpochDriveTest()
+    registerCleanPreconditionTest()
 })
