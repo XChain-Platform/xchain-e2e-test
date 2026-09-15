@@ -63,31 +63,59 @@
 
 'use strict';
 
-const support = require('./oracleBatchReplay.integration.test/support.test');
-const { assert } = support;
+// Four validators, three rounds: the same shape the venue's own smoke drill
+// uses, so a failure here is about replay and not about the publish rail.
+const VALIDATORS = 4;
+const ROUNDS     = 3;
 
-function testIsolation() {
-    const { liveNode, replayNode, liveIsolation, replayIsolation } = support.state;
-        for (const [name, ev] of [['live', liveIsolation], ['replay', replayIsolation]]) {
-            assert.ok(ev, name + ' node produced no isolation evidence');
-            assert.strictEqual(ev.p2pValidatorAddrSet, false,
-                name + ' node was given a P2P validator address, so its hub would run consensus and an oracle round of ' +
-                'its own; every snapshot it held would then be suspect');
-            assert.strictEqual(ev.seedNodesSet, false, name + ' node was given seed nodes, so its hub had peers to learn from');
-            assert.strictEqual(ev.hubSnapshotsAtBoot, 0,
-                name + ' node\'s hub already held ' + ev.hubSnapshotsAtBoot + ' price snapshot(s) before a single block ' +
-                'reached it; nothing it reconstructs afterwards can be attributed to the chain');
-            assert.strictEqual(ev.hubValidators, 0,
-                name + ' node\'s hub already knew ' + ev.hubValidators + ' validator(s); it was not built from nothing');
-        }
-    }
+// The one verdict a well-formed PRICE can legitimately receive on a non-BTC
+// chain today besides an accept. Named as a constant so the failure message can
+// quote it verbatim.
+const CAPABILITY_GAP_STATUS = 'invalid: insufficient signer stake';
 
-// Two whole nodes, two full chain replays and a live publish rail. The budget
-// is per-suite; every wait inside is a poll that returns the moment it can.
-support.addTest('both nodes really were isolated: an empty hub, no validators, no peers', testIsolation, __filename);
+// The price-sync grace BOTH nodes run at, in seconds.
+//
+// MEASURED, and the reason this is not left at the frozen constant: at
+// HUB_SYNC_WATERMARK_GRACE_S.price = 4800 a chain-only node replays the whole
+// history in minutes and then stops at the first block younger than 4800
+// seconds, deferring it once a minute until the hub's wall clock is 80 minutes
+// past that block's time. Both nodes here read a freshly published block, so at
+// the frozen value neither could reach the target inside any sensible budget.
+// 600 is the value the platform ran on until this spec moved it, so it is a real
+// barrier with real mirror-coverage semantics rather than a barrier switched off.
+// It is applied IDENTICALLY to both nodes, which is what keeps the comparison
+// sound; the indexer honours the override on regtest only. The drill that must
+// exercise the barrier at 4800 is AT5, not this one.
+const PRICE_GRACE_S = 600;
 
-require('./oracleBatchReplay.integration.test/01_the_live_node_reconstructed_a_price_snapshot_for_every_round_the_federation_put_on_the_chain.test');
-require('./oracleBatchReplay.integration.test/02_the_replay_node_rebuilt_the_same_snapshots_the_live_node_did.test');
-require('./oracleBatchReplay.integration.test/03_the_replay_nodes_own_indexer_can_read_what_its_hub_rebuilt.test');
-require('./oracleBatchReplay.integration.test/04_every_fee_bearing_action_on_the_chain_replays_to_the_identical_validity_verdict.test');
-require('./oracleBatchReplay.integration.test/05_every_action_on_the_chain_fee_bearing_or_not_replays_to_the_identical_verdict.test');
+// Batch window knobs, set on the PROCESS before the venue builds its publishers
+// (OraclePublisher reads them in its constructor) and restored afterwards.
+//
+// WHY A ONE-ROUND WINDOW. PRICE v0 has landed in the hub, PRICE_BATCH_ACTIVATION
+// is genesis on regtest, and `onRoundFinalized` now buffers every finalized round
+// instead of publishing it. The publish venue drives rounds one at a time and
+// waits for each one to reach the chain, so at the shipped six-round window it
+// waits forever and throws: the first five rounds of a window produce no
+// transaction at all. A window of one makes every finalized round its own batch,
+// which still puts a REAL `PRICE|0|` wire on the chain (the thing AT2 has to
+// replay) while keeping the venue's one-round-at-a-time contract intact. Window
+// COMPOSITION is AT1's question, not this suite's.
+const BATCH_WINDOW_ROUNDS = 1;
+// The window's post-close grace, shipped at 300000ms. Nothing arrives late in a
+// one-round window, so the whole 5 minutes would be dead time per round.
+const BATCH_GRACE_MS = 3000;
+
+function histogram(rows, field) {
+    const out = {};
+    for (const r of rows) out[String(r[field])] = (out[String(r[field])] || 0) + 1;
+    return out;
+}
+
+function describeHistogram(h) {
+    return Object.keys(h).map((k) => h[k] + ' x "' + k + '"').join(', ') || 'nothing';
+}
+
+module.exports = {
+    VALIDATORS, ROUNDS, CAPABILITY_GAP_STATUS, PRICE_GRACE_S,
+    BATCH_WINDOW_ROUNDS, BATCH_GRACE_MS, histogram, describeHistogram
+};

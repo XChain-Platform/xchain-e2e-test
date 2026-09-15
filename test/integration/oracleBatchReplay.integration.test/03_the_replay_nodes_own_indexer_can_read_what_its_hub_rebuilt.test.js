@@ -63,31 +63,17 @@
 
 'use strict';
 
-const support = require('./oracleBatchReplay.integration.test/support.test');
-const { assert } = support;
+const support = require('./support.test');
+const { assert, histogram, describeHistogram, CAPABILITY_GAP_STATUS, SNAPSHOT_COMPARE_KEYS } = support;
 
-function testIsolation() {
-    const { liveNode, replayNode, liveIsolation, replayIsolation } = support.state;
-        for (const [name, ev] of [['live', liveIsolation], ['replay', replayIsolation]]) {
-            assert.ok(ev, name + ' node produced no isolation evidence');
-            assert.strictEqual(ev.p2pValidatorAddrSet, false,
-                name + ' node was given a P2P validator address, so its hub would run consensus and an oracle round of ' +
-                'its own; every snapshot it held would then be suspect');
-            assert.strictEqual(ev.seedNodesSet, false, name + ' node was given seed nodes, so its hub had peers to learn from');
-            assert.strictEqual(ev.hubSnapshotsAtBoot, 0,
-                name + ' node\'s hub already held ' + ev.hubSnapshotsAtBoot + ' price snapshot(s) before a single block ' +
-                'reached it; nothing it reconstructs afterwards can be attributed to the chain');
-            assert.strictEqual(ev.hubValidators, 0,
-                name + ' node\'s hub already knew ' + ev.hubValidators + ' validator(s); it was not built from nothing');
-        }
+function test04() {
+    const { hubDb, liveNode, replayNode, venue, rounds, expectedPairs, targetHeight, livePrices, replayPrices, liveSnaps, replaySnaps, replayMirror, snapDiff, verdictDiff, feeVerdictDiff, liveIsolation, replayIsolation, liveVerdicts, replayVerdicts, wireVersions, venuePublicationBytes, feeCoordinates, feeStatuses, livePushQueue, replayPushQueue } = support.state;
+        // The reconstruction is only useful if it comes back DOWN the mirror into
+        // the connection the settlement path actually reads.
+        assert.strictEqual(replayMirror.length, replaySnaps.length,
+            'the replay node\'s hub holds ' + replaySnaps.length + ' snapshot(s) but hub_db_sync carried ' +
+            replayMirror.length + ' of them down into the mirror the indexer reads. A reconstruction the node ' +
+            'cannot see is not a reconstruction.');
     }
 
-// Two whole nodes, two full chain replays and a live publish rail. The budget
-// is per-suite; every wait inside is a poll that returns the moment it can.
-support.addTest('both nodes really were isolated: an empty hub, no validators, no peers', testIsolation, __filename);
-
-require('./oracleBatchReplay.integration.test/01_the_live_node_reconstructed_a_price_snapshot_for_every_round_the_federation_put_on_the_chain.test');
-require('./oracleBatchReplay.integration.test/02_the_replay_node_rebuilt_the_same_snapshots_the_live_node_did.test');
-require('./oracleBatchReplay.integration.test/03_the_replay_nodes_own_indexer_can_read_what_its_hub_rebuilt.test');
-require('./oracleBatchReplay.integration.test/04_every_fee_bearing_action_on_the_chain_replays_to_the_identical_validity_verdict.test');
-require('./oracleBatchReplay.integration.test/05_every_action_on_the_chain_fee_bearing_or_not_replays_to_the_identical_verdict.test');
+support.addTest('the replay node\'s own indexer can read what its hub rebuilt', test04, __filename);

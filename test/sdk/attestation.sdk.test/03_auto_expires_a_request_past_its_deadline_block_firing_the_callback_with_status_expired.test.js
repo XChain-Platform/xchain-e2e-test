@@ -51,39 +51,48 @@
  *
  ********************************************************************/
 
-const support = require('./attestation.sdk.test/support.sdk.test');
-const { expect, AttestationHelpers } = support;
+const support = require('./support.sdk.test');
+const {
+    expect, submit, mine, submitOpts, attestationHelper, requireResponsibleValidator,
+    AttestationHelpers, findAttestation, xchainEscrowSum, attestRewards
+} = support;
 
-function testBuilders() {
-    const { sdk } = support.state;
-        // http_get: https-only, returns the normalised URL.
-        const url = 'https://example.com/v1/score/123';
-        expect(AttestationHelpers.httpGet(url)).to.equal(url);
-        expect(AttestationHelpers.httpGet({ url })).to.equal(url);
-        expect(() => AttestationHelpers.httpGet('http://insecure.example.com')).to.throw(/https/i);
-        expect(() => AttestationHelpers.httpGet('https://x.example.com/' + 'a'.repeat(2100))).to.throw(/2048/);
+async function test04() {
+    const { sdk, operator, validator, contractIndex } = support.state;
+        const url = AttestationHelpers.httpGet('https://example.com/v1/expiring/789');
+        const exec = await submit(sdk,
+            { action: 'EXECUTE', params: { contractActionIndex: contractIndex, method: 'askOracleExpiring', params: [url] } },
+            { pubkey: operator.address, change: operator.address },
+            submitOpts({ wif: operator.wif })
+        );
+        expect(exec.indexed.status).to.equal('valid');
 
-        // llm: builds a JSON envelope with prompt + optional fields.
-        const env = JSON.parse(AttestationHelpers.llm({ prompt: 'Score this', maxTokens: 64, format: 'json_object' }));
-        expect(env.prompt).to.equal('Score this');
-        expect(env.max_tokens).to.equal(64);
-        expect(env.format).to.equal('json_object');
-        expect(() => AttestationHelpers.llm({})).to.throw(/prompt/i);
+        const request = await global.indexerDatabase.waitForAttestationRequest({
+            txHash:        exec.txid,
+            requestStatus: 'pending'
+        });
+        expect(request, 'expiring request should be pending').to.exist;
+        const expiringRequestId = request.request_id;
 
-        // requestOptions: surfaces only the two fields the VM gateway reads.
-        const opts = AttestationHelpers.requestOptions({ redundancy: 3, deadlineBlocks: 20, junk: 'x' });
-        expect(opts).to.deep.equal({ redundancy: 3, deadlineBlocks: 20 });
+        // deadlineBlocks=2 + margin so the per-block expiry pipeline runs.
+        await mine(5);
 
-        // The builder is also reachable on the instance (parity with
-        // sdk.messaging / sdk.gatedFile).
-        expect(sdk.attestation.httpGet(url)).to.equal(url);
+        const expired = await global.indexerDatabase.waitForAttestationRequest({
+            requestId:     expiringRequestId,
+            requestStatus: 'expired'
+        }, 30000);
+        expect(expired, 'request should auto-expire past DEADLINE_BLOCK').to.exist;
+
+        const getVal = (st, key) => {
+            const r = ((st && st.data) || []).find(x => x.state_key === key);
+            return r ? JSON.parse(r.state_value) : undefined;
+        };
+        const stStatus  = await sdk.getContractState(contractIndex, 'expiry_status');
+        const stContext = await sdk.getContractState(contractIndex, 'expiry_context');
+        const stPayload = await sdk.getContractState(contractIndex, 'expiry_payload');
+        expect(getVal(stStatus,  'expiry_status')).to.equal('expired');
+        expect(getVal(stContext, 'expiry_context')).to.equal('ctx-expiry');
+        expect(getVal(stPayload, 'expiry_payload')).to.equal('');
     }
 
-support.addTest('sdk.attestation builders validate + shape request payloads', testBuilders, __filename);
-
-require('./attestation.sdk.test/01_execute_emits_attest_v0_request_stored_pending_and_readable_via_sdk_get_attestations.test');
-require('./attestation.sdk.test/02_a_signed_attest_v1_response_fulfills_the_request_and_fires_the_callback.test');
-require('./attestation.sdk.test/03_auto_expires_a_request_past_its_deadline_block_firing_the_callback_with_status_expired.test');
-require('./attestation.sdk.test/04_rejects_a_response_signed_by_an_unstaked_validator_request_stays_pending.test');
-require('./attestation.sdk.test/05_a_paid_request_escrows_the_fee_from_the_caller_fulfillment_credits_validator_rewards_collect_pays_the_staker.test');
-require('./attestation.sdk.test/06_a_paid_request_that_expires_past_its_deadline_block_refunds_the_fee_to_the_caller.test');
+support.addTest('auto-expires a request past its DEADLINE_BLOCK, firing the callback with status=expired', test04, __filename);

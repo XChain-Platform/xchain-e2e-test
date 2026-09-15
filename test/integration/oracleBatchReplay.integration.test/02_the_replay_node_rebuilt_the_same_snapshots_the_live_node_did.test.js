@@ -63,31 +63,29 @@
 
 'use strict';
 
-const support = require('./oracleBatchReplay.integration.test/support.test');
-const { assert } = support;
+const support = require('./support.test');
+const { assert, histogram, describeHistogram, CAPABILITY_GAP_STATUS, SNAPSHOT_COMPARE_KEYS } = support;
 
-function testIsolation() {
-    const { liveNode, replayNode, liveIsolation, replayIsolation } = support.state;
-        for (const [name, ev] of [['live', liveIsolation], ['replay', replayIsolation]]) {
-            assert.ok(ev, name + ' node produced no isolation evidence');
-            assert.strictEqual(ev.p2pValidatorAddrSet, false,
-                name + ' node was given a P2P validator address, so its hub would run consensus and an oracle round of ' +
-                'its own; every snapshot it held would then be suspect');
-            assert.strictEqual(ev.seedNodesSet, false, name + ' node was given seed nodes, so its hub had peers to learn from');
-            assert.strictEqual(ev.hubSnapshotsAtBoot, 0,
-                name + ' node\'s hub already held ' + ev.hubSnapshotsAtBoot + ' price snapshot(s) before a single block ' +
-                'reached it; nothing it reconstructs afterwards can be attributed to the chain');
-            assert.strictEqual(ev.hubValidators, 0,
-                name + ' node\'s hub already knew ' + ev.hubValidators + ' validator(s); it was not built from nothing');
-        }
+function test03() {
+    const { hubDb, liveNode, replayNode, venue, rounds, expectedPairs, targetHeight, livePrices, replayPrices, liveSnaps, replaySnaps, replayMirror, snapDiff, verdictDiff, feeVerdictDiff, liveIsolation, replayIsolation, liveVerdicts, replayVerdicts, wireVersions, venuePublicationBytes, feeCoordinates, feeStatuses, livePushQueue, replayPushQueue } = support.state;
+        assert.ok(snapDiff, 'the run produced no snapshot comparison');
+        assert.strictEqual(snapDiff.missing.length, 0,
+            'the replay node is missing ' + snapDiff.missing.length + ' snapshot(s) the live node holds: ' +
+            snapDiff.missing.slice(0, 10).map((r) => r.round_number + '/' + r.coin_pair).join(', ') +
+            '. The chain alone was not enough to rebuild them. Its PRICE verdicts were: ' +
+            describeHistogram(histogram(replayPrices, 'status')));
+        assert.strictEqual(snapDiff.mismatched.length, 0,
+            'the replay node rebuilt ' + snapDiff.mismatched.length + ' snapshot(s) that differ from the live node: ' +
+            snapDiff.mismatched.slice(0, 10).map((m) =>
+                m.key + ' on ' + m.columns.map((c) => c + ' (live ' + m.live[c] + ' vs replay ' + m.replay[c] + ')').join(' and ')
+            ).join('; '));
+        assert.strictEqual(snapDiff.extra.length, 0,
+            'the replay node holds ' + snapDiff.extra.length + ' snapshot(s) the live node does not, for rounds the ' +
+            'federation finalized; a chain-only node must not invent history: ' +
+            snapDiff.extra.slice(0, 10).map((r) => r.round_number + '/' + r.coin_pair).join(', '));
+        assert.ok(snapDiff.matched.length > 0,
+            'nothing was compared: neither node holds a snapshot for any of the ' + rounds.length +
+            ' round(s) the federation finalized, so this assertion proved nothing');
     }
 
-// Two whole nodes, two full chain replays and a live publish rail. The budget
-// is per-suite; every wait inside is a poll that returns the moment it can.
-support.addTest('both nodes really were isolated: an empty hub, no validators, no peers', testIsolation, __filename);
-
-require('./oracleBatchReplay.integration.test/01_the_live_node_reconstructed_a_price_snapshot_for_every_round_the_federation_put_on_the_chain.test');
-require('./oracleBatchReplay.integration.test/02_the_replay_node_rebuilt_the_same_snapshots_the_live_node_did.test');
-require('./oracleBatchReplay.integration.test/03_the_replay_nodes_own_indexer_can_read_what_its_hub_rebuilt.test');
-require('./oracleBatchReplay.integration.test/04_every_fee_bearing_action_on_the_chain_replays_to_the_identical_validity_verdict.test');
-require('./oracleBatchReplay.integration.test/05_every_action_on_the_chain_fee_bearing_or_not_replays_to_the_identical_verdict.test');
+support.addTest('the replay node rebuilt the same snapshots the live node did, on ' + SNAPSHOT_COMPARE_KEYS.join(', '), test03, __filename);
