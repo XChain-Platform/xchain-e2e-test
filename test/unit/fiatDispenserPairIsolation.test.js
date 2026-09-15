@@ -41,11 +41,27 @@ const DISPENSER_SUITE = process.env.XC693_SUITE_SRC
 const NATIVE_FEE_HELPER = process.env.XC693_HELPER_SRC
     || path.join(__dirname, '..', 'helpers', 'nativeFeeHelper.js')
 
+// The suite may be split into a `<basename>.test/NN_*.test.js` container, an
+// oversized-file convention this repo uses elsewhere: the entry keeps only a
+// leading run of cases, so a pin that reads the entry alone would miss
+// whatever moved to a part. Concatenating entry + parts in file order keeps
+// this pin reading the same logical suite the split declares equivalent.
+function readSuiteSource(suiteFile){
+    const own = fs.readFileSync(suiteFile, 'utf8')
+    const partsDir = suiteFile.replace(/\.js$/, '')
+    if (!fs.existsSync(partsDir) || !fs.statSync(partsDir).isDirectory()) return own
+    const parts = fs.readdirSync(partsDir)
+        .filter(f => f.endsWith('.test.js'))
+        .sort((a, b) => a.localeCompare(b, 'en'))
+        .map(f => fs.readFileSync(path.join(partsDir, f), 'utf8'))
+    return [own, ...parts].join('\n')
+}
+
 let suiteSrc, helperSrc
 
 function loadSources(){
     if (suiteSrc !== undefined && helperSrc !== undefined) return
-    const nextSuiteSrc  = fs.readFileSync(DISPENSER_SUITE, 'utf8')
+    const nextSuiteSrc  = readSuiteSource(DISPENSER_SUITE)
     const nextHelperSrc = fs.readFileSync(NATIVE_FEE_HELPER, 'utf8')
     suiteSrc  = nextSuiteSrc
     helperSrc = nextHelperSrc

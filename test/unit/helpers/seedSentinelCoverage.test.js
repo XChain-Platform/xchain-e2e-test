@@ -116,10 +116,18 @@ describe('seed-sentinel coverage', () => {
         const sites = seedSites()
         assert.ok(sites.length >= 6, 'expected the known seed sites, found ' + sites.length)
         const files = sites.map(s => s.file)
+        // A watched file may be split into a `<basename>.test/NN_*.test.js`
+        // container, an oversized-file convention this repo uses elsewhere,
+        // which moves its seed calls into parts the walk lists under that
+        // directory rather than under the entry's own path. Either shape
+        // still counts as "found": the split is a location change, not a
+        // coverage loss.
         for (const expected of ['helpers/nativeFeeHelper.js', 'actions/dispenser.test.js',
-                                'actions/nativeFeeLive.test.js'])
-            assert.ok(files.some(f => f === expected),
+                                'actions/nativeFeeLive.test.js']){
+            const splitDir = expected.replace(/\.js$/, '') + '/'
+            assert.ok(files.some(f => f === expected || f.startsWith(splitDir)),
                 expected + ' seeds price_snapshots but the scan missed it')
+        }
     })
 
     it('the six dispenser FIAT rounds found live on BTC regtest are covered', () => {
