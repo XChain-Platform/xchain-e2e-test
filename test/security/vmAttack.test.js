@@ -14,80 +14,67 @@ const vmHelper = require('../helpers/vmHelper')
 const gasHelper = require('../helpers/gasHelper')
 const transactionHelper = require('../transactionHelper')
 
-/**
- * VM Attack: deploys & executes hostile contracts on-chain and proves the
- * indexer CONTAINS them: each malicious EXECUTE is recorded as a failed
- * execution (no escape, no emissions), and block processing keeps advancing
- * (a halted indexer would stop producing rows and time these out). This is the
- * end-to-end complement to the direct-VM adversarial harness.
- */
-describe('VM Attack: hostile contracts on-chain', function () {
+// Classic sandbox-escape attempt via the Function constructor chain.
+// The function-export form carries its identity as a property (spec R1):
+// CONTRACT_META_REQUIRED reads meta off a function export too, and this
+// fixture has to DEPLOY valid for its EXECUTE to be the thing under test.
+const ESCAPE = `function contract(){
+    return [].constructor.constructor('return process.env')();
+}
+contract.meta = { name: 'Escape Attempt', description: 'Tries to reach the host realm through the Function constructor chain.', version: '1.0.0' };
+module.exports = contract;`
 
-    // Classic sandbox-escape attempt via the Function constructor chain.
-    // The function-export form carries its identity as a property (spec R1):
-    // CONTRACT_META_REQUIRED reads meta off a function export too, and this
-    // fixture has to DEPLOY valid for its EXECUTE to be the thing under test.
-    const ESCAPE = `function contract(){
-        return [].constructor.constructor('return process.env')();
+// Burns past the gas ceiling.
+const LOOP = `module.exports = { meta: { name: 'Infinite Loop', description: 'Spins forever so the gas meter has to stop it.', version: '1.0.0' }, run: function(){ var x=0; while(true){ x++; } } };`
+
+// Blows the call stack.
+const RECURSE = `module.exports = { meta: { name: 'Deep Recursion', description: 'Recurses with no base case to blow the call stack.', version: '1.0.0' }, run: function(){ function f(n){ return f(n+1); } return f(0); } };`
+
+// Tries to emit more actions than the per-execution cap.
+const EMIT_BOMB = `module.exports = { meta: { name: 'Emission Bomb', description: 'Emits past the per-execution action cap.', version: '1.0.0' }, run: function(){
+    for (var i = 0; i < 60; i++) { xchain.emit.send({ tick: 'AAA', quantity: '1', destination: 'x' }); }
+} };`
+
+// Bulk-allocation bomb. Historically (Finding A) this made V8 abort() the host
+// process; F3 allocation metering now charges the fill by size, so it hits the
+// gas ceiling (out_of_gas) BEFORE V8 services it: fast, deterministic, and it
+// never even reaches the out-of-process executor's host-abort containment (which
+// remains the load-bearing defense for paths F3 can't wrap). Either way the
+// hostile contract is contained: a non-valid execution, no emissions, block advances.
+const MEMORY_BOMB = `module.exports = { meta: { name: 'Allocation Bomb', description: 'Allocates a huge array so allocation metering has to bind it.', version: '1.0.0' }, run: function(){ var a = new Array(100000000).fill('x'); return a.length; } };`
+
+// The SAME bulk allocation, but in the contract's constructor (initialize).
+// Exercises the DEPLOY status path: a failed constructor deletes the contract
+// row, but its execution row persists, and the consensus-hashed status must
+// intern as a normalized token (F1), NOT the raw VM error string. Under F3 the
+// constructor fill is gas-bounded; the consensus token is the collapsed
+// 'out_of_resource' (with the raw out_of_gas detail kept in error_message).
+const CONSTRUCTOR_BOMB = `module.exports = { meta: { name: 'Constructor Bomb', description: 'Allocates a huge array from its constructor.', version: '1.0.0' }, initialize: function(){ var a = new Array(100000000).fill('x'); return a.length; } };`
+
+let deployer = null
+
+async function q(sql, params) {
+    const conn = await indexerDatabase.getConnection()
+    try { return await conn.query(sql, params) }
+    finally { await conn.release() }
+}
+async function tip() {
+    const rows = await q('SELECT MAX(block_index) AS t FROM blocks', [])
+    return rows.length ? Number(rows[0].t) : 0
+}
+async function rawExecute(addr, ci, method) {
+    return await transactionHelper.createAndSendTransaction(addr, `EXECUTE|0|${ci}|${method}`)
+}
+async function waitForAnyExecution(ci, caller, method, timeMax = 90000) {
+    const end = Date.now() + timeMax
+    while (Date.now() < end) {
+        const row = await indexerDatabase.checkExecution({ contractIndex: ci, caller, methodName: method })
+        if (row) return row
+        await new Promise(r => setTimeout(r, 1000))
     }
-    contract.meta = { name: 'Escape Attempt', description: 'Tries to reach the host realm through the Function constructor chain.', version: '1.0.0' };
-    module.exports = contract;`
-
-    // Burns past the gas ceiling.
-    const LOOP = `module.exports = { meta: { name: 'Infinite Loop', description: 'Spins forever so the gas meter has to stop it.', version: '1.0.0' }, run: function(){ var x=0; while(true){ x++; } } };`
-
-    // Blows the call stack.
-    const RECURSE = `module.exports = { meta: { name: 'Deep Recursion', description: 'Recurses with no base case to blow the call stack.', version: '1.0.0' }, run: function(){ function f(n){ return f(n+1); } return f(0); } };`
-
-    // Tries to emit more actions than the per-execution cap.
-    const EMIT_BOMB = `module.exports = { meta: { name: 'Emission Bomb', description: 'Emits past the per-execution action cap.', version: '1.0.0' }, run: function(){
-        for (var i = 0; i < 60; i++) { xchain.emit.send({ tick: 'AAA', quantity: '1', destination: 'x' }); }
-    } };`
-
-    // Bulk-allocation bomb. Historically (Finding A) this made V8 abort() the host
-    // process; F3 allocation metering now charges the fill by size, so it hits the
-    // gas ceiling (out_of_gas) BEFORE V8 services it: fast, deterministic, and it
-    // never even reaches the out-of-process executor's host-abort containment (which
-    // remains the load-bearing defense for paths F3 can't wrap). Either way the
-    // hostile contract is contained: a non-valid execution, no emissions, block advances.
-    const MEMORY_BOMB = `module.exports = { meta: { name: 'Allocation Bomb', description: 'Allocates a huge array so allocation metering has to bind it.', version: '1.0.0' }, run: function(){ var a = new Array(100000000).fill('x'); return a.length; } };`
-
-    // The SAME bulk allocation, but in the contract's constructor (initialize).
-    // Exercises the DEPLOY status path: a failed constructor deletes the contract
-    // row, but its execution row persists, and the consensus-hashed status must
-    // intern as a normalized token (F1), NOT the raw VM error string. Under F3 the
-    // constructor fill is gas-bounded; the consensus token is the collapsed
-    // 'out_of_resource' (with the raw out_of_gas detail kept in error_message).
-    const CONSTRUCTOR_BOMB = `module.exports = { meta: { name: 'Constructor Bomb', description: 'Allocates a huge array from its constructor.', version: '1.0.0' }, initialize: function(){ var a = new Array(100000000).fill('x'); return a.length; } };`
-
-    let deployer = null
-
-    async function q(sql, params) {
-        const conn = await indexerDatabase.getConnection()
-        try { return await conn.query(sql, params) }
-        finally { await conn.release() }
-    }
-    async function tip() {
-        const rows = await q('SELECT MAX(block_index) AS t FROM blocks', [])
-        return rows.length ? Number(rows[0].t) : 0
-    }
-    async function rawExecute(addr, ci, method) {
-        return await transactionHelper.createAndSendTransaction(addr, `EXECUTE|0|${ci}|${method}`)
-    }
-    async function waitForAnyExecution(ci, caller, method, timeMax = 90000) {
-        const end = Date.now() + timeMax
-        while (Date.now() < end) {
-            const row = await indexerDatabase.checkExecution({ contractIndex: ci, caller, methodName: method })
-            if (row) return row
-            await new Promise(r => setTimeout(r, 1000))
-        }
-        return null
-    }
-
-    before(async function () {
-        deployer = await cryptoHelper.getNewFundedAddress('vmatk-deployer', COIN, NETWORK, null, 'legacy', 0, 1)
-        await gasHelper.ensureGasBalance(deployer, '500')
-    })
+    return null
+}
+function registerSandboxAttacks() {
 
     it('a sandbox-escape attempt fails and indexes cleanly', async function () {
         const dep = await vmHelper.sendDeployV0(deployer, ESCAPE, 200000)
@@ -123,6 +110,9 @@ describe('VM Attack: hostile contracts on-chain', function () {
         assert(row, 'recursion execution should be recorded')
         assert.notStrictEqual(row.status, 'valid', 'stack overflow must fail the execution')
     })
+}
+
+function registerResourceAttacks() {
 
     it('an over-cap emission storm commits nothing', async function () {
         const dep = await vmHelper.sendDeployV0(deployer, EMIT_BOMB, 200000)
@@ -152,6 +142,9 @@ describe('VM Attack: hostile contracts on-chain', function () {
             `F3 size metering should bind the fill with gas, not the wall-clock net (error_message: ${row.error_message})`)
         assert.strictEqual(Number(row.emitted_count), 0, 'no emissions on a contained failure')
     })
+}
+
+function registerConstructorAttack() {
 
     it('a bulk-allocation bomb in the constructor interns as out_of_resource and the indexer survives', async function () {
         const before = await tip()
@@ -187,6 +180,9 @@ describe('VM Attack: hostile contracts on-chain', function () {
         const after = await tip()
         assert(after >= before, `block tip should keep advancing (before=${before} after=${after})`)
     })
+}
+
+function registerLivenessProbe() {
 
     it('the indexer is still alive and processing after the attacks', async function () {
         const before = await tip()
@@ -200,4 +196,24 @@ describe('VM Attack: hostile contracts on-chain', function () {
         const after = await tip()
         assert(after >= before, `block tip should keep advancing (before=${before} after=${after})`)
     })
+}
+
+/**
+ * VM Attack: deploys & executes hostile contracts on-chain and proves the
+ * indexer CONTAINS them: each malicious EXECUTE is recorded as a failed
+ * execution (no escape, no emissions), and block processing keeps advancing
+ * (a halted indexer would stop producing rows and time these out). This is the
+ * end-to-end complement to the direct-VM adversarial harness.
+ */
+describe('VM Attack: hostile contracts on-chain', function () {
+
+    before(async function () {
+        deployer = await cryptoHelper.getNewFundedAddress('vmatk-deployer', COIN, NETWORK, null, 'legacy', 0, 1)
+        await gasHelper.ensureGasBalance(deployer, '500')
+    })
+
+    registerSandboxAttacks()
+    registerResourceAttacks()
+    registerConstructorAttack()
+    registerLivenessProbe()
 })
