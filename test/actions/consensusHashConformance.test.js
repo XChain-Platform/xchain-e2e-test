@@ -28,6 +28,7 @@
 
 const assert = require('assert');
 const path   = require('path');
+const fs     = require('fs');
 
 // Sibling xchain-sync (monorepo layout). ABSENCE may skip, because a single-repo
 // checkout cannot run this. A checkout that is PRESENT but will not load must be RED:
@@ -44,7 +45,10 @@ try {
 if (syncPresent) {
     BlockHasher         = require(path.join(SYNC_SRC, 'client/block_hasher.js'));
     SyncUtility         = require(path.join(SYNC_SRC, 'util/index.js'));
-    SyncStateCommitment = require(path.join(SYNC_SRC, 'stateCommitment.js'));
+    // The follower moved to src/state_commitment/index.js; a sync checkout from before that
+    // move still carries the flat file, so whichever spelling it has is loaded.
+    SyncStateCommitment = require(fs.existsSync(path.join(SYNC_SRC, 'state_commitment', 'index.js'))
+        ? path.join(SYNC_SRC, 'state_commitment', 'index.js') : path.join(SYNC_SRC, 'stateCommitment.js'));
     SyncDatabase        = require(path.join(SYNC_SRC, 'db/index.js'));
 }
 

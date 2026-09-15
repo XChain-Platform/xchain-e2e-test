@@ -24,11 +24,16 @@
 
 const assert = require('assert');
 const path   = require('path');
+const fs     = require('fs');
 const ROOT   = path.resolve(__dirname, '../../../..');
 
 const M       = require(path.join(ROOT, 'xchain-indexer/src/consensus/merkle.js'));
-const idxSC   = require(path.join(ROOT, 'xchain-indexer/src/stateCommitment.js'));
-const syncSC  = require(path.join(ROOT, 'xchain-sync/src/stateCommitment.js'));
+// Both twins moved their state commitment entry to src/state_commitment/index.js in their
+// code-structure passes; a sibling from before its move still carries the flat file, so
+// each side loads whichever spelling it has.
+const present = (...rels) => rels.map((rel) => path.join(ROOT, rel)).find((p) => fs.existsSync(p)) || path.join(ROOT, rels[0]);
+const idxSC   = require(present('xchain-indexer/src/state_commitment/index.js', 'xchain-indexer/src/stateCommitment.js'));
+const syncSC  = require(present('xchain-sync/src/state_commitment/index.js', 'xchain-sync/src/stateCommitment.js'));
 const CC      = require(path.join(ROOT, 'xchain-sync/src/consensus-constants.js'));
 
 const CAPS = CC.btcStakeCapabilities();        // both twins iterate this BTC capability set
