@@ -53,25 +53,26 @@ const recount = counter.countActionSuites()
 
 function vocabularyChecks() {
     it('every counted name is a real protocol ACTION name', function () {
-        if (!fs.existsSync(DECODER_SRC)) return this.skip()
+        // counter.findActionNamesBlock reads the constants part the decoder's
+        // constructor/method split moved this literal into
+        // (src/XChainDecoder/constants.js) before the entry, and returns null
+        // only when no decoder checkout is present at all (a real drift with
+        // the checkout present throws naming both paths, which fails this
+        // test loudly rather than skipping it).
+        const found = counter.findActionNamesBlock()
+        if (!found) return this.skip()
 
-        const decoderSrc = fs.readFileSync(DECODER_SRC, 'utf8')
-        const block = decoderSrc.match(/const VALID_ACTION_NAMES = new Set\(\[([\s\S]*?)\]\)/)
-        assert.ok(block, 'decoder no longer declares VALID_ACTION_NAMES as a Set literal; ' +
-            'scripts/count-action-suites.js parses that declaration and needs updating')
-
-        const valid = new Set([...block[1].matchAll(/'([A-Z][A-Z0-9]*)'/g)].map((m) => m[1]))
+        const valid = new Set([...found.block[1].matchAll(/'([A-Z][A-Z0-9]*)'/g)].map((m) => m[1]))
         const strays = recount.actions.filter((a) => !valid.has(a))
         assert.deepStrictEqual(strays, [],
             'counted names that the decoder does not recognise as actions: ' + strays.join(', '))
     })
 
     it('the standalone-checkout fallback vocabulary matches the decoder', function () {
-        if (!fs.existsSync(DECODER_SRC)) return this.skip()
+        const found = counter.findActionNamesBlock()
+        if (!found) return this.skip()
 
-        const decoderSrc = fs.readFileSync(DECODER_SRC, 'utf8')
-        const block = decoderSrc.match(/const VALID_ACTION_NAMES = new Set\(\[([\s\S]*?)\]\)/)
-        const valid = [...block[1].matchAll(/'([A-Z][A-Z0-9]*)'/g)].map((m) => m[1]).sort()
+        const valid = [...found.block[1].matchAll(/'([A-Z][A-Z0-9]*)'/g)].map((m) => m[1]).sort()
 
         assert.deepStrictEqual([...counter.FALLBACK_ACTION_NAMES].sort(), valid,
             'FALLBACK_ACTION_NAMES in scripts/count-action-suites.js has drifted from the ' +
