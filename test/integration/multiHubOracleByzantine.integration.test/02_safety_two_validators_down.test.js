@@ -34,18 +34,20 @@
 
 'use strict';
 
+// Covers oracle safety with two validators down. One part of multiHubOracleByzantine.integration.test.js.
+
 const dotenv = require('dotenv');
 dotenv.config();
 
 const path   = require('path');
 const assert = require('assert');
-const { MultiValidatorHub }       = require('../helpers/multiValidatorHubHelper');
-const { startDisposableHubDb }    = require('../helpers/disposableHubDb');
-const { seedWeightSnapshot }      = require('../helpers/seededWeightSnapshot');
-const { silenceOracleValidator }  = require('../helpers/byzantineFaults');
-const { waitForMesh, waitFor }    = require('../helpers/consensusWait');
+const { MultiValidatorHub }       = require('../../helpers/multiValidatorHubHelper');
+const { startDisposableHubDb }    = require('../../helpers/disposableHubDb');
+const { seedWeightSnapshot }      = require('../../helpers/seededWeightSnapshot');
+const { silenceOracleValidator }  = require('../../helpers/byzantineFaults');
+const { waitForMesh, waitFor }    = require('../../helpers/consensusWait');
 
-function hubRequire(rel) { return require(path.resolve(__dirname, '../../../xchain-hub', rel)); }
+function hubRequire(rel) { return require(path.resolve(__dirname, '../../../../xchain-hub', rel)); }
 const OracleConsensus = hubRequire('src/oracle/consensus.js');
 const OracleRound     = hubRequire('src/oracle/round.js');
 
@@ -136,13 +138,14 @@ function seedEqual(mvh) {
 describe('MultiValidatorHub: oracle-PBFT byzantine fault tolerance (C.2)', function () {
     this.timeout(240_000);
 
-    describe('LIVENESS (f=1): a silent oracle validator does not stall finalization', function () {
-        let db, mvh, seed, oracle, restore;
+
+    describe('SAFETY (2-of-4 down): quorum is unreachable, nothing finalizes', function () {
+        let db, mvh, seed, oracle, restores = [];
 
         before(async function () {
             db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping oracle-byzantine liveness: no env DB and Docker unavailable'); this.skip(); }
-            mvh = new MultiValidatorHub({ count: 4, basePort: 26200, startAttestation: false });
+            if (!db) { console.log('Skipping oracle-byzantine safety: no env DB and Docker unavailable'); this.skip(); }
+            mvh = new MultiValidatorHub({ count: 4, basePort: 26210, startAttestation: false });
             await mvh.start();
             await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
             seed   = seedEqual(mvh);
@@ -151,38 +154,28 @@ describe('MultiValidatorHub: oracle-PBFT byzantine fault tolerance (C.2)', funct
         });
 
         after(async function () {
-            if (restore) restore();
+            restores.forEach((r) => { try { r(); } catch (_) {} });
             if (oracle) oracle.stop();
             if (seed) seed.restore();
             if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
             if (db)  { await db.stop(); }
         });
 
-        it('the honest 3-of-4 finalize the correct median; the silenced hub stores nothing', async function () {
+        it('with two oracle validators silenced, no price snapshot finalizes on any hub', async function () {
             const leader = findOracleLeader(mvh);
             assert.ok(leader, 'no oracle round leader identified');
-            const victim = mvh.hubs.find((h) => h !== leader);   // silence a NON-leader
-            restore = silenceOracleValidator(victim);
+            // Silence two NON-leaders → leader + 1 honest = 2 active < quorum 3.
+            const nonLeaders = mvh.hubs.filter((h) => h !== leader);
+            restores.push(silenceOracleValidator(nonLeaders[0]));
+            restores.push(silenceOracleValidator(nonLeaders[1]));
 
-            // The honest 3 of 4 storing their snapshot IS the assertion below, so
-            // wait for exactly that count rather than for a fixed window; the
-            // silenced hub is checked after, which is when its emptiness means
-            // something.
-            await finalizeAll(mvh, { expect: mvh.hubs.length - 1 });
+            await finalizeAll(mvh);
 
-            const honest = mvh.hubs.filter((h) => h !== victim);
-            const seen = [];
-            for (const h of honest) {
-                const rows = await snapshotRows(h);
-                assert.strictEqual(rows.length, 1, 'an honest hub must finalize exactly one price snapshot (got ' + rows.length + ')');
-                assert.strictEqual(String(rows[0].price), PRICE + '.00000000', 'honest hub stored an unexpected price (got ' + rows[0].price + ')');
-                seen.push(String(rows[0].price));
+            for (let i = 0; i < mvh.hubs.length; i++) {
+                const rows = await snapshotRows(mvh.hubs[i]);
+                assert.strictEqual(rows.length, 0,
+                    'hub ' + i + ' finalized a price below quorum (got ' + rows.length + ' rows): safety violation');
             }
-            assert.strictEqual(new Set(seen).size, 1, 'honest hubs must agree on the finalized price');
-
-            const victimRows = await snapshotRows(victim);
-            assert.strictEqual(victimRows.length, 0, 'the silenced hub must not have finalized (it processed no messages)');
         });
     });
-
 });

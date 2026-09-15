@@ -33,7 +33,6 @@
 
 const dotenv = require('dotenv');
 dotenv.config();
-
 const path   = require('path');
 const assert = require('assert');
 const { MultiValidatorHub }    = require('../helpers/multiValidatorHubHelper');
@@ -41,7 +40,6 @@ const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedStakeSnapshot }    = require('../helpers/seededStakeSnapshot');
 const { forceCountModeQuorum } = require('../helpers/forceCountModeQuorum');
 const { waitForMesh }          = require('../helpers/consensusWait');
-
 function hubRequire(rel) { return require(path.resolve(__dirname, '../../../xchain-hub', rel)); }
 const OracleConsensus  = hubRequire('src/oracle/consensus.js');
 const OracleRound      = hubRequire('src/oracle/round.js');
@@ -72,6 +70,20 @@ const ORDERS = [
 ];
 const subsFor = (order) => new Map(order.map((i) => [ENTRIES[i][0], { prices: ENTRIES[i][1] }]));
 const priceMap = (results) => Object.fromEntries(results.map((p) => [p.coinPair, p.price]));
+function assertCrossVerified(signed) {
+    for (let i = 1; i < signed.length; i++) {
+        assert.strictEqual(signed[i].payload, signed[0].payload,
+            'hub ' + i + ' produced a different canonical payload - signatures cannot match');
+    }
+    const canonical = signed[0].payload;
+    const pubkeys = new Set();
+    signed.forEach((s, i) => {
+        assert.ok(s.sig && s.sig.pubkey && s.sig.sig, 'hub ' + i + ' produced no signature');
+        pubkeys.add(s.sig.pubkey);
+        assert.ok(ValidatorIdentity.verify(canonical, s.sig.sig, s.sig.pubkey), 'hub ' + i + ' signature does not verify against the canonical payload');
+    });
+    assert.strictEqual(pubkeys.size, COUNT, 'expected one distinct signing identity per hub');
+}
 
 describe('MultiValidatorHub - oracle determinism (L2)', function () {
     this.timeout(180_000);
@@ -125,19 +137,6 @@ describe('MultiValidatorHub - oracle determinism (L2)', function () {
             };
         });
 
-        for (let i = 1; i < signed.length; i++) {
-            assert.strictEqual(signed[i].payload, signed[0].payload,
-                'hub ' + i + ' produced a different canonical payload - signatures cannot match');
-        }
-
-        const canonical = signed[0].payload;
-        const pubkeys = new Set();
-        signed.forEach((s, i) => {
-            assert.ok(s.sig && s.sig.pubkey && s.sig.sig, 'hub ' + i + ' produced no signature');
-            pubkeys.add(s.sig.pubkey);
-            assert.ok(ValidatorIdentity.verify(canonical, s.sig.sig, s.sig.pubkey),
-                'hub ' + i + ' signature does not verify against the canonical payload');
-        });
-        assert.strictEqual(pubkeys.size, COUNT, 'expected one distinct signing identity per hub');
+        assertCrossVerified(signed);
     });
 });

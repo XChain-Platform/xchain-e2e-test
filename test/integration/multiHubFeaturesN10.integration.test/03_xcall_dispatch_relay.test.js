@@ -41,16 +41,18 @@
 
 'use strict';
 
+// Covers the N=10 XCALL dispatch quorum. One part of multiHubFeaturesN10.integration.test.js.
+
 const dotenv = require('dotenv');
 dotenv.config();
 
 const assert = require('assert');
 const crypto = require('crypto');
-const { MultiValidatorHub, ValidatorIdentity, loadHubModule } = require('../helpers/multiValidatorHubHelper');
-const { startDisposableHubDb } = require('../helpers/disposableHubDb');
-const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
-const { MockCrossChainOfferBook, makeOrder } = require('../helpers/mockCrossChainOfferBook');
-const { waitForMesh, waitFor } = require('../helpers/consensusWait');
+const { MultiValidatorHub, ValidatorIdentity, loadHubModule } = require('../../helpers/multiValidatorHubHelper');
+const { startDisposableHubDb } = require('../../helpers/disposableHubDb');
+const { seedWeightSnapshot }   = require('../../helpers/seededWeightSnapshot');
+const { MockCrossChainOfferBook, makeOrder } = require('../../helpers/mockCrossChainOfferBook');
+const { waitForMesh, waitFor } = require('../../helpers/consensusWait');
 
 const OracleConsensus = loadHubModule('src/oracle/consensus.js');
 const OracleRound     = loadHubModule('src/oracle/round.js');
@@ -193,53 +195,43 @@ describe('MultiValidatorHub: per-feature weighted quorum at N=10 (C.2)', functio
         process.env.P2P_MAX_CONNECTIONS_PER_IP = '50';
     });
 
-    describe('Price + Fiat oracle round (OracleConsensus) finalizes at N=10', function () {
-        let db, mvh, seed, oracle;
+
+    describe('XCALL dispatch relay (CrossChainDexConsensus) finalizes at N=10', function () {
+        let db, mvh, seed, validators;
 
         before(async function () {
             db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping oracle N=10: no env DB and Docker unavailable'); this.skip(); }
-            mvh = new MultiValidatorHub({ count: COUNT, basePort: 25000, startAttestation: false });
+            if (!db) { console.log('Skipping XCALL N=10: no env DB and Docker unavailable'); this.skip(); }
+            mvh = new MultiValidatorHub({ count: COUNT, basePort: 25200, startCrossChain: true, startAttestation: false });
             await mvh.start();
             await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
-            seed   = seedWeightSnapshot(mvh, { blockIndex: BLOCK_INDEX, validators: equalWeights(mvh) });
-            oracle = await attachOracle(mvh);
-            injectSubmissions(mvh);
+            validators = equalWeights(mvh);
+            seed = seedWeightSnapshot(mvh, { blockIndex: BLOCK_INDEX, validators });
         });
 
         after(async function () {
-            if (oracle) oracle.stop();
             if (seed) seed.restore();
             if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
             if (db)  { await db.stop(); }
         });
 
-        it('the weighted quorum (>=7 of 10) finalizes the identical price snapshot on EVERY hub', async function () {
-            await Promise.all(mvh.hubs.map((h) => h._wtOracle.finalizeRound(ORACLE_ROUND, BLOCK_INDEX, BLOCK_TIME).catch(() => {})));
-            // Each hub's own price_snapshots row is the post-condition asserted below.
-            await waitFor(async () => {
-                const counts = [];
-                for (const h of mvh.hubs) {
-                    try {
-                        counts.push((await h.db.doQuery(
-                            'SELECT round_number FROM price_snapshots WHERE round_number = ? AND coin_pair = ?',
-                            [ORACLE_ROUND, PAIR])).length);
-                    } catch (_) { counts.push(0); }
-                }
-                return { ok: counts.length > 0 && counts.every((c) => c >= 1), counts: counts };
-            }, { timeoutMs: SETTLE_MS });
-            const seen = [];
+        it('the weighted quorum (>=7 of 10) finalizes the dispatch on EVERY hub', async function () {
+            const { events, row } = await driveDispatch(mvh, validators, 'xcall-n10-pos');
+            assert.strictEqual(events.length, COUNT, 'expected all ' + COUNT + ' hubs to finalize, got ' + events.length);
+            const callIds = new Set(events.map((e) => String(e.row && e.row.call_id)));
+            assert.strictEqual(callIds.size, 1, 'hubs finalized different call_ids: ' + JSON.stringify([...callIds]));
+
+            const engines = mvh.hubs.map((h) => h.crossChainCalls);
+            for (const ev of events) {
+                const n = countVerifyingSigs(engines[ev.hubIndex].canonicalMatch(ev.row), ev.signatures);
+                assert.ok(n >= QUORUM_SIGS, 'hub ' + ev.hubIndex + ' finalized with < ' + QUORUM_SIGS + ' distinct verifying sigs (' + n + ')');
+            }
             for (let i = 0; i < mvh.hubs.length; i++) {
                 const rows = await mvh.hubs[i].db.doQuery(
-                    'SELECT * FROM price_snapshots WHERE round_number = ? AND coin_pair = ?', [ORACLE_ROUND, PAIR]);
-                assert.strictEqual(rows.length, 1, 'hub ' + i + ' must hold exactly one finalized snapshot (got ' + rows.length + ')');
-                assert.strictEqual(String(rows[0].price), PRICE + '.00000000', 'hub ' + i + ' stored an unexpected price');
-                assert.ok(Number(rows[0].validator_count) >= QUORUM_SIGS,
-                    'hub ' + i + ' expected >= ' + QUORUM_SIGS + ' weighted signers at N=10, got ' + rows[0].validator_count);
-                seen.push(String(rows[0].price));
+                    "SELECT validator_signatures FROM cross_chain_calls WHERE call_id = ? AND phase = 'dispatch'", [row.call_id]);
+                assert.strictEqual(rows.length, 1, 'hub ' + i + ' has no finalized dispatch row');
+                assert.ok(JSON.parse(rows[0].validator_signatures || '[]').length >= QUORUM_SIGS, 'hub ' + i + ' persisted < ' + QUORUM_SIGS + ' sigs');
             }
-            assert.strictEqual(new Set(seen).size, 1, 'all hubs must agree on the finalized price');
         });
     });
-
 });

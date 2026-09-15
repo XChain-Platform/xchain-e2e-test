@@ -44,17 +44,19 @@
 
 'use strict';
 
+// Covers healthy weighted oracle finalization. One part of multiHubOracleWeighted.integration.test.js.
+
 const dotenv = require('dotenv');
 dotenv.config();
 
 const path   = require('path');
 const assert = require('assert');
-const { MultiValidatorHub }    = require('../helpers/multiValidatorHubHelper');
-const { startDisposableHubDb } = require('../helpers/disposableHubDb');
-const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
-const { waitForMesh, waitFor } = require('../helpers/consensusWait');
+const { MultiValidatorHub }    = require('../../helpers/multiValidatorHubHelper');
+const { startDisposableHubDb } = require('../../helpers/disposableHubDb');
+const { seedWeightSnapshot }   = require('../../helpers/seededWeightSnapshot');
+const { waitForMesh, waitFor } = require('../../helpers/consensusWait');
 
-function hubRequire(rel) { return require(path.resolve(__dirname, '../../../xchain-hub', rel)); }
+function hubRequire(rel) { return require(path.resolve(__dirname, '../../../../xchain-hub', rel)); }
 const OracleConsensus = hubRequire('src/oracle/consensus.js');
 const OracleRound     = hubRequire('src/oracle/round.js');
 
@@ -122,28 +124,31 @@ async function snapshotRows(hub) {
 describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM price PBFT round (WI-1 Suite A3, L2)', function () {
     this.timeout(240_000);
 
-    describe('a stake-minority (count-majority) of live hubs cannot finalize a price round', function () {
+
+    describe('a healthy weighted federation finalizes the price on every hub', function () {
         let db, mvh, seed, oracle;
 
         before(async function () {
             db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping A3 (negative): no env DB and Docker unavailable'); this.skip(); }
-            mvh = new MultiValidatorHub({ count: 3, basePort: 33400, startAttestation: false });
+            if (!db) { console.log('Skipping A3 (positive): no env DB and Docker unavailable'); this.skip(); }
+            mvh = new MultiValidatorHub({ count: 4, basePort: 33500, startAttestation: false });
             await mvh.start();
             await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
             const ids = mvh.identities;
+            // Uneven weights, no single source >= 2/3 (S=10000, 2S/3~6666): the
+            // weighted quorum needs >=2 distinct sources -> exercises the multi-signer
+            // aggregation path.
             seed = seedWeightSnapshot(mvh, {
                 blockIndex: BLOCK_INDEX,
                 validators: [
-                    { pubkey: ids[0].pubkeyHex, source: 'sA',    weight: '1000' },
-                    { pubkey: ids[1].pubkeyHex, source: 'sB',    weight: '1000' },
-                    { pubkey: ids[2].pubkeyHex, source: 'sC',    weight: '1000' },
-                    { pubkey: 'ff'.repeat(32),  source: 'whale', weight: '7000' },   // offline
+                    { pubkey: ids[0].pubkeyHex, source: 'sA', weight: '4000' },
+                    { pubkey: ids[1].pubkeyHex, source: 'sB', weight: '3000' },
+                    { pubkey: ids[2].pubkeyHex, source: 'sC', weight: '2000' },
+                    { pubkey: ids[3].pubkeyHex, source: 'sD', weight: '1000' },
                 ],
             });
             oracle = await attachOracle(mvh);
             injectSubmissions(mvh);
-            // S = 10000; the 3 live signers hold 3000.
         });
 
         after(async function () {
@@ -153,14 +158,19 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM price PBFT round (WI-1 Suite 
             if (db)  { await db.stop(); }
         });
 
-        it('the 3 live signers are a stake minority: no price snapshot is stored on any hub', async function () {
+        it('the weighted quorum is reached: the identical price snapshot lands on EVERY hub', async function () {
             await finalizeAll(mvh);
+            const seen = [];
             for (let i = 0; i < mvh.hubs.length; i++) {
                 const rows = await snapshotRows(mvh.hubs[i]);
-                assert.strictEqual(rows.length, 0,
-                    'hub ' + i + ' finalized a price a STAKE minority must never carry (got ' + rows.length + ' rows)');
+                assert.strictEqual(rows.length, 1, 'hub ' + i + ' must hold exactly one finalized price snapshot (got ' + rows.length + ')');
+                assert.strictEqual(String(rows[0].price), PRICE + '.00000000',
+                    'hub ' + i + ' stored an unexpected price (got ' + rows[0].price + ')');
+                assert.ok(Number(rows[0].validator_count) >= 2,
+                    'hub ' + i + ' expected >= 2 weighted signers, got ' + rows[0].validator_count);
+                seen.push(String(rows[0].price));
             }
+            assert.strictEqual(new Set(seen).size, 1, 'all hubs must agree on the finalized price');
         });
     });
-
 });

@@ -35,15 +35,17 @@
 
 'use strict';
 
+// Covers healthy weighted XCALL finalization. One part of multiHubXcallWeighted.integration.test.js.
+
 const dotenv = require('dotenv');
 dotenv.config();
 
 const assert = require('assert');
 const crypto = require('crypto');
-const { MultiValidatorHub, ValidatorIdentity } = require('../helpers/multiValidatorHubHelper');
-const { startDisposableHubDb } = require('../helpers/disposableHubDb');
-const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
-const { waitForMesh, waitFor } = require('../helpers/consensusWait');
+const { MultiValidatorHub, ValidatorIdentity } = require('../../helpers/multiValidatorHubHelper');
+const { startDisposableHubDb } = require('../../helpers/disposableHubDb');
+const { seedWeightSnapshot }   = require('../../helpers/seededWeightSnapshot');
+const { waitForMesh, waitFor } = require('../../helpers/consensusWait');
 
 // A deadline, not a settle: waitForMesh returns on the first fully-peered poll.
 const PEER_WAIT_MS = 60_000;
@@ -132,21 +134,23 @@ async function driveDispatch(mvh, validators, seedBase, requireLiveLeader) {
 describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM XCALL dispatch relay (C.2)', function () {
     this.timeout(240_000);
 
-    describe('a stake-minority (count-majority) of live hubs cannot finalize an XCALL dispatch', function () {
+
+    describe('a healthy weighted federation finalizes the XCALL dispatch on every hub', function () {
         let db, mvh, seed, validators;
 
         before(async function () {
             db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping XCALL weighted (negative): no env DB and Docker unavailable'); this.skip(); }
-            mvh = new MultiValidatorHub({ count: 3, basePort: 26400, startCrossChain: true, startAttestation: false });
+            if (!db) { console.log('Skipping XCALL weighted (positive): no env DB and Docker unavailable'); this.skip(); }
+            mvh = new MultiValidatorHub({ count: 4, basePort: 26410, startCrossChain: true, startAttestation: false });
             await mvh.start();
             await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
             const ids = mvh.identities;
+            // Uneven weights, no single source >= 2/3 of S=10000 → multi-signer quorum.
             validators = [
-                { pubkey: ids[0].pubkeyHex, source: 'sA',    weight: '1000' },
-                { pubkey: ids[1].pubkeyHex, source: 'sB',    weight: '1000' },
-                { pubkey: ids[2].pubkeyHex, source: 'sC',    weight: '1000' },
-                { pubkey: 'ff'.repeat(32),  source: 'whale', weight: '7000' },   // offline
+                { pubkey: ids[0].pubkeyHex, source: 'sA', weight: '4000' },
+                { pubkey: ids[1].pubkeyHex, source: 'sB', weight: '3000' },
+                { pubkey: ids[2].pubkeyHex, source: 'sC', weight: '2000' },
+                { pubkey: ids[3].pubkeyHex, source: 'sD', weight: '1000' },
             ];
             seed = seedWeightSnapshot(mvh, { blockIndex: BLOCK_INDEX, validators });
         });
@@ -157,17 +161,28 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM XCALL dispatch relay (C.2)', 
             if (db)  { await db.stop(); }
         });
 
-        it('no dispatch row finalizes on any hub (stake minority refused)', async function () {
-            const { events, leaderIdx } = await driveDispatch(mvh, validators, 'xcall-neg', true);
-            assert.ok(leaderIdx >= 0, 'could not place the round leader on a live hub');
-            assert.strictEqual(events.length, 0,
-                'a dispatch finalized despite a STAKE minority of live signers: ' +
-                JSON.stringify(events.map((e) => ({ hub: e.hubIndex, sigs: (e.signatures || []).length }))));
+        it('the weighted quorum is reached: the dispatch finalizes on EVERY hub with >=2 distinct sigs', async function () {
+            const { events, row } = await driveDispatch(mvh, validators, 'xcall-pos', false);
+            assert.strictEqual(events.length, 4, 'expected all 4 hubs to finalize, got ' + events.length);
+            const callIds = new Set(events.map((e) => String(e.row && e.row.call_id)));
+            assert.strictEqual(callIds.size, 1, 'hubs finalized different call_ids: ' + JSON.stringify([...callIds]));
+
+            const engines = mvh.hubs.map((h) => h.crossChainCalls);
+            for (const ev of events) {
+                const canonical = engines[ev.hubIndex].canonicalMatch(ev.row);
+                const ok = new Set();
+                for (const s of (ev.signatures || []))
+                    if (ValidatorIdentity.verify(canonical, String(s.sig || ''), String(s.pubkey || '').toLowerCase()))
+                        ok.add(String(s.pubkey || '').toLowerCase());
+                assert.ok(ok.size >= 2, 'hub ' + ev.hubIndex + ' finalized with < 2 distinct verifying sigs (' + ok.size + ')');
+            }
+
             for (let i = 0; i < mvh.hubs.length; i++) {
-                const rows = await mvh.hubs[i].db.doQuery("SELECT call_id FROM cross_chain_calls WHERE phase = 'dispatch'");
-                assert.strictEqual(rows.length, 0, 'hub ' + i + ' wrote a dispatch row a stake minority must never finalize');
+                const rows = await mvh.hubs[i].db.doQuery(
+                    "SELECT validator_signatures FROM cross_chain_calls WHERE call_id = ? AND phase = 'dispatch'", [row.call_id]);
+                assert.strictEqual(rows.length, 1, 'hub ' + i + ' has no finalized dispatch row');
+                assert.ok(JSON.parse(rows[0].validator_signatures || '[]').length >= 2, 'hub ' + i + ' persisted < 2 sigs');
             }
         });
     });
-
 });

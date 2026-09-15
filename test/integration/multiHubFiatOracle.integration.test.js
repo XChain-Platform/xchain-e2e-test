@@ -68,6 +68,13 @@ const ROUND        = 100;
 const PAIR         = 'BTC/USD';
 const PRICE        = '60000';
 
+function unevenWeights(ids) { return [
+    { pubkey: ids[0].pubkeyHex, source: 'sA', weight: '4000' },
+    { pubkey: ids[1].pubkeyHex, source: 'sB', weight: '3000' },
+    { pubkey: ids[2].pubkeyHex, source: 'sC', weight: '2000' },
+    { pubkey: ids[3].pubkeyHex, source: 'sD', weight: '1000' },
+]; }
+
 async function attachOracle(mvh) {
     const stops = [];
     for (const hub of mvh.hubs) {
@@ -140,7 +147,6 @@ function makePriceDb(hubDb) {
 
 describe('MultiValidatorHub: multi-hub fiat oracle round → FIAT dispenser consumption (C.2)', function () {
     this.timeout(240_000);
-
     let db, mvh, seed, oracle;
 
     before(async function () {
@@ -151,15 +157,7 @@ describe('MultiValidatorHub: multi-hub fiat oracle round → FIAT dispenser cons
         await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
         const ids = mvh.identities;
         // Uneven weights, no source ≥ 2/3 of S=10000 → multi-signer weighted quorum.
-        seed = seedWeightSnapshot(mvh, {
-            blockIndex: BLOCK_INDEX,
-            validators: [
-                { pubkey: ids[0].pubkeyHex, source: 'sA', weight: '4000' },
-                { pubkey: ids[1].pubkeyHex, source: 'sB', weight: '3000' },
-                { pubkey: ids[2].pubkeyHex, source: 'sC', weight: '2000' },
-                { pubkey: ids[3].pubkeyHex, source: 'sD', weight: '1000' },
-            ],
-        });
+        seed = seedWeightSnapshot(mvh, { blockIndex: BLOCK_INDEX, validators: unevenWeights(ids) });
         oracle = await attachOracle(mvh);
         injectSubmissions(mvh);
     });

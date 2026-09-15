@@ -33,15 +33,17 @@
 
 'use strict';
 
+// Covers the six-of-ten checkpoint boundary. One part of multiHubStateAnchorN10.integration.test.js.
+
 const dotenv = require('dotenv');
 dotenv.config();
 
 const assert = require('assert');
-const { MultiValidatorHub, ValidatorIdentity } = require('../helpers/multiValidatorHubHelper');
-const { startDisposableHubDb } = require('../helpers/disposableHubDb');
-const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
-const { waitForMesh, waitFor } = require('../helpers/consensusWait');
-const eq = require('../../../xchain-hub/src/equivocation_header.js');
+const { MultiValidatorHub, ValidatorIdentity } = require('../../helpers/multiValidatorHubHelper');
+const { startDisposableHubDb } = require('../../helpers/disposableHubDb');
+const { seedWeightSnapshot }   = require('../../helpers/seededWeightSnapshot');
+const { waitForMesh, waitFor } = require('../../helpers/consensusWait');
+const eq = require('../../../../xchain-hub/src/equivocation_header.js');
 
 // A deadline, not a settle: waitForMesh returns on the first fully-peered poll.
 const PEER_WAIT_MS = 60_000;    // 10-node mesh (45 connections)
@@ -98,23 +100,26 @@ async function checkpointRows(hub) {
         ['BTC', 'regtest', TIP.block_index]);
 }
 
-describe('MultiValidatorHub: state-checkpoint signing at N=10 (C.2 matrix cell)', function () { this.timeout(300_000);
-    describe('a healthy N=10 weighted federation finalizes on every hub (needs >=7 of 10)', function () {
+describe('MultiValidatorHub: state-checkpoint signing at N=10 (C.2 matrix cell)', function () {
+    this.timeout(300_000);
+
+
+    describe('a 6-of-10 live minority cannot finalize a checkpoint (boundary)', function () {
         let db, mvh, seed;
 
         before(async function () {
             db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping N=10 checkpoint (positive): no env DB and Docker unavailable'); this.skip(); }
-            mvh = new MultiValidatorHub({ count: COUNT, basePort: 31000, startCrossChain: true, startAttestation: false });
+            if (!db) { console.log('Skipping N=10 checkpoint (boundary): no env DB and Docker unavailable'); this.skip(); }
+            // 6 live hubs; 4 offline placeholder sources sit in the snapshot (counting
+            // toward S). 6000/10000 is one source below the >=7 quorum.
+            mvh = new MultiValidatorHub({ count: 6, basePort: 31200, startCrossChain: true, startAttestation: false });
             await mvh.start();
             await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
             const ids = mvh.identities;
-            // Equal weights: S = 10*1000 = 10000; no source clears 2/3 alone, so the
-            // round needs a genuine >=7-signer aggregate to pass 3*tally > 2*S.
-            seed = seedWeightSnapshot(mvh, {
-                blockIndex: BLOCK_INDEX,
-                validators: ids.map((id, i) => ({ pubkey: id.pubkeyHex, source: 's' + i, weight: '1000' })),
-            });
+            const offline = ['f0', 'f1', 'f2', 'f3'].map((p) => p.repeat(32));   // distinct, never live
+            const validators = ids.map((id, i) => ({ pubkey: id.pubkeyHex, source: 's' + i, weight: '1000' }))
+                .concat(offline.map((pk, i) => ({ pubkey: pk, source: 'off' + i, weight: '1000' })));
+            seed = seedWeightSnapshot(mvh, { blockIndex: BLOCK_INDEX, validators });
             wireCheckpointEngine(mvh);
         });
 
@@ -124,37 +129,13 @@ describe('MultiValidatorHub: state-checkpoint signing at N=10 (C.2 matrix cell)'
             if (db)  { await db.stop(); }
         });
 
-        it('the identical checkpoint lands on EVERY hub with a >=7-of-10 quorum', async function () {
+        it('6 live of 10 is below quorum: no checkpoint is stored on any hub', async function () {
             await tickAll(mvh);
-
-            const rows = [];
             for (let i = 0; i < mvh.hubs.length; i++) {
-                const r = await checkpointRows(mvh.hubs[i]);
-                assert.strictEqual(r.length, 1, 'hub ' + i + ' must hold exactly one finalized checkpoint (got ' + r.length + ')');
-                rows.push(r[0]);
+                const rows = await checkpointRows(mvh.hubs[i]);
+                assert.strictEqual(rows.length, 0,
+                    'hub ' + i + ' finalized a checkpoint a 6-of-10 minority must never carry (got ' + rows.length + ' rows)');
             }
-
-            const raw = ['XCHECKPOINT', 'BTC', 'regtest', String(TIP.block_index), TIP.block_hash,
-                         TIP.ledger_hash, TIP.actions_hash, TIP.contract_hash,
-                         String(rows[0].checkpoint_seq), String(BLOCK_INDEX)].join('|') + ROOT_SUFFIX;
-            const canonical = eq.isEquivHeaderActive(BLOCK_INDEX, 'regtest')
-                ? eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT,
-                    'BTC|regtest|' + TIP.block_index + '|' + rows[0].checkpoint_seq, 0, raw)
-                : raw;
-
-            for (let i = 0; i < rows.length; i++) {
-                assert.strictEqual(rows[i].ledger_hash, TIP.ledger_hash, 'hub ' + i + ' diverged on ledger_hash');
-                const sigs = JSON.parse(rows[i].validator_signatures);
-                const verifying = new Set();
-                for (const s of sigs)
-                    if (ValidatorIdentity.verify(canonical, s.sig, s.pubkey)) verifying.add(s.pubkey);
-                assert.strictEqual(verifying.size, sigs.length,
-                    'hub ' + i + ': every stored sig must verify over the canonical (got ' + verifying.size + '/' + sigs.length + ')');
-                assert.ok(verifying.size >= QUORUM_SIGS,
-                    'hub ' + i + ': N=10 equal-weight quorum needs >=' + QUORUM_SIGS + ' co-signers (got ' + verifying.size + ')');
-            }
-            const distinct = new Set(rows.map((r) => r.ledger_hash + '|' + r.checkpoint_seq));
-            assert.strictEqual(distinct.size, 1, 'all hubs must hold the identical checkpoint');
         });
     });
 });
