@@ -77,6 +77,13 @@ describe('Fuzz: Connector URL Construction', function () {
             }), FC_PARAMS)
         })
     })
+})
+
+describe('Fuzz: Connector URL Construction', function () {
+
+    afterEach(function () {
+        sinon.restore()
+    })
 
     describe('XChainIndexerConnector constructor', function () {
 
