@@ -105,12 +105,9 @@ async function btcCount(sql, params) { return Number((await btcIdx(sql, params))
 const MATCH_REF_WHERE = "((a_chain='BTC' AND a_action_index = ?) OR (b_chain='BTC' AND b_action_index = ?))";
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-describe('[sdk] cross-chain DEX LIVE escrow-release settlement (#10)', function () {
-    this.timeout(0);
+let sdk, maker, btcOrderIndex, dogeRecv, btcTokenBalanceBefore, matchEffectiveTime;
 
-    let sdk, maker, btcOrderIndex, dogeRecv, btcTokenBalanceBefore, matchEffectiveTime;
-
-    before(async function () {
+async function setupDexSettlement() {
         expect(BTC_TICK, 'DEX_BTC_TICK env').to.match(/^[A-Z0-9]{1,12}$/);
         expect(DOGE_TICK, 'DEX_DOGE_TICK env').to.match(/^[A-Z0-9]{1,12}$/);
         expect(parseInt(process.env.DEX_DOGE_ORDER_INDEX || '', 10), 'DEX_DOGE_ORDER_INDEX env')
@@ -129,9 +126,9 @@ describe('[sdk] cross-chain DEX LIVE escrow-release settlement (#10)', function 
         dogeRecv = dogeSdk.deriveAddress(dogeKp.publicKey, { type: 'p2pkh' });
         console.log('    [dex-settle] maker=' + maker.address + ' BTC_TICK=' + BTC_TICK + ' DOGE_TICK=' + DOGE_TICK);
         console.log('    [dex-settle] DOGE maker BTC payout addr=' + DOGE_MAKER_BTC_RECV);
-    });
+}
 
-    it('ISSUE the BTC token and place the crossing BTC cross-chain ORDER', async function () {
+async function placeCrossingOrder() {
         const iss = await submit(sdk,
             { action: 'ISSUE', params: { tick: BTC_TICK, maxSupply: 1000000, maxMint: 100000, decimals: 0, description: 'dex-settle', mintSupply: 1000 } },
             { pubkey: maker.address, change: maker.address },
@@ -163,9 +160,9 @@ describe('[sdk] cross-chain DEX LIVE escrow-release settlement (#10)', function 
         btcOrderIndex = Number(res.indexed.actions[0].action_index);
         await mine(1);
         console.log('    [dex-settle] BTC order=' + btcOrderIndex);
-    });
+}
 
-    it('the hub finalizes the cross-chain match against the BTC order', async function () {
+async function awaitFinalizedOrderMatch() {
         const deadline = Date.now() + 240000;
         let match = null;
         while (Date.now() < deadline) {
@@ -183,9 +180,9 @@ describe('[sdk] cross-chain DEX LIVE escrow-release settlement (#10)', function 
         matchEffectiveTime = Number(match.effective_time);
         console.log('    [dex-settle] hub finalized match ' + match.match_id + ' legs=' + JSON.stringify(legs) +
             ' effective_time=' + matchEffectiveTime + ' (in ' + Math.max(0, matchEffectiveTime - Math.floor(Date.now() / 1000)) + 's)');
-    });
+}
 
-    it('the BTC indexer SETTLES the match: escrow released to the DOGE maker', async function () {
+async function awaitBtcOrderSettlement() {
         // Wait for the mirrored match to reach the BTC indexer and cross_settle to
         // release the BTC leg's escrow. REQUIRES HubDbSync mirroring the relay hub's
         // rows into the BTC indexer (see header VENUE note); without it this times out.
@@ -229,9 +226,9 @@ describe('[sdk] cross-chain DEX LIVE escrow-release settlement (#10)', function 
         console.log('    [dex-settle] BTC leg SETTLED: settlements=' + settlements +
             ' payout ' + payoutAmt + ' ' + BTC_TICK + ' -> ' + DOGE_MAKER_BTC_RECV +
             ' (order_status=' + orderStatus + ')');
-    });
+}
 
-    it('(best-effort) the DOGE leg also settles out of open on the DOGE indexer', async function () {
+async function observeDogeOrderSettlement() {
         const dogeOrderIndex = parseInt(process.env.DEX_DOGE_ORDER_INDEX, 10);
         const deadline = Date.now() + 120000;
         let status = null;
@@ -247,5 +244,13 @@ describe('[sdk] cross-chain DEX LIVE escrow-release settlement (#10)', function 
         // flip. Log either way; do not fail the suite on the DOGE-leg mirror alone.
         if (status && status !== 'open') console.log('    [dex-settle] DOGE leg settled: order ' + dogeOrderIndex + ' -> ' + status);
         else console.log('    [dex-settle] DOGE leg still ' + status + ' (DOGE indexer HubDbSync mirror not confirmed this run)');
-    });
+}
+
+describe('[sdk] cross-chain DEX LIVE escrow-release settlement (#10)', function () {
+    this.timeout(0);
+    before(setupDexSettlement);
+    it('ISSUE the BTC token and place the crossing BTC cross-chain ORDER', placeCrossingOrder);
+    it('the hub finalizes the cross-chain match against the BTC order', awaitFinalizedOrderMatch);
+    it('the BTC indexer SETTLES the match: escrow released to the DOGE maker', awaitBtcOrderSettlement);
+    it('(best-effort) the DOGE leg also settles out of open on the DOGE indexer', observeDogeOrderSettlement);
 });
