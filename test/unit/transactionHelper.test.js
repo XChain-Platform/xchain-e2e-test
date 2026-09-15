@@ -34,8 +34,40 @@ function resetGlobals() {
     };
 }
 
-describe('transactionHelper', function () {
+// Build a minimal valid PSBT hex using a deterministic private key so
+// bitcoinjs-lib can sign it without a live coin node.
+function buildMinimalPsbt(privKeyBuf) {
+    const ecc      = require('tiny-secp256k1');
+    const { ECPairFactory } = require('ecpair');
+    const ECPair   = ECPairFactory(ecc);
+    const network  = global.NETWORK_OBJECT;
+    const keyPair  = ECPair.fromPrivateKey(privKeyBuf, { network });
+    const p2wpkh   = bitcoin.payments.p2wpkh({ pubkey: keyPair.publicKey, network });
+    const { address } = p2wpkh;
 
+    const psbt = new bitcoin.Psbt({ network });
+    psbt.addInput({
+        hash: 'a'.repeat(64),
+        index: 0,
+        witnessUtxo: { script: p2wpkh.output, value: 100000 }
+    });
+    psbt.addOutput({ address, value: 90000 });
+    return { psbt: psbt.toHex(), encoding: 'OP_RETURN' };
+}
+
+// Stub Date.now so the `while (Date.now() < trackerEnd)` polling loop
+// exits on its first iteration rather than waiting up to 20 seconds.
+function stubDateNowExpired() {
+    let callCount = 0;
+    const BASE = 1_000_000;
+    const stub = sinon.stub(Date, 'now').callsFake(() => {
+        callCount++;
+        return callCount === 1 ? BASE : BASE + 999_999_999;
+    });
+    return stub;
+}
+
+describe('transactionHelper', function () {
     beforeEach(function () {
         resetGlobals();
     });
@@ -85,46 +117,21 @@ describe('transactionHelper', function () {
             assert.strictEqual(transactionHelper.isSegwitUTXO({ scriptPubKey }), false);
         });
     });
+});
 
-    // These unit tests verify the connector call contract only, using stubs that
-    // return a minimal pre-built PSBT hex for a known key pair. Full pipeline
-    // testing (live encoder + real PSBT signing) belongs in the e2e suite.
+// These unit tests verify the connector call contract only, using stubs that
+// return a minimal pre-built PSBT hex for a known key pair. Full pipeline
+// testing (live encoder + real PSBT signing) belongs in the e2e suite.
 
+describe('transactionHelper', function () {
+    beforeEach(function () {
+        resetGlobals();
+    });
+
+    afterEach(function () {
+        sinon.restore();
+    });
     describe('createAndSendTransaction (connector call contract)', function () {
-
-        // Build a minimal valid PSBT hex using a deterministic private key so
-        // bitcoinjs-lib can sign it without a live coin node.
-        function buildMinimalPsbt(privKeyBuf) {
-            const ecc      = require('tiny-secp256k1');
-            const { ECPairFactory } = require('ecpair');
-            const ECPair   = ECPairFactory(ecc);
-            const network  = global.NETWORK_OBJECT;
-            const keyPair  = ECPair.fromPrivateKey(privKeyBuf, { network });
-            const p2wpkh   = bitcoin.payments.p2wpkh({ pubkey: keyPair.publicKey, network });
-            const { address } = p2wpkh;
-
-            const psbt = new bitcoin.Psbt({ network });
-            psbt.addInput({
-                hash: 'a'.repeat(64),
-                index: 0,
-                witnessUtxo: { script: p2wpkh.output, value: 100000 }
-            });
-            psbt.addOutput({ address, value: 90000 });
-            return { psbt: psbt.toHex(), encoding: 'OP_RETURN' };
-        }
-
-        // Stub Date.now so the `while (Date.now() < trackerEnd)` polling loop
-        // exits on its first iteration rather than waiting up to 20 seconds.
-        function stubDateNowExpired() {
-            let callCount = 0;
-            const BASE = 1_000_000;
-            const stub = sinon.stub(Date, 'now').callsFake(() => {
-                callCount++;
-                return callCount === 1 ? BASE : BASE + 999_999_999;
-            });
-            return stub;
-        }
-
         it('calls encoderConnector.createTx with the expected arguments', async function () {
             const ecc    = require('tiny-secp256k1');
             const { ECPairFactory } = require('ecpair');
@@ -168,7 +175,18 @@ describe('transactionHelper', function () {
             // chain, which is exactly the kind of change nothing else would catch.
             assert.strictEqual(args[13], null,            'compress arg defaults to null (encoder decides)');
         });
+    });
+});
 
+describe('transactionHelper', function () {
+    beforeEach(function () {
+        resetGlobals();
+    });
+
+    afterEach(function () {
+        sinon.restore();
+    });
+    describe('createAndSendTransaction (connector call contract)', function () {
         it('calls nodeConnector.broadcastTx after building the signed transaction', async function () {
             const ecc    = require('tiny-secp256k1');
             const { ECPairFactory } = require('ecpair');
@@ -201,24 +219,42 @@ describe('transactionHelper', function () {
             assert.ok(broadcastCalled, 'broadcastTx should be called');
         });
     });
+});
 
-    // createSimpleTransaction fetches UTXOs at runtime and builds full PSBT inputs
-    // including nonWitnessUtxo from nodeConnector.getTransactionHex. Mocking the
-    // full PSBT construction cycle would reproduce production code; use the e2e
-    // suite against a regtest node for full coverage.
+// createSimpleTransaction fetches UTXOs at runtime and builds full PSBT inputs
+// including nonWitnessUtxo from nodeConnector.getTransactionHex. Mocking the
+// full PSBT construction cycle would reproduce production code; use the e2e
+// suite against a regtest node for full coverage.
 
+describe('transactionHelper', function () {
+    beforeEach(function () {
+        resetGlobals();
+    });
+
+    afterEach(function () {
+        sinon.restore();
+    });
     describe('createSimpleTransaction', function () {
         it('is documented as requiring integration testing for full coverage', function () {
             assert.strictEqual(typeof transactionHelper.createSimpleTransaction, 'function');
         });
     });
+});
 
-    // Spec §3.5. The envelope reveal is pre-built against the UNSIGNED commit's
-    // txid, which is only stable because commit inputs are segwit-only. If that
-    // txid ever drifts, the reveal spends nothing while the commit's value sits in
-    // a one-time P2TR output no other transaction references: funds stranded, no
-    // error, no action. The guard is cheap to keep and expensive to lose, so it is
-    // pinned here rather than left to the regtest run that happens to notice.
+// Spec §3.5. The envelope reveal is pre-built against the UNSIGNED commit's
+// txid, which is only stable because commit inputs are segwit-only. If that
+// txid ever drifts, the reveal spends nothing while the commit's value sits in
+// a one-time P2TR output no other transaction references: funds stranded, no
+// error, no action. The guard is cheap to keep and expensive to lose, so it is
+// pinned here rather than left to the regtest run that happens to notice.
+describe('transactionHelper', function () {
+    beforeEach(function () {
+        resetGlobals();
+    });
+
+    afterEach(function () {
+        sinon.restore();
+    });
     describe('signEnvelopeReveal (envelope pair binding)', function () {
         const bitcoin = require('bitcoinjs-lib');
         const ecc     = require('tiny-secp256k1');
