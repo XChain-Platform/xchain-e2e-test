@@ -33,91 +33,91 @@ const path   = require('path');
 // The lockfile assertions in the companion file cannot see this: they describe
 // what a fresh install WOULD produce, and these trees are precisely the part of
 // the checkout a fresh install does not touch.
-describe('Security: staged sibling trees carry no vulnerable copies @regression @tier4', function () {
-    const root = path.resolve(__dirname, '..', '..', '..', '..');
-    const pkg  = require(path.join(root, 'package.json'));
+const root = path.resolve(__dirname, '..', '..', '..', '..');
+const pkg  = require(path.join(root, 'package.json'));
 
-    // Same floors as the companion file. Duplicated rather than imported
-    // because that file is a mocha spec shared verbatim across repos and
-    // exports nothing; keeping this list next to its own assertions is the
-    // cheaper coupling. A floor that drifts fails here as a stale-pin report
-    // rather than passing silently, because ADV-6 also asserts the two lists
-    // agree.
-    const floors = {
-        'fast-uri':             [3, 1, 5],
-        'brace-expansion':      [5, 0, 9],
-        'minimatch':            [10, 2, 5],
-        'axios':                [1, 18, 0],
-        'js-yaml':              [4, 3, 1],
-        'serialize-javascript': [7, 0, 5],
-        'shell-quote':          [1, 9, 0],
-        'form-data':            [4, 0, 6],
-        'tmp':                  [0, 2, 6],
-        'ip-address':           [10, 3, 1],
-        'mariadb':              [3, 5, 3]
-    };
+// Same floors as the companion file. Duplicated rather than imported
+// because that file is a mocha spec shared verbatim across repos and
+// exports nothing; keeping this list next to its own assertions is the
+// cheaper coupling. A floor that drifts fails here as a stale-pin report
+// rather than passing silently, because ADV-6 also asserts the two lists
+// agree.
+const floors = {
+    'fast-uri':             [3, 1, 5],
+    'brace-expansion':      [5, 0, 9],
+    'minimatch':            [10, 2, 5],
+    'axios':                [1, 18, 0],
+    'js-yaml':              [4, 3, 1],
+    'serialize-javascript': [7, 0, 5],
+    'shell-quote':          [1, 9, 0],
+    'form-data':            [4, 0, 6],
+    'tmp':                  [0, 2, 6],
+    'ip-address':           [10, 3, 1],
+    'mariadb':              [3, 5, 3]
+};
 
-    function cmp(a, b) {
-        for (let i = 0; i < 3; i++) {
-            if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) < (b[i] || 0) ? -1 : 1;
+function cmp(a, b) {
+    for (let i = 0; i < 3; i++) {
+        if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) < (b[i] || 0) ? -1 : 1;
+    }
+    return 0;
+}
+
+function parse(version) {
+    return String(version).split('-')[0].split('.').map(Number);
+}
+
+// Every dependency declared as a local path. Read from package.json rather
+// than hardcoded so a third bundled sibling is covered the day it is added.
+function stagedSiblings() {
+    return Object.entries(pkg.dependencies || {})
+        .filter(([, range]) => /^file:/.test(String(range)))
+        .map(([name, range]) => ({
+            name,
+            dir: path.resolve(root, String(range).replace(/^file:/, ''))
+        }));
+}
+
+// Walks a node_modules tree and yields { name, version, path } for every
+// package in it, descending into scopes and into nested node_modules. Depth
+// is bounded so a symlink cycle in a staged bundle cannot hang the suite.
+function* walkTree(dir, depth) {
+    if (depth > 8 || !fs.existsSync(dir)) return;
+
+    let entries;
+    try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+        return;
+    }
+
+    for (const entry of entries) {
+        if (!entry.isDirectory() || entry.name === '.bin') continue;
+        const full = path.join(dir, entry.name);
+
+        // A scope directory holds packages, not a package.
+        if (entry.name.startsWith('@')) {
+            yield* walkTree(full, depth + 1);
+            continue;
         }
-        return 0;
-    }
 
-    function parse(version) {
-        return String(version).split('-')[0].split('.').map(Number);
-    }
-
-    // Every dependency declared as a local path. Read from package.json rather
-    // than hardcoded so a third bundled sibling is covered the day it is added.
-    function stagedSiblings() {
-        return Object.entries(pkg.dependencies || {})
-            .filter(([, range]) => /^file:/.test(String(range)))
-            .map(([name, range]) => ({
-                name,
-                dir: path.resolve(root, String(range).replace(/^file:/, ''))
-            }));
-    }
-
-    // Walks a node_modules tree and yields { name, version, path } for every
-    // package in it, descending into scopes and into nested node_modules. Depth
-    // is bounded so a symlink cycle in a staged bundle cannot hang the suite.
-    function* walkTree(dir, depth) {
-        if (depth > 8 || !fs.existsSync(dir)) return;
-
-        let entries;
-        try {
-            entries = fs.readdirSync(dir, { withFileTypes: true });
-        } catch {
-            return;
-        }
-
-        for (const entry of entries) {
-            if (!entry.isDirectory() || entry.name === '.bin') continue;
-            const full = path.join(dir, entry.name);
-
-            // A scope directory holds packages, not a package.
-            if (entry.name.startsWith('@')) {
-                yield* walkTree(full, depth + 1);
-                continue;
-            }
-
-            const manifest = path.join(full, 'package.json');
-            if (fs.existsSync(manifest)) {
-                try {
-                    const parsed = JSON.parse(fs.readFileSync(manifest, 'utf8'));
-                    if (parsed.name && parsed.version) {
-                        yield { name: parsed.name, version: parsed.version, path: full };
-                    }
-                } catch {
-                    // An unreadable manifest is not this suite's problem.
+        const manifest = path.join(full, 'package.json');
+        if (fs.existsSync(manifest)) {
+            try {
+                const parsed = JSON.parse(fs.readFileSync(manifest, 'utf8'));
+                if (parsed.name && parsed.version) {
+                    yield { name: parsed.name, version: parsed.version, path: full };
                 }
+            } catch {
+                // An unreadable manifest is not this suite's problem.
             }
-
-            yield* walkTree(path.join(full, 'node_modules'), depth + 1);
         }
-    }
 
+        yield* walkTree(path.join(full, 'node_modules'), depth + 1);
+    }
+}
+
+describe('Security: staged sibling trees carry no vulnerable copies @regression @tier4', function () {
     it('ADV-6: the floors here match the ones the lockfile guard enforces', function () {
         const companion = fs.readFileSync(
             path.join(__dirname, 'dependency-advisories.test.js'), 'utf8');
@@ -146,7 +146,9 @@ describe('Security: staged sibling trees carry no vulnerable copies @regression 
         assert.ok(siblings.length > 0,
             'expected at least one file: dependency (xchain-hub, xchain-sdk)');
     });
+});
 
+describe('Security: staged sibling trees carry no vulnerable copies @regression @tier4', function () {
     stagedSiblings().forEach(function (sibling) {
         it(`ADV-8: ${sibling.name}'s staged node_modules carries no package below its advisory floor`, function () {
             this.timeout(30000);
@@ -173,8 +175,9 @@ describe('Security: staged sibling trees carry no vulnerable copies @regression 
                 + offenders.join('\n  '));
         });
     });
+});
 
-    // The same silent-persistence hazard one level up, on the SNAPSHOT rather than
+// The same silent-persistence hazard one level up, on the SNAPSHOT rather than
     // the tree. package-lock.json records a frozen copy of each staged sibling's
     // manifest under its file: path key, and once the staged directory has lost its
     // package.json npm has nothing to reconcile that copy against, so it simply
@@ -184,6 +187,7 @@ describe('Security: staged sibling trees carry no vulnerable copies @regression 
     // which is exactly why it can rot unnoticed until a pin change lands on one
     // side only. The floor checks above cannot see it: they read node_modules, not
     // the lockfile's own path entries (uuid 7d50ae1b).
+describe('Security: staged sibling trees carry no vulnerable copies @regression @tier4', function () {
     stagedSiblings().forEach(function (sibling) {
         it(`ADV-9: the lockfile snapshot of ${sibling.name} records the sibling repo's own version`, function () {
             const lock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
