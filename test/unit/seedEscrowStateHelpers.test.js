@@ -73,6 +73,9 @@ describe('seed-escrow-state helpers', function () {
             assert.deepStrictEqual(listRows('a string'), []);
         });
     });
+});
+
+describe('seed-escrow-state helpers', function () {
 
     describe('holdsEscrow', function () {
         it('counts the transitional states that still hold the lock', function () {
@@ -108,6 +111,9 @@ describe('seed-escrow-state helpers', function () {
             assert.strictEqual(holdsEscrow({ info: { status: 'filled' } }), false);
         });
     });
+});
+
+describe('seed-escrow-state helpers', function () {
 
     describe('isSeedOrder', function () {
         it('claims an order that gives the gas tick', function () {
@@ -132,7 +138,15 @@ describe('seed-escrow-state helpers', function () {
             assert.strictEqual(isSeedOrder({ give_amount: '100' }, 'XCHAIN'), false);
         });
     });
+});
 
+describe('seed-escrow-state helpers', function () {
+    registerEscrowGateArmingCases();
+    registerEscrowGateIdentityCase();
+    registerEscrowGateNegativeCases();
+});
+
+function registerEscrowGateArmingCases() {
     describe('escrowLeafGate', function () {
         it('reports BTC:regtest as armed at the height the indexer actually carries', function () {
             const g = escrowLeafGate('BTC', 'regtest');
@@ -159,6 +173,11 @@ describe('seed-escrow-state helpers', function () {
             const g = escrowLeafGate('BTC', 'mainnet');
             assert.strictEqual(g.armed, null, 'a shadow window must never read as an arming');
         });
+    });
+}
+
+function registerEscrowGateIdentityCase() {
+    describe('escrowLeafGate', function () {
 
         it('names the file it read and hashes it, because a stale sibling answers just as confidently', function () {
             // THE FAILURE THIS EXISTS FOR, measured 2026-08-15 rather than
@@ -192,6 +211,11 @@ describe('seed-escrow-state helpers', function () {
                 .update(fs.readFileSync(g.source)).digest('hex');
             assert.strictEqual(g.sha256, onDisk);
         });
+    });
+}
+
+function registerEscrowGateNegativeCases() {
+    describe('escrowLeafGate', function () {
 
         it('reports the gate identity even for a chain that is neither armed nor shadowing', function () {
             // The stale-copy hazard is WORST precisely here. An unarmed answer is
@@ -225,4 +249,4 @@ describe('seed-escrow-state helpers', function () {
             assert.strictEqual(g.armed, null);
         });
     });
-});
+}
