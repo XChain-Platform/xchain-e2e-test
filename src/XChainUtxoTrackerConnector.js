@@ -19,6 +19,9 @@
  ********************************************************************/
 
 const axios = require('axios')
+const nodeUtil = require('node:util');
+const { getLogger } = require('./lib/logger');
+const logger = getLogger();
 
 class UtxoTracker {
     constructor(url, port) {
@@ -119,7 +122,7 @@ class UtxoTracker {
                 } catch (e) {
                     mineErrors++
                     lastMineError = (e && e.message) ? e.message : String(e)
-                    console.warn('quiesce: nudge mine failed: ' + lastMineError)
+                    logger.warn('quiesce: nudge mine failed: ' + lastMineError)
                 }
             }
             await this.sleep(pollMs)
@@ -178,7 +181,7 @@ class UtxoTracker {
                 }
                 await this.sleep(1000)
             } catch(err) {
-                console.log(err)
+                logger.info(err)
                 await this.sleep(1000)
             }
         }
@@ -207,7 +210,7 @@ class UtxoTracker {
                 throw new Error('Error getting utxos');
             }
         } catch (error) {
-            console.error('Error fetching UTXOs:', error);
+            logger.error(nodeUtil.format('Error fetching UTXOs:', error));
             throw error;
         }
     }

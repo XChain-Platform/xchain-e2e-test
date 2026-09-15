@@ -19,6 +19,8 @@
  ********************************************************************/
 
 const axios = require('axios');
+const { getLogger } = require('./lib/logger');
+const logger = getLogger();
 
 class XChainEncoderConnector {
     constructor(url, port, apiKey = null) {
@@ -48,7 +50,7 @@ class XChainEncoderConnector {
         try {
             response = await axios.post(this.url, data, this.reqConfig)
         } catch (err) {
-            console.log(err)
+            logger.info(err)
             return false
         }
 
@@ -117,7 +119,7 @@ class XChainEncoderConnector {
         try{
             response = await axios.post(this.url, dataToSend, this.reqConfig)
         } catch (err){
-            console.log(err)
+            logger.info(err)
             throw new Error('Error trying to create a tx with the encoder module: ' + (err && err.message));
         }
 

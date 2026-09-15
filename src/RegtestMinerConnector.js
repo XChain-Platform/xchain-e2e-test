@@ -13,6 +13,8 @@
  ********************************************************************/
 
 const axios = require('axios');
+const { getLogger } = require('./lib/logger');
+const logger = getLogger();
 
 // Per-request cap for the readiness probe. axios defaults to no timeout, so a
 // miner that accepts the socket and never answers left ping() pending forever
@@ -210,7 +212,7 @@ class RegtestMinerConnector {
                 throw e
             if (!RegtestMinerConnector._mockTimeFallbackAnnounced) {
                 RegtestMinerConnector._mockTimeFallbackAnnounced = true
-                console.log('RegtestMinerConnector: miner has no set_mock_time; ' +
+                logger.info('RegtestMinerConnector: miner has no set_mock_time; ' +
                     'driving setmocktime through the node RPC instead')
             }
             return await global.nodeConnector._rpc('setmocktime', [Number(timestamp)])
