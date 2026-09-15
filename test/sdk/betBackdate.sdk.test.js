@@ -45,10 +45,9 @@ const {
     submitBet
 } = require('./betHelper');
 
-describe('[sdk] BET timestamp backdating (§12 E11)', function () {
+let sdk, oracle, punter, tick;
 
-    let sdk, oracle, punter, tick;
-
+function registerBackdateHooks() {
     before(async function () {
         // See bet.sdk.test.js: ^id compaction outruns the indexer's wire acceptance.
         sdk = makeSdk({ compactAddresses: false });
@@ -60,17 +59,65 @@ describe('[sdk] BET timestamp backdating (§12 E11)', function () {
     after(async function () {
         await releaseClock();
     });
+}
 
-    it('a backdated block cannot reopen betting on a latched feed', async function () {
+async function createBackdateMarket(now, deadline) {
+    return submitBet(sdk, oracle, sdk.betting.createMarketParams({
+        label: 'E11 backdating', outcomes: ['Yes', 'No'], tick,
+        fee: '1.00', deadline, refundWindow: MIN_REFUND_WINDOW, now
+    }));
+}
+
+async function submitBackdatedBet(feedIndex, early) {
+    // Broadcast into the mempool, then seal the backdated block over it.
+    await submit(sdk,
+        { action: 'BET', params: sdk.betting.placeBetParams({
+            feedActionIndex: feedIndex, outcome: 1, amount: '6.00000000' }) },
+        { pubkey: punter.address, change: punter.address },
+        submitOpts({ wif: punter.wif, waitForIndexer: false }));
+    await mineAtFrozenClock(1);
+    // Wait for the backdated bet to reach the bets table rather than a
+    // fixed settle: the assertions below read the row it writes, and the
+    // clock stays frozen either way.
+    const earlyIndex = Number(actionIndexOf(early));
+    for (let i = 0; i < 30; i++) {
+        const seen = await getBets(feedIndex);
+        if (seen.some(r => Number(r.action_index) !== earlyIndex)) break;
+        await new Promise(r => setTimeout(r, 1000));
+    }
+}
+
+async function latchFeedForBackdate(feedIndex, deadline) {
+    // Cross the deadline: the end-of-block pass writes the one-way latch.
+    await jumpTo(deadline + 120, 2);
+    // NoMine: every extra block here would carry the jumped timestamp and drag
+    // median-time-past above the deadline, making a legal backdate impossible.
+    return waitFeedStatusNoMine(feedIndex, 'closed');
+}
+
+async function restoreClockAfterBackdate() {
+    // Put the clock back above every block the chain carries BEFORE the
+    // suite ends, so nothing downstream inherits a sub-MTP clock.
+    await releaseClock();
+    await resumeMiningAtFrozenClock();
+}
+
+async function attemptBackdate(deadline) {
+    // Now the attack: rewind the clock BELOW the deadline and mine there, so
+    // the next block genuinely carries BLOCK_TIME < DEADLINE even though an
+    // earlier block already crossed it.
+    const target = deadline - 600;
+    const rewind = await backdateTo(target);
+    return { target, rewind };
+}
+
+async function testBackdatedBlockCannotReopen() {
         // A generous window, so the backdate target has room to sit comfortably
         // below DEADLINE and still above median-time-past.
         const now = await blockTime();
         const deadline = now + 3600;
 
-        const res = await submitBet(sdk, oracle, sdk.betting.createMarketParams({
-            label: 'E11 backdating', outcomes: ['Yes', 'No'], tick,
-            fee: '1.00', deadline, refundWindow: MIN_REFUND_WINDOW, now
-        }));
+        const res = await createBackdateMarket(now, deadline);
         expect(res.indexed.status, 'create status').to.equal('valid');
         const feedIndex = actionIndexOf(res);
 
@@ -79,19 +126,11 @@ describe('[sdk] BET timestamp backdating (§12 E11)', function () {
             feedActionIndex: feedIndex, outcome: 0, amount: '4.00000000' }));
         expect(early.indexed.status, 'the honest pre-deadline bet is valid').to.equal('valid');
 
-        // Cross the deadline: the end-of-block pass writes the one-way latch.
-        await jumpTo(deadline + 120, 2);
-        // NoMine: every extra block here would carry the jumped timestamp and drag
-        // median-time-past above the deadline, making a legal backdate impossible.
-        const latched = await waitFeedStatusNoMine(feedIndex, 'closed');
+        const latched = await latchFeedForBackdate(feedIndex, deadline);
         expect(latched.feed_status, 'feed latched closed').to.equal('closed');
         expect(Number(latched.closed_block), 'closed_block stamped').to.be.greaterThan(0);
 
-        // Now the attack: rewind the clock BELOW the deadline and mine there, so
-        // the next block genuinely carries BLOCK_TIME < DEADLINE even though an
-        // earlier block already crossed it.
-        const target = deadline - 600;
-        const rewind = await backdateTo(target);
+        const { target, rewind } = await attemptBackdate(deadline);
         if (!rewind.ok) {
             console.log(`      [bet-backdate] SKIPPED: ${rewind.reason}`);
             this.skip();
@@ -101,22 +140,7 @@ describe('[sdk] BET timestamp backdating (§12 E11)', function () {
 
         let rejected;
         try {
-            // Broadcast into the mempool, then seal the backdated block over it.
-            await submit(sdk,
-                { action: 'BET', params: sdk.betting.placeBetParams({
-                    feedActionIndex: feedIndex, outcome: 1, amount: '6.00000000' }) },
-                { pubkey: punter.address, change: punter.address },
-                submitOpts({ wif: punter.wif, waitForIndexer: false }));
-            await mineAtFrozenClock(1);
-            // Wait for the backdated bet to reach the bets table rather than a
-            // fixed settle: the assertions below read the row it writes, and the
-            // clock stays frozen either way.
-            const earlyIndex = Number(actionIndexOf(early));
-            for (let i = 0; i < 30; i++) {
-                const seen = await getBets(feedIndex);
-                if (seen.some(r => Number(r.action_index) !== earlyIndex)) break;
-                await new Promise(r => setTimeout(r, 1000));
-            }
+            await submitBackdatedBet(feedIndex, early);
 
             // Confirm the block really was backdated, or the drill proves nothing.
             const minedAt = await blockTime();
@@ -128,10 +152,7 @@ describe('[sdk] BET timestamp backdating (§12 E11)', function () {
             expect(rejected, 'the backdated bet reached the chain and was recorded').to.not.equal(undefined);
             console.log(`      [bet-backdate] indexer: ${rejected.parse_status}`);
         } finally {
-            // Put the clock back above every block the chain carries BEFORE the
-            // suite ends, so nothing downstream inherits a sub-MTP clock.
-            await releaseClock();
-            await resumeMiningAtFrozenClock();
+            await restoreClockAfterBackdate();
         }
 
         // THE assertion: rejected on the stored latch, not on the clock. A
@@ -148,5 +169,9 @@ describe('[sdk] BET timestamp backdating (§12 E11)', function () {
 
         const feed = await getFeed(feedIndex);
         expect(feed.feed_status, 'the feed is still closed, never reopened').to.equal('closed');
-    });
+}
+
+describe('[sdk] BET timestamp backdating (§12 E11)', function () {
+    registerBackdateHooks();
+    it('a backdated block cannot reopen betting on a latched feed', testBackdatedBlockCannotReopen);
 });
