@@ -116,30 +116,18 @@ async function getOpenCrossChainOffers() {
 }
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-async function main() {
-    if (!/^[A-Z0-9]{1,12}$/.test(DOGE_TICK) || !/^[A-Z0-9]{1,12}$/.test(BTC_TICK))
-        throw new Error('SWAP_DOGE_TICK and SWAP_BTC_TICK must be set to uppercase-alnum tickers');
-
-    // Resolve the DOGE chain clock: the SWAP expiration is anchored to it (block_time
-    // + 90 days = the free tier), not wall-clock, so it stays in the free band
-    // regardless of regtest clock skew.
-    const blockTime = await dogeIdx(async (c) => {
-        const rows = await c.query('SELECT block_time FROM blocks ORDER BY block_index DESC LIMIT 1');
-        return rows.length ? Number(rows[0].block_time) : Math.floor(Date.now() / 1000);
+// Seed the prices the DOGE native-fee path reads. Both anchors, because the tip
+// alone is wrong on the idle chain this driver usually finds - see
+// helpers/dogeSetupPriceSeed.js for why, and for what it costs when it happens.
+async function seedPrices() {
+    const seeded = await seedDogeFixturePrices({
+        hubConn, dogeIdx, coinPair: 'DOGE/USD',
+        coinUsd: DOGE_USD_SEED, xchainUsd: BOOTSTRAP_XCHAIN_USD, label: 'swapCrossDogeSetup',
     });
+    console.log('[swap-doge-setup] prices seeded (DOGE/USD, XCHAIN/USD) at ' + describeSeed(seeded));
+}
 
-    // Seed the prices the DOGE native-fee path reads. Both anchors, because the tip
-    // alone is wrong on the idle chain this driver usually finds - see
-    // helpers/dogeSetupPriceSeed.js for why, and for what it costs when it happens.
-    async function seedPrices() {
-        const seeded = await seedDogeFixturePrices({
-            hubConn, dogeIdx, coinPair: 'DOGE/USD',
-            coinUsd: DOGE_USD_SEED, xchainUsd: BOOTSTRAP_XCHAIN_USD, label: 'swapCrossDogeSetup',
-        });
-        console.log('[swap-doge-setup] prices seeded (DOGE/USD, XCHAIN/USD) at ' + describeSeed(seeded));
-    }
-    await seedPrices();
-
+async function prepareMaker() {
     const sdk = new XChainSDK({
         network:     'dogecoin-regtest',
         encoderUrl:  'localhost',
@@ -163,50 +151,55 @@ async function main() {
     const btcSdk  = new XChainSDK({ network: 'bitcoin-regtest', timeout: 30000 });
     const btcKp   = btcSdk.generateKeyPair();
     const btcRecv = btcSdk.deriveAddress(btcKp.publicKey, { type: 'p2pkh' });
+    return { sdk, maker, btcRecv };
+}
 
-    // Submit without the explorer waiter (no DOGE explorer), mine, and resolve the
-    // indexed action row by tx hash via the indexer DB. Mirrors dexDogeSetup.
-    async function submitAndIndex(label, actionData, encoderOpts) {
-        // Re-anchor first: this driver mines between its submits, and the first
-        // generate_blocks on an idle chain drags block time forward by the whole idle
-        // gap, which ages out a seed taken before it.
-        await seedPrices();
-        const res = await sdk.submitAction(actionData,
-            Object.assign({ pubkey: maker.address, change: maker.address, unconfirmed: false }, encoderOpts),
-            { wif: maker.wif, waitForIndexer: false });
-        const txid = res.txid || (res.signed && res.signed.txid);
-        if (!txid) throw new Error(label + ': no txid in submit result: ' + JSON.stringify(Object.keys(res)));
-        for (let i = 0; i < 30; i++) {
-            await minerRpc('generate_blocks', { count: 1 });
-            await sleep(2000);
-            const rows = await dogeIdx((c) => c.query(
-                `SELECT a.action_index FROM actions a
-                 JOIN transactions t ON t.tx_index = a.tx_index
-                 JOIN index_transactions ih ON ih.id = t.tx_hash_id
-                 WHERE ih.hash = ? ORDER BY a.action_index ASC LIMIT 1`, [txid]));
-            if (rows.length) {
-                console.log('[swap-doge-setup] ' + label + ': indexed as action ' + rows[0].action_index);
-                return Number(rows[0].action_index);
-            }
+// Submit without the explorer waiter (no DOGE explorer), mine, and resolve the
+// indexed action row by tx hash via the indexer DB. Mirrors dexDogeSetup.
+async function submitAndIndex(sdk, maker, label, actionData, encoderOpts) {
+    // Re-anchor first: this driver mines between its submits, and the first
+    // generate_blocks on an idle chain drags block time forward by the whole idle
+    // gap, which ages out a seed taken before it.
+    await seedPrices();
+    const res = await sdk.submitAction(actionData,
+        Object.assign({ pubkey: maker.address, change: maker.address, unconfirmed: false }, encoderOpts),
+        { wif: maker.wif, waitForIndexer: false });
+    const txid = res.txid || (res.signed && res.signed.txid);
+    if (!txid) throw new Error(label + ': no txid in submit result: ' + JSON.stringify(Object.keys(res)));
+    for (let i = 0; i < 30; i++) {
+        await minerRpc('generate_blocks', { count: 1 });
+        await sleep(2000);
+        const rows = await dogeIdx((c) => c.query(
+            `SELECT a.action_index FROM actions a
+             JOIN transactions t ON t.tx_index = a.tx_index
+             JOIN index_transactions ih ON ih.id = t.tx_hash_id
+             WHERE ih.hash = ? ORDER BY a.action_index ASC LIMIT 1`, [txid]));
+        if (rows.length) {
+            console.log('[swap-doge-setup] ' + label + ': indexed as action ' + rows[0].action_index);
+            return Number(rows[0].action_index);
         }
-        throw new Error(label + ': tx ' + txid + ' never indexed');
     }
+    throw new Error(label + ': tx ' + txid + ' never indexed');
+}
 
+async function issueDogeToken(sdk, maker) {
     // ISSUE the DOGE-side token. DOGE forces native-coin fees (no XCHAIN-fee fallback),
     // so pay the issuance fee as a native DOGE output to FEE_DESTINATION, sized from the
     // UNIFIED_FEES gas schedule valued at the seeded prices (mid-band of 0.95-1.10).
     const issueFeeNative = ISSUE_FEE_XCHAIN * (XCHAIN_USD / DOGE_USD); // DOGE
     const issueFeeSats = Math.round(issueFeeNative * 1e8);
     console.log('[swap-doge-setup] ISSUE native fee: ' + issueFeeNative + ' DOGE (' + issueFeeSats + ' sats) -> ' + FEE_DESTINATION);
-    await submitAndIndex('ISSUE ' + DOGE_TICK,
+    await submitAndIndex(sdk, maker, 'ISSUE ' + DOGE_TICK,
         { action: 'ISSUE', params: { tick: DOGE_TICK, maxSupply: 1000000, maxMint: 100000, decimals: 0, description: 'swap-cross-settle', mintSupply: 1000 } },
         { customOutputs: [{ address: FEE_DESTINATION, value: issueFeeSats }] });
+}
 
+async function placeDogeSwap(sdk, maker, btcRecv, blockTime) {
     // Place the cross-chain SWAP v0. Expiration anchored to the DOGE chain clock + 90
     // days = exactly the free tier (chargeableDays = 0), so the SWAP carries no protocol
     // fee and needs no native output.
     const expiration = blockTime + 90 * 86400;
-    const swapIndex = await submitAndIndex('SWAP',
+    return submitAndIndex(sdk, maker, 'SWAP',
         {
             action: 'SWAP',
             params: {
@@ -216,7 +209,9 @@ async function main() {
                 getAddress: btcRecv, expiration, memo: 'cross-coin swap doge leg',
             },
         }, {});
+}
 
+async function verifyOpenOffer(swapIndex) {
     // Verify the offer is OPEN as a CROSS-CHAIN swap. getopencrosschainorders is the
     // authoritative signal (cross-chain offers escrow locally but match at the hub, not
     // in the local SWAP_MATCH path); its presence confirms the ISSUE escrowed the give
@@ -236,6 +231,25 @@ async function main() {
         throw new Error('DOGE SWAP ' + swapIndex + ' surfaced as kind=' + openOffer.kind + ', expected swap');
     if (openOffer.give_tick !== DOGE_TICK || openOffer.get_tick !== BTC_TICK)
         throw new Error('DOGE SWAP ' + swapIndex + ' tick mismatch: give=' + openOffer.give_tick + ' get=' + openOffer.get_tick);
+}
+
+async function main() {
+    if (!/^[A-Z0-9]{1,12}$/.test(DOGE_TICK) || !/^[A-Z0-9]{1,12}$/.test(BTC_TICK))
+        throw new Error('SWAP_DOGE_TICK and SWAP_BTC_TICK must be set to uppercase-alnum tickers');
+
+    // Resolve the DOGE chain clock: the SWAP expiration is anchored to it (block_time
+    // + 90 days = the free tier), not wall-clock, so it stays in the free band
+    // regardless of regtest clock skew.
+    const blockTime = await dogeIdx(async (c) => {
+        const rows = await c.query('SELECT block_time FROM blocks ORDER BY block_index DESC LIMIT 1');
+        return rows.length ? Number(rows[0].block_time) : Math.floor(Date.now() / 1000);
+    });
+
+    await seedPrices();
+    const { sdk, maker, btcRecv } = await prepareMaker();
+    await issueDogeToken(sdk, maker);
+    const swapIndex = await placeDogeSwap(sdk, maker, btcRecv, blockTime);
+    await verifyOpenOffer(swapIndex);
 
     console.log('[swap-doge-setup] DOGE_SWAP_INDEX=' + swapIndex);
     console.log('[swap-doge-setup] DOGE_MAKER=' + maker.address);
