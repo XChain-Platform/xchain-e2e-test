@@ -96,38 +96,36 @@ async function balanceOf(address, tick) {
     return rows.length ? String(rows[0].amount) : '0';
 }
 
-describe('[sdk] CROSS_CHAIN_ROYALTY create-gate deny drill (mode=' + MODE + ')', function () {
-    this.timeout(0);
+let sdk, maker, legAddr, getAddr, tick, guardIndex, LOCAL_COIN, GET_COIN;
 
-    let sdk, maker, legAddr, getAddr, tick, guardIndex, LOCAL_COIN, GET_COIN;
+async function setupRoyaltyDenyTests() {
+    expect(['deny', 'allow'], 'ROYALTY_DENY_MODE must be deny|allow').to.include(MODE);
+    expect(global.indexerDatabase, 'indexerDatabase global (initialCheck)').to.be.an('object');
 
-    before(async function () {
-        expect(['deny', 'allow'], 'ROYALTY_DENY_MODE must be deny|allow').to.include(MODE);
-        expect(global.indexerDatabase, 'indexerDatabase global (initialCheck)').to.be.an('object');
+    LOCAL_COIN = localCoin();
+    GET_COIN   = String(process.env.ROYALTY_DENY_GET_COIN || (LOCAL_COIN === 'DOGE' ? 'BTC' : 'DOGE')).trim().toUpperCase();
+    expect(GET_COIN, 'GET_COIN must be a foreign chain').to.not.equal(LOCAL_COIN);
 
-        LOCAL_COIN = localCoin();
-        GET_COIN   = String(process.env.ROYALTY_DENY_GET_COIN || (LOCAL_COIN === 'DOGE' ? 'BTC' : 'DOGE')).trim().toUpperCase();
-        expect(GET_COIN, 'GET_COIN must be a foreign chain').to.not.equal(LOCAL_COIN);
+    sdk   = makeSdk();
+    maker = await fundedGasAddress(sdk, 1);
+    tick  = uniqueTick('RDN');
 
-        sdk   = makeSdk();
-        maker = await fundedGasAddress(sdk, 1);
-        tick  = uniqueTick('RDN');
+    // Royalty recipient: a fresh local p2pkh. Regtest BTC/DOGE share the base58
+    // p2pkh prefix, so this address re-encodes to GET_COIN as the same string;
+    // the leg is therefore payable and cannot be what trips the ALLOW pass.
+    const legKp = sdk.generateKeyPair();
+    legAddr = sdk.deriveAddress(legKp.publicKey, { type: 'p2pkh' });
 
-        // Royalty recipient: a fresh local p2pkh. Regtest BTC/DOGE share the base58
-        // p2pkh prefix, so this address re-encodes to GET_COIN as the same string;
-        // the leg is therefore payable and cannot be what trips the ALLOW pass.
-        const legKp = sdk.generateKeyPair();
-        legAddr = sdk.deriveAddress(legKp.publicKey, { type: 'p2pkh' });
+    // Where the maker would receive the foreign-chain proceeds.
+    const foreignSdk = new XChainSDK({ network: SDK_NET_OF[GET_COIN] + '-' + networkTier(), timeout: 30000 });
+    const foreignKp  = foreignSdk.generateKeyPair();
+    getAddr = foreignSdk.deriveAddress(foreignKp.publicKey, { type: 'p2pkh' });
 
-        // Where the maker would receive the foreign-chain proceeds.
-        const foreignSdk = new XChainSDK({ network: SDK_NET_OF[GET_COIN] + '-' + networkTier(), timeout: 30000 });
-        const foreignKp  = foreignSdk.generateKeyPair();
-        getAddr = foreignSdk.deriveAddress(foreignKp.publicKey, { type: 'p2pkh' });
+    console.log('    [royalty-deny] mode=' + MODE + ' tick=' + tick + ' maker=' + maker.address);
+    console.log('    [royalty-deny] leg=' + legAddr + ' bps=' + ROYALTY_BPS + ' getCoin=' + GET_COIN);
+}
 
-        console.log('    [royalty-deny] mode=' + MODE + ' tick=' + tick + ' maker=' + maker.address);
-        console.log('    [royalty-deny] leg=' + legAddr + ' bps=' + ROYALTY_BPS + ' getCoin=' + GET_COIN);
-    });
-
+function registerRoyaltyGuardTest() {
     it('DEPLOY the royalty guard, ISSUE the token, BIND its trade class', async function () {
         const guardSrc = "module.exports={ meta: { name: 'Royalty Deny Guard', description: 'Returns a royalty payout leg for the cross-chain royalty deny drill.', version: '1.0.0' }, guard:function(){ return { payoutLegs: [{ to: '" +
             legAddr + "', bps: " + ROYALTY_BPS + " }] }; } };";
@@ -151,7 +149,9 @@ describe('[sdk] CROSS_CHAIN_ROYALTY create-gate deny drill (mode=' + MODE + ')',
         await mine(1);
         console.log('    [royalty-deny] guard=' + guardIndex + ' bound to the trade class of ' + tick);
     });
+}
 
+function registerCrossChainOrderTest() {
     it('cross-chain ORDER of the royalty-bound token is ' + (DENY ? 'DENIED (fail-closed)' : 'ACCEPTED with legs'), async function () {
         const before = await balanceOf(maker.address, tick);
         const res = await submit(sdk,
@@ -186,7 +186,9 @@ describe('[sdk] CROSS_CHAIN_ROYALTY create-gate deny drill (mode=' + MODE + ')',
             expect(row.legs, 'guard legs on the accepted listing').to.deep.equal([{ to: legAddr, bps: ROYALTY_BPS }]);
         }
     });
+}
 
+function registerCrossChainSwapTest() {
     it('cross-chain SWAP of the royalty-bound token is ' + (DENY ? 'DENIED (fail-closed)' : 'ACCEPTED with legs'), async function () {
         const res = await submit(sdk,
             {
@@ -218,7 +220,9 @@ describe('[sdk] CROSS_CHAIN_ROYALTY create-gate deny drill (mode=' + MODE + ')',
             expect(row.legs, 'guard legs on the accepted listing').to.deep.equal([{ to: legAddr, bps: ROYALTY_BPS }]);
         }
     });
+}
 
+function registerSameChainControlTest() {
     it('CONTROL: the SAME-chain listing of the same royalty-bound token stays ACCEPTED with legs', async function () {
         const res = await submit(sdk,
             {
@@ -243,4 +247,13 @@ describe('[sdk] CROSS_CHAIN_ROYALTY create-gate deny drill (mode=' + MODE + ')',
         expect(res.indexed.status, 'same-chain ORDER status').to.equal('valid');
         expect(row.legs, 'guard legs on the same-chain listing').to.deep.equal([{ to: legAddr, bps: ROYALTY_BPS }]);
     });
+}
+
+describe('[sdk] CROSS_CHAIN_ROYALTY create-gate deny drill (mode=' + MODE + ')', function () {
+    this.timeout(0);
+    before(setupRoyaltyDenyTests);
+    registerRoyaltyGuardTest();
+    registerCrossChainOrderTest();
+    registerCrossChainSwapTest();
+    registerSameChainControlTest();
 });
