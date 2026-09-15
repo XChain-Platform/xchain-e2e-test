@@ -113,214 +113,223 @@ async function readState(sdk, contractIndex, key) {
 
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-describe('[sdk] XCALL per-block injection cap (25 + carry-forward)', function () {
-    this.timeout(0);
+let sdk, deployer, indexA, targetContract, callIds = [];
 
-    let sdk, deployer, indexA, targetContract, callIds = [];
+async function prepareCapCheck() {
+    targetContract = parseInt(process.env.XCALL_TARGET_CONTRACT || '', 10);
+    expect(targetContract, 'XCALL_TARGET_CONTRACT env').to.be.a('number').and.to.be.greaterThan(0);
+    expect(process.env.HUB_DB_USER, 'HUB_DB_USER env (hub mirror reads)').to.be.a('string').and.to.not.equal('');
+    sdk = makeSdk();
+    deployer = await fundedGasAddress(sdk, 1);
+    console.log('    [xcall-cap] deployer=' + deployer.address + ' target=' + targetContract);
 
-    before(async function () {
-        targetContract = parseInt(process.env.XCALL_TARGET_CONTRACT || '', 10);
-        expect(targetContract, 'XCALL_TARGET_CONTRACT env').to.be.a('number').and.to.be.greaterThan(0);
-        expect(process.env.HUB_DB_USER, 'HUB_DB_USER env (hub mirror reads)').to.be.a('string').and.to.not.equal('');
-        sdk = makeSdk();
-        deployer = await fundedGasAddress(sdk, 1);
-        console.log('    [xcall-cap] deployer=' + deployer.address + ' target=' + targetContract);
+    // Drain injection-competing debris from earlier runs: a dispatch that is
+    // mirrored on the DOGE indexer but NOT yet executed there would inject ahead
+    // of this run's calls (lower hub ids) and break the first-batch assertion.
+    // Gate on the DOGE indexer's OWN tables, because injection reads the local
+    // mirror: a relay-hub dispatch that never synced into this indexer's mirror
+    // cannot inject and must not be counted (else the drain burns its whole
+    // deadline on debris that mining can never clear), and a call already
+    // executed locally no longer competes regardless of its hub result state.
+    const drainDeadline = Date.now() + 300000;
+    while (Date.now() < drainDeadline) {
+        const competing = await dogeIdx(async (c) => Number((await c.query(
+            `SELECT COUNT(*) n FROM cross_chain_calls d
+             WHERE d.phase = 'dispatch' AND d.target_chain = 'DOGE'
+               AND NOT EXISTS (SELECT 1 FROM cross_chain_call_executions e WHERE e.call_id = d.call_id)`))[0].n));
+        if (competing === 0) break;
+        console.log('    [xcall-cap] draining ' + competing + ' un-executed call(s) from earlier runs...');
+        await mine(1);
+        await mineTarget(1);
+        await sleep(3000);
+    }
+}
 
-        // Drain injection-competing debris from earlier runs: a dispatch that is
-        // mirrored on the DOGE indexer but NOT yet executed there would inject ahead
-        // of this run's calls (lower hub ids) and break the first-batch assertion.
-        // Gate on the DOGE indexer's OWN tables, because injection reads the local
-        // mirror: a relay-hub dispatch that never synced into this indexer's mirror
-        // cannot inject and must not be counted (else the drain burns its whole
-        // deadline on debris that mining can never clear), and a call already
-        // executed locally no longer competes regardless of its hub result state.
-        const drainDeadline = Date.now() + 300000;
-        while (Date.now() < drainDeadline) {
-            const competing = await dogeIdx(async (c) => Number((await c.query(
-                `SELECT COUNT(*) n FROM cross_chain_calls d
-                 WHERE d.phase = 'dispatch' AND d.target_chain = 'DOGE'
-                   AND NOT EXISTS (SELECT 1 FROM cross_chain_call_executions e WHERE e.call_id = d.call_id)`))[0].n));
-            if (competing === 0) break;
-            console.log('    [xcall-cap] draining ' + competing + ' un-executed call(s) from earlier runs...');
-            await mine(1);
-            await mineTarget(1);
-            await sleep(3000);
-        }
-    });
+async function deployBurstCaller() {
+    const dep = await submit(sdk,
+        { action: 'DEPLOY', params: { code: CONTRACT_A, gasLimit: 200000 } },
+        { pubkey: deployer.address, change: deployer.address },
+        submitOpts({ wif: deployer.wif })
+    );
+    expect(dep.indexed.status).to.equal('valid');
+    indexA = contractIndexOf(dep.indexed);
+    console.log('    [xcall-cap] A=' + indexA);
 
-    it('DEPLOY the burst caller and fire ' + BURST + ' calls in ONE execution', async function () {
-        const dep = await submit(sdk,
-            { action: 'DEPLOY', params: { code: CONTRACT_A, gasLimit: 200000 } },
+    // EXECUTE carries no wire GAS_LIMIT, so execution bills against the
+    // protocol ceiling (1M), which covers the 28 × 32,500 pre-pays.
+    //
+    // The SDK action-waiter can mis-attribute a federated relay action's
+    // "SIGNING_PUBKEY (already in use)" (the hub signing pubkey is reused
+    // across the 28 dispatch signatures) to THIS EXECUTE even though the burst
+    // itself lands and round-trips. Tolerate that one error and confirm the
+    // EXECUTE's effect via contract state below instead of the waiter's verdict.
+    try {
+        const res = await submit(sdk,
+            { action: 'EXECUTE', params: { contractActionIndex: indexA, method: 'burst', params: [String(targetContract), String(BURST)] } },
             { pubkey: deployer.address, change: deployer.address },
             submitOpts({ wif: deployer.wif })
         );
-        expect(dep.indexed.status).to.equal('valid');
-        indexA = contractIndexOf(dep.indexed);
-        console.log('    [xcall-cap] A=' + indexA);
+        expect(res.indexed.status, 'burst EXECUTE').to.equal('valid');
+    } catch (e) {
+        if (!/SIGNING_PUBKEY \(already in use\)/.test(String(e.message))) throw e;
+        console.log('    [xcall-cap] waiter mis-attributed SIGNING_PUBKEY; confirming burst via state');
+    }
+    await mine(1);
 
-        // EXECUTE carries no wire GAS_LIMIT, so execution bills against the
-        // protocol ceiling (1M), which covers the 28 × 32,500 pre-pays.
-        //
-        // The SDK action-waiter can mis-attribute a federated relay action's
-        // "SIGNING_PUBKEY (already in use)" (the hub signing pubkey is reused
-        // across the 28 dispatch signatures) to THIS EXECUTE even though the burst
-        // itself lands and round-trips. Tolerate that one error and confirm the
-        // EXECUTE's effect via contract state below instead of the waiter's verdict.
-        try {
-            const res = await submit(sdk,
-                { action: 'EXECUTE', params: { contractActionIndex: indexA, method: 'burst', params: [String(targetContract), String(BURST)] } },
-                { pubkey: deployer.address, change: deployer.address },
-                submitOpts({ wif: deployer.wif })
-            );
-            expect(res.indexed.status, 'burst EXECUTE').to.equal('valid');
-        } catch (e) {
-            if (!/SIGNING_PUBKEY \(already in use\)/.test(String(e.message))) throw e;
-            console.log('    [xcall-cap] waiter mis-attributed SIGNING_PUBKEY; confirming burst via state');
-        }
+    // The EXECUTE may have landed even if the waiter threw, so poll for the
+    // burst to be indexed. state.set stores the value JSON-encoded and the
+    // contract stringifies the array itself, so there are two decode levels.
+    const burstDeadline = Date.now() + 60000;
+    while (Date.now() < burstDeadline) {
+        const raw = await readState(sdk, indexA, 'burstIds');
+        if (raw != null) { callIds = JSON.parse(raw); if (callIds.length === BURST) break; }
         await mine(1);
+        await sleep(2000);
+    }
+    expect(callIds, 'burst call ids').to.be.an('array').with.length(BURST);
+    expect(new Set(callIds).size, 'distinct ids').to.equal(BURST);
+    console.log('    [xcall-cap] ' + BURST + ' calls emitted from one EXECUTE');
+}
 
-        // The EXECUTE may have landed even if the waiter threw, so poll for the
-        // burst to be indexed. state.set stores the value JSON-encoded and the
-        // contract stringifies the array itself, so there are two decode levels.
-        const burstDeadline = Date.now() + 60000;
-        while (Date.now() < burstDeadline) {
-            const raw = await readState(sdk, indexA, 'burstIds');
-            if (raw != null) { callIds = JSON.parse(raw); if (callIds.length === BURST) break; }
-            await mine(1);
-            await sleep(2000);
-        }
-        expect(callIds, 'burst call ids').to.be.an('array').with.length(BURST);
-        expect(new Set(callIds).size, 'distinct ids').to.equal(BURST);
-        console.log('    [xcall-cap] ' + BURST + ' calls emitted from one EXECUTE');
-    });
-
-    it('all dispatches finalize while DOGE mining is held', async function () {
-        const placeholders = callIds.map(() => '?').join(',');
-        const miner = global.regtestMinerConnector;
-        // The cap test's premise is that the burst's 28 dispatches share a SINGLE
-        // snapshot and become injectable at once. The relay stamps each dispatch
-        // with snapshot_block = the source tip at finalization. The regtest miner
-        // auto-mines empty blocks (submit()/quiesce leaves it in fast mode), so the
-        // tip drifts forward between the relay's finalization waves (it finalizes ~a
-        // batch per poll) and the 28 land at different snapshots (e.g. 14@N +
-        // 14@N+1), fragmenting the deterministic 25 + carry-forward. So: cross the
-        // relay confirmation margin in one shot, then PAUSE auto-mining (same freeze
-        // the reorg drills use) so the source tip stays put and every dispatch
-        // finalizes at the one snapshot.
-        await miner.pauseMining();                          // freeze: real barrier, awaits any in-flight mine
-        let n = 0;
-        try {
-            await mine(3);                                  // explicit blocks to clear the relay margin, then no more
-            const deadline = Date.now() + 240000;
-            while (Date.now() < deadline) {
-                await sleep(2000);                          // poll only; the source tip is frozen
-                n = await hubDb(async (c) => {
-                    const rows = await c.query(
-                        `SELECT COUNT(*) n FROM cross_chain_calls WHERE phase = 'dispatch' AND status = 'finalized' AND call_id IN (${placeholders})`,
-                        callIds);
-                    return Number(rows[0].n);
-                });
-                if (n === BURST) break;
-            }
-        } finally {
-            await miner.resumeMining();                     // restore auto-mining for the injection + result legs
-        }
-        expect(n, 'finalized dispatch rows').to.equal(BURST);
-
-        const executedEarly = await dogeIdx(async (c) => {
-            const rows = await c.query(
-                `SELECT COUNT(*) n FROM cross_chain_call_executions WHERE call_id IN (${placeholders})`, callIds);
-            return Number(rows[0].n);
-        });
-        expect(executedEarly, 'no executions before DOGE mines').to.equal(0);
-        console.log('    [xcall-cap] all ' + BURST + ' dispatches finalized, zero executed; releasing DOGE mining');
-    });
-
-    it('the first DOGE block injects exactly the cap, in (snapshot_block, call_id) order; the rest carry forward', async function () {
-        const placeholders = callIds.map(() => '?').join(',');
-
-        // Barrier: test 2 proved all 28 finalized in the HUB DB, but injection reads
-        // the DOGE indexer's OWN mirror, which the relay populates progressively
-        // (HubDbBroadcaster/HubDbSync is time-driven, not block-driven), so right
-        // after finalization only a subset of the 28 has landed locally. Releasing
-        // DOGE before they all arrive makes the first block inject the partial set
-        // (< CAP) and the deterministic first-batch assertion fails. Wait until every
-        // dispatch row is mirrored, WITHOUT mining DOGE here: a target block would
-        // trigger a partial injection and lock in the short first batch.
-        const mirrorDeadline = Date.now() + 120000;
-        let mirrored = 0;
-        while (Date.now() < mirrorDeadline) {
-            mirrored = await dogeIdx(async (c) => {
-                const r = await c.query(
-                    `SELECT COUNT(*) n FROM cross_chain_calls WHERE phase = 'dispatch' AND call_id IN (${placeholders})`,
-                    callIds);
-                return Number(r[0].n);
-            });
-            if (mirrored === BURST) break;
-            await sleep(2000);
-        }
-        expect(mirrored, 'all dispatches mirrored to the DOGE indexer before release').to.equal(BURST);
-        console.log('    [xcall-cap] all ' + BURST + ' dispatches mirrored locally; releasing DOGE block-by-block');
-
+async function finalizeDispatches() {
+    const placeholders = callIds.map(() => '?').join(',');
+    const miner = global.regtestMinerConnector;
+    // The cap test's premise is that the burst's 28 dispatches share a SINGLE
+    // snapshot and become injectable at once. The relay stamps each dispatch
+    // with snapshot_block = the source tip at finalization. The regtest miner
+    // auto-mines empty blocks (submit()/quiesce leaves it in fast mode), so the
+    // tip drifts forward between the relay's finalization waves (it finalizes ~a
+    // batch per poll) and the 28 land at different snapshots (e.g. 14@N +
+    // 14@N+1), fragmenting the deterministic 25 + carry-forward. So: cross the
+    // relay confirmation margin in one shot, then PAUSE auto-mining (same freeze
+    // the reorg drills use) so the source tip stays put and every dispatch
+    // finalizes at the one snapshot.
+    await miner.pauseMining();                          // freeze: real barrier, awaits any in-flight mine
+    let n = 0;
+    try {
+        await mine(3);                                  // explicit blocks to clear the relay margin, then no more
         const deadline = Date.now() + 240000;
-        let rows = [];
         while (Date.now() < deadline) {
-            await mineTarget(1);
-            await sleep(3000);
-            rows = await dogeIdx(async (c) => c.query(
-                `SELECT call_id, block_index FROM cross_chain_call_executions WHERE call_id IN (${placeholders})`,
-                callIds));
-            if (rows.length === BURST) break;
+            await sleep(2000);                          // poll only; the source tip is frozen
+            n = await hubDb(async (c) => {
+                const rows = await c.query(
+                    `SELECT COUNT(*) n FROM cross_chain_calls WHERE phase = 'dispatch' AND status = 'finalized' AND call_id IN (${placeholders})`,
+                    callIds);
+                return Number(rows[0].n);
+            });
+            if (n === BURST) break;
         }
-        expect(rows.length, 'all calls executed (none dropped)').to.equal(BURST);
+    } finally {
+        await miner.resumeMining();                     // restore auto-mining for the injection + result legs
+    }
+    expect(n, 'finalized dispatch rows').to.equal(BURST);
 
-        const byBlock = new Map();
-        for (const r of rows) {
-            const b = Number(r.block_index);
-            if (!byBlock.has(b)) byBlock.set(b, []);
-            byBlock.get(b).push(String(r.call_id));
-        }
-        const blocks = [...byBlock.keys()].sort((a, b) => a - b);
-        const counts = blocks.map(b => byBlock.get(b).length);
-        console.log('    [xcall-cap] injection batches: ' + blocks.map((b, i) => b + '=' + counts[i]).join(', '));
+    const executedEarly = await dogeIdx(async (c) => {
+        const rows = await c.query(
+            `SELECT COUNT(*) n FROM cross_chain_call_executions WHERE call_id IN (${placeholders})`, callIds);
+        return Number(rows[0].n);
+    });
+    expect(executedEarly, 'no executions before DOGE mines').to.equal(0);
+    console.log('    [xcall-cap] all ' + BURST + ' dispatches finalized, zero executed; releasing DOGE mining');
+}
 
-        expect(Math.max(...counts), 'per-block injection cap').to.be.at.most(CAP);
-        expect(counts[0], 'first batch fills the cap').to.equal(CAP);
-        expect(blocks.length, 'carry-forward to a later block').to.be.at.least(2);
+async function waitForMirrors(placeholders) {
+    // Barrier: test 2 proved all 28 finalized in the HUB DB, but injection reads
+    // the DOGE indexer's OWN mirror, which the relay populates progressively
+    // (HubDbBroadcaster/HubDbSync is time-driven, not block-driven), so right
+    // after finalization only a subset of the 28 has landed locally. Releasing
+    // DOGE before they all arrive makes the first block inject the partial set
+    // (< CAP) and the deterministic first-batch assertion fails. Wait until every
+    // dispatch row is mirrored, WITHOUT mining DOGE here: a target block would
+    // trigger a partial injection and lock in the short first batch.
+    const mirrorDeadline = Date.now() + 120000;
+    let mirrored = 0;
+    while (Date.now() < mirrorDeadline) {
+        mirrored = await dogeIdx(async (c) => {
+            const r = await c.query(
+                `SELECT COUNT(*) n FROM cross_chain_calls WHERE phase = 'dispatch' AND call_id IN (${placeholders})`,
+                callIds);
+            return Number(r[0].n);
+        });
+        if (mirrored === BURST) break;
+        await sleep(2000);
+    }
+    return mirrored;
+}
 
-        // deterministic order: the first batch must be the CAP lowest by
-        // (snapshot_block, call_id): quorum-agreed content, identical on every
-        // hub, so the order no longer depends on which hub DB an indexer mirrors
-        const hubRows = await hubDb(async (c) => c.query(
-            `SELECT call_id, snapshot_block FROM cross_chain_calls WHERE phase = 'dispatch' AND call_id IN (${placeholders})`,
+async function verifyInjectionCap() {
+    const placeholders = callIds.map(() => '?').join(',');
+    const mirrored = await waitForMirrors(placeholders);
+    expect(mirrored, 'all dispatches mirrored to the DOGE indexer before release').to.equal(BURST);
+    console.log('    [xcall-cap] all ' + BURST + ' dispatches mirrored locally; releasing DOGE block-by-block');
+
+    const deadline = Date.now() + 240000;
+    let rows = [];
+    while (Date.now() < deadline) {
+        await mineTarget(1);
+        await sleep(3000);
+        rows = await dogeIdx(async (c) => c.query(
+            `SELECT call_id, block_index FROM cross_chain_call_executions WHERE call_id IN (${placeholders})`,
             callIds));
-        const firstBatch = new Set(byBlock.get(blocks[0]));
-        const sortedByKey = hubRows
-            .map(r => [String(r.call_id), Number(r.snapshot_block)])
-            .sort((a, b) => (a[1] - b[1]) || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
-            .map(e => e[0]);
-        const expectedFirst = new Set(sortedByKey.slice(0, CAP));
-        expect(firstBatch, 'first batch = lowest (snapshot_block, call_id)').to.deep.equal(expectedFirst);
-    });
+        if (rows.length === BURST) break;
+    }
+    expect(rows.length, 'all calls executed (none dropped)').to.equal(BURST);
 
-    it('all results relay back and every callback fires exactly once', async function () {
-        const deadline = Date.now() + 300000;
-        let done = 0;
-        while (Date.now() < deadline) {
-            await mine(1);
-            await mineTarget(1);
-            await sleep(2000);
-            done = Number(await readState(sdk, indexA, 'doneCount') || 0);
-            if (done === BURST) break;
-        }
-        expect(done, 'callback deliveries').to.equal(BURST);
-        // exactly-once: every per-call marker exists (callback param 0 is the
-        // CALL_ID), and the counter equals the marker count (a double delivery
-        // would over-increment the counter past BURST)
-        for (const id of callIds) {
-            const v = await readState(sdk, indexA, 'done:' + id);
-            expect(v, 'done:' + id.substring(0, 12)).to.not.equal(null);
-        }
-        console.log('    [xcall-cap] ' + BURST + '/' + BURST + ' callbacks delivered exactly once');
-    });
+    const byBlock = new Map();
+    for (const r of rows) {
+        const b = Number(r.block_index);
+        if (!byBlock.has(b)) byBlock.set(b, []);
+        byBlock.get(b).push(String(r.call_id));
+    }
+    const blocks = [...byBlock.keys()].sort((a, b) => a - b);
+    const counts = blocks.map(b => byBlock.get(b).length);
+    console.log('    [xcall-cap] injection batches: ' + blocks.map((b, i) => b + '=' + counts[i]).join(', '));
+
+    expect(Math.max(...counts), 'per-block injection cap').to.be.at.most(CAP);
+    expect(counts[0], 'first batch fills the cap').to.equal(CAP);
+    expect(blocks.length, 'carry-forward to a later block').to.be.at.least(2);
+
+    // deterministic order: the first batch must be the CAP lowest by
+    // (snapshot_block, call_id): quorum-agreed content, identical on every
+    // hub, so the order no longer depends on which hub DB an indexer mirrors
+    const hubRows = await hubDb(async (c) => c.query(
+        `SELECT call_id, snapshot_block FROM cross_chain_calls WHERE phase = 'dispatch' AND call_id IN (${placeholders})`,
+        callIds));
+    const firstBatch = new Set(byBlock.get(blocks[0]));
+    const sortedByKey = hubRows
+        .map(r => [String(r.call_id), Number(r.snapshot_block)])
+        .sort((a, b) => (a[1] - b[1]) || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+        .map(e => e[0]);
+    const expectedFirst = new Set(sortedByKey.slice(0, CAP));
+    expect(firstBatch, 'first batch = lowest (snapshot_block, call_id)').to.deep.equal(expectedFirst);
+}
+
+async function verifyAllCallbacks() {
+    const deadline = Date.now() + 300000;
+    let done = 0;
+    while (Date.now() < deadline) {
+        await mine(1);
+        await mineTarget(1);
+        await sleep(2000);
+        done = Number(await readState(sdk, indexA, 'doneCount') || 0);
+        if (done === BURST) break;
+    }
+    expect(done, 'callback deliveries').to.equal(BURST);
+    // exactly-once: every per-call marker exists (callback param 0 is the
+    // CALL_ID), and the counter equals the marker count (a double delivery
+    // would over-increment the counter past BURST)
+    for (const id of callIds) {
+        const v = await readState(sdk, indexA, 'done:' + id);
+        expect(v, 'done:' + id.substring(0, 12)).to.not.equal(null);
+    }
+    console.log('    [xcall-cap] ' + BURST + '/' + BURST + ' callbacks delivered exactly once');
+}
+
+describe('[sdk] XCALL per-block injection cap (25 + carry-forward)', function () {
+    this.timeout(0);
+    before(prepareCapCheck);
+    it('DEPLOY the burst caller and fire ' + BURST + ' calls in ONE execution', deployBurstCaller);
+    it('all dispatches finalize while DOGE mining is held', finalizeDispatches);
+    it('the first DOGE block injects exactly the cap, in (snapshot_block, call_id) order; the rest carry forward', verifyInjectionCap);
+    it('all results relay back and every callback fires exactly once', verifyAllCallbacks);
 });
