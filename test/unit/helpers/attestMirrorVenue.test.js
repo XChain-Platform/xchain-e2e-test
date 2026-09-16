@@ -42,6 +42,7 @@ const {
     resolveDecoderCredential,
     HUB_CONFIG_REDACTION,
     coinCode,
+    mergeIndexerExtraEnv,
     DEFAULT_HUB_COUNT,
     DEFAULT_INDEXER_COUNT,
     DEFAULT_FORWARD_S,
@@ -319,6 +320,36 @@ describe('attestMirrorVenue: indexer environment', function () {
             assert.throws(() => buildIndexerEnv(spec), new RegExp('missing required field ' + key),
                 'buildIndexerEnv accepted a spec with no ' + key)
         }
+    })
+})
+
+describe('attestMirrorVenue: the indexer extraEnv overlays', function () {
+
+    it('keeps the venue-wide overlay when no per-index overlay is given', () => {
+        // A bridge drive's DOGE indexer gets its origin-chain endpoint through the
+        // venue-wide overlay and nothing else; losing it defers every in leg forever.
+        const env = mergeIndexerExtraEnv({ BTC_INDEXER_URL: 'http://127.0.0.1:41001' }, null)
+        assert.deepStrictEqual(env, { BTC_INDEXER_URL: 'http://127.0.0.1:41001' })
+    })
+
+    it('layers the per-index overlay OVER the venue-wide one', () => {
+        const env = mergeIndexerExtraEnv(
+            { BTC_INDEXER_URL: 'http://127.0.0.1:41001', BRIDGE_PROOF_TIMEOUT_MS: 5000 },
+            { BRIDGE_PROOF_TIMEOUT_MS: '9000', X_ONLY_HERE: 1 })
+        assert.deepStrictEqual(env, {
+            BTC_INDEXER_URL: 'http://127.0.0.1:41001', BRIDGE_PROOF_TIMEOUT_MS: '9000', X_ONLY_HERE: '1'
+        })
+    })
+
+    it('stays null when neither side contributes, so an unset venue builds the env it always did', () => {
+        assert.strictEqual(mergeIndexerExtraEnv(null, null), null)
+        assert.strictEqual(mergeIndexerExtraEnv(undefined, undefined), null)
+        assert.strictEqual(mergeIndexerExtraEnv({}, {}), null)
+    })
+
+    it('stringifies every value, since a number in a spawn env throws from child_process', () => {
+        const env = mergeIndexerExtraEnv({ A: 0 }, { B: false })
+        assert.deepStrictEqual(env, { A: '0', B: 'false' })
     })
 })
 

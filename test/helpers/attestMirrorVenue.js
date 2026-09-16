@@ -1818,6 +1818,33 @@ function indexerEnvOverlay(perIndex, i) {
     return out;
 }
 
+/**
+ * The ONE `extraEnv` a venue indexer spawn gets: the venue-wide overlay (a bridge
+ * drive's origin-chain endpoint, for instance) with the per-index overlay layered over
+ * it, so a leg can still override a venue-wide key deliberately.
+ *
+ * Two `extraEnv` keys in one spawn spec silently kept only the second, which dropped the
+ * venue-wide overlay whenever no per-index one was given: the DOGE venue indexer then
+ * had no `BTC_INDEXER_URL`, every in leg deferred under `bridge_proof_barrier`, and the
+ * drive stalled at the first transfer's block with nothing saying "misconfigured".
+ *
+ * Null when neither side contributes, so an unset venue passes `buildIndexerEnv` exactly
+ * what it always did.
+ *
+ * @param {object|null} venueWide  `opts.indexerExtraEnv`
+ * @param {object|null} perIndex   `indexerEnvOverlay(this.indexerEnv, i)`
+ * @returns {object|null}
+ */
+function mergeIndexerExtraEnv(venueWide, perIndex) {
+    const a = venueWide && typeof venueWide === 'object' && !Array.isArray(venueWide) ? venueWide : null;
+    const b = perIndex  && typeof perIndex  === 'object' && !Array.isArray(perIndex)  ? perIndex  : null;
+    if (!a && !b) return null;
+    const out = {};
+    if (a) for (const k of Object.keys(a)) out[k] = String(a[k]);
+    if (b) for (const k of Object.keys(b)) out[k] = String(b[k]);
+    return Object.keys(out).length ? out : null;
+}
+
 class AttestMirrorVenue {
 
     /**
@@ -2522,14 +2549,14 @@ class AttestMirrorVenue {
             // attribution also needs an unaffected peer to advance past the parked node.
             graces:  Object.assign({}, this.graces, this.indexerGraces[i] || {}),
             feeDestination: this._live.feeDestination,
-            // Applied LAST by buildIndexerEnv, so a drill can override anything above
-            // deliberately. See the constructor for the one subsystem that needs it.
-            extraEnv: this.indexerExtraEnv,
             path: process.env.PATH,
             home: process.env.HOME,
-            // PER-INDEX env, layered over everything above, and null when no overlay was
-            // given so an unset venue builds the identical environment it always did.
-            extraEnv: indexerEnvOverlay(this.indexerEnv, i)
+            // Applied LAST by buildIndexerEnv, so a drill can override anything above
+            // deliberately: the venue-wide overlay (see the constructor for the one
+            // subsystem that needs it) with the PER-INDEX overlay layered over it, and
+            // null when neither was given so an unset venue builds the identical
+            // environment it always did. One key, on purpose: see mergeIndexerExtraEnv.
+            extraEnv: mergeIndexerExtraEnv(this.indexerExtraEnv, indexerEnvOverlay(this.indexerEnv, i))
         });
 
         // --no-node-snapshot mirrors the package's own `api` script: the contract
@@ -3706,6 +3733,7 @@ module.exports = {
     coinCode,
     resolveRepoRoot,
     indexerEnvOverlay,
+    mergeIndexerExtraEnv,
     // The barrier family and the gap between it and the grace table the venue pins.
     MIRROR_BARRIERS,
     mirrorBarrierReasons,
