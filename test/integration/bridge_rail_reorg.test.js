@@ -19,17 +19,31 @@
  * in a state the base legs' arithmetic would then read as a fault. Running them beside
  * AT1 and AT2 would make each suite's failures look like the other's.
  *
+ * ── ONE SUITE IN TWO PLACES ────────────────────────────────────────────────────────
+ * This root holds the venue bring-up, the teardown that proves the shared chain was left
+ * no shorter, and the reorg lever; the cases live in `bridge_rail_reorg.test/0*.test.js`
+ * (AT3, then AT4) and reach all of it through `./bridge_rail_reorg.test/helpers/fixture`.
+ * The parts are ONE mocha run and must sit on the same command line, root first, with the
+ * glob quoted so mocha expands it:
+ *
+ *   npx mocha test/integration/bridge_rail_reorg.test.js "test/integration/bridge_rail_reorg.test/*.test.js"
+ *
+ * mocha keeps the command-line order and sorts a glob's matches among themselves, so the
+ * `0N_` prefixes order the parts. The root alone registers no case, so it drives nothing
+ * and never brings the venue up; a part alone has no root to bind to and fails at its
+ * first `before`.
+ *
  * ── HOW TO RUN IT, on the regtest rail host, from this repository root ──────────────
  *
  *   nohup ~/scratch/xc-meta/doge-loop.sh >/dev/null 2>&1 & echo $! > ~/scratch/xc-meta/doge-loop.pid
  *   COIN=bitcoin NETWORK=regtest NODE_PATH=<the chunked module directory> \
  *     npx mocha --timeout 0 --exit --require ./test/initialCheck.test.js \
- *     test/integration/bridgeRailReorg.rail.test.js
+ *     test/integration/bridge_rail_reorg.test.js "test/integration/bridge_rail_reorg.test/*.test.js"
  *   kill $(cat ~/scratch/xc-meta/doge-loop.pid)
  *
  * ── THE SAME QUORUM GATE ───────────────────────────────────────────────────────────
  * Every case here needs a federation, for the same reason and behind the same gate
- * bridgeRailBase.rail.test.js documents at length: the four seated roster keys are idle
+ * bridge_rail_base.test.js documents at length: the four seated roster keys are idle
  * generations of `XC_ROLLCALL_FEDERATION_MNEMONIC`, an operator secret that a drive
  * sources from the operator's own 0600 store into its environment and passes no other
  * way. The gate is `resolveVenueQuorum`; a drive given the secret runs every case below
@@ -55,22 +69,16 @@ const assert = require('assert');
 const chainRail         = require('../helpers/chainRail');
 const stakeTeardown     = require('../helpers/stakeTeardown');
 const cryptoHelper      = require('../cryptoHelper');
-const transactionHelper = require('../transactionHelper');
-const mintHelper        = require('../helpers/mintHelper');
 const fixture           = require('../attestMirror/mirrorDrillFixture');
 const {
     BridgeRailVenue,
     resolveVenueQuorum,
-    lockWireV0,
-    classifyInvariant,
-    escrowOf,
     journalCase,
     minimalQuorumSigners,
     assertShallowOrphan,
-    withMiningPaused,
+    confirmedHeight,
+    orphanWithEmptyBlocks,
 } = require('../helpers/bridgeRailVenue');
-
-const GAS_TICK = 'XCHAIN';
 
 // The standing utxo-tracker's undo window, the same 12 the attestation reorg drills pin. A
 // reorg deeper than this halts the tracker and needs a resync, and the tracker is shared with
@@ -180,41 +188,65 @@ function needsFederation(ctx, at) {
     return true;
 }
 
+// The competing chain's coinbase destination: its own address, so the orphaned chain's
+// coinbases and the replacement chain's are never confused with a case's funds.
+let coinbaseAddress = null;
+async function replacementCoinbase() {
+    if (!coinbaseAddress) {
+        coinbaseAddress = (await cryptoHelper.getNewAddress('BRIDGEREORG.COINBASE', 'bitcoin', NETWORK,
+            null, 'legacy', 0)).address;
+    }
+    return coinbaseAddress;
+}
+
 /**
- * Orphan the BTC block at `height` and re-mine past it.
+ * Orphan the BTC block holding `lockTx` and replace it with a LONGER chain of EMPTY blocks,
+ * leaving the lock unconfirmed. Returns `{hash, height, tipBefore, tipAfter, mined}`, `hash`
+ * being the orphaned block's.
  *
- * Only ever called on a height this suite itself mined; see the header.
+ * Only ever called on a height this suite itself mined; see the header. The height is the
+ * lock's own confirming block as the NODE reports it, never an indexer tip read beside it.
+ *
+ * EMPTY blocks, mined at the node, are the whole point. `invalidateblock` hands the
+ * disconnected blocks' transactions back to the mempool, and the miner sidecar's
+ * `generatetoaddress` would mine them straight back in: the lock would be "orphaned" and yet
+ * confirmed again one block later, the federation would finalize it correctly, and a case
+ * that asserts the absence of a row for that lock would be asserting against a working
+ * bridge. So the standing miner must ALSO be paused for as long as a case's claim depends on
+ * the lock staying out of the chain: every caller runs inside `withMiningPaused`, and once
+ * mining resumes the lock is mined again, finalized and applied, all of it legitimate.
+ *
+ * @param {string} lockTx      the lock's txid
+ * @param {number} replaceWith a floor on the number of replacement blocks
  */
-async function reorgBtcFrom(height, replaceWith) {
+async function reorgBtcFrom(lockTx, replaceWith) {
+    const height = await confirmedHeight(nodeConnector, lockTx);
     assert.ok(height > startTip,
         'refusing to invalidate BTC block ' + height + ', which existed before this suite started');
-    // THE SAME LEVER THE ATTESTATION REORG DRILLS USE, because the first run of this suite
-    // called a `regtestMinerConnector.call()` that does not exist (`call is not a function`)
-    // and a miner RPC that does not either: the miner sidecar mines, the NODE orphans. The
-    // hash also comes from the node rather than an indexer, which is the other half of the
-    // same correction: the block was mined seconds ago and an indexer answers
-    // `block not indexed: <height>` until it has parsed it.
     const tipBefore = Number(await nodeConnector.getBlockCount());
-    // THE WINDOW GUARD, pulled into the shared pure layer so it has one unit-tested
-    // home instead of a copy per reorg drill; the message stays byte-identical.
-    assertShallowOrphan(Number(height), tipBefore, TRACKER_UNDO_BLOCKS);
-    const hash = await nodeConnector.getBlockHash(Number(height));
-    assert.ok(hash, 'the BTC node could not name the block at height ' + height + ' to orphan');
-    await nodeConnector.invalidateBlock(hash);
-    const rolled = Number(await nodeConnector.getBlockCount());
-    assert.strictEqual(rolled, Number(height) - 1,
-        'the node sits at ' + rolled + ' after invalidating block ' + height);
-    // Re-mine through the miner sidecar, which owns the coinbase address, and OVERTAKE the
-    // height that was there: a competing chain no longer than the one it replaced leaves
-    // the orphan reachable and the reorg unobserved.
-    const need = Math.max(Number(replaceWith || 2), tipBefore - rolled + 1);
-    await regtestMinerConnector.generateBlocks(need);
-    const tipAfter = Number(await nodeConnector.getBlockCount());
-    assert.ok(tipAfter > tipBefore,
-        'the competing chain reached ' + tipAfter + ', which does not overtake ' + tipBefore);
-    assert.notStrictEqual(await nodeConnector.getBlockHash(Number(height)), hash,
-        'block ' + height + ' still has its original hash, so nothing actually reorged');
-    return hash;
+    // THE WINDOW GUARD, in the shared pure layer so it has one unit-tested home instead of a
+    // copy per reorg drill.
+    assertShallowOrphan(height, tipBefore, TRACKER_UNDO_BLOCKS);
+    const orphan = await orphanWithEmptyBlocks(nodeConnector, {
+        height: height,
+        coinbase: await replacementCoinbase(),
+        atLeast: replaceWith,
+        lockTx: lockTx,
+    });
+    return Object.assign({ height: height }, orphan);
+}
+
+/**
+ * Hold until the venue BTC indexer has parsed the node's tip, so a reading taken after an
+ * orphan is a reading of the ledger WITHOUT the lock rather than of the ledger a moment
+ * before the rollback ran.
+ */
+async function venueBtcCaughtUp(what) {
+    const tip = Number(await nodeConnector.getBlockCount());
+    await venue.waitUntil('the venue BTC indexer to reach ' + tip + ' ' + what,
+        async () => Number((await venue.blockHashes('BTC'))[0].block_index) >= tip,
+        { timeoutMs: 180000, everyMs: 2000 });
+    return tip;
 }
 
 bridgeParts.provide({
@@ -222,149 +254,7 @@ bridgeParts.provide({
     teardown: tearDownBridgeRail,
     beforeEach: refreshBridgePrices,
     afterEach: journalBridgeTest,
-    snapshot: () => ({ venue, dogeRail, blocked, evidence, needsFederation }),
-});
-
-function registerBridgeTest(group, title, callback) {
-    describe('XBRIDGE acceptance drive: reorg and falsification (AT3, AT4)', function () {
-        bridgeParts.install();
-        describe(group, function () {
-            it(title, callback);
-        });
-    });
-}
-
-
-registerBridgeTest('AT3: a source leg reorged out', "(a) a lock orphaned before the federation signs never produces a bridge_transfers row", async function () {
-    this.timeout(0);
-    if (needsFederation(this, 'AT3a')) return;
-
-    // The lock is mined and then orphaned INSIDE the confirmation window, so the
-    // engine never sees it at depth. The assertion is the ABSENCE of a row for
-    // this destination address, which is why the address is fresh: "no row" is
-    // only a claim if nothing else could have written one.
-    const dest = await venue.funded('AT3A.DEST', () => chainRail.withRail(dogeRail,
-        () => cryptoHelper.getNewFundedAddress('AT3A.DEST', 'dogecoin', NETWORK, null, 'legacy', 0, 1, false)));
-    const sender = await venue.funded('AT3A.SENDER',
-        () => cryptoHelper.getNewFundedAddress('AT3A.SENDER', 'bitcoin', NETWORK, null, 'legacy', 0, 1, false));
-    await mintHelper.sendMintV0(sender, GAS_TICK, 1, sender.address, '');
-
-    const before = Number((await indexerConnector.call('getblockhashes', {})).block_index);
-    const lockTx = await transactionHelper.createAndSendTransaction(
-        sender, lockWireV0('DOGE', dest.address, 1, ''));
-    const minedAt = Number((await indexerConnector.call('getblockhashes', {})).block_index);
-    const orphaned = await reorgBtcFrom(Math.max(minedAt, before + 1), 3);
-    evidence.at3a = { lockTx, minedAt, orphanedHash: orphaned, destAddress: dest.address };
-
-    const row = await venue.waitForFinalizedTransfer(
-        (r) => String(r.dest_address) === dest.address, { timeoutMs: 90000 });
-    assert.strictEqual(row, null,
-        'a bridge_transfers row exists for ' + dest.address + ' whose source lock was orphaned ' +
-        'before it ever reached depth: ' + JSON.stringify(row));
-    assert.strictEqual(await venue.addressBalance('DOGE', dest.address, GAS_TICK), '0',
-        dest.address + ' was credited on DOGE from a lock that is not on the BTC chain');
-});
-
-registerBridgeTest('AT3: a source leg reorged out', "(b) a finalized row whose source is orphaned before effective_time is retracted and never applied", async function () {
-    this.timeout(0);
-    if (needsFederation(this, 'AT3b')) return;
-
-    const dest = await venue.funded('AT3B.DEST', () => chainRail.withRail(dogeRail,
-        () => cryptoHelper.getNewFundedAddress('AT3B.DEST', 'dogecoin', NETWORK, null, 'legacy', 0, 1, false)));
-    const sender = await venue.funded('AT3B.SENDER',
-        () => cryptoHelper.getNewFundedAddress('AT3B.SENDER', 'bitcoin', NETWORK, null, 'legacy', 0, 1, false));
-    await mintHelper.sendMintV0(sender, GAS_TICK, 1, sender.address, '');
-
-    const hashesBefore = await venue.blockHashes('DOGE');
-    const lockTx = await transactionHelper.createAndSendTransaction(
-        sender, lockWireV0('DOGE', dest.address, 1, ''));
-    const minedAt = Number((await indexerConnector.call('getblockhashes', {})).block_index);
-    const row = await venue.waitForFinalizedTransfer((r) => String(r.dest_address) === dest.address);
-    assert.ok(row, 'the AT3b lock never finalized, so there is nothing to retract');
-
-    const orphaned = await reorgBtcFrom(minedAt, 3);
-    // The retraction is FENCED and CO-SIGNED: the row is removed from the mirror
-    // stream by a quorum act, not by one hub deleting a row. What the destination
-    // must never do is apply it, so the DOGE credit and the DOGE hashes are what
-    // the assertions read.
-    const retracted = await venue.waitForFinalizedTransfer(
-        (r) => String(r.transfer_id) === String(row.transfer_id) &&
-               String(r.status || '').toLowerCase().includes('retract'),
-        { timeoutMs: 180000 });
-    const hashesAfter = await venue.blockHashes('DOGE', hashesBefore[0].block_index);
-    evidence.at3b = { lockTx, transferId: row.transfer_id, orphanedHash: orphaned,
-        retracted: !!retracted, destAddress: dest.address };
-
-    assert.strictEqual(await venue.addressBalance('DOGE', dest.address, GAS_TICK), '0',
-        'the DOGE indexer applied a transfer whose source leg is no longer on the BTC chain');
-    assert.strictEqual(String(hashesAfter[0].ledger_hash), String(hashesBefore[0].ledger_hash),
-        'the DOGE ledger_hash at block ' + hashesBefore[0].block_index + ' moved');
-    assert.strictEqual(String(hashesAfter[0].actions_hash), String(hashesBefore[0].actions_hash),
-        'the DOGE actions_hash at block ' + hashesBefore[0].block_index + ' moved');
-});
-
-// FREEZE BTC from here, not sooner: the source leg is already finalized, and
-// every step left is a wait on the DESTINATION's own clock (the hub stamps
-// effective_time off wall time and DOGE applies at its own next block past
-// it), so no further BTC block buys this case anything. Left unfrozen, the
-// standing miner keeps mining BTC on its own ambient cadence regardless of
-// this case, and a multi-minute mint wait burns through the tracker's undo
-// window before the orphan is even attempted (measured: 16 deep against a
-// 12-block window). Mining resumes in every path out of this block.
-registerBridgeTest('AT3: a source leg reorged out', "(c) a lock orphaned AFTER the mint applied leaves the credit, and the deficit reads CRIT", async function () {
-    this.timeout(0);
-    if (needsFederation(this, 'AT3c')) return;
-
-    // D16, ruled: milestone 1 ships NO destination-side unwind. So the correct
-    // behaviour is the uncomfortable one, and this case pins it: the DOGE credit
-    // STAYS, the DOGE hashes do not move, the BTC escrow falls away with BTC's own
-    // rollback, and the invariant is what surfaces the damage.
-    const dest = await venue.funded('AT3C.DEST', () => chainRail.withRail(dogeRail,
-        () => cryptoHelper.getNewFundedAddress('AT3C.DEST', 'dogecoin', NETWORK, null, 'legacy', 0, 1, false)));
-    const sender = await venue.funded('AT3C.SENDER',
-        () => cryptoHelper.getNewFundedAddress('AT3C.SENDER', 'bitcoin', NETWORK, null, 'legacy', 0, 1, false));
-    await mintHelper.sendMintV0(sender, GAS_TICK, 1, sender.address, '');
-
-    const lockTx = await transactionHelper.createAndSendTransaction(
-        sender, lockWireV0('DOGE', dest.address, 1, ''));
-    const minedAt = Number((await indexerConnector.call('getblockhashes', {})).block_index);
-    const row = await venue.waitForFinalizedTransfer((r) => String(r.dest_address) === dest.address);
-    assert.ok(row, 'the AT3c lock never finalized');
-
-    let dogeHashBefore;
-    const orphaned = await withMiningPaused(regtestMinerConnector, async () => {
-        // Wait for the mint to APPLY before the orphan; orphaning first would be AT3b.
-        const deadline = Date.now() + 240000;
-        while (Date.now() < deadline &&
-               Number(await venue.addressBalance('DOGE', dest.address, GAS_TICK)) < 1) {
-            await new Promise((r) => setTimeout(r, 3000));
-        }
-        assert.strictEqual(await venue.addressBalance('DOGE', dest.address, GAS_TICK), '1',
-            'the mint never applied on DOGE, so this case cannot orphan "after the mint"');
-
-        dogeHashBefore = await venue.blockHashes('DOGE');
-        return reorgBtcFrom(minedAt, 4);
-    });
-
-    const inv = await venue.bridgeInvariant(GAS_TICK);
-    const entry = inv[GAS_TICK].DOGE;
-    const cls = classifyInvariant(entry);
-    const dogeHashAfter = await venue.blockHashes('DOGE', dogeHashBefore[0].block_index);
-    evidence.at3c = { lockTx, transferId: row.transfer_id, orphanedHash: orphaned,
-        invariant: entry, escrow: escrowOf(await venue.bridgeBalances('BTC', GAS_TICK), 'DOGE') };
-
-    assert.strictEqual(await venue.addressBalance('DOGE', dest.address, GAS_TICK), '1',
-        'the DOGE credit was unwound, which milestone 1 explicitly does not do (D16)');
-    assert.strictEqual(String(dogeHashAfter[0].ledger_hash), String(dogeHashBefore[0].ledger_hash),
-        'a BTC reorg moved a DOGE ledger hash');
-    assert.strictEqual(cls.verdict, 'deficit',
-        'getbridgeinvariant reads ' + JSON.stringify(entry) + ' rather than a deficit');
-
-            const watch = require('../../../claude/scripts/xchain-watch.js');
-    const items = watch.bridgeInvariantVerdicts([{ label: 'venue-hub-0', ok: true, byTick: inv }])
-        .filter((i) => i.tick === GAS_TICK && i.chain === 'DOGE');
-    evidence.at3c_watch = items.map((i) => ({ sev: i.sev, kind: i.kind }));
-    assert.strictEqual(items.length, 1);
-    assert.strictEqual(items[0].sev, 'crit');
-    assert.strictEqual(items[0].kind, 'BRIDGE_INVARIANT_DEFICIT');
+    // The lever and the catch-up wait ride along with the venue: they close over this
+    // file's `startTip` and `venue`, which the parts never hold directly.
+    snapshot: () => ({ venue, dogeRail, blocked, evidence, needsFederation, reorgBtcFrom, venueBtcCaughtUp }),
 });

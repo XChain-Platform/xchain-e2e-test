@@ -45,6 +45,13 @@ const {
     overFinalizedSourceLegs,
     orphanDepth,
     assertShallowOrphan,
+    replacementBlockCount,
+    describeRow,
+    confirmedHeight,
+    orphanWithEmptyBlocks,
+    destinationApplyBudgetMs,
+    hubRelayMarginFloorS,
+    DEFAULT_APPLY_SLACK_MS,
     withMiningPaused,
     classifyFundingWait,
     fundingBudgetMessage,
@@ -519,6 +526,158 @@ describe('bridgeRailVenue: the pure layer', function () {
             const partial = { pauseMining: async () => {} };
             await assert.rejects(() => withMiningPaused(partial, async () => {}),
                 /needs a connector with pauseMining\(\)\/resumeMining\(\)/);
+        });
+    });
+
+    describe('replacementBlockCount', function () {
+
+        it('disconnects one block and overtakes it with two, or the floor when that is higher', function () {
+            // Orphaning the tip itself: one block disconnected, one to overtake, floored at 2.
+            assert.strictEqual(replacementBlockCount(2653, 2653), 2);
+            assert.strictEqual(replacementBlockCount(2653, 2653, 3), 3);
+        });
+
+        it('covers every block above the orphan plus one, over a lower floor', function () {
+            // Blocks 2653, 2654 and 2655 disconnect; three replace them and a fourth overtakes.
+            assert.strictEqual(replacementBlockCount(2653, 2655, 2), 4);
+        });
+    });
+
+    describe('describeRow', function () {
+
+        it('renders a BigInt column as digits instead of throwing', function () {
+            const text = describeRow({ id: 42n, transfer_id: 'e404b384', amount: '1', nested: { seq: 7n } });
+            assert.strictEqual(text, '{"id":"42","transfer_id":"e404b384","amount":"1","nested":{"seq":"7"}}');
+        });
+
+        it('says null for the row an absence assertion is happy with', function () {
+            assert.strictEqual(describeRow(null), 'null');
+        });
+    });
+
+    /**
+     * A regtest node in miniature: a chain of blocks by height, a mempool, and the five
+     * RPCs the orphan lever uses. `remine` makes `generateBlock` behave like the miner
+     * sidecar's `generatetoaddress`, sweeping the mempool into every block regardless of
+     * the transaction list it was given.
+     */
+    function fakeNode(spec) {
+        const chain = [];
+        for (let h = 0; h <= spec.tip; h++) chain.push({ hash: 'orig-' + h, txs: [] });
+        chain[spec.lockHeight].txs.push(spec.lockTx);
+        const mempool = [];
+        const generated = [];
+        let serial = 0;
+        return {
+            chain, mempool, generated,
+            getBlockCount: async () => chain.length - 1,
+            getBlockHash: async (h) => {
+                if (!chain[h]) throw new Error('Block height out of range');
+                return chain[h].hash;
+            },
+            invalidateBlock: async (hash) => {
+                const at = chain.findIndex((b) => b.hash === hash);
+                for (const b of chain.splice(at)) mempool.push(...b.txs);
+            },
+            generateBlock: async (address, txs) => {
+                const include = spec.remine ? mempool.splice(0) : txs.slice();
+                generated.push({ address, txs: txs.slice() });
+                chain.push({ hash: 'new-' + chain.length + '-' + (serial++), txs: include });
+            },
+            getTransaction: async (txid) => {
+                const block = chain.find((b) => b.txs.includes(txid));
+                if (block) return { txid, blockhash: block.hash, confirmations: chain.length - chain.indexOf(block) };
+                return mempool.includes(txid) ? { txid } : null;
+            },
+            getBlock: async (hash) => ({ hash, height: chain.findIndex((b) => b.hash === hash) }),
+        };
+    }
+
+    describe('confirmedHeight', function () {
+
+        it('reads the confirming block\'s height from the node, waiting out an unconfirmed spell', async function () {
+            const node = fakeNode({ tip: 2655, lockHeight: 2654, lockTx: 'lock' });
+            // Unknown, then in the mempool, then confirmed: the height is read only at the end.
+            const answers = [null, { txid: 'lock' }];
+            const real = node.getTransaction;
+            node.getTransaction = async (txid) => (answers.length ? answers.shift() : real(txid));
+            assert.strictEqual(await confirmedHeight(node, 'lock', { everyMs: 1 }), 2654);
+        });
+
+        it('fails naming a transaction the node holds unconfirmed, and one it has never seen', async function () {
+            const stuck = fakeNode({ tip: 2655, lockHeight: 2654, lockTx: 'lock' });
+            await stuck.invalidateBlock('orig-2654');
+            await assert.rejects(() => confirmedHeight(stuck, 'lock', { timeoutMs: 20, everyMs: 5 }),
+                /transaction lock did not confirm within 0s \(the node holds it unconfirmed\)/);
+            await assert.rejects(() => confirmedHeight(stuck, 'ghost', { timeoutMs: 20, everyMs: 5 }),
+                /transaction ghost did not confirm within 0s \(the node has never seen it\)/);
+        });
+    });
+
+    describe('orphanWithEmptyBlocks', function () {
+
+        it('leaves the lock unconfirmed on a longer chain of coinbase-only blocks', async function () {
+            const node = fakeNode({ tip: 2655, lockHeight: 2654, lockTx: 'lock' });
+            const out = await orphanWithEmptyBlocks(node, { height: 2654, coinbase: 'mcoinbase', atLeast: 3, lockTx: 'lock' });
+            assert.deepStrictEqual(out, { hash: 'orig-2654', tipBefore: 2655, tipAfter: 2656, mined: 3 });
+            // Every replacement block was asked for with NO transactions, at the given coinbase.
+            assert.deepStrictEqual(node.generated, [
+                { address: 'mcoinbase', txs: [] }, { address: 'mcoinbase', txs: [] }, { address: 'mcoinbase', txs: [] },
+            ]);
+            assert.deepStrictEqual(node.mempool, ['lock'], 'the lock sits in the mempool for the next miner');
+            assert.deepStrictEqual(await node.getTransaction('lock'), { txid: 'lock' });
+            assert.notStrictEqual(await node.getBlockHash(2654), 'orig-2654');
+        });
+
+        it('refuses a replacement chain that carried the lock back in, naming its block', async function () {
+            // A miner that sweeps the mempool re-confirms the lock one block later, the exact
+            // shape a `generatetoaddress` replacement produces.
+            const node = fakeNode({ tip: 2655, lockHeight: 2654, lockTx: 'lock', remine: true });
+            await assert.rejects(
+                () => orphanWithEmptyBlocks(node, { height: 2654, coinbase: 'mcoinbase', atLeast: 3, lockTx: 'lock' }),
+                /transaction lock is still confirmed, in block new-2654-0, after the orphan of block 2654/);
+        });
+
+        it('does not ask about a lock it was not given, and still proves the reorg', async function () {
+            const node = fakeNode({ tip: 2655, lockHeight: 2654, lockTx: 'lock', remine: true });
+            const out = await orphanWithEmptyBlocks(node, { height: 2655, coinbase: 'mcoinbase' });
+            assert.deepStrictEqual(out, { hash: 'orig-2655', tipBefore: 2655, tipAfter: 2656, mined: 2 });
+        });
+
+        it('refuses to run without a height or a coinbase address', async function () {
+            const node = fakeNode({ tip: 2655, lockHeight: 2654, lockTx: 'lock' });
+            await assert.rejects(() => orphanWithEmptyBlocks(node, { coinbase: 'mcoinbase' }), /needs a height/);
+            await assert.rejects(() => orphanWithEmptyBlocks(node, { height: 2654 }), /needs a coinbase address/);
+            assert.strictEqual(node.generated.length, 0);
+        });
+    });
+
+    describe('destinationApplyBudgetMs', function () {
+
+        it('is the relay margin plus the default slack, in milliseconds', function () {
+            assert.strictEqual(destinationApplyBudgetMs(240), 240 * 1000 + DEFAULT_APPLY_SLACK_MS);
+            assert.strictEqual(destinationApplyBudgetMs(240, { slackMs: 0 }), 240000);
+        });
+
+        it('exceeds the margin: a wait equal to the margin ends the second the leg becomes eligible', function () {
+            assert.ok(destinationApplyBudgetMs(240) > 240000);
+            assert.ok(DEFAULT_APPLY_SLACK_MS >= 60000, 'the slack must cover several destination blocks');
+        });
+
+        it('refuses a margin that is not a positive number, and a negative slack', function () {
+            assert.throws(() => destinationApplyBudgetMs(0), /relay margin must be a positive number of seconds, got 0/);
+            assert.throws(() => destinationApplyBudgetMs('soon'), /relay margin must be a positive number/);
+            assert.throws(() => destinationApplyBudgetMs(240, { slackMs: -1 }), /slack must be a non-negative number/);
+        });
+
+        it('reads the hub\'s own DOGE margin so the budget moves with the stamp', function () {
+            let relay = null;
+            try { relay = require('../../../../xchain-hub/src/lib/relay_margin.js'); }
+            catch (e) { this.skip(); }
+            const marginS = hubRelayMarginFloorS('DOGE');
+            assert.strictEqual(marginS, relay.relayMarginFloorS('DOGE'));
+            assert.ok(marginS > 0);
+            assert.strictEqual(destinationApplyBudgetMs(marginS), marginS * 1000 + DEFAULT_APPLY_SLACK_MS);
         });
     });
 

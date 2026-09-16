@@ -16,12 +16,27 @@
  * (AT3 and AT4 are in bridge_rail_reorg.test.js; AT8 is the gate run and is not
  * a drive at all.)
  *
+ * ── ONE SUITE IN TWO PLACES ────────────────────────────────────────────────────────
+ * This root holds the venue bring-up and the preconditions; AT1 to AT9 live in
+ * `bridge_rail_base.test/0*.test.js` and share this file's venue through
+ * `./bridge_rail_base.test/support`. The parts are ONE mocha run and must sit on the same
+ * command line, root first, with the glob quoted so mocha expands it:
+ *
+ *   npx mocha test/integration/bridge_rail_base.test.js "test/integration/bridge_rail_base.test/*.test.js"
+ *
+ * mocha keeps the command-line order and sorts a glob's matches among themselves, so the
+ * `0N_` prefixes order the parts. Do NOT add `--sort`: it sorts across the whole list and
+ * moves the guards suite below, which must run first, behind this one. The root alone
+ * brings the venue up and drives only the preconditions; a part alone has no venue and
+ * fails at its first `before`.
+ *
  * HOW TO RUN IT, on the regtest rail host, from this repository root:
  *
  *   nohup ~/scratch/xc-meta/doge-loop.sh >/dev/null 2>&1 & echo $! > ~/scratch/xc-meta/doge-loop.pid
  *   COIN=bitcoin NETWORK=regtest NODE_PATH=<the chunked module directory> \
  *     npx mocha --timeout 0 --exit --require ./test/initialCheck.test.js \
- *     test/integration/bridge_rail_doge_guards.test.js test/integration/bridge_rail_base.test.js
+ *     test/integration/bridge_rail_doge_guards.test.js \
+ *     test/integration/bridge_rail_base.test.js "test/integration/bridge_rail_base.test/*.test.js"
  *   kill $(cat ~/scratch/xc-meta/doge-loop.pid)
  *
  * The DOGE block loop is not optional: the DOGE miner is mempool-driven, so a DOGE leg
