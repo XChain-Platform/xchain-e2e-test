@@ -19,8 +19,15 @@ const issueHelper = require('../../helpers/issueHelper')
 const chainRail = require('../../helpers/chainRail')
 const helper = require('../../helpers/gasHelper')
 const path = require('path')
-// The hub's own relay-margin table, the same copy gasHelper reads (the file: dep).
-const relay = require('xchain-hub/src/lib/relay_margin')
+// The hub's own relay-margin table, resolved the way loadSdk resolves the SDK so
+// the numbers asserted below are the hub's, not a copy typed into this file.
+function loadRelayMargin() {
+    for (const c of ['xchain-hub/src/lib/relay_margin', '../../../xchain-hub/src/lib/relay_margin.js', '../../../../xchain-hub/src/lib/relay_margin.js']) {
+        try { return c.startsWith('.') ? require(path.resolve(__dirname, c)) : require(c) } catch (e) { /* next */ }
+    }
+    throw new Error('gasHelper.test: cannot resolve xchain-hub/src/lib/relay_margin beside this checkout')
+}
+const relay = loadRelayMargin()
 
 // A regtest miner that records every heartbeat setting in order, and can be told
 // to refuse the disable so the restore path is exercised, not just the happy one.

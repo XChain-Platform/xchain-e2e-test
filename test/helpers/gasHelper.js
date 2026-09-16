@@ -14,10 +14,29 @@ const chainRail         = require('./chainRail')
 const requireRow        = require('./requireRow')
 const transactionHelper = require('../transactionHelper')
 const cryptoHelper      = require('../cryptoHelper')
-// The hub's own relay-margin table, from the xchain-hub copy this package depends
-// on (file:./xchain-hub, staged into the e2e image beside src/), so the wait below
-// tracks the margin the hub actually stamps rather than a number copied from it.
-const { relayMarginFloorS } = require('xchain-hub/src/lib/relay_margin')
+const path              = require('path')
+
+// The hub's own relay-margin table, so the wait below tracks the margin the hub
+// actually stamps rather than a number copied from it. Resolved the way
+// multiValidatorHubHelper finds the hub source: the file: dep first (the e2e
+// image and a monorepo dev checkout both link node_modules/xchain-hub), then the
+// copy staged beside this package in the image, then the monorepo sibling, then
+// the xchain-node modules/ layout. A staged CI checkout carries no node_modules
+// link for the sibling, so the bare package require alone is not enough.
+function loadRelayMargin(){
+    const candidates = [
+        'xchain-hub/src/lib/relay_margin',
+        path.resolve(__dirname, '../../xchain-hub/src/lib/relay_margin.js'),
+        path.resolve(__dirname, '../../../xchain-hub/src/lib/relay_margin.js'),
+        path.resolve(__dirname, '../../../../xchain-hub/src/lib/relay_margin.js'),
+        path.resolve(__dirname, '../../../../../modules/xchain-hub/src/lib/relay_margin.js')
+    ]
+    for (const c of candidates) {
+        try { return require(c) } catch (e) { if (e.code !== 'MODULE_NOT_FOUND') throw e }
+    }
+    throw new Error('gasHelper: cannot resolve xchain-hub/src/lib/relay_margin beside this checkout; tried ' + candidates.join(', '))
+}
+const { relayMarginFloorS } = loadRelayMargin()
 
 const GAS_TICK = "XCHAIN"
 
