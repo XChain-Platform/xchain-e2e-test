@@ -113,7 +113,48 @@ const idxDb = {
     // honest view here, not a stub that papers over the isolation the real
     // apiView provides. Without it the drill dies on
     // `indexer.indexerDb.apiView is not a function`.
-    apiView() { return this }
+    apiView() { return this },
+    // The resolver no longer carries its own SQL: the indexer structure pass moved
+    // both legs into named Database mixins (xchain-indexer 0bb77814,
+    // src/db/stakes/credit_source_reads.js and src/db/delegations/index.js) and
+    // calls them on the db it is handed, so the adapter mirrors those two methods
+    // byte-for-byte as well. Without them every resolution died inside the
+    // resolver as "failed to resolve stake source" (freeze matrix run 35102834217).
+    async getStakeSourceAddressBySigningPubkey(pubkeyId, validId, blockIndex) {
+        return await this.doQuery(
+            `SELECT ia.address AS source FROM stakes s
+             JOIN index_addresses ia ON ia.id = s.source_id
+             WHERE s.signing_pubkey_id = ? AND s.status_id = ?
+               AND s.activation_block <= ?
+               AND (s.deactivation_block IS NULL OR s.deactivation_block > ?)
+               AND NOT EXISTS (
+                   SELECT 1 FROM stake_key_revocations r
+                   WHERE r.source_id = s.source_id
+                     AND r.signing_pubkey_id = s.signing_pubkey_id
+                     AND r.status_id = ?
+                     AND r.deactivation_block <= ?
+                     AND r.action_index > s.action_index)
+               AND NOT EXISTS (
+                   SELECT 1 FROM capability_slash_events cse
+                   WHERE cse.signing_pubkey_id = s.signing_pubkey_id
+                     AND cse.block_index <= ?)
+             ORDER BY s.action_index DESC LIMIT 1`,
+            [pubkeyId, validId, blockIndex, blockIndex, validId, blockIndex, blockIndex])
+    },
+    async getDelegationSourceAddressBySigningPubkey(pubkeyId, validId, blockIndex) {
+        return await this.doQuery(
+            `SELECT ia.address AS source FROM delegations d
+                 JOIN index_addresses ia ON ia.id = d.source_id
+                 WHERE d.signing_pubkey_id = ? AND d.status_id = ?
+                   AND d.activation_block <= ?
+                   AND (d.deactivation_block IS NULL OR d.deactivation_block > ?)
+                   AND NOT EXISTS (
+                       SELECT 1 FROM capability_slash_events cse
+                       WHERE cse.signing_pubkey_id = d.signing_pubkey_id
+                         AND cse.block_index <= ?)
+                 ORDER BY d.action_index DESC LIMIT 1`,
+            [pubkeyId, validId, blockIndex, blockIndex, blockIndex])
+    },
 }
 const indexerLike = { indexerDb: idxDb }
 function newPubkey() {

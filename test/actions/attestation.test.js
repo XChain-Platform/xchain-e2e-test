@@ -166,7 +166,7 @@ describe(TITLE, function () {
     before(async function () { await prepareAttestation(this) })
 
     it('rejects a signature from an unstaked pubkey', async function () {
-        const { operatorAddr } = state
+        const { operatorAddr, contractIndex } = state
         // Fresh validator with no stake; sig verification should drop their signature
         let badValidator = new attestationHelper.MockAttestationValidator()
 
