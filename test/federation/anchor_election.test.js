@@ -289,7 +289,7 @@ describe('ANCHOR bundle live: multi-validator per-NETWORK publisher (DOGE regtes
             const wifStr = wifEncode(network.wif, Buffer.from(wallets[i].privateKey), true);
             const hubIdx = i;
             mvh.hubs[i].stateAnchorPublisher.setBroadcastHook(async (payload) => {
-                const encoder = sdk._requireEncoder();
+                const encoder = sdk.requireEncoder();
                 // The tracker can be a beat behind right after a publish/mint
                 // confirms (same staleness transactionHelper's trap handles, and
                 // production absorbs via the flush timer); quiesce and retry.
