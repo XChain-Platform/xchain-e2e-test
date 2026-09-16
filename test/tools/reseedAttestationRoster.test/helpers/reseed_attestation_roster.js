@@ -78,7 +78,7 @@ const VISIBILITY_ROUNDS = 12
  * maths and the same capability read, without the verdict.
  */
 async function readSeatedOrEmpty () {
-    const buffer = Number(loadHubModule('src/snapshot_reorg_buffer.js').CANONICAL_REORG_BUFFER)
+    const buffer = Number(loadHubModule('src/consensus/snapshot_reorg_buffer.js').CANONICAL_REORG_BUFFER)
     const tip = await indexerConnector.call('getblockhashes', {})
     assert.ok(tip && tip.block_index !== undefined && tip.block_index !== null,
         'reseedAttestationRoster: the indexer would not report a tip, so the set cannot be read')

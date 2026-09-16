@@ -3562,7 +3562,7 @@ function coinCode(coin) {
  */
 function signMirrorRowAs(row, signers, requestBlock, network) {
     const canon = loadHubModule('src/attestation/attest_response_canonical.js');
-    const eq    = loadHubModule('src/equivocation_header.js');
+    const eq    = loadHubModule('src/consensus/equivocation_header.js');
     const rid   = String(row.request_id).toLowerCase();
 
     let raw = canon.buildResponseCanonicalRaw({

@@ -55,7 +55,7 @@ const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
 const { seedStakeSnapshot }    = require('../helpers/seededStakeSnapshot');
 const { MockCrossChainOfferBook, makeOrder } = require('../helpers/mockCrossChainOfferBook');
 const { waitForMesh, waitFor } = require('../helpers/consensusWait');
-const eq = require('../../../xchain-hub/src/equivocation_header.js');
+const eq = require('../../../xchain-hub/src/consensus/equivocation_header.js');
 
 const COUNT        = 4;        // quorum 2f+1 = 3
 // Deadlines, not settles: the mesh, the checkpoint rows and the finalized match are

@@ -27,16 +27,19 @@ describe('the legacy on-chain ATTEST response path guard', function () {
     // The guard decides only whether to SKIP, so a local copy of the activation map
     // cannot fork settlement. It can, however, drift after a flag day and silently
     // re-enable nine cases that cannot pass, which is the failure this closes. The
-    // indexer's vendored copy is the nearest authority a sibling checkout has.
+    // indexer's registry row (the map is a row since W5, read by its literal key
+    // through the indexer's consumer-shaped registry entry) is the nearest
+    // authority a sibling checkout has.
     it('carries the same activation map as the indexer it is predicting', function () {
         const sibling = path.join(__dirname, '..', '..', '..', 'xchain-indexer',
-            'src', 'attest_response_mirror_activation.js')
+            'src', 'consensus', 'gate_registry.js')
         if (!fs.existsSync(sibling)) {
             console.log('xchain-indexer not checked out beside this repo; parity unchecked')
             this.skip()
             return
         }
-        const theirs = require(sibling).ATTEST_RESPONSE_MIRROR_ACTIVATION
+        const theirs = require(sibling)
+            .copy('attest_response_mirror_activation.ATTEST_RESPONSE_MIRROR_ACTIVATION')
         assert.deepStrictEqual(ATTEST_RESPONSE_MIRROR_ACTIVATION, theirs,
             'the local activation map has drifted from xchain-indexer. A flag-day edit ' +
             'that lands on one side only makes this guard skip cases that now CAN run, ' +

@@ -62,7 +62,7 @@ const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { waitForMesh, waitForConfigEverywhere } = require('../helpers/consensusWait');
 // Load swq through the SAME resolver the hub harness uses, so this module
 // instance is the one consensus/pbft.js reads and a runtime override reaches it.
-const swq = loadHubModule('src/stake_weighted_quorum.js');
+const swq = loadHubModule('src/consensus/stake_weighted_quorum.js');
 
 // Effective activation height for this run: the shipped regtest height when it
 // already reaches the COUNT side (>=2, the hand-armed case), otherwise the env

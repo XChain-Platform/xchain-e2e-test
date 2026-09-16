@@ -23,8 +23,8 @@
  *
  *   1. CONSENSUS CONSTANTS ARE NEVER RE-DERIVED HERE. Every epoch height, close
  *      height and K value comes from the shipped xchain-indexer
- *      src/rollcall_activation.js, and the canonical comes from the shipped
- *      src/equivocation_header.js. A test that recomputed either would agree
+ *      src/consensus/gates/rollcall_gate.js, and the canonical comes from the shipped
+ *      src/consensus/equivocation_header.js. A test that recomputed either would agree
  *      with itself while disagreeing with the chain, which is the exact failure
  *      the frozen vector exists to catch. assertFrozenCanonicalVector() pins
  *      that borrowed builder against
@@ -135,9 +135,9 @@ if (!process.env[ROLLCALL_REGTEST_ARMING_ENV]) process.env[ROLLCALL_REGTEST_ARMI
 const ROLLCALL_GATES_ARMING_ENV = 'XC_ROLLCALL_GATES_REGTEST_ACTIVATION'
 
 let _rca = null, _eqh = null, _rga = null, _crd = null
-function rca(){ if (!_rca) _rca = require(_resolveSibling('xchain-indexer', 'src/rollcall_activation.js')); return _rca }
-function eqh(){ if (!_eqh) _eqh = require(_resolveSibling('xchain-indexer', 'src/equivocation_header.js')); return _eqh }
-function rga(){ if (!_rga) _rga = require(_resolveSibling('xchain-indexer', 'src/rollcall_gates_activation.js')); return _rga }
+function rca(){ if (!_rca) _rca = require(_resolveSibling('xchain-indexer', 'src/consensus/gates/rollcall_gate.js')); return _rca }
+function eqh(){ if (!_eqh) _eqh = require(_resolveSibling('xchain-indexer', 'src/consensus/equivocation_header.js')); return _eqh }
+function rga(){ if (!_rga) _rga = require(_resolveSibling('xchain-indexer', 'src/consensus/gates/rollcall_gates_gate.js')); return _rga }
 // Any other shipped indexer module, through the SAME candidate ladder. A suite
 // that hard-coded '../../../xchain-indexer/...' would resolve in a monorepo
 // checkout and fail in the e2e image bundle, where the sibling sits elsewhere.
@@ -496,7 +496,7 @@ function assertFrozenCanonicalVector(){
     assert.strictEqual(got, v.canonical.expected,
         'ROLLCALL canonical drift: this harness builds\n  ' + got + '\nbut the frozen vector ' +
         '(xchain-documentation/protocol/test-vectors/rollcall_canonical.json) says\n  ' + v.canonical.expected +
-        '\nThe harness borrows xchain-indexer/src/equivocation_header.js, so a drift here means the ' +
+        '\nThe harness borrows xchain-indexer/src/consensus/equivocation_header.js, so a drift here means the ' +
         'sibling checkout disagrees with the frozen vector, not that the test is wrong.')
 
     // The vector's signatures are real, so verifying one proves the seed

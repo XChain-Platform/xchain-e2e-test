@@ -40,7 +40,7 @@
 const { loadHubModule } = require('./multiValidatorHubHelper');
 
 function forceCountModeQuorum(opts = {}) {
-    const swq = loadHubModule('src/stake_weighted_quorum.js');
+    const swq = loadHubModule('src/consensus/stake_weighted_quorum.js');
     const networks = opts.networks || ['regtest', 'testnet'];
     const height = Number.isFinite(opts.height) ? opts.height : Number.MAX_SAFE_INTEGER;
     const saved = {};

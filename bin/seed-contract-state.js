@@ -303,8 +303,8 @@ function writeState(p, s) {
 // than passed in, so this tool cannot be pointed at a height nobody armed.
 function armedHeight(chain, network) {
     const candidates = [
-        '../../xchain-indexer/src/state_subtree_activation.js',
-        '../../../xchain-indexer/src/state_subtree_activation.js',
+        '../../xchain-indexer/src/consensus/gates/state_subtree_gate.js',
+        '../../../xchain-indexer/src/consensus/gates/state_subtree_gate.js',
     ];
     for (const c of candidates) {
         try {

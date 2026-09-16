@@ -30,14 +30,18 @@
 'use strict';
 
 const assert = require('assert');
-const fs     = require('fs');
 const path   = require('path');
 
 const ROOT = path.resolve(__dirname, '../../../..');
 
 const protocolConstants = require(path.join(ROOT, 'xchain-documentation/protocol/constants.js'));
-const hubCcr = require(path.join(ROOT, 'xchain-hub/src/cross_chain_royalty_activation.js'));
-const idxCcr = require(path.join(ROOT, 'xchain-indexer/src/cross_chain_royalty_activation.js'));
+// The flag-day map is a registry row since W5 (the predicate-only twin module is
+// gone); each service reads it through its own registry entry, at the same tail
+// in every repo, and the predicate is activeAt over the BTC snapshot_block.
+const CCR_KEY = 'cross_chain_royalty_activation.CROSS_CHAIN_ROYALTY_ACTIVATION';
+const REGISTRY_ENTRY = 'src/consensus/gate_registry.js';
+const hubCcr = require(path.join(ROOT, 'xchain-hub', REGISTRY_ENTRY));
+const idxCcr = require(path.join(ROOT, 'xchain-indexer', REGISTRY_ENTRY));
 
 const CrossChainDexEngine  = require(path.join(ROOT, 'xchain-hub/src/cross_chain/dex_engine.js'));
 const StateAnchorPublisher = require(path.join(ROOT, 'xchain-hub/src/anchor/publisher.js'));
@@ -72,17 +76,18 @@ const LEGS = JSON.stringify([{ to: 'mjrCrhL4qjKo1oGYJb78Lp8GoBiF6yFTZM', bps: 50
 describe('cross-chain royalty: CROSS_CHAIN_ROYALTY cross-service parity', function () {
 
     it('the twin activation modules are byte-identical', function () {
-        const hub = fs.readFileSync(path.join(ROOT, 'xchain-hub/src/cross_chain_royalty_activation.js'), 'utf8');
-        const idx = fs.readFileSync(path.join(ROOT, 'xchain-indexer/src/cross_chain_royalty_activation.js'), 'utf8');
-        assert.strictEqual(hub, idx,
-            'cross_chain_royalty_activation.js drifted between hub and indexer; re-copy the twin');
+        // No module to compare since W5: the row is the twin. Its shape (the
+        // network set) is pinned here, its values in the case below, so a slot
+        // added on one side only is caught even when the probed heights agree.
+        assert.deepStrictEqual(Object.keys(hubCcr.copy(CCR_KEY)).sort(), Object.keys(idxCcr.copy(CCR_KEY)).sort(),
+            'cross_chain_royalty_activation row names different network sets in hub and indexer; the registry parts drifted');
     });
 
     it('the flag-day map is byte-equal across the twins and the canonical SoT', function () {
         const map = protocolConstants.CROSS_CHAIN_ROYALTY_ACTIVATION;
         assert.ok(map, 'documentation/protocol/constants.js must export CROSS_CHAIN_ROYALTY_ACTIVATION');
         for (const [name, mod] of [['hub', hubCcr], ['indexer', idxCcr]]) {
-            assert.deepStrictEqual(mod.CROSS_CHAIN_ROYALTY_ACTIVATION, map,
+            assert.deepStrictEqual(mod.copy(CCR_KEY), map,
                 name + ' CROSS_CHAIN_ROYALTY_ACTIVATION drifted from the canonical protocol constant');
         }
     });
@@ -90,7 +95,7 @@ describe('cross-chain royalty: CROSS_CHAIN_ROYALTY cross-service parity', functi
     it('every local isCrossChainRoyaltyActive agrees on the verdict for the same input', function () {
         for (const net of ['mainnet', 'testnet', 'regtest', 'unknownnet']) {
             for (const sb of [0, 100, 1000, 999999998, 999999999, 1000000000, NaN, null]) {
-                const verdicts = [hubCcr, idxCcr].map(m => m.isCrossChainRoyaltyActive(sb, net));
+                const verdicts = [hubCcr, idxCcr].map(m => m.activeAt(CCR_KEY, net, null, sb, null));
                 assert.ok(verdicts.every(v => v === verdicts[0]),
                     'gate verdict disagreement for ' + net + '@' + sb + ': ' + JSON.stringify(verdicts));
             }

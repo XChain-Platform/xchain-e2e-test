@@ -53,7 +53,7 @@ const { MultiValidatorHub, ValidatorIdentity } = require('../helpers/multiValida
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
 const { waitForMesh, waitFor } = require('../helpers/consensusWait');
-const eq = require('../../../xchain-hub/src/equivocation_header.js');
+const eq = require('../../../xchain-hub/src/consensus/equivocation_header.js');
 
 // A deadline, not a settle: waitForMesh returns on the first fully-peered poll.
 const PEER_WAIT_MS = 60_000;

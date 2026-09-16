@@ -48,7 +48,7 @@
  * header-is-only-delta) is asserted once both have captured.
  *
  * REQUIRES a non-zero regtest EQUIV_HEADER_ACTIVATION in
- * xchain-hub/src/equivocation_header.js (regtest is 0 by default = always wrapped,
+ * xchain-hub/src/consensus/equivocation_header.js (regtest is 0 by default = always wrapped,
  * so the headerless side cannot be reached). Set regtest to e.g. 120 in ALL FIVE
  * copies (xchain-documentation/protocol/constants.js + hub + indexer + sdk +
  * explorer; the parity test enforces equality) for the run, then revert. The suite
@@ -69,7 +69,7 @@ const { MultiValidatorHub, ValidatorIdentity } = require('../helpers/multiValida
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
 const { waitForMesh, waitFor } = require('../helpers/consensusWait');
-const eq = require('../../../xchain-hub/src/equivocation_header.js');
+const eq = require('../../../xchain-hub/src/consensus/equivocation_header.js');
 
 const ACT = parseInt(eq.EQUIV_HEADER_ACTIVATION.regtest);
 

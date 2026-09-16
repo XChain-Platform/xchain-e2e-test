@@ -169,14 +169,14 @@ function loadSDK() {
 //
 // A path plus a sha256 makes that visible and hash-matchable against the
 // deployed indexer (`docker exec <indexer> sha256sum
-// /XChainIndexer/src/state_subtree_activation.js`), which is the check this
+// /XChainIndexer/src/consensus/gates/state_subtree_gate.js`), which is the check this
 // project already applies to every staged module. It is deliberately NOT a
 // refusal: the tool cannot reach the fleet to know the right hash, so it
 // reports what it read and leaves the comparison to the operator.
 function escrowLeafGate(chain, network) {
     const candidates = [
-        '../../xchain-indexer/src/state_subtree_activation.js',
-        '../../../xchain-indexer/src/state_subtree_activation.js',
+        '../../xchain-indexer/src/consensus/gates/state_subtree_gate.js',
+        '../../../xchain-indexer/src/consensus/gates/state_subtree_gate.js',
     ];
     for (const c of candidates) {
         const abs = path.resolve(__dirname, c);

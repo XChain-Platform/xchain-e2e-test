@@ -71,8 +71,8 @@ const fs     = require('fs');
 const path   = require('path');
 const { readModuleSource } = require('../../support/sibling_source.js');
 
-const HUB_EQ_PATH = path.resolve(__dirname, '../../../../xchain-hub/src/equivocation_header.js');
-const IDX_EQ_PATH = path.resolve(__dirname, '../../../../xchain-indexer/src/equivocation_header.js');
+const HUB_EQ_PATH = path.resolve(__dirname, '../../../../xchain-hub/src/consensus/equivocation_header.js');
+const IDX_EQ_PATH = path.resolve(__dirname, '../../../../xchain-indexer/src/consensus/equivocation_header.js');
 
 const hubEq = require(HUB_EQ_PATH);
 const idxEq = require(IDX_EQ_PATH);

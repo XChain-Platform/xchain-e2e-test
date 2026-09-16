@@ -35,7 +35,7 @@ describe('mirrorDrillFixture: stake visibility distance', function () {
         // reason: read both terms and check the arithmetic rather than the result.
         const activation = Number(
             loadHubModule('src/coins/index.js').getCoinConfig('BTC', 'regtest').STAKING.ACTIVATION_DELAY_BLOCKS)
-        const burial = Number(loadHubModule('src/snapshot_reorg_buffer.js').CANONICAL_REORG_BUFFER)
+        const burial = Number(loadHubModule('src/consensus/snapshot_reorg_buffer.js').CANONICAL_REORG_BUFFER)
         const shared = Number(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
 
         assert.strictEqual(activation, 6, 'BTC activation delay moved; the shared constant needs re-checking')

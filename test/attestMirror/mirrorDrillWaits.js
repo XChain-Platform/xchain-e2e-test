@@ -46,7 +46,7 @@ const { queryVenueDb } = require('./mirrorDrillFixture')
 
 // The ladder's own constants, imported rather than retyped: a local copy would let
 // this file disagree with the rule it is doing arithmetic about.
-const { ATTEST_RESPONSIBLE_WIDENING } = require('../../../xchain-indexer/src/attest_responsible_widening_activation.js')
+const { ATTEST_RESPONSIBLE_WIDENING } = require('../../../xchain-indexer/src/consensus/gates/attest_responsible_widening_gate.js')
 
 /**
  * Query one of the venue's databases, WITH THAT DATABASE SELECTED.

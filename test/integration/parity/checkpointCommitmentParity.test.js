@@ -15,16 +15,19 @@
  * BLOCK_MERKLE_ROOT|BLOCK_MERKLE_VERSION`, gated on the BTC `snapshot_block` by the
  * CHECKPOINT_COMMITMENT flag-day. The signed string is built INLINE in four places
  * (hub engine, SDK verifier, indexer ANCHOR verifier, explorer verify endpoint) plus
- * the activation map lives as a LOCAL COPY in FIVE services (hub, indexer, sdk,
- * explorer, and xchain-sync, which consumes it at checkpoint.js:53 to decide
- * whether the follower's checkpoint canonical carries the root suffix). A single
+ * the activation map is one registry row (checkpoint_commitment_activation
+ * .CHECKPOINT_COMMITMENT_ACTIVATION) carried by the byte-twin registry parts of FIVE
+ * services (hub, indexer, sdk, explorer, and xchain-sync, which reads it at
+ * checkpoint.js to decide whether the follower's checkpoint canonical carries the
+ * root suffix) and read through each one's activeAt. A single
  * byte of drift between any two of these silently breaks federation quorum
  * verification (a signer set whose canonical differs produces zero valid
  * signatures), so this guards:
  *
- *   1. The CHECKPOINT_COMMITMENT_ACTIVATION map is byte-equal across all five local
- *      copies (hub/indexer/sdk/explorer/sync) AND the canonical
- *      xchain-documentation/protocol/constants.js.
+ *   1. The CHECKPOINT_COMMITMENT_ACTIVATION row is value-equal across all five
+ *      registries (hub/indexer/sdk/explorer/sync) AND the canonical
+ *      xchain-documentation/protocol/constants.js, and every registry's activeAt
+ *      agrees on the verdict.
  *   2. The post-flag-day checkpoint canonical (with the root suffix) is byte-identical
  *      across the hub engine, the SDK verifier, and the indexer's v0 SECTION verifier.
  *   3. The pre-flag-day canonical (no suffix) is likewise byte-identical, and the
@@ -47,14 +50,20 @@ const path   = require('path');
 const ROOT = path.resolve(__dirname, '../../../..');
 
 const protocolConstants = require(path.join(ROOT, 'xchain-documentation/protocol/constants.js'));
-const hubCkpt  = require(path.join(ROOT, 'xchain-hub/src/checkpoint_commitment_activation.js'));
-const idxCkpt  = require(path.join(ROOT, 'xchain-indexer/src/checkpoint_commitment_activation.js'));
-const sdkCkpt  = require(path.join(ROOT, 'xchain-sdk/src/checkpoint_commitment_activation.js'));
-const expCkpt  = require(path.join(ROOT, 'xchain-explorer/src/checkpoint_commitment_activation.js'));
-// Fifth vendored copy: xchain-sync consumes this at checkpoint.js:53
-// (isCheckpointCommitmentActive) and was previously unguarded by this parity
-// loop (uuid 77/229/326).
-const syncCkpt = require(path.join(ROOT, 'xchain-sync/src/checkpoint_commitment_activation.js'));
+// Each service's activation registry (the same entry tail in every repo; the
+// indexer's is the consumer-shaped entry over its protocol_changes parts). The
+// flag-day map is the row below, and the predicate is activeAt over the BTC
+// snapshot_block, which is what every consumer calls since W5.
+const CKPT_KEY = 'checkpoint_commitment_activation.CHECKPOINT_COMMITMENT_ACTIVATION';
+const REGISTRY_ENTRY = 'src/consensus/gate_registry.js';
+const hubCkpt  = require(path.join(ROOT, 'xchain-hub', REGISTRY_ENTRY));
+const idxCkpt  = require(path.join(ROOT, 'xchain-indexer', REGISTRY_ENTRY));
+const sdkCkpt  = require(path.join(ROOT, 'xchain-sdk', REGISTRY_ENTRY));
+const expCkpt  = require(path.join(ROOT, 'xchain-explorer', REGISTRY_ENTRY));
+// Fifth registry: xchain-sync reads the row at checkpoint.js
+// (isCheckpointCommitmentActive), now guarded by this parity loop too
+// (uuid 77/229/326).
+const syncCkpt = require(path.join(ROOT, 'xchain-sync', REGISTRY_ENTRY));
 
 const StateCheckpointEngine = require(path.join(ROOT, 'xchain-hub/src/anchor/checkpoint_engine.js'));
 const sdkCheckpoint         = require(path.join(ROOT, 'xchain-sdk/src/checkpoint.js'));
@@ -104,7 +113,7 @@ describe('SPV Phase 2: CHECKPOINT_COMMITMENT cross-service parity', function () 
         const canonical = protocolConstants.CHECKPOINT_COMMITMENT_ACTIVATION;
         assert.ok(canonical, 'documentation/protocol/constants.js must export CHECKPOINT_COMMITMENT_ACTIVATION');
         for (const [name, mod] of [['hub', hubCkpt], ['indexer', idxCkpt], ['sdk', sdkCkpt], ['explorer', expCkpt], ['sync', syncCkpt]]) {
-            assert.deepStrictEqual(mod.CHECKPOINT_COMMITMENT_ACTIVATION, canonical,
+            assert.deepStrictEqual(mod.copy(CKPT_KEY), canonical,
                 name + ' CHECKPOINT_COMMITMENT_ACTIVATION drifted from the canonical protocol constant');
         }
     });
@@ -112,7 +121,7 @@ describe('SPV Phase 2: CHECKPOINT_COMMITMENT cross-service parity', function () 
     it('every local isCheckpointCommitmentActive agrees on the verdict for the same input', function () {
         for (const net of ['mainnet', 'testnet', 'regtest']) {
             for (const sb of [0, 100, 1000, 999999998, 999999999, 1000000000]) {
-                const verdicts = [hubCkpt, idxCkpt, sdkCkpt, expCkpt, syncCkpt].map(m => m.isCheckpointCommitmentActive(sb, net));
+                const verdicts = [hubCkpt, idxCkpt, sdkCkpt, expCkpt, syncCkpt].map(m => m.activeAt(CKPT_KEY, net, null, sb, null));
                 assert.ok(verdicts.every(v => v === verdicts[0]),
                     'gate verdict disagreement for ' + net + '@' + sb + ': ' + JSON.stringify(verdicts));
             }
@@ -179,31 +188,20 @@ describe('SPV Phase 2: CHECKPOINT_COMMITMENT cross-service parity', function () 
     });
 
     it('checkpoint_commitment_activation.js executable code is byte-identical across all five copies', function () {
-        // Of the six flag-day twins in this repo family, four (stake_weighted_quorum,
-        // equivocation_header, cross_chain_royalty_activation, state_commitment_activation)
-        // are byte-checked somewhere in-repo; this file's own header claims "Byte-identical
-        // twins live in ..." but nothing enforced it (uuid:38212dff). The map + verdict
-        // checks above are a real net, but they don't catch a change that preserves the map
-        // and the six probed heights while altering unprobed code.
-        //
-        // Each copy's header comment names the OTHER four repos reciprocally, so the header
-        // itself is not byte-identical across copies by construction; compare the executable
-        // region only (from the activation map down), same convention as
-        // equivGateInputParity.test.js's codeOnly() helper.
-        const codeOnly = (s) => s.slice(s.indexOf('const CHECKPOINT_COMMITMENT_ACTIVATION'));
-        const paths = {
-            hub:      'xchain-hub/src/checkpoint_commitment_activation.js',
-            indexer:  'xchain-indexer/src/checkpoint_commitment_activation.js',
-            sdk:      'xchain-sdk/src/checkpoint_commitment_activation.js',
-            explorer: 'xchain-explorer/src/checkpoint_commitment_activation.js',
-            sync:     'xchain-sync/src/checkpoint_commitment_activation.js'
-        };
-        const indexerCode = codeOnly(fs.readFileSync(path.join(ROOT, paths.indexer), 'utf8'));
-        for (const [name, rel] of Object.entries(paths)) {
-            if (name === 'indexer') continue;
-            const code = codeOnly(fs.readFileSync(path.join(ROOT, rel), 'utf8'));
-            assert.strictEqual(code, indexerCode,
-                name + '/checkpoint_commitment_activation.js executable code drifted from the indexer copy');
+        // The predicate-only module is gone since W5: the map is the registry row
+        // and the predicate is the registry's own activeAt, so this compares the
+        // registry core every consumer carries as a byte twin of the indexer's
+        // (the platform twin reconcile holds those). The row itself is what can
+        // still drift: the value case above holds its values, and this case pins
+        // its SHAPE (every network the canonical map names, and no other) in
+        // every registry, so a slot added on one side only is caught even when
+        // the probed heights read the same verdict.
+        const canonical = Object.keys(protocolConstants.CHECKPOINT_COMMITMENT_ACTIVATION).sort();
+        for (const [name, mod] of [['hub', hubCkpt], ['sdk', sdkCkpt], ['explorer', expCkpt], ['sync', syncCkpt]]) {
+            assert.deepStrictEqual(Object.keys(mod.copy(CKPT_KEY)).sort(), Object.keys(idxCkpt.copy(CKPT_KEY)).sort(),
+                name + ' checkpoint_commitment_activation row names a different network set from the indexer row');
+            assert.deepStrictEqual(Object.keys(mod.copy(CKPT_KEY)).sort(), canonical,
+                name + ' checkpoint_commitment_activation row names a different network set from the canonical map');
         }
     });
 

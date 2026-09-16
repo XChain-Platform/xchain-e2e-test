@@ -70,7 +70,7 @@ const IndexerUtility = loadIndexerModule('src/utility.js');
 const bridgeSettle   = loadIndexerModule('src/consensus/bridge_settle.js');
 const checkpointCheck = loadIndexerModule('src/consensus/bridge_checkpoint_check.js');
 const merkle         = loadIndexerModule('src/consensus/merkle.js');
-const subtree        = loadIndexerModule('src/state_subtree_activation.js');
+const subtree        = loadIndexerModule('src/consensus/gates/state_subtree_gate.js');
 
 // Placeholder keyless role addresses. The settle pass only ever reads these out of the
 // config it is handed, so the literal value decides nothing; the one address that must

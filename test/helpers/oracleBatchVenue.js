@@ -236,7 +236,7 @@ async function removePriceCapabilityRows(query, rows, table) {
 // tip-anchored read the standing federation on the same chain performs: at the BTC
 // tip these rows are already deactivated and no other hub's quorum denominator
 // moves while a drill runs.
-const CANONICAL_REORG_BUFFER = loadHubModule('src/snapshot_reorg_buffer.js').CANONICAL_REORG_BUFFER;
+const CANONICAL_REORG_BUFFER = loadHubModule('src/consensus/snapshot_reorg_buffer.js').CANONICAL_REORG_BUFFER;
 
 // Reserved `stakes.action_index` values for the seeded rows. The column carries a
 // UNIQUE index, so the seed needs its own range: high enough that no real action on
