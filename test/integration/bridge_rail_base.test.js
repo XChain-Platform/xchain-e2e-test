@@ -13,7 +13,7 @@
  **********************************************************************
  *
  * THE BRIDGE ACCEPTANCE DRIVE, base legs: AT1, AT2, AT5, AT6, AT7, AT9.
- * (AT3 and AT4 are in bridgeRailReorg.rail.test.js; AT8 is the gate run and is not
+ * (AT3 and AT4 are in bridge_rail_reorg.test.js; AT8 is the gate run and is not
  * a drive at all.)
  *
  * HOW TO RUN IT, on the regtest rail host, from this repository root:
@@ -21,7 +21,7 @@
  *   nohup ~/scratch/xc-meta/doge-loop.sh >/dev/null 2>&1 & echo $! > ~/scratch/xc-meta/doge-loop.pid
  *   COIN=bitcoin NETWORK=regtest NODE_PATH=<the chunked module directory> \
  *     npx mocha --timeout 0 --exit --require ./test/initialCheck.test.js \
- *     test/integration/bridgeRailBase.rail.test.js
+ *     test/integration/bridge_rail_doge_guards.test.js test/integration/bridge_rail_base.test.js
  *   kill $(cat ~/scratch/xc-meta/doge-loop.pid)
  *
  * The DOGE block loop is not optional: the DOGE miner is mempool-driven, so a DOGE leg
@@ -87,8 +87,12 @@
  *    lock left units there for good; `cryptoHelper` generates a fresh mnemonic per PROCESS,
  *    so the DOGE keys those units were locked to no longer exist and they can never be
  *    burned back. On top of that `getpendingbridgetransfers` answers every valid XBRIDGE
- *    leg the chain has ever carried, with no settled filter, so a venue federation on a new
- *    hub database re-finalizes the whole backlog the instant its engine has indexer URLs.
+ *    leg the chain has carried that the indexer's own mirror holds no transfer for (every
+ *    leg on a venue whose mirror was just dropped), so a venue federation on a new hub
+ *    database re-finalizes the whole backlog the instant its engine has indexer URLs; and
+ *    since that read gained its settled filter (indexer d93294d8) the pending list empties
+ *    the moment the federation has signed, minutes before the destination applies, so the
+ *    drain wait reads the hubs' own rows as well (drive 18 took its baseline in that gap).
  *
  *    So this drive ARMS THE ENGINE ITSELF. The venue starts with `deferBridgeWiring`, which
  *    leaves the bridge engine without indexer URLs and therefore idle; the two readings

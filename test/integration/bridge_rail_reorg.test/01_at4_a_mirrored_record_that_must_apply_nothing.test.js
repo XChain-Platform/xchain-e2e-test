@@ -80,12 +80,30 @@ const dest = await venue.funded('AT4.' + c.name.replace(/[^A-Za-z]/g, ''),
     () => chainRail.withRail(dogeRail,
         () => cryptoHelper.getNewFundedAddress('AT4.' + c.name.replace(/[^A-Za-z]/g, ''),
             'dogecoin', NETWORK, null, 'legacy', 0, 1, false)));
+// A ROW THE FEDERATION REALLY SIGNED, which the newest row is not once this suite has
+// run a case: drive 18's third case copied the second case's injected foreign
+// btc_chain_id row as its template, and so did the fourth, which is why the destination
+// logged `refused 1, 2, 3 bridge_transfers row(s) carrying btc_chain_id ffffffff` and
+// never examined either of them.
 const template = await venue.queryHubDb(venue.hubs[0].dbName,
-    'SELECT * FROM bridge_transfers ORDER BY id DESC LIMIT 1');
+    "SELECT * FROM bridge_transfers WHERE transfer_id NOT LIKE 'at4%' AND status = 'finalized' " +
+    'ORDER BY id DESC LIMIT 1');
 assert.ok(template.length,
     'AT4 perturbs a row the federation really signed, so a real one must exist first');
 
+// A SOURCE LEG THIS CHAIN HAS NOT SETTLED, or the settle pass never looks at the row.
+// Its due read (xchain-indexer src/consensus/bridge_settle/pass.js dueBridgeTransfers)
+// drops any row whose (src_chain, src_action_index) this chain already settled under
+// another transfer id, silently and by design, so a copy of an applied row is not a
+// refusal the pass logs: drive 18's bad-signature and stranger-pubkey rows sat in the
+// DOGE mirror, finalized and due, and no line ever named them. An index no real lock
+// carries keeps the row in the due set, where the perturbation is judged. The escrow
+// proof the pass fetches first is keyed on the escrow address and the checkpoint, not
+// on this index, so the copy cannot park the block on the proof barrier.
+const unsettledLeg = 700000 + CASES.indexOf(c) + Number(template[0].src_action_index || 0);
+
 const row = Object.assign({}, template[0], {
+    src_action_index: unsettledLeg,
     // DISTINCTIVE IN ITS PREFIX, and the first cut padded the other way:
     // `padStart` put the timestamp at the END, so every AT4 case's id began
     // `at40000000000000` and a log line naming a shortened id could not be
@@ -157,8 +175,12 @@ await venue.waitUntil('two more DOGE blocks after the refusal, so the settle pas
 
 const balance = await venue.addressBalance('DOGE', dest.address, GAS_TICK);
 const refusals = refusalsNow();
+// The line itself is kept, not just its count: with the source leg moved off a settled
+// index every perturbation is judged by the pass, and WHICH guard refused it (quorum,
+// escrow proof, escrow short) is the reading that says the right guard fired.
 evidence['at4_' + c.name.replace(/[^A-Za-z]/g, '')] = { transferId: row.transfer_id, balance,
-    refusalLines: refusals.length };
+    srcActionIndex: row.src_action_index,
+    refusalLines: refusals.length, refusals: refusals.map((l) => l.trim().slice(0, 220)) };
     return { balance, mirrorHolds, refusals };
 
 }

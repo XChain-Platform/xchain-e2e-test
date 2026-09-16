@@ -67,7 +67,7 @@ module.exports = {
             // exactly what hung the LTC/DOGE suite. Dedup against the discovered
             // destination so callers that supply their own fee output (e.g.
             // nativeFeeLive/nativeFeeDispenser) aren't double-charged.
-            const nativeFeeHelper = require('../helpers/nativeFeeHelper')
+            const nativeFeeHelper = require('../../helpers/nativeFeeHelper')
             const feeOutput = await nativeFeeHelper.getNativeFeeOutput()
             if (feeOutput) {
                 const alreadyHasFee = outputs.some(o => o && o.address === feeOutput.address)

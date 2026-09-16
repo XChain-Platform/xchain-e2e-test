@@ -24,6 +24,7 @@ const {
     dogeAction,
     chainHalves,
     assertBacked,
+    assertHubInvariantBacked,
     needsFederation,
     bridgeRailSuite,
 } = require('./support');
@@ -56,15 +57,15 @@ bridgeRailSuite('AT6: the invariant, the two closures and the D65 surplus', func
         const doge = inv[GAS_TICK].DOGE;
         // BOTH readings recorded: the two chain halves the invariant is a claim about,
         // and the hub's own verdict over them. They can disagree, and which one is wrong
-        // is the finding. `delta = escrow - (supply + in_flight)`, and in_flight is
-        // accumulated from `getpendingbridgetransfers`, which answers every XBRIDGE leg
-        // the chain ever carried with no settled filter, so on a rail with history the
-        // hub's delta is permanently negative while the chains are exactly level.
+        // is the finding. `delta = escrow - (supply + in_flight)`; since the indexer's
+        // pending read gained its settled filter the in_flight term drains to 0 and the
+        // hub's delta is exactly the escrow's non-bridge credits (drive 18: 165 / 161 /
+        // 0 / 4 against four plain SENDs), so the verdict is held to that measured term
+        // rather than to the virgin rail's literal `equal`.
         const halves = await chainHalves();
         state.evidence.at6_invariant = { hub: doge, chainHalves: halves };
         assertBacked(halves, 'AT6');
-        assert.strictEqual(classifyInvariant(doge).verdict, 'equal',
-            'the invariant on DOGE reads ' + JSON.stringify(doge) + ' rather than equal');
+        state.evidence.at6_hubReading = assertHubInvariantBacked(doge, halves, 'AT6');
         assert.strictEqual(String(doge.in_flight), '0');
     });
 });
@@ -113,13 +114,11 @@ bridgeRailSuite('AT6: the invariant, the two closures and the D65 surplus', func
             'the units BACKED by locks moved from ' + before.backed + ' to ' + after.backed +
             ' on a stray SEND, which mints nothing and therefore backs nothing (D65)');
         // THE HUB'S OWN VERDICT, asserted as a MOVEMENT. Its `delta` is
-        // `escrow - (supply + in_flight)` and its in_flight term counts every XBRIDGE leg
-        // the source chain has ever carried (the indexer's `getpendingbridgetransfers` has
-        // no settled filter, and the hub adds every row it answers), so the absolute delta
-        // on a rail with history is a large negative number that says nothing about this
-        // SEND. What the SEND must do is move it by exactly one, in the surplus direction,
-        // and that is the same claim without the broken offset. The absolute reading is in
-        // the evidence, and the in_flight term is reported as a production finding.
+        // `escrow - (supply + in_flight)`, and on a rail with earlier stray SENDs the
+        // absolute reading is already a surplus before this case runs (the invariant case
+        // above holds it to the measured term). What THIS SEND must do is move it by
+        // exactly one, in the surplus direction, which is the same claim with the rail's
+        // history factored out. The absolute reading is in the evidence.
         assert.strictEqual(cls.delta - hubBefore.delta, 1,
             'the hub delta moved from ' + hubBefore.delta + ' to ' + cls.delta +
             ' on a plain SEND of 1 to the escrow, so the surplus it reports is not this ' +
@@ -133,11 +132,10 @@ bridgeRailSuite('AT6: the invariant, the two closures and the D65 surplus', func
         state.evidence.at6_watch = forDoge.map((i) => ({ sev: i.sev, kind: i.kind }));
         assert.strictEqual(forDoge.length, 1);
         // D65's asymmetry, driven on the REAL hub answer and deliberately not on a
-        // corrected copy of it. A CRIT here is not the classifier being wrong: it is the
-        // hub's `in_flight` term reaching the watch item, because the term counts every
-        // XBRIDGE leg the source chain has ever carried and a chain with history therefore
-        // reads as a permanent deficit. That is a production finding about the hub read,
-        // and feeding this assertion a patched invariant would hide it.
+        // corrected copy of it. A CRIT here is not the classifier being wrong: it means
+        // the hub read a deficit (an in_flight term that did not drain, or a destination
+        // holding more than the escrow backs), which is a production finding, and feeding
+        // this assertion a patched invariant would hide it.
         assert.strictEqual(forDoge[0].sev, 'warn',
             'the watch raised ' + forDoge[0].sev + '/' + forDoge[0].kind + ' on the hub answer ' +
             JSON.stringify(doge) + '. A deficit here with the chain halves level (escrow ' +

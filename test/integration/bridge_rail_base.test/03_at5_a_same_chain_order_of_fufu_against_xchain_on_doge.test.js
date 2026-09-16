@@ -34,8 +34,20 @@ async function prepareMaker() {
     // one without re-running the drive: drive 11's red claimed the clock, and
     // `at5_price.before.stale` is the reading that either confirms that or refutes it.
     state.evidence.at5_price = { asThisCaseStarted: state.priceBeforeCase };
-    await state.venue.refreshVenuePrices();
-    state.evidence.at5_price.afterReseed = await state.venue.readVenuePrice('DOGE/USD');
+    // Right before the priced action, and CONFIRMED ON THE MIRROR the venue DOGE indexer
+    // grades from: drive 18 reseeded the hub in front of this case and the indexer still
+    // refused a row 48 minutes old, because the hub row is not the one it reads.
+    const reseed = await state.venue.refreshVenuePrices();
+    state.evidence.at5_price.reseed = reseed;
+    state.evidence.at5_price.afterReseed = {
+        hub: await state.venue.readVenuePrice('DOGE/USD'),
+        mirror: await state.venue.readMirrorPrice('DOGE', 'DOGE/USD'),
+    };
+    assert.ok(reseed && reseed.mirrors.DOGE && reseed.mirrors.DOGE.confirmed,
+        'the DOGE/USD and XCHAIN/USD reseed (round ' + (reseed ? reseed.round : 'none') +
+        ') never reached the venue DOGE indexer\'s mirror, so the FUFU issue below would be ' +
+        'priced against ' + JSON.stringify(state.evidence.at5_price.afterReseed.mirror) +
+        ': ' + JSON.stringify(reseed && reseed.mirrors));
     const maker = await state.venue.funded('AT5.MAKER',
         () => chainRail.withRail(state.dogeRail, () => cryptoHelper.getNewFundedAddress(
             'AT5.MAKER', 'dogecoin', NETWORK, null, 'legacy', 0, 5, false)));

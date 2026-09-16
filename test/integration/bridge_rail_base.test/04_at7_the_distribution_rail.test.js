@@ -21,7 +21,6 @@ const {
     transactionHelper,
     mintHelper,
     lockWireV0,
-    classifyInvariant,
     GAS_TICK,
     AT7_MINT,
     AT7_EACH,
@@ -29,12 +28,25 @@ const {
     dogeAction,
     chainHalves,
     assertBacked,
+    assertHubInvariantBacked,
     needsFederation,
     bridgeRailSuite,
 } = require('./support');
 
 async function startDistributionLock() {
-    await state.venue.refreshVenuePrices();
+    // The ISSUE and the lock are both priced by the VENUE BTC indexer, off its own mirror.
+    // Drive 18's lock of 30 "never finalized" because that indexer graded it `invalid: no
+    // current oracle price for BTC/USD (missing or stale beyond 1800s)` 54 minutes after
+    // bring-up (venue-logs-18/bridgerail-indexer0.log), so the federation never saw a
+    // valid leg; the hub's `no broadcast pipeline` lines beside it were background noise.
+    const reseed = await state.venue.refreshVenuePrices();
+    state.evidence.at7_price = { reseed: reseed,
+        btcMirror: await state.venue.readMirrorPrice('BTC', 'BTC/USD') };
+    assert.ok(reseed && reseed.mirrors.BTC && reseed.mirrors.BTC.confirmed,
+        'the BTC/USD and XCHAIN/USD reseed (round ' + (reseed ? reseed.round : 'none') +
+        ') never reached the venue BTC indexer\'s mirror, so the ISSUE and lock below would be ' +
+        'priced against ' + JSON.stringify(state.evidence.at7_price.btcMirror) + ': ' +
+        JSON.stringify(reseed && reseed.mirrors));
 
     const operator = await state.venue.funded('AT7.OPERATOR', () => chainRail.withRail(state.dogeRail,
         () => cryptoHelper.getNewFundedAddress('AT7.OPERATOR', 'dogecoin', NETWORK, null, 'legacy', 0, 5, false)));
@@ -112,10 +124,11 @@ bridgeRailSuite('AT7: the distribution rail', function () {
             assert.strictEqual(Number(landed[r.address]), AT7_EACH,
                 r.address + ' holds ' + landed[r.address] + ' and not ' + AT7_EACH);
         }
-        // The two chain halves, which is what "the invariant is equal" is a claim about.
+        // The two chain halves, which is what "the invariant is equal" is a claim about,
+        // and then the hub's own verdict held to the same identity: equal on a rail with no
+        // stray SENDs, a surplus of exactly the measured non-bridge term on this one.
         assertBacked(halves, 'AT7');
-        assert.strictEqual(classifyInvariant(doge).verdict, 'equal',
-            'the hub reports ' + JSON.stringify(doge) + ' rather than equal');
+        state.evidence.at7_hubReading = assertHubInvariantBacked(doge, halves, 'AT7');
         assert.strictEqual(String(doge.in_flight), '0');
     });
 });

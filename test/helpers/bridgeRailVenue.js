@@ -98,6 +98,7 @@ const mariadb = require('mariadb');
 
 const { AttestMirrorVenue } = require('./attestMirrorVenue');
 const chainRail             = require('./chainRail');
+const xchainPrice           = require('./xchainPriceConstants');
 
 // The four chains the hub engine knows, as the hub spells them. Kept local rather
 // than imported from the hub so a unit run needs no hub module on NODE_PATH.
@@ -124,6 +125,16 @@ const DEFAULT_CONFIRMATIONS = { BTC: 1, DOGE: 1, LTC: 1 };
 // The defect is the hub's and is reported as such; this constant simply stops the venue
 // from manufacturing it. A drive pays about a minute more per leg for the honesty.
 const DEFAULT_POLL_MS = 15000;
+
+// The venue's price seeds. `SEED_ROUND_BASE` is the synthetic round space
+// attestMirrorVenue._seedHubPrices writes its bring-up rows in (9000001, 9000002); a reseed
+// writes the next unused round ABOVE it, because getLatestPrice takes the highest round for
+// a pair and a real oracle round on regtest sits in the tens of thousands. `COIN_USD_SEED`
+// is the COIN/USD value that seed uses, kept identical here so a reseeded fee prices exactly
+// like the bring-up one did. Neither is a round the sentinel clearer has to know: these
+// hub databases are stamped per run and dropped with it.
+const SEED_ROUND_BASE = 9000000;
+const COIN_USD_SEED   = '100000.00000000';
 
 // ---------------------------------------------------------------------------
 // The pure layer. Every function below is a pure function of its arguments and is
@@ -488,6 +499,88 @@ function escrowOf(balances, chain) {
     return null;
 }
 
+/**
+ * The finalized legs a drained rail still owes, from the hubs' own records.
+ *
+ * PURE, and the second half of the drain wait. The source indexers'
+ * `getpendingbridgetransfers` EXCLUDES any leg whose transfer already sits in the indexer's
+ * mirrored `bridge_transfers` (src/db/bridges/index.js), so the moment the venue federation
+ * finalizes the backlog the pending list goes EMPTY while the destination may have applied
+ * nothing yet: a drain wait that reads only the pending list declares quiet with a baseline
+ * of escrow 162 against a supply of 0, and the supply then jumps inside AT1's window. So
+ * the legs that have LEFT the pending list are read back off the hubs' `bridge_transfers`
+ * and each one is held against the destination's `bridge_settlements` until it is there.
+ *
+ * @param {Array}  hubRows      `bridge_transfers` rows gathered across every venue hub,
+ *                              {transferId, srcChain, srcActionIndex, destChain, amount,
+ *                              status, tick}; duplicates by transferId are folded here
+ * @param {Set}    covered      `src:actionIndex` keys the per-leg pass already classified,
+ *                              so a leg is never reported twice
+ * @param {function(string): boolean} isSettled  whether the destination holds a settlement
+ *                              for the transfer id (answered by the caller's reads)
+ * @param {object} [opts]       {tick, observable: ['BTC', 'DOGE']}
+ * @returns {{applied: Array, pending: Array, unobservable: Array}}
+ */
+function outstandingFinalizedLegs(hubRows, covered, isSettled, opts) {
+    const o = opts || {};
+    const observable = (o.observable || ['BTC', 'DOGE']).map((c) => String(c).toUpperCase());
+    const applied = [], pending = [], unobservable = [];
+    const seen = new Set();
+    for (const row of hubRows || []) {
+        const transferId = String(row.transferId);
+        if (seen.has(transferId)) continue;
+        seen.add(transferId);
+        // A retracted row is a leg the federation withdrew (its source was reorged out);
+        // nothing on the destination is owed for it and it must not hold the drain.
+        if (String(row.status) === 'retracted') continue;
+        if (o.tick && row.tick !== undefined && row.tick !== null && String(row.tick) !== String(o.tick)) continue;
+        const src  = String(row.srcChain).toUpperCase();
+        const dest = String(row.destChain).toUpperCase();
+        const where = { chain: src, dest: dest, actionIndex: String(row.srcActionIndex),
+                        amount: String(row.amount), transferId: transferId };
+        if (covered && covered.has(src + ':' + where.actionIndex)) continue;
+        // A leg bound for a chain this venue has no indexer for can never be observed
+        // applying, and a row with no readable destination is the same case.
+        if (!observable.includes(dest)) { unobservable.push(where); continue; }
+        if (isSettled(transferId)) applied.push(where);
+        else pending.push(Object.assign({ stage: 'unapplied' }, where));
+    }
+    return { applied: applied, pending: pending, unobservable: unobservable };
+}
+
+/**
+ * What the hub's own `getbridgeinvariant` must read on a rail whose escrow carries
+ * non-bridge credits.
+ *
+ * PURE. The hub computes `delta = escrow - (supply + in_flight)`, and on a rail that has
+ * ever taken a plain SEND into the escrow address the escrow is permanently above the
+ * supply by exactly those units: they minted nothing and the escrow key is nobody's (D65).
+ * So "the invariant reads equal" is only the literal verdict on a virgin rail; on this one
+ * the same claim is that the hub's delta equals the MEASURED non-bridge term and nothing
+ * else, with nothing in flight. A double mint or an unbacked mint lowers the delta below
+ * that term, a lost credit raises it above, and both read as a break here.
+ *
+ * @param {object} entry     one chain's `getbridgeinvariant` entry
+ * @param {number} nonBridge the measured net non-bridge credits to that chain's escrow
+ * @returns {{ok: boolean, expectedVerdict: string, expectedDelta: number, verdict: string,
+ *   delta: (number|null), inFlight: (number|null), reason: (string|null)}}
+ */
+function expectedInvariantReading(entry, nonBridge) {
+    const cls = classifyInvariant(entry);
+    const want = Number(nonBridge || 0);
+    const expectedVerdict = want === 0 ? 'equal' : (want > 0 ? 'surplus' : 'deficit');
+    const flight = (entry && entry.in_flight !== undefined && entry.in_flight !== null)
+        ? Number(entry.in_flight) : null;
+    let reason = null;
+    if (cls.verdict === 'unknown') reason = 'the hub could not read one side of the chain state';
+    else if (flight !== 0) reason = 'in_flight reads ' + flight + ' rather than 0';
+    else if (cls.delta !== want) reason = 'delta reads ' + cls.delta + ' where the measured non-bridge ' +
+        'credits are ' + want + ', so ' + (cls.delta < want ? 'the destination holds more than the ' +
+        'locks paid for (a double or unbacked mint)' : 'a lock paid for a credit that never landed');
+    return { ok: reason === null, expectedVerdict: expectedVerdict, expectedDelta: want,
+             verdict: cls.verdict, delta: cls.delta, inFlight: flight, reason: reason };
+}
+
 // How long one funding call may take before the drive calls it a stall.
 //
 // WHY A BUDGET EXISTS AT ALL, measured rather than guessed: the harness's funding helper
@@ -780,13 +873,13 @@ class BridgeRailVenue {
         // grading, and say why.
         this.dogeReplayChain = o.dogeReplayChain === undefined ? true : (o.dogeReplayChain === true);
         // LEAVE THE BRIDGE ENGINE UNARMED AT start(), and this exists for one measured
-        // reason. `getpendingbridgetransfers` answers EVERY valid XBRIDGE leg this chain
-        // has ever carried, with no settlement filter of its own (xchain-indexer
-        // src/db.js getPendingBridgeTransfers); deduplication is the hub's, against its
-        // own `bridge_transfers`. A venue hub's database is new on every run, so the
-        // instant its engine has indexer URLs it re-proposes the whole history of locks
-        // on the rail, and a destination ledger with no prior `bridge_settlements` row
-        // applies them. On this rail that is 35 XCHAIN from earlier drive attempts whose
+        // reason. `getpendingbridgetransfers` answers every valid XBRIDGE leg this chain
+        // has carried that its own MIRROR holds no transfer for (xchain-indexer
+        // src/db/bridges/index.js getPendingBridgeTransfers, filtered since d93294d8;
+        // before that, every leg forever). A venue hub's database is new on every run and
+        // the venue indexers' mirrors are dropped with it, so the instant its engine has
+        // indexer URLs it re-proposes the whole history of locks on the rail, and a
+        // destination ledger with no prior `bridge_settlements` row applies them. On this rail that is 35 XCHAIN from earlier drive attempts whose
         // keys were random per process and are gone, so the escrow cannot be drained and
         // the rail can never be virgin again.
         //
@@ -1267,11 +1360,140 @@ class BridgeRailVenue {
      * oracle price for DOGE/USD (missing or stale beyond 1800s)`, measured on drive 10. That
      * is a property of the FIXTURE's clock, not of the bridge, so the fixture refreshes it
      * rather than the drive adapting its assertions to it.
+     *
+     * AND THE HUB ROW IS NOT WHERE THE INDEXER READS. Drive 18 reseeded before every case and
+     * AT5 was still refused, with the hub's DOGE/USD row measured 285 s old at the time: the
+     * indexer prices off its own MIRROR of `price_snapshots`, the mirror takes live rows only
+     * from the WebSocket events a hub emits for rows IT writes, and a row the harness upserts
+     * straight into the hub database is announced to nobody. The venue's bring-up seed
+     * updates the same two rounds in place, so the mirror kept its bring-up copy until the
+     * next hub restart re-paged the table (05:03 and 05:57 on that drive; AT5 sat at 05:51).
+     * AT7's lock died the same way on the BTC side, refused `no current oracle price for
+     * BTC/USD` by the venue BTC indexer 54 minutes after bring-up.
+     *
+     * So this writes NEW rounds (a fresh id per row, above every earlier seed so the
+     * highest-round selection in getLatestPrice takes them), then cuts each venue indexer's
+     * proxied hub sockets so its mirror reconnects and re-pages `price_snapshots`, which is a
+     * FULL_REPAGE table on the indexer side, and then HOLDS until each mirror actually holds
+     * the new round for the pairs its chain prices. That last wait is the difference between
+     * a reseed that happened and a reseed that took, which is what drive 18 could not tell.
+     *
+     * @param {object} [opts] {timeoutMs} for the mirror confirmation, default 180 s
+     * @returns {Promise<object|null>} {round, blockTimestamp, hubsSeeded, mirrors: {BTC, DOGE}}
+     *   where each mirror entry is {confirmed, afterMs, pairs}; null when the venue is not up
      */
-    async refreshVenuePrices() {
-        if (!this.dogeVenue || typeof this.dogeVenue._seedHubPrices !== 'function') return false;
-        await chainRail.withRail(this.dogeRail, () => this.dogeVenue._seedHubPrices());
-        return true;
+    async refreshVenuePrices(opts) {
+        const o = opts || {};
+        if (!this.btcVenue || !this.hubs.length) return null;
+        xchainPrice.refuseSeedIfSuppressed('bridgeRailVenue.refreshVenuePrices');
+        const hubDbName = this.hubs[0].dbName;
+        // The next unused seed round above the venue's own bring-up seeds (9000001 and
+        // 9000002 in attestMirrorVenue._seedHubPrices), read off the hub rather than counted
+        // here so a second venue in the same process cannot collide with the first.
+        const maxRows = await this.queryHubDb(hubDbName,
+            'SELECT MAX(round_number) AS r FROM price_snapshots WHERE round_number >= ?', [SEED_ROUND_BASE]);
+        const round = Math.max(SEED_ROUND_BASE + 100, Number((maxRows[0] && maxRows[0].r) || 0) + 1);
+        // Anchored a minute BEHIND the wall clock: the indexer selects rows whose
+        // block_timestamp is at or before the DOGE block's own time, and a regtest block
+        // mined seconds after this write carries a time that can trail this host by a few
+        // seconds. Sixty seconds of slack costs one minute of the 1800 s window.
+        const ts = Math.floor(Date.now() / 1000) - 60;
+        const pairs = [['BTC/USD', COIN_USD_SEED], ['DOGE/USD', COIN_USD_SEED],
+                       ['XCHAIN/USD', xchainPrice.BOOTSTRAP_XCHAIN_USD]];
+        let hubsSeeded = 0;
+        for (const hub of this.hubs) {
+            for (const [pair, price] of pairs) {
+                await this.queryHubDb(hub.dbName,
+                    'INSERT INTO price_snapshots ' +
+                    '(round_number, coin_pair, price, reference_block, reference_chain, ' +
+                    ' block_timestamp, validator_count, consensus_round, consensus_proof, status) ' +
+                    "VALUES (?, ?, ?, 0, 'BTC', ?, 1, 1, '[]', 'finalized') " +
+                    'ON DUPLICATE KEY UPDATE price = VALUES(price), status = VALUES(status), ' +
+                    ' block_timestamp = VALUES(block_timestamp)',
+                    [round, pair, price, ts]);
+            }
+            hubsSeeded++;
+        }
+        // The delivery half: see the header. Every venue indexer follows a hub through the
+        // harness's own mirror proxy, and dropping its sockets is the lever the ZC4 row
+        // injection already relies on (attestMirrorVenue.injectMirrorRow).
+        const followers = [];
+        for (const v of [this.btcVenue, this.dogeVenue]) {
+            if (!v || !Array.isArray(v.indexers)) continue;
+            for (const ix of v.indexers) {
+                if (ix && ix.mirrorProxy && typeof ix.mirrorProxy.dropSockets === 'function') {
+                    ix.mirrorProxy.dropSockets();
+                    followers.push(ix);
+                }
+            }
+        }
+        const need = { BTC: ['BTC/USD', 'XCHAIN/USD'], DOGE: ['DOGE/USD', 'XCHAIN/USD'] };
+        const mirrors = {};
+        const started = Date.now();
+        const deadline = started + Number(o.timeoutMs || 180000);
+        for (const chain of ['BTC', 'DOGE']) {
+            const ix = chain === 'BTC' ? this.btcIndexer() : this.dogeIndexer();
+            if (!ix) continue;
+            let confirmed = false;
+            let lastError = null;
+            while (Date.now() < deadline && !confirmed) {
+                try {
+                    let held = 0;
+                    for (const pair of need[chain]) {
+                        const rows = await this.queryMirrorDb(chain,
+                            'SELECT block_timestamp FROM price_snapshots ' +
+                            "WHERE coin_pair = ? AND round_number = ? AND status = 'finalized' LIMIT 1",
+                            [pair, round]);
+                        if (rows.length && Number(rows[0].block_timestamp) === ts) held++;
+                    }
+                    confirmed = held === need[chain].length;
+                } catch (e) { lastError = String(e && e.message).slice(0, 160); }
+                if (!confirmed) await new Promise((r) => setTimeout(r, 2000));
+            }
+            mirrors[chain] = { confirmed: confirmed, afterMs: Date.now() - started, pairs: need[chain],
+                               lastError: confirmed ? null : lastError };
+        }
+        return { round: round, blockTimestamp: ts, hubsSeeded: hubsSeeded,
+                 followersDropped: followers.length, mirrors: mirrors };
+    }
+
+    /**
+     * The freshest finalized quote ONE VENUE INDEXER'S MIRROR holds for a pair, and its age.
+     *
+     * The reading `readVenuePrice` cannot give: that one reads the hub, and the hub's row
+     * being fresh is exactly what drive 18 recorded while the indexer refused a stale one.
+     * A priced action is graded against this table and no other, so this is the number a
+     * refusal must be read against.
+     *
+     * @param {string} chain BTC or DOGE, the venue indexer whose mirror is read
+     * @param {string} pair  e.g. 'DOGE/USD'
+     * @returns {Promise<object|null>} {chain, pair, price, round, blockTimestamp, ageSeconds,
+     *   stale, rowCount} or null when that venue indexer is not up
+     */
+    async readMirrorPrice(chain, pair) {
+        const ix = String(chain).toUpperCase() === 'BTC' ? this.btcIndexer() : this.dogeIndexer();
+        if (!ix) return null;
+        let rows = [];
+        try {
+            rows = await this.queryMirrorDb(chain,
+                'SELECT round_number, price, block_timestamp FROM price_snapshots ' +
+                "WHERE coin_pair = ? AND status = 'finalized' AND price IS NOT NULL " +
+                'ORDER BY round_number DESC LIMIT 1', [String(pair)]);
+        } catch (e) {
+            return { chain: String(chain), pair: String(pair), price: null, round: null, blockTimestamp: null,
+                     ageSeconds: null, stale: true, rowCount: 0, error: String(e && e.message).slice(0, 160) };
+        }
+        const now = Math.floor(Date.now() / 1000);
+        if (!rows.length) {
+            return { chain: String(chain), pair: String(pair), price: null, round: null, blockTimestamp: null,
+                     ageSeconds: null, stale: true, rowCount: 0 };
+        }
+        const ts = Number(rows[0].block_timestamp);
+        return { chain: String(chain), pair: String(pair), price: String(rows[0].price),
+                 round: Number(rows[0].round_number), blockTimestamp: ts, ageSeconds: now - ts,
+                 // The handler's own window (native_fee.js maxAgeSeconds), measured against
+                 // the wall clock the next regtest block will carry.
+                 stale: (now - ts) > 1800, rowCount: rows.length };
     }
 
     /**
@@ -1381,15 +1603,16 @@ class BridgeRailVenue {
      * both to one. So the drive arms the engine, waits here until the backlog has drained,
      * and only then takes the baseline every later assertion is a delta from.
      *
-     * AND IT IS MEASURED ON THE SETTLEMENT ROWS, NOT ON `in_flight`, because that term is
-     * broken on this rail and waiting for it would hang forever. Measured 2026-09-12: the
-     * hub adds every row `getpendingbridgetransfers` returns to its in-flight view on each
-     * poll (CrossChainBridgeEngine.recordPending, called before the finalization dedup),
-     * and the indexer read has no settled filter at all (db.js getPendingBridgeTransfers
-     * selects every valid XBRIDGE leg forever). So a leg that finalized and applied months
-     * ago is still counted in flight, and `delta = escrow - (supply + in_flight)` sits
-     * permanently negative. The chain halves themselves are correct; only the term between
-     * them is. See the drive's AT6 for the readout this produces.
+     * AND IT IS MEASURED ON THE SETTLEMENT ROWS, NOT ON `in_flight`. When this was written
+     * (2026-09-12) the indexer read had no settled filter, so the hub's in-flight term summed
+     * the whole bridge history and `delta` sat permanently negative; indexer d93294d8 filters
+     * the read against its mirrored `bridge_transfers`, which fixed the term and BROKE THIS
+     * WAIT: the pending list now empties the moment the federation finalizes the backlog,
+     * minutes before the destination applies any of it, and drive 18 took its baseline in
+     * that gap (escrow 162, supply 0, `backlogApplied: []`). So the backlog is read from
+     * two places: the source indexers' pending lists for the legs not yet finalized, and
+     * every hub's `bridge_transfers` for the legs that have left those lists, each held
+     * against the destination's `bridge_settlements` (`outstandingFinalizedLegs`).
      *
      * @param {string} tick
      * @returns {Promise<{applied: Array, invariant: object}|null>} null on timeout
@@ -1454,6 +1677,45 @@ class BridgeRailVenue {
                     else pending.push(Object.assign({ stage: 'unapplied', transferId: transferId }, where));
                 }
             }
+            // THE SECOND HALF: the legs the source read no longer lists because a hub row
+            // already exists for them. Read across EVERY hub (a hub that did not sign a round
+            // may hold no row for it; see waitForFinalizedTransfer) and held against the
+            // destination's own settlement record, one read per transfer id.
+            const covered = new Set(applied.concat(pending)
+                .filter((e) => e.actionIndex !== undefined)
+                .map((e) => String(e.chain).toUpperCase() + ':' + String(e.actionIndex)));
+            const hubRows = [];
+            for (const hub of this.hubs) {
+                let rows = [];
+                try {
+                    rows = await this.queryHubDb(hub.dbName,
+                        'SELECT transfer_id, src_chain, src_action_index, dest_chain, amount, status, tick ' +
+                        'FROM bridge_transfers');
+                } catch (e) { rows = []; }
+                for (const r of rows) {
+                    hubRows.push({ transferId: r.transfer_id, srcChain: r.src_chain,
+                                   srcActionIndex: r.src_action_index, destChain: r.dest_chain,
+                                   amount: r.amount, status: r.status, tick: r.tick });
+                }
+            }
+            const settledIds = new Set();
+            for (const row of hubRows) {
+                const dest = String(row.destChain).toUpperCase();
+                if (dest !== 'BTC' && dest !== 'DOGE') continue;
+                if (String(row.status) === 'retracted' || settledIds.has(String(row.transferId))) continue;
+                let rows = [];
+                try {
+                    rows = await this.queryIndexerDb(dest,
+                        'SELECT block_index FROM bridge_settlements WHERE transfer_id = ? LIMIT 1',
+                        [String(row.transferId)]);
+                } catch (e) { rows = []; }
+                if (rows.length) settledIds.add(String(row.transferId));
+            }
+            const finalized = outstandingFinalizedLegs(hubRows, covered, (id) => settledIds.has(id), { tick: tick });
+            for (const a of finalized.applied) applied.push(a);
+            for (const p of finalized.pending) pending.push(p);
+            // Reported per poll, not accumulated: a 60 minute wait polls hundreds of times.
+            this._unobservableFinalized = finalized.unobservable;
             last = { applied: applied, pending: pending };
             // Published every poll, not only at the timeout: a case that fails for another
             // reason while the drain is still running can then quote how far it had got.
@@ -1954,6 +2216,8 @@ module.exports = {
     classifyInvariant,
     bridgeSettled,
     escrowOf,
+    outstandingFinalizedLegs,
+    expectedInvariantReading,
     overFinalizedSourceLegs,
     orphanDepth,
     assertShallowOrphan,

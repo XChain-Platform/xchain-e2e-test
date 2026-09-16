@@ -29,6 +29,7 @@ const {
     lockWireV0,
     burnWireV1,
     classifyInvariant,
+    expectedInvariantReading,
     escrowOf,
     minimalQuorumSigners,
     driveVerdictWitness,
@@ -131,6 +132,31 @@ function assertBacked(halves, where) {
         ' backed by locks, where the DOGE ledger reports a supply of ' + halves.supply +
         '. Those two are the same units counted on two chains, so a difference is a real ' +
         'break and not a timing artefact.');
+}
+
+/**
+ * Assert the hub's own `getbridgeinvariant` verdict against the measured chain halves.
+ *
+ * Section 15 writes "the invariant reads equal" for a virgin rail. On this one the escrow
+ * carries the non-bridge credits `chainHalves` measures (four plain SENDs as of drive 18,
+ * one more after every drive that reaches AT6's D65 case), and since the indexer's pending
+ * read gained its settled filter the hub's in_flight term is 0 and its delta is EXACTLY that
+ * surplus: drive 18 read escrow 165 / supply 161 / in_flight 0 / delta 4 against four SENDs
+ * and failed on `'surplus' !== 'equal'`, a red about the rail's history and not about the
+ * bridge. So the claim is driven as the identity it is: in_flight 0 and delta equal to the
+ * measured term, which reads `equal` on a rail with none and `surplus` by exactly the SENDs
+ * here. A double mint, an unbacked mint or a lost credit each move the delta off that term
+ * and fail it (falsified on a fixture at build time).
+ */
+function assertHubInvariantBacked(entry, halves, where) {
+    const reading = expectedInvariantReading(entry, halves.nonBridge.net);
+    assert.ok(reading.ok,
+        'at ' + where + ' the hub reports ' + JSON.stringify(entry) + ' where the chain halves ' +
+        'read escrow ' + halves.escrow + ', non-bridge ' + halves.nonBridge.net + ' (' +
+        JSON.stringify(halves.nonBridge.byAction) + '), supply ' + halves.supply +
+        ': expected verdict ' + reading.expectedVerdict + ' with delta ' + reading.expectedDelta +
+        ' and nothing in flight, but ' + reading.reason);
+    return reading;
 }
 
 async function recordSourceContext() {
@@ -282,18 +308,37 @@ async function finishDrive() {
 // both disappear. So the quote's real age is MEASURED first and recorded per case: a case
 // that is refused for a stale price while `priceClock` says the row was fresh has found
 // something in the pricing path, and that is a production finding, not a fixture one.
+//
+// MEASURED ON THE MIRROR, NOT ON THE HUB. Drive 18's clock read the hub's row (285 s old at
+// AT5) and the case was still refused, because the indexer grades off its own mirror copy
+// and the reseed never reached it (see refreshVenuePrices). Both readings are kept: the
+// mirror's is the one a refusal is judged against, the hub's says whether the write landed.
+// The hook never fails a case itself: a hook failure ends every case after it, so a reseed
+// that did not take is logged here and the priced case fails on its own verdict, with this
+// record beside it.
 async function refreshPrices() {
     this.timeout(0);
     if (!state.venue || state.blocked) return;
-    state.priceBeforeCase = await state.venue.readVenuePrice('DOGE/USD');
-    if (state.priceBeforeCase) {
-        state.evidence.priceClock = state.evidence.priceClock || [];
-        state.evidence.priceClock.push({
-            case: this.currentTest ? String(this.currentTest.title).slice(0, 70) : null,
-            ageSeconds: state.priceBeforeCase.ageSeconds, stale: state.priceBeforeCase.stale,
-            rowCount: state.priceBeforeCase.rowCount, price: state.priceBeforeCase.price });
-    }
-    await state.venue.refreshVenuePrices();
+    const title = this.currentTest ? String(this.currentTest.title).slice(0, 70) : null;
+    state.priceBeforeCase = await state.venue.readMirrorPrice('DOGE', 'DOGE/USD');
+    const hubBefore = await state.venue.readVenuePrice('DOGE/USD');
+    state.evidence.priceClock = state.evidence.priceClock || [];
+    const clock = { case: title,
+        mirror: state.priceBeforeCase ? { ageSeconds: state.priceBeforeCase.ageSeconds,
+            stale: state.priceBeforeCase.stale, round: state.priceBeforeCase.round,
+            price: state.priceBeforeCase.price } : null,
+        hub: hubBefore ? { ageSeconds: hubBefore.ageSeconds, stale: hubBefore.stale,
+            round: hubBefore.round, price: hubBefore.price } : null };
+    const reseed = await state.venue.refreshVenuePrices();
+    clock.reseed = reseed ? { round: reseed.round, hubsSeeded: reseed.hubsSeeded,
+        mirrors: reseed.mirrors } : null;
+    state.evidence.priceClock.push(clock);
+    const took = reseed && Object.keys(reseed.mirrors).every((c) => reseed.mirrors[c].confirmed);
+    console.log('  price reseed before "' + title + '": round ' + (reseed ? reseed.round : 'none') +
+        (reseed ? ', mirrors ' + Object.keys(reseed.mirrors).map((c) => c + (reseed.mirrors[c].confirmed
+            ? ' confirmed after ' + reseed.mirrors[c].afterMs + 'ms'
+            : ' NOT CONFIRMED (' + (reseed.mirrors[c].lastError || 'row absent') + ')')).join(', ') : '') +
+        (took ? '' : '  <-- the reseed did not take'));
 }
 
 /**
@@ -357,6 +402,7 @@ module.exports = {
     dogeAction,
     chainHalves,
     assertBacked,
+    assertHubInvariantBacked,
     needsFederation,
     bridgeRailSuite,
 };
