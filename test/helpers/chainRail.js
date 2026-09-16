@@ -82,7 +82,18 @@ const RAIL_GLOBALS = [
 
 // Env vars a rail owns, because a helper reads them directly rather than through
 // a global (hubMirrorTopology.localParams -> the price-snapshot fixtures).
-const RAIL_ENV = ['COIN', 'NETWORK', 'INDEXER_DB_NAME', 'INDEXER_DB_USER', 'INDEXER_DB_PASS'];
+//
+// FEE_DESTINATION is on the list because nativeFeeHelper.resolveFeeDestination
+// prefers it over asking the indexer, and an xchain-node e2e container carries
+// the LEG coin's destination under that generic name. Left in place across a
+// swap, every fee output the second chain's helpers inject pays the first
+// chain's address: measured on the first two-stack litecoin matrix leg
+// (2026-09-16), the BTC gas lock paid LTC's regtest destination, the BTC
+// indexer saw no fee output, fell back to XCHAIN-balance mode and refused the
+// lock with `insufficient funds (FEE)`. A rail therefore carries its own value
+// or none, and none makes nativeFeeHelper ask that chain's `feeschedule`, the
+// source of truth.
+const RAIL_ENV = ['COIN', 'NETWORK', 'INDEXER_DB_NAME', 'INDEXER_DB_USER', 'INDEXER_DB_PASS', 'FEE_DESTINATION'];
 
 // Helper modules that memoize chain-specific state at module scope.
 const MEMOIZING_HELPERS = [
@@ -232,6 +243,15 @@ async function createRail(coin, network = 'regtest', opts = {}) {
         INDEXER_DB_NAME: db.name,
         INDEXER_DB_USER: db.user,
         INDEXER_DB_PASS: db.pass,
+        // This chain's own destination, on the same ladder as the credentials:
+        // <CODE>_FEE_DESTINATION in the environment, then .env.<code>. Unset
+        // (undefined) means enterRail DELETES the generic name for the duration of
+        // the swap, so the helpers discover it from this chain's indexer instead
+        // of inheriting the leg coin's.
+        FEE_DESTINATION: process.env[code + '_FEE_DESTINATION']
+            || chainEnv['XCHAIN_FEE_DESTINATION_' + code + '_' + String(network).toUpperCase()]
+            || chainEnv.FEE_DESTINATION
+            || undefined,
     };
 
     return rail;
