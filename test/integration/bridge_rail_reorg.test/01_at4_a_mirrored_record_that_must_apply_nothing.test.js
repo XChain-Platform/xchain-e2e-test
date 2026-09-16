@@ -57,8 +57,14 @@ const CASES = [
     { name: 'a foreign network',              mutate: () => ({ network: 'testnet' }),     refusedBefore: 'due' },
     { name: 'a foreign btc_chain_id',         mutate: () => ({ btc_chain_id: 'ffffffff' }), refusedBefore: 'ingest' },
     { name: 'an unwrapped canonical',         mutate: (r) => ({ finalizing_view: String(Number(r.finalizing_view || 0) + 1) }) },
-    { name: 'an out leg over the escrow',     mutate: (r) => ({ src_chain: 'DOGE', dest_chain: 'BTC',
-                                                                amount: String(Number(r.amount) + 1000000) }) },
+    // BTC IS the escrow chain (bridge_checkpoint_check ESCROW_CHAIN), so a row whose
+    // src_chain is anything else settles as an OUT leg on BTC, never on DOGE: the
+    // settle pass's screenRow refuses any row whose dest_chain is not ITS OWN chain
+    // (NOT_OURS), so this case's forged record has to be injected into, and watched
+    // on, the BTC venue rather than the DOGE default every other case uses.
+    { name: 'an out leg over the escrow',     destChain: 'BTC',
+      mutate: (r) => ({ src_chain: 'DOGE', dest_chain: 'BTC',
+                         amount: String(Number(r.amount) + 1000000) }) },
 ];
 
 function flipLastHexNibble(sigs) {
@@ -75,11 +81,25 @@ function resignWithStranger(r) {
     return JSON.stringify(parsed);
 }
 
+// WHICH CHAIN'S ADDRESS the forged record must credit: every case but the out leg is
+// DOGE-bound; the out leg is BTC-bound (BTC is the escrow chain per bridge_checkpoint_check),
+// so its dest address has to be real on BTC, not DOGE, or the refusal would be about a
+// malformed address rather than about the escrow.
+async function fundDestAddress(label, destChain) {
+    return venue.funded(label, destChain === 'BTC'
+        ? () => cryptoHelper.getNewFundedAddress(label, 'bitcoin', NETWORK, null, 'legacy', 0, 1, false)
+        : () => chainRail.withRail(dogeRail,
+            () => cryptoHelper.getNewFundedAddress(label, 'dogecoin', NETWORK, null, 'legacy', 0, 1, false)));
+}
+
 async function buildRefusal(c) {
-const dest = await venue.funded('AT4.' + c.name.replace(/[^A-Za-z]/g, ''),
-    () => chainRail.withRail(dogeRail,
-        () => cryptoHelper.getNewFundedAddress('AT4.' + c.name.replace(/[^A-Za-z]/g, ''),
-            'dogecoin', NETWORK, null, 'legacy', 0, 1, false)));
+// WHICH VENUE IS THE DESTINATION, per case: the settle pass refuses any row whose
+// dest_chain is not ITS OWN chain (screenRow's NOT_OURS), so the injection target has
+// to follow c.destChain or the row lands on a mirror its destination indexer never reads.
+const destChain = c.destChain || 'DOGE';
+const destVenue = destChain === 'BTC' ? venue.btcVenue : venue.dogeVenue;
+const label = 'AT4.' + c.name.replace(/[^A-Za-z]/g, '');
+const dest = await fundDestAddress(label, destChain);
 // A ROW THE FEDERATION REALLY SIGNED, which the newest row is not once this suite has
 // run a case: drive 18's third case copied the second case's injected foreign
 // btc_chain_id row as its template, and so did the fourth, which is why the destination
@@ -117,23 +137,26 @@ const row = Object.assign({}, template[0], {
 delete row.id;
 
 // THROUGH THE DESTINATION'S OWN VENUE, and that is not a detail: the injector
-// writes to the hubs that ITS venue's indexers follow, and the DOGE indexer is
-// attached to the mesh rather than owning it, so injecting through the BTC
-// venue can land the row on a hub the DOGE indexer does not follow and the
-// destination never sees the record at all. The first run of AT4 waited 180 s
-// for a refusal that could not arrive. `bridge_transfers` is deliberately NOT a
-// full-repage mirror table, so delivery is the ordinary id cursor: the row has
-// to be on the followed hub.
+// writes to the hubs that ITS venue's indexers follow, and an attached indexer is
+// on the mesh rather than owning it, so injecting through the WRONG venue can land
+// the row on a hub the actual destination indexer does not follow and it never sees
+// the record at all. The first run of the out-leg case waited 180 s for a refusal
+// that could not arrive, because it went through the DOGE venue for a BTC-bound
+// row. `bridge_transfers` is deliberately NOT a full-repage mirror table, so
+// delivery is the ordinary id cursor: the row has to be on the followed hub.
 //
 // The table AND its natural key: a bridge transfer is keyed by `transfer_id`
 // alone, where the injector's default table is keyed by three columns.
-await venue.dogeVenue.injectMirrorRow(row,
+await destVenue.injectMirrorRow(row,
     { table: 'bridge_transfers', key: ['transfer_id'] });
     return { dest, row };
 
 }
 
 async function observeRefusal(c, row, dest) {
+// THE SAME destChain buildRefusal picked: the tip that has to move twice, and the
+// ledger the credit is checked on, are the destination's, not always DOGE's.
+const destChain = c.destChain || 'DOGE';
 // TWO CONDITIONS, NOT A FIXED WAIT, and the second one is the assertion's
 // whole point. First the destination has to SEE the record and say so, which
 // is a poll on its own log. Then the ledger has to move two more blocks, so
@@ -167,13 +190,13 @@ if (c.refusedBefore === 'due') {
     await venue.waitUntil('the destination to log a refusal naming ' + idPrefix,
         () => refusalsNow().length >= 1, { timeoutMs: 180000 });
 }
-const atRefusal = Number((await venue.venueTips()).DOGE);
-await venue.waitUntil('two more DOGE blocks after the refusal, so the settle pass ' +
+const atRefusal = Number((await venue.venueTips())[destChain]);
+await venue.waitUntil('two more ' + destChain + ' blocks after the refusal, so the settle pass ' +
     'has run again over a record it already refused',
-    async () => Number((await venue.venueTips()).DOGE) >= atRefusal + 2,
+    async () => Number((await venue.venueTips())[destChain]) >= atRefusal + 2,
     { timeoutMs: 300000 });
 
-const balance = await venue.addressBalance('DOGE', dest.address, GAS_TICK);
+const balance = await venue.addressBalance(destChain, dest.address, GAS_TICK);
 const refusals = refusalsNow();
 // The line itself is kept, not just its count: with the source leg moved off a settled
 // index every perturbation is judged by the pass, and WHICH guard refused it (quorum,
@@ -196,7 +219,7 @@ for (const c of CASES) {
 
 assert.strictEqual(balance, '0',
     dest.address + ' was credited from a record carrying ' + c.name);
-const settled = await venue.queryIndexerDb('DOGE',
+const settled = await venue.queryIndexerDb(c.destChain || 'DOGE',
     'SELECT transfer_id FROM bridge_settlements WHERE transfer_id = ?', [row.transfer_id]);
 assert.strictEqual(settled.length, 0,
     'the destination recorded a settlement for a record carrying ' + c.name);
