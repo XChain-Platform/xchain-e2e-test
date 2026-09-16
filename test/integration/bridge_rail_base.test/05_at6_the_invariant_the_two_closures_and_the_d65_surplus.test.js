@@ -27,6 +27,7 @@ const {
     assertHubInvariantBacked,
     needsFederation,
     bridgeRailSuite,
+    confirmedHeight,
 } = require('./support');
 
 async function createSurplus(escrowAddr) {
@@ -36,7 +37,16 @@ async function createSurplus(escrowAddr) {
         () => cryptoHelper.getNewFundedAddress('AT6.SEND', 'bitcoin', NETWORK, null, 'legacy', 0, 1, false));
     await mintHelper.sendMintV0(sender, GAS_TICK, 1, sender.address, '');
     const sendHelper = require('../../helpers/sendHelper');
-    await sendHelper.sendSendV0(sender, GAS_TICK, 1, escrowAddr, '');
+    const sent = await sendHelper.sendSendV0(sender, GAS_TICK, 1, escrowAddr, '');
+    // `sendSendV0` returns on the STANDING indexer's grading. Every reading below is taken
+    // off the VENUE (its BTC indexer directly, and the hub's escrow term through it), which
+    // parses the same block on its own clock and can still be a block behind at this
+    // moment; read then, the escrow has not moved and the case reports a credit that was
+    // simply not parsed yet. So the after-reads wait for the SEND's own confirming block to
+    // land on the venue ledger, and the reading that let them through is kept as evidence.
+    const sendHeight = await confirmedHeight(nodeConnector, sent.txHash);
+    state.evidence.at6_sendParsed = Object.assign({ txHash: sent.txHash },
+        await state.venue.waitForVenueTip('BTC', sendHeight, 'holding the SEND to the escrow'));
 
     const inv = await state.venue.bridgeInvariant(GAS_TICK);
     const doge = inv[GAS_TICK].DOGE;

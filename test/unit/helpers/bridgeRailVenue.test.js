@@ -48,6 +48,7 @@ const {
     replacementBlockCount,
     describeRow,
     confirmedHeight,
+    indexerCaughtUp,
     orphanWithEmptyBlocks,
     destinationApplyBudgetMs,
     hubRelayMarginFloorS,
@@ -611,6 +612,76 @@ describe('bridgeRailVenue: the pure layer', function () {
                 /transaction lock did not confirm within 0s \(the node holds it unconfirmed\)/);
             await assert.rejects(() => confirmedHeight(stuck, 'ghost', { timeoutMs: 20, everyMs: 5 }),
                 /transaction ghost did not confirm within 0s \(the node has never seen it\)/);
+        });
+    });
+
+    describe('indexerCaughtUp and waitForVenueTip', function () {
+
+        it('reads caught up at the height and above, and counts the blocks behind below it', function () {
+            assert.deepStrictEqual(indexerCaughtUp(2887, 2887), { caughtUp: true, have: 2887, want: 2887, behind: 0 });
+            assert.deepStrictEqual(indexerCaughtUp(2890, 2887), { caughtUp: true, have: 2890, want: 2887, behind: 0 });
+            assert.deepStrictEqual(indexerCaughtUp(2886, 2887), { caughtUp: false, have: 2886, want: 2887, behind: 1 });
+            // The RPC answers block_index as a number, but a SQL read hands the same column back
+            // as a string or a BigInt; all three are the same height.
+            assert.strictEqual(indexerCaughtUp('2887', 2887).caughtUp, true);
+            assert.strictEqual(indexerCaughtUp(2887n, '2887').caughtUp, true);
+        });
+
+        it('keeps an unreadable tip apart from a lagging one, so null is never height 0', function () {
+            assert.deepStrictEqual(indexerCaughtUp(null, 2887), { caughtUp: false, have: null, want: 2887, behind: null });
+            assert.deepStrictEqual(indexerCaughtUp(undefined, 2887), { caughtUp: false, have: null, want: 2887, behind: null });
+            assert.strictEqual(indexerCaughtUp('unreadable', 2887).have, null);
+            // And a target of 0 with a null tip is still NOT caught up: Number(null) is 0.
+            assert.strictEqual(indexerCaughtUp(null, 0).caughtUp, false);
+        });
+
+        it('refuses a target that is not a block height instead of waiting on it', function () {
+            for (const bad of [undefined, null, NaN, 'tip', -1, 2887.5]) {
+                assert.throws(() => indexerCaughtUp(2887, bad), /must be a block height, got /);
+            }
+        });
+
+        // The async half on a fake venue: the real `waitUntil` over a scripted `getblockhashes`.
+        function fakeVenue(tips) {
+            const answers = tips.slice();
+            const venue = {
+                calls: 0,
+                indexerRpc: async (chain, method) => {
+                    assert.strictEqual(method, 'getblockhashes');
+                    venue.calls += 1;
+                    const next = answers.length > 1 ? answers.shift() : answers[0];
+                    if (next instanceof Error) throw next;
+                    return next === null ? null : { block_index: next };
+                },
+                indexerTails: () => '(no venue logs in the unit tier)',
+                waitUntil: BridgeRailVenue.prototype.waitUntil,
+            };
+            return venue;
+        }
+
+        it('returns once the venue indexer answers the target height, polling past a lag and a failed read', async function () {
+            const venue = fakeVenue([2885, new Error('ECONNREFUSED'), null, 2886, 2887]);
+            const got = await BridgeRailVenue.prototype.waitForVenueTip.call(venue, 'BTC', 2887, 'for the SEND',
+                { timeoutMs: 2000, everyMs: 1 });
+            assert.deepStrictEqual(got, { caughtUp: true, have: 2887, want: 2887, behind: 0 });
+            assert.strictEqual(venue.calls, 5);
+        });
+
+        it('does not return while the venue indexer is still a block behind, and names the block when the budget runs out', async function () {
+            const venue = fakeVenue([2886]);
+            await assert.rejects(
+                () => BridgeRailVenue.prototype.waitForVenueTip.call(venue, 'BTC', 2887, 'for the SEND',
+                    { timeoutMs: 15, everyMs: 2 }),
+                /waited 0s for the venue BTC indexer to reach block 2887 for the SEND and it never happened/);
+            assert.ok(venue.calls >= 2, 'the wait polled ' + venue.calls + ' times, so it never re-read the tip');
+        });
+
+        it('refuses a bad target before polling, so the failure names the number and not the indexer', async function () {
+            const venue = fakeVenue([2887]);
+            await assert.rejects(
+                () => BridgeRailVenue.prototype.waitForVenueTip.call(venue, 'BTC', NaN, '', { timeoutMs: 15, everyMs: 2 }),
+                /must be a block height, got NaN/);
+            assert.strictEqual(venue.calls, 0);
         });
     });
 

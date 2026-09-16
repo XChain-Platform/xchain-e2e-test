@@ -1822,6 +1822,43 @@ class BridgeRailVenue {
     }
 
     /**
+     * Hold until one venue indexer has parsed `height`.
+     *
+     * WHY A VENUE READ NEEDS THIS. The action helpers return once the STANDING indexer has
+     * graded the action: `sendSendV0` waits on the standing ledger's send, credit and debit
+     * rows and knows nothing of the venue, whose indexers parse the same block on their own
+     * clock (a hub mirror bootstrap in the middle of a block parse stretches it past ten
+     * seconds). A venue read taken straight after such a helper can therefore see the ledger
+     * as it stood one block earlier, and a delta measured across that gap reads as "the
+     * action was not credited" when the fact is that its block was not parsed yet. So a venue
+     * read that follows a standing-helper broadcast waits here first, on the confirming block
+     * (`confirmedHeight`) or on the node's tip.
+     *
+     * The target is validated up front, outside the poll: a NaN height inside the predicate
+     * would be caught and retried for the whole budget, and the failure would then name a
+     * slow indexer instead of the caller's bad number.
+     *
+     * @param {string} chain   BTC or DOGE
+     * @param {number} height  the block the caller needs parsed
+     * @param {string} [what]  why, quoted in the timeout message
+     * @param {{timeoutMs?: number, everyMs?: number}} [opts]
+     * @returns {Promise<{caughtUp: boolean, have: number, want: number, behind: number}>} the last reading
+     */
+    async waitForVenueTip(chain, height, what, opts) {
+        const o = opts || {};
+        let last = indexerCaughtUp(null, height);
+        await this.waitUntil('the venue ' + chain + ' indexer to reach block ' + last.want +
+            (what ? ' ' + what : ''),
+            async () => {
+                const answer = await this.indexerRpc(chain, 'getblockhashes', {});
+                last = indexerCaughtUp(answer ? answer.block_index : null, height);
+                return last.caughtUp;
+            },
+            { timeoutMs: o.timeoutMs || 180000, everyMs: o.everyMs || 2000 });
+        return last;
+    }
+
+    /**
      * Fund an address under a budget, so a stalled funding call fails the case with a
      * diagnosis instead of hanging the drive.
      *
@@ -2214,6 +2251,33 @@ async function confirmedHeight(node, txid, opts) {
 }
 
 /**
+ * Whether an indexer's tip has reached `height`, as a reading a wait can act on and quote.
+ *
+ * A tip the RPC did not answer arrives as undefined or null, and a bare
+ * `Number(tip) >= height` folds that into "still behind" (or, for null, into height 0), so a
+ * wait built on the comparison alone runs its whole budget and then blames a slow indexer for
+ * what was an unreadable one. The reading therefore keeps the parsed numbers apart: `have` is
+ * null when the tip could not be read, and `behind` says how many blocks remain when it could.
+ * A target that is not a block height is refused here rather than waited on.
+ *
+ * @param {*} indexerBlockIndex  what the indexer answered for its tip
+ * @param {*} height             the height the caller needs parsed
+ * @returns {{caughtUp: boolean, have: number|null, want: number, behind: number|null}}
+ */
+function indexerCaughtUp(indexerBlockIndex, height) {
+    // `Number(null)` and `Number('')` are both 0, so a caller that lost its height would
+    // otherwise wait for block 0 and come straight back; the absent cases are refused by name.
+    const want = (height === null || height === undefined || height === '') ? NaN : Number(height);
+    assert.ok(Number.isInteger(want) && want >= 0,
+        'bridgeRailVenue: the height to catch up to must be a block height, got ' + String(height));
+    const have = Number(indexerBlockIndex);
+    if (indexerBlockIndex === null || indexerBlockIndex === undefined || !Number.isFinite(have)) {
+        return { caughtUp: false, have: null, want: want, behind: null };
+    }
+    return { caughtUp: have >= want, have: have, want: want, behind: Math.max(0, want - have) };
+}
+
+/**
  * Orphan the block at `height` and replace it with a LONGER chain of EMPTY blocks.
  *
  * `invalidateblock` disconnects the block and everything above it, and the node returns the
@@ -2374,6 +2438,7 @@ module.exports = {
     replacementBlockCount,
     describeRow,
     confirmedHeight,
+    indexerCaughtUp,
     orphanWithEmptyBlocks,
     destinationApplyBudgetMs,
     hubRelayMarginFloorS,

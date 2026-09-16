@@ -34,6 +34,7 @@ const {
     minimalQuorumSigners,
     driveVerdictWitness,
     journalCase,
+    confirmedHeight,
 } = require('../../../helpers/bridgeRailVenue');
 
 const GAS_TICK = 'XCHAIN';
@@ -392,6 +393,7 @@ module.exports = {
     classifyInvariant,
     escrowOf,
     driveVerdictWitness,
+    confirmedHeight,
     GAS_TICK,
     AT1_LOCK,
     AT2_BURN,

@@ -239,13 +239,12 @@ async function reorgBtcFrom(lockTx, replaceWith) {
 /**
  * Hold until the venue BTC indexer has parsed the node's tip, so a reading taken after an
  * orphan is a reading of the ledger WITHOUT the lock rather than of the ledger a moment
- * before the rollback ran.
+ * before the rollback ran. The wait itself is the venue's, shared with the base suite's
+ * after-reads; this binds it to the node's tip.
  */
 async function venueBtcCaughtUp(what) {
     const tip = Number(await nodeConnector.getBlockCount());
-    await venue.waitUntil('the venue BTC indexer to reach ' + tip + ' ' + what,
-        async () => Number((await venue.blockHashes('BTC'))[0].block_index) >= tip,
-        { timeoutMs: 180000, everyMs: 2000 });
+    await venue.waitForVenueTip('BTC', tip, what, { timeoutMs: 180000, everyMs: 2000 });
     return tip;
 }
 
