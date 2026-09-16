@@ -247,7 +247,10 @@ function registerRecoveryIdentityTest() {
         // createValidatorReward stores exactly this source_id.
         let pubkeyBId = await idxDb.getPubkeyId(pubkeyB.toLowerCase())
         assert(pubkeyBId, 'pubkeyB must have an index_pubkeys id')
-        let writerSourceId = await MasterIndexerDb.prototype._resolveActiveStakeSourceId.call(idxDb, pubkeyBId, blockB)
+        // The indexer structure pass dropped the underscore from the mixin name
+        // (src/db/capabilities/index.js resolveActiveStakeSourceId); the master
+        // class is still the one under test, only its spelling moved.
+        let writerSourceId = await MasterIndexerDb.prototype.resolveActiveStakeSourceId.call(idxDb, pubkeyBId, blockB)
         assert(writerSourceId !== null && writerSourceId !== undefined,
             'writer leg must resolve a source_id (a counted key must resolve)')
         let writerRow = await idxDb.doQuery('SELECT address FROM index_addresses WHERE id=?', [writerSourceId])
