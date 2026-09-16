@@ -23,11 +23,19 @@
  *
  * Env (defaults match the local regtest stack):
  *   XCALL_DOGE_ENCODER_PORT=3123  XCALL_DOGE_MINER_URL=http://localhost:3125
+ *   XCALL_DOGE_INDEXER_URL=http://127.0.0.1:3124 (asked where it reads prices)
  *   XCALL_DB_HOST=127.0.0.1 XCALL_DB_PORT=13306
  *   HUB_DB_USER/HUB_DB_PASS        (XChain_Hub: price seeding)
  *   DOGE_IDX_DB_USER/DOGE_IDX_DB_PASS (XChain_DOGE_Regtest_Indexer: reads)
  *   HUB_DB_NAME / DOGE_IDX_DB_NAME (schema overrides for an isolated venue or
  *                                   a mirror-local HubDbSync topology)
+ *
+ * The price seed does NOT trust HUB_DB_NAME on its own: it asks the DOGE indexer
+ * which database its price lookups land in (feeschedule.priceSource) and seeds
+ * there, falling back to the env only when the indexer will not say. On a
+ * mirror-topology indexer the two differ and the seed is invisible to the reader,
+ * because its upsert/delete shape never crosses hub_db_sync's insert-only cursor.
+ * See helpers/hubMirrorTopology.js resolveDriverPriceTarget.
  *
  * Usage: node test/sdk/xcallDogeSetup.js
  *
@@ -38,6 +46,7 @@ const mariadb = require('mariadb');
 const { XChainSDK } = require('./sdkHelper');
 const { BOOTSTRAP_XCHAIN_USD, BOOTSTRAP_XCHAIN_USD_NUM } = require('../helpers/xchainPriceConstants');
 const { seedDogeFixturePrices, describeSeed } = require('../helpers/dogeSetupPriceSeed');
+const topology = require('../helpers/hubMirrorTopology');
 
 // Seeded fee-oracle prices. XCHAIN comes from the shared bootstrap constant (the
 // value a real hub publishes); DOGE is a venue fiction chosen for round arithmetic.
@@ -45,7 +54,8 @@ const { seedDogeFixturePrices, describeSeed } = require('../helpers/dogeSetupPri
 const DOGE_USD_SEED = '0.10000000';
 const DOGE_USD_NUM  = 0.10;
 
-const MINER_URL = process.env.XCALL_DOGE_MINER_URL || 'http://localhost:3125';
+const MINER_URL   = process.env.XCALL_DOGE_MINER_URL || 'http://localhost:3125';
+const INDEXER_URL = process.env.XCALL_DOGE_INDEXER_URL || 'http://127.0.0.1:3124';
 const DB_HOST   = process.env.XCALL_DB_HOST || '127.0.0.1';
 const DB_PORT   = parseInt(process.env.XCALL_DB_PORT || '13306', 10);
 // Schema names are overridable so this driver also runs against an ISOLATED
@@ -126,7 +136,38 @@ async function dogeIdx(fn) {
 
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-const hubConn = (fn) => withConn(HUB_DB, process.env.HUB_DB_USER, process.env.HUB_DB_PASS, fn);
+async function withTarget(t, fn) {
+    const conn = await mariadb.createConnection({
+        host: t.host, port: t.port, database: t.database, user: t.user, password: t.password });
+    try { return await fn(conn); } finally { await conn.end().catch(() => {}); }
+}
+
+// The DOGE indexer's own connection, which is one of the candidate coordinates for
+// whatever database it names, and the answer outright when it reads its own tables.
+const DOGE_IDX_LOCAL = {
+    host: DB_HOST, port: DB_PORT, dbName: DOGE_IDX_DB,
+    user: process.env.DOGE_IDX_DB_USER, pass: process.env.DOGE_IDX_DB_PASS
+};
+
+// The pre-discovery model, kept as the fallback for an indexer that will not answer.
+const ENV_PRICE_TARGET = {
+    host: DB_HOST, port: DB_PORT, database: HUB_DB,
+    user: process.env.HUB_DB_USER, password: process.env.HUB_DB_PASS
+};
+
+// Resolved once in main() and reused by every seed (submitAndIndex re-seeds before
+// each submit). The fee oracle prices must land where the DOGE indexer's native-fee
+// validation READS them, which the indexer is the only authority on.
+let priceTarget = null;
+async function resolvePriceTarget() {
+    priceTarget = await topology.resolveDriverPriceTarget({
+        indexerUrl: INDEXER_URL, local: DOGE_IDX_LOCAL, envTarget: ENV_PRICE_TARGET });
+    console.log('[doge-setup] price seed target: ' + priceTarget.database + ' at ' +
+                priceTarget.host + ':' + priceTarget.port + ' (' + priceTarget.source + ')');
+    return priceTarget;
+}
+
+const hubConn = (fn) => withTarget(priceTarget || ENV_PRICE_TARGET, fn);
 
 async function seedPrices() {
     // Seed the prices the DOGE native-fee path reads. Both anchors, because the tip
@@ -206,6 +247,8 @@ async function deployContract(sdk, deployer, label, code) {
 const FEE_DESTINATION = 'mfees5pa2HwNBonk5vG23aDWkN9fuDJib4';
 
 async function main() {
+    // Ask the indexer where its price reads land, before anything seeds.
+    await resolvePriceTarget();
     await seedPrices();
 
     const sdk = new XChainSDK({
