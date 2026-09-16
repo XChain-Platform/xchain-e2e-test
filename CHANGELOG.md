@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-09-16
+
+### Added
+- The settle path is drilled across the hub and indexer canonicals, signing with one and verifying with the other.
+- The full distribution rail is drilled from a mint through a lock to an airdrop.
+
+### Changed
+- Gas is funded off Bitcoin by bridging instead of issuing locally, since a broadcast gas issue is refused off Bitcoin.
+- Every direct gas mint is routed through a chain-aware helper and helper ticks are lifted above the namespace floor.
+- Restructured under the platform code-structure standard (feature directories, snake_case files, split test suites, restored comments).
+
 ## [0.18.0] - 2026-09-11
 
 ### Added

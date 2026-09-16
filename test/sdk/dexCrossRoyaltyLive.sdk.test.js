@@ -10,6 +10,8 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
+ **********************************************************************
+ *
  * XChain Platform E2E - Cross-chain DEX LIVE royalty drill
  * (CROSS_CHAIN_ROYALTY finding B: the federation-level twin of indexer
  * integration scenario 26).
@@ -38,7 +40,7 @@
  *      100 -> 75 to the BTC maker's DOGE get_address + 25 to the royalty
  *      leg re-encoded BTC->DOGE, with a cross_chain_settlements row.
  *
- * VENUE: a 3-hub relay mesh: relay HUB1 host api.js
+ * VENUE: same as #10 (a 3-hub relay mesh): relay HUB1 host api.js
  * :10055 + HUB2/3 containers, BTC+DOGE regtest indexers HubDbSync-subscribed
  * to the relay, hub pubkeys staked for cross_chain on the CURRENT BTC chain.
  * Run AFTER dexDogeSetup.js. All services must run royalty-era code
@@ -99,38 +101,36 @@ async function dogeBalance(address, tick) {
 const MATCH_REF_WHERE = "((a_chain='BTC' AND a_action_index = ?) OR (b_chain='BTC' AND b_action_index = ?))";
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-describe('[sdk] cross-chain DEX LIVE royalty split (finding B live drill)', function () {
-    this.timeout(0);
+let sdk, maker, legAddr, dogeRecv, guardIndex, btcOrderIndex, matchId;
 
-    let sdk, maker, legAddr, dogeRecv, guardIndex, btcOrderIndex, matchId;
+async function setupRoyaltyLiveTests() {
+    expect(BTC_TICK, 'DEX_BTC_TICK env').to.match(/^[A-Z0-9]{1,12}$/);
+    expect(DOGE_TICK, 'DEX_DOGE_TICK env').to.match(/^[A-Z0-9]{1,12}$/);
+    expect(parseInt(process.env.DEX_DOGE_ORDER_INDEX || '', 10), 'DEX_DOGE_ORDER_INDEX env')
+        .to.be.a('number').and.to.be.greaterThan(0);
+    expect(DOGE_MAKER_BTC_RECV, 'DEX_DOGE_MAKER_BTC_RECV env').to.match(/^[a-zA-Z0-9]+$/);
+    expect(process.env.HUB_DB_USER, 'HUB_DB_USER env').to.be.a('string').and.to.not.equal('');
+    expect(process.env.DOGE_IDX_DB_USER, 'DOGE_IDX_DB_USER env').to.be.a('string').and.to.not.equal('');
+    expect(global.indexerDatabase, 'indexerDatabase global (initialCheck)').to.be.an('object');
+    sdk = makeSdk();
+    maker = await fundedGasAddress(sdk, 1);
 
-    before(async function () {
-        expect(BTC_TICK, 'DEX_BTC_TICK env').to.match(/^[A-Z0-9]{1,12}$/);
-        expect(DOGE_TICK, 'DEX_DOGE_TICK env').to.match(/^[A-Z0-9]{1,12}$/);
-        expect(parseInt(process.env.DEX_DOGE_ORDER_INDEX || '', 10), 'DEX_DOGE_ORDER_INDEX env')
-            .to.be.a('number').and.to.be.greaterThan(0);
-        expect(DOGE_MAKER_BTC_RECV, 'DEX_DOGE_MAKER_BTC_RECV env').to.match(/^[a-zA-Z0-9]+$/);
-        expect(process.env.HUB_DB_USER, 'HUB_DB_USER env').to.be.a('string').and.to.not.equal('');
-        expect(process.env.DOGE_IDX_DB_USER, 'DOGE_IDX_DB_USER env').to.be.a('string').and.to.not.equal('');
-        expect(global.indexerDatabase, 'indexerDatabase global (initialCheck)').to.be.an('object');
-        sdk = makeSdk();
-        maker = await fundedGasAddress(sdk, 1);
+    // The royalty leg recipient: a fresh BTC p2pkh. Regtest BTC/DOGE share the
+    // base58 p2pkh prefix, so its DOGE re-encoding is the same string; the DOGE
+    // leg assert below reads THIS address on the DOGE indexer.
+    const legKp = sdk.generateKeyPair();
+    legAddr = sdk.deriveAddress(legKp.publicKey, { type: 'p2pkh' });
 
-        // The royalty leg recipient: a fresh BTC p2pkh. Regtest BTC/DOGE share the
-        // base58 p2pkh prefix, so its DOGE re-encoding is the same string; the DOGE
-        // leg assert below reads THIS address on the DOGE indexer.
-        const legKp = sdk.generateKeyPair();
-        legAddr = sdk.deriveAddress(legKp.publicKey, { type: 'p2pkh' });
+    // Where the BTC maker receives the DOGE-side token (75 after the split).
+    const dogeSdk = new XChainSDK({ network: 'dogecoin-regtest', timeout: 30000 });
+    const dogeKp  = dogeSdk.generateKeyPair();
+    dogeRecv = dogeSdk.deriveAddress(dogeKp.publicKey, { type: 'p2pkh' });
 
-        // Where the BTC maker receives the DOGE-side token (75 after the split).
-        const dogeSdk = new XChainSDK({ network: 'dogecoin-regtest', timeout: 30000 });
-        const dogeKp  = dogeSdk.generateKeyPair();
-        dogeRecv = dogeSdk.deriveAddress(dogeKp.publicKey, { type: 'p2pkh' });
+    console.log('    [dex-royalty] maker=' + maker.address + ' leg=' + legAddr + ' bps=' + ROYALTY_BPS);
+    console.log('    [dex-royalty] BTC maker DOGE payout addr=' + dogeRecv);
+}
 
-        console.log('    [dex-royalty] maker=' + maker.address + ' leg=' + legAddr + ' bps=' + ROYALTY_BPS);
-        console.log('    [dex-royalty] BTC maker DOGE payout addr=' + dogeRecv);
-    });
-
+function registerRoyaltyDeploymentTest() {
     it('DEPLOY the royalty guard, ISSUE the BTC token, BIND its trade class', async function () {
         const guardSrc = "module.exports={ meta: { name: 'Royalty Live Guard', description: 'Returns a royalty payout leg for the live cross-chain royalty drill.', version: '1.0.0' }, guard:function(){ return { payoutLegs: [{ to: '" +
             legAddr + "', bps: " + ROYALTY_BPS + " }] }; } };";
@@ -154,7 +154,9 @@ describe('[sdk] cross-chain DEX LIVE royalty split (finding B live drill)', func
         await mine(1);
         console.log('    [dex-royalty] guard=' + guardIndex + ' bound trade class of ' + BTC_TICK);
     });
+}
 
+function registerRoyaltyOrderTest() {
     it('the crossing BTC ORDER is ACCEPTED and the guard legs ride the orders row', async function () {
         const blockTime = Number((await btcIdx('SELECT block_time FROM blocks ORDER BY block_index DESC LIMIT 1', []))[0].block_time);
         const res = await submit(sdk,
@@ -179,7 +181,9 @@ describe('[sdk] cross-chain DEX LIVE royalty split (finding B live drill)', func
         expect(legs, 'payout_legs on the BTC orders row').to.deep.equal([{ to: legAddr, bps: ROYALTY_BPS }]);
         console.log('    [dex-royalty] BTC order=' + btcOrderIndex + ' legs=' + JSON.stringify(legs));
     });
+}
 
+function registerMatchTest() {
     it('the hub finalizes the match WITH the legs inside the signed row', async function () {
         const deadline = Date.now() + 300000;
         let match = null;
@@ -201,7 +205,9 @@ describe('[sdk] cross-chain DEX LIVE royalty split (finding B live drill)', func
         expect(dogeSideLegs, 'DOGE side has no legs').to.satisfy(v => v === null || v === undefined);
         console.log('    [dex-royalty] finalized match ' + matchId + ' carries the BTC-side legs');
     });
+}
 
+function registerBtcSettlementTest() {
     it('the BTC leg settles the FULL 100 to the DOGE maker (counterparty has no legs)', async function () {
         const deadline = Date.now() + 300000;
         let settlements = 0, payoutAmt = null;
@@ -222,7 +228,9 @@ describe('[sdk] cross-chain DEX LIVE royalty split (finding B live drill)', func
         expect(payoutAmt, 'DOGE maker credited the full BTC-side escrow (no legs on the DOGE order)').to.equal('100');
         console.log('    [dex-royalty] BTC leg settled: 100 ' + BTC_TICK + ' -> ' + DOGE_MAKER_BTC_RECV);
     });
+}
 
+function registerDogeSettlementTest() {
     it('REQUIRED: the DOGE leg settles the SPLIT: 75 to the BTC maker + 25 to the re-encoded royalty leg', async function () {
         const dogeOrderIndex = parseInt(process.env.DEX_DOGE_ORDER_INDEX, 10);
         const deadline = Date.now() + 300000;
@@ -243,4 +251,14 @@ describe('[sdk] cross-chain DEX LIVE royalty split (finding B live drill)', func
         console.log('    [dex-royalty] DOGE leg settled the split: 75 ' + DOGE_TICK + ' -> ' + dogeRecv +
             ' + 25 ' + DOGE_TICK + ' -> ' + legAddr + ' (match ' + matchId + ')');
     });
+}
+
+describe('[sdk] cross-chain DEX LIVE royalty split (finding B live drill)', function () {
+    this.timeout(0);
+    before(setupRoyaltyLiveTests);
+    registerRoyaltyDeploymentTest();
+    registerRoyaltyOrderTest();
+    registerMatchTest();
+    registerBtcSettlementTest();
+    registerDogeSettlementTest();
 });

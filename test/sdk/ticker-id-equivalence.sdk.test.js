@@ -46,19 +46,17 @@ function balanceFor(balances, tick) {
     return Number(row.quantity ?? row.amount ?? row.balance ?? row.value);
 }
 
-describe('[sdk] ticker NAME vs TICK_ID (^id) equivalence', function () {
-    this.timeout(0);
+let sdk, issuer, recipName, recipId, tick, tickId;
 
-    let sdk, issuer, recipName, recipId, tick, tickId;
+async function setupTickerEquivalence() {
+    // compactTickers:false => the reference form we pass is the form emitted.
+    sdk = makeSdk({ compactTickers: false });
+    issuer = await fundedGasAddress(sdk, 1);
+    tick = uniqueTick();
+    console.log('    [sdk] issuer=' + issuer.address + ' tick=' + tick);
+}
 
-    before(async function () {
-        // compactTickers:false => the reference form we pass is the form emitted.
-        sdk = makeSdk({ compactTickers: false });
-        issuer = await fundedGasAddress(sdk, 1);
-        tick = uniqueTick();
-        console.log('    [sdk] issuer=' + issuer.address + ' tick=' + tick);
-    });
-
+function registerTickerDefinitionTests() {
     it('ISSUE creates the token (defined by name)', async function () {
         const res = await submit(sdk,
             {
@@ -102,7 +100,9 @@ describe('[sdk] ticker NAME vs TICK_ID (^id) equivalence', function () {
         // The on-chain action genuinely carried the NAME.
         expect(res.actionString).to.include('|' + tick + '|');
     });
+}
 
+function registerTickerReferenceTests() {
     it('SEND by ^id credits recipient B', async function () {
         recipId = await fundedSdkAddress(sdk, 1);
         const res = await submit(sdk,
@@ -134,4 +134,11 @@ describe('[sdk] ticker NAME vs TICK_ID (^id) equivalence', function () {
         expect(res.indexed.status).to.equal('valid');
         expect(res.actionString).to.include('|^' + tickId + '|');
     });
+}
+
+describe('[sdk] ticker NAME vs TICK_ID (^id) equivalence', function () {
+    this.timeout(0);
+    before(setupTickerEquivalence);
+    registerTickerDefinitionTests();
+    registerTickerReferenceTests();
 });

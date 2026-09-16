@@ -138,10 +138,110 @@ async function readState(sdk, contractIndex, key) {
 }
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+async function waitForSourceRetraction(callId) {
+    // Wait for node -> decoder -> indexer rollback -> retractXcallRange -> hub
+    // retraction -> broadcastDeletion -> mirror DELETE to propagate.
+    const deadline = Date.now() + 180000;
+    let hubStatus = null, btcMirror = -1;
+    while (Date.now() < deadline) {
+        await sleep(3000);
+        const hr = await hubDb(async (c) => c.query(
+            "SELECT status FROM cross_chain_calls WHERE call_id = ? AND phase = 'dispatch' LIMIT 1", [callId]));
+        hubStatus = hr.length ? hr[0].status : null;
+        btcMirror = await btcCount('SELECT COUNT(*) n FROM cross_chain_calls WHERE call_id = ?', [callId]);
+        // Separate-DB: wait for the retained 'retracted' flip. Shared-DB: the
+        // flip is immediately followed by the mirror-delete, so the row is gone
+        // (null) once it finalized (it started 'finalized', never null).
+        const retracted = hubStatus === 'retracted' || (HUB_MIRROR_SHARED && hubStatus === null);
+        if (retracted && btcMirror === 0) break;
+    }
+    return { hubStatus, btcMirror };
+}
+
+let sdk, deployer, indexA, targetContract, callId, srcBlock;
+
+function registerDispatchFinalizationTest() {
+    it('bury the request to confirmation depth so the dispatch finalizes (DOGE held)', async function () {
+        // Mine BTC past the relay gate; DOGE is never mined, so the XEXEC cannot inject.
+        const deadline = Date.now() + 240000;
+        let n = 0;
+        while (Date.now() < deadline) {
+            await mine(1);
+            await sleep(2000);
+            n = await hubDb(async (c) => Number((await c.query(
+                "SELECT COUNT(*) n FROM cross_chain_calls WHERE phase = 'dispatch' AND status = 'finalized' AND call_id = ?",
+                [callId]))[0].n));
+            if (n === 1) break;
+        }
+        expect(n, 'dispatch finalized on the hub').to.equal(1);
+
+        // DOGE held: no execution row yet (the precondition the retraction protects).
+        const execNow = await dogeIdx(async (c) => Number((await c.query(
+            'SELECT COUNT(*) n FROM cross_chain_call_executions WHERE call_id = ?', [callId]))[0].n));
+        expect(execNow, 'no XEXEC injected before the reorg (DOGE held)').to.equal(0);
+        console.log('    [xcall-srcreorg] dispatch finalized; DOGE held, no execution yet');
+    });
+}
+
+function registerSourceOrphanTest() {
+    it('orphaning the source block retracts the dispatch and the call never reaches DOGE', async function () {
+        const node  = global.nodeConnector;
+        const miner = global.regtestMinerConnector;
+
+        // Pause auto-mining so the orphaned XCALL tx cannot be re-mined from the
+        // mempool, then build an EMPTY competing chain (generateBlock(addr, []))
+        // longer than the original tip (same mechanism as reorgBalances.test.js).
+        await miner.pauseMining();
+        try {
+            const tipBefore = await node.getBlockCount();
+            const srcHash   = await node.getBlockHash(srcBlock);
+            const payout    = (await cryptoHelper.getNewAddress('xcall-srcreorg-miner', COIN, NETWORK, null, 'legacy', 0)).address;
+
+            await node.invalidateBlock(srcHash);
+            expect(await node.getBlockCount(), 'node rolled back below the XCALL block').to.equal(srcBlock - 1);
+
+            const need = tipBefore - (srcBlock - 1) + 2;
+            for (let i = 0; i < need; i++) await node.generateBlock(payout, []);
+            expect(await node.getBlockCount(), 'competing chain overtakes the original tip').to.be.greaterThan(tipBefore);
+            expect(await node.getBlockHash(srcBlock), 'the chain actually reorged').to.not.equal(srcHash);
+            console.log('    [xcall-srcreorg] BTC reorged onto an empty branch; waiting for rollback.js + hub retraction');
+
+            const { hubStatus, btcMirror } = await waitForSourceRetraction(callId);
+
+            if (HUB_MIRROR_SHARED) {
+                // Shared-DB venue: a flip to 'retracted' immediately followed by the
+                // mirror-delete is the expected outcome, so the row may already be gone
+                // (null). A live status ('finalized'/'dispatched') means retraction
+                // never fired.
+                expect(hubStatus, 'hub dispatch row retracted (or retracted+mirror-deleted in shared-DB venue)').to.be.oneOf(['retracted', null]);
+            } else {
+                // Hub keeps the row but flips it to 'retracted' (audit continuity).
+                expect(hubStatus, 'hub dispatch row marked retracted').to.equal('retracted');
+            }
+
+            expect(await btcCount('SELECT COUNT(*) n FROM xcalls WHERE call_id = ?', [callId]),
+                'source xcalls row removed by rollback').to.equal(0);
+            expect(btcMirror, 'source cross_chain_calls mirror deleted').to.equal(0);
+
+            expect(await btcCount('SELECT COUNT(*) n FROM cross_chain_call_callbacks WHERE call_id = ?', [callId]),
+                'no callback on the source chain').to.equal(0);
+
+            const dogeMirror = await dogeIdx(async (c) => Number((await c.query(
+                'SELECT COUNT(*) n FROM cross_chain_calls WHERE call_id = ?', [callId]))[0].n));
+            const dogeExec = await dogeIdx(async (c) => Number((await c.query(
+                'SELECT COUNT(*) n FROM cross_chain_call_executions WHERE call_id = ?', [callId]))[0].n));
+            expect(dogeMirror, 'target cross_chain_calls mirror deleted').to.equal(0);
+            expect(dogeExec, 'target never executed the retracted call').to.equal(0);
+
+            console.log('    [xcall-srcreorg] retracted cleanly: hub=retracted, mirrors gone, no exec, no callback');
+        } finally {
+            await miner.resumeMining();
+        }
+    });
+}
+
 describe('[sdk] XCALL source-chain reorg retraction (pre-execution)', function () {
     this.timeout(0);
-
-    let sdk, deployer, indexA, targetContract, callId, srcBlock;
 
     before(async function () {
         targetContract = parseInt(process.env.XCALL_TARGET_CONTRACT || '', 10);
@@ -187,94 +287,6 @@ describe('[sdk] XCALL source-chain reorg retraction (pre-execution)', function (
         console.log('    [xcall-srcreorg] call_id=' + callId.substring(0, 16) + '... emitted at BTC block ' + srcBlock);
     });
 
-    it('bury the request to confirmation depth so the dispatch finalizes (DOGE held)', async function () {
-        // Mine BTC past the relay gate; DOGE is never mined, so the XEXEC cannot inject.
-        const deadline = Date.now() + 240000;
-        let n = 0;
-        while (Date.now() < deadline) {
-            await mine(1);
-            await sleep(2000);
-            n = await hubDb(async (c) => Number((await c.query(
-                "SELECT COUNT(*) n FROM cross_chain_calls WHERE phase = 'dispatch' AND status = 'finalized' AND call_id = ?",
-                [callId]))[0].n));
-            if (n === 1) break;
-        }
-        expect(n, 'dispatch finalized on the hub').to.equal(1);
-
-        // DOGE held: no execution row yet (the precondition the retraction protects).
-        const execNow = await dogeIdx(async (c) => Number((await c.query(
-            'SELECT COUNT(*) n FROM cross_chain_call_executions WHERE call_id = ?', [callId]))[0].n));
-        expect(execNow, 'no XEXEC injected before the reorg (DOGE held)').to.equal(0);
-        console.log('    [xcall-srcreorg] dispatch finalized; DOGE held, no execution yet');
-    });
-
-    it('orphaning the source block retracts the dispatch and the call never reaches DOGE', async function () {
-        const node  = global.nodeConnector;
-        const miner = global.regtestMinerConnector;
-
-        // Pause auto-mining so the orphaned XCALL tx cannot be re-mined from the
-        // mempool, then build an EMPTY competing chain (generateBlock(addr, []))
-        // longer than the original tip (same mechanism as reorgBalances.test.js).
-        await miner.pauseMining();
-        try {
-            const tipBefore = await node.getBlockCount();
-            const srcHash   = await node.getBlockHash(srcBlock);
-            const payout    = (await cryptoHelper.getNewAddress('xcall-srcreorg-miner', COIN, NETWORK, null, 'legacy', 0)).address;
-
-            await node.invalidateBlock(srcHash);
-            expect(await node.getBlockCount(), 'node rolled back below the XCALL block').to.equal(srcBlock - 1);
-
-            const need = tipBefore - (srcBlock - 1) + 2;
-            for (let i = 0; i < need; i++) await node.generateBlock(payout, []);
-            expect(await node.getBlockCount(), 'competing chain overtakes the original tip').to.be.greaterThan(tipBefore);
-            expect(await node.getBlockHash(srcBlock), 'the chain actually reorged').to.not.equal(srcHash);
-            console.log('    [xcall-srcreorg] BTC reorged onto an empty branch; waiting for rollback.js + hub retraction');
-
-            // Wait for node -> decoder -> indexer rollback -> retractXcallRange -> hub
-            // retraction -> broadcastDeletion -> mirror DELETE to propagate.
-            const deadline = Date.now() + 180000;
-            let hubStatus = null, btcMirror = -1;
-            while (Date.now() < deadline) {
-                await sleep(3000);
-                const hr = await hubDb(async (c) => c.query(
-                    "SELECT status FROM cross_chain_calls WHERE call_id = ? AND phase = 'dispatch' LIMIT 1", [callId]));
-                hubStatus = hr.length ? hr[0].status : null;
-                btcMirror = await btcCount('SELECT COUNT(*) n FROM cross_chain_calls WHERE call_id = ?', [callId]);
-                // Separate-DB: wait for the retained 'retracted' flip. Shared-DB: the
-                // flip is immediately followed by the mirror-delete, so the row is gone
-                // (null) once it finalized (it started 'finalized', never null).
-                const retracted = hubStatus === 'retracted' || (HUB_MIRROR_SHARED && hubStatus === null);
-                if (retracted && btcMirror === 0) break;
-            }
-
-            if (HUB_MIRROR_SHARED) {
-                // Shared-DB venue: a flip to 'retracted' immediately followed by the
-                // mirror-delete is the expected outcome, so the row may already be gone
-                // (null). A live status ('finalized'/'dispatched') means retraction
-                // never fired.
-                expect(hubStatus, 'hub dispatch row retracted (or retracted+mirror-deleted in shared-DB venue)').to.be.oneOf(['retracted', null]);
-            } else {
-                // Hub keeps the row but flips it to 'retracted' (audit continuity).
-                expect(hubStatus, 'hub dispatch row marked retracted').to.equal('retracted');
-            }
-
-            expect(await btcCount('SELECT COUNT(*) n FROM xcalls WHERE call_id = ?', [callId]),
-                'source xcalls row removed by rollback').to.equal(0);
-            expect(btcMirror, 'source cross_chain_calls mirror deleted').to.equal(0);
-
-            expect(await btcCount('SELECT COUNT(*) n FROM cross_chain_call_callbacks WHERE call_id = ?', [callId]),
-                'no callback on the source chain').to.equal(0);
-
-            const dogeMirror = await dogeIdx(async (c) => Number((await c.query(
-                'SELECT COUNT(*) n FROM cross_chain_calls WHERE call_id = ?', [callId]))[0].n));
-            const dogeExec = await dogeIdx(async (c) => Number((await c.query(
-                'SELECT COUNT(*) n FROM cross_chain_call_executions WHERE call_id = ?', [callId]))[0].n));
-            expect(dogeMirror, 'target cross_chain_calls mirror deleted').to.equal(0);
-            expect(dogeExec, 'target never executed the retracted call').to.equal(0);
-
-            console.log('    [xcall-srcreorg] retracted cleanly: hub=retracted, mirrors gone, no exec, no callback');
-        } finally {
-            await miner.resumeMining();
-        }
-    });
+    registerDispatchFinalizationTest();
+    registerSourceOrphanTest();
 });

@@ -8,21 +8,23 @@
  * This file is part of XChain Platform. Licensed under the GNU Affero
  * General Public License v3.0 or later; see LICENSE.md.
  *
+ **********************************************************************
  * Cross-chain royalty (finding B) cross-service parity.
  *
  * The CROSS_CHAIN_ROYALTY flag-day gates whether the validator-signed XMATCH
  * canonical carries the matched orders' royalty payout legs. FOUR builders must
  * stay byte-identical or the federation forks on the first royalty-bearing match:
- *   hub CrossChainDexEngine._canonicalMatch   (live signing)
- *   hub StateAnchorPublisher._matchCanonical  (archive verification)
- *   indexer cross_settle._canonical           (settlement verification)
- *   indexer recovery._matchCanonical          (full-parse recovery)
+ *   hub CrossChainDexEngine.canonicalMatch   (live signing)
+ *   hub StateAnchorPublisher.matchCanonical  (archive verification)
+ *   indexer cross_settle.canonical           (settlement verification)
+ *   indexer recovery.matchCanonical          (full-parse recovery)
  * The activation gate itself is a 2-repo twin module (like anchor_reward_activation)
  * whose map is registered in the canonical xchain-documentation/protocol/constants.js;
  * this suite pins twin byte-identity, map equality against the canonical SoT, verdict
  * agreement, and canonical parity with legs present, legs absent, and below the
  * flag-day (legacy bytes, regression-safe).
  *
+ * Design: the 2026-07-07 cross-chain royalty design record.
  ********************************************************************/
 
 'use strict';
@@ -37,20 +39,20 @@ const protocolConstants = require(path.join(ROOT, 'xchain-documentation/protocol
 const hubCcr = require(path.join(ROOT, 'xchain-hub/src/cross_chain_royalty_activation.js'));
 const idxCcr = require(path.join(ROOT, 'xchain-indexer/src/cross_chain_royalty_activation.js'));
 
-const CrossChainDexEngine  = require(path.join(ROOT, 'xchain-hub/src/CrossChainDexEngine.js'));
-const StateAnchorPublisher = require(path.join(ROOT, 'xchain-hub/src/StateAnchorPublisher.js'));
-const Cross_Settle         = require(path.join(ROOT, 'xchain-indexer/src/actions/cross_settle.js'));
-const AnchorRecovery       = require(path.join(ROOT, 'xchain-indexer/src/recovery.js'));
+const CrossChainDexEngine  = require(path.join(ROOT, 'xchain-hub/src/cross_chain/dex_engine.js'));
+const StateAnchorPublisher = require(path.join(ROOT, 'xchain-hub/src/anchor/publisher.js'));
+const Cross_Settle         = require(path.join(ROOT, 'xchain-indexer/src/actions/cross_settle/index.js'));
+const AnchorRecovery       = require(path.join(ROOT, 'xchain-indexer/bin/recovery.js'));
 
 // All four builders read only their argument (no `this`), so invoke them directly
 // off the prototype, each through its own service's eq + ccr copies. The engine's
 // live path signs at pending.view; the other three at the persisted finalizing_view.
 function canonicals(m) {
     return {
-        hubEngine:   CrossChainDexEngine.prototype._canonicalMatch.call({}, m, m.finalizing_view || 0),
-        hubArchive:  StateAnchorPublisher.prototype._matchCanonical.call({}, m),
-        idxSettle:   Cross_Settle.prototype._canonical.call({}, m),
-        idxRecovery: AnchorRecovery.prototype._matchCanonical.call({}, m),
+        hubEngine:   CrossChainDexEngine.prototype.canonicalMatch.call({}, m, m.finalizing_view || 0),
+        hubArchive:  StateAnchorPublisher.prototype.matchCanonical.call({}, m),
+        idxSettle:   Cross_Settle.prototype.canonical.call({}, m),
+        idxRecovery: AnchorRecovery.prototype.matchCanonical.call({}, m),
     };
 }
 

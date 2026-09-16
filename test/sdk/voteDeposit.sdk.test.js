@@ -116,86 +116,92 @@ async function castBallot(sdk, voter, pollIndex, ballot) {
     expect(res.indexed.status, 'ballot status').to.equal('valid');
 }
 
+let sdk, issuer, voterA, voterB, depositSetup;
+
+async function prepareDepositVote() {
+    if (depositSetup) return depositSetup;
+    // BTC funding is only for tiny regtest tx fees (the deposit is paid in gas,
+    // which the gas faucet mints), and the cosigner_test faucet runs lean at this
+    // height (subsidy is long since halved to dust). Keep each address small.
+    // compactAddresses off: the SDK's ^id destination compaction is ahead of the
+    // indexer's wire acceptance (P4 arming / F3 gate open) and can invalidate the
+    // setup SENDs; these suites test VOTE semantics, not address compaction.
+    sdk = makeSdk({ compactAddresses: false });
+    issuer = await fundedGasAddress(sdk, 0.015);
+    voterA = await fundedGasAddress(sdk, 0.012);
+    voterB = await fundedGasAddress(sdk, 0.012);
+    depositSetup = { sdk, issuer, voterA, voterB };
+    return depositSetup;
+}
+
+async function verifyDepositRefund() {
+    const tick = await issueGov(sdk, issuer, 1000);
+    await sendTick(sdk, issuer, tick, voterA.address, 300);
+    await sendTick(sdk, issuer, tick, voterB.address, 100);
+    await mine(1);
+
+    const heldBefore = await escrowHeld(issuer.address, 'XCHAIN');
+
+    const endBlock = (await height()) + 8;
+    const pollIndex = await createPollWithDeposit(sdk, issuer, {
+        tick, endBlock, options: 'YES,NO', maxSelections: 1,
+        tallyMode: 'approval', weightMode: 'balance', question: 'Refund deposit?'
+    });
+
+    // The deposit is escrowed at creation: the held amount rises by DEPOSIT and
+    // the poll row records the amount + creator.
+    const heldAfterCreate = await escrowHeld(issuer.address, 'XCHAIN');
+    expect(heldAfterCreate - heldBefore, 'escrow rose by deposit at create').to.equal(Number(DEPOSIT));
+    const pollRow = (await dbQuery('SELECT * FROM polls WHERE action_index = ?', [pollIndex]))[0];
+    expect(String(pollRow.deposit_amount), 'stored deposit_amount').to.equal(DEPOSIT);
+    expect(pollRow.deposit_resolved, 'unresolved at create').to.be.null;
+
+    await castBallot(sdk, voterA, pollIndex, '1'); // NO 300
+    await castBallot(sdk, voterB, pollIndex, '0'); // YES 100
+
+    const poll = await waitFinalized(pollIndex);
+    expect(poll.poll_status, 'poll_status').to.equal('finalized');
+    expect(poll.deposit_resolved, 'deposit refunded').to.equal('refunded');
+
+    // The release writes a negative escrow row, so the creator's net held
+    // returns to its pre-poll baseline (fee-noise-free check).
+    const heldAfter = await escrowHeld(issuer.address, 'XCHAIN');
+    expect(heldAfter, 'escrow released back to baseline').to.equal(heldBefore);
+    console.log('    [sdk] poll #' + pollIndex + ' finalized: ' + DEPOSIT + ' XCHAIN deposit refunded');
+}
+
+async function verifyDepositForfeit() {
+    const tick = await issueGov(sdk, issuer, 1000);
+    await sendTick(sdk, issuer, tick, voterA.address, 300);
+    await mine(1);
+
+    const heldBefore     = await escrowHeld(issuer.address, 'XCHAIN');
+    const treasuryBefore = await balanceOf(DONATE1, 'XCHAIN');
+
+    const endBlock = (await height()) + 8;
+    const pollIndex = await createPollWithDeposit(sdk, issuer, {
+        tick, endBlock, options: 'YES,NO', maxSelections: 1,
+        tallyMode: 'approval', weightMode: 'balance',
+        minVoters: 5, question: 'Forfeit deposit?'
+    });
+    await castBallot(sdk, voterA, pollIndex, '0'); // only one voter, MIN_VOTERS 5 unmet
+
+    const poll = await waitFinalized(pollIndex);
+    expect(poll.poll_status, 'poll_status').to.equal('failed_quorum');
+    expect(poll.deposit_resolved, 'deposit forfeited').to.equal('forfeited');
+
+    // Escrow released off the creator, and the treasury balance rose by exactly
+    // the deposit.
+    const heldAfter     = await escrowHeld(issuer.address, 'XCHAIN');
+    const treasuryAfter = await balanceOf(DONATE1, 'XCHAIN');
+    expect(heldAfter, 'escrow released off creator').to.equal(heldBefore);
+    expect(treasuryAfter - treasuryBefore, 'DONATE1 received the deposit').to.equal(Number(DEPOSIT));
+    console.log('    [sdk] poll #' + pollIndex + ' failed_quorum: ' + DEPOSIT + ' XCHAIN forfeited to DONATE1');
+}
+
 describe('[sdk] VOTE creation deposit', function () {
     this.timeout(0);
-
-    let sdk, issuer, voterA, voterB;
-
-    before(async function () {
-        // BTC funding is only for tiny regtest tx fees (the deposit is paid in gas,
-        // which the gas faucet mints), and the cosigner_test faucet runs lean at this
-        // height (subsidy is long since halved to dust). Keep each address small.
-        // compactAddresses off: the SDK's ^id destination compaction is ahead of the
-        // indexer's wire acceptance (P4 arming / F3 gate open) and can invalidate the
-        // setup SENDs; these suites test VOTE semantics, not address compaction.
-        sdk = makeSdk({ compactAddresses: false });
-        issuer = await fundedGasAddress(sdk, 0.015);
-        voterA = await fundedGasAddress(sdk, 0.012);
-        voterB = await fundedGasAddress(sdk, 0.012);
-    });
-
-    it('refund: a finalized poll returns the deposit to the creator', async function () {
-        const tick = await issueGov(sdk, issuer, 1000);
-        await sendTick(sdk, issuer, tick, voterA.address, 300);
-        await sendTick(sdk, issuer, tick, voterB.address, 100);
-        await mine(1);
-
-        const heldBefore = await escrowHeld(issuer.address, 'XCHAIN');
-
-        const endBlock = (await height()) + 8;
-        const pollIndex = await createPollWithDeposit(sdk, issuer, {
-            tick, endBlock, options: 'YES,NO', maxSelections: 1,
-            tallyMode: 'approval', weightMode: 'balance', question: 'Refund deposit?'
-        });
-
-        // The deposit is escrowed at creation: the held amount rises by DEPOSIT and
-        // the poll row records the amount + creator.
-        const heldAfterCreate = await escrowHeld(issuer.address, 'XCHAIN');
-        expect(heldAfterCreate - heldBefore, 'escrow rose by deposit at create').to.equal(Number(DEPOSIT));
-        const pollRow = (await dbQuery('SELECT * FROM polls WHERE action_index = ?', [pollIndex]))[0];
-        expect(String(pollRow.deposit_amount), 'stored deposit_amount').to.equal(DEPOSIT);
-        expect(pollRow.deposit_resolved, 'unresolved at create').to.be.null;
-
-        await castBallot(sdk, voterA, pollIndex, '1'); // NO 300
-        await castBallot(sdk, voterB, pollIndex, '0'); // YES 100
-
-        const poll = await waitFinalized(pollIndex);
-        expect(poll.poll_status, 'poll_status').to.equal('finalized');
-        expect(poll.deposit_resolved, 'deposit refunded').to.equal('refunded');
-
-        // The release writes a negative escrow row, so the creator's net held
-        // returns to its pre-poll baseline (fee-noise-free check).
-        const heldAfter = await escrowHeld(issuer.address, 'XCHAIN');
-        expect(heldAfter, 'escrow released back to baseline').to.equal(heldBefore);
-        console.log('    [sdk] poll #' + pollIndex + ' finalized: ' + DEPOSIT + ' XCHAIN deposit refunded');
-    });
-
-    it('forfeit: a failed_quorum poll sends the deposit to DONATE1', async function () {
-        const tick = await issueGov(sdk, issuer, 1000);
-        await sendTick(sdk, issuer, tick, voterA.address, 300);
-        await mine(1);
-
-        const heldBefore     = await escrowHeld(issuer.address, 'XCHAIN');
-        const treasuryBefore = await balanceOf(DONATE1, 'XCHAIN');
-
-        const endBlock = (await height()) + 8;
-        const pollIndex = await createPollWithDeposit(sdk, issuer, {
-            tick, endBlock, options: 'YES,NO', maxSelections: 1,
-            tallyMode: 'approval', weightMode: 'balance',
-            minVoters: 5, question: 'Forfeit deposit?'
-        });
-        await castBallot(sdk, voterA, pollIndex, '0'); // only one voter, MIN_VOTERS 5 unmet
-
-        const poll = await waitFinalized(pollIndex);
-        expect(poll.poll_status, 'poll_status').to.equal('failed_quorum');
-        expect(poll.deposit_resolved, 'deposit forfeited').to.equal('forfeited');
-
-        // Escrow released off the creator, and the treasury balance rose by exactly
-        // the deposit.
-        const heldAfter     = await escrowHeld(issuer.address, 'XCHAIN');
-        const treasuryAfter = await balanceOf(DONATE1, 'XCHAIN');
-        expect(heldAfter, 'escrow released off creator').to.equal(heldBefore);
-        expect(treasuryAfter - treasuryBefore, 'DONATE1 received the deposit').to.equal(Number(DEPOSIT));
-        console.log('    [sdk] poll #' + pollIndex + ' failed_quorum: ' + DEPOSIT + ' XCHAIN forfeited to DONATE1');
-    });
+    before(prepareDepositVote);
+    it('refund: a finalized poll returns the deposit to the creator', verifyDepositRefund);
+    it('forfeit: a failed_quorum poll sends the deposit to DONATE1', verifyDepositForfeit);
 });

@@ -19,6 +19,9 @@
  ********************************************************************/
 
 const axios = require('axios')
+const nodeUtil = require('node:util');
+const { getLogger } = require('./lib/logger');
+const logger = getLogger();
 
 class UtxoTracker {
     constructor(url, port) {
@@ -106,7 +109,7 @@ class UtxoTracker {
         while (Date.now() < deadline){
             const status = await this.getQuiescentStatus()
             last = status
-            if (status && status.ready) return this._withMineErrors(status, mineErrors, lastMineError)
+            if (status && status.ready) return this.withMineErrors(status, mineErrors, lastMineError)
             // Not ready yet: if a regtestMiner was passed, mine a block to
             // unblock mempool/batch progression.
             if (regtestMiner && status && status.mempool_size > 0){
@@ -119,20 +122,20 @@ class UtxoTracker {
                 } catch (e) {
                     mineErrors++
                     lastMineError = (e && e.message) ? e.message : String(e)
-                    console.warn('quiesce: nudge mine failed: ' + lastMineError)
+                    logger.warn('quiesce: nudge mine failed: ' + lastMineError)
                 }
             }
             await this.sleep(pollMs)
         }
         // Last status seen, which may carry ready=false. Callers that are a barrier
         // rather than a retry loop must inspect .ready; the root afterEach does.
-        return this._withMineErrors(last, mineErrors, lastMineError)
+        return this.withMineErrors(last, mineErrors, lastMineError)
     }
 
     // Attach the nudge-failure tally to whatever quiesce returns, without
     // rewriting a null status into an object (callers distinguish no-response
     // from a status body).
-    _withMineErrors(status, mineErrors, lastMineError){
+    withMineErrors(status, mineErrors, lastMineError){
         if (!status || typeof status !== 'object') return status
         status.mineErrors = mineErrors
         if (lastMineError) status.lastMineError = lastMineError
@@ -178,7 +181,7 @@ class UtxoTracker {
                 }
                 await this.sleep(1000)
             } catch(err) {
-                console.log(err)
+                logger.info(err)
                 await this.sleep(1000)
             }
         }
@@ -207,7 +210,7 @@ class UtxoTracker {
                 throw new Error('Error getting utxos');
             }
         } catch (error) {
-            console.error('Error fetching UTXOs:', error);
+            logger.error(nodeUtil.format('Error fetching UTXOs:', error));
             throw error;
         }
     }

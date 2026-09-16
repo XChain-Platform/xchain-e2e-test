@@ -147,12 +147,52 @@ async function pumpUntil(label, check, timeoutMs) {
     throw new Error('timed out waiting for ' + label);
 }
 
+let sdk, deployer, indexA, targetContract;
+const callIds = {}; // method → call_id
+
+function registerScenarioResultTests() {
+    it('DOGE executes each call with the expected status', async function () {
+        const results = {};
+        await pumpUntil('all four DOGE-side execution results', async () => {
+            for (const s of SCENARIOS) {
+                if (results[s.method]) continue;
+                const r = await rpc(TARGET_INDEXER_URL, 'getcrosschaincallresult', { call_id: callIds[s.method] });
+                if (r && r.exists === true) results[s.method] = r;
+            }
+            return Object.keys(results).length === SCENARIOS.length ? results : null;
+        });
+        for (const s of SCENARIOS) {
+            const r = results[s.method];
+            console.log('    [xcall-scn] ' + s.method + ' → ' + r.status + ' (block ' + r.executed_block_index + ')');
+            expect(r.status, s.method + ' target status').to.equal(s.status);
+            if (s.payload !== null) {
+                const decoded = Buffer.from(String(r.return_payload_b64 || ''), 'base64').toString('utf8');
+                expect(decoded, s.method + ' target payload').to.equal(s.payload);
+            }
+        }
+    });
+
+    it('each result relays back and the callback delivers the expected outcome exactly once', async function () {
+        for (const s of SCENARIOS) {
+            await pumpUntil(s.method + ' source-side completion', async () => {
+                const r = await rpc(SOURCE_INDEXER_URL, 'getcrosschaincall', { call_id: callIds[s.method] });
+                return (r && r.call && r.call.request_status === 'completed') ? r : null;
+            });
+            const delivered = await pumpUntil(s.method + ' callback state write', async () => {
+                return await readState(sdk, indexA, 'result:' + callIds[s.method]);
+            }, 90000);
+            const outcome = JSON.parse(delivered);
+            console.log('    [xcall-scn] ' + s.method + ' callback: ' + delivered);
+            expect(outcome.chain, s.method).to.equal('DOGE');
+            expect(outcome.status, s.method).to.equal(s.status);
+            expect(outcome.echo, s.method).to.equal('echo-ctx');
+            if (s.payload !== null) expect(outcome.payload, s.method).to.equal(s.payload);
+        }
+    });
+}
+
 describe('[sdk] cross-chain call result scenarios (real DOGE target)', function () {
     this.timeout(0);
-
-    let sdk, deployer, indexA, targetContract;
-    const callIds = {}; // method → call_id
-
     before(async function () {
         targetContract = parseInt(process.env.XCALL_TARGET_CONTRACT || '', 10);
         expect(targetContract, 'XCALL_TARGET_CONTRACT env (DOGE target contract action_index from xcallDogeSetup.js)').to.be.a('number').and.to.be.greaterThan(0);
@@ -192,7 +232,6 @@ describe('[sdk] cross-chain call result scenarios (real DOGE target)', function 
         indexA = contractIndexOf(res.indexed);
         console.log('    [xcall-scn] A=' + indexA);
     });
-
     it('fires all four scenario calls (concurrent in-flight relay)', async function () {
         for (const s of SCENARIOS) {
             const res = await submit(sdk,
@@ -210,42 +249,5 @@ describe('[sdk] cross-chain call result scenarios (real DOGE target)', function 
         expect(new Set(Object.values(callIds)).size, 'distinct call_ids').to.equal(SCENARIOS.length);
     });
 
-    it('DOGE executes each call with the expected status', async function () {
-        const results = {};
-        await pumpUntil('all four DOGE-side execution results', async () => {
-            for (const s of SCENARIOS) {
-                if (results[s.method]) continue;
-                const r = await rpc(TARGET_INDEXER_URL, 'getcrosschaincallresult', { call_id: callIds[s.method] });
-                if (r && r.exists === true) results[s.method] = r;
-            }
-            return Object.keys(results).length === SCENARIOS.length ? results : null;
-        });
-        for (const s of SCENARIOS) {
-            const r = results[s.method];
-            console.log('    [xcall-scn] ' + s.method + ' → ' + r.status + ' (block ' + r.executed_block_index + ')');
-            expect(r.status, s.method + ' target status').to.equal(s.status);
-            if (s.payload !== null) {
-                const decoded = Buffer.from(String(r.return_payload_b64 || ''), 'base64').toString('utf8');
-                expect(decoded, s.method + ' target payload').to.equal(s.payload);
-            }
-        }
-    });
-
-    it('each result relays back and the callback delivers the expected outcome exactly once', async function () {
-        for (const s of SCENARIOS) {
-            await pumpUntil(s.method + ' source-side completion', async () => {
-                const r = await rpc(SOURCE_INDEXER_URL, 'getcrosschaincall', { call_id: callIds[s.method] });
-                return (r && r.call && r.call.request_status === 'completed') ? r : null;
-            });
-            const delivered = await pumpUntil(s.method + ' callback state write', async () => {
-                return await readState(sdk, indexA, 'result:' + callIds[s.method]);
-            }, 90000);
-            const outcome = JSON.parse(delivered);
-            console.log('    [xcall-scn] ' + s.method + ' callback: ' + delivered);
-            expect(outcome.chain, s.method).to.equal('DOGE');
-            expect(outcome.status, s.method).to.equal(s.status);
-            expect(outcome.echo, s.method).to.equal('echo-ctx');
-            if (s.payload !== null) expect(outcome.payload, s.method).to.equal(s.payload);
-        }
-    });
+    registerScenarioResultTests();
 });

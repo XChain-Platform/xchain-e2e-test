@@ -154,124 +154,132 @@ async function execute(sdk, who, contractIndex, method, params) {
     return res;
 }
 
+let sdk, issuer, voterA, voterB, bindingSetup;
+
+async function prepareBindingVote() {
+    if (bindingSetup) return bindingSetup;
+    // compactAddresses off: the SDK's ^id destination compaction is ahead of the
+    // indexer's wire acceptance (P4 arming / F3 gate open) and can invalidate the
+    // setup SENDs; these suites test VOTE semantics, not address compaction.
+    sdk = makeSdk({ compactAddresses: false });
+    issuer = await fundedGasAddress(sdk, 0.05);
+    voterA = await fundedGasAddress(sdk, 0.03);
+    voterB = await fundedGasAddress(sdk, 0.03);
+    bindingSetup = { sdk, issuer, voterA, voterB };
+    return bindingSetup;
+}
+
+async function verifyPassCallback() {
+    const target = await deploy(sdk, issuer, CALLBACK_TARGET);
+    const tick = await issueGov(sdk, issuer, 1000);
+    await sendTick(sdk, issuer, tick, voterA.address, 300);
+    await sendTick(sdk, issuer, tick, voterB.address, 100);
+    await mine(1);
+
+    const endBlock = (await height()) + 8;
+    const pollIndex = await createPoll(sdk, issuer, {
+        tick, endBlock, options: 'YES,NO', maxSelections: 1, tallyMode: 'approval',
+        weightMode: 'balance', quorum: '0.05', minVoters: 1, question: 'Binding pass?',
+        callbackContract: target, callbackMethod: 'onPoll', callbackOn: 'pass'
+    });
+    await castBallot(sdk, voterA, pollIndex, '1'); // NO 300
+    await castBallot(sdk, voterB, pollIndex, '0'); // YES 100
+
+    const poll = await waitFinalized(pollIndex);
+    expect(poll.poll_status).to.equal('finalized');
+    expect(await waitFired(sdk, target), 'callback fired').to.equal(true);
+    expect(await readState(sdk, target, 'status'), 'cb status').to.equal('finalized');
+    expect(await readState(sdk, target, 'winner'), 'cb winner (NO=1)').to.equal('1');
+    expect(await readState(sdk, target, 'voters'), 'cb voters').to.equal('2');
+    expect(String(poll.callback_execute_action_index), 'callback execute recorded').to.not.equal('null');
+    console.log('    [sdk] binding poll #' + pollIndex + ' fired onPoll: winner=1 status=finalized');
+}
+
+async function verifyAlwaysCallback() {
+    const target = await deploy(sdk, issuer, CALLBACK_TARGET);
+    const tick = await issueGov(sdk, issuer, 1000);
+    await sendTick(sdk, issuer, tick, voterA.address, 300);
+    await mine(1);
+
+    const endBlock = (await height()) + 8;
+    const pollIndex = await createPoll(sdk, issuer, {
+        tick, endBlock, options: 'YES,NO', maxSelections: 1, tallyMode: 'approval',
+        weightMode: 'balance', quorum: '0.05', minVoters: 5, question: 'Binding always',
+        callbackContract: target, callbackMethod: 'onPoll', callbackOn: 'always'
+    });
+    await castBallot(sdk, voterA, pollIndex, '0');
+
+    const poll = await waitFinalized(pollIndex);
+    expect(poll.poll_status).to.equal('failed_quorum');
+    expect(await waitFired(sdk, target), 'callback fired on fail').to.equal(true);
+    expect(await readState(sdk, target, 'status'), 'cb status').to.equal('failed_quorum');
+    expect(await readState(sdk, target, 'winner'), 'no winner').to.equal('');
+    console.log('    [sdk] binding poll #' + pollIndex + ' (always) fired onPoll: status=failed_quorum');
+}
+
+async function verifyFailedPassCallback() {
+    const target = await deploy(sdk, issuer, CALLBACK_TARGET);
+    const tick = await issueGov(sdk, issuer, 1000);
+    await sendTick(sdk, issuer, tick, voterA.address, 300);
+    await mine(1);
+
+    const endBlock = (await height()) + 8;
+    const pollIndex = await createPoll(sdk, issuer, {
+        tick, endBlock, options: 'YES,NO', maxSelections: 1, tallyMode: 'approval',
+        weightMode: 'balance', quorum: '0.05', minVoters: 5, question: 'Binding pass-fail',
+        callbackContract: target, callbackMethod: 'onPoll', callbackOn: 'pass'
+    });
+    await castBallot(sdk, voterA, pollIndex, '0');
+
+    const poll = await waitFinalized(pollIndex);
+    expect(poll.poll_status).to.equal('failed_quorum');
+    // Give the v2 block + a couple more time to confirm no callback fired.
+    await mine(3);
+    await new Promise(r => setTimeout(r, 3000));
+    expect(await readState(sdk, target, 'fired'), 'callback did NOT fire').to.equal('0');
+    expect(poll.callback_execute_action_index, 'no callback execute').to.be.null;
+    console.log('    [sdk] binding poll #' + pollIndex + ' (pass) did not fire on failed_quorum');
+}
+
+async function verifyContractActor() {
+    const tick = await issueGov(sdk, issuer, 1000);
+    const actor = await deploy(sdk, issuer, ACTOR_CONTRACT);
+    // Fund the contract's custody so its hold-to-create / hold-to-vote gates pass.
+    const dep = await submit(sdk,
+        { action: 'DEPOSIT', params: { contractActionIndex: actor, tick, quantity: 500 } },
+        { pubkey: issuer.address, change: issuer.address }, submitOpts({ wif: issuer.wif }));
+    expect(dep.indexed.status, 'DEPOSIT').to.equal('valid');
+    await mine(1);
+
+    const endBlock = (await height()) + 30;
+    await execute(sdk, issuer, actor, 'makePoll', [String(tick), String(endBlock)]);
+
+    // The contract-created poll is the newest poll whose tick is this gov tick.
+    const polls = await dbQuery(
+        `SELECT p.action_index, a.source_id FROM polls p JOIN actions a ON a.action_index = p.action_index
+           JOIN index_tickers t ON t.id = p.tick_id WHERE t.tick = ? ORDER BY p.action_index DESC LIMIT 1`, [tick]);
+    expect(polls.length, 'contract poll row').to.equal(1);
+    const pollIndex = Number(polls[0].action_index);
+
+    // The poll's source address is the contract (C:<chain>:<actor>).
+    const src = await dbQuery('SELECT address FROM index_addresses WHERE id = ?', [polls[0].source_id]);
+    expect(String(src[0].address), 'poll source is the contract').to.match(new RegExp('^C:.*:' + actor + '$'));
+
+    // The contract casts a ballot as itself.
+    await execute(sdk, issuer, actor, 'castVote', [String(pollIndex)]);
+    const votes = await dbQuery(
+        `SELECT v.choice, ia.address FROM votes v JOIN index_addresses ia ON ia.id = v.voter_address_id
+          WHERE v.poll_index = ?`, [pollIndex]);
+    expect(votes.length, 'contract ballot row').to.be.greaterThan(0);
+    expect(String(votes[0].address), 'ballot source is the contract').to.match(new RegExp('^C:.*:' + actor + '$'));
+    console.log('    [sdk] contract ' + actor + ' created poll #' + pollIndex + ' and voted as itself');
+}
+
 describe('[sdk] VOTE binding polls + contract actors', function () {
     this.timeout(0);
-
-    let sdk, issuer, voterA, voterB;
-
-    before(async function () {
-        // compactAddresses off: the SDK's ^id destination compaction is ahead of the
-        // indexer's wire acceptance (P4 arming / F3 gate open) and can invalidate the
-        // setup SENDs; these suites test VOTE semantics, not address compaction.
-        sdk = makeSdk({ compactAddresses: false });
-        issuer = await fundedGasAddress(sdk, 0.05);
-        voterA = await fundedGasAddress(sdk, 0.03);
-        voterB = await fundedGasAddress(sdk, 0.03);
-    });
-
-    it('CALLBACK_ON=pass fires the callback on a finalized win', async function () {
-        const target = await deploy(sdk, issuer, CALLBACK_TARGET);
-        const tick = await issueGov(sdk, issuer, 1000);
-        await sendTick(sdk, issuer, tick, voterA.address, 300);
-        await sendTick(sdk, issuer, tick, voterB.address, 100);
-        await mine(1);
-
-        const endBlock = (await height()) + 8;
-        const pollIndex = await createPoll(sdk, issuer, {
-            tick, endBlock, options: 'YES,NO', maxSelections: 1, tallyMode: 'approval',
-            weightMode: 'balance', quorum: '0.05', minVoters: 1, question: 'Binding pass?',
-            callbackContract: target, callbackMethod: 'onPoll', callbackOn: 'pass'
-        });
-        await castBallot(sdk, voterA, pollIndex, '1'); // NO 300
-        await castBallot(sdk, voterB, pollIndex, '0'); // YES 100
-
-        const poll = await waitFinalized(pollIndex);
-        expect(poll.poll_status).to.equal('finalized');
-        expect(await waitFired(sdk, target), 'callback fired').to.equal(true);
-        expect(await readState(sdk, target, 'status'), 'cb status').to.equal('finalized');
-        expect(await readState(sdk, target, 'winner'), 'cb winner (NO=1)').to.equal('1');
-        expect(await readState(sdk, target, 'voters'), 'cb voters').to.equal('2');
-        expect(String(poll.callback_execute_action_index), 'callback execute recorded').to.not.equal('null');
-        console.log('    [sdk] binding poll #' + pollIndex + ' fired onPoll: winner=1 status=finalized');
-    });
-
-    it('CALLBACK_ON=always fires the callback on a failed_quorum poll', async function () {
-        const target = await deploy(sdk, issuer, CALLBACK_TARGET);
-        const tick = await issueGov(sdk, issuer, 1000);
-        await sendTick(sdk, issuer, tick, voterA.address, 300);
-        await mine(1);
-
-        const endBlock = (await height()) + 8;
-        const pollIndex = await createPoll(sdk, issuer, {
-            tick, endBlock, options: 'YES,NO', maxSelections: 1, tallyMode: 'approval',
-            weightMode: 'balance', quorum: '0.05', minVoters: 5, question: 'Binding always',
-            callbackContract: target, callbackMethod: 'onPoll', callbackOn: 'always'
-        });
-        await castBallot(sdk, voterA, pollIndex, '0');
-
-        const poll = await waitFinalized(pollIndex);
-        expect(poll.poll_status).to.equal('failed_quorum');
-        expect(await waitFired(sdk, target), 'callback fired on fail').to.equal(true);
-        expect(await readState(sdk, target, 'status'), 'cb status').to.equal('failed_quorum');
-        expect(await readState(sdk, target, 'winner'), 'no winner').to.equal('');
-        console.log('    [sdk] binding poll #' + pollIndex + ' (always) fired onPoll: status=failed_quorum');
-    });
-
-    it('CALLBACK_ON=pass does NOT fire on a failed_quorum poll', async function () {
-        const target = await deploy(sdk, issuer, CALLBACK_TARGET);
-        const tick = await issueGov(sdk, issuer, 1000);
-        await sendTick(sdk, issuer, tick, voterA.address, 300);
-        await mine(1);
-
-        const endBlock = (await height()) + 8;
-        const pollIndex = await createPoll(sdk, issuer, {
-            tick, endBlock, options: 'YES,NO', maxSelections: 1, tallyMode: 'approval',
-            weightMode: 'balance', quorum: '0.05', minVoters: 5, question: 'Binding pass-fail',
-            callbackContract: target, callbackMethod: 'onPoll', callbackOn: 'pass'
-        });
-        await castBallot(sdk, voterA, pollIndex, '0');
-
-        const poll = await waitFinalized(pollIndex);
-        expect(poll.poll_status).to.equal('failed_quorum');
-        // Give the v2 block + a couple more time to confirm no callback fired.
-        await mine(3);
-        await new Promise(r => setTimeout(r, 3000));
-        expect(await readState(sdk, target, 'fired'), 'callback did NOT fire').to.equal('0');
-        expect(poll.callback_execute_action_index, 'no callback execute').to.be.null;
-        console.log('    [sdk] binding poll #' + pollIndex + ' (pass) did not fire on failed_quorum');
-    });
-
-    it('a contract creates a poll and casts a ballot as itself (xchain.emit.vote)', async function () {
-        const tick = await issueGov(sdk, issuer, 1000);
-        const actor = await deploy(sdk, issuer, ACTOR_CONTRACT);
-        // Fund the contract's custody so its hold-to-create / hold-to-vote gates pass.
-        const dep = await submit(sdk,
-            { action: 'DEPOSIT', params: { contractActionIndex: actor, tick, quantity: 500 } },
-            { pubkey: issuer.address, change: issuer.address }, submitOpts({ wif: issuer.wif }));
-        expect(dep.indexed.status, 'DEPOSIT').to.equal('valid');
-        await mine(1);
-
-        const endBlock = (await height()) + 30;
-        await execute(sdk, issuer, actor, 'makePoll', [String(tick), String(endBlock)]);
-
-        // The contract-created poll is the newest poll whose tick is this gov tick.
-        const polls = await dbQuery(
-            `SELECT p.action_index, a.source_id FROM polls p JOIN actions a ON a.action_index = p.action_index
-               JOIN index_tickers t ON t.id = p.tick_id WHERE t.tick = ? ORDER BY p.action_index DESC LIMIT 1`, [tick]);
-        expect(polls.length, 'contract poll row').to.equal(1);
-        const pollIndex = Number(polls[0].action_index);
-
-        // The poll's source address is the contract (C:<chain>:<actor>).
-        const src = await dbQuery('SELECT address FROM index_addresses WHERE id = ?', [polls[0].source_id]);
-        expect(String(src[0].address), 'poll source is the contract').to.match(new RegExp('^C:.*:' + actor + '$'));
-
-        // The contract casts a ballot as itself.
-        await execute(sdk, issuer, actor, 'castVote', [String(pollIndex)]);
-        const votes = await dbQuery(
-            `SELECT v.choice, ia.address FROM votes v JOIN index_addresses ia ON ia.id = v.voter_address_id
-              WHERE v.poll_index = ?`, [pollIndex]);
-        expect(votes.length, 'contract ballot row').to.be.greaterThan(0);
-        expect(String(votes[0].address), 'ballot source is the contract').to.match(new RegExp('^C:.*:' + actor + '$'));
-        console.log('    [sdk] contract ' + actor + ' created poll #' + pollIndex + ' and voted as itself');
-    });
+    before(prepareBindingVote);
+    it('CALLBACK_ON=pass fires the callback on a finalized win', verifyPassCallback);
+    it('CALLBACK_ON=always fires the callback on a failed_quorum poll', verifyAlwaysCallback);
+    it('CALLBACK_ON=pass does NOT fire on a failed_quorum poll', verifyFailedPassCallback);
+    it('a contract creates a poll and casts a ballot as itself (xchain.emit.vote)', verifyContractActor);
 });

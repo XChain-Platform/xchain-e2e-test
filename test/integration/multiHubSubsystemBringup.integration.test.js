@@ -35,12 +35,50 @@ const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 
 const COUNT = 3;
 
+let mvh;
+
+async function assertSubsystemBringup() {
+    mvh = new MultiValidatorHub({
+        count: COUNT,
+        basePort: 34500,
+        startOracle: true,
+        startReorgHandler: true,
+        startGovernance: true,
+        // Keep the run lean: attestation off, we only assert the three new
+        // consensus subsystems here.
+        startAttestation: false
+    });
+    await mvh.start();
+
+    assert.strictEqual(mvh.hubs.length, COUNT, 'expected ' + COUNT + ' running hubs');
+
+    // Per-hub live objects.
+    for (let i = 0; i < mvh.hubs.length; i++) {
+        const hub = mvh.hubs[i];
+        assert.ok(hub.oracle,           'hub ' + i + ' must have an OracleRound (startOracle)');
+        assert.ok(hub.oracleConsensus,  'hub ' + i + ' must have an OracleConsensus (startOracle)');
+        assert.ok(hub.reorgHandler,     'hub ' + i + ' must have a ReorgHandler (startReorgHandler)');
+        assert.ok(hub.governance,       'hub ' + i + ' must have a Governance (startGovernance)');
+        // Attestation was disabled for this run.
+        assert.ok(!hub.attestationRound, 'hub ' + i + ' must NOT have attestation started');
+    }
+
+    // Harness getters surface the same objects, one per hub, none null.
+    const oracles = mvh.getOracles();
+    const govs    = mvh.getGovernances();
+    const reorgs  = mvh.getReorgHandlers();
+    assert.strictEqual(oracles.length, COUNT);
+    assert.ok(oracles.every(o => o), 'getOracles() returns a live oracle per hub');
+    assert.ok(govs.every(g => g),    'getGovernances() returns a live governance per hub');
+    assert.ok(reorgs.every(r => r),  'getReorgHandlers() returns a live reorg handler per hub');
+}
+
 describe('MultiValidatorHub consensus-subsystem bring-up', function () {
     // 3 hubs × (DB init + schema migrations + P2P bind) plus oracle/governance/
     // reorg start each add tables/timers; teardown drops the DBs. Generous budget.
     this.timeout(180_000);
 
-    let mvh, db;
+    let db;
 
     // Was gated on HUB_DB_USER/HUB_DB_PASS being set, which nothing in CI sets,
     // so this suite skipped itself on every venue and the live tier reported it
@@ -60,39 +98,5 @@ describe('MultiValidatorHub consensus-subsystem bring-up', function () {
         if (db) await db.stop();
     });
 
-    it('brings up oracle + reorg + governance on every hub, reachable via getters', async function () {
-        mvh = new MultiValidatorHub({
-            count: COUNT,
-            basePort: 34500,
-            startOracle: true,
-            startReorgHandler: true,
-            startGovernance: true,
-            // Keep the run lean: attestation off, we only assert the three new
-            // consensus subsystems here.
-            startAttestation: false
-        });
-        await mvh.start();
-
-        assert.strictEqual(mvh.hubs.length, COUNT, 'expected ' + COUNT + ' running hubs');
-
-        // Per-hub live objects.
-        for (let i = 0; i < mvh.hubs.length; i++) {
-            const hub = mvh.hubs[i];
-            assert.ok(hub.oracle,           'hub ' + i + ' must have an OracleRound (startOracle)');
-            assert.ok(hub.oracleConsensus,  'hub ' + i + ' must have an OracleConsensus (startOracle)');
-            assert.ok(hub.reorgHandler,     'hub ' + i + ' must have a ReorgHandler (startReorgHandler)');
-            assert.ok(hub.governance,       'hub ' + i + ' must have a Governance (startGovernance)');
-            // Attestation was disabled for this run.
-            assert.ok(!hub.attestationRound, 'hub ' + i + ' must NOT have attestation started');
-        }
-
-        // Harness getters surface the same objects, one per hub, none null.
-        const oracles = mvh.getOracles();
-        const govs    = mvh.getGovernances();
-        const reorgs  = mvh.getReorgHandlers();
-        assert.strictEqual(oracles.length, COUNT);
-        assert.ok(oracles.every(o => o), 'getOracles() returns a live oracle per hub');
-        assert.ok(govs.every(g => g),    'getGovernances() returns a live governance per hub');
-        assert.ok(reorgs.every(r => r),  'getReorgHandlers() returns a live reorg handler per hub');
-    });
+    it('brings up oracle + reorg + governance on every hub, reachable via getters', assertSubsystemBringup);
 });

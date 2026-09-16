@@ -42,6 +42,7 @@ const {
     resolveDecoderCredential,
     HUB_CONFIG_REDACTION,
     coinCode,
+    mergeIndexerExtraEnv,
     DEFAULT_HUB_COUNT,
     DEFAULT_INDEXER_COUNT,
     DEFAULT_FORWARD_S,
@@ -322,6 +323,36 @@ describe('attestMirrorVenue: indexer environment', function () {
     })
 })
 
+describe('attestMirrorVenue: the indexer extraEnv overlays', function () {
+
+    it('keeps the venue-wide overlay when no per-index overlay is given', () => {
+        // A bridge drive's DOGE indexer gets its origin-chain endpoint through the
+        // venue-wide overlay and nothing else; losing it defers every in leg forever.
+        const env = mergeIndexerExtraEnv({ BTC_INDEXER_URL: 'http://127.0.0.1:41001' }, null)
+        assert.deepStrictEqual(env, { BTC_INDEXER_URL: 'http://127.0.0.1:41001' })
+    })
+
+    it('layers the per-index overlay OVER the venue-wide one', () => {
+        const env = mergeIndexerExtraEnv(
+            { BTC_INDEXER_URL: 'http://127.0.0.1:41001', BRIDGE_PROOF_TIMEOUT_MS: 5000 },
+            { BRIDGE_PROOF_TIMEOUT_MS: '9000', X_ONLY_HERE: 1 })
+        assert.deepStrictEqual(env, {
+            BTC_INDEXER_URL: 'http://127.0.0.1:41001', BRIDGE_PROOF_TIMEOUT_MS: '9000', X_ONLY_HERE: '1'
+        })
+    })
+
+    it('stays null when neither side contributes, so an unset venue builds the env it always did', () => {
+        assert.strictEqual(mergeIndexerExtraEnv(null, null), null)
+        assert.strictEqual(mergeIndexerExtraEnv(undefined, undefined), null)
+        assert.strictEqual(mergeIndexerExtraEnv({}, {}), null)
+    })
+
+    it('stringifies every value, since a number in a spawn env throws from child_process', () => {
+        const env = mergeIndexerExtraEnv({ A: 0 }, { B: false })
+        assert.deepStrictEqual(env, { A: '0', B: 'false' })
+    })
+})
+
 describe('attestMirrorVenue: the outside-the-responsible-set picker', function () {
 
     const indexers = [
@@ -465,7 +496,7 @@ describe('attestMirrorVenue: reading the hub\'s window keying', function () {
     // `whereClause` and every stand-in looking identical.
     const publisherWith = (whereClause, extra) => Object.assign(
         function AttestationBatchPublisher() {}, extra || {},
-        { prototype: { _selectWindowRows: new Function('a', 'b',
+        { prototype: { selectWindowRows: new Function('a', 'b',
             'return this.q(' + JSON.stringify(whereClause) + ', [a, b])') } })
 
     it('reads the shipped hub and calls its window signed, with no band', () => {
@@ -709,7 +740,7 @@ describe('attestMirrorVenue: the llm precondition', function () {
         // The hub's resolver, given the env a hub child will receive, must agree with the
         // probe on the same env: same module, same answer. A token-only env resolves; an
         // env with a directory that has no credentials file and no token does not.
-        const { resolveHubLlmAuth } = require('../../../../xchain-hub/src/lib/hub-credentials.js')
+        const { resolveHubLlmAuth } = require('../../../../xchain-hub/src/lib/hub_credentials.js')
         const probes = llmProbes()
         const tokenEnv = { HUB_CLAUDE_CONFIG_DIR: '/nonexistent/venue-fixture', HUB_CLAUDE_CODE_OAUTH_TOKEN: 'fixture-token' }
         const bareEnv  = { HUB_CLAUDE_CONFIG_DIR: '/nonexistent/venue-fixture' }
@@ -729,7 +760,7 @@ describe('attestMirrorVenue: mirror barrier graces', function () {
     // Turning down a subset is therefore not a partial win, it is a wedge, and it made
     // the attest-response barrier unobservable behind anchor_attest_barrier.
     const { HUB_SYNC_WATERMARK_GRACE_S } =
-        require('../../../../xchain-indexer/src/hub_db_sync.js')
+        require('../../../../xchain-indexer/src/hub/hub_db_sync.js')
 
     function indexerEnv(graces) {
         return buildIndexerEnv({

@@ -46,8 +46,8 @@ const { silenceOracleValidator }  = require('../helpers/byzantineFaults');
 const { waitForMesh, waitFor }    = require('../helpers/consensusWait');
 
 function hubRequire(rel) { return require(path.resolve(__dirname, '../../../xchain-hub', rel)); }
-const OracleConsensus = hubRequire('src/OracleConsensus.js');
-const OracleRound     = hubRequire('src/OracleRound.js');
+const OracleConsensus = hubRequire('src/oracle/consensus.js');
+const OracleRound     = hubRequire('src/oracle/round.js');
 
 // A deadline, not a settle: waitForMesh returns on the first fully-peered poll.
 const PEER_WAIT_MS = 60_000;
@@ -70,7 +70,7 @@ async function attachOracle(mvh) {
         const round = new OracleRound(hub);
         const oc    = new OracleConsensus(hub, round);
         round.setConsensus(oc);
-        oc.setValidatorSet(await hub._loadValidatorSet());
+        oc.setValidatorSet(await hub.loadValidatorSet());
         await oc.start();
         hub._wtOracle = oc;
         hub._wtRound  = round;
@@ -114,7 +114,7 @@ async function snapshotRows(hub) {
 // The deterministic round leader (every hub agrees: same validator set + round).
 function findOracleLeader(mvh) {
     return mvh.hubs.find((h) => {
-        const l = h._wtOracle._getLeader(ROUND);
+        const l = h._wtOracle.getLeader(ROUND);
         return l && l.addr === h.getPeerManager().validatorAddr;
     });
 }
@@ -185,43 +185,4 @@ describe('MultiValidatorHub: oracle-PBFT byzantine fault tolerance (C.2)', funct
         });
     });
 
-    describe('SAFETY (2-of-4 down): quorum is unreachable, nothing finalizes', function () {
-        let db, mvh, seed, oracle, restores = [];
-
-        before(async function () {
-            db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping oracle-byzantine safety: no env DB and Docker unavailable'); this.skip(); }
-            mvh = new MultiValidatorHub({ count: 4, basePort: 26210, startAttestation: false });
-            await mvh.start();
-            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
-            seed   = seedEqual(mvh);
-            oracle = await attachOracle(mvh);
-            injectSubmissions(mvh);
-        });
-
-        after(async function () {
-            restores.forEach((r) => { try { r(); } catch (_) {} });
-            if (oracle) oracle.stop();
-            if (seed) seed.restore();
-            if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
-            if (db)  { await db.stop(); }
-        });
-
-        it('with two oracle validators silenced, no price snapshot finalizes on any hub', async function () {
-            const leader = findOracleLeader(mvh);
-            assert.ok(leader, 'no oracle round leader identified');
-            // Silence two NON-leaders → leader + 1 honest = 2 active < quorum 3.
-            const nonLeaders = mvh.hubs.filter((h) => h !== leader);
-            restores.push(silenceOracleValidator(nonLeaders[0]));
-            restores.push(silenceOracleValidator(nonLeaders[1]));
-
-            await finalizeAll(mvh);
-
-            for (let i = 0; i < mvh.hubs.length; i++) {
-                const rows = await snapshotRows(mvh.hubs[i]);
-                assert.strictEqual(rows.length, 0,
-                    'hub ' + i + ' finalized a price below quorum (got ' + rows.length + ' rows): safety violation');
-            }
-        });
-    });
 });

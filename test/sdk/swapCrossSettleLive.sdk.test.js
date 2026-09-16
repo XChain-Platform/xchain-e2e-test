@@ -32,7 +32,7 @@
  *      get DOGE/<SWAP_DOGE_TICK> 100, with a DOGE get_address.
  *   3. the hub's CrossChainDexEngine finalizes a 2f+1-signed cross_chain_matches
  *      row over both legs, tagged a_kind/b_kind='swap';
- *   4. each chain's indexer processes the mirrored match through cross_settle.js
+ *   4. each chain's indexer processes the mirrored match through cross_settle/index.js
  *      (verify sigs vs the locked cross_chain capability_snapshots ->
  *      recordCrossChainSettlement -> updateBalances). The SWAP leg takes
  *      cross_settle's Phase-A full-release branch: the BTC leg releases the
@@ -136,12 +136,9 @@ async function btcSwapStatus(swapActionIndex) {
 const MATCH_REF_WHERE = "((a_chain='BTC' AND a_action_index = ?) OR (b_chain='BTC' AND b_action_index = ?))";
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-describe('[sdk] cross-coin SWAP live settlement', function () {
-    this.timeout(0);
+let sdk, maker, btcSwapIndex, dogeRecv, matchEffectiveTime;
 
-    let sdk, maker, btcSwapIndex, dogeRecv, matchEffectiveTime;
-
-    before(async function () {
+async function setupSwapSettlement() {
         const coinCode = global.COIN_CODE || 'BTC';
         if (coinCode !== 'BTC') {
             console.log('    [swap-cross] pinned to BTC, skipping on ' + coinCode);
@@ -171,9 +168,9 @@ describe('[sdk] cross-coin SWAP live settlement', function () {
         dogeRecv = dogeSdk.deriveAddress(dogeKp.publicKey, { type: 'p2pkh' });
         console.log('    [swap-cross] maker=' + maker.address + ' BTC_TICK=' + BTC_TICK + ' DOGE_TICK=' + DOGE_TICK);
         console.log('    [swap-cross] DOGE maker BTC payout addr=' + DOGE_MAKER_BTC_RECV);
-    });
+}
 
-    it('ISSUE the BTC token and place the mirroring cross-coin SWAP (GIVE_COIN != GET_COIN)', async function () {
+async function placeMirroringSwap() {
         const iss = await submit(sdk,
             { action: 'ISSUE', params: { tick: BTC_TICK, maxSupply: 1000000, maxMint: 100000, decimals: 0, description: 'swap-cross-settle', mintSupply: 1000 } },
             { pubkey: maker.address, change: maker.address },
@@ -210,9 +207,9 @@ describe('[sdk] cross-coin SWAP live settlement', function () {
             "JOIN index_coins cc ON cc.id=s.get_coin_id WHERE s.action_index=? AND gc.coin<>cc.coin", [btcSwapIndex]);
         expect(Number(open[0].n), 'the BTC swap is recorded with give_coin != get_coin').to.equal(1);
         expect(await btcSwapStatus(btcSwapIndex), 'BTC swap opens').to.equal('open');
-    });
+}
 
-    it('the hub finalizes the cross-chain match against the BTC swap', async function () {
+async function awaitFinalizedSwapMatch() {
         const deadline = Date.now() + 240000;
         let match = null;
         while (Date.now() < deadline) {
@@ -234,9 +231,9 @@ describe('[sdk] cross-coin SWAP live settlement', function () {
         matchEffectiveTime = Number(match.effective_time);
         console.log('    [swap-cross] hub finalized match ' + match.match_id + ' legs=' + JSON.stringify(legs) +
             ' effective_time=' + matchEffectiveTime + ' (in ' + Math.max(0, matchEffectiveTime - Math.floor(Date.now() / 1000)) + 's)');
-    });
+}
 
-    it('the BTC indexer SETTLES the swap: full escrow released to the DOGE maker', async function () {
+async function awaitBtcSwapSettlement() {
         // Wait for the mirrored match to reach the BTC indexer and cross_settle to release
         // the BTC leg's escrow. REQUIRES HubDbSync mirroring the relay hub's rows into the
         // BTC indexer (see header VENUE note); without it this times out.
@@ -279,9 +276,9 @@ describe('[sdk] cross-coin SWAP live settlement', function () {
         console.log('    [swap-cross] BTC leg SETTLED: settlements=' + settlements +
             ' payout ' + payoutAmt + ' ' + BTC_TICK + ' -> ' + DOGE_MAKER_BTC_RECV +
             ' (swap_status=' + status + ')');
-    });
+}
 
-    it('(best-effort) the DOGE leg also settles out of open on the DOGE indexer', async function () {
+async function observeDogeSwapSettlement() {
         const deadline = Date.now() + 120000;
         let status = null;
         while (Date.now() < deadline) {
@@ -296,5 +293,13 @@ describe('[sdk] cross-coin SWAP live settlement', function () {
         // Log either way; do not fail the suite on the DOGE-leg mirror alone.
         if (status && status !== 'open') console.log('    [swap-cross] DOGE leg settled: swap ' + DOGE_SWAP_INDEX + ' -> ' + status);
         else console.log('    [swap-cross] DOGE leg still ' + status + ' (DOGE indexer HubDbSync mirror not confirmed this run)');
-    });
+}
+
+describe('[sdk] cross-coin SWAP live settlement', function () {
+    this.timeout(0);
+    before(setupSwapSettlement);
+    it('ISSUE the BTC token and place the mirroring cross-coin SWAP (GIVE_COIN != GET_COIN)', placeMirroringSwap);
+    it('the hub finalizes the cross-chain match against the BTC swap', awaitFinalizedSwapMatch);
+    it('the BTC indexer SETTLES the swap: full escrow released to the DOGE maker', awaitBtcSwapSettlement);
+    it('(best-effort) the DOGE leg also settles out of open on the DOGE indexer', observeDogeSwapSettlement);
 });

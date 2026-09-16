@@ -14,8 +14,8 @@
  * on-chain publisher attestation. The checkpoint leg carries ONE attestation per
  * ANCHOR v7 bundle: reward type `anchor_bundle`, round_reference SNAPSHOT_BLOCK,
  * the frozen ANCHOR_REWARD_AMOUNT. The attested canonical (XANCPUB) is built
- * INLINE in two services (the hub producer StateAnchorPublisher._attestationCanonical
- * and the indexer verifier actions/anchor.js _rewardCanonical), and the flag-day map
+ * INLINE in two services (the hub producer StateAnchorPublisher.attestationCanonical
+ * and the indexer verifier actions/anchor/index.js rewardCanonical), and the flag-day map
  * plus the frozen reward amount live as LOCAL COPIES in both services AND the
  * canonical xchain-documentation/protocol/constants.js. A single byte of drift
  * between any two of these silently FORKS the derived validator_rewards row (a
@@ -53,16 +53,16 @@ const protocolConstants = require(path.join(ROOT, 'xchain-documentation/protocol
 const hubAr = require(path.join(ROOT, 'xchain-hub/src/anchor_reward_activation.js'));
 const idxAr = require(path.join(ROOT, 'xchain-indexer/src/anchor_reward_activation.js'));
 
-const StateAnchorPublisher = require(path.join(ROOT, 'xchain-hub/src/StateAnchorPublisher.js'));
-const Anchor               = require(path.join(ROOT, 'xchain-indexer/src/actions/anchor.js'));
+const StateAnchorPublisher = require(path.join(ROOT, 'xchain-hub/src/anchor/publisher.js'));
+const Anchor               = require(path.join(ROOT, 'xchain-indexer/src/actions/anchor/index.js'));
 
 // Both canonical builders read only their argument (no `this`), so invoke them
 // directly off the prototype, each through its own service's eq + ar copies.
 function hubXancpub(b, publisher) {
-    return StateAnchorPublisher.prototype._attestationCanonical.call({}, b, publisher);
+    return StateAnchorPublisher.prototype.attestationCanonical.call({}, b, publisher);
 }
 function idxXancpub(d) {
-    return Anchor.prototype._rewardCanonical.call({}, d);
+    return Anchor.prototype.rewardCanonical.call({}, d);
 }
 
 // One logical bundle attestation in BOTH the hub `b` shape (the bundle header the
@@ -164,13 +164,13 @@ describe('ANCHOR_REWARD (XANCPUB) cross-service parity', function () {
 });
 
 // The ARCHIVE leg of the same contract. The archive XANCPUB canonical is built
-// inline in the hub producer (_archiveAttestationCanonical) and the indexer verifier
-// (_rewardCanonical, FORMAT 6); the ARCHIVE_REWARD map + frozen amount live in the same
+// inline in the hub producer (archiveAttestationCanonical) and the indexer verifier
+// (rewardCanonical, FORMAT 6); the ARCHIVE_REWARD map + frozen amount live in the same
 // twin modules + the canonical SoT. Same fork argument, same guards.
 describe('ARCHIVE_REWARD (archive XANCPUB) cross-service parity', function () {
 
     function hubArchXancpub(cp, batchSeq, publisher) {
-        return StateAnchorPublisher.prototype._archiveAttestationCanonical.call({}, cp, batchSeq, publisher);
+        return StateAnchorPublisher.prototype.archiveAttestationCanonical.call({}, cp, batchSeq, publisher);
     }
     function archiveFixtures(net, snapshotBlock) {
         const PUBLISHER = '07'.repeat(32);

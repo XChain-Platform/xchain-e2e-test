@@ -54,7 +54,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // The leader for the next sequence (all hubs agree on the same sorted set + seq).
 function findLeader(mvh) {
     return mvh.hubs.find((h) => {
-        const l = h.consensus._getLeader(h.consensus.seq + 1);
+        const l = h.consensus.getLeader(h.consensus.seq + 1);
         return l && l.addr === h.consensus.peerManager.validatorAddr;
     });
 }
@@ -129,7 +129,7 @@ describe('MultiValidatorHub: byzantine fault tolerance (L5)', function () {
         assert.notStrictEqual(before.GAS_PRICE, forgedValue, 'precondition: forged value not already set');
 
         // Feed the forged proposal straight into the consensus handler.
-        await target.consensus._handlePrePrepare(
+        await target.consensus.handlePrePrepare(
             forgedPrePrepare(seq, { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: forgedValue } } } }, seed.blockIndex, target.consensus.validatorSet[0])
         );
 
@@ -149,11 +149,11 @@ describe('MultiValidatorHub: byzantine fault tolerance (L5)', function () {
         const view = 0;
         const configA = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: '111' } } } };
         const configB = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: '222' } } } };
-        const digestA = follower.consensus._digest(configA);
-        const digestB = follower.consensus._digest(configB);
+        const digestA = follower.consensus.digest(configA);
+        const digestB = follower.consensus.digest(configB);
         // A PRE_PREPARE is only accepted from the validator the rotation
         // designates as leader for (seq, view) and only with a registered sender
-        // (the _isKnownSender + leader-identity guards in Consensus._handlePrePrepare).
+        // (the isKnownSender + leader-identity guards in Consensus.handlePrePrepare).
         // An equivocating leader is still the LEGITIMATE leader; it just emits two
         // conflicting configs for one seq. Address the envelope from that leader so
         // the follower processes it (a hardcoded non-leader/unregistered sender is
@@ -173,13 +173,13 @@ describe('MultiValidatorHub: byzantine fault tolerance (L5)', function () {
         });
 
         // First proposal locks the follower onto config A.
-        await follower.consensus._handlePrePrepare(env(digestA, configA));
+        await follower.consensus.handlePrePrepare(env(digestA, configA));
         assert.ok(follower.consensus.pendingProposals.has(seq), 'first PRE_PREPARE should create a proposal');
 
         // Equivocation: a second, conflicting PRE_PREPARE for the SAME seq (config B,
         // with its own valid digest). The follower must stay locked to the first
         // config. Dedup-by-seq is the safety mechanism, so it cannot adopt both.
-        await follower.consensus._handlePrePrepare(env(digestB, configB));
+        await follower.consensus.handlePrePrepare(env(digestB, configB));
 
         const prop = follower.consensus.pendingProposals.get(seq);
         assert.strictEqual(prop.digest, digestA,

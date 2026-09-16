@@ -89,6 +89,13 @@ describe('[regression:p1] Teardown & Cleanup', function () {
         assert.ok(seed.every(b => b === 0), 'seed should be zeroed')
         assert.ok(privKey.every(b => b === 0), 'privateKey should be zeroed')
     })
+})
+
+describe('[regression:p1] Teardown & Cleanup', function () {
+
+    afterEach(function () {
+        sinon.restore()
+    })
 
     it('[regression:p1] R-TEAR-004: teardown completes even if miner is unavailable', async function () {
         sinon.stub(axios, 'post').rejects(new Error('ECONNREFUSED'))
@@ -164,6 +171,13 @@ describe('[regression:p1] Error Propagation & Resilience', function () {
             () => node.broadcastTx('deadbeef'),
             /Error sending transaction.*dust/
         )
+    })
+})
+
+describe('[regression:p1] Error Propagation & Resilience', function () {
+
+    afterEach(function () {
+        sinon.restore()
     })
 
     it('[regression:p1] R-ERR-005: encoder createTx throws descriptive error on failure', async function () {

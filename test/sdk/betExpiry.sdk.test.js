@@ -111,8 +111,7 @@ async function assertOneTerminalStatusPerBet(feedIndex) {
     return rows;
 }
 
-describe('[sdk] BET expiry + resolve/expire boundary (§12 E4/E7)', function () {
-
+function registerBetExpiryHooks() {
     before(async function () {
         // See bet.sdk.test.js: ^id compaction outruns the indexer's wire acceptance.
         sdk = makeSdk({ compactAddresses: false });
@@ -131,8 +130,9 @@ describe('[sdk] BET expiry + resolve/expire boundary (§12 E4/E7)', function () 
     after(async function () {
         await releaseClock();
     });
+}
 
-    it('E4a: an unresolved feed expires at expire_at and refunds every stake', async function () {
+async function testPlainExpiry() {
         const { feedIndex, deadline, expireAt } = await openMarket(tickPlain, 'E4 plain expiry');
         await placeBoth(feedIndex, '6.00000000', '4.00000000');
 
@@ -161,9 +161,9 @@ describe('[sdk] BET expiry + resolve/expire boundary (§12 E4/E7)', function () 
         const rows = await assertOneTerminalStatusPerBet(feedIndex);
         expect(rows.map(r => r.bet_status), 'every stake refunded').to.deep.equal(['refunded', 'refunded']);
         expect(rows.filter(r => r.bet_status === 'open').length, 'nothing left open').to.equal(0);
-    });
+}
 
-    it('E4b: a single large jump latches AND expires the feed in the same pass', async function () {
+async function testSamePassExpiry() {
         const { feedIndex, expireAt } = await openMarket(tickSamePass, 'E4 latch+expire same pass');
         await placeBoth(feedIndex, '6.00000000', '4.00000000');
 
@@ -186,9 +186,9 @@ describe('[sdk] BET expiry + resolve/expire boundary (§12 E4/E7)', function () 
         amtEq(await balanceOf(p1.address, tickSamePass), '6', 'p1 refunded in full');
         amtEq(await balanceOf(p2.address, tickSamePass), '4', 'p2 refunded in full');
         await assertOneTerminalStatusPerBet(feedIndex);
-    });
+}
 
-    it('E7a: a resolve in the boundary block LOSES to expiry', async function () {
+async function testBoundaryResolveLoses() {
         const { feedIndex, expireAt } = await openMarket(tickBoundary, 'E7 resolve vs expiry');
         await placeBoth(feedIndex, '6.00000000', '4.00000000');
 
@@ -213,9 +213,9 @@ describe('[sdk] BET expiry + resolve/expire boundary (§12 E4/E7)', function () 
         amtEq(Number(await balanceOf(oracle.address, tickBoundary)) - Number(oracleBefore), '0',
             'the losing resolve took no fee');
         await assertOneTerminalStatusPerBet(feedIndex);
-    });
+}
 
-    it('E7b: a resolve one block EARLIER wins, and the pass then skips the feed', async function () {
+async function testEarlierResolveWins() {
         const { feedIndex, deadline, expireAt } = await openMarket(tickEarly, 'E7 resolve before window closes');
         await placeBoth(feedIndex, '6.00000000', '4.00000000');
 
@@ -247,9 +247,9 @@ describe('[sdk] BET expiry + resolve/expire boundary (§12 E4/E7)', function () 
         amtEq(Number(await balanceOf(oracle.address, tickEarly)) - Number(oracleBefore), '0.2',
             'oracle fee unchanged after expire_at passed');
         await assertOneTerminalStatusPerBet(feedIndex);
-    });
+}
 
-    it('E7c: a cancel in the boundary block PREEMPTS expiry', async function () {
+async function testBoundaryCancelWins() {
         const { feedIndex, expireAt } = await openMarket(tickCancelWins, 'E7 cancel preempts expiry');
         await placeBoth(feedIndex, '6.00000000', '4.00000000');
 
@@ -270,5 +270,13 @@ describe('[sdk] BET expiry + resolve/expire boundary (§12 E4/E7)', function () 
         amtEq(await balanceOf(p1.address, tickCancelWins), '6', 'p1 refunded in full');
         amtEq(await balanceOf(p2.address, tickCancelWins), '4', 'p2 refunded in full');
         await assertOneTerminalStatusPerBet(feedIndex);
-    });
+}
+
+describe('[sdk] BET expiry + resolve/expire boundary (§12 E4/E7)', function () {
+    registerBetExpiryHooks();
+    it('E4a: an unresolved feed expires at expire_at and refunds every stake', testPlainExpiry);
+    it('E4b: a single large jump latches AND expires the feed in the same pass', testSamePassExpiry);
+    it('E7a: a resolve in the boundary block LOSES to expiry', testBoundaryResolveLoses);
+    it('E7b: a resolve one block EARLIER wins, and the pass then skips the feed', testEarlierResolveWins);
+    it('E7c: a cancel in the boundary block PREEMPTS expiry', testBoundaryCancelWins);
 });

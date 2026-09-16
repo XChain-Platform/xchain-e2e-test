@@ -17,9 +17,9 @@
  * publisher-attestation tail. Three services hold their own inline copy of that
  * field order:
  *
- *   producer  xchain-hub      StateAnchorPublisher._buildV7Payload (method name
+ *   producer  xchain-hub      StateAnchorPublisher.buildV7Payload (method name
  *                             unchanged; only the version byte it writes moved)
- *   parser    xchain-indexer  actions/anchor.js _parseBundle (formats[0])
+ *   parser    xchain-indexer  actions/anchor/index.js parseBundle (formats[0])
  *   parser    xchain-sdk      light.parseAnchorV0
  *
  * A one-field drift between any two forks consensus silently: the indexer rebuilds
@@ -51,26 +51,26 @@ const path   = require('path');
 const ROOT = path.resolve(__dirname, '../../../..');
 
 const GOLDEN = require(path.join(ROOT, 'xchain-documentation/protocol/test-vectors/anchor_canonical.json'));
-const StateAnchorPublisher = require(path.join(ROOT, 'xchain-hub/src/StateAnchorPublisher.js'));
-const Anchor               = require(path.join(ROOT, 'xchain-indexer/src/actions/anchor.js'));
+const StateAnchorPublisher = require(path.join(ROOT, 'xchain-hub/src/anchor/publisher.js'));
+const Anchor               = require(path.join(ROOT, 'xchain-indexer/src/actions/anchor/index.js'));
 const sdkLight             = require(path.join(ROOT, 'xchain-sdk/src/light.js'));
 
 const BUNDLE = GOLDEN.fixture.bundle;
 const WIRE   = GOLDEN.vectors.v0;
 
 // The builder reads validator_signatures as a JSON string off each state_checkpoints
-// row, and takes no `this` beyond _parseSigs.
-const hubStub = { _parseSigs: StateAnchorPublisher.prototype._parseSigs };
+// row, and takes no `this` beyond parseSigs.
+const hubStub = { parseSigs: StateAnchorPublisher.prototype.parseSigs };
 const hubSections = BUNDLE.sections.map(s =>
     Object.assign({}, s, { validator_signatures: JSON.stringify(s.validator_signatures) }));
 
 function hubBuild(sections) {
-    return StateAnchorPublisher.prototype._buildV7Payload.call(
+    return StateAnchorPublisher.prototype.buildV7Payload.call(
         hubStub, sections, BUNDLE.publisher, BUNDLE.attest_sigs);
 }
 
 // Drive the indexer's real parser over a wire string and collect the anchor_actions
-// rows it would write. The DB stub answers the three reads _parseBundle makes:
+// rows it would write. The DB stub answers the three reads parseBundle makes:
 //   - getMaxAnchorCheckpointSeq: no watermark, so the stale-seq guard admits the wire;
 //   - the oracle_publish set: EMPTY, which makes the verdict 'unverified' and skips
 //     both signature verification and the reward, because the frozen vector carries
@@ -109,7 +109,7 @@ describe('ANCHOR v0 bundle wire cross-service parity', function () {
 
     it('the hub producer reproduces the frozen vector byte-for-byte', function () {
         assert.strictEqual(hubBuild(hubSections), WIRE,
-            'StateAnchorPublisher._buildV7Payload drifted from the frozen ANCHOR v0 vector');
+            'StateAnchorPublisher.buildV7Payload drifted from the frozen ANCHOR v0 vector');
     });
 
     it('the hub applies both ordering rules rather than echoing input order', function () {

@@ -22,7 +22,7 @@
  * WHY THE BOUNDARY IS ARRANGEABLE HERE AND NOT A RACE. Section 4.1 binds a row at
  * the first block B with `effective_time <= t(B)` and `B <= deadline_block`, and on
  * regtest `t(B)` is the block's RAW stamp: `PROTOCOL_TIME_MTP_NETWORKS.regtest` is
- * false in `xchain-indexer/src/protocol_time.js`, so the median-time-past rule that
+ * false in `xchain-indexer/src/consensus/protocol_time.js`, so the median-time-past rule that
  * governs testnet does not apply and a block mined now is stamped now. That single
  * fact is what turns this drill from a race into arithmetic: with the miner paused,
  * mining before the effective time produces blocks that CANNOT satisfy the rule, and

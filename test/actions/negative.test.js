@@ -37,7 +37,9 @@ describe('NEGATIVE', () => {
             assert(invalidSend, "Send should be rejected with insufficient funds")
         })
     })
+})
 
+describe('NEGATIVE', () => {
     describe('ISSUE - non-owner edit', () => {
         it('should reject an issue edit from a non-owner address', async () => {
             let owner = await cryptoHelper.getNewFundedAddress("NEG.ISSUE.OWNER", COIN, NETWORK, null, "legacy", 0, 1)
@@ -58,7 +60,9 @@ describe('NEGATIVE', () => {
             assert(invalidIssue, "Issue edit should be rejected from non-owner")
         })
     })
+})
 
+describe('NEGATIVE', () => {
     describe('SEND - unknown tick', () => {
         it('should reject a send with a non-existent token', async () => {
             let addr = await cryptoHelper.getNewFundedAddress("NEG.SEND.TICK", COIN, NETWORK, null, "legacy", 0, 1)
@@ -75,7 +79,9 @@ describe('NEGATIVE', () => {
             assert(invalidSend, "Send should be rejected with unknown tick")
         })
     })
+})
 
+describe('NEGATIVE', () => {
     describe('SEND - invalid amount format', () => {
         it('should reject a send with decimals on an indivisible token', async () => {
             let addr = await cryptoHelper.getNewFundedAddress("NEG.SEND.AMT", COIN, NETWORK, null, "legacy", 0, 1)

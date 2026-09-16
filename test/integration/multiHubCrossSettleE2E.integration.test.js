@@ -14,11 +14,11 @@
  *
  * The in-process DEX PBFT tests prove a match finalizes with a 2f+1 signature
  * bundle, but they stop at the hub's cross_chain_matches row. The indexer's
- * cross_settle.js (which RE-verifies those signatures against the locked
+ * cross_settle/index.js (which RE-verifies those signatures against the locked
  * capability snapshot and releases escrow) was only unit-tested with SYNTHETIC
  * rows/sigs. This closes the gap by feeding a REAL multi-hub-finalized match row
  * into the real indexer handler, proving the cross-repo canonical alignment
- * (hub _canonicalMatch vs indexer _canonical) and the multi-sig quorum end to end:
+ * (hub canonicalMatch vs indexer canonical) and the multi-sig quorum end to end:
  *   - POSITIVE: the federated row passes signature + weighted-quorum verification
  *     → cross_settle reaches STATUS='valid' and records the settlement;
  *   - NEGATIVE: a tampered signature bundle fails quorum → no settlement.
@@ -45,7 +45,7 @@ const { seedWeightSnapshot }     = require('../helpers/seededWeightSnapshot');
 const { MockCrossChainOfferBook, makeOrder } = require('../helpers/mockCrossChainOfferBook');
 const { waitForMesh, waitFor } = require('../helpers/consensusWait');
 
-const CrossSettle    = require(path.resolve(__dirname, '../../../xchain-indexer/src/actions/cross_settle.js'));
+const CrossSettle    = require(path.resolve(__dirname, '../../../xchain-indexer/src/actions/cross_settle/index.js'));
 const IndexerUtility = require(path.resolve(__dirname, '../../../xchain-indexer/src/utility.js'));
 
 const COUNT        = 4;
@@ -143,7 +143,7 @@ describe('MultiValidatorHub: cross-chain DEX match to indexer CROSS_SETTLE e2e (
         const dexes = mvh.getCrossChainDexes();
         const events = [];
         const listeners = dexes.map((d, i) => { const fn = (ev) => events.push(Object.assign({ hubIndex: i }, ev)); d.consensus.on('match:finalized', fn); return fn; });
-        await Promise.all(dexes.map((d) => d._discoverAndMatch().catch(() => {})));
+        await Promise.all(dexes.map((d) => d.discoverAndMatch().catch(() => {})));
         // Every case below reads matchRow, a PERSISTED cross_chain_matches row, and
         // the finalize event only STARTS that write: CrossChainDexEngine subscribes
         // to 'match:finalized' with an un-awaited `this._writeFinalizedMatch(ev)`,

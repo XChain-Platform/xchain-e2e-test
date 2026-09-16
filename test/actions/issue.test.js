@@ -63,7 +63,9 @@ describe('ISSUE', () => {
             assert(result.issue, "Issue v2 should exist in DB")
         })
     })
+})
 
+describe('ISSUE', () => {
     describe('v3 - edit lock params', () => {
         it('should lock params of an existing token', async () => {
             let addr = await cryptoHelper.getNewFundedAddress("ISSUE.V3", COIN, NETWORK, null, "legacy", 0, 1)

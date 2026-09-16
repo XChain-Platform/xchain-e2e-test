@@ -24,34 +24,59 @@ const assert  = require('assert')
 const fs      = require('fs')
 const path    = require('path')
 const bitcoin = require('bitcoinjs-lib')
+const { moduleEntry } = require('../support/sibling_source.js')
 
 const protocol = require('../../../xchain-documentation/protocol/constants.js')
 
-const encoderValidator = require('../../../xchain-encoder/src/validator.js')
+const encoderValidator = require('../../../xchain-encoder/src/common/validator.js')
 const XChainDecoder     = require('../../../xchain-decoder/src/XChainDecoder.js')
 const sdkValidator      = require('../../../xchain-sdk/src/validator.js')
-const indexerDeploy     = require('../../../xchain-indexer/src/actions/deploy.js')
-const indexerXcall      = require('../../../xchain-indexer/src/actions/xcall.js')
-const indexerXexec      = require('../../../xchain-indexer/src/actions/xexec.js')
+const indexerDeploy     = require('../../../xchain-indexer/src/actions/deploy/index.js')
+const indexerXcall      = require('../../../xchain-indexer/src/actions/xcall/index.js')
+// xexec is the one handler here that may still be flat: `actions/xexec.js` on an older
+// indexer, `actions/xexec/index.js` once it moved into its parts directory. moduleEntry
+// loads whichever exists and throws naming both when neither does.
+const indexerXexec      = require(moduleEntry(path.join(__dirname, '../../../xchain-indexer/src/actions/xexec.js')))
 const hubConstants      = require('../../../xchain-hub/src/constants.js')
-const XChainVM          = require('../../../xchain-vm/src/index.js')
-const explorerVmQuery   = require('../../../xchain-explorer/src/vm-query.js')
 
-// The indexer's execute.js re-validates VM_MAX_CALL_DEPTH/VM_MIN_CALL_GAS host-side
+// An indexer action handler is either src/actions/<name>.js or, once it is split, the
+// directory src/actions/<name>/ with the entry at index.js and the logic in parts beside
+// it (the shape the sdk drift gate pins, which forbids a flat file next to the directory).
+// These tripwires read the handler as SOURCE TEXT, so they read every file of it: reading
+// index.js alone would miss a literal that moved into a part and report the guard
+// "no longer assigns" it, which reads as drift when nothing drifted.
+function readIndexerHandler(handlerPath) {
+    const asDirectory = handlerPath.replace(/\.js$/, '')
+    if (fs.existsSync(asDirectory) && fs.statSync(asDirectory).isDirectory())
+        return fs.readdirSync(asDirectory).filter(f => f.endsWith('.js')).sort()
+            .map(f => fs.readFileSync(path.join(asDirectory, f), 'utf8')).join('\n')
+    return fs.existsSync(handlerPath) ? fs.readFileSync(handlerPath, 'utf8') : null
+}
+
+const XChainVM          = require('../../../xchain-vm/src/index.js')
+const explorerVmQuery   = require('../../../xchain-explorer/src/contract/vm_query.js')
+
+// The indexer's EXECUTE handler re-validates VM_MAX_CALL_DEPTH/VM_MIN_CALL_GAS host-side
 // as un-exported `const`s. Those consts derive from the vendored
-// ../protocol/constants.js rather than bare literals, so assert the source is
+// src/protocol/constants.js rather than bare literals, so assert the source is
 // wired to the vendored module (no bare literal can re-enter) and read the effective
 // values from that same vendored copy. Byte-identity of the vendored copy to the
 // canonical source is asserted separately below.
+//
+// The `../` run in the require is matched rather than counted: the handler moved from
+// src/actions/execute.js to src/actions/execute/index.js and reaches the same vendored
+// module one directory further up. Pinning the exact run would fail on a pure move,
+// which is not what this guard is for; what it must catch is the require disappearing
+// in favour of a bare literal, and any depth of `../` still catches that.
 function readIndexerExecuteCallCaps() {
     const src = fs.readFileSync(
-        path.join(__dirname, '../../../xchain-indexer/src/actions/execute.js'), 'utf8')
-    assert.ok(/require\((['"])\.\.\/protocol\/constants(?:\.js)?\1\)/.test(src),
-        'indexer execute.js no longer requires the vendored ../protocol/constants module')
+        path.join(__dirname, '../../../xchain-indexer/src/actions/execute/index.js'), 'utf8')
+    assert.ok(/require\((['"])(?:\.\.\/)+protocol\/constants(?:\.js)?\1\)/.test(src),
+        'indexer EXECUTE handler no longer requires the vendored protocol/constants module')
     assert.ok(/MAX_CALL_DEPTH\s*=\s*[A-Za-z_$][\w$]*\.VM_MAX_CALL_DEPTH/.test(src),
-        'indexer execute.js MAX_CALL_DEPTH is not derived from the vendored VM_MAX_CALL_DEPTH constant')
+        'indexer execute/index.js MAX_CALL_DEPTH is not derived from the vendored VM_MAX_CALL_DEPTH constant')
     assert.ok(/MIN_CALL_GAS\s*=\s*[A-Za-z_$][\w$]*\.VM_MIN_CALL_GAS/.test(src),
-        'indexer execute.js MIN_CALL_GAS is not derived from the vendored VM_MIN_CALL_GAS constant')
+        'indexer execute/index.js MIN_CALL_GAS is not derived from the vendored VM_MIN_CALL_GAS constant')
     const vendored = require('../../../xchain-indexer/src/protocol/constants.js')
     return { MAX_CALL_DEPTH: vendored.VM_MAX_CALL_DEPTH, MIN_CALL_GAS: vendored.VM_MIN_CALL_GAS }
 }
@@ -142,10 +167,9 @@ describe('Protocol size-limit drift guard', () => {
             )
         })
 
-        // Previously only asserted by the explorer's own unit test
-        // (xchain-explorer/test/unit/vm-query.test.js), not this central
-        // tripwire; a skipped explorer suite in the cross-service CI lane
-        // could let this copy drift unnoticed (uuid 269217d2).
+        // Pins the same MAX_CODE_SIZE limit the explorer's own unit test
+        // (xchain-explorer/test/unit/vm_query.test.js) checks, from the
+        // protocol side, so a skipped explorer suite cannot let it drift.
         it('[regression:p0] explorer vm-query MAX_CODE_SIZE === canonical', () => {
             assert.strictEqual(
                 explorerVmQuery.MAX_CODE_SIZE,
@@ -225,7 +249,7 @@ describe('Protocol size-limit drift guard', () => {
 
     describe('XCALL consensus bounds (indexer is the arbiter)', () => {
 
-        // The indexer xcall.js values gate cross-chain calls on chain. They are
+        // The indexer xcall/index.js values gate cross-chain calls on chain. They are
         // literal-copied into the canonical module; assert they have not drifted.
         const XCALL_FIELDS = [
             'XCALL_MIN_GAS', 'XCALL_MAX_GAS', 'XCALL_MAX_HOPS',
@@ -241,7 +265,7 @@ describe('Protocol size-limit drift guard', () => {
             })
         })
 
-        // The hub keeps its own defense-in-depth copy (CrossChainCallEngine.js
+        // The hub keeps its own defense-in-depth copy (cross_chain/call_engine.js
         // rejects any relay whose cross_hops exceeds it before ever reaching the
         // indexer arbiter). If the hub relaxed while the indexer stayed strict, the
         // hub would PBFT-sign a relay row the indexer then rejects (wasted round).
@@ -254,7 +278,7 @@ describe('Protocol size-limit drift guard', () => {
         })
 
         // XCALL_MAX_RETURN_BYTES is enforced in a different indexer module
-        // (xexec.js, not xcall.js): an oversize return becomes status
+        // (xexec.js, not xcall/index.js): an oversize return becomes status
         // 'payload_too_large' with an empty payload. Asserted separately since it
         // does not live on indexerXcall (uuid 333).
         it('[regression:p0] indexer xexec XCALL_MAX_RETURN_BYTES === canonical (uuid 333)', () => {
@@ -299,7 +323,7 @@ describe('Protocol size-limit drift guard', () => {
 
         // VM_MAX_CALL_DEPTH / VM_MIN_CALL_GAS are literal-copied into the VM
         // (emit-time enforcement, now exported) and the indexer's host-side
-        // re-validation copy (inline consts in execute.js, read via source scan
+        // re-validation copy (inline consts in execute/index.js, read via source scan
         // since they are not exported). A drift between VM emit-time and indexer
         // re-validation would fork execution outcomes (uuid 334).
         it('[regression:p0] VM MAX_CALL_DEPTH / MIN_CALL_GAS === canonical', () => {
@@ -315,17 +339,17 @@ describe('Protocol size-limit drift guard', () => {
             )
         })
 
-        it('[regression:p0] indexer execute.js re-validation MAX_CALL_DEPTH / MIN_CALL_GAS === canonical', () => {
+        it('[regression:p0] indexer execute/index.js re-validation MAX_CALL_DEPTH / MIN_CALL_GAS === canonical', () => {
             const indexerCaps = readIndexerExecuteCallCaps()
             assert.strictEqual(
                 indexerCaps.MAX_CALL_DEPTH,
                 protocol.VM_MAX_CALL_DEPTH,
-                'indexer execute.js MAX_CALL_DEPTH drifted from the canonical VM_MAX_CALL_DEPTH protocol constant'
+                'indexer execute/index.js MAX_CALL_DEPTH drifted from the canonical VM_MAX_CALL_DEPTH protocol constant'
             )
             assert.strictEqual(
                 indexerCaps.MIN_CALL_GAS,
                 protocol.VM_MIN_CALL_GAS,
-                'indexer execute.js MIN_CALL_GAS drifted from the canonical VM_MIN_CALL_GAS protocol constant'
+                'indexer execute/index.js MIN_CALL_GAS drifted from the canonical VM_MIN_CALL_GAS protocol constant'
             )
         })
     })
@@ -333,7 +357,7 @@ describe('Protocol size-limit drift guard', () => {
     describe('Chunked DEPLOY caps (MAX_DEPLOY_CHUNKS / MAX_DEPLOYCHUNK_PART_BYTES)', () => {
 
         const chunkHelper        = require('../../../xchain-sdk/src/chunkHelper.js')
-        const indexerDeployChunk = require('../../../xchain-indexer/src/actions/deploy_chunk.js')
+        const indexerDeployChunk = require('../../../xchain-indexer/src/actions/deploy/deploy_chunk.js')
 
         it('[regression:p0] MAX_DEPLOY_CHUNKS === canonical across SDK + indexer', () => {
             assert.strictEqual(chunkHelper.MAX_DEPLOY_CHUNKS, protocol.MAX_DEPLOY_CHUNKS,
@@ -506,19 +530,19 @@ describe('Protocol size-limit drift guard', () => {
             assert.strictEqual(
                 indexerXcall.XCALL_RESULT_ORPHAN_GRACE_SECONDS,
                 protocol.XCALL_RESULT_ORPHAN_GRACE_SECONDS,
-                'indexer xcall.js XCALL_RESULT_ORPHAN_GRACE_SECONDS drifted from the canonical protocol constant'
+                'indexer xcall/index.js XCALL_RESULT_ORPHAN_GRACE_SECONDS drifted from the canonical protocol constant'
             )
             assertVendored('XCALL_RESULT_ORPHAN_GRACE_SECONDS', ['xchain-indexer'])
         })
 
         // COMPRESSION_MAX_RATIO is the inflation bound that makes a compressed
         // payload safe to stream: a decompressor that stops later than the encoder
-        // planned is a zip-bomb surface. The encoder (src/validator.js) and the
-        // explorer compression reader (src/compression.js) each declare a bare
+        // planned is a zip-bomb surface. The encoder (src/common/validator.js) and the
+        // explorer compression reader (src/http/compression.js) each declare a bare
         // literal; the explorer's only guard compared itself to the encoder, so the
         // pair could drift from canonical together and stay green (uuid 3499).
         it('[regression:p0] COMPRESSION_MAX_RATIO === canonical across encoder + explorer + sdk', () => {
-            const explorerCompression = require('../../../xchain-explorer/src/compression.js')
+            const explorerCompression = require('../../../xchain-explorer/src/http/compression.js')
             const sdkCompression      = require('../../../xchain-sdk/src/compression.js')
             assert.strictEqual(
                 encoderValidator.COMPRESSION_MAX_RATIO,
@@ -545,7 +569,7 @@ describe('Protocol size-limit drift guard', () => {
         // test/unit/xcall-constants-cross-repo.test.js) gates only MAX_CODE_SIZE
         // and three XCALL bounds, and its participating repo list is vm, indexer
         // and sdk, so the decoder and explorer copies sit outside it entirely.
-        // xchain-hub test/unit/constants-conformance.test.js records the missing
+        // xchain-hub test/unit/shared/constants_conformance.test.js records the missing
         // twin as pending coordinated work; this is that twin, on the side that
         // can see every sibling at once (uuid ae66b1df).
         it('[regression:p0] PRICE_MAX / ORACLE_DEVIATION_THRESHOLD === canonical in every vendored copy', () => {
@@ -577,10 +601,10 @@ describe('Protocol size-limit drift guard', () => {
         it('[regression:p0] CANONICAL_REORG_BUFFER === canonical across hub + indexer + sdk (uuid 96193535)', () => {
             // Every consumer buries exactly once, locally: the hub resolves a capability
             // snapshot at H - CANONICAL_REORG_BUFFER, and the three verifier families that
-            // re-derive that set from on-chain state (indexer attest.js, indexer
+            // re-derive that set from on-chain state (indexer attest/index.js, indexer
             // recovery.js, sdk light.js) must bury by the identical depth or they resolve
             // a different signer set than the hub that signed the artifact. Each repo
-            // holds its own bare literal; the indexer's snapshotReorgBuffer.test.js pins
+            // holds its own bare literal; the indexer's test/unit/recovery/snapshot_reorg_buffer.test.js pins
             // its copy to the literal 6 and cross-checks the hub copy, never canonical,
             // and the sdk copy had no guard anywhere.
             const reorgCopies = {
@@ -629,7 +653,7 @@ describe('Protocol size-limit drift guard', () => {
         // BATCH_COMMAND_LIMIT caps the commands one BATCH may carry. The indexer's
         // actions/batch.js is the on-chain arbiter and holds its copy as an instance
         // field (`this.commandLimit`), not an export, so it is read from source the same
-        // way the execute.js call caps above are. The SDK exports its own literal from
+        // way the execute/index.js call caps above are. The SDK exports its own literal from
         // batchLimits.js, and four further SDK sites (validator, batchBuilder,
         // decoder/parse, preflight/checks/batch) follow that one (uuid 500f2f11).
         it('[regression:p0] BATCH_COMMAND_LIMIT === canonical across SDK batchLimits + indexer batch.js (uuid 500f2f11)', () => {
@@ -642,12 +666,13 @@ describe('Protocol size-limit drift guard', () => {
             )
             const batchPath = path.join(
                 __dirname, '../../../xchain-indexer/src/actions/batch.js')
-            assert.ok(fs.existsSync(batchPath),
-                'xchain-indexer src/actions/batch.js is missing; this tripwire needs the full sibling tree')
+            const batchSource = readIndexerHandler(batchPath)
+            assert.ok(batchSource,
+                'xchain-indexer src/actions/batch.js is missing at both spellings (flat file and '
+                + 'directory); this tripwire needs the full sibling tree')
             // Read the indexer copy from source: it is an instance field on the action
             // class, and requiring that module drags in the whole indexer action tree.
-            const commandLimit = /this\.commandLimit\s*=\s*(\d+)\s*;/.exec(
-                fs.readFileSync(batchPath, 'utf8'))
+            const commandLimit = /this\.commandLimit\s*=\s*(\d+)\s*;/.exec(batchSource)
             assert.ok(commandLimit,
                 'indexer actions/batch.js no longer assigns this.commandLimit as a literal; re-point this guard')
             assert.strictEqual(Number(commandLimit[1]), protocol.BATCH_COMMAND_LIMIT,
@@ -680,10 +705,11 @@ describe('Protocol size-limit drift guard', () => {
 
             const batchPath = path.join(
                 __dirname, '../../../xchain-indexer/src/actions/batch.js')
-            assert.ok(fs.existsSync(batchPath),
-                'xchain-indexer src/actions/batch.js is missing; this tripwire needs the full sibling tree')
-            const weightBudget = /this\.weightBudget\s*=\s*(\d+)\s*;/.exec(
-                fs.readFileSync(batchPath, 'utf8'))
+            const batchSource = readIndexerHandler(batchPath)
+            assert.ok(batchSource,
+                'xchain-indexer src/actions/batch.js is missing at both spellings (flat file and '
+                + 'directory); this tripwire needs the full sibling tree')
+            const weightBudget = /this\.weightBudget\s*=\s*(\d+)\s*;/.exec(batchSource)
             assert.ok(weightBudget,
                 'indexer actions/batch.js no longer assigns this.weightBudget as a literal; re-point this guard')
             assert.strictEqual(Number(weightBudget[1]), protocol.BATCH_WEIGHT_BUDGET,
@@ -741,6 +767,39 @@ describe('Protocol size-limit drift guard', () => {
             // The lookback is 2K by construction; a canonical edit to one alone strands the window.
             assert.strictEqual(protocol.ROLLCALL_STREAK_LOOKBACK, 2 * protocol.ROLLCALL_EVICT_MISSES,
                 'canonical ROLLCALL_STREAK_LOOKBACK is no longer exactly 2 x ROLLCALL_EVICT_MISSES')
+        })
+
+        // The ROLLCALL GATES rail is a second, later pair of twins: canonical declares
+        // ROLLCALL_GATES_REGTEST_ARMED_HEIGHT and its opt-in env key, and
+        // xchain-hub/src/rollcall_gates_activation.js and
+        // xchain-indexer/src/rollcall_gates_activation.js each re-declare both as bare
+        // literals of their own. Neither repo compares its copy to canonical, and the
+        // block above covers rollcall_activation.js only, so the gates twins could be
+        // edited in step and leave the map of record behind with nothing red. The
+        // height is what arms the rail on regtest and the env key is what opts a venue
+        // in, so a drift in either silently changes which epochs the venue publishes
+        // gates for while the hub and the indexer still agree with each other.
+        it('[regression:p0] ROLLCALL_GATES_REGTEST_ARMED_HEIGHT / _ENV === canonical across hub + indexer', () => {
+            const hubGates     = require('../../../xchain-hub/src/rollcall_gates_activation.js')
+            const indexerGates = require('../../../xchain-indexer/src/rollcall_gates_activation.js')
+
+            // A dropped export on all three sides would compare undefined to undefined
+            // and pass, which is the shape this whole file exists to refuse.
+            assert.ok(Number.isFinite(protocol.ROLLCALL_GATES_REGTEST_ARMED_HEIGHT),
+                'ROLLCALL_GATES_REGTEST_ARMED_HEIGHT is not a finite value on the canonical protocol constants module')
+            assert.ok(typeof protocol.ROLLCALL_GATES_REGTEST_ENV === 'string'
+                && protocol.ROLLCALL_GATES_REGTEST_ENV.length > 0,
+                'ROLLCALL_GATES_REGTEST_ENV is not a non-empty string on the canonical protocol constants module')
+
+            const names = ['ROLLCALL_GATES_REGTEST_ARMED_HEIGHT', 'ROLLCALL_GATES_REGTEST_ENV']
+            names.forEach((name) => {
+                assert.strictEqual(hubGates[name], protocol[name],
+                    'hub rollcall_gates_activation ' + name + ' drifted from the canonical protocol constant; ' +
+                    'the hub decides which epochs it publishes gates for')
+                assert.strictEqual(indexerGates[name], protocol[name],
+                    'indexer rollcall_gates_activation ' + name + ' drifted from the canonical protocol constant; ' +
+                    'the indexer is where the gates predicate is judged, so its copy decides what is accepted')
+            })
         })
     })
 

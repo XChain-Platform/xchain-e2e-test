@@ -71,6 +71,24 @@ describe('Chaos Experiment 7: UTXO Race Condition @P1', function () {
             const utxoListForA = (_verifiedUtxosAddress === addrA && _verifiedUtxos) ? _verifiedUtxos : []
             assert.deepStrictEqual(utxoListForA, cachedUtxos, 'same address should use cached UTXOs')
         })
+    })
+})
+
+describe('Chaos Experiment 7: UTXO Race Condition @P1', function () {
+
+    let saved
+
+    beforeEach(function () {
+        saved = saveGlobals(GLOBAL_KEYS)
+        global.NETWORK_OBJECT = bitcoin.networks.regtest
+    })
+
+    afterEach(function () {
+        restoreGlobals(saved)
+        sinon.restore()
+    })
+
+    describe('UTXO cache isolation across addresses', function () {
 
         it('cache is cleared after being consumed', function () {
             let _verifiedUtxos = [{ txid: 'aabb', vout: 0 }]
@@ -85,6 +103,21 @@ describe('Chaos Experiment 7: UTXO Race Condition @P1', function () {
             assert.strictEqual(_verifiedUtxos, null, 'cache should be cleared after consumption')
             assert.strictEqual(_verifiedUtxosAddress, null, 'cache address should be cleared')
         })
+    })
+})
+
+describe('Chaos Experiment 7: UTXO Race Condition @P1', function () {
+
+    let saved
+
+    beforeEach(function () {
+        saved = saveGlobals(GLOBAL_KEYS)
+        global.NETWORK_OBJECT = bitcoin.networks.regtest
+    })
+
+    afterEach(function () {
+        restoreGlobals(saved)
+        sinon.restore()
     })
 
     describe('waitForUtxos timeout with empty tracker responses', function () {
@@ -113,6 +146,21 @@ describe('Chaos Experiment 7: UTXO Race Condition @P1', function () {
             assert.strictEqual(result, true)
             assert.strictEqual(stub.callCount, 3)
         })
+    })
+})
+
+describe('Chaos Experiment 7: UTXO Race Condition @P1', function () {
+
+    let saved
+
+    beforeEach(function () {
+        saved = saveGlobals(GLOBAL_KEYS)
+        global.NETWORK_OBJECT = bitcoin.networks.regtest
+    })
+
+    afterEach(function () {
+        restoreGlobals(saved)
+        sinon.restore()
     })
 
     describe('double-spend detection', function () {

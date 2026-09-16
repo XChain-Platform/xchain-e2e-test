@@ -52,8 +52,8 @@ const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
 const { MockCrossChainOfferBook, makeOrder } = require('../helpers/mockCrossChainOfferBook');
 const { waitForMesh, waitFor } = require('../helpers/consensusWait');
 
-const OracleConsensus = loadHubModule('src/OracleConsensus.js');
-const OracleRound     = loadHubModule('src/OracleRound.js');
+const OracleConsensus = loadHubModule('src/oracle/consensus.js');
+const OracleRound     = loadHubModule('src/oracle/round.js');
 
 const COUNT        = 10;
 const QUORUM_SIGS  = 7;          // tally > 2S/3 with equal weights => >=7 of 10 sources
@@ -82,7 +82,7 @@ async function attachOracle(mvh) {
         const round = new OracleRound(hub);
         const oc    = new OracleConsensus(hub, round);
         round.setConsensus(oc);
-        oc.setValidatorSet(await hub._loadValidatorSet());
+        oc.setValidatorSet(await hub.loadValidatorSet());
         await oc.start();
         hub._wtOracle = oc;
         hub._wtRound  = round;
@@ -116,14 +116,14 @@ async function driveDispatch(mvh, validators, seedBase) {
     const engines = mvh.hubs.map((h) => h.crossChainCalls);
     engines.forEach((e) => { e.validateProposedMatch = async () => true; });
     const callId  = callIdFrom(seedBase);
-    const roundId = engines[0]._roundId('dispatch', callId);
+    const roundId = engines[0].roundId('dispatch', callId);
     const row = dispatchRow(roundId, callId);
     const events = [];
     const listeners = engines.map((e, i) => { const fn = (ev) => events.push(Object.assign({ hubIndex: i }, ev)); e.consensus.on('match:finalized', fn); return fn; });
     await Promise.all(engines.map((e) => e.consensus.propose(roundId, { row, snapshot: { validators, count: validators.length } }).catch(() => {})));
     // The caller asserts the PERSISTED cross_chain_calls row on every hub, and the
     // finalize event only STARTS that write: CrossChainCallEngine subscribes to
-    // 'match:finalized' with an un-awaited `this._writeFinalizedRow(ev)`, so an
+    // 'match:finalized' with an un-awaited `this.writeFinalizedRow(ev)`, so an
     // event-count poll clears while the INSERT is still in flight. Poll the row,
     // keyed on (call_id, phase) exactly as the assertions key it.
     await waitFor(async () => {
@@ -154,7 +154,7 @@ async function driveDexRound(mvh) {
     const dexes = mvh.getCrossChainDexes();
     const events = [];
     const listeners = dexes.map((d, i) => { const fn = (ev) => events.push(Object.assign({ hubIndex: i }, ev)); d.consensus.on('match:finalized', fn); return fn; });
-    await Promise.all(dexes.map((d) => d._discoverAndMatch().catch(() => {})));
+    await Promise.all(dexes.map((d) => d.discoverAndMatch().catch(() => {})));
     // The caller asserts the PERSISTED cross_chain_matches row on every hub, and the
     // finalize event only STARTS that write: CrossChainDexEngine subscribes to
     // 'match:finalized' with an un-awaited `this._writeFinalizedMatch(ev)`, so an
@@ -242,89 +242,4 @@ describe('MultiValidatorHub: per-feature weighted quorum at N=10 (C.2)', functio
         });
     });
 
-    describe('Cross-chain DEX match (CrossChainDexConsensus) finalizes at N=10', function () {
-        let db, mvh, seed, book;
-
-        before(async function () {
-            db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping cross-chain DEX N=10: no env DB and Docker unavailable'); this.skip(); }
-            book = new MockCrossChainOfferBook();
-            await book.start();
-            book.setBook('shared', { network: NETWORK, latestBlockIndex: 200, ordersByCoin: crossingPair({ ltcIdx: 11, dogeIdx: 21 }) });
-            mvh = new MultiValidatorHub({
-                count: COUNT, basePort: 25100, startCrossChain: true, startAttestation: false,
-                crossChainIndexerUrls: { LTC: book.urlFor('shared', 'LTC'), DOGE: book.urlFor('shared', 'DOGE') }
-            });
-            await mvh.start();
-            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
-            seed = seedWeightSnapshot(mvh, { blockIndex: BLOCK_INDEX, validators: equalWeights(mvh) });
-        });
-
-        after(async function () {
-            if (seed) seed.restore();
-            if (book) await book.stop();
-            if (mvh)  { await mvh.stop(); await mvh.dropDatabases(); }
-            if (db)   { await db.stop(); }
-        });
-
-        it('the weighted quorum (>=7 of 10) finalizes the identical match on EVERY hub', async function () {
-            const events = await driveDexRound(mvh);
-            assert.strictEqual(events.length, COUNT, 'expected all ' + COUNT + ' hubs to finalize, got ' + events.length);
-            const matchIds = new Set(events.map((e) => e.matchId));
-            assert.strictEqual(matchIds.size, 1, 'hubs finalized different match_ids: ' + JSON.stringify([...matchIds]));
-
-            const dexes = mvh.getCrossChainDexes();
-            for (const ev of events) {
-                const n = countVerifyingSigs(dexes[ev.hubIndex]._canonicalMatch(ev.row), ev.signatures);
-                assert.ok(n >= QUORUM_SIGS, 'hub ' + ev.hubIndex + ' finalized with < ' + QUORUM_SIGS + ' distinct verifying sigs (' + n + ')');
-            }
-            const matchId = [...matchIds][0];
-            for (let i = 0; i < mvh.hubs.length; i++) {
-                const rows = await mvh.hubs[i].db.doQuery(
-                    'SELECT status, validator_signatures FROM cross_chain_matches WHERE match_id = ?', [matchId]);
-                assert.strictEqual(rows.length, 1, 'hub ' + i + ' has no cross_chain_matches row');
-                assert.strictEqual(rows[0].status, 'finalized', 'hub ' + i + ' row not finalized');
-                assert.ok(JSON.parse(rows[0].validator_signatures || '[]').length >= QUORUM_SIGS, 'hub ' + i + ' persisted < ' + QUORUM_SIGS + ' sigs');
-            }
-        });
-    });
-
-    describe('XCALL dispatch relay (CrossChainDexConsensus) finalizes at N=10', function () {
-        let db, mvh, seed, validators;
-
-        before(async function () {
-            db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping XCALL N=10: no env DB and Docker unavailable'); this.skip(); }
-            mvh = new MultiValidatorHub({ count: COUNT, basePort: 25200, startCrossChain: true, startAttestation: false });
-            await mvh.start();
-            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
-            validators = equalWeights(mvh);
-            seed = seedWeightSnapshot(mvh, { blockIndex: BLOCK_INDEX, validators });
-        });
-
-        after(async function () {
-            if (seed) seed.restore();
-            if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
-            if (db)  { await db.stop(); }
-        });
-
-        it('the weighted quorum (>=7 of 10) finalizes the dispatch on EVERY hub', async function () {
-            const { events, row } = await driveDispatch(mvh, validators, 'xcall-n10-pos');
-            assert.strictEqual(events.length, COUNT, 'expected all ' + COUNT + ' hubs to finalize, got ' + events.length);
-            const callIds = new Set(events.map((e) => String(e.row && e.row.call_id)));
-            assert.strictEqual(callIds.size, 1, 'hubs finalized different call_ids: ' + JSON.stringify([...callIds]));
-
-            const engines = mvh.hubs.map((h) => h.crossChainCalls);
-            for (const ev of events) {
-                const n = countVerifyingSigs(engines[ev.hubIndex]._canonicalMatch(ev.row), ev.signatures);
-                assert.ok(n >= QUORUM_SIGS, 'hub ' + ev.hubIndex + ' finalized with < ' + QUORUM_SIGS + ' distinct verifying sigs (' + n + ')');
-            }
-            for (let i = 0; i < mvh.hubs.length; i++) {
-                const rows = await mvh.hubs[i].db.doQuery(
-                    "SELECT validator_signatures FROM cross_chain_calls WHERE call_id = ? AND phase = 'dispatch'", [row.call_id]);
-                assert.strictEqual(rows.length, 1, 'hub ' + i + ' has no finalized dispatch row');
-                assert.ok(JSON.parse(rows[0].validator_signatures || '[]').length >= QUORUM_SIGS, 'hub ' + i + ' persisted < ' + QUORUM_SIGS + ' sigs');
-            }
-        });
-    });
 });

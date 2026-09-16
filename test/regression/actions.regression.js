@@ -21,12 +21,12 @@ global.nodeConnector         = { broadcastTx: async () => 'txhash-stub', waitFor
 global.utxoTrackerConnector  = { getUtxosFromAddress: async () => ({ utxos: [] }), waitForUtxos: async () => true }
 global.regtestMinerConnector = { sendFunds: async () => 'txid-stub' }
 global.indexerDatabase       = {
-    waitForIssue:   sinon.stub().resolves({ tick: 'TOK', status: 'valid' }),
-    waitForSend:    sinon.stub().resolves({ tick: 'TOK', status: 'valid' }),
-    waitForCredit:  sinon.stub().resolves({ tick: 'TOK', amount: '100' }),
-    waitForDebit:   sinon.stub().resolves({ tick: 'TOK', amount: '100' }),
-    waitForMint:    sinon.stub().resolves({ tick: 'TOK', status: 'valid' }),
-    waitForDestroy: sinon.stub().resolves({ tick: 'TOK', status: 'valid' }),
+    waitForIssue:   sinon.stub().resolves({ tick: 'TOKR', status: 'valid' }),
+    waitForSend:    sinon.stub().resolves({ tick: 'TOKR', status: 'valid' }),
+    waitForCredit:  sinon.stub().resolves({ tick: 'TOKR', amount: '100' }),
+    waitForDebit:   sinon.stub().resolves({ tick: 'TOKR', amount: '100' }),
+    waitForMint:    sinon.stub().resolves({ tick: 'TOKR', status: 'valid' }),
+    waitForDestroy: sinon.stub().resolves({ tick: 'TOKR', status: 'valid' }),
     waitForBatch:   sinon.stub().resolves({ status: 'valid' }),
     waitForSweep:   sinon.stub().resolves({ status: 'valid' }),
 }
@@ -42,11 +42,11 @@ describe('[regression:p1] Action Helpers', function () {
     beforeEach(function () {
         createTxStub = sinon.stub(transactionHelper, 'createAndSendTransaction').resolves('txhash-test')
 
-        global.indexerDatabase.waitForIssue  = sinon.stub().resolves({ tick: 'TOK', status: 'valid' })
-        global.indexerDatabase.waitForSend   = sinon.stub().resolves({ tick: 'TOK', status: 'valid' })
-        global.indexerDatabase.waitForCredit = sinon.stub().resolves({ tick: 'TOK', amount: '100' })
-        global.indexerDatabase.waitForDebit  = sinon.stub().resolves({ tick: 'TOK', amount: '100' })
-        global.indexerDatabase.waitForMint   = sinon.stub().resolves({ tick: 'TOK', status: 'valid' })
+        global.indexerDatabase.waitForIssue  = sinon.stub().resolves({ tick: 'TOKR', status: 'valid' })
+        global.indexerDatabase.waitForSend   = sinon.stub().resolves({ tick: 'TOKR', status: 'valid' })
+        global.indexerDatabase.waitForCredit = sinon.stub().resolves({ tick: 'TOKR', amount: '100' })
+        global.indexerDatabase.waitForDebit  = sinon.stub().resolves({ tick: 'TOKR', amount: '100' })
+        global.indexerDatabase.waitForMint   = sinon.stub().resolves({ tick: 'TOKR', status: 'valid' })
     })
 
     afterEach(function () {
@@ -72,7 +72,7 @@ describe('[regression:p1] Action Helpers', function () {
         })
 
         it('[regression:p1] R-ACT-001b: sendIssueV0 calls waitForIssue and waitForCredit', async function () {
-            await issueHelper.sendIssueV0(fakeAddr, 'TOK', 1000, 100, 8, 'desc', 50)
+            await issueHelper.sendIssueV0(fakeAddr, 'TOKR', 1000, 100, 8, 'desc', 50)
 
             assert.ok(global.indexerDatabase.waitForIssue.calledOnce, 'waitForIssue should be called')
             assert.ok(global.indexerDatabase.waitForCredit.calledOnce, 'waitForCredit should be called')
@@ -80,12 +80,12 @@ describe('[regression:p1] Action Helpers', function () {
             // Verify filter args
             const issueFilter = global.indexerDatabase.waitForIssue.firstCall.args[0]
             assert.strictEqual(issueFilter.source, 'addr1')
-            assert.strictEqual(issueFilter.tick, 'TOK')
+            assert.strictEqual(issueFilter.tick, 'TOKR')
             assert.strictEqual(issueFilter.status, 'valid')
         })
 
         it('[regression:p1] R-ACT-001c: sendIssueV0 returns txHash, issue, and credit', async function () {
-            const result = await issueHelper.sendIssueV0(fakeAddr, 'TOK', 1000, 100, 8, 'desc', 50)
+            const result = await issueHelper.sendIssueV0(fakeAddr, 'TOKR', 1000, 100, 8, 'desc', 50)
 
             assert.strictEqual(result.txHash, 'txhash-test')
             assert.ok(result.issue, 'should return issue row')
@@ -93,16 +93,16 @@ describe('[regression:p1] Action Helpers', function () {
         })
 
         it('[regression:p1] R-ACT-001d: sendIssueV1 constructs V1 message with tick and description', async function () {
-            global.indexerDatabase.waitForIssue = sinon.stub().resolves({ tick: 'TOK' })
+            global.indexerDatabase.waitForIssue = sinon.stub().resolves({ tick: 'TOKR' })
 
-            await issueHelper.sendIssueV1(fakeAddr, 'TOK', 'new desc')
+            await issueHelper.sendIssueV1(fakeAddr, 'TOKR', 'new desc')
 
             const message = createTxStub.firstCall.args[1]
-            assert.strictEqual(message, 'ISSUE|1|TOK|new desc')
+            assert.strictEqual(message, 'ISSUE|1|TOKR|new desc')
         })
 
         it('[regression:p1] R-ACT-005a: sendIssueV0 passes addressInfo as first arg to createAndSendTransaction', async function () {
-            await issueHelper.sendIssueV0(fakeAddr, 'TOK', 1000, 100, 8, 'desc', 50)
+            await issueHelper.sendIssueV0(fakeAddr, 'TOKR', 1000, 100, 8, 'desc', 50)
 
             assert.strictEqual(createTxStub.firstCall.args[0], fakeAddr)
         })
@@ -111,15 +111,15 @@ describe('[regression:p1] Action Helpers', function () {
     describe('sendHelper', function () {
 
         it('[regression:p1] R-ACT-002: sendSendV0 constructs correct pipe-delimited message', async function () {
-            await sendHelper.sendSendV0(fakeAddr, 'TOK', '100', 'dest1', 'memo1')
+            await sendHelper.sendSendV0(fakeAddr, 'TOKR', '100', 'dest1', 'memo1')
 
             assert.ok(createTxStub.calledOnce)
             const message = createTxStub.firstCall.args[1]
-            assert.strictEqual(message, 'SEND|0|TOK|100|dest1|memo1')
+            assert.strictEqual(message, 'SEND|0|TOKR|100|dest1|memo1')
         })
 
         it('[regression:p1] R-ACT-002b: sendSendV0 calls waitForSend, waitForCredit, waitForDebit', async function () {
-            await sendHelper.sendSendV0(fakeAddr, 'TOK', '100', 'dest1', 'memo1')
+            await sendHelper.sendSendV0(fakeAddr, 'TOKR', '100', 'dest1', 'memo1')
 
             assert.ok(global.indexerDatabase.waitForSend.calledOnce)
             assert.ok(global.indexerDatabase.waitForCredit.calledOnce)
@@ -133,7 +133,7 @@ describe('[regression:p1] Action Helpers', function () {
         })
 
         it('[regression:p1] R-ACT-002c: sendSendV0 returns txHash, send, credit, debit', async function () {
-            const result = await sendHelper.sendSendV0(fakeAddr, 'TOK', '100', 'dest1', '')
+            const result = await sendHelper.sendSendV0(fakeAddr, 'TOKR', '100', 'dest1', '')
 
             assert.strictEqual(result.txHash, 'txhash-test')
             assert.ok(result.send)
@@ -142,7 +142,7 @@ describe('[regression:p1] Action Helpers', function () {
         })
 
         it('[regression:p1] R-ACT-006: sendSendV1 calls waitForSend twice for two destinations', async function () {
-            await sendHelper.sendSendV1(fakeAddr, 'TOK', '50', 'dest1', '30', 'dest2', 'memo')
+            await sendHelper.sendSendV1(fakeAddr, 'TOKR', '50', 'dest1', '30', 'dest2', 'memo')
 
             assert.strictEqual(global.indexerDatabase.waitForSend.callCount, 2)
             assert.strictEqual(global.indexerDatabase.waitForCredit.callCount, 2)
@@ -156,7 +156,7 @@ describe('[regression:p1] Action Helpers', function () {
             sinon.stub(transactionHelper, 'createAndSendTransaction').rejects(new Error('encoder down'))
 
             await assert.rejects(
-                () => issueHelper.sendIssueV0(fakeAddr, 'TOK', 1000, 100, 8, 'desc', 50),
+                () => issueHelper.sendIssueV0(fakeAddr, 'TOKR', 1000, 100, 8, 'desc', 50),
                 /encoder down/
             )
         })

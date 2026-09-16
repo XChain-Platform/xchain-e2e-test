@@ -44,7 +44,6 @@
 
 const dotenv = require('dotenv');
 dotenv.config();
-
 const path   = require('path');
 const assert = require('assert');
 const { MultiValidatorHub }    = require('../helpers/multiValidatorHubHelper');
@@ -53,9 +52,8 @@ const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
 const { waitForMesh, waitFor } = require('../helpers/consensusWait');
 
 function hubRequire(rel) { return require(path.resolve(__dirname, '../../../xchain-hub', rel)); }
-const OracleConsensus = hubRequire('src/OracleConsensus.js');
-const OracleRound     = hubRequire('src/OracleRound.js');
-
+const OracleConsensus = hubRequire('src/oracle/consensus.js');
+const OracleRound     = hubRequire('src/oracle/round.js');
 // Deadlines, not settles: mesh formation and the C1 finalize are both observable,
 // so each wait polls its post-condition and returns on the first passing poll.
 const PEER_WAIT_MS = 60_000;
@@ -78,7 +76,7 @@ const TIP = {
     // SPV Phase 2 (xchain-hub 08228c8): post-flag-day the checkpoint canonical
     // signs the indexer light-client roots and StateCheckpointEngine fails closed
     // without them; regtest's commitment flag-day is genesis, so the stubbed
-    // indexer view must carry them or every _tick throws (0 checkpoint rows).
+    // indexer view must carry them or every tick throws (0 checkpoint rows).
     state_root: 'd4'.repeat(32), state_root_version: 1,
     block_merkle_root: 'e5'.repeat(32), block_merkle_version: 1
 };
@@ -91,7 +89,7 @@ async function attachEngines(mvh) {
         const round = new OracleRound(hub);
         const oc    = new OracleConsensus(hub, round);
         round.setConsensus(oc);
-        oc.setValidatorSet(await hub._loadValidatorSet());
+        oc.setValidatorSet(await hub.loadValidatorSet());
         await oc.start();
         hub._cOracle = oc;
         hub._cRound  = round;
@@ -102,7 +100,7 @@ async function attachEngines(mvh) {
         cps.chains        = ['BTC'];
         cps.confirmations = 0;
         cps.indexers.BTC  = { url: 'http://stubbed', key: '' };
-        cps._indexerCall  = async () => Object.assign({}, TIP);
+        cps.indexerCall  = async () => Object.assign({}, TIP);
     }
     return { stop() { stops.forEach((s) => { try { s(); } catch (_) {} }); } };
 }
@@ -124,7 +122,7 @@ async function driveConfig(mvh, value) {
     const config = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: value } } } };
     // Any hub can drive: N=1 self-finalizes (quorum 0); ≥2 routes through a leader.
     const leader = mvh.hubs.find((h) => {
-        const l = h.consensus._getLeader(h.consensus.seq + 1);
+        const l = h.consensus.getLeader(h.consensus.seq + 1);
         return l && l.addr === h.consensus.peerManager.validatorAddr;
     }) || mvh.hubs[0];
     await leader.addParametersFromJson(config).catch(() => {});
@@ -143,7 +141,7 @@ async function priceFinalized(hub) {
 }
 
 async function driveCheckpoint(mvh) {
-    await Promise.all(mvh.hubs.map((h) => h.stateCheckpoints._tick().catch(() => {})));
+    await Promise.all(mvh.hubs.map((h) => h.stateCheckpoints.tick().catch(() => {})));
 }
 async function checkpointFinalized(hub) {
     const r = await hub.db.doQuery(
@@ -154,10 +152,8 @@ async function checkpointFinalized(hub) {
 
 describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM R-1 degenerate uniformity (WI-1 Suite C, L2)', function () {
     this.timeout(300_000);
-
     describe('C1 (N=1): every engine finalizes on the single staker', function () {
         let db, mvh, seed, engines;
-
         before(async function () {
             db = await startDisposableHubDb();
             if (!db) { console.log('Skipping C1: no env DB and Docker unavailable'); this.skip(); }
@@ -204,10 +200,12 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM R-1 degenerate uniformity (WI
                 assert.strictEqual(ok, true, 'engine ' + engine + ' did NOT finalize at N=1 (expected single-staker finalize)');
         });
     });
+});
 
+describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM R-1 degenerate uniformity (WI-1 Suite C, L2)', function () {
+    this.timeout(300_000);
     describe('C2 (S=0): no engine finalizes under zero total stake', function () {
         let db, mvh, seed, engines;
-
         before(async function () {
             db = await startDisposableHubDb();
             if (!db) { console.log('Skipping C2: no env DB and Docker unavailable'); this.skip(); }

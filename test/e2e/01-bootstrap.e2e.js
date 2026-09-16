@@ -22,19 +22,31 @@ describe('E2E: Suite Bootstrap & Initialization', () => {
             const validCoins = ['bitcoin', 'litecoin', 'dogecoin']
             assert(validCoins.includes(COIN), 'COIN should be bitcoin, litecoin, or dogecoin, got: ' + COIN)
         })
+    })
+})
 
+describe('E2E: Suite Bootstrap & Initialization', () => {
+    describe('E2E-INIT-001: Global state after bootstrap', () => {
         it('should have NETWORK set to a valid network', () => {
             assert(global.NETWORK, 'NETWORK global should be set')
             const validNetworks = ['mainnet', 'testnet', 'regtest']
             assert(validNetworks.includes(NETWORK), 'NETWORK should be mainnet, testnet, or regtest, got: ' + NETWORK)
         })
+    })
+})
 
+describe('E2E: Suite Bootstrap & Initialization', () => {
+    describe('E2E-INIT-001: Global state after bootstrap', () => {
         it('should have COIN_CODE matching the COIN value', () => {
             assert(global.COIN_CODE, 'COIN_CODE global should be set')
             const expectedMap = { bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' }
             assert.strictEqual(COIN_CODE, expectedMap[COIN], 'COIN_CODE should match COIN')
         })
+    })
+})
 
+describe('E2E: Suite Bootstrap & Initialization', () => {
+    describe('E2E-INIT-001: Global state after bootstrap', () => {
         it('should have NETWORK_OBJECT with required bitcoinjs-lib fields', () => {
             assert(global.NETWORK_OBJECT, 'NETWORK_OBJECT global should be set')
             assert(NETWORK_OBJECT.pubKeyHash !== undefined, 'NETWORK_OBJECT should have pubKeyHash')
@@ -47,7 +59,11 @@ describe('E2E: Suite Bootstrap & Initialization', () => {
             const expectedDust = COIN === 'litecoin' ? 5460 : 546
             assert.strictEqual(NETWORK_OBJECT.dustThreshold, expectedDust, `dustThreshold should be ${expectedDust}`)
         })
+    })
+})
 
+describe('E2E: Suite Bootstrap & Initialization', () => {
+    describe('E2E-INIT-001: Global state after bootstrap', () => {
         it('should have all seven connectors instantiated with valid URLs', () => {
             assert(global.nodeConnector, 'nodeConnector should be initialized')
             assert(typeof nodeConnector.url === 'string', 'nodeConnector.url should be a string')
@@ -69,12 +85,20 @@ describe('E2E: Suite Bootstrap & Initialization', () => {
             assert(global.regtestMinerConnector, 'regtestMinerConnector should be initialized')
             assert(typeof regtestMinerConnector.url === 'string', 'regtestMinerConnector.url should be a string')
         })
+    })
+})
 
+describe('E2E: Suite Bootstrap & Initialization', () => {
+    describe('E2E-INIT-001: Global state after bootstrap', () => {
         it('should have a live connection pool for the indexer database', async () => {
             const result = await indexerDatabase.ping()
             assert(result, 'indexerDatabase.ping() should return truthy after bootstrap')
         })
+    })
+})
 
+describe('E2E: Suite Bootstrap & Initialization', () => {
+    describe('E2E-INIT-001: Global state after bootstrap', () => {
         it('should have all services still reachable after bootstrap completes', async () => {
             const networkInfo = await nodeConnector.getNetworkInfo()
             assert(networkInfo, 'Blockchain node should respond to getNetworkInfo')
@@ -92,7 +116,9 @@ describe('E2E: Suite Bootstrap & Initialization', () => {
             assert(pingMiner, 'Regtest miner should respond to ping')
         })
     })
+})
 
+describe('E2E: Suite Bootstrap & Initialization', () => {
     describe('E2E-INIT-003: GAS token existence after bootstrap', () => {
         it('should have XCHAIN token in the indexer database with status valid', async () => {
             const gasToken = await indexerDatabase.checkIssue({ tick: 'XCHAIN', status: 'valid' })
@@ -101,14 +127,20 @@ describe('E2E: Suite Bootstrap & Initialization', () => {
             assert(Number(gasToken.max_supply) > 0, 'GAS token max_supply should be > 0')
             assert(Number(gasToken.mint_supply) > 0, 'GAS token mint_supply should be > 0')
         })
+    })
+})
 
+describe('E2E: Suite Bootstrap & Initialization', () => {
+    describe('E2E-INIT-003: GAS token existence after bootstrap', () => {
         it('should have a credit record for the XCHAIN initial mint supply', async () => {
             const credit = await indexerDatabase.checkCredit({ tick: 'XCHAIN' })
             assert(credit, 'XCHAIN credit record should exist')
             assert(Number(credit.amount) > 0, 'XCHAIN credit amount should be > 0')
         })
     })
+})
 
+describe('E2E: Suite Bootstrap & Initialization', () => {
     describe('E2E-INIT-005: Bootstrap idempotency', () => {
         it('should return the same XCHAIN record on repeated checkIssue calls', async () => {
             const first = await indexerDatabase.checkIssue({ tick: 'XCHAIN', status: 'valid' })
@@ -117,7 +149,11 @@ describe('E2E: Suite Bootstrap & Initialization', () => {
             assert(second, 'Second checkIssue call should return a row')
             assert.strictEqual(first.tx_hash, second.tx_hash, 'Both calls should return the same tx_hash')
         })
+    })
+})
 
+describe('E2E: Suite Bootstrap & Initialization', () => {
+    describe('E2E-INIT-005: Bootstrap idempotency', () => {
         it('should generate unique wallet addresses for different labels', async () => {
             const addr1 = await cryptoHelper.getNewFundedAddress('E2E.BOOT.UNIQUE1', COIN, NETWORK, null, 'legacy', 0, 1)
             const addr2 = await cryptoHelper.getNewFundedAddress('E2E.BOOT.UNIQUE2', COIN, NETWORK, null, 'legacy', 0, 1)

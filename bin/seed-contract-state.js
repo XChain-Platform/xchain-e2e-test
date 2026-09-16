@@ -786,7 +786,7 @@ async function main() {
         // mint window it will carry from here on. Decimals lock at the first mint
         // (issue.js locks them only once SUPPLY > 0), so most of this is editable
         // for exactly as long as nobody has minted, and not one block longer.
-        // Defaults mirror the mainnet genesis injection (xchain-indexer/src/genesis.js:
+        // Defaults mirror the mainnet genesis injection (xchain-indexer/src/chain/genesis.js:
         // 8 decimals, 100,000,000 MAX_SUPPLY, zero pre-mint, GAS-owned) with ONE
         // deliberate difference: genesis pins MINT_START_BLOCK to a far-future
         // sentinel so the token exists un-mintable until the operator opens the

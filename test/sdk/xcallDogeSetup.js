@@ -126,18 +126,86 @@ async function dogeIdx(fn) {
 
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-async function main() {
+const hubConn = (fn) => withConn(HUB_DB, process.env.HUB_DB_USER, process.env.HUB_DB_PASS, fn);
+
+async function seedPrices() {
     // Seed the prices the DOGE native-fee path reads. Both anchors, because the tip
     // alone is wrong on the idle chain this driver usually finds - see
     // helpers/dogeSetupPriceSeed.js for why, and for what it costs when it happens.
-    const hubConn = (fn) => withConn(HUB_DB, process.env.HUB_DB_USER, process.env.HUB_DB_PASS, fn);
-    async function seedPrices() {
-        const seeded = await seedDogeFixturePrices({
-            hubConn, dogeIdx, coinPair: 'DOGE/USD',
-            coinUsd: DOGE_USD_SEED, xchainUsd: BOOTSTRAP_XCHAIN_USD, label: 'xcallDogeSetup',
-        });
-        console.log('[doge-setup] prices seeded (DOGE/USD, XCHAIN/USD) at ' + describeSeed(seeded));
+    const seeded = await seedDogeFixturePrices({
+        hubConn, dogeIdx, coinPair: 'DOGE/USD',
+        coinUsd: DOGE_USD_SEED, xchainUsd: BOOTSTRAP_XCHAIN_USD, label: 'xcallDogeSetup',
+    });
+    console.log('[doge-setup] prices seeded (DOGE/USD, XCHAIN/USD) at ' + describeSeed(seeded));
+}
+
+// Helper: submit without the explorer waiter (no DOGE explorer), mine, and
+// resolve the indexed action row by tx hash via the indexer DB.
+async function submitAndIndex(sdk, deployer, label, actionData, encoderOpts) {
+    // Re-anchor first: this driver mines between its submits, and the first
+    // generate_blocks on an idle chain drags block time forward by the whole idle
+    // gap, which ages out a seed taken before it.
+    await seedPrices();
+    const res = await sdk.submitAction(actionData,
+        Object.assign({ pubkey: deployer.address, change: deployer.address, unconfirmed: false }, encoderOpts),
+        { wif: deployer.wif, waitForIndexer: false });
+    const txid = res.txid || (res.signed && res.signed.txid);
+    if (!txid) throw new Error(label + ': no txid in submit result: ' + JSON.stringify(Object.keys(res)));
+    for (let i = 0; i < 30; i++) {
+        await minerRpc('generate_blocks', { count: 1 });
+        await sleep(2000);
+        const rows = await dogeIdx((c) => c.query(
+            `SELECT a.action_index FROM actions a
+             JOIN transactions t ON t.tx_index = a.tx_index
+             JOIN index_transactions ih ON ih.id = t.tx_hash_id
+             WHERE ih.hash = ? ORDER BY a.action_index ASC LIMIT 1`, [txid]));
+        if (rows.length) {
+            console.log('[doge-setup] ' + label + ': indexed as action ' + rows[0].action_index);
+            return Number(rows[0].action_index);
+        }
     }
+    throw new Error(label + ': tx ' + txid + ' never indexed');
+}
+
+async function deployContract(sdk, deployer, label, code) {
+    const codeBytes  = Buffer.byteLength(code, 'utf8');
+    const gasCost    = 100000 + codeBytes * 10;
+    const feeXchain  = gasCost * 0.00001;
+    const nativeDoge = feeXchain * (BOOTSTRAP_XCHAIN_USD_NUM / DOGE_USD_NUM);
+    const feeSats    = Math.round(nativeDoge * 1e8);
+    console.log('[doge-setup] ' + label + ' fee sizing: codeBytes=' + codeBytes + ' gasCost=' + gasCost +
+                ' feeXCHAIN=' + feeXchain + ' nativeDOGE=' + nativeDoge);
+
+    const actionIndex = await submitAndIndex(sdk, deployer, 'DEPLOY ' + label,
+        { action: 'DEPLOY', params: { code: code, gasLimit: 200000 } },
+        { customOutputs: [{ address: FEE_DESTINATION, value: feeSats }] });
+
+    const contractRows = await dogeIdx((c) => c.query(
+        `SELECT c.action_index, ix.status FROM contracts c
+         LEFT JOIN index_statuses ix ON ix.id = c.status_id
+         WHERE c.action_index = ?`, [actionIndex]));
+    if (!contractRows.length)
+        throw new Error('DEPLOY ' + label + ' indexed (action ' + actionIndex + ') but no contracts row: deploy failed validation');
+    const status = contractRows[0].status || 'n/a';
+    console.log('[doge-setup] ' + label + ' contract status=' + status);
+    if (status !== 'valid')
+        throw new Error('DEPLOY ' + label + ' rejected: ' + status);
+    return actionIndex;
+}
+
+// No DOGE explorer, so the SDK feequote rail is unavailable. Size the native
+// fee output from the consensus formula directly:
+//   gasCost        = VM_DEPLOY_BASE(100000) + codeBytes x VM_DEPLOY_PER_BYTE(10)
+//   feeXchain      = gasCost x GAS_PRICE(0.00001)
+//   expectedNative = feeXchain x (XCHAIN/USD / DOGE/USD)
+// The two prices are read from the SAME constants the seeding above used, so the
+// sizing cannot drift from what was actually seeded. It silently could before:
+// the ratio was the literal (1.0 / 0.1) sitting a hundred lines
+// from the seed, and moving the seed alone would have underpaid every fee.
+// paid to the chain's FEE_DESTINATION, mid-band of the 0.95-1.10 tolerance.
+const FEE_DESTINATION = 'mfees5pa2HwNBonk5vG23aDWkN9fuDJib4';
+
+async function main() {
     await seedPrices();
 
     const sdk = new XChainSDK({
@@ -154,79 +222,13 @@ async function main() {
     await sleep(3000);
     console.log('[doge-setup] deployer=' + deployer.address);
 
-    // Helper: submit without the explorer waiter (no DOGE explorer), mine, and
-    // resolve the indexed action row by tx hash via the indexer DB.
-    async function submitAndIndex(label, actionData, encoderOpts) {
-        // Re-anchor first: this driver mines between its submits, and the first
-        // generate_blocks on an idle chain drags block time forward by the whole idle
-        // gap, which ages out a seed taken before it.
-        await seedPrices();
-        const res = await sdk.submitAction(actionData,
-            Object.assign({ pubkey: deployer.address, change: deployer.address, unconfirmed: false }, encoderOpts),
-            { wif: deployer.wif, waitForIndexer: false });
-        const txid = res.txid || (res.signed && res.signed.txid);
-        if (!txid) throw new Error(label + ': no txid in submit result: ' + JSON.stringify(Object.keys(res)));
-        for (let i = 0; i < 30; i++) {
-            await minerRpc('generate_blocks', { count: 1 });
-            await sleep(2000);
-            const rows = await dogeIdx((c) => c.query(
-                `SELECT a.action_index FROM actions a
-                 JOIN transactions t ON t.tx_index = a.tx_index
-                 JOIN index_transactions ih ON ih.id = t.tx_hash_id
-                 WHERE ih.hash = ? ORDER BY a.action_index ASC LIMIT 1`, [txid]));
-            if (rows.length) {
-                console.log('[doge-setup] ' + label + ': indexed as action ' + rows[0].action_index);
-                return Number(rows[0].action_index);
-            }
-        }
-        throw new Error(label + ': tx ' + txid + ' never indexed');
-    }
-
     // Cap at the genesis XCHAIN MAX_MINT (100000): a MINT above it is indexed
     // 'invalid: AMOUNT > MAX_MINT', leaving the deployer without gas for DEPLOY.
-    await submitAndIndex('MINT gas',
+    await submitAndIndex(sdk, deployer, 'MINT gas',
         { action: 'MINT', params: { tick: 'XCHAIN', amount: 100000, destination: deployer.address } }, {});
 
-    // No DOGE explorer, so the SDK feequote rail is unavailable. Size the native
-    // fee output from the consensus formula directly:
-    //   gasCost        = VM_DEPLOY_BASE(100000) + codeBytes x VM_DEPLOY_PER_BYTE(10)
-    //   feeXchain      = gasCost x GAS_PRICE(0.00001)
-    //   expectedNative = feeXchain x (XCHAIN/USD / DOGE/USD)
-    // The two prices are read from the SAME constants the seeding above used, so the
-    // sizing cannot drift from what was actually seeded. It silently could before:
-    // the ratio was the literal (1.0 / 0.1) sitting a hundred lines
-    // from the seed, and moving the seed alone would have underpaid every fee.
-    // paid to the chain's FEE_DESTINATION, mid-band of the 0.95-1.10 tolerance.
-    const FEE_DESTINATION = 'mfees5pa2HwNBonk5vG23aDWkN9fuDJib4';
-
-    async function deployContract(label, code) {
-        const codeBytes  = Buffer.byteLength(code, 'utf8');
-        const gasCost    = 100000 + codeBytes * 10;
-        const feeXchain  = gasCost * 0.00001;
-        const nativeDoge = feeXchain * (BOOTSTRAP_XCHAIN_USD_NUM / DOGE_USD_NUM);
-        const feeSats    = Math.round(nativeDoge * 1e8);
-        console.log('[doge-setup] ' + label + ' fee sizing: codeBytes=' + codeBytes + ' gasCost=' + gasCost +
-                    ' feeXCHAIN=' + feeXchain + ' nativeDOGE=' + nativeDoge);
-
-        const actionIndex = await submitAndIndex('DEPLOY ' + label,
-            { action: 'DEPLOY', params: { code: code, gasLimit: 200000 } },
-            { customOutputs: [{ address: FEE_DESTINATION, value: feeSats }] });
-
-        const contractRows = await dogeIdx((c) => c.query(
-            `SELECT c.action_index, ix.status FROM contracts c
-             LEFT JOIN index_statuses ix ON ix.id = c.status_id
-             WHERE c.action_index = ?`, [actionIndex]));
-        if (!contractRows.length)
-            throw new Error('DEPLOY ' + label + ' indexed (action ' + actionIndex + ') but no contracts row: deploy failed validation');
-        const status = contractRows[0].status || 'n/a';
-        console.log('[doge-setup] ' + label + ' contract status=' + status);
-        if (status !== 'valid')
-            throw new Error('DEPLOY ' + label + ' rejected: ' + status);
-        return actionIndex;
-    }
-
-    const targetIndex  = await deployContract('target',  CONTRACT_B);
-    const bouncerIndex = await deployContract('bouncer', CONTRACT_C);
+    const targetIndex  = await deployContract(sdk, deployer, 'target',  CONTRACT_B);
+    const bouncerIndex = await deployContract(sdk, deployer, 'bouncer', CONTRACT_C);
     console.log('[doge-setup] TARGET_CONTRACT_INDEX=' + targetIndex);
     console.log('[doge-setup] BOUNCER_CONTRACT_INDEX=' + bouncerIndex);
 }

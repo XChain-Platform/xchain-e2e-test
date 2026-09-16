@@ -75,33 +75,31 @@ async function waitFor(predicate, timeoutMs = 90000, pollMs = 250) {
 
 const BET_FORMAT = { CREATE: 0, CANCEL: 1, PLACE: 2, RESOLVE: 3 };
 
-describe('[sdk] BET live websocket channel (§11.1 P7)', function () {
-    this.timeout(0);
+let sdk, oracle, punter, tick, events, collector, feedIndex;
 
-    let sdk, oracle, punter, tick, events, collector, feedIndex;
+async function setupWebsocketTests() {
+    if (!haveConnectors()) this.skip();
+    // See bet.sdk.test.js: ^id compaction outruns the indexer's wire acceptance.
+    sdk = makeSdk({ compactAddresses: false });
+    await sdk.connectWs();
+    events = [];
+    // Collect EVERYTHING the socket pushes, then filter per assertion. A
+    // per-type listener would hide the interesting failure, which is an event
+    // arriving on the wrong channel or under the wrong type.
+    collector = (msg) => { events.push(msg); };
+    sdk.ws.on('*', collector);
+    oracle = await fundedGasAddress(sdk, 1);
+    punter = await fundedGasAddress(sdk, 1);
+    tick = await issueWagerToken(sdk, oracle, [[punter.address, '10.00000000']], 1000000, 'BWS');
+}
 
-    before(async function () {
-        if (!haveConnectors()) this.skip();
-        // See bet.sdk.test.js: ^id compaction outruns the indexer's wire acceptance.
-        sdk = makeSdk({ compactAddresses: false });
-        await sdk.connectWs();
-        events = [];
-        // Collect EVERYTHING the socket pushes, then filter per assertion. A
-        // per-type listener would hide the interesting failure, which is an event
-        // arriving on the wrong channel or under the wrong type.
-        collector = (msg) => { events.push(msg); };
-        sdk.ws.on('*', collector);
-        oracle = await fundedGasAddress(sdk, 1);
-        punter = await fundedGasAddress(sdk, 1);
-        tick = await issueWagerToken(sdk, oracle, [[punter.address, '10.00000000']], 1000000, 'BWS');
-    });
+async function cleanupWebsocketTests() {
+    try { if (collector) sdk.ws.off('*', collector); } catch (e) { /* ignore */ }
+    try { sdk.disconnectWs(); } catch (e) { /* ignore */ }
+    await releaseClock();
+}
 
-    after(async function () {
-        try { if (collector) sdk.ws.off('*', collector); } catch (e) { /* ignore */ }
-        try { sdk.disconnectWs(); } catch (e) { /* ignore */ }
-        await releaseClock();
-    });
-
+function registerSubscriptionTest() {
     it('subscribing to one market is confirmed by the server', async function () {
         const now = await blockTime();
         const deadline = now + 900;
@@ -117,7 +115,9 @@ describe('[sdk] BET live websocket channel (§11.1 P7)', function () {
         expect(confirmation, 'the server answered the subscribe').to.be.an('object');
         expect(sdk.ws.isConnected(), 'still connected after subscribing').to.equal(true);
     });
+}
 
+function registerBetEventTest() {
     it('pushes a bet placed by SOMEONE ELSE on the subscribed market', async function () {
         expect(feedIndex, 'the previous test subscribed').to.not.equal(undefined);
         const before = events.length;
@@ -147,7 +147,9 @@ describe('[sdk] BET live websocket channel (§11.1 P7)', function () {
         expect(evt.data.source, 'event carries the bettor, not the oracle')
             .to.equal(punter.address);
     });
+}
 
+function registerResolveEventTest() {
     it('pushes the resolve, distinguishable from the bet by its format alone', async function () {
         expect(feedIndex, 'the market exists').to.not.equal(undefined);
         const feed = await getFeed(feedIndex);
@@ -192,7 +194,9 @@ describe('[sdk] BET live websocket channel (§11.1 P7)', function () {
             .to.equal(BET_FORMAT.RESOLVE);
         expect(evt.data.source, 'resolve comes from the oracle').to.equal(oracle.address);
     });
+}
 
+function registerLatchEventTest() {
     it('pushes the deadline latch, the one transition with no action behind it', async function () {
         // The latch happened during the resolve test (waitFeedStatus saw `closed`),
         // so if the channel emitted it, it is already in `events`. Given the
@@ -232,4 +236,14 @@ describe('[sdk] BET live websocket channel (§11.1 P7)', function () {
             && Number(e.data.feed_action_index) === Number(feedIndex));
         expect(latches.length, 'the latch is one-way and must push exactly once').to.equal(1);
     });
+}
+
+describe('[sdk] BET live websocket channel (§11.1 P7)', function () {
+    this.timeout(0);
+    before(setupWebsocketTests);
+    after(cleanupWebsocketTests);
+    registerSubscriptionTest();
+    registerBetEventTest();
+    registerResolveEventTest();
+    registerLatchEventTest();
 });

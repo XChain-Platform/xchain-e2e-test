@@ -120,17 +120,15 @@ async function readState(sdk, contractIndex, key) {
     return row ? JSON.parse(row.state_value) : null;
 }
 
-describe('[sdk] cross-contract calls (emit.execute)', function () {
-    this.timeout(0);
+let sdk, deployer, indexA, indexB;
 
-    let sdk, deployer, indexA, indexB;
+async function setupCrossContractTests() {
+    sdk = makeSdk();
+    deployer = await fundedGasAddress(sdk, 1);
+    console.log('    [sdk] deployer=' + deployer.address);
+}
 
-    before(async function () {
-        sdk = makeSdk();
-        deployer = await fundedGasAddress(sdk, 1);
-        console.log('    [sdk] deployer=' + deployer.address);
-    });
-
+function registerDeploymentTest() {
     it('DEPLOY caller (A) and callee (B)', async function () {
         const resB = await submit(sdk,
             { action: 'DEPLOY', params: { code: CONTRACT_B, gasLimit: 200000, constructorParams: 'initialize' } },
@@ -149,6 +147,12 @@ describe('[sdk] cross-contract calls (emit.execute)', function () {
         indexA = contractIndexOf(resA.indexed);
         console.log('    [sdk] A=' + indexA + ' B=' + indexB);
     });
+}
+
+describe('[sdk] cross-contract calls (emit.execute)', function () {
+    this.timeout(0);
+    before(setupCrossContractTests);
+    registerDeploymentTest();
 
     it('A->B call updates B and authenticates A; B->A callback lands (round trip)', async function () {
         const res = await submit(sdk,

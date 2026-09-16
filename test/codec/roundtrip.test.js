@@ -90,6 +90,11 @@ function makeCodec() {
     return { enc, dec };
 }
 
+function setupCodec(context) {
+    if (!XChainEncoder || !XChainDecoder) context.skip();
+    return makeCodec();
+}
+
 // --- Faithful re-implementations of the decoder READ path for each carrier,
 //     using the decoder's OWN removeObfuscation (the only crypto involved). ---
 
@@ -150,8 +155,7 @@ function roundtripRedeem(enc, payload, encoding) {
 
     let enc, dec;
     before(function () {
-        if (!XChainEncoder || !XChainDecoder) this.skip();
-        ({ enc, dec } = makeCodec());
+        ({ enc, dec } = setupCodec(this));
     });
 
     describe('obfuscation layer (AES-128-CTR, symmetric)', function () {
@@ -174,6 +178,16 @@ function roundtripRedeem(enc, payload, encoding) {
             assert.strictEqual(back.length, d.length);
             assert.ok(!back.equals(d), 'wrong txid still recovered payload (cipher is not keyed to txid)');
         });
+    });
+});
+
+(XChainEncoder && XChainDecoder && bitcoin ? describe : describe.skip)
+('Phase 1a: codec carrier round-trip', function () {
+    this.timeout(0);
+
+    let enc, dec;
+    before(function () {
+        ({ enc, dec } = setupCodec(this));
     });
 
     describe('OP_RETURN carrier (chunk + magic + obfuscate, multi-output)', function () {
@@ -202,6 +216,16 @@ function roundtripRedeem(enc, payload, encoding) {
             }
         });
     });
+});
+
+(XChainEncoder && XChainDecoder && bitcoin ? describe : describe.skip)
+('Phase 1a: codec carrier round-trip', function () {
+    this.timeout(0);
+
+    let enc, dec;
+    before(function () {
+        ({ enc, dec } = setupCodec(this));
+    });
 
     describe('MULTISIGN carrier (pubkey-packed, zero-padded slots)', function () {
         it('recovers the payload as a prefix (trailing pad is keystream, discarded downstream)', async function () {
@@ -218,6 +242,16 @@ function roundtripRedeem(enc, payload, encoding) {
                     `MULTISIGN tail not zero-pad at ${n} bytes`);
             }
         });
+    });
+});
+
+(XChainEncoder && XChainDecoder && bitcoin ? describe : describe.skip)
+('Phase 1a: codec carrier round-trip', function () {
+    this.timeout(0);
+
+    let enc, dec;
+    before(function () {
+        ({ enc, dec } = setupCodec(this));
     });
 
     describe('P2SH / P2WSH carrier (raw data in redeem/witness script)', function () {
@@ -252,6 +286,16 @@ function roundtripRedeem(enc, payload, encoding) {
                 assert.ok(back.equals(marker), `${tag} marker did not round-trip`);
             }
         });
+    });
+});
+
+(XChainEncoder && XChainDecoder && bitcoin ? describe : describe.skip)
+('Phase 1a: codec carrier round-trip', function () {
+    this.timeout(0);
+
+    let enc, dec;
+    before(function () {
+        ({ enc, dec } = setupCodec(this));
     });
 
     describe('golden wire-format vector (pins cipher + key derivation)', function () {

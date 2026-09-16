@@ -265,7 +265,7 @@ function jsonSafe (value) {
 /**
  * The fee-settlement lines a venue indexer logged, for a reward assertion.
  *
- * `_settleRequestFee` says exactly what it did (`ATTEST fee : <amount> ... split
+ * `settleRequestFee` says exactly what it did (`ATTEST fee : <amount> ... split
  * N way(s)`, or `fee left in escrow` with the reason), and it says it far enough
  * above the tail that a bare `logTail` misses it. A reward assertion that fails
  * without these lines cannot tell a settle that never ran from one that split to

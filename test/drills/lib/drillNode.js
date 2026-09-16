@@ -129,14 +129,14 @@ function makeHubNode(id) {
         const cs = h.capabilitySnapshot;
         const origActive = cs.getActiveValidatorSnapshot;
         const origPerCap = cs.getSnapshot;
-        const origBlock  = h._resolveBtcLatestBlock;
+        const origBlock  = h.resolveBtcLatestBlock;
         cs.getActiveValidatorSnapshot = async () => fresh({ capability: null });
         cs.getSnapshot                = async (capability) => fresh({ capability });
-        h._resolveBtcLatestBlock      = async () => blockIndex;
+        h.resolveBtcLatestBlock      = async () => blockIndex;
         return () => {
             cs.getActiveValidatorSnapshot = origActive;
             cs.getSnapshot                = origPerCap;
-            h._resolveBtcLatestBlock      = origBlock;
+            h.resolveBtcLatestBlock      = origBlock;
         };
     }
 
@@ -156,7 +156,7 @@ function makeHubNode(id) {
 
         async boot() {
             const XChainHub         = resolveHubModule('src/XChainHub.js');
-            const ValidatorIdentity = resolveHubModule('src/ValidatorIdentity.js');
+            const ValidatorIdentity = resolveHubModule('src/validators/identity.js');
 
             const privkeyHex = process.env.DRILL_PRIVKEY_HEX;
             if (!privkeyHex) throw new Error('drillNode: DRILL_PRIVKEY_HEX is required');
@@ -240,7 +240,7 @@ function makeHubNode(id) {
         async isLeader() {
             const c = hub.consensus;
             if (!c) return { leader: false, seq: null };
-            const l = c._getLeader(c.seq + 1);
+            const l = c.getLeader(c.seq + 1);
             return { leader: !!(l && l.addr === c.peerManager.validatorAddr), seq: c.seq + 1 };
         },
         async alignSeq(a) {
@@ -281,7 +281,7 @@ function makeHubNode(id) {
         // reject it on the digest check.
         async forgePrePrepare(a) {
             const env = byz.forgedPrePrepare(a.seq, a.config, a.blockIndex);
-            await hub.consensus._handlePrePrepare(env);
+            await hub.consensus.handlePrePrepare(env);
             return { pendingCreated: hub.consensus.pendingProposals.has(a.seq) };
         },
 

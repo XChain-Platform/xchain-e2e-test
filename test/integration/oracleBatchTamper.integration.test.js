@@ -53,7 +53,7 @@
  * be staked on the venue's chain at all. So this half drives the indexer's REAL
  * `Slash` handler in-process against REAL signed artifacts the venue produced:
  * the per-round canonical built by the hub's OWN producer
- * (`OracleConsensus._buildPriceV0Payload`, reached through `venue.priceCanonical`)
+ * (`OracleConsensus.buildPriceV0Payload`, reached through `venue.priceCanonical`)
  * and the batch canonical the REAL signing round built, each carrying a signature
  * that a REAL venue validator produced and that `ValidatorIdentity.verify`
  * confirms. Only the DB surface behind the handler is stubbed, and it is stubbed
@@ -105,11 +105,15 @@ const {
 // The indexer's own consensus modules, read from the repo a landing chain
 // actually runs. `slash.js` pulls in only `ed25519.js` and
 // `equivocation_header.js`, both of which depend on nothing but `crypto`, so the
-// real handler loads here without a database driver or a running node.
+// real handler loads here without a database driver or a running node. The handler
+// is `actions/slash.js` on an older indexer and `actions/slash/index.js` once it moved
+// into its parts directory; moduleEntry takes whichever exists and throws naming both
+// when neither does.
+const { moduleEntry } = require('../support/sibling_source.js');
 const INDEXER_ROOT = path.resolve(__dirname, '../../../xchain-indexer');
-const Slash   = require(path.join(INDEXER_ROOT, 'src', 'actions', 'slash.js'));
+const Slash   = require(moduleEntry(path.join(INDEXER_ROOT, 'src', 'actions', 'slash.js')));
 const eq      = require(path.join(INDEXER_ROOT, 'src', 'equivocation_header.js'));
-const ed25519 = require(path.join(INDEXER_ROOT, 'src', 'ed25519.js'));
+const ed25519 = require(path.join(INDEXER_ROOT, 'src', 'consensus', 'ed25519.js'));
 
 // ---------------------------------------------------------------------------
 // The drill's own numbers
@@ -142,7 +146,7 @@ const PRICE_GRACE_S = 600;
 const CAPABILITY_GAP_STATUS = 'invalid: insufficient signer stake';
 
 // The status a header-anchor tamper can ONLY earn from the tamper: it is thrown
-// in the structural rules (`price.js`, "batch anchor does not match the last
+// in the structural rules (`price/index.js`, "batch anchor does not match the last
 // round"), upstream of every capability, gate and signature.
 const ANCHOR_TAMPER_STATUS = 'invalid: batch anchor does not match the last round';
 
@@ -276,7 +280,7 @@ function tamperPriceDigit(body) {
  * THE TAMPER THAT CANNOT BE CONFUSED WITH ANYTHING ELSE: move the batch header's
  * anchor off the last included round's anchor.
  *
- * Section 4 pins the two to be numerically equal and `price.js` checks it
+ * Section 4 pins the two to be numerically equal and `price/index.js` checks it
  * structurally, BEFORE the straddle rule and before either quorum gate resolves,
  * so the rejection is reached without resolving a capability, a stake weight or a
  * signature. Its status string is therefore attributable to this tamper and to
@@ -889,7 +893,7 @@ describe('AT4: a post-signing tamper is refused identically by two nodes, and an
             'the replaying node recorded NO PRICE action at block ' + landed.headerAnchor.height);
         assert.strictEqual(live, ANCHOR_TAMPER_STATUS,
             'the live node recorded "' + live + '" for a batch whose header anchor was moved off the ' +
-            'last round\'s anchor. Section 4 pins those equal and price.js checks it structurally, ' +
+            'last round\'s anchor. Section 4 pins those equal and price/index.js checks it structurally, ' +
             'BEFORE the straddle rule and both quorum gates, so the expected verdict is "' +
             ANCHOR_TAMPER_STATUS + '". Anything else means the check moved or stopped running.');
         assert.strictEqual(replay, live,

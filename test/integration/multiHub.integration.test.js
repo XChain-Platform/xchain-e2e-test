@@ -36,31 +36,27 @@ const COUNT = 3;
 // + migrations; with 3 hubs sequentially that can be ~10s.
 const PEER_WAIT_MS = 8000;
 
+let mvh, db;
+let dbSetup = null;
+
+// Was gated on HUB_DB_USER/HUB_DB_PASS being set, which nothing in CI sets,
+// so this suite skipped itself on every venue and the live tier reported it
+// as covered regardless. startDisposableHubDb self-provisions a throwaway
+// MariaDB in Docker exactly as the rest of the L2 suites do, so the only
+// remaining skip is a host with no Docker at all.
+async function prepareMultiHubDb() {
+    this.timeout(180_000);
+    if (!dbSetup) dbSetup = startDisposableHubDb();
+    db = await dbSetup;
+    if (!db) { console.log('Skipping MultiValidatorHub smoke: no env DB and Docker unavailable'); this.skip(); }
+}
+
 describe('MultiValidatorHub harness: bring-up smoke', function () {
     // 3 hubs × (DB init + schema migrations + P2P bind + peer connect) can run
     // ~15s; teardown (hub.close + DB drop) adds more. Generous budget so we're
     // measuring correctness, not racing the timeout.
     this.timeout(180_000);
-
-    let mvh, db;
-
-    // Was gated on HUB_DB_USER/HUB_DB_PASS being set, which nothing in CI sets,
-    // so this suite skipped itself on every venue and the live tier reported it
-    // as covered regardless. startDisposableHubDb self-provisions a throwaway
-    // MariaDB in Docker exactly as the rest of the L2 suites do, so the only
-    // remaining skip is a host with no Docker at all.
-    before(async function () {
-        db = await startDisposableHubDb();
-        if (!db) { console.log('Skipping MultiValidatorHub smoke: no env DB and Docker unavailable'); this.skip(); }
-    });
-
-    after(async function () {
-        if (mvh) {
-            await mvh.stop();
-            await mvh.dropDatabases();
-        }
-        if (db) await db.stop();
-    });
+    before(prepareMultiHubDb);
 
     it('starts ' + COUNT + ' hubs with distinct pubkeys + DBs + ports', async function () {
         mvh = new MultiValidatorHub({ count: COUNT });
@@ -75,6 +71,20 @@ describe('MultiValidatorHub harness: bring-up smoke', function () {
         for (const pk of pubkeys) {
             assert.match(pk, /^[0-9a-f]{64}$/, 'pubkey must be 64 hex chars');
         }
+    });
+});
+
+describe('MultiValidatorHub harness: bring-up smoke', function () {
+    this.timeout(180_000);
+    before(prepareMultiHubDb);
+
+    after(async function () {
+        this.timeout(180_000);
+        if (mvh) {
+            await mvh.stop();
+            await mvh.dropDatabases();
+        }
+        if (db) await db.stop();
     });
 
     it('hubs peer-connect via SEED_NODES (each sees count-1 peers within ' + PEER_WAIT_MS + 'ms)', async function () {

@@ -102,29 +102,69 @@ async function pumpUntil(label, check, timeoutMs) {
     throw new Error('timed out waiting for ' + label);
 }
 
+let sdk, deployer, indexA;
+let stalled = null;          // call_id left pending by the two-down drill
+const downed = new Set();
+
+function hubStop(name)  { execSync('docker stop '  + name, { stdio: 'inherit' }); downed.add(name); }
+function hubStart(name) { execSync('docker start ' + name, { stdio: 'inherit' }); downed.delete(name); }
+
+async function fireCall(label) {
+    const res = await submit(sdk,
+        { action: 'EXECUTE', params: { contractActionIndex: indexA, method: 'callOut', params: ['999999'] } },
+        { pubkey: deployer.address, change: deployer.address },
+        submitOpts({ wif: deployer.wif })
+    );
+    expect(res.indexed.status, label + ' EXECUTE').to.equal('valid');
+    await mine(1);
+    const id = String(await readState(sdk, indexA, 'lastCall'));
+    expect(id, label + ' call_id').to.match(/^[0-9a-f]{64}$/);
+    console.log('    [xcall-q] ' + label + ' call_id=' + id.substring(0, 16) + '...');
+    return id;
+}
+
+function registerQuorumRecoveryTests() {
+    it('with TWO hubs down (1/3 < quorum) the relay stalls: no under-quorum row reaches the indexers', async function () {
+        hubStop(HUB2);
+        console.log('    [xcall-q] ' + HUB2 + ' stopped too, 1 of 3 validators alive (< quorum 2)');
+
+        const callId = await fireCall('two-down');
+
+        // hold the window open ~90s (30 poll cycles): the request must stay
+        // pending and the DOGE side must never execute
+        for (let i = 0; i < 18; i++) {
+            await mine(1);
+            await mineTarget(1);
+            await new Promise(r => setTimeout(r, 3000));
+        }
+        const req = await rpc(SOURCE_INDEXER_URL, 'getcrosschaincall', { call_id: callId });
+        expect(req.call.request_status, 'request must stay pending').to.equal('pending');
+        const target = await rpc(TARGET_INDEXER_URL, 'getcrosschaincallresult', { call_id: callId });
+        expect(target && target.exists, 'no DOGE-side execution under quorum loss').to.not.equal(true);
+        console.log('    [xcall-q] two-down call stalled as required (still pending after 90s)');
+        stalled = callId;
+    });
+
+    it('restarting the hubs recovers the stalled call to completion', async function () {
+        expect(stalled, 'stalled call_id from the previous test').to.match(/^[0-9a-f]{64}$/);
+        hubStart(HUB2);
+        hubStart(HUB3);
+        console.log('    [xcall-q] federation restored, 3 of 3 alive');
+
+        await pumpUntil('stalled call completion after recovery', async () => {
+            const r = await rpc(SOURCE_INDEXER_URL, 'getcrosschaincall', { call_id: stalled });
+            return (r && r.call && r.call.request_status === 'completed') ? r : null;
+        }, 420000);
+        const delivered = JSON.parse(await pumpUntil('recovered callback', async () => {
+            return await readState(sdk, indexA, 'result:' + stalled);
+        }, 60000));
+        expect(delivered.status).to.equal('no_contract');
+        console.log('    [xcall-q] recovered relay completed: ' + delivered.status);
+    });
+}
+
 describe('[sdk] cross-chain call 2f+1 quorum fault drills (N=3 federation)', function () {
     this.timeout(0);
-
-    let sdk, deployer, indexA;
-    let stalled = null;          // call_id left pending by the two-down drill
-    const downed = new Set();
-
-    function hubStop(name)  { execSync('docker stop '  + name, { stdio: 'inherit' }); downed.add(name); }
-    function hubStart(name) { execSync('docker start ' + name, { stdio: 'inherit' }); downed.delete(name); }
-
-    async function fireCall(label) {
-        const res = await submit(sdk,
-            { action: 'EXECUTE', params: { contractActionIndex: indexA, method: 'callOut', params: ['999999'] } },
-            { pubkey: deployer.address, change: deployer.address },
-            submitOpts({ wif: deployer.wif })
-        );
-        expect(res.indexed.status, label + ' EXECUTE').to.equal('valid');
-        await mine(1);
-        const id = String(await readState(sdk, indexA, 'lastCall'));
-        expect(id, label + ' call_id').to.match(/^[0-9a-f]{64}$/);
-        console.log('    [xcall-q] ' + label + ' call_id=' + id.substring(0, 16) + '...');
-        return id;
-    }
 
     before(async function () {
         sdk = makeSdk();
@@ -166,41 +206,5 @@ describe('[sdk] cross-chain call 2f+1 quorum fault drills (N=3 federation)', fun
         console.log('    [xcall-q] one-down relay completed: ' + delivered.status);
     });
 
-    it('with TWO hubs down (1/3 < quorum) the relay stalls: no under-quorum row reaches the indexers', async function () {
-        hubStop(HUB2);
-        console.log('    [xcall-q] ' + HUB2 + ' stopped too, 1 of 3 validators alive (< quorum 2)');
-
-        const callId = await fireCall('two-down');
-
-        // hold the window open ~90s (30 poll cycles): the request must stay
-        // pending and the DOGE side must never execute
-        for (let i = 0; i < 18; i++) {
-            await mine(1);
-            await mineTarget(1);
-            await new Promise(r => setTimeout(r, 3000));
-        }
-        const req = await rpc(SOURCE_INDEXER_URL, 'getcrosschaincall', { call_id: callId });
-        expect(req.call.request_status, 'request must stay pending').to.equal('pending');
-        const target = await rpc(TARGET_INDEXER_URL, 'getcrosschaincallresult', { call_id: callId });
-        expect(target && target.exists, 'no DOGE-side execution under quorum loss').to.not.equal(true);
-        console.log('    [xcall-q] two-down call stalled as required (still pending after 90s)');
-        stalled = callId;
-    });
-
-    it('restarting the hubs recovers the stalled call to completion', async function () {
-        expect(stalled, 'stalled call_id from the previous test').to.match(/^[0-9a-f]{64}$/);
-        hubStart(HUB2);
-        hubStart(HUB3);
-        console.log('    [xcall-q] federation restored, 3 of 3 alive');
-
-        await pumpUntil('stalled call completion after recovery', async () => {
-            const r = await rpc(SOURCE_INDEXER_URL, 'getcrosschaincall', { call_id: stalled });
-            return (r && r.call && r.call.request_status === 'completed') ? r : null;
-        }, 420000);
-        const delivered = JSON.parse(await pumpUntil('recovered callback', async () => {
-            return await readState(sdk, indexA, 'result:' + stalled);
-        }, 60000));
-        expect(delivered.status).to.equal('no_contract');
-        console.log('    [xcall-q] recovered relay completed: ' + delivered.status);
-    });
+    registerQuorumRecoveryTests();
 });

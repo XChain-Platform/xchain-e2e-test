@@ -44,7 +44,9 @@ describe('LIST', () => {
             assert(result.list, "List v0 addresses should exist in DB")
         })
     })
+})
 
+describe('LIST', () => {
     describe('v1 - edit', () => {
         it('should create a LIST Message v1 with addresses (add + remove)', async () => {
             let listAddress0 = await cryptoHelper.getNewFundedAddress("LIST.V1", COIN, NETWORK, null, "legacy", 0, 1)

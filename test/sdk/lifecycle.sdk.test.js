@@ -38,19 +38,20 @@ function balanceFor(balances, tick) {
     return Number(row.quantity ?? row.amount ?? row.balance ?? row.value);
 }
 
-describe('[sdk] token lifecycle: ISSUE -> SEND', function () {
-    this.timeout(0);
+let sdk, issuer, recipient, tick;
+let lifecycleReady = false;
 
-    let sdk, issuer, recipient, tick;
+async function prepareLifecycle() {
+    if (lifecycleReady) return;
+    sdk = makeSdk();
+    // Issuer needs native coin (tx fees) AND XCHAIN gas (protocol ISSUE fee).
+    issuer = await fundedGasAddress(sdk, 1);
+    tick = uniqueTick();
+    console.log('    [sdk] issuer=' + issuer.address + ' tick=' + tick);
+    lifecycleReady = true;
+}
 
-    before(async function () {
-        sdk = makeSdk();
-        // Issuer needs native coin (tx fees) AND XCHAIN gas (protocol ISSUE fee).
-        issuer = await fundedGasAddress(sdk, 1);
-        tick = uniqueTick();
-        console.log('    [sdk] issuer=' + issuer.address + ' tick=' + tick);
-    });
-
+function registerIssuanceChecks() {
     it('ISSUE creates the token and mints supply to the issuer', async function () {
         const res = await submit(sdk,
             {
@@ -82,7 +83,9 @@ describe('[sdk] token lifecycle: ISSUE -> SEND', function () {
         const amt = balanceFor(balances, tick);
         expect(amt, 'minted balance for ' + tick).to.equal(1000000);
     });
+}
 
+function registerTransferChecks() {
     it('SEND transfers tokens to a recipient', async function () {
         recipient = await fundedSdkAddress(sdk, 1);
         const res = await submit(sdk,
@@ -107,4 +110,11 @@ describe('[sdk] token lifecycle: ISSUE -> SEND', function () {
         const amt = balanceFor(balances, tick);
         expect(amt, 'received balance for ' + tick).to.equal(1000);
     });
+}
+
+describe('[sdk] token lifecycle: ISSUE -> SEND', function () {
+    this.timeout(0);
+    before(prepareLifecycle);
+    registerIssuanceChecks();
+    registerTransferChecks();
 });

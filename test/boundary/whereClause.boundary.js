@@ -42,10 +42,7 @@ function getWhereClause(query) {
 
 describe('Boundary: WHERE Clause Construction', function () {
 
-    afterEach(function () {
-        sinon.restore()
-        mockMariadb.createPool.resetHistory()
-    })
+    afterEach(function () { sinon.restore(); mockMariadb.createPool.resetHistory() })
 
     describe('WC-01: checkIssue with all filter fields null/undefined', function () {
 
@@ -82,6 +79,9 @@ describe('Boundary: WHERE Clause Construction', function () {
             assert.deepStrictEqual(params, ['MYTOKEN'])
         })
     })
+})
+describe('Boundary: WHERE Clause Construction', function () {
+    afterEach(function () { sinon.restore(); mockMariadb.createPool.resetHistory() })
 
     describe('WC-03: checkIssue with many fields populated', function () {
 
@@ -134,6 +134,9 @@ describe('Boundary: WHERE Clause Construction', function () {
             assert.deepStrictEqual(params, ['', ''])
         })
     })
+})
+describe('Boundary: WHERE Clause Construction', function () {
+    afterEach(function () { sinon.restore(); mockMariadb.createPool.resetHistory() })
 
     describe('WC-05: checkIssue with very long filter values', function () {
 
@@ -181,6 +184,9 @@ describe('Boundary: WHERE Clause Construction', function () {
             assert(mockConn.release.calledOnce)
         })
     })
+})
+describe('Boundary: WHERE Clause Construction', function () {
+    afterEach(function () { sinon.restore(); mockMariadb.createPool.resetHistory() })
 
     describe('WC-08: checkSend with all fields populated', function () {
 
@@ -232,6 +238,9 @@ describe('Boundary: WHERE Clause Construction', function () {
             assert.deepStrictEqual(params, ['addr1', 'TOK'])
         })
     })
+})
+describe('Boundary: WHERE Clause Construction', function () {
+    afterEach(function () { sinon.restore(); mockMariadb.createPool.resetHistory() })
 
     describe('WC-10: checkCredit with all fields', function () {
 
@@ -272,6 +281,9 @@ describe('Boundary: WHERE Clause Construction', function () {
             assert.deepStrictEqual(params, [200, 'hash789', 'TOK', 'addr2', 300])
         })
     })
+})
+describe('Boundary: WHERE Clause Construction', function () {
+    afterEach(function () { sinon.restore(); mockMariadb.createPool.resetHistory() })
 
     describe('WC-12: Numeric zero treated as valid filter value', function () {
 
@@ -309,6 +321,9 @@ describe('Boundary: WHERE Clause Construction', function () {
             assert.deepStrictEqual(params, [0])
         })
     })
+})
+describe('Boundary: WHERE Clause Construction', function () {
+    afterEach(function () { sinon.restore(); mockMariadb.createPool.resetHistory() })
 
     describe('WC-13: Parameterized query safety - placeholder/value count match', function () {
 
@@ -344,6 +359,12 @@ describe('Boundary: WHERE Clause Construction', function () {
 
             assert.strictEqual(placeholderCount, params.length)
         })
+    })
+})
+describe('Boundary: WHERE Clause Construction', function () {
+    afterEach(function () { sinon.restore(); mockMariadb.createPool.resetHistory() })
+
+    describe('WC-13: Parameterized query safety - placeholder/value count match', function () {
 
         it('checkCredit placeholder count matches params', async function () {
             const { db, mockConn } = createDb()

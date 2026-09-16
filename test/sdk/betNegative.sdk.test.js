@@ -109,8 +109,7 @@ async function expectFeedUnchanged(feedIndex, run, message) {
     return sdkSaid;
 }
 
-describe('[sdk] BET cancel + rejection matrix (§12 E5/E6)', function () {
-
+function registerBetNegativeHooks() {
     before(async function () {
         // See bet.sdk.test.js: the SDK's ^id compaction outruns the indexer's wire
         // acceptance and would invalidate the setup SENDs.
@@ -132,7 +131,9 @@ describe('[sdk] BET cancel + rejection matrix (§12 E5/E6)', function () {
     after(async function () {
         await releaseClock();
     });
+}
 
+function registerCancelTests() {
     describe('E5: cancelling a feed refunds every stake and takes no fee', function () {
 
         it('refunds in full, marks the feed cancelled, and then refuses new bets', async function () {
@@ -176,7 +177,9 @@ describe('[sdk] BET cancel + rejection matrix (§12 E5/E6)', function () {
             );
         });
     });
+}
 
+function registerEarlyRejectionTests() {
     describe('E6: state-dependent rejections', function () {
 
         it('rejects a resolve before the deadline (DEADLINE is the earliest resolve)', async function () {
@@ -217,7 +220,11 @@ describe('[sdk] BET cancel + rejection matrix (§12 E5/E6)', function () {
                 'a bet on outcome 7 of a two-outcome market'
             );
         });
+    });
+}
 
+function registerAmountRejectionTests() {
+    describe('E6: state-dependent rejections', function () {
         it('rejects a stake below the feed MIN_AMOUNT', async function () {
             const { feedIndex } = await openMarket(tickReject, {
                 label: 'E6 min amount', minAmount: '5.00000000' });
@@ -258,7 +265,11 @@ describe('[sdk] BET cancel + rejection matrix (§12 E5/E6)', function () {
                 'the feed owner staking on its own market'
             );
         });
+    });
+}
 
+function registerLateRejectionTests() {
+    describe('E6: state-dependent rejections', function () {
         it('rejects a bet once a block has crossed the deadline', async function () {
             // Runs LAST: it walks the chain clock forward, and every earlier case
             // needs a market that is still open.
@@ -282,4 +293,12 @@ describe('[sdk] BET cancel + rejection matrix (§12 E5/E6)', function () {
             );
         });
     });
+}
+
+describe('[sdk] BET cancel + rejection matrix (§12 E5/E6)', function () {
+    registerBetNegativeHooks();
+    registerCancelTests();
+    registerEarlyRejectionTests();
+    registerAmountRejectionTests();
+    registerLateRejectionTests();
 });

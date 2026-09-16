@@ -99,7 +99,7 @@ function parseHosts(raw) {
 function loadIdentities(count) {
     const ValidatorIdentity = require(path.join(
         process.env.XCHAIN_DRILL_LOCAL_HUB_PATH || path.resolve(__dirname, '../../../xchain-hub'),
-        'src/ValidatorIdentity.js'
+        'src/validators/identity.js'
     ));
     const out = [];
     for (let i = 0; i < count; i++) out.push(ValidatorIdentity.generate());

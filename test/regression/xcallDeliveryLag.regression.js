@@ -43,9 +43,9 @@ const path       = require('path');
 // integration suite; skips cleanly if the hub source isn't reachable.
 function loadEngine(){
     const candidates = [
-        process.env.XCHAIN_HUB_PATH && path.join(process.env.XCHAIN_HUB_PATH, 'src/CrossChainCallEngine.js'),
-        path.join(__dirname, '../../../xchain-hub/src/CrossChainCallEngine.js'),
-        path.join(__dirname, '../../xchain-hub/src/CrossChainCallEngine.js')
+        process.env.XCHAIN_HUB_PATH && path.join(process.env.XCHAIN_HUB_PATH, 'src/cross_chain/call_engine.js'),
+        path.join(__dirname, '../../../xchain-hub/src/cross_chain/call_engine.js'),
+        path.join(__dirname, '../../xchain-hub/src/cross_chain/call_engine.js')
     ].filter(Boolean);
     for(const c of candidates){
         try { return require(c); } catch(e){ /* try next */ }
@@ -116,7 +116,7 @@ describe('[regression:p0] XCALL relay: live/replay determinism under hub deliver
     it('WITH the real hub relay margin, live and replay inject at the same block (same call_id)', function(){
         const engine = makeEngine(CrossChainCallEngine);
         // The fix: effective_time = finalize instant + a DOGE-sized margin into the future.
-        const margin = engine._relayEffectiveTime('DOGE') - Math.floor(Date.now() / 1000);
+        const margin = engine.relayEffectiveTime('DOGE') - Math.floor(Date.now() / 1000);
         expect(margin).to.be.greaterThan(0);                       // the margin must be real
         const effectiveTime = FINALIZE_T + margin;
 
@@ -134,8 +134,8 @@ describe('[regression:p0] XCALL relay: live/replay determinism under hub deliver
         const now = Math.floor(Date.now() / 1000);
         // Margin (seconds) must comfortably exceed a single block interval of the
         // gating chain, which is the lag the live evidence showed forking the federation.
-        expect(engine._relayEffectiveTime('DOGE') - now).to.be.greaterThan(60);
-        expect(engine._relayEffectiveTime('LTC')  - now).to.be.greaterThan(150);
-        expect(engine._relayEffectiveTime('BTC')  - now).to.be.greaterThan(600);
+        expect(engine.relayEffectiveTime('DOGE') - now).to.be.greaterThan(60);
+        expect(engine.relayEffectiveTime('LTC')  - now).to.be.greaterThan(150);
+        expect(engine.relayEffectiveTime('BTC')  - now).to.be.greaterThan(600);
     });
 });

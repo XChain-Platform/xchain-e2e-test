@@ -29,25 +29,26 @@ function balanceFor(balances, tick) {
     return row ? Number(row.amount ?? row.quantity ?? row.balance) : null;
 }
 
-describe('[sdk] foundation actions', function () {
-    this.timeout(0);
+let sdk, issuer, recipient, tick;
+let foundationReady = false;
 
-    let sdk, issuer, recipient, tick;
+async function prepareFoundation() {
+    if (foundationReady) return;
+    sdk = makeSdk();
+    issuer = await fundedGasAddress(sdk, 1);
+    recipient = await fundedSdkAddress(sdk, 1);
+    tick = uniqueTick();
+    const res = await submit(sdk,
+        { action: 'ISSUE', params: { tick, maxSupply: 1000000, maxMint: 100000, decimals: 0, description: 'foundation', mintSupply: 1000 } },
+        { pubkey: issuer.address, change: issuer.address },
+        submitOpts({ wif: issuer.wif })
+    );
+    expect(res.indexed.status, 'ISSUE status').to.equal('valid');
+    console.log('    [sdk] issuer=' + issuer.address + ' tick=' + tick);
+    foundationReady = true;
+}
 
-    before(async function () {
-        sdk = makeSdk();
-        issuer = await fundedGasAddress(sdk, 1);
-        recipient = await fundedSdkAddress(sdk, 1);
-        tick = uniqueTick();
-        const res = await submit(sdk,
-            { action: 'ISSUE', params: { tick, maxSupply: 1000000, maxMint: 100000, decimals: 0, description: 'foundation', mintSupply: 1000 } },
-            { pubkey: issuer.address, change: issuer.address },
-            submitOpts({ wif: issuer.wif })
-        );
-        expect(res.indexed.status, 'ISSUE status').to.equal('valid');
-        console.log('    [sdk] issuer=' + issuer.address + ' tick=' + tick);
-    });
-
+function registerFoundationSupply() {
     it('MINT adds supply to the issuer', async function () {
         const res = await submit(sdk,
             { action: 'MINT', params: { tick, amount: 500, destination: issuer.address } },
@@ -65,7 +66,9 @@ describe('[sdk] foundation actions', function () {
         );
         expect(res.indexed.status).to.equal('valid');
     });
+}
 
+function registerFoundationPublishing() {
     it('DESTROY burns issuer balance', async function () {
         const res = await submit(sdk,
             { action: 'DESTROY', params: { tick, amount: 200, memo: 'burn' } },
@@ -83,7 +86,9 @@ describe('[sdk] foundation actions', function () {
         );
         expect(res.indexed.status).to.equal('valid');
     });
+}
 
+function registerFoundationPreferences() {
     it('ADDRESS sets address preferences', async function () {
         const res = await submit(sdk,
             { action: 'ADDRESS', params: { feePreference: 2, requireMemo: 1 } },
@@ -102,4 +107,12 @@ describe('[sdk] foundation actions', function () {
         expect(issuerBal, 'issuer balance').to.equal(1200);
         expect(recipBal, 'recipient balance').to.equal(100);
     });
+}
+
+describe('[sdk] foundation actions', function () {
+    this.timeout(0);
+    before(prepareFoundation);
+    registerFoundationSupply();
+    registerFoundationPublishing();
+    registerFoundationPreferences();
 });

@@ -14,7 +14,7 @@
  *
  * Boots N=3 in-process XChainHub validators (MultiValidatorHub) and drives the
  * REAL config-consensus path (Consensus.propose → PRE_PREPARE/PREPARE/COMMIT →
- * _applyConfig) end to end over live P2P. Asserts:
+ * applyConfig) end to end over live P2P. Asserts:
  *   - a config change proposed by the round leader reaches COMMIT quorum and is
  *     applied on EVERY hub (not just the proposer), i.e. PBFT actually carries
  *     the change across the federation, persisted to each hub's own DB;
@@ -48,7 +48,7 @@ const COUNT        = 4;
 // return on the first passing poll, so a long deadline costs nothing on a quiet
 // venue and stops a busy one failing on the clock.
 const PEER_WAIT_MS = 60_000;   // every hub holds an OPEN socket to every other hub
-const APPLY_WAIT_MS = 60_000;  // COMMIT propagation + follower _applyConfig
+const APPLY_WAIT_MS = 60_000;  // COMMIT propagation + follower applyConfig
 
 describe('MultiValidatorHub: config-change PBFT (L2)', function () {
     this.timeout(180_000);
@@ -100,12 +100,12 @@ describe('MultiValidatorHub: config-change PBFT (L2)', function () {
 
     it('a leader-proposed config change reaches quorum and applies on EVERY hub', async function () {
         // Real path: addParametersFromJson → Consensus.propose → PBFT round →
-        // _applyConfig on each hub that observes COMMIT quorum.
+        // applyConfig on each hub that observes COMMIT quorum.
         const COIN = 'BTC', NET = 'regtest', MODULE = 'node', VALUE = '424242';
         const config = { [COIN]: { [NET]: { [MODULE]: { GAS_PRICE: VALUE } } } };
 
         const leader = mvh.hubs.find((h) => {
-            const l = h.consensus._getLeader(h.consensus.seq + 1);
+            const l = h.consensus.getLeader(h.consensus.seq + 1);
             return l && l.addr === h.consensus.peerManager.validatorAddr;
         });
         assert.ok(leader, 'no round leader could be identified');
@@ -141,7 +141,7 @@ describe('MultiValidatorHub: config-change PBFT (L2)', function () {
         const nonLeader = mvh.hubs.find((h) => {
             const c = h.consensus;
             const nextSeq = Math.max(c.seq, c.lastAppliedSeq) + 1;
-            const l = c._getLeader(nextSeq);
+            const l = c.getLeader(nextSeq);
             return l && l.addr !== c.peerManager.validatorAddr;
         });
         assert.ok(nonLeader, 'expected at least one non-leader');

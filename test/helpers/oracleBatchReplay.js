@@ -33,7 +33,7 @@
  *
  * WHY A HUB AND NOT "NO HUB" (decision D33). `price_snapshots` is hub-mirrored:
  * `XChainIndexer.js` only opens `hubDb` when HUB_DB_HOST and HUB_DB_NAME are
- * both set, and `actions/price.js` reconstructs history by pushing
+ * both set, and `actions/price/index.js` reconstructs history by pushing
  * `price_round` / `price_batch` onto the durable outbox, which delivers to a HUB
  * over JSON-RPC. A hub-less indexer is therefore not a configuration that can
  * rebuild anything; it is not a configuration at all. The replaying node has a
@@ -758,7 +758,7 @@ class OracleBatchReplayNode {
     /**
      * Prove the endpoint this node's hub will trust is a BITCOIN indexer.
      *
-     * This is the same question `XChainHub._indexerCoinMismatch` asks before it
+     * This is the same question `XChainHub.indexerCoinMismatch` asks before it
      * lets a BTC-anchored read happen at all (`getblockhashes` is the one
      * federation read that names the chain it answers for), asked HERE as well so
      * the drill's evidence carries the answer instead of the operator having to
@@ -865,7 +865,7 @@ class OracleBatchReplayNode {
      * Ask the oracle the question the hub is about to ask, at the height the hub
      * will actually ask it at.
      *
-     * MEASURED, NEVER ASSUMED. `CapabilitySnapshot._buriedBlockIndex` subtracts
+     * MEASURED, NEVER ASSUMED. `CapabilitySnapshot.buriedBlockIndex` subtracts
      * CANONICAL_REORG_BUFFER before it resolves anything, so the height that
      * reaches the indexer is (anchor - buffer) and a set that exists only at the
      * anchor is invisible. Reading it back here turns "the seed should be visible"
@@ -1213,8 +1213,8 @@ class OracleBatchReplayNode {
      *
      * WHY A NODE MUST HAVE THIS TO JUDGE ANYTHING. A hub that has started its
      * capability registry and has NO threshold for a capability refuses to build a
-     * snapshot for it at all (`CapabilitySnapshot._resolveMinStake` returns null
-     * while `_registryReady()` is true, which is a deliberate fail-closed: omitting
+     * snapshot for it at all (`CapabilitySnapshot.resolveMinStake` returns null
+     * while `registryReady()` is true, which is a deliberate fail-closed: omitting
      * min_stake would let each indexer apply its own local floor and fork the
      * qualified set). `xchain-hub/src/api.js` calls startCapabilities on every hub,
      * standalone included, so a node launched with no HUB_CAPABILITY_CONFIG resolves
@@ -1223,7 +1223,7 @@ class OracleBatchReplayNode {
      *
      * The values are lifted from the hub's OWN canonical coins registry rather than
      * typed here, so they cannot drift from the floor the hub asserts them against
-     * (`_assertCanonicalMinStakes`, which reads src/coins/BTC.js STAKING.CAPABILITIES).
+     * (`assertCanonicalMinStakes`, which reads src/coins/BTC.js STAKING.CAPABILITIES).
      */
     _writeCapabilityConfig() {
         const coins = loadHubModule('src/coins/index.js');
@@ -1278,9 +1278,9 @@ class OracleBatchReplayNode {
 
             // THE BITCOIN CAPABILITY ORACLE, wired the way a properly configured node
             // wires one: an explicit per-coin indexer URL, which is the first thing
-            // `XChainHub._resolveIndexerUrl` consults. The hub still VERIFIES the
+            // `XChainHub.resolveIndexerUrl` consults. The hub still VERIFIES the
             // endpoint is a Bitcoin indexer for itself before it trusts a
-            // BTC-anchored read (`_indexerCoinMismatch`), and nothing here switches
+            // BTC-anchored read (`indexerCoinMismatch`), and nothing here switches
             // that check off; _verifyBtcOracle asks the same question first so the
             // drill's own evidence carries the answer.
             BTC_INDEXER_API_URL: this._live.btcOracle.url,
@@ -1486,7 +1486,7 @@ class OracleBatchReplayNode {
      * Block until this node has no push left to deliver.
      *
      * WHY A DRAIN AND NOT A FIXED PAUSE. The reconstruction is asynchronous
-     * relative to the block loop: `actions/price.js` write-aheads a durable
+     * relative to the block loop: `actions/price/index.js` write-aheads a durable
      * `pending_hub_pushes` row inside the block transaction and HubPushQueue
      * delivers it afterwards, retrying on a backoff. Reading the hub after a fixed
      * pause therefore measures whichever of the two won a race, and a queue still

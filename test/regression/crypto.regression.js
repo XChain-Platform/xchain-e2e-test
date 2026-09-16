@@ -71,6 +71,18 @@ describe('[regression:p0] Crypto & Wallet Management', function () {
         assert.ok(typeof result.address === 'string')
         assert.ok(result.address.length > 0)
     })
+})
+
+describe('[regression:p0] Crypto & Wallet Management', function () {
+
+    beforeEach(function () {
+        global.wallets = {}
+    })
+
+    afterEach(function () {
+        sinon.restore()
+        global.wallets = {}
+    })
 
     it('[regression:p0] R-CRYP-005: getNewFundedAddress calls sendFunds, waitForTx, waitForUtxos', async function () {
         const MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
@@ -111,6 +123,18 @@ describe('[regression:p0] Crypto & Wallet Management', function () {
         // Verify zeroed
         assert.ok(wallet.seed.every(b => b === 0), 'seed should be zeroed')
         assert.ok(wallet.addresses[0].privateKey.every(b => b === 0), 'privateKey should be zeroed')
+    })
+})
+
+describe('[regression:p0] Crypto & Wallet Management', function () {
+
+    beforeEach(function () {
+        global.wallets = {}
+    })
+
+    afterEach(function () {
+        sinon.restore()
+        global.wallets = {}
     })
 
     it('[regression:p0] R-CRYP-003b: same mnemonic is preserved on second getNewAddress call', async function () {

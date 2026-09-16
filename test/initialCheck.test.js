@@ -45,6 +45,7 @@ const Database = require('../src/db.js')
 const CryptoNetworks = require('../src/CryptoNetworks')
 const cryptoHelper = require('./cryptoHelper')
 const issueHelper = require('./helpers/issueHelper')
+const gasHelper = require('./helpers/gasHelper')
 const stakeHelper = require('./helpers/stakeHelper')
 const stakeTeardown = require('./helpers/stakeTeardown')
 
@@ -141,6 +142,18 @@ function maskSecret(value){
     return '(set)'
 }
 
+// One credential out of the hub's config tree, or a named refusal.
+// The oracle serves '[redacted]' for every password unless the getallconfigs
+// call was authorized for its credential tier, and that sentinel authenticates
+// nothing: passing it on surfaces minutes later as ER_ACCESS_DENIED or a 401 on
+// a service that looks misconfigured. An explicitly supplied environment value
+// still wins, because discovery only runs at all when some variable was missing.
+function hubCredential(hubValue, envValue, whatItIsFor){
+    if(hubValue !== XChainHubConnector.REDACTED) return hubValue
+    if(envValue) return envValue
+    return XChainHubConnector.assertUnredactedCredential(hubValue, whatItIsFor)
+}
+
 function printAllEnvironmentalVariables(){
     console.log({
       node_url:NODE_URL,
@@ -199,7 +212,8 @@ exports.mochaHooks = {
                         NODE_URL = "localhost"
                         NODE_PORT = coinNet["node"]["port"]
                         NODE_USER = coinNet["node"]["user"]
-                        NODE_PASS = coinNet["node"]["pass"]
+                        NODE_PASS = hubCredential(coinNet["node"]["pass"], process.env.NODE_PASS,
+                            'the node RPC password (NODE_PASS)')
 
                         // DB config comes from the indexer's db_host/db_port fields
                         // (hub has no top-level "database" section).
@@ -219,7 +233,8 @@ exports.mochaHooks = {
                         INDEXER_PORT = coinNet["xchain-indexer"]["port"]
                         INDEXER_DATABASE_NAME = coinNet["xchain-indexer"]["name"]
                         INDEXER_DATABASE_USER = coinNet["xchain-indexer"]["user"]
-                        INDEXER_DATABASE_PASS = coinNet["xchain-indexer"]["pass"]
+                        INDEXER_DATABASE_PASS = hubCredential(coinNet["xchain-indexer"]["pass"],
+                            process.env.INDEXER_DATABASE_PASS, 'the indexer database password (INDEXER_DATABASE_PASS)')
 
                         REGTEST_MINER_URL = "localhost"
                         REGTEST_MINER_PORT = coinNet["xchain-regtest-miner"] && coinNet["xchain-regtest-miner"]["port"]
@@ -329,11 +344,23 @@ exports.mochaHooks = {
         })
 
         await phase('gas-token-check', async () => {
-            // Ensure the GAS token exists before any tests run
+            // Ensure the GAS token exists on THIS chain before any tests run. On BTC
+            // that is still a direct ISSUE: xchain-bridge.md's supply-path closure
+            // (D62) leaves BTC alone, it only closes the OFF-BTC paths. On DOGE/LTC
+            // a broadcast ISSUE of the GAS tick is refused unconditionally, even on
+            // regtest, from the commit that lands the bridge (section 4), and the
+            // token row on that chain is instead created lazily by the first
+            // XBRIDGE v2 in-leg (section 9) - so bootstrap asks gasHelper for a
+            // (throwaway) bridged balance instead of broadcasting ISSUE locally.
             console.log("Checking if GAS token ("+GAS_TICK+") exists...")
             const gasTokenExists = await indexerDatabase.checkIssue({ tick: GAS_TICK, status: 'valid' })
-            if (!gasTokenExists) {
-                console.log("GAS token not found, creating it...")
+            if (gasTokenExists) {
+                console.log("GAS token ("+GAS_TICK+") already exists")
+                return
+            }
+
+            console.log("GAS token not found, creating it...")
+            if (global.COIN_CODE === 'BTC') {
                 // seedGas=false: this is the address that ISSUEs XCHAIN itself. On a
                 // genesis-fresh chain the gas token does not exist yet, so the default
                 // gas-seeding MINT would reject as invalid:TICK(unknown) and hang the
@@ -354,10 +381,17 @@ exports.mochaHooks = {
                     "XChain GAS Token",
                     0            // MINT_SUPPLY: faucet, no pre-minted supply
                 )
-                console.log("GAS token ("+GAS_TICK+") created successfully")
             } else {
-                console.log("GAS token ("+GAS_TICK+") already exists")
+                // gasHelper.ensureGasBalance mints the GAS tick on BTC and locks it
+                // across with an XBRIDGE v0 (xchain-bridge.md section 4); the tiny
+                // throwaway amount only needs to be enough to trip the lazy,
+                // idempotent token-row creation on THIS chain (section 9) - its
+                // parameters are byte-identical to injectGasToken regardless of the
+                // amount bridged.
+                let gasAddressInfo = await cryptoHelper.getNewFundedAddress("GAS.TOKEN", COIN, NETWORK, null, "legacy", 0, 1, false)
+                await gasHelper.ensureGasBalance(gasAddressInfo, 1)
             }
+            console.log("GAS token ("+GAS_TICK+") created successfully")
         })
 
         await phase('stake-baseline', async () => {

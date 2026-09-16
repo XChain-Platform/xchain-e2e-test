@@ -61,75 +61,79 @@ function dryRunStatus(finding) {
     return d.status || d.error || null;
 }
 
+let sdk, owner, tick, recipient;
+let tier1SetupComplete = false;
+
+async function setupTier1(context) {
+    if (!global.regtestMinerConnector || !global.utxoTrackerConnector || !global.nodeConnector) {
+        context.skip();
+        return;
+    }
+    if (tier1SetupComplete) return;
+    sdk = makeSdk({ preflight: 'report' });
+    // ISSUE charges gas on create, so the owner needs native coin AND gas.
+    owner = await fundedGasAddress(sdk, 1);
+    recipient = await fundedSdkAddress(sdk, 1);
+    tick = uniqueTick('T1');
+
+    const issue = await submit(sdk,
+        { action: 'ISSUE', params: { tick, maxSupply: 1000, maxMint: 1000, decimals: 0, mintSupply: 100 } },
+        { pubkey: owner.address, change: owner.address }, submitOpts({ wif: owner.wif }));
+    expect(issue.indexed.status, 'ISSUE setup indexed valid').to.equal('valid');
+    await mine(1);
+    tier1SetupComplete = true;
+}
+
+/**
+ * The whole assertion, in one place: ask Tier 1, broadcast, compare.
+ *
+ * `expectValid` is what the CHAIN is expected to do. It is asserted
+ * too - otherwise a fixture that silently stopped being invalid (a
+ * balance that grew, a cap that moved) would still "conform" while
+ * testing nothing.
+ */
+async function assertConformance(action, expectValid, label) {
+    const report = await sdk.preflight(action, { source: owner.address, chain: sdk.config.network });
+    const t1 = tier1Verdict(report);
+
+    if (t1.kind !== 'verdict') {
+        // Parity is undefined outside the quotable subset (§4.3). Say so
+        // rather than passing quietly, or the day an action drops out of
+        // the verdict set this suite would go green having checked nothing.
+        this.skip();
+        return;
+    }
+
+    // requireValid:false is load-bearing. submitAction THROWS on a
+    // non-valid indexed status by default, which is right for callers
+    // doing work but wrong here: the invalid status is the measurement,
+    // and throwing would turn every negative fixture into an error before
+    // the comparison ran.
+    const res = await submit(sdk, action,
+        { pubkey: owner.address, change: owner.address },
+        submitOpts({ wif: owner.wif, requireValid: false }));
+    const indexedValid = res.indexed.status === 'valid';
+
+    expect(indexedValid, `${label}: fixture no longer does what it claims (chain said ${res.indexed.status})`)
+        .to.equal(expectValid);
+    expect(t1.valid, `${label}: Tier-1 said valid=${t1.valid} but the chain recorded ${res.indexed.status}`)
+        .to.equal(indexedValid);
+
+    // Same handler, so the reject reason should be the same words too.
+    // Checked separately from the boolean: a wording drift is a much
+    // smaller problem than a verdict drift, and conflating them would
+    // make a formatting change look like a consensus divergence.
+    const claimed = dryRunStatus(t1.finding);
+    if (!indexedValid && claimed) {
+        expect(String(claimed), `${label}: dry-run reason "${claimed}" != recorded "${res.indexed.status}"`)
+            .to.equal(String(res.indexed.status));
+    }
+    await mine(1);
+}
+
 describe('[sdk] pre-flight Tier-1 conformance @preflight', function () {
     this.timeout(0);
-
-    let sdk, owner, tick, recipient;
-
-    before(async function () {
-        if (!global.regtestMinerConnector || !global.utxoTrackerConnector || !global.nodeConnector) {
-            this.skip();
-            return;
-        }
-        sdk = makeSdk({ preflight: 'report' });
-        // ISSUE charges gas on create, so the owner needs native coin AND gas.
-        owner = await fundedGasAddress(sdk, 1);
-        recipient = await fundedSdkAddress(sdk, 1);
-        tick = uniqueTick('T1');
-
-        const issue = await submit(sdk,
-            { action: 'ISSUE', params: { tick, maxSupply: 1000, maxMint: 1000, decimals: 0, mintSupply: 100 } },
-            { pubkey: owner.address, change: owner.address }, submitOpts({ wif: owner.wif }));
-        expect(issue.indexed.status, 'ISSUE setup indexed valid').to.equal('valid');
-        await mine(1);
-    });
-
-    /**
-     * The whole assertion, in one place: ask Tier 1, broadcast, compare.
-     *
-     * `expectValid` is what the CHAIN is expected to do. It is asserted
-     * too - otherwise a fixture that silently stopped being invalid (a
-     * balance that grew, a cap that moved) would still "conform" while
-     * testing nothing.
-     */
-    async function assertConformance(action, expectValid, label) {
-        const report = await sdk.preflight(action, { source: owner.address, chain: sdk.config.network });
-        const t1 = tier1Verdict(report);
-
-        if (t1.kind !== 'verdict') {
-            // Parity is undefined outside the quotable subset (§4.3). Say so
-            // rather than passing quietly, or the day an action drops out of
-            // the verdict set this suite would go green having checked nothing.
-            this.skip();
-            return;
-        }
-
-        // requireValid:false is load-bearing. submitAction THROWS on a
-        // non-valid indexed status by default, which is right for callers
-        // doing work but wrong here: the invalid status is the measurement,
-        // and throwing would turn every negative fixture into an error before
-        // the comparison ran.
-        const res = await submit(sdk, action,
-            { pubkey: owner.address, change: owner.address },
-            submitOpts({ wif: owner.wif, requireValid: false }));
-        const indexedValid = res.indexed.status === 'valid';
-
-        expect(indexedValid, `${label}: fixture no longer does what it claims (chain said ${res.indexed.status})`)
-            .to.equal(expectValid);
-        expect(t1.valid, `${label}: Tier-1 said valid=${t1.valid} but the chain recorded ${res.indexed.status}`)
-            .to.equal(indexedValid);
-
-        // Same handler, so the reject reason should be the same words too.
-        // Checked separately from the boolean: a wording drift is a much
-        // smaller problem than a verdict drift, and conflating them would
-        // make a formatting change look like a consensus divergence.
-        const claimed = dryRunStatus(t1.finding);
-        if (!indexedValid && claimed) {
-            expect(String(claimed), `${label}: dry-run reason "${claimed}" != recorded "${res.indexed.status}"`)
-                .to.equal(String(res.indexed.status));
-        }
-        await mine(1);
-    }
+    before(function () { return setupTier1(this); });
 
     describe('the verdict matches block inclusion, both directions', function () {
 
@@ -182,6 +186,12 @@ describe('[sdk] pre-flight Tier-1 conformance @preflight', function () {
             await mine(1);
         });
     });
+
+});
+
+describe('[sdk] pre-flight Tier-1 conformance @preflight', function () {
+    this.timeout(0);
+    before(function () { return setupTier1(this); });
 
     describe('scope: actions outside the quotable subset yield NO verdict (§4.3)', function () {
 

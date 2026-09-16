@@ -11,6 +11,11 @@
 const assert = require('assert')
 
 describe('SMOKE: GAS Token', () => {
+    // initialCheck's bootstrap creates this row two different ways depending on
+    // the chain (xchain-bridge.md section 4/9): a direct ISSUE on BTC, or on
+    // DOGE/LTC the lazy, idempotent row a bridged XBRIDGE v2 in-leg creates the
+    // first time gasHelper locks any amount across. Either way it lands here as
+    // an ordinary valid ISSUE row.
     it('should have the XCHAIN GAS token in the indexer database', async () => {
         const gasToken = await indexerDatabase.checkIssue({ tick: 'XCHAIN', status: 'valid' })
         assert(gasToken, 'GAS token (XCHAIN) should exist with status valid (bootstrap should have created it)')

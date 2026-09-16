@@ -39,11 +39,14 @@ async function futureBlock(sdk, ahead = 1000) {
     return Number(last) + ahead;
 }
 
+let sdk;
+function prepareMisc() {
+    if (!sdk) sdk = makeSdk();
+}
+
 describe('[sdk] misc actions', function () {
     this.timeout(0);
-
-    let sdk;
-    before(function () { sdk = makeSdk(); });
+    before(prepareMisc);
 
     it('LIST creates an allowlist with an address item', async function () {
         const actor = await fundedGasAddress(sdk, 1);
@@ -70,6 +73,11 @@ describe('[sdk] misc actions', function () {
         console.log('    [sdk] AIRDROP status=' + res.indexed.status);
         expect(res.indexed.status).to.equal('valid');
     });
+});
+
+describe('[sdk] misc actions', function () {
+    this.timeout(0);
+    before(prepareMisc);
 
     it('SLEEP pauses a TICK without sleeping the owner address', async function () {
         const actor = await fundedGasAddress(sdk, 1);
@@ -102,6 +110,11 @@ describe('[sdk] misc actions', function () {
         console.log('    [sdk] DIVIDEND status=' + res.indexed.status);
         expect(res.indexed.status).to.equal('valid');
     });
+});
+
+describe('[sdk] misc actions', function () {
+    this.timeout(0);
+    before(prepareMisc);
 
     it('SWEEP moves balances to another address', async function () {
         const sweeper = await fundedGasAddress(sdk, 1);

@@ -77,6 +77,18 @@ describe('Fuzz: CryptoHelper', function () {
             }), FC_PARAMS)
         })
     })
+})
+
+describe('Fuzz: CryptoHelper', function () {
+
+    beforeEach(function () {
+        global.wallets = {}
+    })
+
+    afterEach(function () {
+        sinon.restore()
+        global.wallets = {}
+    })
 
     // getNewAddress with fuzzed coin/network
 
@@ -124,6 +136,18 @@ describe('Fuzz: CryptoHelper', function () {
             ), { numRuns: 50 })
         })
     })
+})
+
+describe('Fuzz: CryptoHelper', function () {
+
+    beforeEach(function () {
+        global.wallets = {}
+    })
+
+    afterEach(function () {
+        sinon.restore()
+        global.wallets = {}
+    })
 
     // getNewAddress with fuzzed addressIndex
 
@@ -159,6 +183,18 @@ describe('Fuzz: CryptoHelper', function () {
                 }
             ), { numRuns: 30 })
         })
+    })
+})
+
+describe('Fuzz: CryptoHelper', function () {
+
+    beforeEach(function () {
+        global.wallets = {}
+    })
+
+    afterEach(function () {
+        sinon.restore()
+        global.wallets = {}
     })
 
     // getNewAddress with fuzzed mnemonic

@@ -164,86 +164,18 @@ async function pumpSourceUntil(label, check, timeoutMs) {
     throw new Error('timed out waiting for ' + label);
 }
 
-describe('[sdk] cross-chain call deadline expiry (federation below quorum)', function () {
-    this.timeout(0);
+let sdk, deployer, indexA, callId, drop = null;
+const stopped = new Set();
 
-    let sdk, deployer, indexA, callId, drop = null;
-    const stopped = new Set();
+// docker takes argv, never a shell line: a container name is operator env,
+// and the planner's name check is the only thing between it and this call.
+function dockerStop(name)  { execFileSync('docker', ['stop', name],  { stdio: 'inherit' }); stopped.add(name); }
+function dockerStart(name) { execFileSync('docker', ['start', name], { stdio: 'inherit' }); stopped.delete(name); }
+function dockerRunning(name) {
+    return String(execFileSync('docker', ['inspect', '-f', '{{.State.Running}}', name])).trim() === 'true';
+}
 
-    // docker takes argv, never a shell line: a container name is operator env,
-    // and the planner's name check is the only thing between it and this call.
-    function dockerStop(name)  { execFileSync('docker', ['stop', name],  { stdio: 'inherit' }); stopped.add(name); }
-    function dockerStart(name) { execFileSync('docker', ['start', name], { stdio: 'inherit' }); stopped.delete(name); }
-    function dockerRunning(name) {
-        return String(execFileSync('docker', ['inspect', '-f', '{{.State.Running}}', name])).trim() === 'true';
-    }
-
-    before(async function () {
-        sdk = makeSdk();
-        deployer = await fundedGasAddress(sdk, 1);
-        console.log('    [xcall-exp] deployer=' + deployer.address);
-    });
-
-    after(async function () {
-        // ALWAYS restore the whole federation, even when an assertion failed
-        // mid-suite: a drill that leaves a venue under quorum breaks every
-        // XCALL suite that runs after it.
-        for (const name of [...stopped]) {
-            try { dockerStart(name); } catch (e) { console.error('    [xcall-exp] FAILED to restart ' + name + ': ' + e.message); }
-        }
-        if (!stopped.size) console.log('    [xcall-exp] federation restored');
-    });
-
-    it('STAKE the relay validator for the cross_chain capability (idempotent top-up)', async function () {
-        const hubPubkey = process.env.XCALL_HUB_PUBKEY;
-        expect(hubPubkey, 'XCALL_HUB_PUBKEY env (the relay hub\'s Ed25519 pubkey)').to.match(/^[0-9a-f]{64}$/);
-        try {
-            const res = await submit(sdk,
-                { action: 'STAKE', params: { amount: '5000.00000000', signingPubkey: hubPubkey } },
-                { pubkey: deployer.address, change: deployer.address },
-                submitOpts({ wif: deployer.wif })
-            );
-            expect(res.indexed.status).to.equal('valid');
-        } catch (e) {
-            if (!/SIGNING_PUBKEY \(already in use\)/.test(String(e.message))) throw e;
-            console.log('    [xcall-exp] hub pubkey already staked, reusing the active stake');
-        }
-        await mine(8);
-    });
-
-    it('PLAN the quorum drop against the live federation (refuses a venue it cannot drop)', async function () {
-        const spec = federation.parseFederationSpec(process.env);
-        const snapshot = await crossChainSnapshot();
-        const view = federation.summarizeSnapshot(snapshot);
-        console.log('    [xcall-exp] federation: ' + view.n + ' staked source(s) from ' + spec.source);
-
-        // A member declared with a pubkey that is not in the snapshot is not a
-        // qualifying validator here. Stopping it would remove no stake, and the
-        // planner would then quietly plan around it, so say it out loud: the
-        // operator either mis-declared the pair or never staked that hub.
-        const unstaked = spec.members.filter(m => m.pubkey && !view.sourceByPubkey.has(m.pubkey));
-        expect(unstaked.map(m => m.container + '=' + m.pubkey.substring(0, 16) + '...'),
-            'declared members with no active cross_chain stake (run test/sdk/xcallStakeValidators.js)').to.deep.equal([]);
-
-        drop = federation.planQuorumDrop({ snapshot, stoppable: spec.members });
-        console.log('    [xcall-exp] quorum=' + drop.countQuorum + '/' + drop.n
-            + ' -> stopping [' + drop.stop.join(', ') + '], '
-            + drop.survivingSources + ' source(s) left standing');
-        expect(drop.stop.length, 'the plan must actually stop something').to.be.above(0);
-        expect(drop.survivingSources, 'survivors must be under the count quorum').to.be.below(drop.countQuorum);
-    });
-
-    it('DEPLOY the short-deadline caller contract on BTC', async function () {
-        const res = await submit(sdk,
-            { action: 'DEPLOY', params: { code: CONTRACT_A, gasLimit: 200000 } },
-            { pubkey: deployer.address, change: deployer.address },
-            submitOpts({ wif: deployer.wif })
-        );
-        expect(res.indexed.status).to.equal('valid');
-        indexA = contractIndexOf(res.indexed);
-        console.log('    [xcall-exp] A=' + indexA);
-    });
-
+function registerExpiryDispatchTests() {
     it('DROP the federation below quorum, then fire a 10-block-deadline call', async function () {
         expect(drop, 'the planning step must have run').to.not.equal(null);
         for (const name of drop.stop) dockerStop(name);
@@ -281,7 +213,9 @@ describe('[sdk] cross-chain call deadline expiry (federation below quorum)', fun
         const target = await rpc(TARGET_INDEXER_URL, 'getcrosschaincallresult', { call_id: callId });
         expect(target && target.exists, 'no DOGE-side execution under quorum loss').to.not.equal(true);
     });
+}
 
+function registerExpiryOutcomeTests() {
     it('mining past the deadline expires the request deterministically (no quorum)', async function () {
         const req = await pumpSourceUntil('request expiry', async () => {
             const r = await rpc(SOURCE_INDEXER_URL, 'getcrosschaincall', { call_id: callId });
@@ -302,7 +236,9 @@ describe('[sdk] cross-chain call deadline expiry (federation below quorum)', fun
         expect(outcome.echo).to.equal('expiry-ctx');
         expect(await readState(sdk, indexA, 'count:' + callId)).to.equal('1');
     });
+}
 
+function registerExpiryRestoreTest() {
     it('with quorum RESTORED, the terminal expiry holds (no late dispatch, no double callback)', async function () {
         const restored = [...stopped];
         for (const name of restored) dockerStart(name);
@@ -330,4 +266,82 @@ describe('[sdk] cross-chain call deadline expiry (federation below quorum)', fun
 
         expect(await readState(sdk, indexA, 'count:' + callId), 'callback count').to.equal('1');
     });
+}
+
+function registerQuorumPlanTest() {
+    it('PLAN the quorum drop against the live federation (refuses a venue it cannot drop)', async function () {
+        const spec = federation.parseFederationSpec(process.env);
+        const snapshot = await crossChainSnapshot();
+        const view = federation.summarizeSnapshot(snapshot);
+        console.log('    [xcall-exp] federation: ' + view.n + ' staked source(s) from ' + spec.source);
+
+        // A member declared with a pubkey that is not in the snapshot is not a
+        // qualifying validator here. Stopping it would remove no stake, and the
+        // planner would then quietly plan around it, so say it out loud: the
+        // operator either mis-declared the pair or never staked that hub.
+        const unstaked = spec.members.filter(m => m.pubkey && !view.sourceByPubkey.has(m.pubkey));
+        expect(unstaked.map(m => m.container + '=' + m.pubkey.substring(0, 16) + '...'),
+            'declared members with no active cross_chain stake (run test/sdk/xcallStakeValidators.js)').to.deep.equal([]);
+
+        drop = federation.planQuorumDrop({ snapshot, stoppable: spec.members });
+        console.log('    [xcall-exp] quorum=' + drop.countQuorum + '/' + drop.n
+            + ' -> stopping [' + drop.stop.join(', ') + '], '
+            + drop.survivingSources + ' source(s) left standing');
+        expect(drop.stop.length, 'the plan must actually stop something').to.be.above(0);
+        expect(drop.survivingSources, 'survivors must be under the count quorum').to.be.below(drop.countQuorum);
+    });
+}
+
+describe('[sdk] cross-chain call deadline expiry (federation below quorum)', function () {
+    this.timeout(0);
+
+    before(async function () {
+        sdk = makeSdk();
+        deployer = await fundedGasAddress(sdk, 1);
+        console.log('    [xcall-exp] deployer=' + deployer.address);
+    });
+
+    after(async function () {
+        // ALWAYS restore the whole federation, even when an assertion failed
+        // mid-suite: a drill that leaves a venue under quorum breaks every
+        // XCALL suite that runs after it.
+        for (const name of [...stopped]) {
+            try { dockerStart(name); } catch (e) { console.error('    [xcall-exp] FAILED to restart ' + name + ': ' + e.message); }
+        }
+        if (!stopped.size) console.log('    [xcall-exp] federation restored');
+    });
+
+    it('STAKE the relay validator for the cross_chain capability (idempotent top-up)', async function () {
+        const hubPubkey = process.env.XCALL_HUB_PUBKEY;
+        expect(hubPubkey, 'XCALL_HUB_PUBKEY env (the relay hub\'s Ed25519 pubkey)').to.match(/^[0-9a-f]{64}$/);
+        try {
+            const res = await submit(sdk,
+                { action: 'STAKE', params: { amount: '5000.00000000', signingPubkey: hubPubkey } },
+                { pubkey: deployer.address, change: deployer.address },
+                submitOpts({ wif: deployer.wif })
+            );
+            expect(res.indexed.status).to.equal('valid');
+        } catch (e) {
+            if (!/SIGNING_PUBKEY \(already in use\)/.test(String(e.message))) throw e;
+            console.log('    [xcall-exp] hub pubkey already staked, reusing the active stake');
+        }
+        await mine(8);
+    });
+
+    registerQuorumPlanTest();
+
+    it('DEPLOY the short-deadline caller contract on BTC', async function () {
+        const res = await submit(sdk,
+            { action: 'DEPLOY', params: { code: CONTRACT_A, gasLimit: 200000 } },
+            { pubkey: deployer.address, change: deployer.address },
+            submitOpts({ wif: deployer.wif })
+        );
+        expect(res.indexed.status).to.equal('valid');
+        indexA = contractIndexOf(res.indexed);
+        console.log('    [xcall-exp] A=' + indexA);
+    });
+
+    registerExpiryDispatchTests();
+    registerExpiryOutcomeTests();
+    registerExpiryRestoreTest();
 });

@@ -57,7 +57,9 @@ describe('E2E: Polling & UTXO Tracker Reliability', () => {
             assert(pollDuration < 10000, 'Polling should not run significantly over timeMax')
         })
     })
+})
 
+describe('E2E: Polling & UTXO Tracker Reliability', () => {
     describe('E2E-POLL-003: UTXO tracker synchronization accuracy', () => {
         it('should return UTXOs whose txid exists on the blockchain node', async () => {
             const addr = await cryptoHelper.getNewFundedAddress('E2E.UTXO.SYNC', COIN, NETWORK, null, 'legacy', 0, 1)

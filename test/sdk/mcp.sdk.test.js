@@ -139,41 +139,34 @@ class McpChild {
     stop() { try { this.child.kill(); } catch { /* already gone */ } }
 }
 
-describe(`MCP server write path: stdio submit_action (${MCP_COIN})`, function () {
+let sdk, agent, stateRoot, policyPath;
+const children = [];
+const mkChild = (env) => { const c = new McpChild(env); children.push(c); return c; };
 
-    let sdk, agent, stateRoot, policyPath;
-    const children = [];
-    const mkChild = (env) => { const c = new McpChild(env); children.push(c); return c; };
+async function prepareMcp() {
+    sdk = makeSdk();
+    stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-e2e-'));
 
-    before(async function () {
-        this.timeout(600000);
-        sdk = makeSdk();
-        stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mcp-e2e-'));
+    // Agent key: native-funded + gas-minted so ISSUE can pay the protocol fee.
+    agent = await fundedGasAddress(sdk, 1);
 
-        // Agent key: native-funded + gas-minted so ISSUE can pay the protocol fee.
-        agent = await fundedGasAddress(sdk, 1);
+    // The server now refuses to start a wallet policy with no binding
+    // amount ceiling (fail-closed, server.js hasAmountCap check): a real
+    // operator policy must set maxPerAction or maxPerWindow.perTick, so
+    // the fixture carries a wildcard SEND cap. ISSUE has no
+    // value-derivability (no amount/tick the evaluator can read from its
+    // params), so this cap does not gate test 2's ISSUE call; it exists
+    // only to satisfy the server's startup guard the way a real policy
+    // would.
+    policyPath = path.join(stateRoot, 'policy.json');
+    fs.writeFileSync(policyPath, JSON.stringify({
+        allowedActions: ['ISSUE'],
+        maxPerAction: { SEND: { '*': '1000' } },
+        stateFile: path.join(stateRoot, 'usage.json'),
+    }));
+}
 
-        // The server now refuses to start a wallet policy with no binding
-        // amount ceiling (fail-closed, server.js hasAmountCap check): a real
-        // operator policy must set maxPerAction or maxPerWindow.perTick, so
-        // the fixture carries a wildcard SEND cap. ISSUE has no
-        // value-derivability (no amount/tick the evaluator can read from its
-        // params), so this cap does not gate test 2's ISSUE call; it exists
-        // only to satisfy the server's startup guard the way a real policy
-        // would.
-        policyPath = path.join(stateRoot, 'policy.json');
-        fs.writeFileSync(policyPath, JSON.stringify({
-            allowedActions: ['ISSUE'],
-            maxPerAction: { SEND: { '*': '1000' } },
-            stateFile: path.join(stateRoot, 'usage.json'),
-        }));
-    });
-
-    after(function () {
-        children.forEach((c) => c.stop());
-        fs.rmSync(stateRoot, { recursive: true, force: true });
-    });
-
+function registerReadOnlyMcp() {
     it('1. without XCHAIN_MCP_WIF/POLICY the write tools are not even listed', async function () {
         this.timeout(60000);
         const child = mkChild({});
@@ -183,7 +176,9 @@ describe(`MCP server write path: stdio submit_action (${MCP_COIN})`, function ()
         expect(tools).to.not.include('submit_action');
         expect(tools).to.not.include('get_agent_wallet');
     });
+}
 
+function registerWalletMcp() {
     it('2. with the wallet configured, submit_action ISSUEs a token end-to-end', async function () {
         this.timeout(300000);
         const child = mkChild({ XCHAIN_MCP_WIF: agent.wif, XCHAIN_MCP_POLICY: policyPath });
@@ -221,7 +216,9 @@ describe(`MCP server write path: stdio submit_action (${MCP_COIN})`, function ()
         expect(token, `token ${tick} never became readable via the explorer`).to.not.equal(null);
         expect(token.info.owner, 'token owner must be the agent wallet').to.equal(agent.address);
     });
+}
 
+function registerDeniedMcp() {
     it('3. an action outside allowedActions is refused with a POLICY_* code, unsigned', async function () {
         this.timeout(60000);
         const child = mkChild({ XCHAIN_MCP_WIF: agent.wif, XCHAIN_MCP_POLICY: policyPath });
@@ -233,4 +230,18 @@ describe(`MCP server write path: stdio submit_action (${MCP_COIN})`, function ()
         expect(res.isError).to.equal(true);
         expect(res.body.code).to.equal('POLICY_ACTION_DENIED');
     });
+}
+
+describe(`MCP server write path: stdio submit_action (${MCP_COIN})`, function () {
+    before(async function () {
+        this.timeout(600000);
+        await prepareMcp();
+    });
+    after(function () {
+        children.forEach((c) => c.stop());
+        fs.rmSync(stateRoot, { recursive: true, force: true });
+    });
+    registerReadOnlyMcp();
+    registerWalletMcp();
+    registerDeniedMcp();
 });

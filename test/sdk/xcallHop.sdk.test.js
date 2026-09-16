@@ -110,11 +110,74 @@ async function pumpUntil(label, check, timeoutMs) {
     throw new Error('timed out waiting for ' + label);
 }
 
+let sdk, deployer, indexA, bouncerContract, callId, backId;
+
+function registerBounceTest() {
+    it('the bouncer executes ok and emits the back-call at hops=2', async function () {
+        const result = await pumpUntil('DOGE-side bounce execution', async () => {
+            const r = await rpc(TARGET_INDEXER_URL, 'getcrosschaincallresult', { call_id: callId });
+            return (r && r.exists === true) ? r : null;
+        });
+        expect(result.status, 'bounce execution').to.equal('ok');
+
+        // the bouncer returns the back-call id (JSON-quoted by the VM)
+        backId = JSON.parse(Buffer.from(String(result.return_payload_b64 || ''), 'base64').toString('utf8'));
+        expect(String(backId), 'back-call id from bounce return').to.match(/^[0-9a-f]{64}$/);
+        console.log('    [xcall-hop] back call_id=' + String(backId).substring(0, 16) + '...');
+
+        // the back-call request row lives on the DOGE side (its origin chain)
+        const backReq = await rpc(TARGET_INDEXER_URL, 'getcrosschaincall', { call_id: backId });
+        expect(backReq.exists, 'back-call request on DOGE').to.equal(true);
+        expect(backReq.call.cross_hops, 'back-call hops').to.equal(2);
+        expect(backReq.call.target_chain).to.equal('BTC');
+        expect(backReq.call.target_contract_index).to.equal(Number(indexA));
+    });
+}
+
+function registerHopCompletionTests() {
+    it('the back-call lands on BTC: onPong executes and returns ack', async function () {
+        const result = await pumpUntil('BTC-side onPong execution', async () => {
+            const r = await rpc(SOURCE_INDEXER_URL, 'getcrosschaincallresult', { call_id: backId });
+            return (r && r.exists === true) ? r : null;
+        });
+        expect(result.status, 'onPong execution').to.equal('ok');
+        const decoded = Buffer.from(String(result.return_payload_b64 || ''), 'base64').toString('utf8');
+        expect(decoded).to.equal('"ack"');
+
+        const pong = await pumpUntil('pong state write on A', async () => {
+            return await readState(sdk, indexA, 'pong');
+        }, 60000);
+        expect(pong).to.equal('from-doge');
+        const pongHops = await readState(sdk, indexA, 'pongHops');
+        expect(pongHops, 'crossHops seen by onPong').to.equal('2');
+        console.log('    [xcall-hop] pong=' + pong + ' hops=' + pongHops);
+    });
+
+    it('both legs complete with exactly-once callbacks on their origin chains', async function () {
+        // outbound leg: completed on BTC + A records the bounce return (the back-call id)
+        await pumpUntil('outbound completion on BTC', async () => {
+            const r = await rpc(SOURCE_INDEXER_URL, 'getcrosschaincall', { call_id: callId });
+            return (r && r.call && r.call.request_status === 'completed') ? r : null;
+        });
+        const outDelivered = JSON.parse(await pumpUntil('outbound callback on A', async () => {
+            return await readState(sdk, indexA, 'result:' + callId);
+        }, 90000));
+        expect(outDelivered.status).to.equal('ok');
+        expect(outDelivered.chain).to.equal('DOGE');
+        expect(outDelivered.echo).to.equal('hop-ctx');
+        expect(JSON.parse(outDelivered.payload)).to.equal(backId);
+
+        // back leg: completed on DOGE (its origin)
+        await pumpUntil('back-call completion on DOGE', async () => {
+            const r = await rpc(TARGET_INDEXER_URL, 'getcrosschaincall', { call_id: backId });
+            return (r && r.call && r.call.request_status === 'completed') ? r : null;
+        });
+        console.log('    [xcall-hop] both legs completed');
+    });
+}
+
 describe('[sdk] cross-chain call hop round trip (BTC→DOGE→BTC)', function () {
     this.timeout(0);
-
-    let sdk, deployer, indexA, bouncerContract, callId, backId;
-
     before(async function () {
         bouncerContract = parseInt(process.env.XCALL_BOUNCER_CONTRACT || '', 10);
         expect(bouncerContract, 'XCALL_BOUNCER_CONTRACT env (DOGE bouncer action_index from xcallDogeSetup.js)').to.be.a('number').and.to.be.greaterThan(0);
@@ -170,63 +233,6 @@ describe('[sdk] cross-chain call hop round trip (BTC→DOGE→BTC)', function ()
         expect(req.call.target_chain).to.equal('DOGE');
     });
 
-    it('the bouncer executes ok and emits the back-call at hops=2', async function () {
-        const result = await pumpUntil('DOGE-side bounce execution', async () => {
-            const r = await rpc(TARGET_INDEXER_URL, 'getcrosschaincallresult', { call_id: callId });
-            return (r && r.exists === true) ? r : null;
-        });
-        expect(result.status, 'bounce execution').to.equal('ok');
-
-        // the bouncer returns the back-call id (JSON-quoted by the VM)
-        backId = JSON.parse(Buffer.from(String(result.return_payload_b64 || ''), 'base64').toString('utf8'));
-        expect(String(backId), 'back-call id from bounce return').to.match(/^[0-9a-f]{64}$/);
-        console.log('    [xcall-hop] back call_id=' + String(backId).substring(0, 16) + '...');
-
-        // the back-call request row lives on the DOGE side (its origin chain)
-        const backReq = await rpc(TARGET_INDEXER_URL, 'getcrosschaincall', { call_id: backId });
-        expect(backReq.exists, 'back-call request on DOGE').to.equal(true);
-        expect(backReq.call.cross_hops, 'back-call hops').to.equal(2);
-        expect(backReq.call.target_chain).to.equal('BTC');
-        expect(backReq.call.target_contract_index).to.equal(Number(indexA));
-    });
-
-    it('the back-call lands on BTC: onPong executes and returns ack', async function () {
-        const result = await pumpUntil('BTC-side onPong execution', async () => {
-            const r = await rpc(SOURCE_INDEXER_URL, 'getcrosschaincallresult', { call_id: backId });
-            return (r && r.exists === true) ? r : null;
-        });
-        expect(result.status, 'onPong execution').to.equal('ok');
-        const decoded = Buffer.from(String(result.return_payload_b64 || ''), 'base64').toString('utf8');
-        expect(decoded).to.equal('"ack"');
-
-        const pong = await pumpUntil('pong state write on A', async () => {
-            return await readState(sdk, indexA, 'pong');
-        }, 60000);
-        expect(pong).to.equal('from-doge');
-        const pongHops = await readState(sdk, indexA, 'pongHops');
-        expect(pongHops, 'crossHops seen by onPong').to.equal('2');
-        console.log('    [xcall-hop] pong=' + pong + ' hops=' + pongHops);
-    });
-
-    it('both legs complete with exactly-once callbacks on their origin chains', async function () {
-        // outbound leg: completed on BTC + A records the bounce return (the back-call id)
-        await pumpUntil('outbound completion on BTC', async () => {
-            const r = await rpc(SOURCE_INDEXER_URL, 'getcrosschaincall', { call_id: callId });
-            return (r && r.call && r.call.request_status === 'completed') ? r : null;
-        });
-        const outDelivered = JSON.parse(await pumpUntil('outbound callback on A', async () => {
-            return await readState(sdk, indexA, 'result:' + callId);
-        }, 90000));
-        expect(outDelivered.status).to.equal('ok');
-        expect(outDelivered.chain).to.equal('DOGE');
-        expect(outDelivered.echo).to.equal('hop-ctx');
-        expect(JSON.parse(outDelivered.payload)).to.equal(backId);
-
-        // back leg: completed on DOGE (its origin)
-        await pumpUntil('back-call completion on DOGE', async () => {
-            const r = await rpc(TARGET_INDEXER_URL, 'getcrosschaincall', { call_id: backId });
-            return (r && r.call && r.call.request_status === 'completed') ? r : null;
-        });
-        console.log('    [xcall-hop] both legs completed');
-    });
+    registerBounceTest();
+    registerHopCompletionTests();
 });

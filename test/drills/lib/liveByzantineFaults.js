@@ -10,6 +10,7 @@
  * license (without AGPL source-disclosure terms) is available -
  * contact legal@dankest.llc.
  *
+ **********************************************************************
  * Live byzantine fault injectors for an OUT-OF-PROCESS drill validator.
  *
  * test/helpers/byzantineFaults.js does the same job for the in-process mesh,
@@ -19,16 +20,17 @@
  * distinction is the whole point of the physical drill: an auditor can see
  * that the honest boxes were never reached into.
  *
- * Modelled on the live relay-mesh hook that produced the N=3 result: forge
- * only the CONSENSUS signatures, leave transport auth intact, so the victim
- * stays an ACTIVE voter rather than degrading into a crash fault.
+ * Modelled on the live relay-mesh hook that produced the N=3 result recorded
+ * at launch: forge only the CONSENSUS signatures, leave transport auth
+ * intact, so the victim stays an ACTIVE voter rather than degrading into a
+ * crash fault.
  *
  * No production code is modified; every injector returns a restore().
  ********************************************************************/
 
 'use strict';
 
-// Consensus traffic is exactly the PBFT_* envelope family (Consensus.js
+// Consensus traffic is exactly the PBFT_* envelope family (consensus/pbft.js
 // broadcasts PRE_PREPARE / PREPARE / COMMIT / VIEW_CHANGE / NEW_VIEW).
 // Heartbeats, handshakes and gossip are deliberately NOT forged: corrupting
 // those would get the victim disconnected, and a disconnected node is a crash
@@ -52,15 +54,15 @@ function corruptSignature(sigHex) {
 /**
  * CRASH / PARTITION. The victim stops reacting to every consensus message: it
  * never PREPAREs, COMMITs or applies. Consensus.start() registers an arrow
- * listener that reads `this._handleMessage` at call time, so replacing the
+ * listener that reads `this.handleMessage` at call time, so replacing the
  * method on the instance mutes the node without detaching the listener.
  */
 function silenceConsensus(hub) {
     const consensus = hub && hub.consensus;
     if (!consensus) throw new Error('silenceConsensus: hub has no started consensus engine');
-    const orig = consensus._handleMessage;
-    consensus._handleMessage = () => {};
-    return () => { consensus._handleMessage = orig; };
+    const orig = consensus.handleMessage;
+    consensus.handleMessage = () => {};
+    return () => { consensus.handleMessage = orig; };
 }
 
 /**
@@ -103,7 +105,7 @@ function prePrepareEnvelope(consensus, seq, view, config, btcBlockHeight) {
         data: {
             seq:            seq,
             view:           view,
-            configDigest:   consensus._digest(config),
+            configDigest:   consensus.digest(config),
             config:         config,
             btcBlockHeight: btcBlockHeight
         }

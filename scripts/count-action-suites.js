@@ -36,7 +36,10 @@ const DECODER_SRC = path.join(REPO_ROOT, '../xchain-decoder/src/XChainDecoder.js
 // The alias table moved out of XChainDecoder.js into its own leaf module to
 // break a require cycle with batchSubCommandCapture.js. Read it where it lives
 // now; the inline-literal parse below is kept only for an older sibling.
-const ALIAS_SRC = path.join(REPO_ROOT, '../xchain-decoder/src/actionAliases.js')
+const ALIAS_SRC = path.join(REPO_ROOT, '../xchain-decoder/src/protocol/action_aliases.js')
+// The decoder's constructor/method split moved the VALID_ACTION_NAMES Set
+// literal out of the entry and into this part file beside it.
+const CONSTANTS_SRC = path.join(REPO_ROOT, '../xchain-decoder/src/XChainDecoder/constants.js')
 
 // Leading token of an ACTION payload literal: "ISSUE|0|...", `SEND|${v}|...`,
 // "BATCH|" + version + ... . The delimiter class after the pipe keeps ordinary
@@ -56,7 +59,7 @@ const FALLBACK_ACTION_NAMES = [
     'DIVIDEND', 'EXECUTE', 'FILE', 'ISSUE', 'LINK', 'LIST', 'MESSAGE', 'MINT',
     'NODEPROOF', 'ORDER', 'PRICE', 'ROLLCALL', 'SEND', 'SLASH', 'SLEEP', 'STAKE',
     'SWAP',
-    'SWEEP', 'UNSTAKE', 'VOTE', 'WITHDRAW'
+    'SWEEP', 'UNSTAKE', 'VOTE', 'WITHDRAW', 'XBRIDGE'
 ]
 
 // Fallback alias table, same contract as FALLBACK_ACTION_NAMES: used only when
@@ -72,7 +75,7 @@ const FALLBACK_ACTION_ALIASES = {
 }
 
 // Loads the decoder's short-form alias table. Requiring is safe here where
-// requiring the decoder itself is not: actionAliases.js is a leaf (one object
+// requiring the decoder itself is not: action_aliases.js is a leaf (one object
 // literal and a module.exports, no requires, no side effects), while
 // XChainDecoder.js would pull in its whole dependency tree.
 //
@@ -84,7 +87,7 @@ function readDecoderAliases(decoderSrc) {
     if (fs.existsSync(ALIAS_SRC)) {
         const table = require(ALIAS_SRC)
         if (table && typeof table === 'object' && Object.keys(table).length > 0) {
-            return { aliases: { ...table }, aliasSource: 'xchain-decoder actionAliases.js' }
+            return { aliases: { ...table }, aliasSource: 'xchain-decoder action_aliases.js' }
         }
     }
 
@@ -108,6 +111,36 @@ function readDecoderAliases(decoderSrc) {
     )
 }
 
+// Finds the VALID_ACTION_NAMES Set literal wherever it currently lives: the
+// constants part the decoder's constructor/method split moved it into
+// (src/XChainDecoder/constants.js), checked first, then the entry
+// (src/XChainDecoder.js) for a checkout still at the pre-split layout. Reads
+// text rather than requiring either file, for the same side-effect-free
+// reason as readDecoderAliases below.
+//
+// Returns null only when the decoder checkout itself is absent, matching the
+// standalone-clone fallback path. When the checkout IS present but neither
+// file declares the literal, that is real drift (the declaration moved again
+// or changed shape) and must fail loudly naming both paths, never degrade to
+// the vendored fallback vocabulary with no error.
+function findActionNamesBlock() {
+    if (!fs.existsSync(DECODER_SRC)) return null
+
+    for (const candidate of [CONSTANTS_SRC, DECODER_SRC]) {
+        if (!fs.existsSync(candidate)) continue
+        const src = fs.readFileSync(candidate, 'utf8')
+        const block = src.match(/const VALID_ACTION_NAMES = new Set\(\[([\s\S]*?)\]\)/)
+        if (block) return { block, source: candidate }
+    }
+
+    throw new Error(
+        'count-action-suites: the sibling decoder checkout is present but VALID_ACTION_NAMES ' +
+        'could not be found as a Set literal in ' + CONSTANTS_SRC + ' or ' + DECODER_SRC + '. ' +
+        'The declaration moved or changed shape; update this script rather than counting with ' +
+        'the vendored fallback vocabulary, because a stale name list is a silent under- or over-count.'
+    )
+}
+
 // Reads the decoder's action vocabulary. VALID_ACTION_NAMES is parsed out of
 // the source rather than required, because requiring XChainDecoder.js would
 // pull in its whole dependency tree and this script must stay side-effect free
@@ -115,16 +148,13 @@ function readDecoderAliases(decoderSrc) {
 // table is loaded from its own leaf module instead (see readDecoderAliases):
 // parsing it was what silently broke when the table moved.
 function readDecoderVocabulary() {
-    if (!fs.existsSync(DECODER_SRC)) return null
+    const found = findActionNamesBlock()
+    if (!found) return null
 
-    const src = fs.readFileSync(DECODER_SRC, 'utf8')
-
-    const namesBlock = src.match(/const VALID_ACTION_NAMES = new Set\(\[([\s\S]*?)\]\)/)
-    if (!namesBlock) return null
-    const names = [...namesBlock[1].matchAll(/'([A-Z][A-Z0-9]*)'/g)].map((m) => m[1])
+    const names = [...found.block[1].matchAll(/'([A-Z][A-Z0-9]*)'/g)].map((m) => m[1])
     if (names.length === 0) return null
 
-    const { aliases, aliasSource } = readDecoderAliases(src)
+    const { aliases, aliasSource } = readDecoderAliases(fs.readFileSync(DECODER_SRC, 'utf8'))
 
     return { names, aliases, aliasSource }
 }
@@ -188,7 +218,7 @@ function countActionSuites({ actionsDir = ACTIONS_DIR, testRoot = TEST_ROOT } = 
     }
 }
 
-module.exports = { countActionSuites, vocabulary, FALLBACK_ACTION_NAMES, FALLBACK_ACTION_ALIASES }
+module.exports = { countActionSuites, vocabulary, FALLBACK_ACTION_NAMES, FALLBACK_ACTION_ALIASES, findActionNamesBlock }
 
 if (require.main === module) {
     const result = countActionSuites()

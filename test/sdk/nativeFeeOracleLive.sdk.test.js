@@ -158,20 +158,12 @@ function issueWireParams(tick) {
     return ['0', tick, '1000000', '100000', '0', 'nativefee-oracle-live', '1000'].join('|');
 }
 
-describe('native-coin fee against a LIVE price oracle feed (DOGE)', function () {
-    this.timeout(600000);
+let sdk, maker, feeDestination;
+let liveFee;          // the headline ISSUE's fees row
+let liveDogeBlock;    // DOGE block index the headline ISSUE was in
 
-    let sdk, maker, feeDestination;
-    let liveFee;          // the headline ISSUE's fees row
-    let liveDogeBlock;    // DOGE block index the headline ISSUE was in
-
-    before(async function () {
-        // The XCHAIN/USD sidecar below is a hand-seed into the hub
-        // DB; on a venue whose hub derives the pair it would shadow every real
-        // round. This suite's point is the LIVE DOGE/USD half, so on a publishing
-        // venue the derivation suite covers the whole path instead.
-        if (NO_PRICE_SEED) this.skip()
-        // 1) The XCHAIN/USD sidecar in the HUB DB (mirrors to the indexer via the
+async function prepareSidecar() {
+    // 1) The XCHAIN/USD sidecar in the HUB DB (mirrors to the indexer via the
         //    real HubDbSync channel). Stamp block_timestamp at the DOGE tip's block
         //    time: the H-3 time gate (NATIVE_FEE_PRICE_TIME_GATE, armed 2026-07-07)
         //    only selects rounds stamped at-or-before the evaluated block's time, so
@@ -190,9 +182,11 @@ describe('native-coin fee against a LIVE price oracle feed (DOGE)', function () 
                  block_timestamp, validator_count, consensus_round, consensus_proof, status)
              VALUES (?, 'XCHAIN/USD', ?, 0, 'BTC', ?, 1, 1, '[]', 'finalized')
              ON DUPLICATE KEY UPDATE price=VALUES(price), block_timestamp=VALUES(block_timestamp), status='finalized'`,
-            [XCHAIN_SIDECAR_RND, XCHAIN_USD_PRICE, sidecarTs]));
+        [XCHAIN_SIDECAR_RND, XCHAIN_USD_PRICE, sidecarTs]));
+}
 
-        // 2) Wait for the live oracle to finalize DOGE/USD AND for the indexer to
+async function findFeeDestination() {
+    // 2) Wait for the live oracle to finalize DOGE/USD AND for the indexer to
         //    mirror both pairs: feeschedule reports prices.available with both
         //    xchainUsd and coinUsd. Fail loudly (this is GATE 1 + GATE 2).
         let sched = null;
@@ -209,33 +203,36 @@ describe('native-coin fee against a LIVE price oracle feed (DOGE)', function () 
                 'Confirm the relay hub is finalizing DOGE/USD rounds (GATE 1) and the DOGE ' +
                 'indexer is subscribed via HubDbSync (GATE 2).');
         }
-        feeDestination = process.env.NFO_FEE_DESTINATION || sched.feeDestination;
-        if (!feeDestination) throw new Error('no FEE_DESTINATION from feeschedule and no NFO_FEE_DESTINATION override');
+    const destination = process.env.NFO_FEE_DESTINATION || sched.feeDestination;
+    if (!destination) throw new Error('no FEE_DESTINATION from feeschedule and no NFO_FEE_DESTINATION override');
+    return destination;
+}
 
-        // 3) SDK + funded maker.
-        sdk = new XChainSDK({
-            network:     'dogecoin-regtest',
-            encoderUrl:  'localhost',
-            encoderPort: parseInt(process.env.XCALL_DOGE_ENCODER_PORT || '3123', 10),
-            timeout:     30000,
-            retry:       { maxRetries: 2 },
-        });
-        const kp = sdk.generateKeyPair();
-        maker = { ...kp, address: sdk.deriveAddress(kp.publicKey, { type: 'p2pkh' }) };
-        const tipBeforeFunding = await dogeIndexerTip();
-        await minerRpc('send_funds', { address: maker.address, amount: 100 });
-        await minerRpc('generate_blocks', { count: 2 });
-        // Every test below submits against indexed state, so wait for the indexer
-        // to commit the funding blocks rather than settling for a fixed window.
-        for (let i = 0; i < 30; i++) {
-            if (await dogeIndexerTip() >= tipBeforeFunding + 2) break;
-            await sleep(1000);
-        }
+async function prepareMaker() {
+    // 3) SDK + funded maker.
+    sdk = new XChainSDK({
+        network:     'dogecoin-regtest',
+        encoderUrl:  'localhost',
+        encoderPort: parseInt(process.env.XCALL_DOGE_ENCODER_PORT || '3123', 10),
+        timeout:     30000,
+        retry:       { maxRetries: 2 },
     });
+    const kp = sdk.generateKeyPair();
+    maker = { ...kp, address: sdk.deriveAddress(kp.publicKey, { type: 'p2pkh' }) };
+    const tipBeforeFunding = await dogeIndexerTip();
+    await minerRpc('send_funds', { address: maker.address, amount: 100 });
+    await minerRpc('generate_blocks', { count: 2 });
+    // Every test below submits against indexed state, so wait for the indexer
+    // to commit the funding blocks rather than settling for a fixed window.
+    for (let i = 0; i < 30; i++) {
+        if (await dogeIndexerTip() >= tipBeforeFunding + 2) break;
+        await sleep(1000);
+    }
+}
 
-    // Submit a DOGE action with waitForIndexer:false (no DOGE explorer), mine, and
-    // resolve the indexed action_index from the indexer DB by tx hash.
-    async function submitAndIndex(label, actionData, customOutputs) {
+// Submit a DOGE action with waitForIndexer:false (no DOGE explorer), mine, and
+// resolve the indexed action_index from the indexer DB by tx hash.
+async function submitAndIndex(label, actionData, customOutputs) {
         const res = await sdk.submitAction(
             actionData,
             { pubkey: maker.address, change: maker.address, unconfirmed: false,
@@ -253,9 +250,10 @@ describe('native-coin fee against a LIVE price oracle feed (DOGE)', function () 
                  WHERE ih.hash = ? ORDER BY a.action_index ASC LIMIT 1`, [txid]));
             if (rows.length) return { actionIndex: Number(rows[0].action_index), blockIndex: Number(rows[0].block_index) };
         }
-        throw new Error(label + ': tx ' + txid + ' never indexed');
-    }
+    throw new Error(label + ': tx ' + txid + ' never indexed');
+}
 
+function registerNativeFeeValidation() {
     it('validates a DOGE native-coin fee against the live oracle-mirrored price', async function () {
         const tick = freshTick('NFO');
 
@@ -306,7 +304,9 @@ describe('native-coin fee against a LIVE price oracle feed (DOGE)', function () 
 
         liveFee = fee;
     });
+}
 
+function registerNativeFeeQuotes() {
     it('feequote == feequotedryrun == band recomputed from the live oracle row', async function () {
         // The maker is now indexed (it sourced the headline ISSUE), so the dry-run
         // (which requires a known source) can run. Use a SECOND fresh tick so the
@@ -348,4 +348,20 @@ describe('native-coin fee against a LIVE price oracle feed (DOGE)', function () 
         expect(approxEqual(fq.minAcceptable, band.min), 'minAcceptable matches live-row recompute').to.equal(true);
         expect(approxEqual(fq.maxAcceptable, band.max), 'maxAcceptable matches live-row recompute').to.equal(true);
     });
+}
+
+describe('native-coin fee against a LIVE price oracle feed (DOGE)', function () {
+    this.timeout(600000);
+    before(async function () {
+        // The XCHAIN/USD sidecar below is a hand-seed into the hub
+        // DB; on a venue whose hub derives the pair it would shadow every real
+        // round. This suite's point is the LIVE DOGE/USD half, so on a publishing
+        // venue the derivation suite covers the whole path instead.
+        if (NO_PRICE_SEED) this.skip()
+        await prepareSidecar();
+        feeDestination = await findFeeDestination();
+        await prepareMaker();
+    });
+    registerNativeFeeValidation();
+    registerNativeFeeQuotes();
 });

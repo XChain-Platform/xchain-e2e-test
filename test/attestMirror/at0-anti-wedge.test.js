@@ -184,20 +184,18 @@ describe('AT0 anti-wedge: the mirror barrier parks a hubless BTC indexer and nev
             ' against the peer at ' + advanced)
     })
 
-    // PARKED PENDING AN OPERATOR RULING, not skipped as an inconvenience.
+    // NOT a pending question any more: the operator ruled on 2026-09-04, the lever was
+    // built, and this clause IS driven, in `at0b-barrier-attribution.test.js`. It lives
+    // there rather than here so a green anti-wedge run does not depend on a second venue.
     //
-    // AT0 as written names `attest_response_sync_barrier` as the reason on `/status`.
-    // Driven on this venue, that reason CANNOT appear when a whole hub is stopped:
-    // `anchor_attest_barrier` sits earlier in the same block loop and reads the same
-    // starved stream watermark, so it reports first and both indexers carry it. The
-    // anti-wedge property AT0 exists to prove is fully covered by the case above; only
-    // the reason string is unreachable. Two ways to close it, and the choice changes what
-    // the milestone tests, so it is not this drill's to make:
-    //   1. give the venue a route-level fault injection that withholds ONLY
-    //      `attestation_responses` so the earlier barriers stay satisfied, then this case
-    //      becomes drivable as written;
-    //   2. re-word AT0 to the shape the case above already asserts.
-    it.skip('names attest_response_sync_barrier specifically (needs ruling: see comment)', async function () {
+    // Why it is still unreachable in THIS file: AT0 as written names
+    // `attest_response_sync_barrier` as the reason on `/status`, and with a whole hub
+    // stopped every barrier starves at once. `anchor_attest_barrier` sits earlier in the
+    // same block loop and reads the same starved stream watermark, so it reports first and
+    // both indexers carry it. The anti-wedge property AT0 exists to prove is fully covered
+    // by the case above; only the reason string needed the at0b lever
+    // (`venue.withholdMirrorTable` plus a raised `attestResponse` grace).
+    it.skip('names attest_response_sync_barrier specifically (DRIVEN in at0b, see comment)', async function () {
         const a = await statusOf(0)
         assert.strictEqual(a.reason, BARRIER_REASON)
         assert.ok(PARKED_CLASSES.includes(a.klass))

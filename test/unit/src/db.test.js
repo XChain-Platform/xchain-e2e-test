@@ -1130,3 +1130,43 @@ describe('waitForSend() inline polling', function () {
         }
     })
 })
+
+// contract_state is utf8_general_ci, so matching the plain state_key column folds
+// "Key" into "key" and an assertion can read a different key's row. The indexer
+// keys current state on the utf8_bin shadow state_key_bin (armed from genesis on
+// regtest), so the harness must match the same column or its assertions describe
+// a key nobody wrote.
+describe('getContractState() key semantics', function () {
+    it('matches the binary shadow column, never the folding state_key', async function () {
+        await db.getContractState(7, 'callback_status')
+        const sql    = mockConnection.query.firstCall.args[0]
+        const params = mockConnection.query.firstCall.args[1]
+        assert.match(sql, /state_key_bin\s*=\s*\?/)
+        assert.doesNotMatch(sql, /[^_]state_key\s*=\s*\?/)
+        assert.deepStrictEqual(params, [7, 'callback_status'])
+    })
+
+    it('selects the latest row by id DESC, the writer tiebreak', async function () {
+        await db.getContractState(7, 'callback_status')
+        const sql = mockConnection.query.firstCall.args[0]
+        assert.match(sql, /ORDER BY\s+id\s+DESC\s+LIMIT\s+1/)
+        assert.doesNotMatch(sql, /ORDER BY\s+block_index/)
+    })
+
+    it('returns null when no row matches', async function () {
+        mockConnection.query.resolves([])
+        assert.strictEqual(await db.getContractState(7, 'missing'), null)
+    })
+
+    it('names a missing shadow column instead of swallowing it', async function () {
+        const err = new Error("Unknown column 'state_key_bin' in 'where clause'")
+        err.code = 'ER_BAD_FIELD_ERROR'
+        mockConnection.query.rejects(err)
+        const spy = sinon.stub(console, 'error')
+        try {
+            assert.strictEqual(await db.getContractState(7, 'callback_status'), null)
+            assert.strictEqual(spy.callCount, 1)
+            assert.match(spy.firstCall.args[0], /state_key_bin/)
+        } finally { spy.restore() }
+    })
+})

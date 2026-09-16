@@ -65,7 +65,7 @@ const TIP = {
     block_merkle_root: 'e5'.repeat(32), block_merkle_version: 1
 };
 
-// Mirror StateCheckpointEngine._checkpointRootSuffix (post-flag-day SPV root suffix).
+// Mirror StateCheckpointEngine.checkpointRootSuffix (post-flag-day SPV root suffix).
 const ROOT_SUFFIX = '|' + [TIP.state_root.toLowerCase(), String(TIP.state_root_version),
                            TIP.block_merkle_root.toLowerCase(), String(TIP.block_merkle_version)].join('|');
 
@@ -76,12 +76,12 @@ function wireCheckpointEngine(mvh) {
         cps.chains         = ['BTC'];
         cps.confirmations  = 0;
         cps.indexers.BTC   = { url: 'http://stubbed', key: '' };
-        cps._indexerCall   = async () => Object.assign({}, TIP);
+        cps.indexerCall   = async () => Object.assign({}, TIP);
     }
 }
 
 async function tickAll(mvh) {
-    await Promise.all(mvh.hubs.map((h) => h.stateCheckpoints._tick().catch(() => {})));
+    await Promise.all(mvh.hubs.map((h) => h.stateCheckpoints.tick().catch(() => {})));
     await waitFor(async () => {
         let held = 0;
         for (const hub of mvh.hubs) {
@@ -98,9 +98,7 @@ async function checkpointRows(hub) {
         ['BTC', 'regtest', TIP.block_index]);
 }
 
-describe('MultiValidatorHub: state-checkpoint signing at N=10 (C.2 matrix cell)', function () {
-    this.timeout(300_000);
-
+describe('MultiValidatorHub: state-checkpoint signing at N=10 (C.2 matrix cell)', function () { this.timeout(300_000);
     describe('a healthy N=10 weighted federation finalizes on every hub (needs >=7 of 10)', function () {
         let db, mvh, seed;
 
@@ -157,41 +155,6 @@ describe('MultiValidatorHub: state-checkpoint signing at N=10 (C.2 matrix cell)'
             }
             const distinct = new Set(rows.map((r) => r.ledger_hash + '|' + r.checkpoint_seq));
             assert.strictEqual(distinct.size, 1, 'all hubs must hold the identical checkpoint');
-        });
-    });
-
-    describe('a 6-of-10 live minority cannot finalize a checkpoint (boundary)', function () {
-        let db, mvh, seed;
-
-        before(async function () {
-            db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping N=10 checkpoint (boundary): no env DB and Docker unavailable'); this.skip(); }
-            // 6 live hubs; 4 offline placeholder sources sit in the snapshot (counting
-            // toward S). 6000/10000 is one source below the >=7 quorum.
-            mvh = new MultiValidatorHub({ count: 6, basePort: 31200, startCrossChain: true, startAttestation: false });
-            await mvh.start();
-            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
-            const ids = mvh.identities;
-            const offline = ['f0', 'f1', 'f2', 'f3'].map((p) => p.repeat(32));   // distinct, never live
-            const validators = ids.map((id, i) => ({ pubkey: id.pubkeyHex, source: 's' + i, weight: '1000' }))
-                .concat(offline.map((pk, i) => ({ pubkey: pk, source: 'off' + i, weight: '1000' })));
-            seed = seedWeightSnapshot(mvh, { blockIndex: BLOCK_INDEX, validators });
-            wireCheckpointEngine(mvh);
-        });
-
-        after(async function () {
-            if (seed) seed.restore();
-            if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
-            if (db)  { await db.stop(); }
-        });
-
-        it('6 live of 10 is below quorum: no checkpoint is stored on any hub', async function () {
-            await tickAll(mvh);
-            for (let i = 0; i < mvh.hubs.length; i++) {
-                const rows = await checkpointRows(mvh.hubs[i]);
-                assert.strictEqual(rows.length, 0,
-                    'hub ' + i + ' finalized a checkpoint a 6-of-10 minority must never carry (got ' + rows.length + ' rows)');
-            }
         });
     });
 });

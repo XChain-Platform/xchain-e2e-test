@@ -58,18 +58,18 @@ function seedWeightSnapshot(mvh, opts = {}) {
         const cs          = hub.capabilitySnapshot;
         const origActiveW = cs.getActiveWeightSnapshot;
         const origWeight  = cs.getWeightSnapshot;
-        const origBlock   = hub._resolveBtcLatestBlock;
+        const origBlock   = hub.resolveBtcLatestBlock;
         const origNet     = hub.network;
 
         cs.getActiveWeightSnapshot = async () => fresh({ capability: '*' });
         cs.getWeightSnapshot       = async (capability) => fresh({ capability });
-        hub._resolveBtcLatestBlock = async () => blockIndex;
+        hub.resolveBtcLatestBlock = async () => blockIndex;
         hub.network                = network;
 
         restores.push(() => {
             cs.getActiveWeightSnapshot = origActiveW;
             cs.getWeightSnapshot       = origWeight;
-            hub._resolveBtcLatestBlock = origBlock;
+            hub.resolveBtcLatestBlock = origBlock;
             hub.network                = origNet;
         });
     }

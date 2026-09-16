@@ -75,80 +75,96 @@ const GRACE_MS = 4000;
 // can tell that apart from a parse or wire regression.
 const CAPABILITY_GAP_STATUS = 'invalid: insufficient signer stake';
 
+let venue = null, pinned = null, signerSet = null;
+let rounds = [], parsed = null, indexed = null, block = null, settle = null;
+let cadenceSetup = null;
+let cadenceFailure = null;
+
+async function initializeCadence() {
+    pinned = drive.pinBatchWindow({ windowRounds: WINDOW_ROUNDS, graceMs: GRACE_MS });
+    venue = new OracleBatchVenue({
+        coin: 'dogecoin', network: 'regtest',
+        validatorCount: VALIDATORS,
+        basePort: 33900,
+        roundBase: drive.alignedRoundBase(WINDOW_ROUNDS),
+        expectWireVersion: 0
+    });
+
+    let up = false;
+    try { up = await venue.up(); }
+    catch (err) {
+        console.log('AT1 venue unavailable: ' + (err && err.message));
+        await venue.down(); venue = null; pinned.restore();
+        return false;
+    }
+    if (!up) {
+        console.log('AT1 venue unavailable: ' + venue.unavailable);
+        await venue.down(); venue = null; pinned.restore();
+        return false;
+    }
+
+    // Every hub, not just the leader. Without this no follower has registered the
+    // XPRICEB handler and the signing round expires at 1/3 sigs.
+    signerSet = drive.attachBatchSigners(venue);
+
+    rounds = await drive.finalizeRoundsNoWait(venue, WINDOW_ROUNDS);
+    settle = await drive.waitForPublications(venue, { min: 1, quietMs: 25_000, timeoutMs: 300_000 });
+
+    if (venue.publications.length > 0) {
+        parsed  = drive.parsePriceBatchWire(venue.publications[0].wire);
+        indexed = await venue.readIndexedPrice(venue.publications[0].txid);
+        block   = await venue.blockOf(venue.publications[0].txid);
+    }
+
+    console.log('\n  --- AT1: what actually landed ---');
+    console.log('  rounds driven: ' + rounds.map((r) => r.round).join(', '));
+    console.log('  publications:  ' + venue.publications.length);
+    for (const p of venue.publications) {
+        console.log('    leader hub ' + p.hubIndex + '  v' + p.wireVersion + '  wire ' + p.wireBytes +
+            'B  ' + p.encoding + '  tx ' + p.txid);
+    }
+    if (parsed && parsed.ok) {
+        console.log('  wire: rounds [' + parsed.firstRound + '..' + parsed.lastRound + '] count ' +
+            parsed.roundCount + '  sigs ' + parsed.sigs.length + '  anchor ' + parsed.anchor +
+            '  body ' + parsed.bodyBytes + 'B  compressed=' + parsed.compressed +
+            (parsed.compressed ? ('  (' + parsed.compressedBytes + 'B, ratio ' +
+                parsed.ratio.toFixed(2) + ':1)') : ''));
+    }
+    if (indexed) {
+        console.log('  indexed: action ' + indexed.action_index + '  version ' + indexed.version +
+            '  round ' + indexed.round_number + '  batch [' + indexed.batch_first_round + '..' +
+            indexed.batch_last_round + '] count ' + indexed.round_count +
+            '  block ' + (block ? block.height : '?') + '  -> ' + indexed.status);
+    }
+    console.log(drive.railDiagnosis(venue, signerSet));
+    console.log('  ---------------------------------\n');
+    return true;
+}
+
+async function setUpCadence() {
+    if (cadenceFailure) this.skip();
+    if (!cadenceSetup) cadenceSetup = initializeCadence();
+    try {
+        if (!await cadenceSetup) this.skip();
+    } catch (err) {
+        cadenceFailure = err;
+        throw err;
+    }
+}
+
+async function tearDownCadence() {
+    if (signerSet) signerSet.stop();
+    if (venue) await venue.down();
+    if (pinned) pinned.restore();
+}
+
 describe('AT1 oracle batch cadence: six finalized rounds, ONE PRICE v0 on DOGE regtest (L3)', function () {
     // Six PBFT rounds, a peer signing round, an encoder build, a broadcast and a
     // confirmation on a real chain. The budget is per-suite; every wait inside is a
     // poll that returns the moment its condition holds.
     this.timeout(45 * 60 * 1000);
 
-    let venue = null, pinned = null, signerSet = null;
-    let rounds = [], parsed = null, indexed = null, block = null, settle = null;
-
-    before(async function () {
-        pinned = drive.pinBatchWindow({ windowRounds: WINDOW_ROUNDS, graceMs: GRACE_MS });
-        venue = new OracleBatchVenue({
-            coin: 'dogecoin', network: 'regtest',
-            validatorCount: VALIDATORS,
-            basePort: 33900,
-            roundBase: drive.alignedRoundBase(WINDOW_ROUNDS),
-            expectWireVersion: 0
-        });
-
-        let up = false;
-        try { up = await venue.up(); }
-        catch (err) {
-            console.log('AT1 venue unavailable: ' + (err && err.message));
-            await venue.down(); venue = null; pinned.restore();
-            this.skip(); return;
-        }
-        if (!up) {
-            console.log('AT1 venue unavailable: ' + venue.unavailable);
-            await venue.down(); venue = null; pinned.restore();
-            this.skip(); return;
-        }
-
-        // Every hub, not just the leader. Without this no follower has registered the
-        // XPRICEB handler and the signing round expires at 1/3 sigs.
-        signerSet = drive.attachBatchSigners(venue);
-
-        rounds = await drive.finalizeRoundsNoWait(venue, WINDOW_ROUNDS);
-        settle = await drive.waitForPublications(venue, { min: 1, quietMs: 25_000, timeoutMs: 300_000 });
-
-        if (venue.publications.length > 0) {
-            parsed  = drive.parsePriceBatchWire(venue.publications[0].wire);
-            indexed = await venue.readIndexedPrice(venue.publications[0].txid);
-            block   = await venue.blockOf(venue.publications[0].txid);
-        }
-
-        console.log('\n  --- AT1: what actually landed ---');
-        console.log('  rounds driven: ' + rounds.map((r) => r.round).join(', '));
-        console.log('  publications:  ' + venue.publications.length);
-        for (const p of venue.publications) {
-            console.log('    leader hub ' + p.hubIndex + '  v' + p.wireVersion + '  wire ' + p.wireBytes +
-                'B  ' + p.encoding + '  tx ' + p.txid);
-        }
-        if (parsed && parsed.ok) {
-            console.log('  wire: rounds [' + parsed.firstRound + '..' + parsed.lastRound + '] count ' +
-                parsed.roundCount + '  sigs ' + parsed.sigs.length + '  anchor ' + parsed.anchor +
-                '  body ' + parsed.bodyBytes + 'B  compressed=' + parsed.compressed +
-                (parsed.compressed ? ('  (' + parsed.compressedBytes + 'B, ratio ' +
-                    parsed.ratio.toFixed(2) + ':1)') : ''));
-        }
-        if (indexed) {
-            console.log('  indexed: action ' + indexed.action_index + '  version ' + indexed.version +
-                '  round ' + indexed.round_number + '  batch [' + indexed.batch_first_round + '..' +
-                indexed.batch_last_round + '] count ' + indexed.round_count +
-                '  block ' + (block ? block.height : '?') + '  -> ' + indexed.status);
-        }
-        console.log(drive.railDiagnosis(venue, signerSet));
-        console.log('  ---------------------------------\n');
-    });
-
-    after(async function () {
-        if (signerSet) signerSet.stop();
-        if (venue) await venue.down();
-        if (pinned) pinned.restore();
-    });
+    before(setUpCadence);
 
     it('all six rounds finalized on a real multi-signature quorum', function () {
         assert.strictEqual(rounds.length, WINDOW_ROUNDS,
@@ -177,6 +193,11 @@ describe('AT1 oracle batch cadence: six finalized rounds, ONE PRICE v0 on DOGE r
             'a second wire was still arriving when the quiet window expired, so "exactly one" is a ' +
             'race this run happened to win rather than a property.' + drive.railDiagnosis(venue, signerSet));
     });
+});
+
+describe('AT1 oracle batch cadence: six finalized rounds, ONE PRICE v0 on DOGE regtest (L3)', function () {
+    this.timeout(45 * 60 * 1000);
+    before(setUpCadence);
 
     // The old companion assertion here required ZERO per-round wires alongside the batch.
     // It is void and was self-contradicting: the per-round wire is DELETED, the batch IS
@@ -222,6 +243,11 @@ describe('AT1 oracle batch cadence: six finalized rounds, ONE PRICE v0 on DOGE r
         assert.strictEqual(parsed.anchor, parsed.rounds[parsed.rounds.length - 1].btcBlockHeight,
             'the batch header anchor is not the last round\'s anchor; both verifiers reject that wire');
     });
+});
+
+describe('AT1 oracle batch cadence: six finalized rounds, ONE PRICE v0 on DOGE regtest (L3)', function () {
+    this.timeout(45 * 60 * 1000);
+    before(setUpCadence);
 
     it('the batch carries a real quorum signature set over the batch canonical', function () {
         const distinct = new Set(parsed.sigs.map((s) => s.pubkey));
@@ -263,6 +289,12 @@ describe('AT1 oracle batch cadence: six finalized rounds, ONE PRICE v0 on DOGE r
         assert.strictEqual(storedRounds.length, WINDOW_ROUNDS,
             'PARSE rung: rounds_json holds ' + storedRounds.length + ' round(s), not ' + WINDOW_ROUNDS);
     });
+});
+
+describe('AT1 oracle batch cadence: six finalized rounds, ONE PRICE v0 on DOGE regtest (L3)', function () {
+    this.timeout(45 * 60 * 1000);
+    before(setUpCadence);
+    after(tearDownCadence);
 
     it('the landing chain accepted the batch', function () {
         const status = String(indexed.status);

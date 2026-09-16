@@ -108,117 +108,124 @@ async function pumpUntil(label, check, timeoutMs) {
     throw new Error('timed out waiting for ' + label);
 }
 
+let sdk, deployer, indexA, callId;
+
+async function prepareCrossChainCall() {
+    sdk = makeSdk();
+    deployer = await fundedGasAddress(sdk, 1);
+    console.log('    [xcall] deployer=' + deployer.address);
+}
+
+async function stakeRelayValidator() {
+    // BTC resolves the cross_chain validator set from its OWN stakes (root of
+    // trust), so the hub's signing pubkey must hold an active capability stake
+    // before the BTC side will verify relay signatures. Pass the hub's pubkey
+    // via XCALL_HUB_PUBKEY. Re-runs top up the same stake (harmless).
+    const hubPubkey = process.env.XCALL_HUB_PUBKEY;
+    expect(hubPubkey, 'XCALL_HUB_PUBKEY env (the relay hub\'s Ed25519 pubkey)').to.match(/^[0-9a-f]{64}$/);
+
+    try {
+        const res = await submit(sdk,
+            { action: 'STAKE', params: { amount: '5000.00000000', signingPubkey: hubPubkey } },
+            { pubkey: deployer.address, change: deployer.address },
+            submitOpts({ wif: deployer.wif })
+        );
+        expect(res.indexed.status).to.equal('valid');
+    } catch (e) {
+        // A prior run already staked this pubkey from a different funding
+        // address, so the capability stake exists and stays active.
+        if (!/SIGNING_PUBKEY \(already in use\)/.test(String(e.message))) throw e;
+        console.log('    [xcall] hub pubkey already staked, reusing the active stake');
+    }
+    await mine(8); // past ACTIVATION_DELAY_BLOCKS (6) so the stake is active at relay snapshot blocks
+}
+
+async function deploySourceContract() {
+    const res = await submit(sdk,
+        { action: 'DEPLOY', params: { code: CONTRACT_A, gasLimit: 200000 } },
+        { pubkey: deployer.address, change: deployer.address },
+        submitOpts({ wif: deployer.wif })
+    );
+    expect(res.indexed.status).to.equal('valid');
+    indexA = contractIndexOf(res.indexed);
+    console.log('    [xcall] A=' + indexA);
+}
+
+async function emitCrossChainCall() {
+    const res = await submit(sdk,
+        { action: 'EXECUTE', params: { contractActionIndex: indexA, method: 'callOut', params: ['999999', 'onArrival'] } },
+        { pubkey: deployer.address, change: deployer.address },
+        submitOpts({ wif: deployer.wif })
+    );
+    expect(res.indexed.status).to.equal('valid');
+    await mine(1);
+
+    callId = await readState(sdk, indexA, 'lastCall');
+    expect(String(callId)).to.match(/^[0-9a-f]{64}$/);
+    console.log('    [xcall] call_id=' + String(callId).substring(0, 16) + '...');
+
+    const req = await rpc(SOURCE_INDEXER_URL, 'getcrosschaincall', { call_id: callId });
+    expect(req.exists).to.equal(true);
+    expect(req.call.target_chain).to.equal('DOGE');
+    expect(req.call.target_contract_index).to.equal(999999);
+    expect(req.call.gas_limit).to.equal(50000);
+    expect(req.call.cross_hops).to.equal(1);
+    expect(req.call.request_status).to.equal('pending');
+}
+
+async function verifyTargetExecution() {
+    const result = await pumpUntil('DOGE-side execution result', async () => {
+        const r = await rpc(TARGET_INDEXER_URL, 'getcrosschaincallresult', { call_id: callId });
+        return (r && r.exists === true) ? r : null;
+    });
+    console.log('    [xcall] DOGE executed: status=' + result.status + ' block=' + result.executed_block_index);
+    expect(result.status).to.equal('no_contract');
+    expect(result.network).to.equal('regtest');
+    expect(result.return_payload_b64 || '').to.equal('');
+}
+
+async function verifyCallbackDelivery() {
+    // The result leg is gated by the SOURCE chain's relay margin (now +
+    // XCALL_RELAY_MARGIN_BLOCKS * nominal-BTC-interval). At 1 margin block that
+    // is ~600s of wall-clock before the source-side effective_time<=block_time
+    // gate clears, so this wait needs headroom well past the 600s default.
+    await pumpUntil('source-side request completion', async () => {
+        const r = await rpc(SOURCE_INDEXER_URL, 'getcrosschaincall', { call_id: callId });
+        return (r && r.call && r.call.request_status === 'completed') ? r : null;
+    }, 1200000);
+
+    const delivered = await pumpUntil('callback state write', async () => {
+        return await readState(sdk, indexA, 'result:' + callId);
+    }, 60000);
+    const outcome = JSON.parse(delivered);
+    console.log('    [xcall] callback delivered: ' + delivered);
+    expect(outcome.status).to.equal('no_contract');
+    expect(outcome.chain).to.equal('DOGE');
+    expect(outcome.payload).to.equal('');
+    expect(outcome.echo).to.equal('echo-ctx');
+}
+
+async function verifyContractRead() {
+    await mine(1); // result visibility starts the block after the terminal flip
+    const res = await submit(sdk,
+        { action: 'EXECUTE', params: { contractActionIndex: indexA, method: 'checkResult', params: [String(callId)] } },
+        { pubkey: deployer.address, change: deployer.address },
+        submitOpts({ wif: deployer.wif })
+    );
+    expect(res.indexed.status).to.equal('valid');
+    await mine(1);
+
+    const read = JSON.parse(await readState(sdk, indexA, 'read:' + callId));
+    expect(read).to.deep.equal({ status: 'no_contract', payload: '' });
+}
+
 describe('[sdk] cross-chain calls (emit.crossExecute)', function () {
     this.timeout(0);
-
-    let sdk, deployer, indexA, callId;
-
-    before(async function () {
-        sdk = makeSdk();
-        deployer = await fundedGasAddress(sdk, 1);
-        console.log('    [xcall] deployer=' + deployer.address);
-    });
-
-    it('STAKE the relay validator for the cross_chain capability (BTC chain truth)', async function () {
-        // BTC resolves the cross_chain validator set from its OWN stakes (root of
-        // trust), so the hub's signing pubkey must hold an active capability stake
-        // before the BTC side will verify relay signatures. Pass the hub's pubkey
-        // via XCALL_HUB_PUBKEY. Re-runs top up the same stake (harmless).
-        const hubPubkey = process.env.XCALL_HUB_PUBKEY;
-        expect(hubPubkey, 'XCALL_HUB_PUBKEY env (the relay hub\'s Ed25519 pubkey)').to.match(/^[0-9a-f]{64}$/);
-
-        try {
-            const res = await submit(sdk,
-                { action: 'STAKE', params: { amount: '5000.00000000', signingPubkey: hubPubkey } },
-                { pubkey: deployer.address, change: deployer.address },
-                submitOpts({ wif: deployer.wif })
-            );
-            expect(res.indexed.status).to.equal('valid');
-        } catch (e) {
-            // A prior run already staked this pubkey from a different funding
-            // address, so the capability stake exists and stays active.
-            if (!/SIGNING_PUBKEY \(already in use\)/.test(String(e.message))) throw e;
-            console.log('    [xcall] hub pubkey already staked, reusing the active stake');
-        }
-        await mine(8); // past ACTIVATION_DELAY_BLOCKS (6) so the stake is active at relay snapshot blocks
-    });
-
-    it('DEPLOY the source-side contract (A) on BTC', async function () {
-        const res = await submit(sdk,
-            { action: 'DEPLOY', params: { code: CONTRACT_A, gasLimit: 200000 } },
-            { pubkey: deployer.address, change: deployer.address },
-            submitOpts({ wif: deployer.wif })
-        );
-        expect(res.indexed.status).to.equal('valid');
-        indexA = contractIndexOf(res.indexed);
-        console.log('    [xcall] A=' + indexA);
-    });
-
-    it('emit.crossExecute lands a valid on-chain XCALL request with the derived call_id', async function () {
-        const res = await submit(sdk,
-            { action: 'EXECUTE', params: { contractActionIndex: indexA, method: 'callOut', params: ['999999', 'onArrival'] } },
-            { pubkey: deployer.address, change: deployer.address },
-            submitOpts({ wif: deployer.wif })
-        );
-        expect(res.indexed.status).to.equal('valid');
-        await mine(1);
-
-        callId = await readState(sdk, indexA, 'lastCall');
-        expect(String(callId)).to.match(/^[0-9a-f]{64}$/);
-        console.log('    [xcall] call_id=' + String(callId).substring(0, 16) + '...');
-
-        const req = await rpc(SOURCE_INDEXER_URL, 'getcrosschaincall', { call_id: callId });
-        expect(req.exists).to.equal(true);
-        expect(req.call.target_chain).to.equal('DOGE');
-        expect(req.call.target_contract_index).to.equal(999999);
-        expect(req.call.gas_limit).to.equal(50000);
-        expect(req.call.cross_hops).to.equal(1);
-        expect(req.call.request_status).to.equal('pending');
-    });
-
-    it('the federation relays the dispatch and DOGE records a no_contract execution', async function () {
-        const result = await pumpUntil('DOGE-side execution result', async () => {
-            const r = await rpc(TARGET_INDEXER_URL, 'getcrosschaincallresult', { call_id: callId });
-            return (r && r.exists === true) ? r : null;
-        });
-        console.log('    [xcall] DOGE executed: status=' + result.status + ' block=' + result.executed_block_index);
-        expect(result.status).to.equal('no_contract');
-        expect(result.network).to.equal('regtest');
-        expect(result.return_payload_b64 || '').to.equal('');
-    });
-
-    it('the result relays back and the callback delivers exactly one no_contract outcome', async function () {
-        // The result leg is gated by the SOURCE chain's relay margin (now +
-        // XCALL_RELAY_MARGIN_BLOCKS * nominal-BTC-interval). At 1 margin block that
-        // is ~600s of wall-clock before the source-side effective_time<=block_time
-        // gate clears, so this wait needs headroom well past the 600s default.
-        await pumpUntil('source-side request completion', async () => {
-            const r = await rpc(SOURCE_INDEXER_URL, 'getcrosschaincall', { call_id: callId });
-            return (r && r.call && r.call.request_status === 'completed') ? r : null;
-        }, 1200000);
-
-        const delivered = await pumpUntil('callback state write', async () => {
-            return await readState(sdk, indexA, 'result:' + callId);
-        }, 60000);
-        const outcome = JSON.parse(delivered);
-        console.log('    [xcall] callback delivered: ' + delivered);
-        expect(outcome.status).to.equal('no_contract');
-        expect(outcome.chain).to.equal('DOGE');
-        expect(outcome.payload).to.equal('');
-        expect(outcome.echo).to.equal('echo-ctx');
-    });
-
-    it('xchain.crossChain.getCallResult reads the terminal outcome on-contract', async function () {
-        await mine(1); // result visibility starts the block after the terminal flip
-        const res = await submit(sdk,
-            { action: 'EXECUTE', params: { contractActionIndex: indexA, method: 'checkResult', params: [String(callId)] } },
-            { pubkey: deployer.address, change: deployer.address },
-            submitOpts({ wif: deployer.wif })
-        );
-        expect(res.indexed.status).to.equal('valid');
-        await mine(1);
-
-        const read = JSON.parse(await readState(sdk, indexA, 'read:' + callId));
-        expect(read).to.deep.equal({ status: 'no_contract', payload: '' });
-    });
+    before(prepareCrossChainCall);
+    it('STAKE the relay validator for the cross_chain capability (BTC chain truth)', stakeRelayValidator);
+    it('DEPLOY the source-side contract (A) on BTC', deploySourceContract);
+    it('emit.crossExecute lands a valid on-chain XCALL request with the derived call_id', emitCrossChainCall);
+    it('the federation relays the dispatch and DOGE records a no_contract execution', verifyTargetExecution);
+    it('the result relays back and the callback delivers exactly one no_contract outcome', verifyCallbackDelivery);
+    it('xchain.crossChain.getCallResult reads the terminal outcome on-contract', verifyContractRead);
 });

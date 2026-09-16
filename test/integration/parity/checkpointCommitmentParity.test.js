@@ -33,7 +33,7 @@
  *      post-flag-day (the presence-aware gate), so old signatures still verify.
  *
  * The explorer's inline copy is exercised against the SDK in the explorer's own unit
- * suite (explorer.checkpoints.test.js); here we cover the three callable builders.
+ * suite (explorer_checkpoints.test.js); here we cover the three callable builders.
  *
  * Spec: SPV light-client spec s6; Phase 2 handover.
  ********************************************************************/
@@ -56,16 +56,16 @@ const expCkpt  = require(path.join(ROOT, 'xchain-explorer/src/checkpoint_commitm
 // loop (uuid 77/229/326).
 const syncCkpt = require(path.join(ROOT, 'xchain-sync/src/checkpoint_commitment_activation.js'));
 
-const StateCheckpointEngine = require(path.join(ROOT, 'xchain-hub/src/StateCheckpointEngine.js'));
+const StateCheckpointEngine = require(path.join(ROOT, 'xchain-hub/src/anchor/checkpoint_engine.js'));
 const sdkCheckpoint         = require(path.join(ROOT, 'xchain-sdk/src/checkpoint.js'));
-const Anchor                = require(path.join(ROOT, 'xchain-indexer/src/actions/anchor.js'));
+const Anchor                = require(path.join(ROOT, 'xchain-indexer/src/actions/anchor/index.js'));
 
-// The indexer ANCHOR _canonical is a plain method that reads only its `d` argument
+// The indexer ANCHOR canonical is a plain method that reads only its `d` argument
 // (no `this`), so invoke it directly off the prototype. `d` is ONE v0 bundle section,
 // already rebuilt with the header NETWORK and carrying its own SECTION_SNAPSHOT_BLOCK
 // as SNAPSHOT_BLOCK, which is the shape the parser hands it.
 function anchorSectionCanonical(d) {
-    return Anchor.prototype._canonical.call({}, d);
+    return Anchor.prototype.canonical.call({}, d);
 }
 
 // One logical checkpoint, expressed in BOTH the hub/SDK row shape and the indexer
@@ -137,7 +137,7 @@ describe('SPV Phase 2: CHECKPOINT_COMMITMENT cross-service parity', function () 
     it('pre-flag-day: hub == SDK == indexer canonical, and the root suffix is absent', function () {
         // mainnet flag-day is the far-future placeholder, so snapshot_block 1000 is inactive
         // and the row carries null roots. No v0 section is ever cut here (a rootless row is
-        // skipped, D8), so the indexer side is _canonical's shared rootless base, which the
+        // skipped, D8), so the indexer side is canonical's shared rootless base, which the
         // archive leg still signs and which the v0 branch extends.
         const { cp, d, STATE_ROOT, BLOCK_MERKLE } = fixtures('mainnet', 1000, false);
         const hubC = StateCheckpointEngine.canonicalCheckpoint(cp);
@@ -153,9 +153,19 @@ describe('SPV Phase 2: CHECKPOINT_COMMITMENT cross-service parity', function () 
         // The Phase 3 proof server builds SMT/block proofs with an explorer-local copy
         // of merkle.js; a client recomputes with the SDK's merkle logic and binds to the
         // indexer-committed root. A single byte of drift makes server proofs unverifiable.
-        const idx = fs.readFileSync(path.join(ROOT, 'xchain-indexer/src/merkle.js'), 'utf8');
-        const exp = fs.readFileSync(path.join(ROOT, 'xchain-explorer/src/merkle.js'), 'utf8');
-        assert.strictEqual(exp, idx, 'xchain-explorer/src/merkle.js drifted from the indexer merkle.js');
+        //
+        // The explorer carries this twin at src/consensus/merkle.js, its layout-pass home,
+        // and at src/merkle.js before that move lands. Either spelling is read so the
+        // guard holds on both sides of the move; a checkout with neither fails naming
+        // both paths rather than skipping, because a skipped twin guard is how a copy
+        // drifts without a red run.
+        const idx = fs.readFileSync(path.join(ROOT, 'xchain-indexer/src/consensus/merkle.js'), 'utf8');
+        const candidates = ['xchain-explorer/src/consensus/merkle.js', 'xchain-explorer/src/merkle.js'];
+        const rel = candidates.find((p) => fs.existsSync(path.join(ROOT, p)));
+        assert.ok(rel, 'the explorer merkle.js twin resolved at neither '
+            + candidates.map((p) => path.join(ROOT, p)).join(' nor '));
+        const exp = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+        assert.strictEqual(exp, idx, rel + ' drifted from the indexer merkle.js');
     });
 
     it('sdk merkle.js is a byte-identical twin of the indexer merkle.js (Phase 4 light client)', function () {
@@ -163,7 +173,7 @@ describe('SPV Phase 2: CHECKPOINT_COMMITMENT cross-service parity', function () 
         // and the state-root sub-path with an sdk-local copy of merkle.js, binding to
         // the indexer-committed root. A single byte of drift makes a valid server proof
         // fail to verify (or, worse, lets a forged one pass), so it must match exactly.
-        const idx = fs.readFileSync(path.join(ROOT, 'xchain-indexer/src/merkle.js'), 'utf8');
+        const idx = fs.readFileSync(path.join(ROOT, 'xchain-indexer/src/consensus/merkle.js'), 'utf8');
         const sdk = fs.readFileSync(path.join(ROOT, 'xchain-sdk/src/merkle.js'), 'utf8');
         assert.strictEqual(sdk, idx, 'xchain-sdk/src/merkle.js drifted from the indexer merkle.js');
     });

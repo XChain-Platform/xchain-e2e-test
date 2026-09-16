@@ -21,25 +21,45 @@ const sinon = require('sinon')
 const axios = require('axios')
 const XChainHubConnector = require('../../src/XChainHubConnector')
 
+function saveHubEnv() {
+    return {
+        HUB_URL: process.env.HUB_URL,
+        HUB_PORT: process.env.HUB_PORT,
+        HUB_VALIDATORS: process.env.HUB_VALIDATORS,
+        HUB_API_HOST: process.env.HUB_API_HOST,
+    }
+}
+
+function restoreHubEnv(savedEnv) {
+    for (const [k, v] of Object.entries(savedEnv)) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+    }
+    sinon.restore()
+}
+
+// Axios throws on non-2xx but attaches the full response to err.response.
+// The hub's ping() returns HTTP 503 with a valid JSON-RPC "degraded" body
+// when its DB pool is down (a live hub, not an unreachable one).
+function degraded503Error() {
+    const err = new Error('Request failed with status code 503')
+    err.response = {
+        status: 503,
+        data: { jsonrpc: '2.0', id: 1, result: { status: 'degraded', db: false } }
+    }
+    return err
+}
+
 describe('Chaos Experiment 3: Hub Auto-Discovery Total Failure @P1', function () {
 
     let savedEnv
 
     beforeEach(function () {
-        savedEnv = {
-            HUB_URL: process.env.HUB_URL,
-            HUB_PORT: process.env.HUB_PORT,
-            HUB_VALIDATORS: process.env.HUB_VALIDATORS,
-            HUB_API_HOST: process.env.HUB_API_HOST,
-        }
+        savedEnv = saveHubEnv()
     })
 
     afterEach(function () {
-        for (const [k, v] of Object.entries(savedEnv)) {
-            if (v === undefined) delete process.env[k]
-            else process.env[k] = v
-        }
-        sinon.restore()
+        restoreHubEnv(savedEnv)
     })
 
     describe('_call returns null when all endpoints fail', function () {
@@ -77,6 +97,19 @@ describe('Chaos Experiment 3: Hub Auto-Discovery Total Failure @P1', function ()
             assert.strictEqual(result, null)
         })
     })
+})
+
+describe('Chaos Experiment 3: Hub Auto-Discovery Total Failure @P1', function () {
+
+    let savedEnv
+
+    beforeEach(function () {
+        savedEnv = saveHubEnv()
+    })
+
+    afterEach(function () {
+        restoreHubEnv(savedEnv)
+    })
 
     describe('ping returns false when all endpoints fail', function () {
 
@@ -88,6 +121,19 @@ describe('Chaos Experiment 3: Hub Auto-Discovery Total Failure @P1', function ()
 
             assert.strictEqual(result, false)
         })
+    })
+})
+
+describe('Chaos Experiment 3: Hub Auto-Discovery Total Failure @P1', function () {
+
+    let savedEnv
+
+    beforeEach(function () {
+        savedEnv = saveHubEnv()
+    })
+
+    afterEach(function () {
+        restoreHubEnv(savedEnv)
     })
 
     describe('getAllConfig returns null when hub unreachable', function () {
@@ -101,20 +147,21 @@ describe('Chaos Experiment 3: Hub Auto-Discovery Total Failure @P1', function ()
             assert.strictEqual(result, null)
         })
     })
+})
+
+describe('Chaos Experiment 3: Hub Auto-Discovery Total Failure @P1', function () {
+
+    let savedEnv
+
+    beforeEach(function () {
+        savedEnv = saveHubEnv()
+    })
+
+    afterEach(function () {
+        restoreHubEnv(savedEnv)
+    })
 
     describe('reachable-but-degraded hub (HTTP 503) is distinguished from total failure', function () {
-
-        // Axios throws on non-2xx but attaches the full response to err.response.
-        // The hub's ping() returns HTTP 503 with a valid JSON-RPC "degraded" body
-        // when its DB pool is down (a live hub, not an unreachable one).
-        function degraded503Error() {
-            const err = new Error('Request failed with status code 503')
-            err.response = {
-                status: 503,
-                data: { jsonrpc: '2.0', id: 1, result: { status: 'degraded', db: false } }
-            }
-            return err
-        }
 
         it('_call surfaces the degraded body rather than returning null', async function () {
             sinon.stub(axios, 'post').rejects(degraded503Error())
@@ -153,6 +200,19 @@ describe('Chaos Experiment 3: Hub Auto-Discovery Total Failure @P1', function ()
             assert.strictEqual(config, null)
         })
     })
+})
+
+describe('Chaos Experiment 3: Hub Auto-Discovery Total Failure @P1', function () {
+
+    let savedEnv
+
+    beforeEach(function () {
+        savedEnv = saveHubEnv()
+    })
+
+    afterEach(function () {
+        restoreHubEnv(savedEnv)
+    })
 
     describe('parseEndpoints with invalid env vars', function () {
 
@@ -178,6 +238,19 @@ describe('Chaos Experiment 3: Hub Auto-Discovery Total Failure @P1', function ()
             // Should either return empty or fallback, not crash
             assert(Array.isArray(endpoints))
         })
+    })
+})
+
+describe('Chaos Experiment 3: Hub Auto-Discovery Total Failure @P1', function () {
+
+    let savedEnv
+
+    beforeEach(function () {
+        savedEnv = saveHubEnv()
+    })
+
+    afterEach(function () {
+        restoreHubEnv(savedEnv)
     })
 
     describe('bootstrap failure scenario', function () {

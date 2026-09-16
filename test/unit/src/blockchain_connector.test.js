@@ -1,0 +1,399 @@
+'use strict';
+
+// Copyright © 2025–2026 Dankest, LLC
+// Based on XChain Platform by Dankest, LLC – https://dankest.llc
+//
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// This file is part of XChain Platform. Licensed under the GNU Affero
+// General Public License v3.0 or later; see LICENSE.md. A commercial
+// license (without AGPL source-disclosure terms) is available -
+// contact legal@dankest.llc.
+
+const assert = require('assert');
+const sinon = require('sinon');
+const axios = require('axios');
+
+const BlockchainConnector = require('../../../src/BlockchainConnector');
+
+function makeResponse(body) {
+    return { status: 200, data: body };
+}
+
+function makeHttpError(status, data = {}) {
+    const err = new Error(`Request failed with status code ${status}`);
+    err.response = { status, statusText: 'Error', data };
+    return err;
+}
+
+function expectedAuth(user, pass) {
+    return 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64');
+}
+
+const URL  = 'localhost';
+const PORT = 8332;
+const USER = 'rpcuser';
+const PASS = 'rpcpass';
+
+let connector;
+let axiosPostStub;
+
+function connectorHooks() {
+    beforeEach(function () {
+        axiosPostStub = sinon.stub(axios, 'post');
+        connector = new BlockchainConnector(URL, PORT, USER, PASS);
+    });
+    afterEach(function () {
+        sinon.restore();
+    });
+}
+
+describe('BlockchainConnector', function () {
+    connectorHooks();
+    describe('constructor', function () {
+        it('builds the URL as http://{url}:{port}', function () {
+            assert.strictEqual(connector.url, `http://${URL}:${PORT}`);
+        });
+
+        it('stores rpcUser and rpcPassword', function () {
+            assert.strictEqual(connector.rpcUser, USER);
+            assert.strictEqual(connector.rpcPassword, PASS);
+        });
+    });
+});
+
+describe('BlockchainConnector', function () {
+    connectorHooks();
+    describe('getNetworkInfo', function () {
+        it('sends the correct JSON-RPC payload with method getnetworkinfo', async function () {
+            const fakeResult = { version: 210000 };
+            axiosPostStub.resolves(makeResponse({ result: fakeResult }));
+
+            await connector.getNetworkInfo();
+
+            const [url, data] = axiosPostStub.firstCall.args;
+            assert.strictEqual(url, connector.url);
+            assert.strictEqual(data.jsonrpc, '2.0');
+            assert.strictEqual(data.method, 'getnetworkinfo');
+            assert.strictEqual(data.id, 1);
+        });
+
+        it('sends a valid Basic auth header', async function () {
+            axiosPostStub.resolves(makeResponse({ result: { version: 1 } }));
+            await connector.getNetworkInfo();
+
+            const opts = axiosPostStub.firstCall.args[2];
+            assert.strictEqual(opts.headers['Authorization'], expectedAuth(USER, PASS));
+        });
+
+        it('returns the result on success', async function () {
+            const fakeResult = { subversion: '/Satoshi:0.21/' };
+            axiosPostStub.resolves(makeResponse({ result: fakeResult }));
+
+            const result = await connector.getNetworkInfo();
+            assert.deepStrictEqual(result, fakeResult);
+        });
+
+        it('throws when the HTTP request fails (axios rejects on non-2xx)', async function () {
+            axiosPostStub.rejects(makeHttpError(500));
+            await assert.rejects(
+                () => connector.getNetworkInfo(),
+                /Error in network request/
+            );
+        });
+
+        it('throws when response has no result', async function () {
+            axiosPostStub.resolves(makeResponse({ result: null }));
+            await assert.rejects(
+                () => connector.getNetworkInfo(),
+                /Error/
+            );
+        });
+    });
+});
+
+describe('BlockchainConnector', function () {
+    connectorHooks();
+    describe('getTransactionHex', function () {
+        const TXID = 'abc123';
+        const HEX  = 'deadbeef';
+
+        it('sends getrawtransaction with [txid, true]', async function () {
+            axiosPostStub.resolves(makeResponse({ result: { hex: HEX } }));
+
+            await connector.getTransactionHex(TXID);
+
+            const data = axiosPostStub.firstCall.args[1];
+            assert.strictEqual(data.method, 'getrawtransaction');
+            assert.deepStrictEqual(data.params, [TXID, true]);
+        });
+
+        it('returns result.hex on success', async function () {
+            axiosPostStub.resolves(makeResponse({ result: { hex: HEX } }));
+            const result = await connector.getTransactionHex(TXID);
+            assert.strictEqual(result, HEX);
+        });
+
+        it('throws when the HTTP request fails (axios rejects on non-2xx)', async function () {
+            axiosPostStub.rejects(makeHttpError(503));
+            await assert.rejects(
+                () => connector.getTransactionHex(TXID),
+                /503/
+            );
+        });
+
+        it('throws when result or result.hex is missing', async function () {
+            axiosPostStub.resolves(makeResponse({ result: {} }));
+            await assert.rejects(
+                () => connector.getTransactionHex(TXID),
+                /Error/
+            );
+        });
+    });
+});
+
+describe('BlockchainConnector', function () {
+    connectorHooks();
+    describe('broadcastTx', function () {
+        const TX_HEX  = 'cafebabe';
+        const TX_HASH = 'txhash999';
+
+        it('sends sendrawtransaction with [txHex]', async function () {
+            axiosPostStub.resolves(makeResponse({ result: TX_HASH }));
+
+            await connector.broadcastTx(TX_HEX);
+
+            const data = axiosPostStub.firstCall.args[1];
+            assert.strictEqual(data.method, 'sendrawtransaction');
+            assert.deepStrictEqual(data.params, [TX_HEX]);
+        });
+
+        it('returns result on success', async function () {
+            axiosPostStub.resolves(makeResponse({ result: TX_HASH }));
+            const result = await connector.broadcastTx(TX_HEX);
+            assert.strictEqual(result, TX_HASH);
+        });
+
+        it('surfaces the node error body when the HTTP request fails', async function () {
+            axiosPostStub.rejects(makeHttpError(500, { error: { code: -26, message: 'dust' } }));
+            await assert.rejects(
+                () => connector.broadcastTx(TX_HEX),
+                /HTTP 500/
+            );
+        });
+
+        it('throws with node error JSON when result is missing', async function () {
+            const nodeError = { code: -25, message: 'bad tx' };
+            axiosPostStub.resolves(makeResponse({ result: null, error: nodeError }));
+            await assert.rejects(
+                () => connector.broadcastTx(TX_HEX),
+                /bad tx/
+            );
+        });
+
+        it('throws with "unknown error" when result and error are both missing', async function () {
+            axiosPostStub.resolves(makeResponse({ result: null }));
+            await assert.rejects(
+                () => connector.broadcastTx(TX_HEX),
+                /unknown error/
+            );
+        });
+    });
+});
+
+describe('BlockchainConnector', function () {
+    connectorHooks();
+    describe('waitForTx', function () {
+        const TXID = 'txid-abc';
+
+        it('returns true when getTransactionHex succeeds on first attempt', async function () {
+            sinon.stub(connector, 'getTransactionHex').resolves('deadbeef');
+            sinon.stub(connector, 'sleep').resolves();
+
+            const result = await connector.waitForTx(TXID);
+            assert.strictEqual(result, true);
+        });
+
+        it('returns false after timeout when getTransactionHex always throws', async function () {
+            sinon.stub(connector, 'getTransactionHex').rejects(new Error('not found'));
+            sinon.stub(connector, 'sleep').resolves();
+
+            const now = Date.now();
+            const dateStub = sinon.stub(Date, 'now');
+            // First call: start time; subsequent calls: past the deadline
+            dateStub.onFirstCall().returns(now);
+            dateStub.returns(now + 99999);
+
+            try {
+                const result = await connector.waitForTx(TXID, 10000);
+                assert.strictEqual(result, false);
+            } finally {
+                dateStub.restore();
+            }
+        });
+    });
+});
+
+describe('BlockchainConnector', function () {
+    connectorHooks();
+    describe('setMockTime', function () {
+        it('sends setmocktime with the numeric timestamp', async function () {
+            axiosPostStub.resolves(makeResponse({ result: null }));
+
+            await connector.setMockTime(1893456000);
+
+            const data = axiosPostStub.firstCall.args[1];
+            assert.strictEqual(data.method, 'setmocktime');
+            assert.deepStrictEqual(data.params, [1893456000]);
+        });
+
+        it('coerces a string timestamp to a number', async function () {
+            axiosPostStub.resolves(makeResponse({ result: null }));
+
+            await connector.setMockTime('1893456000');
+
+            const data = axiosPostStub.firstCall.args[1];
+            assert.deepStrictEqual(data.params, [1893456000]);
+        });
+
+        it('sends 0 to release the mock clock', async function () {
+            axiosPostStub.resolves(makeResponse({ result: null }));
+
+            await connector.setMockTime(0);
+
+            const data = axiosPostStub.firstCall.args[1];
+            assert.deepStrictEqual(data.params, [0]);
+        });
+
+        it('sends a valid Basic auth header', async function () {
+            axiosPostStub.resolves(makeResponse({ result: null }));
+
+            await connector.setMockTime(0);
+
+            const opts = axiosPostStub.firstCall.args[2];
+            assert.strictEqual(opts.headers['Authorization'], expectedAuth(USER, PASS));
+        });
+
+        it('throws when the node returns an error body', async function () {
+            axiosPostStub.resolves(makeResponse({ error: { code: -8, message: 'bad time' } }));
+            await assert.rejects(
+                () => connector.setMockTime(-1),
+                /setmocktime RPC error/
+            );
+        });
+    });
+});
+
+describe('BlockchainConnector', function () {
+    // Reorg-drill primitives: enumerate a block's transactions, put an orphaned
+    // transaction back, and tell "in the mempool" apart from "already re-mined".
+    connectorHooks();
+    describe('getBlock', function () {
+        it('sends getblock with the hash and default verbosity 1', async function () {
+            axiosPostStub.resolves(makeResponse({ result: { tx: ['a', 'b'] } }));
+
+            const block = await connector.getBlock('deadbeef');
+
+            const data = axiosPostStub.firstCall.args[1];
+            assert.strictEqual(data.method, 'getblock');
+            assert.deepStrictEqual(data.params, ['deadbeef', 1]);
+            assert.deepStrictEqual(block.tx, ['a', 'b']);
+        });
+
+        it('coerces the verbosity to a number', async function () {
+            axiosPostStub.resolves(makeResponse({ result: {} }));
+
+            await connector.getBlock('deadbeef', '2');
+
+            assert.deepStrictEqual(axiosPostStub.firstCall.args[1].params, ['deadbeef', 2]);
+        });
+
+        it('throws when the node returns an error body', async function () {
+            axiosPostStub.resolves(makeResponse({ error: { code: -5, message: 'Block not found' } }));
+            await assert.rejects(() => connector.getBlock('nope'), /getblock RPC error/);
+        });
+    });
+});
+
+describe('BlockchainConnector', function () {
+    connectorHooks();
+    describe('sendRawTransaction', function () {
+        it('sends sendrawtransaction with the raw hex and returns the txid', async function () {
+            axiosPostStub.resolves(makeResponse({ result: 'txid-1' }));
+
+            const txid = await connector.sendRawTransaction('0100beef');
+
+            const data = axiosPostStub.firstCall.args[1];
+            assert.strictEqual(data.method, 'sendrawtransaction');
+            assert.deepStrictEqual(data.params, ['0100beef']);
+            assert.strictEqual(txid, 'txid-1');
+        });
+
+        // The reorg drill re-broadcasts a whole orphaned chain and has to read the
+        // reject reason to tell "parent not back yet" from a real failure.
+        it('surfaces the node reject reason', async function () {
+            axiosPostStub.resolves(makeResponse({ error: { code: -25, message: 'bad-txns-inputs-missingorspent' } }));
+            await assert.rejects(
+                () => connector.sendRawTransaction('0100beef'),
+                /sendrawtransaction RPC error.*missingorspent/
+            );
+        });
+    });
+});
+
+describe('BlockchainConnector', function () {
+    connectorHooks();
+    describe('getTransaction', function () {
+        it('sends getrawtransaction verbose and returns the object', async function () {
+            axiosPostStub.resolves(makeResponse({ result: { txid: 'txid-1', confirmations: 3 } }));
+
+            const tx = await connector.getTransaction('txid-1');
+
+            const data = axiosPostStub.firstCall.args[1];
+            assert.strictEqual(data.method, 'getrawtransaction');
+            assert.deepStrictEqual(data.params, ['txid-1', true]);
+            assert.strictEqual(tx.confirmations, 3);
+        });
+
+        // An unknown txid is an expected state during a reorg (the tx is gone from the
+        // node entirely), so it must read as null rather than throw.
+        it('returns null when the node has never seen the txid', async function () {
+            axiosPostStub.resolves(makeResponse({ error: { code: -5, message: 'No such mempool transaction' } }));
+            assert.strictEqual(await connector.getTransaction('missing'), null);
+        });
+
+        it('returns null when the request itself fails', async function () {
+            axiosPostStub.rejects(makeHttpError(500));
+            assert.strictEqual(await connector.getTransaction('boom'), null);
+        });
+    });
+});
+
+describe('BlockchainConnector', function () {
+    connectorHooks();
+    describe('getFeePerKilobyte', function () {
+        it('returns feerate when present in response', async function () {
+            const feerate = 0.00012345;
+            axiosPostStub.resolves(makeResponse({ result: { feerate } }));
+
+            const result = await connector.getFeePerKilobyte(6);
+            assert.strictEqual(result, feerate);
+        });
+
+        it('sends estimatesmartfee with the blocksNumber param', async function () {
+            axiosPostStub.resolves(makeResponse({ result: { feerate: 0.0001 } }));
+
+            await connector.getFeePerKilobyte(3);
+
+            const data = axiosPostStub.firstCall.args[1];
+            assert.strictEqual(data.method, 'estimatesmartfee');
+            assert.deepStrictEqual(data.params, [3]);
+        });
+
+        it('falls back to the default feerate when feerate is absent', async function () {
+            axiosPostStub.resolves(makeResponse({ result: {} }));
+            const result = await connector.getFeePerKilobyte(6);
+            assert.strictEqual(result, 0.00001000);
+        });
+    });
+});

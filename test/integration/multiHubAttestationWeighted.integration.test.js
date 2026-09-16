@@ -20,7 +20,7 @@
  * so a source that DELEGATEs N keys gets N bites at the responsible slots and can
  * occupy MULTIPLE of them, re-introducing the very key-multiplication WI-1 kills.
  *
- * The fix (operator-ratified): when weighted, AttestationRound._computeResponsibleSet
+ * The fix (operator-ratified): when weighted, AttestationRound.computeResponsibleSet
  * dedupes by staking SOURCE (one slot per source, keep the source's lowest-hash
  * key). This drives the REAL hub method over a delegated set (one source with many
  * keys + several single-key sources) and asserts:
@@ -32,14 +32,14 @@
  *     requestId under the weighted rule collapses it to exactly one. This is the
  *     inflation the dedup closes.
  *
- * _computeResponsibleSet is a pure ranking over the seeded validator set (no P2P,
+ * computeResponsibleSet is a pure ranking over the seeded validator set (no P2P,
  * no providers, no chain); we boot one real hub for a fully-constructed
  * AttestationRound and call it directly. Disposable Docker MariaDB; skips when
  * neither an env DB nor Docker is available.
  *
  * The second describe drives the SAME rule through the live pipeline, because the
  * pure-helper tests above cannot see a wiring regression: a change that stopped
- * passing `weighted` into _computeResponsibleSet, or that recomputed the set
+ * passing `weighted` into computeResponsibleSet, or that recomputed the set
  * without dedup between AttestationRound and AttestationConsensus, leaves both of
  * them green and leaves the three-hub federation suite green too (it stakes one
  * key per source, so dedup is a no-op there). Five in-process hubs run a real
@@ -78,9 +78,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // hashes them, it never verifies a signature here.
 function hx(n) { return String(n).padStart(2, '0').repeat(32); }
 const VALIDATORS = [
-    // Weights are all above the http_get PROVIDER floor of 10000, which the weighted
-    // responsible-set derivation applies before dedupe. This suite isolates the dedupe
-    // rule, so nothing here may sit under the floor or empty the set for unrelated reasons.
+    // Weights are all above the http_get PROVIDER floor of 10000, which the
+    // weighted responsible-set derivation applies before the source dedupe. This suite
+    // isolates the dedupe rule, so nothing here may sit under the floor or the set
+    // empties for a reason that has nothing to do with what is being asserted.
     { pubkey: hx(1),  source: 'whale', weight: '50000' },
     { pubkey: hx(2),  source: 'whale', weight: '50000' },
     { pubkey: hx(3),  source: 'whale', weight: '50000' },
@@ -115,10 +116,10 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM attestation source-dedup (WI-
         // Poll for it instead of betting PEER_WAIT_MS that startAttestation finished.
         await waitUntil(() => {
             const round = mvh.hubs[0] && mvh.hubs[0].attestationRound;
-            return !!(round && typeof round._computeResponsibleSet === 'function');
+            return !!(round && typeof round.computeResponsibleSet === 'function');
         }, PEER_WAIT_MS);
         ar = mvh.hubs[0].attestationRound;
-        assert.ok(ar && typeof ar._computeResponsibleSet === 'function', 'hub.attestationRound not available');
+        assert.ok(ar && typeof ar.computeResponsibleSet === 'function', 'hub.attestationRound not available');
     });
 
     after(async function () {
@@ -129,7 +130,7 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM attestation source-dedup (WI-
     it('WEIGHTED: every responsible slot is a distinct source; a multi-key source can take at most one slot', function () {
         for (let i = 0; i < 300; i++) {
             const rid = 'req-weighted-' + i;
-            const set = ar._computeResponsibleSet(VALIDATORS, rid, REDUNDANCY, true, PROVIDER_FLOOR);
+            const set = ar.computeResponsibleSet(VALIDATORS, rid, REDUNDANCY, true, PROVIDER_FLOOR);
             const srcs = sourcesOf(set);
             assert.strictEqual(new Set(srcs).size, srcs.length,
                 'rid ' + rid + ': a source occupies >1 responsible slot under weighting (' + JSON.stringify(srcs) + ')');
@@ -143,13 +144,13 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM attestation source-dedup (WI-
         let witness = null;
         for (let i = 0; i < 1000 && !witness; i++) {
             const rid = 'req-' + i;
-            const countSet = ar._computeResponsibleSet(VALIDATORS, rid, REDUNDANCY, false, PROVIDER_FLOOR);
+            const countSet = ar.computeResponsibleSet(VALIDATORS, rid, REDUNDANCY, false, PROVIDER_FLOOR);
             if (whaleSlots(countSet) >= 2) witness = rid;
         }
         assert.ok(witness, 'expected some requestId where the count path gives the whale ≥2 slots (5 of 9 keys)');
 
         // Same rid, weighted: the whale collapses to exactly one slot, all sources distinct.
-        const weightedSet = ar._computeResponsibleSet(VALIDATORS, witness, REDUNDANCY, true, PROVIDER_FLOOR);
+        const weightedSet = ar.computeResponsibleSet(VALIDATORS, witness, REDUNDANCY, true, PROVIDER_FLOOR);
         assert.strictEqual(whaleSlots(weightedSet), 1,
             'witness ' + witness + ': weighting must collapse the whale to exactly one slot (got ' + whaleSlots(weightedSet) + ')');
         const srcs = sourcesOf(weightedSet);
@@ -192,7 +193,7 @@ function openPeerCount(hub) {
 
 // Pin both capability snapshots plus the network on every hub.
 // The shared seedWeightSnapshot helper stubs only the SOURCE-keyed half, and the
-// count CONTROL below runs with weighting OFF, which sends _startRound down
+// count CONTROL below runs with weighting OFF, which sends startRound down
 // getSnapshot() instead; a hub left with a live getSnapshot there would resolve an
 // empty snapshot and skip the round, which would read as a passing control.
 function seedLiveSnapshot(mvh, validators, network) {
@@ -211,19 +212,19 @@ function seedLiveSnapshot(mvh, validators, network) {
             activeWeight: cs.getActiveWeightSnapshot,
             weight:       cs.getWeightSnapshot,
             count:        cs.getSnapshot,
-            block:        hub._resolveBtcLatestBlock,
+            block:        hub.resolveBtcLatestBlock,
             network:      hub.network
         };
         cs.getActiveWeightSnapshot = async () => fresh('*');
         cs.getWeightSnapshot       = async (capability) => fresh(capability);
         cs.getSnapshot             = async (capability) => fresh(capability);
-        hub._resolveBtcLatestBlock = async () => LIVE_BLOCK;
+        hub.resolveBtcLatestBlock = async () => LIVE_BLOCK;
         hub.network                = network;
         restores.push(() => {
             cs.getActiveWeightSnapshot = orig.activeWeight;
             cs.getWeightSnapshot       = orig.weight;
             cs.getSnapshot             = orig.count;
-            hub._resolveBtcLatestBlock = orig.block;
+            hub.resolveBtcLatestBlock = orig.block;
             hub.network                = orig.network;
         });
     }
@@ -231,7 +232,7 @@ function seedLiveSnapshot(mvh, validators, network) {
 }
 
 // Drive ONE attestation round on every hub and return the finalize events.
-// Non-responsible hubs return early inside _startRound, so calling all of them
+// Non-responsible hubs return early inside startRound, so calling all of them
 // mirrors what the pollers do rather than pre-selecting the responsible set (a
 // pre-selection would hide exactly the membership regression under test).
 //
@@ -259,7 +260,7 @@ async function driveAttestationRound(mvh, requestId, url, redundancy, expect) {
 
     // latestBlock = snapshot block + confirmations keeps the leader on slot 0
     // (no escalation step), so the round leader is the responsible set's head.
-    await Promise.all(mvh.hubs.map((hub) => hub.attestationRound._startRound(request, LIVE_BLOCK + 3).catch(() => {})));
+    await Promise.all(mvh.hubs.map((hub) => hub.attestationRound.startRound(request, LIVE_BLOCK + 3).catch(() => {})));
     if (expect > 0) await waitUntil(() => events.length >= expect, LIVE_FINALIZE_MS);
     else            await waitUntil(() => events.length > 0,       LIVE_QUIET_MS);
     mvh.hubs.forEach((hub, i) => hub.attestationConsensus.removeListener('request:finalized', listeners[i]));
@@ -337,9 +338,10 @@ describe('MultiValidatorHub: LIVE weighted attestation source-dedup through PBFT
 
         ids          = mvh.identities.map((id) => String(id.pubkeyHex).toLowerCase());
         whalePubkeys = new Set([ids[0], ids[1], ids[2]]);
-        // Every weight clears the http_get provider floor of 10000: these hubs run the
-        // REAL _startRound, which filters below-floor sources out of the responsible set
-        // before deduping; a starved set here would fail the assertions for the wrong reason.
+        // Every weight clears the http_get provider floor of 10000: these hubs
+        // run the REAL startRound, which filters below-floor sources out of the
+        // responsible set before deduping, and a starved set here would fail the
+        // assertions for the wrong reason.
         weightedValidators = [
             { pubkey: ids[0], source: 'whale', weight: '50000' },
             { pubkey: ids[1], source: 'whale', weight: '50000' },
@@ -364,7 +366,7 @@ describe('MultiValidatorHub: LIVE weighted attestation source-dedup through PBFT
         const starvedOf = sourceOfKey(dedupStarvedValidators);
         for (let i = 0; i < 2000 && !starvedRid; i++) {
             const rid = crypto.createHash('sha256').update('a2-live-starved-' + i).digest('hex');
-            const set = ar._computeResponsibleSet(dedupStarvedValidators, rid, REDUNDANCY, false, PROVIDER_FLOOR);
+            const set = ar.computeResponsibleSet(dedupStarvedValidators, rid, REDUNDANCY, false, PROVIDER_FLOOR);
             if (set.filter((v) => starvedOf.get(v.pubkey) === 'whale').length >= 2) starvedRid = rid;
         }
         assert.ok(starvedRid, 'no request id gave the whale >=2 count-path slots (4 of 5 keys)');
@@ -413,7 +415,7 @@ describe('MultiValidatorHub: LIVE weighted attestation source-dedup through PBFT
         seeded = seedLiveSnapshot(mvh, dedupStarvedValidators, 'regtest');
         const events = await driveAttestationRound(mvh, starvedRid, testUrl, REDUNDANCY, 0);
 
-        // Deterministic half: _startRound refuses before consensus, so no hub may
+        // Deterministic half: startRound refuses before consensus, so no hub may
         // hold a live round for this request id at all. The event budget above
         // then only has to rule out a late finalize.
         for (let i = 0; i < mvh.hubs.length; i++) {
@@ -433,7 +435,7 @@ describe('MultiValidatorHub: LIVE weighted attestation source-dedup through PBFT
     // it, "no hub finalized" is indistinguishable from a federation that never
     // finalizes anything, which is how a green refusal test certifies nothing.
     // It runs after that case so the shared request id reaches consensus clean
-    // (the weighted round is refused in _startRound and never registers a
+    // (the weighted round is refused in startRound and never registers a
     // pending round or a fetch-cache row).
     it('CONTROL (dedup off): the SAME round finalizes, with >=2 of its signatures from the one whale source', async function () {
         const srcOf = sourceOfKey(dedupStarvedValidators);

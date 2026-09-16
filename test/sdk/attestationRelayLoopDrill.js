@@ -38,7 +38,7 @@
  * test/actions/realUrlAttestation.test.js stands in for AttestationRound +
  * AttestationPublisher on the single-chain path. The BYTES are not stood in for:
  * the v3/v4 canonicals and wire strings are built by the HUB'S OWN
- * AttestationRelay methods (`xchain-hub/src/AttestationRelay.js`), so a
+ * AttestationRelay methods (`xchain-hub/src/attestation/relay.js`), so a
  * hub↔indexer canonical drift fails this drill rather than hiding in it. Every
  * verdict is the deployed indexer's.
  *
@@ -99,7 +99,7 @@ const HUB_BASE = (function () {
         _path.resolve(__dirname, '../../../xchain-hub'),
     ].filter(Boolean);
     for (const c of candidates) {
-        if (_fs.existsSync(_path.join(c, 'src/AttestationRelay.js'))) return c;
+        if (_fs.existsSync(_path.join(c, 'src/attestation/relay.js'))) return c;
     }
     return null;
 })();
@@ -148,20 +148,20 @@ module.exports = {
 `;
 
 // ── production canonical/wire codec, borrowed from the hub ────────────────────
-// The relay's canonical + wire builders depend on nothing but `this._sha256`, so
+// The relay's canonical + wire builders depend on nothing but `this.sha256`, so
 // binding them onto a bare object runs the SHIPPED hub implementation without
 // booting a hub. If these ever stop being pure, this throws here rather than
 // producing signatures the indexer silently drops as unquorate.
 function relayCodec() {
     if (!HUB_BASE) throw new Error('xchain-hub checkout not found; the drill signs with the hub\'s own canonical builders');
-    const AttestationRelay = require(_path.join(HUB_BASE, 'src/AttestationRelay.js'));
+    const AttestationRelay = require(_path.join(HUB_BASE, 'src/attestation/relay.js'));
     const p = AttestationRelay.prototype;
     const codec = {
-        _sha256: p._sha256,
-        requestCanonical:  function (r) { return p._relayRequestCanonical.call(codec, r); },
-        responseCanonical: function (r) { return p._relayResponseCanonical.call(codec, r); },
-        requestWire:       function (r, sigs) { return p._buildRequestWire.call(codec, r, sigs); },
-        responseWire:      function (r, sigs) { return p._buildResponseWire.call(codec, r, sigs); },
+        sha256: p.sha256,
+        requestCanonical:  function (r) { return p.relayRequestCanonical.call(codec, r); },
+        responseCanonical: function (r) { return p.relayResponseCanonical.call(codec, r); },
+        requestWire:       function (r, sigs) { return p.buildRequestWire.call(codec, r, sigs); },
+        responseWire:      function (r, sigs) { return p.buildResponseWire.call(codec, r, sigs); },
     };
     return codec;
 }
@@ -183,7 +183,7 @@ class RelaySigner {
 
 function sha256Hex(s) { return crypto.createHash('sha256').update(String(s), 'utf8').digest('hex'); }
 
-// Rank a pubkey the way _computeResponsibleSet does: SHA256(request_id || pubkey).
+// Rank a pubkey the way computeResponsibleSet does: SHA256(request_id || pubkey).
 function responsibleRank(requestId, pubkey) {
     return crypto.createHash('sha256')
         .update(String(requestId), 'utf8')
@@ -544,7 +544,7 @@ describe('[drill] cross-chain attestation relay loop (origin -> BTC -> origin)',
             const mintStarted = Date.now();
             for (let i = 0; i < chunks; i++) {
                 await resilientSend('gas mint ' + (i + 1) + '/' + chunks, homeRail, () =>
-                    gasHelper.mintGas(relayStakeSource, String(MINT_CHUNK)));
+                    gasHelper.ensureGasBalance(relayStakeSource, String(MINT_CHUNK)));
                 if ((i + 1) % 5 === 0 || i + 1 === chunks)
                     console.log('    [relay-loop] minted ' + ((i + 1) * MINT_CHUNK) + '/' + relayStakeAmount +
                                 ' XCHAIN (' + Math.round((Date.now() - mintStarted) / 1000) + 's)');

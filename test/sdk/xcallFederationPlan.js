@@ -170,6 +170,23 @@ function summarizeSnapshot(snapshot) {
     return { n: weightBySource.size, total, weightBySource, sourceByPubkey };
 }
 
+function attributeMembers(stoppable, sourceByPubkey) {
+    // Attribute each stoppable container to a staking source. A container whose
+    // pubkey is absent from the snapshot is not a qualifying validator on this
+    // venue, so stopping it removes no stake; say so instead of counting it.
+    const members      = (stoppable || []).map(m => ({ ...m }));
+    const unattributed = [];
+    const bySource     = new Map();   // source -> containers that carry it
+    for (const m of members) {
+        const src = m.pubkey ? sourceByPubkey.get(m.pubkey) : undefined;
+        if (!src) { unattributed.push(m.container); continue; }
+        m.stakeSource = src;
+        if (!bySource.has(src)) bySource.set(src, []);
+        bySource.get(src).push(m.container);
+    }
+    return { members, unattributed, bySource };
+}
+
 /**
  * Name the containers to stop so the surviving federation can neither reach the
  * count quorum nor clear the stake-weighted threshold.
@@ -192,19 +209,7 @@ function planQuorumDrop({ snapshot, stoppable }) {
             + 'stake the federation first (test/sdk/xcallStakeValidators.js)');
     const countQuorum = countQuorumFor(n);
 
-    // Attribute each stoppable container to a staking source. A container whose
-    // pubkey is absent from the snapshot is not a qualifying validator on this
-    // venue, so stopping it removes no stake; say so instead of counting it.
-    const members      = (stoppable || []).map(m => ({ ...m }));
-    const unattributed = [];
-    const bySource     = new Map();   // source -> containers that carry it
-    for (const m of members) {
-        const src = m.pubkey ? sourceByPubkey.get(m.pubkey) : undefined;
-        if (!src) { unattributed.push(m.container); continue; }
-        m.stakeSource = src;
-        if (!bySource.has(src)) bySource.set(src, []);
-        bySource.get(src).push(m.container);
-    }
+    const { members, unattributed, bySource } = attributeMembers(stoppable, sourceByPubkey);
 
     // Heaviest source first (name-ascending tiebreak, so the plan is the same on
     // every run and every host): removing the most stake per stop leaves the most

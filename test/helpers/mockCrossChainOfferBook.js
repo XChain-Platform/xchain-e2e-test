@@ -20,7 +20,7 @@
  *
  * Why an HTTP mock (vs monkeypatching the engine): the DEX federation proof
  * hinges on every follower INDEPENDENTLY re-fetching the book in
- * validateProposedMatch -> _findOpenOffer -> _indexerCall before it will sign a
+ * validateProposedMatch -> findOpenOffer -> indexerCall before it will sign a
  * leader's proposed match. Serving over real HTTP keeps the engine's actual
  * network path intact, and per-path "books" let one validator be pointed at a
  * DIVERGENT book (the byzantine case) while the honest majority shares one.

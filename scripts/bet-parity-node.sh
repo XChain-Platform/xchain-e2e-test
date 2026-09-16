@@ -90,6 +90,19 @@ cmd_up() {
     mkdir -p "$WORK"
     write_client_cnf
 
+    # Node B must be GONE before its own database is touched. A resident follower
+    # keeps its indexer writing $PARITY_DB all through the DROP and the restore
+    # below, and the clone comes out silently inconsistent: --single-transaction
+    # buys a consistent read of the SOURCE, nothing at the destination.
+    echo "== removing any existing $PARITY_CONTAINER before touching $PARITY_DB"
+    docker rm -f "$PARITY_CONTAINER" >/dev/null 2>&1 || true
+    # `rm -f ... || true` swallows its own failure, so prove the container is gone
+    # rather than assume it: a swallowed failure lands back in the bug above.
+    if [ -n "$(docker ps -aq --filter "name=^${PARITY_CONTAINER}$")" ]; then
+        echo "   REFUSING: $PARITY_CONTAINER still exists after rm -f; will not drop $PARITY_DB under a live writer" >&2
+        exit 1
+    fi
+
     echo "== cloning $SRC_DB -> $PARITY_DB (consistent snapshot, node A keeps running)"
     sql "DROP DATABASE IF EXISTS \\\`$PARITY_DB\\\`; CREATE DATABASE \\\`$PARITY_DB\\\`;"
     docker exec "$DB_CONTAINER" sh -c \
@@ -110,7 +123,8 @@ cmd_up() {
     echo "== creating $PARITY_CONTAINER from node A's image + node A's live src/"
     local image
     image=$(docker inspect -f '{{.Config.Image}}' "$SRC_CONTAINER")
-    docker rm -f "$PARITY_CONTAINER" >/dev/null 2>&1 || true
+    # The removal that used to live here now runs at the top of cmd_up, ahead of
+    # the DROP/restore; nothing can have re-created the container since.
     docker create --name "$PARITY_CONTAINER" --network "$NETWORK" \
         --env-file "$WORK/env.parity" "$image" >/dev/null
     # Copy node A's RUNNING source tree in, not the image's: the P4 BET indexer

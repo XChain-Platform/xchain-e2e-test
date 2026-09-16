@@ -69,6 +69,7 @@
 const assert = require('assert');
 const fs     = require('fs');
 const path   = require('path');
+const { readModuleSource } = require('../../support/sibling_source.js');
 
 const HUB_EQ_PATH = path.resolve(__dirname, '../../../../xchain-hub/src/equivocation_header.js');
 const IDX_EQ_PATH = path.resolve(__dirname, '../../../../xchain-indexer/src/equivocation_header.js');
@@ -81,7 +82,13 @@ const idxEq = require(IDX_EQ_PATH);
 // monorepo root (two up from test/integration/parity).
 const ROOT = path.resolve(__dirname, '../../../..');
 function srcOf(rel) {
-    return fs.readFileSync(path.join(ROOT, rel), 'utf8');
+    // Read through the part-aware reader, because a service splits a long module
+    // without moving its require path: the entry keeps the path this suite names
+    // and the body moves into same-stem part files beside it. Both services do
+    // this, so both are read the same way (support/sibling_source.js). Anchoring
+    // on the entry alone is what made four of these cases red against a hub whose
+    // every path still resolved.
+    return readModuleSource(path.join(ROOT, rel));
 }
 
 function gateInputArg(source, anchorRegex) {
@@ -135,9 +142,9 @@ describe('EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', function () 
     describe('engines that feed a BTC block height on both sides (assert green)', function () {
 
         it('CHECKPOINT: both sides gate on snapshot_block (height)', function () {
-            const hubArg = gateInputArg(srcOf('xchain-hub/src/StateCheckpointEngine.js'),
+            const hubArg = gateInputArg(srcOf('xchain-hub/src/anchor/checkpoint_engine.js'),
                 /isEquivHeaderActive\(cp\.snapshot_block/);
-            const idxArg = gateInputArg(srcOf('xchain-indexer/src/actions/anchor.js'),
+            const idxArg = gateInputArg(srcOf('xchain-indexer/src/actions/anchor/index.js'),
                 /isEquivHeaderActive\(d\['SNAPSHOT_BLOCK'\]/);
             assert.ok(hubArg, 'hub checkpoint gate input not found');
             assert.ok(idxArg, 'indexer checkpoint gate input not found');
@@ -147,9 +154,9 @@ describe('EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', function () 
         });
 
         it('DEX: both sides gate on the match row snapshot_block (height)', function () {
-            const hubArg = gateInputArg(srcOf('xchain-hub/src/CrossChainDexEngine.js'),
+            const hubArg = gateInputArg(srcOf('xchain-hub/src/cross_chain/dex_engine.js'),
                 /isEquivHeaderActive\(r\.snapshot_block/);
-            const idxArg = gateInputArg(srcOf('xchain-indexer/src/actions/cross_settle.js'),
+            const idxArg = gateInputArg(srcOf('xchain-indexer/src/actions/cross_settle/index.js'),
                 /isEquivHeaderActive\(m\.snapshot_block/);
             assert.ok(hubArg && idxArg, 'DEX gate inputs must be found on both sides');
             assert.match(hubArg, /snapshot_block/);
@@ -158,11 +165,11 @@ describe('EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', function () 
         });
 
         it('XCALL: both sides gate on the call/result row snapshot_block (height)', function () {
-            const hubArg = gateInputArg(srcOf('xchain-hub/src/CrossChainCallEngine.js'),
+            const hubArg = gateInputArg(srcOf('xchain-hub/src/cross_chain/call_engine.js'),
                 /isEquivHeaderActive\(r\.snapshot_block/);
             const idxArgExec = gateInputArg(srcOf('xchain-indexer/src/actions/xexec.js'),
                 /isEquivHeaderActive\(c\.snapshot_block/);
-            const idxArgCall = gateInputArg(srcOf('xchain-indexer/src/actions/xcall.js'),
+            const idxArgCall = gateInputArg(srcOf('xchain-indexer/src/actions/xcall/index.js'),
                 /isEquivHeaderActive\(r\.snapshot_block/);
             assert.ok(hubArg, 'hub xcall gate input not found');
             assert.ok(idxArgExec && idxArgCall, 'indexer xcall/xexec gate inputs not found');
@@ -173,14 +180,14 @@ describe('EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', function () 
         });
 
         it('ATTEST: both sides gate on the REQUEST block (height)', function () {
-            const hubArg = gateInputArg(srcOf('xchain-hub/src/AttestationConsensus.js'),
+            const hubArg = gateInputArg(srcOf('xchain-hub/src/attestation/consensus.js'),
                 /isEquivHeaderActive\(requestBlock/);
             // The indexer's response verification lives in its own module beside the
             // handler, so the gate call and the handler are in different files. Both
             // are read here: what the case asserts is the INPUT the gate receives, not
             // which file spells it.
-            const idxSrc = srcOf('xchain-indexer/src/actions/attest.js')
-                + '\n' + srcOf('xchain-indexer/src/attest_response_verify.js');
+            const idxSrc = srcOf('xchain-indexer/src/actions/attest/index.js')
+                + '\n' + srcOf('xchain-indexer/src/actions/attest/attest_response_verify.js');
             const idxArg = gateInputArg(idxSrc, /isEquivHeaderActive\(declaredBlock/);
             assert.ok(hubArg && idxArg, 'ATTEST gate inputs must be found on both sides');
             // Hub: requestBlock (the REQUEST's block_index). Indexer: declaredBlock
@@ -202,7 +209,7 @@ describe('EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', function () 
         });
 
         it('NODEPROOF: both sides gate on the epoch HEIGHT', function () {
-            const hubArg = gateInputArg(srcOf('xchain-hub/src/FullNodeChallengeRound.js'),
+            const hubArg = gateInputArg(srcOf('xchain-hub/src/consensus/full_node_challenge_round.js'),
                 /isEquivHeaderActive\(epoch/);
             const idxArg = gateInputArg(srcOf('xchain-indexer/src/actions/nodeproof.js'),
                 /isEquivHeaderActive\(snapshotBlock/);
@@ -221,7 +228,7 @@ describe('EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', function () 
             // so config equivocation stays slashable. The hub gate input is the PBFT
             // block height. Assert the hub feeds a HEIGHT and document the indexer
             // side is a content-carried-height contract (verified via slash.js).
-            const hubArg = gateInputArg(srcOf('xchain-hub/src/Consensus.js'),
+            const hubArg = gateInputArg(srcOf('xchain-hub/src/consensus/pbft.js'),
                 /isEquivHeaderActive\(blockHeight/);
             assert.ok(hubArg, 'hub CONFIG gate input not found');
             assert.match(hubArg, /blockHeight/, 'hub CONFIG gate input must be the PBFT block height');
@@ -240,12 +247,12 @@ describe('EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', function () 
     describe('ORACLE gate input (fix: gate on the BTC block height)', function () {
 
         it('the hub ORACLE gate now feeds the BTC block height, distinct from the round counter', function () {
-            const hubArg = gateInputArg(srcOf('xchain-hub/src/OracleConsensus.js'),
+            const hubArg = gateInputArg(srcOf('xchain-hub/src/oracle/consensus.js'),
                 /isEquivHeaderActive\(btcBlockHeight/);
             assert.ok(hubArg, 'hub ORACLE gate input not found');
             assert.match(hubArg, /^btcBlockHeight$/, 'hub ORACLE gate input must be btcBlockHeight');
 
-            const roundSrc = srcOf('xchain-hub/src/OracleRound.js');
+            const roundSrc = srcOf('xchain-hub/src/oracle/round.js');
             // currentRound is wall-clock derived...
             assert.match(roundSrc, /currentRound\s*=\s*newRound/);
             assert.match(roundSrc, /newRound\s*=\s*Math\.floor\(\(Date\.now\(\)\s*-\s*this\.epochStart\)/,
@@ -257,13 +264,13 @@ describe('EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', function () 
         });
 
         it('hub ORACLE gate input is a BTC block height, matching every other engine', function () {
-            const hubArg = gateInputArg(srcOf('xchain-hub/src/OracleConsensus.js'),
+            const hubArg = gateInputArg(srcOf('xchain-hub/src/oracle/consensus.js'),
                 /isEquivHeaderActive\(/);
             assert.match(hubArg, /(btcBlockHeight|referenceBlock|blockHeight|snapshot_block)/,
                 'hub ORACLE gate input must be a BTC block height; got `' + hubArg + '`');
 
             // Hub re-verify (PriceAggregator) gates on the pushed btc_block_height.
-            const aggArg = gateInputArg(srcOf('xchain-hub/src/PriceAggregator.js'),
+            const aggArg = gateInputArg(srcOf('xchain-hub/src/oracle/price_aggregator.js'),
                 /isEquivHeaderActive\(btcBlockHeight/);
             assert.match(aggArg, /^btcBlockHeight$/, 'hub PriceAggregator must gate on btcBlockHeight');
 
@@ -275,13 +282,16 @@ describe('EQUIV gate-input parity (xchain-hub <-> xchain-indexer)', function () 
             // whole point of this suite: the indexer must parse the BTC height off the
             // wire and feed that same value into the canonical the gate keys on.
             // Batch wire: PRICE|0|FIRST_ROUND|LAST_ROUND|BTC_BLOCK_HEIGHT|ROUND_COUNT|...
-            const edSrc = srcOf('xchain-indexer/src/ed25519.js');
+            const edSrc = srcOf('xchain-indexer/src/consensus/ed25519.js');
             assert.match(edSrc, /isEquivHeaderActive\(btcBlockHeight,\s*network\)/,
                 'indexer ed25519 must gate the price canonical on btcBlockHeight');
-            const priceSrc = srcOf('xchain-indexer/src/actions/price.js');
-            assert.match(priceSrc, /btcBlockHeight\s*=\s*parseInt\(fields\[3\]\)/,
+            const priceSrc = srcOf('xchain-indexer/src/actions/price/index.js');
+            assert.match(priceSrc, /btcBlockHeight\s*[=:]\s*parseInt\(fields\[3\]\)/,
                 'indexer must parse BTC_BLOCK_HEIGHT off the PRICE batch wire (fields[3])');
-            assert.match(priceSrc, /buildPriceBatchPayload\(firstRound,\s*lastRound,\s*btcBlockHeight,\s*rounds\)/,
+            // The builder also takes the network as a trailing argument (the mirror-admission
+            // era is keyed per round on that network); the height stays the third argument,
+            // which is the property pinned here. The parsed header may ride as locals or on one batch object.
+            assert.match(priceSrc, /buildPriceBatchPayload\((?:batch\.)?firstRound,\s*(?:batch\.)?lastRound,\s*(?:batch\.)?btcBlockHeight,\s*(?:batch\.)?rounds(,\s*[^)]+)?\)/,
                 'indexer must feed the parsed btcBlockHeight into the batch canonical builder');
 
             assertHeightParity('ORACLE', 500);

@@ -101,7 +101,7 @@ for COIN in "${COINS[@]}"; do
     COIN="$PKG" NETWORK="regtest" \
     ./node_modules/.bin/mocha --timeout 0 \
       --require ./test/initialCheck.test.js \
-      test/parity/multichain-parity.test.js )
+      test/parity/multichain_parity.test.js )
 
   echo "[parity] $COIN - tearing down"
   run_node remove master "$PKG" regtest || true

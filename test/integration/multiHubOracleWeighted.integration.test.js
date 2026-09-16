@@ -55,8 +55,8 @@ const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
 const { waitForMesh, waitFor } = require('../helpers/consensusWait');
 
 function hubRequire(rel) { return require(path.resolve(__dirname, '../../../xchain-hub', rel)); }
-const OracleConsensus = hubRequire('src/OracleConsensus.js');
-const OracleRound     = hubRequire('src/OracleRound.js');
+const OracleConsensus = hubRequire('src/oracle/consensus.js');
+const OracleRound     = hubRequire('src/oracle/round.js');
 
 // A deadline, not a settle: waitForMesh returns on the first fully-peered poll.
 const PEER_WAIT_MS = 60_000;
@@ -80,7 +80,7 @@ async function attachOracle(mvh) {
         const round = new OracleRound(hub);
         const oc    = new OracleConsensus(hub, round);
         round.setConsensus(oc);
-        oc.setValidatorSet(await hub._loadValidatorSet());   // for leader rotation
+        oc.setValidatorSet(await hub.loadValidatorSet());   // for leader rotation
         await oc.start();                                    // registers P2P handlers (no cadence)
         hub._wtOracle = oc;
         hub._wtRound  = round;
@@ -163,52 +163,4 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM price PBFT round (WI-1 Suite 
         });
     });
 
-    describe('a healthy weighted federation finalizes the price on every hub', function () {
-        let db, mvh, seed, oracle;
-
-        before(async function () {
-            db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping A3 (positive): no env DB and Docker unavailable'); this.skip(); }
-            mvh = new MultiValidatorHub({ count: 4, basePort: 33500, startAttestation: false });
-            await mvh.start();
-            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
-            const ids = mvh.identities;
-            // Uneven weights, no single source >= 2/3 (S=10000, 2S/3~6666): the
-            // weighted quorum needs >=2 distinct sources -> exercises the multi-signer
-            // aggregation path.
-            seed = seedWeightSnapshot(mvh, {
-                blockIndex: BLOCK_INDEX,
-                validators: [
-                    { pubkey: ids[0].pubkeyHex, source: 'sA', weight: '4000' },
-                    { pubkey: ids[1].pubkeyHex, source: 'sB', weight: '3000' },
-                    { pubkey: ids[2].pubkeyHex, source: 'sC', weight: '2000' },
-                    { pubkey: ids[3].pubkeyHex, source: 'sD', weight: '1000' },
-                ],
-            });
-            oracle = await attachOracle(mvh);
-            injectSubmissions(mvh);
-        });
-
-        after(async function () {
-            if (oracle) oracle.stop();
-            if (seed) seed.restore();
-            if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
-            if (db)  { await db.stop(); }
-        });
-
-        it('the weighted quorum is reached: the identical price snapshot lands on EVERY hub', async function () {
-            await finalizeAll(mvh);
-            const seen = [];
-            for (let i = 0; i < mvh.hubs.length; i++) {
-                const rows = await snapshotRows(mvh.hubs[i]);
-                assert.strictEqual(rows.length, 1, 'hub ' + i + ' must hold exactly one finalized price snapshot (got ' + rows.length + ')');
-                assert.strictEqual(String(rows[0].price), PRICE + '.00000000',
-                    'hub ' + i + ' stored an unexpected price (got ' + rows[0].price + ')');
-                assert.ok(Number(rows[0].validator_count) >= 2,
-                    'hub ' + i + ' expected >= 2 weighted signers, got ' + rows[0].validator_count);
-                seen.push(String(rows[0].price));
-            }
-            assert.strictEqual(new Set(seen).size, 1, 'all hubs must agree on the finalized price');
-        });
-    });
 });

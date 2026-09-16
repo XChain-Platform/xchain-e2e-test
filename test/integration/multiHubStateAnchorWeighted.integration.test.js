@@ -36,7 +36,7 @@
  * seedWeightSnapshot sets hub.network), so we set cps.network='regtest' per hub.
  * Without this the engine resolves an unknown network and the weighted gate is OFF.
  *
- * No chain: the indexer view is stubbed (_indexerCall -> TIP); disposable Docker
+ * No chain: the indexer view is stubbed (indexerCall -> TIP); disposable Docker
  * MariaDB; skips when neither an env DB nor Docker is available. Runs with regtest
  * activation = 0 (always weighted), no constant edit needed.
  *
@@ -78,7 +78,7 @@ const TIP = {
     block_merkle_root: 'e5'.repeat(32), block_merkle_version: 1
 };
 
-// Mirror StateCheckpointEngine._checkpointRootSuffix (post-flag-day SPV root suffix).
+// Mirror StateCheckpointEngine.checkpointRootSuffix (post-flag-day SPV root suffix).
 const ROOT_SUFFIX = '|' + [TIP.state_root.toLowerCase(), String(TIP.state_root_version),
                            TIP.block_merkle_root.toLowerCase(), String(TIP.block_merkle_version)].join('|');
 
@@ -92,12 +92,12 @@ function wireCheckpointEngine(mvh) {
         cps.chains         = ['BTC'];
         cps.confirmations  = 0;
         cps.indexers.BTC   = { url: 'http://stubbed', key: '' };
-        cps._indexerCall   = async () => Object.assign({}, TIP);
+        cps.indexerCall   = async () => Object.assign({}, TIP);
     }
 }
 
 async function tickAll(mvh) {
-    await Promise.all(mvh.hubs.map((h) => h.stateCheckpoints._tick().catch(() => {})));
+    await Promise.all(mvh.hubs.map((h) => h.stateCheckpoints.tick().catch(() => {})));
     await waitFor(async () => {
         let held = 0;
         for (const hub of mvh.hubs) {
@@ -157,76 +157,4 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM oracle_publish checkpoint (WI
         });
     });
 
-    describe('a healthy weighted federation (whale online) finalizes on every hub', function () {
-        let db, mvh, seed;
-
-        before(async function () {
-            db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping A5 (positive): no env DB and Docker unavailable'); this.skip(); }
-            // 4 hubs: three small + one whale, all live (uneven stake).
-            mvh = new MultiValidatorHub({ count: 4, basePort: 33300, startCrossChain: true, startAttestation: false });
-            await mvh.start();
-            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
-            const ids = mvh.identities;
-            // Uneven weights where NO single source clears 2/3 (S=10000, 2S/3~6666):
-            // the weighted quorum requires >=2 distinct sources to co-sign, so this
-            // exercises the multi-signer weighted aggregation path (not the single
-            // supermajority fast path).
-            seed = seedWeightSnapshot(mvh, {
-                blockIndex: BLOCK_INDEX,
-                validators: [
-                    { pubkey: ids[0].pubkeyHex, source: 'sA', weight: '4000' },
-                    { pubkey: ids[1].pubkeyHex, source: 'sB', weight: '3000' },
-                    { pubkey: ids[2].pubkeyHex, source: 'sC', weight: '2000' },
-                    { pubkey: ids[3].pubkeyHex, source: 'sD', weight: '1000' },
-                ],
-            });
-            wireCheckpointEngine(mvh);
-            // S = 10000; e.g. 4000+3000 = 7000 -> 3·7000 > 2·10000 -> finalizes.
-        });
-
-        after(async function () {
-            if (seed) seed.restore();
-            if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
-            if (db)  { await db.stop(); }
-        });
-
-        it('the weighted quorum is reached: the identical checkpoint lands on EVERY hub', async function () {
-            await tickAll(mvh);
-
-            const rows = [];
-            for (let i = 0; i < mvh.hubs.length; i++) {
-                const r = await checkpointRows(mvh.hubs[i]);
-                assert.strictEqual(r.length, 1, 'hub ' + i + ' must hold exactly one finalized checkpoint (got ' + r.length + ')');
-                rows.push(r[0]);
-            }
-
-            // Every hub holds the identical checkpoint, with weighted-quorum sigs
-            // that verify against the canonical. At/above the EQUIV flag-day (regtest
-            // activates at genesis -> always on) the signed bytes are the v0 raw wrapped
-            // in the uniform header (TAG=XCHECKPOINT, VIEW=0); gate keys on snapshot_block.
-            const raw = ['XCHECKPOINT', 'BTC', 'regtest', String(TIP.block_index), TIP.block_hash,
-                         TIP.ledger_hash, TIP.actions_hash, TIP.contract_hash,
-                         String(rows[0].checkpoint_seq), String(BLOCK_INDEX)].join('|') + ROOT_SUFFIX;
-            const canonical = eq.isEquivHeaderActive(BLOCK_INDEX, 'regtest')
-                ? eq.buildEquivCanonical(eq.ENGINE_TAGS.CHECKPOINT,
-                    'BTC|regtest|' + TIP.block_index + '|' + rows[0].checkpoint_seq, 0, raw)
-                : raw;
-            for (let i = 0; i < rows.length; i++) {
-                assert.strictEqual(rows[i].ledger_hash, TIP.ledger_hash, 'hub ' + i + ' diverged on ledger_hash');
-                const sigs = JSON.parse(rows[i].validator_signatures);
-                const verifying = new Set();
-                for (const s of sigs)
-                    if (ValidatorIdentity.verify(canonical, s.sig, s.pubkey)) verifying.add(s.pubkey);
-                // Count-INDEPENDENT: this weighted fixture reaches quorum at 2 of 4 signers
-                // (4000+3000 > 2·S/3), so the checkpoint can legitimately finalize with 2 sigs.
-                // Assert EVERY stored sig verifies over the canonical, not a fixed >=3 floor.
-                assert.ok(sigs.length >= 1, 'hub ' + i + ' must carry at least one quorum sig');
-                assert.strictEqual(verifying.size, sigs.length,
-                    'hub ' + i + ': every stored sig must verify over the canonical (got ' + verifying.size + '/' + sigs.length + ')');
-            }
-            const distinct = new Set(rows.map((r) => r.ledger_hash + '|' + r.checkpoint_seq));
-            assert.strictEqual(distinct.size, 1, 'all hubs must hold the identical checkpoint');
-        });
-    });
 });

@@ -175,4 +175,47 @@ describe('mutation-report generator fidelity', () => {
             assert.strictEqual(built.perFile[0].critical, true)
         })
     })
+
+    describe('the all-detected claim is gated on mutants actually killed', () => {
+
+        it('refuses the claim when nothing Survived and nothing was detected either', () => {
+            // Zero Survived is not all-detected. An ungated else-branch emits the
+            // success line for a NoCoverage-only run sitting directly under an
+            // overall score of N/A, which is a claim about test strength that the
+            // run never measures.
+            const noCov = script.buildReport(oneFileReport([mutant({ status: 'NoCoverage' })]))
+            assert.strictEqual(noCov.allDetected, false)
+            assert.ok(!noCov.md.includes('All mutants were detected'),
+                'a NoCoverage-only run must not claim every mutant was detected')
+            assert.match(noCov.md, /No mutants have Survived status/)
+            assert.match(noCov.md, /1 of 1 mutant\(s\) were never exercised/)
+
+            const errs = script.buildReport(oneFileReport([
+                mutant({ status: 'Ignored' }),
+                mutant({ status: 'RuntimeError' }),
+                mutant({ status: 'CompileError' }),
+            ]))
+            assert.strictEqual(errs.allDetected, false)
+            assert.ok(!errs.md.includes('All mutants were detected'),
+                'an Ignored/error-only run measured nothing')
+
+            const empty = script.buildReport({ files: {} })
+            assert.strictEqual(empty.allDetected, false)
+            assert.ok(!empty.md.includes('All mutants were detected'), 'an empty report claims nothing')
+            assert.match(empty.md, /contained no mutants/)
+        })
+
+        it('keeps the claim for a run that really did detect every mutant', () => {
+            const allKilled = script.buildReport(oneFileReport([mutant({ status: 'Killed' })]))
+            assert.strictEqual(allKilled.allDetected, true)
+            assert.match(allKilled.md, /All mutants were detected by the test suite/)
+
+            // Timeout is a detection, so it belongs on the same side as Killed.
+            const killedAndTimeout = script.buildReport(oneFileReport([
+                mutant({ status: 'Killed' }), mutant({ status: 'Timeout' }),
+            ]))
+            assert.strictEqual(killedAndTimeout.allDetected, true)
+            assert.match(killedAndTimeout.md, /All mutants were detected by the test suite/)
+        })
+    })
 })

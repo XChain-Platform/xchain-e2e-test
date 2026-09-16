@@ -47,6 +47,9 @@ describe('Chaos Experiment 10: Unhandled Promise Rejection @P2', function () {
             }
         }, 200)
     })
+})
+
+describe('Chaos Experiment 10: Unhandled Promise Rejection @P2', function () {
 
     it('caught rejection does NOT fire unhandledRejection', function (done) {
         const marker = 'chaos-caught-' + Date.now()
@@ -71,6 +74,9 @@ describe('Chaos Experiment 10: Unhandled Promise Rejection @P2', function () {
             done()
         }, 50)
     })
+})
+
+describe('Chaos Experiment 10: Unhandled Promise Rejection @P2', function () {
 
     it('rejection in async function is detectable when not awaited', function (done) {
         const marker = 'chaos-connector-' + Date.now() + '-' + Math.random()

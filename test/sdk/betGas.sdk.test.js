@@ -35,7 +35,7 @@
  * Assertions read `fees.xchain_amount` (gas x GAS_PRICE) rather than a balance
  * delta, so they hold under BOTH payment modes (native coin and XCHAIN
  * balance). ORDER byte-identity for the shared arithmetic is pinned at unit
- * level in xchain-indexer/test/unit/bet-duration-fee.test.js.
+ * level in xchain-indexer/test/unit/fees/bet_duration_fee.test.js.
  *
  ********************************************************************/
 
@@ -96,8 +96,7 @@ async function openWithDuration(durationSeconds, label) {
     return feedIndex;
 }
 
-describe('[sdk] BET gas schedule (§12 E9, decision F)', function () {
-
+function registerBetGasHooks() {
     before(async function () {
         // See bet.sdk.test.js: ^id compaction outruns the indexer's wire acceptance.
         sdk = makeSdk({ compactAddresses: false });
@@ -109,14 +108,15 @@ describe('[sdk] BET gas schedule (§12 E9, decision F)', function () {
     after(async function () {
         await releaseClock();
     });
+}
 
-    it('creates for ZERO inside the 90-day free window', async function () {
+async function testFreeWindow() {
         const feedIndex = await openWithDuration(44 * DAY, 'E9 free window 44d');
         amtEq(await xchainFeeOf(feedIndex), '0',
             'a 44-day market is free: short feeds and users testing the system pay nothing');
-    });
+}
 
-    it('matches the §10 value table past the free window', async function () {
+async function testValueTable() {
         const table = [
             { days: 91,  expected: '0.0055'  },
             { days: 120, expected: '0.165'   },
@@ -127,17 +127,17 @@ describe('[sdk] BET gas schedule (§12 E9, decision F)', function () {
             amtEq(await xchainFeeOf(feedIndex), row.expected,
                 `${row.days} days = (${row.days} - 90) x 550 x 0.00001 XCHAIN`);
         }
-    });
+}
 
-    it('prices the both-maxima feed (730 days) at the top of the table', async function () {
+async function testBothMaxima() {
         // DEADLINE horizon and REFUND_WINDOW are one year each, so 730 days is
         // the longest life the protocol can express.
         const feedIndex = await openWithDuration(730 * DAY, 'E9 730d both maxima');
         amtEq(await xchainFeeOf(feedIndex), '3.52',
             '730 days = (730 - 90) x 550 x 0.00001 XCHAIN, the maximum creation fee');
-    });
+}
 
-    it('rounds the day count to NEAREST, not floor and not ceil', async function () {
+async function testNearestDayRounding() {
         // 90.4 days -> 90 -> free. A ceil implementation would charge here.
         const under = await openWithDuration(Math.round(90.4 * DAY), 'E9 90.4d');
         amtEq(await xchainFeeOf(under), '0',
@@ -148,9 +148,9 @@ describe('[sdk] BET gas schedule (§12 E9, decision F)', function () {
         const over = await openWithDuration(Math.round(90.6 * DAY), 'E9 90.6d');
         amtEq(await xchainFeeOf(over), '0.0055',
             '90.6 days rounds UP to 91 and is charged: bcdiv rounds to nearest, it does not floor');
-    });
+}
 
-    it('charges BET_PER_CREDIT at place, and nothing to cancel', async function () {
+async function testPlaceAndCancelFees() {
         const feedIndex = await openWithDuration(30 * DAY, 'E9 place + cancel');
         amtEq(await xchainFeeOf(feedIndex), '0', 'the 30-day feed itself is free');
 
@@ -165,9 +165,9 @@ describe('[sdk] BET gas schedule (§12 E9, decision F)', function () {
         expect(cancel.indexed.status, 'cancel status').to.equal('valid');
         amtEq(await xchainFeeOf(actionIndexOf(cancel)), '0',
             'cancel is free regardless of bet count');
-    });
+}
 
-    it('charges the duration fee AGAIN on cancel + recreate (no refund, no edit path)', async function () {
+async function testRecreateFee() {
         const first = await openWithDuration(120 * DAY, 'E9 recreate first');
         amtEq(await xchainFeeOf(first), '0.165', 'first 120-day create charged');
 
@@ -181,9 +181,9 @@ describe('[sdk] BET gas schedule (§12 E9, decision F)', function () {
         const second = await openWithDuration(120 * DAY, 'E9 recreate second');
         amtEq(await xchainFeeOf(second), '0.165',
             'recreating pays the duration fee a second time');
-    });
+}
 
-    it('charges nothing to resolve, however many bets are on the book', async function () {
+async function testResolveFee() {
         const now = await blockTime();
         const deadline = now + 300;
         const res = await submitBet(sdk, oracle, sdk.betting.createMarketParams({
@@ -202,5 +202,15 @@ describe('[sdk] BET gas schedule (§12 E9, decision F)', function () {
         expect(resolve.indexed.status, 'resolve status').to.equal('valid');
         amtEq(await xchainFeeOf(actionIndexOf(resolve)), '0',
             'resolve is free: a surcharge would be griefable by dust bets inflating the oracle cost');
-    });
+}
+
+describe('[sdk] BET gas schedule (§12 E9, decision F)', function () {
+    registerBetGasHooks();
+    it('creates for ZERO inside the 90-day free window', testFreeWindow);
+    it('matches the §10 value table past the free window', testValueTable);
+    it('prices the both-maxima feed (730 days) at the top of the table', testBothMaxima);
+    it('rounds the day count to NEAREST, not floor and not ceil', testNearestDayRounding);
+    it('charges BET_PER_CREDIT at place, and nothing to cancel', testPlaceAndCancelFees);
+    it('charges the duration fee AGAIN on cancel + recreate (no refund, no edit path)', testRecreateFee);
+    it('charges nothing to resolve, however many bets are on the book', testResolveFee);
 });

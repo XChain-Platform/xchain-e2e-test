@@ -115,10 +115,97 @@ async function readState(sdk, contractIndex, key) {
 
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+let sdk, deployer, indexA, targetContract, callId, executedBlock, executedHash;
+
+function registerReplayTest() {
+    it('invalidating the executed block rolls back and the new branch re-injects exactly once', async function () {
+        dogeCli('invalidateblock ' + executedHash);
+        console.log('    [xcall-reorg] block ' + executedBlock + ' invalidated; mining the replacement branch');
+        await mineTarget(3);
+
+        // Deterministic replay re-injects at the SAME HEIGHT on the new branch
+        // (the first new-branch block processed); distinguish branches by
+        // block HASH, never height.
+        const deadline = Date.now() + 180000;
+        let rows = [], rowBranchHash = null;
+        while (Date.now() < deadline) {
+            await sleep(3000);
+            rows = await dogeIdx(async (c) => c.query(
+                'SELECT block_index FROM cross_chain_call_executions WHERE call_id = ?', [callId]));
+            if (rows.length === 1) {
+                rowBranchHash = dogeCli('getblockhash ' + Number(rows[0].block_index));
+                if (rowBranchHash !== executedHash) break;     // row exists on the NEW branch
+                rowBranchHash = null;                          // stale pre-rollback row; keep waiting
+            }
+            await mineTarget(1);
+        }
+        expect(dogeCli('getblockhash ' + executedBlock), 'the chain actually reorged').to.not.equal(executedHash);
+        expect(rows.length, 'exactly one execution row after replay').to.equal(1);
+        expect(rowBranchHash, 'execution recorded on a new-branch block').to.be.a('string');
+        console.log('    [xcall-reorg] re-injected at DOGE block ' + Number(rows[0].block_index) +
+                    ' (' + String(rowBranchHash).substring(0, 16) + '... new branch, ' +
+                    (Number(rows[0].block_index) === executedBlock ? 'same height' : 'different height') + ')');
+    });
+}
+
+function registerRelayResultTest() {
+    it('the result relays once and the callback fires exactly once', async function () {
+        const deadline = Date.now() + 300000;
+        let req = null;
+        while (Date.now() < deadline) {
+            await mine(1);
+            await mineTarget(1);
+            await sleep(2000);
+            const r = await rpc(SOURCE_INDEXER_URL, 'getcrosschaincall', { call_id: callId });
+            if (r && r.call && r.call.request_status === 'completed') { req = r; break; }
+        }
+        expect(req, 'request completed').to.not.equal(null);
+
+        const delivered = JSON.parse(await (async () => {
+            const dl = Date.now() + 60000;
+            while (Date.now() < dl) {
+                const v = await readState(sdk, indexA, 'result:' + callId);
+                if (v) return v;
+                await mine(1);
+                await sleep(2000);
+            }
+            throw new Error('callback never delivered');
+        })());
+        expect(delivered.status).to.equal('ok');
+        expect(await readState(sdk, indexA, 'count:' + callId), 'exactly-once').to.equal('1');
+
+        const resultRows = await hubDb(async (c) => c.query(
+            "SELECT COUNT(*) n FROM cross_chain_calls WHERE phase = 'result' AND call_id = ?", [callId]));
+        expect(Number(resultRows[0].n), 'single result relay row').to.equal(1);
+        console.log('    [xcall-reorg] result relayed once, callback exactly once; replay clean');
+    });
+}
+
+function registerInitialExecutionTest() {
+    it('one DOGE block executes the call at depth 1 (below the relay gate)', async function () {
+        await mineTarget(1);
+        const deadline = Date.now() + 60000;
+        let row = null;
+        while (Date.now() < deadline && !row) {
+            await sleep(2000);
+            const rows = await dogeIdx(async (c) => c.query(
+                'SELECT block_index FROM cross_chain_call_executions WHERE call_id = ?', [callId]));
+            row = rows[0] || null;
+        }
+        expect(row, 'execution row').to.not.equal(null);
+        executedBlock = Number(row.block_index);
+        executedHash  = dogeCli('getblockhash ' + executedBlock);
+        console.log('    [xcall-reorg] executed at DOGE block ' + executedBlock + ' (' + executedHash.substring(0, 16) + '...)');
+
+        // depth 1: the result leg must NOT be signed yet
+        const resultRows = await hubDb(async (c) => c.query(
+            "SELECT COUNT(*) n FROM cross_chain_calls WHERE phase = 'result' AND call_id = ?", [callId]));
+        expect(Number(resultRows[0].n), 'no result relay below confirmation depth').to.equal(0);
+    });
+}
+
 describe('[sdk] XCALL target-chain reorg replay (pre-confirmation)', function () {
     this.timeout(0);
-
-    let sdk, deployer, indexA, targetContract, callId, executedBlock, executedHash;
 
     before(async function () {
         targetContract = parseInt(process.env.XCALL_TARGET_CONTRACT || '', 10);
@@ -162,84 +249,7 @@ describe('[sdk] XCALL target-chain reorg replay (pre-confirmation)', function ()
         expect(n, 'dispatch finalized').to.equal(1);
     });
 
-    it('one DOGE block executes the call at depth 1 (below the relay gate)', async function () {
-        await mineTarget(1);
-        const deadline = Date.now() + 60000;
-        let row = null;
-        while (Date.now() < deadline && !row) {
-            await sleep(2000);
-            const rows = await dogeIdx(async (c) => c.query(
-                'SELECT block_index FROM cross_chain_call_executions WHERE call_id = ?', [callId]));
-            row = rows[0] || null;
-        }
-        expect(row, 'execution row').to.not.equal(null);
-        executedBlock = Number(row.block_index);
-        executedHash  = dogeCli('getblockhash ' + executedBlock);
-        console.log('    [xcall-reorg] executed at DOGE block ' + executedBlock + ' (' + executedHash.substring(0, 16) + '...)');
-
-        // depth 1: the result leg must NOT be signed yet
-        const resultRows = await hubDb(async (c) => c.query(
-            "SELECT COUNT(*) n FROM cross_chain_calls WHERE phase = 'result' AND call_id = ?", [callId]));
-        expect(Number(resultRows[0].n), 'no result relay below confirmation depth').to.equal(0);
-    });
-
-    it('invalidating the executed block rolls back and the new branch re-injects exactly once', async function () {
-        dogeCli('invalidateblock ' + executedHash);
-        console.log('    [xcall-reorg] block ' + executedBlock + ' invalidated; mining the replacement branch');
-        await mineTarget(3);
-
-        // Deterministic replay re-injects at the SAME HEIGHT on the new branch
-        // (the first new-branch block processed); distinguish branches by
-        // block HASH, never height.
-        const deadline = Date.now() + 180000;
-        let rows = [], rowBranchHash = null;
-        while (Date.now() < deadline) {
-            await sleep(3000);
-            rows = await dogeIdx(async (c) => c.query(
-                'SELECT block_index FROM cross_chain_call_executions WHERE call_id = ?', [callId]));
-            if (rows.length === 1) {
-                rowBranchHash = dogeCli('getblockhash ' + Number(rows[0].block_index));
-                if (rowBranchHash !== executedHash) break;     // row exists on the NEW branch
-                rowBranchHash = null;                          // stale pre-rollback row; keep waiting
-            }
-            await mineTarget(1);
-        }
-        expect(dogeCli('getblockhash ' + executedBlock), 'the chain actually reorged').to.not.equal(executedHash);
-        expect(rows.length, 'exactly one execution row after replay').to.equal(1);
-        expect(rowBranchHash, 'execution recorded on a new-branch block').to.be.a('string');
-        console.log('    [xcall-reorg] re-injected at DOGE block ' + Number(rows[0].block_index) +
-                    ' (' + String(rowBranchHash).substring(0, 16) + '... new branch, ' +
-                    (Number(rows[0].block_index) === executedBlock ? 'same height' : 'different height') + ')');
-    });
-
-    it('the result relays once and the callback fires exactly once', async function () {
-        const deadline = Date.now() + 300000;
-        let req = null;
-        while (Date.now() < deadline) {
-            await mine(1);
-            await mineTarget(1);
-            await sleep(2000);
-            const r = await rpc(SOURCE_INDEXER_URL, 'getcrosschaincall', { call_id: callId });
-            if (r && r.call && r.call.request_status === 'completed') { req = r; break; }
-        }
-        expect(req, 'request completed').to.not.equal(null);
-
-        const delivered = JSON.parse(await (async () => {
-            const dl = Date.now() + 60000;
-            while (Date.now() < dl) {
-                const v = await readState(sdk, indexA, 'result:' + callId);
-                if (v) return v;
-                await mine(1);
-                await sleep(2000);
-            }
-            throw new Error('callback never delivered');
-        })());
-        expect(delivered.status).to.equal('ok');
-        expect(await readState(sdk, indexA, 'count:' + callId), 'exactly-once').to.equal('1');
-
-        const resultRows = await hubDb(async (c) => c.query(
-            "SELECT COUNT(*) n FROM cross_chain_calls WHERE phase = 'result' AND call_id = ?", [callId]));
-        expect(Number(resultRows[0].n), 'single result relay row').to.equal(1);
-        console.log('    [xcall-reorg] result relayed once, callback exactly once; replay clean');
-    });
+    registerInitialExecutionTest();
+    registerReplayTest();
+    registerRelayResultTest();
 });

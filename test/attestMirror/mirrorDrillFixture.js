@@ -24,7 +24,7 @@
  * THIS MODULE NO LONGER STAKES ANYTHING, and that reversal is the most
  * expensive lesson the ladder has. Staking five fresh identities per run, on
  * the belief that a well-funded venue would win the draw, is what this refuses. Stake does not
- * work that way: `AttestationRound._computeResponsibleSet` uses stake as a
+ * work that way: `AttestationRound.computeResponsibleSet` uses stake as a
  * PRE-FILTER and then ranks by `sha256(requestId || pubkey)`, so staking
  * alongside a standing roster never buys selection priority, it only DILUTES the
  * pool with keys whose hubs are not in this mesh. Five AT1 drives died of it,
@@ -38,7 +38,7 @@
  *   - A SEATED KEY WITH NO LIVE HUB IS FATAL, not merely unlucky.
  *     `AttestationConsensus` needs `max(quorum, redundancy)` valid signatures
  *     with the quorum measured over the PRE-widening set size, and
- *     `_handleCommit` accepts signatures only from responsible-set members. At
+ *     `handleCommit` accepts signatures only from responsible-set members. At
  *     redundancy 3 that is three signatures from the three drawn members, so one
  *     drawn member without a signer stalls the round to timeout. Wherever
  *     redundancy equals the whole live set, one orphaned seated key is not a
@@ -46,7 +46,7 @@
  *     `provisionDrillIdentities` refuses rather than running that lottery.
  *   - The PROVIDER floor filters the seated set per provider BEFORE the ranking,
  *     and the two providers do not share a floor: `http_get` is 10000 and `llm`
- *     is 25000 (ProviderRegistry.js DEFAULTS). Filtering only ever removes
+ *     is 25000 (validators/provider_registry.js DEFAULTS). Filtering only ever removes
  *     members, so it cannot introduce a foreign one, but it can shrink the set
  *     below redundancy, and then the round is skipped as unfinalizable and the
  *     request expires at its deadline with nothing anywhere near the floor that
@@ -725,7 +725,7 @@ async function waitForVenuePrices (venue, opts) {
  * identity module rather than a second derivation written here.
  */
 function _pubkeyForSeed (seedHex) {
-    const ValidatorIdentity = loadHubModule('src/ValidatorIdentity.js')
+    const ValidatorIdentity = loadHubModule('src/validators/identity.js')
     return String(new ValidatorIdentity(String(seedHex).toLowerCase()).getPubkeyHex()).toLowerCase()
 }
 
@@ -848,7 +848,7 @@ function _weightOf (seated, pubkeyHex) {
  *
  *   - ADOPTED: the harness derives its seed, so it gets a live hub.
  *   - PASSED OVER: no seed, and its snapshot weight is below the floor of EVERY
- *     provider the drill declares, so `_computeResponsibleSet` filters it out
+ *     provider the drill declares, so `computeResponsibleSet` filters it out
  *     before the ranking and no draw of this drill can contain it. Listed, never
  *     adopted, never refused.
  *   - ORPHAN: no seed, and it clears at least one declared provider's floor, so a
@@ -873,7 +873,7 @@ function resolveAdoptionPlan (seated, known, opts) {
     // Checked through the hub's OWN comparator, never a second one written here,
     // because a test-side `>=` on decimal strings is exactly the kind of second
     // implementation this fixture exists to avoid.
-    const providerDefaults = loadHubModule('src/ProviderRegistry.js').DEFAULTS || {}
+    const providerDefaults = loadHubModule('src/validators/provider_registry.js').DEFAULTS || {}
     const declared = (o.providers === undefined || o.providers === null)
         ? Object.keys(providerDefaults)
         : [].concat(o.providers).map((p) => String(p))
@@ -888,10 +888,10 @@ function resolveAdoptionPlan (seated, known, opts) {
             'to a provider nothing serves rather than failing.')
     }
 
-    const AttestationRound = loadHubModule('src/AttestationRound.js')
-    const meetsFloor = AttestationRound.prototype._meetsProviderFloor
+    const AttestationRound = loadHubModule('src/attestation/round.js')
+    const meetsFloor = AttestationRound.prototype.meetsProviderFloor
     assert.strictEqual(typeof meetsFloor, 'function',
-        'mirrorDrillFixture: the hub no longer exposes _meetsProviderFloor, so the provider-floor ' +
+        'mirrorDrillFixture: the hub no longer exposes meetsProviderFloor, so the provider-floor ' +
         'precondition cannot be checked against the rule the hub actually applies')
 
     const eligibleBy = new Map()
@@ -938,7 +938,7 @@ function resolveAdoptionPlan (seated, known, opts) {
     // ── the eligible set must still be big enough to draw from ───────────────
     //
     // Filtering only ever removes members, so it cannot introduce a foreign one.
-    // What it can do is shrink the set below redundancy, and `_computeResponsibleSet`
+    // What it can do is shrink the set below redundancy, and `computeResponsibleSet`
     // then returns fewer members than needed, which `AttestationConsensus` skips as
     // an unfinalizable round: the request sits until its deadline and expires, with
     // no error anywhere near the floor that caused it.
@@ -978,7 +978,7 @@ function _rawWeight (seated, pubkeyHex) {
  * Can the hubs this venue runs reach the BATCH co-sign quorum on their own?
  *
  * THE PROVIDER FLOOR SCOPES THE DRAW AND NOT THE BATCH, which is the one trap in
- * scoping the orphan rule at all. `AttestationResponseMirror._verifyBatchQuorum`
+ * scoping the orphan rule at all. `AttestationResponseMirror.verifyBatchQuorum`
  * and the leader half in `AttestationBatchPublisher` judge a window's signatures
  * against the WHOLE attestation capability snapshot at the batch anchor, with no
  * provider anywhere in the rule. So a seated key this venue does not run is a set
@@ -1061,7 +1061,7 @@ function _batchQuorumReach (seated, adopted, belowFloor, buriedBlock, network) {
  * lesson this ladder has: the responsible set is drawn from EVERY staked
  * validator carrying the attestation capability, ranked by
  * `sha256(requestId || pubkey)`, with stake acting only as a pre-filter
- * (`AttestationRound._computeResponsibleSet`). Stake is therefore a FILTER and
+ * (`AttestationRound.computeResponsibleSet`). Stake is therefore a FILTER and
  * never a RANK, so staking new identities alongside a standing roster does not
  * win the draw, it DILUTES it: the venue's keys compete with keys whose hubs are
  * not in this mesh, and a draw containing one of those can never finalize.
@@ -1069,7 +1069,7 @@ function _batchQuorumReach (seated, adopted, belowFloor, buriedBlock, network) {
  * WHY IT CAN NEVER FINALIZE, since "it might work sometimes" is the belief that
  * cost five runs: `AttestationConsensus` computes `needed = max(quorum,
  * redundancy)` with the quorum measured over the PRE-widening set size, so at
- * redundancy 3 it needs THREE valid signatures, and `_handleCommit` accepts
+ * redundancy 3 it needs THREE valid signatures, and `handleCommit` accepts
  * signatures only from responsible-set members. One drawn member with no live
  * hub means the round stalls to timeout. It does not degrade, it does not
  * widen its way out on the first pass, and it presents as "the mirror produced
@@ -1090,7 +1090,7 @@ function _batchQuorumReach (seated, adopted, belowFloor, buriedBlock, network) {
  * THE "COULD ACTUALLY DRAW" HALF IS `opts.providers`, and it is what lets an
  * acceptance drill run on a chain carrying a validator nobody here may sign as.
  * The provider floor filters the seated set BEFORE the hash ranking
- * (`AttestationRound._computeResponsibleSet` calls `_meetsProviderFloor` on the
+ * (`AttestationRound.computeResponsibleSet` calls `meetsProviderFloor` on the
  * snapshot weight), and the floors differ: `http_get` 10000, `llm` 25000. A key
  * below the floor of EVERY provider a drill declares can therefore never appear
  * in that drill's responsible set however the ranking falls, so it is not that
@@ -1146,7 +1146,7 @@ async function provisionDrillIdentities (opts) {
     // one: its whole claim is that an indexer following a hub OUTSIDE the set
     // derives the identical rows, and a venue whose every hub is responsible
     // cannot state that claim at all.
-    const ValidatorIdentity = loadHubModule('src/ValidatorIdentity.js')
+    const ValidatorIdentity = loadHubModule('src/validators/identity.js')
     const identities = adopted.map((a) => ({ pubkeyHex: a.pubkeyHex, privkeyHex: a.privkeyHex }))
     const observers  = []
     for (let i = adopted.length; i < count; i++) {
@@ -1260,7 +1260,7 @@ async function deployRequestContract (opts) {
  * WHY A GUARD AND NOT A MECHANISM. The responsible set is drawn from EVERY
  * staked validator carrying the attestation capability and ranked by
  * `sha256(requestId || pubkey)`, with stake acting only as a pre-filter
- * (`AttestationRound.js`). The venue stakes its identities INTO a shared roster
+ * (`attestation/round.js`). The venue stakes its identities INTO a shared roster
  * that already holds others, so nothing makes its own hubs win: measured
  * 2026-09-04, an all-venue draw of three from five venue identities among eleven
  * is C(5,3)/C(11,3), about 6%. Retrying until the draw is clean is therefore not

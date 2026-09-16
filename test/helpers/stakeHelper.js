@@ -17,7 +17,7 @@ const requireRow = require('./requireRow')
 //
 // Two delays compose here, and mining only the first is the trap: the stake becomes
 // ACTIVE at stakeBlock + ACTIVATION_DELAY_BLOCKS (6 on BTC), but
-// _computeResponsibleSet resolves the capability snapshot at the REQUEST's block
+// computeResponsibleSet resolves the capability snapshot at the REQUEST's block
 // BURIED by CANONICAL_REORG_BUFFER (another 6; xchain-indexer
 // snapshot_reorg_buffer.js), matching where the hub's CapabilitySnapshot resolves it.
 // So a request at height H sees only stakes active at H-6, and the first height that
@@ -324,7 +324,7 @@ module.exports = {
     // STAKE v3 expected to be REJECTED. The valid-only waitForContractStake can never
     // observe an intentionally-invalid stake, so broadcast and poll the row
     // status-agnostically (invalid contract stakes still write a contract_stakes row
-    // carrying the rejection status (see xchain-indexer stake.js _parseContractStake,
+    // carrying the rejection status (see xchain-indexer stake.js parseContractStake,
     // which calls createContractStake unconditionally). Filters on the unique
     // (source, pubkey, target, tick) tuple, not txHash, so it stays robust to encoding.
     async sendStakeV3Invalid(addressInfo, amount, signingPubkey, contractIndex, tick, timeMax = 60000){

@@ -102,6 +102,17 @@ describe('[regression:p0] Transaction Pipeline', function () {
             assert.strictEqual(transactionHelper.isSegwitUTXO({ scriptPubKey: null }), false)
         })
     })
+})
+
+describe('[regression:p0] Transaction Pipeline', function () {
+
+    beforeEach(function () {
+        resetGlobals()
+    })
+
+    afterEach(function () {
+        sinon.restore()
+    })
 
     describe('createAndSendTransaction', function () {
 
@@ -138,6 +149,20 @@ describe('[regression:p0] Transaction Pipeline', function () {
             assert.deepStrictEqual(args[3], { action: 'ISSUE' }, 'data arg')
             assert.strictEqual(args[8], address, 'changeAddress arg')
         })
+    })
+})
+
+describe('[regression:p0] Transaction Pipeline', function () {
+
+    beforeEach(function () {
+        resetGlobals()
+    })
+
+    afterEach(function () {
+        sinon.restore()
+    })
+
+    describe('createAndSendTransaction', function () {
 
         it('[regression:p0] R-TX-002 : broadcasts transaction after signing', async function () {
             const ecc    = require('tiny-secp256k1')
@@ -168,6 +193,17 @@ describe('[regression:p0] Transaction Pipeline', function () {
             assert.ok(broadcastStub.calledOnce, 'broadcastTx should be called')
             assert.ok(typeof broadcastStub.firstCall.args[0] === 'string', 'should pass hex string')
         })
+    })
+})
+
+describe('[regression:p0] Transaction Pipeline', function () {
+
+    beforeEach(function () {
+        resetGlobals()
+    })
+
+    afterEach(function () {
+        sinon.restore()
     })
 
     describe('createSimpleTransaction', function () {

@@ -37,38 +37,45 @@
 
 const dotenv = require('dotenv');
 dotenv.config();
-
 const assert = require('assert');
 const { MultiValidatorHub }   = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
 const { waitForMesh, waitForConfigEverywhere, assertNeverApplied } = require('../helpers/consensusWait');
 
-// Deadlines, not settles: both waits below poll their own post-condition and
-// return on the first passing poll, so a long deadline costs nothing on a
-// quiet venue and stops a busy one failing on the clock. A stall past the
-// deadline reports which hub held what, instead of hiding inside a settle window.
+// Deadlines, not settles. Fixed sleeps of 8s for the mesh and 4s for the
+// followers' apply went red at random on a busy venue (the same
+// commit failed twice and passed once, always on `hub 0 did not apply ...
+// (got {})`). Reproduced 2026-08-14 under 14 busy cores on a 10-core venue: 2 of
+// 3 runs failed with that assertion.
+//
+// The deadlines are what MADE the diagnosis, and they are not what fixed it.
+// Waiting 60s instead of 4 turned "hub 0 lagged" into "hubs 0, 1 and 2 never
+// applied at all", which is a stuck round, not a slow one: the whale leader was
+// broadcasting COMMIT before the followers had finished locking their snapshots,
+// and Consensus dropped a vote for a round it had not opened yet. The fix is the
+// early-arrival vote buffer in xchain-hub's Consensus (the config-change twin of
+// the buffers OracleConsensus and AttestationConsensus already carry). What these
+// waits still buy is that the next such stall reports which hub held what, at a
+// deadline, instead of hiding inside a settle window.
 const MESH_WAIT_MS  = 60_000;  // every hub peered with every other hub
-const APPLY_WAIT_MS = 60_000;  // COMMIT propagation + follower _applyConfig
+const APPLY_WAIT_MS = 60_000;  // COMMIT propagation + follower applyConfig
 // The negative case has no event to wait for, so its window stays fixed; it is
 // spent polling, so a hub that finalizes fails the test at that moment.
 const STALL_WAIT_MS = 6000;    // long enough to confirm a round does NOT finalize
-
 // Find the hub that is the round leader for the next sequence (all hubs share the
 // same sorted validator set + seq, so exactly one matches).
 function findLeader(mvh) {
     return mvh.hubs.find((h) => {
-        const l = h.consensus._getLeader(h.consensus.seq + 1);
+        const l = h.consensus.getLeader(h.consensus.seq + 1);
         return l && l.addr === h.consensus.peerManager.validatorAddr;
     });
 }
 
 describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM config-change PBFT (WI-1, L2)', function () {
     this.timeout(240_000);
-
     describe('a stake-minority (count-majority) of live hubs cannot apply a config', function () {
         let db, mvh, seed;
-
         before(async function () {
             db = await startDisposableHubDb();
             if (!db) { console.log('Skipping weighted-PBFT L2 (negative): no env DB and Docker unavailable'); this.skip(); }
@@ -117,10 +124,12 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM config-change PBFT (WI-1, L2)
                 { windowMs: STALL_WAIT_MS });
         });
     });
+});
 
+describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM config-change PBFT (WI-1, L2)', function () {
+    this.timeout(240_000);
     describe('a healthy weighted federation (whale online) applies the config on every hub', function () {
         let db, mvh, seed;
-
         before(async function () {
             db = await startDisposableHubDb();
             if (!db) { console.log('Skipping weighted-PBFT L2 (positive): no env DB and Docker unavailable'); this.skip(); }

@@ -56,12 +56,14 @@ describe('initialCheck: COIN_CODE_MAP logic', function () {
             assert.deepStrictEqual(keys.sort(), ['bitcoin', 'dogecoin', 'litecoin']);
         });
     });
+});
 
-    // When COIN is not set, initialCheck.js splits NETWORK on "-":
+// When COIN is not set, initialCheck.js splits NETWORK on "-":
     //   let networkSplit = NETWORK.split("-")
     //   global.COIN = networkSplit[0]
     //   global.NETWORK = networkSplit[1]
 
+describe('initialCheck: COIN_CODE_MAP logic', function () {
     describe('NETWORK splitting fallback (when COIN is absent)', function () {
         function splitNetwork(network) {
             const parts = network.split('-');
@@ -86,7 +88,9 @@ describe('initialCheck: COIN_CODE_MAP logic', function () {
             assert.strictEqual(r.network, 'testnet');
         });
     });
+});
 
+describe('initialCheck: COIN_CODE_MAP logic', function () {
     describe('mochaHooks.beforeAll / afterAll', function () {
         it('cannot be unit-tested without live services (integration-test boundary)', function () {
             // initialCheck.js bootstraps all global connectors (nodeConnector,

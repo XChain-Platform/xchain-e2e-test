@@ -78,6 +78,13 @@ describe('[regression:p0] Database Polling & Assertions', function () {
         assert.ok(params.includes('addr2'), 'params should include destination')
         assert.ok(params.includes('TOK'), 'params should include tick')
     })
+})
+
+describe('[regression:p0] Database Polling & Assertions', function () {
+
+    afterEach(function () {
+        sinon.restore()
+    })
 
     it('[regression:p0] R-DB-004: waitForCredit matches address, tick, amount', async function () {
         const creditRow = { address: 'addr1', tick: 'TOK', amount: '100' }
@@ -99,6 +106,13 @@ describe('[regression:p0] Database Polling & Assertions', function () {
         }, 5000)
 
         assert.ok(result, 'should return a row')
+    })
+})
+
+describe('[regression:p0] Database Polling & Assertions', function () {
+
+    afterEach(function () {
+        sinon.restore()
     })
 
     it('[regression:p0] R-DB-006: checkIssue builds parameterized SQL with correct placeholders', async function () {
@@ -148,6 +162,13 @@ describe('[regression:p0] Database Polling & Assertions', function () {
         const result = await db.ping()
         assert.strictEqual(result, false)
     })
+})
+
+describe('[regression:p0] Database Polling & Assertions', function () {
+
+    afterEach(function () {
+        sinon.restore()
+    })
 
     it('[regression:p0] R-DB-006b: connection is released after checkIssue', async function () {
         const { db, conn } = createDb([])
@@ -173,6 +194,13 @@ describe('[regression:p0] Database Polling & Assertions', function () {
         const params = conn.query.firstCall.args[1]
         assert.strictEqual(params.length, 1, 'only non-null tick should be in params')
         assert.strictEqual(params[0], 'TOK')
+    })
+})
+
+describe('[regression:p0] Database Polling & Assertions', function () {
+
+    afterEach(function () {
+        sinon.restore()
     })
 
     it('[regression:p0] R-DB-001b: waitForIssue polls multiple times before finding record', async function () {

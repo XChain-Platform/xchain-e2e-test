@@ -18,7 +18,7 @@
  * ATTEST v1 broadcast can only run where the response mirror is NOT armed. Above
  * the activation height the indexer refuses that transaction outright with
  * `invalid: ATTEST v1 after mirror activation` (xchain-indexer
- * src/actions/attest.js:612), so the row the case waits for can never exist and
+ * src/actions/attest/index.js:667), so the row the case waits for can never exist and
  * the case fails on a timeout that says nothing about the product.
  *
  * WHY THIS IS NOT FIXABLE BY MIGRATING THE CASES. In the mirror era a response is

@@ -154,8 +154,90 @@ const WINDOW_KEY_WALL_CLOCK = 'finalized_at';
 // Every mirror barrier the indexer has a grace for, read from the indexer itself so
 // this venue cannot fall behind a barrier being added. The names are the keys; the
 // frozen values are irrelevant here because the venue sets all of them to zero.
-const { HUB_SYNC_WATERMARK_GRACE_S } = require('../../../xchain-indexer/src/hub_db_sync.js');
+// Resolved from BRIDGE_RAIL_REPO_ROOT when a drive has pinned one, because this venue spawns
+// the indexer out of that root and reading the barrier names from the SHARED checkout instead
+// would describe a different build than the one running. Unset keeps the relative path exactly.
+const { HUB_SYNC_WATERMARK_GRACE_S } = require(
+    process.env.BRIDGE_RAIL_REPO_ROOT
+        ? require('path').join(process.env.BRIDGE_RAIL_REPO_ROOT, 'xchain-indexer', 'src', 'hub', 'hub_db_sync.js')
+        : '../../../xchain-indexer/src/hub/hub_db_sync.js');
 const MIRROR_BARRIERS = Object.freeze(Object.keys(HUB_SYNC_WATERMARK_GRACE_S));
+
+// THE GRACE TABLE IS NOT THE FAMILY, and the difference is one whole member.
+//
+// `MIRROR_BARRIERS` above is the eight keys of the indexer's grace table (price,
+// oracle, match, call, anchorAttest, attestResponse, bridge, policy). The indexer
+// reports NINE watermark-keyed barrier reasons: `snapshot_sync_barrier` is pure
+// content and has no grace, so it has no key, so the venue's zero-grace pinning
+// never reaches it and a list derived from the grace table cannot see it at all.
+// A leg enumerating the family has to name it explicitly, and inventing a grace
+// for it to make the derived list line up would change the indexer's behaviour to
+// suit the harness.
+//
+// So the family is derived from the indexer's OWN source instead of the grace
+// table, and the gap between the two is exported rather than papered over. The
+// two `_barrier` reasons deliberately NOT in the family are `bridge_proof_barrier`
+// and `call_presence_barrier`: neither is keyed on the mirror stream watermark.
+// Anchored on the file this directory is actually read for, XChainIndexer.js,
+// rather than on the mirror module: the mirror moved into src/hub/ and taking its
+// dirname would point the barrier scan one directory below the tree it wants.
+const INDEXER_SRC_DIR = path.dirname(require.resolve('../../../xchain-indexer/src/XChainIndexer.js'));
+const MIRROR_BARRIER_REASON_RE = /'([a-z0-9_]+_sync_barrier|anchor_attest_barrier)'/g;
+let _mirrorBarrierReasons = null;
+
+/**
+ * Every watermark-keyed barrier reason string the indexer can report, read from
+ * `XChainIndexer.js` so a barrier added there cannot be missing here.
+ *
+ * A SET, not a sequence: the evaluation order is the block loop's and only
+ * `/status` can be asked for it, so a leg asserting loop order must read it from
+ * the running node rather than from this list.
+ *
+ * Lazy and cached: the source file is large and only the legs that enumerate the
+ * family pay for reading it.
+ */
+function mirrorBarrierReasons() {
+    if (_mirrorBarrierReasons) return _mirrorBarrierReasons;
+    const src  = fs.readFileSync(path.join(INDEXER_SRC_DIR, 'XChainIndexer.js'), 'utf8');
+    const seen = new Set();
+    for (const m of src.matchAll(MIRROR_BARRIER_REASON_RE)) seen.add(m[1]);
+    if (seen.size === 0) {
+        throw new Error('attestMirrorVenue: no mirror barrier reason strings found in ' +
+            path.join(INDEXER_SRC_DIR, 'XChainIndexer.js') + '; the venue is reading the wrong tree');
+    }
+    _mirrorBarrierReasons = Object.freeze(Array.from(seen).sort());
+    return _mirrorBarrierReasons;
+}
+
+/**
+ * The reason string one grace key names, derived rather than tabulated.
+ *
+ * Most keys are `<snake>_sync_barrier`; `anchorAttest` is `anchor_attest_barrier`
+ * with no `_sync`. Both spellings are tried against the strings actually present
+ * in the indexer, and a key matching neither THROWS: a grace key whose reason the
+ * venue cannot name is a renamed barrier, and guessing would silently drop a
+ * member out of every enumeration built on this.
+ */
+function gracedBarrierReason(barrier) {
+    const snake  = String(barrier).replace(/[A-Z]/g, (c) => '_' + c.toLowerCase());
+    const reasons = new Set(mirrorBarrierReasons());
+    for (const candidate of [snake + '_sync_barrier', snake + '_barrier']) {
+        if (reasons.has(candidate)) return candidate;
+    }
+    throw new Error('attestMirrorVenue: grace key ' + JSON.stringify(barrier) +
+        ' names no barrier reason in XChainIndexer.js (tried ' + snake + '_sync_barrier and ' +
+        snake + '_barrier); the barrier was renamed and this venue is now blind to it');
+}
+
+/**
+ * The members the venue's grace pinning CANNOT reach, because they have no grace
+ * key. Today that is `snapshot_sync_barrier` alone, and it is computed rather than
+ * asserted so a second ungraced member shows up here the day it is added.
+ */
+function ungracedMirrorBarrierReasons() {
+    const graced = new Set(MIRROR_BARRIERS.map(gracedBarrierReason));
+    return mirrorBarrierReasons().filter((r) => !graced.has(r));
+}
 
 // `attestResponse` -> `HUB_SYNC_ATTEST_RESPONSE_GRACE_S`, the spelling
 // `resolveWatermarkGrace` reads for that barrier.
@@ -462,7 +544,7 @@ function assertTimingInvariants(forwardS, batchWindowS, keying, hopBudgetS = GOS
  * guard pinned to either spelling refuses to boot on the other for want of a constant
  * that belongs to only one of them. Absence of `BOUNDARY_SKEW_S` is therefore not by
  * itself the signal, and neither is its presence: the window read is, so the verdict comes from the
- * column `_selectWindowRows` actually filters on and the band is only collected once that
+ * column `selectWindowRows` actually filters on and the band is only collected once that
  * read says wall clock.
  *
  * Refused rather than defaulted when neither shape is recognizable. A third keying would
@@ -470,11 +552,16 @@ function assertTimingInvariants(forwardS, batchWindowS, keying, hopBudgetS = GOS
  * the invariant exists to prevent.
  */
 function resolveWindowKeying() {
-    return resolveWindowKeyingFrom(loadHubModule('src/AttestationBatchPublisher.js'));
+    // A hub whose SQL lives under src/db/ reads its window through a named Database method,
+    // so the column it filters on sits in that method's text rather than in selectWindowRows.
+    // A hub without src/db/index.js keeps the SQL inline and needs no second read.
+    let dbProto = null;
+    try { dbProto = loadHubModule('src/db/index.js').prototype; } catch (_) { dbProto = null; }
+    return resolveWindowKeyingFrom(loadHubModule('src/attestation/batch_publisher.js'), dbProto);
 }
 
 // The environment keys the hub's credential resolver reads (`xchain-hub/src/lib/
-// hub-credentials.js resolveHubLlmAuth`). Only these are handed to the probe, so a
+// lib/hub_credentials.js resolveHubLlmAuth`). Only these are handed to the probe, so a
 // signer WIF or an API key for another vendor riding in the same extra env never
 // travels further than it has to.
 const HUB_LLM_CREDENTIAL_KEYS = [
@@ -508,7 +595,7 @@ function llmProbes() {
     return {
         dirExists: (p) => { try { return fs.statSync(p).isDirectory(); } catch (_) { return false; } },
         isExecutable: (p) => { try { fs.accessSync(p, fs.constants.X_OK); return true; } catch (_) { return false; } },
-        resolveCredential: (env) => loadHubModule('src/lib/hub-credentials.js').resolveHubLlmAuth({ env: env })
+        resolveCredential: (env) => loadHubModule('src/lib/hub_credentials.js').resolveHubLlmAuth({ env: env })
     };
 }
 
@@ -575,11 +662,19 @@ function assertLlmAvailable(spec, probes) {
  * exactly one hub, so a guard that could only call `resolveWindowKeying()` would be able
  * to test whichever shape that checkout happens to have and nothing else.
  *
- * @param {Function} pub  the hub's `AttestationBatchPublisher` module export
+ * @param {Function} pub      the hub's `AttestationBatchPublisher` module export
+ * @param {object}   [dbProto] the hub's `Database.prototype`, when its SQL lives under src/db/
  */
-function resolveWindowKeyingFrom(pub) {
-    const select = pub && pub.prototype && pub.prototype._selectWindowRows;
-    const src    = typeof select === 'function' ? String(select) : '';
+function resolveWindowKeyingFrom(pub, dbProto) {
+    const select = pub && pub.prototype && pub.prototype.selectWindowRows;
+    let src      = typeof select === 'function' ? String(select) : '';
+    // Follow every db method the window read delegates to, so a query that lives in the db
+    // layer is still judged by the column it actually filters on.
+    if (dbProto) {
+        for (const m of src.matchAll(/\bdb\.([A-Za-z_$][\w$]*)\s*\(/g)) {
+            if (typeof dbProto[m[1]] === 'function') src += '\n' + String(dbProto[m[1]]);
+        }
+    }
     const onSigned = /effective_time\s*>=\s*\?/.test(src);
     const onWall   = /finalized_at\s*>=\s*\?/.test(src);
 
@@ -599,8 +694,8 @@ function resolveWindowKeyingFrom(pub) {
 
     throw new Error('attestMirrorVenue: refusing to boot. The hub this venue resolves keys its ' +
         'batch window on neither effective_time alone nor finalized_at alone (' +
-        (select ? 'its _selectWindowRows matches ' + (onSigned && onWall ? 'both' : 'neither') :
-            'it exposes no _selectWindowRows') + '), so this venue\'s window invariant no longer ' +
+        (select ? 'its selectWindowRows matches ' + (onSigned && onWall ? 'both' : 'neither') :
+            'it exposes no selectWindowRows') + '), so this venue\'s window invariant no longer ' +
         'describes it. Re-derive the invariant against that hub, or point XCHAIN_HUB_PATH at the ' +
         'hub revision this venue is meant to drive.');
 }
@@ -615,7 +710,7 @@ function resolveWindowKeyingFrom(pub) {
  * Three things in here are load-bearing and not obvious:
  *
  *   - `SIGNING_PRIVKEY_SECRET`, not `SIGNING_PRIVKEY_HEX`. Both names resolve
- *     (`xchain-hub/src/secret-env.js`), but the `_SECRET` spelling is the one an
+ *     (`xchain-hub/src/secret_env.js`), but the `_SECRET` spelling is the one an
  *     operator's redaction filter catches, and setting BOTH to different values
  *     is a hard error in the hub, so only one is set.
  *   - `HUB_API_KEY` is deliberately ABSENT. The `/hub-db/snapshot` middleware
@@ -993,7 +1088,7 @@ class P2pDelayProxy {
  * WHERE IT HAS TO SIT. An indexer reaches its hub's mirror through exactly one
  * coordinate, `HUB_API_URL`: the snapshot route is `<hubUrl>/hub-db/snapshot/<table>`
  * and the live stream is `ws://<host>/hub-db/subscribe` derived from the same value
- * (`xchain-indexer/src/hub_db_sync.js`). One proxy in front of that value therefore
+ * (`xchain-indexer/src/hub/hub_db_sync.js`). One proxy in front of that value therefore
  * governs the whole mirror for one indexer, and pointing only that indexer at it is
  * what makes the fault per-edge rather than per-hub: indexer 0's feed of hub 2 can
  * be starved while indexer 1 reads the same hub normally.
@@ -1169,6 +1264,147 @@ function mirrorFrameTable(text) {
     return event.table ? String(event.table) : null;
 }
 
+// ---------------------------------------------------------------------------
+// The height pin: freezing one follower's view of the hub's admission heights
+// ---------------------------------------------------------------------------
+
+/**
+ * WHY A PIN AND NOT A WITHHOLD. Withholding a table cannot hold a watermark-keyed
+ * member at all: `filterSnapshotBody` and `_forwardFrame` above pass `watermark`,
+ * `ready` and `schema_version` through by design, which is exactly what keeps the
+ * other barriers satisfied. A member gated on a HEIGHT is therefore unreachable by
+ * the row levers, and the only fault that reaches it is a follower whose height
+ * watermark stops advancing while everything else keeps flowing.
+ *
+ * THE THREE CARRIERS, and all three or nothing. The same `heights` map rides:
+ *   - the `watermark` heartbeat frame (live advancement),
+ *   - the `ready` frame (every reconnect re-establishes the baseline from it),
+ *   - all ten `/hub-db/snapshot/<table>` pages (poll-mode bootstrap has no socket
+ *     at all and reads its baseline from these).
+ * Pin one and skip another and the follower re-reads the true height the first
+ * time it reconnects or polls, the block commits, and the leg reads GREEN for the
+ * wrong reason. That is why the pin is armed on the proxy rather than on a
+ * carrier, and why `assertMirrorHeightPinObserved` exists.
+ *
+ * WHAT IT DOES NOT TOUCH: `ts`, `max_ids`, `watermark`, `watermark_interval_ms`,
+ * `schema_version`, `rows` and `count` are all carried verbatim. The stream-stall
+ * detector and the liveness stamp read `ts`, so a pin that froze it would stall the
+ * stream instead of the member, and every barrier would starve at once.
+ *
+ * PRESENT KEYS ONLY, deliberately. The pin overlays entries whose table AND chain
+ * are already in the served map; it never creates a table, a chain or the `heights`
+ * object itself. A hub that does not publish a height for a table is telling the
+ * follower something (the legacy, height-free rule applies), and a proxy that
+ * manufactured one would be testing a wire shape no hub produces. Every entry that
+ * found nothing to overlay is counted as `unmatched` and every payload with no
+ * `heights` at all is counted as `absent`, so the no-op is loud rather than silent:
+ * until the hub-side producer ships, an armed pin on this venue reports `absent` on
+ * every carrier and `pinned: 0`, which is the signal, not a pass.
+ */
+
+/**
+ * One payload with the pinned heights overlaid.
+ *
+ * PURE, and the single interpretation of a pin, so the REST half, the watermark
+ * frame and the ready frame cannot disagree about what pinning means.
+ *
+ * @param {object|null} payload  a parsed snapshot body or stream frame
+ * @param {object|null} pin      `{table: {chain: height}}`, or null for unarmed
+ * @returns {{payload: object, pinned: number, unmatched: number, absent: boolean, changed: boolean}}
+ */
+function pinHeightsInPayload(payload, pin) {
+    const none = { payload: payload, pinned: 0, unmatched: 0, absent: false, changed: false };
+    if (!pin || typeof pin !== 'object') return none;
+    const pinTables = Object.keys(pin);
+    if (pinTables.length === 0) return none;
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return none;
+
+    const heights = payload.heights;
+    // Absent is a RESULT, not an error: the pin is armed against a hub that may not
+    // publish heights yet, and the caller needs to be able to tell "nothing to pin"
+    // from "pinned nothing".
+    if (!heights || typeof heights !== 'object' || Array.isArray(heights)) {
+        return { payload: payload, pinned: 0, unmatched: pinTables.length, absent: true, changed: false };
+    }
+
+    let pinned = 0;
+    let unmatched = 0;
+    const nextHeights = Object.assign({}, heights);
+    for (const table of pinTables) {
+        const served = heights[table];
+        const wanted = pin[table];
+        if (!served || typeof served !== 'object' || Array.isArray(served) ||
+            !wanted || typeof wanted !== 'object') {
+            unmatched += (wanted && typeof wanted === 'object') ? Object.keys(wanted).length : 1;
+            continue;
+        }
+        const nextTable = Object.assign({}, served);
+        for (const chain of Object.keys(wanted)) {
+            if (!Object.prototype.hasOwnProperty.call(served, chain)) { unmatched++; continue; }
+            nextTable[chain] = wanted[chain];
+            pinned++;
+        }
+        nextHeights[table] = nextTable;
+    }
+    if (pinned === 0) return { payload: payload, pinned: 0, unmatched: unmatched, absent: false, changed: false };
+    // A NEW object, like filterSnapshotBody: the caller may still hold the original
+    // and nothing in this proxy may mutate a payload it is only passing along.
+    return {
+        payload: Object.assign({}, payload, { heights: nextHeights }),
+        pinned: pinned, unmatched: unmatched, absent: false, changed: true,
+    };
+}
+
+// The two stream frames that carry a heights map. A row event never does, and a
+// frame this does not name is forwarded as its original bytes.
+const HEIGHT_PIN_FRAME_TYPES = Object.freeze(['watermark', 'ready']);
+
+/**
+ * One stream frame's text with the pinned heights overlaid, or null text when the
+ * frame is not a heights carrier and must be forwarded untouched.
+ *
+ * @returns {{text: string|null, type: string|null, pinned: number, unmatched: number, absent: boolean}}
+ */
+function pinHeightsInFrameText(text, pin) {
+    const none = { text: null, type: null, pinned: 0, unmatched: 0, absent: false };
+    let event = null;
+    try { event = JSON.parse(text); } catch (_) { return none; }
+    if (!event || typeof event !== 'object') return none;
+    const type = String(event.type || '');
+    if (!HEIGHT_PIN_FRAME_TYPES.includes(type)) return none;
+    const out = pinHeightsInPayload(event, pin);
+    return {
+        text: out.changed ? JSON.stringify(out.payload) : null,
+        type: type, pinned: out.pinned, unmatched: out.unmatched, absent: out.absent,
+    };
+}
+
+/**
+ * A server-to-client text frame for `text`.
+ *
+ * Needed because a pinned frame is the one thing this proxy re-encodes rather than
+ * forwarding verbatim. Server frames are never masked, and the three length forms
+ * are the protocol's; `readServerFrames` above is the reader this must round-trip
+ * with.
+ */
+function encodeServerTextFrame(text) {
+    const payload = Buffer.from(String(text), 'utf8');
+    const len = payload.length;
+    let header;
+    if (len < 126) {
+        header = Buffer.from([0x81, len]);
+    } else if (len < 65536) {
+        header = Buffer.alloc(4);
+        header[0] = 0x81; header[1] = 126;
+        header.writeUInt16BE(len, 2);
+    } else {
+        header = Buffer.alloc(10);
+        header[0] = 0x81; header[1] = 127;
+        header.writeBigUInt64BE(BigInt(len), 2);
+    }
+    return Buffer.concat([header, payload]);
+}
+
 /**
  * An HTTP-plus-WebSocket proxy in front of one hub's API port, with a per-table
  * withhold and delay on the hub-DB mirror.
@@ -1185,7 +1421,18 @@ class HubDbMirrorProxy {
         this.label      = label || 'mirror-proxy';
         this.filters    = new Map();   // table -> {mode, delayMs}
         this.seen       = new Map();   // 'table:id' -> first-seen ms
+        // The height pin: null when unarmed, else {table: {chain: height}}. See the
+        // height-pin header above for why it is proxy-wide rather than per carrier.
+        this.heightPin  = null;
         this.stats      = { snapshotRowsHeld: 0, framesDropped: 0, framesHeld: 0, opaqueFrames: 0 };
+        // Per CARRIER, because "the pin worked" is a claim about all three of them and
+        // a leg that saw only the heartbeat has not held a reconnect or a poll-mode
+        // bootstrap. `absent` counts carriers that arrived with no `heights` map at all.
+        this.heightPinStats = {
+            watermark: { pinned: 0, unmatched: 0, absent: 0, frames: 0 },
+            ready:     { pinned: 0, unmatched: 0, absent: 0, frames: 0 },
+            snapshot:  { pinned: 0, unmatched: 0, absent: 0, frames: 0 },
+        };
         this._server    = null;
         this._sockets   = new Set();
         this._timers    = new Set();
@@ -1240,7 +1487,50 @@ class HubDbMirrorProxy {
 
     releaseAll(opts) {
         this.filters.clear();
+        this.heightPin = null;
         if (!opts || opts.reconnect !== false) this.dropSockets();
+    }
+
+    /**
+     * Freeze this edge's view of the hub's admission heights at `map`
+     * (`{table: {chain: height}}`), on all three carriers, until released.
+     *
+     * Rows, `ts` and every other field keep flowing: this is the only lever that can
+     * hold a height-keyed member while the mirror stays live. Re-arming replaces the
+     * whole map rather than merging, so a leg cannot leave half of a previous pin in
+     * place by accident.
+     */
+    pinHeights(map) {
+        if (!map || typeof map !== 'object' || Array.isArray(map) || Object.keys(map).length === 0) {
+            throw new Error('attestMirrorVenue: a height pin must be a non-empty {table: {chain: height}} map');
+        }
+        for (const [table, chains] of Object.entries(map)) {
+            if (!chains || typeof chains !== 'object' || Array.isArray(chains) || Object.keys(chains).length === 0) {
+                throw new Error('attestMirrorVenue: height pin for table ' + JSON.stringify(table) +
+                    ' must be a non-empty {chain: height} map');
+            }
+            for (const [chain, height] of Object.entries(chains)) {
+                if (!Number.isFinite(Number(height))) {
+                    throw new Error('attestMirrorVenue: height pin ' + table + '.' + chain +
+                        ' is not a finite height: ' + JSON.stringify(height));
+                }
+            }
+        }
+        this.heightPin = map;
+    }
+
+    /**
+     * Stop pinning heights.
+     *
+     * NO RECONNECT BY DEFAULT, and that is the opposite of `releaseTable` on purpose:
+     * nothing was withheld, so nothing has to be re-paged. The next heartbeat carries
+     * the hub's true heights and the follower advances on its own, which is the
+     * recovery a leg wants to observe. Pass `{reconnect: true}` to cut the socket
+     * anyway, for the leg that wants the baseline re-established through `ready`.
+     */
+    releaseHeights(opts) {
+        this.heightPin = null;
+        if (opts && opts.reconnect === true) this.dropSockets();
     }
 
     /** Cut every proxied connection, so the client reconnects and re-bootstraps. */
@@ -1267,7 +1557,12 @@ class HubDbMirrorProxy {
             up.on('data', (c) => chunks.push(c));
             up.on('end', () => {
                 const raw = Buffer.concat(chunks);
-                if (!filter || up.statusCode !== 200) {
+                // The height pin applies to EVERY snapshot page, filtered or not: a
+                // poll-mode bootstrap reads its height baseline from pages whose rows
+                // nothing is withholding. With neither lever armed this stays the
+                // verbatim relay it has always been.
+                const pinning = table && this.heightPin;
+                if ((!filter && !pinning) || up.statusCode !== 200) {
                     res.writeHead(up.statusCode, this._forwardableHeaders(up.headers));
                     return res.end(raw);
                 }
@@ -1279,7 +1574,22 @@ class HubDbMirrorProxy {
                 }
                 const filtered = filterSnapshotBody(parsed, table, filter, this.seen, Date.now());
                 this.stats.snapshotRowsHeld += filtered.held;
-                const body = Buffer.from(JSON.stringify(filtered.body), 'utf8');
+                let served = filtered.body;
+                let rewritten = !!filter;
+                if (pinning) {
+                    const pinnedOut = pinHeightsInPayload(served, this.heightPin);
+                    this._tallyHeightPin('snapshot', pinnedOut);
+                    served = pinnedOut.payload;
+                    rewritten = rewritten || pinnedOut.changed;
+                }
+                // A pin that changed nothing forwards the ORIGINAL bytes rather than a
+                // re-serialized copy: re-encoding a page this proxy had no reason to
+                // touch is how a wire-precision difference gets blamed on the hub.
+                if (!rewritten) {
+                    res.writeHead(up.statusCode, this._forwardableHeaders(up.headers));
+                    return res.end(raw);
+                }
+                const body = Buffer.from(JSON.stringify(served), 'utf8');
                 const out = this._forwardableHeaders(up.headers);
                 out['content-length'] = String(body.length);
                 res.writeHead(up.statusCode, out);
@@ -1359,6 +1669,18 @@ class HubDbMirrorProxy {
             this.stats.opaqueFrames++;
             return this._write(socket, frame.bytes);
         }
+        // The height pin is read BEFORE the row filters, because the frames it rewrites
+        // (`watermark`, `ready`) are precisely the ones `mirrorFrameTable` returns null
+        // for and which therefore pass straight through below.
+        if (this.heightPin) {
+            const pinned = pinHeightsInFrameText(frame.text, this.heightPin);
+            if (pinned.type) {
+                this._tallyHeightPin(pinned.type, pinned);
+                if (pinned.text !== null) return this._write(socket, encodeServerTextFrame(pinned.text));
+                return this._write(socket, frame.bytes);
+            }
+        }
+
         const table = mirrorFrameTable(frame.text);
         const filter = table ? this.filters.get(table) : null;
         if (!filter) return this._write(socket, frame.bytes);
@@ -1388,6 +1710,18 @@ class HubDbMirrorProxy {
         this._timers.add(timer);
     }
 
+    // One carrier's tally. Separate from `stats` because a leg asserts on the three
+    // carriers by name, and a single total cannot tell "pinned the heartbeat only"
+    // from "pinned all three".
+    _tallyHeightPin(carrier, out) {
+        const tally = this.heightPinStats[carrier];
+        if (!tally) return;
+        tally.frames++;
+        tally.pinned    += out.pinned;
+        tally.unmatched += out.unmatched;
+        if (out.absent) tally.absent++;
+    }
+
     _frameRowId(text) {
         try {
             const event = JSON.parse(text);
@@ -1415,6 +1749,102 @@ class HubDbMirrorProxy {
 // The venue
 // ---------------------------------------------------------------------------
 
+/**
+ * WHICH TREE THE VENUE'S CHILDREN RUN, and why it is not a detail.
+ *
+ * The hub and indexer children are spawned from `<repoRoot>/xchain-hub/src/api.js`
+ * and `<repoRoot>/xchain-indexer/src/api.js`, so `repoRoot` decides whose BYTES the
+ * acceptance evidence is about. Defaulting to the checkout this file lives in is
+ * what keeps a lane's evidence inside the lane: a peer measured the other outcome,
+ * a mid-drive rewrite of `xchain-hub/src/db/index.js` in a shared tree leaving four
+ * running venue children on different code than the leg believed it was testing.
+ *
+ * Precedence: an explicit `opts.repoRoot` (a leg that knows), then
+ * `XCHAIN_VENUE_REPO_ROOT` (the lane that launched mocha), then this file's own
+ * checkout. Explicit beats ambient, which is the ordinary rule, and UNSET is
+ * byte-for-byte what this venue did before the override existed.
+ *
+ * `XCHAIN_HUB_PATH` is NOT this knob and never was: it is read by
+ * `multiValidatorHubHelper` alone and redirects nothing here.
+ *
+ * An explicit root is CHECKED, because pointing at a tree with no children in it
+ * fails today as a three-minute boot timeout that reads like a slow host.
+ */
+function resolveRepoRoot(optsRepoRoot, env) {
+    const ownCheckout = path.resolve(__dirname, '../../..');
+    const fromEnv = (env || {}).XCHAIN_VENUE_REPO_ROOT;
+    const explicit = optsRepoRoot || (fromEnv ? String(fromEnv) : null);
+    if (!explicit) return ownCheckout;
+    const root = path.resolve(String(explicit));
+    for (const child of [['xchain-hub', 'src', 'api.js'], ['xchain-indexer', 'src', 'api.js']]) {
+        const p = path.join(root, ...child);
+        if (!fs.existsSync(p)) {
+            throw new Error('attestMirrorVenue: repoRoot ' + root + ' has no ' + child.join('/') +
+                '; the venue spawns its children from there and would fail as a boot timeout' +
+                (optsRepoRoot ? '' : ' (set through XCHAIN_VENUE_REPO_ROOT)'));
+        }
+    }
+    return root;
+}
+
+/**
+ * The extra environment for indexer `i`, or null when nothing is overlaid.
+ *
+ * WHY PER INDEX. Everything else `buildIndexerEnv` takes is venue-wide (coin,
+ * network, the three databases, the decoder, the node, the tracker, the fee
+ * destination) and until now the grace table was the ONLY `[i]`-indexed term. That
+ * is enough to single out a barrier but not enough to single out a node: a leg that
+ * needs indexer 0 running one rule and indexer 1 running another - the rolling
+ * deploy a flag day exists to survive - has no seam at all without this.
+ *
+ * Applied LAST, through `buildIndexerEnv`'s `extraEnv`, so an overlay can override
+ * a venue-wide key deliberately; merged first it could only add keys nothing else
+ * sets, which is the wrong half of the job.
+ *
+ * Null rather than `{}` when unset, so an unset venue passes `buildIndexerEnv`
+ * exactly what it passed before this existed.
+ */
+function indexerEnvOverlay(perIndex, i) {
+    if (!perIndex || typeof perIndex !== 'object') return null;
+    const overlay = perIndex[i];
+    if (!overlay || typeof overlay !== 'object' || Array.isArray(overlay)) return null;
+    const keys = Object.keys(overlay);
+    if (keys.length === 0) return null;
+    const out = {};
+    // Stringified here rather than at the spawn: a number or a boolean in a spawn env
+    // throws from child_process, and a leg that wrote `{X: 0}` should get `'0'` rather
+    // than a crash two minutes into a boot.
+    for (const k of keys) out[k] = String(overlay[k]);
+    return out;
+}
+
+/**
+ * The ONE `extraEnv` a venue indexer spawn gets: the venue-wide overlay (a bridge
+ * drive's origin-chain endpoint, for instance) with the per-index overlay layered over
+ * it, so a leg can still override a venue-wide key deliberately.
+ *
+ * Two `extraEnv` keys in one spawn spec silently kept only the second, which dropped the
+ * venue-wide overlay whenever no per-index one was given: the DOGE venue indexer then
+ * had no `BTC_INDEXER_URL`, every in leg deferred under `bridge_proof_barrier`, and the
+ * drive stalled at the first transfer's block with nothing saying "misconfigured".
+ *
+ * Null when neither side contributes, so an unset venue passes `buildIndexerEnv` exactly
+ * what it always did.
+ *
+ * @param {object|null} venueWide  `opts.indexerExtraEnv`
+ * @param {object|null} perIndex   `indexerEnvOverlay(this.indexerEnv, i)`
+ * @returns {object|null}
+ */
+function mergeIndexerExtraEnv(venueWide, perIndex) {
+    const a = venueWide && typeof venueWide === 'object' && !Array.isArray(venueWide) ? venueWide : null;
+    const b = perIndex  && typeof perIndex  === 'object' && !Array.isArray(perIndex)  ? perIndex  : null;
+    if (!a && !b) return null;
+    const out = {};
+    if (a) for (const k of Object.keys(a)) out[k] = String(a[k]);
+    if (b) for (const k of Object.keys(b)) out[k] = String(b[k]);
+    return Object.keys(out).length ? out : null;
+}
+
 class AttestMirrorVenue {
 
     /**
@@ -1429,7 +1859,12 @@ class AttestMirrorVenue {
      * @param opts.coin/network     the chain the indexers index (default bitcoin/regtest)
      * @param opts.basePort         port probe base (default 41000)
      * @param opts.hubDb            an already-started disposableHubDb handle to share
-     * @param opts.repoRoot         monorepo root; defaults to the checkout this file is in
+     * @param opts.repoRoot         monorepo root the hub and indexer children are spawned
+     *                              from; defaults to XCHAIN_VENUE_REPO_ROOT, else the
+     *                              checkout this file is in. See resolveRepoRoot.
+     * @param opts.indexerEnv       `{0: {KEY: 'value'}}`, a per-INDEX env overlay applied
+     *                              last; the only seam that can run two indexers on one
+     *                              venue under different rules. See indexerEnvOverlay.
      * @param opts.forwardS         ATTEST_RESPONSE_FORWARD_S_OVERRIDE (default 5)
      * @param opts.batchWindowS     ATTEST_BATCH_WINDOW_S_OVERRIDE (default 30)
      * @param opts.graces           { attestResponse, price, oracle } seconds, default 0 each
@@ -1465,7 +1900,7 @@ class AttestMirrorVenue {
         if (this.attachHubs) this.hubCount = this.attachHubs.length;
         this.network      = opts.network || 'regtest';
         this.basePort     = opts.basePort || 41000;
-        this.repoRoot     = opts.repoRoot || path.resolve(__dirname, '../../..');
+        this.repoRoot     = resolveRepoRoot(opts.repoRoot, process.env);
         this.forwardS     = opts.forwardS     === undefined ? DEFAULT_FORWARD_S     : opts.forwardS;
         this.batchWindowS = opts.batchWindowS === undefined ? DEFAULT_BATCH_WINDOW_S : opts.batchWindowS;
         // Every barrier at zero by default, not the three that were once listed by hand.
@@ -1477,10 +1912,21 @@ class AttestMirrorVenue {
         // comment at the buildIndexerEnv call site for why the grace is the only term
         // that can single out one barrier.
         this.indexerGraces   = opts.indexerGraces || {};
+        // `{0: {XCHAIN_MIRROR_ADMISSION_HEIGHT_REGTEST: '0'}}`: a per-INDEX environment
+        // overlay, applied last. See indexerEnvOverlay for why the grace table was not
+        // enough and why the merge order is the whole point.
+        this.indexerEnv      = opts.indexerEnv || {};
         // Extra environment for every hub child, applied last. The seam exists for the
         // attestation BATCH publisher, which needs a signer module, a DOGE encoder and
         // a funded DOGE address that only a drill can supply; see the buildHubEnv call.
         this.hubExtraEnv     = opts.hubExtraEnv || null;
+        // The same seam for every INDEXER child, and it exists for the bridge rail: the
+        // destination indexer's D2 escrow-proof client resolves the ORIGIN chain's
+        // endpoint from `<COIN>_INDEXER_URL` in its own environment, which no venue
+        // indexer can be told about any other way (a child's environment is built from
+        // scratch here, never inherited). Null for every existing caller, so their
+        // children's environments are byte-identical to what they were.
+        this.indexerExtraEnv = opts.indexerExtraEnv || null;
         // Lower-only knobs; a caller raising the round timeout must raise the
         // request-seen window with it, so the venue refuses that below.
         this.attestationPollMs = opts.attestationPollMs === undefined
@@ -1504,6 +1950,33 @@ class AttestMirrorVenue {
         // Opt out of the reusable indexer databases; see the naming site for why
         // nothing should want this without saying so.
         this.freshIndexers   = opts.freshIndexers === true;
+        // REPLAY THE CHAIN INSTEAD OF COPYING THE STANDING NODE'S LEDGER, and it is a
+        // different request from `freshIndexers`: that one asks for a fresh DATABASE and
+        // then seeds it from the standing node all the same, so the ledger it produces is
+        // the standing node's ledger either way. This one asks for a different LEDGER:
+        // the venue indexer builds its own by parsing every block under the code in this
+        // tree, which is the only way to observe a rule that came in AFTER the standing
+        // node parsed its history grading the actions that predate it.
+        //
+        // The bridge rail is why it exists (spec xchain-bridge.md, dq 5, ruled (a)
+        // 2026-09-12). DOGE regtest carries an XCHAIN token row from a pre-D62 `mintGas`
+        // self-seed, a broadcast ISSUE the shipped rules now refuse unconditionally off
+        // BTC. A clone inherits that row and AT1's stated precondition (no XCHAIN row on
+        // the destination ledger) cannot be asserted; a replay refuses the historical
+        // ISSUE and holds no row, which is the ledger AT1 describes.
+        //
+        // IT IS EXPENSIVE AND IT RE-GRADES, which is why it is opt-in and named. Every
+        // block is parsed again (DOGE regtest was 10648 blocks on 2026-09-12), and every
+        // action downstream of the refused one is graded under today's rules rather than
+        // the rules that were live when it was first parsed. Both effects are confined to
+        // this venue's disposable database; no standing container and no standing database
+        // is touched either way.
+        this.replayChain     = opts.replayChain === true;
+        // Seed THIS venue's own COIN/USD pair into the hub databases it borrowed; see
+        // the attach branch in start() for the barrier this unblocks and why it is not
+        // the default. Meaningless without `attachHubs`, since a venue that owns its
+        // hubs already seeds them.
+        this.seedAttachedHubPrices = opts.seedAttachedHubPrices === true;
         this.oracleEpochStart = opts.oracleEpochStart || (Date.now() - 60_000);
         this.btcIndexerApiUrl = opts.btcIndexerApiUrl || null;
 
@@ -1615,6 +2088,22 @@ class AttestMirrorVenue {
             // Borrowed, not owned: the records carry the apiPort, apiUrl, index and
             // pubkey the indexer plumbing reads; procs and proxies stay the owner's.
             this.hubs = this.attachHubs.slice();
+            // AND THE BORROWED HUBS WERE SEEDED FOR THE OWNER'S COIN, NOT THIS ONE.
+            // `_seedHubPrices` runs inside `_startHubs`, so an attached venue on a
+            // DIFFERENT coin inherits hub databases holding the owner's COIN/USD and no
+            // row at all for its own. Its mirror then carries only whatever the venue
+            // oracle published for that pair, and `waitForVenuePrices` judges every
+            // COIN/USD against one BTC-sized canonical: a real DOGE price of about 0.085
+            // is outside that band by six orders of magnitude, so the barrier waits out
+            // its whole budget and fails as "the venue hubs never published a usable
+            // oracle price" when the real fact is that nobody seeded this coin's pair.
+            // Measured on the bridge rail 2026-09-12, where the DOGE venue attached to
+            // the four BTC venue hubs.
+            //
+            // OPT-IN rather than automatic, because seeding a pair moves the fee every
+            // priced action on that chain computes, and an existing attach-mode drill
+            // that is passing against the live price must keep getting exactly that.
+            if (this.seedAttachedHubPrices) await this._seedHubPrices();
         } else {
             await this._startHubs(ports, stamp);
         }
@@ -1774,7 +2263,14 @@ class AttestMirrorVenue {
                 // Pass `freshIndexers: true` for a drill that genuinely needs a node
                 // with no history. Nothing needs it today, and a drill reaching for
                 // it should say why, because it is buying back the whole replay.
-                indexerDbName: DB_PREFIX + this.label + (this.freshIndexers ? '_' + stamp : '') + '_Ixr' + i,
+                // A REPLAYED ledger gets its own STABLE name rather than a stamp. It has to
+                // be separate from the cloned one, because the two disagree about the same
+                // chain by construction and mixing them is the divergence this naming exists
+                // to prevent. It has to be stable because the replay is the whole chain from
+                // genesis and a stamped name would pay for it again on every run; resuming
+                // one costs only the blocks added since.
+                indexerDbName: DB_PREFIX + this.label + (this.freshIndexers ? '_' + stamp : '') +
+                    (this.replayChain ? '_Rpl' : '') + '_Ixr' + i,
                 mirrorDbName:  DB_PREFIX + this.label + (this.freshIndexers ? '_' + stamp : '') + '_Mirror' + i,
                 proc: null,
                 connector: null
@@ -1851,6 +2347,21 @@ class AttestMirrorVenue {
     }
 
     async _cloneChainDbFromStanding(ix) {
+        // THE REPLAY PATH: make the database and hand it over empty. `XChainIndexer.start()`
+        // calls verifyTables() on its own indexer database, so it builds its schema and then
+        // parses the chain from genesis under this tree's rules. See the `replayChain`
+        // comment in the constructor for what that buys and what it costs.
+        if (this.replayChain) {
+            await this._conn.query('CREATE DATABASE IF NOT EXISTS `' +
+                ident(ix.indexerDbName, 'database name') + '`');
+            console.log('attestMirrorVenue[' + this.label + ']: indexer ' + ix.index +
+                        ' REPLAYS the chain into ' + ix.indexerDbName + ' rather than cloning the ' +
+                        'standing node. Its ledger is this tree\'s grading of every block, so it ' +
+                        'may disagree with the standing node about actions a shipped rule now ' +
+                        'refuses, and the first run pays the whole replay.');
+            return;
+        }
+
         const srcName = process.env.INDEXER_DB_NAME;
         if (!srcName || !process.env.INDEXER_DB_USER || !process.env.INDEXER_DB_PASS)
             throw new Error(
@@ -2039,7 +2550,13 @@ class AttestMirrorVenue {
             graces:  Object.assign({}, this.graces, this.indexerGraces[i] || {}),
             feeDestination: this._live.feeDestination,
             path: process.env.PATH,
-            home: process.env.HOME
+            home: process.env.HOME,
+            // Applied LAST by buildIndexerEnv, so a drill can override anything above
+            // deliberately: the venue-wide overlay (see the constructor for the one
+            // subsystem that needs it) with the PER-INDEX overlay layered over it, and
+            // null when neither was given so an unset venue builds the identical
+            // environment it always did. One key, on purpose: see mergeIndexerExtraEnv.
+            extraEnv: mergeIndexerExtraEnv(this.indexerExtraEnv, indexerEnvOverlay(this.indexerEnv, i))
         });
 
         // --no-node-snapshot mirrors the package's own `api` script: the contract
@@ -2357,7 +2874,7 @@ class AttestMirrorVenue {
      *
      * A MIRROR, and named as one: it re-applies the shared ranking in
      * `attestationHelper.computeResponsibleSigners`, which is itself pinned against
-     * the indexer's `_computeResponsibleSet`.
+     * the indexer's `computeResponsibleSet`.
      *
      * PREFER `responsibleSetFromHub` WHERE IT CAN ANSWER: the hub's
      * `getattestationresponsibleset` RPC resolves the set through the hub's own
@@ -2507,7 +3024,7 @@ class AttestMirrorVenue {
      * a row that appears in the table by other means is announced to nobody, so a
      * follower sitting on a live WebSocket never hears about it. What delivers it is the
      * BOOTSTRAP: `attestation_responses` is a FULL_REPAGE table on the indexer side
-     * (xchain-indexer/src/hub_db_sync.js FULL_REPAGE_TABLES), so every reconnect
+     * (xchain-indexer/src/hub/hub_db_sync.js FULL_REPAGE_TABLES), so every reconnect
      * re-pages it from `since_id=0` and the injected row arrives with the rest.
      * Dropping each follower's proxied sockets is therefore part of the injection, not
      * a tidy-up, and it is the same mechanism `releaseMirrorTable` already relies on.
@@ -2517,10 +3034,21 @@ class AttestMirrorVenue {
      * a row shaped unlike the ones under test. Pass a row read back off a hub, minus its
      * `id`, with the fields the drill wants changed.
      *
+     * WHICH MIRRORED TABLE, and why it is a parameter rather than the one name this method
+     * was born with. Every mirrored hub table travels the same path, and a drill that has to
+     * inject a row the federation would never sign needs whichever table its own leg lives in:
+     * the bridge rail's AT4 perturbs a `bridge_transfers` row (a bad signature, a pubkey
+     * outside the snapshot, a foreign network, an out leg over the escrow) and asserts the
+     * destination applies none of them. Defaulting to `attestation_responses` with its own
+     * natural key keeps every existing caller byte-identical; the first run of AT4 wrote
+     * `bridge_transfers` columns into `attestation_responses` and died on
+     * `Unknown column 'transfer_id' in 'INSERT INTO'`, which is what this closes.
+     *
      * @param {object} row      column name -> value; keys are validated as identifiers
-     * @param {object} [opts]   `{hubs: [i], reconnect: false}`; hubs defaults to every
-     *                          hub an indexer actually follows, which is the only set
-     *                          that can reach a follower at all
+     * @param {object} [opts]   `{hubs: [i], reconnect: false, table, key}`; hubs defaults to
+     *                          every hub an indexer actually follows, which is the only set
+     *                          that can reach a follower at all; `table` defaults to
+     *                          `attestation_responses` and `key` to that table's natural key
      * @returns {Promise<Array>} one `{hub, inserted, id}` per hub written
      */
     async injectMirrorRow(row, opts) {
@@ -2530,6 +3058,17 @@ class AttestMirrorVenue {
             throw new Error('attestMirrorVenue: injectMirrorRow was given no columns to write');
         }
         for (const c of cols) ident(c, 'mirror row column');
+        const table = ident(String(o.table || 'attestation_responses'), 'mirror table');
+        const keyCols = (Array.isArray(o.key) && o.key.length)
+            ? o.key.map((c) => ident(c, 'mirror key column'))
+            : ['network', 'request_id', 'effective_time'];
+        for (const c of keyCols) {
+            if (!cols.includes(c)) {
+                throw new Error('attestMirrorVenue: injectMirrorRow cannot read back a ' + table +
+                    ' row without its key column ' + c + ', so it cannot say whether the row ' +
+                    'is reachable at all');
+            }
+        }
 
         const hubIndexes = (Array.isArray(o.hubs) && o.hubs.length)
             ? o.hubs.slice()
@@ -2545,7 +3084,7 @@ class AttestMirrorVenue {
             // hub that already holds the row must be ordinary traffic rather than an
             // error the caller has to distinguish from a real failure.
             const res = await this._conn.query(
-                'INSERT IGNORE INTO `' + db + '`.attestation_responses ' +
+                'INSERT IGNORE INTO `' + db + '`.`' + table + '` ' +
                 '(' + cols.map((c) => '`' + c + '`').join(', ') + ') ' +
                 'VALUES (' + cols.map(() => '?').join(', ') + ')',
                 cols.map((c) => (row[c] === undefined ? null : row[c])));
@@ -2553,9 +3092,9 @@ class AttestMirrorVenue {
             // insert. The id is what the follower pages on, so a drill that cannot name
             // it cannot say the row was reachable at all.
             const back = await this._conn.query(
-                'SELECT id FROM `' + db + '`.attestation_responses ' +
-                'WHERE network = ? AND request_id = ? AND effective_time = ? LIMIT 1',
-                [row.network, row.request_id, row.effective_time]);
+                'SELECT id FROM `' + db + '`.`' + table + '` ' +
+                'WHERE ' + keyCols.map((c) => '`' + c + '` = ?').join(' AND ') + ' LIMIT 1',
+                keyCols.map((c) => row[c]));
             written.push({
                 hub:      hubIndex,
                 inserted: !!(res && Number(res.affectedRows) > 0),
@@ -2609,6 +3148,73 @@ class AttestMirrorVenue {
         const ix = this.indexers[indexerIndex];
         if (!ix) throw new Error('attestMirrorVenue: no indexer ' + indexerIndex);
         ix.mirrorProxy.releaseTable(table, opts);
+    }
+
+    /**
+     * Freeze indexer `i`'s view of the hub's admission heights at `map`, while rows,
+     * `ts` and every other field keep flowing.
+     *
+     * `map` is `{table: {chain: height}}`, e.g.
+     * `{cross_chain_matches: {BTC: 812}}`. The pin rides all three carriers (the
+     * `watermark` heartbeat, the `ready` frame every reconnect reads, and the ten
+     * REST snapshot pages a poll-mode bootstrap reads), because any one of them left
+     * live lets the follower re-read the true height and the leg then passes for the
+     * wrong reason.
+     *
+     * THIS IS THE ONLY LEVER THAT REACHES A HEIGHT-KEYED MEMBER. `withholdMirrorTable`
+     * cannot: it passes watermark and heartbeat frames through by design.
+     */
+    pinMirrorHeights(indexerIndex, map) {
+        const ix = this.indexers[indexerIndex];
+        if (!ix) throw new Error('attestMirrorVenue: no indexer ' + indexerIndex);
+        ix.mirrorProxy.pinHeights(map);
+    }
+
+    /** Stop pinning indexer `i`'s heights; no reconnect unless asked. */
+    releaseMirrorHeights(indexerIndex, opts) {
+        const ix = this.indexers[indexerIndex];
+        if (!ix) throw new Error('attestMirrorVenue: no indexer ' + indexerIndex);
+        ix.mirrorProxy.releaseHeights(opts);
+    }
+
+    /** Per-carrier tally of what the height pin actually rewrote on this edge. */
+    mirrorHeightPinStats(indexerIndex) {
+        const ix = this.indexers[indexerIndex];
+        if (!ix) throw new Error('attestMirrorVenue: no indexer ' + indexerIndex);
+        return JSON.parse(JSON.stringify(ix.mirrorProxy.heightPinStats));
+    }
+
+    /**
+     * Refuse to let a leg claim a height pin held anything it never rewrote.
+     *
+     * A pin that rewrote nothing is indistinguishable, from the block loop's side,
+     * from no pin at all: the node commits, the leg sees the commit it expected in
+     * the release phase and reads green. That happens for two different reasons and
+     * both are silent, so both are named here: the hub published no `heights` map at
+     * all (`absent`), or it published one that carries no entry for the pinned table
+     * or chain (`unmatched`).
+     *
+     * `carriers` defaults to the heartbeat and the snapshot pages, the two a leg sees
+     * without forcing a reconnect; a leg that drops the socket asserts `ready` too.
+     */
+    assertMirrorHeightPinObserved(indexerIndex, opts) {
+        const o = opts || {};
+        const carriers = o.carriers || ['watermark', 'snapshot'];
+        const stats = this.mirrorHeightPinStats(indexerIndex);
+        const failed = [];
+        for (const carrier of carriers) {
+            const tally = stats[carrier];
+            if (!tally) throw new Error('attestMirrorVenue: no height pin carrier named ' + carrier);
+            if (tally.pinned <= 0) failed.push(carrier + ' (' + JSON.stringify(tally) + ')');
+        }
+        if (failed.length > 0) {
+            throw new Error('attestMirrorVenue: the height pin on indexer ' + indexerIndex +
+                ' rewrote nothing on ' + failed.join(', ') + '. An `absent` count means the hub ' +
+                'publishes no heights map on that carrier yet; an `unmatched` count means it ' +
+                'publishes one without the pinned table or chain. Either way this leg proves ' +
+                'nothing about a height-keyed member.');
+        }
+        return stats;
     }
 
     /** What one indexer's mirror proxy actually held back, for a failure message. */
@@ -2955,7 +3561,7 @@ function coinCode(coin) {
  * @returns {{signer_pubkeys: string, signatures: string, canonical: string}}
  */
 function signMirrorRowAs(row, signers, requestBlock, network) {
-    const canon = loadHubModule('src/attest_response_canonical.js');
+    const canon = loadHubModule('src/attestation/attest_response_canonical.js');
     const eq    = loadHubModule('src/equivocation_header.js');
     const rid   = String(row.request_id).toLowerCase();
 
@@ -3097,6 +3703,12 @@ module.exports = {
     filterSnapshotBody,
     readServerFrames,
     mirrorFrameTable,
+    // The height pin's pure layer, exported for the same reason: the three carriers
+    // can be driven with synthetic payloads without a rail, a hub or a database.
+    pinHeightsInPayload,
+    pinHeightsInFrameText,
+    encodeServerTextFrame,
+    HEIGHT_PIN_FRAME_TYPES,
     MIRROR_WITHHOLD,
     MIRROR_DELAY,
     MIRROR_PASS,
@@ -3119,6 +3731,14 @@ module.exports = {
     resolveDecoderCredential,
     HUB_CONFIG_REDACTION,
     coinCode,
+    resolveRepoRoot,
+    indexerEnvOverlay,
+    mergeIndexerExtraEnv,
+    // The barrier family and the gap between it and the grace table the venue pins.
+    MIRROR_BARRIERS,
+    mirrorBarrierReasons,
+    gracedBarrierReason,
+    ungracedMirrorBarrierReasons,
     DEFAULT_HUB_COUNT,
     DEFAULT_INDEXER_COUNT,
     DEFAULT_FORWARD_S,

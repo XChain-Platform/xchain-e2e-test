@@ -47,8 +47,8 @@ const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
 const { waitForMesh, waitFor } = require('../helpers/consensusWait');
 
 function hubRequire(rel) { return require(path.resolve(__dirname, '../../../xchain-hub', rel)); }
-const OracleConsensus = hubRequire('src/OracleConsensus.js');
-const OracleRound     = hubRequire('src/OracleRound.js');
+const OracleConsensus = hubRequire('src/oracle/consensus.js');
+const OracleRound     = hubRequire('src/oracle/round.js');
 
 // The REAL dispenser-side consumption logic lives in the indexer's Utility.
 // reversePriceMatch + its bignumber helpers are pure (mathjs, never touch
@@ -68,13 +68,20 @@ const ROUND        = 100;
 const PAIR         = 'BTC/USD';
 const PRICE        = '60000';
 
+function unevenWeights(ids) { return [
+    { pubkey: ids[0].pubkeyHex, source: 'sA', weight: '4000' },
+    { pubkey: ids[1].pubkeyHex, source: 'sB', weight: '3000' },
+    { pubkey: ids[2].pubkeyHex, source: 'sC', weight: '2000' },
+    { pubkey: ids[3].pubkeyHex, source: 'sD', weight: '1000' },
+]; }
+
 async function attachOracle(mvh) {
     const stops = [];
     for (const hub of mvh.hubs) {
         const round = new OracleRound(hub);
         const oc    = new OracleConsensus(hub, round);
         round.setConsensus(oc);
-        oc.setValidatorSet(await hub._loadValidatorSet());
+        oc.setValidatorSet(await hub.loadValidatorSet());
         await oc.start();
         hub._wtOracle = oc;
         hub._wtRound  = round;
@@ -140,7 +147,6 @@ function makePriceDb(hubDb) {
 
 describe('MultiValidatorHub: multi-hub fiat oracle round → FIAT dispenser consumption (C.2)', function () {
     this.timeout(240_000);
-
     let db, mvh, seed, oracle;
 
     before(async function () {
@@ -151,15 +157,7 @@ describe('MultiValidatorHub: multi-hub fiat oracle round → FIAT dispenser cons
         await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
         const ids = mvh.identities;
         // Uneven weights, no source ≥ 2/3 of S=10000 → multi-signer weighted quorum.
-        seed = seedWeightSnapshot(mvh, {
-            blockIndex: BLOCK_INDEX,
-            validators: [
-                { pubkey: ids[0].pubkeyHex, source: 'sA', weight: '4000' },
-                { pubkey: ids[1].pubkeyHex, source: 'sB', weight: '3000' },
-                { pubkey: ids[2].pubkeyHex, source: 'sC', weight: '2000' },
-                { pubkey: ids[3].pubkeyHex, source: 'sD', weight: '1000' },
-            ],
-        });
+        seed = seedWeightSnapshot(mvh, { blockIndex: BLOCK_INDEX, validators: unevenWeights(ids) });
         oracle = await attachOracle(mvh);
         injectSubmissions(mvh);
     });

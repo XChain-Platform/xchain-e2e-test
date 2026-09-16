@@ -27,7 +27,7 @@
  * and no chain. It overrides, per hub:
  *   - capabilitySnapshot.getActiveValidatorSnapshot(blockIndex)  (federation set)
  *   - capabilitySnapshot.getSnapshot(capability, blockIndex)     (per-capability set)
- *   - hub._resolveBtcLatestBlock()                               (the block to snapshot at)
+ *   - hub.resolveBtcLatestBlock()                               (the block to snapshot at)
  *
  * Quorum is 2·⌊(N−1)/3⌋+1, so for a meaningful (fault-tolerant) quorum use
  * N ≥ 4 hubs: N=3 → quorum 1 (degenerate), N=4 → quorum 3 (tolerates 1 fault).
@@ -53,16 +53,16 @@ function seedStakeSnapshot(mvh, opts = {}) {
         const cs        = hub.capabilitySnapshot;
         const origActive = cs.getActiveValidatorSnapshot;
         const origPerCap = cs.getSnapshot;
-        const origBlock  = hub._resolveBtcLatestBlock;
+        const origBlock  = hub.resolveBtcLatestBlock;
 
         cs.getActiveValidatorSnapshot = async () => fresh({ capability: null });
         cs.getSnapshot                = async (capability) => fresh({ capability });
-        hub._resolveBtcLatestBlock    = async () => blockIndex;
+        hub.resolveBtcLatestBlock    = async () => blockIndex;
 
         restores.push(() => {
             cs.getActiveValidatorSnapshot = origActive;
             cs.getSnapshot                = origPerCap;
-            hub._resolveBtcLatestBlock    = origBlock;
+            hub.resolveBtcLatestBlock    = origBlock;
         });
     }
 

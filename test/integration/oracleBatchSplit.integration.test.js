@@ -36,19 +36,19 @@
  *   round is isolated rather than poisoning the hour around it.
  *
  * HOW THE OVERFLOW IS FORCED, and why it is not a mock. `PRICE_WIRE_MAX_BYTES`
- * is a module-level const in `xchain-hub/src/OraclePublisher.js:92`; neither the
+ * is a module-level const in `xchain-hub/src/oracle/publisher.js:92`; neither the
  * constructor nor any of the four `ORACLE_BATCH_*` knobs exposes it, and the two
  * env knobs that DO exist (`ORACLE_BATCH_WINDOW_ROUNDS`, `ORACLE_BATCH_GRACE_MS`)
  * change cadence, not capacity. So there is no limit to inject, and lowering one
- * by monkey-patching `_wireFits` would replace the predicate under test with a
+ * by monkey-patching `wireFits` would replace the predicate under test with a
  * test-authored one. Instead the rounds are made genuinely large: real pairs,
  * really aggregated by a real trimmed median on four real validators, really
- * signed by a real quorum, really packed by `_packSegment` against the real
- * `_emitWire`/`_wireFits` pair, and really refused at the real 8,189-byte bound.
+ * signed by a real quorum, really packed by `packSegment` against the real
+ * `emitWire`/`wireFits` pair, and really refused at the real 8,189-byte bound.
  *
  * The pair counts are not guessed. Before a single round is driven, this drill
- * CALIBRATES them by binary search against the publisher's OWN `_emitWire`,
- * `_placeholderSigs` and `_wireFits` on the venue's own publisher instance, so
+ * CALIBRATES them by binary search against the publisher's OWN `emitWire`,
+ * `placeholderSigs` and `wireFits` on the venue's own publisher instance, so
  * the sizes it picks are the sizes that class will measure later. The calibration
  * is then re-asserted as evidence in its own `it()`: if a future encoder or
  * compression change moves the bound, this drill says the premise moved rather
@@ -56,7 +56,7 @@
  *
  * WHICH BOUND ACTUALLY BINDS, and it is the interesting half of section 8. These
  * bodies compress extremely well, so the emitted wire is far under the encoder's
- * payload limit while the INFLATED body is far over the reader's cap. `_wireFits`
+ * payload limit while the INFLATED body is far over the reader's cap. `wireFits`
  * checks both, which is exactly why the overflow is reproducible at all:
  * compression buys fee, not round capacity.
  *
@@ -67,7 +67,7 @@
  * two on every action tx), and only the OVERFLOW above that is synthesized. The
  * synthetic tickers are six uppercase letters, which is what the widened regtest
  * pair bound accepts, and they are added to each hub's co-sign whitelist before
- * any round runs: `OracleConsensus._handlePropose` refuses to co-sign a pair
+ * any round runs: `OracleConsensus.handlePropose` refuses to co-sign a pair
  * outside `oracleRound.canonicalPairs`, so without that a follower withholds the
  * whole round and no batch exists to split. That widening changes WHICH pairs the
  * federation is willing to price, which is feed configuration; it touches nothing
@@ -120,7 +120,7 @@ const GRACE_MS = 8000;
 
 // `PRICE_WIRE_MAX_BYTES`, restated so the calibration evidence is readable
 // without opening the hub. It decides nothing: every fit decision in this file
-// is delegated to the publisher's own `_wireFits`.
+// is delegated to the publisher's own `wireFits`.
 const WIRE_MAX_BYTES = 8189;
 
 // The one verdict a well-formed PRICE can legitimately record on a non-BTC
@@ -197,7 +197,7 @@ function submissionSet(pairCount) {
 }
 
 // What the calibration measures: the same pairs in the shape
-// `OraclePublisher._bufferEntryFromEvent` produces ({pair, price}), carrying the
+// `OraclePublisher.bufferEntryFromEvent` produces ({pair, price}), carrying the
 // FINALIZED eight-decimal spelling rather than the submitted one.
 function bufferedPairSet(pairCount) {
     const out = [];
@@ -374,11 +374,11 @@ describe('AT3 oracle batch splitting and the wire ceiling on DOGE regtest (L3)',
         // ---- calibration, against the REAL packer -----------------------------
         const pub = venue.publishers[0];
 
-        // The same hint the publisher will size against (`_priceSetSizeHint`), so the
-        // pair counts chosen here are the ones `_packSegment` will judge.
+        // The same hint the publisher will size against (`priceSetSizeHint`), so the
+        // pair counts chosen here are the ones `packSegment` will judge.
         let sigHint = VALIDATORS;
-        try { sigHint = await pub._priceSetSizeHint(venue.anchorHeight, VALIDATORS); }
-        catch (e) { notes.push('_priceSetSizeHint threw (' + (e && e.message) + '); falling back to ' + VALIDATORS); }
+        try { sigHint = await pub.priceSetSizeHint(venue.anchorHeight, VALIDATORS); }
+        catch (e) { notes.push('priceSetSizeHint threw (' + (e && e.message) + '); falling back to ' + VALIDATORS); }
         const sigMax = Math.max(1, sigHint, VALIDATORS);
 
         const measure = (roundCount, pairCount, sigCount) => {
@@ -392,11 +392,11 @@ describe('AT3 oracle batch splitting and the wire ceiling on DOGE regtest (L3)',
                     pairs:          pairs
                 });
             }
-            const emitted = pub._emitWire(
+            const emitted = pub.emitWire(
                 rounds[0].round, rounds[rounds.length - 1].round,
-                venue.anchorHeight, rounds, pub._placeholderSigs(sigCount));
+                venue.anchorHeight, rounds, pub.placeholderSigs(sigCount));
             return {
-                fits:       pub._wireFits(emitted),
+                fits:       pub.wireFits(emitted),
                 bodyBytes:  emitted.bodyBytes,
                 wireBytes:  emitted.bytes,
                 compressed: emitted.compressed
@@ -471,7 +471,7 @@ describe('AT3 oracle batch splitting and the wire ceiling on DOGE regtest (L3)',
         }
 
         // ---- widen the co-sign whitelist to cover the synthetic overflow -------
-        // `OracleConsensus._handlePropose` refuses to co-sign any pair outside
+        // `OracleConsensus.handlePropose` refuses to co-sign any pair outside
         // `oracleRound.canonicalPairs`, on EVERY follower, so without this a synthetic
         // pair does not merely get dropped: the whole round is withheld and there is no
         // batch to split. Applied to every hub, before any round is driven, and to the

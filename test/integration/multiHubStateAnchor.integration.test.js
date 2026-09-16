@@ -78,7 +78,7 @@ const TIP = {
     block_merkle_root: 'e5'.repeat(32), block_merkle_version: 1
 };
 
-// Mirror StateCheckpointEngine._checkpointRootSuffix: the post-flag-day SPV root
+// Mirror StateCheckpointEngine.checkpointRootSuffix: the post-flag-day SPV root
 // suffix appended to the raw v0 checkpoint canonical BEFORE the EQUIV wrap.
 const ROOT_SUFFIX = '|' + [TIP.state_root.toLowerCase(), String(TIP.state_root_version),
                            TIP.block_merkle_root.toLowerCase(), String(TIP.block_merkle_version)].join('|');
@@ -151,13 +151,13 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
         // checkpoint engine's indexer view to the SHARED state, scope to BTC,
         // and capture every "on-chain" anchor broadcast instead of hitting DOGE.
         mvh.hubs.forEach((hub, i) => {
-            hub._resolveBtcLatestBlock = async () => BLOCK_INDEX;
+            hub.resolveBtcLatestBlock = async () => BLOCK_INDEX;
             let cps = hub.stateCheckpoints;
             cps.network = 'regtest';   // engine cached '' at construction (pre-seed)
             cps.chains = ['BTC'];
             cps.confirmations = 0;
             cps.indexers.BTC = { url: 'http://stubbed', key: '' };
-            cps._indexerCall = async () => Object.assign({}, TIP);
+            cps.indexerCall = async () => Object.assign({}, TIP);
             hub.stateAnchorPublisher.setBroadcastHook(async (payload) => {
                 published.push({ hubIndex: i, payload });
                 return { txid: 'e2e-txid-' + published.length };
@@ -176,7 +176,7 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
     it('checkpoint round: every hub stores the same 2f+1-signed checkpoint', async function () {
         // Drive one cadence tick on every hub. Only the elected leader initiates;
         // followers co-sign over real P2P and adopt the XCHK_FINALIZED row.
-        await Promise.all(mvh.hubs.map(h => h.stateCheckpoints._tick()));
+        await Promise.all(mvh.hubs.map(h => h.stateCheckpoints.tick()));
         // Each hub's own state_checkpoints row is the post-condition asserted next.
         await waitFor(async () => {
             let held = 0;
@@ -227,7 +227,7 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
     it('anchor flush: leader publishes v3 checkpoint anchor + quorum-signed v1 archive; back-fill reaches every hub', async function () {
         // A finalized cross-chain match gives the archive something to carry.
         let dexes = mvh.getCrossChainDexes();
-        await Promise.all(dexes.map(d => d._discoverAndMatch().catch(() => {})));
+        await Promise.all(dexes.map(d => d.discoverAndMatch().catch(() => {})));
         // The finalized match on every hub is the precondition the loop below
         // asserts, so wait for it rather than for a fixed window.
         await waitFor(async () => {
@@ -250,7 +250,7 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
         published.length = 0;
         await Promise.all(mvh.hubs.map(h => h.stateAnchorPublisher.flush()));
         // The archive round finalizes asynchronously: the leader gathers a co-sign
-        // quorum over P2P before publishing inside _checkArchiveQuorum, which can
+        // quorum over P2P before publishing inside checkArchiveQuorum, which can
         // exceed a single SETTLE_MS. Poll for the v1 archive publish rather than
         // assuming a fixed settle (a 6s window raced the quorum round and saw 0).
         await waitFor(() => ({ ok: published.some(p => p.payload.split('|')[1] === '1') }),
@@ -280,7 +280,7 @@ describe('MultiValidatorHub: state checkpoints + ANCHOR archive (L2)', function 
         let v1s = published.filter(p => p.payload.split('|')[1] === '1');
         // The safety invariant is PER-ARTIFACT, not "one hub does everything": the
         // checkpoint anchor (v3, elected per checkpoint row via _v0ElectionKey) and
-        // the archive (v1, elected per election block via _archiveElectionKey) run
+        // the archive (v1, elected per election block via archiveElectionKey) run
         // INDEPENDENT hash-order elections, so they are routinely paid by two
         // DIFFERENT hubs (distributed DOGE cost, not a double-anchor). What must
         // hold is that each artifact publishes exactly once. (A prior

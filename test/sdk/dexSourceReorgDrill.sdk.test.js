@@ -91,37 +91,38 @@ async function btcCount(sql, params) { return Number((await btcIdx(sql, params))
 const MATCH_REF_WHERE = "((a_chain='BTC' AND a_action_index = ?) OR (b_chain='BTC' AND b_action_index = ?))";
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-describe('[sdk] cross-chain DEX match source-chain reorg retraction (pre-settlement)', function () {
-    this.timeout(0);
+let sdk, maker, btcOrderIndex, srcBlock, dogeRecv;
+// Pre-reorg indexer match-mirror counts. The hub->indexer DB mirror (HubDbSync)
+// is only active when HUB_DB_SYNC_ENABLED=true on the indexer; a single-hub
+// regtest venue (like this one and the XCALL drill's) runs it OFF to avoid the
+// match/call/snapshot barriers, so indexers don't mirror cross_chain_matches.
+// We capture the pre-reorg counts and assert the broadcast-deletion only when
+// the mirror was actually populated, so the drill validates the full path under
+// HubDbSync and the hub-only retraction (the consensus property) without it.
+let btcMirrorBefore = 0, dogeMirrorBefore = 0;
+let reorgReady = false;
 
-    let sdk, maker, btcOrderIndex, srcBlock, dogeRecv;
-    // Pre-reorg indexer match-mirror counts. The hub->indexer DB mirror (HubDbSync)
-    // is only active when HUB_DB_SYNC_ENABLED=true on the indexer; a single-hub
-    // regtest venue (like this one and the XCALL drill's) runs it OFF to avoid the
-    // match/call/snapshot barriers, so indexers don't mirror cross_chain_matches.
-    // We capture the pre-reorg counts and assert the broadcast-deletion only when
-    // the mirror was actually populated, so the drill validates the full path under
-    // HubDbSync and the hub-only retraction (the consensus property) without it.
-    let btcMirrorBefore = 0, dogeMirrorBefore = 0;
+async function prepareReorg() {
+    if (reorgReady) return;
+    expect(BTC_TICK, 'DEX_BTC_TICK env').to.match(/^[A-Z0-9]{1,12}$/);
+    expect(DOGE_TICK, 'DEX_DOGE_TICK env').to.match(/^[A-Z0-9]{1,12}$/);
+    expect(parseInt(process.env.DEX_DOGE_ORDER_INDEX || '', 10), 'DEX_DOGE_ORDER_INDEX env')
+        .to.be.a('number').and.to.be.greaterThan(0);
+    expect(process.env.HUB_DB_USER, 'HUB_DB_USER env').to.be.a('string').and.to.not.equal('');
+    expect(process.env.DOGE_IDX_DB_USER, 'DOGE_IDX_DB_USER env').to.be.a('string').and.to.not.equal('');
+    expect(global.nodeConnector, 'nodeConnector global (initialCheck)').to.be.an('object');
+    expect(global.indexerDatabase, 'indexerDatabase global (initialCheck)').to.be.an('object');
+    sdk = makeSdk();
+    maker = await fundedGasAddress(sdk, 1);
+    // A valid DOGE regtest address for the BTC ORDER's GET_ADDRESS.
+    const dogeSdk = new XChainSDK({ network: 'dogecoin-regtest', timeout: 30000 });
+    const dogeKp  = dogeSdk.generateKeyPair();
+    dogeRecv = dogeSdk.deriveAddress(dogeKp.publicKey, { type: 'p2pkh' });
+    console.log('    [dex-srcreorg] maker=' + maker.address + ' BTC_TICK=' + BTC_TICK + ' DOGE_TICK=' + DOGE_TICK);
+    reorgReady = true;
+}
 
-    before(async function () {
-        expect(BTC_TICK, 'DEX_BTC_TICK env').to.match(/^[A-Z0-9]{1,12}$/);
-        expect(DOGE_TICK, 'DEX_DOGE_TICK env').to.match(/^[A-Z0-9]{1,12}$/);
-        expect(parseInt(process.env.DEX_DOGE_ORDER_INDEX || '', 10), 'DEX_DOGE_ORDER_INDEX env')
-            .to.be.a('number').and.to.be.greaterThan(0);
-        expect(process.env.HUB_DB_USER, 'HUB_DB_USER env').to.be.a('string').and.to.not.equal('');
-        expect(process.env.DOGE_IDX_DB_USER, 'DOGE_IDX_DB_USER env').to.be.a('string').and.to.not.equal('');
-        expect(global.nodeConnector, 'nodeConnector global (initialCheck)').to.be.an('object');
-        expect(global.indexerDatabase, 'indexerDatabase global (initialCheck)').to.be.an('object');
-        sdk = makeSdk();
-        maker = await fundedGasAddress(sdk, 1);
-        // A valid DOGE regtest address for the BTC ORDER's GET_ADDRESS.
-        const dogeSdk = new XChainSDK({ network: 'dogecoin-regtest', timeout: 30000 });
-        const dogeKp  = dogeSdk.generateKeyPair();
-        dogeRecv = dogeSdk.deriveAddress(dogeKp.publicKey, { type: 'p2pkh' });
-        console.log('    [dex-srcreorg] maker=' + maker.address + ' BTC_TICK=' + BTC_TICK + ' DOGE_TICK=' + DOGE_TICK);
-    });
-
+function registerCrossingOrder() {
     it('ISSUE the BTC token and place the crossing BTC cross-chain ORDER', async function () {
         const iss = await submit(sdk,
             { action: 'ISSUE', params: { tick: BTC_TICK, maxSupply: 1000000, maxMint: 100000, decimals: 0, description: 'dex-reorg', mintSupply: 1000 } },
@@ -153,7 +154,9 @@ describe('[sdk] cross-chain DEX match source-chain reorg retraction (pre-settlem
         expect(srcBlock, 'BTC ORDER indexed block').to.be.a('number').and.to.be.greaterThan(0);
         console.log('    [dex-srcreorg] BTC order=' + btcOrderIndex + ' at block ' + srcBlock);
     });
+}
 
+function registerFinalizedMatch() {
     it('the hub finalizes the cross-chain match against the BTC order', async function () {
         // Wait for the CrossChainDexEngine poll (default 15s) to cross the BTC
         // ORDER against the DOGE ORDER and finalize a match row on the hub.
@@ -186,11 +189,12 @@ describe('[sdk] cross-chain DEX match source-chain reorg retraction (pre-settlem
         console.log('    [dex-srcreorg] indexer match mirrors: BTC=' + btcMirrorBefore + ' DOGE=' + dogeMirrorBefore +
             (btcMirrorBefore || dogeMirrorBefore ? '' : ' (HubDbSync disabled: mirror-deletion not exercised this run)'));
     });
+}
 
+function registerRetractedMatch() {
     it('orphaning the source block retracts the match and deletes both mirrors', async function () {
         const node  = global.nodeConnector;
         const miner = global.regtestMinerConnector;
-
         // Pause auto-mining so the orphaned ORDER tx cannot be re-mined from the
         // mempool, then build an EMPTY competing chain longer than the original
         // tip (same mechanism as reorgBalances.test.js / the XCALL src-reorg drill).
@@ -229,7 +233,6 @@ describe('[sdk] cross-chain DEX match source-chain reorg retraction (pre-settlem
             // PRIMARY (consensus property): the hub keeps the row for audit but flips it
             // to 'retracted', so it is no longer eligible for settlement.
             expect(hubStatus, 'hub match row marked retracted').to.equal('retracted');
-
             expect(btcOrderRows, 'source orders row removed by rollback').to.equal(0);
 
             // CONDITIONAL: the broadcast-deletion is only observable where the indexer
@@ -247,4 +250,12 @@ describe('[sdk] cross-chain DEX match source-chain reorg retraction (pre-settlem
             await miner.resumeMining();
         }
     });
+}
+
+describe('[sdk] cross-chain DEX match source-chain reorg retraction (pre-settlement)', function () {
+    this.timeout(0);
+    before(prepareReorg);
+    registerCrossingOrder();
+    registerFinalizedMatch();
+    registerRetractedMatch();
 });

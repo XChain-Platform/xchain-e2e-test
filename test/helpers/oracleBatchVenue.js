@@ -21,7 +21,7 @@
  * an in-process MultiValidatorHub and stop at finalizeRound(): nothing they do
  * reaches a chain. The single-host regtest stack runs ONE hub, so it has a
  * chain but no quorum and cannot produce a multi-signature PRICE at all.
- * Between them, `xchain-hub/src/OraclePublisher.js` - the class that decides
+ * Between them, `xchain-hub/src/oracle/publisher.js` - the class that decides
  * which validator publishes, builds the wire, guards the spend and owns the
  * durable at-most-once markers - has never been driven by anything in this
  * repo. This venue closes that: N in-process validators finalize real rounds,
@@ -83,10 +83,10 @@ const { waitForMesh, waitFor } = require('./consensusWait');
 const { waitForTxIndexed }     = require('./indexerWait');
 const chainRail                = require('./chainRail');
 
-const OracleConsensus  = loadHubModule('src/OracleConsensus.js');
-const OracleRound      = loadHubModule('src/OracleRound.js');
-const OraclePublisher  = loadHubModule('src/OraclePublisher.js');
-const ValidatorIdentity = loadHubModule('src/ValidatorIdentity.js');
+const OracleConsensus  = loadHubModule('src/oracle/consensus.js');
+const OracleRound      = loadHubModule('src/oracle/round.js');
+const OraclePublisher  = loadHubModule('src/oracle/publisher.js');
+const ValidatorIdentity = loadHubModule('src/validators/identity.js');
 
 // A deadline, not a settle: waitForMesh returns on the first fully-peered poll.
 const MESH_WAIT_MS = 60_000;
@@ -553,7 +553,7 @@ class OracleBatchVenue {
             const round = new OracleRound(hub);
             const oc    = new OracleConsensus(hub, round);
             round.setConsensus(oc);
-            oc.setValidatorSet(await hub._loadValidatorSet());
+            oc.setValidatorSet(await hub.loadValidatorSet());
             await oc.start();
             hub.oracle          = round;
             hub.oracleConsensus = oc;
@@ -586,7 +586,7 @@ class OracleBatchVenue {
             // bufferPath is derived from queuePath IN THE CONSTRUCTOR, so redirecting
             // queuePath afterwards leaves the batch buffer pointing at the checkout's own
             // data/ file, SHARED by every hub and surviving the run. It is the input to
-            // _hydrateBuffer() and therefore to restart catch-up, so a stale window in it
+            // hydrateBuffer() and therefore to restart catch-up, so a stale window in it
             // re-publishes on the next drill and breaks any "exactly one wire" assertion.
             pub.bufferPath     = pub.queuePath.replace(/\.jsonl$/, '') + '.buffer.jsonl';
             pub.spendGuard.statePath = path.join(this._queueDir, 'spend-state-' + i + '.json');
@@ -627,7 +627,7 @@ class OracleBatchVenue {
     // Finalize `count` rounds, one at a time, each one carried all the way to a
     // landed transaction before the next begins.
     //
-    // Strictly sequential on purpose, twice over. OraclePublisher._processQueue
+    // Strictly sequential on purpose, twice over. OraclePublisher.processQueue
     // holds a self-overlap guard: a second pass entered while the first is still
     // awaiting a broadcast is SKIPPED, and its round then sits on the durable
     // queue until that hub next leads, which on a K-round run means it may never
@@ -762,14 +762,14 @@ class OracleBatchVenue {
     }
 
     // The canonical bytes a v0 round was signed over, built by the hub's OWN
-    // producer (`OracleConsensus._buildPriceV0Payload`) rather than re-derived
+    // producer (`OracleConsensus.buildPriceV0Payload`) rather than re-derived
     // here. Re-deriving it in a test would silently drop the EQUIV header wrap,
     // which IS active on regtest (activation is genesis) once the weight seed has
     // set hub.network, and every signature would then read as bad for a reason
     // that has nothing to do with the rail. `prices` entries take `pair` or
     // `coinPair`, exactly as the producer does.
     priceCanonical(round, timestamp, prices, anchorHeight) {
-        return this._oracles[0].oc._buildPriceV0Payload(
+        return this._oracles[0].oc.buildPriceV0Payload(
             round, timestamp, prices, anchorHeight === undefined ? this.anchorHeight : anchorHeight);
     }
 

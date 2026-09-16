@@ -93,8 +93,7 @@ async function closeAndResolve(feedIndex, deadline, outcome) {
     expect(res.indexed.status, 'resolve status').to.equal('valid');
 }
 
-describe('[sdk] BET settlement drills (§12 E1/E2/E3/E10)', function () {
-
+function registerBetHooks() {
     before(async function () {
         // compactAddresses off: the SDK's ^id destination compaction runs ahead of
         // the indexer's wire acceptance (the P4-arming open item), which invalidates
@@ -130,12 +129,20 @@ describe('[sdk] BET settlement drills (§12 E1/E2/E3/E10)', function () {
     after(async function () {
         await releaseClock();
     });
+}
 
+let feedIndex, deadline, oracleBefore;
+
+function registerE1Suite() {
     describe('E1: happy-path settlement matches the §7 worked example', function () {
+        it('creates the market with DETAILS cross-checked against OUTCOMES', testE1MarketDetails);
+        it('accepts three bets across two outcomes and escrows every stake', testE1BetsAndEscrow);
+        it('latches the feed closed once a block crosses the deadline', testE1DeadlineLatch);
+        it('settles to the worked example exactly, with conservation', testE1Settlement);
+    });
+}
 
-        let feedIndex, deadline, oracleBefore;
-
-        it('creates the market with DETAILS cross-checked against OUTCOMES', async function () {
+async function testE1MarketDetails() {
             const now = await blockTime();
             // Wider than the later drills': this is the only market opened while
             // the clock still runs at wall speed, so the window has to cover the
@@ -177,9 +184,9 @@ describe('[sdk] BET settlement drills (§12 E1/E2/E3/E10)', function () {
             expect(feed.closed_block, 'not latched yet').to.equal(null);
             expect(feed.terminal_block, 'not terminal yet').to.equal(null);
             expect(feed.details, 'DETAILS rides the chain as base64').to.be.a('string').and.not.equal('');
-        });
+}
 
-        it('accepts three bets across two outcomes and escrows every stake', async function () {
+async function testE1BetsAndEscrow() {
             await place(p1, feedIndex, 0, '10.00000000');
             await place(p2, feedIndex, 1, '5.00000000');
             await place(p3, feedIndex, 0, '2.50000000');
@@ -191,9 +198,9 @@ describe('[sdk] BET settlement drills (§12 E1/E2/E3/E10)', function () {
             // Stakes are debited + escrowed at place time: spendable balance is zero.
             for (const who of [p1, p2, p3])
                 amtEq(await balanceOf(who.address, tickE1), '0', 'stake escrowed out of spendable balance');
-        });
+}
 
-        it('latches the feed closed once a block crosses the deadline', async function () {
+async function testE1DeadlineLatch() {
             oracleBefore = await balanceOf(oracle.address, tickE1);
 
             await jumpTo(deadline + 60, 2);
@@ -203,9 +210,9 @@ describe('[sdk] BET settlement drills (§12 E1/E2/E3/E10)', function () {
             expect(Number(feed.closed_block), 'closed_block stamped with the latching block')
                 .to.be.greaterThan(0);
             expect(feed.terminal_block, 'the latch is not a terminal flip').to.equal(null);
-        });
+}
 
-        it('settles to the worked example exactly, with conservation', async function () {
+async function testE1Settlement() {
             await resumeMiningAtFrozenClock();
             const res = await submitBet(sdk, oracle, sdk.betting.resolveMarketParams({
                 feedActionIndex: feedIndex, outcome: 0
@@ -240,9 +247,9 @@ describe('[sdk] BET settlement drills (§12 E1/E2/E3/E10)', function () {
                       + Number(await balanceOf(p3.address, tickE1))
                       + (Number(oracleAfter) - Number(oracleBefore));
             amtEq(out, '17.5', 'sum(credits out) == sum(escrows in) == T');
-        });
-    });
+}
 
+function registerE2Suite() {
     describe('E2: multiple bets from one address settle pro-rata per row', function () {
 
         it('credits each winning bet row independently', async function () {
@@ -278,7 +285,9 @@ describe('[sdk] BET settlement drills (§12 E1/E2/E3/E10)', function () {
             expect(rows.filter(r => r.bet_status === 'open').length, 'nothing left open').to.equal(0);
         });
     });
+}
 
+function registerE3Suite() {
     describe('E3: resolving to an unbacked outcome voids and refunds in full', function () {
 
         it('refunds every stake, takes NO fee, and marks the feed resolved_void', async function () {
@@ -309,7 +318,9 @@ describe('[sdk] BET settlement drills (§12 E1/E2/E3/E10)', function () {
             expect(rows.filter(r => r.bet_status === 'open').length, 'nothing left open').to.equal(0);
         });
     });
+}
 
+function registerE10Suite() {
     describe('E10: the rake case, including a payout that floors to zero', function () {
 
         it('rakes when W == T and absorbs a zero-floored winner into dust', async function () {
@@ -355,4 +366,12 @@ describe('[sdk] BET settlement drills (§12 E1/E2/E3/E10)', function () {
             amtEq(out, '10.00000001', 'sum(credits out) == sum(escrows in) == T');
         });
     });
+}
+
+describe('[sdk] BET settlement drills (§12 E1/E2/E3/E10)', function () {
+    registerBetHooks();
+    registerE1Suite();
+    registerE2Suite();
+    registerE3Suite();
+    registerE10Suite();
 });

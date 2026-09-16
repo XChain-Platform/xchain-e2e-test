@@ -58,11 +58,11 @@ global.regtestMinerConnector = {
 global.indexerConnector = { ping: async () => true }
 
 const mockDbResults = {
-    issue: { tick: 'TOK', status: 'valid' },
-    send: { tick: 'TOK', source: 'addr', status: 'valid' },
-    credit: { tick: 'TOK', amount: 100 },
-    debit: { tick: 'TOK', amount: 100 },
-    mint: { tick: 'TOK', status: 'valid' },
+    issue: { tick: 'TOKF', status: 'valid' },
+    send: { tick: 'TOKF', source: 'addr', status: 'valid' },
+    credit: { tick: 'TOKF', amount: 100 },
+    debit: { tick: 'TOKF', amount: 100 },
+    mint: { tick: 'TOKF', status: 'valid' },
     broadcast: { message: 'msg', status: 'valid' },
     dispenser: { status: 'valid' },
     dispense: { status: 'valid' },
@@ -248,7 +248,7 @@ describe('Fuzz: ACTION Message Construction', function () {
             const issueHelper = require('../helpers/issueHelper')
             const fakeAddr = { address: 'addr', privateKey: Buffer.alloc(32), publicKey: Buffer.alloc(33) }
 
-            await issueHelper.sendIssueV0(fakeAddr, 'TOK', 1000, 100, 0, 'desc|with|pipes', 500)
+            await issueHelper.sendIssueV0(fakeAddr, 'TOKF', 1000, 100, 0, 'desc|with|pipes', 500)
 
             assert(typeof capturedMessage === 'string')
         })
@@ -257,7 +257,7 @@ describe('Fuzz: ACTION Message Construction', function () {
             const sendHelper = require('../helpers/sendHelper')
             const fakeAddr = { address: 'addr', privateKey: Buffer.alloc(32), publicKey: Buffer.alloc(33) }
 
-            await sendHelper.sendSendV0(fakeAddr, 'TOK', 100, 'dest', 'memo|with|pipes')
+            await sendHelper.sendSendV0(fakeAddr, 'TOKF', 100, 'dest', 'memo|with|pipes')
 
             assert(typeof capturedMessage === 'string')
         })
@@ -294,7 +294,7 @@ describe('Fuzz: ACTION Message Construction', function () {
             const sendHelper = require('../helpers/sendHelper')
             const fakeAddr = { address: 'addr', privateKey: Buffer.alloc(32), publicKey: Buffer.alloc(33) }
 
-            await sendHelper.sendSendV0(fakeAddr, 'TOK', undefined, 'dest', 'memo')
+            await sendHelper.sendSendV0(fakeAddr, 'TOKF', undefined, 'dest', 'memo')
 
             assert(capturedMessage.includes('undefined'),
                 'undefined should be coerced to "undefined" string via concatenation')
@@ -304,7 +304,7 @@ describe('Fuzz: ACTION Message Construction', function () {
             const mintHelper = require('../helpers/mintHelper')
             const fakeAddr = { address: 'addr', privateKey: Buffer.alloc(32), publicKey: Buffer.alloc(33) }
 
-            await mintHelper.sendMintV0(fakeAddr, 'TOK', NaN, 'dest', 'memo')
+            await mintHelper.sendMintV0(fakeAddr, 'TOKF', NaN, 'dest', 'memo')
 
             assert(capturedMessage.includes('NaN'),
                 'NaN should be coerced to "NaN" string via concatenation')

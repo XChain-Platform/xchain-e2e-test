@@ -76,6 +76,80 @@ const SETTLE_BLOCKS = Number(stakeTeardown.RELEASE_SETTLE_BLOCKS) || 14
 const EXTRA_STEP   = 10
 const MAX_EXTRA    = 60
 
+async function broadcastUnstakes(entries, mine) {
+    // ---- broadcast one UNSTAKE per recorded key ------------------------
+    const verdicts = []
+    for (const entry of entries) {
+        const short = String(entry.signingPubkey).slice(0, 16)
+        if (!mine.includes(String(entry.signingPubkey).toLowerCase())) {
+            verdicts.push({ pubkey: short, unstake: 'not seated, nothing to do' })
+            continue
+        }
+        let restored = null
+        try {
+            // The mnemonic goes in here and nowhere else. Same label, type and
+            // index as the prologue used, which is what makes it the same address.
+            restored = await cryptoHelper.getNewAddress(
+                entry.staker, COIN, NETWORK, entry.mnemonic, 'legacy', 0)
+        } catch (e) {
+            verdicts.push({ pubkey: short, unstake: 'restore failed: ' + (e && e.message) })
+            continue
+        }
+        if (String(restored.address) !== String(entry.address)) {
+            // Refused rather than broadcast: an UNSTAKE signed by the wrong
+            // address cannot release this stake and would only spend a fee.
+            verdicts.push({ pubkey: short,
+                unstake: 'restore produced ' + restored.address + ' rather than the recorded ' + entry.address })
+            continue
+        }
+        try {
+            const res = await stakeHelper.sendUnstakeV0(restored, entry.signingPubkey)
+            const status = res && res.unstake && res.unstake.status
+            verdicts.push({ pubkey: short, address: entry.address, unstake: String(status) })
+        } catch (e) {
+            verdicts.push({ pubkey: short, address: entry.address,
+                unstake: 'broadcast failed: ' + (e && e.message) })
+        }
+    }
+    console.log('RELEASE broadcasts:\n' + verdicts.map((v) =>
+        '  ' + v.pubkey + '... ' + (v.address || '') + ' -> ' + v.unstake).join('\n'))
+}
+
+async function settleReleasedStakes(mine) {
+    // ---- settle, then re-read, then settle further if needed -----------
+    // Keeping the other chain's tip alive as it goes: mining this many BTC blocks
+    // with DOGE still is the exact recipe for the roll-call wedge, and a wedge here
+    // is what turns a release into a leak.
+    await mineBtcKeepingDogeAlive(SETTLE_BLOCKS)
+    let mined = SETTLE_BLOCKS
+    let current = await stakeTeardown.readCapabilitySet({ indexer: indexerConnector })
+    let stillSeated = mine.filter((p) => current && current.pubkeys && current.pubkeys.includes(p))
+    console.log('RELEASE: after ' + mined + ' block(s), at block ' +
+        (current && current.blockIndex) + ', ' + stillSeated.length + ' of mine still seated')
+
+    while (stillSeated.length > 0 && (mined - SETTLE_BLOCKS) < MAX_EXTRA) {
+        // A FROZEN READ HEIGHT IS NOT A SEATED KEY. `readCapabilitySet` resolves
+        // the set at the indexer's own tip, so a wedged indexer answers the same
+        // stale question no matter how much is mined: measured here as 74 blocks
+        // mined while every read came back at block 4051. Clearing between
+        // operations is what makes the next read mean something, and without this
+        // the loop burns its whole budget re-reading one stale height and then
+        // reports a leak it cannot see past.
+        const beforeHeight = current && current.blockIndex
+        const clear = await clearWedgeIfPresent(console.log)
+        if (clear.finding) console.log('RELEASE: ' + clear.reason)
+        await mineBtcKeepingDogeAlive(EXTRA_STEP)
+        mined += EXTRA_STEP
+        current = await stakeTeardown.readCapabilitySet({ indexer: indexerConnector })
+        stillSeated = mine.filter((p) => current && current.pubkeys && current.pubkeys.includes(p))
+        const moved = current && current.blockIndex !== beforeHeight
+        console.log('RELEASE: after ' + mined + ' block(s), at block ' +
+            (current && current.blockIndex) + ' (' + (moved ? 'advancing' : 'HEIGHT DID NOT MOVE') +
+            '), ' + stillSeated.length + ' of mine still seated')
+    }
+    return { current, mined, stillSeated }
+}
+
 describe('release leaked stakes recorded by drill ' + LABEL, function () {
     this.timeout(90 * 60 * 1000)
 
@@ -101,74 +175,8 @@ describe('release leaked stakes recorded by drill ' + LABEL, function () {
         console.log('RELEASE: at block ' + before.blockIndex + ' the set holds ' + before.pubkeys.length +
             ' key(s), ' + seatedBefore.length + ' of them mine')
 
-        // ---- broadcast one UNSTAKE per recorded key ------------------------
-        const verdicts = []
-        for (const entry of entries) {
-            const short = String(entry.signingPubkey).slice(0, 16)
-            if (!mine.includes(String(entry.signingPubkey).toLowerCase())) {
-                verdicts.push({ pubkey: short, unstake: 'not seated, nothing to do' })
-                continue
-            }
-            let restored = null
-            try {
-                // The mnemonic goes in here and nowhere else. Same label, type and
-                // index as the prologue used, which is what makes it the same address.
-                restored = await cryptoHelper.getNewAddress(
-                    entry.staker, COIN, NETWORK, entry.mnemonic, 'legacy', 0)
-            } catch (e) {
-                verdicts.push({ pubkey: short, unstake: 'restore failed: ' + (e && e.message) })
-                continue
-            }
-            if (String(restored.address) !== String(entry.address)) {
-                // Refused rather than broadcast: an UNSTAKE signed by the wrong
-                // address cannot release this stake and would only spend a fee.
-                verdicts.push({ pubkey: short,
-                    unstake: 'restore produced ' + restored.address + ' rather than the recorded ' + entry.address })
-                continue
-            }
-            try {
-                const res = await stakeHelper.sendUnstakeV0(restored, entry.signingPubkey)
-                const status = res && res.unstake && res.unstake.status
-                verdicts.push({ pubkey: short, address: entry.address, unstake: String(status) })
-            } catch (e) {
-                verdicts.push({ pubkey: short, address: entry.address,
-                    unstake: 'broadcast failed: ' + (e && e.message) })
-            }
-        }
-        console.log('RELEASE broadcasts:\n' + verdicts.map((v) =>
-            '  ' + v.pubkey + '... ' + (v.address || '') + ' -> ' + v.unstake).join('\n'))
-
-        // ---- settle, then re-read, then settle further if needed -----------
-        // Keeping the other chain's tip alive as it goes: mining this many BTC blocks
-        // with DOGE still is the exact recipe for the roll-call wedge, and a wedge here
-        // is what turns a release into a leak.
-        await mineBtcKeepingDogeAlive(SETTLE_BLOCKS)
-        let mined = SETTLE_BLOCKS
-        let current = await stakeTeardown.readCapabilitySet({ indexer: indexerConnector })
-        let stillSeated = mine.filter((p) => current && current.pubkeys && current.pubkeys.includes(p))
-        console.log('RELEASE: after ' + mined + ' block(s), at block ' +
-            (current && current.blockIndex) + ', ' + stillSeated.length + ' of mine still seated')
-
-        while (stillSeated.length > 0 && (mined - SETTLE_BLOCKS) < MAX_EXTRA) {
-            // A FROZEN READ HEIGHT IS NOT A SEATED KEY. `readCapabilitySet` resolves
-            // the set at the indexer's own tip, so a wedged indexer answers the same
-            // stale question no matter how much is mined: measured here as 74 blocks
-            // mined while every read came back at block 4051. Clearing between
-            // operations is what makes the next read mean something, and without this
-            // the loop burns its whole budget re-reading one stale height and then
-            // reports a leak it cannot see past.
-            const beforeHeight = current && current.blockIndex
-            const clear = await clearWedgeIfPresent(console.log)
-            if (clear.finding) console.log('RELEASE: ' + clear.reason)
-            await mineBtcKeepingDogeAlive(EXTRA_STEP)
-            mined += EXTRA_STEP
-            current = await stakeTeardown.readCapabilitySet({ indexer: indexerConnector })
-            stillSeated = mine.filter((p) => current && current.pubkeys && current.pubkeys.includes(p))
-            const moved = current && current.blockIndex !== beforeHeight
-            console.log('RELEASE: after ' + mined + ' block(s), at block ' +
-                (current && current.blockIndex) + ' (' + (moved ? 'advancing' : 'HEIGHT DID NOT MOVE') +
-                '), ' + stillSeated.length + ' of mine still seated')
-        }
+        await broadcastUnstakes(entries, mine)
+        const { current, mined, stillSeated } = await settleReleasedStakes(mine)
 
         assert.ok(current && !current.error,
             'could not re-read the capability set after settling: ' + JSON.stringify(current))

@@ -16,7 +16,7 @@
  * PRICE v0 is the validator PBFT snapshot (driven by the in-process
  * federation suites). PRICE v1 is the permissionless path: any address may
  * publish a TOKEN/FIAT quote on-chain, no stake required. Its indexer handler
- * (`xchain-indexer/src/actions/price.js` `_parseV1`) validates the fields and
+ * (`xchain-indexer/src/actions/price/index.js` `parseV1`) validates the fields and
  * records the action into the `prices` table (valid or invalid), then
  * fire-and-forgets a hub push for cross-chain aggregation. No e2e driver
  * exercised this on-chain path; this suite drives the happy path plus every
@@ -62,58 +62,6 @@ describe('PRICE v1 (permissionless user oracle)', function () {
             assert(res.price, 'PRICE v1 row should exist in DB')
             assert.strictEqual(res.price.validation_status, 'valid', 'zero fee + 8-decimal value is valid')
             assert.strictEqual(res.price.value, '0.00000003', 'full 8-decimal precision preserved')
-        })
-    })
-
-    describe('negatives (recorded invalid)', function () {
-        it('rejects an unsupported FIAT', async function () {
-            const addr = await cryptoHelper.getNewFundedAddress('PRICE.V1.BADFIAT', COIN, NETWORK, null, 'legacy', 0, 1)
-            const res = await priceHelper.sendPriceV1(addr, {
-                coin: COIN_CODE, tick: 'PEPECASH', fiat: 'ZZZ', value: '1.50000000', fee: '0.01', memo: 'bad fiat'
-            }, 'invalid')
-            assert(res.price, 'invalid PRICE v1 is still recorded')
-            assert.strictEqual(res.price.validation_status, 'invalid', 'unsupported FIAT is invalid')
-            assert(/FIAT/.test(res.price.status), 'status names the FIAT failure: ' + res.price.status)
-        })
-
-        it('rejects a malformed VALUE', async function () {
-            const addr = await cryptoHelper.getNewFundedAddress('PRICE.V1.BADVAL', COIN, NETWORK, null, 'legacy', 0, 1)
-            const res = await priceHelper.sendPriceV1(addr, {
-                coin: COIN_CODE, tick: 'PEPECASH', fiat: 'USD', value: 'abc', fee: '0.01', memo: 'bad value'
-            }, 'invalid')
-            assert(res.price, 'invalid PRICE v1 is still recorded')
-            assert.strictEqual(res.price.validation_status, 'invalid', 'non-numeric VALUE is invalid')
-            assert(/VALUE/.test(res.price.status), 'status names the VALUE failure: ' + res.price.status)
-        })
-
-        it('rejects a non-positive VALUE', async function () {
-            const addr = await cryptoHelper.getNewFundedAddress('PRICE.V1.ZEROVAL', COIN, NETWORK, null, 'legacy', 0, 1)
-            const res = await priceHelper.sendPriceV1(addr, {
-                coin: COIN_CODE, tick: 'PEPECASH', fiat: 'USD', value: '0', fee: '0.01', memo: 'zero value'
-            }, 'invalid')
-            assert(res.price, 'invalid PRICE v1 is still recorded')
-            assert.strictEqual(res.price.validation_status, 'invalid', 'zero VALUE is invalid')
-            assert(/VALUE/.test(res.price.status), 'status names the VALUE failure: ' + res.price.status)
-        })
-
-        it('rejects a FEE above 1', async function () {
-            const addr = await cryptoHelper.getNewFundedAddress('PRICE.V1.BADFEE', COIN, NETWORK, null, 'legacy', 0, 1)
-            const res = await priceHelper.sendPriceV1(addr, {
-                coin: COIN_CODE, tick: 'PEPECASH', fiat: 'USD', value: '1.50000000', fee: '2', memo: 'fee over 1'
-            }, 'invalid')
-            assert(res.price, 'invalid PRICE v1 is still recorded')
-            assert.strictEqual(res.price.validation_status, 'invalid', 'FEE > 1 is invalid')
-            assert(/FEE/.test(res.price.status), 'status names the FEE failure: ' + res.price.status)
-        })
-
-        it('rejects an unsupported COIN', async function () {
-            const addr = await cryptoHelper.getNewFundedAddress('PRICE.V1.BADCOIN', COIN, NETWORK, null, 'legacy', 0, 1)
-            const res = await priceHelper.sendPriceV1(addr, {
-                coin: 'XXX', tick: 'PEPECASH', fiat: 'USD', value: '1.50000000', fee: '0.01', memo: 'bad coin'
-            }, 'invalid')
-            assert(res.price, 'invalid PRICE v1 is still recorded')
-            assert.strictEqual(res.price.validation_status, 'invalid', 'unsupported COIN is invalid')
-            assert(/COIN/.test(res.price.status), 'status names the COIN failure: ' + res.price.status)
         })
     })
 })

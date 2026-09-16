@@ -25,7 +25,7 @@
  * There is no offer book / discovery for XCALL, so the round is driven by calling
  * consensus.propose directly on the deterministic round leader with a hand-built
  * dispatch row (every canonical field populated). Followers' validateProposedMatch
- * re-verifies against the source-chain indexer via _indexerCall, which is
+ * re-verifies against the source-chain indexer via indexerCall, which is
  * unavailable in-process, so it is overridden to accept (that path is covered by
  * CrossChainCallEngine.test.js); the quorum/signature aggregation under test is
  * unaffected. regtest activates weighting at height 0.
@@ -93,8 +93,8 @@ async function driveDispatch(mvh, validators, seedBase, requireLiveLeader) {
     let callId, roundId, leaderPubkey, leaderIdx, n = 0;
     do {
         callId = callIdFrom(seedBase + ':' + n);
-        roundId = engines[0]._roundId('dispatch', callId);
-        leaderPubkey = engines[0].consensus._leaderFor(roundId.toLowerCase(), validators, 0);
+        roundId = engines[0].roundId('dispatch', callId);
+        leaderPubkey = engines[0].consensus.leaderFor(roundId.toLowerCase(), validators, 0);
         leaderIdx = livePubkeys.findIndex((pk) => pk === String(leaderPubkey).toLowerCase());
         n++;
     } while (requireLiveLeader && leaderIdx < 0 && n < 64);
@@ -102,14 +102,14 @@ async function driveDispatch(mvh, validators, seedBase, requireLiveLeader) {
     const row = dispatchRow(roundId, callId);
     const events = [];
     const listeners = engines.map((e, i) => { const fn = (ev) => events.push(Object.assign({ hubIndex: i }, ev)); e.consensus.on('match:finalized', fn); return fn; });
-    // Every hub runs the round (mirrors _discoverAndMatch on all DEX engines):
+    // Every hub runs the round (mirrors discoverAndMatch on all DEX engines):
     // each creates its pending context, the deterministic leader broadcasts
     // PROPOSE, and followers validate + sign. The row is identical across hubs so
     // every canonical matches.
     await Promise.all(engines.map((e) => e.consensus.propose(roundId, { row, snapshot: { validators, count: validators.length } }).catch(() => {})));
     // Poll the PERSISTED cross_chain_calls row, not the finalize event: the event is
-    // emitted synchronously by CrossChainDexConsensus._finalize, and the row is
-    // written by CrossChainCallEngine's un-awaited `this._writeFinalizedRow(ev)`
+    // emitted synchronously by CrossChainDexConsensus.finalize, and the row is
+    // written by CrossChainCallEngine's un-awaited `this.writeFinalizedRow(ev)`
     // listener on that same emit, so an event-count poll clears while the INSERT is
     // still in flight and both cases below read the row. Keyed on (call_id, phase)
     // exactly as they key it. The stake-minority case writes no row, so it still
@@ -170,54 +170,4 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM XCALL dispatch relay (C.2)', 
         });
     });
 
-    describe('a healthy weighted federation finalizes the XCALL dispatch on every hub', function () {
-        let db, mvh, seed, validators;
-
-        before(async function () {
-            db = await startDisposableHubDb();
-            if (!db) { console.log('Skipping XCALL weighted (positive): no env DB and Docker unavailable'); this.skip(); }
-            mvh = new MultiValidatorHub({ count: 4, basePort: 26410, startCrossChain: true, startAttestation: false });
-            await mvh.start();
-            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
-            const ids = mvh.identities;
-            // Uneven weights, no single source >= 2/3 of S=10000 → multi-signer quorum.
-            validators = [
-                { pubkey: ids[0].pubkeyHex, source: 'sA', weight: '4000' },
-                { pubkey: ids[1].pubkeyHex, source: 'sB', weight: '3000' },
-                { pubkey: ids[2].pubkeyHex, source: 'sC', weight: '2000' },
-                { pubkey: ids[3].pubkeyHex, source: 'sD', weight: '1000' },
-            ];
-            seed = seedWeightSnapshot(mvh, { blockIndex: BLOCK_INDEX, validators });
-        });
-
-        after(async function () {
-            if (seed) seed.restore();
-            if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
-            if (db)  { await db.stop(); }
-        });
-
-        it('the weighted quorum is reached: the dispatch finalizes on EVERY hub with >=2 distinct sigs', async function () {
-            const { events, row } = await driveDispatch(mvh, validators, 'xcall-pos', false);
-            assert.strictEqual(events.length, 4, 'expected all 4 hubs to finalize, got ' + events.length);
-            const callIds = new Set(events.map((e) => String(e.row && e.row.call_id)));
-            assert.strictEqual(callIds.size, 1, 'hubs finalized different call_ids: ' + JSON.stringify([...callIds]));
-
-            const engines = mvh.hubs.map((h) => h.crossChainCalls);
-            for (const ev of events) {
-                const canonical = engines[ev.hubIndex]._canonicalMatch(ev.row);
-                const ok = new Set();
-                for (const s of (ev.signatures || []))
-                    if (ValidatorIdentity.verify(canonical, String(s.sig || ''), String(s.pubkey || '').toLowerCase()))
-                        ok.add(String(s.pubkey || '').toLowerCase());
-                assert.ok(ok.size >= 2, 'hub ' + ev.hubIndex + ' finalized with < 2 distinct verifying sigs (' + ok.size + ')');
-            }
-
-            for (let i = 0; i < mvh.hubs.length; i++) {
-                const rows = await mvh.hubs[i].db.doQuery(
-                    "SELECT validator_signatures FROM cross_chain_calls WHERE call_id = ? AND phase = 'dispatch'", [row.call_id]);
-                assert.strictEqual(rows.length, 1, 'hub ' + i + ' has no finalized dispatch row');
-                assert.ok(JSON.parse(rows[0].validator_signatures || '[]').length >= 2, 'hub ' + i + ' persisted < 2 sigs');
-            }
-        });
-    });
 });

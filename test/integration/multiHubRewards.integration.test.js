@@ -36,7 +36,7 @@ const assert = require('assert');
 const { MultiValidatorHub }    = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 
-const RewardTracker = require(path.resolve(__dirname, '../../../xchain-hub/src/RewardTracker.js'));
+const RewardTracker = require(path.resolve(__dirname, '../../../xchain-hub/src/anchor/reward_tracker.js'));
 
 const COUNT = 2;
 const PK = (c) => c.repeat(64);

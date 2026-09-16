@@ -98,73 +98,139 @@ async function waitIndexerPast(height, timeoutMs = 240000) {
     return false;
 }
 
-describe('[sdk] BET reorg drill (§12 E8: in-place latch + settlement reset)', function () {
-    this.timeout(0);
+let sdk, oracle, p1, p2, tickResolve, tickLatch, reorgSetupComplete;
 
-    let sdk, oracle, p1, p2, tickResolve, tickLatch;
+async function setupReorgTests() {
+    if (reorgSetupComplete) return;
+    if (!haveConnectors()) this.skip();
+    // Empty-competing-chain reorgs are a BTC/LTC mechanism; DOGE regtest's
+    // fast-chain mining model differs. Skip, as the other reorg drills do.
+    if (global.COIN_CODE === 'DOGE') this.skip();
+    // compactAddresses off: the SDK's ^id compaction outruns the indexer's
+    // wire acceptance on this stack; this drill tests BET reorg semantics.
+    sdk = makeSdk({ compactAddresses: false });
 
-    before(async function () {
-        if (!haveConnectors()) this.skip();
-        // Empty-competing-chain reorgs are a BTC/LTC mechanism; DOGE regtest's
-        // fast-chain mining model differs. Skip, as the other reorg drills do.
-        if (global.COIN_CODE === 'DOGE') this.skip();
-        // compactAddresses off: the SDK's ^id compaction outruns the indexer's
-        // wire acceptance on this stack; this drill tests BET reorg semantics.
-        sdk = makeSdk({ compactAddresses: false });
+    // All funding happens up front, at the prevailing clock, before any jump.
+    oracle = await fundedGasAddress(sdk, 1);
+    p1     = await fundedGasAddress(sdk, 1);
+    p2     = await fundedGasAddress(sdk, 1);
 
-        // All funding happens up front, at the prevailing clock, before any jump.
-        oracle = await fundedGasAddress(sdk, 1);
-        p1     = await fundedGasAddress(sdk, 1);
-        p2     = await fundedGasAddress(sdk, 1);
+    tickResolve = await issueWagerToken(sdk, oracle, [
+        [p1.address, '10.00000000'], [p2.address, '5.00000000']
+    ], 1000000, 'BR8');
 
-        tickResolve = await issueWagerToken(sdk, oracle, [
-            [p1.address, '10.00000000'], [p2.address, '5.00000000']
-        ], 1000000, 'BR8');
+    tickLatch = await issueWagerToken(sdk, oracle, [
+        [p1.address, '2.00000000']
+    ], 1000000, 'BL8');
+    reorgSetupComplete = true;
+}
 
-        tickLatch = await issueWagerToken(sdk, oracle, [
-            [p1.address, '2.00000000']
-        ], 1000000, 'BL8');
-    });
+async function cleanupReorgTests() {
+    try { await global.regtestMinerConnector.resumeMining(); } catch (e) { /* best effort */ }
+    await releaseClock();
+}
 
-    after(async function () {
-        try { await global.regtestMinerConnector.resumeMining(); } catch (e) { /* best effort */ }
-        await releaseClock();
-    });
+async function submitMarket(tick, label, fee, deadline, now) {
+    return submitBet(sdk, oracle, sdk.betting.createMarketParams({
+        label, outcomes: ['Yes', 'No'], tick, fee, deadline,
+        refundWindow: MIN_REFUND_WINDOW, now
+    }));
+}
 
+async function submitStake(who, feedIndex, outcome, amount) {
+    return submitBet(sdk, who, sdk.betting.placeBetParams({
+        feedActionIndex: feedIndex, outcome, amount }));
+}
+
+async function submitResolution(feedIndex) {
+    return submitBet(sdk, oracle, sdk.betting.resolveMarketParams({
+        feedActionIndex: feedIndex, outcome: 0 }));
+}
+
+async function closeMarket(deadline, feedIndex) {
+    await jumpTo(deadline + 60, 2);
+    await waitFeedStatus(feedIndex, 'closed');
+    await resumeMiningAtFrozenClock();
+}
+
+async function readSettlementBalances() {
+    // T = 15, W = 10, fee = floor(15 * 1/100, 8) = 0.15, pot = 14.85
+    // p1 = floor(10 * 14.85 / 10, 8) = 14.85, dust = 0
+    return {
+        p1:     await balanceOf(p1.address, tickResolve),
+        p2:     await balanceOf(p2.address, tickResolve),
+        oracle: await balanceOf(oracle.address, tickResolve)
+    };
+}
+
+async function mineSettlementReplayBlocks() {
+    // Give the replayed resolve room to be re-mined and re-indexed: wait
+    // for the indexer to reach the branch tip these blocks built, rather
+    // than a fixed settle that passes or fails on how busy the venue is.
+    for (let i = 0; i < 4; i++) await global.nodeConnector.generateBlock(
+        (await cryptoHelper.getNewAddress('bet-reorg-settle2', global.COIN, global.NETWORK, null, 'legacy', 0)).address, []);
+}
+
+async function waitResolvedMarket(feedIndex) {
+    // Whether the resolve re-mined immediately or a beat later, the market must
+    // converge on the SAME settlement. The failure this guards against is a
+    // rollback that restored the credits but not the escrows (or a settlement
+    // that summed bets without the bet_status='open' filter), either of which
+    // pays the winner twice.
+    let feed = null;
+    for (let i = 0; i < 40; i++) {
+        feed = await getFeed(feedIndex);
+        if (feed && feed.feed_status === 'resolved') break;
+        await sleep(3000);
+    }
+    return feed;
+}
+
+async function readBetStatusSummary(actionIndex) {
+    // One terminal credit per bet, asserted directly rather than inferred from
+    // the balances (a compensating pair of errors satisfies a sum).
+    //
+    // bet_statuses is a TRANSITION history, so a settled bet legitimately holds
+    // an 'open' row from the placement plus one terminal row from settlement.
+    // What must never appear is the same status twice: that is the signature of
+    // a replay whose rollback failed to clear the orphaned history.
+    const hist = await dbQuery(
+        `SELECT s.status AS status, COUNT(*) AS n
+           FROM bet_statuses bs
+           INNER JOIN index_statuses s ON s.id = bs.status_id
+          WHERE bs.bet_action_index = ?
+          GROUP BY s.status`, [actionIndex]);
+    const dupes = hist.filter(h => Number(h.n) !== 1).map(h => `${h.status} x${h.n}`);
+    const terminal = hist.filter(h => ['won', 'lost', 'refunded'].includes(String(h.status)));
+    return { hist, dupes, terminal };
+}
+
+async function waitRelatchedMarket(feedIndex) {
+    let feed = null;
+    for (let i = 0; i < 40; i++) {
+        feed = await getFeed(feedIndex);
+        if (feed && feed.feed_status === 'closed' && feed.closed_block !== null) break;
+        await sleep(3000);
+    }
+    return feed;
+}
+
+function registerSettlementReorgTest() {
     it('leg 1: orphaning the settlement block re-settles identically, with no double credit', async function () {
         const now = await blockTime();
         const deadline = now + 900;
-
-        let res = await submitBet(sdk, oracle, sdk.betting.createMarketParams({
-            label: 'E8 settlement reorg', outcomes: ['Yes', 'No'], tick: tickResolve,
-            fee: '1.00', deadline, refundWindow: MIN_REFUND_WINDOW, now
-        }));
+        let res = await submitMarket(tickResolve, 'E8 settlement reorg', '1.00', deadline, now);
         expect(res.indexed.status, 'create status').to.equal('valid');
         const feedIndex = actionIndexOf(res);
-
-        res = await submitBet(sdk, p1, sdk.betting.placeBetParams({
-            feedActionIndex: feedIndex, outcome: 0, amount: '10.00000000' }));
+        res = await submitStake(p1, feedIndex, 0, '10.00000000');
         expect(res.indexed.status, 'p1 bet status').to.equal('valid');
-        res = await submitBet(sdk, p2, sdk.betting.placeBetParams({
-            feedActionIndex: feedIndex, outcome: 1, amount: '5.00000000' }));
+        res = await submitStake(p2, feedIndex, 1, '5.00000000');
         expect(res.indexed.status, 'p2 bet status').to.equal('valid');
-
-        await jumpTo(deadline + 60, 2);
-        await waitFeedStatus(feedIndex, 'closed');
-        await resumeMiningAtFrozenClock();
-
-        res = await submitBet(sdk, oracle, sdk.betting.resolveMarketParams({
-            feedActionIndex: feedIndex, outcome: 0 }));
+        await closeMarket(deadline, feedIndex);
+        res = await submitResolution(feedIndex);
         expect(res.indexed.status, 'resolve status').to.equal('valid');
         const resolveIndex = actionIndexOf(res);
-
-        // T = 15, W = 10, fee = floor(15 * 1/100, 8) = 0.15, pot = 14.85
-        // p1 = floor(10 * 14.85 / 10, 8) = 14.85, dust = 0
-        const before = {
-            p1:     await balanceOf(p1.address, tickResolve),
-            p2:     await balanceOf(p2.address, tickResolve),
-            oracle: await balanceOf(oracle.address, tickResolve)
-        };
+        const before = await readSettlementBalances();
         amtEq(before.p1, '14.85', 'p1 payout before the reorg');
         expect((await getFeed(feedIndex)).feed_status, 'resolved before the reorg').to.equal('resolved');
 
@@ -176,28 +242,14 @@ describe('[sdk] BET reorg drill (§12 E8: in-place latch + settlement reset)', f
         try {
             await reorgPast(resolveBlock, 'bet-reorg-settle');
             expect(await waitIndexerPast(resolveBlock + 1), 'indexer followed the reorg').to.equal(true);
-            // Give the replayed resolve room to be re-mined and re-indexed: wait
-            // for the indexer to reach the branch tip these blocks built, rather
-            // than a fixed settle that passes or fails on how busy the venue is.
-            for (let i = 0; i < 4; i++) await global.nodeConnector.generateBlock(
-                (await cryptoHelper.getNewAddress('bet-reorg-settle2', global.COIN, global.NETWORK, null, 'legacy', 0)).address, []);
+            await mineSettlementReplayBlocks();
             expect(await waitIndexerPast(Number(await global.nodeConnector.getBlockCount())),
                 'indexer followed the replay to the branch tip').to.equal(true);
         } finally {
             await miner.resumeMining();
         }
 
-        // Whether the resolve re-mined immediately or a beat later, the market must
-        // converge on the SAME settlement. The failure this guards against is a
-        // rollback that restored the credits but not the escrows (or a settlement
-        // that summed bets without the bet_status='open' filter), either of which
-        // pays the winner twice.
-        let feed = null;
-        for (let i = 0; i < 40; i++) {
-            feed = await getFeed(feedIndex);
-            if (feed && feed.feed_status === 'resolved') break;
-            await sleep(3000);
-        }
+        const feed = await waitResolvedMarket(feedIndex);
         expect(feed.feed_status, 'market re-settled after the reorg').to.equal('resolved');
 
         amtEq(await balanceOf(p1.address, tickResolve), before.p1,
@@ -212,45 +264,28 @@ describe('[sdk] BET reorg drill (§12 E8: in-place latch + settlement reset)', f
         expect(rows.filter(r => r.bet_status === 'open').length,
             'no bet left open on the re-settled feed').to.equal(0);
 
-        // One terminal credit per bet, asserted directly rather than inferred from
-        // the balances (a compensating pair of errors satisfies a sum).
-        //
-        // bet_statuses is a TRANSITION history, so a settled bet legitimately holds
-        // an 'open' row from the placement plus one terminal row from settlement.
-        // What must never appear is the same status twice: that is the signature of
-        // a replay whose rollback failed to clear the orphaned history.
         for (const r of rows) {
-            const hist = await dbQuery(
-                `SELECT s.status AS status, COUNT(*) AS n
-                   FROM bet_statuses bs
-                   INNER JOIN index_statuses s ON s.id = bs.status_id
-                  WHERE bs.bet_action_index = ?
-                  GROUP BY s.status`, [r.action_index]);
-
-            const dupes = hist.filter(h => Number(h.n) !== 1).map(h => `${h.status} x${h.n}`);
+            const { hist, dupes, terminal } = await readBetStatusSummary(r.action_index);
             expect(dupes.join(', '),
                 `bet ${r.action_index}: no status may be recorded twice across a reorg`).to.equal('');
 
-            const terminal = hist.filter(h => ['won', 'lost', 'refunded'].includes(String(h.status)));
             expect(terminal.length,
                 `bet ${r.action_index}: exactly one terminal status (got ${hist.map(h => h.status).join('/')})`)
                 .to.equal(1);
         }
     });
+}
 
+function registerLatchReorgTest() {
     it('leg 2: orphaning the latch block re-latches against a live block', async function () {
         const now = await blockTime();
         const deadline = now + 300;
 
-        let res = await submitBet(sdk, oracle, sdk.betting.createMarketParams({
-            label: 'E8 latch reorg', outcomes: ['Yes', 'No'], tick: tickLatch,
-            fee: '0', deadline, refundWindow: MIN_REFUND_WINDOW, now
-        }));
+        let res = await submitMarket(tickLatch, 'E8 latch reorg', '0', deadline, now);
         expect(res.indexed.status, 'create status').to.equal('valid');
         const feedIndex = actionIndexOf(res);
 
-        res = await submitBet(sdk, p1, sdk.betting.placeBetParams({
-            feedActionIndex: feedIndex, outcome: 0, amount: '2.00000000' }));
+        res = await submitStake(p1, feedIndex, 0, '2.00000000');
         expect(res.indexed.status, 'bet status').to.equal('valid');
         const betIndex = actionIndexOf(res);
         const betBlock = await blockIndexOfAction(betIndex);
@@ -282,12 +317,7 @@ describe('[sdk] BET reorg drill (§12 E8: in-place latch + settlement reset)', f
         // branch. What must NOT survive is the old stamp: an unreset closed_block
         // would still name the orphaned block, which is precisely the un-rollback-able
         // in-place flip the pass-4 review flagged.
-        let feed = null;
-        for (let i = 0; i < 40; i++) {
-            feed = await getFeed(feedIndex);
-            if (feed && feed.feed_status === 'closed' && feed.closed_block !== null) break;
-            await sleep(3000);
-        }
+        const feed = await waitRelatchedMarket(feedIndex);
         expect(feed.feed_status, 'feed is closed again after the reorg').to.equal('closed');
         expect(feed.closed_block, 'closed_block re-stamped').to.not.equal(null);
 
@@ -305,4 +335,17 @@ describe('[sdk] BET reorg drill (§12 E8: in-place latch + settlement reset)', f
         expect(rows.length, 'bet row survived the reorg').to.equal(1);
         expect(rows[0].bet_status, 'the bet is still open on a merely-closed feed').to.equal('open');
     });
+}
+
+describe('[sdk] BET reorg drill (§12 E8: in-place latch + settlement reset)', function () {
+    this.timeout(0);
+    before(setupReorgTests);
+    registerSettlementReorgTest();
+});
+
+describe('[sdk] BET reorg drill (§12 E8: in-place latch + settlement reset)', function () {
+    this.timeout(0);
+    before(setupReorgTests);
+    after(cleanupReorgTests);
+    registerLatchReorgTest();
 });

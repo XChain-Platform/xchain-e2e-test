@@ -45,7 +45,7 @@
  * by the hubs talking to each other over their real mesh, or it is not reached.
  *
  * WHY THE INSTRUMENTATION IS A WRAPPER AND NOT A FORK. `collectBatchSignatures`
- * and `_canonical` are wrapped on the signer instances THIS file constructs, so
+ * and `canonical` are wrapped on the signer instances THIS file constructs, so
  * a drill can read the exact proposal the leader made and the exact canonical
  * bytes it signed over. Wrapping is what keeps AT6's "byte-identical canonical
  * content" claim honest: the bytes compared are the bytes the real builder
@@ -66,13 +66,13 @@ const { submissionsForRound } = require('./oracleBatchVenue');
 const { loadHubModule }       = require('./multiValidatorHubHelper');
 const { waitFor }             = require('./consensusWait');
 
-const OracleBatchSigner = loadHubModule('src/OracleBatchSigner.js');
+const OracleBatchSigner = loadHubModule('src/oracle/batch_signer.js');
 
 // The consensus compression module, read from the INDEXER copy. The hub vendors a
 // byte-identical twin and the parity tests in both repos fail on a one-sided edit,
 // so either copy is the same module; the indexer's is the one a landing chain
 // actually runs, which is the side every drill here is making a claim about.
-const priceBatch = require(path.resolve(__dirname, '../../../xchain-indexer/src/price_batch_compression.js'));
+const priceBatch = require(path.resolve(__dirname, '../../../xchain-indexer/src/actions/price/price_batch_compression.js'));
 
 // How long a finalized round has to appear in every hub's own price_snapshots.
 // This is pure in-process consensus plus one INSERT per hub; it is nowhere near
@@ -166,8 +166,8 @@ function attachBatchSigners(venue, opts) {
         // re-derived in the drill, because AT6's claim is about the bytes the REAL
         // builder produced on two separate attempts; a test-side re-derivation would
         // be comparing the test to itself.
-        const origCanonical = signer._canonical.bind(signer);
-        signer._canonical = function (first, last, anchor, rounds) {
+        const origCanonical = signer.canonical.bind(signer);
+        signer.canonical = function (first, last, anchor, rounds) {
             const bytes = origCanonical(first, last, anchor, rounds);
             signer._lastCanonical = bytes;
             return bytes;
@@ -229,8 +229,8 @@ function attachBatchSigners(venue, opts) {
  *
  * Waiting for the row on EVERY hub is not politeness, it is a precondition of the
  * signing round: a follower co-signs only what it can rebuild from its own
- * `price_snapshots` (`OracleBatchSigner._deriveWindow`), and the leader withholds
- * a window whose rounds it cannot self-check (`_windowCoverageComplete`). Opening
+ * `price_snapshots` (`OracleBatchSigner.deriveWindow`), and the leader withholds
+ * a window whose rounds it cannot self-check (`windowCoverageComplete`). Opening
  * the window before the rows exist is how a drill produces a silent refusal that
  * looks like a signing bug.
  */
@@ -324,7 +324,7 @@ async function waitForPublications(venue, opts) {
 
 /**
  * Split a PRICE v0 wire into its parts, handling BOTH forms exactly as the
- * indexer's `_parseV0` distinguishes them: `Z` in the FIRST_ROUND slot means the
+ * indexer's `parseV0` distinguishes them: `Z` in the FIRST_ROUND slot means the
  * remainder is base64 deflate-raw, anything else means the body is already there.
  *
  * The inflate goes through the CONSENSUS module, not through zlib directly, so a

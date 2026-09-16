@@ -465,7 +465,7 @@ describe('mirrorDrillFixture: the venue adopts the roll-call roster', function (
         // Cross-checked against the hub's own identity class rather than against
         // a literal, so a change in the hub's derivation fails here instead of
         // producing hubs whose pubkeys nobody can match to a seat.
-        const ValidatorIdentity = loadHubModule('src/ValidatorIdentity.js')
+        const ValidatorIdentity = loadHubModule('src/validators/identity.js')
         const seed = '11'.repeat(32)
         assert.strictEqual(_pubkeyForSeed(seed),
             new ValidatorIdentity(seed).getPubkeyHex().toLowerCase())
@@ -558,10 +558,10 @@ describe('mirrorDrillFixture: the provider floor is INCLUSIVE at equality', func
     // because a second implementation of a consensus filter in the test tree is
     // the thing this fixture exists to avoid.
     it('admits a validator whose weight equals the floor exactly', function () {
-        const AttestationRound = loadHubModule('src/AttestationRound.js')
-        const meets = AttestationRound.prototype._meetsProviderFloor
+        const AttestationRound = loadHubModule('src/attestation/round.js')
+        const meets = AttestationRound.prototype.meetsProviderFloor
         assert.strictEqual(typeof meets, 'function',
-            'the hub no longer exposes _meetsProviderFloor; the adoption precondition checks the ' +
+            'the hub no longer exposes meetsProviderFloor; the adoption precondition checks the ' +
             'floor through it and cannot silently fall back to a local comparison')
 
         assert.strictEqual(meets.call(null, '25000.00000000', '25000'), true,
@@ -572,7 +572,7 @@ describe('mirrorDrillFixture: the provider floor is INCLUSIVE at equality', func
     })
 
     it('reads the llm floor from the registry rather than a literal here', function () {
-        const defaults = loadHubModule('src/ProviderRegistry.js').DEFAULTS || {}
+        const defaults = loadHubModule('src/validators/provider_registry.js').DEFAULTS || {}
         assert.ok(defaults.llm && defaults.llm.min_stake_xchain !== undefined,
             'could not read the llm provider floor; this guard must not pass vacuously')
         assert.strictEqual(String(defaults.llm.min_stake_xchain), '25000',
@@ -648,7 +648,7 @@ describe('mirrorDrillFixture: resolveAdoptionPlan scopes the orphan rule by decl
     })
 
     it('refuses a venue that cannot reach the BATCH quorum beside its silent set members', function () {
-        // THE HALF THE PROVIDER FLOOR DOES NOT COVER. `_verifyBatchQuorum` measures
+        // THE HALF THE PROVIDER FLOOR DOES NOT COVER. `verifyBatchQuorum` measures
         // a window's signatures against the whole capability snapshot, so keys the
         // draw filters out still raise the batch bar. Three adoptable keys at 25000
         // against three silent ones just under the llm floor: eligible 3 of 6 clears

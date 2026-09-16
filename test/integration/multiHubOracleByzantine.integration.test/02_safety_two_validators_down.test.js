@@ -1,0 +1,181 @@
+/*********************************************************************
+ *
+ * Copyright © 2025–2026 Dankest, LLC
+ * Based on XChain Platform by Dankest, LLC – https://dankest.llc
+ *
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * This file is part of XChain Platform. Licensed under the GNU Affero
+ * General Public License v3.0 or later; see LICENSE.md. A commercial
+ * license (without AGPL source-disclosure terms) is available -
+ * contact legal@dankest.llc.
+ *
+ * Track C.2: Byzantine fault tolerance for the price-oracle PBFT engine.
+ *
+ * Byzantine coverage existed for config-PBFT and DEX-PBFT but the oracle round
+ * was only unit-tested. This drives the REAL OracleConsensus PBFT round over
+ * live P2P with a silenced (partitioned) oracle validator, proving:
+ *   - LIVENESS (f=1): one silent oracle validator does NOT stall the round.
+ *     The honest 3-of-4 reach quorum and finalize the correct median on every
+ *     honest hub; the silenced hub legitimately stores nothing.
+ *   - SAFETY (2-of-4 down): with two oracle validators silenced, quorum (3) is
+ *     unreachable → NO price_snapshots row finalizes on any hub.
+ *
+ * regtest activates STAKE_WEIGHTED_QUORUM at height 0, so the round uses the
+ * weighted predicate (3·tally > 2·S). Four EQUAL-weight sources make that behave
+ * exactly like a count quorum of 3 (3 distinct signers clear 2/3 of S; 2 do not),
+ * giving the clean f=1 liveness / 2-of-4 safety boundary.
+ *
+ * Uses the new silenceOracleValidator() byzantine injector (test/helpers/
+ * byzantineFaults.js). Helpers (attachOracle/injectSubmissions/finalizeAll) mirror
+ * multiHubOracleWeighted.integration.test.js. Disposable Docker MariaDB; skips
+ * cleanly when neither an env DB nor Docker is available.
+ ********************************************************************/
+
+'use strict';
+
+// Covers oracle safety with two validators down. One part of multiHubOracleByzantine.integration.test.js.
+
+const dotenv = require('dotenv');
+dotenv.config();
+
+const path   = require('path');
+const assert = require('assert');
+const { MultiValidatorHub }       = require('../../helpers/multiValidatorHubHelper');
+const { startDisposableHubDb }    = require('../../helpers/disposableHubDb');
+const { seedWeightSnapshot }      = require('../../helpers/seededWeightSnapshot');
+const { silenceOracleValidator }  = require('../../helpers/byzantineFaults');
+const { waitForMesh, waitFor }    = require('../../helpers/consensusWait');
+
+function hubRequire(rel) { return require(path.resolve(__dirname, '../../../../xchain-hub', rel)); }
+const OracleConsensus = hubRequire('src/oracle/consensus.js');
+const OracleRound     = hubRequire('src/oracle/round.js');
+
+// A deadline, not a settle: waitForMesh returns on the first fully-peered poll.
+const PEER_WAIT_MS = 60_000;
+// finalizeAll's window is shared by the liveness case (which names how many hubs
+// must store a snapshot and returns the moment they have) and the safety case
+// (which expects none, can never satisfy the poll, and so still watches the whole
+// window). It therefore keeps its measured length.
+const SETTLE_MS    = 6000;
+const BLOCK_INDEX  = 100;
+const BLOCK_TIME   = 1700000000;
+const ROUND        = 100;
+const PAIR         = 'BTC/USD';
+const PRICE        = '60000';
+
+// Attach a real OracleConsensus per hub (registers ORACLE_* P2P handlers); skip
+// OracleRound.start() so no price-fetch cadence races our manual round.
+async function attachOracle(mvh) {
+    const stops = [];
+    for (const hub of mvh.hubs) {
+        const round = new OracleRound(hub);
+        const oc    = new OracleConsensus(hub, round);
+        round.setConsensus(oc);
+        oc.setValidatorSet(await hub.loadValidatorSet());
+        await oc.start();
+        hub._wtOracle = oc;
+        hub._wtRound  = round;
+        stops.push(() => oc.stop && oc.stop());
+    }
+    return { stop() { stops.forEach((s) => { try { s(); } catch (_) {} }); } };
+}
+
+function injectSubmissions(mvh) {
+    const addrs = mvh.hubs.map((h) => h.getPeerManager().validatorAddr);
+    for (const hub of mvh.hubs) {
+        const subs = new Map();
+        for (const addr of addrs) subs.set(addr, { prices: [{ coinPair: PAIR, price: PRICE }] });
+        hub._wtRound.submissions.set(ROUND, subs);
+    }
+}
+
+// Drive the round on every hub, then poll until `expect` hubs hold a snapshot row.
+// `expect` defaults to the whole federation, which the safety case can never reach,
+// so that case spends the full window watching (the only way to prove a negative).
+async function finalizeAll(mvh, opts) {
+    opts = opts || {};
+    const expect = opts.expect === undefined ? mvh.hubs.length : opts.expect;
+    await Promise.all(mvh.hubs.map((h) => h._wtOracle.finalizeRound(ROUND, BLOCK_INDEX, BLOCK_TIME).catch(() => {})));
+    await waitFor(async () => {
+        let stored = 0;
+        for (const hub of mvh.hubs) {
+            try { if ((await snapshotRows(hub)).length > 0) stored++; }
+            catch (_) { /* a hub that cannot be read has not stored it */ }
+        }
+        return { ok: stored >= expect, stored: stored };
+    }, { timeoutMs: opts.settle || SETTLE_MS });
+}
+
+async function snapshotRows(hub) {
+    return hub.db.doQuery(
+        'SELECT * FROM price_snapshots WHERE round_number = ? AND coin_pair = ?',
+        [ROUND, PAIR]);
+}
+
+// The deterministic round leader (every hub agrees: same validator set + round).
+function findOracleLeader(mvh) {
+    return mvh.hubs.find((h) => {
+        const l = h._wtOracle.getLeader(ROUND);
+        return l && l.addr === h.getPeerManager().validatorAddr;
+    });
+}
+
+// Four EQUAL-weight sources → weighted quorum behaves as count-3.
+function seedEqual(mvh) {
+    const ids = mvh.identities;
+    return seedWeightSnapshot(mvh, {
+        blockIndex: BLOCK_INDEX,
+        validators: [
+            { pubkey: ids[0].pubkeyHex, source: 'sA', weight: '1000' },
+            { pubkey: ids[1].pubkeyHex, source: 'sB', weight: '1000' },
+            { pubkey: ids[2].pubkeyHex, source: 'sC', weight: '1000' },
+            { pubkey: ids[3].pubkeyHex, source: 'sD', weight: '1000' },
+        ],
+    });
+}
+
+describe('MultiValidatorHub: oracle-PBFT byzantine fault tolerance (C.2)', function () {
+    this.timeout(240_000);
+
+
+    describe('SAFETY (2-of-4 down): quorum is unreachable, nothing finalizes', function () {
+        let db, mvh, seed, oracle, restores = [];
+
+        before(async function () {
+            db = await startDisposableHubDb();
+            if (!db) { console.log('Skipping oracle-byzantine safety: no env DB and Docker unavailable'); this.skip(); }
+            mvh = new MultiValidatorHub({ count: 4, basePort: 26210, startAttestation: false });
+            await mvh.start();
+            await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
+            seed   = seedEqual(mvh);
+            oracle = await attachOracle(mvh);
+            injectSubmissions(mvh);
+        });
+
+        after(async function () {
+            restores.forEach((r) => { try { r(); } catch (_) {} });
+            if (oracle) oracle.stop();
+            if (seed) seed.restore();
+            if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
+            if (db)  { await db.stop(); }
+        });
+
+        it('with two oracle validators silenced, no price snapshot finalizes on any hub', async function () {
+            const leader = findOracleLeader(mvh);
+            assert.ok(leader, 'no oracle round leader identified');
+            // Silence two NON-leaders → leader + 1 honest = 2 active < quorum 3.
+            const nonLeaders = mvh.hubs.filter((h) => h !== leader);
+            restores.push(silenceOracleValidator(nonLeaders[0]));
+            restores.push(silenceOracleValidator(nonLeaders[1]));
+
+            await finalizeAll(mvh);
+
+            for (let i = 0; i < mvh.hubs.length; i++) {
+                const rows = await snapshotRows(mvh.hubs[i]);
+                assert.strictEqual(rows.length, 0,
+                    'hub ' + i + ' finalized a price below quorum (got ' + rows.length + ' rows): safety violation');
+            }
+        });
+    });
+});

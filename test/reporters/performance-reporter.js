@@ -44,13 +44,21 @@ function PerformanceReporter(runner, options) {
     const testMemStart = new Map()
     const testResults = []
 
+    registerRunBegin(runner)
+    registerTestTiming(runner, testStartTimes, testMemStart, testResults)
+    registerRunEnd(runner, options, testResults)
+}
+
+function registerRunBegin(runner) {
     runner.on(EVENT_RUN_BEGIN, function () {
         try {
             const collector = require('../perf/perfCollector')
             if (!collector._runMeta.startedAt) collector.startRun()
         } catch (e) {}
     })
+}
 
+function registerTestTiming(runner, testStartTimes, testMemStart, testResults) {
     runner.on(EVENT_TEST_BEGIN, function (test) {
         testStartTimes.set(test, process.hrtime.bigint())
         testMemStart.set(test, process.memoryUsage())
@@ -82,7 +90,9 @@ function PerformanceReporter(runner, options) {
         testStartTimes.delete(test)
         testMemStart.delete(test)
     })
+}
 
+function registerRunEnd(runner, options, testResults) {
     runner.once(EVENT_RUN_END, function () {
         let perfCollector = null
         try { perfCollector = require('../perf/perfCollector') } catch (e) {}

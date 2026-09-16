@@ -105,313 +105,98 @@
  ********************************************************************/
 
 const { expect } = require('chai');
-const path       = require('path');
-const cryptoHelper = require('../cryptoHelper');
 const Database   = require('../../src/db');
 const { makeSdk, fundedGasAddress } = require('./sdkHelper');
 const {
-    MIN_REFUND_WINDOW, dbQuery, getFeed, getBets, balanceOf, amtEq, actionIndexOf,
-    blockTime, jumpTo, resumeMiningAtFrozenClock, releaseClock, waitFeedStatus,
-    issueWagerToken, submitBet
+    MIN_REFUND_WINDOW, dbQuery, balanceOf, amtEq, actionIndexOf, blockTime,
+    jumpTo, waitFeedStatus, issueWagerToken, submitBet
 } = require('./betHelper');
+const {
+    state, haveConnectors, sleep, bQuery, tipOf, compareHashes, betClasses, waitNodeB,
+    levelNodes, mirrorOracleTables
+} = require('./betParity.sdk.test/support/bet_parity_support');
 
-// The follower's copy of the state-hash preimage builder. Byte-aligned twin of
-// xchain-indexer/src/stateHash.js (their equality is locked by
-// consensusHashConformance.test.js), so using the follower's here recomputes
-// what a real replica would compute rather than re-running the source's own
-// code against its own rows. Absent sibling => that leg skips, as elsewhere.
-let syncBuildStateHashData, SyncUtility;
-try {
-    ({ buildStateHashData: syncBuildStateHashData } =
-        require(path.join(__dirname, '../../../xchain-sync/src/stateHash.js')));
-    SyncUtility = require(path.join(__dirname, '../../../xchain-sync/src/utility.js'));
-} catch (e) { /* handled at the call site */ }
-
-// BTC's frozen ACTIVATION_DELAY_BLOCKS (src/coins/BTC.js). Only reaches the
-// staking-deactivation class of the preimage, which is empty for these blocks,
-// but the recompute must still pass what the node passed.
-const ACTIVATION_DELAY_BLOCKS = parseInt(process.env.E2E_ACTIVATION_DELAY_BLOCKS) || 6;
-
-function haveConnectors() {
-    return global.nodeConnector && global.regtestMinerConnector && global.indexerDatabase;
-}
-
-async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-let nodeB = null;
-
-async function bQuery(sql, params) {
-    const connection = await nodeB.getConnection();
-    try { return await connection.query(sql, params); }
-    finally { await connection.release(); }
-}
-
-async function tipOf(q) {
-    const rows = await q('SELECT MAX(block_index) AS tip FROM blocks', []);
-    return rows.length && rows[0].tip != null ? Number(rows[0].tip) : -1;
-}
-
-// The four per-block hashes, resolved out of the index_transactions interning
-// table. The interned ROW IDS are node-local and are deliberately not compared;
-// the hash strings are the portable value.
-const HASHES_SQL =
-    'SELECT b.block_index, ' +
-    '       t1.hash AS ledger_hash, t2.hash AS actions_hash, ' +
-    '       t3.hash AS contract_hash, t4.hash AS state_hash ' +
-    '  FROM blocks b ' +
-    '  LEFT JOIN index_transactions t1 ON t1.id = b.ledger_hash_id ' +
-    '  LEFT JOIN index_transactions t2 ON t2.id = b.actions_hash_id ' +
-    '  LEFT JOIN index_transactions t3 ON t3.id = b.contract_hash_id ' +
-    '  LEFT JOIN index_transactions t4 ON t4.id = b.state_hash_id ' +
-    ' WHERE b.block_index BETWEEN ? AND ? ORDER BY b.block_index ASC';
-
-async function hashesOf(q, from, to) {
-    const rows = await q(HASHES_SQL, [from, to]);
-    const out = new Map();
-    for (const r of rows) out.set(Number(r.block_index), {
-        ledger_hash:   r.ledger_hash,
-        actions_hash:  r.actions_hash,
-        contract_hash: r.contract_hash,
-        state_hash:    r.state_hash
-    });
-    return out;
-}
-
-// Compare every block in [from, to] across the two nodes and return the
-// divergences. A block only one node has is itself a divergence: the follower
-// must reach the same height, not merely agree where it happens to have data.
-// `bq` is injectable so the sensitivity leg can run the SAME comparison over a
-// deliberately corrupted view of node B.
-async function compareHashes(from, to, bq = bQuery) {
-    const [a, b] = [await hashesOf(dbQuery, from, to), await hashesOf(bq, from, to)];
-    const diffs = [];
-    for (let i = from; i <= to; i++) {
-        const ha = a.get(i), hb = b.get(i);
-        if (!ha || !hb) { diffs.push({ block: i, field: 'presence', A: !!ha, B: !!hb }); continue; }
-        for (const f of ['ledger_hash', 'actions_hash', 'contract_hash', 'state_hash'])
-            if (ha[f] !== hb[f]) diffs.push({ block: i, field: f, A: ha[f], B: hb[f] });
+async function connectNodeB(context) {
+    if (!haveConnectors()) context.skip();
+    // Empty-competing-chain reorgs are a BTC/LTC mechanism; DOGE regtest's
+    // fast-chain mining model differs, as the other reorg drills note.
+    if (global.COIN_CODE === 'DOGE') context.skip();
+    if (!process.env.BET_PARITY_DB_NAME) {
+        console.log('BET_PARITY_DB_NAME unset: no second indexer node provisioned.');
+        console.log('Provision one on the venue host with scripts/bet-parity-node.sh up, then re-run.');
+        context.skip();
     }
-    return diffs;
-}
 
-// The BET state-hash class, read with the exact keys stateHash.js hashes by.
-const FEED_CLASS_SQL =
-    'SELECT f.action_index, s.status AS feed_status, f.closed_block, f.terminal_block ' +
-    '  FROM bet_feeds f JOIN index_statuses s ON s.id = f.feed_status_id ' +
-    ' WHERE f.closed_block BETWEEN ? AND ? OR f.terminal_block BETWEEN ? AND ? ' +
-    ' ORDER BY f.action_index ASC';
-const BET_CLASS_SQL =
-    'SELECT b.action_index, s.status AS bet_status, b.settled_block ' +
-    '  FROM bets b JOIN index_statuses s ON s.id = b.bet_status_id ' +
-    ' WHERE b.settled_block BETWEEN ? AND ? ORDER BY b.action_index ASC';
-
-async function betClasses(q, from, to) {
-    const feeds = await q(FEED_CLASS_SQL, [from, to, from, to]);
-    const bets  = await q(BET_CLASS_SQL,  [from, to]);
-    const norm = rows => rows.map(r => Object.fromEntries(
-        Object.entries(r).map(([k, v]) => [k, v == null ? null : String(v)])));
-    return { feeds: norm(feeds), bets: norm(bets) };
-}
-
-// Wait for node B to reach `height`. B is a passive follower of the same chain,
-// so it trails node A by however long its own block loop takes.
-async function waitNodeB(height, timeoutMs = 420000) {
-    const deadline = Date.now() + timeoutMs;
-    let last = -1;
-    while (Date.now() < deadline) {
-        last = await tipOf(bQuery);
-        if (last >= height) return last;
-        await sleep(3000);
-    }
-    return last;
-}
-
-// Park the miner until BOTH indexers are level with the chain, then hand it back.
-//
-// Two separate lags have to be cleared, and only one of them is about node B:
-//
-//   * node B is clone-forward, so it starts as many blocks behind as the clone
-//     took to restore, and
-//   * node A is routinely behind the CHAIN on this venue regardless of betting.
-//     A near-empty block costs it 1.5-3s to parse while the e2e harness sets the
-//     miner to one block per SECOND (initialCheck.test.js), so any suite that
-//     mines steadily outruns it. Running a second indexer roughly doubles the
-//     per-block cost and pushes the lag past the SDK's 120s indexing wait, which
-//     then surfaces as "Timed out waiting for transaction ... to be indexed"
-//     during setup and points nowhere near the cause. Two runs of this drill
-//     died that way before this helper existed.
-//
-// Pausing is the only reliable way to close a gap the venue is actively
-// widening; it is bounded, and the miner is always resumed.
-async function levelNodes(timeoutMs = 480000) {
-    const miner = global.regtestMinerConnector;
-    let paused = false;
-    const read = async () => ({
-        nodeHeight: await global.nodeConnector.getBlockCount(),
-        tipA: await tipOf(dbQuery),
-        tipB: await tipOf(bQuery)
-    });
-    try {
-        const deadline = Date.now() + timeoutMs;
-        let s = await read();
-        // Give up early on a node that is not moving at all. A torn-down node B
-        // would otherwise hold the shared miner parked for the full timeout, and
-        // a dead follower is a venue problem to report, not to wait out.
-        let lastB = s.tipB, movedAt = Date.now();
-        while (Date.now() < deadline && (s.nodeHeight - s.tipA > 2 || s.nodeHeight - s.tipB > 2)) {
-            if (!paused) { await miner.pauseMining(); paused = true; }
-            await sleep(3000);
-            s = await read();
-            if (s.tipB > lastB) { lastB = s.tipB; movedAt = Date.now(); }
-            else if (Date.now() - movedAt > 60000 && s.nodeHeight - s.tipB > 2) break;
-        }
-        return s;
-    } finally {
-        if (paused) { try { await miner.resumeMining(); } catch (e) { /* best effort */ } }
+    state.nodeB = new Database(
+        process.env.DATABASE_URL || '127.0.0.1',
+        parseInt(process.env.BET_PARITY_DB_PORT || process.env.DATABASE_PORT || '3306'),
+        process.env.BET_PARITY_DB_NAME,
+        process.env.BET_PARITY_DB_USER || process.env.INDEXER_DB_USER,
+        process.env.BET_PARITY_DB_PASS || process.env.INDEXER_DB_PASS
+    );
+    // Bounded: the shared Database.getConnection RETRIES forever by design,
+    // so an unreachable node B would hang the suite instead of skipping it.
+    const reachable = await Promise.race([
+        state.nodeB.ping().catch(() => false),
+        sleep(20000).then(() => false)
+    ]);
+    if (!reachable) {
+        console.log(`node B database ${process.env.BET_PARITY_DB_NAME} is not reachable; skipping`);
+        context.skip();
     }
 }
 
-// ── the oracle-price shim ────────────────────────────────────────────────────
-// The e2e harness seeds fee-oracle prices by writing price_snapshots /
-// oracle_prices STRAIGHT INTO THE INDEXER'S OWN DATABASE (this venue sets no
-// HUB_DB_NAME, so the indexer's price lookup falls back to its local copy of
-// what the hub would otherwise supply). Those rows are an EXTERNAL input, not
-// chain data - in a real fleet hub_db_sync carries the identical rows down to
-// every node. A second node that never receives them is not running the same
-// inputs, and every native-fee or FIAT-priced action on the venue then diverges
-// for a configuration reason rather than a consensus one: observed twice here,
-// as `invalid: no current oracle price for BTC/USD` on an unrelated ISSUE and
-// `invalid: ORACLE_ADDRESS (no effective oracle price)` on an unrelated
-// DISPENSER, both rejected by node B alone. So the drill plays hub_db_sync.
-const ORACLE_TABLES = ['price_snapshots', 'oracle_prices'];
-let mirrorTimer = null;
+async function prepareParityVenue() {
+    // Ease the miner off the harness's one-block-per-second cadence for the
+    // duration of this file (see levelNodes above for why that cadence is
+    // unsurvivable with two indexers on this venue). Both numbers matter:
+    // max_time caps the idle cadence, tx_added_time caps how soon a block
+    // follows a transaction, and it was the latter that kept blocks coming
+    // every 1.5s through the funding burst. after() hands the miner back to
+    // its defaults.
+    await global.regtestMinerConnector.setMiningTime(6000, 4000);
 
-async function mirrorOracleTables() {
-    for (const table of ORACLE_TABLES) {
-        let rows;
-        try { rows = await dbQuery(`SELECT * FROM ${table}`, []); }
-        catch (e) { continue; }                       // table absent on this schema
-        if (!rows.length) continue;
-        const cols = Object.keys(rows[0]);
-        const place = cols.map(() => '?').join(', ');
-        for (const r of rows) {
-            try {
-                await bQuery(`REPLACE INTO ${table} (${cols.join(', ')}) VALUES (${place})`,
-                    cols.map(c => r[c]));
-            } catch (e) { /* best effort: a live writer may hold the row */ }
-        }
+    // Keep node B supplied with the same oracle prices the harness injects
+    // into node A, for as long as this file runs. Started BEFORE anything is
+    // submitted, because node B has to have the row by the time it parses
+    // the block that needs it, and it parses a few seconds behind.
+    await mirrorOracleTables();
+    state.mirrorTimer = setInterval(() => { mirrorOracleTables().catch(() => {}); }, 1000);
+
+    // Start level. Node A being behind the CHAIN when the drill opens is the
+    // single most likely way this file fails for a reason that has nothing
+    // to do with betting.
+    const level = await levelNodes();
+    if (level.nodeHeight - level.tipA > 2) {
+        throw new Error(`the source indexer is ${level.nodeHeight - level.tipA} blocks behind the chain `
+            + `(node ${level.nodeHeight}, indexer ${level.tipA}) and is not catching up; `
+            + 'the venue cannot serve this drill until it does');
     }
 }
 
-async function blockIndexOfAction(actionIndex) {
-    const rows = await dbQuery('SELECT block_index FROM actions WHERE action_index = ?', [actionIndex]);
-    return rows.length ? Number(rows[0].block_index) : null;
-}
+async function fundParticipants() {
+    // compactAddresses off: the SDK's ^id compaction outruns the indexer's
+    // wire acceptance on this stack and would invalidate the setup SENDs.
+    // Same stance as every other BET suite.
+    state.sdk = makeSdk({ compactAddresses: false });
 
-// Orphan `targetBlock` and build a longer competing chain over it (same
-// mechanism as betReorgDrill; both nodes read the reorg from the shared
-// decoder, so this exercises the rollback path on BOTH of them at once).
-async function reorgPast(targetBlock, label) {
-    const node = global.nodeConnector;
-    const tipBefore = await node.getBlockCount();
-    const oldHash   = await node.getBlockHash(targetBlock);
-    const payout    = (await cryptoHelper.getNewAddress(label, global.COIN, global.NETWORK, null, 'legacy', 0)).address;
-
-    await node.invalidateBlock(oldHash);
-    expect(await node.getBlockCount(), 'node rolled back below the target block')
-        .to.equal(targetBlock - 1);
-    const need = tipBefore - (targetBlock - 1) + 2;
-    for (let i = 0; i < need; i++) await node.generateBlock(payout, []);
-    expect(await node.getBlockHash(targetBlock), 'the chain actually reorged').to.not.equal(oldHash);
-    return oldHash;
+    // All funding happens before the first clock jump (funding a new address
+    // after a jump fails in the encoder).
+    state.oracle = await fundedGasAddress(state.sdk, 1);
+    state.p1     = await fundedGasAddress(state.sdk, 1);
+    state.p2     = await fundedGasAddress(state.sdk, 1);
+    state.tick   = await issueWagerToken(state.sdk, state.oracle, [
+        [state.p1.address, '10.00000000'], [state.p2.address, '5.00000000']
+    ], 1000000, 'BP2');
 }
 
 describe('[sdk] BET two-node state-hash parity (§12 E8: the fleet leg)', function () {
     this.timeout(0);
 
-    let sdk, oracle, p1, p2, tick;
-    let startBlock, feedIndex, deadline, latchBlock, resolveIndex, resolveBlock, endBlock;
-    // Set by the first drill. Everything after it needs a node B that is
-    // actually following the chain; without this the whole file grinds through a
-    // full lifecycle and several multi-minute waits before reporting the one
-    // thing that was wrong, and does it against the shared venue.
-    let following = false;
-
     before(async function () {
-        if (!haveConnectors()) this.skip();
-        // Empty-competing-chain reorgs are a BTC/LTC mechanism; DOGE regtest's
-        // fast-chain mining model differs, as the other reorg drills note.
-        if (global.COIN_CODE === 'DOGE') this.skip();
-        if (!process.env.BET_PARITY_DB_NAME) {
-            console.log('BET_PARITY_DB_NAME unset: no second indexer node provisioned.');
-            console.log('Provision one on the venue host with scripts/bet-parity-node.sh up, then re-run.');
-            this.skip();
-        }
-
-        nodeB = new Database(
-            process.env.DATABASE_URL || '127.0.0.1',
-            parseInt(process.env.BET_PARITY_DB_PORT || process.env.DATABASE_PORT || '3306'),
-            process.env.BET_PARITY_DB_NAME,
-            process.env.BET_PARITY_DB_USER || process.env.INDEXER_DB_USER,
-            process.env.BET_PARITY_DB_PASS || process.env.INDEXER_DB_PASS
-        );
-        // Bounded: the shared Database.getConnection RETRIES forever by design,
-        // so an unreachable node B would hang the suite instead of skipping it.
-        const reachable = await Promise.race([
-            nodeB.ping().catch(() => false),
-            sleep(20000).then(() => false)
-        ]);
-        if (!reachable) {
-            console.log(`node B database ${process.env.BET_PARITY_DB_NAME} is not reachable; skipping`);
-            this.skip();
-        }
-
-        // Ease the miner off the harness's one-block-per-second cadence for the
-        // duration of this file (see levelNodes above for why that cadence is
-        // unsurvivable with two indexers on this venue). Both numbers matter:
-        // max_time caps the idle cadence, tx_added_time caps how soon a block
-        // follows a transaction, and it was the latter that kept blocks coming
-        // every 1.5s through the funding burst. after() hands the miner back to
-        // its defaults.
-        await global.regtestMinerConnector.setMiningTime(6000, 4000);
-
-        // Keep node B supplied with the same oracle prices the harness injects
-        // into node A, for as long as this file runs. Started BEFORE anything is
-        // submitted, because node B has to have the row by the time it parses
-        // the block that needs it, and it parses a few seconds behind.
-        await mirrorOracleTables();
-        mirrorTimer = setInterval(() => { mirrorOracleTables().catch(() => {}); }, 1000);
-
-        // Start level. Node A being behind the CHAIN when the drill opens is the
-        // single most likely way this file fails for a reason that has nothing
-        // to do with betting.
-        const level = await levelNodes();
-        if (level.nodeHeight - level.tipA > 2) {
-            throw new Error(`the source indexer is ${level.nodeHeight - level.tipA} blocks behind the chain `
-                + `(node ${level.nodeHeight}, indexer ${level.tipA}) and is not catching up; `
-                + 'the venue cannot serve this drill until it does');
-        }
-
-        // compactAddresses off: the SDK's ^id compaction outruns the indexer's
-        // wire acceptance on this stack and would invalidate the setup SENDs.
-        // Same stance as every other BET suite.
-        sdk = makeSdk({ compactAddresses: false });
-
-        // All funding happens before the first clock jump (funding a new address
-        // after a jump fails in the encoder).
-        oracle = await fundedGasAddress(sdk, 1);
-        p1     = await fundedGasAddress(sdk, 1);
-        p2     = await fundedGasAddress(sdk, 1);
-        tick   = await issueWagerToken(sdk, oracle, [
-            [p1.address, '10.00000000'], [p2.address, '5.00000000']
-        ], 1000000, 'BP2');
-    });
-
-    after(async function () {
-        if (mirrorTimer) { clearInterval(mirrorTimer); mirrorTimer = null; }
-        try { await global.regtestMinerConnector.resumeMining(); } catch (e) { /* best effort */ }
-        await releaseClock();
-        if (nodeB && nodeB.pool) { try { await nodeB.pool.end(); } catch (e) { /* best effort */ } }
+        await connectNodeB(this);
+        await prepareParityVenue();
+        await fundParticipants();
     });
 
     it('node B is independently following the same chain', async function () {
@@ -426,21 +211,24 @@ describe('[sdk] BET two-node state-hash parity (§12 E8: the fleet leg)', functi
         const diffs = await compareHashes(from, Math.min(tipA, tipB));
         expect(diffs, `nodes disagree BEFORE the drill starts:\n${JSON.stringify(diffs.slice(0, 5), null, 1)}`)
             .to.deep.equal([]);
-        following = true;
+        state.following = true;
     });
+});
 
+describe('[sdk] BET two-node state-hash parity (§12 E8: the fleet leg)', function () {
     it('a market, two bets and the deadline latch land identically on both nodes', async function () {
-        if (!following) this.skip();
-        startBlock = await tipOf(dbQuery);
+        if (!state.following) this.skip();
+        const { sdk, oracle, p1, p2, tick } = state;
+        const startBlock = state.startBlock = await tipOf(dbQuery);
 
         const now = await blockTime();
-        deadline = now + 900;
+        const deadline = state.deadline = now + 900;
         let res = await submitBet(sdk, oracle, sdk.betting.createMarketParams({
             label: 'E8 two-node parity', outcomes: ['Yes', 'No'], tick,
             fee: '1.00', deadline, refundWindow: MIN_REFUND_WINDOW, now
         }));
         expect(res.indexed.status, 'create status').to.equal('valid');
-        feedIndex = actionIndexOf(res);
+        const feedIndex = state.feedIndex = actionIndexOf(res);
 
         res = await submitBet(sdk, p1, sdk.betting.placeBetParams({
             feedActionIndex: feedIndex, outcome: 0, amount: '10.00000000' }));
@@ -452,7 +240,7 @@ describe('[sdk] BET two-node state-hash parity (§12 E8: the fleet leg)', functi
         await jumpTo(deadline + 60, 2);
         const latched = await waitFeedStatus(feedIndex, 'closed');
         expect(latched.feed_status, 'feed latched closed').to.equal('closed');
-        latchBlock = Number(latched.closed_block);
+        const latchBlock = state.latchBlock = Number(latched.closed_block);
         expect(latchBlock, 'latch block stamped').to.be.a('number');
 
         const tipA = await tipOf(dbQuery);
@@ -482,242 +270,11 @@ describe('[sdk] BET two-node state-hash parity (§12 E8: the fleet leg)', functi
         const strays = cb.feeds.filter(r => r.action_index === String(feedIndex)
             && r.closed_block !== String(latchBlock));
         expect(strays, 'the feed is stamped in exactly one block').to.deep.equal([]);
-    });
 
-    it('node B\'s committed state hash is reproducible from its own rows, and the BET class is load-bearing in it',
-        async function () {
-        if (!following) this.skip();
-        if (!syncBuildStateHashData || !SyncUtility) {
-            console.log('xchain-sync sibling absent; skipping the state-hash recompute leg');
-            this.skip();
-        }
-
-        // APPLY-TIME ONLY. The class rows carry their CURRENT status, so this has
-        // to run while the feed is still `closed`. Once it resolves, a recompute
-        // of the latch block returns 'resolved' and can never match again.
-        const feed = await getFeed(feedIndex);
-        expect(feed.feed_status, 'still latched (the recompute leg must precede the resolve)')
-            .to.equal('closed');
-
-        // The preimage builder needs the two reads the indexer's own db exposes:
-        // doQuery, and the index_statuses lookup it resolves 'completed' through.
-        const adapter = {
-            doQuery: (sql, params) => bQuery(sql, params),
-            getStatusId: async (status) => {
-                const rows = await bQuery('SELECT id FROM index_statuses WHERE status = ? LIMIT 1', [status]);
-                return rows.length ? Number(rows[0].id) : null;
-            }
-        };
-        const util = new SyncUtility();
-        const preimage = await syncBuildStateHashData(adapter, latchBlock, {
-            activationDelay: ACTIVATION_DELAY_BLOCKS,
-            gasTick:         undefined,          // defaults to the consensus GAS symbol
-            network:         global.NETWORK,
-            coin:            global.COIN_CODE
-        });
-
-        const committed = (await hashesOf(bQuery, latchBlock, latchBlock)).get(latchBlock);
-        expect(committed && committed.state_hash, 'node B committed a state hash for the latch block')
-            .to.be.a('string');
-        expect(util.getDataHash(preimage),
-            'the follower recompute must reproduce what node B committed at the latch block')
-            .to.equal(committed.state_hash);
-
-        // The BET class is genuinely present at this block...
-        expect(preimage.bet_feed_status, 'bet_feed_status class present in the preimage').to.be.an('array');
-        expect(preimage.bet_feed_status.map(r => String(r.action_index)),
-            'the latched feed is in the hashed class').to.include(String(feedIndex));
-
-        // ...and load-bearing in two distinct senses, because only the second
-        // one rules out a class that is present but empty:
-        //
-        //   (a) a follower that never learned about the BET keys at all drops
-        //       them from the preimage, and
-        //   (b) a follower that HAS the keys but failed to apply the latch
-        //       hashes them empty.
-        //
-        // Both must move the hash. If (b) did not, a node could silently miss
-        // the latch and still agree - the fork class §8 was written against.
-        const dropped = Object.assign({}, preimage);
-        delete dropped.bet_feed_status;
-        delete dropped.bet_status;
-        expect(util.getDataHash(dropped),
-            'dropping the BET keys left the state hash unchanged: the class is NOT in the preimage')
-            .to.not.equal(committed.state_hash);
-
-        const emptied = Object.assign({}, preimage, { bet_feed_status: [], bet_status: [] });
-        expect(util.getDataHash(emptied),
-            'an EMPTY BET class hashes the same as the real one: the latch itself is not covered')
-            .to.not.equal(committed.state_hash);
-    });
-
-    it('the resolve and the settlement land identically on both nodes', async function () {
-        if (!following) this.skip();
-        await resumeMiningAtFrozenClock();
-        const res = await submitBet(sdk, oracle, sdk.betting.resolveMarketParams({
-            feedActionIndex: feedIndex, outcome: 0 }));
-        expect(res.indexed.status, 'resolve status').to.equal('valid');
-        resolveIndex = actionIndexOf(res);
-
-        const settled = await waitFeedStatus(feedIndex, 'resolved');
-        expect(settled.feed_status, 'market resolved on node A').to.equal('resolved');
-        resolveBlock = await blockIndexOfAction(resolveIndex);
-
-        // T = 15, W = 10, fee = floor(15 * 1/100, 8) = 0.15, pot = 14.85,
-        // p1 = floor(10 * 14.85 / 10, 8) = 14.85, dust = 0.
-        amtEq(await balanceOf(p1.address, tick), '14.85', 'winner payout on node A');
-
-        endBlock = await tipOf(dbQuery);
-        const tipB = await waitNodeB(endBlock);
-        expect(tipB, 'node B caught up past the settlement').to.be.at.least(endBlock);
-
-        const diffs = await compareHashes(startBlock, endBlock);
-        expect(diffs, 'node A and node B diverged over the full lifecycle:\n'
-            + JSON.stringify(diffs.slice(0, 8), null, 1)).to.deep.equal([]);
-
-        const [ca, cb] = [await betClasses(dbQuery, startBlock, endBlock),
-                          await betClasses(bQuery,  startBlock, endBlock)];
-        expect(cb, 'BET state-hash class rows differ across nodes after settlement').to.deep.equal(ca);
-        expect(cb.bets.length, 'both bets settled in the class').to.equal(2);
-        expect(new Set(cb.bets.map(r => r.settled_block)).size,
-            'both bets settled in the SAME block').to.equal(1);
-
-        // The settled ledger itself, not just its hash: node B credits the same
-        // winner the same amount, from rows it derived on its own.
-        const bBalance = await bQuery(
-            'SELECT b.amount FROM balances b ' +
-            '  JOIN index_addresses ia ON ia.id = b.address_id ' +
-            '  JOIN index_tickers   it ON it.id = b.tick_id ' +
-            ' WHERE ia.address = ? AND it.tick = ?', [p1.address, tick]);
-        amtEq(bBalance.length ? String(bBalance[0].amount) : '0', '14.85',
-            'node B credits the winner identically');
-        amtEq(await balanceOf(p2.address, tick), '0', 'loser keeps nothing on node A');
-    });
-
-    it('a reorg across the settlement block re-converges both nodes', async function () {
-        if (!following) this.skip();
-        expect(resolveBlock, 'resolve block located').to.be.a('number');
-
-        // Pin what each node currently holds AT the doomed height. The orphaned
-        // block is replaced by a different one, so both nodes must end up with a
-        // different ledger hash there. Without this the drill could read the
-        // pre-reorg state, find the market already 'resolved', and pass without
-        // either node having rolled back anything.
-        const preA = (await hashesOf(dbQuery, resolveBlock, resolveBlock)).get(resolveBlock);
-        const preB = (await hashesOf(bQuery,  resolveBlock, resolveBlock)).get(resolveBlock);
-        expect(preB, 'node B had indexed the block that is about to be orphaned').to.not.equal(undefined);
-        expect(preB.ledger_hash, 'both nodes agreed on it beforehand').to.equal(preA.ledger_hash);
-
-        const miner = global.regtestMinerConnector;
-        await miner.pauseMining();
-        try {
-            await reorgPast(resolveBlock, 'bet-parity-reorg');
-            // The orphaned resolve returns to the mempool; give it blocks to be
-            // re-mined and both nodes room to roll back and replay.
-            for (let i = 0; i < 4; i++) await global.nodeConnector.generateBlock(
-                (await cryptoHelper.getNewAddress('bet-parity-reorg2', global.COIN, global.NETWORK, null, 'legacy', 0)).address, []);
-            // Hand the miner back only once node A's indexer has reached the
-            // competing branch tip, so the rollback and replay are observable
-            // instead of merely likely after a fixed settle.
-            const branchTip = Number(await global.nodeConnector.getBlockCount());
-            for (let i = 0; i < 30; i++) {
-                if (await tipOf(dbQuery) >= branchTip) break;
-                await sleep(1000);
-            }
-        } finally {
-            await miner.resumeMining();
-        }
-
-        // Both nodes must actually roll back and re-index the replacement block
-        // at that height, not merely still be sitting on the old answer.
-        const rolledBack = async (q, before) => {
-            for (let i = 0; i < 60; i++) {
-                const now = (await hashesOf(q, resolveBlock, resolveBlock)).get(resolveBlock);
-                if (now && now.ledger_hash && now.ledger_hash !== before.ledger_hash) return now;
-                await sleep(3000);
-            }
-            return null;
-        };
-        const postA = await rolledBack(dbQuery, preA);
-        expect(postA, 'node A rolled back and re-indexed the orphaned height').to.not.equal(null);
-
-        // Node A re-settles (proved on its own by betReorgDrill); here the point
-        // is that node B, rolling back independently, lands on the same state.
-        let feed = null;
-        for (let i = 0; i < 40; i++) {
-            feed = await getFeed(feedIndex);
-            if (feed && feed.feed_status === 'resolved') break;
-            await sleep(3000);
-        }
-        expect(feed.feed_status, 'market re-settled on node A after the reorg').to.equal('resolved');
-
-        const postB = await rolledBack(bQuery, preB);
-        expect(postB, 'node B rolled back and re-indexed the orphaned height on its own').to.not.equal(null);
-
-        const tipA = await tipOf(dbQuery);
-        const tipB = await waitNodeB(tipA);
-        expect(tipB, 'node B caught up after the reorg').to.be.at.least(tipA);
-
-        const diffs = await compareHashes(startBlock, tipA);
-        expect(diffs, 'the two nodes did not re-converge after the reorg:\n'
-            + JSON.stringify(diffs.slice(0, 8), null, 1)).to.deep.equal([]);
-
-        // No double credit on EITHER node: exactly one terminal status per bet,
-        // read from history rather than inferred from a balance (a compensating
-        // pair of errors satisfies a sum).
-        for (const [label, q] of [['node A', dbQuery], ['node B', bQuery]]) {
-            const rows = await q(
-                'SELECT b.action_index, COUNT(*) AS terminal_rows ' +
-                '  FROM bets b ' +
-                // bet_statuses.action_index is the CAUSING action; the bet is
-                // keyed by bet_action_index. Joining on the wrong one counts
-                // nothing and passes for the wrong reason.
-                '  JOIN bet_statuses bs ON bs.bet_action_index = b.action_index ' +
-                '  JOIN index_statuses s ON s.id = bs.status_id ' +
-                ' WHERE b.feed_action_index = ? AND s.status IN (\'won\', \'lost\', \'refunded\') ' +
-                ' GROUP BY b.action_index', [feedIndex]);
-            expect(rows.length, `${label} has both bets in history`).to.equal(2);
-            for (const r of rows)
-                expect(Number(r.terminal_rows),
-                    `${label} credited bet ${r.action_index} exactly once`).to.equal(1);
-        }
-
-        const bets = await getBets(feedIndex);
-        expect(bets.map(r => r.bet_status).sort(), 'terminal statuses on node A after replay')
-            .to.deep.equal(['lost', 'won']);
-        amtEq(await balanceOf(p1.address, tick), '14.85', 'winner payout unchanged after the reorg');
-    });
-
-    it('sensitivity: a one-node divergence at the latch block is actually caught', async function () {
-        if (!following) this.skip();
-        // Everything above is a green comparison, and a comparison that cannot
-        // fail is worth nothing. So corrupt node B's committed ledger hash at the
-        // latch block INSIDE a transaction, re-run the very same comparison over
-        // that connection's view, and require it to report the divergence - then
-        // roll back and require it to come back clean. Node B's own database, its
-        // own connection, never committed.
-        const conn = await nodeB.getConnection();
-        const tq = (sql, params) => conn.query(sql, params);
-        try {
-            await conn.beginTransaction();
-            const before = await compareHashes(latchBlock, latchBlock, tq);
-            expect(before, 'the latch block agrees before the corruption').to.deep.equal([]);
-
-            await conn.query(
-                'UPDATE index_transactions SET hash = ? WHERE id = ' +
-                '(SELECT ledger_hash_id FROM blocks WHERE block_index = ?)',
-                ['de' + 'ad'.repeat(31), latchBlock]);
-
-            const during = await compareHashes(latchBlock, latchBlock, tq);
-            expect(during.length, 'the corrupted latch block is reported as divergent').to.equal(1);
-            expect(during[0].block, 'reported against the latch block').to.equal(latchBlock);
-            expect(during[0].field, 'reported against the hash that moved').to.equal('ledger_hash');
-        } finally {
-            try { await conn.rollback(); } catch (e) { /* best effort */ }
-            try { await conn.release(); } catch (e) { /* best effort */ }
-        }
-
-        const after = await compareHashes(latchBlock, latchBlock);
-        expect(after, 'node B is untouched once the transaction is rolled back').to.deep.equal([]);
     });
 });
+
+require('./betParity.sdk.test/01_state_hash_recompute.test');
+require('./betParity.sdk.test/02_resolve_and_settlement.test');
+require('./betParity.sdk.test/03_reorg_across_settlement.test');
+require('./betParity.sdk.test/04_sensitivity.test');

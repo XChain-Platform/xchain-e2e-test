@@ -40,6 +40,12 @@ function parseWaitTunable(raw, def){
     return Number.isInteger(n) && n >= 0 ? n : def;
 }
 
+/**
+ * A named-method wrapper around one mariadb connection pool: every query the
+ * e2e suites need lives here as a method, never as a literal SQL string at
+ * the call site, and the waitFor* helpers below poll these methods for a row
+ * the indexer has not written yet.
+ */
 class Database {
     constructor(host, port, dbName, user, pass){
         this.sqlPath  = __dirname+'/sql';
@@ -2350,9 +2356,15 @@ class Database {
         let connection = await this.getConnection()
         try {
             const rows = await connection.query(query, [responseActionIndex])
+            // No response row yet, or one with nothing recorded: report no
+            // signatures rather than throw, so a caller can keep polling.
             if(rows.length === 0 || !rows[0].validator_signatures) return []
             let parsed
+            // Malformed JSON in the column is a data problem, not a
+            // missing-row one; treat it the same as "no signatures".
             try { parsed = JSON.parse(rows[0].validator_signatures) } catch(e){ return [] }
+            // The column is JSON-typed but not schema-enforced to hold an
+            // array; guard the shape before mapping it below.
             if(!Array.isArray(parsed)) return []
             return parsed.map(s => ({ validator_pubkey: s.pubkey, validator_sig: s.sig }))
         } catch(err){ this._warnOnSchemaError('getAttestationValidatorSignatures', err); return [] } finally { await connection.release() }
@@ -2367,7 +2379,7 @@ class Database {
     // checkAttestationRequest answers ONE row and filters by request_status, which
     // cannot express the question an admission cap poses: what did the OTHER requests
     // of this same block do, and in what order. The per-block caps
-    // (attest_request_cap_activation.js) are decided from the count of admissions
+    // (actions/attest/attest_request_cap_gate.js) are decided from the count of admissions
     // EARLIER IN THE SAME BLOCK, so a test of them has to see the whole set, and it
     // has to see the verdict STRING - request_status only says pending/rejected, it
     // never says which rule refused the row.
@@ -2401,13 +2413,26 @@ class Database {
         }
     }
 
+    // Read the current value of one contract state key, with the SAME key
+    // semantics the serving indexer uses.
+    // contract_state is COLLATE=utf8_general_ci, so matching on state_key folds
+    // "Key" and "key" into one key and an assertion can read another key's row
+    // (or read a stale row and hide a write that never landed). The schema
+    // carries state_key_bin, a utf8_bin generated shadow of state_key backed by
+    // idx_latest_bin, and that is what the indexer keys current state on
+    // (xchain-indexer/src/db/contracts.js getContractState, armed from genesis on regtest
+    // by state_key_collation_activation.js). Match the shadow column here for the
+    // same reason xchain-explorer's proof reader does.
+    // Latest row is id DESC, the tiebreak the writer and the schema's own
+    // read-current comment use; block_index/action_index is a second ordering of
+    // the same append-only sequence, so aligning removes a needless divergence.
     async getContractState(contractIndex, stateKey){
-        let query = `SELECT * FROM contract_state WHERE contract_index = ? AND state_key = ? ORDER BY block_index DESC, action_index DESC LIMIT 1`
+        let query = `SELECT * FROM contract_state WHERE contract_index = ? AND state_key_bin = ? ORDER BY id DESC LIMIT 1`
         let connection = await this.getConnection()
         try {
             const rows = await connection.query(query, [contractIndex, stateKey])
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ return null } finally { await connection.release() }
+        } catch(err){ this._warnOnSchemaError('getContractState', err); return null } finally { await connection.release() }
     }
 
     async waitForDelegation(params, timeMax = 60000){ return this._waitFor(this.checkDelegation, params, timeMax) }

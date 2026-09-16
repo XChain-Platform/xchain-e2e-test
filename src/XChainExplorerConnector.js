@@ -19,6 +19,8 @@
  ********************************************************************/
 
 const axios = require('axios');
+const { getLogger } = require('./lib/logger');
+const logger = getLogger();
 
 class XChainExplorerConnector {
     constructor(url, port) {
@@ -41,7 +43,7 @@ class XChainExplorerConnector {
         try {
             response = await axios.post(this.url, data)
         } catch (err) {
-            console.log(err)
+            logger.info(err)
             return false
         }
 
