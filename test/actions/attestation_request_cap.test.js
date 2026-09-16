@@ -15,13 +15,13 @@ const gasHelper = require('../helpers/gasHelper')
 const vmHelper = require('../helpers/vmHelper')
 const batchHelper = require('../helpers/batchHelper')
 const attestationHelper = require('../helpers/attestationHelper')
-const capRule = require('../../../xchain-indexer/src/attest_request_cap_activation.js')
+const capRule = require('../../../xchain-indexer/src/actions/attest/attest_request_cap_gate.js')
 
 /**
  * ATTEST v0 per-block admission caps, driven on a chain.
  *
  * The caps (framework spec §11.1, xchain-indexer
- * src/attest_request_cap_activation.js) bound how many attestation requests one
+ * src/actions/attest/attest_request_cap_gate.js) bound how many attestation requests one
  * block may admit: `perContract` 2 from any single contract, `perBlock` 10 in
  * total. They exist because an ADMITTED request makes OTHER people spend - each
  * one puts REDUNDANCY validators on the hook for a provider call, and for the

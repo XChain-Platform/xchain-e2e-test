@@ -203,8 +203,11 @@ describe('ROLLCALL acceptance: the rules-aware attestation set (ZC7)', function 
             'the shipped http_get provider entry carries no allowed_redundancy / min_stake_xchain; this suite ' +
             'reads both from it rather than spelling them, so a changed shape is a stop rather than a guess')
 
-        const attestAdmission = rc.indexerModule('src/attest_admission_activation.js')
-        assert.strictEqual(attestAdmission.isAttestAdmissionActive(0, ctx.network), true,
+        // The admission gate lives as a registry row (src/protocol_changes/gates_1.js);
+        // its former predicate module was retired in W4, so the row is read through
+        // the registry's generic predicate against the request's own LOCAL height.
+        const gateRegistry = rc.indexerModule('src/consensus/gate_registry.js')
+        assert.strictEqual(gateRegistry.activeAt('attest_admission_activation.ATTEST_ADMISSION_ACTIVATION', ctx.network, null, 0, 0), true,
             'the ATTEST v0 admission gate is inert on ' + ctx.network + ', so no request can be refused for a ' +
             'short responsible set and ZC7d has no verdict to read')
 

@@ -2379,7 +2379,7 @@ class Database {
     // checkAttestationRequest answers ONE row and filters by request_status, which
     // cannot express the question an admission cap poses: what did the OTHER requests
     // of this same block do, and in what order. The per-block caps
-    // (attest_request_cap_activation.js) are decided from the count of admissions
+    // (actions/attest/attest_request_cap_gate.js) are decided from the count of admissions
     // EARLIER IN THE SAME BLOCK, so a test of them has to see the whole set, and it
     // has to see the verdict STRING - request_status only says pending/rejected, it
     // never says which rule refused the row.
