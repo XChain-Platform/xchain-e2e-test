@@ -198,12 +198,22 @@ let _mirrorBarrierReasons = null;
  */
 function mirrorBarrierReasons() {
     if (_mirrorBarrierReasons) return _mirrorBarrierReasons;
-    const src  = fs.readFileSync(path.join(INDEXER_SRC_DIR, 'XChainIndexer.js'), 'utf8');
+    // The entry plus its parts directory: the structure pass split the block loop's
+    // barriers out of XChainIndexer.js into XChainIndexer/*.js (price_barriers,
+    // mirror_barriers, stall_health), so a scan of the entry alone finds nothing and
+    // reads as "wrong tree" against the right one.
+    const files = [path.join(INDEXER_SRC_DIR, 'XChainIndexer.js')];
+    const parts = path.join(INDEXER_SRC_DIR, 'XChainIndexer');
+    if (fs.existsSync(parts)) {
+        for (const f of fs.readdirSync(parts).sort()) if (f.endsWith('.js')) files.push(path.join(parts, f));
+    }
     const seen = new Set();
-    for (const m of src.matchAll(MIRROR_BARRIER_REASON_RE)) seen.add(m[1]);
+    for (const file of files) {
+        for (const m of fs.readFileSync(file, 'utf8').matchAll(MIRROR_BARRIER_REASON_RE)) seen.add(m[1]);
+    }
     if (seen.size === 0) {
         throw new Error('attestMirrorVenue: no mirror barrier reason strings found in ' +
-            path.join(INDEXER_SRC_DIR, 'XChainIndexer.js') + '; the venue is reading the wrong tree');
+            files.join(', ') + '; the venue is reading the wrong tree');
     }
     _mirrorBarrierReasons = Object.freeze(Array.from(seen).sort());
     return _mirrorBarrierReasons;
@@ -1788,6 +1798,137 @@ function resolveRepoRoot(optsRepoRoot, env) {
 }
 
 /**
+ * The code root each HUB child is spawned from, one entry per hub index.
+ *
+ * WHY PER HUB. `repoRoot` pins every child to one tree, which is what keeps a
+ * lane's evidence inside the lane (B4). BF6's mixed-version assertion needs the
+ * one thing that pin forbids: two hubs in ONE federation on DIFFERENT bytes (a v6
+ * hub beside a v7 hub, an un-upgraded rules digest beside an upgraded one), so
+ * that their co-signature ends in a clean refusal naming the mismatch. Indexers
+ * are not part of that assertion and keep the venue's own `repoRoot`; nothing
+ * here touches them.
+ *
+ * `perHub` is `{i: root}` or a sparse array; a hub with no entry runs from
+ * `defaultRoot`, so every existing caller's hubs run exactly where they did.
+ * Every explicit entry is CHECKED here, before any spawn, because a root with
+ * no `xchain-hub/src/api.js` in it fails later as a boot timeout that reads like
+ * a slow host. The root is resolved, never trusted as given: a relative path is a
+ * different tree from a different cwd.
+ *
+ * @param {object|Array|null} perHub
+ * @param {number} hubCount
+ * @param {string} defaultRoot   the venue's resolved `repoRoot`
+ * @returns {string[]}           length `hubCount`, absolute paths
+ */
+function resolveHubRepoRoots(perHub, hubCount, defaultRoot) {
+    const out = [];
+    for (let i = 0; i < hubCount; i++) out.push(defaultRoot);
+    if (perHub === null || perHub === undefined) return out;
+    if (typeof perHub !== 'object') {
+        throw new Error('attestMirrorVenue: hubRepoRoots must be {index: root} or an array, got ' + typeof perHub);
+    }
+    for (const key of Object.keys(perHub)) {
+        const i = Number(key);
+        if (!Number.isInteger(i) || i < 0 || i >= hubCount) {
+            throw new Error('attestMirrorVenue: hubRepoRoots names hub ' + key + ' but the venue has ' + hubCount + ' hubs');
+        }
+        if (perHub[key] === null || perHub[key] === undefined) continue;
+        const root = path.resolve(String(perHub[key]));
+        const entry = path.join(root, 'xchain-hub', 'src', 'api.js');
+        if (!fs.existsSync(entry)) {
+            throw new Error('attestMirrorVenue: hubRepoRoots[' + i + '] ' + root + ' has no xchain-hub/src/api.js; ' +
+                'hub ' + i + ' would be spawned from there and fail as a boot timeout');
+        }
+        out[i] = root;
+    }
+    return out;
+}
+
+// `coinCode` takes a coin NAME and slices anything else to three letters, so a code
+// handed in comes back truncated (`DOGE` reads `DOG`). The two second-coin helpers
+// accept either spelling, because a leg holds the code (from a chain rail) as often
+// as the name (from a venue).
+function chainCodeOf(coinOrCode) {
+    const raw = String(coinOrCode || '');
+    const upper = raw.toUpperCase();
+    for (const name of Object.keys(COIN_CODE_MAP)) {
+        if (COIN_CODE_MAP[name] === upper) return upper;
+    }
+    return coinCode(raw);
+}
+
+/**
+ * The option set for a SECOND coin's indexers against a started venue's federation:
+ * the attach-mode shape AT5 defines for DOGE, pinned here so BF8 (family
+ * section 7, R6 (a)) and any later non-BTC leg cannot forget a half of it.
+ *
+ * The three halves, and the failure each one prevents: `attachHubs` plus the owner's
+ * `hubDb`, or the new venue starts a disposable database the shared hubs know nothing
+ * about; `useEnvDecoderCredential: false`, or the harness `.env`'s Bitcoin credential is
+ * presented to the other coin's decoder database and refused (AT5, 2026-09-05); the
+ * owner's `repoRoot`, so the second coin's indexer runs the same bytes the evidence
+ * names (B4) rather than whatever tree the leg happens to live in. No new credential
+ * store: the second coin's decoder credential resolves through the same hub config
+ * oracle and per-coin sidecar every venue uses (resolveDecoderCredential).
+ *
+ * Refuses an owner that has not started (no hubs to attach to) and a coin equal to the
+ * owner's (two venues on one coin is not a second-coin venue). Pure: nothing is spawned.
+ *
+ * @param {AttestMirrorVenue} owner   a STARTED venue whose hubs the new indexers follow
+ * @param {object} opts               `{coin (required), indexerCount?, label?, venue?}`;
+ *                                    `venue` is merged first, the pinned halves win
+ * @returns {object}                  constructor options for the attached venue
+ */
+function attachedCoinVenueOpts(owner, opts) {
+    const o = opts || {};
+    if (!owner || !Array.isArray(owner.hubs) || owner.hubs.length === 0) {
+        throw new Error('attestMirrorVenue: attachedCoinVenueOpts needs a STARTED owner venue with hubs to attach to');
+    }
+    if (!owner.hubDb) {
+        throw new Error('attestMirrorVenue: attachedCoinVenueOpts: the owner venue has no hubDb to share');
+    }
+    const coin = String(o.coin || '');
+    if (!coin) throw new Error('attestMirrorVenue: attachedCoinVenueOpts needs the second coin');
+    if (chainCodeOf(coin) === chainCodeOf(owner.coin)) {
+        throw new Error('attestMirrorVenue: attachedCoinVenueOpts: ' + coin + ' is the owner venue\'s own coin; ' +
+            'a second-coin venue indexes a DIFFERENT chain against the same hubs');
+    }
+    return Object.assign({}, o.venue || {}, {
+        label:        o.label || (owner.label + chainCodeOf(coin).toLowerCase()),
+        coin:         coin,
+        network:      owner.network,
+        attachHubs:   owner.hubs,
+        hubDb:        owner.hubDb,
+        indexerCount: o.indexerCount || 1,
+        useEnvDecoderCredential: false,
+        repoRoot:     owner.repoRoot
+    });
+}
+
+/**
+ * The hub environment that lets the federation stamp a SECOND chain's admission
+ * heights: `<CODE>_INDEXER_API_URL`, which is the first store the hub's per-coin
+ * `resolveIndexerUrl(coin)` reads before its configs table (xchain-hub
+ * src/hub/indexer_urls.js). The venue gives its hubs only `BTC_INDEXER_API_URL`, so
+ * without this a hub answers "no LTC indexer URL configured" to every admission-tip
+ * read, publishes no `heights[table].LTC`, and an armed LTC indexer defers every
+ * height-keyed member forever (fail-closed by absence, family section 5.2 F19).
+ * Passed through `opts.hubExtraEnv` of the OWNER venue before it starts.
+ *
+ * @param {string} coin           coin name or code of the second chain
+ * @param {string} indexerApiUrl  that chain's indexer JSON-RPC URL (the standing one)
+ * @returns {object}              one env key
+ */
+function secondCoinHubEnv(coin, indexerApiUrl) {
+    const code = chainCodeOf(coin);
+    const url = String(indexerApiUrl || '');
+    if (!/^https?:\/\/\S+$/.test(url)) {
+        throw new Error('attestMirrorVenue: secondCoinHubEnv needs an http(s) indexer URL for ' + code + ', got ' + JSON.stringify(indexerApiUrl));
+    }
+    return { [code + '_INDEXER_API_URL']: url };
+}
+
+/**
  * The extra environment for indexer `i`, or null when nothing is overlaid.
  *
  * WHY PER INDEX. Everything else `buildIndexerEnv` takes is venue-wide (coin,
@@ -1862,6 +2003,9 @@ class AttestMirrorVenue {
      * @param opts.repoRoot         monorepo root the hub and indexer children are spawned
      *                              from; defaults to XCHAIN_VENUE_REPO_ROOT, else the
      *                              checkout this file is in. See resolveRepoRoot.
+     * @param opts.hubRepoRoots     `{1: '/other/root'}`, a per-HUB code root; hubs with no
+     *                              entry run from `repoRoot`, indexers always do. Checked
+     *                              at construction. See resolveHubRepoRoots.
      * @param opts.indexerEnv       `{0: {KEY: 'value'}}`, a per-INDEX env overlay applied
      *                              last; the only seam that can run two indexers on one
      *                              venue under different rules. See indexerEnvOverlay.
@@ -1901,6 +2045,11 @@ class AttestMirrorVenue {
         this.network      = opts.network || 'regtest';
         this.basePort     = opts.basePort || 41000;
         this.repoRoot     = resolveRepoRoot(opts.repoRoot, process.env);
+        // `{1: '/path/to/other/root'}`: the per-HUB code root, resolved and checked here
+        // so a bad root refuses at construction rather than as a boot timeout. Every
+        // hub without an entry runs from `repoRoot`; indexers always do. See
+        // resolveHubRepoRoots for why one federation may need two trees (BF6).
+        this.hubRepoRoots = resolveHubRepoRoots(opts.hubRepoRoots, this.hubCount, this.repoRoot);
         this.forwardS     = opts.forwardS     === undefined ? DEFAULT_FORWARD_S     : opts.forwardS;
         this.batchWindowS = opts.batchWindowS === undefined ? DEFAULT_BATCH_WINDOW_S : opts.batchWindowS;
         // Every barrier at zero by default, not the three that were once listed by hand.
@@ -2175,7 +2324,7 @@ class AttestMirrorVenue {
             path: process.env.PATH,
             home: process.env.HOME
         });
-        hub.proc = this._spawn('hub' + i, path.join(this.repoRoot, 'xchain-hub', 'src', 'api.js'), [], env);
+        hub.proc = this._spawn('hub' + i, path.join(this.hubRepoRoot(i), 'xchain-hub', 'src', 'api.js'), [], env);
 
         const connector = new XChainHubConnector(['http://127.0.0.1:' + hub.apiPort]);
         const up = await waitFor(async () => {
@@ -3009,6 +3158,19 @@ class AttestMirrorVenue {
     }
 
     /**
+     * The code root hub `i`'s process runs from: its `hubRepoRoots` entry, else the
+     * venue's `repoRoot`. Resolved and checked at construction (resolveHubRepoRoots),
+     * so this is a read, and it is what `_spawnHub` and every restart through
+     * `startHub` use, so a hub comes back on the same bytes it first ran on. Legs
+     * record it in their evidence beside the SHA it points at.
+     */
+    hubRepoRoot(i) {
+        const root = this.hubRepoRoots[i];
+        if (root === undefined) throw new Error('attestMirrorVenue: no hub ' + i);
+        return root;
+    }
+
+    /**
      * Write ONE `attestation_responses` row straight into hub databases, then make
      * the followers pick it up.
      *
@@ -3732,6 +3894,9 @@ module.exports = {
     HUB_CONFIG_REDACTION,
     coinCode,
     resolveRepoRoot,
+    resolveHubRepoRoots,
+    attachedCoinVenueOpts,
+    secondCoinHubEnv,
     indexerEnvOverlay,
     mergeIndexerExtraEnv,
     // The barrier family and the gap between it and the grace table the venue pins.

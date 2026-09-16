@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- The barrier-family acceptance legs BF1 to BF6 and AB1 to AB5 under `test/attestMirror/barrier_family/`, built on the family fixture with a shared drive and inert-row helper, every venue pinned to the isolated build root and its SHAs recorded in evidence.
+
 ## [0.19.0] - 2026-09-16
 
 ### Added

@@ -25,7 +25,7 @@
     "venue:age-rollcall-absences": "E2E_REQUIRE_FEDERATION=1 mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/tools/rollcall_age_absences.test.js",
     "venue:clear-rollcall-outsiders": "E2E_STAKE_TEARDOWN=off E2E_REQUIRE_FEDERATION=1 XC_ROLLCALL_CLEAR_OUTSIDERS=1 mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/tools/rollcallClearOutsiders.test.js",
     "venue:seed-attestation": "E2E_STAKE_TEARDOWN=off mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/tools/reseedAttestationRoster.test.js test/tools/reseedAttestationRoster.test/01_seed_the_attestation_roster_on_a_reset_chain.test.js",
-    "test:attest-mirror": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/attestMirror/*.test.js'",
+    "test:attest-mirror": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/attestMirror/*.test.js' 'test/attestMirror/barrier_family/*.test.js'",
     "test:bridge-rail": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/integration/bridge_rail_*.test.js'",
     "lint:sleep-flake": "node scripts/check-sleep-flake.js",
     "lint:wait-swallow": "node scripts/check-wait-swallow.js",
