@@ -671,9 +671,13 @@ describe('bridgeRailVenue: the pure layer', function () {
         });
 
         it('reads the hub\'s own DOGE margin so the budget moves with the stamp', function () {
-            let relay = null;
-            try { relay = require('../../../../xchain-hub/src/lib/relay_margin.js'); }
-            catch (e) { this.skip(); }
+            // Absence is a single-repo clone and may skip; a checkout that IS
+            // present and will not load must fail this case rather than skip it,
+            // so the require below runs unguarded once resolution proves it exists.
+            const hubRelayMarginModule = '../../../../xchain-hub/src/lib/relay_margin.js';
+            try { require.resolve(hubRelayMarginModule); }
+            catch (e) { return this.skip(); }
+            const relay = require(hubRelayMarginModule);
             const marginS = hubRelayMarginFloorS('DOGE');
             assert.strictEqual(marginS, relay.relayMarginFloorS('DOGE'));
             assert.ok(marginS > 0);
