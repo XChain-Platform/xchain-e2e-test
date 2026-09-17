@@ -42,7 +42,7 @@ const rows = require('../helpers/barrierFamilyRows')
 const drive = require('../helpers/barrierFamilyDrive')
 const { createRail, withRail } = require('../../helpers/chainRail')
 const { attachedCoinVenueOpts, secondCoinHubEnv } = require('../../helpers/attestMirrorVenue')
-const { diffStateHashes, queryDb } = require('../mirrorDrillWaits')
+const { diffStateHashes, queryDb, until } = require('../mirrorDrillWaits')
 
 const BUILD_ROOT = path.resolve(__dirname, '..', '..', '..', '..')
 const { HUB_SCHEMA_VERSION } = require(path.join(BUILD_ROOT, 'xchain-indexer', 'src', 'hub', 'hub_schema_version.js'))
@@ -247,8 +247,11 @@ async function bindOnBtc (ctx) {
 }
 
 async function bindOnLtc (ctx) {
-  // Stamps have one-second resolution: two seconds keeps the LTC stamp off BTC's.
-  await new Promise((r) => setTimeout(r, 2000))
+  // Stamps have one-second resolution: wait for wall clock to pass the BTC
+  // entry's own second, rather than guessing a fixed gap is long enough.
+  const btcStamp = ctx.blocks[BTC][ctx.plan[BTC]].blockTime
+  const clockPast = await until(async () => ({ ok: Math.floor(Date.now() / 1000) > btcStamp }), 10000, 200)
+  assert.ok(clockPast.ok, 'wall clock did not pass the BTC stamp ' + btcStamp + ' within 10s')
   await withRail(ctx.ltc, async () => {
     await drive.assertChainHeld(ctx.ltc, ctx.tips[LTC], 'the LTC chain, before its run,')
     for (let h = ctx.tips[LTC] + 1; h <= ctx.plan[LTC]; h++) {

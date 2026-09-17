@@ -488,7 +488,9 @@ async function spaceChainBehindMargin (btc, venue, marginS, graceS) {
     const waitS = horizonOpensAt + 5 - Math.floor(Date.now() / 1000)
     if (waitS > 0) {
         console.log('BF spaced chain clamped at the tip\'s median time; waiting ' + waitS + ' s for the horizon window to pass')
-        await new Promise((r) => setTimeout(r, waitS * 1000))
+        // Bounded condition wait on the same clock test the assert below makes,
+        // instead of a fixed sleep sized off a guess of how long that takes.
+        await until(async () => ({ ok: Math.floor(Date.now() / 1000) >= horizonOpensAt }), (waitS + 10) * 1000, 1000)
     }
     await levelIndexers(venue)
     assert.ok(Math.floor(Date.now() / 1000) >= horizonOpensAt, 'the horizon window is still ahead of wall clock')

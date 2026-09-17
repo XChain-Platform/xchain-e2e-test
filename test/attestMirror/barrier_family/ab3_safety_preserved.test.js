@@ -43,6 +43,7 @@ dotenv.config()
 
 const fixture = require('../helpers/barrierFamilyFixture')
 const drive = require('../helpers/barrierFamilyDrive')
+const { until } = require('../mirrorDrillWaits')
 
 const BUILD_ROOT = path.resolve(__dirname, '..', '..', '..', '..')
 const HELD = 0
@@ -134,8 +135,14 @@ async function assertHeldInWindow (ctx) {
     assert.strictEqual(ctx.held.stallClass, 'barrier_defer', 'stallClass ' + ctx.held.stallClass + ' (want barrier_defer, D41)')
     assert.strictEqual(ctx.held.stallClearsAt, null, 'stallClearsAt ' + ctx.held.stallClearsAt + ' above the activation')
     const first = await drive.holdSnapshot(ctx.venue, HELD)
-    await new Promise((r) => setTimeout(r, HOLD_OBSERVE_MS))
-    const later = await drive.holdSnapshot(ctx.venue, HELD)
+    // Bounded condition wait, not a fixed settle: polls the indexer's own hold
+    // counter and stops the instant it reports the target duration, rather than
+    // sleeping a guess and hoping the accounting caught up by then.
+    const observed = await until(async () => {
+        const snap = await drive.holdSnapshot(ctx.venue, HELD)
+        return { ok: snap.barrierHoldMs - first.barrierHoldMs >= HOLD_OBSERVE_MS, snap }
+    }, HOLD_OBSERVE_MS + 30000, 2000)
+    const later = observed.snap
     const s = await drive.statusSnapshot(ctx.venue, HELD)
     console.log('AB3 hold: ' + JSON.stringify(first) + ' then ' + JSON.stringify(later) + '; status ' + JSON.stringify(s))
     assert.strictEqual(later.barrierHoldBlock, B, 'the hold is not on block ' + B)
