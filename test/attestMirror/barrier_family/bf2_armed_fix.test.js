@@ -115,7 +115,9 @@ async function mineAndWatch (ctx) {
     // "The identical mirror state" includes the hub's published heights. Without this wait the
     // block was mined before the hub published anchor_reward_attestations at all, and the armed
     // node deferred it once under anchor_attest_barrier (rail 2026-09-17, block 104, 62 s on).
-    const ready = await drive.waitForAdmissionHeights(ctx.venue, ARMED, HEIGHT_TABLES, ctx.coin, ctx.B)
+    // The chain is held at B-1 through this wait, so wait at the height a held chain can
+    // actually publish (drive.waitForHeldAdmissionHeights), not the plain B - margin line.
+    const ready = await drive.waitForHeldAdmissionHeights(ctx.venue, ARMED, HEIGHT_TABLES, ctx.coin, ctx.B)
     console.log('BF2 heights before mining B=' + ctx.B + ': ' + JSON.stringify(ready.heights))
     await drive.assertChainHeld(ctx.btc, ctx.B - 1, 'the BTC chain, across the admission-height wait,')
     const wall = Math.floor(Date.now() / 1000)

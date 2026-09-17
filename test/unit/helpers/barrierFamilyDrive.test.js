@@ -207,6 +207,56 @@ describe('barrierFamilyDrive: an armed leg mines only once the hub has published
     })
 })
 
+describe('barrierFamilyDrive: heldAdmissionCeiling clamps a held chain\'s wait target to B-2', function () {
+    it('clamps a margin-0 member to B-2', function () {
+        assert.strictEqual(drive.heldAdmissionCeiling(105, 0), 103)
+    })
+
+    it('clamps a margin-1 member to B-2, not the unclamped B-1', function () {
+        assert.strictEqual(drive.heldAdmissionCeiling(105, 1), 103)
+    })
+
+    it('passes a margin-2 member through unclamped, exactly at the ceiling', function () {
+        assert.strictEqual(drive.heldAdmissionCeiling(105, 2), 103)
+    })
+
+    it('leaves a margin-3 member at its own B-3, already under the held ceiling', function () {
+        assert.strictEqual(drive.heldAdmissionCeiling(105, 3), 102)
+    })
+})
+
+describe('barrierFamilyDrive: waitForHeldAdmissionHeights waits at the height a held chain can publish', function () {
+    // A venue whose indexer 0 reports one constant heights map for every poll.
+    function heightsVenue (heights) {
+        let n = 0
+        return {
+            indexers: [{ index: 0 }],
+            statusOf: async () => {
+                n += 1
+                return { httpStatus: 200, body: { indexerBlock: 103, decoderBlock: 103, hubMirror: { heights } } }
+            },
+            reads: () => n,
+        }
+    }
+
+    it('resolves a margin-1 member at B-2, the height a chain held at B-1 can publish', async function () {
+        // attestation_responses (margin 1) would need height 104 at B=105 on the plain line;
+        // held at B-2=103 it never reaches 104, so only the clamp lets this resolve.
+        assert.strictEqual(fixture.admitMarginBlocks('attestation_responses'), 1)
+        const venue = heightsVenue({ cross_chain_matches: { BTC: 101 }, attestation_responses: { BTC: 103 } })
+        const s = await drive.waitForHeldAdmissionHeights(venue, 0, ['cross_chain_matches', 'attestation_responses'], 'BTC', 105, 1000)
+        assert.strictEqual(s.heights.attestation_responses.BTC, 103)
+    })
+
+    it('still asks a margin-4 member for its own unclamped B - margin line', async function () {
+        this.timeout(6000)
+        assert.strictEqual(fixture.admitMarginBlocks('cross_chain_matches'), 4)
+        const venue = heightsVenue({ cross_chain_matches: { BTC: 100 }, attestation_responses: { BTC: 103 } })
+        await assert.rejects(drive.waitForHeldAdmissionHeights(venue, 0, ['cross_chain_matches', 'attestation_responses'], 'BTC', 105, 50),
+            /cross_chain_matches\.BTC at 100, needs 101/)
+    })
+})
+
 describe('barrierFamilyDrive: an indexer whose API is not listening yet is not level, and not a failure', function () {
     it('keeps polling past a refused connection and levels once the API answers', async function () {
         this.timeout(10000)

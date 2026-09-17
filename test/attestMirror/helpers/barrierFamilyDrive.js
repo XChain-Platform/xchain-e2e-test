@@ -161,6 +161,35 @@ async function waitForAdmissionHeights (venue, i, tables, coin, B, timeoutMs) {
     return got.s
 }
 
+/**
+ * The most a member's admission height can reach at drill block B while a leg holds the chain
+ * at B-1: the hub publishes its watermark at most one below its own observed tip, so B-2 is the
+ * ceiling no matter how far a member's margin would otherwise let B - margin run (rail
+ * 2026-09-17, BF2 block 104: a margin-1 member asked for B-1, which a held chain never reaches).
+ */
+function heldAdmissionCeiling (B, margin) {
+    return Math.min(B - margin, B - 2)
+}
+
+/**
+ * waitForAdmissionHeights for a leg that holds the chain at B-1 before mining the drill block:
+ * each member in `tables` waits at heldAdmissionCeiling(B, its margin) instead of the plain
+ * B - margin line, so a low-margin member's wait never asks for a height a held chain cannot
+ * publish. Members that land on the same effective height share one poll.
+ */
+async function waitForHeldAdmissionHeights (venue, i, tables, coin, B, timeoutMs) {
+    const groups = new Map()
+    for (const t of tables) {
+        const margin = fixture.admitMarginBlocks(t)
+        const asB = heldAdmissionCeiling(B, margin) + margin
+        if (!groups.has(asB)) groups.set(asB, [])
+        groups.get(asB).push(t)
+    }
+    let got = null
+    for (const [asB, group] of groups) got = await waitForAdmissionHeights(venue, i, group, coin, asB, timeoutMs)
+    return got
+}
+
 /** The node's own record of block `height`: hash and stamp, never the pin the leg asked for. */
 async function readBlockStamp (btc, height) {
     const node = btc.globals.nodeConnector
@@ -490,6 +519,8 @@ module.exports = {
     waitForStatus,
     ADMISSION_HEIGHT_WAIT_MS,
     waitForAdmissionHeights,
+    heldAdmissionCeiling,
+    waitForHeldAdmissionHeights,
     readBlockStamp,
     mineStamped,
     mineSpacedRun,
