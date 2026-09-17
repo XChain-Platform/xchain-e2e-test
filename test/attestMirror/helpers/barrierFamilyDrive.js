@@ -24,6 +24,8 @@
  ********************************************************************/
 
 const assert = require('assert')
+const fs = require('fs')
+const path = require('path')
 
 const { createRail, withRail } = require('../../helpers/chainRail')
 const { until, untilOrClearDogeStall, venueTipProbe, queryDb } = require('../mirrorDrillWaits')
@@ -508,6 +510,69 @@ async function waitCommitted (venue, i, height, timeoutMs) {
     return got
 }
 
+/**
+ * Indexer i's mirror rows for one attestation request, with the admission column this
+ * coin binds on (`admit_block_btc` for attestation responses on every chain) and the
+ * signatures, the two facts that make a row a signed admission-era corpus row.
+ * `deps` passes through to queryDb for the unit tier.
+ */
+async function readAdmissionRows (venue, requestId, coin, deps) {
+    const column = fixture.admissionColumn('attestation_responses', coin)
+    const out = []
+    for (const ix of venue.indexers) {
+        out.push(await queryDb(venue, ix.mirrorDbName,
+            'SELECT id, response_hash, status, effective_time, signatures, `' + column + '` FROM attestation_responses ' +
+            'WHERE request_id = ? ORDER BY id ASC', [String(requestId)], deps))
+    }
+    return { column, rows: out }
+}
+
+/**
+ * Where indexer i's corpus lives, in the shape rows.replayWitnessCommand takes: the
+ * decoder schema the venue borrowed, the mirror schema, the server both sit on, and
+ * whether the mirror's server is a throwaway the venue removes at stop. The password
+ * is named by its variable (the one disposableHubDb reads), never carried. `coinCode` is the
+ * venue evidence's upper-case code.
+ */
+function corpusCoordinates (venue, i, coinCode) {
+    const ix = venue.indexers[i]
+    assert.ok(ix, 'corpusCoordinates: no indexer ' + i)
+    // `_live` is the venue's resolved standing-stack record; the decoder schema has no public accessor.
+    const decoder = (venue._live && venue._live.decoder) || {}
+    return {
+        coin: coinCode,
+        network: venue.network,
+        decoderDb: decoder.name,
+        decoderServer: { host: decoder.host, port: decoder.port },
+        mirrorDb: ix.mirrorDbName,
+        db: { host: venue.hubDb.host, port: venue.hubDb.port, user: venue.hubDb.user },
+        passEnv: 'HUB_DB_PASS',
+        hubDbDisposable: !!venue.hubDb.disposable,
+    }
+}
+
+/**
+ * Why the build root's indexer cannot load the VM, or null when it can. The indexer
+ * reaches it through `xchain-indexer/node_modules/xchain-vm`, a link to
+ * `xchain-indexer/xchain-vm`, itself a link a worktree may point at an absolute path
+ * on another host; a tree copied across hosts keeps that link and every venue indexer
+ * then dies at boot on `Cannot find module 'xchain-vm'`. Named here, by link, before
+ * the venue spends minutes booting children that cannot start.
+ */
+function vmLinkProblem (repoRoot) {
+    const entry = path.join(repoRoot, 'xchain-indexer', 'node_modules', 'xchain-vm')
+    try {
+        if (fs.existsSync(path.join(fs.realpathSync(entry), 'package.json'))) return null
+    } catch (_) { /* a dangling link lands here; the hops below name it */ }
+    const hops = [entry, path.join(repoRoot, 'xchain-indexer', 'xchain-vm')].map((p) => {
+        let target = null
+        try { target = fs.readlinkSync(p) } catch (_) { target = fs.existsSync(p) ? '(not a link)' : '(missing)' }
+        return path.relative(repoRoot, p) + ' -> ' + target
+    })
+    return 'the build root\'s indexer cannot load xchain-vm: ' + hops.join('; ') + '. Re-link it inside the tree: ' +
+        'ln -sfn ../xchain-vm ' + path.join(repoRoot, 'xchain-indexer', 'xchain-vm')
+}
+
 module.exports = {
     STAMP_AHEAD_S,
     POLL_MS,
@@ -545,4 +610,7 @@ module.exports = {
     hubRows,
     blockHashesOf,
     waitCommitted,
+    readAdmissionRows,
+    corpusCoordinates,
+    vmLinkProblem,
 }

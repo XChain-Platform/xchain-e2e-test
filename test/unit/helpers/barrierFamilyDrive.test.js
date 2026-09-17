@@ -273,3 +273,65 @@ describe('barrierFamilyDrive: an indexer whose API is not listening yet is not l
         assert.deepStrictEqual(all.map((s) => s.height), [100, 100])
     })
 })
+
+describe('barrierFamilyDrive: the AT4 corpus coordinates and the VM link a copied tree breaks', function () {
+    const fs = require('fs')
+    const os = require('os')
+    const path = require('path')
+
+    function tree (link) {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'at4-vmlink-'))
+        fs.mkdirSync(path.join(root, 'xchain-vm'))
+        fs.writeFileSync(path.join(root, 'xchain-vm', 'package.json'), '{}')
+        fs.mkdirSync(path.join(root, 'xchain-indexer', 'node_modules'), { recursive: true })
+        fs.symlinkSync('../xchain-vm', path.join(root, 'xchain-indexer', 'node_modules', 'xchain-vm'))
+        fs.symlinkSync(link, path.join(root, 'xchain-indexer', 'xchain-vm'))
+        return root
+    }
+
+    it('passes a tree whose indexer link resolves to the sibling VM', function () {
+        const root = tree('../xchain-vm')
+        try { assert.strictEqual(drive.vmLinkProblem(root), null) } finally { fs.rmSync(root, { recursive: true, force: true }) }
+    })
+
+    it('names both hops and the re-link when the link points at a path this host lacks', function () {
+        const root = tree('/srv/other-host/Sites/XChain-Platform/xchain-indexer/xchain-vm')
+        try {
+            const why = drive.vmLinkProblem(root)
+            assert.match(String(why), /xchain-indexer\/node_modules\/xchain-vm -> \.\.\/xchain-vm/)
+            assert.match(String(why), /xchain-indexer\/xchain-vm -> \/srv\/other-host\/Sites/)
+            assert.ok(String(why).endsWith('ln -sfn ../xchain-vm ' + path.join(root, 'xchain-indexer', 'xchain-vm')), why)
+        } finally { fs.rmSync(root, { recursive: true, force: true }) }
+    })
+
+    it('reads the corpus coordinates off the venue with the password named, never carried', function () {
+        const venue = {
+            coin: 'bitcoin', network: 'regtest', _live: { decoder: { name: 'XChain_BTC_Regtest_Decoder', host: '127.0.0.1', port: 57400, pass: 'secret' } },
+            hubDb: { host: '127.0.0.1', port: '57400', user: 'root', pass: 'secret', disposable: false },
+            indexers: [{ index: 0, mirrorDbName: 'XChain_AM_MVH_at4corpus_Mirror0' }],
+        }
+        const c = drive.corpusCoordinates(venue, 0, 'BTC')
+        assert.deepStrictEqual(c, {
+            coin: 'BTC', network: 'regtest', decoderDb: 'XChain_BTC_Regtest_Decoder', decoderServer: { host: '127.0.0.1', port: 57400 },
+            mirrorDb: 'XChain_AM_MVH_at4corpus_Mirror0', db: { host: '127.0.0.1', port: '57400', user: 'root' },
+            passEnv: 'HUB_DB_PASS', hubDbDisposable: false,
+        })
+        assert.ok(!JSON.stringify(c).includes('secret'))
+        assert.throws(() => drive.corpusCoordinates(venue, 1, 'BTC'), /no indexer 1/)
+    })
+
+    it('reads each mirror\'s rows for the request with the admission column the coin binds on', async function () {
+        const seen = []
+        const mariadb = { createConnection: async (o) => ({
+            query: async (sql, params) => { seen.push({ db: o.database, sql, params }); return [{ id: 1, admit_block_btc: 276 }] },
+            end: async () => {},
+        }) }
+        const venue = { hubDb: { host: '127.0.0.1', port: '57400', user: 'root', pass: 'p' }, indexers: [{ mirrorDbName: 'M0' }, { mirrorDbName: 'M1' }] }
+        const got = await drive.readAdmissionRows(venue, 'c24bfe588b4c7e52', 'LTC', { mariadb })
+        assert.strictEqual(got.column, 'admit_block_btc')
+        assert.deepStrictEqual(got.rows, [[{ id: 1, admit_block_btc: 276 }], [{ id: 1, admit_block_btc: 276 }]])
+        assert.deepStrictEqual(seen.map((q) => q.db), ['M0', 'M1'])
+        assert.match(seen[0].sql, /`admit_block_btc` FROM attestation_responses WHERE request_id = \?/)
+        assert.deepStrictEqual(seen[0].params, ['c24bfe588b4c7e52'])
+    })
+})

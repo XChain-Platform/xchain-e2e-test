@@ -275,3 +275,77 @@ describe('barrierFamilyRows: the timed-out line parser', () => {
         assert.deepStrictEqual(rows.timedOutLines('', 812000), { lines: 0, distinct: [], identical: 0 })
     })
 })
+
+describe('barrierFamilyRows: the AT4 signed admission-era corpus', () => {
+    const COL = 'admit_block_btc'
+    const signed = (over) => Object.assign({ response_hash: 'de30690073c0f924', signatures: '["aa","bb","cc"]', [COL]: 276 }, over || {})
+    const applied = (over) => Object.assign({ action_index: 22, block_index: 276, tx_index: null, response_hash: 'de30690073c0f924' }, over || {})
+
+    it('builds an asker that requests at redundancy 3 inside the given window and tags its callback', () => {
+        const code = rows.attestRequestContractCode(60, 'ctx-at4corpus')
+        assert.match(code, /redundancy: 3, deadlineBlocks: 60 \}/)
+        assert.match(code, /\['ctx-at4corpus'\]/)
+        assert.throws(() => rows.attestRequestContractCode(0, 'ctx'), /bad deadline/)
+        assert.throws(() => rows.attestRequestContractCode(60, "x'); evil('"), /bad context tag/)
+    })
+
+    it('accepts a signed row applied at its admission height on both indexers, and reports that height', () => {
+        const got = rows.admitHeightApplyFindings(COL, [[signed()], [signed()]], [applied(), applied()])
+        assert.deepStrictEqual(got, { findings: [], admitHeight: 276 })
+    })
+
+    it('binds the earliest admission height when a second leader slot left a later row', () => {
+        const got = rows.admitHeightApplyFindings(COL, [[signed({ [COL]: 279 }), signed()], [signed()]], [applied(), applied()])
+        assert.deepStrictEqual(got, { findings: [], admitHeight: 276 })
+    })
+
+    it('names an apply one block past the admission height, which is the claim under test', () => {
+        const got = rows.admitHeightApplyFindings(COL, [[signed()], [signed()]], [applied(), applied({ block_index: 277 })])
+        assert.ok(got.findings.some((f) => /indexer 1 applied it at block 277, not at its admission height 276/.test(f)), JSON.stringify(got.findings))
+        assert.ok(got.findings.some((f) => /block_index=277 while indexer 0 applied 276/.test(f)), JSON.stringify(got.findings))
+    })
+
+    it('names a legacy-era row, an unsigned row, a transaction-backed apply and a missing mirror', () => {
+        const legacy = rows.admitHeightApplyFindings(COL, [[signed({ [COL]: null })], [signed()]], [])
+        assert.ok(legacy.findings.some((f) => /indexer 0: mirror row de30690073c0f924 carries no admit_block_btc/.test(f)), JSON.stringify(legacy.findings))
+        const unsigned = rows.admitHeightApplyFindings(COL, [[signed({ signatures: '[]' })], [signed()]], [])
+        assert.ok(unsigned.findings.some((f) => /carries no signatures/.test(f)), JSON.stringify(unsigned.findings))
+        const txBacked = rows.admitHeightApplyFindings(COL, [[signed()], [signed()]], [applied({ tx_index: 3 }), applied()])
+        assert.ok(txBacked.findings.some((f) => /tx_index 3, not NULL/.test(f)), JSON.stringify(txBacked.findings))
+        const missing = rows.admitHeightApplyFindings(COL, [[signed()], []], [])
+        assert.ok(missing.findings.some((f) => /indexer 1 holds no mirror row/.test(f)), JSON.stringify(missing.findings))
+        assert.ok(missing.findings.some((f) => /disagree on the admission height/.test(f)), JSON.stringify(missing.findings))
+    })
+
+    const corpus = (over) => Object.assign({
+        indexerRoot: '/tree/xchain-indexer', coin: 'BTC', network: 'regtest',
+        decoderDb: 'XChain_BTC_Regtest_Decoder', decoderServer: { host: '127.0.0.1', port: 57400 },
+        mirrorDb: 'XChain_AM_MVH_at4corpus_Mirror0', db: { host: '127.0.0.1', port: '57400', user: 'root' },
+        passEnv: 'HUB_DB_PASS', hubDbDisposable: false, admitHeight: 276, corpusTip: 322,
+    }, over || {})
+
+    it('puts H strictly above the admission height and at or below the corpus tip, and passes the password by name', () => {
+        const got = rows.replayWitnessCommand(corpus())
+        assert.deepStrictEqual(got.refusals, [])
+        assert.strictEqual(got.activationHeight, 299)
+        assert.strictEqual(got.line, 'node /tree/xchain-indexer/bin/verify-mirror-admission-replay-equivalence.js --coin BTC --network regtest ' +
+            '--decoder-db XChain_BTC_Regtest_Decoder --mirror-db XChain_AM_MVH_at4corpus_Mirror0 --activation-height 299 ' +
+            '--db-host 127.0.0.1 --db-port 57400 --db-user root --db-pass-env HUB_DB_PASS')
+        const tight = rows.replayWitnessCommand(corpus({ corpusTip: 277 }))
+        assert.strictEqual(tight.activationHeight, 277)
+        for (let tip = 277; tip < 290; tip++) {
+            const h = rows.replayWitnessCommand(corpus({ corpusTip: tip })).activationHeight
+            assert.ok(h > 276 && h <= tip, 'H ' + h + ' outside (276, ' + tip + ']')
+        }
+    })
+
+    it('refuses a corpus no witness can read: no block above the admission height, split servers, a disposable mirror', () => {
+        assert.match(rows.replayWitnessCommand(corpus({ corpusTip: 276 })).refusals.join(), /not above the admission height/)
+        assert.strictEqual(rows.replayWitnessCommand(corpus({ corpusTip: 276 })).activationHeight, null)
+        assert.match(rows.replayWitnessCommand(corpus({ decoderServer: { host: '127.0.0.1', port: 3306 } })).refusals.join(), /reads both from one server/)
+        assert.deepStrictEqual(rows.replayWitnessCommand(corpus({ decoderServer: { host: 'localhost', port: '57400' } })).refusals, [])
+        assert.match(rows.replayWitnessCommand(corpus({ hubDbDisposable: true })).refusals.join(), /disposable database/)
+        assert.match(rows.replayWitnessCommand(corpus({ mirrorDb: 'x`; DROP' })).refusals.join(), /not a plain schema name/)
+        assert.match(rows.replayWitnessCommand(corpus({ passEnv: 'hunter2' })).refusals.join(), /not an environment variable name/)
+    })
+})

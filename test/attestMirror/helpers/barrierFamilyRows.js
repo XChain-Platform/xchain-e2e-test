@@ -13,6 +13,8 @@
  * inert mirror rows that close each member's empty-mirror escape, the SQL shapes
  * a leg reads a hub or a mirror with, the grace ladder BF1 walks the family with,
  * and the log-line parser the "three identical timed-out lines" assertion reads.
+ * For AT4 it also holds the request contract, the admitted-at-height apply check and
+ * the replay witness invocation for a signed admission-era mirror corpus.
  *
  * Nothing here touches a venue, a database or the rail, so every function is
  * driven in the unit tier (test/unit/helpers/barrierFamilyRows.test.js) before a
@@ -29,6 +31,7 @@
  ********************************************************************/
 
 const crypto = require('crypto')
+const path = require('path')
 
 const { MIRROR_BARRIERS, gracedBarrierReason } = require('../../helpers/attestMirrorVenue')
 const { FAMILY_REASONS_LOOP_ORDER, admissionColumn, ADMISSION_TABLES } = require('./barrierFamilyFixture')
@@ -442,6 +445,118 @@ function timedOutLines (logText, blockHeight) {
     return { lines: Array.from(counts.values()).reduce((a, b) => a + b, 0), distinct: Array.from(counts.keys()), identical }
 }
 
+// ---------------------------------------------------------------------------
+// AT4: the signed admission-era corpus the replay witness reads
+// ---------------------------------------------------------------------------
+
+/**
+ * The request contract the AT4 corpus drive deploys: AT1's asker, one `ask` that emits
+ * a redundancy-3 attestation request and one callback that records what arrived. The
+ * context tag is what tells this drive's callback apart from AT1's in contract state.
+ */
+function attestRequestContractCode (deadlineBlocks, contextTag) {
+    const d = Number(deadlineBlocks)
+    if (!Number.isSafeInteger(d) || d <= 0) throw new Error('barrierFamilyFixture: bad deadline ' + deadlineBlocks)
+    if (!/^[A-Za-z0-9-]+$/.test(String(contextTag))) throw new Error('barrierFamilyFixture: bad context tag ' + contextTag)
+    return `
+module.exports = {
+    meta: { name: 'Admission Corpus Asker', description: 'Requests an attestation whose response is admitted by height through the hub mirror.', version: '1.0.0' },
+    ask: function(xchain) {
+        var requestId = xchain.attestation.request(xchain.getInputParam(0), xchain.getInputParam(1), 'handleResponse', ['${contextTag}'], { redundancy: 3, deadlineBlocks: ${d} });
+        xchain.state.set('pending_request_id', requestId);
+        return requestId;
+    },
+    handleResponse: function(xchain) {
+        xchain.state.set('callback_request_id',  xchain.getInputParam(0));
+        xchain.state.set('callback_provider_id', xchain.getInputParam(1));
+        xchain.state.set('callback_status',      xchain.getInputParam(2));
+        xchain.state.set('callback_payload',     xchain.getInputParam(3));
+        xchain.state.set('callback_context',     xchain.getInputParam(4));
+    }
+};
+`
+}
+
+/** A signatures cell that carries at least one signature (JSON text or an array). */
+function hasSignatures (cell) {
+    if (cell === null || cell === undefined) return false
+    if (Array.isArray(cell)) return cell.length > 0
+    const s = String(cell).trim()
+    return s !== '' && s !== '[]' && s !== 'null' && s !== '{}'
+}
+
+/**
+ * What stops one signed response from being an admission-era corpus row, as findings
+ * (empty means it is one). `mirrorRows[i]` is indexer i's mirror rows for the request,
+ * `applied[i]` its applied v1 row. The claims: every mirror row is signed and carries an
+ * admission height in `column`; both mirrors agree on the earliest one; each indexer
+ * applied the response with no transaction AT that height; and the two applies agree.
+ *
+ * @returns {{findings: string[], admitHeight: number|null}}
+ */
+function admitHeightApplyFindings (column, mirrorRows, applied) {
+    const findings = []
+    const perIndexer = mirrorRows.map((rowsOf, i) => {
+        if (!rowsOf || rowsOf.length === 0) { findings.push('indexer ' + i + ' holds no mirror row'); return null }
+        for (const r of rowsOf) {
+            const tag = String(r.response_hash).slice(0, 16)
+            if (r[column] === null || r[column] === undefined) findings.push('indexer ' + i + ': mirror row ' + tag + ' carries no ' + column + ', a legacy-era row')
+            if (!hasSignatures(r.signatures)) findings.push('indexer ' + i + ': mirror row ' + tag + ' carries no signatures')
+        }
+        const heights = rowsOf.map((r) => r[column]).filter((h) => h !== null && h !== undefined).map(Number)
+        return heights.length ? Math.min(...heights) : null
+    })
+    if (new Set(perIndexer.map(String)).size !== 1) findings.push('the mirrors disagree on the admission height: ' + JSON.stringify(perIndexer))
+    const admitHeight = perIndexer[0]
+    applied.forEach((a, i) => {
+        if (!a) { findings.push('indexer ' + i + ' has not applied the response'); return }
+        if (a.tx_index !== null) findings.push('indexer ' + i + ' applied it with tx_index ' + a.tx_index + ', not NULL')
+        if (perIndexer[i] !== null && Number(a.block_index) !== perIndexer[i]) {
+            findings.push('indexer ' + i + ' applied it at block ' + a.block_index + ', not at its admission height ' + perIndexer[i])
+        }
+    })
+    const [first, ...others] = applied
+    for (const [k, other] of others.entries()) {
+        for (const f of ['action_index', 'block_index', 'response_hash']) {
+            if (first && other && String(first[f]) !== String(other[f])) findings.push('indexer ' + (k + 1) + ' applied ' + f + '=' + other[f] + ' while indexer 0 applied ' + first[f])
+        }
+    }
+    return { findings, admitHeight }
+}
+
+const SQL_NAME = /^[A-Za-z0-9_]+$/
+const sameServer = (a, b) => String(a.host).replace(/^localhost$/, '127.0.0.1') === String(b.host).replace(/^localhost$/, '127.0.0.1') && String(a.port) === String(b.port)
+
+/**
+ * The replay witness invocation for a corpus the AT4 drive built, or the refusals that
+ * make the corpus unreadable by it. The activation height H sits strictly above the
+ * admission height and at or below the corpus tip, so BOUNDARY replays the admitting
+ * block in the legacy era (A1 covers it) while ON applies it there (A2 has a difference).
+ * The password is passed by the NAME of its variable, never by value.
+ *
+ * @param {{indexerRoot: string, coin: string, network: string, decoderDb: string,
+ *          decoderServer: {host, port}, mirrorDb: string, db: {host, port, user},
+ *          passEnv: string, hubDbDisposable: boolean, admitHeight: number, corpusTip: number}} o
+ * @returns {{refusals: string[], activationHeight: number|null, argv: string[], line: string}}
+ */
+function replayWitnessCommand (o) {
+    const refusals = []
+    for (const k of ['decoderDb', 'mirrorDb']) if (!SQL_NAME.test(String(o[k]))) refusals.push(k + ' ' + o[k] + ' is not a plain schema name')
+    if (!/^[A-Z_][A-Z0-9_]*$/.test(String(o.passEnv))) refusals.push('passEnv ' + o.passEnv + ' is not an environment variable name')
+    if (!sameServer(o.decoderServer, o.db)) refusals.push('the decoder schema is on ' + o.decoderServer.host + ':' + o.decoderServer.port + ' and the mirror on ' + o.db.host + ':' + o.db.port + '; the witness reads both from one server')
+    if (o.hubDbDisposable) refusals.push('the mirror lives in a disposable database that the venue removes at stop, so no witness can read it afterwards')
+    const admit = Number(o.admitHeight)
+    const tip = Number(o.corpusTip)
+    const valid = Number.isSafeInteger(admit) && Number.isSafeInteger(tip) && tip > admit
+    if (!valid) refusals.push('the corpus tip ' + o.corpusTip + ' is not above the admission height ' + o.admitHeight + ', so no H inside the corpus sits above it')
+    const H = valid ? Math.floor((admit + 1 + tip) / 2) : null
+    const argv = [path.join(o.indexerRoot, 'bin', 'verify-mirror-admission-replay-equivalence.js'),
+        '--coin', String(o.coin), '--network', String(o.network), '--decoder-db', String(o.decoderDb),
+        '--mirror-db', String(o.mirrorDb), '--activation-height', String(H),
+        '--db-host', String(o.db.host), '--db-port', String(o.db.port), '--db-user', String(o.db.user), '--db-pass-env', String(o.passEnv)]
+    return { refusals, activationHeight: H, argv, line: 'node ' + argv.join(' ') }
+}
+
 module.exports = {
     NATURAL_KEYS,
     INERT_SIGNATURES,
@@ -464,4 +579,7 @@ module.exports = {
     distinctRuns,
     timedOutLines,
     sha256Hex,
+    attestRequestContractCode,
+    admitHeightApplyFindings,
+    replayWitnessCommand,
 }
