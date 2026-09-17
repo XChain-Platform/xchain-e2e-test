@@ -125,7 +125,7 @@ describe('BF8 unit: a two-entry map binds per chain at its own entry, a one-entr
 describe('BF8: the non-BTC leg, one BTC/LTC match bound at each chain\'s own entry', function () {
   this.timeout(Math.max(drive.LEG_FLOOR_MS, 90 * 60 * 1000))
 
-  const ctx = { venue: null, btc: null, ltc: null, ltcVenue: null, plan: null, keys: null, sets: { BTC: {}, LTC: {} },
+  const ctx = { venue: null, btc: null, ltc: null, ltcVenue: null, plan: null, tips: null, keys: null, sets: { BTC: {}, LTC: {} },
                 blocks: { BTC: {}, LTC: {} }, committedAt: {} }
 
   before(async function () {
@@ -133,6 +133,9 @@ describe('BF8: the non-BTC leg, one BTC/LTC match bound at each chain\'s own ent
   })
 
   after(async function () {
+    // A case that failed while either chain was held must not leave a miner paused.
+    await drive.releaseChain(ctx.btc)
+    await drive.releaseChain(ctx.ltc)
     if (ctx.ltcVenue) await ctx.ltcVenue.stop()
     if (ctx.venue) await ctx.venue.stop()
   })
@@ -188,9 +191,15 @@ async function bootBothCoins (ctx) {
   assert.deepStrictEqual(ctx.ltcVenue.indexers.map((ix) => ix.followsHub), btcFollows, 'each LTC indexer must follow the hub its BTC twin follows')
 }
 
+// Both chains are held from their tip reads to their planned entries (each miner paused BEFORE
+// its read): the plan names exact heights, and a block either adaptive miner lands in between
+// moves an entry off the block this leg mines for it.
 async function seedRows (ctx) {
-  const btcTip = Number(await ctx.btc.globals.nodeConnector.getBlockCount())
-  const ltcTip = Number(await ctx.ltc.globals.nodeConnector.getBlockCount())
+  const btcHeld = await drive.holdBaseline(ctx.btc, ctx.venue, { label: 'bf8 BTC' })
+  const ltcHeld = await drive.holdBaseline(ctx.ltc, ctx.ltcVenue, { label: 'bf8 LTC' })
+  const btcTip = btcHeld.tip
+  const ltcTip = ltcHeld.tip
+  ctx.tips = { [BTC]: btcTip, [LTC]: ltcTip }
   ctx.plan = planEntries(btcTip, ltcTip)
   const now = Math.floor(Date.now() / 1000)
   const base = { network: ctx.venue.network, coin: BTC, otherChain: LTC, snapshotBlock: btcTip, effectiveTime: now - 10 }
@@ -216,6 +225,8 @@ async function seedRows (ctx) {
 
 async function bindOnBtc (ctx) {
   const started = Date.now()
+  await drive.assertChainHeld(ctx.btc, ctx.tips[BTC], 'the BTC chain, before its entry,')
+  // Resumes the BTC miner: the plan has one BTC block, so the BTC hold ends here.
   const block = await drive.mineStamped(ctx.btc, null)
   assert.strictEqual(block.height, ctx.plan[BTC], 'the BTC block is not the planned entry')
   for (const i of ARMED) {
@@ -238,8 +249,11 @@ async function bindOnLtc (ctx) {
   // Stamps have one-second resolution: two seconds keeps the LTC stamp off BTC's.
   await new Promise((r) => setTimeout(r, 2000))
   await withRail(ctx.ltc, async () => {
-    for (let h = Number(await ctx.ltc.globals.nodeConnector.getBlockCount()) + 1; h <= ctx.plan[LTC]; h++) {
-      const block = await drive.mineStamped(ctx.ltc, null)
+    await drive.assertChainHeld(ctx.ltc, ctx.tips[LTC], 'the LTC chain, before its run,')
+    for (let h = ctx.tips[LTC] + 1; h <= ctx.plan[LTC]; h++) {
+      // The LTC miner stays paused between the run's blocks (each commit wait is minutes
+      // long) and resumes with the last one, the LTC entry.
+      const block = await drive.mineStamped(ctx.ltc, null, { resume: h === ctx.plan[LTC] })
       assert.strictEqual(block.height, h, 'the LTC block is not the next height')
       for (const i of ARMED) {
         const got = await drive.waitCommitted(ctx.ltcVenue, i, h, 10 * 60 * 1000)

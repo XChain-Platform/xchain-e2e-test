@@ -59,7 +59,7 @@ const SEED_TABLES = ['cross_chain_matches', 'cross_chain_calls', 'bridge_transfe
 describe('BF1: the RED baseline, and the family enumerated from the running node', function () {
     this.timeout(Math.max(drive.LEG_FLOOR_MS, fixture.legTimeoutMs(WALK_AHEAD_S + (10 * LADDER_STEP_S))))
 
-    const ctx = { venue: null, btc: null, coin: 'BTC', blocks: {}, walk: [], red: null }
+    const ctx = { venue: null, btc: null, coin: 'BTC', blocks: {}, walk: [], red: null, baseline: null, markerAddress: null }
 
     before(async function () {
         const up = await drive.bootFamilyVenue({
@@ -70,6 +70,9 @@ describe('BF1: the RED baseline, and the family enumerated from the running node
     })
 
     after(async function () {
+        // The miner is resumed first and unconditionally: a case that failed between the
+        // held baseline and the walker block must not hand the next leg a paused chain.
+        await drive.releaseChain(ctx.btc)
         if (!ctx.venue) return
         try { ctx.venue.releaseMirrorTable(WALKER, 'capability_snapshots') } catch (_) { /* never armed */ }
         await ctx.venue.stop()
@@ -99,8 +102,24 @@ describe('BF1: the RED baseline, and the family enumerated from the running node
 // One inert row per member table, plus the capability snapshot the match and call rows
 // point at. The snapshot is withheld from the WALKER first, so the ninth member holds
 // there and nowhere else; the inert node receives it and stays clear of that member.
+//
+// THE CHAIN IS HELD STILL BEFORE ANYTHING IS ARMED. The snapshot member is content-keyed
+// and runs on EVERY block, so once the rows are seeded and the snapshot withheld, the first
+// block the walker meets that is stamped at or past the seed time parks it there forever.
+// That must be the walker block and nothing earlier: a block the adaptive miner lands, or the
+// two the marker's funding mines, would take the ladder and the snapshot stall first, and the
+// walker would never stand on walker block - 1 (six red drives on 2026-09-17, "last []").
+// So: fund the marker while the miner runs, pause the miner, read the tip, let both indexers
+// commit it through the ladder, and only then withhold and seed.
 async function seedFamily (ctx) {
-    const tip = Number(await ctx.btc.globals.nodeConnector.getBlockCount())
+    const held = await drive.holdBaseline(ctx.btc, ctx.venue, {
+        label: 'bf1',
+        graces: LADDER,
+        beforeHold: () => drive.fundMarkerAddress(ctx.btc, 'BF1'),
+    })
+    ctx.baseline = held
+    ctx.markerAddress = held.before
+    const tip = held.tip
     const now = Math.floor(Date.now() / 1000)
     const spec = { network: ctx.venue.network, coin: ctx.coin, effectiveTime: now, snapshotBlock: tip, tag: 'bf1|' + tip }
     ctx.venue.withholdMirrorTable(WALKER, 'capability_snapshots')
@@ -111,16 +130,24 @@ async function seedFamily (ctx) {
         await drive.waitForMirrorRows(ctx.venue, WALKER, t, 1)
     }
     await drive.waitForMirrorRows(ctx.venue, INERT, 'capability_snapshots', 1)
+    await drive.assertChainHeld(ctx.btc, tip, 'the BTC chain, across the seed,')
     ctx.seedTime = now
     console.log('BF1 seeded one finalized row per member at effective_time ' + now + ', snapshot_block ' + tip)
 }
 
 async function mineBoth (ctx) {
-    // The marker is queued with mining paused (see queueMarkerTransaction), so it lands in
-    // the walker block and that block reads price.
-    const marker = await drive.queueMarkerTransaction(ctx.btc, 'BF1')
+    assert.ok(ctx.baseline && ctx.markerAddress, 'the held baseline and the funded marker address come from the seed case')
+    // The marker is broadcast with mining still paused (the address was funded before the
+    // hold), so it lands in the walker block and that block reads price. The walker block is
+    // the first block after the held baseline, which is what observeBoth keys on.
+    await drive.assertChainHeld(ctx.btc, ctx.baseline.tip, 'the BTC chain, before the walker block,')
+    const marker = await drive.broadcastMarker(ctx.btc, ctx.markerAddress, 'BF1')
     const wall = Math.floor(Date.now() / 1000)
+    // This mineStamped resumes the miner: the hold ends here. A block landing between the
+    // walker block and the red block is harmless, because the walker is already parked on
+    // the walker block and the red block's height is read back, never assumed.
     const walk = await drive.mineStamped(ctx.btc, wall + WALK_AHEAD_S)
+    assert.strictEqual(walk.height, ctx.baseline.tip + 1, 'the walker block landed at ' + walk.height + ', not on the held baseline ' + ctx.baseline.tip)
     const red = await drive.mineStamped(ctx.btc, wall + drive.STAMP_AHEAD_S)
     // Never the pin, always the stamp read back: a pin BEHIND is silent and a pin AHEAD
     // wedges the miner, so a leg that trusted the call could assert against a stamp that

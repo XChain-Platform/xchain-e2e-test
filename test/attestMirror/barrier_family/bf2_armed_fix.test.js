@@ -57,6 +57,8 @@ describe('BF2: the fix, armed, the identical block on the identical mirror state
     })
 
     after(async function () {
+        // A case that failed while the chain was held must not leave the miner paused.
+        await drive.releaseChain(ctx.btc)
         if (ctx.venue) await ctx.venue.stop()
     })
 
@@ -75,8 +77,11 @@ describe('BF2: the fix, armed, the identical block on the identical mirror state
 
 // B is the next height; the rows are stamped against it before it exists so the
 // "admitted AT B" row is exactly at the boundary and the "past B" row is beyond it.
+// The chain is held from here to the drill block (miner paused BEFORE the tip is read), or a
+// block the adaptive miner lands in between takes height B and the drill block lands at B + 1.
 async function seedAdmissionRows (ctx) {
-    const tip = Number(await ctx.btc.globals.nodeConnector.getBlockCount())
+    const held = await drive.holdBaseline(ctx.btc, ctx.venue, { label: 'bf2' })
+    const tip = held.tip
     ctx.B = tip + 1
     const now = Math.floor(Date.now() / 1000)
     const base = { network: ctx.venue.network, coin: ctx.coin, effectiveTime: now, snapshotBlock: tip }
@@ -93,7 +98,9 @@ async function seedAdmissionRows (ctx) {
 }
 
 async function mineAndWatch (ctx) {
+    await drive.assertChainHeld(ctx.btc, ctx.B - 1, 'the BTC chain, before the drill block,')
     const wall = Math.floor(Date.now() / 1000)
+    // Resumes the miner: the hold ends with the drill block.
     ctx.block = await drive.mineStamped(ctx.btc, wall + drive.STAMP_AHEAD_S)
     assert.strictEqual(ctx.block.height, ctx.B, 'the drill block landed at ' + ctx.block.height + ', not the seeded B=' + ctx.B)
     assert.ok(ctx.block.blockTime >= wall + drive.STAMP_AHEAD_S - 1, 'the block is stamped ' + ctx.block.blockTime + ', not +' + drive.STAMP_AHEAD_S)

@@ -60,6 +60,8 @@ describe('BF5: the flag day, one venue, two rules, one row bound at two differen
     })
 
     after(async function () {
+        // A case that failed while the chain was held must not leave the miner paused.
+        await drive.releaseChain(ctx.btc)
         if (ctx.venue) await ctx.venue.stop()
     })
 
@@ -76,8 +78,12 @@ describe('BF5: the flag day, one venue, two rules, one row bound at two differen
     })
 })
 
+// The chain is held from the tip read through B + 1 (miner paused BEFORE the read, and B mined
+// with the miner left paused): the row's two rules are keyed on B and B + 2 exactly, so a block
+// the adaptive miner lands anywhere in that run moves both off the blocks this leg mines.
 async function seedDivergingRow (ctx) {
-    const tip = Number(await ctx.btc.globals.nodeConnector.getBlockCount())
+    const held = await drive.holdBaseline(ctx.btc, ctx.venue, { label: 'bf5' })
+    const tip = held.tip
     ctx.B = tip + 1
     const now = Math.floor(Date.now() / 1000)
     const base = { network: ctx.venue.network, coin: ctx.coin, snapshotBlock: tip }
@@ -93,8 +99,11 @@ async function seedDivergingRow (ctx) {
 }
 
 async function assertDivergence (ctx) {
+    await drive.assertChainHeld(ctx.btc, ctx.B - 1, 'the BTC chain, before B,')
     const wall = Math.floor(Date.now() / 1000)
-    ctx.blocks.B = await drive.mineStamped(ctx.btc, wall + AHEAD_S)
+    // Left PAUSED: the inert node's wait below runs for the whole stamp, and B + 1 must still
+    // be the next block when the convergence case mines it.
+    ctx.blocks.B = await drive.mineStamped(ctx.btc, wall + AHEAD_S, { resume: false })
     assert.strictEqual(ctx.blocks.B.height, ctx.B)
     const started = Date.now()
     const armed = await drive.waitForStatus(ctx.venue, ARMED, (s) => s.height !== null && s.height >= ctx.B, 5 * 60 * 1000)
@@ -119,7 +128,9 @@ async function assertDivergence (ctx) {
 }
 
 async function assertConvergence (ctx) {
-    ctx.blocks.B1 = await drive.mineStamped(ctx.btc, null)
+    await drive.assertChainHeld(ctx.btc, ctx.B, 'the BTC chain, after B,')
+    ctx.blocks.B1 = await drive.mineStamped(ctx.btc, null, { resume: false })
+    // Resumes the miner: the hold ends with B + 2.
     ctx.blocks.B2 = await drive.mineStamped(ctx.btc, null)
     assert.strictEqual(ctx.blocks.B2.height, ctx.B + 2)
     for (const i of [ARMED, INERT]) {

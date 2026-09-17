@@ -64,6 +64,8 @@ describe('BF3: the bound is real, a pinned height holds one member and only that
     })
 
     after(async function () {
+        // A case that failed while the chain was held must not leave the miner paused.
+        await drive.releaseChain(ctx.btc)
         if (!ctx.venue) return
         try { ctx.venue.releaseMirrorHeights(PINNED) } catch (_) { /* never armed */ }
         await ctx.venue.stop()
@@ -90,8 +92,11 @@ describe('BF3: the bound is real, a pinned height holds one member and only that
     })
 })
 
+// The chain is held from the tip read to the drill block (miner paused BEFORE the read), so the
+// pin sized for B is sized for the block this case actually mines.
 async function seedAndPin (ctx) {
-    const tip = Number(await ctx.btc.globals.nodeConnector.getBlockCount())
+    const held = await drive.holdBaseline(ctx.btc, ctx.venue, { label: 'bf3' })
+    const tip = held.tip
     ctx.B = tip + 1
     const now = Math.floor(Date.now() / 1000)
     const base = { network: ctx.venue.network, coin: ctx.coin, effectiveTime: now, snapshotBlock: tip }
@@ -106,7 +111,9 @@ async function seedAndPin (ctx) {
     // The pin must be seen on a live carrier BEFORE the block, so a reconnect cannot
     // re-read the true height; the drop forces the ready frame and a snapshot page through it.
     ctx.venue.indexers[PINNED].mirrorProxy.dropSockets()
+    await drive.assertChainHeld(ctx.btc, tip, 'the BTC chain, before the drill block,')
     const wall = Math.floor(Date.now() / 1000)
+    // Resumes the miner: the hold ends with the drill block.
     ctx.block = await drive.mineStamped(ctx.btc, wall + drive.STAMP_AHEAD_S)
     assert.strictEqual(ctx.block.height, ctx.B, 'the drill block landed at ' + ctx.block.height + ', not B=' + ctx.B)
     console.log('BF3 pinned ' + JSON.stringify(ctx.pin) + ' on indexer ' + PINNED + ' for B=' + ctx.B + ' stamped ' + ctx.block.blockTime)

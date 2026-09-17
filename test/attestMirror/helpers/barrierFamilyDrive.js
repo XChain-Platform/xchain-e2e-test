@@ -136,8 +136,14 @@ async function readBlockStamp (btc, height) {
  * Mine ONE block with the node clock pinned at `stampS` (unpinned when null), the miner's
  * adaptive loop paused so nothing else lands in it, and read the stamp back from the node.
  * The pin is released in a finally so a failed leg never leaves the rail's clock pinned.
+ *
+ * `opts.resume === false` leaves the miner PAUSED after the block, for a leg whose next
+ * drill block must be the very next height (BF5's B then B + 1 then B + 2, BF8's LTC run).
+ * The leg's last `mineStamped` resumes, and its after hook calls `releaseChain` in case a
+ * case failed in between. The clock pin is released either way.
  */
-async function mineStamped (btc, stampS) {
+async function mineStamped (btc, stampS, opts) {
+    const resume = !(opts && opts.resume === false)
     const miner = btc.globals.regtestMinerConnector
     const before = Number(await btc.globals.nodeConnector.getBlockCount())
     await miner.pauseMining()
@@ -146,7 +152,7 @@ async function mineStamped (btc, stampS) {
         await miner.generateBlocks(1)
     } finally {
         if (stampS !== null && stampS !== undefined) await miner.setMockTime(0).catch(() => {})
-        await miner.resumeMining().catch(() => {})
+        if (resume) await miner.resumeMining().catch(() => {})
     }
     const after = Number(await btc.globals.nodeConnector.getBlockCount())
     assert.strictEqual(after, before + 1, 'mineStamped: expected exactly one block, tip went ' + before + ' to ' + after)
@@ -203,16 +209,138 @@ async function mineSpacedChain (btc, count, behindS) {
  * the marker needs it PAUSED (or it lands in a block of its own before the leg's pinned
  * block). So: fund, pause, broadcast. The caller mines the pinned block next; `mineStamped`
  * resumes the miner in its finally.
+ *
+ * A leg that holds the chain still across its setup (BF1) cannot fund here: funding MINES
+ * at least two blocks (the funding transaction and the gas mint), and on BF1's walker any
+ * block mined after the seed parks forever at the withheld snapshot member. Such a leg calls
+ * `fundMarkerAddress` BEFORE `holdBaseline` and `broadcastMarker` after it instead.
  */
 async function queueMarkerTransaction (btc, label) {
+    const addr = await fundMarkerAddress(btc, label)
+    return broadcastMarker(btc, addr, label)
+}
+
+/** Fund the marker's address with the miner RUNNING; the blocks this mines land now, not later. */
+async function fundMarkerAddress (btc, label) {
     return withRail(btc, async () => {
         const cryptoHelper = require('../../cryptoHelper')
+        return cryptoHelper.getNewFundedAddress(label, global.COIN, global.NETWORK, null, 'legacy', 0, 1)
+    })
+}
+
+/** Broadcast the marker from a funded address with the miner PAUSED, so it waits for the drill block. */
+async function broadcastMarker (btc, addr, label) {
+    return withRail(btc, async () => {
         const transactionHelper = require('../../transactionHelper')
-        const addr = await cryptoHelper.getNewFundedAddress(label, global.COIN, global.NETWORK, null, 'legacy', 0, 1)
+        // Idempotent when the leg already holds the chain; the pause is what keeps the marker
+        // out of any block but the one `mineStamped` mines next.
         await btc.globals.regtestMinerConnector.pauseMining()
         const txid = await transactionHelper.createAndSendTransaction(addr, 'BROADCAST|0|' + label + '|1')
         return { address: addr.address, txid }
     })
+}
+
+// What a level wait allows on top of the longest grace a leg configured. A graced member
+// opens once the hub's stream watermark passes stamp + grace, the watermark trails wall
+// clock, and a held block is re-evaluated once per barrier cycle, so a rung can open up to a
+// cycle late: three cycles for that, plus five minutes for a DOGE nudge and a slow poll.
+const LEVEL_MARGIN_S = (3 * fixture.BARRIER_CYCLE_S) + 300
+
+/**
+ * How long every indexer may take to commit an ORDINARY block stamped `stampS` when one of
+ * them carries `graces` (a venue grace object, such as BF1's ladder). The anchor-attest and
+ * attest-response members have no escape, so every BTC block waits out their graces, which
+ * are the top two rungs of BF1's ladder (630 s and 720 s at the default 90 s step): the
+ * budget is the longest grace, plus however far the stamp sits ahead of `nowS`, plus
+ * LEVEL_MARGIN_S. A five-minute drain, shorter than those rungs, is what a scratch BF1 drive
+ * went red on.
+ *
+ * @returns {number} milliseconds
+ */
+function levelBudgetMs (graces, stampS, nowS) {
+    const values = Object.values(graces || {}).map(Number).filter(Number.isFinite)
+    const longest = values.length ? Math.max(0, ...values) : 0
+    const ahead = Number.isFinite(Number(stampS)) && Number.isFinite(Number(nowS)) ? Math.max(0, Number(stampS) - Number(nowS)) : 0
+    return (longest + ahead + LEVEL_MARGIN_S) * 1000
+}
+
+/**
+ * Stop the chain moving: PAUSE the miner, and only then read the tip. Read-then-pause leaves
+ * a window in which the adaptive loop lands a block after the read, and every leg that keys
+ * rows or a withhold on "the next block" then keys them on a block that is already history.
+ *
+ * @returns {Promise<{tip: number, stamp: object}>}
+ */
+async function holdChain (rail) {
+    await rail.globals.regtestMinerConnector.pauseMining()
+    const tip = Number(await rail.globals.nodeConnector.getBlockCount())
+    return { tip, stamp: await readBlockStamp(rail, tip) }
+}
+
+/**
+ * The after-hook half of `holdChain`: resume the miner so a leg that failed between its hold
+ * and its last `mineStamped` never hands the next leg a paused chain. Resuming a running
+ * miner is a no-op, so it is safe unconditionally. Never throws: an after hook must still
+ * stop the venue.
+ */
+async function releaseChain (rail) {
+    if (!rail || !rail.globals || !rail.globals.regtestMinerConnector) return false
+    try {
+        await rail.globals.regtestMinerConnector.resumeMining()
+        return true
+    } catch (_) {
+        return false
+    }
+}
+
+/** The held chain did not move: a block that landed anyway is named here, not as a stall later. */
+async function assertChainHeld (rail, tip, what) {
+    const now = Number(await rail.globals.nodeConnector.getBlockCount())
+    assert.strictEqual(now, Number(tip), (what || 'the held chain') + ' moved from ' + tip + ' to ' + now +
+        ' while the miner was paused: a block landed between the baseline and the drill block')
+    return now
+}
+
+/** Every indexer of `venue` has committed exactly `tip`, the DOGE remedy applied on the way. */
+async function levelAtTip (venue, tip, timeoutMs, opts) {
+    const idx = venue.indexers.map((ix) => ix.index)
+    const want = Number(tip)
+    const level = await untilOrClearDogeStall(async () => {
+        const all = []
+        for (const i of idx) all.push(await statusSnapshot(venue, i))
+        return { ok: all.every((s) => s.height === want), all }
+    }, Object.assign({ timeoutMs, tipProbe: venueTipProbe(venue, idx[idx.length - 1]) }, (opts && opts.intervalMs) ? { intervalMs: opts.intervalMs } : {}))
+    assert.ok(level && level.ok, 'the venue indexers never committed the held baseline ' + want + ' inside ' + timeoutMs + ' ms: ' +
+        JSON.stringify(level && level.all && level.all.map((s) => ({ height: s.height, stallReason: s.stallReason }))))
+    return level.all
+}
+
+/**
+ * The setup ORDER every leg that keys rows, a pin or a withhold on "the next block" follows,
+ * in one place so it cannot drift per leg:
+ *
+ *   1. `opts.beforeHold()` runs with the miner RUNNING (funding a marker waits for blocks);
+ *   2. the miner is paused, then the baseline tip is read (`holdChain`);
+ *   3. every indexer commits exactly that tip, inside a budget sized from `opts.graces`
+ *      (`levelBudgetMs`) unless `opts.levelTimeoutMs` names one;
+ *   4. the tip is read again and must not have moved (`assertChainHeld`).
+ *
+ * The leg arms its withhold and seeds its rows only AFTER this returns. The pause is lifted by
+ * the leg's drill `mineStamped` and, on a failed case, by `releaseChain` in its after hook.
+ *
+ * @returns {Promise<{tip: number, stamp: object, levelTimeoutMs: number, before: *}>}
+ */
+async function holdBaseline (rail, venue, opts) {
+    const o = opts || {}
+    const before = o.beforeHold ? await o.beforeHold() : undefined
+    const held = await holdChain(rail)
+    const levelTimeoutMs = Number(o.levelTimeoutMs) ||
+        levelBudgetMs(o.graces, held.stamp.blockTime, Math.floor(Date.now() / 1000))
+    await levelAtTip(venue, held.tip, levelTimeoutMs, { intervalMs: o.intervalMs })
+    await assertChainHeld(rail, held.tip, o.label ? o.label + ' chain' : undefined)
+    console.log('BF held baseline' + (o.label ? ' (' + o.label + ')' : '') + ': miner paused at tip ' + held.tip +
+        ' stamped ' + held.stamp.blockTime + ', every indexer level, budget ' + levelTimeoutMs + ' ms')
+    return Object.assign(held, { levelTimeoutMs, before })
 }
 
 /** Inject inert rows into every followed hub and let the followers re-page them. */
@@ -331,6 +459,15 @@ module.exports = {
     rewardCount,
     minimumStamp,
     queueMarkerTransaction,
+    fundMarkerAddress,
+    broadcastMarker,
+    LEVEL_MARGIN_S,
+    levelBudgetMs,
+    holdChain,
+    releaseChain,
+    assertChainHeld,
+    levelAtTip,
+    holdBaseline,
     seedMirrors,
     waitForMirrorRows,
     assertFederationQuiet,
