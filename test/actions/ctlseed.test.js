@@ -25,12 +25,18 @@
  * contract DEPLOY indexes "invalid: no current oracle price for {COIN}/USD".
  * (Known harness flake.)
  *
- * Anchoring: priceSnapshotHelper.usableSeedAnchors(), which bounds every
- * seeded anchor at or before the chain tip. On every chain but BTC,
- * getLatestPrice SELECTS with `block_timestamp <= <block time>`, so a
- * future-dated row is invisible rather than merely stale; headroom comes
- * from re-seeding as the chain advances, which is what nativeFeeHelper does
- * per SEED_REFRESH_MS.
+ * Anchoring: priceSnapshotHelper.usableSeedAnchors() returns the chain-time
+ * anchor and adds a wall-time anchor when the chain trails wall clock. Fee
+ * validation on every chain except BTC selects only snapshots with a
+ * `block_timestamp` at or before the processed block time. A snapshot dated
+ * after that block is invisible to the lookup, even while the table contains
+ * a finalized row for the pair. The chain-time anchor remains readable at the
+ * current tip. The wall-time anchor covers later blocks stamped near wall clock
+ * after an idle chain resumes. Seeds use ascending round numbers in anchor
+ * order, giving the wall-time row selection priority when both timestamps are
+ * eligible while allowing the chain-time row to match when the wall-time row
+ * is beyond the processed block. Continued freshness depends on periodic
+ * seeding as the chain advances, and SEED_REFRESH_MS limits refresh frequency.
  ********************************************************************/
 
 const assert = require('assert')
