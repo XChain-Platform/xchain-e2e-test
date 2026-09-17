@@ -47,8 +47,8 @@ const REASON = 'match_sync_barrier'
 const ARMED_RUN = process.env.BF3_ARMED !== '0'
 // The hold must cross the ceiling: the ceiling, one more barrier cycle, and slack.
 const CEILING_WAIT_MS = (fixture.HOLD_CEILING_S + (2 * fixture.BARRIER_CYCLE_S) + 120) * 1000
-// Read AFTER the ceiling: by then every unpinned table's height has settled for longer
-// than the longest producer window (the price rail's 600 s), so a frozen map is the pin's.
+// How long the pinned heights map must read frozen while ts flows. Read BEFORE the ceiling
+// (the resync resets the age) and waited for, so the height dimension has had two minutes to fire.
 const FROZEN_MIN_MS = 2 * 60 * 1000
 
 describe('BF3: the bound is real, a pinned height holds one member and only that member', function () {
@@ -79,12 +79,14 @@ describe('BF3: the bound is real, a pinned height holds one member and only that
         await assertDeferred(ctx)
     })
 
-    it('accumulates a hold across the 900 s ceiling into one forced resync, and never commits', async function () {
-        await assertHoldAndCeiling(ctx)
-    })
-
+    // Before the ceiling case, not after: the forced resync reconnects the mirror and resets
+    // heightsFrozenMs, so a read after it sampled 555 ms (rail 2026-09-17, bf3-height-age-red).
     it('fires the height dimension of the stall verdict while ts keeps flowing', async function () {
         await assertHeightDimension(ctx)
+    })
+
+    it('accumulates a hold across the 900 s ceiling into one forced resync, and never commits', async function () {
+        await assertHoldAndCeiling(ctx)
     })
 
     it('commits once the pin is released', async function () {
@@ -137,9 +139,15 @@ async function assertDeferred (ctx) {
 }
 
 async function assertHeightDimension (ctx) {
-    const s = await drive.statusSnapshot(ctx.venue, PINNED)
     // The member's line is B - margin, one above the pinned height.
     const target = fixture.pinnedHeightFor(TABLE, ctx.B) + 1
+    // Waited for rather than sampled once: this case now runs before the ceiling, so the heights
+    // map may not have been frozen FROZEN_MIN_MS yet when it starts (rail 2026-09-17: 121448 ms frozen, ts 1413 ms).
+    const got = await drive.waitForStatus(ctx.venue, PINNED, (s) =>
+        s.heightShortfalls && s.heightShortfalls[TABLE + '|' + ctx.coin] === target &&
+        Number(s.heightsFrozenMs) >= FROZEN_MIN_MS && Number(s.watermarkFrozenMs) < 60000, 5 * 60 * 1000)
+    assert.ok(got.ok, 'the height dimension did not stay frozen while ts flowed: ' + JSON.stringify(got.s))
+    const s = got.s
     console.log('BF3 height dimension: ' + JSON.stringify({ shortfalls: s.heightShortfalls, heightsFrozenMs: s.heightsFrozenMs, watermarkFrozenMs: s.watermarkFrozenMs }))
     assert.ok(s.heightShortfalls && s.heightShortfalls[TABLE + '|' + ctx.coin] === target,
         'heightShortfalls does not name ' + TABLE + '|' + ctx.coin + ' at ' + target + ': ' + JSON.stringify(s.heightShortfalls))

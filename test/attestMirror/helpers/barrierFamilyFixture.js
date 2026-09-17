@@ -297,6 +297,8 @@ module.exports = {
     rowAdmittedAt,
     admittedRowSet,
     pinnedHeightFor,
+    // The indexer's own per-table margin, so a leg waiting for heights compares the way the barrier does.
+    admitMarginBlocks: gate.admitMarginBlocks,
     stallSnapshot,
     legTimeoutMs,
     reseedQuoteBefore,

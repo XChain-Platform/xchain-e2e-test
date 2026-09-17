@@ -165,3 +165,61 @@ describe('barrierFamilyDrive: the level budget covers the longest grace a leg co
         assert.strictEqual(drive.levelBudgetMs(undefined, undefined, 1000), drive.LEVEL_MARGIN_S * 1000)
     })
 })
+
+describe('barrierFamilyDrive: an armed leg mines only once the hub has published its heights', function () {
+    // A venue whose indexer 0 reports a heights map that the test swaps between reads.
+    function heightsVenue (seq) {
+        let n = 0
+        return {
+            indexers: [{ index: 0 }],
+            statusOf: async () => {
+                const heights = seq[Math.min(n, seq.length - 1)]
+                n += 1
+                return { httpStatus: 200, body: { indexerBlock: 103, decoderBlock: 103, hubMirror: { heights } } }
+            },
+            reads: () => n,
+        }
+    }
+    const TABLES = ['cross_chain_matches', 'attestation_responses', 'anchor_reward_attestations']
+    const READY = { cross_chain_matches: { BTC: 103 }, attestation_responses: { BTC: 103 }, anchor_reward_attestations: { BTC: 103 } }
+
+    it('returns the snapshot as soon as every member\'s height is at its line', async function () {
+        const venue = heightsVenue([READY])
+        const s = await drive.waitForAdmissionHeights(venue, 0, TABLES, 'BTC', 104, 1000)
+        assert.deepStrictEqual(s.heights, READY)
+        assert.strictEqual(venue.reads(), 1)
+    })
+
+    it('fails naming the height the hub never published, with the indexer\'s own margin', async function () {
+        // One failed poll still sleeps the drive's 2 s interval before the deadline is re-read.
+        this.timeout(6000)
+        const venue = heightsVenue([{ cross_chain_matches: { BTC: 103 }, attestation_responses: { BTC: 103 } }])
+        await assert.rejects(drive.waitForAdmissionHeights(venue, 0, TABLES, 'BTC', 104, 50),
+            /never published the admission heights drill block B=104 needs on indexer 0 inside 50 ms: admission height anchor_reward_attestations\.BTC at none, needs -40$/)
+    })
+
+    it('reads the margin from the indexer gate, so a member one block short is not ready', async function () {
+        this.timeout(6000)
+        assert.strictEqual(fixture.admitMarginBlocks('cross_chain_matches'), 4)
+        const venue = heightsVenue([Object.assign({}, READY, { cross_chain_matches: { BTC: 99 } })])
+        await assert.rejects(drive.waitForAdmissionHeights(venue, 0, TABLES, 'BTC', 104, 50),
+            /cross_chain_matches\.BTC at 99, needs 100/)
+    })
+})
+
+describe('barrierFamilyDrive: an indexer whose API is not listening yet is not level, and not a failure', function () {
+    it('keeps polling past a refused connection and levels once the API answers', async function () {
+        this.timeout(10000)
+        let refused = 0
+        const venue = {
+            indexers: [{ index: 0 }, { index: 1 }],
+            statusOf: async (i) => {
+                if (i === 1 && refused < 1) { refused += 1; throw new Error('connect ECONNREFUSED 127.0.0.1:62104') }
+                return { httpStatus: 200, body: { indexerBlock: 100, decoderBlock: 100 } }
+            },
+        }
+        const all = await drive.levelIndexers(venue, 8000)
+        assert.strictEqual(refused, 1, 'the refused read never happened, so the case proves nothing')
+        assert.deepStrictEqual(all.map((s) => s.height), [100, 100])
+    })
+})

@@ -48,6 +48,10 @@ const BUILD_ROOT = path.resolve(__dirname, '..', '..', '..', '..')
 const ARMED = 0
 const PEER = 1
 const TABLES = ['cross_chain_matches', 'cross_chain_calls', 'bridge_transfers', 'policy_snapshots', 'attestation_responses']
+// Every height-keyed member an EMPTY BTC drill block evaluates (members 1 to 3 run only on a block
+// with transactions): the seeded tables plus the anchor-reward attestation rail, which holds no row
+// here but still needs its published height before B can pass on first evaluation.
+const HEIGHT_TABLES = TABLES.concat(['anchor_reward_attestations'])
 // The block must commit well inside the stamp: a bound far below 7200 s, and above the
 // attest rail's height watermark window plus one barrier attempt.
 const COMMIT_BUDGET_MS = 5 * 60 * 1000
@@ -108,6 +112,12 @@ async function seedAdmissionRows (ctx) {
 
 async function mineAndWatch (ctx) {
     await drive.assertChainHeld(ctx.btc, ctx.B - 1, 'the BTC chain, before the drill block,')
+    // "The identical mirror state" includes the hub's published heights. Without this wait the
+    // block was mined before the hub published anchor_reward_attestations at all, and the armed
+    // node deferred it once under anchor_attest_barrier (rail 2026-09-17, block 104, 62 s on).
+    const ready = await drive.waitForAdmissionHeights(ctx.venue, ARMED, HEIGHT_TABLES, ctx.coin, ctx.B)
+    console.log('BF2 heights before mining B=' + ctx.B + ': ' + JSON.stringify(ready.heights))
+    await drive.assertChainHeld(ctx.btc, ctx.B - 1, 'the BTC chain, across the admission-height wait,')
     const wall = Math.floor(Date.now() / 1000)
     // Resumes the miner: the hold ends with the drill block.
     ctx.block = await drive.mineStamped(ctx.btc, wall + drive.STAMP_AHEAD_S)

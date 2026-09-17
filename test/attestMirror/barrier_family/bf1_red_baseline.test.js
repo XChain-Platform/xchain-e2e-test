@@ -54,7 +54,13 @@ const LADDER_STEP_S = Number(process.env.BF1_LADDER_STEP_S || 90)
 // escape can open before the ladder's first rung, short enough that the walk is bounded.
 const WALK_AHEAD_S = 4 * LADDER_STEP_S
 const LADDER = rows.graceLadder(LADDER_STEP_S)
+// The tables the seed waits on and the quiet-federation check counts. familySeedRows also seeds an
+// inert oracle_prices row; it is left out here because contentEscapeSql has no oracle scope (the
+// member reads MAX(effective_at) unscoped) and throws on the table, and the rail run that named all
+// nine reasons passed its quiet check, so it ran with this five-table list.
 const SEED_TABLES = ['cross_chain_matches', 'cross_chain_calls', 'bridge_transfers', 'policy_snapshots', 'attestation_responses']
+// Members with no clock deadline to judge a class against: price's height case sets none, snapshot is content-keyed.
+const UNCLOCKED_REASONS = ['price_sync_barrier', 'snapshot_sync_barrier']
 
 describe('BF1: the RED baseline, and the family enumerated from the running node', function () {
     this.timeout(Math.max(drive.LEG_FLOOR_MS, fixture.legTimeoutMs(WALK_AHEAD_S + (10 * LADDER_STEP_S))))
@@ -167,9 +173,12 @@ async function observeBoth (ctx) {
     const walkReason = () => ctx.walk.length ? ctx.walk[ctx.walk.length - 1].stallReason : null
     let redDone = false
     while (Date.now() < deadline) {
+        // Both ends of the read are kept: the class check judges an observation only when the whole
+        // request sits on one side of the member's deadline (enumerationClassFaults).
+        const askedAt = Date.now()
         const w = await drive.statusSnapshot(ctx.venue, WALKER)
         if (w.stallReason && w.height === ctx.blocks.walk.height - 1) {
-            ctx.walk.push({ at: Date.now(), stallReason: w.stallReason, stallClass: w.stallClass, stallClearsAt: w.stallClearsAt })
+            ctx.walk.push({ askedAt, at: Date.now(), stallReason: w.stallReason, stallClass: w.stallClass, stallClearsAt: w.stallClearsAt })
         }
         const r = await drive.statusSnapshot(ctx.venue, INERT)
         if (!redDone && r.height === ctx.blocks.red.height - 1 && r.stallReason) {
@@ -208,6 +217,11 @@ function assertRedBaseline (ctx) {
 // is the stamp plus ITS rung of the ladder, which is the "grace per member" the venue
 // promises (D34); price carries no per-member deadline on the height case, so only its
 // name is asserted, and the snapshot member is content-keyed (null deadline).
+//
+// The class is judged per observation against that deadline, not required of every one: the
+// reason a rung deferred under stays on `/status` for one barrier cycle after the rung opens, and
+// reads `wedged` there (rail 2026-09-17, oracle), which is the node's health verdict on a stale
+// label, not the future-stamp wait this leg enumerates.
 function assertEnumeration (ctx) {
     const seen = rows.distinctRuns(ctx.walk.map((x) => x.stallReason))
     assert.deepStrictEqual(seen, fixture.FAMILY_REASONS_LOOP_ORDER.slice(),
@@ -216,12 +230,8 @@ function assertEnumeration (ctx) {
     assert.strictEqual(new Set(fixture.mirrorBarrierReasons()).size, 9, 'the indexer source no longer carries nine reasons')
     const ladderByReason = {}
     for (const key of Object.keys(LADDER)) ladderByReason[gracedBarrierReason(key)] = LADDER[key]
-    for (const obs of ctx.walk) {
-        if (obs.stallReason === 'price_sync_barrier' || obs.stallReason === 'snapshot_sync_barrier') continue
-        assert.strictEqual(obs.stallClass, 'future_block_wait', obs.stallReason + ' reported ' + obs.stallClass)
-        assert.strictEqual(obs.stallClearsAt, (ctx.blocks.walk.blockTime + ladderByReason[obs.stallReason]) * 1000,
-            obs.stallReason + ' clears at ' + obs.stallClearsAt + ', not stamp + its own grace ' + ladderByReason[obs.stallReason])
-    }
+    const faults = rows.enumerationClassFaults(ctx.walk, ladderByReason, ctx.blocks.walk.blockTime, UNCLOCKED_REASONS)
+    assert.deepStrictEqual(faults, [], 'the walker\'s per-member class and deadline: ' + faults.join('; '))
     const snapshot = ctx.walk.filter((x) => x.stallReason === 'snapshot_sync_barrier')
     assert.ok(snapshot.every((x) => x.stallClearsAt === null), 'the snapshot member reported a clock deadline')
 }

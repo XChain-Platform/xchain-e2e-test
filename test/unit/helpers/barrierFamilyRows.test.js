@@ -63,9 +63,108 @@ describe('barrierFamilyRows: inert rows', () => {
         const c = rows.inertRow('bridge_transfers', Object.assign({}, SPEC, { tag: 'u' })).row
         assert.strictEqual(a.transfer_id, b.transfer_id)
         assert.notStrictEqual(a.transfer_id, c.transfer_id)
-        assert.strictEqual(rows.familySeedRows(SPEC).length, 5)
+        assert.strictEqual(rows.familySeedRows(SPEC).length, 6)
         assert.deepStrictEqual(rows.familySeedRows(SPEC).map((s) => s.table),
-            ['cross_chain_matches', 'cross_chain_calls', 'bridge_transfers', 'policy_snapshots', 'attestation_responses'])
+            ['oracle_prices', 'cross_chain_matches', 'cross_chain_calls', 'bridge_transfers', 'policy_snapshots', 'attestation_responses'])
+    })
+
+    it('seeds an oracle row whose effective_at is the seed time, since member 3 reads MAX(effective_at)', () => {
+        const oracle = rows.familySeedRows(SPEC).find((s) => s.table === 'oracle_prices')
+        assert.strictEqual(oracle.row.effective_at, SPEC.effectiveTime)
+        assert.strictEqual(oracle.row.source_chain, 'BTC')
+        assert.notStrictEqual(oracle.row.action_index, rows.inertRow('oracle_prices', SPEC).row.action_index, 'the family tag keys the row')
+    })
+})
+
+describe('barrierFamilyRows: BF1 judges each walker observation against its own deadline', () => {
+    // The rail's walker block (2026-09-17, v020-final-bf1.log): stamped 1789635655, ladder step 90.
+    const STAMP = 1789635655
+    const LADDER = { oracle_sync_barrier: 180, match_sync_barrier: 270 }
+    const SKIP = ['price_sync_barrier', 'snapshot_sync_barrier']
+    const ms = (s) => s * 1000
+    const obs = (reason, askedS, atS, stallClass, clearsAt) => ({
+        askedAt: ms(askedS), at: ms(atS), stallReason: reason, stallClass,
+        stallClearsAt: clearsAt === undefined ? ms(STAMP + LADDER[reason]) : clearsAt,
+    })
+
+    it('passes the rail shape: a future wait before the deadline, then the stale label read wedged after it', () => {
+        const walk = [
+            obs('price_sync_barrier', STAMP + 100, STAMP + 100, 'wedged', null),
+            obs('oracle_sync_barrier', STAMP + 160, STAMP + 160, 'future_block_wait'),
+            obs('oracle_sync_barrier', STAMP + 179, STAMP + 179.5, 'future_block_wait'),
+            // 09:03:55Z to 09:04:58Z on the rail: the rung opened, match's wait had not timed out yet.
+            obs('oracle_sync_barrier', STAMP + 185, STAMP + 185, 'wedged'),
+            obs('match_sync_barrier', STAMP + 245, STAMP + 245, 'future_block_wait'),
+            obs('match_sync_barrier', STAMP + 280, STAMP + 280, 'barrier_defer'),
+            obs('snapshot_sync_barrier', STAMP + 900, STAMP + 900, 'wedged', null),
+        ]
+        assert.deepStrictEqual(rows.enumerationClassFaults(walk, LADDER, STAMP, SKIP), [])
+    })
+
+    it('does not judge a read that straddles the deadline, in either class', () => {
+        const walk = [
+            obs('oracle_sync_barrier', STAMP + 170, STAMP + 170, 'future_block_wait'),
+            obs('oracle_sync_barrier', STAMP + 179.9, STAMP + 180.2, 'future_block_wait'),
+            obs('oracle_sync_barrier', STAMP + 179.9, STAMP + 180.2, 'wedged'),
+        ]
+        assert.deepStrictEqual(rows.enumerationClassFaults(walk, LADDER, STAMP, SKIP), [])
+    })
+
+    it('fails a non-future class before the deadline, and a future wait asked after it', () => {
+        const early = rows.enumerationClassFaults([obs('oracle_sync_barrier', STAMP + 100, STAMP + 101, 'wedged')], LADDER, STAMP, SKIP)
+        assert.ok(early.some((f) => /oracle_sync_barrier reported wedged at .*before its deadline/.test(f)), JSON.stringify(early))
+        const late = rows.enumerationClassFaults([
+            obs('oracle_sync_barrier', STAMP + 170, STAMP + 170, 'future_block_wait'),
+            obs('oracle_sync_barrier', STAMP + 181, STAMP + 181, 'future_block_wait'),
+        ], LADDER, STAMP, SKIP)
+        assert.deepStrictEqual(late.length, 1)
+        assert.ok(/still reported future_block_wait when asked at .*past its deadline/.test(late[0]), late[0])
+    })
+
+    it('fails a deadline that is not stamp plus the member\'s own rung', () => {
+        const got = rows.enumerationClassFaults([obs('match_sync_barrier', STAMP + 10, STAMP + 10, 'future_block_wait', ms(STAMP + 180))], LADDER, STAMP, SKIP)
+        assert.ok(got.some((f) => /match_sync_barrier clears at .*not stamp \+ its own grace 270/.test(f)), JSON.stringify(got))
+    })
+
+    it('fails a graced member that was only ever seen past its deadline, so the class check cannot be vacuous', () => {
+        const got = rows.enumerationClassFaults([obs('match_sync_barrier', STAMP + 300, STAMP + 300, 'wedged')], LADDER, STAMP, SKIP)
+        assert.deepStrictEqual(got, ['match_sync_barrier was never observed in future_block_wait before its deadline'])
+    })
+
+    it('ignores the members with no clock deadline and any reason outside the ladder', () => {
+        const got = rows.enumerationClassFaults([
+            obs('price_sync_barrier', STAMP, STAMP, 'wedged', null),
+            obs('snapshot_sync_barrier', STAMP, STAMP, 'wedged', null),
+            { at: 1, stallReason: 'vm_executor_unavailable', stallClass: 'barrier_defer', stallClearsAt: null },
+        ], Object.assign({ price_sync_barrier: 90 }, LADDER), STAMP, SKIP)
+        assert.deepStrictEqual(got, [])
+    })
+})
+
+describe('barrierFamilyRows: the heights a drill block needs before it is mined', () => {
+    const MARGINS = { cross_chain_matches: 4, attestation_responses: 1, anchor_reward_attestations: 144 }
+    const marginOf = (t) => MARGINS[t]
+    const TABLES = Object.keys(MARGINS)
+
+    it('names the rail\'s BF2 shortfall: no anchor height at all, in the indexer\'s own spelling', () => {
+        const heights = { cross_chain_matches: { BTC: 103 }, attestation_responses: { BTC: 103 } }
+        const got = rows.admissionHeightShortfalls(heights, TABLES, 'BTC', 104, marginOf)
+        assert.deepStrictEqual(got, [{ table: 'anchor_reward_attestations', chain: 'BTC', have: null, need: -40 }])
+        assert.strictEqual(rows.describeShortfall(got[0]), 'admission height anchor_reward_attestations.BTC at none, needs -40')
+    })
+
+    it('is satisfied exactly at each member\'s line and short one below it', () => {
+        const at = { cross_chain_matches: { BTC: 100 }, attestation_responses: { BTC: 103 }, anchor_reward_attestations: { BTC: 0 } }
+        assert.deepStrictEqual(rows.admissionHeightShortfalls(at, TABLES, 'BTC', 104, marginOf), [])
+        const below = { cross_chain_matches: { BTC: 99 }, attestation_responses: { BTC: 102 }, anchor_reward_attestations: { BTC: 0 } }
+        assert.deepStrictEqual(rows.admissionHeightShortfalls(below, TABLES, 'BTC', 104, marginOf).map((s) => s.table),
+            ['cross_chain_matches', 'attestation_responses'])
+    })
+
+    it('never reads a missing, foreign-chain or non-integer entry as a height', () => {
+        const odd = { cross_chain_matches: { LTC: 500 }, attestation_responses: { BTC: '103' }, anchor_reward_attestations: { BTC: -1 } }
+        assert.deepStrictEqual(rows.admissionHeightShortfalls(odd, TABLES, 'BTC', 104, marginOf).map((s) => s.have), [null, null, null])
+        assert.strictEqual(rows.admissionHeightShortfalls(undefined, TABLES, 'BTC', 104, marginOf).length, 3)
     })
 })
 

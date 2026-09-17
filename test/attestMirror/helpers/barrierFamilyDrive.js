@@ -54,6 +54,8 @@ async function bootFamilyVenue (opts) {
     assert.ok(o.repoRoot, 'bootFamilyVenue: repoRoot is required (B4: the evidence names the tree that ran)')
     const btc = await createRail('bitcoin', 'regtest')
     const venueOpts = Object.assign({}, o.venue || {})
+    // Port seam for concurrent stacks on one host: the rail runner gives each leg its own base (rail 2026-09-17, four stacks at once).
+    if (process.env.AB_VENUE_BASE_PORT) venueOpts.basePort = Number(process.env.AB_VENUE_BASE_PORT)
     // Bounded XDEX rounds (5 s, 20 s terminal) and 1 s admission samples: the hub default 480 s terminal
     // window publishes no settled match height inside a case's 300 s commit budget (rail 2026-09-17, bf2/bf5).
     venueOpts.hubExtraEnv = Object.assign({
@@ -80,7 +82,11 @@ async function levelIndexers (venue, timeoutMs) {
     const idx = venue.indexers.map((ix) => ix.index)
     const level = await untilOrClearDogeStall(async () => {
         const all = []
-        for (const i of idx) all.push(await statusSnapshot(venue, i))
+        // `start()` returns once an indexer's cloned schema exists, which can be before its
+        // API listens, so a refused connection here is "not level yet" rather than a failure.
+        for (const i of idx) {
+            all.push(await statusSnapshot(venue, i).catch((e) => ({ height: null, decoder: null, unreachable: String(e && e.message) })))
+        }
         return { ok: all.every((s) => s.height !== null && s.decoder !== null && s.height === s.decoder), all }
     }, { timeoutMs: timeoutMs || LEVEL_TIMEOUT_MS, tipProbe: venueTipProbe(venue, idx[idx.length - 1]) })
     assert.ok(level.ok, 'the venue indexers never caught the chain before the drill: ' + JSON.stringify(level.all))
@@ -129,6 +135,30 @@ async function waitForStatus (venue, i, pred, timeoutMs) {
         return { ok: !!pred(s), s }
     }, timeoutMs, POLL_MS)
     return Object.assign({ ok: false }, got, { s: got.s || null })
+}
+
+// How long a leg waits for the hub to publish the heights its drill block needs. The slowest
+// rails settle a tip only once it is older than their round-abandon window (anchor and attest
+// default 120 s, xchain-hub admission_height_watermark.js), counted from the hub's first tip
+// read, so a venue booted a moment ago can still show none: two windows plus a margin.
+const ADMISSION_HEIGHT_WAIT_MS = 5 * 60 * 1000
+
+/**
+ * Wait until indexer `i` holds a published admission height that satisfies every member
+ * `tables` names at drill height `B` (`heights[table][coin] >= B - margin`, the indexer's own
+ * comparison), and fail with the shortfalls named when it never does. An armed leg calls this
+ * BEFORE mining the drill block: a height the hub has not published yet defers the block under
+ * that member's reason, which is a venue that was not ready rather than the rule under test
+ * (rail 2026-09-17: BF2's block 104 deferred on anchor_reward_attestations "at none, needs -40").
+ */
+async function waitForAdmissionHeights (venue, i, tables, coin, B, timeoutMs) {
+    const budget = timeoutMs || ADMISSION_HEIGHT_WAIT_MS
+    const got = await waitForStatus(venue, i, (s) =>
+        rows.admissionHeightShortfalls(s.heights, tables, coin, B, fixture.admitMarginBlocks).length === 0, budget)
+    const short = rows.admissionHeightShortfalls(got.s && got.s.heights, tables, coin, B, fixture.admitMarginBlocks)
+    assert.ok(got.ok, 'the hub never published the admission heights drill block B=' + B + ' needs on indexer ' + i +
+        ' inside ' + budget + ' ms: ' + short.map(rows.describeShortfall).join('; '))
+    return got.s
 }
 
 /** The node's own record of block `height`: hash and stamp, never the pin the leg asked for. */
@@ -458,6 +488,8 @@ module.exports = {
     statusSnapshot,
     holdSnapshot,
     waitForStatus,
+    ADMISSION_HEIGHT_WAIT_MS,
+    waitForAdmissionHeights,
     readBlockStamp,
     mineStamped,
     mineSpacedRun,

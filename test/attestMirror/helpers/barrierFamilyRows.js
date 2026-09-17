@@ -167,9 +167,13 @@ function inertRow (table, spec) {
     return { table, row: build(s, String(s.tag)), key: NATURAL_KEYS[table] }
 }
 
-/** The set BF1 seeds: one finalized row in each of the four xdex mirrors, one attest response. */
+/**
+ * The set BF1 seeds: one inert oracle price, one finalized row in each of the four xdex mirrors,
+ * one attest response. The oracle row closes member 3's escape: without it the walker's first
+ * corrected drive named eight reasons, not nine (rail 2026-09-17, v020-final-bf1-oracle-red.log).
+ */
 function familySeedRows (spec) {
-    return ['cross_chain_matches', 'cross_chain_calls', 'bridge_transfers', 'policy_snapshots', 'attestation_responses']
+    return ['oracle_prices', 'cross_chain_matches', 'cross_chain_calls', 'bridge_transfers', 'policy_snapshots', 'attestation_responses']
         .map((t) => inertRow(t, Object.assign({}, spec, { tag: spec.tag + '|' + t })))
 }
 
@@ -319,6 +323,90 @@ function inLoopOrder (observed) {
     return true
 }
 
+/**
+ * What BF1 may assert about the CLASS of each walker observation, and where it fails.
+ *
+ * `/status` keeps naming the member that last deferred until the next member's own wait times
+ * out (a reason is written on a defer and cleared on a commit), so for about one barrier cycle
+ * after a rung opens the walker still reads that rung's reason with a `stallClearsAt` already in
+ * the past, and the health verdict for it is `barrier_defer` or `wedged`, never a future wait
+ * (rail 2026-09-17: oracle, stamp + 180 s at 09:03:55Z, read `wedged` until match deferred at
+ * 09:04:58Z). So the class is asserted only where it is decidable from the harness clock:
+ *
+ *   - every graced observation carries `stallClearsAt == (stamp + its own rung) * 1000`;
+ *   - one RETURNED before that instant (`at`) must read `future_block_wait`, since the node's
+ *     clock read happened earlier still;
+ *   - one REQUESTED at or after it (`askedAt`) must NOT read `future_block_wait`, or the
+ *     deadline is not real;
+ *   - one straddling the instant is not judged;
+ *   - every graced member observed needs at least one pre-deadline future wait, or the class
+ *     assertion above is vacuous for that member.
+ *
+ * `skip` names reasons with no clock deadline to judge (price's height case, snapshot).
+ *
+ * @param {Array<{askedAt?: number, at: number, stallReason: string, stallClass: string, stallClearsAt: *}>} walk
+ * @param {object} ladderByReason  reason -> grace seconds
+ * @param {number} stampS          the walker block's stamp, seconds
+ * @param {string[]} [skip]
+ * @returns {string[]} one line per fault; empty when the walk satisfies every rule
+ */
+function enumerationClassFaults (walk, ladderByReason, stampS, skip) {
+    const skipped = new Set(skip || [])
+    const faults = []
+    const preDeadlineWait = {}
+    for (const obs of walk || []) {
+        const reason = obs.stallReason
+        if (skipped.has(reason) || !Object.prototype.hasOwnProperty.call(ladderByReason || {}, reason)) continue
+        if (!(reason in preDeadlineWait)) preDeadlineWait[reason] = false
+        const want = (Number(stampS) + Number(ladderByReason[reason])) * 1000
+        if (obs.stallClearsAt !== want) {
+            faults.push(reason + ' clears at ' + obs.stallClearsAt + ', not stamp + its own grace ' + ladderByReason[reason] + ' = ' + want)
+            continue
+        }
+        const askedAt = Number.isFinite(obs.askedAt) ? obs.askedAt : obs.at
+        if (obs.at < want) {
+            if (obs.stallClass === 'future_block_wait') preDeadlineWait[reason] = true
+            else faults.push(reason + ' reported ' + obs.stallClass + ' at ' + obs.at + ', before its deadline ' + want)
+        } else if (askedAt >= want && obs.stallClass === 'future_block_wait') {
+            faults.push(reason + ' still reported future_block_wait when asked at ' + askedAt + ', past its deadline ' + want)
+        }
+    }
+    for (const reason of Object.keys(preDeadlineWait)) {
+        if (!preDeadlineWait[reason]) faults.push(reason + ' was never observed in future_block_wait before its deadline')
+    }
+    return faults
+}
+
+/**
+ * The published admission heights a drill block B still lacks on one indexer: for each table,
+ * the height `/status` shows for `coin` against the barrier's line `B - marginOf(table)`. A
+ * missing or non-integer entry is a shortfall with `have: null`, never a zero, matching the
+ * indexer's publishedHeight (xchain-indexer hub_db_sync/watermarks.js).
+ *
+ * @param {object} heights   the `/status` hubMirror.heights map, table -> chain -> height
+ * @param {string[]} tables
+ * @param {string} coin      upper-case chain code
+ * @param {number} B         the drill height
+ * @param {function} marginOf table -> ADMIT_MARGIN_BLOCKS[table]
+ * @returns {Array<{table: string, chain: string, have: number|null, need: number}>}
+ */
+function admissionHeightShortfalls (heights, tables, coin, B, marginOf) {
+    const out = []
+    for (const table of tables || []) {
+        const need = Number(B) - Number(marginOf(table))
+        const entry = heights && heights[table]
+        const h = entry && typeof entry === 'object' ? entry[coin] : undefined
+        const have = (typeof h === 'number' && Number.isSafeInteger(h) && h >= 0) ? h : null
+        if (have === null || have < need) out.push({ table, chain: coin, have, need })
+    }
+    return out
+}
+
+/** One shortfall in the indexer's own heightTail spelling, so a harness failure greps like the node's log. */
+function describeShortfall (s) {
+    return 'admission height ' + s.table + '.' + s.chain + ' at ' + (s.have === null ? 'none' : s.have) + ', needs ' + s.need
+}
+
 /** Collapse consecutive repeats: the distinct reasons in the order they were first seen. */
 function distinctRuns (observed) {
     const out = []
@@ -370,6 +458,9 @@ module.exports = {
     graceLadder,
     ladderReasons,
     inLoopOrder,
+    enumerationClassFaults,
+    admissionHeightShortfalls,
+    describeShortfall,
     distinctRuns,
     timedOutLines,
     sha256Hex,

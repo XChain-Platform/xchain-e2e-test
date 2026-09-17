@@ -52,6 +52,7 @@ const { spawnSync } = require('child_process')
 
 const fixture = require('../helpers/barrierFamilyFixture')
 const drive = require('../helpers/barrierFamilyDrive')
+const drill = require('../mirrorDrillFixture')
 const { until } = require('../mirrorDrillWaits')
 
 const BUILD_ROOT = path.resolve(__dirname, '..', '..', '..', '..')
@@ -181,6 +182,26 @@ function hubUpgradeState (root) {
     return Object.assign({ root, sha: fixture.headShaOf(hub) }, out)
 }
 
+/**
+ * Two SEATED identities the harness can sign for, one per hub. A hub outside the
+ * chain-effective signer set is an observer, and an observer's broadcast() is held,
+ * HEARTBEAT included, so an unstaked older hub never advertises the digest the v7
+ * hub is asserted to name (the rail's green BF6, 2026-09-17, ran with this pair).
+ * Adopted from the roster the at* drills adopt (the federation signing seeds, plus
+ * the idle key when XC_ROLLCALL_FEDERATION_MNEMONIC is in the environment); nothing
+ * is staked.
+ */
+async function seatedPairIdentities () {
+    const reading = await drill.readSeatedAttestationSet({})
+    const known = drill._knownSignerSeeds()
+    const signable = reading.set.pubkeys.filter((pk) => known.has(pk))
+    assert.ok(signable.length >= 2, 'FAILED DRIVE (not a skip): only ' + signable.length + ' of the ' + reading.set.pubkeys.length +
+        ' seated key(s) at buried block ' + reading.buriedBlock + ' have a seed this harness holds; the mixed pair needs two')
+    const pair = signable.slice(0, 2).map((pk) => ({ pubkeyHex: pk, privkeyHex: known.get(pk).seedHex, origin: known.get(pk).origin }))
+    console.log('BF6 MIXED seated pair: ' + pair.map((p) => p.pubkeyHex.slice(0, 16) + ' via ' + p.origin).join('; '))
+    return pair.map((p) => ({ pubkeyHex: p.pubkeyHex, privkeyHex: p.privkeyHex }))
+}
+
 /** Poll a venue child's log tail for `re`; the match, or a failure showing the tail. */
 async function untilLogMatches (venue, which, re, timeoutMs) {
     const got = await until(async () => {
@@ -212,8 +233,9 @@ describe('BF6 mixed-version pair: a v7 mirror parks on an older hub, and the fed
 
     it('live: indexer 1 (v7) behind the older hub PARKS its mirror on the version handshake while indexer 0 bootstraps', async function () {
         assert.ok(ctx.states, 'the precondition did not run')
+        const identities = await seatedPairIdentities()
         const built = fixture.buildFamilyVenue({
-            repoRoot: BUILD_ROOT, label: 'bf6mix', hubRepoRoots: { [OLD]: ctx.states.old.root }, venue: { hubCount: 2, indexerCount: 2 },
+            repoRoot: BUILD_ROOT, label: 'bf6mix', hubRepoRoots: { [OLD]: ctx.states.old.root }, venue: { hubCount: 2, indexerCount: 2, identities },
         })
         ctx.venue = built.venue
         console.log('BF EVIDENCE ' + JSON.stringify(Object.assign(built.evidence, { states: ctx.states })))
