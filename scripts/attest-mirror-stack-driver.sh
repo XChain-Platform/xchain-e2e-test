@@ -29,10 +29,17 @@ venue_base=$(( ${ATTEST_MIRROR_VENUE_PORT_BASE:-63400} + (slot * 100) ))
 stack_dir=${ATTEST_MIRROR_STACK_ROOT}/${project}
 node_bin=${ATTEST_MIRROR_NODE_BIN:-node}
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+build_hub=${repo_root}/../xchain-hub
+mixed_root=${stack_dir}/bf6-mixed/${stack}
+bf6_leg=test/attestMirror/barrier_family/bf6_producer_follower_parity.test.js
 
 case "$phase" in
     up)
         "${ATTEST_MIRROR_STACK_ROOT}/setup-stack.sh" "$number" "$base"
+        if [ "$leg" = "$bf6_leg" ]; then
+            "$node_bin" "${repo_root}/scripts/prepare-bf6-mixed-hub.js" create \
+                --workspace "$stack_dir" --stack "$stack" --build-hub "$build_hub"
+        fi
         ;;
     ready)
         set -a
@@ -51,16 +58,28 @@ case "$phase" in
             EXPLORER_API_PORT="${ATTEST_MIRROR_EXPLORER_PORT:-46599}" E2E_STAKE_TEARDOWN=off
         ;;
     run)
-        "${ATTEST_MIRROR_STACK_ROOT}/run-leg.sh" "$stack" "$number" "$venue_base" "$leg" \
-            EXPLORER_API_PORT="${ATTEST_MIRROR_EXPLORER_PORT:-46599}" E2E_STAKE_TEARDOWN=off
+        if [ "$leg" = "$bf6_leg" ]; then
+            "${ATTEST_MIRROR_STACK_ROOT}/run-leg.sh" "$stack" "$number" "$venue_base" "$leg" \
+                EXPLORER_API_PORT="${ATTEST_MIRROR_EXPLORER_PORT:-46599}" E2E_STAKE_TEARDOWN=off \
+                BF6_MIXED_HUB_ROOT="$mixed_root"
+        else
+            "${ATTEST_MIRROR_STACK_ROOT}/run-leg.sh" "$stack" "$number" "$venue_base" "$leg" \
+                EXPLORER_API_PORT="${ATTEST_MIRROR_EXPLORER_PORT:-46599}" E2E_STAKE_TEARDOWN=off
+        fi
         ;;
     down)
+        down_status=0
         if [ -f "${stack_dir}/compose.yml" ]; then
-            docker compose -p "$project" -f "${stack_dir}/compose.yml" down -v
+            docker compose -p "$project" -f "${stack_dir}/compose.yml" down -v || down_status=$?
         fi
-        test -z "$(docker ps -aq --filter "label=com.docker.compose.project=${project}")"
-        test -z "$(docker volume ls -q --filter "label=com.docker.compose.project=${project}")"
-        test -z "$(docker network ls -q --filter "label=com.docker.compose.project=${project}")"
+        if [ "$leg" = "$bf6_leg" ]; then
+            "$node_bin" "${repo_root}/scripts/prepare-bf6-mixed-hub.js" remove \
+                --workspace "$stack_dir" --stack "$stack" || down_status=$?
+        fi
+        test -z "$(docker ps -aq --filter "label=com.docker.compose.project=${project}")" || down_status=$?
+        test -z "$(docker volume ls -q --filter "label=com.docker.compose.project=${project}")" || down_status=$?
+        test -z "$(docker network ls -q --filter "label=com.docker.compose.project=${project}")" || down_status=$?
+        exit "$down_status"
         ;;
     *)
         printf 'unknown driver phase: %s\n' "$phase" >&2
