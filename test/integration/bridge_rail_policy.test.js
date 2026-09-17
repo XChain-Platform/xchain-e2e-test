@@ -12,8 +12,7 @@
  *
  **********************************************************************
  *
- * THE POLICY INHERITANCE ACCEPTANCE DRIVE: policy AT1 to AT10 of
- * claude/specs/xchain-token-bridge-policy.md section 11, on the token drive's venue shape
+ * THE POLICY INHERITANCE ACCEPTANCE DRIVE: policy AT1 to AT10, on the token drive's venue shape
  * (a harness federation of the seated roster keys, one venue BTC indexer per hub, a venue
  * DOGE indexer REPLAYED from genesis under this tree's code).
  *
@@ -51,8 +50,8 @@
  * chain and are skipped with the spec sentence quoted; each opt-in still journals the flag
  * state it was graded under.
  *
- * Spec: claude/specs/xchain-token-bridge-policy.md sections 3 to 11; the token spec's
- * section 10 and the base spec's section 15 for the venue.
+ * Acceptance sections 3 to 11 of the policy inheritance drive; the token drive's
+ * section 10 and the base drive's section 15 for the venue.
  *
  ********************************************************************/
 

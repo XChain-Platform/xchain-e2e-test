@@ -12,8 +12,7 @@
  *
  **********************************************************************
  *
- * THE TOKEN BRIDGE ACCEPTANCE DRIVE: token AT1 to AT8 of claude/specs/xchain-token-bridge.md
- * section 10, over the base drive's venue shape (a harness federation of the seated roster
+ * THE TOKEN BRIDGE ACCEPTANCE DRIVE: token AT1 to AT8, over the base drive's venue shape (a harness federation of the seated roster
  * keys, a venue BTC clone, a venue DOGE indexer REPLAYED from genesis under this tree's
  * bridge code). AT9 is the gate run plus the activation parity test and is not a drive.
  *
@@ -65,8 +64,8 @@
  * As the base drive: the standing DOGE indexer parsed a different history, and a count
  * over a set this small passes against broken code half the time.
  *
- * Spec: claude/specs/xchain-token-bridge.md section 10, D24, D29, D45; the base spec's
- * section 15 for the venue.
+ * Acceptance section 10 of the token bridge drive, decisions D24, D29 and D45; the
+ * base drive's section 15 for the venue.
  *
  ********************************************************************/
 
