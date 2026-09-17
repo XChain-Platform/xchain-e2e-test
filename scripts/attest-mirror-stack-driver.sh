@@ -45,6 +45,11 @@ case "$phase" in
         export DOGE_REGTEST_MINER_API_PORT=$DOGE_MINER_HOST_PORT
         "$node_bin" "${repo_root}/scripts/wait-attest-mirror-stack.js"
         ;;
+    seed)
+        "${ATTEST_MIRROR_STACK_ROOT}/run-leg.sh" "${stack}-seed" "$number" "$venue_base" \
+            test/tools/reseedAttestationRoster.test.js \
+            EXPLORER_API_PORT="${ATTEST_MIRROR_EXPLORER_PORT:-46599}" E2E_STAKE_TEARDOWN=off
+        ;;
     run)
         "${ATTEST_MIRROR_STACK_ROOT}/run-leg.sh" "$stack" "$number" "$venue_base" "$leg" \
             EXPLORER_API_PORT="${ATTEST_MIRROR_EXPLORER_PORT:-46599}" E2E_STAKE_TEARDOWN=off

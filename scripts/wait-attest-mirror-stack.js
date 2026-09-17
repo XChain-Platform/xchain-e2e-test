@@ -2,6 +2,10 @@
 
 const mariadb = require('mariadb')
 
+const REQUIRED_INDEXER_TABLES = Object.freeze([
+    'actions', 'addresses', 'issues', 'price_snapshots', 'statuses', 'ticks', 'transactions',
+])
+
 function sleep (ms) {
     return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -24,10 +28,12 @@ async function indexerSchemaReady (config) {
             user: config.dbUser,
             password: config.dbPassword,
         })
+        const placeholders = config.requiredIndexerTables.map(() => '?').join(', ')
         const rows = await connection.query(
-            'SELECT COUNT(*) AS n FROM information_schema.tables WHERE table_schema = ? AND table_name = ?',
-            [config.indexerDbName, 'issues'])
-        return Number(rows[0].n) === 1
+            'SELECT COUNT(DISTINCT table_name) AS n FROM information_schema.tables ' +
+            'WHERE table_schema = ? AND table_name IN (' + placeholders + ')',
+            [config.indexerDbName, ...config.requiredIndexerTables])
+        return Number(rows[0].n) === config.requiredIndexerTables.length
     } catch (_) {
         return false
     } finally {
@@ -76,6 +82,7 @@ function configFromEnv (env) {
         dbUser: env.INDEXER_DB_USER || 'root',
         dbPassword: required.dbPassword,
         indexerDbName: env.BTC_INDEXER_DB_NAME || env.INDEXER_DB_NAME || 'XChain_BTC_Regtest_Indexer',
+        requiredIndexerTables: REQUIRED_INDEXER_TABLES,
         indexerStatusUrl: 'http://' + host + ':' + required.indexerPort + '/status',
         minerHealthUrls: minerPorts.map((port) => 'http://' + host + ':' + port + '/'),
         timeoutMs: Number(env.ATTEST_MIRROR_READY_TIMEOUT_MS || 300000),
@@ -92,7 +99,7 @@ async function main () {
     process.stdout.write('attest-mirror stack ready: indexer schema and ' + config.minerHealthUrls.length + ' miner health endpoint(s)\n')
 }
 
-module.exports = { responseOk, indexerSchemaReady, stackReady, waitForStack, configFromEnv }
+module.exports = { REQUIRED_INDEXER_TABLES, responseOk, indexerSchemaReady, stackReady, waitForStack, configFromEnv }
 
 if (require.main === module) {
     main().catch((error) => {

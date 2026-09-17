@@ -84,6 +84,7 @@ async function runLeg (driver, job, options) {
         for (const step of [
             ['up', []],
             ['ready', ['--require', 'indexer-schema', '--require', 'miner-health']],
+            ['seed', []],
             ['run', []],
         ]) {
             const code = await runDriver(driver, step[0], job, step[1], options)

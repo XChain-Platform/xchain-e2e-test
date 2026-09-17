@@ -8,8 +8,9 @@ function config (overrides) {
         dbHost: '127.0.0.1', dbPort: 1, dbUser: 'root', dbPassword: 'secret',
         indexerDbName: 'indexer', indexerStatusUrl: 'http://indexer/status',
         minerHealthUrls: ['http://miner-a/', 'http://miner-b/'],
+        requiredIndexerTables: ready.REQUIRED_INDEXER_TABLES,
         timeoutMs: 20, intervalMs: 0, sleep: async () => {},
-        connect: async () => ({ query: async () => [{ n: 1 }], end: async () => {} }),
+        connect: async () => ({ query: async () => [{ n: ready.REQUIRED_INDEXER_TABLES.length }], end: async () => {} }),
         fetchImpl: async () => ({ ok: true }),
     }, overrides || {})
 }
@@ -28,7 +29,7 @@ describe('attest-mirror stack readiness', function () {
     it('does not probe services until the indexer schema exists', async function () {
         let fetched = false
         const c = config({
-            connect: async () => ({ query: async () => [{ n: 0 }], end: async () => {} }),
+            connect: async () => ({ query: async () => [{ n: ready.REQUIRED_INDEXER_TABLES.length - 1 }], end: async () => {} }),
             fetchImpl: async () => { fetched = true; return { ok: true } },
         })
         assert.strictEqual(await ready.stackReady(c), false)

@@ -25,6 +25,7 @@ function fixture () {
         "const event = (name) => fs.appendFileSync(process.env.FAKE_LOG, name + ' ' + stack + ' ' + leg + ' ' + args.join(' ') + '\\n')",
         "if (phase === 'up') { fs.writeFileSync(state, leg); event('up') }",
         "if (phase === 'ready') { if (!fs.existsSync(state)) process.exit(31); event('ready') }",
+        "if (phase === 'seed') { if (!fs.existsSync(state)) process.exit(32); event('seed') }",
         "if (phase === 'run') { event('run-start'); setTimeout(() => { event('run-end'); process.exit(leg.includes('fail') ? 7 : 0) }, 100) }",
         "if (phase === 'down') { event('down'); if (fs.existsSync(state)) fs.unlinkSync(state) }",
     ].join('\n'))
@@ -87,6 +88,7 @@ describe('attest-mirror aggregate runner', function () {
         const stacks = new Set(lines.filter((line) => line.startsWith('up ')).map((line) => line.split(' ')[1]))
         assert.strictEqual(stacks.size, 3, 'each leg must receive a different stack')
         assert.strictEqual(lines.filter((line) => line.startsWith('down ')).length, 3)
+        assert.strictEqual(lines.filter((line) => line.startsWith('seed ')).length, 3)
         assert.deepStrictEqual(fs.readdirSync(f.state), [], 'all stack markers must be removed')
         for (const line of lines.filter((entry) => entry.startsWith('ready '))) {
             assert.match(line, /--require indexer-schema --require miner-health$/)
