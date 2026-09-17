@@ -3,7 +3,8 @@
 const mariadb = require('mariadb')
 
 const REQUIRED_INDEXER_TABLES = Object.freeze([
-    'actions', 'addresses', 'issues', 'price_snapshots', 'statuses', 'ticks', 'transactions',
+    'actions', 'index_addresses', 'index_statuses', 'index_tickers', 'index_transactions',
+    'issues', 'price_snapshots', 'transactions',
 ])
 
 function sleep (ms) {
