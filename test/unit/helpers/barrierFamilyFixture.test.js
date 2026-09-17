@@ -139,6 +139,26 @@ describe('barrierFamilyFixture: the BF3 pin and the leg sizing', function () {
 })
 
 describe('barrierFamilyFixture: the build root and its evidence (B4, B11)', function () {
+    it('uses a pinned archive revision without following a copied .git pointer', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'barrier-source-revision-'))
+        const repo = path.join(root, 'xchain-hub')
+        fs.mkdirSync(repo)
+        fs.writeFileSync(path.join(repo, '.git'), 'gitdir: /unreachable/copied-worktree-pointer\n')
+        const revision = 'a'.repeat(40)
+        fs.writeFileSync(path.join(root, '.xchain-source-revisions.json'), JSON.stringify({
+            version: 1, repositories: { 'xchain-hub': revision },
+        }))
+        assert.strictEqual(F.headShaOf(repo), revision)
+    })
+
+    it('refuses an archive manifest that does not pin the requested repository', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'barrier-source-revision-'))
+        const repo = path.join(root, 'xchain-hub')
+        fs.mkdirSync(repo)
+        fs.writeFileSync(path.join(root, '.xchain-source-revisions.json'), JSON.stringify({ version: 1, repositories: {} }))
+        assert.throws(() => F.headShaOf(repo), /no pinned 40-hex revision for xchain-hub/)
+    })
+
     it('refuses to build a venue without an explicit build root', () => {
         assert.throws(() => F.buildFamilyVenue({}), /repoRoot is required/)
         assert.throws(() => F.buildFamilyVenue({ repoRoot: os.tmpdir() }), /has no xchain-hub\/src\/api\.js/)

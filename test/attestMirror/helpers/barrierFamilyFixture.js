@@ -224,6 +224,16 @@ function reseedQuoteBefore (startedAtMs, nowMs, nextS) {
 
 /** The commit a checkout (worktree or main) is at, read-only. */
 function headShaOf (repoDir) {
+    const manifestPath = process.env.XCHAIN_SOURCE_REVISION_FILE ||
+        path.join(path.dirname(repoDir), '.xchain-source-revisions.json')
+    if (fs.existsSync(manifestPath)) {
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+        const revisions = manifest && manifest.repositories
+        const revision = revisions && revisions[path.basename(repoDir)]
+        assert.ok(/^[0-9a-f]{40}$/.test(String(revision || '')),
+            manifestPath + ' has no pinned 40-hex revision for ' + path.basename(repoDir))
+        return revision
+    }
     return execFileSync('git', ['-C', repoDir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
 }
 
