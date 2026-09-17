@@ -1986,6 +1986,28 @@ function mergeIndexerExtraEnv(venueWide, perIndex) {
     return Object.keys(out).length ? out : null;
 }
 
+/**
+ * The ONE `extraEnv` hub `i` is spawned with: the venue-wide `hubExtraEnv`, with hub `i`'s
+ * entry in the per-index `hubEnv` layered over it.
+ *
+ * WHY PER HUB. A validator node runs its hub beside its own indexers, so each hub's engines
+ * read the indexer that follows THAT hub, and a retraction is co-signed only by a hub whose
+ * own indexer pushed the reorg (xchain-hub src/consensus/retraction.js). A venue that hands
+ * every hub the same indexer URL cannot model either fact.
+ *
+ * Returns `venueWide` itself, untouched, when hub `i` has no overlay, so a venue that never
+ * sets `hubEnv` spawns every hub with exactly the object it always did.
+ *
+ * @param {object|null} venueWide  `opts.hubExtraEnv`
+ * @param {object|null} perIndex   `opts.hubEnv`, `{i: {KEY: value}}`
+ * @param {number} i
+ * @returns {object|null}
+ */
+function hubExtraEnvFor(venueWide, perIndex, i) {
+    const overlay = indexerEnvOverlay(perIndex, i);
+    return overlay ? mergeIndexerExtraEnv(venueWide, overlay) : venueWide;
+}
+
 class AttestMirrorVenue {
 
     /**
@@ -2069,6 +2091,11 @@ class AttestMirrorVenue {
         // attestation BATCH publisher, which needs a signer module, a DOGE encoder and
         // a funded DOGE address that only a drill can supply; see the buildHubEnv call.
         this.hubExtraEnv     = opts.hubExtraEnv || null;
+        // `{0: {BTC_INDEXER_URL: url}}`: a per-INDEX hub overlay, applied over
+        // `hubExtraEnv`. It exists so each hub can read its OWN indexer, the way a
+        // validator node wires its hub to its co-located indexers; empty for every
+        // caller that does not set it, so their hub environments are unchanged.
+        this.hubEnv          = opts.hubEnv || {};
         // The same seam for every INDEXER child, and it exists for the bridge rail: the
         // destination indexer's D2 escrow-proof client resolves the ORIGIN chain's
         // endpoint from `<COIN>_INDEXER_URL` in its own environment, which no venue
@@ -2320,7 +2347,9 @@ class AttestMirrorVenue {
             // wallet on another chain, which is a drill's business rather than a venue's,
             // so the venue offers the seam and AT5 fills it or skips saying what is
             // missing. Applied LAST, so a drill can override anything above deliberately.
-            extraEnv: this.hubExtraEnv,
+            // The per-index overlay (see `hubEnv`) layers over the venue-wide one only when
+            // this hub has one, so an unset venue passes exactly the object it always did.
+            extraEnv: hubExtraEnvFor(this.hubExtraEnv, this.hubEnv, i),
             path: process.env.PATH,
             home: process.env.HOME
         });
@@ -3878,6 +3907,7 @@ module.exports = {
     MIRROR_HOLD,
     // The pure composition layer, exported for test/unit/helpers/attestMirrorVenue.test.js.
     assignFollowedHubs,
+    hubExtraEnvFor,
     planPorts,
     portCount,
     buildHubEnv,

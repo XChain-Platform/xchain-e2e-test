@@ -513,6 +513,9 @@ describe('XPOLICY: hub-signed policy snapshot to indexer settle pass (policy AT1
 
             mvh = new MultiValidatorHub({
                 count: COUNT, basePort: 26700,
+                // The pending source IS this mesh's indexer: named explicitly so a rail host's
+                // INDEXER_URL cannot hand the hubs the standing indexer's capability set.
+                venue: 'bridgePendingSource', btcIndexerApiUrl: source.urlFor('shared', 'BTC'),
                 startCrossChain: true, startAttestation: false,
                 extraP2pConfig: { XDEX_SNAPSHOT_BLOCK: String(SNAPSHOT) }
             });
