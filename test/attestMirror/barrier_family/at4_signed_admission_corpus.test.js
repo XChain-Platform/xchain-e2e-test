@@ -145,7 +145,7 @@ async function finalizeSignedRow (ctx) {
     assert.strictEqual(rowsPerIndexer[0].response_hash, rowsPerIndexer[1].response_hash, 'the two mirrors hold different response hashes')
     ctx.admission = await drive.readAdmissionRows(ctx.venue, ctx.requestId, ctx.coin)
     const pre = rows.admitHeightApplyFindings(ctx.admission.column, ctx.admission.rows, [])
-    assert.deepStrictEqual(pre.findings, [], 'the finalized row is not a signed admission-era corpus row: ' + JSON.stringify(ctx.admission.rows))
+    assert.deepStrictEqual(pre.findings, [], 'the finalized row is not a signed admission-era corpus row: ' + rows.bigintSafeStringify(ctx.admission.rows))
     console.log('AT4 corpus: request ' + ctx.requestId + ' finalized, ' + ctx.admission.column + '=' + pre.admitHeight)
 }
 
@@ -160,7 +160,7 @@ async function applyAtAdmitHeight (ctx) {
     // Re-read: a second leader slot can add a row between the finalize and the apply.
     ctx.admission = await drive.readAdmissionRows(ctx.venue, ctx.requestId, ctx.coin)
     const got = rows.admitHeightApplyFindings(ctx.admission.column, ctx.admission.rows, ctx.applied)
-    console.log('AT4 corpus apply: ' + JSON.stringify({ admitHeight: got.admitHeight, applied: ctx.applied.map((a) => a && ({ block_index: a.block_index, action_index: a.action_index })) }))
+    console.log('AT4 corpus apply: ' + rows.bigintSafeStringify({ admitHeight: got.admitHeight, applied: ctx.applied.map((a) => a && ({ block_index: a.block_index, action_index: a.action_index })) }))
     assert.deepStrictEqual(got.findings, [], 'the response was not applied at its admission height on both armed indexers')
     ctx.admitHeight = got.admitHeight
     const state = await readContractState(ctx.venue, ctx.venue.indexers[0].index, ctx.contract.contractIndex)
@@ -177,7 +177,7 @@ async function printWitnessCommand (ctx) {
     const corpusTip = Math.min(...level.map((s) => s.decoder))
     const coords = drive.corpusCoordinates(ctx.venue, 0, ctx.coin)
     const cmd = rows.replayWitnessCommand(Object.assign({ indexerRoot: path.join(BUILD_ROOT, 'xchain-indexer'), admitHeight: ctx.admitHeight, corpusTip }, coords))
-    console.log('AT4 CORPUS ' + JSON.stringify({ requestId: ctx.requestId, admitHeight: ctx.admitHeight, corpusTip, mirrorDbs: ctx.venue.indexers.map((ix) => ix.mirrorDbName), activationHeight: cmd.activationHeight }))
+    console.log('AT4 CORPUS ' + rows.bigintSafeStringify({ requestId: ctx.requestId, admitHeight: ctx.admitHeight, corpusTip, mirrorDbs: ctx.venue.indexers.map((ix) => ix.mirrorDbName), activationHeight: cmd.activationHeight }))
     assert.deepStrictEqual(cmd.refusals, [], 'the corpus cannot be read by the replay witness')
     console.log('AT4 WITNESS COMMAND (export ' + coords.passEnv + ' first): ' + cmd.line)
 }

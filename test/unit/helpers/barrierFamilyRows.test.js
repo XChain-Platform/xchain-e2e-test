@@ -289,6 +289,13 @@ describe('barrierFamilyRows: the AT4 signed admission-era corpus', () => {
         assert.throws(() => rows.attestRequestContractCode(60, "x'); evil('"), /bad context tag/)
     })
 
+    it('stringifies a mariadb row carrying a BigInt column without throwing, and prints its digits', () => {
+        const row = { id: 1, response_hash: 'de30690073c0f924', [COL]: 276n }
+        assert.doesNotThrow(() => rows.bigintSafeStringify(row))
+        assert.strictEqual(rows.bigintSafeStringify(row), JSON.stringify({ id: 1, response_hash: 'de30690073c0f924', [COL]: 276 }))
+        assert.strictEqual(rows.bigintSafeStringify([[row], [row]]), JSON.stringify([[{ id: 1, response_hash: 'de30690073c0f924', [COL]: 276 }], [{ id: 1, response_hash: 'de30690073c0f924', [COL]: 276 }]]))
+    })
+
     it('accepts a signed row applied at its admission height on both indexers, and reports that height', () => {
         const got = rows.admitHeightApplyFindings(COL, [[signed()], [signed()]], [applied(), applied()])
         assert.deepStrictEqual(got, { findings: [], admitHeight: 276 })

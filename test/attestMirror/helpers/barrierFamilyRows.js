@@ -486,6 +486,32 @@ function hasSignatures (cell) {
 }
 
 /**
+ * JSON for a console line or an assertion message, safe over a raw mariadb row or any
+ * value nested under it. The driver hands back BIGINT columns (an admission height, a
+ * block or action index) as BigInt, and plain JSON.stringify throws on those; the AT4
+ * corpus drive prints exactly such rows on every finalize and apply step.
+ *
+ * Walks the value itself rather than leaning on a JSON.stringify replacer: replacer
+ * only runs after JSON.stringify's own toJSON lookup, and another loaded module can
+ * define BigInt.prototype.toJSON (the SDK does, for its own amount serialization),
+ * which would hand the replacer an already-stringified value and hide the BigInt.
+ */
+function bigintSafe (value) {
+    if (typeof value === 'bigint') return Number(value)
+    if (Array.isArray(value)) return value.map(bigintSafe)
+    if (value && typeof value === 'object') {
+        const out = {}
+        for (const k of Object.keys(value)) out[k] = bigintSafe(value[k])
+        return out
+    }
+    return value
+}
+
+function bigintSafeStringify (value) {
+    return JSON.stringify(bigintSafe(value))
+}
+
+/**
  * What stops one signed response from being an admission-era corpus row, as findings
  * (empty means it is one). `mirrorRows[i]` is indexer i's mirror rows for the request,
  * `applied[i]` its applied v1 row. The claims: every mirror row is signed and carries an
@@ -580,6 +606,7 @@ module.exports = {
     timedOutLines,
     sha256Hex,
     attestRequestContractCode,
+    bigintSafeStringify,
     admitHeightApplyFindings,
     replayWitnessCommand,
 }
