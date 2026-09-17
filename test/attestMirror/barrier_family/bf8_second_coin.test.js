@@ -202,7 +202,8 @@ async function seedRows (ctx) {
   ctx.tips = { [BTC]: btcTip, [LTC]: ltcTip }
   ctx.plan = planEntries(btcTip, ltcTip)
   const now = Math.floor(Date.now() / 1000)
-  const base = { network: ctx.venue.network, coin: BTC, otherChain: LTC, snapshotBlock: btcTip, effectiveTime: now - 10 }
+  // Snapshot at BTC's planned entry, not the reached tip: a fresh node's stake re-derivation rejects a synthetic capability row at a reached height.
+  const base = { network: ctx.venue.network, coin: BTC, otherChain: LTC, snapshotBlock: ctx.plan[BTC], effectiveTime: now - 10 }
   const seeded = bf8Rows(ctx.plan, base)
   ctx.keys = { A: seeded.A.row.match_id, N: seeded.N.row.match_id }
   const snap = rows.inertRow('capability_snapshots', Object.assign({ tag: 'bf8|snap|' + btcTip, effectiveTime: now }, base))

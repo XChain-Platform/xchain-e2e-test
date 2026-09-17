@@ -54,6 +54,13 @@ async function bootFamilyVenue (opts) {
     assert.ok(o.repoRoot, 'bootFamilyVenue: repoRoot is required (B4: the evidence names the tree that ran)')
     const btc = await createRail('bitcoin', 'regtest')
     const venueOpts = Object.assign({}, o.venue || {})
+    // Bounded XDEX rounds (5 s, 20 s terminal) and 1 s admission samples: the hub default 480 s terminal
+    // window publishes no settled match height inside a case's 300 s commit budget (rail 2026-09-17, bf2/bf5).
+    venueOpts.hubExtraEnv = Object.assign({
+        XDEX_ROUND_TIMEOUT_MS: '5000',
+        XDEX_ROUND_MAX_LIFETIME_MS: '20000',
+        ADMISSION_WATERMARK_SAMPLE_MS: '1000',
+    }, venueOpts.hubExtraEnv || {})
     if (o.indexerGraces) venueOpts.indexerGraces = o.indexerGraces
     if (o.indexerExtraEnv) venueOpts.indexerExtraEnv = Object.assign({}, venueOpts.indexerExtraEnv || {}, o.indexerExtraEnv)
     if (o.armHubs) venueOpts.hubExtraEnv = Object.assign({}, venueOpts.hubExtraEnv || {}, { [fixture.ARM_ENV]: fixture.ARM_VALUE })

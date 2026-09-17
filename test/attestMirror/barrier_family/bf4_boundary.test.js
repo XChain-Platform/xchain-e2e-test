@@ -177,10 +177,14 @@ async function seedThree (ctx) {
     const floor = await drive.minimumStamp(ctx.btc)
     // Both drill blocks must be stampable: T sits comfortably above the tip's median time.
     ctx.T = Math.max(Math.floor(Date.now() / 1000), floor.floor + 60) + 120
-    const base = { network: ctx.venue.network, coin: ctx.coin, effectiveTime: ctx.T, snapshotBlock: ctx.tip }
+    // Snapshot at the next height, not the reached tip: a fresh node's stake re-derivation rejects a synthetic capability row at a reached height.
+    const base = { network: ctx.venue.network, coin: ctx.coin, effectiveTime: ctx.T, snapshotBlock: ctx.tip + 1 }
     const legacy = rows.inertRow(TABLE, Object.assign({ tag: 'bf4|legacy|' + ctx.tip }, base))
     const omits = rows.inertRow(TABLE, Object.assign({ tag: 'bf4|omits|' + ctx.tip, admitBlocks: { LTC: 5 } }, base))
     const control = rows.inertRow(TABLE, Object.assign({ tag: 'bf4|control|' + ctx.tip, admitBlocks: { BTC: ctx.tip + 1 }, effectiveTime: ctx.T + 9999 }, base))
+    // The legacy row lives in cross_chain_matches, whose armed apply reads the capability set before the
+    // canonical; the guard fails this case, not the drill block, if it is ever moved to bridge or policy.
+    assert.deepStrictEqual(rows.armedLegacyApplyHazards([legacy, omits, control]), [], 'BF4 would seed a legacy row the armed apply pass refuses')
     await drive.seedMirrors(ctx.venue, [rows.inertRow('capability_snapshots', Object.assign({ tag: 'bf4|snap|' + ctx.tip }, base)), legacy, omits, control])
     await drive.waitForMirrorRows(ctx.venue, ARMED, TABLE, 3)
     ctx.keys = { legacy: legacy.row.match_id, omits: omits.row.match_id, control: control.row.match_id }

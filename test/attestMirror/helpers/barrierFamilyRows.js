@@ -173,6 +173,62 @@ function familySeedRows (spec) {
         .map((t) => inertRow(t, Object.assign({}, spec, { tag: spec.tag + '|' + t })))
 }
 
+/*
+ * WHERE AN ARMED VENUE CANNOT TAKE A LEGACY ROW. The regtest arming lever resolves to height 0
+ * (xchain-indexer mirror_admission_gate.js resolveMirrorAdmissionRegtest), so every snapshot_block is
+ * admission era and a NULL admission map is a row no hub produces. The canonical builders refuse it
+ * ("admission-era row at block N ... has no admit_blocks", admissionCanonicalValue), and that refusal
+ * is a thrown error that stalls the block wherever the apply pass reaches the canonical for a due row.
+ *
+ * These two tables reach it unconditionally: bridge_settle/transfer.js guardQuorumAndEscrow and
+ * bridge_settle/policy.js guardQuorumAndCopy build the canonical as verifyQuorum's ARGUMENT, before the
+ * capability set is read (rail 2026-09-17: BF2 stalled at block 104 on its legacy bridge row). The match
+ * and call passes read the capability set first and defer while it is empty (cross_settle/quorum.js,
+ * xexec/dispatch_quorum.js), and the attest pass selects mirror rows only for a pending request, so an
+ * inert legacy row in those tables is never canonicalized on these venues.
+ */
+const CANONICAL_BEFORE_QUORUM_TABLES = Object.freeze(['bridge_transfers', 'policy_snapshots'])
+
+/**
+ * The seeds an armed venue would stall on: finalized rows in a CANONICAL_BEFORE_QUORUM table whose
+ * every admission column is NULL. A map naming any chain builds its canonical and is not a hazard.
+ *
+ * @param {Array<{table: string, row: object, key: string[]}>} seeds  inertRow results
+ * @returns {string[]} one 'table|key' per offending seed; empty when the set is safe to seed armed
+ */
+function armedLegacyApplyHazards (seeds) {
+    const out = []
+    for (const s of seeds || []) {
+        if (!s || !CANONICAL_BEFORE_QUORUM_TABLES.includes(s.table)) continue
+        const r = s.row || {}
+        // A retracted row is outside every apply select (status = 'finalized'), so it never reaches a canonical.
+        if (r.status !== 'finalized') continue
+        const cols = Object.keys(admissionColumns(s.table, null))
+        if (cols.every((c) => r[c] === null || r[c] === undefined)) out.push(s.table + '|' + (s.key || []).map((k) => r[k]).join(','))
+    }
+    return out
+}
+
+/**
+ * BF2's member rows against drill height B: per table one row admitted AT B and one PAST B, plus a
+ * legacy NULL row only where the armed apply pass cannot reach its canonical (see above). The legacy
+ * rule itself is BF4's to prove; BF2's spec asserts the set with admit_blocks[BTC] <= B.
+ *
+ * @param {string[]} tables  the member tables
+ * @param {object} base      inertRow spec without tag or admitBlocks
+ * @param {number} B         the drill height
+ * @param {string} tagTail   distinguishes re-runs (the leg passes the held tip)
+ */
+function admissionSeedRows (tables, base, B, tagTail) {
+    const seeds = []
+    for (const t of tables) {
+        seeds.push(inertRow(t, Object.assign({}, base, { tag: 'bf2|at|' + t + '|' + tagTail, admitBlocks: { BTC: B } })))
+        seeds.push(inertRow(t, Object.assign({}, base, { tag: 'bf2|past|' + t + '|' + tagTail, admitBlocks: { BTC: B + 3 } })))
+        if (!CANONICAL_BEFORE_QUORUM_TABLES.includes(t)) seeds.push(inertRow(t, Object.assign({}, base, { tag: 'bf2|legacy|' + t + '|' + tagTail })))
+    }
+    return seeds
+}
+
 // "Finalized" per table: the xdex rails carry a finalized/retracted lifecycle, the attest
 // response rail carries only the TERMINAL vocabulary (ok/expired) and every row counts.
 function finalizedClause (table) {
@@ -306,6 +362,9 @@ module.exports = {
     inertRow,
     familySeedRows,
     admissionColumns,
+    CANONICAL_BEFORE_QUORUM_TABLES,
+    armedLegacyApplyHazards,
+    admissionSeedRows,
     contentEscapeSql,
     readableRowsSql,
     graceLadder,

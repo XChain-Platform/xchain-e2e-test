@@ -121,7 +121,8 @@ async function seedFamily (ctx) {
     ctx.markerAddress = held.before
     const tip = held.tip
     const now = Math.floor(Date.now() / 1000)
-    const spec = { network: ctx.venue.network, coin: ctx.coin, effectiveTime: now, snapshotBlock: tip, tag: 'bf1|' + tip }
+    // Snapshot at the drill height, not the reached tip: a fresh node's stake re-derivation rejects a synthetic capability row at a reached height.
+    const spec = { network: ctx.venue.network, coin: ctx.coin, effectiveTime: now, snapshotBlock: tip + 1, tag: 'bf1|' + tip }
     ctx.venue.withholdMirrorTable(WALKER, 'capability_snapshots')
     await drive.seedMirrors(ctx.venue, [rows.inertRow('capability_snapshots', spec)])
     await drive.seedMirrors(ctx.venue, rows.familySeedRows(spec))

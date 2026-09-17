@@ -99,7 +99,8 @@ async function seedAndPin (ctx) {
     const tip = held.tip
     ctx.B = tip + 1
     const now = Math.floor(Date.now() / 1000)
-    const base = { network: ctx.venue.network, coin: ctx.coin, effectiveTime: now, snapshotBlock: tip }
+    // Snapshot at B, not the reached tip: a fresh node's stake re-derivation rejects a synthetic capability row at a reached height.
+    const base = { network: ctx.venue.network, coin: ctx.coin, effectiveTime: now, snapshotBlock: ctx.B }
     await drive.seedMirrors(ctx.venue, [
         rows.inertRow('capability_snapshots', Object.assign({ tag: 'bf3|snap|' + tip }, base)),
         rows.inertRow(TABLE, Object.assign({ tag: 'bf3|match|' + tip, admitBlocks: { BTC: ctx.B } }, base)),

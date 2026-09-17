@@ -69,6 +69,43 @@ describe('barrierFamilyRows: inert rows', () => {
     })
 })
 
+describe('barrierFamilyRows: no legacy row where a height-0 armed apply pass canonicalizes it', () => {
+    const B = 104
+    const MEMBERS = ['cross_chain_matches', 'cross_chain_calls', 'bridge_transfers', 'policy_snapshots', 'attestation_responses']
+    const legacy = (t) => rows.inertRow(t, Object.assign({}, SPEC, { tag: 'legacy|' + t }))
+
+    it('flags a finalized NULL-map row in bridge_transfers and policy_snapshots, and only there', () => {
+        const hazards = rows.armedLegacyApplyHazards(MEMBERS.map(legacy))
+        assert.deepStrictEqual(hazards.map((h) => h.split('|')[0]), ['bridge_transfers', 'policy_snapshots'])
+        assert.strictEqual(hazards[0], 'bridge_transfers|' + legacy('bridge_transfers').row.transfer_id, 'the hazard names the row key')
+    })
+
+    it('passes a row whose map names any chain, and a legacy row no apply select reads', () => {
+        const atB = rows.inertRow('bridge_transfers', Object.assign({}, SPEC, { tag: 'at', admitBlocks: { BTC: B } }))
+        const omitsBtc = rows.inertRow('policy_snapshots', Object.assign({}, SPEC, { tag: 'omits', admitBlocks: { LTC: 5 } }))
+        const retracted = legacy('bridge_transfers')
+        retracted.row = Object.assign({}, retracted.row, { status: 'retracted' })
+        assert.deepStrictEqual(rows.armedLegacyApplyHazards([atB, omitsBtc, retracted]), [])
+    })
+
+    it('BF2\'s seed plan carries at-B and past-B rows everywhere, legacy rows only where the apply cannot reach them', () => {
+        const seeds = rows.admissionSeedRows(MEMBERS, SPEC, B, 103)
+        assert.deepStrictEqual(rows.armedLegacyApplyHazards(seeds), [], 'the BF2 plan seeds a row the armed node stalls on')
+        const count = (t) => seeds.filter((s) => s.table === t).length
+        assert.deepStrictEqual(MEMBERS.map(count), [3, 3, 2, 2, 3])
+        for (const t of MEMBERS) {
+            const col = fixture.admissionColumn(t, 'BTC')
+            const heights = seeds.filter((s) => s.table === t).map((s) => s.row[col])
+            assert.ok(heights.includes(B) && heights.includes(B + 3), t + ': the at-B and past-B rows are both present')
+            // The fixture's expected set at B is the seeded count minus the past-B row, which is what BF2 asserts.
+            const admitted = fixture.admittedRowSet(seeds.filter((s) => s.table === t).map((s) => s.row), t, 'BTC', B, SPEC.effectiveTime, (r) => String(r[s0(t)]))
+            assert.strictEqual(admitted.length, count(t) - 1, t + ': admitted at B')
+        }
+    })
+
+    function s0 (t) { return rows.NATURAL_KEYS[t][0] }
+})
+
 describe('barrierFamilyRows: the SQL shapes the legs read with', () => {
 
     it('counts content-escape rows in each member\'s own coin scope', () => {

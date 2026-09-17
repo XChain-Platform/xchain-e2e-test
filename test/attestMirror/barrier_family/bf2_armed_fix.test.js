@@ -18,10 +18,16 @@
  *
  * THE BINDING ASSERTION IS A ROW SET, NOT A HASH. Above the activation a row binds
  * at a different block by design, so equality with BF1's `state_hash` could only
- * hold vacuously. The leg seeds three rows per member table (one admitted AT B,
- * one admitted past B, one legacy NULL row) and compares the set the armed node's
- * mirror reads at B (the section 5.5 rule in its IS NULL OR SQL form) against the
- * fixture's independently computed expected set over the hub's own rows.
+ * hold vacuously. The leg seeds one row admitted AT B and one admitted past B per
+ * member table, plus a legacy NULL row in the tables whose armed apply pass never
+ * reaches that row's canonical, and compares the set the armed node's mirror reads
+ * at B (the section 5.5 rule in its IS NULL OR SQL form) against the fixture's
+ * independently computed expected set over the hub's own rows.
+ *
+ * NO LEGACY ROW IN bridge_transfers OR policy_snapshots. The venue arms at height 0,
+ * so every block is admission era and no hub produces a NULL-map row; those two apply
+ * passes build the canonical before reading the capability set and throw on one,
+ * stalling the drill block (rail 2026-09-17, block 104). The legacy rule is BF4's.
  *
  * WHAT THIS DOES NOT PROVE. The seeded rows carry no verifiable signature, so no
  * pass APPLIES them to the ledger; the read set is the mirror's, which is the rule
@@ -49,7 +55,7 @@ const COMMIT_BUDGET_MS = 5 * 60 * 1000
 describe('BF2: the fix, armed, the identical block on the identical mirror state', function () {
     this.timeout(Math.max(drive.LEG_FLOOR_MS, fixture.legTimeoutMs(600)))
 
-    const ctx = { venue: null, btc: null, coin: 'BTC', B: null, block: null, seen: [], expected: {}, read: {} }
+    const ctx = { venue: null, btc: null, coin: 'BTC', B: null, block: null, seen: [], seeded: {}, expected: {}, read: {} }
 
     before(async function () {
         const up = await drive.bootFamilyVenue({ label: 'bf2', repoRoot: BUILD_ROOT, armed: [ARMED, PEER], armHubs: true })
@@ -62,7 +68,7 @@ describe('BF2: the fix, armed, the identical block on the identical mirror state
         if (ctx.venue) await ctx.venue.stop()
     })
 
-    it('seeds three rows per member: admitted at B, admitted past B, legacy NULL', async function () {
+    it('seeds per member: admitted at B, admitted past B, and legacy NULL where the armed apply cannot reach it', async function () {
         await seedAdmissionRows(ctx)
     })
 
@@ -84,17 +90,20 @@ async function seedAdmissionRows (ctx) {
     const tip = held.tip
     ctx.B = tip + 1
     const now = Math.floor(Date.now() / 1000)
-    const base = { network: ctx.venue.network, coin: ctx.coin, effectiveTime: now, snapshotBlock: tip }
-    const seeds = [rows.inertRow('capability_snapshots', Object.assign({ tag: 'bf2|snap|' + tip }, base))]
-    for (const t of TABLES) {
-        seeds.push(rows.inertRow(t, Object.assign({}, base, { tag: 'bf2|at|' + t + '|' + tip, admitBlocks: { BTC: ctx.B } })))
-        seeds.push(rows.inertRow(t, Object.assign({}, base, { tag: 'bf2|past|' + t + '|' + tip, admitBlocks: { BTC: ctx.B + 3 } })))
-        seeds.push(rows.inertRow(t, Object.assign({}, base, { tag: 'bf2|legacy|' + t + '|' + tip })))
-    }
+    // Snapshot at B, not the reached tip: a fresh node's stake re-derivation rejects a synthetic capability row at a reached height.
+    const base = { network: ctx.venue.network, coin: ctx.coin, effectiveTime: now, snapshotBlock: ctx.B }
+    const members = rows.admissionSeedRows(TABLES, base, ctx.B, tip)
+    // Refuse before seeding: a NULL-map row the armed apply canonicalizes stalls the drill block, not this case.
+    assert.deepStrictEqual(rows.armedLegacyApplyHazards(members), [], 'BF2 would seed a legacy row the armed apply pass refuses')
+    const seeds = [rows.inertRow('capability_snapshots', Object.assign({ tag: 'bf2|snap|' + tip }, base))].concat(members)
     await drive.seedMirrors(ctx.venue, seeds)
-    for (const t of TABLES) await drive.waitForMirrorRows(ctx.venue, ARMED, t, 3)
+    ctx.seeded = {}
+    for (const t of TABLES) {
+        ctx.seeded[t] = members.filter((m) => m.table === t).length
+        await drive.waitForMirrorRows(ctx.venue, ARMED, t, ctx.seeded[t])
+    }
     await drive.waitForMirrorRows(ctx.venue, ARMED, 'capability_snapshots', 1)
-    console.log('BF2 seeded 3 rows per member table against B=' + ctx.B)
+    console.log('BF2 seeded ' + JSON.stringify(ctx.seeded) + ' rows per member table against B=' + ctx.B)
 }
 
 async function mineAndWatch (ctx) {
@@ -122,7 +131,7 @@ async function mineAndWatch (ctx) {
 
 // The expected set is computed by the FIXTURE over the hub's rows (independent of the
 // indexer); the read set is the mirror's under the IS NULL OR rule. Both must contain the
-// at-B row and the legacy row and exclude the past-B row, per table.
+// at-B row, and the legacy row where one was seeded, and exclude the past-B row, per table.
 async function assertReadSets (ctx) {
     const hub = ctx.venue.indexers[ARMED].followsHub
     for (const t of TABLES) {
@@ -132,8 +141,10 @@ async function assertReadSets (ctx) {
         ctx.read[t] = await drive.mirrorReadableSet(ctx.venue, ARMED, t, ctx.coin, ctx.B, ctx.block.blockTime)
         assert.deepStrictEqual(ctx.read[t], ctx.expected[t], t + ': the mirror reads ' + JSON.stringify(ctx.read[t]) +
             ' at B=' + ctx.B + ' while the hub rows admit ' + JSON.stringify(ctx.expected[t]))
-        assert.strictEqual(ctx.expected[t].length, 2, t + ': expected exactly the at-B row and the legacy row, got ' +
-            ctx.expected[t].length + ' of ' + hubRows.length + ' hub rows')
+        // The past-B row is the one seeded row not admitted at B.
+        const want = ctx.seeded[t] - 1
+        assert.strictEqual(ctx.expected[t].length, want, t + ': expected the at-B row' + (want > 1 ? ' and the legacy row' : '') +
+            ', got ' + ctx.expected[t].length + ' of ' + hubRows.length + ' hub rows')
         const col = fixture.admissionColumn(t, ctx.coin)
         const past = hubRows.filter((r) => Number(r[col]) === ctx.B + 3).map((r) => String(r[keyCol]))
         assert.strictEqual(past.length, 1, t + ': the past-B row is missing on the hub')
