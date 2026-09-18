@@ -119,6 +119,32 @@ async function _pickFreePorts(count, base) {
     return picked;
 }
 
+// The BTC indexer URL the mesh's hubs read (capability snapshots, chain tip, pending polls).
+//
+// A VENUE NEVER FALLS BACK TO THE STANDING INDEXER. Without a venue the precedence is the
+// harness's historical one: `opts.btcIndexerApiUrl`, then env BTC_INDEXER_API_URL, then
+// `http://INDEXER_URL:INDEXER_API_PORT`. On a rail host that last pair names the STANDING
+// BTC indexer, whose real capability set seats none of a test mesh's generated keys, so a
+// mesh that meant to read its own stub runs its hubs as observers and a federated round
+// that is green in CI reads red there (policy off-rail file: 20/2 with the rail `.env`,
+// 22/0 with it masked, 2026-09-17). A caller that names `opts.venue` owns its indexer and
+// must pass that URL; this refuses rather than silently reading the standing one.
+function _resolveMeshBtcIndexerUrl(opts, env) {
+    const o = opts || {};
+    const e = env || {};
+    if (o.venue) {
+        if (!o.btcIndexerApiUrl) {
+            throw new Error('MultiValidatorHub: venue ' + o.venue + ' passed no btcIndexerApiUrl. A venue ' +
+                'must name its own indexer; the env fallback would read the standing indexer (' +
+                (e.BTC_INDEXER_API_URL || ('http://' + (e.INDEXER_URL || 'localhost') + ':' + (e.INDEXER_API_PORT || '12001'))) + ').');
+        }
+        return String(o.btcIndexerApiUrl);
+    }
+    return o.btcIndexerApiUrl
+        || e.BTC_INDEXER_API_URL
+        || ('http://' + (e.INDEXER_URL || 'localhost') + ':' + (e.INDEXER_API_PORT || '12001'));
+}
+
 // Promise.race with a tagged-error timeout. The slow path (a hub close
 // that gets stuck on a peer drain) gets bounded so the test harness
 // can finish teardown deterministically.
@@ -139,6 +165,8 @@ class MultiValidatorHub {
      * @param opts.basePort             starting P2P port to probe (defaults to 28000)
      * @param opts.btcIndexerApiUrl     URL the hubs poll for pending requests
      *                                  (defaults from env: BTC_INDEXER_API_URL -> http://INDEXER_URL:INDEXER_API_PORT)
+     * @param opts.venue                name of the caller's own indexer venue; when set,
+     *                                  btcIndexerApiUrl is REQUIRED and the env is never read
      * @param opts.oracleEpochStart    ORACLE_EPOCH_START required by the hub even when oracle isn't started
      */
     constructor(opts) {
@@ -150,9 +178,9 @@ class MultiValidatorHub {
         this.dbPass        = opts.dbPass || process.env.HUB_DB_PASS;
         this.dbNamePrefix  = opts.dbNamePrefix || ('XChain_BTC_Regtest_MVH_' + process.pid + '_');
         this.basePort      = opts.basePort || 28000;
-        this.btcIndexerApiUrl = opts.btcIndexerApiUrl
-            || process.env.BTC_INDEXER_API_URL
-            || ('http://' + (process.env.INDEXER_URL || 'localhost') + ':' + (process.env.INDEXER_API_PORT || '12001'));
+        // `opts.venue` names a caller that serves its own indexer; see _resolveMeshBtcIndexerUrl.
+        this.venue = opts.venue || null;
+        this.btcIndexerApiUrl = _resolveMeshBtcIndexerUrl(opts, process.env);
         this.oracleEpochStart = opts.oracleEpochStart || Date.now() - 60_000;
 
         // Subsystem toggles. Attestation is the historical default (the harness was
@@ -494,4 +522,4 @@ class MultiValidatorHub {
 // a passing integration run and only shows itself as a rare EADDRINUSE, so it is
 // pinned directly (test/unit/helpers/multiValidatorHubPorts.test.js).
 module.exports = { MultiValidatorHub, ValidatorIdentity, loadHubModule: _loadHubModule, resolveHubFile: _resolveHubFile,
-    pickFreePorts: _pickFreePorts, ephemeralRange: _ephemeralRange };
+    pickFreePorts: _pickFreePorts, ephemeralRange: _ephemeralRange, resolveMeshBtcIndexerUrl: _resolveMeshBtcIndexerUrl };

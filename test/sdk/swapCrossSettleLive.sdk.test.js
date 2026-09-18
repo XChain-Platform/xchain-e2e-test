@@ -85,10 +85,18 @@ const DB_PORT = parseInt(process.env.XCALL_DB_PORT || '13306', 10);
 
 // The relay hub may run as a SEPARATE disposable DB rather than the shared stack
 // MariaDB (the proven 3-hub venue runs XChain_Relay_Hub on 172.17.0.1:13341).
-// Default to the XCALL_DB_* stack DB + 'XChain_Hub'; override to point elsewhere.
-const HUB_DB_HOST = process.env.HUB_DB_HOST || DB_HOST;
-const HUB_DB_PORT = parseInt(process.env.HUB_DB_PORT || String(DB_PORT), 10);
-const HUB_DB_NAME = process.env.HUB_DB_NAME || 'XChain_Hub';
+// Default to the XCALL_DB_* stack DB + 'XChain_Hub'; override with RELAY_HUB_DB_*.
+//
+// Resolved by hubMirrorTopology.relayHubParams, and NOT from HUB_DB_NAME alone:
+// that variable means "the database the indexer reads prices from", which on a
+// mirror topology is an INDEXER's database (this one's or another chain's), and
+// pointing the drill there queries for match rows that only ever exist on the hub,
+// with credentials that usually cannot even open it. HUB_SOURCE_DB_NAME, which names
+// the hub's own authoritative database, is preferred over it. See relayHubParams.
+// Resolved lazily, since it consults global.indexerDatabase, which initialCheck
+// sets in a hook long after mocha has loaded this file.
+const topology = require('../helpers/hubMirrorTopology');
+function relayHub() { return topology.relayHubParams({ host: DB_HOST, port: DB_PORT }); }
 
 const BTC_TICK  = String(process.env.SWAP_BTC_TICK  || '').trim();
 const DOGE_TICK = String(process.env.SWAP_DOGE_TICK || '').trim();
@@ -104,17 +112,28 @@ const SWAP_AMOUNT = 100;
 
 // Every env this drill needs before it can mean anything. Absent => the venue is a
 // plain single-chain SDK stack and the suite skips rather than fails.
+// Each entry is one requirement; an array is a set of alternatives, any one of which
+// satisfies it. The relay-hub credentials have three spellings because the drill's own
+// RELAY_HUB_DB_* naming (see relayHub above) has to keep accepting the HUB_DB_USER a
+// venue set before that naming existed, and a mirror-topology venue supplies the hub's
+// own credentials as HUB_SOURCE_DB_USER. Same precedence as relayHubParams.
 const REQUIRED_ENV = ['SWAP_BTC_TICK', 'SWAP_DOGE_TICK', 'SWAP_DOGE_SWAP_INDEX',
-    'SWAP_DOGE_MAKER_BTC_RECV', 'HUB_DB_USER', 'DOGE_IDX_DB_USER'];
+    'SWAP_DOGE_MAKER_BTC_RECV', ['RELAY_HUB_DB_USER', 'HUB_SOURCE_DB_USER', 'HUB_DB_USER'],
+    'DOGE_IDX_DB_USER'];
 function missingEnv() {
-    return REQUIRED_ENV.filter(k => !String(process.env[k] || '').trim());
+    const out = [];
+    for (const req of REQUIRED_ENV) {
+        const keys = Array.isArray(req) ? req : [req];
+        if (!keys.some(k => String(process.env[k] || '').trim())) out.push(keys.join(' or '));
+    }
+    return out;
 }
 
 async function withConn(host, port, database, user, password, fn) {
     const conn = await mariadb.createConnection({ host, port, database, user, password });
     try { return await fn(conn); } finally { await conn.end().catch(() => {}); }
 }
-async function hubDb(fn)   { return withConn(HUB_DB_HOST, HUB_DB_PORT, HUB_DB_NAME, process.env.HUB_DB_USER, process.env.HUB_DB_PASS, fn); }
+async function hubDb(fn)   { const h = relayHub(); return withConn(h.host, h.port, h.database, h.user, h.password, fn); }
 async function dogeIdx(fn) { return withConn(DB_HOST, DB_PORT, 'XChain_DOGE_Regtest_Indexer', process.env.DOGE_IDX_DB_USER, process.env.DOGE_IDX_DB_PASS, fn); }
 
 async function btcIdx(sql, params) {
@@ -158,6 +177,11 @@ async function setupSwapSettlement() {
         expect(DOGE_MAKER_BTC_RECV, 'SWAP_DOGE_MAKER_BTC_RECV env (the BTC addr the DOGE swap pays out to)')
             .to.match(/^[a-zA-Z0-9]+$/);
         expect(global.indexerDatabase, 'indexerDatabase global (initialCheck)').to.be.an('object');
+        // Named in the log because the drill asserting against the wrong database is
+        // indistinguishable from the hub never having matched: both read as zero rows.
+        const h = relayHub();
+        console.log('    [swap-cross] relay hub db=' + h.database + ' at ' + h.host + ':' + h.port
+            + ' (from ' + h.source + ')');
 
         sdk = makeSdk();
         maker = await fundedGasAddress(sdk, 1);

@@ -38,6 +38,11 @@ const {
     resolveVenueQuorum,
     lockWireV0,
     burnWireV1,
+    lockWireV3,
+    burnWireV4,
+    optInWire,
+    effectiveLockDepth,
+    capOrderReading,
     classifyInvariant,
     bridgeSettled,
     escrowOf,
@@ -252,6 +257,104 @@ describe('bridgeRailVenue: the pure layer', function () {
         it('refuses to build a leg with a missing address rather than emitting an empty field', function () {
             assert.throws(() => lockWireV0('DOGE', '', 5, ''), /destination coin and address/);
             assert.throws(() => burnWireV1('', 2, ''), /BTC destination address/);
+        });
+    });
+
+    // The token wires (token spec section 5 and 7), checked against the SDK's own format
+    // strings so a field added or reordered there fails here before it reaches a rail.
+    describe('the token bridge wires (v3, v4, format 7)', function () {
+        // The SDK's own format table is the second witness for the field order. Absence is
+        // a single-repo clone and skips that half only; a checkout that is present and will
+        // not load fails the case, the convention hubRelayMarginFloorS's case sets below.
+        const SDK_FORMATS = '../../../../xchain-sdk/src/protocol/formats.js';
+        const sdkFields = (ctx, action, version) => {
+            try { require.resolve(SDK_FORMATS); }
+            catch (e) { ctx.skip(); }
+            return String(require(SDK_FORMATS)[action][version]).split('|');
+        };
+        const wireFields = (wire) => wire.split('|').length - 1;
+
+        it('builds the v3 lock the handler parses: tick before the destination, trailing memo', function () {
+            assert.strictEqual(lockWireV3('FUFU', 'DOGE', 'nXyZ', 5, 'AT1'), 'XBRIDGE|3|FUFU|DOGE|nXyZ|5|AT1');
+            assert.strictEqual(lockWireV3('FUFU', 'DOGE', 'nXyZ', '0.5', ''), 'XBRIDGE|3|FUFU|DOGE|nXyZ|0.5|');
+        });
+
+        it('builds the v4 burn with no coin field: the origin chain is the rooted tick prefix', function () {
+            assert.strictEqual(burnWireV4('BTC.FUFU', 'mABC', 2, ''), 'XBRIDGE|4|BTC.FUFU|mABC|2|');
+        });
+
+        it('carries exactly the field count the SDK names for v3 and v4', function () {
+            const v3 = sdkFields(this, 'XBRIDGE', 3);
+            assert.strictEqual(wireFields(lockWireV3('FUFU', 'DOGE', 'nXyZ', 5, '')), v3.length,
+                'the v3 wire does not match the SDK field list ' + v3.join('|'));
+            const v4 = sdkFields(this, 'XBRIDGE', 4);
+            assert.strictEqual(wireFields(burnWireV4('BTC.FUFU', 'mABC', 2, '')), v4.length,
+                'the v4 wire does not match the SDK field list ' + v4.join('|'));
+            const f7 = sdkFields(this, 'ISSUE', 7);
+            assert.strictEqual(wireFields(optInWire('FUFU', 'DOGE', '', '', '')), f7.length,
+                'the format 7 wire does not match the SDK field list ' + f7.join('|'));
+        });
+
+        it('builds format 7 with empty fields for "unchanged" and keeps 0 and "-" as the values they are', function () {
+            assert.strictEqual(optInWire('FUFU', 'DOGE', undefined, undefined, 'opt in'), 'ISSUE|7|FUFU|DOGE|||opt in');
+            assert.strictEqual(optInWire('FUFU', null, 3, null, ''), 'ISSUE|7|FUFU||3||');
+            assert.strictEqual(optInWire('FUFU', '-', 0, 1, ''), 'ISSUE|7|FUFU|-|0|1|');
+            assert.strictEqual(optInWire('FUFU', 'DOGE,LTC', '', '', ''), 'ISSUE|7|FUFU|DOGE,LTC|||');
+        });
+
+        it('refuses a wire with a missing tick or address rather than emitting an empty field', function () {
+            assert.throws(() => lockWireV3('', 'DOGE', 'nXyZ', 5, ''), /tick, a destination coin and an address/);
+            assert.throws(() => lockWireV3('FUFU', 'DOGE', '', 5, ''), /tick, a destination coin and an address/);
+            assert.throws(() => burnWireV4('BTC.FUFU', '', 2, ''), /bridged tick and an origin address/);
+            assert.throws(() => optInWire('', 'DOGE', '', '', ''), /needs a tick/);
+        });
+    });
+
+    describe('effectiveLockDepth', function () {
+        it('raises the pinned depth to MIN_DEPTH and never lowers it (the hub rule, D24)', function () {
+            assert.strictEqual(effectiveLockDepth(1, 3), 3);
+            assert.strictEqual(effectiveLockDepth(6, 3), 6);
+            assert.strictEqual(effectiveLockDepth(1, 0), 1);
+            assert.strictEqual(effectiveLockDepth(1, null), 1);
+            assert.strictEqual(effectiveLockDepth(1, 'x'), 1);
+            assert.strictEqual(effectiveLockDepth('bad', 2), 2);
+        });
+    });
+
+    describe('capOrderReading', function () {
+        const t = (id, snap) => ({ transfer_id: id, snapshot_block: snap });
+        const s = (id, block) => ({ transfer_id: id, block_index: block });
+
+        it('reads 25 then 5 when a held destination applies thirty due legs in canonical order', function () {
+            const transfers = [];
+            const settlements = [];
+            for (let i = 0; i < 30; i++) {
+                const id = 'id' + String(i).padStart(2, '0');
+                transfers.push(t(id, 700));
+                settlements.push(s(id, i < 25 ? 9001 : 9002));
+            }
+            const r = capOrderReading(transfers.slice().reverse(), settlements, 25);
+            assert.strictEqual(r.ok, true, r.reason);
+            assert.deepStrictEqual(r.groups, [{ block: 9001, count: 25 }, { block: 9002, count: 5 }]);
+            assert.strictEqual(r.order[0], 'id00');
+            assert.strictEqual(r.order[29], 'id29');
+        });
+
+        it('sorts by snapshot_block before transfer_id and fails a leg applied out of that order', function () {
+            const r = capOrderReading([t('zz', 700), t('aa', 701)], [s('zz', 10), s('aa', 9)], 25);
+            assert.strictEqual(r.ok, false);
+            assert.match(r.reason, /aa applied at block 9 after a leg that sorts before it applied at 10/);
+        });
+
+        it('fails an unapplied leg and a block over the cap, naming each', function () {
+            assert.match(capOrderReading([t('aa', 1)], [], 25).reason, /aa was never applied/);
+            const r = capOrderReading([t('aa', 1), t('bb', 1), t('cc', 1)], [s('aa', 5), s('bb', 5), s('cc', 5)], 2);
+            assert.strictEqual(r.ok, false);
+            assert.match(r.reason, /block 5 applied 3 legs, over the cap of 2/);
+        });
+
+        it('refuses a cap that is not a positive integer', function () {
+            assert.throws(() => capOrderReading([], [], 0), /cap must be a positive integer/);
         });
     });
 

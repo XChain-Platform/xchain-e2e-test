@@ -203,7 +203,7 @@ function registerEscrowGateIdentityCase() {
             assert.ok(g.source, 'the gate must name the file it read');
             assert.ok(path.isAbsolute(g.source),
                 'a relative path does not identify a copy; two checkouts share it');
-            assert.strictEqual(path.basename(g.source), 'state_subtree_activation.js');
+            assert.strictEqual(path.basename(g.source), 'state_subtree_gate.js');
             assert.ok(fs.existsSync(g.source), 'the named file must be the one on disk');
             assert.match(g.sha256 || '', /^[0-9a-f]{64}$/, 'a sha256 the operator can hash-match');
             // And it must be the hash OF THAT FILE, not of anything else: this is

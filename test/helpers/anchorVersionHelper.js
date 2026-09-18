@@ -67,7 +67,7 @@ let _hubFlagDays = null;
 function hubFlagDays(){
     if(!_hubFlagDays){
         const ckpt = loadHubModule('src/checkpoint_commitment_activation.js');
-        const ar   = loadHubModule('src/anchor_reward_activation.js');
+        const ar   = loadHubModule('src/consensus/gates/anchor_reward_gate.js');
         _hubFlagDays = {
             isCheckpointCommitmentActive: ckpt.isCheckpointCommitmentActive,
             isAnchorRewardActive:         ar.isAnchorRewardActive,

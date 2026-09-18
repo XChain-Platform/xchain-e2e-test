@@ -208,7 +208,7 @@ function stakeVisibilityBlocks (coin, network) {
         : raw
     const net  = String(network || 'regtest')
     const shared = Number(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
-    const burial = Number(loadHubModule('src/snapshot_reorg_buffer.js').CANONICAL_REORG_BUFFER)
+    const burial = Number(loadHubModule('src/consensus/snapshot_reorg_buffer.js').CANONICAL_REORG_BUFFER)
 
     // The COINS REGISTRY is where this actually lives, not a config module:
     // ACTIVATION_DELAY_BLOCKS is nested under the coin's STAKING block and is
@@ -801,7 +801,7 @@ async function readSeatedAttestationSet (opts) {
     const o = opts || {}
     const indexer = o.indexer || indexerConnector
     const stakeTeardown = require('../helpers/stakeTeardown')
-    const buffer = Number(loadHubModule('src/snapshot_reorg_buffer.js').CANONICAL_REORG_BUFFER)
+    const buffer = Number(loadHubModule('src/consensus/snapshot_reorg_buffer.js').CANONICAL_REORG_BUFFER)
 
     const tip = await indexer.call('getblockhashes', {})
     assert.ok(tip && tip.block_index !== undefined && tip.block_index !== null,
@@ -992,7 +992,7 @@ function _rawWeight (seated, pubkeyHex) {
  * decides which one a window is measured by.
  */
 function _batchQuorumReach (seated, adopted, belowFloor, buriedBlock, network) {
-    const swq = loadHubModule('src/stake_weighted_quorum.js')
+    const swq = loadHubModule('src/consensus/stake_weighted_quorum.js')
     const { bftQuorumOrSingle } = loadHubModule('src/lib/bft_quorum.js')
 
     const weighted   = !!swq.isStakeWeightedQuorumActive(buriedBlock, network)

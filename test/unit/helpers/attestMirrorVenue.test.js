@@ -824,3 +824,117 @@ describe('attestMirrorVenue: coin codes', function () {
         assert.strictEqual(coinCode('dogecoin'), 'DOGE')
     })
 })
+
+describe('attestMirrorVenue: the per-hub code root (BF6 mixed-version seam)', function () {
+    // The venue's own root is the one tree guaranteed to hold xchain-hub/src/api.js
+    // here, so it doubles as the "other" root: identity of VALUE is what is asserted,
+    // and a second real tree is the rail lane's to supply.
+    const fs   = require('fs')
+    const os   = require('os')
+    const path = require('path')
+    const { AttestMirrorVenue, resolveRepoRoot, resolveHubRepoRoots } = require('../../helpers/attestMirrorVenue')
+    const ROOT = resolveRepoRoot(undefined, {})
+
+    it('gives every hub the venue root when nothing is overridden (default identity)', () => {
+        assert.deepStrictEqual(resolveHubRepoRoots(undefined, 3, ROOT), [ROOT, ROOT, ROOT])
+        assert.deepStrictEqual(resolveHubRepoRoots(null, 2, ROOT), [ROOT, ROOT])
+        assert.deepStrictEqual(resolveHubRepoRoots({}, 2, ROOT), [ROOT, ROOT])
+        const venue = new AttestMirrorVenue({ label: 'hubroots', hubCount: 2 })
+        assert.deepStrictEqual(venue.hubRepoRoots, [venue.repoRoot, venue.repoRoot])
+        assert.strictEqual(venue.hubRepoRoot(1), venue.repoRoot)
+    })
+
+    it('overrides ONE hub and leaves the others on the venue root', () => {
+        // A path spelled differently but resolving to the same tree proves the entry is
+        // resolved rather than copied, without needing a second checkout.
+        const spelled = path.join(ROOT, 'xchain-hub', '..')
+        const roots = resolveHubRepoRoots({ 1: spelled }, 3, '/venue/default')
+        assert.deepStrictEqual(roots, ['/venue/default', ROOT, '/venue/default'])
+        const venue = new AttestMirrorVenue({ label: 'hubroots', hubCount: 3, hubRepoRoots: { 2: spelled } })
+        assert.strictEqual(venue.hubRepoRoot(2), ROOT)
+        assert.strictEqual(venue.hubRepoRoot(0), venue.repoRoot)
+        assert.strictEqual(venue.hubRepoRoot(1), venue.repoRoot)
+    })
+
+    it('refuses a root with no hub entry point BEFORE any spawn, and an index the venue has no hub for', () => {
+        assert.throws(() => resolveHubRepoRoots({ 0: os.tmpdir() }, 2, ROOT), /has no xchain-hub\/src\/api\.js/)
+        assert.throws(() => new AttestMirrorVenue({ label: 'hubroots', hubCount: 2, hubRepoRoots: { 0: os.tmpdir() } }),
+            /hubRepoRoots\[0\]/)
+        assert.throws(() => resolveHubRepoRoots({ 5: ROOT }, 2, ROOT), /names hub 5 but the venue has 2 hubs/)
+        assert.throws(() => resolveHubRepoRoots('/some/root', 2, ROOT), /must be \{index: root\} or an array/)
+        assert.throws(() => new AttestMirrorVenue({ label: 'hubroots', hubCount: 2 }).hubRepoRoot(7), /no hub 7/)
+    })
+
+    it('has no effect on the indexers, which keep the venue root', () => {
+        const venue = new AttestMirrorVenue({ label: 'hubroots', hubCount: 2, indexerCount: 2, hubRepoRoots: { 0: ROOT } })
+        assert.strictEqual(venue.repoRoot, ROOT)
+        assert.ok(fs.existsSync(path.join(venue.repoRoot, 'xchain-indexer', 'src', 'api.js')))
+        // The indexer spawn reads `this.repoRoot` and nothing else; the source is pinned
+        // so a later edit that routes indexers through the hub selector reddens here.
+        const src = fs.readFileSync(require.resolve('../../helpers/attestMirrorVenue'), 'utf8')
+        assert.ok(/this\._spawn\('indexer' \+ i, path\.join\(this\.repoRoot, 'xchain-indexer', 'src', 'api\.js'\)/.test(src),
+            'the indexer spawn no longer reads this.repoRoot directly')
+        assert.ok(/this\._spawn\('hub' \+ i, path\.join\(this\.hubRepoRoot\(i\), 'xchain-hub', 'src', 'api\.js'\)/.test(src),
+            'the hub spawn does not read hubRepoRoot(i)')
+    })
+})
+
+describe('attestMirrorVenue: the second-coin venue (BF8, R6 (a))', function () {
+    const { AttestMirrorVenue, attachedCoinVenueOpts, secondCoinHubEnv } = require('../../helpers/attestMirrorVenue')
+    // A "started" owner is one with hubs and a hubDb; nothing here spawns, so the two
+    // are stood in by the shapes start() would leave behind.
+    function startedOwner () {
+        const owner = new AttestMirrorVenue({ label: 'bf8', hubCount: 2, indexerCount: 2 })
+        owner.hubs = [{ index: 0, apiUrl: 'http://127.0.0.1:1' }, { index: 1, apiUrl: 'http://127.0.0.1:2' }]
+        owner.hubDb = { host: '127.0.0.1', port: '13306', user: 'u', pass: 'p' }
+        return owner
+    }
+
+    it('pins the three attach-mode halves to the owner: its hubs, its hubDb, its repoRoot, and no env credential', () => {
+        const owner = startedOwner()
+        const o = attachedCoinVenueOpts(owner, { coin: 'litecoin', indexerCount: 2 })
+        assert.strictEqual(o.attachHubs, owner.hubs)
+        assert.strictEqual(o.hubDb, owner.hubDb)
+        assert.strictEqual(o.repoRoot, owner.repoRoot)
+        assert.strictEqual(o.useEnvDecoderCredential, false)
+        assert.strictEqual(o.coin, 'litecoin')
+        assert.strictEqual(o.network, owner.network)
+        assert.strictEqual(o.indexerCount, 2)
+        assert.strictEqual(o.label, 'bf8ltc')
+        // The options build a real attached venue: no hubs of its own, the owner's count.
+        const attached = new AttestMirrorVenue(o)
+        assert.strictEqual(attached.attachHubs, owner.hubs)
+        assert.strictEqual(attached.hubCount, 2)
+        assert.strictEqual(attached.useEnvDecoderCredential, false)
+        assert.strictEqual(attached.repoRoot, owner.repoRoot)
+    })
+
+    it('lets a leg add options but never lets them undo a pinned half', () => {
+        const owner = startedOwner()
+        const o = attachedCoinVenueOpts(owner, { coin: 'dogecoin', label: 'x',
+            venue: { useEnvDecoderCredential: true, hubDb: null, indexerEnv: { 0: { A: '1' } }, freshIndexers: true } })
+        assert.strictEqual(o.useEnvDecoderCredential, false)
+        assert.strictEqual(o.hubDb, owner.hubDb)
+        assert.deepStrictEqual(o.indexerEnv, { 0: { A: '1' } })
+        assert.strictEqual(o.freshIndexers, true)
+        assert.strictEqual(o.indexerCount, 1)
+        assert.strictEqual(o.label, 'x')
+    })
+
+    it('refuses an unstarted owner, a missing coin and the owner\'s own coin', () => {
+        const unstarted = new AttestMirrorVenue({ label: 'bf8' })
+        assert.throws(() => attachedCoinVenueOpts(unstarted, { coin: 'litecoin' }), /STARTED owner venue/)
+        const noDb = startedOwner(); noDb.hubDb = null
+        assert.throws(() => attachedCoinVenueOpts(noDb, { coin: 'litecoin' }), /no hubDb to share/)
+        assert.throws(() => attachedCoinVenueOpts(startedOwner(), {}), /needs the second coin/)
+        assert.throws(() => attachedCoinVenueOpts(startedOwner(), { coin: 'bitcoin' }), /owner venue's own coin/)
+        assert.throws(() => attachedCoinVenueOpts(startedOwner(), { coin: 'BTC' }), /owner venue's own coin/)
+    })
+
+    it('spells the hub\'s per-coin indexer URL key the way resolveIndexerUrl reads it, and refuses a non-URL', () => {
+        assert.deepStrictEqual(secondCoinHubEnv('litecoin', 'http://10.0.0.5:3224'), { LTC_INDEXER_API_URL: 'http://10.0.0.5:3224' })
+        assert.deepStrictEqual(secondCoinHubEnv('DOGE', 'https://h:1'), { DOGE_INDEXER_API_URL: 'https://h:1' })
+        assert.throws(() => secondCoinHubEnv('litecoin', ''), /needs an http\(s\) indexer URL for LTC/)
+        assert.throws(() => secondCoinHubEnv('litecoin', '10.0.0.5:3224'), /needs an http\(s\) indexer URL/)
+    })
+})

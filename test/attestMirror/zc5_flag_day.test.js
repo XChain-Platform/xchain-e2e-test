@@ -110,8 +110,8 @@ describe('ZC5 below the height: the flag day leaves every rule where it was', fu
         // tree, and a venue-only run has no use for it. The hub modules resolve through
         // the same loader every other drill uses, so a relocated checkout moves them all
         // together.
-        zc      = loadHubModule('src/attest_zero_conf_activation.js')
-        wid     = loadHubModule('src/attest_responsible_widening_activation.js')
+        zc      = loadHubModule('src/attestation/attest_zero_conf_gate.js')
+        wid     = loadHubModule('src/consensus/gates/attest_responsible_widening_gate.js')
         // The indexer's own copy of the selector. `INDEXER_COIN`/`INDEXER_NETWORK` are
         // read when the module initialises, and are set only if the harness has not
         // already set them, so this cannot move a value another suite is relying on.

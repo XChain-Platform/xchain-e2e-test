@@ -28,7 +28,9 @@ const TOPOLOGY_PATH = require.resolve('../../helpers/hubMirrorTopology')
 const ENV_KEYS = [
     'HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS',
     'HUB_SOURCE_DB_HOST', 'HUB_SOURCE_DB_PORT', 'HUB_SOURCE_DB_NAME',
-    'HUB_SOURCE_DB_USER', 'HUB_SOURCE_DB_PASS'
+    'HUB_SOURCE_DB_USER', 'HUB_SOURCE_DB_PASS',
+    'RELAY_HUB_DB_HOST', 'RELAY_HUB_DB_PORT', 'RELAY_HUB_DB_NAME',
+    'RELAY_HUB_DB_USER', 'RELAY_HUB_DB_PASS'
 ]
 
 // The suite's stand-in for the indexer's own connection, which the helpers read
@@ -421,6 +423,234 @@ describe('hubMirrorTopology', () => {
             assert.strictEqual(t.readParams().database, 'XChain_Hub')
             t.resetDiscovery()
             assert.strictEqual(t.readParams().database, LOCAL.dbName)
+        })
+    })
+
+    // The relay hub's own database is a FOURTH role: the one-config contract sets
+    // HUB_DB_NAME to the database the INDEXER reads prices from, which on this stack
+    // is the indexer's own, so resolving the relay hub through that same variable
+    // would query the indexer's database for match rows that only ever exist on the
+    // hub. Reading match rows out of the indexer's database returns zero rows, which
+    // is indistinguishable from the hub never having matched, so the drill and the
+    // price contract cannot both be satisfied by one variable; relayHubParams below
+    // resolves the hub through its own name instead.
+    describe('relayHubParams (the relay hub is not the price-read database)', () => {
+        const DEFAULTS = { host: '127.0.0.1', port: 13306 }
+
+        it('refuses HUB_DB_NAME when it names the indexer\'s own database', () => {
+            process.env.HUB_DB_HOST = 'mariadb'
+            process.env.HUB_DB_NAME = LOCAL.dbName
+            const r = freshTopology().relayHubParams(DEFAULTS)
+            assert.notStrictEqual(r.database, LOCAL.dbName)
+            assert.strictEqual(r.database, 'XChain_Hub')
+        })
+
+        it('honours HUB_DB_NAME when it really does name a hub database', () => {
+            process.env.HUB_DB_HOST = 'relayhost'
+            process.env.HUB_DB_PORT = '13341'
+            process.env.HUB_DB_NAME = 'XChain_Relay_Hub'
+            const r = freshTopology().relayHubParams(DEFAULTS)
+            assert.strictEqual(r.database, 'XChain_Relay_Hub')
+            assert.strictEqual(r.host, 'relayhost')
+            assert.strictEqual(r.port, 13341)
+        })
+
+        it('lets RELAY_HUB_DB_* win outright, including over a colliding HUB_DB_NAME', () => {
+            process.env.HUB_DB_HOST = 'mariadb'
+            process.env.HUB_DB_NAME = LOCAL.dbName
+            process.env.RELAY_HUB_DB_HOST = '172.17.0.1'
+            process.env.RELAY_HUB_DB_PORT = '13341'
+            process.env.RELAY_HUB_DB_NAME = 'XChain_Relay_Hub'
+            process.env.RELAY_HUB_DB_USER = 'relay'
+            const r = freshTopology().relayHubParams(DEFAULTS)
+            assert.strictEqual(r.database, 'XChain_Relay_Hub')
+            assert.strictEqual(r.host, '172.17.0.1')
+            assert.strictEqual(r.port, 13341)
+            assert.strictEqual(r.user, 'relay')
+        })
+
+        it('falls back to the caller\'s stack connection when no hub env is set at all', () => {
+            const r = freshTopology().relayHubParams(DEFAULTS)
+            assert.strictEqual(r.database, 'XChain_Hub')
+            assert.strictEqual(r.host, '127.0.0.1')
+            assert.strictEqual(r.port, 13306)
+        })
+
+        it('keeps the HUB_DB_* credentials when only the database name is overridden', () => {
+            process.env.HUB_DB_HOST = 'mariadb'
+            process.env.HUB_DB_NAME = LOCAL.dbName
+            process.env.HUB_DB_USER = 'xchain_hub'
+            const r = freshTopology().relayHubParams(DEFAULTS)
+            assert.strictEqual(r.user, 'xchain_hub')
+            assert.strictEqual(r.host, 'mariadb')
+        })
+
+        it('never resolves to the price-read target on the one-config stack', () => {
+            // The whole point, stated as the invariant rather than as a name: with the
+            // one config in force (HUB_DB_NAME = the indexer's own database, hub source
+            // named), the drill's target and the price fixtures' target must differ.
+            process.env.HUB_DB_HOST = 'mariadb'
+            process.env.HUB_DB_NAME = LOCAL.dbName
+            process.env.HUB_SOURCE_DB_NAME = 'XChain_Hub'
+            const t = freshTopology()
+            assert.strictEqual(t.readParams().database, LOCAL.dbName)
+            assert.notStrictEqual(t.relayHubParams(DEFAULTS).database, t.readParams().database)
+        })
+
+        // The rule above only catches the mirror belonging to THIS process's indexer.
+        // The cross-settle recipe runs the BTC harness with HUB_DB_NAME pointed at the
+        // DOGE indexer's mirror, which is not the local database, passes that rule, and
+        // is still not the hub: measured on the regtest venue 2026-09-08 the drills
+        // died with `Access denied for user 'xchain_hub' to database
+        // 'XChain_..._Indexer'`. HUB_SOURCE_DB_NAME says which database IS the hub.
+        it('prefers HUB_SOURCE_DB_NAME over a HUB_DB_NAME naming another chain\'s mirror', () => {
+            process.env.HUB_DB_HOST = 'mariadb'
+            process.env.HUB_DB_NAME = 'XChain_DOGE_Regtest_Indexer'
+            process.env.HUB_DB_USER = 'xchain_hub'
+            process.env.HUB_SOURCE_DB_NAME = 'XChain_Hub'
+            const r = freshTopology().relayHubParams(DEFAULTS)
+            assert.strictEqual(r.database, 'XChain_Hub')
+            assert.strictEqual(r.source, 'HUB_SOURCE_DB_NAME')
+        })
+
+        it('takes the hub\'s own coordinates when the name came from HUB_SOURCE_DB_NAME', () => {
+            // The HUB_DB_* connection describes the MIRROR: on a split venue it is a
+            // different host and a user with no grant on the hub, so following it would
+            // reproduce the access-denied failure with the right database name.
+            process.env.HUB_DB_HOST = 'mirror-box'
+            process.env.HUB_DB_PORT = '13307'
+            process.env.HUB_DB_NAME = 'XChain_DOGE_Regtest_Indexer'
+            process.env.HUB_DB_USER = 'doge_idx'
+            process.env.HUB_DB_PASS = 'mirrorpass'
+            process.env.HUB_SOURCE_DB_NAME = 'XChain_Hub'
+            process.env.HUB_SOURCE_DB_HOST = 'hub-box'
+            process.env.HUB_SOURCE_DB_PORT = '13341'
+            process.env.HUB_SOURCE_DB_USER = 'xchain_hub'
+            process.env.HUB_SOURCE_DB_PASS = 'hubpass'
+            const r = freshTopology().relayHubParams(DEFAULTS)
+            assert.deepStrictEqual(
+                [r.database, r.host, r.port, r.user, r.password],
+                ['XChain_Hub', 'hub-box', 13341, 'xchain_hub', 'hubpass'])
+        })
+
+        it('still lets RELAY_HUB_DB_* win over HUB_SOURCE_DB_NAME', () => {
+            process.env.HUB_SOURCE_DB_NAME = 'XChain_Hub'
+            process.env.RELAY_HUB_DB_NAME = 'XChain_Relay_Hub'
+            const r = freshTopology().relayHubParams(DEFAULTS)
+            assert.strictEqual(r.database, 'XChain_Relay_Hub')
+        })
+
+        it('falls back to the HUB_DB_* coordinates when only the hub NAME is given', () => {
+            // One MariaDB holding both databases under one grant is the ordinary regtest
+            // stack; naming the hub must not move the connection off it.
+            process.env.HUB_DB_HOST = 'mariadb'
+            process.env.HUB_DB_PORT = '13306'
+            process.env.HUB_DB_USER = 'xchain_hub'
+            process.env.HUB_SOURCE_DB_NAME = 'XChain_Hub'
+            const r = freshTopology().relayHubParams(DEFAULTS)
+            assert.deepStrictEqual([r.database, r.host, r.port, r.user],
+                ['XChain_Hub', 'mariadb', 13306, 'xchain_hub'])
+        })
+    })
+
+    // The three DOGE setup drivers are plain node scripts with no initialCheck
+    // bootstrap, so every path above that reads global.indexerDatabase is blind for
+    // them. They modelled their seed target as HUB_DB_NAME and never asked the DOGE
+    // indexer, so on a mirror-topology indexer they seeded the hub while every price
+    // lookup read the mirror, and the seed's upsert/delete shape never crossed
+    // hub_db_sync's insert-only cursor: every DOGE ISSUE died `no current oracle price
+    // for DOGE/USD` (measured on the regtest venue 2026-09-08).
+    describe('resolveDriverPriceTarget (the standalone drivers follow the indexer too)', () => {
+        // These drivers run with NO harness globals at all, which is the condition the
+        // `local` override exists for.
+        beforeEach(() => { delete global.indexerDatabase })
+
+        const DOGE_LOCAL = {
+            host: '127.0.0.1', port: 13306, dbName: 'XChain_DOGE_Regtest_Indexer',
+            user: 'doge_idx', pass: 'dp'
+        }
+        const ENV_TARGET = {
+            host: '127.0.0.1', port: 13306, database: 'XChain_Hub',
+            user: 'xchain_hub', password: 'hp'
+        }
+        function saying(priceSource, opts){
+            const o = opts || {}
+            return async (method) => {
+                if (method !== 'feeschedule') throw new Error('unexpected method ' + method)
+                if (o.throws) throw new Error('indexer unreachable')
+                return { coin: 'DOGE', priceSource: priceSource }
+            }
+        }
+        const OK = async () => true
+
+        it('seeds the indexer\'s OWN database when that is where it reads, not HUB_DB_NAME', async () => {
+            const t = freshTopology()
+            const target = await t.resolveDriverPriceTarget({
+                local: DOGE_LOCAL, envTarget: ENV_TARGET, probe: OK,
+                call: saying({ hubDb: false, database: DOGE_LOCAL.dbName })
+            })
+            assert.strictEqual(target.database, 'XChain_DOGE_Regtest_Indexer')
+            assert.strictEqual(target.user, 'doge_idx', 'reached with the indexer\'s own credentials')
+            assert.strictEqual(target.source, 'indexer-disclosed')
+        })
+
+        // The mirror-topology venue this item is about: hub_db_sync lands the hub tables
+        // in the DOGE indexer's own schema, so the indexer HAS a hub database and it is
+        // that schema. The seed has to go there, reached by the credentials that can open
+        // it, which are the indexer's rather than the hub user's.
+        it('pins the mirror the indexer names, on coordinates that can actually read it', async () => {
+            process.env.HUB_DB_HOST = '127.0.0.1'
+            process.env.HUB_DB_PORT = '13306'
+            process.env.HUB_DB_USER = 'xchain_hub'
+            process.env.HUB_DB_PASS = 'hp'
+            const t = freshTopology()
+            const target = await t.resolveDriverPriceTarget({
+                local: DOGE_LOCAL, envTarget: ENV_TARGET,
+                probe: async (p) => p.user === 'doge_idx',
+                call: saying({ hubDb: true, database: 'XChain_DOGE_Regtest_Indexer' })
+            })
+            assert.strictEqual(target.database, 'XChain_DOGE_Regtest_Indexer')
+            assert.strictEqual(target.user, 'doge_idx')
+        })
+
+        it('keeps the env model when the indexer cannot be reached', async () => {
+            const t = freshTopology()
+            const target = await t.resolveDriverPriceTarget({
+                local: DOGE_LOCAL, envTarget: ENV_TARGET, probe: OK, call: saying(null, { throws: true })
+            })
+            assert.strictEqual(target.database, 'XChain_Hub')
+            assert.strictEqual(target.user, 'xchain_hub')
+            assert.strictEqual(target.source, 'env model (HUB_DB_NAME)')
+        })
+
+        it('keeps the env model when the indexer predates the priceSource disclosure', async () => {
+            const t = freshTopology()
+            const target = await t.resolveDriverPriceTarget({
+                local: DOGE_LOCAL, envTarget: ENV_TARGET, probe: OK, call: saying(undefined)
+            })
+            assert.strictEqual(target.database, 'XChain_Hub')
+            assert.strictEqual(target.source, 'env model (HUB_DB_NAME)')
+        })
+
+        it('keeps the env model when no indexer URL is configured at all', async () => {
+            const t = freshTopology()
+            const target = await t.resolveDriverPriceTarget({ local: DOGE_LOCAL, envTarget: ENV_TARGET })
+            assert.strictEqual(target.database, 'XChain_Hub')
+        })
+
+        // Without the `local` override discovery has nothing to fall back to and no
+        // candidate coordinates, so it would pin nothing and the driver would keep
+        // seeding the wrong database. This binds the override rather than the plumbing.
+        it('uses the supplied local connection where the harness global would be', async () => {
+            const t = freshTopology()
+            const probes = []
+            await t.resolveDriverPriceTarget({
+                local: DOGE_LOCAL, envTarget: ENV_TARGET,
+                probe: async (p) => { probes.push(p); return p.user === 'doge_idx' },
+                call: saying({ hubDb: true, database: 'XChain_Hub' })
+            })
+            assert.ok(probes.some(p => p.host === '127.0.0.1' && p.port === 13306 && p.user === 'doge_idx'),
+                'the DOGE indexer\'s own connection was offered as a candidate')
         })
     })
 })

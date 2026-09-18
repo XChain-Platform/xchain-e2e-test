@@ -41,8 +41,16 @@
  *                                     XCALL_DB_* + XChain_Hub, point at the relay
  *                                     hub DB in the distributed venue)
  *   DOGE_IDX_DB_USER/DOGE_IDX_DB_PASS (XChain_DOGE_Regtest_Indexer, reads)
+ *   DOGE_IDX_DB_NAME                 (schema override for an isolated venue)
  *   DEX_DOGE_FEE_DESTINATION         (native fee output address; defaults to the
  *                                     DOGE regtest FEE_DESTINATION)
+ *
+ * The price seed does NOT trust HUB_DB_NAME on its own: it asks the DOGE indexer
+ * which database its price lookups land in (feeschedule.priceSource) and seeds
+ * there, falling back to the env only when the indexer will not say. On a
+ * mirror-topology indexer the two differ and the seed is invisible to the reader,
+ * because its upsert/delete shape never crosses hub_db_sync's insert-only cursor.
+ * See helpers/hubMirrorTopology.js resolveDriverPriceTarget.
  *
  * Usage: node test/sdk/dexDogeSetup.js
  *
@@ -53,6 +61,7 @@ const mariadb = require('mariadb');
 const { XChainSDK } = require('./sdkHelper');
 const { BOOTSTRAP_XCHAIN_USD, BOOTSTRAP_XCHAIN_USD_NUM } = require('../helpers/xchainPriceConstants');
 const { seedDogeFixturePrices, describeSeed } = require('../helpers/dogeSetupPriceSeed');
+const topology = require('../helpers/hubMirrorTopology');
 
 const MINER_URL = process.env.XCALL_DOGE_MINER_URL || 'http://localhost:3125';
 const INDEXER_URL = process.env.XCALL_DOGE_INDEXER_URL || 'http://127.0.0.1:3124';
@@ -65,6 +74,7 @@ const DB_PORT   = parseInt(process.env.XCALL_DB_PORT || '13306', 10);
 const HUB_DB_HOST = process.env.HUB_DB_HOST || DB_HOST;
 const HUB_DB_PORT = parseInt(process.env.HUB_DB_PORT || String(DB_PORT), 10);
 const HUB_DB_NAME = process.env.HUB_DB_NAME || 'XChain_Hub';
+const DOGE_IDX_DB = process.env.DOGE_IDX_DB_NAME || 'XChain_DOGE_Regtest_Indexer';
 // Must track xchain-indexer/src/coins/DOGE.js regtest addresses.FEE_DESTINATION.
 // A stale value here pays a real DOGE output nobody credits, and the ISSUE dies as
 // 'insufficient fee (native coin output required)' with no mention of the address.
@@ -91,12 +101,36 @@ async function withConn(database, user, password, fn) {
     try { return await fn(conn); } finally { await conn.end().catch(() => {}); }
 }
 async function dogeIdx(fn) {
-    return withConn('XChain_DOGE_Regtest_Indexer', process.env.DOGE_IDX_DB_USER, process.env.DOGE_IDX_DB_PASS, fn);
+    return withConn(DOGE_IDX_DB, process.env.DOGE_IDX_DB_USER, process.env.DOGE_IDX_DB_PASS, fn);
 }
-// The fee oracle prices live in the indexer's hub DB (the relay hub when distributed);
-// seed there so the native-coin fee validation can value the ISSUE fee.
+
+// The DOGE indexer's own connection, which is one of the candidate coordinates for
+// whatever database it names, and the answer outright when it reads its own tables.
+const DOGE_IDX_LOCAL = {
+    host: DB_HOST, port: DB_PORT, dbName: DOGE_IDX_DB,
+    user: process.env.DOGE_IDX_DB_USER, pass: process.env.DOGE_IDX_DB_PASS
+};
+
+// The pre-discovery model, kept as the fallback for an indexer that will not answer.
+const ENV_PRICE_TARGET = {
+    host: HUB_DB_HOST, port: HUB_DB_PORT, database: HUB_DB_NAME,
+    user: process.env.HUB_DB_USER, password: process.env.HUB_DB_PASS
+};
+
+// Resolved once in main() and reused by every seed. The fee oracle prices must land
+// where the DOGE indexer's native-fee validation READS them, which the indexer is
+// the only authority on.
+let priceTarget = null;
+async function resolvePriceTarget() {
+    priceTarget = await topology.resolveDriverPriceTarget({
+        indexerUrl: INDEXER_URL, local: DOGE_IDX_LOCAL, envTarget: ENV_PRICE_TARGET });
+    console.log('[doge-dex] price seed target: ' + priceTarget.database + ' at ' +
+                priceTarget.host + ':' + priceTarget.port + ' (' + priceTarget.source + ')');
+    return priceTarget;
+}
 async function hubConn(fn) {
-    const conn = await mariadb.createConnection({ host: HUB_DB_HOST, port: HUB_DB_PORT, database: HUB_DB_NAME, user: process.env.HUB_DB_USER, password: process.env.HUB_DB_PASS });
+    const t = priceTarget || ENV_PRICE_TARGET;
+    const conn = await mariadb.createConnection({ host: t.host, port: t.port, database: t.database, user: t.user, password: t.password });
     try { return await fn(conn); } finally { await conn.end().catch(() => {}); }
 }
 async function getOpenCrossChainOrders() {
@@ -190,6 +224,9 @@ async function findOpenOrder(orderIndex) {
 async function main() {
     if (!/^[A-Z0-9]{1,12}$/.test(DOGE_TICK) || !/^[A-Z0-9]{1,12}$/.test(BTC_TICK))
         throw new Error('DEX_DOGE_TICK and DEX_BTC_TICK must be set to uppercase-alnum tickers');
+
+    // ── 0. Ask the indexer where its price reads land, before anything seeds.
+    await resolvePriceTarget();
 
     // ── 1. Resolve the DOGE chain clock (the ORDER expiration is anchored to it)
     //       (block_time + 90 days = the free tier), not wall-clock, so it stays in

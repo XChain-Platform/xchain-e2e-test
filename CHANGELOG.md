@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-09-17
+
+### Added
+- Added acceptance coverage for mirror-admission and anchor-attestation barriers across live, replay, flag-day, parity, and second-chain cases.
+- Added end-to-end token-bridge and policy-inheritance rail suites for regtest.
+
+### Changed
+- Each test chain now uses its own fee destination.
+- DOGE cross-settle setup is seeded from the disclosed mirror topology.
+- Bridged-gas tests resolve the hub relay-margin table from the sibling checkout.
+- Bridged-gas tests wait for the relay margin while both chains idle-mine.
+
+### Fixed
+- Action drills follow the relocated writer-leg resolver.
+- Database helpers no longer expose the unused `sqlPath` field.
+- Barrier drills wait for required state instead of fixed delays.
+- Replay drives safely serialize database rows that contain BigInt values.
+
 ## [0.19.0] - 2026-09-16
 
 ### Added

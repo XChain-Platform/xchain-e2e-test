@@ -48,7 +48,6 @@ function parseWaitTunable(raw, def){
  */
 class Database {
     constructor(host, port, dbName, user, pass){
-        this.sqlPath  = __dirname+'/sql';
         // Adaptive-wait tunables. Extensions are bounded so a wedged stack
         // still fails. The lag threshold is ZERO: these waits ask "has MY row
         // been indexed", and any block the indexer has not reached may be the

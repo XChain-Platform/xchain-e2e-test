@@ -50,8 +50,8 @@ const path   = require('path');
 const ROOT = path.resolve(__dirname, '../../../..');
 
 const protocolConstants = require(path.join(ROOT, 'xchain-documentation/protocol/constants.js'));
-const hubAr = require(path.join(ROOT, 'xchain-hub/src/anchor_reward_activation.js'));
-const idxAr = require(path.join(ROOT, 'xchain-indexer/src/anchor_reward_activation.js'));
+const hubAr = require(path.join(ROOT, 'xchain-hub/src/consensus/gates/anchor_reward_gate.js'));
+const idxAr = require(path.join(ROOT, 'xchain-indexer/src/consensus/gates/anchor_reward_gate.js'));
 
 const StateAnchorPublisher = require(path.join(ROOT, 'xchain-hub/src/anchor/publisher.js'));
 const Anchor               = require(path.join(ROOT, 'xchain-indexer/src/actions/anchor/index.js'));
@@ -102,8 +102,8 @@ describe('ANCHOR_REWARD (XANCPUB) cross-service parity', function () {
         // executable region only (from the activation map down), same convention as
         // equivGateInputParity.test.js's codeOnly() helper.
         const codeOnly = (s) => s.slice(s.indexOf('const ANCHOR_REWARD_ACTIVATION'));
-        const hubCode = codeOnly(fs.readFileSync(path.join(ROOT, 'xchain-hub/src/anchor_reward_activation.js'), 'utf8'));
-        const idxCode = codeOnly(fs.readFileSync(path.join(ROOT, 'xchain-indexer/src/anchor_reward_activation.js'), 'utf8'));
+        const hubCode = codeOnly(fs.readFileSync(path.join(ROOT, 'xchain-hub/src/consensus/gates/anchor_reward_gate.js'), 'utf8'));
+        const idxCode = codeOnly(fs.readFileSync(path.join(ROOT, 'xchain-indexer/src/consensus/gates/anchor_reward_gate.js'), 'utf8'));
         assert.strictEqual(hubCode, idxCode,
             'hub/anchor_reward_activation.js executable code drifted from the indexer copy');
     });

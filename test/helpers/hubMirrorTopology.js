@@ -75,8 +75,13 @@ let _discovered = null
 // mean "no mirror", and assertCoherent must key on this flag rather than on equality.
 let _discoveredHubDb = null
 
-function localParams(){
-    let idb = global.indexerDatabase
+// `override` lets a caller that is NOT the mocha harness supply the indexer's own
+// connection directly. The three DOGE setup drivers are plain node scripts with no
+// initialCheck bootstrap, so `global.indexerDatabase` is never populated for them,
+// and without this every discovery path below would resolve to null and silently
+// fall back to the env model that mis-seeds a mirror-topology venue.
+function localParams(override){
+    let idb = override || global.indexerDatabase
     if (!idb) return null
     return {
         host:     idb.host,
@@ -142,8 +147,11 @@ function seedParams(){
 //   - no disclosure / unreachable       -> pin nothing.
 //
 // `opts.probe` replaces the reachability probe; the tests use it to keep this unit-pure.
+// `opts.local` supplies the indexer's own connection for a caller outside the mocha
+// harness (see localParams).
 async function discoverReadParams(connector, opts){
     let probe = (opts && opts.probe) || probeTarget
+    let local = (opts && opts.local) || null
     let c = connector || global.indexerConnector
     if (!c || typeof c.call !== 'function') return null
 
@@ -166,12 +174,12 @@ async function discoverReadParams(connector, opts){
     }
 
     if (!src.hubDb){
-        let local = localParams()
-        if (!local) return null
-        _discovered = local
+        let own = localParams(local)
+        if (!own) return null
+        _discovered = own
         _discoveredHubDb = false
         console.log('hubMirrorTopology: indexer reads prices from its OWN database ('
-            + local.database + '); price fixtures pinned there')
+            + own.database + '); price fixtures pinned there')
         return _discovered
     }
 
@@ -186,7 +194,7 @@ async function discoverReadParams(connector, opts){
         return null
     }
 
-    let candidates = hubCandidates(database)
+    let candidates = hubCandidates(database, local)
     if (!candidates.length) return null
     for (let cand of candidates){
         let ok = false
@@ -222,8 +230,8 @@ async function discoverReadParams(connector, opts){
 //      HUB_DB_HOST holds a compose service name this process cannot resolve;
 //   3. the indexer connection outright, for a stack where one MariaDB holds both
 //      databases and one grant covers them.
-function hubCandidates(database){
-    let idb = global.indexerDatabase
+function hubCandidates(database, local){
+    let idb = local || global.indexerDatabase
     let localHost = idb && idb.host
     let localPort = (idb && idb.port) || 3306
     let out = []
@@ -323,10 +331,167 @@ function clearTargets(){
     return out
 }
 
+// ── The RELAY hub's own database, which is a FOURTH role ─────────────────────
+//
+// The three roles above all answer "where do price rows live". This one answers
+// "where does the relay hub keep the cross-chain state the settle drills assert
+// on" (cross_chain_matches, xcall rows): the hub's own tables, written by
+// CrossChainDex on a validator-mode hub, never mirrored anywhere the indexer
+// reads.
+//
+// It needs its own name because HUB_DB_NAME already has a meaning that collides
+// with it. HUB_DB_NAME is defined above as the database the INDEXER reads prices
+// from, and on the ordinary regtest stack that database is the indexer's own
+// (hub_db_sync lands the mirror tables there), so the one-config contract sets
+// HUB_DB_NAME=XChain_BTC_Regtest_Indexer. Resolving the relay hub through that
+// same variable would query the indexer's database for match rows that only
+// ever exist on the hub, and re-pointing HUB_DB_NAME at the hub to reach them
+// would send the price fixtures to a database the indexer does not read: the
+// settle drills and the price-seed contract cannot share one variable, so this
+// function resolves the relay hub through its own name instead, closing the
+// second half of that gap (discoverReadParams above closes the first, the price
+// seed).
+//
+// Resolution order:
+//   RELAY_HUB_DB_NAME            the operator naming the relay hub outright, and
+//                                the only form that reaches a disposable relay DB
+//                                on its own host/port.
+//   HUB_SOURCE_DB_NAME           the hub's OWN authoritative database, which is by
+//                                definition where the hub writes, so it is where the
+//                                relay rows are. See below.
+//   HUB_DB_NAME                  honoured ONLY when it is not the indexer's own
+//                                database. That keeps every venue whose HUB_DB_*
+//                                really did name the hub working unchanged, and
+//                                refuses the one reading that is provably wrong.
+//   DEFAULT_RELAY_DB             the stack default, which is what these drills
+//                                assumed before HUB_DB_NAME was ever exported.
+//
+// HUB_SOURCE_DB_NAME sits above HUB_DB_NAME because the "not the indexer's own
+// database" rule only catches the mirror belonging to THIS process's indexer. On a
+// mirror-topology venue HUB_DB_NAME routinely names a DIFFERENT indexer's mirror
+// (the cross-settle recipe runs the BTC harness while HUB_DB_NAME points at the DOGE
+// indexer's mirror), which passes that rule and is still not the hub: the mirror
+// carries no cross_chain_matches the hub has not already replicated, and the hub
+// credentials cannot even open it. Measured on the regtest venue 2026-09-08: the
+// drills died with `Access denied for user 'xchain_hub' to database
+// 'XChain_..._Indexer'`, and the standing workaround was to re-export HUB_DB_NAME for
+// the drill step alone, which then mis-seeded the price fixtures. HUB_SOURCE_DB_NAME
+// is unambiguous where HUB_DB_NAME is not, so when the operator has named it there is
+// nothing left to guess.
+//
+// `defaults` carries the caller's own host/port fallback (the drills default to
+// their XCALL_DB_* stack connection), so this cannot change where a venue that
+// sets no hub env at all connects.
+const DEFAULT_RELAY_DB = 'XChain_Hub'
+
+function relayHubParams(defaults){
+    let d = defaults || {}
+    let idb = global.indexerDatabase
+    let localName = idb && idb.dbName
+    let envName = process.env.RELAY_HUB_DB_NAME || null
+    let sourceName = process.env.HUB_SOURCE_DB_NAME || null
+    let database = envName
+    let source = 'RELAY_HUB_DB_NAME'
+    // True once the name came from HUB_SOURCE_DB_NAME: the hub's own coordinates then
+    // take precedence over the HUB_DB_* ones, which describe the MIRROR connection and
+    // on a split venue are a different host and a user with no grant on the hub.
+    let fromHubSource = false
+    if (!database && sourceName){
+        database = sourceName
+        source = 'HUB_SOURCE_DB_NAME'
+        fromHubSource = true
+    }
+    if (!database){
+        let hubName = process.env.HUB_DB_NAME || null
+        if (hubName && !(localName && hubName === localName)){
+            database = hubName
+            source = 'HUB_DB_NAME'
+        } else {
+            database = DEFAULT_RELAY_DB
+            source = hubName
+                ? 'default (HUB_DB_NAME names the indexer\'s own database, which holds no relay rows)'
+                : 'default'
+        }
+    }
+    let srcHost = fromHubSource ? process.env.HUB_SOURCE_DB_HOST : null
+    let srcPort = fromHubSource ? process.env.HUB_SOURCE_DB_PORT : null
+    let srcUser = fromHubSource ? process.env.HUB_SOURCE_DB_USER : null
+    let srcPass = fromHubSource ? process.env.HUB_SOURCE_DB_PASS : null
+    return {
+        host:     process.env.RELAY_HUB_DB_HOST || srcHost || process.env.HUB_DB_HOST || d.host || '127.0.0.1',
+        port:     parseInt(process.env.RELAY_HUB_DB_PORT || srcPort || process.env.HUB_DB_PORT, 10) || d.port || 3306,
+        database: database,
+        user:     process.env.RELAY_HUB_DB_USER || srcUser || process.env.HUB_DB_USER,
+        password: process.env.RELAY_HUB_DB_PASS || srcPass || process.env.HUB_DB_PASS,
+        source:   source
+    }
+}
+
+// ── The standalone drivers' entry point ──────────────────────────────────────
+//
+// The three DOGE setup drivers (dexDogeSetup, swapCrossDogeSetup, xcallDogeSetup)
+// are plain node scripts against the DOGE stack, with no initialCheck bootstrap and
+// so none of the globals every function above reads. They modelled their price-seed
+// target as `HUB_DB_NAME || 'XChain_Hub'` and never asked the DOGE indexer where it
+// actually reads, which is the same defect discoverReadParams closed for the harness.
+//
+// On a mirror-topology DOGE indexer (HUB_DB_SYNC_ENABLED, hub tables landed in the
+// indexer's OWN schema) the seed then went to the hub while every price lookup read
+// the mirror, and the seed's shape made the divergence permanent rather than merely
+// slow: it is an in-place upsert on four fixed rounds plus a DELETE of the shadowing
+// rounds, and hub_db_sync's cursor is insert-shaped, so neither an UPDATE of an
+// existing row nor a DELETE ever crosses it. Measured on the regtest venue 2026-09-08: the
+// mirror still served a DOGE/USD row stamped five days earlier, so every DOGE ISSUE
+// indexed `invalid: no current oracle price for DOGE/USD` while the hub's own table
+// held a fresh one.
+//
+// So: ask the indexer, pin the answer, and fall back to the caller's env model only
+// when the indexer says nothing usable (an older indexer, or an unreachable one).
+// Never throws, for the same reason discoverReadParams does not.
+//
+// opts:
+//   indexerUrl   the coin indexer's JSON-RPC base, e.g. 'http://127.0.0.1:3124'
+//   local        the indexer's OWN db connection {host, port, dbName, user, pass}
+//   envTarget    the driver's existing model {host, port, database, user, password}
+//   call/probe   test seams, replacing the RPC and the reachability probe
+//
+// Returns { host, port, database, user, password, source } - always a usable target.
+async function resolveDriverPriceTarget(opts){
+    let o = opts || {}
+    let envTarget = o.envTarget || null
+    let connector = (typeof o.call === 'function')
+        ? { call: o.call }
+        : rpcConnector(o.indexerUrl)
+    let pinned = null
+    if (connector)
+        pinned = await discoverReadParams(connector, { probe: o.probe, local: o.local })
+    if (pinned)
+        return Object.assign({}, pinned, { source: 'indexer-disclosed' })
+    if (!envTarget) return null
+    return Object.assign({}, envTarget, { source: 'env model (HUB_DB_NAME)' })
+}
+
+// A connector shaped like XChainIndexerConnector for a driver that has only a URL.
+// Returns null rather than throwing on a missing URL, so a driver that cannot reach
+// its indexer keeps the env model instead of failing to start.
+function rpcConnector(url){
+    if (!url) return null
+    let axios = require('axios')
+    return { call: async (method, params) => {
+        let res = await axios.post(url.replace(/\/+$/, '') + '/api',
+            { jsonrpc: '2.0', method: method, params: params || {}, id: 1 }, { timeout: 8000 })
+        if (res.data && res.data.error)
+            return { error: (res.data.error.message || JSON.stringify(res.data.error)) }
+        return res.data ? res.data.result : null
+    } }
+}
+
 module.exports = {
     localParams,
+    resolveDriverPriceTarget,
     readParams,
     seedParams,
+    relayHubParams,
     seedsThroughMirror,
     assertCoherent,
     clearTargets,

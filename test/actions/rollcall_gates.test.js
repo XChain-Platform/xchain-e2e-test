@@ -154,7 +154,7 @@ describe('ROLLCALL acceptance: the rules-aware attestation set (ZC7)', function 
     // The BTC height the filter judges a request at, given the buried block a
     // reader passes. Borrowed from the shipped module so the two cannot drift.
     function requestBlockFor(buriedBlock){
-        return Number(buriedBlock) + Number(rc.indexerModule('src/snapshot_reorg_buffer.js').CANONICAL_REORG_BUFFER)
+        return Number(buriedBlock) + Number(rc.indexerModule('src/consensus/snapshot_reorg_buffer.js').CANONICAL_REORG_BUFFER)
     }
 
     before(async function () {

@@ -18,14 +18,14 @@ const cryptoHelper = require('../../../cryptoHelper');
 const { dbQuery } = require('../../betHelper');
 
 // The follower's copy of the state-hash preimage builder. Byte-aligned twin of
-// xchain-indexer/src/stateHash.js (their equality is locked by
+// xchain-indexer/src/consensus/state_hash.js (their equality is locked by
 // consensusHashConformance.test.js), so using the follower's here recomputes
 // what a real replica would compute rather than re-running the source's own
 // code against its own rows. Absent sibling => that leg skips, as elsewhere.
 let syncBuildStateHashData, SyncUtility;
 try {
     ({ buildStateHashData: syncBuildStateHashData } =
-        require(path.join(__dirname, '../../../../../xchain-sync/src/stateHash.js')));
+        require(path.join(__dirname, '../../../../../xchain-sync/src/consensus/state_hash.js')));
     SyncUtility = require(path.join(__dirname, '../../../../../xchain-sync/src/util/index.js'));
 } catch (e) {
     // Strict runs lay every sibling, so a load failure there is a moved or broken

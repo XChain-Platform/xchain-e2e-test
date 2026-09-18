@@ -19,11 +19,11 @@ const { waitForTxIndexed } = require('../helpers/indexerWait')
 // The same header module the indexer's SLASH verifier derives the EQUIV key from,
 // so the proof this test signs is byte-identical to what a real equivocating
 // validator would have produced.
-const eq = require('../../../xchain-indexer/src/equivocation_header.js')
+const eq = require('../../../xchain-indexer/src/consensus/equivocation_header.js')
 // Same reason: the verifier resolves the proof's membership at the BURIED height, so the
 // declared snapshot_block this test signs has to be one whose buried form the bond is
 // active at, exactly as a real hub's locked slot would be.
-const srb = require('../../../xchain-indexer/src/snapshot_reorg_buffer.js')
+const srb = require('../../../xchain-indexer/src/consensus/snapshot_reorg_buffer.js')
 
 /**
  * CAPABILITY SLASH, driven on a chain.

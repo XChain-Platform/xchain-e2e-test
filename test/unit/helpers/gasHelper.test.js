@@ -19,6 +19,31 @@ const issueHelper = require('../../helpers/issueHelper')
 const chainRail = require('../../helpers/chainRail')
 const helper = require('../../helpers/gasHelper')
 const path = require('path')
+// The hub's own relay-margin table, resolved the way loadSdk resolves the SDK so
+// the numbers asserted below are the hub's, not a copy typed into this file.
+function loadRelayMargin() {
+    for (const c of ['xchain-hub/src/lib/relay_margin', '../../../xchain-hub/src/lib/relay_margin.js', '../../../../xchain-hub/src/lib/relay_margin.js']) {
+        try { return c.startsWith('.') ? require(path.resolve(__dirname, c)) : require(c) } catch (e) { /* next */ }
+    }
+    throw new Error('gasHelper.test: cannot resolve xchain-hub/src/lib/relay_margin beside this checkout')
+}
+const relay = loadRelayMargin()
+
+// A regtest miner that records every heartbeat setting in order, and can be told
+// to refuse the disable so the restore path is exercised, not just the happy one.
+function fakeMiner(name, opts = {}) {
+    return {
+        name,
+        intervals: [],
+        interval: 0,
+        async setIdleMineInterval(ms) {
+            if (ms === 0 && opts.failRestore) throw new Error(name + ' refused the restore')
+            this.intervals.push(ms)
+            this.interval = ms
+            return 'ok'
+        },
+    }
+}
 
 // The SDK the way the harness's tools resolve it: a staged CI checkout carries no
 // node_modules link for the sibling, so a bare require('xchain-sdk') is not enough.
@@ -117,7 +142,7 @@ describe('gasHelper', () => {
     // rather than a hand-rolled parser.
     describe('bridgeGasIn', () => {
         let sendTxStub, getAddrStub, createRailStub
-        let destDb, btcDb
+        let destDb, btcDb, btcMiner, destMiner, savedDestMiner
 
         beforeEach(() => {
             // This block drives the real mintHelper.sendMintV0/issueHelper.sendIssueV0
@@ -128,6 +153,14 @@ describe('gasHelper', () => {
             global.COIN = 'dogecoin'
             global.COIN_CODE = 'DOGE'
             global.NETWORK = 'regtest'
+
+            // The two miners the idle heartbeat drives: the BTC rail's (on the
+            // rail's captured globals) and the destination's standing one (the
+            // process global, which the real withRail swaps out and back).
+            btcMiner  = fakeMiner('btc')
+            destMiner = fakeMiner('dest')
+            savedDestMiner = global.regtestMinerConnector
+            global.regtestMinerConnector = destMiner
 
             destDb = {
                 checkIssue: sinon.stub().resolves(null),
@@ -157,10 +190,15 @@ describe('gasHelper', () => {
                     COIN: 'bitcoin', NETWORK: 'regtest', NETWORK_OBJECT: null, COIN_CODE: 'BTC',
                     nodeConnector: null, utxoTrackerConnector: null, encoderConnector: null,
                     decoderConnector: null, indexerConnector: null, explorerConnector: null,
-                    indexerDatabase: btcDb, regtestMinerConnector: null,
+                    indexerDatabase: btcDb, regtestMinerConnector: btcMiner,
                 },
                 env: { COIN: 'bitcoin', NETWORK: 'regtest', INDEXER_DB_NAME: 'x', INDEXER_DB_USER: 'x', INDEXER_DB_PASS: 'x' },
             })
+        })
+
+        afterEach(() => {
+            if (savedDestMiner === undefined) delete global.regtestMinerConnector
+            else global.regtestMinerConnector = savedDestMiner
         })
 
         it('mints on BTC and locks the amount to the destination with a real XBRIDGE v0 wire string, byte-equal to the SDK builder and round-tripping through the decoder', async () => {
@@ -249,6 +287,119 @@ describe('gasHelper', () => {
                 () => helper.bridgeGasIn({ address: 'DDest4' }, '10'),
                 /never landed/
             )
+        })
+
+        // The two-stack nightly legs sat on this twice (runs 35122297316 and
+        // 35124072478): neither regtest miner mines without a transaction in its
+        // mempool, so with nothing in flight BTC never buried the lock to the hub's
+        // depth and the destination's protocol clock (median-time-past) never
+        // reached the row's effective_time, a full relay margin ahead. The
+        // heartbeat has to be on for BOTH chains for the whole gas-in, and off
+        // again on every exit, because every later case counts blocks.
+        describe('idle heartbeat and the credit budget', () => {
+            it('runs the lock and the credit wait with the heartbeat on the BTC rail miner and the destination miner, then turns both off', async () => {
+                let intervalsAtWait
+                destDb.waitForCredit.callsFake(async () => {
+                    intervalsAtWait = [btcMiner.interval, destMiner.interval]
+                    return { id: 500 }
+                })
+                await helper.bridgeGasIn({ address: 'DDest5' }, '10')
+                assert.deepStrictEqual(intervalsAtWait, [helper.IDLE_MINE_INTERVAL_MS, helper.IDLE_MINE_INTERVAL_MS],
+                    'both heartbeats are still on while the credit is awaited, not just through the lock')
+                assert.deepStrictEqual(btcMiner.intervals, [helper.IDLE_MINE_INTERVAL_MS, 0])
+                assert.deepStrictEqual(destMiner.intervals, [helper.IDLE_MINE_INTERVAL_MS, 0])
+            })
+
+            it('budgets the credit wait at the destination relay margin plus slack, never the old 120 s', async () => {
+                await helper.bridgeGasIn({ address: 'DDest6' }, '10')
+                const waitCall = destDb.waitForCredit.firstCall
+                assert.deepStrictEqual(waitCall.args[0], { address: 'DDest6', tick: 'XCHAIN', amount: '10' })
+                assert.strictEqual(waitCall.args[1], helper.bridgeCreditWaitMs('DOGE'))
+                assert.ok(waitCall.args[1] > relay.relayMarginFloorS('DOGE') * 1000)
+            })
+
+            it('budgets LTC at its own longer margin', async () => {
+                global.COIN = 'litecoin'
+                global.COIN_CODE = 'LTC'
+                await helper.bridgeGasIn({ address: 'LDest7' }, '10')
+                assert.strictEqual(destDb.waitForCredit.firstCall.args[1], helper.bridgeCreditWaitMs('LTC'))
+                assert.ok(helper.bridgeCreditWaitMs('LTC') > helper.bridgeCreditWaitMs('DOGE'))
+            })
+
+            it('turns both heartbeats off when the credit never lands', async () => {
+                destDb.waitForCredit.resolves(null)
+                await assert.rejects(() => helper.bridgeGasIn({ address: 'DDest8' }, '10'), /never landed/)
+                assert.strictEqual(btcMiner.interval, 0)
+                assert.strictEqual(destMiner.interval, 0)
+            })
+
+            it('turns both heartbeats off when the BTC lock never debits', async () => {
+                btcDb.waitForDebit.resolves(null)
+                await assert.rejects(() => helper.bridgeGasIn({ address: 'DDest9' }, '10'), /never debited/)
+                assert.strictEqual(btcMiner.interval, 0)
+                assert.strictEqual(destMiner.interval, 0)
+            })
+        })
+    })
+
+    describe('bridgeCreditWaitMs', () => {
+        it('is the destination relay margin plus the slack, read from the hub table, so it always exceeds the margin', () => {
+            for (const coin of ['LTC', 'DOGE', 'BTC']) {
+                const wait = helper.bridgeCreditWaitMs(coin)
+                assert.strictEqual(wait, relay.relayMarginFloorS(coin) * 1000 + helper.BRIDGE_CREDIT_SLACK_MS, coin)
+                assert.ok(wait > relay.relayMarginFloorS(coin) * 1000, coin + ': the wait must exceed the margin')
+            }
+        })
+
+        it('lands on the margins the hub stamps, LTC 600 s and DOGE 240 s, plus 180 s slack', () => {
+            assert.strictEqual(helper.bridgeCreditWaitMs('LTC'), 780000)
+            assert.strictEqual(helper.bridgeCreditWaitMs('DOGE'), 420000)
+        })
+    })
+
+    describe('withIdleMining', () => {
+        it('turns the heartbeat on for every miner before fn runs, and off on every one after it resolves', async () => {
+            const a = fakeMiner('btc'), b = fakeMiner('dest')
+            let seenDuring
+            const result = await helper.withIdleMining([a, b], async () => {
+                seenDuring = [a.interval, b.interval]
+                return 'credit-row'
+            })
+            assert.strictEqual(result, 'credit-row')
+            assert.deepStrictEqual(seenDuring, [helper.IDLE_MINE_INTERVAL_MS, helper.IDLE_MINE_INTERVAL_MS])
+            assert.deepStrictEqual(a.intervals, [helper.IDLE_MINE_INTERVAL_MS, 0])
+            assert.deepStrictEqual(b.intervals, [helper.IDLE_MINE_INTERVAL_MS, 0])
+        })
+
+        it('turns the heartbeat off on every miner when fn throws, and rethrows fn\'s own error', async () => {
+            const a = fakeMiner('btc'), b = fakeMiner('dest')
+            await assert.rejects(
+                helper.withIdleMining([a, b], async () => { throw new Error('credit never landed') }),
+                /credit never landed/
+            )
+            assert.strictEqual(a.interval, 0)
+            assert.strictEqual(b.interval, 0)
+        })
+
+        it('restores the other miner when one refuses the restore, and surfaces that refusal after a success', async () => {
+            const a = fakeMiner('btc', { failRestore: true }), b = fakeMiner('dest')
+            await assert.rejects(helper.withIdleMining([a, b], async () => 'ok'), /btc refused the restore/)
+            assert.strictEqual(b.interval, 0, 'the second miner is still restored')
+        })
+
+        it('never lets a restore failure mask fn\'s own failure', async () => {
+            const a = fakeMiner('btc', { failRestore: true }), b = fakeMiner('dest')
+            await assert.rejects(
+                helper.withIdleMining([a, b], async () => { throw new Error('the real failure') }),
+                /the real failure/
+            )
+            assert.strictEqual(b.interval, 0)
+        })
+
+        it('honours an explicit interval', async () => {
+            const a = fakeMiner('btc')
+            await helper.withIdleMining([a], async () => {}, 5000)
+            assert.deepStrictEqual(a.intervals, [5000, 0])
         })
     })
 })

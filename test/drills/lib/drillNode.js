@@ -144,7 +144,7 @@ function makeHubNode(id) {
     // the COUNT snapshot, so lift the activation out of reach for this run (the
     // same runtime-only move forceCountModeQuorum makes in-process).
     function forceCountMode() {
-        const swq = resolveHubModule('src/stake_weighted_quorum.js');
+        const swq = resolveHubModule('src/consensus/stake_weighted_quorum.js');
         const nets = ['regtest', 'testnet'];
         const saved = {};
         for (const n of nets) { saved[n] = swq.STAKE_WEIGHTED_QUORUM_ACTIVATION[n]; swq.STAKE_WEIGHTED_QUORUM_ACTIVATION[n] = Number.MAX_SAFE_INTEGER; }

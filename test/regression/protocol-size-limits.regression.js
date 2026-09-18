@@ -480,8 +480,8 @@ describe('Protocol size-limit drift guard', () => {
         // guard nor any other test compared them to canonical (uuids 3409, 3410).
         // A one-sided edit forks the fleet on the first round naming a 6-char ticker.
         it('[regression:p0] PRICE_PAIR_TICKER_MAX_LEGACY / _WIDE === canonical across indexer + hub', () => {
-            const indexerPricePair = require('../../../xchain-indexer/src/price_pair_activation.js')
-            const hubPricePair     = require('../../../xchain-hub/src/price_pair_activation.js')
+            const indexerPricePair = require('../../../xchain-indexer/src/consensus/gates/price_pair_gate.js')
+            const hubPricePair     = require('../../../xchain-hub/src/consensus/gates/price_pair_gate.js')
             const bounds = ['PRICE_PAIR_TICKER_MAX_LEGACY', 'PRICE_PAIR_TICKER_MAX_WIDE']
             bounds.forEach((name) => {
                 assert.strictEqual(indexerPricePair[name], protocol[name],
@@ -608,14 +608,14 @@ describe('Protocol size-limit drift guard', () => {
             // its copy to the literal 6 and cross-checks the hub copy, never canonical,
             // and the sdk copy had no guard anywhere.
             const reorgCopies = {
-                'xchain-hub':     require('../../../xchain-hub/src/snapshot_reorg_buffer.js'),
-                'xchain-indexer': require('../../../xchain-indexer/src/snapshot_reorg_buffer.js'),
-                'xchain-sdk':     require('../../../xchain-sdk/src/snapshot_reorg_buffer.js'),
+                'xchain-hub':     require('../../../xchain-hub/src/consensus/snapshot_reorg_buffer.js'),
+                'xchain-indexer': require('../../../xchain-indexer/src/consensus/snapshot_reorg_buffer.js'),
+                'xchain-sdk':     require('../../../xchain-sdk/src/consensus/snapshot_reorg_buffer.js'),
                 // The documentation repo's own reference implementation is the vector
                 // source consumers are checked against; nothing in that repo compares it
                 // to constants.js, so it drifts silently too.
                 'xchain-documentation reference-impl':
-                    require('../../../xchain-documentation/protocol/reference-impl/snapshot_reorg_buffer.js'),
+                    require('../../../xchain-documentation/protocol/reference-impl/consensus/snapshot_reorg_buffer.js'),
             }
             Object.keys(reorgCopies).forEach((svc) => {
                 assert.strictEqual(
@@ -631,12 +631,12 @@ describe('Protocol size-limit drift guard', () => {
         // anchor reward materializes at: a mirrored attestation matures at
         // snapshot_block + this constant. The hub writes the row and the indexer
         // derives the reward, each from its own bare literal in
-        // src/anchor_reward_activation.js. A one-sided edit reproduces the exact defect
+        // src/consensus/gates/anchor_reward_gate.js. A one-sided edit reproduces the exact defect
         // the constant was introduced to fix, two nodes with different mirror contents
         // deriving the same reward at different BTC heights (uuid 27c632bf).
         it('[regression:p0] ANCHOR_REWARD_MIRROR_MATURITY === canonical across hub + indexer (uuid 27c632bf)', () => {
-            const hubAnchor     = require('../../../xchain-hub/src/anchor_reward_activation.js')
-            const indexerAnchor = require('../../../xchain-indexer/src/anchor_reward_activation.js')
+            const hubAnchor     = require('../../../xchain-hub/src/consensus/gates/anchor_reward_gate.js')
+            const indexerAnchor = require('../../../xchain-indexer/src/consensus/gates/anchor_reward_gate.js')
             assert.strictEqual(
                 hubAnchor.ANCHOR_REWARD_MIRROR_MATURITY,
                 protocol.ANCHOR_REWARD_MIRROR_MATURITY,
@@ -743,13 +743,13 @@ describe('Protocol size-limit drift guard', () => {
         })
 
         // Bind the ROLLCALL eviction scalars to canonical (the hub signs, the indexer judges,
-        // each from its own bare literal in src/rollcall_activation.js). Neither repo compares
+        // each from its own bare literal in src/consensus/gates/rollcall_gate.js). Neither repo compares
         // its copy to canonical: the hub pins 2 / 4 / 0 as literals of its own and the indexer
         // only asserts the 2K relation, so the twin can be edited in step and leave the map of
         // record behind with nothing red (uuids 88da060f, 602f690e, 2fbdb0ef).
         it('[regression:p0] ROLLCALL_EVICT_MISSES / _STREAK_LOOKBACK / _REGTEST_ARMED_HEIGHT === canonical across hub + indexer', () => {
-            const hubRollcall     = require('../../../xchain-hub/src/rollcall_activation.js')
-            const indexerRollcall = require('../../../xchain-indexer/src/rollcall_activation.js')
+            const hubRollcall     = require('../../../xchain-hub/src/consensus/gates/rollcall_gate.js')
+            const indexerRollcall = require('../../../xchain-indexer/src/consensus/gates/rollcall_gate.js')
             const names = [
                 'ROLLCALL_EVICT_MISSES', 'ROLLCALL_STREAK_LOOKBACK', 'ROLLCALL_REGTEST_ARMED_HEIGHT',
             ]
@@ -771,8 +771,8 @@ describe('Protocol size-limit drift guard', () => {
 
         // The ROLLCALL GATES rail is a second, later pair of twins: canonical declares
         // ROLLCALL_GATES_REGTEST_ARMED_HEIGHT and its opt-in env key, and
-        // xchain-hub/src/rollcall_gates_activation.js and
-        // xchain-indexer/src/rollcall_gates_activation.js each re-declare both as bare
+        // xchain-hub/src/consensus/gates/rollcall_gates_gate.js and
+        // xchain-indexer/src/consensus/gates/rollcall_gates_gate.js each re-declare both as bare
         // literals of their own. Neither repo compares its copy to canonical, and the
         // block above covers rollcall_activation.js only, so the gates twins could be
         // edited in step and leave the map of record behind with nothing red. The
@@ -780,8 +780,8 @@ describe('Protocol size-limit drift guard', () => {
         // in, so a drift in either silently changes which epochs the venue publishes
         // gates for while the hub and the indexer still agree with each other.
         it('[regression:p0] ROLLCALL_GATES_REGTEST_ARMED_HEIGHT / _ENV === canonical across hub + indexer', () => {
-            const hubGates     = require('../../../xchain-hub/src/rollcall_gates_activation.js')
-            const indexerGates = require('../../../xchain-indexer/src/rollcall_gates_activation.js')
+            const hubGates     = require('../../../xchain-hub/src/consensus/gates/rollcall_gates_gate.js')
+            const indexerGates = require('../../../xchain-indexer/src/consensus/gates/rollcall_gates_gate.js')
 
             // A dropped export on all three sides would compare undefined to undefined
             // and pass, which is the shape this whole file exists to refuse.

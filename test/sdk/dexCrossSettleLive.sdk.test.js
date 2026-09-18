@@ -76,10 +76,18 @@ const DB_PORT = parseInt(process.env.XCALL_DB_PORT || '13306', 10);
 // The relay hub may run as a SEPARATE disposable DB rather than the shared stack
 // MariaDB. The proven 3-hub venue runs XChain_Relay_Hub on 172.17.0.1:13341.
 // Default to the XCALL_DB_* stack DB + 'XChain_Hub' for back-compat; override with
-// HUB_DB_HOST / HUB_DB_PORT / HUB_DB_NAME to point at the disposable relay DB.
-const HUB_DB_HOST = process.env.HUB_DB_HOST || DB_HOST;
-const HUB_DB_PORT = parseInt(process.env.HUB_DB_PORT || String(DB_PORT), 10);
-const HUB_DB_NAME = process.env.HUB_DB_NAME || 'XChain_Hub';
+// RELAY_HUB_DB_HOST / RELAY_HUB_DB_PORT / RELAY_HUB_DB_NAME to point at it.
+//
+// Resolved by hubMirrorTopology.relayHubParams, and NOT from HUB_DB_NAME alone:
+// that variable means "the database the indexer reads prices from", which on a
+// mirror topology is an INDEXER's database (this one's or another chain's), and
+// pointing the drill there queries for match rows that only ever exist on the hub,
+// with credentials that usually cannot even open it. HUB_SOURCE_DB_NAME, which names
+// the hub's own authoritative database, is preferred over it. See relayHubParams.
+// Resolved lazily, since it consults global.indexerDatabase, which initialCheck
+// sets in a hook long after mocha has loaded this file.
+const topology = require('../helpers/hubMirrorTopology');
+function relayHub() { return topology.relayHubParams({ host: DB_HOST, port: DB_PORT }); }
 
 const BTC_TICK  = String(process.env.DEX_BTC_TICK  || '').trim();
 const DOGE_TICK = String(process.env.DEX_DOGE_TICK || '').trim();
@@ -92,7 +100,7 @@ async function withConn(host, port, database, user, password, fn) {
     const conn = await mariadb.createConnection({ host, port, database, user, password });
     try { return await fn(conn); } finally { await conn.end().catch(() => {}); }
 }
-async function hubDb(fn)   { return withConn(HUB_DB_HOST, HUB_DB_PORT, HUB_DB_NAME, process.env.HUB_DB_USER, process.env.HUB_DB_PASS, fn); }
+async function hubDb(fn)   { const h = relayHub(); return withConn(h.host, h.port, h.database, h.user, h.password, fn); }
 async function dogeIdx(fn) { return withConn(DB_HOST, DB_PORT, 'XChain_DOGE_Regtest_Indexer', process.env.DOGE_IDX_DB_USER, process.env.DOGE_IDX_DB_PASS, fn); }
 
 async function btcIdx(sql, params) {
@@ -114,9 +122,17 @@ async function setupDexSettlement() {
             .to.be.a('number').and.to.be.greaterThan(0);
         expect(DOGE_MAKER_BTC_RECV, 'DEX_DOGE_MAKER_BTC_RECV env (the BTC addr the DOGE order pays out to)')
             .to.match(/^[a-zA-Z0-9]+$/);
-        expect(process.env.HUB_DB_USER, 'HUB_DB_USER env').to.be.a('string').and.to.not.equal('');
+        // Any of the three names the relay hub credentials can arrive under, in the
+        // same precedence relayHubParams applies.
+        expect(process.env.RELAY_HUB_DB_USER || process.env.HUB_SOURCE_DB_USER || process.env.HUB_DB_USER,
+            'RELAY_HUB_DB_USER (or HUB_SOURCE_DB_USER / HUB_DB_USER) env').to.be.a('string').and.to.not.equal('');
         expect(process.env.DOGE_IDX_DB_USER, 'DOGE_IDX_DB_USER env').to.be.a('string').and.to.not.equal('');
         expect(global.indexerDatabase, 'indexerDatabase global (initialCheck)').to.be.an('object');
+        // Named in the log because the drill asserting against the wrong database is
+        // indistinguishable from the hub never having matched: both read as zero rows.
+        const h = relayHub();
+        console.log('    [dex-settle] relay hub db=' + h.database + ' at ' + h.host + ':' + h.port
+            + ' (from ' + h.source + ')');
         sdk = makeSdk();
         maker = await fundedGasAddress(sdk, 1);
         // A valid DOGE regtest address for the BTC ORDER's GET_ADDRESS (where the
