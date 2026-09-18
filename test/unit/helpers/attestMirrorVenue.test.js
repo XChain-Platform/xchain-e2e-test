@@ -178,6 +178,93 @@ describe('attestMirrorVenue: port planning', function () {
     })
 })
 
+describe('attestMirrorVenue: the per-slot probe base (concurrent venues)', function () {
+    this.timeout(20000)
+
+    const { AttestMirrorVenue, resolveVenueBasePort, DEFAULT_VENUE_BASE_PORT, VENUE_BASE_PORT_ENV } =
+        require('../../helpers/attestMirrorVenue')
+
+    // The three bases a three-slot run derives, 100 apart, which is the layout the
+    // venue has to land inside for the slots to stay out of each other's way.
+    const SLOT_BASES = [63400, 63500, 63600]
+    const SLOT_WIDTH = 100
+
+    let saved
+    beforeEach(() => { saved = process.env[VENUE_BASE_PORT_ENV]; delete process.env[VENUE_BASE_PORT_ENV] })
+    afterEach(() => {
+        if (saved === undefined) delete process.env[VENUE_BASE_PORT_ENV]
+        else process.env[VENUE_BASE_PORT_ENV] = saved
+    })
+
+    // A venue's whole port footprint: the children's planned ports plus the mirror
+    // proxies, i.e. the same one-probe-sliced-twice pool start() takes.
+    async function footprint (venue) {
+        const planned = portCount(venue.hubCount, venue.indexerCount)
+        const pool = await pickFreePorts(planned + venue.indexerCount, venue.basePort)
+        const plan = planPorts(pool.slice(0, planned), venue.hubCount, venue.indexerCount)
+        return [].concat(plan.hubApi, plan.p2p, plan.p2pProxy, plan.indexerApi, pool.slice(planned))
+    }
+
+    function venueAt (base, label) {
+        if (base === null) delete process.env[VENUE_BASE_PORT_ENV]
+        else process.env[VENUE_BASE_PORT_ENV] = String(base)
+        return new AttestMirrorVenue({ label: label })
+    }
+
+    it('hands two venues with no slot base the SAME ports, which is the collision itself', async () => {
+        // The defect, reproduced without a rail: a probe reports what is free, it binds
+        // nothing, so a second venue probing the same base is told the same ports are
+        // free and both plan onto them. Concurrently, whichever child listens second
+        // dies in its `before all` hook on EADDRINUSE.
+        const a = venueAt(null, 'slotless1')
+        const b = venueAt(null, 'slotless2')
+        assert.strictEqual(a.basePort, DEFAULT_VENUE_BASE_PORT)
+        assert.strictEqual(b.basePort, DEFAULT_VENUE_BASE_PORT)
+        const [pa, pb] = [await footprint(a), await footprint(b)]
+        const shared = pa.filter(p => pb.includes(p))
+        assert.strictEqual(pa[0], pb[0], 'two venues probing one base were handed different first ports')
+        assert.strictEqual(shared.length, pa.length,
+            'expected both shared-base venues to plan the same ' + pa.length + ' ports, shared ' + shared.length)
+    })
+
+    it('keeps three slot venues in three disjoint windows', async () => {
+        const venues = SLOT_BASES.map((base, i) => venueAt(base, 'slot' + i))
+        venues.forEach((v, i) => assert.strictEqual(v.basePort, SLOT_BASES[i]))
+        const prints = []
+        for (const v of venues) prints.push(await footprint(v))
+        for (let i = 0; i < prints.length; i++) {
+            const lo = SLOT_BASES[i]
+            for (const p of prints[i])
+                assert.ok(p >= lo && p < lo + SLOT_WIDTH, 'slot ' + i + ' planned ' + p + ' outside its window at ' + lo)
+            for (let j = i + 1; j < prints.length; j++) {
+                const shared = prints[i].filter(p => prints[j].includes(p))
+                assert.deepStrictEqual(shared, [], 'slots ' + i + ' and ' + j + ' share ports: ' + shared.join(','))
+            }
+        }
+    })
+
+    it('reads the slot base for a venue that names none, which is every leg that builds one directly', () => {
+        assert.strictEqual(resolveVenueBasePort(undefined, {}), DEFAULT_VENUE_BASE_PORT)
+        assert.strictEqual(resolveVenueBasePort(undefined, { [VENUE_BASE_PORT_ENV]: '63500' }), 63500)
+        assert.strictEqual(resolveVenueBasePort(undefined, { [VENUE_BASE_PORT_ENV]: '' }), DEFAULT_VENUE_BASE_PORT)
+        assert.strictEqual(resolveVenueBasePort(undefined, undefined), DEFAULT_VENUE_BASE_PORT)
+    })
+
+    it('lets a caller that places its own venues keep its base', () => {
+        // The bridge rail hands its two venues bases 200 apart on purpose; the slot
+        // base must not move them, or the pair would land on top of each other.
+        assert.strictEqual(resolveVenueBasePort(43000, { [VENUE_BASE_PORT_ENV]: '63400' }), 43000)
+        process.env[VENUE_BASE_PORT_ENV] = '63400'
+        assert.strictEqual(new AttestMirrorVenue({ label: 'explicit', basePort: 43200 }).basePort, 43200)
+    })
+
+    it('refuses a slot base it cannot use rather than falling back into the shared window', () => {
+        for (const bad of ['sixty-three thousand', '0', '80', '65001', '63400.5'])
+            assert.throws(() => resolveVenueBasePort(undefined, { [VENUE_BASE_PORT_ENV]: bad }),
+                /is not a usable probe base/, 'accepted ' + bad)
+    })
+})
+
 describe('attestMirrorVenue: hub environment', function () {
 
     it('points every peer at the DELAY PROXY, not at the hub\'s own P2P port', () => {

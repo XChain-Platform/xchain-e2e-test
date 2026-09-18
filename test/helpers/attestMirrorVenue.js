@@ -449,6 +449,51 @@ function planPorts(ports, hubCount, indexerCount) {
     };
 }
 
+/** Where the venue probes from when nothing names a base. */
+const DEFAULT_VENUE_BASE_PORT = 41000;
+
+/** The per-slot probe base the stack runner exports for the leg it launches. */
+const VENUE_BASE_PORT_ENV = 'AB_VENUE_BASE_PORT';
+
+/**
+ * The port probe base for ONE venue, which is `planPorts`' guarantee carried one
+ * level out, from inside a venue to between concurrent venues.
+ *
+ * `planPorts` makes two roles of one venue unable to share a port by partitioning a
+ * single probe. Nothing made two VENUES unable to share one, and they run side by
+ * side: `pickFreePorts` probes and returns, and no child binds until seconds later,
+ * so two processes probing the same base are handed the same ports and the second
+ * child to listen dies. Measured on a three-way concurrent run, where two legs lost
+ * their whole `before all` hook to `listen EADDRINUSE 127.0.0.1:61017` and `:61030`
+ * and reported 0 passing, which reads as two broken legs rather than as one
+ * allocation that was never slot-aware.
+ *
+ * The runner already derives a disjoint window per concurrency slot and exports it.
+ * Reading it HERE is what covers every leg: a leg that constructs the venue directly
+ * and names no base is the common case, and a fix at the call sites would cover only
+ * the legs that exist today. An explicit `basePort` still wins, so a caller that
+ * places its own venues by hand (the bridge rail's two) is unchanged.
+ *
+ * A base that is set but unusable throws rather than falling back, because the
+ * fallback is the shared window this exists to leave.
+ *
+ * @param {number} [explicit]  `opts.basePort`, the caller's own choice
+ * @param {object} [env]       environment to read, normally `process.env`
+ * @returns {number}           the base to probe upward from
+ */
+function resolveVenueBasePort(explicit, env) {
+    if (explicit) return explicit;
+    const raw = (env || {})[VENUE_BASE_PORT_ENV];
+    if (raw === undefined || raw === null || String(raw).trim() === '') return DEFAULT_VENUE_BASE_PORT;
+    const base = Number(raw);
+    if (!Number.isInteger(base) || base < 1024 || base > 65000) {
+        throw new Error('attestMirrorVenue: ' + VENUE_BASE_PORT_ENV + '=' + raw + ' is not a usable probe base. ' +
+            'The stack runner exports the slot\'s base as an integer between 1024 and 65000; ' +
+            'falling back to ' + DEFAULT_VENUE_BASE_PORT + ' would put this leg back in the shared window.');
+    }
+    return base;
+}
+
 /**
  * Refuse a knob combination that makes an acceptance test flaky rather than failing.
  *
@@ -2020,7 +2065,8 @@ class AttestMirrorVenue {
      *                              keypairs are generated and no request will ever select
      *                              these hubs.
      * @param opts.coin/network     the chain the indexers index (default bitcoin/regtest)
-     * @param opts.basePort         port probe base (default 41000)
+     * @param opts.basePort         port probe base; unset, the runner's per-slot base from
+     *                              the environment, else 41000 (see resolveVenueBasePort)
      * @param opts.hubDb            an already-started disposableHubDb handle to share
      * @param opts.repoRoot         monorepo root the hub and indexer children are spawned
      *                              from; defaults to XCHAIN_VENUE_REPO_ROOT, else the
@@ -2065,7 +2111,10 @@ class AttestMirrorVenue {
         this.configSecretsRedacted   = null;
         if (this.attachHubs) this.hubCount = this.attachHubs.length;
         this.network      = opts.network || 'regtest';
-        this.basePort     = opts.basePort || 41000;
+        // Named base first, else the runner's per-slot window, else the historical
+        // 41000. See resolveVenueBasePort for why the environment is read here and
+        // not at the legs.
+        this.basePort     = resolveVenueBasePort(opts.basePort, process.env);
         this.repoRoot     = resolveRepoRoot(opts.repoRoot, process.env);
         // `{1: '/path/to/other/root'}`: the per-HUB code root, resolved and checked here
         // so a bad root refuses at construction rather than as a boot timeout. Every
@@ -3936,6 +3985,9 @@ module.exports = {
     hubExtraEnvFor,
     planPorts,
     portCount,
+    resolveVenueBasePort,
+    DEFAULT_VENUE_BASE_PORT,
+    VENUE_BASE_PORT_ENV,
     buildHubEnv,
     buildIndexerEnv,
     pickOutsideIndexer,
