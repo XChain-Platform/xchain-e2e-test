@@ -119,7 +119,10 @@ async function assertDivergence (ctx) {
     assert.deepStrictEqual(armedSet, [], 'the armed node reads the row at B, but its admission height is B + 2')
     const inertGot = await drive.waitCommitted(ctx.venue, INERT, ctx.B, (AHEAD_S + 600) * 1000)
     ctx.committedAt[INERT] = Date.now() - started
-    assert.ok(inertGot.ok, 'the inert node never committed B: ' + JSON.stringify(inertGot.s))
+    // The status JSON names the last barrier the block DEFERRED on, which is not the same as the
+    // reason it is still uncommitted: a canonical-build refusal or a parse rollback never reaches
+    // /status at all. The inert node's own log is the only carrier of that, so it rides the message.
+    assert.ok(inertGot.ok, 'the inert node never committed B: ' + JSON.stringify(inertGot.s) + '\n' + ctx.venue.logTail('indexer' + INERT))
     // The inert node's read at B is the LEGACY rule alone: effective_time <= t(B).
     const inertRows = await queryDb(ctx.venue, ctx.venue.indexers[INERT].mirrorDbName,
         'SELECT match_id AS k FROM `' + TABLE + "` WHERE status = 'finalized' AND effective_time <= ? ORDER BY match_id ASC", [t])
@@ -136,7 +139,7 @@ async function assertConvergence (ctx) {
     assert.strictEqual(ctx.blocks.B2.height, ctx.B + 2)
     for (const i of [ARMED, INERT]) {
         const got = await drive.waitCommitted(ctx.venue, i, ctx.B + 2, 10 * 60 * 1000)
-        assert.ok(got.ok, 'indexer ' + i + ' never committed B + 2: ' + JSON.stringify(got.s))
+        assert.ok(got.ok, 'indexer ' + i + ' never committed B + 2: ' + JSON.stringify(got.s) + '\n' + ctx.venue.logTail('indexer' + i))
     }
     const t2 = ctx.blocks.B2.blockTime
     const armedSet = await drive.mirrorReadableSet(ctx.venue, ARMED, TABLE, ctx.coin, ctx.B + 2, t2)
