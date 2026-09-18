@@ -16,7 +16,12 @@ describe('BF6 mixed hub checkout preparer', function () {
 
     it('creates a detached real checkout at the pinned older upgrade state and removes it', function () {
         const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'bf6-mixed-checkout-'))
-        const modules = path.join(ROOT, '..', '..', '..', 'xchain-hub', 'node_modules')
+        // Beside the hub this test already clones from, never a counted number of
+        // levels above it. The sibling row is what every layout agrees on; absolute
+        // depth is not, so counting levels resolved to a real path in one lane
+        // worktree and to a nonexistent directory on the CI venue, which is how this
+        // case passed where it was written and failed the gate.
+        const modules = path.join(BUILD_HUB, 'node_modules')
         const config = {
             workspace,
             stack: 'am-unit-1',
