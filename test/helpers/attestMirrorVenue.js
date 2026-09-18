@@ -2755,6 +2755,32 @@ class AttestMirrorVenue {
             throw new Error('attestMirrorVenue[' + this.label + ']: indexer ' + i + ' never created its schema in ' +
                 ix.indexerDbName + ' within ' + up.waitedMs + 'ms.\n' + this._tail('indexer' + i));
         }
+
+        // The schema wait proves the indexer reached its DATABASE, not that its HTTP
+        // listener is bound, and those are minutes apart on a cold genesis replay. Every
+        // read a drill takes goes through `//status`, so without this wait `start()` returns
+        // over a socket that is still refusing and the leg dies in its `before all` hook
+        // with ECONNREFUSED rather than a named barrier. Indexers are spawned SERIALLY, so
+        // the last one is the exposed one every time: it is the one whose schema ends the
+        // wait above with nothing behind it to cover its listener, which is why the refusal
+        // lands on the same port on every stack rather than looking like a flake.
+        //
+        // ANY answer counts, 503 included. A stalled indexer that reports its stall is
+        // listening, and a barrier drill's whole subject is a node parked on a stall: a wait
+        // for HTTP 200 here would hang exactly the legs this is meant to let run.
+        const answering = await waitFor(async () => {
+            if (ix.proc.exitCode !== null) return { ok: false, dead: true };
+            try {
+                const res = await axios.get(ix.apiUrl + '/status', { timeout: 5_000, validateStatus: () => true });
+                return { ok: true, httpStatus: res.status };
+            } catch (_) { return { ok: false }; }
+        }, { timeoutMs: BOOT_WAIT_MS, intervalMs: 1000 });
+        if (!answering.ok) {
+            throw new Error('attestMirrorVenue[' + this.label + ']: indexer ' + i + ' never answered /status on ' +
+                ix.apiUrl + ' within ' + answering.waitedMs + 'ms' +
+                (answering.last && answering.last.dead ? ' (the process exited)' : '') +
+                '.\n' + this._tail('indexer' + i));
+        }
         ix.connector = new XChainIndexerConnector('127.0.0.1', ix.apiPort, null);
     }
 
