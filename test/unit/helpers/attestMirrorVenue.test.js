@@ -181,7 +181,8 @@ describe('attestMirrorVenue: port planning', function () {
 describe('attestMirrorVenue: the per-slot probe base (concurrent venues)', function () {
     this.timeout(20000)
 
-    const { AttestMirrorVenue, resolveVenueBasePort, DEFAULT_VENUE_BASE_PORT, VENUE_BASE_PORT_ENV } =
+    const { AttestMirrorVenue, resolveVenueBasePort, DEFAULT_VENUE_BASE_PORT, VENUE_BASE_PORT_ENV,
+        RUNNER_SLOT_ENV } =
         require('../../helpers/attestMirrorVenue')
 
     // The three bases a three-slot run derives, 100 apart, which is the layout the
@@ -262,6 +263,34 @@ describe('attestMirrorVenue: the per-slot probe base (concurrent venues)', funct
         for (const bad of ['sixty-three thousand', '0', '80', '65001', '63400.5'])
             assert.throws(() => resolveVenueBasePort(undefined, { [VENUE_BASE_PORT_ENV]: bad }),
                 /is not a usable probe base/, 'accepted ' + bad)
+    })
+
+    // A leg under the runner is owed a window of its own, and the slot is the evidence
+    // that it was owed one. Without this the export going missing would not fail: every
+    // slot would quietly share 41000 and the run would come back as flaky barrier legs.
+    it('refuses to default the base for a leg the runner gave a slot', () => {
+        for (const slot of ['0', '1', '2'])
+            assert.throws(() => resolveVenueBasePort(undefined, { [RUNNER_SLOT_ENV]: slot }),
+                /names a concurrency slot but AB_VENUE_BASE_PORT is unset/, 'defaulted slot ' + slot)
+        // Slot 0 is a real slot and the first one allocated. Asserted on its own because a
+        // presence check written as a truthiness check waves through exactly this case.
+        assert.throws(() => resolveVenueBasePort(undefined, { [RUNNER_SLOT_ENV]: '0' }),
+            /names a concurrency slot/)
+        // An empty or absent slot is NOT the runner, so the standalone default stands.
+        for (const empty of ['', '   ', undefined, null])
+            assert.strictEqual(resolveVenueBasePort(undefined, { [RUNNER_SLOT_ENV]: empty }),
+                DEFAULT_VENUE_BASE_PORT, 'threw for slot ' + JSON.stringify(empty))
+    })
+
+    it('resolves normally when the runner supplies both the slot and the base', () => {
+        for (const [slot, base] of [['0', '63400'], ['1', '63500'], ['2', '63600']])
+            assert.strictEqual(
+                resolveVenueBasePort(undefined, { [RUNNER_SLOT_ENV]: slot, [VENUE_BASE_PORT_ENV]: base }),
+                Number(base))
+        // An explicit base still wins over both, so the bridge rail's hand-placed pair
+        // is not touched by a slot it happens to inherit.
+        assert.strictEqual(
+            resolveVenueBasePort(43000, { [RUNNER_SLOT_ENV]: '1', [VENUE_BASE_PORT_ENV]: '63500' }), 43000)
     })
 })
 

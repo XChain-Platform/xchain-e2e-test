@@ -464,6 +464,13 @@ const DEFAULT_VENUE_BASE_PORT = 41000;
 const VENUE_BASE_PORT_ENV = 'AB_VENUE_BASE_PORT';
 
 /**
+ * The runner's own slot number, which is how a leg knows it is one of several running
+ * side by side. `run-attest-mirror.js` puts it in the driver's environment and nothing
+ * down the chain scrubs it, so it arrives in the mocha process alongside the base.
+ */
+const RUNNER_SLOT_ENV = 'ATTEST_MIRROR_SLOT';
+
+/**
  * The port probe base for ONE venue, which is `planPorts`' guarantee carried one
  * level out, from inside a venue to between concurrent venues.
  *
@@ -491,8 +498,29 @@ const VENUE_BASE_PORT_ENV = 'AB_VENUE_BASE_PORT';
  */
 function resolveVenueBasePort(explicit, env) {
     if (explicit) return explicit;
-    const raw = (env || {})[VENUE_BASE_PORT_ENV];
-    if (raw === undefined || raw === null || String(raw).trim() === '') return DEFAULT_VENUE_BASE_PORT;
+    const source = env || {};
+    const raw = source[VENUE_BASE_PORT_ENV];
+    if (raw === undefined || raw === null || String(raw).trim() === '') {
+        // UNDER THE RUNNER, AN ABSENT BASE IS A FAILURE AND NOT A DEFAULT. A leg that is
+        // one of several concurrent slots and has no base of its own would fall back to
+        // the shared window, every slot would probe the same ports, and the whole run
+        // would come back as intermittently flaky barrier legs rather than as a missing
+        // export. That is the failure this refuses to report quietly: the slot is the
+        // evidence that a base was owed, so its presence without one throws.
+        //
+        // SLOT 0 IS A REAL SLOT. The check is presence, never truthiness, because the
+        // first slot arrives as the string "0" and a truthiness test would wave through
+        // exactly the case that collides with everything else.
+        const slot = source[RUNNER_SLOT_ENV];
+        if (slot !== undefined && slot !== null && String(slot).trim() !== '') {
+            throw new Error('attestMirrorVenue: ' + RUNNER_SLOT_ENV + '=' + slot + ' names a concurrency ' +
+                'slot but ' + VENUE_BASE_PORT_ENV + ' is unset, so this leg has no window of its own. ' +
+                'Falling back to ' + DEFAULT_VENUE_BASE_PORT + ' would put every concurrent slot back ' +
+                'in one shared window and surface as flaky legs rather than as the missing export. ' +
+                'The stack driver derives the base per slot and run-leg.sh exports it.');
+        }
+        return DEFAULT_VENUE_BASE_PORT;
+    }
     const base = Number(raw);
     if (!Number.isInteger(base) || base < 1024 || base > 65000) {
         throw new Error('attestMirrorVenue: ' + VENUE_BASE_PORT_ENV + '=' + raw + ' is not a usable probe base. ' +
@@ -4031,6 +4059,7 @@ module.exports = {
     resolveVenueBasePort,
     DEFAULT_VENUE_BASE_PORT,
     VENUE_BASE_PORT_ENV,
+    RUNNER_SLOT_ENV,
     buildHubEnv,
     buildIndexerEnv,
     pickOutsideIndexer,
