@@ -144,6 +144,14 @@ const DEFAULT_BATCH_WINDOW_S = 30;
 // this: the invariant governs the venue's own resting knobs.
 const GOSSIP_HOP_BUDGET_S = 2;
 
+// How many times `statusOf` re-reads `/status` when the read fails WITHOUT an HTTP
+// status, and how long it waits between those reads. Three attempts over two seconds
+// covers a socket dropped under load without hiding a listener that is genuinely gone:
+// an indexer that is down stays down and still fails the leg, about two seconds in,
+// while a single dropped connection costs one retry rather than the whole leg.
+const STATUS_TRANSPORT_ATTEMPTS = 3;
+const STATUS_TRANSPORT_RETRY_MS = 1000;
+
 // The two window keyings this venue knows how to reason about, named so a verdict cannot
 // be spelled two ways in the helper and its guard. `effective_time` is the signed field
 // every hub reads identically; `finalized_at` is the per-hub wall clock older hubs keyed
@@ -3624,11 +3632,46 @@ class AttestMirrorVenue {
     // The indexer's `/status`, parsed. Carries `stallReason`, `stallClass`,
     // `stallClearsAt`, `degraded` and the block counters: the anti-wedge leg reads
     // `attest_response_sync_barrier` out of `stallReason` here.
+    //
+    // RETRIES A DROPPED SOCKET, AND NOTHING ELSE. `validateStatus` accepts every HTTP
+    // status on purpose, because a stalled indexer reporting 503 is an ANSWER and is
+    // frequently the very state a barrier drill is asserting. A transport failure is the
+    // absence of an answer: the socket hung up, the connection reset, the read timed out
+    // before any response line arrived. Those two are not the same event and only the
+    // second is safe to repeat, so the retry keys on `error.response` being absent and a
+    // status of any kind returns on the first attempt, unretried and unmodified.
+    //
+    // WHY IT EXISTS. This was one unretried `axios.get`, so a single dropped socket
+    // anywhere in a leg threw straight out of the venue and killed the leg in whatever
+    // `before all` hook or poll loop happened to be reading. Measured across two full
+    // aggregate drives, `statusOf` threw in four legs: at0, at0b and venue.smoke on the
+    // 2026-09-17 drive (ECONNREFUSED, the indexer's listener not yet bound, since fixed
+    // upstream by waiting for it) and ab1 on the 2026-09-18 drive (socket hang up, mid
+    // leg, on an indexer that was up and had answered many times already). Waiting for
+    // the listener at bring-up cured the first shape and could not cure the second.
     async statusOf(indexerIndex) {
         const ix = this.indexers[indexerIndex];
         if (!ix) throw new Error('attestMirrorVenue: no indexer ' + indexerIndex);
-        const res = await axios.get(ix.apiUrl + '/status', { timeout: 10_000, validateStatus: () => true });
-        return { httpStatus: res.status, body: res.data };
+        let lastError = null;
+        for (let attempt = 0; attempt < STATUS_TRANSPORT_ATTEMPTS; attempt++) {
+            try {
+                const res = await axios.get(ix.apiUrl + '/status',
+                    { timeout: 10_000, validateStatus: () => true });
+                return { httpStatus: res.status, body: res.data };
+            } catch (error) {
+                // A response of ANY status is an answer and must not be retried; without
+                // one this is a transport failure and repeating it is safe.
+                if (error && error.response) throw error;
+                lastError = error;
+                await sleep(STATUS_TRANSPORT_RETRY_MS);
+            }
+        }
+        const reason = lastError && lastError.message ? lastError.message : String(lastError);
+        const wrapped = new Error('attestMirrorVenue[' + this.label + ']: indexer ' + indexerIndex +
+            ' did not answer /status on ' + ix.apiUrl + ' in ' + STATUS_TRANSPORT_ATTEMPTS +
+            ' attempts, the last failing before any HTTP status arrived: ' + reason);
+        wrapped.cause = lastError;
+        throw wrapped;
     }
 
     async stallClassOf(indexerIndex) {
