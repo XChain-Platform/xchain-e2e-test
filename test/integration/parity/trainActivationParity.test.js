@@ -18,7 +18,7 @@
  * new rules, the other halts, and the halting half is the one whose copy is stale.
  *
  * The row lives in the SHARED registry block part 5, which is a registered byte twin
- * (claude/bin/frozen-twins.json, canonical xchain-indexer) copied into xchain-hub,
+ * (registered in the twin manifest, canonical xchain-indexer) copied into xchain-hub,
  * xchain-sync, xchain-explorer, xchain-sdk and the xchain-documentation reference
  * implementation. Until this file existed nothing in the parity tier read part 5 at
  * all: reverting a TRAIN_ACTIVATION testnet height in one consumer left the tier at
