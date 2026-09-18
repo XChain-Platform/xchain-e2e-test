@@ -62,6 +62,7 @@ dotenv.config()
 const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const { createRail } = require('../helpers/chainRail')
 const { until, untilOrClearDogeStall, diffStateHashes, venueTipProbe } = require('./mirrorDrillWaits')
+const { HUB_SCHEMA_VERSION } = require('./helpers/hubSchemaVersion')
 const XChainIndexerConnector = require('../../src/XChainIndexerConnector.js')
 
 // The observable this file exists to pin.
@@ -182,8 +183,14 @@ describe('AT0 last clause: the mirror stall is attest_response_sync_barrier by n
             assert.ok(snap && !snap.error,
                 'hub ' + followed + ' would not serve its own snapshot route, so the withhold cannot be ' +
                 'distinguished from a hub that is down: ' + JSON.stringify(snap))
-            assert.strictEqual(Number(snap.schema_version), 5,
-                'the hub is serving schema_version ' + snap.schema_version + ' rather than 5')
+            // Against the indexer's own constant, never a literal. This clause only needs
+            // the hub to be serving the version the mirror consumer demands; a literal here
+            // goes stale at the next schema bump and reds the leg for a reason that has
+            // nothing to do with barrier attribution, which is what it did at v5 against a
+            // hub serving v7.
+            assert.strictEqual(Number(snap.schema_version), Number(HUB_SCHEMA_VERSION),
+                'the hub is serving schema_version ' + snap.schema_version +
+                ' but the mirror consumer demands ' + HUB_SCHEMA_VERSION)
 
             // THE PEER IS UNAFFECTED. Same chain, same federation, graces at zero, no
             // withhold: it must get past the height the starved one is holding at.
