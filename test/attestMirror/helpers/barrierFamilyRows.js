@@ -181,29 +181,47 @@ function familySeedRows (spec) {
 }
 
 /*
- * WHERE AN ARMED VENUE CANNOT TAKE A LEGACY ROW. The regtest arming lever resolves to height 0
- * (xchain-indexer mirror_admission_gate.js resolveMirrorAdmissionRegtest), so every snapshot_block is
- * admission era and a NULL admission map is a row no hub produces. The canonical builders refuse it
- * ("admission-era row at block N ... has no admit_blocks", admissionCanonicalValue), and that refusal
- * is a thrown error that stalls the block wherever the apply pass reaches the canonical for a due row.
+ * WHERE AN ARMED VENUE CANNOT TAKE A NULL-MAP ROW. A row whose era block is at or above the
+ * producer activation and whose every admission column is NULL is a row no hub produces. The
+ * canonical builders refuse it ("admission-era row at block N ... has no admit_blocks",
+ * admissionCanonicalValue), and that refusal is a thrown error that stalls the block wherever the
+ * apply pass reaches the canonical for a due row.
  *
  * These two tables reach it unconditionally: bridge_settle/transfer.js guardQuorumAndEscrow and
  * bridge_settle/policy.js guardQuorumAndCopy build the canonical as verifyQuorum's ARGUMENT, before the
  * capability set is read (rail 2026-09-17: BF2 stalled at block 104 on its legacy bridge row). The match
  * and call passes read the capability set first and defer while it is empty (cross_settle/quorum.js,
- * xexec/dispatch_quorum.js), and the attest pass selects mirror rows only for a pending request, so an
- * inert legacy row in those tables is never canonicalized on these venues.
+ * xexec/dispatch_quorum.js), and the attest pass selects mirror rows only for a pending request, so a
+ * NULL-map row in those tables is never canonicalized on these venues.
+ *
+ * WHAT CHANGED, and why the table list is no longer a seeding rule. While the legs armed at genesis
+ * this list doubled as a workaround: BF2 simply did not seed a legacy row in these two tables, because
+ * on a venue armed at height 0 every era block is admission era and a "legacy" seed was really a modern
+ * row missing its map (adjudicated 2026-09-18: the product is correct, the seed was the defect). The
+ * legs now arm at a crossing and seed their legacy rows BELOW it, where the builder returns an empty
+ * canonical and no pass throws, so every member table takes a legacy row. The list survives as the
+ * SCOPE of the guard below, which is now keyed on the era rather than on the table alone.
  */
 const CANONICAL_BEFORE_QUORUM_TABLES = Object.freeze(['bridge_transfers', 'policy_snapshots'])
 
+// The column each table's era is fixed by, the one the canonical builder keys on. Only the tables
+// the guard scopes over are listed: a table added here without an era column is a defect, not a pass.
+const ERA_BLOCK_COLUMN = Object.freeze({ bridge_transfers: 'snapshot_block', policy_snapshots: 'snapshot_block' })
+
 /**
  * The seeds an armed venue would stall on: finalized rows in a CANONICAL_BEFORE_QUORUM table whose
- * every admission column is NULL. A map naming any chain builds its canonical and is not a hazard.
+ * every admission column is NULL and whose ERA BLOCK is at or above the activation. A map naming any
+ * chain builds its canonical and is not a hazard; nor is a NULL-map row below the activation, which is
+ * an honest legacy row and builds an empty canonical tail.
  *
  * @param {Array<{table: string, row: object, key: string[]}>} seeds  inertRow results
+ * @param {number} [armHeight]  the producer activation; omitted means the genesis form, where every
+ *                              era block is admission era and every NULL-map seed is a hazard
  * @returns {string[]} one 'table|key' per offending seed; empty when the set is safe to seed armed
  */
-function armedLegacyApplyHazards (seeds) {
+function armedLegacyApplyHazards (seeds, armHeight) {
+    const activation = (armHeight === undefined || armHeight === null) ? 0 : Number(armHeight)
+    if (!Number.isSafeInteger(activation) || activation < 0) throw new Error('barrierFamilyRows: bad arm height ' + armHeight)
     const out = []
     for (const s of seeds || []) {
         if (!s || !CANONICAL_BEFORE_QUORUM_TABLES.includes(s.table)) continue
@@ -211,27 +229,39 @@ function armedLegacyApplyHazards (seeds) {
         // A retracted row is outside every apply select (status = 'finalized'), so it never reaches a canonical.
         if (r.status !== 'finalized') continue
         const cols = Object.keys(admissionColumns(s.table, null))
-        if (cols.every((c) => r[c] === null || r[c] === undefined)) out.push(s.table + '|' + (s.key || []).map((k) => r[k]).join(','))
+        if (!cols.every((c) => r[c] === null || r[c] === undefined)) continue
+        // An unreadable era block fails CLOSED: the builder reads it as pre-activation, but a seed that
+        // cannot say which era it is in is a harness defect and the leg should hear about it here.
+        // NULL and the empty string are the trap, since Number() reads both as block 0.
+        const raw = r[ERA_BLOCK_COLUMN[s.table]]
+        const era = (raw === null || raw === undefined || raw === '') ? Number.NaN : Number(raw)
+        if (Number.isSafeInteger(era) && era < activation) continue
+        out.push(s.table + '|' + (s.key || []).map((k) => r[k]).join(','))
     }
     return out
 }
 
 /**
- * BF2's member rows against drill height B: per table one row admitted AT B and one PAST B, plus a
- * legacy NULL row only where the armed apply pass cannot reach its canonical (see above). The legacy
- * rule itself is BF4's to prove; BF2's spec asserts the set with admit_blocks[BTC] <= B.
+ * BF2's member rows against drill height B: per table one row admitted AT B, one PAST B, and one
+ * LEGACY row seeded at `legacyBlock`, a block below the activation, where a NULL admission map is
+ * what a pre-crossing hub really wrote. The legacy rule itself is BF4's to prove; BF2's spec asserts
+ * the set with admit_blocks[BTC] <= B.
  *
- * @param {string[]} tables  the member tables
- * @param {object} base      inertRow spec without tag or admitBlocks
- * @param {number} B         the drill height
- * @param {string} tagTail   distinguishes re-runs (the leg passes the held tip)
+ * @param {string[]} tables     the member tables
+ * @param {object} base         inertRow spec without tag or admitBlocks
+ * @param {number} B            the drill height
+ * @param {string} tagTail      distinguishes re-runs (the leg passes the held tip)
+ * @param {number} legacyBlock  the legacy seed's era block (barrierFamilyFixture.legacyEraBlock)
  */
-function admissionSeedRows (tables, base, B, tagTail) {
+function admissionSeedRows (tables, base, B, tagTail, legacyBlock) {
+    if (!Number.isSafeInteger(Number(legacyBlock)) || Number(legacyBlock) < 0) {
+        throw new Error('barrierFamilyRows: admissionSeedRows needs a legacyBlock below the activation, got ' + legacyBlock)
+    }
     const seeds = []
     for (const t of tables) {
         seeds.push(inertRow(t, Object.assign({}, base, { tag: 'bf2|at|' + t + '|' + tagTail, admitBlocks: { BTC: B } })))
         seeds.push(inertRow(t, Object.assign({}, base, { tag: 'bf2|past|' + t + '|' + tagTail, admitBlocks: { BTC: B + 3 } })))
-        if (!CANONICAL_BEFORE_QUORUM_TABLES.includes(t)) seeds.push(inertRow(t, Object.assign({}, base, { tag: 'bf2|legacy|' + t + '|' + tagTail })))
+        seeds.push(inertRow(t, Object.assign({}, base, { tag: 'bf2|legacy|' + t + '|' + tagTail, snapshotBlock: Number(legacyBlock) })))
     }
     return seeds
 }

@@ -18,16 +18,22 @@
  *
  * THE BINDING ASSERTION IS A ROW SET, NOT A HASH. Above the activation a row binds
  * at a different block by design, so equality with BF1's `state_hash` could only
- * hold vacuously. The leg seeds one row admitted AT B and one admitted past B per
- * member table, plus a legacy NULL row in the tables whose armed apply pass never
- * reaches that row's canonical, and compares the set the armed node's mirror reads
- * at B (the section 5.5 rule in its IS NULL OR SQL form) against the fixture's
+ * hold vacuously. The leg seeds one row admitted AT B, one admitted past B and one
+ * LEGACY NULL row per member table, and compares the set the armed node's mirror
+ * reads at B (the section 5.5 rule in its IS NULL OR SQL form) against the fixture's
  * independently computed expected set over the hub's own rows.
  *
- * NO LEGACY ROW IN bridge_transfers OR policy_snapshots. The venue arms at height 0,
- * so every block is admission era and no hub produces a NULL-map row; those two apply
- * passes build the canonical before reading the capability set and throw on one,
- * stalling the drill block (rail 2026-09-17, block 104). The legacy rule is BF4's.
+ * A LEGACY ROW IN EVERY MEMBER TABLE, BECAUSE THE VENUE ARMS AT A CROSSING. This leg
+ * used to skip bridge_transfers and policy_snapshots: armed at height 0 every block is
+ * admission era, so a NULL-map seed was a modern row missing its mandatory map, those
+ * two apply passes build the canonical before reading the capability set, and the
+ * builder's refusal stalled the drill block (rail 2026-09-17, block 104). The refusal
+ * was the product working (adjudicated 2026-09-18): the canonical builder refuses a NULL
+ * admission map on any row whose era block is at or above the producer activation. The
+ * leg now arms producers and consumers at the chain's tip + 1 and seeds its legacy rows
+ * below that height,
+ * where a NULL map is what a pre-crossing hub really wrote and the builder returns an
+ * empty canonical tail, so every member table carries one. The legacy rule is BF4's.
  *
  * WHAT THIS DOES NOT PROVE. The seeded rows carry no verifiable signature, so no
  * pass APPLIES them to the ledger; the read set is the mirror's, which is the rule
@@ -59,11 +65,13 @@ const COMMIT_BUDGET_MS = 5 * 60 * 1000
 describe('BF2: the fix, armed, the identical block on the identical mirror state', function () {
     this.timeout(Math.max(drive.LEG_FLOOR_MS, fixture.legTimeoutMs(600)))
 
-    const ctx = { venue: null, btc: null, coin: 'BTC', B: null, block: null, seen: [], seeded: {}, expected: {}, read: {} }
+    const ctx = { venue: null, btc: null, coin: 'BTC', B: null, block: null, armHeight: null, legacyBlock: null,
+                  seen: [], seeded: {}, expected: {}, read: {} }
 
     before(async function () {
-        const up = await drive.bootFamilyVenue({ label: 'bf2', repoRoot: BUILD_ROOT, armed: [ARMED, PEER], armHubs: true })
+        const up = await drive.bootFamilyVenue({ label: 'bf2', repoRoot: BUILD_ROOT, armed: [ARMED, PEER], armHubs: true, armAtCrossing: true })
         Object.assign(ctx, up, { coin: up.evidence.coinCode })
+        console.log('BF2 armed at ' + ctx.armHeight + ', legacy era block ' + ctx.legacyBlock)
     })
 
     after(async function () {
@@ -96,9 +104,13 @@ async function seedAdmissionRows (ctx) {
     const now = Math.floor(Date.now() / 1000)
     // Snapshot at B, not the reached tip: a fresh node's stake re-derivation rejects a synthetic capability row at a reached height.
     const base = { network: ctx.venue.network, coin: ctx.coin, effectiveTime: now, snapshotBlock: ctx.B }
-    const members = rows.admissionSeedRows(TABLES, base, ctx.B, tip)
-    // Refuse before seeding: a NULL-map row the armed apply canonicalizes stalls the drill block, not this case.
-    assert.deepStrictEqual(rows.armedLegacyApplyHazards(members), [], 'BF2 would seed a legacy row the armed apply pass refuses')
+    // The crossing, asserted before anything is seeded: both eras exist on this one venue.
+    assert.strictEqual(ctx.legacyBlock, fixture.legacyEraBlock(ctx.armHeight), 'the leg and the fixture disagree on the legacy era block')
+    assert.ok(ctx.legacyBlock < ctx.armHeight, 'the legacy seed at ' + ctx.legacyBlock + ' is not below the activation ' + ctx.armHeight)
+    assert.ok(ctx.armHeight <= ctx.B, 'the venue never reached the activation ' + ctx.armHeight + ': B is ' + ctx.B)
+    const members = rows.admissionSeedRows(TABLES, base, ctx.B, tip, ctx.legacyBlock)
+    // Refuse before seeding: a NULL-map row at or above the activation stalls the drill block, not this case.
+    assert.deepStrictEqual(rows.armedLegacyApplyHazards(members, ctx.armHeight), [], 'BF2 would seed a row the armed apply pass refuses')
     const seeds = [rows.inertRow('capability_snapshots', Object.assign({ tag: 'bf2|snap|' + tip }, base))].concat(members)
     await drive.seedMirrors(ctx.venue, seeds)
     ctx.seeded = {}
@@ -107,7 +119,8 @@ async function seedAdmissionRows (ctx) {
         await drive.waitForMirrorRows(ctx.venue, ARMED, t, ctx.seeded[t])
     }
     await drive.waitForMirrorRows(ctx.venue, ARMED, 'capability_snapshots', 1)
-    console.log('BF2 seeded ' + JSON.stringify(ctx.seeded) + ' rows per member table against B=' + ctx.B)
+    console.log('BF2 seeded ' + JSON.stringify(ctx.seeded) + ' rows per member table against B=' + ctx.B +
+                ', activation ' + ctx.armHeight + ', legacy era block ' + ctx.legacyBlock)
 }
 
 async function mineAndWatch (ctx) {

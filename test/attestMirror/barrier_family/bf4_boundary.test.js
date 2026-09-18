@@ -33,6 +33,16 @@
  * asserted at the block the legacy rule selects: excluded at a block stamped
  * before their effective_time, included at the next block stamped past it, while
  * a control row admitted by height binds at the first of the two.
+ *
+ * THE VENUE ARMS AT A CROSSING, NOT AT GENESIS. "Armed" resolves to height 0, and on
+ * that venue no block sits below the activation, so a NULL-map seed is not a legacy
+ * row at all: it is a modern row missing its mandatory map, which no hub produces and
+ * which the canonical builder refuses by design: it rejects a NULL admission map on any
+ * row whose era block is at or above the producer activation (adjudicated 2026-09-18, the
+ * product is correct on both sides and they agree; the seed was the defect). The leg
+ * arms producers and consumers at the chain's tip + 1 and seeds its legacy row below
+ * that height, so the row is one a pre-crossing hub really wrote and the crossing is
+ * one this venue walked through rather than one the seeding manufactured.
  ********************************************************************/
 
 const assert = require('assert')
@@ -146,11 +156,12 @@ describe('BF4 unit: the binding rule and its SQL form', function () {
 describe('BF4 live: above the activation a NULL row and a chain-omitting row bind by the legacy rule', function () {
     this.timeout(drive.LEG_FLOOR_MS)
 
-    const ctx = { venue: null, btc: null, coin: 'BTC', T: null, tip: null, keys: {}, blocks: [] }
+    const ctx = { venue: null, btc: null, coin: 'BTC', T: null, tip: null, armHeight: null, legacyBlock: null, keys: {}, blocks: [] }
 
     before(async function () {
-        const up = await drive.bootFamilyVenue({ label: 'bf4', repoRoot: BUILD_ROOT, armed: [ARMED, 1], armHubs: true })
+        const up = await drive.bootFamilyVenue({ label: 'bf4', repoRoot: BUILD_ROOT, armed: [ARMED, 1], armHubs: true, armAtCrossing: true })
         Object.assign(ctx, up, { coin: up.evidence.coinCode })
+        console.log('BF4 armed at ' + ctx.armHeight + ', legacy era block ' + ctx.legacyBlock)
     })
 
     after(async function () {
@@ -179,18 +190,29 @@ async function seedThree (ctx) {
     ctx.T = Math.max(Math.floor(Date.now() / 1000), floor.floor + 60) + 120
     // Snapshot at the next height, not the reached tip: a fresh node's stake re-derivation rejects a synthetic capability row at a reached height.
     const base = { network: ctx.venue.network, coin: ctx.coin, effectiveTime: ctx.T, snapshotBlock: ctx.tip + 1 }
-    const legacy = rows.inertRow(TABLE, Object.assign({ tag: 'bf4|legacy|' + ctx.tip }, base))
+    // The crossing, asserted before anything is seeded: the legacy block is a real block BELOW the
+    // activation and the drill blocks land at or above it, so both eras exist on this one venue.
+    assert.strictEqual(ctx.legacyBlock, fixture.legacyEraBlock(ctx.armHeight), 'the leg and the fixture disagree on the legacy era block')
+    assert.ok(ctx.legacyBlock < ctx.armHeight, 'the legacy seed at ' + ctx.legacyBlock + ' is not below the activation ' + ctx.armHeight)
+    assert.ok(ctx.armHeight <= ctx.tip + 1, 'the venue never reached the activation ' + ctx.armHeight + ': tip is ' + ctx.tip)
+    // The legacy row is the one seed in the pre-activation era: its map is NULL because the hub that
+    // wrote it did not stamp maps yet, which is the row C33 and BF4's "Above" half are about.
+    const legacy = rows.inertRow(TABLE, Object.assign({ tag: 'bf4|legacy|' + ctx.tip }, base, { snapshotBlock: ctx.legacyBlock }))
     const omits = rows.inertRow(TABLE, Object.assign({ tag: 'bf4|omits|' + ctx.tip, admitBlocks: { LTC: 5 } }, base))
     const control = rows.inertRow(TABLE, Object.assign({ tag: 'bf4|control|' + ctx.tip, admitBlocks: { BTC: ctx.tip + 1 }, effectiveTime: ctx.T + 9999 }, base))
     // The legacy row lives in cross_chain_matches, whose armed apply reads the capability set before the
     // canonical; the guard fails this case, not the drill block, if it is ever moved to bridge or policy.
-    assert.deepStrictEqual(rows.armedLegacyApplyHazards([legacy, omits, control]), [], 'BF4 would seed a legacy row the armed apply pass refuses')
+    assert.deepStrictEqual(rows.armedLegacyApplyHazards([legacy, omits, control], ctx.armHeight), [], 'BF4 would seed a row the armed apply pass refuses')
     await drive.seedMirrors(ctx.venue, [rows.inertRow('capability_snapshots', Object.assign({ tag: 'bf4|snap|' + ctx.tip }, base)), legacy, omits, control])
     await drive.waitForMirrorRows(ctx.venue, ARMED, TABLE, 3)
     ctx.keys = { legacy: legacy.row.match_id, omits: omits.row.match_id, control: control.row.match_id }
     assert.strictEqual(omits.row[fixture.admissionColumn(TABLE, 'BTC')], null, 'the omitting row must carry NULL for this chain')
     assert.strictEqual(omits.row[fixture.admissionColumn(TABLE, 'LTC')], 5, 'the omitting row must carry a height for the other chain')
-    console.log('BF4 seeded at T=' + ctx.T + ' against tip ' + ctx.tip + ': ' + JSON.stringify(ctx.keys))
+    // Each seed in the era it is meant to be in, read off the row rather than off the spec.
+    assert.ok(legacy.row.snapshot_block < ctx.armHeight, 'the legacy row is at block ' + legacy.row.snapshot_block + ', not below the activation')
+    for (const s of [omits, control]) assert.ok(s.row.snapshot_block >= ctx.armHeight, 'a map-carrying row is below the activation at ' + s.row.snapshot_block)
+    console.log('BF4 seeded at T=' + ctx.T + ' against tip ' + ctx.tip + ', activation ' + ctx.armHeight +
+                ', legacy era block ' + ctx.legacyBlock + ': ' + JSON.stringify(ctx.keys))
 }
 
 async function expectReadSet (ctx, block, want) {

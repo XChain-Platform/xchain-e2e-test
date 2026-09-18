@@ -49,12 +49,25 @@ const STAMP_AHEAD_S = Number(process.env.BF_STAMP_AHEAD_S || 7200)
  * the fixture; `opts.armHubs` arms every hub child with the same lever so the producers
  * stamp admission maps (the venue's `hubExtraEnv` seam).
  *
- * @returns {Promise<{venue: object, evidence: object, btc: object}>}
+ * `opts.armAtCrossing` arms at the chain's own tip + 1 instead of at genesis, and returns
+ * that height beside `legacyBlock`, the last block below it. A leg that seeds a legacy-era
+ * row needs this: armed at genesis there is no block below the activation, so a NULL-map
+ * seed is a modern row missing its map and the canonical builder refuses it by design
+ * (barrierFamilyFixture, the crossing note). The height is read from the rail BEFORE the
+ * venue starts, so every block the venue goes on to mine is admission era.
+ *
+ * @returns {Promise<{venue: object, evidence: object, btc: object, armHeight: number|null, legacyBlock: number|null}>}
  */
 async function bootFamilyVenue (opts) {
     const o = opts || {}
     assert.ok(o.repoRoot, 'bootFamilyVenue: repoRoot is required (B4: the evidence names the tree that ran)')
     const btc = await createRail('bitcoin', 'regtest')
+    let armHeight = o.armHeight === undefined ? null : o.armHeight
+    if (o.armAtCrossing) {
+        assert.strictEqual(armHeight, null, 'bootFamilyVenue: armAtCrossing derives the height; do not also pass armHeight')
+        armHeight = fixture.crossingArmHeight(Number(await btc.globals.nodeConnector.getBlockCount()))
+    }
+    const legacyBlock = armHeight === null ? null : fixture.legacyEraBlock(armHeight)
     const venueOpts = Object.assign({}, o.venue || {})
     // Port seam for concurrent stacks on one host: the rail runner gives each leg its own base (rail 2026-09-17, four stacks at once).
     if (process.env.AB_VENUE_BASE_PORT) venueOpts.basePort = Number(process.env.AB_VENUE_BASE_PORT)
@@ -67,16 +80,19 @@ async function bootFamilyVenue (opts) {
     }, venueOpts.hubExtraEnv || {})
     if (o.indexerGraces) venueOpts.indexerGraces = o.indexerGraces
     if (o.indexerExtraEnv) venueOpts.indexerExtraEnv = Object.assign({}, venueOpts.indexerExtraEnv || {}, o.indexerExtraEnv)
-    if (o.armHubs) venueOpts.hubExtraEnv = Object.assign({}, venueOpts.hubExtraEnv || {}, { [fixture.ARM_ENV]: fixture.ARM_VALUE })
+    // The hubs take the SAME height as the indexers: one value arms producer and consumer
+    // (protocol_changes/shared_rows.js REGTEST_ARMING), so a hub armed at genesis beside an
+    // indexer armed at a crossing would stamp maps the consumer reads under the other rule.
+    if (o.armHubs) venueOpts.hubExtraEnv = Object.assign({}, venueOpts.hubExtraEnv || {}, { [fixture.ARM_ENV]: fixture.armValue(armHeight) })
     const built = fixture.buildFamilyVenue({
-        repoRoot: o.repoRoot, armed: o.armed || [], hubRepoRoots: o.hubRepoRoots, label: o.label, venue: venueOpts,
+        repoRoot: o.repoRoot, armed: o.armed || [], armHeight, hubRepoRoots: o.hubRepoRoots, label: o.label, venue: venueOpts,
     })
-    const evidence = Object.assign(built.evidence, { armHubs: !!o.armHubs, stampAheadS: STAMP_AHEAD_S })
+    const evidence = Object.assign(built.evidence, { armHubs: !!o.armHubs, stampAheadS: STAMP_AHEAD_S, legacyBlock })
     console.log('BF EVIDENCE ' + JSON.stringify(evidence))
     const up = await built.venue.start()
     assert.ok(up, 'FAILED DRIVE (not a skip): the family venue did not come up: ' + String(built.venue.unavailable))
     await levelIndexers(built.venue, o.levelTimeoutMs)
-    return { venue: built.venue, evidence, btc }
+    return { venue: built.venue, evidence, btc, armHeight, legacyBlock }
 }
 
 /** Every indexer level with the decoder before a leg breaks anything, so a hold is the leg's doing. */
