@@ -35,6 +35,44 @@ bf6_leg=test/attestMirror/barrier_family/bf6_producer_follower_parity.test.js
 
 case "$phase" in
     up)
+        # Clear the slot before filling it. setup-stack.sh mints a fresh random root
+        # password into the stack's .env on every boot, but MariaDB honours
+        # MARIADB_ROOT_PASSWORD only while the datadir is empty. So a db-data volume that
+        # outlives its stack leaves the datadir on the OLD password, db-init's one client
+        # call is refused with ERROR 1045, and the whole `up` dies. Two things leave one
+        # behind: a lane killed before it reaches the down phase (a machine reboot did
+        # exactly this on 2026-09-18), and a `down -v` that skips a volume another
+        # container still holds ("Resource is still in use"). Booting over a survivor is
+        # not recoverable downstream, so `up` owns the cleanup rather than trusting the
+        # previous `down` to have finished.
+        if [ -f "${stack_dir}/compose.yml" ]; then
+            docker compose -p "$project" -f "${stack_dir}/compose.yml" down -v --remove-orphans >&2 || true
+        fi
+        # `down -v` is best effort, so sweep by project label and retry: a volume is
+        # released only once the last container holding it is actually gone.
+        attempt=0
+        while [ "$attempt" -lt 10 ]; do
+            leftover_containers=$(docker ps -aq --filter "label=com.docker.compose.project=${project}")
+            if [ -n "$leftover_containers" ]; then
+                # Unquoted on purpose: this is a whitespace-separated id list, and the
+                # -n guard above is what keeps the command from running with no argument.
+                docker rm -f $leftover_containers >&2 || true
+            fi
+            leftover_volumes=$(docker volume ls -q --filter "label=com.docker.compose.project=${project}")
+            if [ -z "$leftover_volumes" ]; then
+                break
+            fi
+            docker volume rm $leftover_volumes >&2 || true
+            attempt=$((attempt + 1))
+            sleep 2
+        done
+        # Fail loudly rather than boot onto a stale datadir: a silent pass here becomes an
+        # ERROR 1045 forty seconds later that reads like a rail capacity problem.
+        leftover_volumes=$(docker volume ls -q --filter "label=com.docker.compose.project=${project}")
+        if [ -n "$leftover_volumes" ]; then
+            printf 'stack slot %s still holds volumes after cleanup; refusing to boot over them\n' "$project" >&2
+            exit 1
+        fi
         "${ATTEST_MIRROR_STACK_ROOT}/setup-stack.sh" "$number" "$base"
         if [ "$leg" = "$bf6_leg" ]; then
             "$node_bin" "${repo_root}/scripts/prepare-bf6-mixed-hub.js" create \
