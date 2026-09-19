@@ -22,9 +22,82 @@
 // The thrown message points at the GAVE UP line the poll already printed,
 // because that line is what separates "the row is absent" from "the row
 // landed with another status".
-module.exports = function requireRow(row, what){
+function requireRow(row, what){
     if (row) return row
     throw new Error(what + ' never landed; the GAVE UP line above, from the '
         + 'matching check* poll, says whether the row is absent or landed with '
         + 'another status - read the indexer verdict for this tx')
 }
+
+// Keep the two-argument contract above synchronous and unchanged. Callers that
+// opt into a give-up probe use this companion: a diagnostic failure is folded
+// into the original failure instead of replacing it.
+requireRow.withProbe = async function withProbe(row, what, probe, probeContext){
+    if (row) return row
+
+    let verdict
+    try {
+        verdict = await probe()
+    } catch (err) {
+        verdict = 'UNREACHABLE: ' + probeContext + '; query failed: ' + safeErrorText(err)
+    }
+
+    throw new Error(what + ' never landed; indexer verdict: ' + verdict)
+}
+
+requireRow.bridgeCreditEvidence = function bridgeCreditEvidence(
+    {lockTxHash, destCoin, destAddress, tick, amount}
+){
+    return 'lock tx ' + lockTxHash + ', destination ' + destCoin + ', address '
+        + destAddress + ', tick ' + tick + ', expected amount ' + amount
+}
+
+// Read once after waitForCredit gives up, without its amount filter. That makes
+// an existing row with the wrong amount visible instead of looking absent.
+// Credit rows are valid ledger effects by definition; older database accessors
+// do not project a status column, so an omitted status is reported as valid.
+requireRow.bridgeCreditAttribution = async function bridgeCreditAttribution(database, expected){
+    const evidence = requireRow.bridgeCreditEvidence(expected)
+    const row = await database.checkCredit({
+        address: expected.destAddress,
+        tick: expected.tick
+    })
+
+    if (!row) return 'ABSENT: ' + evidence + '; destination credit row not found'
+
+    const foundStatus = row.status == null ? 'valid' : String(row.status)
+    const foundAmount = row.amount == null ? 'unknown' : String(row.amount)
+    if (foundStatus !== 'valid' || !sameDecimalAmount(foundAmount, expected.amount)) {
+        return 'WRONG STATUS: ' + evidence + '; found status ' + foundStatus
+            + ', amount ' + foundAmount + '; expected status valid, amount ' + expected.amount
+    }
+
+    return 'WRONG STATUS: ' + evidence + '; the row appeared only after the wait gave up; '
+        + 'found status valid, amount ' + foundAmount + '; expected status valid, amount '
+        + expected.amount
+}
+
+function sameDecimalAmount(left, right){
+    return canonicalDecimal(left) === canonicalDecimal(right)
+}
+
+function canonicalDecimal(value){
+    const text = String(value).trim()
+    const match = /^([+-]?)(\d+)(?:\.(\d*))?$/.exec(text)
+    if (!match) return text
+    const whole = match[2].replace(/^0+(?=\d)/, '')
+    const fraction = (match[3] || '').replace(/0+$/, '')
+    const zero = whole === '0' && fraction === ''
+    return (match[1] === '-' && !zero ? '-' : '') + whole + (fraction ? '.' + fraction : '')
+}
+
+// Error messages are useful evidence, but connection errors can include a DSN
+// or key/value configuration. Preserve the cause while removing secret values.
+function safeErrorText(err){
+    return String(err && err.message ? err.message : err)
+        .replace(/([a-z][a-z0-9+.-]*:\/\/[^:\s/@]+:)[^@\s/]+@/gi, '$1[REDACTED]@')
+        .replace(/(\b[\w.-]*(?:pass(?:word)?|pwd|secret|token)[\w.-]*\b\s*[:=]\s*)([^\s,;]+)/gi,
+            '$1[REDACTED]')
+}
+
+module.exports = requireRow

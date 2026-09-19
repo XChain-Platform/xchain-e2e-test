@@ -94,6 +94,8 @@ module.exports = {
     BRIDGE_CREDIT_SLACK_MS,
     IDLE_MINE_INTERVAL_MS,
     bridgeCreditWaitMs,
+    bridgeCreditAttribution: requireRow.bridgeCreditAttribution,
+    bridgeCreditEvidence: requireRow.bridgeCreditEvidence,
     withIdleMining,
 
     async mintGas(addressInfo, amount){
@@ -178,12 +180,23 @@ module.exports = {
             console.log("Waiting for the bridged " + GAS_TICK + " credit on " + destCoin
                 + " (up to " + Math.round(waitMs / 1000) + " s: relay margin "
                 + relayMarginFloorS(destCoin) + " s plus slack)...")
-            return requireRow(await indexerDatabase.waitForCredit({
+            const credit = await indexerDatabase.waitForCredit({
                 address: destAddress,
                 tick: GAS_TICK,
                 amount: amount
-            }, waitMs), "bridgeGasIn: the bridged " + GAS_TICK + " credit of " + amount + " to "
-                + destAddress + " on " + destCoin + " never landed (lock tx " + lockTxHash + ")")
+            }, waitMs)
+            const failure = "bridgeGasIn: the bridged " + GAS_TICK + " credit of " + amount + " to "
+                + destAddress + " on " + destCoin + " never landed (lock tx " + lockTxHash + ")"
+            const expected = {
+                lockTxHash,
+                destCoin,
+                destAddress,
+                tick: GAS_TICK,
+                amount
+            }
+            return await requireRow.withProbe(credit, failure,
+                () => requireRow.bridgeCreditAttribution(indexerDatabase, expected),
+                requireRow.bridgeCreditEvidence(expected))
         })
     },
 
