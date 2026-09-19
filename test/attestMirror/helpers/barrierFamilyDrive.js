@@ -91,12 +91,40 @@ async function bootFamilyVenue (opts) {
     console.log('BF EVIDENCE ' + JSON.stringify(evidence))
     const up = await built.venue.start()
     assert.ok(up, 'FAILED DRIVE (not a skip): the family venue did not come up: ' + String(built.venue.unavailable))
-    await levelIndexers(built.venue, o.levelTimeoutMs)
+    await levelIndexers(built.venue, o.levelTimeoutMs, { requireMirrorReady: !!o.requireMirrorReady })
     return { venue: built.venue, evidence, btc, armHeight, legacyBlock }
 }
 
-/** Every indexer level with the decoder before a leg breaks anything, so a hold is the leg's doing. */
-async function levelIndexers (venue, timeoutMs) {
+/**
+ * Is this indexer's hub mirror far enough along to judge a barrier, from one status snapshot?
+ *
+ * Chain level is not mirror readiness. An indexer can commit every block the decoder has while
+ * its hub mirror is still draining its bootstrap, and a match barrier that clears only once
+ * `bootstrapped` is true then reads as a product hold on a node that was merely still starting
+ * (BF5, 2026-09-18: indexer 1 sat at 263 against decoder 266 in `barrier_defer`).
+ *
+ * An indexer with NO mirror configured is ready by definition, because there is nothing to
+ * bootstrap. Anything else fails closed: an absent `configured` flag is "not ready", never
+ * "ready", so a status shape that stops carrying the field parks the baseline loudly instead of
+ * releasing it on a field nobody is reading any more.
+ */
+function mirrorReady (s) {
+    if (s.mirrorConfigured === false) return { ok: true, why: 'no hub mirror configured' }
+    if (s.mirrorConfigured !== true) return { ok: false, why: 'hubMirror.configured absent from /status' }
+    if (s.mirrorConnected !== true) return { ok: false, why: 'hub mirror not connected' }
+    if (s.mirrorBootstrapped !== true) return { ok: false, why: 'hub mirror not bootstrapped' }
+    return { ok: true, why: 'connected and bootstrapped' }
+}
+
+/**
+ * Every indexer level with the decoder before a leg breaks anything, so a hold is the leg's doing.
+ *
+ * `opts.requireMirrorReady` additionally holds the baseline until every indexer's hub mirror is
+ * connected and bootstrapped. It is OPT IN: the legs that pass today level on chain height alone
+ * and keep doing so, so a leg that wants the stricter gate asks for it by name.
+ */
+async function levelIndexers (venue, timeoutMs, opts) {
+    const o = opts || {}
     const idx = venue.indexers.map((ix) => ix.index)
     const level = await untilOrClearDogeStall(async () => {
         const all = []
@@ -105,10 +133,13 @@ async function levelIndexers (venue, timeoutMs) {
         for (const i of idx) {
             all.push(await statusSnapshot(venue, i).catch((e) => ({ height: null, decoder: null, unreachable: String(e && e.message) })))
         }
-        return { ok: all.every((s) => s.height !== null && s.decoder !== null && s.height === s.decoder), all }
+        const chainLevel = all.every((s) => s.height !== null && s.decoder !== null && s.height === s.decoder)
+        const mirrorHeld = o.requireMirrorReady ? all.filter((s) => !mirrorReady(s).ok) : []
+        return { ok: chainLevel && mirrorHeld.length === 0, all, mirrorHeld: mirrorHeld.length }
     }, { timeoutMs: timeoutMs || LEVEL_TIMEOUT_MS, tipProbe: venueTipProbe(venue, idx[idx.length - 1]) })
     assert.ok(level.ok, 'the venue indexers never caught the chain before the drill: ' + JSON.stringify(level.all))
-    console.log('BF baseline: every indexer committed block ' + level.all[0].height)
+    console.log('BF baseline: every indexer committed block ' + level.all[0].height +
+        (o.requireMirrorReady ? '; hub mirrors ' + level.all.map((s) => mirrorReady(s).why).join(', ') : ''))
     return level.all
 }
 
@@ -126,6 +157,11 @@ async function statusSnapshot (venue, i) {
         inFlight: b.inFlightBlock !== undefined && b.inFlightBlock !== null ? Number(b.inFlightBlock) : null,
         decoder:  b.decoderBlock !== undefined ? Number(b.decoderBlock) : null,
         // /status carries the mirror under `hubMirror`; the fixture's snapshot reads `mirror`.
+        // `configured`/`connected`/`bootstrapped` come straight off the indexer's own status route
+        // (xchain-indexer src/api/status_route.js) so a readiness verdict never has to be inferred.
+        mirrorConfigured:   mirror.configured,
+        mirrorConnected:    mirror.connected,
+        mirrorBootstrapped: mirror.bootstrapped,
         heights:          mirror.heights,
         heightShortfalls: mirror.heightShortfalls,
         heightsFrozenMs:  mirror.heightsFrozenMs,
@@ -597,6 +633,7 @@ module.exports = {
     LEG_FLOOR_MS,
     bootFamilyVenue,
     levelIndexers,
+    mirrorReady,
     statusSnapshot,
     holdSnapshot,
     waitForStatus,

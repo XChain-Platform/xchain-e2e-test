@@ -274,6 +274,50 @@ describe('barrierFamilyDrive: an indexer whose API is not listening yet is not l
     })
 })
 
+describe('barrierFamilyDrive: a level chain is not a ready hub mirror', function () {
+    /** A venue whose indexers are always level, and whose mirror flags come from `plan` per read. */
+    function mirrorVenue (plan) {
+        const reads = []
+        const venue = {
+            indexers: [{ index: 0 }, { index: 1 }],
+            statusOf: async (i) => {
+                const turn = reads.filter((r) => r === i).length
+                reads.push(i)
+                const hubMirror = plan(i, turn)
+                return { httpStatus: 200, body: { indexerBlock: 100, decoderBlock: 100, hubMirror } }
+            },
+        }
+        return { venue, reads }
+    }
+
+    it('does not release the baseline on a level chain whose mirror has not bootstrapped', async function () {
+        this.timeout(10000)
+        const ready = { configured: true, connected: true, bootstrapped: true }
+        const { venue, reads } = mirrorVenue((i, turn) => (i === 1 && turn < 1
+            ? { configured: true, connected: true, bootstrapped: false }
+            : ready))
+        const all = await drive.levelIndexers(venue, 8000, { requireMirrorReady: true })
+        assert.ok(reads.filter((r) => r === 1).length > 1,
+            'indexer 1 was read once, so the withheld bootstrap never held anything')
+        assert.deepStrictEqual(all.map((s) => s.mirrorBootstrapped), [true, true])
+    })
+
+    it('releases on the same withheld bootstrap when the gate was not asked for', async function () {
+        this.timeout(10000)
+        const { venue } = mirrorVenue(() => ({ configured: true, connected: true, bootstrapped: false }))
+        const all = await drive.levelIndexers(venue, 8000)
+        assert.deepStrictEqual(all.map((s) => s.height), [100, 100])
+    })
+
+    it('treats an indexer with no mirror configured as ready, and an absent flag as not ready', function () {
+        assert.strictEqual(drive.mirrorReady({ mirrorConfigured: false }).ok, true)
+        assert.strictEqual(drive.mirrorReady({}).ok, false)
+        assert.strictEqual(drive.mirrorReady({ mirrorConfigured: true, mirrorConnected: false, mirrorBootstrapped: true }).ok, false)
+        assert.strictEqual(drive.mirrorReady({ mirrorConfigured: true, mirrorConnected: true, mirrorBootstrapped: false }).ok, false)
+        assert.strictEqual(drive.mirrorReady({ mirrorConfigured: true, mirrorConnected: true, mirrorBootstrapped: true }).ok, true)
+    })
+})
+
 describe('barrierFamilyDrive: the AT4 corpus coordinates and the VM link a copied tree breaks', function () {
     const fs = require('fs')
     const os = require('os')

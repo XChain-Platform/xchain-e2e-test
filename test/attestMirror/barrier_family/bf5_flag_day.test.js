@@ -54,7 +54,11 @@ describe('BF5: the flag day, one venue, two rules, one row bound at two differen
     const ctx = { venue: null, btc: null, coin: 'BTC', B: null, key: null, blocks: {}, committedAt: {}, inertSeen: [] }
 
     before(async function () {
-        const up = await drive.bootFamilyVenue({ label: 'bf5', repoRoot: BUILD_ROOT, armed: [ARMED] })
+        // requireMirrorReady: BF5 judges the INERT node by the match barrier, which can only clear
+        // once its hub mirror is bootstrapped. Levelling on chain height alone let the 2026-09-18
+        // drive start with indexer 1 still draining its bootstrap, and both of BF5's reds were that
+        // one unready node rather than the rule under test.
+        const up = await drive.bootFamilyVenue({ label: 'bf5', repoRoot: BUILD_ROOT, armed: [ARMED], requireMirrorReady: true })
         Object.assign(ctx, up, { coin: up.evidence.coinCode })
         assert.deepStrictEqual(Object.keys(ctx.venue.indexerEnv).map(Number), [ARMED], 'the overlay must arm indexer 0 alone')
     })
