@@ -45,13 +45,13 @@
  *     a wait instead of a divergence, and it is what makes the wait attributable to
  *     THIS barrier by name.
  *
- * So the drill arms a delivery delay LONGER than the forward margin, which is
- * exactly the fault the margin is supposed to absorb and, on its own, does not; and
- * it runs the affected indexer with a grace longer than the delay. The claim then
- * has two halves that must both hold: the barrier reports itself while it waits,
- * and when the block finally lands, the response bound at the SAME block on both
- * nodes. The second half is what "no block is processed early" means in terms a
- * ledger can be checked against.
+ * So the drill arms a delivery window LONGER than the forward margin, which is
+ * exactly the fault the margin is supposed to absorb and, on its own, does not. It
+ * runs the affected indexer with enough grace to expose the named barrier, then
+ * releases delivery inside that grace. The claim has two halves that must both
+ * hold: the barrier reports itself while it waits, and when the block finally lands,
+ * the response bound at the SAME block on both nodes. The second half is what "no
+ * block is processed early" means in terms a ledger can be checked against.
  *
  * WHAT IS NOT DRIVEN HERE, deliberately: the spec's falsification, lowering the
  * margin below the injected delay. Its expected outcome is a real divergence
@@ -80,6 +80,7 @@ const {
     settleOrReport,
     widenArithmetic,
 } = require('./mirrorDrillWaits')
+const { delayedDeliveryWindow } = require('./helpers/deliveryWindow')
 const vmHelper = require('../helpers/vmHelper')
 const XChainIndexerConnector = require('../../src/XChainIndexerConnector.js')
 
@@ -96,24 +97,27 @@ const BURIAL_BLOCKS   = 6
 // exceed it without the drill waiting out the frozen 120.
 const FORWARD_S = 5
 
-// Delivery delay, comfortably PAST the forward margin: by the time the row reaches
-// this indexer its signed effective time is long gone, so the margin has already
-// failed to cover it and only the barrier can.
-const DELIVERY_DELAY_MS = 25_000
+// The configured delay is a safety ceiling, not time the drill waits out. The row
+// is released as soon as the named barrier is observable. Keeping this window long
+// enough for the delayed indexer to reach the decoder tip prevents its existing
+// block backlog from consuming the fault before the binding block is mined.
+const DELIVERY_DELAY_MS = 10 * 60 * 1000
 
-// The grace on the affected indexer, above the delay so the wait can absorb it.
-// WELL above the barrier's per-attempt timeout too (HUB_PRICE_SYNC_TIMEOUT_MS,
-// 60 s), because that timeout is the ONLY thing that sets `stallReason`: a wait
-// that resolves inside one attempt parks the node silently. At 70 s the reason
-// was readable for ten seconds per block, and on 2026-09-05 the drill missed it
-// entirely (indexer 1 had deferred 6761 by name at 15:58:47, before the poll
-// began). At 100 s a fresh block parks the node for forty readable seconds.
+// The grace on the affected indexer is above the barrier's per-attempt timeout
+// (HUB_PRICE_SYNC_TIMEOUT_MS, 60 s), because that timeout is the ONLY thing that
+// sets `stallReason`: a wait that resolves inside one attempt parks the node
+// silently. At 70 s the reason was readable for ten seconds per block, and on
+// 2026-09-05 the drill missed it entirely (indexer 1 had deferred 6761 by name at
+// 15:58:47, before the poll began). At 100 s a fresh block parks the node for
+// forty readable seconds. Delivery is released inside that grace after the named
+// status is observed.
 const BARRIER_GRACE_S = 100
 
 // The indexer whose delivery is delayed. Its peer keeps every grace at zero and an
 // unfiltered feed, which is what makes "one waiting, one not" attributable.
 const DELAYED = 1
 const PROMPT  = 0
+
 
 const CONTRACT_CODE = `
 module.exports = {
@@ -143,6 +147,7 @@ describe('AT2 second clause: delivery past the forward margin holds the barrier 
     let testServer = null
     let testUrl    = null
     let contract   = null
+    let delayArmedAtMs = null
 
     async function statusOf (i) {
         const s = await venue.statusOf(i)
@@ -195,6 +200,7 @@ describe('AT2 second clause: delivery past the forward margin holds the barrier 
     it('waits on the named barrier and still binds at the same block on both nodes', async function () {
         // Armed BEFORE the request, so the row is delayed from the moment it exists
         // rather than after this indexer has already seen it.
+        delayArmedAtMs = Date.now()
         venue.delayMirrorTable(DELAYED, MIRROR_TABLE, DELIVERY_DELAY_MS)
         console.log('AT2b: delaying ' + MIRROR_TABLE + ' by ' + DELIVERY_DELAY_MS + 'ms on indexer ' +
             DELAYED + ' mirror edge; the forward margin is ' + FORWARD_S +
@@ -263,10 +269,34 @@ describe('AT2 second clause: delivery past the forward margin holds the barrier 
         console.log('AT2b: the unfiltered indexer holds the row; effective_time ' +
             prompt.rows[0].effective_time)
 
-        // THE HOLD, BY NAME. A fresh block is what arms the barrier, and while the
-        // delayed row is in flight the affected indexer must report THIS barrier and
-        // not a neighbouring one.
+        // Remove the replay backlog before mining the binding block. Without this
+        // synchronization the configured delay can expire while the delayed indexer
+        // is still clearing older blocks, so the assertion observes neither the
+        // injected fault nor the block whose binding rule is under test.
+        await waitForVenueIndexersAtTip(venue, { maxLag: 0 })
+        const beforeMineStats = venue.mirrorProxyStats(DELAYED)
+        const delayWindow = delayedDeliveryWindow(
+            delayArmedAtMs, Date.now(), DELIVERY_DELAY_MS, beforeMineStats)
+        assert.ok(delayWindow.ok,
+            'the delayed indexer reached the tip outside an active delivery window. ' +
+            'Elapsed ' + delayWindow.elapsedMs + 'ms; proxy ' + JSON.stringify(beforeMineStats))
+
+        // THE HOLD, BY NAME. A fresh block is what arms the barrier. The row is known
+        // to be in flight when this block is mined, so the named status is evidence
+        // about this delivery rather than an older block waiting out the same grace.
+        const conn0 = new XChainIndexerConnector('127.0.0.1', venue.indexers[PROMPT].apiPort, null)
         await regtestMinerConnector.generateBlocks(1)
+        const crossing = await until(async () => {
+            const tip = await conn0.call('getblockhashes', {})
+            const blockTime = Number(tip && tip.block_time)
+            return {
+                ok: Number.isFinite(blockTime) && blockTime >= Number(prompt.rows[0].effective_time),
+                tip: tip,
+            }
+        }, 2 * 60 * 1000)
+        assert.ok(crossing.ok,
+            'the mined block did not cross response effective_time ' + prompt.rows[0].effective_time +
+            ', so it cannot exercise the response barrier: ' + JSON.stringify(crossing.tip))
         const held = await until(async () => {
             const a = await statusOf(DELAYED)
             return { ok: a.reason === BARRIER_REASON && PARKED_CLASSES.includes(a.klass), a: a }
@@ -287,14 +317,18 @@ describe('AT2 second clause: delivery past the forward margin holds the barrier 
         console.log('AT2b: proxy held ' + stats.framesHeld + ' stream frame(s) and ' +
             stats.snapshotRowsHeld + ' snapshot row(s)')
 
+        // The configured delay is deliberately generous enough to survive a slow
+        // catch-up. Release once the barrier has named itself so the rest of the leg
+        // measures recovery instead of waiting out unused fault-injection time.
+        venue.releaseMirrorTable(DELAYED, MIRROR_TABLE)
+
         // NO BLOCK PROCESSED EARLY, expressed as the thing a ledger can be checked
         // against: both nodes bound the response at the SAME block, so the wait
         // absorbed the delay instead of the delayed node skipping past it and binding
         // later.
-        // MINES WHILE WAITING, as AT1 does: the applier runs inside the block loop,
-        // and the one block mined above may well be stamped before the effective
-        // time. The claim rests on the BARRIER holding the delayed node, not on the
-        // chain standing still, so blocks under this wait do not weaken it.
+        // MINES WHILE WAITING, as AT1 does: the applier runs inside the block loop.
+        // The crossing assertion above proves the first block is eligible to bind;
+        // later blocks only keep recovery moving after delivery is released.
         const applied = await waitForAppliedEverywhere(venue, requestId, 20 * 60 * 1000,
             { mineWhileWaiting: { perPoll: 1, maxBlocks: widenArithmetic(DEADLINE_BLOCKS).safeCap } })
         const diffs = diffRows(applied[PROMPT], applied[DELAYED], APPLIED_FIELDS)
@@ -304,11 +338,10 @@ describe('AT2 second clause: delivery past the forward margin holds the barrier 
             'block was processed before the row arrived, and the two nodes fired the callback at ' +
             'different heights.')
         const at = Number(applied[PROMPT].block_index)
-        console.log('AT2b: both nodes bound at block ' + at + ' despite a ' + DELIVERY_DELAY_MS +
-            'ms delivery delay against a ' + FORWARD_S + 's margin')
+        console.log('AT2b: both nodes bound at block ' + at + ' while delivery was held past a ' +
+            FORWARD_S + 's margin (configured delay ceiling ' + DELIVERY_DELAY_MS + 'ms)')
 
         // And the ledger agrees, not merely the row.
-        const conn0 = new XChainIndexerConnector('127.0.0.1', venue.indexers[PROMPT].apiPort, null)
         const conn1 = new XChainIndexerConnector('127.0.0.1', venue.indexers[DELAYED].apiPort, null)
         const h0 = await conn0.call('getblockhashes', { block_index: at })
         const h1 = await conn1.call('getblockhashes', { block_index: at })
@@ -322,9 +355,8 @@ describe('AT2 second clause: delivery past the forward margin holds the barrier 
     })
 
     it('clears the barrier once the delay is released', async function () {
-        // The wait must be a wait rather than a wedge: with the filter gone the node
-        // stops reporting the barrier and keeps up.
-        venue.releaseMirrorTable(DELAYED, MIRROR_TABLE)
+        // The wait must be a wait rather than a wedge: after the release above the
+        // node stops reporting the barrier and keeps up.
         await regtestMinerConnector.generateBlocks(2)
         await settleOrReport('at2b')
 
