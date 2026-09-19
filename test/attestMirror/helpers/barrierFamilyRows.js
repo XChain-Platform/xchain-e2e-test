@@ -144,6 +144,60 @@ function snapshotRow (s, tag) {
     }
 }
 
+// The two seed tables selected by snapshotSyncSatisfied. The helper below is an
+// explicit fixture seam: a withholding leg can omit the call and keep the barrier red.
+const SNAPSHOT_JOIN_TABLES = Object.freeze(['cross_chain_matches', 'cross_chain_calls'])
+
+function joinedSnapshotBlocks (seeds) {
+    const blocks = new Set()
+    for (const seed of seeds || []) {
+        if (!seed || !SNAPSHOT_JOIN_TABLES.includes(seed.table)) continue
+        const raw = seed.row && seed.row.snapshot_block
+        const block = Number(raw)
+        if (raw === null || raw === undefined || raw === '' || !Number.isSafeInteger(block) || block < 0) {
+            throw new Error('barrierFamilyRows: joined seed has no valid snapshot_block')
+        }
+        blocks.add(block)
+    }
+    return Array.from(blocks).sort((a, b) => a - b)
+}
+
+/**
+ * One deterministic cross_chain capability snapshot for every distinct block named by
+ * a match or call seed. Blocks are derived only from the seeds, never from caller input.
+ *
+ * @param {Array<{table: string, row: object, key: string[]}>} seeds inertRow results
+ * @returns {Array<{table: string, row: object, key: string[]}>}
+ */
+function requiredCapabilitySnapshots (seeds) {
+    return joinedSnapshotBlocks(seeds).map((block) => ({
+        table: 'capability_snapshots',
+        row: snapshotRow({ snapshotBlock: block }, 'required|cross_chain|' + block),
+        key: NATURAL_KEYS.capability_snapshots,
+    }))
+}
+
+/**
+ * Whether a complete seed set carries every snapshot required by its match and call
+ * rows. No joined rows is an explicit refusal, not a vacuous success.
+ *
+ * @returns {{satisfied: boolean, missingBlocks: number[], refusal: string|null}}
+ */
+function snapshotCapabilityCoverage (seeds) {
+    const required = joinedSnapshotBlocks(seeds)
+    if (required.length === 0) {
+        return { satisfied: false, missingBlocks: [], refusal: 'no rows from snapshot barrier join tables' }
+    }
+    const present = new Set()
+    for (const seed of seeds || []) {
+        if (!seed || seed.table !== 'capability_snapshots' || !seed.row || seed.row.capability !== 'cross_chain') continue
+        const block = Number(seed.row.snapshot_block)
+        if (Number.isSafeInteger(block) && block >= 0) present.add(block)
+    }
+    const missingBlocks = required.filter((block) => !present.has(block))
+    return { satisfied: missingBlocks.length === 0, missingBlocks, refusal: null }
+}
+
 const ROW_BUILDERS = Object.freeze({
     cross_chain_matches: matchRow, cross_chain_calls: callRow, bridge_transfers: bridgeRow,
     policy_snapshots: policyRow, attestation_responses: attestRow, oracle_prices: oracleRow,
@@ -616,9 +670,12 @@ function replayWitnessCommand (o) {
 module.exports = {
     NATURAL_KEYS,
     INERT_SIGNATURES,
+    SNAPSHOT_JOIN_TABLES,
     COIN_SCOPE,
     finalizedClause,
     inertRow,
+    requiredCapabilitySnapshots,
+    snapshotCapabilityCoverage,
     familySeedRows,
     admissionColumns,
     CANONICAL_BEFORE_QUORUM_TABLES,

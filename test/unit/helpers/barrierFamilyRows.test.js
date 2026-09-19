@@ -76,6 +76,66 @@ describe('barrierFamilyRows: inert rows', () => {
     })
 })
 
+describe('barrierFamilyRows: capability snapshots required by seeded rows', () => {
+    const seed = (table, block, tag) => rows.inertRow(table, Object.assign({}, SPEC, { snapshotBlock: block, tag }))
+
+    it('emits exactly one snapshot for seeds at one joined block', () => {
+        const seeds = [seed('cross_chain_matches', 100, 'm'), seed('cross_chain_calls', 100, 'c')]
+        const got = rows.requiredCapabilitySnapshots(seeds)
+        assert.strictEqual(got.length, 1)
+        assert.strictEqual(got[0].row.snapshot_block, 100)
+    })
+
+    it('covers the BF4 shape with one snapshot per legacy, boundary and post-boundary block', () => {
+        const seeds = [
+            seed('cross_chain_matches', 99, 'legacy'),
+            seed('cross_chain_matches', 100, 'boundary'),
+            seed('cross_chain_calls', 103, 'post'),
+        ]
+        assert.deepStrictEqual(rows.requiredCapabilitySnapshots(seeds).map((s) => s.row.snapshot_block), [99, 100, 103])
+    })
+
+    it('collapses duplicate blocks and is deterministic for upsert-safe re-runs', () => {
+        const seeds = [seed('cross_chain_matches', 200, 'm1'), seed('cross_chain_matches', 200, 'm2')]
+        const first = rows.requiredCapabilitySnapshots(seeds)
+        const second = rows.requiredCapabilitySnapshots(seeds.slice().reverse())
+        assert.strictEqual(first.length, 1)
+        assert.deepStrictEqual(first, second)
+    })
+
+    it('emits the predicate capability and the declared capability snapshot natural key', () => {
+        const got = rows.requiredCapabilitySnapshots([seed('cross_chain_calls', 300, 'c')])[0]
+        assert.strictEqual(got.row.capability, 'cross_chain')
+        assert.strictEqual(got.table, 'capability_snapshots')
+        assert.deepStrictEqual(got.key, rows.NATURAL_KEYS.capability_snapshots)
+        for (const column of got.key) assert.notStrictEqual(got.row[column], undefined, 'missing natural key column ' + column)
+    })
+
+    it('reports false and names every joined block missing a required snapshot', () => {
+        const joined = [seed('cross_chain_matches', 400, 'm'), seed('cross_chain_calls', 401, 'c')]
+        const snapshots = rows.requiredCapabilitySnapshots(joined).filter((s) => s.row.snapshot_block === 400)
+        assert.deepStrictEqual(rows.snapshotCapabilityCoverage(joined.concat(snapshots)), {
+            satisfied: false, missingBlocks: [401], refusal: null,
+        })
+    })
+
+    it('refuses an empty seed set instead of reporting the invariant satisfied', () => {
+        assert.deepStrictEqual(rows.snapshotCapabilityCoverage([]), {
+            satisfied: false, missingBlocks: [], refusal: 'no rows from snapshot barrier join tables',
+        })
+    })
+
+    it('ignores tables outside the predicate and distinguishes absence from full coverage', () => {
+        const unrelated = [seed('bridge_transfers', 500, 'bridge')]
+        assert.deepStrictEqual(rows.requiredCapabilitySnapshots(unrelated), [])
+        assert.strictEqual(rows.snapshotCapabilityCoverage(unrelated).refusal, 'no rows from snapshot barrier join tables')
+        const joined = [seed('cross_chain_matches', 500, 'match')]
+        assert.deepStrictEqual(rows.snapshotCapabilityCoverage(joined.concat(rows.requiredCapabilitySnapshots(joined))), {
+            satisfied: true, missingBlocks: [], refusal: null,
+        })
+    })
+})
+
 describe('barrierFamilyRows: BF1 judges each walker observation against its own deadline', () => {
     // The rail's walker block (2026-09-17, v020-final-bf1.log): stamped 1789635655, ladder step 90.
     const STAMP = 1789635655
