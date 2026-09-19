@@ -62,6 +62,34 @@ const HEIGHT_TABLES = TABLES.concat(['anchor_reward_attestations'])
 // attest rail's height watermark window plus one barrier attempt.
 const COMMIT_BUDGET_MS = 5 * 60 * 1000
 
+function renderEvidence (value) {
+    try {
+        const rendered = JSON.stringify(value, (key, item) => typeof item === 'bigint' ? item.toString() : item)
+        return rendered === undefined ? String(value) : rendered
+    } catch (error) {
+        return '[unprintable: ' + (error && error.message ? error.message : String(error)) + ']'
+    }
+}
+
+function assertionMessage (expected, found, next) {
+    return 'expected ' + expected + '; found ' + renderEvidence(found) + '; inspect ' + next
+}
+
+function deferralNote (venue, indexer) {
+    const which = 'indexer' + indexer
+    try {
+        const tail = String(venue.logTail(which) || '')
+        if (!tail || /\blast 0 line\(s\) from\b/.test(tail)) {
+            return 'log tail unavailable: ' + which + ' has not written any lines yet'
+        }
+        const lines = tail.split(/\r?\n/).filter((line) => /Deferring block /.test(line))
+        if (lines.length) return 'latest deferral from ' + which + ': ' + lines[lines.length - 1].trim()
+        return 'deferral evidence unavailable: no matching line in the available ' + which + ' log tail'
+    } catch (error) {
+        return 'log tail unavailable: ' + (error && error.message ? error.message : String(error))
+    }
+}
+
 describe('BF2: the fix, armed, the identical block on the identical mirror state', function () {
     this.timeout(Math.max(drive.LEG_FLOOR_MS, fixture.legTimeoutMs(600)))
 
@@ -105,12 +133,16 @@ async function seedAdmissionRows (ctx) {
     // Snapshot at B, not the reached tip: a fresh node's stake re-derivation rejects a synthetic capability row at a reached height.
     const base = { network: ctx.venue.network, coin: ctx.coin, effectiveTime: now, snapshotBlock: ctx.B }
     // The crossing, asserted before anything is seeded: both eras exist on this one venue.
-    assert.strictEqual(ctx.legacyBlock, fixture.legacyEraBlock(ctx.armHeight), 'the leg and the fixture disagree on the legacy era block')
-    assert.ok(ctx.legacyBlock < ctx.armHeight, 'the legacy seed at ' + ctx.legacyBlock + ' is not below the activation ' + ctx.armHeight)
-    assert.ok(ctx.armHeight <= ctx.B, 'the venue never reached the activation ' + ctx.armHeight + ': B is ' + ctx.B)
+    assert.strictEqual(ctx.legacyBlock, fixture.legacyEraBlock(ctx.armHeight),
+        assertionMessage('legacyBlock=' + fixture.legacyEraBlock(ctx.armHeight), 'legacyBlock=' + ctx.legacyBlock, 'the BF2 activation setup'))
+    assert.ok(ctx.legacyBlock < ctx.armHeight,
+        assertionMessage('legacyBlock below armHeight', { legacyBlock: ctx.legacyBlock, armHeight: ctx.armHeight }, 'the BF2 legacy seed era'))
+    assert.ok(ctx.armHeight <= ctx.B,
+        assertionMessage('armHeight at or below B', { armHeight: ctx.armHeight, B: ctx.B }, 'the BF2 crossing height'))
     const members = rows.admissionSeedRows(TABLES, base, ctx.B, tip, ctx.legacyBlock)
     // Refuse before seeding: a NULL-map row at or above the activation stalls the drill block, not this case.
-    assert.deepStrictEqual(rows.armedLegacyApplyHazards(members, ctx.armHeight), [], 'BF2 would seed a row the armed apply pass refuses')
+    const hazards = rows.armedLegacyApplyHazards(members, ctx.armHeight)
+    assert.deepStrictEqual(hazards, [], assertionMessage('no armed legacy apply hazards', hazards, 'the BF2 member seeds'))
     const seeds = [rows.inertRow('capability_snapshots', Object.assign({ tag: 'bf2|snap|' + tip }, base))].concat(members)
     await drive.seedMirrors(ctx.venue, seeds)
     ctx.seeded = {}
@@ -136,8 +168,10 @@ async function mineAndWatch (ctx) {
     const wall = Math.floor(Date.now() / 1000)
     // Resumes the miner: the hold ends with the drill block.
     ctx.block = await drive.mineStamped(ctx.btc, wall + drive.STAMP_AHEAD_S)
-    assert.strictEqual(ctx.block.height, ctx.B, 'the drill block landed at ' + ctx.block.height + ', not the seeded B=' + ctx.B)
-    assert.ok(ctx.block.blockTime >= wall + drive.STAMP_AHEAD_S - 1, 'the block is stamped ' + ctx.block.blockTime + ', not +' + drive.STAMP_AHEAD_S)
+    assert.strictEqual(ctx.block.height, ctx.B,
+        assertionMessage('drill block height B=' + ctx.B, 'block height=' + ctx.block.height, 'the BF2 mined block'))
+    assert.ok(ctx.block.blockTime >= wall + drive.STAMP_AHEAD_S - 1,
+        assertionMessage('blockTime at least ' + (wall + drive.STAMP_AHEAD_S - 1), 'blockTime=' + ctx.block.blockTime, 'the BF2 block stamp'))
     const started = Date.now()
     const got = await drive.waitForStatus(ctx.venue, ARMED, (s) => {
         if (s.height === ctx.B - 1 && s.stallReason) ctx.seen.push({ at: Date.now() - started, reason: s.stallReason, stallClass: s.stallClass })
@@ -145,13 +179,15 @@ async function mineAndWatch (ctx) {
     }, COMMIT_BUDGET_MS)
     const heights = got.s && got.s.heights
     console.log('BF2 armed node: ' + JSON.stringify(got.s) + '; reasons seen while on B-1: ' + JSON.stringify(ctx.seen))
-    assert.ok(got.ok, 'the armed node did not commit the +' + drive.STAMP_AHEAD_S + ' block inside ' + COMMIT_BUDGET_MS +
-        ' ms: ' + JSON.stringify(got.s) + '\n' + ctx.venue.logTail('indexer' + ARMED))
+    assert.ok(got.ok, assertionMessage('armed node commit of block ' + ctx.B + ' inside ' + COMMIT_BUDGET_MS + ' ms',
+        { ok: got.ok, status: got.s }, 'the armed indexer evidence: ' + deferralNote(ctx.venue, ARMED)))
     const barriers = ctx.seen.filter((x) => /_barrier$/.test(String(x.reason)))
-    assert.deepStrictEqual(barriers, [], 'a barrier reason appeared for block ' + ctx.B + ' on the armed node: ' + JSON.stringify(barriers))
-    assert.strictEqual(got.s.stallClass, 'none', 'stallClass after the commit is ' + got.s.stallClass)
-    assert.ok(heights && Object.keys(heights).length > 0, 'the hub published no heights map; the consumer bound on nothing')
-    assert.ok(Date.now() - started < drive.STAMP_AHEAD_S * 1000, 'the commit waited out the stamp')
+    assert.deepStrictEqual(barriers, [], assertionMessage('no barrier reasons for block ' + ctx.B, barriers, 'the BF2 status samples'))
+    assert.strictEqual(got.s.stallClass, 'none', assertionMessage('stallClass="none" after commit', got.s.stallClass, 'the BF2 final status'))
+    assert.ok(heights && Object.keys(heights).length > 0,
+        assertionMessage('a non-empty hub heights map', heights, 'the BF2 final status hubMirror.heights'))
+    assert.ok(Date.now() - started < drive.STAMP_AHEAD_S * 1000,
+        assertionMessage('commit latency below ' + (drive.STAMP_AHEAD_S * 1000) + ' ms', (Date.now() - started) + ' ms', 'the BF2 commit timer'))
 }
 
 // The expected set is computed by the FIXTURE over the hub's rows (independent of the
@@ -164,16 +200,18 @@ async function assertReadSets (ctx) {
         const hubRows = await drive.hubRows(ctx.venue, hub, t)
         ctx.expected[t] = fixture.admittedRowSet(hubRows, t, ctx.coin, ctx.B, ctx.block.blockTime, (r) => String(r[keyCol]))
         ctx.read[t] = await drive.mirrorReadableSet(ctx.venue, ARMED, t, ctx.coin, ctx.B, ctx.block.blockTime)
-        assert.deepStrictEqual(ctx.read[t], ctx.expected[t], t + ': the mirror reads ' + JSON.stringify(ctx.read[t]) +
-            ' at B=' + ctx.B + ' while the hub rows admit ' + JSON.stringify(ctx.expected[t]))
+        assert.deepStrictEqual(ctx.read[t], ctx.expected[t],
+            assertionMessage(t + ' mirror read set ' + renderEvidence(ctx.expected[t]), ctx.read[t], 'the BF2 ' + t + ' rows at B=' + ctx.B))
         // The past-B row is the one seeded row not admitted at B.
         const want = ctx.seeded[t] - 1
-        assert.strictEqual(ctx.expected[t].length, want, t + ': expected the at-B row' + (want > 1 ? ' and the legacy row' : '') +
-            ', got ' + ctx.expected[t].length + ' of ' + hubRows.length + ' hub rows')
+        assert.strictEqual(ctx.expected[t].length, want,
+            assertionMessage(t + ' admitted row count=' + want, ctx.expected[t].length, 'the BF2 ' + t + ' hub rows, total=' + hubRows.length))
         const col = fixture.admissionColumn(t, ctx.coin)
         const past = hubRows.filter((r) => Number(r[col]) === ctx.B + 3).map((r) => String(r[keyCol]))
-        assert.strictEqual(past.length, 1, t + ': the past-B row is missing on the hub')
-        assert.ok(!ctx.read[t].includes(past[0]), t + ': the past-B row was read at B')
+        assert.strictEqual(past.length, 1,
+            assertionMessage(t + ' past-B hub row count=1', past.length, 'the BF2 ' + t + ' hub rows'))
+        assert.ok(!ctx.read[t].includes(past[0]),
+            assertionMessage(t + ' past-B key excluded at B=' + ctx.B, ctx.read[t], 'the BF2 ' + t + ' mirror read set'))
     }
     console.log('BF2 read sets at B=' + ctx.B + ': ' + JSON.stringify(ctx.read))
 }

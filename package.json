@@ -30,6 +30,7 @@
     "lint:sleep-flake": "node scripts/check-sleep-flake.js",
     "lint:wait-swallow": "node scripts/check-wait-swallow.js",
     "lint:stake-teardown": "node scripts/check-stake-teardown.js",
+    "lint:mirror-pendings": "node scripts/check-mirror-pendings.js",
     "count:actions": "node scripts/count-action-suites.js",
     "stage:siblings": "node scripts/stage-siblings.js",
     "stage:siblings:check": "node scripts/stage-siblings.js --check",

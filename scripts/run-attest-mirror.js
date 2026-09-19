@@ -4,9 +4,11 @@ const assert = require('assert')
 const fs = require('fs')
 const path = require('path')
 const { spawn } = require('child_process')
+const { createRequire } = require('module')
 
 const REPO_ROOT = path.resolve(__dirname, '..')
 const MAX_CONCURRENCY = 3
+const ENV_FAILURE_ABORT_THRESHOLD = 3
 const LEG_DIRS = [
     path.join('test', 'attestMirror'),
     path.join('test', 'attestMirror', 'barrier_family'),
@@ -57,6 +59,25 @@ function driverCommand (driver, args) {
     return path.extname(driver) === '.js'
         ? { command: process.execPath, args: [driver, ...args] }
         : { command: driver, args }
+}
+
+function preflightReadinessHelper (driver) {
+    const helper = path.join(path.dirname(driver), 'wait-attest-mirror-stack.js')
+    assert.ok(fs.existsSync(helper) && fs.statSync(helper).isFile(),
+        'attest-mirror readiness helper does not exist: ' + helper)
+    const source = fs.readFileSync(helper, 'utf8')
+    const requireFromHelper = createRequire(helper)
+    const dependencies = new Set()
+    const requirePattern = /\brequire\s*\(\s*(['"])([^'"]+)\1\s*\)/g
+    for (const match of source.matchAll(requirePattern)) dependencies.add(match[2])
+    for (const dependency of dependencies) {
+        try {
+            requireFromHelper.resolve(dependency)
+        } catch (error) {
+            throw new Error('attest-mirror readiness preflight could not resolve module "' + dependency +
+                '" from ' + path.dirname(helper), { cause: error })
+        }
+    }
 }
 
 function runDriver (driver, phase, job, extraArgs, options) {
@@ -113,14 +134,44 @@ async function runAll (config) {
     const driver = path.resolve(root, config.driver)
     assert.ok(fs.existsSync(driver), 'ATTEST_MIRROR_STACK_DRIVER does not exist: ' + driver)
     assert.ok(legs.length > 0, 'no attest-mirror legs selected')
+    preflightReadinessHelper(driver)
 
     const runId = String(config.runId || (Date.now().toString(36) + '-' + process.pid))
     assert.ok(/^[a-zA-Z0-9_-]+$/.test(runId), 'ATTEST_MIRROR_RUN_ID contains unsafe characters')
     let next = 0
     const results = []
+    let completedThrough = -1
+    let streakPhase = null
+    let streakLegs = []
+    let abort = null
+
+    function observeCompletedLegs () {
+        if (abort) return
+        while (results[completedThrough + 1]) {
+            const result = results[++completedThrough]
+            if (result.code !== 0 && result.phase !== 'run') {
+                if (result.phase !== streakPhase) {
+                    streakPhase = result.phase
+                    streakLegs = []
+                }
+                streakLegs.push(result.leg)
+                if (streakLegs.length >= ENV_FAILURE_ABORT_THRESHOLD) {
+                    abort = {
+                        phase: streakPhase,
+                        legs: streakLegs.slice(-ENV_FAILURE_ABORT_THRESHOLD),
+                    }
+                    return
+                }
+            } else {
+                streakPhase = null
+                streakLegs = []
+            }
+        }
+    }
 
     async function worker (slot) {
         for (;;) {
+            if (abort) return
             const index = next++
             if (index >= legs.length) return
             const job = { leg: legs[index], slot, stack: 'am-' + runId + '-' + String(index + 1) }
@@ -129,19 +180,26 @@ async function runAll (config) {
             results[index] = result
             process.stdout.write('[attest-mirror] release ' + job.stack + ' exit=' + result.code +
                 (result.phase ? ' phase=' + result.phase : '') + '\n')
+            observeCompletedLegs()
         }
     }
 
     await Promise.all(Array.from({ length: Math.min(concurrency, legs.length) }, (_, slot) => worker(slot)))
+    if (abort) {
+        throw new Error('attest-mirror abort after ' + ENV_FAILURE_ABORT_THRESHOLD + ' consecutive ' + abort.phase +
+            ' failures: ' + abort.legs.join(', '))
+    }
     return results
 }
 
 async function main () {
     const driver = process.env.ATTEST_MIRROR_STACK_DRIVER
     assert.ok(driver, 'ATTEST_MIRROR_STACK_DRIVER must name the isolated-stack lifecycle driver')
-    const selected = process.env.ATTEST_MIRROR_LEGS
+    const selectedFromEnv = process.env.ATTEST_MIRROR_LEGS !== undefined
+    const selected = selectedFromEnv
         ? process.env.ATTEST_MIRROR_LEGS.split(',').map((leg) => leg.trim()).filter(Boolean)
         : process.argv.slice(2)
+    if (selectedFromEnv) assert.ok(selected.length > 0, 'no attest-mirror legs selected')
     const results = await runAll({
         root: REPO_ROOT,
         driver,
@@ -150,7 +208,13 @@ async function main () {
         runId: process.env.ATTEST_MIRROR_RUN_ID,
     })
     const failed = results.filter((result) => result.code !== 0)
-    process.stdout.write('[attest-mirror] ' + (results.length - failed.length) + ' legs passed, ' + failed.length + ' failed\n')
+    const failuresByPhase = new Map()
+    for (const result of failed) failuresByPhase.set(result.phase, (failuresByPhase.get(result.phase) || 0) + 1)
+    const phaseSummary = failuresByPhase.size === 0
+        ? 'none'
+        : [...failuresByPhase].map(([phase, count]) => phase + '=' + count).join(', ')
+    process.stdout.write('[attest-mirror] ' + (results.length - failed.length) + ' legs passed, ' + failed.length +
+        ' failed; failures by phase: ' + phaseSummary + '\n')
     if (failed.length > 0) process.exitCode = Math.min(failed.length, 255)
 }
 
