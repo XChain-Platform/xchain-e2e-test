@@ -79,6 +79,11 @@ const FIXED_BODY = '{"score":23,"meta":"zc3-headroom"}'
 // Long enough to read the draw and stop a hub before any hub's first poll fires.
 const POLL_MS = 20000
 
+// A poll can land in the interval between request visibility and stopHub. A fresh
+// request changes both the draw and which hub occupies rank 1, so a bounded retry
+// turns that race into one discarded request without turning the leg into a hang.
+const VICTIM_WINDOW_ATTEMPTS = 4
+
 const FORWARD_S = 3
 
 // Sixty blocks gives a first ladder segment of twenty (span 60, V2 maxSlots 2, so
@@ -153,7 +158,7 @@ async function issueRequest() {
     await clearBeforeBroadcast()
     const exec = await mineWhile(() => vmHelper.sendExecuteV0(
         contract.owner, contract.contractIndex, 'ask', ['http_get', testUrl]))
-    return { exec, sinceAction }
+    return { exec, sinceAction, requestVisibleAtMs: Date.now() }
 }
 
 async function readDraw(sinceAction) {
@@ -193,7 +198,7 @@ function selectVictim(draw) {
     return { victimKey, victimHub }
 }
 
-async function stopVictim(victimHub, victimKey, requestId) {
+async function stopVictim(victimHub, victimKey, requestId, requestVisibleAtMs) {
     await venue.stopHub(victimHub)
     stoppedHub = victimHub
     console.log('ZC3: stopped hub ' + victimHub + ' (' + victimKey.slice(0, 16) + '...), rank 1 of the draw')
@@ -203,8 +208,40 @@ async function stopVictim(victimHub, victimKey, requestId) {
     // round that four members ran and three finished, which is a different claim.
     // The round-start line is written once per started round on a responsible hub,
     // so its absence on the victim is the evidence.
-    return venue.logTail('hub' + victimHub)
-        .includes('AttestationRound: starting ' + requestId.slice(0, 16) + '...')
+    const tail = venue.logTail('hub' + victimHub)
+    const tailAvailable = typeof tail === 'string' && tail.trim().length > 0 &&
+        !/^\s*last 0 line\(s\) from /.test(tail)
+    const marker = 'AttestationRound: starting ' + requestId.slice(0, 16) + '...'
+    const roundStartLine = tailAvailable
+        ? tail.split('\n').find((line) => line.includes(marker)) || null
+        : null
+    const roundStartAtMs = roundStartLine ? Date.parse(roundStartLine.trim().split(/\s+/, 1)[0]) : NaN
+    const gapMs = Number.isFinite(roundStartAtMs) ? roundStartAtMs - requestVisibleAtMs : null
+
+    // An unavailable tail cannot prove absence. Treat it as a violated window so
+    // the retry either obtains observable evidence or exhausts loudly.
+    return {
+        victimStarted: !tailAvailable || roundStartLine !== null,
+        tailAvailable,
+        roundStartLine,
+        gapMs,
+    }
+}
+
+function victimAttemptEvidence(attempt, requestId, victimHub, requestVisibleAtMs, observation) {
+    const prefix = 'attempt ' + attempt + ' request ' + requestId.slice(0, 16) +
+        '... hub ' + victimHub + ': '
+    if (!observation.tailAvailable) {
+        return prefix + 'log tail unavailable; request observed at ' +
+            new Date(requestVisibleAtMs).toISOString() + ', round-start gap not measurable'
+    }
+    if (!observation.roundStartLine) {
+        return prefix + 'no round-start line; request observed at ' +
+            new Date(requestVisibleAtMs).toISOString()
+    }
+    return prefix + 'round-start gap ' + observation.gapMs + 'ms (request observed ' +
+        new Date(requestVisibleAtMs).toISOString() + ', round started ' +
+        new Date(requestVisibleAtMs + observation.gapMs).toISOString() + ')'
 }
 
 async function waitForSignedResult(requestId, draw) {
@@ -271,23 +308,52 @@ describe('ZC3: a drawn member that cannot sign is covered by the headroom slot',
     after(teardownZc3)
 
     it('finalizes with exactly redundancy signatures inside the first ladder segment', async function () {
-        const { exec, sinceAction } = await issueRequest()
-        assert.strictEqual(exec.execution.status, 'valid',
-            'the EXECUTE that emits the request came back ' + exec.execution.status)
-        const { requestId, draw, drawFrom } = await readDraw(sinceAction)
-        assert.ok(draw, 'no venue hub could resolve the responsible set for ' + requestId +
-            ' while it was pending\n' + allHubTails(venue))
-        console.log('ZC3: hub ' + drawFrom + ' drew ' + jsonSafe(draw.responsible.map((p) => p.slice(0, 16))) + ' (redundancy ' + draw.redundancy + ', widen ' + draw.widen + ') for request ' + requestId.slice(0, 12))
-        assert.strictEqual(draw.widen, 1,
-            'the draw carries widen ' + draw.widen + ' rather than 1. At the request\'s own block ' + 'the V2 ladder returns its headroom slot and nothing more, so 0 means the stage-2 early ' + 'return is not armed and 2 or more means blocks went by before the draw was read.')
-        assert.strictEqual(draw.responsible.length, REDUNDANCY + 1,
-            'the responsible set holds ' + draw.responsible.length + ' member(s) rather than ' + (REDUNDANCY + 1) + ' (redundancy ' + REDUNDANCY + ' plus one headroom slot): ' + jsonSafe(draw.responsible.map((p) => p.slice(0, 16))))
-        const { victimKey, victimHub } = selectVictim(draw)
-        assert.ok(victimHub >= 0,
-            'the drawn member at rank 1 (' + victimKey.slice(0, 16) + '...) belongs to no venue hub. ' + 'The venue adopts the roster precisely so every drawn key has a live hub here.')
-        const victimStarted = await stopVictim(victimHub, victimKey, requestId)
+        let requestId = null
+        let draw = null
+        let victimKey = null
+        let victimHub = null
+        let victimStarted = true
+        const victimAttempts = []
+
+        for (let attempt = 1; attempt <= VICTIM_WINDOW_ATTEMPTS; attempt++) {
+            const { exec, sinceAction, requestVisibleAtMs } = await issueRequest()
+            assert.strictEqual(exec.execution.status, 'valid',
+                'the EXECUTE that emits the request came back ' + exec.execution.status)
+            const read = await readDraw(sinceAction)
+            requestId = read.requestId
+            draw = read.draw
+            assert.ok(draw, 'no venue hub could resolve the responsible set for ' + requestId +
+                ' while it was pending\n' + allHubTails(venue))
+            console.log('ZC3: hub ' + read.drawFrom + ' drew ' + jsonSafe(draw.responsible.map((p) => p.slice(0, 16))) + ' (redundancy ' + draw.redundancy + ', widen ' + draw.widen + ') for request ' + requestId.slice(0, 12))
+            assert.strictEqual(draw.widen, 1,
+                'the draw carries widen ' + draw.widen + ' rather than 1. At the request\'s own block ' + 'the V2 ladder returns its headroom slot and nothing more, so 0 means the stage-2 early ' + 'return is not armed and 2 or more means blocks went by before the draw was read.')
+            assert.strictEqual(draw.responsible.length, REDUNDANCY + 1,
+                'the responsible set holds ' + draw.responsible.length + ' member(s) rather than ' + (REDUNDANCY + 1) + ' (redundancy ' + REDUNDANCY + ' plus one headroom slot): ' + jsonSafe(draw.responsible.map((p) => p.slice(0, 16))))
+            const selected = selectVictim(draw)
+            victimKey = selected.victimKey
+            victimHub = selected.victimHub
+            assert.ok(victimHub >= 0,
+                'the drawn member at rank 1 (' + victimKey.slice(0, 16) + '...) belongs to no venue hub. ' + 'The venue adopts the roster precisely so every drawn key has a live hub here.')
+            const observation = await stopVictim(
+                victimHub, victimKey, requestId, requestVisibleAtMs)
+            victimStarted = observation.victimStarted
+            victimAttempts.push(victimAttemptEvidence(
+                attempt, requestId, victimHub, requestVisibleAtMs, observation))
+            if (!victimStarted) break
+            if (attempt < VICTIM_WINDOW_ATTEMPTS) {
+                await venue.startHub(victimHub)
+                stoppedHub = null
+                console.log('ZC3: discarded request ' + requestId.slice(0, 12) +
+                    ' after its victim started; hub ' + victimHub +
+                    ' is back for fresh attempt ' + (attempt + 1))
+            }
+        }
+
         assert.strictEqual(victimStarted, false,
-            'hub ' + victimHub + ' had already started a round for ' + requestId.slice(0, 16) + '... before it was stopped, so it is not a member that never signed and ZC3 is measuring ' + 'something else. Its poll fired inside the window; re-run (the poll interval is the ' + 'window, see the header).\n' + venue.logTail('hub' + victimHub))
+            'ZC3 exhausted ' + VICTIM_WINDOW_ATTEMPTS + ' fresh request attempts without constructing ' +
+            'a victim window at poll interval ' + POLL_MS + 'ms. A selected victim had already ' +
+            'started its request, or its log tail was unavailable, so it cannot prove a member that ' +
+            'never signed. ' + victimAttempts.join('; ') + '\n' + venue.logTail('hub' + victimHub))
         const { mirrorRows, signers, headroomKey, strays } = await waitForSignedResult(requestId, draw)
         for (const [i, row] of mirrorRows.entries()) {
             assert.strictEqual(String(row.status), 'ok',
