@@ -198,8 +198,13 @@ describe('AT3: the deadline decides whether a mirrored response ever binds', fun
         assert.strictEqual(String(rows[0].status), 'ok',
             tag + ': the round did not produce an ok response, so the deadline is not what is under test')
 
+        await waitForHeightWithClear(venue, 0, request.blockIndex)
         const local = await readRequestRow(venue, 0, requestId)
-        assert.ok(local, tag + ': the venue indexer holds no v0 request row for ' + requestId)
+        assert.ok(local, tag + ': the venue indexer holds no v0 request row for ' + requestId +
+            ' after committing request block ' + request.blockIndex)
+        assert.strictEqual(Number(local.block_index), Number(request.blockIndex),
+            tag + ': the venue request row landed at block ' + local.block_index +
+            ' but the standing indexer placed it at ' + request.blockIndex)
 
         const effectiveTime = Number(rows[0].effective_time)
         assert.ok(Number.isFinite(effectiveTime) && effectiveTime > 0,
