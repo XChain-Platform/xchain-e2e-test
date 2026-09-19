@@ -22,6 +22,19 @@ const axios = require('axios');
 const { getLogger } = require('./lib/logger');
 const logger = getLogger();
 
+// Per-request cap, same reasoning and same fix as RegtestMinerConnector's
+// PING_TIMEOUT_MS: axios defaults to no timeout, so an explorer that accepts
+// the socket and never answers (the "503 with zero DB pools" venue left with
+// no pool to even answer FROM) left ping() pending forever. initialCheck.test.js
+// requires this ping before any action test runs, and the suite runs under
+// `mocha --timeout 0`, so nothing else in this stack would ever time the call
+// out: a stuck explorer silently stalled the whole CI job instead of failing
+// it. getFileRaw carries the same cap because waitForServedFile's own polling
+// deadline (envelopeHelper.js) is defeated if a single GET inside the loop can
+// hang past it.
+const PING_TIMEOUT_MS = 5000;
+const FILE_TIMEOUT_MS = 15000;
+
 class XChainExplorerConnector {
     constructor(url, port) {
         this.url = "http://"+url+":"+port
@@ -41,7 +54,7 @@ class XChainExplorerConnector {
 
         var response = null
         try {
-            response = await axios.post(this.url, data)
+            response = await axios.post(this.url, data, { timeout: PING_TIMEOUT_MS })
         } catch (err) {
             logger.info(err)
             return false
@@ -67,7 +80,8 @@ class XChainExplorerConnector {
         const url = this.url+"/"+coinPrefix+"/api/file/"+actionIndex+"/raw"
         const response = await axios.get(url, {
             responseType: 'arraybuffer',
-            validateStatus: () => true
+            validateStatus: () => true,
+            timeout: FILE_TIMEOUT_MS
         })
         return {
             status: response.status,
