@@ -69,7 +69,7 @@ const COIN_CODE_MAP = { bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' };
 const DEFAULT_PORTS = {
     BTC:  { node: 3020, tracker: 3021, decoder: 3022, encoder: 3023, indexer: 3024, miner: 3025 },
     LTC:  { node: 3220, tracker: 3221, decoder: 3222, encoder: 3223, indexer: 3224, miner: 3225 },
-    DOGE: { node: 3120, tracker: 3121, decoder: 3122, encoder: 3123, indexer: 3124, miner: 3125 },
+    DOGE: { node: 3120, tracker: 3121, decoder: 3122, encoder: 3123, indexer: 3004, miner: 3125 },
 };
 
 // Globals a rail owns. Restoring exactly this list is what makes withRail safe
