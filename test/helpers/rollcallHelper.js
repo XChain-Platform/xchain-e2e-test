@@ -511,16 +511,26 @@ function assertFrozenCanonicalVector(){
     // The wire builder too: AT6 lands a hand-built ROLLCALL, and a wire the DOGE
     // parser rejects would read as "the sweeper never landed" rather than as a
     // malformed payload.
-    const bySeed = new Map(v.signers.map(s => [s.pubkey.toLowerCase(), s.sig.toLowerCase()]))
+    const byPubkey = new Map(v.signers.map(s => [s.pubkey.toLowerCase(), s.sig.toLowerCase()]))
     for (const w of v.wire){
-        const pairs = Array.from(bySeed, ([pubkey, sig]) => ({ pubkey, sig })).slice(0, w.sig_count)
-        // The one-signature case names its lone signer as publisher, so take the
-        // pairs the vector's own expected payload carries rather than the first N.
-        const wanted = String(w.expected).split('|').slice(6)
-        const exact  = []
-        for (let i = 0; i < wanted.length; i += 2) exact.push({ pubkey: wanted[i], sig: wanted[i + 1] })
+        const fields = String(w.expected).split('|')
+        const pairs  = []
+        for (let i = 6; i + 1 < fields.length; i += 2){
+            const pubkey = String(fields[i]).toLowerCase()
+            const sig    = byPubkey.get(pubkey)
+            assert.ok(sig,
+                'the frozen v0 wire case "' + w.name + '" names signer ' + pubkey.slice(0, 16) +
+                '... which signers does not carry, so its payload cannot be rebuilt from signed material')
+            assert.strictEqual(String(fields[i + 1]).toLowerCase(), sig,
+                'the frozen v0 wire case "' + w.name + '" carries a signature for ' + pubkey.slice(0, 16) +
+                '... that signers does not: the vector disagrees with itself, so one of the two was edited')
+            pairs.push({ pubkey, sig })
+        }
+        assert.strictEqual(pairs.length, Number(w.sig_count),
+            'the frozen v0 wire case "' + w.name + '" declares sig_count ' + w.sig_count + ' but its payload ' +
+            'carries ' + pairs.length + ' pair(s)')
         const got2 = buildWire(v.canonical.epoch_height, v.canonical.ledger_hash, w.publisher,
-                               exact.length === w.sig_count ? exact : pairs, null)
+                               pairs, null)
         assert.strictEqual(got2, w.expected, 'ROLLCALL wire drift on frozen case "' + w.name + '"')
     }
 

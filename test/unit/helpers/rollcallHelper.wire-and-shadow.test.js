@@ -69,6 +69,25 @@ describe('rollcallHelper.parseWire: the wire is read by field name, not position
     })
 })
 
+describe('rollcallHelper.assertFrozenCanonicalVector: v0 wire signatures come from signers', function () {
+    it('rejects a tampered v0 expected signature', function () {
+        const vector = rc.frozenVector()
+        const wire = vector.wire.find(w => Number(w.sig_count) > 0)
+        assert.ok(wire, 'the frozen vector must carry a signed v0 wire case')
+
+        const original = wire.expected
+        const fields = String(original).split('|')
+        fields[7] = (fields[7][0] === '0' ? '1' : '0') + fields[7].slice(1)
+        wire.expected = fields.join('|')
+        try {
+            assert.throws(() => rc.assertFrozenCanonicalVector(),
+                /frozen v0 wire case .* carries a signature .* that signers does not/)
+        } finally {
+            wire.expected = original
+        }
+    })
+})
+
 describe('rollcallHelper.assertEpochsUnshadowed: epochs the DOGE side already holds rows for are refused', function () {
     // A ctx with the DOGE peer canned: `rows` maps epoch -> pubkeys with a row.
     function ctxWith(rows){
