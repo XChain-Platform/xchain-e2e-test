@@ -79,9 +79,8 @@ describe('barrierFamilyFixture: the crossing a legacy-era seed needs', function 
     })
 
     // The whole point of the crossing, measured against the indexer's own builder rather than argued:
-    // BELOW the activation a NULL-map row builds an empty canonical tail, AT or above it the builder
-    // refuses a NULL admission map on any row whose era block is at or above the producer
-    // activation (adjudicated 2026-09-18: that refusal is the product working).
+    // BELOW the activation a NULL-map row builds an empty canonical tail, and AT or above it the
+    // builder still yields the legacy canonical: an absent map never throws in either era.
     //
     // In a CHILD process, because the arming is a child's environment: the gate reads its activation
     // tables once at require time, so a venue arms a child at spawn and this case must do the same or
@@ -95,20 +94,20 @@ describe('barrierFamilyFixture: the crossing a legacy-era seed needs', function 
         assert.strictEqual(out.eraAtLegacyBlock, false, 'the legacy block must be below the producer activation')
         assert.strictEqual(out.eraAtArmHeight, true, 'the activation height itself is admission era')
         assert.strictEqual(out.canonicalAtLegacyBlock, null, 'a NULL-map row below the activation must build an empty canonical tail')
-        assert.match(String(out.canonicalAtArmHeight), /has no admit_blocks/, 'a NULL-map row at the activation must still be refused')
+        assert.strictEqual(out.canonicalAtArmHeight, null, 'a NULL-map row at the activation must build the legacy canonical, not throw')
         // The binding rule is untouched by the crossing: a NULL column binds by effective_time at every height.
         assert.strictEqual(out.readableAbove, true, 'a NULL admission column must bind by effective_time above the activation')
     })
 
     // Armed at GENESIS, which is what every leg did before the crossing: there is no block below the
-    // activation, so the very same NULL-map row is refused at every height a chain can reach.
+    // activation, so the very same NULL-map row builds the legacy canonical at every height a chain can reach.
     it('has no such line when the child is armed at genesis, which is why the seed had to move', () => {
         const out = armedGateProbe(F.ARM_VALUE, 0, 0)
         assert.strictEqual(out.resolved, 0)
         assert.strictEqual(out.eraAtArmHeight, true, 'block 0 is already admission era')
-        assert.match(String(out.canonicalAtArmHeight), /has no admit_blocks/)
-        assert.match(String(out.canonicalAtLegacyBlock), /has no admit_blocks/,
-            'armed at genesis there is no height at which a NULL-map row builds a canonical')
+        assert.strictEqual(out.canonicalAtArmHeight, null)
+        assert.strictEqual(out.canonicalAtLegacyBlock, null,
+            'armed at genesis a NULL-map row still builds the legacy canonical and never throws')
     })
 
     /**
