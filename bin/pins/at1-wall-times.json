@@ -1,0 +1,340 @@
+{
+  "timingMethod": "UTC timestamps captured around each Mocha process",
+  "node": "v22.22.3",
+  "scripts": {
+    "test": {
+      "command": "npm run test",
+      "notRun": "drives a live rail"
+    },
+    "test:attest-mirror": {
+      "command": "npm run test:attest-mirror",
+      "notRun": "drives a live rail"
+    },
+    "test:attest-relay-loop": {
+      "command": "npm run test:attest-relay-loop",
+      "notRun": "drives a live rail"
+    },
+    "test:attestation:llm": {
+      "command": "npm run test:attestation:llm",
+      "notRun": "drives a live rail"
+    },
+    "test:auctions": {
+      "command": "npm run test:auctions",
+      "notRun": "drives a live rail"
+    },
+    "test:boundary": {
+      "command": "npm run test:boundary",
+      "startedAt": "2026-09-21T03:44:15.536Z",
+      "finishedAt": "2026-09-21T03:44:17.698Z",
+      "wallTimeSeconds": 2.162,
+      "files": 7,
+      "titles": 145,
+      "passing": 145,
+      "pending": 0,
+      "failing": 0
+    },
+    "test:bridge-rail": {
+      "command": "npm run test:bridge-rail",
+      "notRun": "drives a live rail"
+    },
+    "test:chaos": {
+      "command": "npm run test:chaos",
+      "startedAt": "2026-09-21T03:44:17.701Z",
+      "finishedAt": "2026-09-21T03:44:18.916Z",
+      "wallTimeSeconds": 1.215,
+      "files": 12,
+      "titles": 80,
+      "passing": 79,
+      "pending": 0,
+      "failing": 1
+    },
+    "test:chaos:quick": {
+      "command": "npm run test:chaos:quick",
+      "startedAt": "2026-09-21T03:44:18.917Z",
+      "finishedAt": "2026-09-21T03:44:19.731Z",
+      "wallTimeSeconds": 0.814,
+      "files": 4,
+      "titles": 23,
+      "passing": 23,
+      "pending": 0,
+      "failing": 0
+    },
+    "test:codec": {
+      "command": "npm run test:codec",
+      "startedAt": "2026-09-21T03:44:19.731Z",
+      "finishedAt": "2026-09-21T03:44:20.713Z",
+      "wallTimeSeconds": 0.982,
+      "files": 2,
+      "titles": 19,
+      "passing": 18,
+      "pending": 0,
+      "failing": 1
+    },
+    "test:compaction": {
+      "command": "npm run test:compaction",
+      "notRun": "drives a live rail"
+    },
+    "test:contracts": {
+      "command": "npm run test:contracts",
+      "notRun": "drives a live rail"
+    },
+    "test:cpbridge": {
+      "command": "npm run test:cpbridge",
+      "notRun": "drives a live rail"
+    },
+    "test:e2e": {
+      "command": "npm run test:e2e",
+      "notRun": "drives a live rail"
+    },
+    "test:envelope": {
+      "command": "npm run test:envelope",
+      "notRun": "drives a live rail"
+    },
+    "test:federation": {
+      "command": "npm run test:federation",
+      "notRun": "drives a live rail"
+    },
+    "test:federation:all": {
+      "command": "npm run test:federation:all",
+      "notRun": "drives a live rail"
+    },
+    "test:federation:anchor-acceptance": {
+      "command": "npm run test:federation:anchor-acceptance",
+      "notRun": "drives a live rail"
+    },
+    "test:federation:anchor-election": {
+      "command": "npm run test:federation:anchor-election",
+      "notRun": "drives a live rail"
+    },
+    "test:federation:dex": {
+      "command": "npm run test:federation:dex",
+      "notRun": "drives a live rail"
+    },
+    "test:federation:llm:multi": {
+      "command": "npm run test:federation:llm:multi",
+      "notRun": "drives a live rail"
+    },
+    "test:federation:llm:outage": {
+      "command": "npm run test:federation:llm:outage",
+      "notRun": "drives a live rail"
+    },
+    "test:federation:nodeproof": {
+      "command": "npm run test:federation:nodeproof",
+      "notRun": "drives a live rail"
+    },
+    "test:federation:signer-wiring": {
+      "command": "npm run test:federation:signer-wiring",
+      "notRun": "drives a live rail"
+    },
+    "test:fuzz": {
+      "command": "npm run test:fuzz",
+      "startedAt": "2026-09-21T03:44:20.713Z",
+      "finishedAt": "2026-09-21T03:45:13.347Z",
+      "wallTimeSeconds": 52.634,
+      "files": 5,
+      "titles": 170,
+      "passing": 170,
+      "pending": 0,
+      "failing": 0
+    },
+    "test:fuzz:quick": {
+      "command": "npm run test:fuzz:quick",
+      "startedAt": "2026-09-21T03:45:13.348Z",
+      "finishedAt": "2026-09-21T03:45:55.411Z",
+      "wallTimeSeconds": 42.063,
+      "files": 5,
+      "titles": 170,
+      "passing": 170,
+      "pending": 0,
+      "failing": 0
+    },
+    "test:integration": {
+      "command": "npm run test:integration",
+      "notRun": "drives a live rail"
+    },
+    "test:integration:live": {
+      "command": "npm run test:integration:live",
+      "notRun": "drives a live rail"
+    },
+    "test:integration:stubbed": {
+      "command": "npm run test:integration:stubbed",
+      "notRun": "drives a live rail"
+    },
+    "test:mutate": {
+      "command": "npm run test:mutate",
+      "notRun": "not a Mocha command (runs npx)"
+    },
+    "test:mutate:dry-run": {
+      "command": "npm run test:mutate:dry-run",
+      "notRun": "not a Mocha command (runs npx)"
+    },
+    "test:mutate:integration": {
+      "command": "npm run test:mutate:integration",
+      "notRun": "not a Mocha command (runs npx)"
+    },
+    "test:parity": {
+      "command": "npm run test:parity",
+      "notRun": "drives a live rail"
+    },
+    "test:perf": {
+      "command": "npm run test:perf",
+      "notRun": "drives a live rail"
+    },
+    "test:perf:actions": {
+      "command": "npm run test:perf:actions",
+      "notRun": "drives a live rail"
+    },
+    "test:perf:budget": {
+      "command": "npm run test:perf:budget",
+      "notRun": "drives a live rail"
+    },
+    "test:perf:e2e": {
+      "command": "npm run test:perf:e2e",
+      "notRun": "drives a live rail"
+    },
+    "test:regression": {
+      "command": "npm run test:regression",
+      "startedAt": "2026-09-21T03:45:55.412Z",
+      "finishedAt": "2026-09-21T03:45:59.554Z",
+      "wallTimeSeconds": 4.142,
+      "files": 10,
+      "titles": 178,
+      "passing": 169,
+      "pending": 0,
+      "failing": 9
+    },
+    "test:regression:p0": {
+      "command": "npm run test:regression:p0",
+      "startedAt": "2026-09-21T03:45:59.557Z",
+      "finishedAt": "2026-09-21T03:46:01.660Z",
+      "wallTimeSeconds": 2.103,
+      "files": 7,
+      "titles": 138,
+      "passing": 129,
+      "pending": 0,
+      "failing": 9
+    },
+    "test:regression:p0p1": {
+      "command": "npm run test:regression:p0p1",
+      "startedAt": "2026-09-21T03:46:01.664Z",
+      "finishedAt": "2026-09-21T03:46:03.786Z",
+      "wallTimeSeconds": 2.122,
+      "files": 9,
+      "titles": 158,
+      "passing": 149,
+      "pending": 0,
+      "failing": 9
+    },
+    "test:rollcall": {
+      "command": "npm run test:rollcall",
+      "notRun": "drives a live rail"
+    },
+    "test:sdk": {
+      "command": "npm run test:sdk",
+      "notRun": "drives a live rail"
+    },
+    "test:sdk:attestation": {
+      "command": "npm run test:sdk:attestation",
+      "notRun": "drives a live rail"
+    },
+    "test:sdk:bet": {
+      "command": "npm run test:sdk:bet",
+      "notRun": "drives a live rail"
+    },
+    "test:sdk:bet-expiry": {
+      "command": "npm run test:sdk:bet-expiry",
+      "notRun": "drives a live rail"
+    },
+    "test:sdk:bet-latch": {
+      "command": "npm run test:sdk:bet-latch",
+      "notRun": "drives a live rail"
+    },
+    "test:sdk:bet-parity": {
+      "command": "npm run test:sdk:bet-parity",
+      "notRun": "drives a live rail"
+    },
+    "test:sdk:bet-reorg": {
+      "command": "npm run test:sdk:bet-reorg",
+      "notRun": "drives a live rail"
+    },
+    "test:sdk:bet-ws": {
+      "command": "npm run test:sdk:bet-ws",
+      "notRun": "drives a live rail"
+    },
+    "test:sdk:chunked": {
+      "command": "npm run test:sdk:chunked",
+      "notRun": "drives a live rail"
+    },
+    "test:sdk:chunked-clients": {
+      "command": "npm run test:sdk:chunked-clients",
+      "notRun": "drives a live rail"
+    },
+    "test:sdk:chunked-deferred": {
+      "command": "npm run test:sdk:chunked-deferred",
+      "notRun": "drives a live rail"
+    },
+    "test:sdk:chunked-reorg": {
+      "command": "npm run test:sdk:chunked-reorg",
+      "notRun": "drives a live rail"
+    },
+    "test:sdk:decoder": {
+      "command": "npm run test:sdk:decoder",
+      "notRun": "drives a live rail"
+    },
+    "test:sdk:dex-reorg": {
+      "command": "npm run test:sdk:dex-reorg",
+      "notRun": "drives a live rail"
+    },
+    "test:sdk:mcp": {
+      "command": "npm run test:sdk:mcp",
+      "notRun": "drives a live rail"
+    },
+    "test:sdk:multileg": {
+      "command": "npm run test:sdk:multileg",
+      "notRun": "drives a live rail"
+    },
+    "test:sdk:tickerid": {
+      "command": "npm run test:sdk:tickerid",
+      "notRun": "drives a live rail"
+    },
+    "test:sdk:vote": {
+      "command": "npm run test:sdk:vote",
+      "notRun": "drives a live rail"
+    },
+    "test:sdk:vote-reorg": {
+      "command": "npm run test:sdk:vote-reorg",
+      "notRun": "drives a live rail"
+    },
+    "test:sdk:x402": {
+      "command": "npm run test:sdk:x402",
+      "notRun": "drives a live rail"
+    },
+    "test:sdk:xcall-reorg": {
+      "command": "npm run test:sdk:xcall-reorg",
+      "notRun": "drives a live rail"
+    },
+    "test:security": {
+      "command": "npm run test:security",
+      "notRun": "drives a live rail"
+    },
+    "test:smoke": {
+      "command": "npm run test:smoke",
+      "notRun": "drives a live rail"
+    },
+    "test:unit": {
+      "command": "npm run test:unit",
+      "startedAt": "2026-09-21T03:46:03.789Z",
+      "finishedAt": "2026-09-21T03:46:42.384Z",
+      "wallTimeSeconds": 38.595,
+      "files": 114,
+      "titles": 1926,
+      "passing": 1912,
+      "pending": 12,
+      "failing": 2
+    },
+    "test:vm": {
+      "command": "npm run test:vm",
+      "notRun": "drives a live rail"
+    }
+  }
+}
