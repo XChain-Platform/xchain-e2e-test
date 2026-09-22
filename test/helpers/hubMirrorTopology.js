@@ -471,18 +471,71 @@ async function resolveDriverPriceTarget(opts){
     return Object.assign({}, envTarget, { source: 'env model (HUB_DB_NAME)' })
 }
 
+// JSON-RPC 'Method not found' (see xchain-indexer's express-json-rpc-router). An
+// indexer that answers this for a method every current build serves is not the
+// coin's real indexer at all: on the regtest venue behind this driver, the DOGE
+// indexer publishes on 3004 while every caller here still dials the conventional
+// 3124, and whatever answers there instead - measured 2026-09-08 as the reachable
+// BTC indexer sharing the docker network - has never heard of DOGE's method set
+// and refuses it exactly this way rather than by refusing the connection. Only
+// this code means 'wrong server, keep looking'; any other error (a domain
+// rejection, an auth failure) comes from the right server and is the final answer.
+const RPC_METHOD_NOT_FOUND = -32601
+
+// Candidate JSON-RPC bases to try for the coin indexer, most-explicit (the
+// caller's own URL) first. A caller on the conventional 3124 gets 3004 added as
+// a fallback, since that is the one venue-specific port swap known to matter;
+// every other URL resolves to itself alone.
+function indexerRpcUrls(url){
+    let primary = String(url || '').replace(/\/+$/, '')
+    if (!primary) return []
+    let out = [primary]
+    try {
+        let parsed = new URL(primary)
+        if (parsed.port === '3124'){
+            parsed.port = '3004'
+            let fallback = parsed.toString().replace(/\/+$/, '')
+            if (fallback !== primary) out.push(fallback)
+        }
+    } catch (e){
+        // Let axios report the original malformed URL with its normal diagnostic.
+    }
+    return out
+}
+
 // A connector shaped like XChainIndexerConnector for a driver that has only a URL.
 // Returns null rather than throwing on a missing URL, so a driver that cannot reach
 // its indexer keeps the env model instead of failing to start.
 function rpcConnector(url){
     if (!url) return null
     let axios = require('axios')
+    let urls = indexerRpcUrls(url)
     return { call: async (method, params) => {
-        let res = await axios.post(url.replace(/\/+$/, '') + '/api',
-            { jsonrpc: '2.0', method: method, params: params || {}, id: 1 }, { timeout: 8000 })
-        if (res.data && res.data.error)
-            return { error: (res.data.error.message || JSON.stringify(res.data.error)) }
-        return res.data ? res.data.result : null
+        let lastError = null
+        for (let i = 0; i < urls.length; i++){
+            let base = urls[i]
+            let isLast = i === urls.length - 1
+            try {
+                let res = await axios.post(base.replace(/\/+$/, '') + '/api',
+                    { jsonrpc: '2.0', method: method, params: params || {}, id: 1 }, { timeout: 8000 })
+                if (res.data && res.data.error){
+                    // A reachable indexer that simply does not know this method is not
+                    // this coin's indexer; try the next candidate rather than reporting
+                    // its refusal as the answer. Any other error came from a server that
+                    // DOES know the method, which proves it is the right one.
+                    if (res.data.error.code === RPC_METHOD_NOT_FOUND && !isLast) continue
+                    return { error: (res.data.error.message || JSON.stringify(res.data.error)) }
+                }
+                return res.data ? res.data.result : null
+            } catch (e){
+                lastError = e
+                // An HTTP response proves the configured endpoint is live. Its error
+                // belongs to that service and must not be hidden by trying another port.
+                if (e && e.response) throw e
+                if (isLast) throw e
+            }
+        }
+        throw lastError
     } }
 }
 
