@@ -66,7 +66,14 @@ describe('BF5: the flag day, one venue, two rules, one row bound at two differen
     after(async function () {
         // A case that failed while the chain was held must not leave the miner paused.
         await drive.releaseChain(ctx.btc)
-        if (ctx.venue) await ctx.venue.stop()
+        if (ctx.venue) {
+            // Printed unconditionally, before stop() kills both indexer processes and removes
+            // the venue's working directory: a red that never touched the one assertion above
+            // that carries a logTail must not lose the only copy of either node's log.
+            console.log('BF5 indexer ' + ARMED + ' log tail at teardown:\n' + ctx.venue.logTail('indexer' + ARMED))
+            console.log('BF5 indexer ' + INERT + ' log tail at teardown:\n' + ctx.venue.logTail('indexer' + INERT))
+            await ctx.venue.stop()
+        }
     })
 
     it('seeds the one row whose two rules select different blocks', async function () {
@@ -116,8 +123,10 @@ async function assertDivergence (ctx) {
     assert.ok(armed.ok, 'the armed node did not commit B inside five minutes: ' + JSON.stringify(armed.s) + '\n' + ctx.venue.logTail('indexer' + ARMED))
     assert.ok(armed.s.heights && Object.keys(armed.s.heights).length > 0, 'the hub published no heights map; arming bound on nothing')
     const inertNow = await drive.statusSnapshot(ctx.venue, INERT)
-    assert.strictEqual(inertNow.height, ctx.B - 1, 'the inert node committed the future-stamped block early: ' + JSON.stringify(inertNow))
-    assert.strictEqual(inertNow.stallClass, 'future_block_wait', 'the inert node reports ' + inertNow.stallClass + ', not future_block_wait')
+    assert.strictEqual(inertNow.height, ctx.B - 1, 'the inert node committed the future-stamped block early: ' + JSON.stringify(inertNow) +
+        '\n' + ctx.venue.logTail('indexer' + INERT))
+    assert.strictEqual(inertNow.stallClass, 'future_block_wait', 'the inert node reports ' + inertNow.stallClass + ', not future_block_wait' +
+        '\n' + ctx.venue.logTail('indexer' + INERT))
     const t = ctx.blocks.B.blockTime
     const armedSet = await drive.mirrorReadableSet(ctx.venue, ARMED, TABLE, ctx.coin, ctx.B, t)
     assert.deepStrictEqual(armedSet, [], 'the armed node reads the row at B, but its admission height is B + 2')
