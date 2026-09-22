@@ -30,10 +30,23 @@ function repositorySource (buildHub, explicitSource) {
         return source
     }
     if (isCheckout(buildHub)) return buildHub
+    return upstreamRepository(buildHub)
+}
+
+function upstreamRepository (buildHub) {
     const pkg = JSON.parse(fs.readFileSync(path.join(buildHub, 'package.json'), 'utf8'))
     const repository = typeof pkg.repository === 'string' ? pkg.repository : pkg.repository && pkg.repository.url
     assert.ok(repository, buildHub + '/package.json has no repository source')
     return repository
+}
+
+function hasCommit (repo, revision) {
+    try {
+        git(['-C', repo, 'cat-file', '-e', revision + '^{commit}'])
+        return true
+    } catch (_) {
+        return false
+    }
 }
 
 function targetPaths (workspace, stack) {
@@ -54,6 +67,11 @@ function createMixedCheckout (config) {
     fs.mkdirSync(paths.parent, { recursive: true })
     try {
         git(['clone', '--no-checkout', '--quiet', source, paths.hub])
+        // A shallow source (the CI venue's depth-1 sibling clone) lacks the pinned
+        // commit, so fetch that one commit from the hub's declared upstream.
+        if (!hasCommit(paths.hub, MIXED_HUB_REVISION)) {
+            git(['-C', paths.hub, 'fetch', '--quiet', '--depth', '1', upstreamRepository(buildHub), MIXED_HUB_REVISION])
+        }
         git(['-C', paths.hub, 'checkout', '--detach', '--quiet', MIXED_HUB_REVISION])
         const head = git(['-C', paths.hub, 'rev-parse', 'HEAD'])
         assert.strictEqual(head, MIXED_HUB_REVISION, 'mixed hub checkout resolved to the wrong revision')
