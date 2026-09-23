@@ -381,3 +381,6 @@ registerOracleTest('the leader ran a signing round, it EXPIRED SHORT, and batchS
         'a silenced peer co-signed anyway, so the federation was never below signing quorum and the ' +
         'timeout this drill observed was caused by something else');
 });
+
+// Run the split parts after this entry provides their shared setup; the stubbed lane ignores their directory.
+require('./oracleBatchQuorum.integration.test/01_with_quorum_restored_the_same_window_published.test');

@@ -186,3 +186,6 @@ describe('MultiValidatorHub: oracle-PBFT byzantine fault tolerance (C.2)', funct
     });
 
 });
+
+// Run the split parts in this suite's lane; the stubbed lane ignores their directory.
+require('./multiHubOracleByzantine.integration.test/02_safety_two_validators_down.test');
