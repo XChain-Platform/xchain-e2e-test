@@ -122,10 +122,12 @@ async function assertDivergence (ctx) {
     ctx.committedAt[ARMED] = Date.now() - started
     assert.ok(armed.ok, 'the armed node did not commit B inside five minutes: ' + JSON.stringify(armed.s) + '\n' + ctx.venue.logTail('indexer' + ARMED))
     assert.ok(armed.s.heights && Object.keys(armed.s.heights).length > 0, 'the hub published no heights map; arming bound on nothing')
-    const inertNow = await drive.statusSnapshot(ctx.venue, INERT)
-    assert.strictEqual(inertNow.height, ctx.B - 1, 'the inert node committed the future-stamped block early: ' + JSON.stringify(inertNow) +
+    // A one-shot statusSnapshot read here races indexer 188b08af's per-pass stall reset: the
+    // node can report between passes with the prior stallClass already cleared. Poll instead.
+    const inertNow = await drive.waitForStatus(ctx.venue, INERT, (s) => s.stallClass === 'future_block_wait', 90 * 1000)
+    assert.ok(inertNow.ok, 'the inert node never reported future_block_wait: ' + JSON.stringify(inertNow.s) +
         '\n' + ctx.venue.logTail('indexer' + INERT))
-    assert.strictEqual(inertNow.stallClass, 'future_block_wait', 'the inert node reports ' + inertNow.stallClass + ', not future_block_wait' +
+    assert.strictEqual(inertNow.s.height, ctx.B - 1, 'the inert node committed the future-stamped block early: ' + JSON.stringify(inertNow.s) +
         '\n' + ctx.venue.logTail('indexer' + INERT))
     const t = ctx.blocks.B.blockTime
     const armedSet = await drive.mirrorReadableSet(ctx.venue, ARMED, TABLE, ctx.coin, ctx.B, t)
