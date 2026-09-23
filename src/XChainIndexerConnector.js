@@ -19,6 +19,8 @@
  ********************************************************************/
 
 const axios = require('axios');
+const { getLogger } = require('./lib/logger');
+const logger = getLogger();
 
 // What the SERVICE said, when it said anything at all.
 // The indexer refuses a gated call with a non-2xx status whose body is still a
@@ -60,8 +62,8 @@ class XChainIndexerConnector {
             // A probe keeps its boolean sentinel: callers poll on false. Name the
             // refusal in the log so a gated port is not read as a dead one.
             const refusal = serviceRefusal(err)
-            if(refusal) console.warn('Indexer ' + this.url + ' refused ping: ' + refusal)
-            else console.log(err)
+            if(refusal) logger.warn('Indexer ' + this.url + ' refused ping: ' + refusal)
+            else logger.info(err)
             return false
         }
 
@@ -89,8 +91,8 @@ class XChainIndexerConnector {
             // polls it in a loop and must ride out a restarting indexer's non-2xx
             // window rather than abort the run. Name the refusal instead.
             const refusal = serviceRefusal(err)
-            if(refusal) console.warn('Indexer ' + this.url + ' refused health: ' + refusal)
-            else console.log(err)
+            if(refusal) logger.warn('Indexer ' + this.url + ' refused health: ' + refusal)
+            else logger.info(err)
             return null
         }
 
@@ -137,7 +139,7 @@ class XChainIndexerConnector {
             // assertion that fired instead never named authentication.
             const refusal = serviceRefusal(err)
             if(refusal) throw new Error('Indexer refused ' + method + ': ' + refusal)
-            console.log(err)
+            logger.info(err)
             return null
         }
         if (response.data && response.data.error) {

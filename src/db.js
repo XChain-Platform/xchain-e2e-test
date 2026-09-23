@@ -30,6 +30,9 @@
 // order-independent: it only has to happen before the first `new Database()`.
 function mariadbDriver(){ return require('mariadb'); }
 
+const { getLogger } = require('./lib/logger');
+const logger = getLogger();
+
 // Parses an integer-valued tunable from an env var, falling back to `def`
 // only when the var is unset/empty/non-numeric. Plain `parseInt(x) || def`
 // swallows an explicit "0" (0 is falsy), which silently reinstates a wait
@@ -164,7 +167,7 @@ class Database {
                 const fatal   = this._isFatalConnectError(e);
                 const spent   = attempts >= this.CONNECT_MAX_ATTEMPTS || Date.now() >= deadline;
                 if (fatal || spent) break;
-                console.log("Can't connect to mariadb at " + this._target()
+                logger.info("Can't connect to mariadb at " + this._target()
                     + " (attempt " + attempts + "/" + this.CONNECT_MAX_ATTEMPTS + "): "
                     + this._errText(lastError) + ". Trying again...");
                 await this.sleep(this.CONNECT_RETRY_MS);
@@ -842,11 +845,11 @@ class Database {
                     if (itemsClone.length == 0){
                         return listRow
                     } else {
-                        console.log("ERROR! List items don't match with the items in the database")
+                        logger.info("ERROR! List items don't match with the items in the database")
                         return null
                     }
                 } else {
-                    console.log("ERROR! List items don't have the same length as the items in the database")
+                    logger.info("ERROR! List items don't have the same length as the items in the database")
                     return null
                 }
             } catch (err) {
@@ -874,11 +877,11 @@ class Database {
             if (rows.length > 0){
                 listType = parseInt(rows[0]["type"])
             } else {
-                console.log("ERROR! Couldn't get the type of a list")
-                return null 
+                logger.info("ERROR! Couldn't get the type of a list")
+                return null
             }
         } catch (err) {
-            console.log(err)
+            logger.info(err)
             return null
         } finally {
             await connection.release()
@@ -938,7 +941,7 @@ class Database {
             }
         }
         
-        console.log("ERROR: there is no list with action index "+listActionIndex)
+        logger.info("ERROR: there is no list with action index "+listActionIndex)
         return null
     }
     
@@ -1351,7 +1354,7 @@ class Database {
                     return row
                 }
             } catch(err) {
-                console.log(err)
+                logger.info(err)
             }
             await this.sleep(1000)
 
@@ -1380,7 +1383,7 @@ class Database {
             if (behind || writing){
                 extensions++
                 deadline = Date.now() + timeMax
-                console.log(label + ': '
+                logger.info(label + ': '
                     + (behind
                         ? 'indexer is ' + lastLag + ' blocks behind the chain tip'
                         : 'indexer is still writing action rows (index ' + writeMark + ')')
@@ -1407,7 +1410,7 @@ class Database {
         // and the write signal says whether rows were still landing at give-up time,
         // which separates "the stack is busy and we ran out of budget" from "the
         // stack was idle and the row is genuinely absent".
-        console.log(label + ': GAVE UP after ' + (Date.now() - startMs) + 'ms'
+        logger.info(label + ': GAVE UP after ' + (Date.now() - startMs) + 'ms'
             + ' (' + polls + ' polls, ' + extensions + '/' + this.WAIT_MAX_EXTENSIONS + ' extensions, '
             + 'timeMax ' + timeMax + 'ms, '
             + (!eligible
@@ -1476,7 +1479,7 @@ class Database {
     _warnProbeFailed(err){
         if (this._probeWarned) return
         this._probeWarned = true
-        console.log('_pipelineProgress: probe unavailable (' + (err && err.message ? err.message : err) + '); '
+        logger.info('_pipelineProgress: probe unavailable (' + (err && err.message ? err.message : err) + '); '
             + 'waits fall back to the fixed deadline')
     }
 
