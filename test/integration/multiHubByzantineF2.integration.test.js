@@ -50,9 +50,7 @@ const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedStakeSnapshot }    = require('../helpers/seededStakeSnapshot');
 const { forceCountModeQuorum } = require('../helpers/forceCountModeQuorum');
 const { silenceValidator, forgedPrePrepare } = require('../helpers/byzantineFaults');
-const { waitForMesh, waitForConfigEverywhere } = require('../helpers/consensusWait');
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const { waitForMesh, waitForConfigEverywhere, assertNeverApplied } = require('../helpers/consensusWait');
 
 // The leader for the next sequence (all hubs agree on the same sorted set + seq).
 function findLeader(mvh) {
@@ -193,13 +191,13 @@ function byzantineScaleSuite({ count, quorum, faults, basePort, peerWaitMs }) {
             const restores = victims.map((v) => silenceValidator(v));
             try {
                 // Quorum is unreachable, so addParametersFromJson never resolves on a
-                // COMMIT quorum. Bound the wait and assert the change applied NOWHERE.
-                await Promise.race([
-                    leader.addParametersFromJson(config).catch(() => {}),
-                    sleep(STALL_WAIT_MS)
-                ]);
-                await sleep(1000);
+                // COMMIT quorum. Fire and forget, then watch that the change applies NOWHERE.
+                leader.addParametersFromJson(config).catch(() => {});
+                await assertNeverApplied(mvh.hubs,
+                    { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: VALUE },
+                    { windowMs: STALL_WAIT_MS + 1000 });
 
+                // Re-read without the watcher's swallowed read errors, so a dead hub DB fails loud.
                 for (let i = 0; i < mvh.hubs.length; i++) {
                     const cfg = await mvh.hubs[i].db.getConfig(COIN, NET, MODULE);
                     assert.notStrictEqual(cfg.GAS_PRICE, VALUE,
@@ -227,7 +225,9 @@ function byzantineScaleSuite({ count, quorum, faults, basePort, peerWaitMs }) {
             assert.ok(!target.consensus.pendingProposals.has(seq),
                 'forged PRE_PREPARE created a pending proposal (digest check failed)');
 
-            await sleep(500);
+            await assertNeverApplied([target],
+                { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: forgedValue },
+                { windowMs: 500 });
             const after = await target.db.getConfig(COIN, NET, MODULE);
             assert.notStrictEqual(after.GAS_PRICE, forgedValue, 'forged config was applied (safety violated)');
         });
