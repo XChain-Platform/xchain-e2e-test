@@ -135,7 +135,7 @@ describe('gasHelper', () => {
         })
     })
 
-    // Run 35829816064: the litecoin leg finished 8 tests in six hours because every
+    // A representative nightly run: the litecoin leg finished 8 tests in six hours because every
     // funded address paid a full relay margin for its own bridge. The reservoir
     // bridges once per chain per process and pays every later address by SEND.
     describe('gas reservoir', () => {

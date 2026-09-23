@@ -52,7 +52,7 @@ const GAS_UNIT_SCALE = 10n ** 8n
 // Bridged gas held on a non-BTC chain for the rest of this process, handed out by a
 // local SEND. Bridging once per funded address cost a full relay margin each time
 // (LTC 600 s, DOGE 240 s, plus the BTC MINT and lock), and nearly every funded
-// address takes gas: on the 2026-09-23 nightly (run 35829816064) the lock-to-credit
+// address takes gas: on a representative nightly run the lock-to-credit
 // leg alone averaged 518 s on litecoin and 404 s on dogecoin, per address, where
 // bitcoin's faucet is a one-block local MINT. A SEND from the reservoir is one block.
 // Sized to cover a full action suite in one bridge: the 111 literal call sites ask

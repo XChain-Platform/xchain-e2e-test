@@ -63,8 +63,8 @@ describe('XChainExplorerConnector', function () {
         // requires this ping before any action test runs, and the suite runs
         // under `mocha --timeout 0`, so nothing else in this stack would ever
         // time the call out: a stuck explorer silently stalled the whole CI
-        // job (xchain-node run 35440776385, LTC/DOGE legs, 2026-09-19) instead
-        // of failing it fast the way the known "answers 503" shape does.
+        // job (observed on the LTC/DOGE legs) instead of failing it fast the
+        // way the known "answers 503" shape does.
         it('bounds the readiness probe with a request timeout', async function () {
             axiosPostStub.resolves({ data: { result: 'pong' } });
             await connector.ping();
