@@ -57,8 +57,44 @@ function seedsThroughMirror(){
     return !topology.sameTarget(resolveParams(), indexerReadParams())
 }
 
+// Fixture rows take their PRIMARY KEY from here up, never from AUTO_INCREMENT.
+//
+// On an indexer with hub_db_sync, price_snapshots is a mirror that keeps the HUB's
+// row ids (row_apply strips the wire id only for capability_snapshots and
+// attestation_responses), and its upsert is ON DUPLICATE KEY UPDATE with round_number
+// and coin_pair left out of the update. A fixture inserted with AUTO_INCREMENT takes
+// MAX(id)+1, which is exactly the id the hub's next finalized round arrives with. That
+// row then lands on the fixture's primary key and rewrites its price, block_timestamp
+// and reference_block in place while the fixture keeps its sentinel round and its
+// pair: the round still wins every getLatestPrice read, now carrying some other
+// pair's live price. That was MT3 run 35925455269 (a DOGE ISSUE quoted at 17.5 DOGE)
+// and the LTC DEPLOY that owed 7.8 LTC, each seconds after a hub round finalized, and
+// it lasted until the next re-seed cleared the pair.
+//
+// A hub writes about 37 rows per ten-minute round, so 1e12 is out of reach for the
+// life of any venue. price_snapshots is a FULL_REPAGE mirror table, whose cursor never
+// reads the local MAX(id), so ids above the hub's ceiling do not move the mirror's
+// drain or its rebuilt-hub fence.
+const FIXTURE_ID_FLOOR = 1000000000000
+
+// Insert one finalized fixture row at the next id at or above FIXTURE_ID_FLOOR.
+// Arguments: [FIXTURE_ID_FLOOR, round_number, coin_pair, price, reference_block,
+// block_timestamp]. There is no upsert: a row already at this (round_number, coin_pair)
+// may sit on a hub-reachable id from before this floor existed, so callers delete it first.
+const FIXTURE_INSERT_SQL = `INSERT INTO price_snapshots
+    (id, round_number, coin_pair, price, reference_block, reference_chain,
+     block_timestamp, validator_count, consensus_round, consensus_proof, status)
+    SELECT GREATEST(COALESCE(MAX(id), 0) + 1, ?), ?, ?, ?, ?, 'BTC', ?, 1, 1, '[]', 'finalized'
+      FROM price_snapshots`
+
+const FIXTURE_DELETE_SQL = 'DELETE FROM price_snapshots WHERE round_number = ? AND coin_pair = ?'
+
 module.exports = {
     seedsThroughMirror,
+
+    FIXTURE_ID_FLOOR,
+    FIXTURE_INSERT_SQL,
+    FIXTURE_DELETE_SQL,
 
     // Exposed for tests: which database this helper writes to and which one
     // settlement reads. They must be equal in every topology (see resolveParams).
@@ -260,16 +296,11 @@ module.exports = {
         let params = resolveParams()
         let conn = await mariadb.createConnection(params)
         try {
-            let query = `INSERT INTO price_snapshots
-                (round_number, coin_pair, price, reference_block, reference_chain,
-                 block_timestamp, validator_count, consensus_round, consensus_proof, status)
-                VALUES (?, ?, ?, ?, 'BTC', ?, 1, 1, '[]', 'finalized')
-                ON DUPLICATE KEY UPDATE
-                 price = VALUES(price),
-                 reference_block = VALUES(reference_block),
-                 block_timestamp = VALUES(block_timestamp),
-                 status = 'finalized'`
-            await conn.query(query, [roundNumber, coinPair, price, referenceBlock || 0, blockTimestamp])
+            // Delete, then insert above the hub's id space (see FIXTURE_ID_FLOOR). This
+            // replaces an upsert, so a re-seed of the same round still replaces its row.
+            await conn.query(FIXTURE_DELETE_SQL, [roundNumber, coinPair])
+            await conn.query(FIXTURE_INSERT_SQL,
+                [FIXTURE_ID_FLOOR, roundNumber, coinPair, price, referenceBlock || 0, blockTimestamp])
         } finally {
             await conn.end().catch(() => {})
         }

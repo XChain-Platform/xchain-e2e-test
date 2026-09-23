@@ -505,7 +505,7 @@ describe('nativeFeeHelper.seedGlobalPrices hub seeding', () => {
 describe('nativeFeeHelper.nativeFeeSats', () => {
     const SNAPSHOT_PATH = require.resolve('../../helpers/priceSnapshotHelper')
     let savedSnapshotModule, savedCoin, savedNetwork, savedConnector, savedLog
-    let calls, seeded, schedules, quote, chainTime
+    let calls, seeded, schedules, quote, chainTime, reseeds, savedTracker
 
     const SEED       = { xchainUsd: '2.00000000', coinUsd: '100000.00000000', oracleRound: 888100012 }
     const REPRICED   = { xchainUsd: '2.00000000', coinUsd: '1000.00000000',   oracleRound: 997710002 }
@@ -518,7 +518,9 @@ describe('nativeFeeHelper.nativeFeeSats', () => {
             calls.push({ method, params })
             if (method === 'feeschedule') {
                 const n = calls.filter(c => c.method === 'feeschedule').length
-                const p = schedules[Math.min(n, schedules.length) - 1]
+                // A function is a stateful view: it sees how many re-seeds have happened.
+                const p = (typeof schedules === 'function') ? schedules(reseeds)
+                    : schedules[Math.min(n, schedules.length) - 1]
                 return {
                     nativeFeeEnabled: true, feeDestination: 'DFeeDest111',
                     prices: p ? Object.assign({ available: true }, p) : { available: false, error: 'no current oracle price for DOGE/USD' }
@@ -541,12 +543,16 @@ describe('nativeFeeHelper.nativeFeeSats', () => {
         global.NETWORK = 'regtest'
         calls = []
         seeded = []
+        reseeds = 0
         quote = null
+        savedTracker = global.utxoTrackerConnector
+        delete global.utxoTrackerConnector
         chainTime = Math.floor(Date.now() / 1000) + 60
         require.cache[SNAPSHOT_PATH] = { id: SNAPSHOT_PATH, filename: SNAPSHOT_PATH, loaded: true, exports: {
             isAvailable: async () => true,
             latestBlockTime: async () => chainTime,
-            clearPair: async () => {},
+            // One seedGlobalPrices clears XCHAIN/USD exactly once, so this counts re-seeds.
+            clearPair: async (pair) => { if (pair === 'XCHAIN/USD') reseeds++ },
             seedSnapshot: async (row) => { seeded.push(row) }
         }}
         global.indexerConnector = connector()
@@ -561,10 +567,16 @@ describe('nativeFeeHelper.nativeFeeSats', () => {
         global.COIN_CODE = savedCoin
         global.NETWORK = savedNetwork
         global.indexerConnector = savedConnector
+        if (savedTracker === undefined) delete global.utxoTrackerConnector
+        else global.utxoTrackerConnector = savedTracker
         delete require.cache[HELPER_PATH]
     })
 
     const quotes = () => calls.filter(c => c.method === 'feequote')
+    // A sender the tracker reports as holding `sats`.
+    const fundSender = (sats) => {
+        global.utxoTrackerConnector = { getUtxosFromAddress: async () => ({ utxos: [{ value: sats }] }) }
+    }
 
     it('pays the flat fee at the seeded pair and asks for no quote', async () => {
         schedules = [SEED]
@@ -572,6 +584,82 @@ describe('nativeFeeHelper.nativeFeeSats', () => {
         assert.strictEqual(await helper.nativeFeeSats('ISSUE|0|TICK|1000|100|0|d|10', 'DSrc111'), helper.FLAT_FEE_SATS)
         assert.strictEqual(quotes().length, 0, 'the seed path must stay as cheap as it was')
         assert.strictEqual(seeded.length, 0, 'a visible seed must not be re-seeded')
+        assert.strictEqual(reseeds, 0)
+    })
+
+    it('stays flat on a steady seed across many actions, with no re-seed and no quote', async () => {
+        schedules = [SEED]
+        const helper = freshHelper()
+        for (let i = 0; i < 5; i++)
+            assert.strictEqual(await helper.nativeFeeSats('ISSUE|0|T' + i + '|1|1|0|d|1', 'DSrc111'), helper.FLAT_FEE_SATS)
+        assert.strictEqual(reseeds, 0)
+        assert.strictEqual(quotes().length, 0)
+    })
+
+    // MT3 run 35925455269 (DOGE shard 2). A hub round finalized seconds after a seed, and the
+    // mirror wrote its rows onto the seed rows' primary keys: the coin row kept the seed's own
+    // round 888100012 but now carried a live price. That round cleared the fixture floor, so
+    // the old check read it as a suite's re-price, never re-seeded, and quoted 17.5 DOGE plus
+    // headroom against a 1-DOGE sender on all eight controller_policy cases.
+    it('re-seeds once when an oracle-round price sits under the seed\'s own round, then pays flat', async () => {
+        const OVERWRITTEN = { xchainUsd: '2.00000000', coinUsd: '0.11414000', oracleRound: 888100012 }
+        schedules = (n) => (n === 0 ? OVERWRITTEN : SEED)
+        quote = { supported: true, valid: true, requiredFeeSats: 1751730805 }
+        const helper = freshHelper()
+        assert.strictEqual(await helper.nativeFeeSats('ISSUE|0|TICK|1000|100|0|d|10', 'DSrc111'), helper.FLAT_FEE_SATS)
+        assert.strictEqual(reseeds, 1, 'exactly one re-seed')
+        assert.strictEqual(quotes().length, 0, 'back on the seed, the flat fee needs no quote')
+    })
+
+    it('forces one re-seed when a fixture-round quote exceeds what the sender holds, then pays flat', async () => {
+        // A round above the floor that no helper here owns: the displaced check lets it
+        // stand, but a fee the sender cannot pay is never a suite's intended re-price.
+        const UNKNOWN_FIXTURE = { xchainUsd: '2.00000000', coinUsd: '0.11414000', oracleRound: 990500 }
+        schedules = (n) => (n === 0 ? UNKNOWN_FIXTURE : SEED)
+        quote = { supported: true, valid: true, requiredFeeSats: 1751730805,
+                  coinUsdPrice: '0.11414000', xchainUsdPrice: '2.00000000', oracleRound: 990500 }
+        const helper = freshHelper()
+        assert.strictEqual(await helper.nativeFeeSats('ISSUE|0|TICK|1000|100|0|d|10', 'DSrc111'), helper.FLAT_FEE_SATS)
+        assert.strictEqual(reseeds, 1, 'one forced re-seed, then the flat fee at the seed')
+        assert.strictEqual(quotes().length, 1)
+    })
+
+    it('forces the re-seed even inside the displaced rate-limit window', async () => {
+        const OVERWRITTEN = { xchainUsd: '2.00000000', coinUsd: '0.11414000', oracleRound: 888100012 }
+        let flip = 0
+        schedules = (n) => (n === flip ? OVERWRITTEN : SEED)
+        const helper = freshHelper()
+        await helper.nativeFeeSats('SEND|0|T|1|x|', 'DSrc111')       // takes the rate-limited re-seed
+        assert.strictEqual(reseeds, 1)
+        flip = 1                                                     // the next round overwrites again
+        quote = { supported: true, valid: true, requiredFeeSats: 1751730805 }
+        assert.strictEqual(await helper.nativeFeeSats('ISSUE|0|T|1|1|0|d|1', 'DSrc111'), helper.FLAT_FEE_SATS)
+        assert.strictEqual(reseeds, 2, 'an over-flat displaced quote re-seeds regardless of the window')
+    })
+
+    it('refuses loudly, naming the prices it saw, when the fee stays above the funded balance', async () => {
+        const OVERWRITTEN = { xchainUsd: '2.00000000', coinUsd: '0.11414000', oracleRound: 888100012 }
+        schedules = [OVERWRITTEN]
+        quote = { supported: true, valid: true, requiredFeeSats: 1751730805,
+                  coinUsdPrice: '0.11414000', xchainUsdPrice: '2.00000000', oracleRound: 888100012 }
+        const helper = freshHelper()
+        await assert.rejects(helper.nativeFeeSats('ISSUE|0|T|1|1|0|d|1', 'DSrc111'), (err) => {
+            assert.match(err.message, /refusing a 1926903886-sat native fee output for ISSUE from DSrc111/)
+            assert.match(err.message, /holds 100000000 sats/)
+            assert.match(err.message, /feeschedule DOGE\/USD=0\.11414 XCHAIN\/USD=2 round 888100012/)
+            assert.match(err.message, /feequote DOGE\/USD=0\.11414 XCHAIN\/USD=2 round 888100012/)
+            assert.match(err.message, /The seed is XCHAIN\/USD=2\.00000000 DOGE\/USD=100000\.00000000/)
+            return true
+        })
+        assert.strictEqual(reseeds, 1, 'one re-seed before refusing, not one per sizing pass')
+    })
+
+    it('refuses against the tracker\'s balance for the sender when it can read one', async () => {
+        schedules = [REPRICED]
+        quote = { supported: true, valid: true, requiredFeeSats: 200000 }
+        fundSender(100000)
+        const helper = freshHelper()
+        await assert.rejects(helper.nativeFeeSats('ISSUE|0|T|1|1|0|d|1', 'DSrc111'), /holds 100000 sats/)
     })
 
     it('sizes the fee to the action\'s own quote, with headroom, under a re-priced fixture', async () => {
@@ -630,16 +718,24 @@ describe('nativeFeeHelper.nativeFeeSats', () => {
         assert(seeded.length > 0, 'an unpriceable indexer must get the seed back')
     })
 
-    it('rate-limits the displaced re-seed, and still prices a live round it could not displace', async () => {
+    it('rate-limits the displaced re-seed for an action that stays at the flat fee', async () => {
+        schedules = [LIVE_HUB]
+        quote = { supported: true, valid: true, feeExempt: true, requiredFeeSats: 0 }
+        const helper = freshHelper()
+        assert.strictEqual(await helper.nativeFeeSats('SEND|0|T|1|x|', 'DSrc111'), helper.FLAT_FEE_SATS)
+        assert.strictEqual(reseeds, 1)
+        await helper.nativeFeeSats('SEND|0|T|1|x|', 'DSrc111')
+        assert.strictEqual(reseeds, 1, 'a second displaced call inside the window must not re-seed')
+    })
+
+    it('pays an unmovable live round the sender can afford, after its one re-seed', async () => {
         schedules = [LIVE_HUB]
         quote = { supported: true, valid: true, requiredFeeSats: 1752151752 }
+        fundSender(10000000000)
         const helper = freshHelper()
         assert.strictEqual(await helper.nativeFeeSats('ISSUE|0|T|1|1|0|d|1', 'DSrc111'),
             Math.ceil(1752151752 * helper.FEE_HEADROOM), 'an unmovable live price is still paid correctly')
-        const afterFirst = seeded.length
-        assert(afterFirst > 0)
-        await helper.nativeFeeSats('ISSUE|0|T|1|1|0|d|1', 'DSrc111')
-        assert.strictEqual(seeded.length, afterFirst, 'a second displaced call inside the window must not re-seed')
+        assert.strictEqual(reseeds, 1)
     })
 
     it('keeps the flat fee when the indexer cannot answer at all', async () => {
@@ -663,6 +759,7 @@ describe('nativeFeeHelper.nativeFeeSats', () => {
         try {
             schedules = [LIVE_HUB]
             quote = { supported: true, valid: true, requiredFeeSats: 1752151752 }
+            fundSender(10000000000)
             const helper = freshHelper()
             assert.strictEqual(await helper.nativeFeeSats('ISSUE|0|T|1|1|0|d|1', 'DSrc111'),
                 Math.ceil(1752151752 * helper.FEE_HEADROOM))
