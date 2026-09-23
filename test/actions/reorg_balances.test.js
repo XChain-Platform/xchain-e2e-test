@@ -12,12 +12,7 @@ const assert = require('assert')
 const cryptoHelper = require('../cryptoHelper')
 const issueHelper = require('../helpers/issueHelper')
 const sendHelper = require('../helpers/sendHelper')
-const mintHelper = require('../helpers/mintHelper')
-
-// GAS token. Issuing a new token charges an ISSUANCE_FEE payable in GAS (XCHAIN);
-// on testnet/regtest XCHAIN is an open faucet (anyone MINTs it; no owner check,
-// no fee), so a fresh issuer grabs gas via a MINT before it can ISSUE.
-const GAS_TICK = 'XCHAIN'
+const gasHelper = require('../helpers/gasHelper')
 
 async function q(sql, params) {
     const conn = await indexerDatabase.getConnection()
@@ -51,8 +46,10 @@ async function createMoneyReorgFixture() {
     const tick   = 'MRG' + sender['address'].substring(sender['address'].length - 8)
 
     // Grab GAS first: the sender needs an XCHAIN balance to pay the ISSUANCE_FEE.
-    // XCHAIN is an open faucet on testnet/regtest: anyone MINTs it (no owner check, no fee).
-    await mintHelper.sendMintV0(sender, GAS_TICK, 10)
+    // gasHelper mints it on BTC and sends it from the bridged reservoir elsewhere,
+    // where XCHAIN exists only by bridging and a local MINT of it is invalid
+    // (MINT_START_BLOCK).
+    await gasHelper.ensureGasBalance(sender, 10)
 
     // ISSUE in an early block: mintSupply credited to the sender.
     const MINT = 100

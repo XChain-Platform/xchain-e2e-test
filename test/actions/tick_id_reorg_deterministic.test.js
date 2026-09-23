@@ -11,10 +11,8 @@
 const assert = require('assert')
 const cryptoHelper = require('../cryptoHelper')
 const issueHelper = require('../helpers/issueHelper')
-const mintHelper = require('../helpers/mintHelper')
+const gasHelper = require('../helpers/gasHelper')
 const transactionHelper = require('../transactionHelper')
-
-const GAS_TICK = 'XCHAIN'
 
 async function q(sql, params) {
     const conn = await indexerDatabase.getConnection()
@@ -55,8 +53,10 @@ async function prepareTickIdIssuers() {
     const TOKENA = 'TDA' + suffix
     const TOKENB = 'TDB' + suffix
 
-    await mintHelper.sendMintV0(issuerA, GAS_TICK, 10)
-    await mintHelper.sendMintV0(issuerB, GAS_TICK, 10)
+    // Gas for each ISSUE: minted on BTC, sent from the bridged reservoir elsewhere, where
+    // a local MINT of XCHAIN is invalid (MINT_START_BLOCK).
+    await gasHelper.ensureGasBalance(issuerA, 10)
+    await gasHelper.ensureGasBalance(issuerB, 10)
     return { issuerA, issuerB, TOKENA, TOKENB }
 }
 

@@ -28,6 +28,7 @@ const assert = require('assert')
 const bitcoin = require('bitcoinjs-lib')
 const cryptoHelper = require('../cryptoHelper')
 const mintHelper = require('../helpers/mintHelper')
+const issueHelper = require('../helpers/issueHelper')
 
 const GAS_TICK = "XCHAIN"
 const MINT_AMOUNT = 100
@@ -35,16 +36,19 @@ const CHAIN_LENGTH = 3
 
 describe('MINT chaining', () => {
     it('three chained MINTs from one address are three distinct txids and three balance increments', async () => {
-        // seedGas=false: the gas seed is itself a MINT, and it would put a
-        // credit on the address before the chain under test starts. Starting at
-        // zero makes each increment below attributable to one of these three.
-        // XCHAIN is an open mint on the test networks, so a zero-gas address can
-        // still mint it.
+        // The chained token is one the sender issues itself with open minting and no
+        // MINT_SUPPLY, not XCHAIN: off BTC XCHAIN exists only by bridging, so a MINT of
+        // it is invalid (MINT_START_BLOCK). A fresh token also opens at a zero balance
+        // whatever gas the funding helper seeds, so each increment below is
+        // attributable to one of these three. The ISSUE precedes the chain, so it is
+        // not one of the chained sends.
         const sender = await cryptoHelper.getNewFundedAddress(
-            'XC1796.CHAIN', COIN, NETWORK, null, 'legacy', 0, 1, false
+            'XC1796.CHAIN', COIN, NETWORK, null, 'legacy', 0, 1
         )
+        const tick = 'MCH' + sender.address.substring(sender.address.length - 8).toUpperCase().replace(/[^A-Z0-9]/g, 'X')
+        await issueHelper.sendIssueV0(sender, tick, 1000000, MINT_AMOUNT, 0, 'mint chaining drill token', 0)
 
-        const opening = await indexerDatabase.getBalance({ address: sender.address, tick: GAS_TICK })
+        const opening = await indexerDatabase.getBalance({ address: sender.address, tick: tick })
         assert.strictEqual(opening, "0", 'the drill needs a zero opening balance to attribute each increment')
 
         const txids = []
@@ -55,13 +59,13 @@ describe('MINT chaining', () => {
             // row AND the credit row, so each send starts from a view that has
             // the previous spend in it - which is exactly the chained-send shape,
             // and the one the encoder has to keep distinct.
-            const result = await mintHelper.sendMintV0(sender, GAS_TICK, MINT_AMOUNT, sender.address, 'mint chain ' + i)
+            const result = await mintHelper.sendMintV0(sender, tick, MINT_AMOUNT, sender.address, 'mint chain ' + i)
             assert(result.mint, 'MINT ' + i + ' should exist in the DB')
             assert(result.credit, 'MINT ' + i + ' credit should exist in the DB')
 
             txids.push(result.txHash)
 
-            const settled = await indexerDatabase.getBalance({ address: sender.address, tick: GAS_TICK })
+            const settled = await indexerDatabase.getBalance({ address: sender.address, tick: tick })
             assert(settled != null, 'balance read after MINT ' + i + ' failed')
             balances.push(BigInt(settled))
         }

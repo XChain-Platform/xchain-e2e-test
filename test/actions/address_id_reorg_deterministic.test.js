@@ -11,9 +11,9 @@
 const assert = require('assert')
 const cryptoHelper = require('../cryptoHelper')
 const mintHelper = require('../helpers/mintHelper')
+const issueHelper = require('../helpers/issueHelper')
+const gasHelper = require('../helpers/gasHelper')
 const transactionHelper = require('../transactionHelper')
-
-const GAS_TICK = 'XCHAIN'
 
 /**
  * Phase 5 ACCEPTANCE GATE for the deterministic index-id fix - ADDRESS twin of
@@ -30,14 +30,14 @@ const GAS_TICK = 'XCHAIN'
  * fix, an orphaned new-address id is reclaimed and a later DIFFERENT address reuses
  * it, matching a fresh canonical-only node.
  *
- *   1. MINT XCHAIN from issuerA to a FRESH addrA -> addrA takes id = idA (its
- *      block_index stamped). issuerA already has an id (surviving self-mint), so the
+ *   1. MINT the drill token from issuerA to a FRESH addrA -> addrA takes id = idA (its
+ *      block_index stamped). issuerA already has an id (surviving gas top-up), so the
  *      MINT introduces ONLY addrA.
  *   2. Orphan the block that introduced addrA (invalidateblock + a longer EMPTY
  *      competing chain).
  *   3. After rollback: addrA's credit is gone AND the index_addresses row idA->addrA
  *      is DELETED (not resurrected by updateBalances during rollback).
- *   4. On the canonical chain, MINT XCHAIN from issuerB to a DIFFERENT fresh addrB.
+ *   4. On the canonical chain, MINT the drill token from issuerB to a DIFFERENT fresh addrB.
  *      addrB must take id = idA (reclaimed) - what a fresh canonical-only node
  *      assigns - so a wire `^idA` resolves to addrB everywhere. No divergence.
  *
@@ -51,6 +51,10 @@ const GAS_TICK = 'XCHAIN'
  *
  * generateBlock(addr, [...]) is a Bitcoin Core 0.19 RPC; Dogecoin Core 1.14.x lacks
  * it, so this runs on BTC/LTC regtest only.
+ *
+ * The minted token is one issuerA ISSUEs in the fixture with open minting (any address
+ * may MINT it), not XCHAIN: off BTC XCHAIN exists only by bridging, so a MINT of it is
+ * invalid (MINT_START_BLOCK) and would introduce no address at all.
  */
 const ADDRESS_REORG_TITLE = 'Address ^id reorg DETERMINISTIC (Phase 5 gate): orphaned index_addresses id is reclaimed, ^id no longer forks'
 
@@ -86,11 +90,16 @@ async function createAddressFixture() {
     const addrA = (await cryptoHelper.getNewAddress('addriddet-destA', COIN, NETWORK, null, 'legacy', 0)).address
     const addrB = (await cryptoHelper.getNewAddress('addriddet-destB', COIN, NETWORK, null, 'legacy', 0)).address
 
-    // Pre-reorg, surviving: each issuer (source) gets its index_addresses id via a
-    // self-mint, so the destination MINTs below introduce ONLY the fresh address.
-    await mintHelper.sendMintV0(issuerA, GAS_TICK, 10)
-    await mintHelper.sendMintV0(issuerB, GAS_TICK, 10)
-    return { issuerA, issuerB, addrA, addrB }
+    // Pre-reorg, surviving: each issuer (source) gets its index_addresses id from a gas
+    // top-up (it is the recipient of the MINT or reservoir SEND), so the destination MINTs
+    // below introduce ONLY the fresh address. The drill token is issued here too, with no
+    // MINT_SUPPLY, so its ticker exists before the reorg and credits nobody yet.
+    await gasHelper.ensureGasBalance(issuerA, 10)
+    await gasHelper.ensureGasBalance(issuerB, 10)
+    const suffix = issuerA['address'].substring(issuerA['address'].length - 6).toUpperCase().replace(/[^A-Z0-9]/g, 'X')
+    const tick = 'ADR' + suffix
+    await issueHelper.sendIssueV0(issuerA, tick, 1000000, 1000, 0, 'address id reorg drill token', 0)
+    return { issuerA, issuerB, addrA, addrB, tick }
 }
 
 async function reorgContext(addrABlock) {
@@ -116,13 +125,13 @@ async function waitForAddressCreditRemoval(addrA) {
     return addrAGone
 }
 
-async function mintCanonicalAddress(issuerB, addrB, miner) {
-    // 4. MINT XCHAIN from issuerB -> the DIFFERENT fresh addrB, WITHOUT re-mining the
+async function mintCanonicalAddress(issuerB, addrB, miner, tick) {
+    // 4. MINT the drill token from issuerB -> the DIFFERENT fresh addrB, WITHOUT re-mining the
     //    orphaned MINT. Auto-mining stays paused: broadcast from issuerB (no mempool
     //    conflict with issuerA's orphaned tx) and mine ONLY that tx, so the orphaned
     //    MINT stays unmined and idA is available for addrB. Message mirrors
     //    mintHelper.sendMintV0 (MINT v0, amount 5, empty memo).
-    const mintBMessage = 'MINT|0|' + GAS_TICK + '|5|' + addrB + '|'
+    const mintBMessage = 'MINT|0|' + tick + '|5|' + addrB + '|'
     const mintBTxid = await transactionHelper.createAndSendTransaction(issuerB, mintBMessage)
     await nodeConnector.generateBlock(miner, [mintBTxid])
 
@@ -143,13 +152,13 @@ async function reclaimOrphanedAddressId() {
     const cols = await q("SHOW COLUMNS FROM index_addresses LIKE 'block_index'")
     assert.strictEqual(cols.length, 1, 'index_addresses.block_index must exist (deterministic-id migration applied)')
 
-    const { issuerA, issuerB, addrA, addrB } = await createAddressFixture()
+    const { issuerA, issuerB, addrA, addrB, tick } = await createAddressFixture()
     assert(await addrIdByName(issuerA['address']), 'issuerA has an index_addresses id pre-reorg')
     assert(await addrIdByName(issuerB['address']), 'issuerB has an index_addresses id pre-reorg')
 
-    // 1. MINT XCHAIN from issuerA -> the FRESH addrA. addrA takes the next dense
+    // 1. MINT the drill token from issuerA -> the FRESH addrA. addrA takes the next dense
     //    index_addresses id (idA), stamped with the block_index of this MINT.
-    await mintHelper.sendMintV0(issuerA, GAS_TICK, 5, addrA)
+    await mintHelper.sendMintV0(issuerA, tick, 5, addrA)
     const idA = await addrIdByName(addrA)
     assert(idA, 'addrA resolved an index_addresses id pre-reorg')
     assert.strictEqual(await addrById(idA), addrA, 'idA maps to addrA pre-reorg')
@@ -179,7 +188,7 @@ async function reclaimOrphanedAddressId() {
         assert.strictEqual(await addrById(idA), null,
             'index_addresses id ' + idA + ' must be reclaimed (deleted) after the orphaning reorg')
 
-        const idB = await mintCanonicalAddress(issuerB, addrB, miner)
+        const idB = await mintCanonicalAddress(issuerB, addrB, miner, tick)
         assert(idB, 'addrB resolved an index_addresses id on the canonical chain')
 
         // THE FIX (part 2): no divergence. addrB (a DIFFERENT address than the orphaned
