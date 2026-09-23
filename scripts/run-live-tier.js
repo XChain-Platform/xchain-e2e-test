@@ -61,6 +61,8 @@
  * Usage:
  *   node scripts/run-live-tier.js            run the lane
  *   node scripts/run-live-tier.js --list     print the roster and exit
+ *   node scripts/run-live-tier.js --force-docker
+ *       ignore HUB_DB_* and require the disposable Docker database path
  *
  * Exit: 0 green; 1 red (roster drift, a failing case, or a suite that ran
  * nothing); 95 when the HOST cannot run the tier truthfully, which the shared
@@ -153,6 +155,7 @@ function suitesExcluded(roster) {
 function tallyByFile(report, repoRoot = REPO_ROOT) {
     const tally = new Map()
     const bump = (file, field) => {
+        if (!file) return
         const rel = path.relative(repoRoot, file).split(path.sep).join('/')
         if (!tally.has(rel)) tally.set(rel, { passing: 0, failing: 0, pending: 0 })
         tally.get(rel)[field]++
@@ -199,6 +202,53 @@ function formatTally(expected, tally) {
     return lines
 }
 
+function mochaSummary(report) {
+    const stats = report.stats || {}
+    const count = (field, entries) => Number.isFinite(stats[field])
+        ? stats[field]
+        : (report[entries] || []).length
+    const lines = ['  ' + count('passes', 'passes') + ' passing']
+    const pending = count('pending', 'pending')
+    if (pending) lines.push('  ' + pending + ' pending')
+    lines.push('  ' + count('failures', 'failures') + ' failing')
+    return lines
+}
+
+const DB_PRIVILEGE_CODES = new Set([
+    'ER_ACCESS_DENIED_ERROR',
+    'ER_DBACCESS_DENIED_ERROR',
+    'ER_TABLEACCESS_DENIED_ERROR',
+    'ER_COLUMNACCESS_DENIED_ERROR',
+    'ER_PROCACCESS_DENIED_ERROR',
+    'ER_SPECIFIC_ACCESS_DENIED_ERROR'
+])
+const DB_PRIVILEGE_ERRNOS = new Set([1044, 1045, 1142, 1143, 1227, 1370])
+
+function isDbPrivilegeError(err) {
+    if (!err) return false
+    let node = err
+    for (let depth = 0; node && depth < 5; depth++) {
+        if (DB_PRIVILEGE_CODES.has(node.code)) return true
+        if (node.errno !== undefined && DB_PRIVILEGE_ERRNOS.has(Number(node.errno))) return true
+        node = node.cause
+    }
+    const detail = [err.code, err.errno, err.sqlState, err.message, err.stack]
+        .filter(v => v !== undefined && v !== null).join('\n')
+    return /\bER_(?:ACCESS_DENIED|DBACCESS_DENIED|TABLEACCESS_DENIED|COLUMNACCESS_DENIED|PROCACCESS_DENIED|SPECIFIC_ACCESS_DENIED)_ERROR\b/i.test(detail)
+        || /\baccess denied for user\b/i.test(detail)
+        || /\b(?:create|drop|alter|select|insert|update|delete|execute) command denied to user\b/i.test(detail)
+}
+
+function isBeforeAllHookFailure(failure) {
+    const hook = [failure && failure.title, failure && failure.fullTitle]
+        .filter(Boolean).join(' ')
+    return /\bbefore(?:[ -])?all\b.*\bhook\b|\bhook\b.*\bbefore(?:[ -])?all\b/i.test(hook)
+}
+
+function isDbPrivilegeBeforeAllFailure(failure) {
+    return isBeforeAllHookFailure(failure) && isDbPrivilegeError(failure.err)
+}
+
 // ---- the lane ------------------------------------------------------------
 
 // Can this host run the tier at all? The suites obtain a database one of two
@@ -212,13 +262,40 @@ function formatTally(expected, tally) {
 // with no container runtime says nothing about the code. Reporting it as a red
 // commit is the misattribution the exit contract exists to prevent.
 const VENUE_EXIT = 95
+const HUB_DB_KEYS = ['HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS']
 
-function liveTierBlocker(env = process.env) {
-    if (env.HUB_DB_USER && env.HUB_DB_PASS) return null
+function classifyReport(report, problems) {
+    const failures = report.failures || []
+    const venueFailures = failures.filter(isDbPrivilegeBeforeAllFailure)
+    const hasCommitFailure = failures.some(f => !isDbPrivilegeBeforeAllFailure(f))
+    return {
+        venueFailures,
+        exitCode: hasCommitFailure
+            ? 1
+            : (venueFailures.length ? VENUE_EXIT : (problems.length ? 1 : 0))
+    }
+}
+
+function optionForcesDocker(options) {
+    return options === true || !!(options && options.forceDocker)
+}
+
+function liveTierBlocker(env = process.env, options = {}) {
+    const forceDocker = optionForcesDocker(options)
+    if (!forceDocker && env.HUB_DB_USER && env.HUB_DB_PASS) return null
     const probe = spawnSync('docker', ['version', '--format', '{{.Server.Version}}'], { stdio: 'ignore' })
     if (probe.error || probe.status !== 0)
-        return 'no container runtime and no HUB_DB_USER/HUB_DB_PASS, so every live suite would skip itself'
+        return forceDocker
+            ? 'Docker was required but no container runtime is available'
+            : 'no container runtime and no HUB_DB_USER/HUB_DB_PASS, so every live suite would skip itself'
     return null
+}
+
+function mochaEnvironment(env = process.env, options = {}) {
+    const childEnv = { ...env }
+    if (optionForcesDocker(options))
+        for (const key of HUB_DB_KEYS) delete childEnv[key]
+    return childEnv
 }
 
 // Remove disposable-MariaDB containers a previous run left behind.
@@ -255,7 +332,7 @@ function reapStaleFixtureContainers(now = Date.now()) {
     return stale.length
 }
 
-function runMocha(files, roster) {
+function runMocha(files, roster, options = {}) {
     const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'xc714-live-')), 'report.json')
     const bin = path.join(REPO_ROOT, 'node_modules', '.bin', 'mocha')
     const args = [
@@ -269,7 +346,11 @@ function runMocha(files, roster) {
         '--reporter-option', 'output=' + out,
         ...files
     ]
-    const res = spawnSync(bin, args, { cwd: REPO_ROOT, stdio: 'inherit' })
+    const res = spawnSync(bin, args, {
+        cwd: REPO_ROOT,
+        stdio: 'inherit',
+        env: mochaEnvironment(process.env, options)
+    })
     return { out, status: res.status, error: res.error }
 }
 
@@ -301,19 +382,23 @@ function main(argv) {
         return 1
     }
 
-    const blocker = liveTierBlocker()
+    const forceDocker = argv.includes('--force-docker') || argv.includes('--forceDocker')
+    const blocker = liveTierBlocker(process.env, { forceDocker })
     if (blocker) {
         console.error('live tier: this host cannot run the tier truthfully: ' + blocker + '.')
-        console.error('live tier: the commit was NOT evaluated. Run the lane on a venue with Docker,')
-        console.error('           or export HUB_DB_HOST/PORT/USER/PASS for a database it may create schemas in.')
+        console.error('live tier: the commit was NOT evaluated. Run the lane on a venue with Docker'
+            + (forceDocker ? '.' : ','))
+        if (!forceDocker)
+            console.error('           or export HUB_DB_HOST/PORT/USER/PASS for a database it may create schemas in.')
         return VENUE_EXIT
     }
 
     const reaped = reapStaleFixtureContainers()
     if (reaped) console.log('live tier: removed ' + reaped + ' stale disposable-MariaDB container(s) from an earlier run')
 
-    console.log('live tier: running ' + expected.length + ' suite(s) on ' + os.hostname())
-    const { out, status, error } = runMocha(expected, roster)
+    console.log('live tier: running ' + expected.length + ' suite(s) on ' + os.hostname()
+        + (forceDocker ? ' (--force-docker)' : ''))
+    const { out, status, error } = runMocha(expected, roster, { forceDocker })
     if (error) {
         console.error('live tier: could not start mocha: ' + error.message)
         return 1
@@ -333,6 +418,10 @@ function main(argv) {
 
     const tally    = tallyByFile(report)
     const problems = classify(expected, tally)
+    const outcome  = classifyReport(report, problems)
+
+    console.log('')
+    for (const line of mochaSummary(report)) console.log(line)
 
     console.log('\nlive tier: per-suite tally')
     for (const line of formatTally(expected, tally)) console.log(line)
@@ -343,22 +432,33 @@ function main(argv) {
         for (const e of excluded) console.log('  ' + e.file.replace('test/integration/', '') + ': ' + e.why)
     }
 
-    if (problems.length) {
+    if (outcome.exitCode === VENUE_EXIT) {
+        console.error('\nlive tier: VENUE FAILURE')
+        for (const f of outcome.venueFailures)
+            console.error('  ' + (f.file ? path.relative(REPO_ROOT, f.file) : '<unknown file>')
+                + ' :: ' + f.fullTitle + '\n      '
+                + String((f.err && f.err.message) || '').split('\n')[0])
+        console.error('live tier: the commit was NOT evaluated because every failure was a before-all')
+        console.error('           database privilege failure.\n')
+        return VENUE_EXIT
+    }
+
+    if (outcome.exitCode !== 0) {
         console.error('\nlive tier: FAILED')
         for (const p of problems) console.error('  ' + p.file + ': ' + p.detail)
         for (const f of report.failures || [])
-            console.error('  ' + path.relative(REPO_ROOT, f.file) + ' :: ' + f.fullTitle
+            console.error('  ' + (f.file ? path.relative(REPO_ROOT, f.file) : '<unknown file>') + ' :: ' + f.fullTitle
                 + '\n      ' + String((f.err && f.err.message) || '').split('\n')[0])
         console.error('')
         return 1
     }
 
-    console.log('\nlive tier: GREEN (' + (report.stats && report.stats.passes) + ' passing in '
-        + expected.length + ' suite(s))\n')
+    console.log('\nlive tier: GREEN (' + expected.length + ' suite(s))\n')
     return 0
 }
 
 module.exports = { discoverSuites, readRoster, auditRoster, suitesToRun, suitesExcluded, tallyByFile, classify,
-    liveTierBlocker, VENUE_EXIT, ROSTER_FILE, LIVE_DIR }
+    mochaSummary, isDbPrivilegeError, isBeforeAllHookFailure, isDbPrivilegeBeforeAllFailure, classifyReport,
+    liveTierBlocker, mochaEnvironment, VENUE_EXIT, ROSTER_FILE, LIVE_DIR }
 
 if (require.main === module) process.exit(main(process.argv.slice(2)))
