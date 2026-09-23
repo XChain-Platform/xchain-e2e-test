@@ -382,14 +382,13 @@ exports.mochaHooks = {
                     0            // MINT_SUPPLY: faucet, no pre-minted supply
                 )
             } else {
-                // gasHelper.ensureGasBalance mints the GAS tick on BTC and locks it
-                // across with an XBRIDGE v0 (xchain-bridge.md section 4); the tiny
-                // throwaway amount only needs to be enough to trip the lazy,
-                // idempotent token-row creation on THIS chain (section 9) - its
-                // parameters are byte-identical to injectGasToken regardless of the
-                // amount bridged.
-                let gasAddressInfo = await cryptoHelper.getNewFundedAddress("GAS.TOKEN", COIN, NETWORK, null, "legacy", 0, 1, false)
-                await gasHelper.ensureGasBalance(gasAddressInfo, 1)
+                // Fill this run's gas reservoir: gasHelper mints the GAS tick on BTC
+                // and locks it across with an XBRIDGE v0 (xchain-bridge.md section 4),
+                // and that first in-leg trips the lazy, idempotent token-row creation
+                // on THIS chain (section 9), whose parameters are byte-identical to
+                // injectGasToken regardless of the amount bridged. Every later
+                // ensureGasBalance is then a local SEND from the reservoir.
+                await gasHelper.fillGasReservoir()
             }
             console.log("GAS token ("+GAS_TICK+") created successfully")
         })
