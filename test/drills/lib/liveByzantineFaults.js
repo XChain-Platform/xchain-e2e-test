@@ -75,15 +75,12 @@ function silenceConsensus(hub) {
  */
 function forgeConsensusSignatures(hub) {
     const pm = hub && hub.peerManager;
-    const buildEnvelope = pm && (typeof pm.buildEnvelope === 'function'
-        ? 'buildEnvelope'
-        : typeof pm._buildEnvelope === 'function' ? '_buildEnvelope' : null);
-    if (!buildEnvelope) {
+    if (!pm || typeof pm.buildEnvelope !== 'function') {
         throw new Error('forgeConsensusSignatures: hub has no started peer manager');
     }
-    const orig = pm[buildEnvelope];
+    const orig = pm.buildEnvelope;
     let forged = 0;
-    pm[buildEnvelope] = function (type, data) {
+    pm.buildEnvelope = function (type, data) {
         const env = orig.call(this, type, data);
         if (env && env.sig && shouldForge(type)) {
             env.sig = corruptSignature(env.sig);
@@ -91,7 +88,7 @@ function forgeConsensusSignatures(hub) {
         }
         return env;
     };
-    const restore = () => { pm[buildEnvelope] = orig; };
+    const restore = () => { pm.buildEnvelope = orig; };
     restore.forgedCount = () => forged;
     return restore;
 }
@@ -141,36 +138,3 @@ module.exports = {
     prePrepareEnvelope,
     forgedPrePrepare
 };
-
-if (require.main === module) {
-    const assert = require('node:assert/strict');
-    const test = require('node:test');
-
-    function assertPhaseInjectsFault(phase) {
-        const signature = 'ab'.repeat(64);
-        const peerManager = {
-            buildEnvelope(type, data) {
-                return { type, data, sig: signature };
-            }
-        };
-        const original = peerManager.buildEnvelope;
-
-        assert.equal('_buildEnvelope' in peerManager, false);
-        const restore = forgeConsensusSignatures({ peerManager });
-        const envelope = peerManager.buildEnvelope('PBFT_PREPARE', { phase });
-
-        assert.notEqual(envelope.sig, signature, 'phase ' + phase + ' did not inject its fault');
-        assert.deepEqual(envelope.data, { phase });
-        assert.equal(restore.forgedCount(), 1);
-        restore();
-        assert.equal(peerManager.buildEnvelope, original);
-    }
-
-    test('phase E injects a forged-signature fault through buildEnvelope', () => {
-        assertPhaseInjectsFault('E');
-    });
-
-    test('phase F injects a forged-signature fault through buildEnvelope', () => {
-        assertPhaseInjectsFault('F');
-    });
-}

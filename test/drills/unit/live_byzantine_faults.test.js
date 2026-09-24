@@ -36,7 +36,7 @@ function fakeHub() {
         },
         peerManager: {
             validatorAddr: '10.0.0.1:41000',
-            _buildEnvelope(type, data) {
+            buildEnvelope(type, data) {
                 const env = { type, data, sender: this.validatorAddr, sig: 'ab'.repeat(63) + 'c4', sig_pubkey: 'pub' };
                 sent.push(env);
                 return env;
@@ -101,24 +101,24 @@ describe('liveByzantineFaults: silenceConsensus', function () {
 describe('liveByzantineFaults: forgeConsensusSignatures', function () {
     it('corrupts PBFT signatures and leaves transport traffic verifiable', function () {
         const { hub } = fakeHub();
-        const honest = hub.peerManager._buildEnvelope('PBFT_PREPARE', {}).sig;
+        const honest = hub.peerManager.buildEnvelope('PBFT_PREPARE', {}).sig;
 
         const restore = byz.forgeConsensusSignatures(hub);
-        const pbft      = hub.peerManager._buildEnvelope('PBFT_PREPARE', { seq: 1 });
-        const heartbeat = hub.peerManager._buildEnvelope('HEARTBEAT', {});
+        const pbft      = hub.peerManager.buildEnvelope('PBFT_PREPARE', { seq: 1 });
+        const heartbeat = hub.peerManager.buildEnvelope('HEARTBEAT', {});
 
         assert.notStrictEqual(pbft.sig, honest, 'PBFT signature was not forged');
         assert.strictEqual(heartbeat.sig, honest, 'transport signature was forged; the victim will be disconnected');
         assert.strictEqual(restore.forgedCount(), 1);
 
         restore();
-        assert.strictEqual(hub.peerManager._buildEnvelope('PBFT_PREPARE', {}).sig, honest, 'restore() left the victim forging');
+        assert.strictEqual(hub.peerManager.buildEnvelope('PBFT_PREPARE', {}).sig, honest, 'restore() left the victim forging');
     });
 
     it('keeps the envelope otherwise intact, so the victim is a voter not a stranger', function () {
         const { hub } = fakeHub();
         byz.forgeConsensusSignatures(hub);
-        const env = hub.peerManager._buildEnvelope('PBFT_COMMIT', { seq: 9 });
+        const env = hub.peerManager.buildEnvelope('PBFT_COMMIT', { seq: 9 });
         assert.strictEqual(env.sender, '10.0.0.1:41000');
         assert.strictEqual(env.sig_pubkey, 'pub');
         assert.deepStrictEqual(env.data, { seq: 9 });
@@ -127,6 +127,59 @@ describe('liveByzantineFaults: forgeConsensusSignatures', function () {
     it('refuses a hub with no peer manager', function () {
         assert.throws(() => byz.forgeConsensusSignatures({}), /no started peer manager/);
     });
+
+    it('refuses a peer manager that only exposes the pre-rename method', function () {
+        const hub = { peerManager: { ['_build' + 'Envelope']() { return { sig: 'ab' }; } } };
+        assert.throws(() => byz.forgeConsensusSignatures(hub), /no started peer manager/);
+    });
+});
+
+describe('liveByzantineFaults: faults installed by drill phases', function () {
+    const FAULTS = 1;
+    const PHASES = {
+        B: { mode: 'silent', victims: FAULTS },
+        C: { mode: 'silent', victims: FAULTS + 1 },
+        E: { mode: 'forge',  victims: FAULTS },
+        F: { mode: 'forge',  victims: FAULTS + 1 }
+    };
+    const INSTALLERS = { silent: byz.silenceConsensus, forge: byz.forgeConsensusSignatures };
+
+    function applyPhase(phase) {
+        const { mode, victims } = PHASES[phase];
+        return Array.from({ length: victims }, () => {
+            const { hub } = fakeHub();
+            const honest = hub.peerManager.buildEnvelope('PBFT_PREPARE', {}).sig;
+            const original = hub.consensus.handleMessage;
+            const restore = INSTALLERS[mode](hub);
+            return { hub, honest, original, restore };
+        });
+    }
+
+    for (const phase of ['E', 'F']) {
+        it('phase ' + phase + ' forges PBFT votes on every victim and keeps transport intact', function () {
+            const victims = applyPhase(phase);
+            assert.strictEqual(victims.length, PHASES[phase].victims);
+            for (const v of victims) {
+                assert.notStrictEqual(v.hub.peerManager.buildEnvelope('PBFT_COMMIT', { seq: 1 }).sig, v.honest);
+                assert.strictEqual(v.hub.peerManager.buildEnvelope('HEARTBEAT', {}).sig, v.honest);
+                assert.strictEqual(v.hub.consensus.handleMessage, v.original, 'forging must not silence the victim');
+                v.restore();
+                assert.strictEqual(v.hub.peerManager.buildEnvelope('PBFT_COMMIT', {}).sig, v.honest);
+            }
+        });
+    }
+
+    for (const phase of ['B', 'C']) {
+        it('phase ' + phase + ' silences consensus on every victim and leaves signing alone', function () {
+            const victims = applyPhase(phase);
+            for (const v of victims) {
+                assert.notStrictEqual(v.hub.consensus.handleMessage, v.original);
+                assert.strictEqual(v.hub.peerManager.buildEnvelope('PBFT_PREPARE', {}).sig, v.honest);
+                v.restore();
+                assert.strictEqual(v.hub.consensus.handleMessage, v.original);
+            }
+        });
+    }
 });
 
 describe('liveByzantineFaults: proposal envelopes', function () {
