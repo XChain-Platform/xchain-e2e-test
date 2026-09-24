@@ -897,6 +897,74 @@ describe('bridgeRailVenue: the pure layer', function () {
         });
     });
 
+    describe('BridgeRailVenue.setHubOriginIndexer', function () {
+
+        const identity = [{ pubkeyHex: 'a'.repeat(64), privkeyHex: 'b'.repeat(64) }];
+
+        function fakeBtcVenue(events) {
+            return {
+                hubs: [{ index: 0 }, { index: 1 }, { index: 2 }],
+                indexers: [
+                    { followsHub: 0, apiUrl: 'http://127.0.0.1:41000' },
+                    { followsHub: 1, apiUrl: 'http://127.0.0.1:41001' },
+                    { followsHub: 2, apiUrl: 'http://127.0.0.1:41002' },
+                ],
+                hubEnv: { stale: true },
+                stopHub: async (index) => { events.push('stop:' + index); },
+                startHub: async (index) => { events.push('start:' + index); },
+            };
+        }
+
+        it('rebuilds every per-hub BTC environment, restarts only the selected hub in order, and returns its environment',
+            async function () {
+                const events = [];
+                const venue = new BridgeRailVenue({ label: 'unit', identities: identity });
+                venue.btcVenue = fakeBtcVenue(events);
+
+                const selected = await venue.setHubOriginIndexer(1, 'http://127.0.0.1:1');
+
+                assert.deepStrictEqual(venue.btcVenue.hubEnv, {
+                    0: { BTC_INDEXER_URL: 'http://127.0.0.1:41000' },
+                    1: { BTC_INDEXER_URL: 'http://127.0.0.1:1' },
+                    2: { BTC_INDEXER_URL: 'http://127.0.0.1:41002' },
+                });
+                assert.strictEqual(selected, venue.btcVenue.hubEnv[1]);
+                assert.deepStrictEqual(events, ['stop:1', 'start:1']);
+            });
+
+        it('removes a null override and restores the selected hub\'s own BTC indexer URL', async function () {
+            const events = [];
+            const venue = new BridgeRailVenue({ label: 'unit', identities: identity });
+            venue.btcVenue = fakeBtcVenue(events);
+            venue._hubIndexerOverrides[1] = 'http://127.0.0.1:1';
+
+            const selected = await venue.setHubOriginIndexer(1, null);
+
+            assert.deepStrictEqual(selected, { BTC_INDEXER_URL: 'http://127.0.0.1:41001' });
+            assert.ok(!Object.prototype.hasOwnProperty.call(venue._hubIndexerOverrides, 1));
+            assert.deepStrictEqual(events, ['stop:1', 'start:1']);
+        });
+
+        it('rejects a missing hub or standing BTC indexer before any restart', async function () {
+            const events = [];
+            const venue = new BridgeRailVenue({ label: 'unit', identities: identity });
+            venue.btcVenue = fakeBtcVenue(events);
+            const originalHubEnv = venue.btcVenue.hubEnv;
+
+            await assert.rejects(
+                () => venue.setHubOriginIndexer(9, 'http://127.0.0.1:1'),
+                /bridgeRailVenue: no hub 9/);
+            venue.standingBtcIndexerUrl = 'http://127.0.0.1:3024';
+            await assert.rejects(
+                () => venue.setHubOriginIndexer(1, 'http://127.0.0.1:1'),
+                /standing BTC indexer has no per-hub origin endpoint to replace/);
+
+            assert.strictEqual(venue.btcVenue.hubEnv, originalHubEnv);
+            assert.deepStrictEqual(venue._hubIndexerOverrides, {});
+            assert.deepStrictEqual(events, []);
+        });
+    });
+
     describe('the funding budget', function () {
 
         // VERBATIM from drive 13's log, the three lines the harness printed on a loop for
