@@ -2680,10 +2680,10 @@ function hubRelayMarginFloorS(chain) {
  * exactly the span that does not need it removes the drift without touching the window.
  *
  * The miner's own pause only stops its auto-mine loop: `generate_blocks` is exposed with no
- * pause gate, so a drive that mines BTC through an external loop keeps moving the tip. That
- * loop honours a flag file instead: when `BRIDGE_RAIL_MINER_PAUSE_FILE` names one, it is
- * created for the span and removed in the same finally, and the loop skips its call while
- * the file exists.
+ * pause gate, so a drive that mines through external loops keeps moving the tips. Those
+ * loops honour flag files instead: `BRIDGE_RAIL_MINER_PAUSE_FILE` controls the BTC loop and
+ * `BRIDGE_RAIL_DOGE_MINER_PAUSE_FILE` controls the DOGE loop. Each configured file exists
+ * for the span and is removed in the same finally, so the corresponding loop skips its call.
  *
  * @param {{pauseMining: function, resumeMining: function}} miner  the regtest miner connector
  * @param {function(): Promise<*>} fn
@@ -2695,13 +2695,15 @@ async function withMiningPaused(miner, fn, opts) {
         'withMiningPaused: needs a connector with pauseMining()/resumeMining()');
     const pauseFile = (opts && opts.pauseFile !== undefined) ? opts.pauseFile
         : (process.env.BRIDGE_RAIL_MINER_PAUSE_FILE || '');
+    const dogePauseFile = process.env.BRIDGE_RAIL_DOGE_MINER_PAUSE_FILE || '';
+    const pauseFiles = [pauseFile, dogePauseFile].filter(Boolean);
     const fs = require('fs');
     await miner.pauseMining();
-    if (pauseFile) fs.writeFileSync(pauseFile, String(process.pid) + '\n');
     try {
+        for (const file of pauseFiles) fs.writeFileSync(file, String(process.pid) + '\n');
         return await fn();
     } finally {
-        if (pauseFile) { try { fs.unlinkSync(pauseFile); } catch (e) { /* already gone */ } }
+        for (const file of pauseFiles) { try { fs.unlinkSync(file); } catch (e) { /* already gone */ } }
         await miner.resumeMining();
     }
 }

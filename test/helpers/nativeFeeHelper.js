@@ -19,10 +19,16 @@
 // is never created, and the suite hangs on the resulting TICK-unknown cascade.
 //
 // validateNativeCoinFee (utility.js) enforces only a LOWER bound: it rejects
-// when paidAmount < 0.95 * oracle-expected and never rejects overpayment, and
-// this suite seeds (and therefore controls) the oracle prices. So a single flat
-// fee output that comfortably clears the min for every action is sufficient; no
-// per-action fee computation is needed. BTC is left untouched (gas mode).
+// when paidAmount < 0.95 * oracle-expected and never rejects overpayment. At the
+// seeded prices a flat FLAT_FEE_SATS output clears the min for every action, so
+// that is still what is paid there. But the seed is not the only thing that sets
+// the prices the indexer values a fee against: a suite that re-prices a pair for
+// its own case, and a hub_db_sync reconcile that deletes the seed rows and leaves
+// the hub's live rounds in force, both move them, and the flat output was then
+// rejected on every ISSUE/DEPLOY/EXECUTE (nightly run 35899520268, all ten LTC and
+// DOGE shards). So the output is sized at send time from the indexer's own
+// feeschedule prices and, where those make the flat output too small, its feequote
+// for this very action (nativeFeeSats). BTC is left untouched (gas mode).
 
 const priceSnapshotHelper = require('./priceSnapshotHelper')
 const topology            = require('./hubMirrorTopology')
@@ -51,6 +57,30 @@ const COIN_USD   = '100000.00000000'
 // fundings cryptoHelper uses.
 const FLAT_FEE_SATS = 50000
 
+// The XCHAIN cost FLAT_FEE_SATS covers at the seeded pair (0.0005 coin * 100000 / 2).
+// Re-valued at the indexer's current prices it is the fallback size for an action the
+// feequote cannot price, so the fallback always buys the same XCHAIN as the flat fee.
+const FEE_BUDGET_XCHAIN = 25
+
+// Headroom over the indexer's own expected fee. The band's floor is 0.95x expected, so
+// 1.10x survives a price move of about 14% between the quote and the action's block.
+const FEE_HEADROOM = 1.10
+
+// Every price fixture in this repo writes a round at or above this (the same floor
+// xchainPriceDerivation asserts against); a hub's round counter is a small integer that
+// needs decades to reach it. An indexer pricing off a round below it is therefore pricing
+// off the hub's live rounds, which means the seed rows are gone from what it reads.
+const FIXTURE_ROUND_FLOOR = 990000
+
+// At most one displaced-seed re-seed (see nativeFeeSats) per this many milliseconds.
+const DISPLACED_RESEED_MIN_MS = 15000
+let _lastDisplacedReseedMs = 0
+
+// What a sender can pay when its balance cannot be read: cryptoHelper's default funding
+// is one coin, which is exactly the 100000000-sat input the encoder refused to stretch
+// over a live-priced ISSUE in MT3 run 35925455269.
+const DEFAULT_FUNDED_SATS = 100000000
+
 // Re-seed at most this often. Must stay well under ORACLE_MAX_PRICE_AGE_SECONDS
 // (1800s): a >30-minute run would otherwise let the seeded snapshot age out and
 // the validator would reject every fee as stale. Re-anchored to the chain clock.
@@ -72,6 +102,7 @@ const XCHAIN_ROUND     = 888100001
 const COIN_ROUND       = 888100002
 const XCHAIN_ROUND_NOW = 888100011
 const COIN_ROUND_NOW   = 888100012
+const OWN_SEED_ROUNDS  = new Set([XCHAIN_ROUND, COIN_ROUND, XCHAIN_ROUND_NOW, COIN_ROUND_NOW])
 
 // Re-seed once the CHAIN clock has moved this far past the last seed's anchor,
 // independent of the wall-clock throttle above. A clock-drill family (BET, and
@@ -460,11 +491,183 @@ async function discoverFeeMode(){
     return _feeMode
 }
 
+// The two prices the indexer values a native fee against right now, from its own
+// feeschedule (the same getFeeOraclePrices read validateNativeCoinFee makes, anchored on
+// the tip block). Returns { available, xchainUsd, coinUsd, oracleRound, error }, or null
+// when the indexer cannot answer, in which case the caller keeps the flat fee.
+async function readFeePrices(){
+    const c = global.indexerConnector
+    if (!c || typeof c.call !== 'function') return null
+    let sched = null
+    try { sched = await c.call('feeschedule', {}) } catch (e) { return null }
+    if (!sched || !sched.prices) return null
+    const p = sched.prices
+    if (!p.available) return { available: false, error: p.error || 'unavailable' }
+    const xchainUsd = Number(p.xchainUsd)
+    const coinUsd   = Number(p.coinUsd)
+    if (!(xchainUsd > 0) || !(coinUsd > 0)) return { available: false, error: 'non-positive price' }
+    return { available: true, xchainUsd, coinUsd, oracleRound: Number(p.oracleRound) }
+}
+
+function isSeedPair(prices){
+    return prices.xchainUsd === Number(XCHAIN_USD) && prices.coinUsd === Number(COIN_USD)
+}
+
+// True when the prices the indexer reads are no longer anything this suite put there:
+// none at all, a hub round (below every fixture's round) valuing the coin, or one of
+// THIS helper's own rounds carrying a pair it never wrote. A pair some other suite
+// re-priced for its own case carries that suite's fixture round and is left alone, so
+// the fee is sized to it instead. Never true on a venue that publishes its own prices.
+//
+// The own-round case is what MT3 run 35925455269 hit. A mirrored hub round landed on the
+// seed rows' primary keys and rewrote their prices in place (see priceSnapshotHelper
+// FIXTURE_ID_FLOOR), so the coin row still reported round 888100012, which cleared the
+// fixture floor, and the displaced check never fired. Only the coin row's round is
+// reported, so a moved XCHAIN/USD leg under a seed-round coin row reads the same way.
+function seedDisplaced(prices){
+    if (NO_PRICE_SEED) return false
+    if (!prices.available) return true
+    if (isSeedPair(prices)) return false
+    return !(prices.oracleRound >= FIXTURE_ROUND_FLOOR) || OWN_SEED_ROUNDS.has(prices.oracleRound)
+}
+
+// What the sender can pay, in satoshis: its UTXO total from the tracker, or the default
+// one-coin funding when it cannot be read (no sender named, no tracker, nothing indexed).
+async function fundedSats(source){
+    const t = global.utxoTrackerConnector
+    if (source && t && typeof t.getUtxosFromAddress === 'function') {
+        try {
+            const snap = await t.getUtxosFromAddress(source)
+            const utxos = (snap && Array.isArray(snap.utxos)) ? snap.utxos : []
+            const total = utxos.reduce((sum, u) => sum + (Number(u && u.value) || 0), 0)
+            if (total > 0) return total
+        } catch (e) { /* fall through to the default funding */ }
+    }
+    return DEFAULT_FUNDED_SATS
+}
+
+function describePrices(label, p){
+    if (!p) return label + ' unreadable'
+    if (p.available === false) return label + ' unavailable (' + (p.error || 'no price') + ')'
+    return label + ' ' + global.COIN_CODE + '/USD=' + p.coinUsd + ' XCHAIN/USD=' + p.xchainUsd +
+        ' round ' + p.oracleRound
+}
+
+// Satoshis for `xchainAmount` of protocol fee at `prices`, before any headroom. Multiplied
+// out before the one division so the seeded pair comes out exact (25 * 2 * 1e8 / 1e5).
+function rawSatsForXchain(xchainAmount, prices){
+    return Number(xchainAmount) * prices.xchainUsd * 1e8 / prices.coinUsd
+}
+
+// The indexer's own expected fee for this exact action, in satoshis with FEE_HEADROOM,
+// or null when it will not price it. feequote dry-runs the real handler against current
+// state and values its staged XCHAIN fee at the prices the chain will use. It answers
+// no fee for an action it judges invalid (a negative test's deliberately bad action),
+// for a controller-bound one, for BATCH/XEXEC, or while the indexer is busy on a block;
+// connector.call throws on that answer's error envelope, and every one of those cases
+// falls back to the priced budget.
+// Returns { sats, prices } where `prices` is the pair the quote itself was valued at (the
+// feequote answer carries it), or null when there is no quote.
+async function quoteActionSats(wire, source){
+    const c = global.indexerConnector
+    if (typeof wire !== 'string' || !source || !c || typeof c.call !== 'function') return null
+    const cut = wire.indexOf('|')
+    if (cut <= 0) return null
+    let q = null
+    try {
+        q = await c.call('feequote', { action: wire.slice(0, cut), params: wire.slice(cut + 1), source: source })
+    } catch (e) { return null }
+    if (!q || q.valid === false) return null
+    if (q.feeExempt) return { sats: 0, prices: null }
+    const sats = Number(q.requiredFeeSats)
+    if (!Number.isFinite(sats) || sats < 0) return null
+    const prices = (q.coinUsdPrice != null && q.xchainUsdPrice != null)
+        ? { available: true, xchainUsd: Number(q.xchainUsdPrice), coinUsd: Number(q.coinUsdPrice),
+            oracleRound: Number(q.oracleRound) }
+        : null
+    return { sats: Math.ceil(sats * FEE_HEADROOM), prices }
+}
+
+// One sizing pass at `prices` (the feeschedule view): { sats, quotePrices }. `sats` is the
+// raw size before the flat floor, so a caller can tell a pass that needs no more than the
+// flat fee from one that does.
+async function sizeAt(prices, wire, source){
+    if (!prices || !prices.available) return { sats: FLAT_FEE_SATS, quotePrices: null }
+    const budget = rawSatsForXchain(FEE_BUDGET_XCHAIN, prices)
+    if (Math.round(budget) <= FLAT_FEE_SATS) return { sats: FLAT_FEE_SATS, quotePrices: null }
+    const quoted = await quoteActionSats(wire, source)
+    if (quoted) return { sats: quoted.sats, quotePrices: quoted.prices }
+    return { sats: Math.ceil(budget * FEE_HEADROOM), quotePrices: null }
+}
+
+async function reseedDisplaced(why){
+    _lastDisplacedReseedMs = Date.now()
+    console.log('nativeFeeHelper: ' + why + '; re-seeding')
+    await seedGlobalPrices(true)
+    return readFeePrices()
+}
+
+// Size the native fee output for one action tx (`wire`, from `source`; both optional).
+// At the seeded pair, or any pair at which FLAT_FEE_SATS still buys FEE_BUDGET_XCHAIN,
+// the flat fee is paid exactly as before and no quote is made, so a suite that runs on
+// the seed sees no change. Past that the flat fee is too small for some actions: the
+// action's own feequote sizes it, and where there is none the budget is re-priced. The
+// flat fee stays the floor either way, since overpaying is never rejected.
+//
+// Before sizing, a seed that has vanished from the indexer's view is put back (see
+// seedDisplaced). Paying the live hub price is not an option there: at a real
+// DOGE/USD one ISSUE costs about 17 DOGE, several times what a test address is funded
+// with, so the build would fail instead of the validation.
+//
+// A size above the flat fee gets one more look. A suite's own re-price that the sender
+// can pay is paid as quoted. A size off the seed that is displaced (in the feeschedule
+// view or the pair the quote was valued at) or that the sender cannot pay gets ONE
+// forced re-seed, ignoring the rate limit, and is sized again. A size still above the
+// sender's balance is refused with every price seen, rather than handed to the encoder
+// to fail as "insufficient funds" with no word about why the fee was that large.
+async function nativeFeeSats(wire, source){
+    let prices = await readFeePrices()
+    const seen = [describePrices('feeschedule', prices)]
+    let reseeded = false
+    // Rate-limited: where even a fresh seed stays invisible (warnIfSeedInvisible names
+    // that case), re-seeding before every action would only repeat the warning.
+    if (prices && seedDisplaced(prices) && (Date.now() - _lastDisplacedReseedMs) >= DISPLACED_RESEED_MIN_MS) {
+        prices = await reseedDisplaced('the indexer no longer prices off the seed (' +
+            describePrices('feeschedule', prices) + ')')
+        reseeded = true
+        seen.push(describePrices('feeschedule after re-seed', prices))
+    }
+    let sized = await sizeAt(prices, wire, source)
+    if (sized.sats <= FLAT_FEE_SATS) return FLAT_FEE_SATS
+    if (sized.quotePrices) seen.push(describePrices('feequote', sized.quotePrices))
+
+    const funded = await fundedSats(source)
+    const offSeed = !isSeedPair(prices) || !!(sized.quotePrices && !isSeedPair(sized.quotePrices))
+    const displaced = seedDisplaced(prices) || !!(sized.quotePrices && seedDisplaced(sized.quotePrices))
+    if (!reseeded && !NO_PRICE_SEED && offSeed && (displaced || sized.sats > funded)) {
+        prices = await reseedDisplaced('a ' + sized.sats + '-sat fee for ' + (wire ? wire.split('|')[0] : 'this action') +
+            ' is priced off the seed (' + seen.join('; ') + ')')
+        seen.push(describePrices('feeschedule after re-seed', prices))
+        sized = await sizeAt(prices, wire, source)
+        if (sized.sats <= FLAT_FEE_SATS) return FLAT_FEE_SATS
+        if (sized.quotePrices) seen.push(describePrices('feequote after re-seed', sized.quotePrices))
+    }
+    if (sized.sats > funded)
+        throw new Error('nativeFeeHelper: refusing a ' + sized.sats + '-sat native fee output for ' +
+            (wire ? wire.split('|')[0] : 'this action') + (source ? ' from ' + source : '') +
+            ': the sender holds ' + funded + ' sats. Prices seen: ' + seen.join('; ') +
+            '. The seed is XCHAIN/USD=' + XCHAIN_USD + ' ' + global.COIN_CODE + '/USD=' + COIN_USD +
+            ', at which this fee would be the flat ' + FLAT_FEE_SATS + ' sats.')
+    return Math.max(FLAT_FEE_SATS, sized.sats)
+}
+
 // The native fee output to attach to an action tx, or null to skip (gas-mode
 // chains where native fees are disabled). Throws loudly when native fees ARE
 // enabled but no destination is resolvable. Throwing loudly is far better than
 // a silent skip that hangs the suite. Refreshes prices first so a long run never ages out.
-async function getNativeFeeOutput(){
+// `wire` and `source` (the action string and its sender) let the fee be quoted for this
+// action; a caller without them still gets an output priced at the current rates.
+async function getNativeFeeOutput(wire, source){
     // Refresh oracle prices for EVERY chain first (throttled). Gas-mode BTC
     // returns null just below, but its contract actions still need a fresh
     // BTC/USD for USD-pegged fee validation, so the seed must run BEFORE the
@@ -475,8 +678,9 @@ async function getNativeFeeOutput(){
     if (!mode.destination)
         throw new Error('native fee enabled on ' + global.COIN_CODE +
             ' but no FEE_DESTINATION resolvable (set FEE_DESTINATION or check indexer feeschedule)')
-    return { address: mode.destination, value: FLAT_FEE_SATS }
+    return { address: mode.destination, value: await nativeFeeSats(wire, source) }
 }
 
 module.exports = { resolveFeeDestination, discoverFeeMode, seedGlobalPrices, getNativeFeeOutput,
-    warnIfSeedInvisible, hubSeedTarget, lastSeedReport, FLAT_FEE_SATS }
+    nativeFeeSats, warnIfSeedInvisible, hubSeedTarget, lastSeedReport, FLAT_FEE_SATS,
+    FEE_BUDGET_XCHAIN, FEE_HEADROOM }

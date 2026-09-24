@@ -29,6 +29,8 @@
  *
  *   - wrap the wait in requireRow() from test/helpers/requireRow.js (the
  *     fixture-builder shape: fail at the wait, naming the row that never came)
+ *   - hand it to requireRow.withProbe(row, ...), the same helper's companion,
+ *     which throws on a falsy row and folds a give-up diagnosis into the message
  *   - guard it with an explicit `if (!row) throw`
  *   - assert on the row (`assert(row, ...)`, `expect(row)...`) before using it
  *   - hand it straight back (`return await db.waitForX(...)`) or test it inline
@@ -107,8 +109,12 @@ function guardedByThrow(lines, from, name){
     const esc      = name.replace(/[$]/g, '\\$')
     const nullTest = new RegExp('if\\s*\\(\\s*!\\s*' + esc + '\\b')
     const asserted = new RegExp('(?:assert|expect)[\\w.]*\\([^;]*\\b' + esc + '\\b')
+    // requireRow.withProbe(row, ...) throws on a falsy row exactly as requireRow
+    // does, so a wait handed to it fails loud rather than storing a null.
+    const probed   = new RegExp('requireRow\\.withProbe\\s*\\(\\s*' + esc + '\\b')
     for (let i = from + 1; i < lines.length; i++){
         if (asserted.test(lines[i])) return true
+        if (probed.test(lines[i])) return true
         if (i > from + 1 && METHOD_HEAD.test(lines[i]) && !NOT_A_HEAD.test(lines[i])) break
         if (!nullTest.test(lines[i])) continue
         // The guard's block: this line plus the few that close it.

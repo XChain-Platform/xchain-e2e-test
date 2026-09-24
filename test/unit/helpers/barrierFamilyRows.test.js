@@ -76,6 +76,66 @@ describe('barrierFamilyRows: inert rows', () => {
     })
 })
 
+describe('barrierFamilyRows: capability snapshots required by seeded rows', () => {
+    const seed = (table, block, tag) => rows.inertRow(table, Object.assign({}, SPEC, { snapshotBlock: block, tag }))
+
+    it('emits exactly one snapshot for seeds at one joined block', () => {
+        const seeds = [seed('cross_chain_matches', 100, 'm'), seed('cross_chain_calls', 100, 'c')]
+        const got = rows.requiredCapabilitySnapshots(seeds)
+        assert.strictEqual(got.length, 1)
+        assert.strictEqual(got[0].row.snapshot_block, 100)
+    })
+
+    it('covers the BF4 shape with one snapshot per legacy, boundary and post-boundary block', () => {
+        const seeds = [
+            seed('cross_chain_matches', 99, 'legacy'),
+            seed('cross_chain_matches', 100, 'boundary'),
+            seed('cross_chain_calls', 103, 'post'),
+        ]
+        assert.deepStrictEqual(rows.requiredCapabilitySnapshots(seeds).map((s) => s.row.snapshot_block), [99, 100, 103])
+    })
+
+    it('collapses duplicate blocks and is deterministic for upsert-safe re-runs', () => {
+        const seeds = [seed('cross_chain_matches', 200, 'm1'), seed('cross_chain_matches', 200, 'm2')]
+        const first = rows.requiredCapabilitySnapshots(seeds)
+        const second = rows.requiredCapabilitySnapshots(seeds.slice().reverse())
+        assert.strictEqual(first.length, 1)
+        assert.deepStrictEqual(first, second)
+    })
+
+    it('emits the predicate capability and the declared capability snapshot natural key', () => {
+        const got = rows.requiredCapabilitySnapshots([seed('cross_chain_calls', 300, 'c')])[0]
+        assert.strictEqual(got.row.capability, 'cross_chain')
+        assert.strictEqual(got.table, 'capability_snapshots')
+        assert.deepStrictEqual(got.key, rows.NATURAL_KEYS.capability_snapshots)
+        for (const column of got.key) assert.notStrictEqual(got.row[column], undefined, 'missing natural key column ' + column)
+    })
+
+    it('reports false and names every joined block missing a required snapshot', () => {
+        const joined = [seed('cross_chain_matches', 400, 'm'), seed('cross_chain_calls', 401, 'c')]
+        const snapshots = rows.requiredCapabilitySnapshots(joined).filter((s) => s.row.snapshot_block === 400)
+        assert.deepStrictEqual(rows.snapshotCapabilityCoverage(joined.concat(snapshots)), {
+            satisfied: false, missingBlocks: [401], refusal: null,
+        })
+    })
+
+    it('refuses an empty seed set instead of reporting the invariant satisfied', () => {
+        assert.deepStrictEqual(rows.snapshotCapabilityCoverage([]), {
+            satisfied: false, missingBlocks: [], refusal: 'no rows from snapshot barrier join tables',
+        })
+    })
+
+    it('ignores tables outside the predicate and distinguishes absence from full coverage', () => {
+        const unrelated = [seed('bridge_transfers', 500, 'bridge')]
+        assert.deepStrictEqual(rows.requiredCapabilitySnapshots(unrelated), [])
+        assert.strictEqual(rows.snapshotCapabilityCoverage(unrelated).refusal, 'no rows from snapshot barrier join tables')
+        const joined = [seed('cross_chain_matches', 500, 'match')]
+        assert.deepStrictEqual(rows.snapshotCapabilityCoverage(joined.concat(rows.requiredCapabilitySnapshots(joined))), {
+            satisfied: true, missingBlocks: [], refusal: null,
+        })
+    })
+})
+
 describe('barrierFamilyRows: BF1 judges each walker observation against its own deadline', () => {
     // The rail's walker block (2026-09-17, v020-final-bf1.log): stamped 1789635655, ladder step 90.
     const STAMP = 1789635655
@@ -168,38 +228,69 @@ describe('barrierFamilyRows: the heights a drill block needs before it is mined'
     })
 })
 
-describe('barrierFamilyRows: no legacy row where a height-0 armed apply pass canonicalizes it', () => {
+describe('barrierFamilyRows: a NULL-map row is a hazard only in the ADMISSION era', () => {
     const B = 104
+    // The activation, chosen so SPEC's own block is admission era and one block below it is not.
+    const ARM = SPEC.snapshotBlock
+    const LEGACY = fixture.legacyEraBlock(ARM)
     const MEMBERS = ['cross_chain_matches', 'cross_chain_calls', 'bridge_transfers', 'policy_snapshots', 'attestation_responses']
     const legacy = (t) => rows.inertRow(t, Object.assign({}, SPEC, { tag: 'legacy|' + t }))
+    const preCrossing = (t) => rows.inertRow(t, Object.assign({}, SPEC, { tag: 'legacy|' + t, snapshotBlock: LEGACY }))
 
-    it('flags a finalized NULL-map row in bridge_transfers and policy_snapshots, and only there', () => {
-        const hazards = rows.armedLegacyApplyHazards(MEMBERS.map(legacy))
+    it('flags a finalized NULL-map row at or above the activation in bridge_transfers and policy_snapshots, and only there', () => {
+        const hazards = rows.armedLegacyApplyHazards(MEMBERS.map(legacy), ARM)
         assert.deepStrictEqual(hazards.map((h) => h.split('|')[0]), ['bridge_transfers', 'policy_snapshots'])
         assert.strictEqual(hazards[0], 'bridge_transfers|' + legacy('bridge_transfers').row.transfer_id, 'the hazard names the row key')
+        // No height is the genesis form: every era block is admission era, which is what the legs armed at 0 saw.
+        assert.deepStrictEqual(rows.armedLegacyApplyHazards(MEMBERS.map(preCrossing)).map((h) => h.split('|')[0]),
+            ['bridge_transfers', 'policy_snapshots'], 'armed at genesis there is no era below the activation')
+        assert.throws(() => rows.armedLegacyApplyHazards([], -1), /bad arm height/)
     })
 
-    it('passes a row whose map names any chain, and a legacy row no apply select reads', () => {
+    it('passes the SAME row seeded BELOW the activation, which is the row a pre-crossing hub really wrote', () => {
+        assert.deepStrictEqual(rows.armedLegacyApplyHazards(MEMBERS.map(preCrossing), ARM), [])
+        // The boundary itself: a row AT the activation is admission era and still a hazard.
+        const at = rows.inertRow('bridge_transfers', Object.assign({}, SPEC, { tag: 'edge', snapshotBlock: ARM }))
+        assert.strictEqual(rows.armedLegacyApplyHazards([at], ARM).length, 1, 'a row at the activation is admission era')
+        const below = rows.inertRow('bridge_transfers', Object.assign({}, SPEC, { tag: 'edge', snapshotBlock: ARM - 1 }))
+        assert.deepStrictEqual(rows.armedLegacyApplyHazards([below], ARM), [])
+        // An unreadable era block fails CLOSED rather than passing as pre-activation.
+        const noEra = rows.inertRow('bridge_transfers', Object.assign({}, SPEC, { tag: 'edge' }))
+        noEra.row = Object.assign({}, noEra.row, { snapshot_block: null })
+        assert.strictEqual(rows.armedLegacyApplyHazards([noEra], ARM).length, 1, 'a seed with no readable era must be flagged')
+    })
+
+    it('passes a row whose map names any chain, and a retracted row no apply select reads', () => {
         const atB = rows.inertRow('bridge_transfers', Object.assign({}, SPEC, { tag: 'at', admitBlocks: { BTC: B } }))
         const omitsBtc = rows.inertRow('policy_snapshots', Object.assign({}, SPEC, { tag: 'omits', admitBlocks: { LTC: 5 } }))
         const retracted = legacy('bridge_transfers')
         retracted.row = Object.assign({}, retracted.row, { status: 'retracted' })
-        assert.deepStrictEqual(rows.armedLegacyApplyHazards([atB, omitsBtc, retracted]), [])
+        assert.deepStrictEqual(rows.armedLegacyApplyHazards([atB, omitsBtc, retracted], ARM), [])
     })
 
-    it('BF2\'s seed plan carries at-B and past-B rows everywhere, legacy rows only where the apply cannot reach them', () => {
-        const seeds = rows.admissionSeedRows(MEMBERS, SPEC, B, 103)
-        assert.deepStrictEqual(rows.armedLegacyApplyHazards(seeds), [], 'the BF2 plan seeds a row the armed node stalls on')
+    it('BF2\'s seed plan carries at-B, past-B and a legacy row in EVERY member table, the legacy one below the activation', () => {
+        const seeds = rows.admissionSeedRows(MEMBERS, SPEC, B, 103, LEGACY)
+        assert.deepStrictEqual(rows.armedLegacyApplyHazards(seeds, ARM), [], 'the BF2 plan seeds a row the armed node stalls on')
         const count = (t) => seeds.filter((s) => s.table === t).length
-        assert.deepStrictEqual(MEMBERS.map(count), [3, 3, 2, 2, 3])
+        assert.deepStrictEqual(MEMBERS.map(count), [3, 3, 3, 3, 3])
         for (const t of MEMBERS) {
             const col = fixture.admissionColumn(t, 'BTC')
-            const heights = seeds.filter((s) => s.table === t).map((s) => s.row[col])
+            const seeded = seeds.filter((s) => s.table === t)
+            const heights = seeded.map((s) => s.row[col])
             assert.ok(heights.includes(B) && heights.includes(B + 3), t + ': the at-B and past-B rows are both present')
+            assert.strictEqual(heights.filter((h) => h === null).length, 1, t + ': exactly one legacy row')
+            // The legacy seed sits below the activation and the map-carrying seeds sit at or above it.
+            for (const s of seeded) {
+                if (!('snapshot_block' in s.row)) continue
+                const era = s.row[col] === null ? LEGACY : SPEC.snapshotBlock
+                assert.strictEqual(s.row.snapshot_block, era, t + ': a seed is in the wrong era')
+            }
             // The fixture's expected set at B is the seeded count minus the past-B row, which is what BF2 asserts.
-            const admitted = fixture.admittedRowSet(seeds.filter((s) => s.table === t).map((s) => s.row), t, 'BTC', B, SPEC.effectiveTime, (r) => String(r[s0(t)]))
+            const admitted = fixture.admittedRowSet(seeded.map((s) => s.row), t, 'BTC', B, SPEC.effectiveTime, (r) => String(r[s0(t)]))
             assert.strictEqual(admitted.length, count(t) - 1, t + ': admitted at B')
         }
+        assert.throws(() => rows.admissionSeedRows(MEMBERS, SPEC, B, 103), /needs a legacyBlock/)
+        assert.throws(() => rows.admissionSeedRows(MEMBERS, SPEC, B, 103, -1), /needs a legacyBlock/)
     })
 
     function s0 (t) { return rows.NATURAL_KEYS[t][0] }

@@ -742,6 +742,21 @@ describe('Protocol size-limit drift guard', () => {
             assertVendored('CROSS_SETTLE_MAX_PER_BLOCK', ['xchain-indexer'])
         })
 
+        // Pin the inherited-policy membership ceiling on both halves of the rule: the
+        // indexer refuses a format-7 opt-in over it, the hub declines to sign a snapshot
+        // over it from a bare literal of its own. A one-sided edit lets the hub sign a
+        // snapshot the indexer's opt-in would refuse, or strand one it would accept.
+        it('[regression:p0] XPOLICY_MAX_MEMBERS === canonical across hub bridge constants + indexer vendored copy', () => {
+            const hubBridge = require('../../../xchain-hub/src/cross_chain/bridge/constants.js')
+            // A dropped export on every side would compare undefined to undefined and pass.
+            assert.ok(Number.isFinite(protocol.XPOLICY_MAX_MEMBERS),
+                'XPOLICY_MAX_MEMBERS is not a finite value on the canonical protocol constants module')
+            assert.strictEqual(hubBridge.XPOLICY_MAX_MEMBERS, protocol.XPOLICY_MAX_MEMBERS,
+                'hub cross_chain/bridge/constants.js XPOLICY_MAX_MEMBERS drifted from the canonical protocol constant; ' +
+                'the hub would sign policy snapshots the indexer sizes differently')
+            assertVendored('XPOLICY_MAX_MEMBERS', ['xchain-indexer'])
+        })
+
         // Bind the ROLLCALL eviction scalars to canonical (the hub signs, the indexer judges,
         // each from its own bare literal in src/consensus/gates/rollcall_gate.js). Neither repo compares
         // its copy to canonical: the hub pins 2 / 4 / 0 as literals of its own and the indexer

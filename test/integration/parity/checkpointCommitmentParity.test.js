@@ -13,8 +13,10 @@
  * Phase 2 makes the quorum-signed checkpoint canonical (and every ANCHOR v0 bundle
  * SECTION) additively commit the light-client roots `STATE_ROOT|STATE_ROOT_VERSION|
  * BLOCK_MERKLE_ROOT|BLOCK_MERKLE_VERSION`, gated on the BTC `snapshot_block` by the
- * CHECKPOINT_COMMITMENT flag-day. The signed string is built INLINE in four places
- * (hub engine, SDK verifier, indexer ANCHOR verifier, explorer verify endpoint) plus
+ * CHECKPOINT_COMMITMENT flag-day. The signed string is built INLINE in six places
+ * (hub engine, SDK verifier, sync follower, explorer verify endpoint, indexer ANCHOR
+ * v0 section verifier, indexer bridge-proof mirrored-row verifier); the first four
+ * gate the root suffix and the two indexer copies append it unconditionally. Plus
  * the activation map is one registry row (checkpoint_commitment_activation
  * .CHECKPOINT_COMMITMENT_ACTIVATION) carried by the byte-twin registry parts of FIVE
  * services (hub, indexer, sdk, explorer, and xchain-sync, which reads it at
@@ -30,13 +32,16 @@
  *      agrees on the verdict.
  *   2. The post-flag-day checkpoint canonical (with the root suffix) is byte-identical
  *      across the hub engine, the SDK verifier, and the indexer's v0 SECTION verifier.
- *   3. The pre-flag-day canonical (no suffix) is likewise byte-identical, and the
- *      suffix is genuinely absent.
+ *   3. The rootless pre-flag-day canonical is likewise byte-identical on the shared
+ *      ten-field base, and the suffix is genuinely absent.
  *   4. A null-root row (legacy / pre-Phase-1) stays on the rootless canonical even
  *      post-flag-day (the presence-aware gate), so old signatures still verify.
+ *   5. All six builders agree on a post-flag-day root-bearing checkpoint, and on a
+ *      root-bearing checkpoint BELOW the flag day the gated four omit the suffix while
+ *      the two indexer copies append it: the one quadrant where they differ, pinned.
  *
- * The explorer's inline copy is exercised against the SDK in the explorer's own unit
- * suite (explorer_checkpoints.test.js); here we cover the three callable builders.
+ * The archive family (indexer ANCHOR v1, bin/recovery.js wrapperCanonical, the hub's
+ * archiveCanonical) is pinned in the indexer's recovery_wrapper_canonical_parity suite.
  *
  * Spec: SPV light-client spec s6; Phase 2 handover.
  ********************************************************************/
@@ -68,6 +73,9 @@ const syncCkpt = require(path.join(ROOT, 'xchain-sync', REGISTRY_ENTRY));
 const StateCheckpointEngine = require(path.join(ROOT, 'xchain-hub/src/anchor/checkpoint_engine.js'));
 const sdkCheckpoint         = require(path.join(ROOT, 'xchain-sdk/src/checkpoint.js'));
 const Anchor                = require(path.join(ROOT, 'xchain-indexer/src/actions/anchor/index.js'));
+const syncCheckpoint        = require(path.join(ROOT, 'xchain-sync/src/checkpoint.js'));
+const explorerProofs        = require(path.join(ROOT, 'xchain-explorer/src/explorer/proofs.js'));
+const checkpointSource      = require(path.join(ROOT, 'xchain-indexer/src/consensus/bridge_proof_client/checkpoint_source.js'));
 
 // The indexer ANCHOR canonical is a plain method that reads only its `d` argument
 // (no `this`), so invoke it directly off the prototype. `d` is ONE v0 bundle section,
@@ -93,8 +101,9 @@ function fixtures(net, snapshotBlock, withRoots) {
     };
     const d = {
         // A v0 SECTION is root-bearing by construction: the publisher skips a null-root
-        // row rather than emitting a rootless section (D8), so the rootless shape has no
-        // FORMAT on the checkpoint leg at all and exercises _canonical's shared base.
+        // row rather than emitting a rootless section (D8). The rootless `d` is therefore
+        // not a real section shape, carries no FORMAT, and reaches only canonical's shared
+        // ten-field base, never the v0 branch.
         FORMAT: withRoots ? 0 : undefined,
         CHAIN: 'BTC', NETWORK: net, BLOCK_INDEX_CHECKPOINTED: 500, BLOCK_HASH: 'c0'.repeat(32),
         LEDGER_HASH: 'a1'.repeat(32), ACTIONS_HASH: 'b2'.repeat(32), CONTRACT_HASH: 'c3'.repeat(32),
@@ -143,11 +152,12 @@ describe('SPV Phase 2: CHECKPOINT_COMMITMENT cross-service parity', function () 
             'post-flag-day canonical must commit the root suffix; got ' + hubC);
     });
 
-    it('pre-flag-day: hub == SDK == indexer canonical, and the root suffix is absent', function () {
-        // mainnet flag-day is the far-future placeholder, so snapshot_block 1000 is inactive
-        // and the row carries null roots. No v0 section is ever cut here (a rootless row is
-        // skipped, D8), so the indexer side is canonical's shared rootless base, which the
-        // archive leg still signs and which the v0 branch extends.
+    it('pre-flag-day rootless row: hub == SDK == indexer shared base, and the root suffix is absent', function () {
+        // snapshot_block 1000 sits below the mainnet flag day and the row carries null
+        // roots. No v0 section is ever cut here (a rootless row is skipped, D8), so the
+        // indexer side is canonical's shared rootless base, which the archive leg still
+        // signs and which the v0 branch extends. The root-bearing pre-flag-day quadrant
+        // is pinned separately below.
         const { cp, d, STATE_ROOT, BLOCK_MERKLE } = fixtures('mainnet', 1000, false);
         const hubC = StateCheckpointEngine.canonicalCheckpoint(cp);
         const sdkC = sdkCheckpoint.canonicalCheckpoint(cp);
@@ -218,5 +228,53 @@ describe('SPV Phase 2: CHECKPOINT_COMMITMENT cross-service parity', function () 
             'null-root canonical must not append a root suffix');
         assert.notStrictEqual(hubNull, StateCheckpointEngine.canonicalCheckpoint(withRoots.cp),
             'a null-root and a rooted checkpoint must not share a canonical');
+    });
+});
+
+// The four builders that gate the root suffix on CHECKPOINT_COMMITMENT, over the row shape.
+function gatedCanonicals(cp) {
+    return {
+        hub:      StateCheckpointEngine.canonicalCheckpoint(cp),
+        sdk:      sdkCheckpoint.canonicalCheckpoint(cp),
+        sync:     syncCheckpoint.canonicalCheckpoint(cp),
+        explorer: explorerProofs.canonicalCheckpointString(cp)
+    };
+}
+
+// The two indexer builders that append the root suffix unconditionally.
+function unconditionalCanonicals(cp, d) {
+    return {
+        anchorSection: anchorSectionCanonical(d),
+        mirroredRow:   checkpointSource.checkpointCanonical(cp)
+    };
+}
+
+describe('XCHECKPOINT canonical: all six checkpoint-family builders', function () {
+
+    it('post-flag-day, roots present: all six emit one byte string', function () {
+        const { cp, d } = fixtures('regtest', 100, true);
+        const all = Object.assign(gatedCanonicals(cp), unconditionalCanonicals(cp, d));
+        for (const [name, s] of Object.entries(all))
+            assert.strictEqual(s, all.hub, name + ' drifted from the hub on a post-flag-day root-bearing checkpoint');
+    });
+
+    it('pre-flag-day, roots present: the gated four omit the suffix and both indexer copies append it', function () {
+        // The one quadrant where the builders disagree, pinned as the contract. The hub signs
+        // the rootless form here, so an indexer rebuild carrying the suffix fails every
+        // signature: a v0 section fails closed, and a mirrored row never hands the escrow
+        // check roots no quorum signed. Gating either indexer copy turns that into adopting
+        // unsigned roots, which is what this case refuses.
+        const { cp, d, STATE_ROOT, BLOCK_MERKLE } = fixtures('mainnet', 1000, true);
+        assert.strictEqual(idxCkpt.activeAt(CKPT_KEY, 'mainnet', null, 1000, null), false,
+            'premise: mainnet@1000 must sit below CHECKPOINT_COMMITMENT or this case pins nothing');
+        const gated = gatedCanonicals(cp);
+        assert.ok(gated.hub.startsWith('XCHECKPOINT|'), 'premise: no EQUIV wrap at mainnet@1000');
+        for (const [name, s] of Object.entries(gated)) {
+            assert.strictEqual(s, gated.hub, name + ' drifted from the hub below the flag day');
+            assert.ok(!s.includes(STATE_ROOT) && !s.includes(BLOCK_MERKLE), name + ' carries a root below the flag day');
+        }
+        const suffixed = gated.hub + '|' + STATE_ROOT + '|1|' + BLOCK_MERKLE + '|1';
+        for (const [name, s] of Object.entries(unconditionalCanonicals(cp, d)))
+            assert.strictEqual(s, suffixed, name + ' must append the root suffix unconditionally below the flag day');
     });
 });

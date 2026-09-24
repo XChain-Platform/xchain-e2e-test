@@ -144,6 +144,14 @@ const DEFAULT_BATCH_WINDOW_S = 30;
 // this: the invariant governs the venue's own resting knobs.
 const GOSSIP_HOP_BUDGET_S = 2;
 
+// How many times `statusOf` re-reads `/status` when the read fails WITHOUT an HTTP
+// status, and how long it waits between those reads. Three attempts over two seconds
+// covers a socket dropped under load without hiding a listener that is genuinely gone:
+// an indexer that is down stays down and still fails the leg, about two seconds in,
+// while a single dropped connection costs one retry rather than the whole leg.
+const STATUS_TRANSPORT_ATTEMPTS = 3;
+const STATUS_TRANSPORT_RETRY_MS = 1000;
+
 // The two window keyings this venue knows how to reason about, named so a verdict cannot
 // be spelled two ways in the helper and its guard. `effective_time` is the signed field
 // every hub reads identically; `finalized_at` is the per-hub wall clock older hubs keyed
@@ -447,6 +455,79 @@ function planPorts(ports, hubCount, indexerCount) {
         p2pProxy: used.slice(hubCount * 2, hubCount * 3),
         indexerApi: used.slice(hubCount * 3, hubCount * 3 + indexerCount)
     };
+}
+
+/** Where the venue probes from when nothing names a base. */
+const DEFAULT_VENUE_BASE_PORT = 41000;
+
+/** The per-slot probe base the stack runner exports for the leg it launches. */
+const VENUE_BASE_PORT_ENV = 'AB_VENUE_BASE_PORT';
+
+/**
+ * The runner's own slot number, which is how a leg knows it is one of several running
+ * side by side. `run-attest-mirror.js` puts it in the driver's environment and nothing
+ * down the chain scrubs it, so it arrives in the mocha process alongside the base.
+ */
+const RUNNER_SLOT_ENV = 'ATTEST_MIRROR_SLOT';
+
+/**
+ * The port probe base for ONE venue, which is `planPorts`' guarantee carried one
+ * level out, from inside a venue to between concurrent venues.
+ *
+ * `planPorts` makes two roles of one venue unable to share a port by partitioning a
+ * single probe. Nothing made two VENUES unable to share one, and they run side by
+ * side: `pickFreePorts` probes and returns, and no child binds until seconds later,
+ * so two processes probing the same base are handed the same ports and the second
+ * child to listen dies. Measured on a three-way concurrent run, where two legs lost
+ * their whole `before all` hook to `listen EADDRINUSE 127.0.0.1:61017` and `:61030`
+ * and reported 0 passing, which reads as two broken legs rather than as one
+ * allocation that was never slot-aware.
+ *
+ * The runner already derives a disjoint window per concurrency slot and exports it.
+ * Reading it HERE is what covers every leg: a leg that constructs the venue directly
+ * and names no base is the common case, and a fix at the call sites would cover only
+ * the legs that exist today. An explicit `basePort` still wins, so a caller that
+ * places its own venues by hand (the bridge rail's two) is unchanged.
+ *
+ * A base that is set but unusable throws rather than falling back, because the
+ * fallback is the shared window this exists to leave.
+ *
+ * @param {number} [explicit]  `opts.basePort`, the caller's own choice
+ * @param {object} [env]       environment to read, normally `process.env`
+ * @returns {number}           the base to probe upward from
+ */
+function resolveVenueBasePort(explicit, env) {
+    if (explicit) return explicit;
+    const source = env || {};
+    const raw = source[VENUE_BASE_PORT_ENV];
+    if (raw === undefined || raw === null || String(raw).trim() === '') {
+        // UNDER THE RUNNER, AN ABSENT BASE IS A FAILURE AND NOT A DEFAULT. A leg that is
+        // one of several concurrent slots and has no base of its own would fall back to
+        // the shared window, every slot would probe the same ports, and the whole run
+        // would come back as intermittently flaky barrier legs rather than as a missing
+        // export. That is the failure this refuses to report quietly: the slot is the
+        // evidence that a base was owed, so its presence without one throws.
+        //
+        // SLOT 0 IS A REAL SLOT. The check is presence, never truthiness, because the
+        // first slot arrives as the string "0" and a truthiness test would wave through
+        // exactly the case that collides with everything else.
+        const slot = source[RUNNER_SLOT_ENV];
+        if (slot !== undefined && slot !== null && String(slot).trim() !== '') {
+            throw new Error('attestMirrorVenue: ' + RUNNER_SLOT_ENV + '=' + slot + ' names a concurrency ' +
+                'slot but ' + VENUE_BASE_PORT_ENV + ' is unset, so this leg has no window of its own. ' +
+                'Falling back to ' + DEFAULT_VENUE_BASE_PORT + ' would put every concurrent slot back ' +
+                'in one shared window and surface as flaky legs rather than as the missing export. ' +
+                'The stack driver derives the base per slot and run-leg.sh exports it.');
+        }
+        return DEFAULT_VENUE_BASE_PORT;
+    }
+    const base = Number(raw);
+    if (!Number.isInteger(base) || base < 1024 || base > 65000) {
+        throw new Error('attestMirrorVenue: ' + VENUE_BASE_PORT_ENV + '=' + raw + ' is not a usable probe base. ' +
+            'The stack runner exports the slot\'s base as an integer between 1024 and 65000; ' +
+            'falling back to ' + DEFAULT_VENUE_BASE_PORT + ' would put this leg back in the shared window.');
+    }
+    return base;
 }
 
 /**
@@ -2020,7 +2101,8 @@ class AttestMirrorVenue {
      *                              keypairs are generated and no request will ever select
      *                              these hubs.
      * @param opts.coin/network     the chain the indexers index (default bitcoin/regtest)
-     * @param opts.basePort         port probe base (default 41000)
+     * @param opts.basePort         port probe base; unset, the runner's per-slot base from
+     *                              the environment, else 41000 (see resolveVenueBasePort)
      * @param opts.hubDb            an already-started disposableHubDb handle to share
      * @param opts.repoRoot         monorepo root the hub and indexer children are spawned
      *                              from; defaults to XCHAIN_VENUE_REPO_ROOT, else the
@@ -2065,7 +2147,10 @@ class AttestMirrorVenue {
         this.configSecretsRedacted   = null;
         if (this.attachHubs) this.hubCount = this.attachHubs.length;
         this.network      = opts.network || 'regtest';
-        this.basePort     = opts.basePort || 41000;
+        // Named base first, else the runner's per-slot window, else the historical
+        // 41000. See resolveVenueBasePort for why the environment is read here and
+        // not at the legs.
+        this.basePort     = resolveVenueBasePort(opts.basePort, process.env);
         this.repoRoot     = resolveRepoRoot(opts.repoRoot, process.env);
         // `{1: '/path/to/other/root'}`: the per-HUB code root, resolved and checked here
         // so a bad root refuses at construction rather than as a boot timeout. Every
@@ -2754,6 +2839,32 @@ class AttestMirrorVenue {
         if (!up.ok) {
             throw new Error('attestMirrorVenue[' + this.label + ']: indexer ' + i + ' never created its schema in ' +
                 ix.indexerDbName + ' within ' + up.waitedMs + 'ms.\n' + this._tail('indexer' + i));
+        }
+
+        // The schema wait proves the indexer reached its DATABASE, not that its HTTP
+        // listener is bound, and those are minutes apart on a cold genesis replay. Every
+        // read a drill takes goes through `//status`, so without this wait `start()` returns
+        // over a socket that is still refusing and the leg dies in its `before all` hook
+        // with ECONNREFUSED rather than a named barrier. Indexers are spawned SERIALLY, so
+        // the last one is the exposed one every time: it is the one whose schema ends the
+        // wait above with nothing behind it to cover its listener, which is why the refusal
+        // lands on the same port on every stack rather than looking like a flake.
+        //
+        // ANY answer counts, 503 included. A stalled indexer that reports its stall is
+        // listening, and a barrier drill's whole subject is a node parked on a stall: a wait
+        // for HTTP 200 here would hang exactly the legs this is meant to let run.
+        const answering = await waitFor(async () => {
+            if (ix.proc.exitCode !== null) return { ok: false, dead: true };
+            try {
+                const res = await axios.get(ix.apiUrl + '/status', { timeout: 5_000, validateStatus: () => true });
+                return { ok: true, httpStatus: res.status };
+            } catch (_) { return { ok: false }; }
+        }, { timeoutMs: BOOT_WAIT_MS, intervalMs: 1000 });
+        if (!answering.ok) {
+            throw new Error('attestMirrorVenue[' + this.label + ']: indexer ' + i + ' never answered /status on ' +
+                ix.apiUrl + ' within ' + answering.waitedMs + 'ms' +
+                (answering.last && answering.last.dead ? ' (the process exited)' : '') +
+                '.\n' + this._tail('indexer' + i));
         }
         ix.connector = new XChainIndexerConnector('127.0.0.1', ix.apiPort, null);
     }
@@ -3549,11 +3660,46 @@ class AttestMirrorVenue {
     // The indexer's `/status`, parsed. Carries `stallReason`, `stallClass`,
     // `stallClearsAt`, `degraded` and the block counters: the anti-wedge leg reads
     // `attest_response_sync_barrier` out of `stallReason` here.
+    //
+    // RETRIES A DROPPED SOCKET, AND NOTHING ELSE. `validateStatus` accepts every HTTP
+    // status on purpose, because a stalled indexer reporting 503 is an ANSWER and is
+    // frequently the very state a barrier drill is asserting. A transport failure is the
+    // absence of an answer: the socket hung up, the connection reset, the read timed out
+    // before any response line arrived. Those two are not the same event and only the
+    // second is safe to repeat, so the retry keys on `error.response` being absent and a
+    // status of any kind returns on the first attempt, unretried and unmodified.
+    //
+    // WHY IT EXISTS. This was one unretried `axios.get`, so a single dropped socket
+    // anywhere in a leg threw straight out of the venue and killed the leg in whatever
+    // `before all` hook or poll loop happened to be reading. Measured across two full
+    // aggregate drives, `statusOf` threw in four legs: at0, at0b and venue.smoke on the
+    // 2026-09-17 drive (ECONNREFUSED, the indexer's listener not yet bound, since fixed
+    // upstream by waiting for it) and ab1 on the 2026-09-18 drive (socket hang up, mid
+    // leg, on an indexer that was up and had answered many times already). Waiting for
+    // the listener at bring-up cured the first shape and could not cure the second.
     async statusOf(indexerIndex) {
         const ix = this.indexers[indexerIndex];
         if (!ix) throw new Error('attestMirrorVenue: no indexer ' + indexerIndex);
-        const res = await axios.get(ix.apiUrl + '/status', { timeout: 10_000, validateStatus: () => true });
-        return { httpStatus: res.status, body: res.data };
+        let lastError = null;
+        for (let attempt = 0; attempt < STATUS_TRANSPORT_ATTEMPTS; attempt++) {
+            try {
+                const res = await axios.get(ix.apiUrl + '/status',
+                    { timeout: 10_000, validateStatus: () => true });
+                return { httpStatus: res.status, body: res.data };
+            } catch (error) {
+                // A response of ANY status is an answer and must not be retried; without
+                // one this is a transport failure and repeating it is safe.
+                if (error && error.response) throw error;
+                lastError = error;
+                await sleep(STATUS_TRANSPORT_RETRY_MS);
+            }
+        }
+        const reason = lastError && lastError.message ? lastError.message : String(lastError);
+        const wrapped = new Error('attestMirrorVenue[' + this.label + ']: indexer ' + indexerIndex +
+            ' did not answer /status on ' + ix.apiUrl + ' in ' + STATUS_TRANSPORT_ATTEMPTS +
+            ' attempts, the last failing before any HTTP status arrived: ' + reason);
+        wrapped.cause = lastError;
+        throw wrapped;
     }
 
     async stallClassOf(indexerIndex) {
@@ -3910,6 +4056,10 @@ module.exports = {
     hubExtraEnvFor,
     planPorts,
     portCount,
+    resolveVenueBasePort,
+    DEFAULT_VENUE_BASE_PORT,
+    VENUE_BASE_PORT_ENV,
+    RUNNER_SLOT_ENV,
     buildHubEnv,
     buildIndexerEnv,
     pickOutsideIndexer,

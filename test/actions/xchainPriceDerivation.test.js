@@ -31,7 +31,10 @@ const gasHelper = require('../helpers/gasHelper')
 const sendHelper = require('../helpers/sendHelper')
 const issueHelper = require('../helpers/issueHelper')
 const stakeHelper = require('../helpers/stakeHelper')
+const { captureCurrentRail } = require('../helpers/chainRail')
 const { NO_PRICE_SEED } = require('../helpers/xchainPriceConstants')
+
+const { code: COIN_CODE } = captureCurrentRail()
 
 // The derivation lives in xchain-indexer and is vendored byte-identically into
 // xchain-hub. Require it from the sibling checkout rather than copying it here:

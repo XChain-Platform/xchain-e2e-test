@@ -13,6 +13,7 @@ const cryptoHelper = require('../cryptoHelper')
 const transactionHelper = require('../transactionHelper')
 const nativeFeeHelper = require('../helpers/nativeFeeHelper')
 const { BOOTSTRAP_XCHAIN_USD, NO_PRICE_SEED } = require('../helpers/xchainPriceConstants')
+const { FIXTURE_ID_FLOOR, FIXTURE_INSERT_SQL } = require('../helpers/priceSnapshotHelper')
 
 // Live-stack proof of native-coin USD-pegged fee payment.
 //
@@ -48,13 +49,10 @@ async function seedPrice(coinPair, price, referenceBlock, roundNumber){
         let rows = await conn.query("SELECT block_time FROM blocks ORDER BY block_index DESC LIMIT 1")
         let nowSec = Math.floor(Date.now() / 1000)
         let chainNow = rows.length ? Math.max(Number(rows[0].block_time), nowSec) : nowSec
-        await conn.query(
-            `INSERT INTO price_snapshots
-               (round_number, coin_pair, price, reference_block, reference_chain,
-                block_timestamp, validator_count, consensus_round, consensus_proof, status)
-             VALUES (?, ?, ?, ?, 'BTC', ?, 1, 1, '[]', 'finalized')`,
-            [roundNumber, coinPair, price, referenceBlock, chainNow - 60]
-        )
+        // Above the hub's id space, or the next mirrored round overwrites this row's
+        // price in place (see priceSnapshotHelper FIXTURE_ID_FLOOR).
+        await conn.query(FIXTURE_INSERT_SQL,
+            [FIXTURE_ID_FLOOR, roundNumber, coinPair, price, referenceBlock, chainNow - 60])
     } finally { await conn.release() }
 }
 

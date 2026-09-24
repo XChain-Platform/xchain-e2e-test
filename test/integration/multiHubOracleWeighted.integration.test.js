@@ -164,3 +164,6 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM price PBFT round (WI-1 Suite 
     });
 
 });
+
+// Run the split parts in this suite's lane; the stubbed lane ignores their directory.
+require('./multiHubOracleWeighted.integration.test/02_healthy_weighted_federation.test');

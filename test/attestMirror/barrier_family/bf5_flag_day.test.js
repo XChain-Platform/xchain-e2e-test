@@ -54,7 +54,11 @@ describe('BF5: the flag day, one venue, two rules, one row bound at two differen
     const ctx = { venue: null, btc: null, coin: 'BTC', B: null, key: null, blocks: {}, committedAt: {}, inertSeen: [] }
 
     before(async function () {
-        const up = await drive.bootFamilyVenue({ label: 'bf5', repoRoot: BUILD_ROOT, armed: [ARMED] })
+        // requireMirrorReady: BF5 judges the INERT node by the match barrier, which can only clear
+        // once its hub mirror is bootstrapped. Levelling on chain height alone let the 2026-09-18
+        // drive start with indexer 1 still draining its bootstrap, and both of BF5's reds were that
+        // one unready node rather than the rule under test.
+        const up = await drive.bootFamilyVenue({ label: 'bf5', repoRoot: BUILD_ROOT, armed: [ARMED], requireMirrorReady: true })
         Object.assign(ctx, up, { coin: up.evidence.coinCode })
         assert.deepStrictEqual(Object.keys(ctx.venue.indexerEnv).map(Number), [ARMED], 'the overlay must arm indexer 0 alone')
     })
@@ -62,7 +66,14 @@ describe('BF5: the flag day, one venue, two rules, one row bound at two differen
     after(async function () {
         // A case that failed while the chain was held must not leave the miner paused.
         await drive.releaseChain(ctx.btc)
-        if (ctx.venue) await ctx.venue.stop()
+        if (ctx.venue) {
+            // Printed unconditionally, before stop() kills both indexer processes and removes
+            // the venue's working directory: a red that never touched the one assertion above
+            // that carries a logTail must not lose the only copy of either node's log.
+            console.log('BF5 indexer ' + ARMED + ' log tail at teardown:\n' + ctx.venue.logTail('indexer' + ARMED))
+            console.log('BF5 indexer ' + INERT + ' log tail at teardown:\n' + ctx.venue.logTail('indexer' + INERT))
+            await ctx.venue.stop()
+        }
     })
 
     it('seeds the one row whose two rules select different blocks', async function () {
@@ -111,15 +122,22 @@ async function assertDivergence (ctx) {
     ctx.committedAt[ARMED] = Date.now() - started
     assert.ok(armed.ok, 'the armed node did not commit B inside five minutes: ' + JSON.stringify(armed.s) + '\n' + ctx.venue.logTail('indexer' + ARMED))
     assert.ok(armed.s.heights && Object.keys(armed.s.heights).length > 0, 'the hub published no heights map; arming bound on nothing')
-    const inertNow = await drive.statusSnapshot(ctx.venue, INERT)
-    assert.strictEqual(inertNow.height, ctx.B - 1, 'the inert node committed the future-stamped block early: ' + JSON.stringify(inertNow))
-    assert.strictEqual(inertNow.stallClass, 'future_block_wait', 'the inert node reports ' + inertNow.stallClass + ', not future_block_wait')
+    // A one-shot statusSnapshot read here races indexer 188b08af's per-pass stall reset: the
+    // node can report between passes with the prior stallClass already cleared. Poll instead.
+    const inertNow = await drive.waitForStatus(ctx.venue, INERT, (s) => s.stallClass === 'future_block_wait', 90 * 1000)
+    assert.ok(inertNow.ok, 'the inert node never reported future_block_wait: ' + JSON.stringify(inertNow.s) +
+        '\n' + ctx.venue.logTail('indexer' + INERT))
+    assert.strictEqual(inertNow.s.height, ctx.B - 1, 'the inert node committed the future-stamped block early: ' + JSON.stringify(inertNow.s) +
+        '\n' + ctx.venue.logTail('indexer' + INERT))
     const t = ctx.blocks.B.blockTime
     const armedSet = await drive.mirrorReadableSet(ctx.venue, ARMED, TABLE, ctx.coin, ctx.B, t)
     assert.deepStrictEqual(armedSet, [], 'the armed node reads the row at B, but its admission height is B + 2')
     const inertGot = await drive.waitCommitted(ctx.venue, INERT, ctx.B, (AHEAD_S + 600) * 1000)
     ctx.committedAt[INERT] = Date.now() - started
-    assert.ok(inertGot.ok, 'the inert node never committed B: ' + JSON.stringify(inertGot.s))
+    // The status JSON names the last barrier the block DEFERRED on, which is not the same as the
+    // reason it is still uncommitted: a canonical-build refusal or a parse rollback never reaches
+    // /status at all. The inert node's own log is the only carrier of that, so it rides the message.
+    assert.ok(inertGot.ok, 'the inert node never committed B: ' + JSON.stringify(inertGot.s) + '\n' + ctx.venue.logTail('indexer' + INERT))
     // The inert node's read at B is the LEGACY rule alone: effective_time <= t(B).
     const inertRows = await queryDb(ctx.venue, ctx.venue.indexers[INERT].mirrorDbName,
         'SELECT match_id AS k FROM `' + TABLE + "` WHERE status = 'finalized' AND effective_time <= ? ORDER BY match_id ASC", [t])
@@ -136,7 +154,7 @@ async function assertConvergence (ctx) {
     assert.strictEqual(ctx.blocks.B2.height, ctx.B + 2)
     for (const i of [ARMED, INERT]) {
         const got = await drive.waitCommitted(ctx.venue, i, ctx.B + 2, 10 * 60 * 1000)
-        assert.ok(got.ok, 'indexer ' + i + ' never committed B + 2: ' + JSON.stringify(got.s))
+        assert.ok(got.ok, 'indexer ' + i + ' never committed B + 2: ' + JSON.stringify(got.s) + '\n' + ctx.venue.logTail('indexer' + i))
     }
     const t2 = ctx.blocks.B2.blockTime
     const armedSet = await drive.mirrorReadableSet(ctx.venue, ARMED, TABLE, ctx.coin, ctx.B + 2, t2)

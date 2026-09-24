@@ -18,11 +18,14 @@
  * against mock fixtures and catch mutations unit tests alone may miss. That is
  * the same selection package.json declares as `test:integration:stubbed`.
  *
- * The top-level test/integration/*.integration.test.js live suites are
- * deliberately OUT. They provision a Docker MariaDB (test/helpers/disposableHubDb.js)
- * and return null without Docker, so including them made this phase's score
- * host-dependent: a Docker-less host silently skips 34 of the 56 files and still
- * reports a number. Docker also does not survive mutation well here, since
+ * The live suites are deliberately OUT: the top-level test/integration/*.test.js
+ * roots AND the same-named test/integration/<root>.test/ directories holding
+ * their split parts (the `ignore` below). They provision a Docker MariaDB
+ * (test/helpers/disposableHubDb.js) or a regtest rail and skip themselves when
+ * it is absent, so including any of them makes this phase's score
+ * host-dependent: a Docker-less host silently skips those files and still
+ * reports a number. A split part runs in its root's lane, so excluding it here
+ * drops it from no lane. Docker also does not survive mutation well here, since
  * disposableHubDb.js is itself in the `mutate` list above, so a mutant of the
  * teardown path leaks containers; and `timeoutMS` below is far under live
  * bring-up, which would score live mutants as timeouts rather than survivors.
@@ -44,10 +47,13 @@ export default {
   mochaOptions: {
     spec: [
       'test/unit/**/*.test.js',
-      // Stubbed integration only. `test/integration/**` also matches the 34
-      // top-level live suites; the one-directory-deep form is the stubbed lane.
+      // Stubbed integration only: the one-directory-deep form skips the top-level
+      // live roots, and `ignore` skips their split-part directories.
       'test/integration/*/**/*.test.js',
     ],
+    // Same selection as package.json `test:integration:stubbed`, pinned by
+    // test/unit/scripts/stubbed_lane_hermetic.test.js.
+    ignore: ['test/integration/*.test/**'],
   },
   coverageAnalysis: 'perTest',
   timeoutMS: 60000,

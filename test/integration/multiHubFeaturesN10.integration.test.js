@@ -243,3 +243,7 @@ describe('MultiValidatorHub: per-feature weighted quorum at N=10 (C.2)', functio
     });
 
 });
+
+// Run the split parts in this suite's lane; the stubbed lane ignores their directory.
+require('./multiHubFeaturesN10.integration.test/02_cross_chain_dex_match.test');
+require('./multiHubFeaturesN10.integration.test/03_xcall_dispatch_relay.test');

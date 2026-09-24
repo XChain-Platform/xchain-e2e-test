@@ -26,7 +26,9 @@
  *     defaulted from whatever tree this file happens to live in;
  *   - the arming lever is the indexer's own regtest resolver, read from the
  *     indexer's registry rather than spelled here, so a renamed env key reddens
- *     the fixture instead of silently leaving every "armed" indexer inert.
+ *     the fixture instead of silently leaving every "armed" indexer inert. It
+ *     arms at genesis or at a named HEIGHT, and a leg that asserts anything about
+ *     a legacy-era row must use the height form (see the crossing note below).
  *
  * VENUE TRAPS, encoded once (family frontier, "Venue traps the legs must encode"):
  * the oracle quote lives QUOTE_LIFETIME_S and a leg that outlives it misreads a
@@ -58,6 +60,70 @@ const gate = require('../../../../xchain-indexer/src/consensus/gates/mirror_admi
 // behaviour byte for byte; the fixture never spells an "inert" value.
 const ARM_ENV   = gate.MIRROR_ADMISSION_REGTEST_ENV
 const ARM_VALUE = 'armed'
+
+/**
+ * THE CROSSING FORM OF THE SAME LEVER, and why a leg needs it.
+ *
+ * `ARM_VALUE` resolves to MIRROR_ADMISSION_REGTEST_ARMED_HEIGHT, which is 0, so on that
+ * venue EVERY height is admission era and no block below the activation exists. A leg
+ * that seeds a "legacy" row there is not seeding a legacy row: it is seeding a modern row
+ * missing its mandatory map, which is a row no hub produces and which the canonical
+ * builder refuses by design: `admissionCanonicalValue` rejects a NULL admission map on any
+ * row whose era block is at or above the producer activation (adjudicated 2026-09-18).
+ * The refusal is the product working; the seed was the defect.
+ *
+ * The resolver also takes a HEIGHT (xchain-indexer protocol_changes/regtest_env.js
+ * `regtestHeight`), and the same value arms the producer and the consumer. A leg that
+ * needs a real flag day passes the chain's own tip + 1: every block already on the chain
+ * is then legacy era, every block the venue goes on to mine is admission era, and the
+ * crossing the legs assert about is one the venue actually walks through rather than one
+ * the seeds manufacture.
+ */
+
+/**
+ * The env VALUE that arms a child at `armHeight`: the canonical decimal spelling the
+ * indexer's regtest resolver accepts, or `ARM_VALUE` when no height is named.
+ *
+ * @param {number} [armHeight]  a non-negative safe integer, or null/undefined for genesis
+ * @returns {string}
+ */
+function armValue (armHeight) {
+    if (armHeight === null || armHeight === undefined) return ARM_VALUE
+    if (!Number.isSafeInteger(armHeight) || armHeight < 0) throw new Error('barrierFamilyFixture: bad arm height ' + armHeight)
+    return String(armHeight)
+}
+
+/**
+ * The activation height a crossing leg arms at, given the chain tip the venue was built
+ * on: the FIRST block the venue itself mines. Below it sits the chain the stack already
+ * has, which is where a legacy-era row can honestly live; at and above it sits everything
+ * the venue produces, which is admission era and carries a map.
+ *
+ * @param {number} railTip  the chain's height when the venue is built
+ * @returns {number}
+ */
+function crossingArmHeight (railTip) {
+    if (typeof railTip !== 'number' || !Number.isSafeInteger(railTip) || railTip < 0) {
+        throw new Error('barrierFamilyFixture: bad rail tip ' + JSON.stringify(railTip))
+    }
+    return railTip + 1
+}
+
+/**
+ * The era block a LEGACY seed carries under `armHeight`: the last block below the
+ * activation, which is a block the chain has actually reached. Never negative, so a
+ * venue armed at genesis has no legacy era and says so rather than seeding block -1.
+ *
+ * @param {number} armHeight
+ * @returns {number}
+ */
+function legacyEraBlock (armHeight) {
+    if (typeof armHeight !== 'number' || !Number.isSafeInteger(armHeight) || armHeight < 1) {
+        throw new Error('barrierFamilyFixture: no legacy era below arm height ' + JSON.stringify(armHeight) +
+                        '; arm above genesis (crossingArmHeight) before seeding a legacy row')
+    }
+    return armHeight - 1
+}
 
 // The nine watermark-keyed reasons in BLOCK-LOOP order, which is the order BF1's
 // enumeration must observe as each member's grace is raised in turn. `/status` is
@@ -104,17 +170,19 @@ const ADMISSION_TABLES = Object.freeze({
 /**
  * The per-index env overlay that arms the named indexers and leaves the rest inert.
  * `{ armed: [0] }` gives `{ 0: { [ARM_ENV]: 'armed' } }` and nothing for indexer 1,
- * which is BF5's whole lever: one venue, two rules.
+ * which is BF5's whole lever: one venue, two rules. `armHeight` arms at that height
+ * instead of at genesis, which is what a crossing leg needs (see `crossingArmHeight`).
  *
- * @param {{armed?: number[]}} spec
+ * @param {{armed?: number[], armHeight?: number}} spec
  * @returns {object} an `opts.indexerEnv` value
  */
 function armingOverlay (spec) {
     const armed = (spec && Array.isArray(spec.armed)) ? spec.armed : []
+    const value = armValue(spec ? spec.armHeight : undefined)
     const out = {}
     for (const i of armed) {
         if (!Number.isInteger(i) || i < 0) throw new Error('barrierFamilyFixture: bad indexer index ' + i)
-        out[i] = { [ARM_ENV]: ARM_VALUE }
+        out[i] = { [ARM_ENV]: value }
     }
     return out
 }
@@ -224,6 +292,16 @@ function reseedQuoteBefore (startedAtMs, nowMs, nextS) {
 
 /** The commit a checkout (worktree or main) is at, read-only. */
 function headShaOf (repoDir) {
+    const manifestPath = process.env.XCHAIN_SOURCE_REVISION_FILE ||
+        path.join(path.dirname(repoDir), '.xchain-source-revisions.json')
+    if (fs.existsSync(manifestPath)) {
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+        const revisions = manifest && manifest.repositories
+        const revision = revisions && revisions[path.basename(repoDir)]
+        assert.ok(/^[0-9a-f]{40}$/.test(String(revision || '')),
+            manifestPath + ' has no pinned 40-hex revision for ' + path.basename(repoDir))
+        return revision
+    }
     return execFileSync('git', ['-C', repoDir, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
 }
 
@@ -276,16 +354,22 @@ function buildFamilyVenue (opts) {
     const venueOpts = Object.assign({}, o.venue || {}, {
         label:      o.label || 'bf',
         repoRoot:   root,
-        indexerEnv: mergeIndexerEnv((o.venue && o.venue.indexerEnv) || {}, armingOverlay({ armed: o.armed || [] })),
+        indexerEnv: mergeIndexerEnv((o.venue && o.venue.indexerEnv) || {},
+                                    armingOverlay({ armed: o.armed || [], armHeight: o.armHeight })),
     })
     if (o.hubRepoRoots) venueOpts.hubRepoRoots = o.hubRepoRoots
     const venue = new AttestMirrorVenue(venueOpts)
-    return { venue, evidence: evidenceRecord(venue, { armed: o.armed || [], coinCode: coinCode(venue.coin) }) }
+    return { venue, evidence: evidenceRecord(venue, {
+        armed: o.armed || [], armHeight: o.armHeight === undefined ? null : o.armHeight, coinCode: coinCode(venue.coin),
+    }) }
 }
 
 module.exports = {
     ARM_ENV,
     ARM_VALUE,
+    armValue,
+    crossingArmHeight,
+    legacyEraBlock,
     FAMILY_REASONS_LOOP_ORDER,
     QUOTE_LIFETIME_S,
     RESEED_MARGIN_S,

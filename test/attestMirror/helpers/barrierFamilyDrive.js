@@ -49,12 +49,25 @@ const STAMP_AHEAD_S = Number(process.env.BF_STAMP_AHEAD_S || 7200)
  * the fixture; `opts.armHubs` arms every hub child with the same lever so the producers
  * stamp admission maps (the venue's `hubExtraEnv` seam).
  *
- * @returns {Promise<{venue: object, evidence: object, btc: object}>}
+ * `opts.armAtCrossing` arms at the chain's own tip + 1 instead of at genesis, and returns
+ * that height beside `legacyBlock`, the last block below it. A leg that seeds a legacy-era
+ * row needs this: armed at genesis there is no block below the activation, so a NULL-map
+ * seed is a modern row missing its map and the canonical builder refuses it by design
+ * (barrierFamilyFixture, the crossing note). The height is read from the rail BEFORE the
+ * venue starts, so every block the venue goes on to mine is admission era.
+ *
+ * @returns {Promise<{venue: object, evidence: object, btc: object, armHeight: number|null, legacyBlock: number|null}>}
  */
 async function bootFamilyVenue (opts) {
     const o = opts || {}
     assert.ok(o.repoRoot, 'bootFamilyVenue: repoRoot is required (B4: the evidence names the tree that ran)')
     const btc = await createRail('bitcoin', 'regtest')
+    let armHeight = o.armHeight === undefined ? null : o.armHeight
+    if (o.armAtCrossing) {
+        assert.strictEqual(armHeight, null, 'bootFamilyVenue: armAtCrossing derives the height; do not also pass armHeight')
+        armHeight = fixture.crossingArmHeight(Number(await btc.globals.nodeConnector.getBlockCount()))
+    }
+    const legacyBlock = armHeight === null ? null : fixture.legacyEraBlock(armHeight)
     const venueOpts = Object.assign({}, o.venue || {})
     // Port seam for concurrent stacks on one host: the rail runner gives each leg its own base (rail 2026-09-17, four stacks at once).
     if (process.env.AB_VENUE_BASE_PORT) venueOpts.basePort = Number(process.env.AB_VENUE_BASE_PORT)
@@ -67,20 +80,51 @@ async function bootFamilyVenue (opts) {
     }, venueOpts.hubExtraEnv || {})
     if (o.indexerGraces) venueOpts.indexerGraces = o.indexerGraces
     if (o.indexerExtraEnv) venueOpts.indexerExtraEnv = Object.assign({}, venueOpts.indexerExtraEnv || {}, o.indexerExtraEnv)
-    if (o.armHubs) venueOpts.hubExtraEnv = Object.assign({}, venueOpts.hubExtraEnv || {}, { [fixture.ARM_ENV]: fixture.ARM_VALUE })
+    // The hubs take the SAME height as the indexers: one value arms producer and consumer
+    // (protocol_changes/shared_rows.js REGTEST_ARMING), so a hub armed at genesis beside an
+    // indexer armed at a crossing would stamp maps the consumer reads under the other rule.
+    if (o.armHubs) venueOpts.hubExtraEnv = Object.assign({}, venueOpts.hubExtraEnv || {}, { [fixture.ARM_ENV]: fixture.armValue(armHeight) })
     const built = fixture.buildFamilyVenue({
-        repoRoot: o.repoRoot, armed: o.armed || [], hubRepoRoots: o.hubRepoRoots, label: o.label, venue: venueOpts,
+        repoRoot: o.repoRoot, armed: o.armed || [], armHeight, hubRepoRoots: o.hubRepoRoots, label: o.label, venue: venueOpts,
     })
-    const evidence = Object.assign(built.evidence, { armHubs: !!o.armHubs, stampAheadS: STAMP_AHEAD_S })
+    const evidence = Object.assign(built.evidence, { armHubs: !!o.armHubs, stampAheadS: STAMP_AHEAD_S, legacyBlock })
     console.log('BF EVIDENCE ' + JSON.stringify(evidence))
     const up = await built.venue.start()
     assert.ok(up, 'FAILED DRIVE (not a skip): the family venue did not come up: ' + String(built.venue.unavailable))
-    await levelIndexers(built.venue, o.levelTimeoutMs)
-    return { venue: built.venue, evidence, btc }
+    await levelIndexers(built.venue, o.levelTimeoutMs, { requireMirrorReady: !!o.requireMirrorReady })
+    return { venue: built.venue, evidence, btc, armHeight, legacyBlock }
 }
 
-/** Every indexer level with the decoder before a leg breaks anything, so a hold is the leg's doing. */
-async function levelIndexers (venue, timeoutMs) {
+/**
+ * Is this indexer's hub mirror far enough along to judge a barrier, from one status snapshot?
+ *
+ * Chain level is not mirror readiness. An indexer can commit every block the decoder has while
+ * its hub mirror is still draining its bootstrap, and a match barrier that clears only once
+ * `bootstrapped` is true then reads as a product hold on a node that was merely still starting
+ * (BF5, 2026-09-18: indexer 1 sat at 263 against decoder 266 in `barrier_defer`).
+ *
+ * An indexer with NO mirror configured is ready by definition, because there is nothing to
+ * bootstrap. Anything else fails closed: an absent `configured` flag is "not ready", never
+ * "ready", so a status shape that stops carrying the field parks the baseline loudly instead of
+ * releasing it on a field nobody is reading any more.
+ */
+function mirrorReady (s) {
+    if (s.mirrorConfigured === false) return { ok: true, why: 'no hub mirror configured' }
+    if (s.mirrorConfigured !== true) return { ok: false, why: 'hubMirror.configured absent from /status' }
+    if (s.mirrorConnected !== true) return { ok: false, why: 'hub mirror not connected' }
+    if (s.mirrorBootstrapped !== true) return { ok: false, why: 'hub mirror not bootstrapped' }
+    return { ok: true, why: 'connected and bootstrapped' }
+}
+
+/**
+ * Every indexer level with the decoder before a leg breaks anything, so a hold is the leg's doing.
+ *
+ * `opts.requireMirrorReady` additionally holds the baseline until every indexer's hub mirror is
+ * connected and bootstrapped. It is OPT IN: the legs that pass today level on chain height alone
+ * and keep doing so, so a leg that wants the stricter gate asks for it by name.
+ */
+async function levelIndexers (venue, timeoutMs, opts) {
+    const o = opts || {}
     const idx = venue.indexers.map((ix) => ix.index)
     const level = await untilOrClearDogeStall(async () => {
         const all = []
@@ -89,10 +133,13 @@ async function levelIndexers (venue, timeoutMs) {
         for (const i of idx) {
             all.push(await statusSnapshot(venue, i).catch((e) => ({ height: null, decoder: null, unreachable: String(e && e.message) })))
         }
-        return { ok: all.every((s) => s.height !== null && s.decoder !== null && s.height === s.decoder), all }
+        const chainLevel = all.every((s) => s.height !== null && s.decoder !== null && s.height === s.decoder)
+        const mirrorHeld = o.requireMirrorReady ? all.filter((s) => !mirrorReady(s).ok) : []
+        return { ok: chainLevel && mirrorHeld.length === 0, all, mirrorHeld: mirrorHeld.length }
     }, { timeoutMs: timeoutMs || LEVEL_TIMEOUT_MS, tipProbe: venueTipProbe(venue, idx[idx.length - 1]) })
     assert.ok(level.ok, 'the venue indexers never caught the chain before the drill: ' + JSON.stringify(level.all))
-    console.log('BF baseline: every indexer committed block ' + level.all[0].height)
+    console.log('BF baseline: every indexer committed block ' + level.all[0].height +
+        (o.requireMirrorReady ? '; hub mirrors ' + level.all.map((s) => mirrorReady(s).why).join(', ') : ''))
     return level.all
 }
 
@@ -110,6 +157,11 @@ async function statusSnapshot (venue, i) {
         inFlight: b.inFlightBlock !== undefined && b.inFlightBlock !== null ? Number(b.inFlightBlock) : null,
         decoder:  b.decoderBlock !== undefined ? Number(b.decoderBlock) : null,
         // /status carries the mirror under `hubMirror`; the fixture's snapshot reads `mirror`.
+        // `configured`/`connected`/`bootstrapped` come straight off the indexer's own status route
+        // (xchain-indexer src/api/status_route.js) so a readiness verdict never has to be inferred.
+        mirrorConfigured:   mirror.configured,
+        mirrorConnected:    mirror.connected,
+        mirrorBootstrapped: mirror.bootstrapped,
         heights:          mirror.heights,
         heightShortfalls: mirror.heightShortfalls,
         heightsFrozenMs:  mirror.heightsFrozenMs,
@@ -581,6 +633,7 @@ module.exports = {
     LEG_FLOOR_MS,
     bootFamilyVenue,
     levelIndexers,
+    mirrorReady,
     statusSnapshot,
     holdSnapshot,
     waitForStatus,

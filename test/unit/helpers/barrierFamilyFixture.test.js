@@ -22,10 +22,12 @@ const assert = require('assert')
 const fs     = require('fs')
 const os     = require('os')
 const path   = require('path')
+const { execFileSync } = require('child_process')
 
 const F = require('../../attestMirror/helpers/barrierFamilyFixture')
 const { resolveRepoRoot } = require('../../helpers/attestMirrorVenue')
-const gate = require('../../../../xchain-indexer/src/consensus/gates/mirror_admission_gate.js')
+const GATE_PATH = require.resolve('../../../../xchain-indexer/src/consensus/gates/mirror_admission_gate.js')
+const gate = require(GATE_PATH)
 
 const ROOT = resolveRepoRoot(undefined, {})
 
@@ -43,6 +45,94 @@ describe('barrierFamilyFixture: the arming lever', function () {
         assert.strictEqual(gate.resolveMirrorAdmissionRegtest({}), null, 'no key must read inert')
         assert.throws(() => F.armingOverlay({ armed: [-1] }), /bad indexer index/)
     })
+
+    it('arms at a HEIGHT when one is named, in the spelling the indexer\'s own resolver reads back', () => {
+        assert.deepStrictEqual(F.armingOverlay({ armed: [0, 1], armHeight: 812000 }),
+            { 0: { [F.ARM_ENV]: '812000' }, 1: { [F.ARM_ENV]: '812000' } })
+        assert.strictEqual(gate.resolveMirrorAdmissionRegtest({ [F.ARM_ENV]: F.armValue(812000) }), 812000,
+            'the height value does not arm the resolver at that height')
+        assert.strictEqual(F.armValue(undefined), F.ARM_VALUE, 'no height keeps the genesis form')
+        assert.strictEqual(F.armValue(null), F.ARM_VALUE)
+        assert.strictEqual(gate.resolveMirrorAdmissionRegtest({ [F.ARM_ENV]: F.armValue(0) }),
+            gate.MIRROR_ADMISSION_REGTEST_ARMED_HEIGHT, 'height 0 is the genesis height spelled out')
+        assert.throws(() => F.armValue(-1), /bad arm height/)
+        assert.throws(() => F.armValue(1.5), /bad arm height/)
+        assert.throws(() => F.armValue('812000'), /bad arm height/)
+    })
+})
+
+describe('barrierFamilyFixture: the crossing a legacy-era seed needs', function () {
+    it('puts the activation at the first block the venue mines, so the chain it was built on is legacy era', () => {
+        assert.strictEqual(F.crossingArmHeight(811999), 812000)
+        assert.strictEqual(F.legacyEraBlock(F.crossingArmHeight(811999)), 811999, 'the legacy block is the tip the venue was built on')
+        assert.strictEqual(F.crossingArmHeight(0), 1, 'a chain at genesis still yields one legacy block: block 0')
+        assert.strictEqual(F.legacyEraBlock(1), 0)
+        assert.throws(() => F.crossingArmHeight(-1), /bad rail tip/)
+        assert.throws(() => F.crossingArmHeight('811999'), /bad rail tip/)
+    })
+
+    it('refuses to name a legacy block under the GENESIS arming, because there is none', () => {
+        assert.strictEqual(gate.MIRROR_ADMISSION_REGTEST_ARMED_HEIGHT, 0,
+            'the genesis arming moved; the crossing rule below is keyed on it being 0')
+        assert.throws(() => F.legacyEraBlock(gate.MIRROR_ADMISSION_REGTEST_ARMED_HEIGHT), /no legacy era below arm height 0/)
+        assert.throws(() => F.legacyEraBlock(null), /no legacy era below arm height/)
+    })
+
+    // The whole point of the crossing, measured against the indexer's own builder rather than argued:
+    // BELOW the activation a NULL-map row builds an empty canonical tail, and AT or above it the
+    // builder still yields the legacy canonical: an absent map never throws in either era.
+    //
+    // In a CHILD process, because the arming is a child's environment: the gate reads its activation
+    // tables once at require time, so a venue arms a child at spawn and this case must do the same or
+    // it would only be testing this process's own already-resolved tables.
+    it('is the line the canonical builder itself draws for a NULL-map row', () => {
+        const ARM = 812000
+        const out = armedGateProbe(F.armValue(ARM), ARM, F.legacyEraBlock(ARM))
+        assert.strictEqual(out.resolved, ARM, 'the height value did not arm the child')
+        assert.strictEqual(out.producerActivation, ARM, 'the producer activation is not the armed height')
+        assert.strictEqual(out.consumerActivation, ARM, 'one value arms producer and consumer, or the eras split')
+        assert.strictEqual(out.eraAtLegacyBlock, false, 'the legacy block must be below the producer activation')
+        assert.strictEqual(out.eraAtArmHeight, true, 'the activation height itself is admission era')
+        assert.strictEqual(out.canonicalAtLegacyBlock, null, 'a NULL-map row below the activation must build an empty canonical tail')
+        assert.strictEqual(out.canonicalAtArmHeight, null, 'a NULL-map row at the activation must build the legacy canonical, not throw')
+        // The binding rule is untouched by the crossing: a NULL column binds by effective_time at every height.
+        assert.strictEqual(out.readableAbove, true, 'a NULL admission column must bind by effective_time above the activation')
+    })
+
+    // Armed at GENESIS, which is what every leg did before the crossing: there is no block below the
+    // activation, so the very same NULL-map row builds the legacy canonical at every height a chain can reach.
+    it('has no such line when the child is armed at genesis, which is why the seed had to move', () => {
+        const out = armedGateProbe(F.ARM_VALUE, 0, 0)
+        assert.strictEqual(out.resolved, 0)
+        assert.strictEqual(out.eraAtArmHeight, true, 'block 0 is already admission era')
+        assert.strictEqual(out.canonicalAtArmHeight, null)
+        assert.strictEqual(out.canonicalAtLegacyBlock, null,
+            'armed at genesis a NULL-map row still builds the legacy canonical and never throws')
+    })
+
+    /**
+     * The indexer gate's answers under one arming value, read out of a child process whose
+     * environment carries it. A thrown canonical comes back as its message, never as a pass.
+     */
+    function armedGateProbe (armValue, armHeight, legacyBlock) {
+        const script = [
+            'const g = require(' + JSON.stringify(GATE_PATH) + ');',
+            'const N = "regtest";',
+            'const can = (b) => { try { return g.admissionCanonicalValue("cross_chain_matches", N, b, null) } catch (e) { return String(e.message) } };',
+            'process.stdout.write(JSON.stringify({',
+            '  resolved: g.resolveMirrorAdmissionRegtest(process.env),',
+            '  producerActivation: g.MIRROR_ADMISSION_ACTIVATION["BTC:regtest"],',
+            '  consumerActivation: g.MIRROR_ADMISSION_CONSUMER_ACTIVATION["BTC:regtest"],',
+            '  eraAtLegacyBlock: g.isMirrorAdmissionProducerActive("BTC", N, ' + Number(legacyBlock) + '),',
+            '  eraAtArmHeight: g.isMirrorAdmissionProducerActive("BTC", N, ' + Number(armHeight) + '),',
+            '  canonicalAtLegacyBlock: can(' + Number(legacyBlock) + '),',
+            '  canonicalAtArmHeight: can(' + Number(armHeight) + '),',
+            '  readableAbove: g.isRowReadableAt(null, ' + (Number(armHeight) + 50) + ', 1788494058, 1788494058),',
+            '}))',
+        ].join('\n')
+        const env = Object.assign({}, process.env, { [F.ARM_ENV]: armValue })
+        return JSON.parse(execFileSync(process.execPath, ['-e', script], { encoding: 'utf8', env }))
+    }
 })
 
 describe('barrierFamilyFixture: the family in loop order', function () {
@@ -139,6 +229,26 @@ describe('barrierFamilyFixture: the BF3 pin and the leg sizing', function () {
 })
 
 describe('barrierFamilyFixture: the build root and its evidence (B4, B11)', function () {
+    it('uses a pinned archive revision without following a copied .git pointer', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'barrier-source-revision-'))
+        const repo = path.join(root, 'xchain-hub')
+        fs.mkdirSync(repo)
+        fs.writeFileSync(path.join(repo, '.git'), 'gitdir: /unreachable/copied-worktree-pointer\n')
+        const revision = 'a'.repeat(40)
+        fs.writeFileSync(path.join(root, '.xchain-source-revisions.json'), JSON.stringify({
+            version: 1, repositories: { 'xchain-hub': revision },
+        }))
+        assert.strictEqual(F.headShaOf(repo), revision)
+    })
+
+    it('refuses an archive manifest that does not pin the requested repository', () => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'barrier-source-revision-'))
+        const repo = path.join(root, 'xchain-hub')
+        fs.mkdirSync(repo)
+        fs.writeFileSync(path.join(root, '.xchain-source-revisions.json'), JSON.stringify({ version: 1, repositories: {} }))
+        assert.throws(() => F.headShaOf(repo), /no pinned 40-hex revision for xchain-hub/)
+    })
+
     it('refuses to build a venue without an explicit build root', () => {
         assert.throws(() => F.buildFamilyVenue({}), /repoRoot is required/)
         assert.throws(() => F.buildFamilyVenue({ repoRoot: os.tmpdir() }), /has no xchain-hub\/src\/api\.js/)

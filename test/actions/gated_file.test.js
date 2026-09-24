@@ -198,16 +198,31 @@ describe('FILE: token-gated content', function () {
 })
 
 describe('FILE: token-gated content', function () {
-    this.timeout(240000)
+    // No finite outer bound (timeout = 0): the negative check below requires
+    // its own internal wait budget to complete and prove rejection.
+    this.timeout(0)
     before(setupGatedActors)
 
     it('rejects bare SEND of the gated token with no sibling MESSAGE', async function () {
-        // The encoder picks the P2SH 2-tx path for this SEND (gated-token
-        // wire size pushes past OP_RETURN), so we wait for two confirms
-        // not one. Worst case: 2 x 60s tx confirm + 20s tracker + 30s
-        // waitForSend is about 170s. 180s was right at the boundary and flaked.
-        // 240s gives a real margin for retries + load.
-        this.timeout(240000)
+        // This is a negative check: it can only conclude "rejected" by
+        // waitForSend running all the way to its own give-up, on every
+        // healthy run, not just on failure. That give-up is already bounded
+        // by Database's adaptive-wait budget (base timeMax x (1 +
+        // WAIT_MAX_EXTENSIONS) = 60000 x 4 = 240000ms today), which sits
+        // AFTER the P2SH 2-tx confirm + utxo-tracker prefix this SEND also
+        // pays. A finite mocha timeout here is a second, independently
+        // maintained copy of that same budget: it drifted out of sync when
+        // db.js's _waitFor grew extension support (WAIT_MAX_EXTENSIONS,
+        // added later) without this test's timeout being revisited, so the
+        // two bounds collided with no margin between them - mocha fired
+        // first here, on a run where the indexer's real lag used all three
+        // extensions, converting a correct rejection into a false failure.
+        // Bumping the number again just rebuilds the same race one level
+        // up; every other test in this suite driven by these waitFor*
+        // polls (test/actions/*.test.js) instead disables the outer bound
+        // and trusts _waitFor's own give-up as the one source of truth for
+        // how long a poll may run, so this test follows that convention.
+        this.timeout(0)
         // sendHelper.sendSendV0 doesn't throw on a timeout. waitForSend
         // resolves to null. So we check the resolved value: if `send` is
         // non-null AND status='valid', the gate isn't being enforced.

@@ -124,7 +124,7 @@ module.exports = {
         const nativeFeeHelper = require('./nativeFeeHelper')
         let outputs = customOutputs
         if (outputs === null){
-            const feeOutput = await nativeFeeHelper.getNativeFeeOutput()
+            const feeOutput = await nativeFeeHelper.getNativeFeeOutput(action, addressInfo && addressInfo["address"])
             outputs = feeOutput ? [feeOutput] : []
         }
 

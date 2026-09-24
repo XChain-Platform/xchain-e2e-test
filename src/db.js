@@ -30,6 +30,9 @@
 // order-independent: it only has to happen before the first `new Database()`.
 function mariadbDriver(){ return require('mariadb'); }
 
+const { getLogger } = require('./lib/logger');
+const logger = getLogger();
+
 // Parses an integer-valued tunable from an env var, falling back to `def`
 // only when the var is unset/empty/non-numeric. Plain `parseInt(x) || def`
 // swallows an explicit "0" (0 is falsy), which silently reinstates a wait
@@ -164,7 +167,7 @@ class Database {
                 const fatal   = this._isFatalConnectError(e);
                 const spent   = attempts >= this.CONNECT_MAX_ATTEMPTS || Date.now() >= deadline;
                 if (fatal || spent) break;
-                console.log("Can't connect to mariadb at " + this._target()
+                logger.info("Can't connect to mariadb at " + this._target()
                     + " (attempt " + attempts + "/" + this.CONNECT_MAX_ATTEMPTS + "): "
                     + this._errText(lastError) + ". Trying again...");
                 await this.sleep(this.CONNECT_RETRY_MS);
@@ -842,11 +845,11 @@ class Database {
                     if (itemsClone.length == 0){
                         return listRow
                     } else {
-                        console.log("ERROR! List items don't match with the items in the database")
+                        logger.info("ERROR! List items don't match with the items in the database")
                         return null
                     }
                 } else {
-                    console.log("ERROR! List items don't have the same length as the items in the database")
+                    logger.info("ERROR! List items don't have the same length as the items in the database")
                     return null
                 }
             } catch (err) {
@@ -874,11 +877,11 @@ class Database {
             if (rows.length > 0){
                 listType = parseInt(rows[0]["type"])
             } else {
-                console.log("ERROR! Couldn't get the type of a list")
-                return null 
+                logger.info("ERROR! Couldn't get the type of a list")
+                return null
             }
         } catch (err) {
-            console.log(err)
+            logger.info(err)
             return null
         } finally {
             await connection.release()
@@ -938,7 +941,7 @@ class Database {
             }
         }
         
-        console.log("ERROR: there is no list with action index "+listActionIndex)
+        logger.info("ERROR: there is no list with action index "+listActionIndex)
         return null
     }
     
@@ -1325,8 +1328,11 @@ class Database {
         // Retained for the give-up report below: the last answers the probe gave
         // (null means it could not answer) and whether it was ever consulted.
         let lastLag    = null
+        let lagReason  = null
         let probes     = 0
         let writeMark  = null   // highest action_index the indexer has written
+        let lastWrites = null
+        let writeReason = null
         let writeMoved = null   // when that mark last advanced
         // Only waits that were meant to be long can be extended. Short waits are
         // callers polling for something that should be immediate, and probing on
@@ -1348,7 +1354,7 @@ class Database {
                     return row
                 }
             } catch(err) {
-                console.log(err)
+                logger.info(err)
             }
             await this.sleep(1000)
 
@@ -1363,6 +1369,9 @@ class Database {
             probes++
             nextProbeAt = Date.now() + probeEvery
             lastLag = progress.lag
+            lagReason = progress.lagReason
+            lastWrites = progress.writes
+            writeReason = progress.writesReason
             if (progress.writes !== null){
                 if (writeMark !== null && progress.writes > writeMark) writeMoved = Date.now()
                 if (writeMark === null || progress.writes > writeMark) writeMark = progress.writes
@@ -1374,7 +1383,7 @@ class Database {
             if (behind || writing){
                 extensions++
                 deadline = Date.now() + timeMax
-                console.log(label + ': '
+                logger.info(label + ': '
                     + (behind
                         ? 'indexer is ' + lastLag + ' blocks behind the chain tip'
                         : 'indexer is still writing action rows (index ' + writeMark + ')')
@@ -1401,16 +1410,18 @@ class Database {
         // and the write signal says whether rows were still landing at give-up time,
         // which separates "the stack is busy and we ran out of budget" from "the
         // stack was idle and the row is genuinely absent".
-        console.log(label + ': GAVE UP after ' + (Date.now() - startMs) + 'ms'
+        logger.info(label + ': GAVE UP after ' + (Date.now() - startMs) + 'ms'
             + ' (' + polls + ' polls, ' + extensions + '/' + this.WAIT_MAX_EXTENSIONS + ' extensions, '
             + 'timeMax ' + timeMax + 'ms, '
             + (!eligible
-                ? 'not eligible for extension'
+                ? 'last indexer lag unavailable (probe was never run because the wait was not eligible for extension)'
+                  + ', action writes unavailable (probe was never run because the wait was not eligible for extension)'
                 : probes === 0
-                    ? 'extension never probed'
-                    : 'last indexer lag ' + (lastLag === null ? 'unknown (probe failed)' : lastLag + ' blocks')
-                      + ', action writes ' + (writeMark === null
-                            ? 'unknown'
+                    ? 'last indexer lag unavailable (probe was never run before give-up)'
+                      + ', action writes unavailable (probe was never run before give-up)'
+                    : 'last indexer lag ' + (lastLag === null ? 'unavailable (' + lagReason + ')' : lastLag + ' blocks')
+                      + ', action writes ' + (lastWrites === null
+                            ? 'unavailable (' + writeReason + ')'
                             : writeMoved === null
                                 ? 'idle at index ' + writeMark
                                 : 'last advanced ' + (Date.now() - writeMoved) + 'ms ago (index ' + writeMark + ')'))
@@ -1428,14 +1439,37 @@ class Database {
     // signal so the fixed deadline stands: without progress, waiting longer is
     // indistinguishable from hanging.
     async _pipelineProgress(){
-        if (!this.pool) return { lag: null, writes: null }
+        if (!this.pool) return {
+            lag: null, lagReason: 'no database pool wired',
+            writes: null, writesReason: 'no database pool wired'
+        }
         // The probe is an optimisation, never a reason to block. If it cannot answer
         // promptly the fixed deadline stands, so a probe that hangs costs one timeout
         // rather than stalling the suite. Learned the hard way: the first cut called
         // this.getConnection(), which retries until a connection appears.
-        const blind  = { lag: null, writes: null }
-        const capped = new Promise(resolve => setTimeout(() => resolve(blind), this.WAIT_LAG_PROBE_MS))
-        return Promise.race([this._probePipeline().catch(err => { this._warnProbeFailed(err); return blind }), capped])
+        const unavailable = reason => ({
+            lag: null, lagReason: reason,
+            writes: null, writesReason: reason
+        })
+        const capped = new Promise(resolve => setTimeout(() =>
+            resolve(unavailable('probe timed out')), this.WAIT_LAG_PROBE_MS))
+        const measured = this._probePipeline().then(progress => ({
+            lag: progress.lag,
+            lagReason: progress.lag === null
+                ? (!global.nodeConnector || typeof global.nodeConnector.getBlockCount !== 'function'
+                    ? 'no node connector wired'
+                    : 'blocks table held no rows')
+                : null,
+            writes: progress.writes,
+            writesReason: progress.writes === null ? 'actions table held no rows' : null
+        })).catch(err => {
+            const message = err && typeof err.message === 'string' && err.message
+                ? err.message
+                : 'no error message'
+            this._warnProbeFailed({ message })
+            return unavailable('probe failed: ' + message)
+        })
+        return Promise.race([measured, capped])
     }
 
     // A probe that can never answer degrades every wait back to a fixed deadline
@@ -1445,7 +1479,7 @@ class Database {
     _warnProbeFailed(err){
         if (this._probeWarned) return
         this._probeWarned = true
-        console.log('_pipelineProgress: probe unavailable (' + (err && err.message ? err.message : err) + '); '
+        logger.info('_pipelineProgress: probe unavailable (' + (err && err.message ? err.message : err) + '); '
             + 'waits fall back to the fixed deadline')
     }
 

@@ -158,3 +158,6 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM oracle_publish checkpoint (WI
     });
 
 });
+
+// Run the split parts in this suite's lane; the stubbed lane ignores their directory.
+require('./multiHubStateAnchorWeighted.integration.test/02_healthy_weighted_federation.test');

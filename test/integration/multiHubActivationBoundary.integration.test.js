@@ -59,7 +59,7 @@ dotenv.config();
 const assert = require('assert');
 const { MultiValidatorHub, loadHubModule } = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
-const { waitForMesh, waitForConfigEverywhere } = require('../helpers/consensusWait');
+const { waitForMesh, waitForConfigEverywhere, assertNeverApplied } = require('../helpers/consensusWait');
 // Load swq through the SAME resolver the hub harness uses, so this module
 // instance is the one consensus/pbft.js reads and a runtime override reaches it.
 const swq = loadHubModule('src/consensus/stake_weighted_quorum.js');
@@ -80,8 +80,6 @@ const APPLY_WAIT_MS = 60_000;  // COMMIT propagation + follower applyConfig
 // The stall case has no event to wait for (non-occurrence), so its window stays a
 // fixed observation window rather than a deadline.
 const STALL_WAIT_MS = 6000;   // long enough to confirm a round does NOT finalize
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function findLeader(mvh) {
     return mvh.hubs.find((h) => {
@@ -236,8 +234,11 @@ describe('MultiValidatorHub: STAKE_WEIGHTED_QUORUM activation boundary (WI-1 Sui
             // Stake-minority → never reaches weighted quorum → the propose promise
             // rejects on timeout; fire-and-forget, assert no-apply on every hub.
             leader.addParametersFromJson(config).catch(() => {});
-            await sleep(STALL_WAIT_MS);
+            await assertNeverApplied(mvh.hubs,
+                { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: VALUE },
+                { windowMs: STALL_WAIT_MS });
 
+            // Re-read without the watcher's swallowed read errors, so a dead hub DB fails loud.
             for (let i = 0; i < mvh.hubs.length; i++) {
                 const cfg = await mvh.hubs[i].db.getConfig(COIN, NET, MODULE);
                 assert.notStrictEqual(cfg && cfg.GAS_PRICE, VALUE,

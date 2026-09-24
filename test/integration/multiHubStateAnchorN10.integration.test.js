@@ -158,3 +158,6 @@ describe('MultiValidatorHub: state-checkpoint signing at N=10 (C.2 matrix cell)'
         });
     });
 });
+
+// Run the split parts in this suite's lane; the stubbed lane ignores their directory.
+require('./multiHubStateAnchorN10.integration.test/02_six_of_ten_boundary.test');

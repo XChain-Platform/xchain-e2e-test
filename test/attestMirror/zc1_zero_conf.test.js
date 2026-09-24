@@ -51,7 +51,8 @@
 
 const assert = require('assert')
 const dotenv = require('dotenv')
-dotenv.config()
+const UNIT_ONLY = process.env.ZC1_UNIT_ONLY === '1'
+if (!UNIT_ONLY) dotenv.config()
 
 const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
@@ -110,6 +111,30 @@ module.exports = {
 
 function sleep (ms) { return new Promise((r) => setTimeout(r, ms)) }
 
+async function waitForLocalRequestAtBlock (venue, indexerIndex, request, deps) {
+    const d = deps || {}
+    const waitForHeight = d.waitForHeight || waitForHeightWithClear
+    const readRow = d.readRow || readRequestRow
+    const log = d.log || console.log
+    const requestId = String(request && request.requestId)
+    const rawBlockIndex = request && request.blockIndex
+    const blockIndex = Number(rawBlockIndex)
+    assert.ok(rawBlockIndex !== null && rawBlockIndex !== undefined &&
+        Number.isSafeInteger(blockIndex) && blockIndex >= 0,
+        'the standing indexer returned no usable block height for request ' + requestId)
+
+    const committed = await waitForHeight(venue, indexerIndex, blockIndex)
+    log('ZC1 BARRIER: request ' + requestId.slice(0, 12) + ' mined at ' + blockIndex +
+        ', venue indexer ' + indexerIndex + ' committed ' + (committed && committed.at))
+    const local = await readRow(venue, indexerIndex, requestId)
+    assert.ok(local, 'the venue indexer holds no v0 request row for ' + requestId +
+        ' after committing request block ' + blockIndex)
+    assert.strictEqual(Number(local.block_index), blockIndex,
+        'the venue request row landed at block ' + local.block_index +
+        ' but the standing indexer placed it at ' + blockIndex)
+    return local
+}
+
 /**
  * Run `work` and mine AT MOST ONE block, and only once the mempool has something.
  *
@@ -137,7 +162,52 @@ async function mineOneBlockFor (work) {
     try { return await p } finally { await miner; }
 }
 
-describe('ZC1: a request mined at N is served at tip N and binds at N+1', function () {
+if (UNIT_ONLY) {
+    describe('ZC1 request-block barrier', function () {
+        it('waits for the venue commit before reading the request row', async function () {
+            const venue = { label: 'unit' }
+            const request = { requestId: 'abc123', blockIndex: 157 }
+            let committed = false
+            let evidence = null
+            const local = await waitForLocalRequestAtBlock(venue, 0, request, {
+                waitForHeight: async (gotVenue, gotIndex, gotHeight) => {
+                    assert.strictEqual(gotVenue, venue)
+                    assert.strictEqual(gotIndex, 0)
+                    assert.strictEqual(gotHeight, 157)
+                    await Promise.resolve()
+                    committed = true
+                    return { at: gotHeight }
+                },
+                readRow: async (gotVenue, gotIndex, gotRequestId) => {
+                    assert.ok(committed, 'the request row read ran before the venue committed its block')
+                    assert.strictEqual(gotVenue, venue)
+                    assert.strictEqual(gotIndex, 0)
+                    assert.strictEqual(gotRequestId, 'abc123')
+                    return { block_index: 157 }
+                },
+                log: (line) => { evidence = line },
+            })
+            assert.strictEqual(local.block_index, 157)
+            assert.strictEqual(evidence,
+                'ZC1 BARRIER: request abc123 mined at 157, venue indexer 0 committed 157')
+        })
+
+        it('refuses a row assigned to a different block', async function () {
+            await assert.rejects(() => waitForLocalRequestAtBlock({}, 0,
+                { requestId: 'abc123', blockIndex: 157 }, {
+                    waitForHeight: async () => {},
+                    readRow: async () => ({ block_index: 158 }),
+                    log: () => {},
+                }), /venue request row landed at block 158 but the standing indexer placed it at 157/)
+        })
+
+        it('refuses to wait without a usable request height', async function () {
+            await assert.rejects(() => waitForLocalRequestAtBlock({}, 0,
+                { requestId: 'abc123', blockIndex: null }),
+            /standing indexer returned no usable block height/)
+        })
+    })
+} else describe('ZC1: a request mined at N is served at tip N and binds at N+1', function () {
     // Five hub processes, two indexers replaying from genesis, then one round.
     this.timeout(60 * 60 * 1000)
 
@@ -207,8 +277,7 @@ describe('ZC1: a request mined at N is served at tip N and binds at N+1', functi
                 const requestId = request.requestId
                 await settleOrReport('zc1')
 
-                const local = await readRequestRow(venue, 0, requestId)
-                assert.ok(local, 'the venue indexer holds no v0 request row for ' + requestId)
+                const local = await waitForLocalRequestAtBlock(venue, 0, request)
                 const N = Number(local.block_index)
 
                 // THE PRECONDITION THE WHOLE CASE RESTS ON. The miner is paused precisely

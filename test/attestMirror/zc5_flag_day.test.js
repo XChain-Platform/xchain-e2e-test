@@ -26,10 +26,10 @@
  * exist below it, exactly as AT6's own skipped case measures for the mirror
  * activation. The below-height behaviour is therefore asserted at a SYNTHETIC
  * height on `testnet`, which is the one network where the widening map is armed
- * (150780), the mirror map is armed (151324) and the zero-conf map is still null:
- * the only combination that reaches the old branches with the mirror-era gate
- * satisfied. If the operator arms testnet, these cases stop testing what they say
- * they test, so the fixture assumption is asserted first rather than assumed.
+ * (150780), the mirror map is armed (151324) and the zero-conf map arms at 151800:
+ * the only interval that reaches the old branches with the mirror-era gate satisfied.
+ * The fixture pins that activation and keeps every synthetic height below it, so a
+ * later registry change fails before these cases can assert the wrong era.
  *
  * THE ABOVE-HEIGHT HALF IS ON THE VENUE, on the at6 shape (D79): a request served
  * at zero confirmations, bound, then rolled back and re-applied, with the signed
@@ -80,10 +80,11 @@ const XChainIndexerConnector = require('../../src/XChainIndexerConnector.js')
 // ---------------------------------------------------------------------------
 
 // A testnet request block: above the widening height (150780) and above the mirror
-// height (151324), with the zero-conf map still null. Any height in that band works;
-// these three pin one request's whole window.
+// height (151324), but below the zero-conf height (151800). These values pin one
+// request's whole window inside that interval.
 const T_REQ_BLOCK = 151400
 const T_DEADLINE  = 151500
+const TESTNET_ZERO_CONF_HEIGHT = 151800
 
 // The regtest counterparts, where every request is above the zero-conf height because
 // the map is armed at genesis. Present so every below-height assertion has an
@@ -120,17 +121,19 @@ describe('ZC5 below the height: the flag day leaves every rule where it was', fu
         Utility = require('../../../xchain-indexer/src/utility.js')
     })
 
-    it('holds the fixture assumption: testnet is armed for mirror and widening, not zero-conf',
+    it('holds the fixture assumption: the synthetic request stays below testnet zero-conf activation',
         function () {
             // THE ASSUMPTION EVERY CASE BELOW RESTS ON. If the operator arms testnet (the
             // frontier's own row 19), these cases would silently start testing the
             // above-height branch while still claiming to test the below-height one,
             // which is the most dangerous direction for a flag-day test to fail in.
-            assert.strictEqual(zc.ATTEST_ZERO_CONF_ACTIVATION.testnet, null,
-                'ATTEST_ZERO_CONF_ACTIVATION.testnet is no longer null (' +
-                zc.ATTEST_ZERO_CONF_ACTIVATION.testnet + '), so testnet is not a below-height venue any ' +
-                'more and this whole describe block is asserting the wrong branch. Move these cases to ' +
-                'a network that is still null, or retire them with the height.')
+            assert.strictEqual(zc.ATTEST_ZERO_CONF_ACTIVATION.testnet, TESTNET_ZERO_CONF_HEIGHT,
+                'ATTEST_ZERO_CONF_ACTIVATION.testnet moved from the pinned height ' +
+                TESTNET_ZERO_CONF_HEIGHT + ' to ' + zc.ATTEST_ZERO_CONF_ACTIVATION.testnet +
+                '; resize the synthetic below-height window before trusting these cases')
+            assert.ok(T_DEADLINE < TESTNET_ZERO_CONF_HEIGHT,
+                'the synthetic request window reaches testnet zero-conf activation at ' +
+                TESTNET_ZERO_CONF_HEIGHT + '; these cases no longer exercise the below-height branch')
             assert.strictEqual(zc.isZeroConfActive(T_REQ_BLOCK, 'testnet'), false)
             assert.ok(Number.isInteger(wid.ATTEST_RESPONSIBLE_WIDENING_ACTIVATION.testnet) &&
                       T_REQ_BLOCK >= wid.ATTEST_RESPONSIBLE_WIDENING_ACTIVATION.testnet,

@@ -16,6 +16,7 @@ const transactionHelper = require('../../transactionHelper')
 const cryptoHelper = require('../../cryptoHelper')
 const mintHelper = require('../../helpers/mintHelper')
 const issueHelper = require('../../helpers/issueHelper')
+const sendHelper = require('../../helpers/sendHelper')
 const chainRail = require('../../helpers/chainRail')
 const helper = require('../../helpers/gasHelper')
 const path = require('path')
@@ -122,13 +123,96 @@ describe('gasHelper', () => {
             assert.strictEqual(mintStub.firstCall.args[2], '1000')
         })
 
-        it('routes to bridgeGasIn on every other chain', async () => {
+        it('routes to the bridged reservoir on every other chain, never a per-address bridge', async () => {
             global.COIN_CODE = 'DOGE'
-            const bridgeStub = sinon.stub(helper, 'bridgeGasIn').resolves({ bridged: true })
+            const reservoirStub = sinon.stub(helper, 'sendFromGasReservoir').resolves({ sent: true })
+            const bridgeStub = sinon.stub(helper, 'bridgeGasIn')
             const result = await helper.ensureGasBalance(addressInfo, '500')
-            assert(bridgeStub.calledOnceWith(addressInfo, '500'))
+            assert(reservoirStub.calledOnceWith(addressInfo, '500'))
+            assert(bridgeStub.notCalled)
             assert(mintStub.notCalled)
-            assert.deepStrictEqual(result, { bridged: true })
+            assert.deepStrictEqual(result, { sent: true })
+        })
+    })
+
+    // A representative nightly run: the litecoin leg finished 8 tests in six hours because every
+    // funded address paid a full relay margin for its own bridge. The reservoir
+    // bridges once per chain per process and pays every later address by SEND.
+    describe('gas reservoir', () => {
+        let bridgeStub, sendStub, fundStub
+
+        beforeEach(() => {
+            helper._resetGasReservoirs()
+            global.COIN = 'litecoin'
+            global.COIN_CODE = 'LTC'
+            global.NETWORK = 'regtest'
+            bridgeStub = sinon.stub(helper, 'bridgeGasIn').resolves({ id: 9 })
+            sendStub = sinon.stub(sendHelper, 'sendSendV0').resolves({ txHash: 'send1' })
+            let n = 0
+            fundStub = sinon.stub(cryptoHelper, 'getNewFundedAddress').callsFake(async () => ({ address: 'Lres' + (++n) }))
+        })
+
+        afterEach(() => helper._resetGasReservoirs())
+
+        it('bridges the reservoir amount once, then pays each address with a local SEND of the gas tick', async () => {
+            await helper.ensureGasBalance({ address: 'Lrecv1' }, 100)
+            await helper.ensureGasBalance({ address: 'Lrecv2' }, '20000')
+
+            assert.strictEqual(fundStub.callCount, 1, 'one reservoir address per chain')
+            const [label, coin, network, , , , native, seedGas] = fundStub.firstCall.args
+            assert.deepStrictEqual([label, coin, network, seedGas], ['GAS.RESERVOIR', 'litecoin', 'regtest', false])
+            assert.ok(native > 1, 'the reservoir needs native coin for many SEND fees')
+
+            assert.strictEqual(bridgeStub.callCount, 1)
+            assert.deepStrictEqual(bridgeStub.firstCall.args, [{ address: 'Lres1' }, String(helper.RESERVOIR_BRIDGE_AMOUNT)])
+
+            assert.strictEqual(sendStub.callCount, 2)
+            assert.deepStrictEqual(sendStub.firstCall.args, [{ address: 'Lres1' }, 'XCHAIN', 100, 'Lrecv1', ''])
+            assert.deepStrictEqual(sendStub.secondCall.args, [{ address: 'Lres1' }, 'XCHAIN', '20000', 'Lrecv2', ''])
+        })
+
+        it('refills over the bridge when the next request would overdraw it, and bridges a request bigger than the default whole', async () => {
+            const big = helper.RESERVOIR_BRIDGE_AMOUNT * 2
+            await helper.ensureGasBalance({ address: 'Lrecv1' }, String(big))
+            // the fee headroom rounds the shortfall up by one whole XCHAIN
+            assert.strictEqual(bridgeStub.firstCall.args[1], String(big + 1))
+
+            await helper.ensureGasBalance({ address: 'Lrecv2' }, '100')
+            assert.strictEqual(bridgeStub.callCount, 2, 'drained by the first SEND, so the second refills')
+            assert.strictEqual(bridgeStub.secondCall.args[1], String(helper.RESERVOIR_BRIDGE_AMOUNT))
+            assert.strictEqual(fundStub.callCount, 1, 'a refill reuses the same reservoir address')
+        })
+
+        it('keeps one reservoir per chain, so a DOGE caller never spends the LTC one', async () => {
+            await helper.ensureGasBalance({ address: 'Lrecv1' }, 100)
+            global.COIN = 'dogecoin'
+            global.COIN_CODE = 'DOGE'
+            await helper.ensureGasBalance({ address: 'Drecv1' }, 100)
+            assert.strictEqual(fundStub.callCount, 2)
+            assert.strictEqual(bridgeStub.callCount, 2)
+            assert.deepStrictEqual(sendStub.secondCall.args[0], { address: 'Lres2' })
+        })
+
+        it('rebuilds from scratch after a SEND that did not land, instead of trusting the old balance', async () => {
+            sendStub.onFirstCall().rejects(new Error('sendSendV0: SEND 100 XCHAIN never valid'))
+            await assert.rejects(helper.ensureGasBalance({ address: 'Lrecv1' }, 100), /never valid/)
+            await helper.ensureGasBalance({ address: 'Lrecv2' }, 100)
+            assert.strictEqual(fundStub.callCount, 2)
+            assert.strictEqual(bridgeStub.callCount, 2)
+        })
+
+        it('rebuilds after a refill that failed, since its credit may or may not have landed', async () => {
+            bridgeStub.onFirstCall().rejects(new Error('never landed'))
+            await assert.rejects(helper.fillGasReservoir(), /never landed/)
+            await helper.fillGasReservoir()
+            assert.strictEqual(fundStub.callCount, 2)
+        })
+
+        it('fillGasReservoir alone bridges once and SENDs nothing (the initialCheck bootstrap)', async () => {
+            await helper.fillGasReservoir()
+            await helper.fillGasReservoir()
+            assert.strictEqual(bridgeStub.callCount, 1)
+            assert(sendStub.notCalled)
         })
     })
 
@@ -249,6 +333,19 @@ describe('gasHelper', () => {
             assert.strictEqual(global.COIN_CODE, 'DOGE')
             assert.strictEqual(global.indexerDatabase, destDb)
             assert.deepStrictEqual(result, { id: 500 })
+        })
+
+        it('mints an amount above MAX_MINT in MAX_MINT chunks on BTC, then locks the whole amount in ONE XBRIDGE', async () => {
+            const amount = String(helper.GAS_MAX_MINT * 2 + 12345)
+            await helper.bridgeGasIn({ address: 'DDestBig' }, amount)
+            const messages = sendTxStub.getCalls().map(c => c.args[1])
+            assert.deepStrictEqual(messages, [
+                'MINT|0|XCHAIN|' + helper.GAS_MAX_MINT + '|btcIssuer1|',
+                'MINT|0|XCHAIN|' + helper.GAS_MAX_MINT + '|btcIssuer1|',
+                'MINT|0|XCHAIN|12345|btcIssuer1|',
+                'XBRIDGE|0|DOGE|DDestBig|' + amount + '|',
+            ])
+            assert.deepStrictEqual(destDb.waitForCredit.firstCall.args[0], { address: 'DDestBig', tick: 'XCHAIN', amount })
         })
 
         it('ISSUEs the GAS tick on BTC first when it does not exist there yet, with the real 24-field wire string', async () => {
