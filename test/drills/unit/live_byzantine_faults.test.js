@@ -23,6 +23,9 @@
 'use strict';
 
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const proxyquire = require('proxyquire').noCallThru();
 const byz = require('../lib/liveByzantineFaults');
 
 function fakeHub() {
@@ -135,51 +138,161 @@ describe('liveByzantineFaults: forgeConsensusSignatures', function () {
 });
 
 describe('liveByzantineFaults: faults installed by drill phases', function () {
-    const FAULTS = 1;
-    const PHASES = {
-        B: { mode: 'silent', victims: FAULTS },
-        C: { mode: 'silent', victims: FAULTS + 1 },
-        E: { mode: 'forge',  victims: FAULTS },
-        F: { mode: 'forge',  victims: FAULTS + 1 }
-    };
-    const INSTALLERS = { silent: byz.silenceConsensus, forge: byz.forgeConsensusSignatures };
+    it('the real phase E and F bodies install forging on every selected victim', async function () {
+        const suites = [];
+        const installations = [];
+        let registering;
 
-    function applyPhase(phase) {
-        const { mode, victims } = PHASES[phase];
-        return Array.from({ length: victims }, () => {
-            const { hub } = fakeHub();
-            const honest = hub.peerManager.buildEnvelope('PBFT_PREPARE', {}).sig;
-            const original = hub.consensus.handleMessage;
-            const restore = INSTALLERS[mode](hub);
-            return { hub, honest, original, restore };
-        });
-    }
+        function captureDescribe(name, register) {
+            const suite = { name, tests: [] };
+            const parent = registering;
+            registering = suite;
+            register.call({ timeout() {} });
+            registering = parent;
+            suites.push(suite);
+        }
 
-    for (const phase of ['E', 'F']) {
-        it('phase ' + phase + ' forges PBFT votes on every victim and keeps transport intact', function () {
-            const victims = applyPhase(phase);
-            assert.strictEqual(victims.length, PHASES[phase].victims);
-            for (const v of victims) {
-                assert.notStrictEqual(v.hub.peerManager.buildEnvelope('PBFT_COMMIT', { seq: 1 }).sig, v.honest);
-                assert.strictEqual(v.hub.peerManager.buildEnvelope('HEARTBEAT', {}).sig, v.honest);
-                assert.strictEqual(v.hub.consensus.handleMessage, v.original, 'forging must not silence the victim');
-                v.restore();
-                assert.strictEqual(v.hub.peerManager.buildEnvelope('PBFT_COMMIT', {}).sig, v.honest);
+        const mochaGlobals = {
+            describe: global.describe,
+            before: global.before,
+            after: global.after,
+            it: global.it
+        };
+        const env = {
+            hosts: process.env.XCHAIN_DRILL_HOSTS,
+            hubPath: process.env.XCHAIN_DRILL_LOCAL_HUB_PATH,
+            applyWait: process.env.XCHAIN_DRILL_APPLY_WAIT_MS,
+            stallWait: process.env.XCHAIN_DRILL_STALL_WAIT_MS
+        };
+        const createWriteStream = fs.createWriteStream;
+
+        function planDrill(spec) {
+            return Object.assign({}, spec, {
+                hosts: [{}],
+                nodes: Array.from({ length: spec.count }, (_, i) => ({
+                    id: 'v' + i,
+                    role: i < spec.faults ? 'byzantine' : 'honest',
+                    hostId: 'unit'
+                }))
+            });
+        }
+
+        async function startMesh(plan) {
+            const handles = plan.nodes.map((node, index) => {
+                const { hub } = fakeHub();
+                const honest = hub.peerManager.buildEnvelope('PBFT_PREPARE', {}).sig;
+                return {
+                    id: node.id,
+                    node,
+                    hub,
+                    honest,
+                    applied: null,
+                    restore: null,
+                    async send(command, args) {
+                        if (command === 'peers') return { peers: plan.count - 1 };
+                        if (command === 'quorum') return { quorum: plan.quorum };
+                        if (command === 'seq') return { seq: 1 };
+                        if (command === 'alignSeq' || command === 'clearPending') return {};
+                        if (command === 'isLeader') return { leader: index === 0 };
+                        if (command === 'getConfig') return { value: this.applied };
+                        if (command === 'dropDb') return { dropped: true };
+                        if (command === 'fault') {
+                            if (this.restore) { this.restore(); this.restore = null; }
+                            if (args.mode === 'forge') {
+                                this.restore = byz.forgeConsensusSignatures(this.hub);
+                                installations.push({
+                                    id: this.id,
+                                    pbft: this.hub.peerManager.buildEnvelope('PBFT_COMMIT', {}).sig,
+                                    heartbeat: this.hub.peerManager.buildEnvelope('HEARTBEAT', {}).sig,
+                                    honest: this.honest
+                                });
+                            }
+                            return { mode: args.mode };
+                        }
+                        if (command === 'propose') {
+                            const forged = handles.filter((h) => h.restore).length;
+                            if (forged <= plan.faults) {
+                                const value = args.config.BTC.regtest.node.GAS_PRICE;
+                                handles.forEach((h) => { h.applied = value; });
+                            }
+                            return { accepted: true };
+                        }
+                        throw new Error('unexpected command ' + command);
+                    }
+                };
+            });
+            return {
+                handles,
+                byzantine: () => handles.filter((h) => h.node.role === 'byzantine'),
+                honest: () => handles.filter((h) => h.node.role === 'honest'),
+                async stop() {
+                    handles.forEach((h) => { if (h.restore) h.restore(); });
+                }
+            };
+        }
+
+        try {
+            global.describe = captureDescribe;
+            global.before = (fn) => { registering.before = fn; };
+            global.after = (fn) => { registering.after = fn; };
+            global.it = (name, fn) => { registering.tests.push({ name, fn }); };
+            process.env.XCHAIN_DRILL_HOSTS = 'unit';
+            process.env.XCHAIN_DRILL_LOCAL_HUB_PATH = path.resolve(__dirname, '../../../xchain-hub');
+            process.env.XCHAIN_DRILL_APPLY_WAIT_MS = '1';
+            process.env.XCHAIN_DRILL_STALL_WAIT_MS = '1';
+            fs.createWriteStream = () => ({ write() {}, end() {} });
+
+            proxyquire('../physicalByzantine.drill', {
+                './lib/drillPlan': { planDrill, describePlan: () => 'unit plan' },
+                './lib/drillRunner': { startMesh },
+                './lib/drillVerdict': {
+                    PASS: 'PASS',
+                    evaluateLiveness: () => ({ status: 'PASS', phase: 'liveness', reasons: [] }),
+                    evaluateBoundary: () => ({ status: 'PASS', phase: 'boundary', reasons: [] }),
+                    evaluateSafetyForge: () => ({ status: 'PASS', phase: 'safety', reasons: [] }),
+                    summarize: () => ({}),
+                    renderReport: () => ''
+                }
+            });
+
+            const suite = suites.find((s) => s.name.includes('N=7'));
+            assert.ok(suite, 'the physical N=7 drill did not register');
+            await suite.before.call({ skip() {} });
+
+            const phaseE = suite.tests.find((t) => t.name.startsWith('E ACTIVE-BFT'));
+            const phaseF = suite.tests.find((t) => t.name.startsWith('F EXCLUSION'));
+            assert.ok(phaseE, 'the real phase E body is absent');
+            assert.ok(phaseF, 'the real phase F body is absent');
+
+            await phaseE.fn();
+            const phaseEInstalls = installations.splice(0);
+            assert.strictEqual(phaseEInstalls.length, 2, 'phase E did not install f faults');
+
+            await phaseF.fn();
+            const phaseFInstalls = installations.splice(0);
+            assert.strictEqual(phaseFInstalls.length, 3, 'phase F did not install f+1 faults');
+
+            for (const installed of phaseEInstalls.concat(phaseFInstalls)) {
+                assert.notStrictEqual(installed.pbft, installed.honest, installed.id + ' kept an honest PBFT signature');
+                assert.strictEqual(installed.heartbeat, installed.honest, installed.id + ' forged transport traffic');
             }
-        });
-    }
-
-    for (const phase of ['B', 'C']) {
-        it('phase ' + phase + ' silences consensus on every victim and leaves signing alone', function () {
-            const victims = applyPhase(phase);
-            for (const v of victims) {
-                assert.notStrictEqual(v.hub.consensus.handleMessage, v.original);
-                assert.strictEqual(v.hub.peerManager.buildEnvelope('PBFT_PREPARE', {}).sig, v.honest);
-                v.restore();
-                assert.strictEqual(v.hub.consensus.handleMessage, v.original);
-            }
-        });
-    }
+            await suite.after();
+        } finally {
+            global.describe = mochaGlobals.describe;
+            global.before = mochaGlobals.before;
+            global.after = mochaGlobals.after;
+            global.it = mochaGlobals.it;
+            fs.createWriteStream = createWriteStream;
+            if (env.hosts === undefined) delete process.env.XCHAIN_DRILL_HOSTS;
+            else process.env.XCHAIN_DRILL_HOSTS = env.hosts;
+            if (env.hubPath === undefined) delete process.env.XCHAIN_DRILL_LOCAL_HUB_PATH;
+            else process.env.XCHAIN_DRILL_LOCAL_HUB_PATH = env.hubPath;
+            if (env.applyWait === undefined) delete process.env.XCHAIN_DRILL_APPLY_WAIT_MS;
+            else process.env.XCHAIN_DRILL_APPLY_WAIT_MS = env.applyWait;
+            if (env.stallWait === undefined) delete process.env.XCHAIN_DRILL_STALL_WAIT_MS;
+            else process.env.XCHAIN_DRILL_STALL_WAIT_MS = env.stallWait;
+        }
+    });
 });
 
 describe('liveByzantineFaults: proposal envelopes', function () {
