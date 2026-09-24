@@ -110,6 +110,47 @@ function childFiles(parent, repoRoot = REPO_ROOT) {
     return fs.readdirSync(dir).filter(f => CHILD_FILE_RE.test(f)).sort()
 }
 
+// Specifiers passed to a literal require() call in real code. Comments and the
+// contents of other string or template literals are skipped, so a child named
+// only in prose or data never counts as collected.
+function requiredSpecifiers(source) {
+    const found = []
+    let i = 0
+    const n = source.length
+    while (i < n) {
+        const c = source[i]
+        if (c === '/' && source[i + 1] === '/') {
+            while (i < n && source[i] !== '\n') i++
+        } else if (c === '/' && source[i + 1] === '*') {
+            const end = source.indexOf('*/', i + 2)
+            i = end === -1 ? n : end + 2
+        } else if (c === '"' || c === "'" || c === '`') {
+            let j = i + 1
+            while (j < n && source[j] !== c) j += source[j] === '\\' ? 2 : 1
+            i = j + 1
+        } else if (/[A-Za-z_$]/.test(c)) {
+            let j = i
+            while (j < n && /[\w$]/.test(source[j])) j++
+            const word = source.slice(i, j)
+            const prev = source[i - 1]
+            i = j
+            if (word !== 'require' || prev === '.') continue
+            const m = /^\s*\(\s*(["'`])([^"'`\n]*)\1\s*\)/.exec(source.slice(i, i + 400))
+            if (m) found.push(m[2])
+        } else {
+            i++
+        }
+    }
+    return found
+}
+
+function requiresChild(source, parent, kid) {
+    const dir = path.posix.dirname(parent)
+    const want = path.posix.join(parent.replace(/\.js$/, ''), kid.replace(/\.js$/, ''))
+    return requiredSpecifiers(source).some(spec =>
+        spec.startsWith('.') && path.posix.join(dir, spec).replace(/\.js$/, '') === want)
+}
+
 function readRoster(file = ROSTER_FILE) {
     return JSON.parse(fs.readFileSync(file, 'utf8'))
 }
@@ -164,7 +205,7 @@ function auditRoster(files, roster) {
         if (!kids.length) continue
         const source = fs.readFileSync(path.join(REPO_ROOT, file), 'utf8')
         for (const kid of kids)
-            if (!source.includes(kid.replace(/\.js$/, '')))
+            if (!requiresChild(source, file, kid))
                 problems.push(file.replace(/\.js$/, '') + '/' + kid
                     + ': is a child case file the roster suite never requires, so the lane never collects it')
     }
@@ -510,7 +551,7 @@ function main(argv) {
     return 0
 }
 
-module.exports = { formatTally, childTally, childFiles, parentOf, discoverSuites, readRoster, auditRoster, suitesToRun, suitesExcluded, tallyByFile, classify,
+module.exports = { requiredSpecifiers, requiresChild, formatTally, childTally, childFiles, parentOf, discoverSuites, readRoster, auditRoster, suitesToRun, suitesExcluded, tallyByFile, classify,
     mochaSummary, isDbPrivilegeError, isBeforeAllHookFailure, isDbPrivilegeBeforeAllFailure, classifyReport,
     liveTierBlocker, mochaEnvironment, VENUE_EXIT, ROSTER_FILE, LIVE_DIR }
 
