@@ -179,7 +179,7 @@ function drillScale(spec) {
     describe('PHYSICAL byzantine drill N=' + spec.count + ' f=' + spec.faults, function () {
         this.timeout(30 * 60 * 1000);
 
-        let plan, mesh, verdicts, logStream, logPath;
+        let plan, mesh, verdicts, logStream, logPath, dropFailures = [];
 
         before(async function () {
             if (!hostsRaw) {
@@ -217,7 +217,10 @@ function drillScale(spec) {
             if (mesh) {
                 // Drop each validator's schema before killing it; a shared venue
                 // must be handed back the way it was found.
-                await Promise.all(mesh.handles.map((h) => h.send('dropDb', {}, 60000).catch(() => {})));
+                const drops = await Promise.all(mesh.handles.map((h) => h.send('dropDb', {}, 60000)
+                    .then((r) => (r && r.dropped === false && !r.skipped ? 'not dropped: ' + JSON.stringify(r) : null),
+                          (e) => 'dropDb failed: ' + String(e && e.message || e))));
+                dropFailures = drops.filter(Boolean);
                 await mesh.stop();
             }
             if (logStream) logStream.end();
@@ -225,6 +228,7 @@ function drillScale(spec) {
                 const summary = V.summarize(verdicts);
                 console.log('\n' + V.renderReport(plan, summary, { runId: 'N' + spec.count, startedAt: new Date().toISOString() }) + '\n');
             }
+            if (dropFailures.length) throw new Error('schema teardown left databases behind: ' + dropFailures.join('; '));
         });
 
         it('A MESH: every validator sees ' + (spec.count - 1) + ' peers and all agree on quorum ' + spec.quorum, async function () {

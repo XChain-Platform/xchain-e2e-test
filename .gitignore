@@ -42,3 +42,7 @@ data/*.buffer.jsonl
 # Spend ledgers the attestation queue and the LLM client append to as they run.
 # Per-run accounting, cwd-relative like the buffer above, and not source.
 data/*spend.jsonl
+
+# Oracle publisher queue, written to the same cwd-relative default as the batch
+# buffer above. Per-run state, not source.
+data/publisher-queue*.jsonl
