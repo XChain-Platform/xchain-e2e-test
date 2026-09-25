@@ -93,6 +93,64 @@ function discoverSuites(dir = LIVE_DIR) {
         .map(f => path.posix.join('test', 'integration', f))
 }
 
+// A suite split by behavior keeps its cases in `<suite>.integration.test/NN_*.test.js`
+// and pulls them in with require(). Mocha reports each case against the child
+// file, so the roster only ever names the parent.
+const CHILD_RE = /^(.*\.integration\.test)\/[^/]+\.js$/
+const CHILD_FILE_RE = /^\d+_.*\.test\.js$/
+
+function parentOf(rel) {
+    const m = CHILD_RE.exec(rel)
+    return m ? m[1] + '.js' : rel
+}
+
+function childFiles(parent, repoRoot = REPO_ROOT) {
+    const dir = path.join(repoRoot, parent.replace(/\.js$/, ''))
+    if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return []
+    return fs.readdirSync(dir).filter(f => CHILD_FILE_RE.test(f)).sort()
+}
+
+// Specifiers passed to a literal require() call in real code. Comments and the
+// contents of other string or template literals are skipped, so a child named
+// only in prose or data never counts as collected.
+function requiredSpecifiers(source) {
+    const found = []
+    let i = 0
+    const n = source.length
+    while (i < n) {
+        const c = source[i]
+        if (c === '/' && source[i + 1] === '/') {
+            while (i < n && source[i] !== '\n') i++
+        } else if (c === '/' && source[i + 1] === '*') {
+            const end = source.indexOf('*/', i + 2)
+            i = end === -1 ? n : end + 2
+        } else if (c === '"' || c === "'" || c === '`') {
+            let j = i + 1
+            while (j < n && source[j] !== c) j += source[j] === '\\' ? 2 : 1
+            i = j + 1
+        } else if (/[A-Za-z_$]/.test(c)) {
+            let j = i
+            while (j < n && /[\w$]/.test(source[j])) j++
+            const word = source.slice(i, j)
+            const prev = source[i - 1]
+            i = j
+            if (word !== 'require' || prev === '.') continue
+            const m = /^\s*\(\s*(["'`])([^"'`\n]*)\1\s*\)/.exec(source.slice(i, i + 400))
+            if (m) found.push(m[2])
+        } else {
+            i++
+        }
+    }
+    return found
+}
+
+function requiresChild(source, parent, kid) {
+    const dir = path.posix.dirname(parent)
+    const want = path.posix.join(parent.replace(/\.js$/, ''), kid.replace(/\.js$/, ''))
+    return requiredSpecifiers(source).some(spec =>
+        spec.startsWith('.') && path.posix.join(dir, spec).replace(/\.js$/, '') === want)
+}
+
 function readRoster(file = ROSTER_FILE) {
     return JSON.parse(fs.readFileSync(file, 'utf8'))
 }
@@ -139,6 +197,19 @@ function auditRoster(files, roster) {
         if (!files.includes(file))
             problems.push(file + ': is in the roster but no such file exists')
 
+    // A child the parent never requires is a case the lane reports green
+    // without ever collecting.
+    for (const [file, entry] of declared) {
+        if (entry.run !== true || !files.includes(file)) continue
+        const kids = childFiles(file)
+        if (!kids.length) continue
+        const source = fs.readFileSync(path.join(REPO_ROOT, file), 'utf8')
+        for (const kid of kids)
+            if (!requiresChild(source, file, kid))
+                problems.push(file.replace(/\.js$/, '') + '/' + kid
+                    + ': is a child case file the roster suite never requires, so the lane never collects it')
+    }
+
     return problems
 }
 
@@ -156,7 +227,7 @@ function tallyByFile(report, repoRoot = REPO_ROOT) {
     const tally = new Map()
     const bump = (file, field) => {
         if (!file) return
-        const rel = path.relative(repoRoot, file).split(path.sep).join('/')
+        const rel = parentOf(path.relative(repoRoot, file).split(path.sep).join('/'))
         if (!tally.has(rel)) tally.set(rel, { passing: 0, failing: 0, pending: 0 })
         tally.get(rel)[field]++
     }
@@ -164,6 +235,26 @@ function tallyByFile(report, repoRoot = REPO_ROOT) {
     for (const t of report.failures || []) bump(t.file, 'failing')
     for (const t of report.pending || []) bump(t.file, 'pending')
     return tally
+}
+
+// Per-child counts under each parent suite, for the tally listing. Parents with
+// no child directory do not appear.
+function childTally(report, repoRoot = REPO_ROOT) {
+    const kids = new Map()
+    const bump = (file, field) => {
+        if (!file) return
+        const rel = path.relative(repoRoot, file).split(path.sep).join('/')
+        const parent = parentOf(rel)
+        if (parent === rel) return
+        if (!kids.has(parent)) kids.set(parent, new Map())
+        const byChild = kids.get(parent)
+        if (!byChild.has(rel)) byChild.set(rel, { passing: 0, failing: 0, pending: 0 })
+        byChild.get(rel)[field]++
+    }
+    for (const t of report.passes   || []) bump(t.file, 'passing')
+    for (const t of report.failures || []) bump(t.file, 'failing')
+    for (const t of report.pending  || []) bump(t.file, 'pending')
+    return kids
 }
 
 // The lane's verdict. `expected` is the list of files the roster said to run;
@@ -192,12 +283,15 @@ function classify(expected, tally) {
     return problems
 }
 
-function formatTally(expected, tally) {
+function formatTally(expected, tally, kids = new Map()) {
     const lines = []
+    const row = (label, t) => label.padEnd(52)
+        + t.passing + ' pass  ' + t.failing + ' fail  ' + t.pending + ' pending'
     for (const file of expected) {
         const t = tally.get(file) || { passing: 0, failing: 0, pending: 0 }
-        lines.push('  ' + file.replace('test/integration/', '').padEnd(52)
-            + t.passing + ' pass  ' + t.failing + ' fail  ' + t.pending + ' pending')
+        lines.push('  ' + row(file.replace('test/integration/', ''), t))
+        for (const [child, ct] of kids.get(file) || [])
+            lines.push('    ' + row('- ' + path.posix.basename(child), ct))
     }
     return lines
 }
@@ -424,7 +518,7 @@ function main(argv) {
     for (const line of mochaSummary(report)) console.log(line)
 
     console.log('\nlive tier: per-suite tally')
-    for (const line of formatTally(expected, tally)) console.log(line)
+    for (const line of formatTally(expected, tally, childTally(report))) console.log(line)
     if (excluded.length) {
         // Printed on green runs too, deliberately: this is the list of things
         // the lane does NOT cover, and it is only honest while it is read.
@@ -457,7 +551,7 @@ function main(argv) {
     return 0
 }
 
-module.exports = { discoverSuites, readRoster, auditRoster, suitesToRun, suitesExcluded, tallyByFile, classify,
+module.exports = { requiredSpecifiers, requiresChild, formatTally, childTally, childFiles, parentOf, discoverSuites, readRoster, auditRoster, suitesToRun, suitesExcluded, tallyByFile, classify,
     mochaSummary, isDbPrivilegeError, isBeforeAllHookFailure, isDbPrivilegeBeforeAllFailure, classifyReport,
     liveTierBlocker, mochaEnvironment, VENUE_EXIT, ROSTER_FILE, LIVE_DIR }
 
