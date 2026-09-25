@@ -110,11 +110,13 @@ function replace(root, relPath, from, to) {
     fs.writeFileSync(absolute, source.replace(from, to))
 }
 
-before(createFixture)
+describe('check-move-only-split', function() {
+    this.timeout(30000)
 
-after(() => fs.rmSync(root, { recursive: true, force: true }))
+    before(createFixture)
 
-describe('check-move-only-split', () => {
+    after(() => fs.rmSync(root, { recursive: true, force: true }))
+
     it('accepts statements moved verbatim while ignoring formatting outside literals', () => {
         assert.deepStrictEqual(check(), { ok: true, problems: [] })
     })
