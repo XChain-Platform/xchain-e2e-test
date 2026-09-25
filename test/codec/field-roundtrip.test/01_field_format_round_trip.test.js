@@ -15,7 +15,7 @@ const fs = require('fs');
 const path = require('path');
 
 const INDEXER_PATH = process.env.XCHAIN_INDEXER_PATH
-    || path.resolve(__dirname, '../../../xchain-indexer');
+    || path.resolve(__dirname, '../../../../xchain-indexer');
 const HAVE_INDEXER = fs.existsSync(path.join(INDEXER_PATH, 'src/actions/index.js'));
 
 const GOLDEN_PATH = path.join(__dirname, 'fixtures', 'field-golden-vectors.json');
