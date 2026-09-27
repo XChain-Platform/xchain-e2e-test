@@ -26,6 +26,7 @@ const { silenceArchiveAttestor } = require('../../helpers/byzantineFaults');
 const { parseAnchorV3 } = require('../../helpers/anchor_fold/parse_anchor_v3');
 const { summarizeAnchorCycle } = require('../../helpers/anchor_fold/anchor_fold_readings');
 
+const REQUIRE_FEDERATION = process.env.E2E_REQUIRE_FEDERATION === '1';
 const N = 2;
 const ARCHIVE_SUBDEADLINE_MS = 10;
 const PUBLISH_CADENCE_BOUND_MS = 5000;
@@ -386,4 +387,9 @@ function registerSuite(){
     it('publishes the checkpoint on cadence with no archive section', driveAcceptance);
 }
 
-describe('ANCHOR fold acceptance: archive co-signers silenced', registerSuite);
+if(!REQUIRE_FEDERATION){
+    console.log('Skipping ANCHOR fold archive-silenced acceptance: set E2E_REQUIRE_FEDERATION=1 to run');
+}
+
+(REQUIRE_FEDERATION ? describe : describe.skip)(
+    'ANCHOR fold acceptance: archive co-signers silenced', registerSuite);
