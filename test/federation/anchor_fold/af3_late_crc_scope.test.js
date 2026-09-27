@@ -293,7 +293,7 @@ async function teardown(){
     restoreFoldEnv();
 }
 
-describe.skip('ANCHOR fold late CRC verdict scope', function () {
+describe('ANCHOR fold late CRC verdict scope', function () {
     this.timeout(15 * 60 * 1000);
 
     before(setup);
