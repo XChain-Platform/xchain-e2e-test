@@ -35,6 +35,14 @@ function randTick(prefix) {
     return tick
 }
 
+async function freshTick(prefix) {
+    while (true) {
+        const tick = randTick(prefix)
+        const rows = await q('SELECT id FROM index_tickers WHERE tick=? LIMIT 1', [tick])
+        if (rows.length === 0) return tick
+    }
+}
+
 async function q(sql, params) {
     const connection = await indexerDatabase.getConnection()
     try { return await connection.query(sql, params) }
@@ -98,7 +106,7 @@ describe('controller custody guard rail: DEPOSIT', function () {
 
     for (const testCase of DEPOSIT_CASES) {
         it(`DEPOSIT ${testCase.name} is ${testCase.expect}`, async function () {
-            const tick = randTick('CGD')
+            const tick = await freshTick('CGD')
             await issueHelper.sendIssueV0(
                 depositor, tick, '1000', '1000', '0', 'custody guard deposit', '1000'
             )
