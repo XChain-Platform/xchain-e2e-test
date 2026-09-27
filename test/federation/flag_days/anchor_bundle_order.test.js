@@ -9,6 +9,9 @@ const fs = require('fs');
 const path = require('path');
 const { encode: wifEncode } = require('wif');
 
+const previousBundleOrderActivation = process.env.ANCHOR_BUNDLE_ORDER_ACTIVATION;
+process.env.ANCHOR_BUNDLE_ORDER_ACTIVATION = '0';
+
 const cryptoHelper = require('../../cryptoHelper');
 const CryptoNetworks = require('../../../src/CryptoNetworks');
 const {
@@ -252,6 +255,9 @@ describe('ANCHOR v0 bundle ordering on DOGE regtest', function () {
         if(signerDir) fs.rmSync(signerDir, { recursive: true, force: true });
         delete process.env.DOGE_WIF;
         delete process.env.HUB_SIGNER_MODULE;
+        if(previousBundleOrderActivation === undefined)
+            delete process.env.ANCHOR_BUNDLE_ORDER_ACTIVATION;
+        else process.env.ANCHOR_BUNDLE_ORDER_ACTIVATION = previousBundleOrderActivation;
     });
 
     it('accepts the publisher-sorted multi-section bundle as the control', async function () {
