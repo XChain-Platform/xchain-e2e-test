@@ -33,8 +33,8 @@ function matchRows(payload) {
     return payload && Array.isArray(payload.data) ? payload.data : [];
 }
 
-async function defaultSleep(ms) {
-    await new Promise((resolve) => setTimeout(resolve, ms));
+function defaultSleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function awaitCrossChainMatch({
