@@ -1324,8 +1324,8 @@ class BridgeRailVenue {
     }
 
     /**
-     * Point ONE hub's origin (BTC) indexer somewhere else, or back at its own with `null`,
-     * and restart that hub alone so its engine reads the new endpoint.
+     * Point ONE hub's origin (BTC) indexer somewhere else, or back at its own with `null`.
+     * Restart that hub alone by default, or restart an explicit ordered set during recovery.
      *
      * Exists for policy AT5's abstain leg: a follower whose origin indexer is unreachable
      * must abstain rather than refuse, and stopping a shared indexer would take every hub's
@@ -1333,6 +1333,7 @@ class BridgeRailVenue {
      *
      * @param {number} hubIndex
      * @param {string|null} url  an endpoint, or null to restore the hub's own indexer
+     * @param {{restartIndexes?: number[]}} [opts]
      */
     async setHubOriginIndexer(hubIndex, url, opts) {
         assert.ok(this.btcVenue && this.hubs[hubIndex], 'bridgeRailVenue: no hub ' + hubIndex);
