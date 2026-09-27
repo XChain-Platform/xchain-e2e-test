@@ -883,15 +883,35 @@ class OracleBatchReplayNode {
                     { capability: 'price', block_index: h, min_stake: this._priceMinStake });
                 return (r && r.count !== undefined) ? Number(r.count) : ('error: ' + JSON.stringify(r).slice(0, 120));
             };
+            const weightsAt = async (h) => {
+                const r = await conn.call('getstakeweightsbycapability',
+                    { capability: 'price', block_index: h, min_stake: this._priceMinStake });
+                if (Array.isArray(r)) return r.length;
+                if (r && Array.isArray(r.validators)) return r.validators.length;
+                if (r && r.count !== undefined) return Number(r.count);
+                return 'error: ' + JSON.stringify(r).slice(0, 120);
+            };
             this._btcOracleProof.anchorHeight    = anchor;
             this._btcOracleProof.queriedHeight   = buried;
             this._btcOracleProof.priceSetAtAnchor = await at(anchor);
             this._btcOracleProof.priceSetAtBuried = await at(buried);
+            this._btcOracleProof.priceWeightSetAtAnchor = await weightsAt(anchor);
+            this._btcOracleProof.priceWeightSetAtBuried = await weightsAt(buried);
             console.log('oracleBatchReplay[' + this.label + ']: Bitcoin capability oracle ' + oracle.url +
                 ' (coin ' + this._btcOracleProof.coin + ', tip ' + this._btcOracleProof.height + ') answers the ' +
                 '`price` set as ' + this._btcOracleProof.priceSetAtBuried + ' validator(s) at block ' + buried +
                 ', the buried height CapabilitySnapshot resolves for a batch anchored at ' + anchor +
-                ' (' + this._btcOracleProof.priceSetAtAnchor + ' at the anchor itself).');
+                ' (' + this._btcOracleProof.priceSetAtAnchor + ' at the anchor itself). The source-keyed weight ' +
+                'read used under STAKE_WEIGHTED_QUORUM answers ' +
+                this._btcOracleProof.priceWeightSetAtBuried + ' validator(s) at that buried height (' +
+                this._btcOracleProof.priceWeightSetAtAnchor + ' at the anchor).');
+            if (this._btcOracleProof.priceSetAtBuried > 0 &&
+                this._btcOracleProof.priceWeightSetAtBuried === 0) {
+                console.warn('oracleBatchReplay[' + this.label + ']: the two resolvers disagree at block ' + buried +
+                    ': the count read sees ' + this._btcOracleProof.priceSetAtBuried + ' validator(s), while the ' +
+                    'source-keyed weight read the hub gates on under STAKE_WEIGHTED_QUORUM sees nobody. A `0 ' +
+                    'verified signers` refusal means the stake sources or their minimum weights need checking.');
+            }
         } catch (e) {
             console.warn('oracleBatchReplay[' + this.label + ']: could not read the Bitcoin capability oracle ' +
                 'back: ' + (e && e.message));

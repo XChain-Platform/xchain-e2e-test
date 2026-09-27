@@ -110,7 +110,16 @@ function testLiveReconstruction() {
                 'means the federation\'s stake is not visible at the BURIED height (a set that exists only at ' +
                 'the anchor itself is not found); a null snapshot with a non-zero set means the hub was refused ' +
                 'the read, which is either a missing per-capability MIN_STAKE or the hub\'s own coin check ' +
-                'rejecting the endpoint';
+                'rejecting the endpoint. For "insufficient signer stake (0 verified signers)" the suspect is ' +
+                'WHICH resolver: under STAKE_WEIGHTED_QUORUM the hub gates on the SOURCE-KEYED weight read, ' +
+                'which answered ' + btc.priceWeightSetAtBuried + ' validator(s) at that same block against the ' +
+                'count read\'s ' + btc.priceSetAtBuried + '. A count set the whole federation wide and a weight ' +
+                'set of nobody is not a hub defect and not a replay failure: the hub is failing closed on a ' +
+                'stake it cannot sum, and the suspect is the SEED. _stakeWeightsSql inner-joins ' +
+                'index_addresses on the stake\'s source_id and then drops any source whose aggregate is under ' +
+                'the `price` MIN_STAKE, so check that the per-validator source rows ' +
+                'oracleBatchVenue.applyPriceCapabilityStakes mints actually landed, and that the seeded ' +
+                'per-source amount still clears that floor';
         } else {
             rung = 'RUNG 2 (signer resolution), mixed: the ' + livePrices.length + ' PRICE action(s) it ' +
                 'indexed recorded: ' + describeHistogram(byStatus);
