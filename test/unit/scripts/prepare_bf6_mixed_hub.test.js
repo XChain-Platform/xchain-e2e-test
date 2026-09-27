@@ -12,7 +12,8 @@ const ROOT = path.resolve(__dirname, '..', '..', '..', '..')
 const BUILD_HUB = path.join(ROOT, 'xchain-hub')
 
 describe('BF6 mixed hub checkout preparer', function () {
-    this.timeout(60 * 1000)
+    // The checkout case clones a real repository and can be slow under load.
+    this.timeout(240 * 1000)
 
     it('creates a detached real checkout at the pinned older upgrade state and removes it', function () {
         const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'bf6-mixed-checkout-'))
