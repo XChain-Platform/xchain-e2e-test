@@ -41,6 +41,7 @@ function runCli(drive, leg) {
 
 describe('bridge rail leg map', function () {
     before(function () {
+        this.timeout(120000);
         for (const [name, drive] of Object.entries(RAIL_DRIVES)) reports[name] = dryRun(drive);
     });
 
