@@ -98,7 +98,7 @@ async function settleInitialSnapshot(step) {
     const M = detachState();
     assert.ok(M.leg, 'the bridge step must have run');
     M.seq1 = await waitForFinalizedSeq(M.tick, 1);
-    M.applied1 = await waitForAppliedSeq(M.tick, 1);
+    M.applied1 = await waitForAppliedSeq(M.tick, 1, { snapshotId: M.seq1.snapshot_id });
     M.copy1 = await state.venue.tokenParameters('DOGE', 'BTC.' + M.tick);
     M.policy1 = await copyPolicy(M.tick);
     assert.ok(M.copy1 && Number(M.copy1.params.allow_list) > 0,
@@ -130,7 +130,7 @@ async function settleDetachedSnapshot(step) {
     M.seq2 = await waitForFinalizedSeq(M.tick, nextSeq);
     assert.strictEqual(Number(M.seq2.policy_seq), nextSeq,
         'the detach finalized as seq ' + M.seq2.policy_seq + ', not ' + nextSeq);
-    M.applied2 = await waitForAppliedSeq(M.tick, nextSeq);
+    M.applied2 = await waitForAppliedSeq(M.tick, nextSeq, { snapshotId: M.seq2.snapshot_id });
     M.copy2 = await state.venue.tokenParameters('DOGE', 'BTC.' + M.tick);
     M.policy2 = await copyPolicy(M.tick);
     assert.strictEqual(M.copy2.params.allow_list, M.copy1.params.allow_list,
@@ -154,22 +154,28 @@ async function sendToFormerlyBlocked(step) {
     state.evidence.at11_send = M.send;
 }
 
-const ACTIONS = {
+const ACTIONS = Object.freeze({
     issue_btc_tick_with_lists: issueListedTick,
     bridge_btc_tick_to_doge: bridgeTick,
     wait_for_initial_snapshot: settleInitialSnapshot,
     detach_origin_block_list: detachOrigin,
     wait_for_detached_snapshot: settleDetachedSnapshot,
     send_to_formerly_blocked: sendToFormerlyBlocked,
-};
+});
+
+async function runDetachStep(step) {
+    assert.strictEqual(typeof ACTIONS[step.action], 'function', 'no rail action for ' + step.action);
+    await ACTIONS[step.action](step);
+}
 
 bridgeRailSuite(GROUP, function () {
     for (const step of DETACH_STEPS) {
         it('policy AT11: ' + step.name, async function () {
             this.timeout(0);
             if (needsFederation(this, 'policy AT11 ' + step.action)) return;
-            assert.strictEqual(typeof ACTIONS[step.action], 'function', 'no rail action for ' + step.action);
-            await ACTIONS[step.action](step);
+            await runDetachStep(step);
         });
     }
 });
+
+module.exports = { ACTIONS, runDetachStep };
