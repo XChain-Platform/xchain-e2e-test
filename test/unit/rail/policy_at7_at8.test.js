@@ -1,6 +1,11 @@
 'use strict';
 
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+
+const INVARIANT_SUITE = path.resolve(__dirname,
+    '../../integration/bridge_rail_policy.test/09_at8_invariants_cap_and_destination_reorg.test.js');
 
 const {
     bridgeLockRowMatches,
@@ -58,6 +63,12 @@ describe('policy AT7 and AT8 readiness and snapshot decisions', function () {
 });
 
 describe('policy AT8 invariant and reorg decisions', function () {
+    it('passes the finalized snapshot origin block to the origin policy read', function () {
+        const source = fs.readFileSync(INVARIANT_SUITE, 'utf8');
+        assert.match(source,
+            /originPolicy\(originLookup\.tick,\s*originLookup\.block\)/);
+    });
+
     it('compares each copy with the origin at its finalized snapshot block', function () {
         const snapshot = {
             tick: 'LAGA',
