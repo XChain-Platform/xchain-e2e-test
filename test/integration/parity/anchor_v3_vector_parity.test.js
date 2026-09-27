@@ -33,8 +33,15 @@ function sha256(relativePath) {
         .digest('hex');
 }
 
+function fixtureArray(bundle, field) {
+    if (Array.isArray(bundle[field])) return bundle[field];
+    assert.strictEqual(bundle[field], `same as bundle_v3.${field}`,
+        `${field} fixture reference`);
+    return GOLDEN.fixture.bundle_v3[field];
+}
+
 function normalizedSections(bundle) {
-    return bundle.sections.map(section => Object.assign({}, section, {
+    return fixtureArray(bundle, 'sections').map(section => Object.assign({}, section, {
         validator_signatures: section.validator_signatures.slice()
             .sort((a, b) => a.pubkey.localeCompare(b.pubkey))
     })).sort((a, b) => a.chain.localeCompare(b.chain));
@@ -54,24 +61,22 @@ function expectedArchive(bundle) {
 
 function assertParsedVector(wire, bundle) {
     const parsed = sdkLight.parseAnchorV3(wire);
+    const sections = normalizedSections(bundle);
     assert.strictEqual(parsed.version, 3, 'VERSION');
     assert.strictEqual(parsed.network, bundle.network, 'NETWORK');
     assert.strictEqual(parsed.snapshot_block, bundle.snapshot_block, 'SNAPSHOT_BLOCK');
-    assert.strictEqual(parsed.section_count, bundle.sections.length, 'SECTION_COUNT');
-    assert.deepStrictEqual(parsed.sections, normalizedSections(bundle), 'sections');
+    assert.strictEqual(parsed.section_count, sections.length, 'SECTION_COUNT');
+    assert.deepStrictEqual(parsed.sections, sections, 'sections');
     assert.strictEqual(parsed.archive_count, bundle.archive_count, 'ARCHIVE_COUNT');
     assert.deepStrictEqual(parsed.archive, expectedArchive(bundle), 'archive fields');
     assert.strictEqual(parsed.publisher, bundle.publisher, 'PUBLISHER');
-    assert.deepStrictEqual(parsed.publisher_attestations, bundle.attest_sigs,
+    assert.deepStrictEqual(parsed.publisher_attestations, fixtureArray(bundle, 'attest_sigs'),
         'publisher attestations');
 }
 
 describe('ANCHOR v3 frozen vector parity', function () {
     const withArchive = GOLDEN.fixture.bundle_v3;
-    const withoutArchive = Object.assign({}, GOLDEN.fixture.bundle_v3_no_archive, {
-        sections: withArchive.sections,
-        attest_sigs: withArchive.attest_sigs
-    });
+    const withoutArchive = GOLDEN.fixture.bundle_v3_no_archive;
 
     it('keeps all three frozen vector copies sha256-equal', function () {
         const hashes = VECTOR_PATHS.map(sha256);
