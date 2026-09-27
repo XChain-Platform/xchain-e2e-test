@@ -73,7 +73,7 @@ async function requireRedDriver() {
     throw new Error(runDetails(run))
 }
 
-describe.skip('anchor fold unarmed replay falsification', function () {
+describe('anchor fold unarmed replay falsification', function () {
     this.timeout(0)
 
     it('turns a perturbed replay digest red, restores exact bytes, and returns green', async function () {
