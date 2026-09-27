@@ -167,4 +167,14 @@ describe('bridged list detach plan', function () {
             /the copy BLOCK_LIST did not detach/
         );
     });
+
+    it('stays out of the legacy split-leg audit but registers for a standalone dry run', function () {
+        const { isLegacyLegAudit } = loadDriver().driver;
+        const root = 'test/integration/bridge_rail_policy.test.js';
+        const at11 = 'test/integration/bridge_rail_policy.test/11_at11_a_null_list_detaches_the_copy.test.js';
+
+        assert.strictEqual(isLegacyLegAudit(['mocha', '--dry-run', root, at11]), true);
+        assert.strictEqual(isLegacyLegAudit(['mocha', '--dry-run', at11]), false);
+        assert.strictEqual(isLegacyLegAudit(['mocha', root, at11]), false);
+    });
 });
