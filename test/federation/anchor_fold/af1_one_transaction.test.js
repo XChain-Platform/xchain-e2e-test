@@ -54,6 +54,7 @@ let checkpointEngine = null;
 let weightSeed = null;
 let signerDir = null;
 let broadcasts = [];
+let venueSetupAttempted = false;
 
 function restoreManagedEnv(){
     for(const key of MANAGED_ENV){
@@ -151,7 +152,14 @@ async function insertArchiveFloor(batchSequence){
 }
 
 async function startVenue(){
-    await venueHooks.beforeAll.call(this);
+    venueSetupAttempted = true;
+    try { await venueHooks.beforeAll.call(this); }
+    catch(error){
+        if(!/trying to connect to the node/.test(String(error && error.message))) throw error;
+        console.log('Skipping ANCHOR fold acceptance: DOGE regtest node is unavailable');
+        this.skip();
+        return;
+    }
     // Keep this acceptance tied to the DOGE regtest venue.
     assert.strictEqual(COIN + '-' + NETWORK, 'dogecoin-regtest');
 }
@@ -215,7 +223,9 @@ async function stopHub(){
 }
 
 async function stopVenue(){
-    try { await venueHooks.afterAll.call(this); }
+    try {
+        if(venueSetupAttempted) await venueHooks.afterAll.call(this);
+    }
     finally { restoreManagedEnv(); }
 }
 
