@@ -49,7 +49,6 @@ let signerDir = null;
 let signerHooks = null;
 let checkpointSeqBase = 0;
 let batchSeq = 0;
-let driverHooks = null;
 
 function assertArchiveOnlyInvalid(statuses, chainCount){
     const chainValid = Array(chainCount).fill('valid');
@@ -59,25 +58,6 @@ function assertArchiveOnlyInvalid(statuses, chainCount){
 function restoreFoldEnv(){
     if(priorFoldEnv === undefined) delete process.env[FOLD_ENV];
     else process.env[FOLD_ENV] = priorFoldEnv;
-}
-
-async function startDriverHarness(){
-    if(global.indexerDatabase) return;
-    const hooks = require('../../initialCheck.test').mochaHooks;
-    try { await hooks.beforeAll(); }
-    catch(error){
-        try { await hooks.afterAll(); } catch(_) {}
-        throw error;
-    }
-    driverHooks = hooks;
-}
-
-async function stopDriverHarness(){
-    if(!driverHooks) return;
-    const hooks = driverHooks;
-    driverHooks = null;
-    try { await hooks.afterEach(); }
-    finally { await hooks.afterAll(); }
 }
 
 async function indexerQuery(sql, params){
@@ -265,7 +245,6 @@ async function waitForArchiveVerdict(totalChunks){
 }
 
 async function setup(){
-    await startDriverHarness();
     process.env[FOLD_ENV] = '0';
     process.env.XDEX_SNAPSHOT_BLOCK = String(SNAPSHOT_BLOCK);
     process.env.CHECKPOINT_CHAINS = 'DOGE';
@@ -306,16 +285,12 @@ async function setup(){
 }
 
 async function teardown(){
-    try {
-        if(mvh){ await mvh.stop(); await mvh.dropDatabases(); }
-        if(hubDb) await hubDb.stop();
-        if(signerDir) fs.rmSync(signerDir, { recursive: true, force: true });
-        delete process.env.DOGE_WIF;
-        delete process.env.HUB_SIGNER_MODULE;
-        restoreFoldEnv();
-    } finally {
-        await stopDriverHarness();
-    }
+    if(mvh){ await mvh.stop(); await mvh.dropDatabases(); }
+    if(hubDb) await hubDb.stop();
+    if(signerDir) fs.rmSync(signerDir, { recursive: true, force: true });
+    delete process.env.DOGE_WIF;
+    delete process.env.HUB_SIGNER_MODULE;
+    restoreFoldEnv();
 }
 
 describe('ANCHOR fold late CRC verdict scope', function () {
