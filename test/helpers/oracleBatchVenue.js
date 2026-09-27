@@ -243,6 +243,7 @@ const CANONICAL_REORG_BUFFER = loadHubModule('src/consensus/snapshot_reorg_buffe
 // a regtest chain can reach it, and deterministic so a rerun overwrites its
 // predecessor instead of accumulating rows.
 const PRICE_CAPABILITY_STAKE_ACTION_BASE = 9000000000000;
+const PRICE_CAPABILITY_STAKE_SOURCE_ID_BASE = 9100000000000;
 
 // One `stakes` row per validator key, written through a caller-supplied
 // query(sql, args) against a BTC indexer database. Returns the rows as written so
@@ -265,25 +266,41 @@ async function applyPriceCapabilityStakes(query, rows) {
     for (let i = 0; i < rows.length; i++) {
         const r = rows[i];
         // index_pubkeys is a plain AUTO_INCREMENT lookup (getOrCreatePubkeyId does
-        // exactly this INSERT IGNORE + refetch), so adding a key carries none of the
-        // dense-id consensus weight index_addresses does. `source_id` is left at 0
-        // rather than minting an address row for that reason: the count read the hub
-        // performs joins only index_pubkeys, and a seed that cannot be summed by the
-        // source-keyed weight read fails CLOSED there rather than inventing a weight.
+        // exactly this INSERT IGNORE + refetch).
         await query('INSERT IGNORE INTO index_pubkeys (pubkey) VALUES (?)', [r.pubkey]);
         const found = await query('SELECT id FROM index_pubkeys WHERE pubkey = ? LIMIT 1', [r.pubkey]);
         if (!found || found.length === 0) throw new Error('oracleBatchVenue: could not resolve a pubkey id for ' + r.pubkey);
         const pubkeyId    = found[0].id;
         const actionIndex = PRICE_CAPABILITY_STAKE_ACTION_BASE + i;
+        const sourceAddress = String(r.source || ('at2-price-source-' + i));
+        const reservedSource = PRICE_CAPABILITY_STAKE_SOURCE_ID_BASE + i;
+        const sourceInsert = await query(
+            'INSERT IGNORE INTO index_addresses (id, address, block_index) VALUES (?, ?, ?)',
+            [reservedSource, sourceAddress, landed]);
+        const addresses = await query('SELECT id FROM index_addresses WHERE address = ? LIMIT 1', [sourceAddress]);
+        if (!addresses || addresses.length === 0) {
+            throw new Error('oracleBatchVenue: could not resolve an index_addresses id for the seeded staking ' +
+                'source ' + sourceAddress);
+        }
+        const sourceId = Number(addresses[0].id);
+        const mintedSourceId = sourceInsert && Number(sourceInsert.affectedRows) > 0 ? sourceId : null;
 
         await query('INSERT INTO stakes (action_index, source_id, version, signing_pubkey_id, amount, ' +
                     'status_id, block_index, activation_block, deactivation_block) ' +
-                    'VALUES (?, 0, 1, ?, ?, ?, ?, ?, ?) ' +
-                    'ON DUPLICATE KEY UPDATE signing_pubkey_id = VALUES(signing_pubkey_id), ' +
+                    'VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?) ' +
+                    'ON DUPLICATE KEY UPDATE source_id = VALUES(source_id), ' +
+                    'signing_pubkey_id = VALUES(signing_pubkey_id), ' +
                     'amount = VALUES(amount), status_id = VALUES(status_id), block_index = VALUES(block_index), ' +
                     'activation_block = VALUES(activation_block), deactivation_block = VALUES(deactivation_block)',
-                    [actionIndex, pubkeyId, r.amount, validId, landed, activation, deactivation]);
-        written.push({ actionIndex: actionIndex, pubkeyId: pubkeyId, pubkey: r.pubkey });
+                    [actionIndex, sourceId, pubkeyId, r.amount, validId, landed, activation, deactivation]);
+        written.push({
+            actionIndex: actionIndex,
+            pubkeyId: pubkeyId,
+            pubkey: r.pubkey,
+            sourceId: sourceId,
+            sourceAddress: sourceAddress,
+            mintedSourceId: mintedSourceId
+        });
     }
     return written;
 }
@@ -297,6 +314,10 @@ async function removePriceCapabilityStakes(query, written) {
     for (const w of written || []) {
         await query('DELETE FROM stakes WHERE action_index = ? AND signing_pubkey_id = ?',
                     [w.actionIndex, w.pubkeyId]);
+        if (w.mintedSourceId !== null && w.mintedSourceId !== undefined) {
+            await query('DELETE FROM index_addresses WHERE id = ? AND address = ?',
+                        [w.mintedSourceId, w.sourceAddress]);
+        }
     }
     return (written || []).length;
 }

@@ -82,9 +82,20 @@ function testIsolation() {
         }
     }
 
+function testBtcResolverAgreement() {
+    const btc = support.state.liveNode.btcOracleEvidence() || {};
+    if (!(btc.priceSetAtBuried > 0 && btc.priceWeightSetAtBuried === 0)) return;
+    assert.fail('RUNG 1 (Bitcoin capability resolver agreement): for "insufficient signer stake (0 verified ' +
+        'signers)" the suspect is which resolver. Under STAKE_WEIGHTED_QUORUM the hub gates on the ' +
+        'source-keyed weight read, which answered ' + btc.priceWeightSetAtBuried + ' validator(s) at the buried ' +
+        'block against the count read\'s ' + btc.priceSetAtBuried + '. A count set containing the federation and ' +
+        'a weight set containing nobody means the stake source rows or their minimum weights need checking.');
+}
+
 // Two whole nodes, two full chain replays and a live publish rail. The budget
 // is per-suite; every wait inside is a poll that returns the moment it can.
 support.addTest('both nodes really were isolated: an empty hub, no validators, no peers', testIsolation, __filename);
+support.addTest('the Bitcoin capability count and weight resolvers agree', testBtcResolverAgreement, __filename);
 
 require('./oracleBatchReplay.integration.test/01_the_live_node_reconstructed_a_price_snapshot_for_every_round_the_federation_put_on_the_chain.test');
 require('./oracleBatchReplay.integration.test/02_the_replay_node_rebuilt_the_same_snapshots_the_live_node_did.test');
