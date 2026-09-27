@@ -24,7 +24,9 @@ const MANAGED_ENV = [
     'DOGE_ENCODER_URL', 'HUB_SIGNER_MODULE'
 ];
 const priorEnv = Object.fromEntries(MANAGED_ENV.map((key) => [key, process.env[key]]));
-process.env.XC_ANCHOR_FOLD_REGTEST_ACTIVATION = '0';
+const requireFederation = process.env.E2E_REQUIRE_FEDERATION === '1';
+if(requireFederation) process.env.XC_ANCHOR_FOLD_REGTEST_ACTIVATION = '0';
+else console.log('Skipping ANCHOR fold live acceptance: E2E_REQUIRE_FEDERATION=1 is not set');
 
 const venueHooks = require('../../initialCheck.test.js').mochaHooks;
 const cryptoHelper = require('../../cryptoHelper');
@@ -341,7 +343,7 @@ async function acceptFoldedCycle(){
     assert.deepStrictEqual(reading.chains, checkpointChains, 'indexed chains match the flushed checkpoint set');
 }
 
-describe('ANCHOR fold live acceptance', function(){
+(requireFederation ? describe : describe.skip)('ANCHOR fold live acceptance', function(){
     this.timeout(15 * 60 * 1000);
     before(startVenue);
     before(startHub);
