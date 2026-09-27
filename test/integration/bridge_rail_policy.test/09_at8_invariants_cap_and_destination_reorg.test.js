@@ -40,6 +40,14 @@ const {
     withMiningPaused,
 } = require('../../helpers/bridgeRailVenue');
 const {
+    bridgeLockRowMatches,
+    newestFinalizedSnapshot,
+    nextFinalizedSnapshot,
+    policyFinalizationBudgetMs,
+    policyInvariantOriginLookup,
+    policyInvariantReading,
+} = require('../../helpers/rail_preflight/policy_at7_at8');
+const {
     assert,
     cryptoHelper,
     lockWireV3,
@@ -65,8 +73,19 @@ const TABLE = 'policy_snapshots';
 const DOGE_UNDO_BLOCKS = 12;
 
 async function newestFinalized(tick) {
-    const rows = (await hubPolicyRows(tick)).filter((r) => String(r.status) === 'finalized');
-    return rows[rows.length - 1];
+    return newestFinalizedSnapshot(await hubPolicyRows(tick), tick);
+}
+
+async function waitForNextFinalized(tick, previous) {
+    let found = null;
+    await state.venue.waitUntil('a later finalized policy_snapshots row for ' + tick, async () => {
+        found = nextFinalizedSnapshot(await hubPolicyRows(tick), tick, previous);
+        return !!found;
+    }, {
+        timeoutMs: policyFinalizationBudgetMs(state.venue.pollMs || 15000),
+        everyMs: 5000,
+    });
+    return found;
 }
 
 bridgeRailSuite(GROUP, function () {
@@ -78,12 +97,15 @@ bridgeRailSuite(GROUP, function () {
             const newest = await newestFinalized(tick);
             if (!newest) continue;
             await waitForAppliedSeq(tick, Number(newest.policy_seq));
-            const origin = await originPolicy(tick);
+            const originLookup = policyInvariantOriginLookup(newest);
+            const origin = await originPolicy(originLookup.tick, originLookup.block);
+            const applied = await appliedPolicyRead(tick);
             readings.push({ tick, seq: Number(newest.policy_seq), originHash: origin.policy_hash,
-                copyHash: (await copyPolicy(tick)).policy_hash, applied: await appliedPolicyRead(tick) });
+                copyHash: (await copyPolicy(tick)).policy_hash, applied, appliedHash: applied.policy_hash });
         }
         state.evidence.at8_invariant = readings;
-        assert.ok(readings.length >= 2, 'the invariant covers ' + readings.length + ' bridged ticks; AT1 to AT5 bridge three');
+        const invariant = policyInvariantReading(readings, 2);
+        assert.ok(invariant.enough, 'the invariant covers ' + invariant.covered + ' bridged ticks; AT1 to AT5 bridge three');
         for (const r of readings) {
             assert.strictEqual(r.copyHash, r.originHash, r.tick + ': the copy\'s materialized policy differs from the origin');
             assert.strictEqual(String(r.applied.policy_hash), String(r.originHash),
@@ -98,11 +120,12 @@ async function sixSnapshots(tokens) {
     const made = [];
     for (let round = 0; round < 3; round++) {
         for (const t of tokens) {
-            const before = Number((await newestFinalized(t.tick)).policy_seq);
+            const before = await newestFinalized(t.tick);
+            assert.ok(before, 'the cap needs an existing finalized snapshot for ' + t.tick);
             const member = (await cryptoHelper.getNewAddress('POLICY.AT8.CAP.' + t.tick + '.' + round, 'dogecoin', NETWORK, null, 'legacy', 0)).address;
             const edit = await btcAction(t.issuer, listEditWire(POLICY_LIST_EDIT.ADD, t.listIndex, [member], 'policy AT8 cap'), 'lists');
             assert.strictEqual(edit.status, 'valid', 'the cap edit on ' + t.tick + ' graded ' + edit.status);
-            made.push(await waitForFinalizedSeq(t.tick, before + 1));
+            made.push(await waitForNextFinalized(t.tick, before));
         }
     }
     return made;
@@ -172,7 +195,8 @@ bridgeRailSuite(GROUP, function () {
         assert.strictEqual(R.optIn.status, 'valid', 'ISSUE|7 of the reorg token graded ' + R.optIn.status);
         const lock = await btcAction(R.issuer, lockWireV3(R.tick, 'DOGE', R.dest.address, 1, 'policy AT8 reorg'), 'xbridges');
         assert.strictEqual(lock.status, 'valid', 'the reorg token lock graded ' + lock.status);
-        await settleLeg('the policy AT8 reorg lock', (r) => String(r.dest_address) === R.dest.address && String(r.tick) === R.tick, 'DOGE');
+        const expectedLock = { tick: R.tick, destAddress: R.dest.address, actionIndex: lock.actionIndex };
+        await settleLeg('the policy AT8 reorg lock', (r) => bridgeLockRowMatches(r, expectedLock), 'DOGE');
         await waitForFinalizedSeq(R.tick, 1);
         // Applied FIRST, then the pause: a paused DOGE miner produces no block to apply it in.
         const applied = await waitForAppliedSeq(R.tick, 1);

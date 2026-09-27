@@ -7,11 +7,12 @@ const { execFileSync, spawn } = require('child_process')
 
 const { RAIL_DRIVES } = require('../test/helpers/bridge_rail_legs')
 const { triageJournal } = require('./rail_journal_triage')
+const { limitSchedule, parseGraceMinutes } = require('./rail_leg/rail_leg_limit')
 
 const REPO_ROOT = path.resolve(__dirname, '..')
 const MOCHA = './node_modules/.bin/mocha'
 const DEFAULT_LIMIT_MINUTES = 45
-const TERMINATE_GRACE_MS = 60 * 1000
+const DEFAULT_TEARDOWN_GRACE_MINUTES = 20
 const ENV_KEYS_SET = [
     'COIN',
     'NETWORK',
@@ -85,11 +86,20 @@ function otherRailDrives (psText, ownPids) {
 
 function parseArgs (argv) {
     if (argv.length < 2) throw new Error('drive and leg are required')
-    const options = { drive: argv[0], leg: argv[1], limitMinutes: DEFAULT_LIMIT_MINUTES, dryRun: false }
+    const options = {
+        drive: argv[0],
+        leg: argv[1],
+        limitMinutes: DEFAULT_LIMIT_MINUTES,
+        teardownGraceMinutes: DEFAULT_TEARDOWN_GRACE_MINUTES,
+        dryRun: false,
+    }
     for (let i = 2; i < argv.length; i++) {
         if (argv[i] === '--dry-run') options.dryRun = true
         else if (argv[i] === '--journal-dir' && i + 1 < argv.length) options.journalDir = argv[++i]
         else if (argv[i] === '--limit-minutes' && i + 1 < argv.length) options.limitMinutes = Number(argv[++i])
+        else if (argv[i] === '--teardown-grace-minutes' && i + 1 < argv.length) {
+            options.teardownGraceMinutes = parseGraceMinutes(argv[++i])
+        }
         else throw new Error('unknown or incomplete argument: ' + argv[i])
     }
     if (!options.journalDir) throw new Error('--journal-dir is required')
@@ -109,8 +119,9 @@ function findCompetingDrive () {
     return otherRailDrives(psText, [process.pid, process.ppid])[0]
 }
 
-function runChild (command, limitMinutes) {
+function runChild (command, limitMinutes, graceMinutes) {
     return new Promise((resolve, reject) => {
+        const schedule = limitSchedule(limitMinutes, graceMinutes)
         const child = spawn(command.command, command.argv, {
             cwd: command.cwd,
             env: command.env,
@@ -122,8 +133,12 @@ function runChild (command, limitMinutes) {
             timedOut = true
             console.error('leg exceeded ' + limitMinutes + ' minutes')
             child.kill('SIGTERM')
-            killTimer = setTimeout(() => child.kill('SIGKILL'), TERMINATE_GRACE_MS)
-        }, limitMinutes * 60 * 1000)
+            killTimer = setTimeout(() => {
+                console.error('leg teardown killed after ' + graceMinutes +
+                    ' grace minutes: run test/attestMirror/releaseLeakedStakes.js before the next drive')
+                child.kill('SIGKILL')
+            }, schedule.killAtMs - schedule.termAtMs)
+        }, schedule.termAtMs)
         child.once('error', (error) => {
             clearTimeout(limitTimer)
             if (killTimer) clearTimeout(killTimer)
@@ -183,7 +198,7 @@ async function main (argv) {
     }
     fs.mkdirSync(options.journalDir, { recursive: true })
     fs.rmSync(command.journalPath, { force: true })
-    const childResult = await runChild(command, options.limitMinutes)
+    const childResult = await runChild(command, options.limitMinutes, options.teardownGraceMinutes)
     const passed = triageFile(command)
     return passed && !childResult.timedOut ? 0 : 1
 }

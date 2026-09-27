@@ -64,7 +64,7 @@ bridgeRailSuite(GROUP, function () {
         for (const e of edits) assert.strictEqual(e.status, 'valid', 'an issuer LIST edit graded ' + e.status);
         const seq2 = await waitForFinalizedSeq(M.tick, 2);
         assert.strictEqual(Number(seq2.policy_seq), 2, 'the edit finalized as seq ' + seq2.policy_seq + ', not 2');
-        const applied = await waitForAppliedSeq(M.tick, 2);
+        const applied = await waitForAppliedSeq(M.tick, 2, { snapshotId: seq2.snapshot_id });
         state.evidence.at2_lag = { wallSeconds: Math.round((Date.now() - startedMs) / 1000),
             dogeBlocks: Number(applied.block) - dogeTipAtEdit, seq2: String(seq2.snapshot_id),
             effectiveTime: Number(seq2.effective_time), appliedBlock: applied.block };

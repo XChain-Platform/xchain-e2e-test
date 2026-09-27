@@ -1324,8 +1324,8 @@ class BridgeRailVenue {
     }
 
     /**
-     * Point ONE hub's origin (BTC) indexer somewhere else, or back at its own with `null`,
-     * and restart that hub alone so its engine reads the new endpoint.
+     * Point ONE hub's origin (BTC) indexer somewhere else, or back at its own with `null`.
+     * Restart that hub alone by default, or restart an explicit ordered set during recovery.
      *
      * Exists for policy AT5's abstain leg: a follower whose origin indexer is unreachable
      * must abstain rather than refuse, and stopping a shared indexer would take every hub's
@@ -1333,16 +1333,25 @@ class BridgeRailVenue {
      *
      * @param {number} hubIndex
      * @param {string|null} url  an endpoint, or null to restore the hub's own indexer
+     * @param {{restartIndexes?: number[]}} [opts]
      */
-    async setHubOriginIndexer(hubIndex, url) {
+    async setHubOriginIndexer(hubIndex, url, opts) {
         assert.ok(this.btcVenue && this.hubs[hubIndex], 'bridgeRailVenue: no hub ' + hubIndex);
         assert.ok(!this.standingBtcIndexerUrl, 'bridgeRailVenue: a venue served by the standing BTC ' +
             'indexer has no per-hub origin endpoint to replace');
         if (url === null || url === undefined) delete this._hubIndexerOverrides[hubIndex];
         else this._hubIndexerOverrides[hubIndex] = String(url);
         this.btcVenue.hubEnv = hubIndexerEnvMap(this.btcVenue.indexers, 'BTC', this._hubIndexerOverrides);
-        await this.btcVenue.stopHub(hubIndex);
-        await this.btcVenue.startHub(hubIndex);
+        const requested = opts && Array.isArray(opts.restartIndexes) ? opts.restartIndexes : [hubIndex];
+        const restartIndexes = [...new Set(requested.map(Number))];
+        assert.ok(restartIndexes.includes(Number(hubIndex)),
+            'bridgeRailVenue: origin indexer restart plan omits hub ' + hubIndex);
+        for (const index of restartIndexes) {
+            assert.ok(Number.isInteger(index) && this.hubs[index],
+                'bridgeRailVenue: origin indexer restart plan names no hub ' + index);
+            await this.btcVenue.stopHub(index);
+            await this.btcVenue.startHub(index);
+        }
         return this.btcVenue.hubEnv[hubIndex];
     }
 

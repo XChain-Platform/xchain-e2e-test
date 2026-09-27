@@ -124,5 +124,22 @@ describe('vmHelper', () => {
             assert.strictEqual(waitArg.tick, 'MYTOKEN')
             assert.strictEqual(waitArg.amount, '999')
         })
+
+        it('should pass the expected status and default to valid', async () => {
+            await helper.sendWithdrawV0(addressInfo, '4', 'MYTOKEN', '999', 'invalid')
+            assert.strictEqual(global.indexerDatabase.waitForWithdrawal.firstCall.args[0].status, 'invalid')
+
+            await helper.sendWithdrawV0(addressInfo, '4', 'MYTOKEN', '999')
+            assert.strictEqual(global.indexerDatabase.waitForWithdrawal.secondCall.args[0].status, 'valid')
+        })
+
+        it('should include the expected status in a missing-row error', async () => {
+            global.indexerDatabase.waitForWithdrawal.resolves(null)
+
+            await assert.rejects(
+                helper.sendWithdrawV0(addressInfo, '4', 'MYTOKEN', '999', 'invalid'),
+                /status=invalid/
+            )
+        })
     })
 })
