@@ -11,6 +11,45 @@
 const transactionHelper = require('../transactionHelper')
 const requireRow = require('./requireRow')
 
+function waitForIndexer(method, query, waitMs){
+    if(waitMs === undefined) return method.call(indexerDatabase, query)
+    return method.call(indexerDatabase, query, waitMs)
+}
+
+async function sendIssueV0AndWait(helper, waitMs, args){
+    const [addressInfo, tick, maxSupply, maxMint, decimals, description, mintSupply] = args
+    const txHash = await helper.sendIssueV0Raw(...args)
+
+    console.log("Waiting for ISSUE in the database...")
+    const issueRow = await waitForIndexer(indexerDatabase.waitForIssue, {
+        source: addressInfo.address,
+        tick: tick,
+        txHash: txHash,
+        description: description,
+        maxSupply: maxSupply,
+        maxMint: maxMint,
+        decimals: decimals,
+        mintSupply: mintSupply,
+        status: "valid"
+    }, waitMs)
+    if(!issueRow)
+        throw new Error("sendIssueV0: ISSUE " + tick + " (tx " + txHash + ") never reached "
+            + "status=valid; the checkIssue give-up line above says whether the row is "
+            + "absent or landed with another status - read the indexer's verdict for this tx")
+
+    const creditRow = await waitForIndexer(indexerDatabase.waitForCredit, {
+        address: addressInfo.address,
+        tick: tick,
+        txHash: txHash,
+        amount: mintSupply
+    }, waitMs)
+    if(!creditRow)
+        throw new Error("sendIssueV0: ISSUE " + tick + " (tx " + txHash + ") is valid but its "
+            + "mint credit of " + mintSupply + " never appeared")
+
+    return { txHash, issue: issueRow, credit: creditRow }
+}
+
 module.exports = {
     // Broadcast an ISSUE v0 and return its txHash, waiting for NO particular
     // indexer verdict. This is the helper for a test asserting a REJECTION:
@@ -47,47 +86,13 @@ module.exports = {
         allowList='', blockList='', mintAddressMax='', mintStartBlock='', mintStopBlock='', lockMint='',
         lockMintSupply='', outputType=null, compressedPubKey=null
     ){
-        let address = addressInfo["address"]
+        return sendIssueV0AndWait(this, undefined, Array.from(arguments))
+    },
 
-        let txHash = await this.sendIssueV0Raw(addressInfo, tick, maxSupply, maxMint, decimals,
-            description, mintSupply, transfer, transferSupply, lockMaxSupply, lockMaxMint,
-            lockDescription, lockSleep, lockCallback, callbackBlock, callbackTick, callbackAmount,
-            allowList, blockList, mintAddressMax, mintStartBlock, mintStopBlock, lockMint,
-            lockMintSupply, outputType, compressedPubKey)
-
-        console.log("Waiting for ISSUE in the database...")
-        let issueRow = await indexerDatabase.waitForIssue({
-            source: address,
-            tick: tick,
-            txHash: txHash,
-            description: description,
-            maxSupply: maxSupply,
-            maxMint: maxMint,
-            decimals: decimals,
-            mintSupply: mintSupply,
-            status: "valid"
-        })
-        // Fail HERE, not three assertions later. A caller of this helper is
-        // setting up a fixture it needs to exist; returning a null row lets the
-        // test walk on and fail somewhere misleading (a rejected parent ISSUE
-        // leaves its tick interned but valueless, so a dependent action fails
-        // on the wrong rule and the real rejection never surfaces).
-        if(!issueRow)
-            throw new Error("sendIssueV0: ISSUE " + tick + " (tx " + txHash + ") never reached "
-                + "status=valid; the checkIssue give-up line above says whether the row is "
-                + "absent or landed with another status - read the indexer's verdict for this tx")
-
-        let creditRow = await indexerDatabase.waitForCredit({
-            address: address,
-            tick: tick,
-            txHash: txHash,
-            amount: mintSupply
-        })
-        if(!creditRow)
-            throw new Error("sendIssueV0: ISSUE " + tick + " (tx " + txHash + ") is valid but its "
-                + "mint credit of " + mintSupply + " never appeared")
-
-        return { txHash, issue: issueRow, credit: creditRow }
+    async sendIssueV0Waiting(waitMs, addressInfo, tick, maxSupply, maxMint, decimals, description, mintSupply){
+        return sendIssueV0AndWait(this, waitMs, [
+            addressInfo, tick, maxSupply, maxMint, decimals, description, mintSupply
+        ])
     },
 
     // Broadcast an ISSUE v1 and return its txHash, waiting for NO verdict. The
