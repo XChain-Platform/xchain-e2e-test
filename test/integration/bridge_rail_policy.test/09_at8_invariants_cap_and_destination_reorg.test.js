@@ -44,6 +44,7 @@ const {
     newestFinalizedSnapshot,
     nextFinalizedSnapshot,
     policyFinalizationBudgetMs,
+    policyInvariantOriginLookup,
     policyInvariantReading,
 } = require('../../helpers/rail_preflight/policy_at7_at8');
 const {
@@ -96,7 +97,8 @@ bridgeRailSuite(GROUP, function () {
             const newest = await newestFinalized(tick);
             if (!newest) continue;
             await waitForAppliedSeq(tick, Number(newest.policy_seq));
-            const origin = await originPolicy(tick, Number(newest.origin_block));
+            const originLookup = policyInvariantOriginLookup(newest);
+            const origin = await originPolicy(originLookup.tick, originLookup.block);
             const applied = await appliedPolicyRead(tick);
             readings.push({ tick, seq: Number(newest.policy_seq), originHash: origin.policy_hash,
                 copyHash: (await copyPolicy(tick)).policy_hash, applied, appliedHash: applied.policy_hash });

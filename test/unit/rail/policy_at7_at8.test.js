@@ -9,6 +9,7 @@ const {
     newestFinalizedSnapshot,
     nextFinalizedSnapshot,
     policyFinalizationBudgetMs,
+    policyInvariantOriginLookup,
     policyInvariantReading,
 } = require('../../helpers/rail_preflight/policy_at7_at8');
 
@@ -58,6 +59,19 @@ describe('policy AT7 and AT8 readiness and snapshot decisions', function () {
 
 describe('policy AT8 invariant and reorg decisions', function () {
     it('compares each copy with the origin at its finalized snapshot block', function () {
+        const snapshot = {
+            tick: 'LAGA',
+            policy_seq: 3,
+            origin_block: 26800,
+            snapshot_block: 26806,
+            status: 'finalized',
+        };
+        assert.deepStrictEqual(policyInvariantOriginLookup(snapshot), {
+            tick: 'LAGA',
+            block: 26800,
+        });
+        assert.throws(() => policyInvariantOriginLookup({ ...snapshot, status: 'pending' }),
+            /snapshot must be finalized/);
         const reading = policyInvariantReading([
             { tick: 'LAGA', originHash: 'old-a', copyHash: 'old-a', appliedHash: 'old-a' },
             { tick: 'POLA', originHash: 'old-b', copyHash: 'old-b', appliedHash: 'old-b' },

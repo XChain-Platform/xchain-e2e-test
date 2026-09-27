@@ -52,6 +52,17 @@ function policyFinalizationBudgetMs(pollMs) {
     return Math.max(MIN_FINALIZATION_BUDGET_MS, cadence * 6);
 }
 
+function policyInvariantOriginLookup(snapshot) {
+    assert.ok(snapshot && String(snapshot.status) === 'finalized',
+        'policyInvariantOriginLookup: snapshot must be finalized');
+    const tick = String(snapshot.tick || '');
+    const block = Number(snapshot.origin_block);
+    assert.ok(tick.length > 0, 'policyInvariantOriginLookup: snapshot tick is required');
+    assert.ok(Number.isInteger(block) && block >= 0,
+        'policyInvariantOriginLookup: origin_block must be a non-negative integer');
+    return { tick, block };
+}
+
 function policyInvariantReading(readings, minimum) {
     const rows = Array.isArray(readings) ? readings : [];
     const needed = Number(minimum);
@@ -80,5 +91,6 @@ module.exports = {
     newestFinalizedSnapshot,
     nextFinalizedSnapshot,
     policyFinalizationBudgetMs,
+    policyInvariantOriginLookup,
     policyInvariantReading,
 };
