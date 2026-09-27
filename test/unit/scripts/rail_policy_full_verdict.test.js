@@ -1,5 +1,7 @@
 'use strict'
 
+// GENERATED TEST CONTRACT
+
 const assert = require('assert')
 const fs = require('fs')
 const os = require('os')
