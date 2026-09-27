@@ -46,13 +46,18 @@ describe('waitForBlocks', () => {
         expect(h.urls.length).to.be.greaterThan(1);
     });
 
-    it('never calls anything but the status route', async () => {
+    it('never calls mine, generateBlocks, or a miner RPC', async () => {
         const h = harness([100, 102]);
-        await run(h);
+        const forbiddenCalls = [];
+        await run(h, {
+            mine() { forbiddenCalls.push('mine'); },
+            generateBlocks() { forbiddenCalls.push('generateBlocks'); },
+            minerRpc() { forbiddenCalls.push('minerRpc'); }
+        });
+        expect(forbiddenCalls).to.deep.equal([]);
         expect(h.urls.length).to.be.greaterThan(0);
         h.urls.forEach((u) => {
             expect(u).to.equal('http://explorer.test/TBTC/api/status');
-            expect(u).to.not.match(/mine|generateBlocks|generatetoaddress/i);
         });
     });
 
