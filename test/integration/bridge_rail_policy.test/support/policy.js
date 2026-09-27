@@ -198,7 +198,8 @@ async function listOrigin(state, chain, listIndex) {
         'LEFT JOIN transactions t ON (t.tx_index = a.tx_index) ' +
         'LEFT JOIN index_transactions it ON (it.id = t.tx_hash_id) ' +
         'WHERE l.action_index = ? LIMIT 1', [String(listIndex)]);
-    return rows[0] || null;
+    if (!rows[0]) return null;
+    return { type: Number(rows[0].type), source: rows[0].source, tx_hash: rows[0].tx_hash };
 }
 
 async function btcAddressList(T, owner, members, memo) {
@@ -242,8 +243,8 @@ async function oneBtcBlock(state, T, from, wires, table) {
 
 async function listedToken(state, T, label, candidates, blocked) {
     const expanded = expandPolicyTickCandidates(candidates);
-    const tick = await T.pickFreeTick(expanded);
-    assert.ok(tick, 'no free tick among ' + expanded.join(', '));
+    const tick = await T.pickFreeTick(expanded.concat(fallbackTicks(label)));
+    assert.ok(tick, 'no free tick among ' + expanded.join(', ') + ' or the ' + label + ' fallbacks');
     const issuer = await T.fundBtc('POLICY.' + label + '.ISSUER');
     const issue = await T.btcAction(issuer, () => require('../../../helpers/issueHelper').sendIssueV0Raw(
         issuer, tick, 100000, 100000, 0, 'policy ' + label, 1000), 'issues');
@@ -284,8 +285,7 @@ function bind(state, T) {
         sendCopy: (...args) => sendCopy(state, T, ...args),
         policyLines: (...args) => policyLines(state, ...args),
         fundDoge: async (...args) => { await ensureDogeFeeSchedule(state); return T.fundDoge(...args); },
-        settleLeg: (what, match, chain, opts) => T.settleLeg(what, match, chain,
-            Object.assign({ applyMs: policyApplyBudgetMs(chain) }, opts || {})),
+        settleLeg: (...args) => settleLeg(state, ...args),
         policyTransferMatches,
     };
 }
