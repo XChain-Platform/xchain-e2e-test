@@ -38,4 +38,19 @@ const DEPOSIT_CASES = Object.freeze([
     })
 ])
 
-module.exports = { custodyWires, DEPOSIT_CASES }
+const WITHDRAW_CASES = Object.freeze([
+    Object.freeze({
+        name: 'deny guard bound after deposit',
+        bindBeforeWithdraw: true,
+        guard: 'deny',
+        expect: 'invalid'
+    }),
+    Object.freeze({
+        name: 'allow guard bound before deposit',
+        bindBeforeWithdraw: false,
+        guard: 'allow',
+        expect: 'valid'
+    })
+])
+
+module.exports = { custodyWires, DEPOSIT_CASES, WITHDRAW_CASES }

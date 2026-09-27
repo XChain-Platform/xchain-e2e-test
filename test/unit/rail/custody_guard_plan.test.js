@@ -11,7 +11,7 @@
 // contact legal@dankest.llc.
 
 const assert = require('assert')
-const { custodyWires, DEPOSIT_CASES } = require('../../rail/custody_guard/plan')
+const { custodyWires, DEPOSIT_CASES, WITHDRAW_CASES } = require('../../rail/custody_guard/plan')
 
 describe('custody guard rail plan', function () {
     it('builds the token controller wire field by field', function () {
@@ -51,6 +51,25 @@ describe('custody guard rail plan', function () {
                 tokenBound: false,
                 depositorBound: true,
                 expect: 'invalid'
+            }
+        ])
+    })
+
+    it('freezes the ordered withdrawal cases', function () {
+        assert(Object.isFrozen(WITHDRAW_CASES))
+        assert(WITHDRAW_CASES.every(Object.isFrozen))
+        assert.deepStrictEqual(WITHDRAW_CASES, [
+            {
+                name: 'deny guard bound after deposit',
+                bindBeforeWithdraw: true,
+                guard: 'deny',
+                expect: 'invalid'
+            },
+            {
+                name: 'allow guard bound before deposit',
+                bindBeforeWithdraw: false,
+                guard: 'allow',
+                expect: 'valid'
             }
         ])
     })
