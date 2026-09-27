@@ -43,6 +43,10 @@ const INTENTIONALLY_UNRUN = [
         why: 'Hand-driven Byzantine drill against a live multi-host stack; test/drills/README.md carries the invocation and the operator preconditions it needs.'
     },
     {
+        file: 'test/drills/unit/cross_chain_settle_testnet_drill.test.js',
+        why: 'Hermetic cover for the testnet settlement drill, run by its row verification command like the other drill unit files; folding it into test:unit is the same deliberate decision.'
+    },
+    {
         file: 'test/drills/unit/drill_plan.test.js',
         why: 'Hermetic cover for the drill library, run by the npx line in test/drills/README.md. Folding the drill lane into test:unit would change what the CI unit job runs, which is a decision to take deliberately rather than a side effect of this guard.'
     },
