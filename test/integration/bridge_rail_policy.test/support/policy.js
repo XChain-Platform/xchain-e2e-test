@@ -71,6 +71,19 @@ function bind(state, T) {
         indexer.mirrorProxy.dropSockets();
     }
 
+    async function waitForDestinationApply(destChain, transferId, timeoutMs) {
+        const isDoge = String(destChain).toUpperCase() === 'DOGE';
+        if (isDoge) refreshDestinationMirror();
+        // Re-page finalized transfer and policy rows that land after the first refresh.
+        const timer = isDoge ? setInterval(refreshDestinationMirror, 30000) : null;
+        try {
+            return await state.venue.waitForBridgeApplied(destChain, transferId,
+                timeoutMs ? { timeoutMs: timeoutMs } : undefined);
+        } finally {
+            if (timer) clearInterval(timer);
+        }
+    }
+
     // The origin read, at the confirmed height the hub reads it at unless one is named.
     async function originPolicy(tick, originBlock) {
         let block = originBlock;
@@ -131,9 +144,7 @@ function bind(state, T) {
         const row = await state.venue.waitForFinalizedTransfer(match,
             { timeoutMs: o.finalizeMs || 30 * 60 * 1000 });
         assert.ok(row, what + ' never finalized on any venue hub.\n' + state.venue.hubTails(30));
-        if (String(destChain).toUpperCase() === 'DOGE') refreshDestinationMirror();
-        const applied = await state.venue.waitForBridgeApplied(destChain, row.transfer_id,
-            o.applyMs ? { timeoutMs: o.applyMs } : undefined);
+        const applied = await waitForDestinationApply(destChain, row.transfer_id, o.applyMs);
         assert.ok(applied, 'the venue ' + destChain + ' indexer never applied ' + what + ' (' + row.transfer_id +
             ').\n' + state.venue.indexerTails(40));
         return { row, applied, transfer: { transferId: row.transfer_id,
