@@ -47,6 +47,10 @@
  *   itself. A withhold alone cannot produce a park at all, because the watermark it
  *   deliberately preserves is what the barrier reads.
  *
+ * `future_block_wait` counts as a parked class because the reason name is the
+ * attribution claim; the class only proves that the indexer is held. While the
+ * raised grace keeps `stallClearsAt` in the future, that is the truthful class.
+ *
  * WHY THE RAISED GRACE DOES NOT MAKE BRING-UP IMPOSSIBLE, since a reader will
  * worry about it: the barrier compares against the BLOCK's own protocol time, and
  * on regtest that is the raw stamp. Every historical block is minutes to days old,
@@ -62,12 +66,9 @@ dotenv.config()
 const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const { createRail } = require('../helpers/chainRail')
 const { until, untilOrClearDogeStall, diffStateHashes, venueTipProbe } = require('./mirrorDrillWaits')
+const { BARRIER_REASON, PARKED_CLASSES, isAttributedPark } = require('./helpers/barrierAttribution')
 const { HUB_SCHEMA_VERSION } = require('./helpers/hubSchemaVersion')
 const XChainIndexerConnector = require('../../src/XChainIndexerConnector.js')
-
-// The observable this file exists to pin.
-const BARRIER_REASON = 'attest_response_sync_barrier'
-const PARKED_CLASSES = ['barrier_defer', 'wedged']
 
 // The mirrored table starved on one edge.
 const MIRROR_TABLE = 'attestation_responses'
@@ -151,7 +152,7 @@ describe('AT0 last clause: the mirror stall is attest_response_sync_barrier by n
 
             const parked = await until(async () => {
                 const a = await statusOf(STARVED)
-                return { ok: a.reason === BARRIER_REASON && PARKED_CLASSES.includes(a.klass), a: a }
+                return { ok: isAttributedPark(a), a: a }
             }, 8 * 60 * 1000)
             assert.ok(parked.ok,
                 'indexer ' + STARVED + ' never reported ' + BARRIER_REASON + '. Last status ' +
