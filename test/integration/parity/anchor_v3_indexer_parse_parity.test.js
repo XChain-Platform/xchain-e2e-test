@@ -106,6 +106,7 @@ describe('ANCHOR v3 indexer parse parity', function () {
         const expected = expectedRows(bundle);
         assert.strictEqual(rows.length, expected.chainRows.length + 1, 'one archive row');
         assert.deepStrictEqual(actualRows(rows, expected.chainRows.length), expected);
+        assert.ok(rows.every(row => row.STATUS === 'unverified'), 'unverified rows');
     });
 
     it('records no archive row for the frozen archive-free vector', async function () {
