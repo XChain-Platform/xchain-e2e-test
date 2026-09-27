@@ -13,13 +13,7 @@
 
 const assert = require('assert');
 const crypto = require('crypto');
-const fs     = require('fs');
 const path   = require('path');
-
-const ROOT = path.resolve(__dirname, '../../../..');
-const HUB_ROOT = path.join(ROOT, 'xchain-hub');
-const PAYLOAD_PATH = path.join(HUB_ROOT, 'src/anchor/publisher/fold/v3_payload.js');
-const FIXTURE_PATH = path.join(HUB_ROOT, 'test/fixtures/anchor_canonical_vectors.json');
 
 const { parseAnchorV3 } = require('../../helpers/anchor_fold/parse_anchor_v3');
 
@@ -30,18 +24,26 @@ function sha256(value) {
     return crypto.createHash('sha256').update(value, 'utf8').digest('hex');
 }
 
-function fixtureArray(bundle, field) {
+function resolveHubRoot() {
+    try {
+        return path.dirname(require.resolve('xchain-hub/package.json'));
+    } catch (error) {
+        if (error.code === 'MODULE_NOT_FOUND') return null;
+        throw error;
+    }
+}
+
+function resolveFixtureReference(bundle, field) {
     if (Array.isArray(bundle[field])) return bundle[field];
     assert.strictEqual(bundle[field], `same as bundle_v3.${field}`,
         `${field} fixture reference`);
     return golden.fixture.bundle_v3[field];
 }
 
-function materializedBundle(bundle) {
-    return Object.assign({}, bundle, {
-        sections: fixtureArray(bundle, 'sections'),
-        attest_sigs: fixtureArray(bundle, 'attest_sigs')
-    });
+function resolveArchiveFreeFixture() {
+    const bundle = golden.fixture.bundle_v3_no_archive;
+    bundle.sections = resolveFixtureReference(bundle, 'sections');
+    bundle.attest_sigs = resolveFixtureReference(bundle, 'attest_sigs');
 }
 
 function expectedArchive(bundle) {
@@ -57,15 +59,18 @@ function expectedArchive(bundle) {
 
 describe('ANCHOR v3 hub serializer parity', function () {
     before(function () {
-        if (!fs.existsSync(HUB_ROOT)) {
-            const reason = 'xchain-hub sibling is absent at ' + HUB_ROOT;
+        const hubRoot = resolveHubRoot();
+        if (!hubRoot) {
+            const reason = 'xchain-hub sibling is absent';
             console.log('ANCHOR v3 hub serializer parity: ' + reason + '; skipping');
             if (process.env.XCHAIN_REQUIRE_SIBLINGS === '1') throw new Error(reason);
             this.skip();
             return;
         }
-        ({ buildAnchorV3Payload } = require(PAYLOAD_PATH));
-        golden = require(FIXTURE_PATH);
+        ({ buildAnchorV3Payload } = require(path.join(
+            hubRoot, 'src/anchor/publisher/fold/v3_payload.js')));
+        golden = require(path.join(hubRoot, 'test/fixtures/anchor_canonical_vectors.json'));
+        resolveArchiveFreeFixture();
     });
 
     it('serializes the archive-bearing fixture byte for byte and by sha256', function () {
@@ -76,8 +81,7 @@ describe('ANCHOR v3 hub serializer parity', function () {
     });
 
     it('serializes the archive-free fixture byte for byte and by sha256', function () {
-        const bundle = materializedBundle(golden.fixture.bundle_v3_no_archive);
-        const actual = buildAnchorV3Payload(bundle);
+        const actual = buildAnchorV3Payload(golden.fixture.bundle_v3_no_archive);
         assert.strictEqual(actual, golden.vectors.v3_no_archive, 'archive-free v3 bytes');
         assert.strictEqual(sha256(actual), sha256(golden.vectors.v3_no_archive),
             'archive-free v3 sha256');
