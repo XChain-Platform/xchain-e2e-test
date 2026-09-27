@@ -22,7 +22,10 @@ const transactionHelper = require('../transactionHelper')
  * library suite to avoid risking the live indexer's per-block transaction.)
  */
 const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
-const NOOP = `module.exports = { meta: { name: 'Noop', description: 'Returns a constant, used as the target of negative execute cases.', version: '1.0.0' }, ping: function(){ return 'ok'; } };`
+const NOOP = `module.exports = { meta: { name: 'Noop', description: 'Returns a constant, used as the target of negative execute cases.', version: '1.0.0', ownerWithdraw: true }, ping: function(){ return 'ok'; } };`
+// Same shape as NOOP but does not declare ownerWithdraw, so its owner WITHDRAW
+// must be refused for not opting in rather than for any balance reason.
+const NOOP_NO_OPTIN = `module.exports = { meta: { name: 'Noop No OptIn', description: 'Target contract for the owner-withdraw opt-in rejection case.', version: '1.0.0' }, ping: function(){ return 'ok'; } };`
 
 let deployer = null
 
@@ -68,16 +71,22 @@ let contractIndex = null
 let contractAddr = null
 let heldTick = null
 
+async function setupDeployer() {
+    deployer = await cryptoHelper.getNewFundedAddress('vmneg-deployer', COIN, NETWORK, null, 'legacy', 0, 1)
+    await gasHelper.ensureGasBalance(deployer, '500')
+}
+
+async function setupNoopContract() {
+    await setupDeployer()
+    heldTick = randTick('VNG')
+    await issueHelper.sendIssueV0(deployer, heldTick, '1000', '1000', '0', 'vm neg', '1000')
+    const dep = await vmHelper.sendDeployV0(deployer, NOOP, 200000)
+    contractIndex = dep.contract.action_index
+    contractAddr = `C:${CHAIN}:${contractIndex}`
+}
+
 describe('VM Execute Negative: deposit/withdraw failure paths', function () {
-    before(async function () {
-        deployer = await cryptoHelper.getNewFundedAddress('vmneg-deployer', COIN, NETWORK, null, 'legacy', 0, 1)
-        await gasHelper.ensureGasBalance(deployer, '500')
-        heldTick = randTick('VNG')
-        await issueHelper.sendIssueV0(deployer, heldTick, '1000', '1000', '0', 'vm neg', '1000')
-        const dep = await vmHelper.sendDeployV0(deployer, NOOP, 200000)
-        contractIndex = dep.contract.action_index
-        contractAddr = `C:${CHAIN}:${contractIndex}`
-    })
+    before(setupNoopContract)
 
     it('rejects a DEPOSIT exceeding the depositor balance', async function () {
         // deployer holds 1000 of heldTick; depositing 5000 must fail.
@@ -124,5 +133,29 @@ describe('VM Execute Negative: deposit/withdraw failure paths', function () {
         assert.notStrictEqual(row.status, 'valid', 'over-balance withdrawal must fail')
         assert(/insufficient/i.test(row.status), `status should cite insufficient contract balance (got: ${row.status})`)
         assert.strictEqual(await balanceOf(contractAddr, heldTick), '100', 'contract balance must be unchanged')
+    })
+})
+
+describe('VM Execute Negative: owner withdraw opt-in', function () {
+    before(setupDeployer)
+
+    it('rejects an owner WITHDRAW when the contract has not opted in to owner withdraw', async function () {
+        const tick = randTick('VNO')
+        await issueHelper.sendIssueV0(deployer, tick, '1000', '1000', '0', 'vm neg no optin', '1000')
+
+        const dep = await vmHelper.sendDeployV0(deployer, NOOP_NO_OPTIN, 200000)
+        const ci = dep.contract.action_index
+        const addr = `C:${CHAIN}:${ci}`
+
+        const d = await vmHelper.sendDepositV0(deployer, ci, tick, '100')
+        assert.strictEqual(d.deposit.status, 'valid')
+        assert.strictEqual(await balanceOf(addr, tick), '100', 'contract should hold deposited amount')
+
+        await rawWithdraw(deployer, ci, tick, '40')
+        const row = await waitWithdrawal(deployer.address, ci, tick)
+        assert(row, 'a withdrawal row should be recorded')
+        assert.strictEqual(row.status, 'invalid: CONTRACT_ACTION_INDEX (owner withdraw not enabled)',
+            `owner withdraw on a contract without ownerWithdraw should be refused with the frozen token (got: ${row.status})`)
+        assert.strictEqual(await balanceOf(addr, tick), '100', 'contract balance must be unchanged (withdraw refused)')
     })
 })
