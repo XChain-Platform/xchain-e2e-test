@@ -26,6 +26,7 @@ const { archiveCountCases } = require('../../helpers/flag_days/archive_count_cas
 
 const MATCHES_LENGTH = 3;
 const CASES = archiveCountCases(MATCHES_LENGTH);
+const MATCH_COUNT_GATE = 'archive_match_count_activation.ARCHIVE_MATCH_COUNT_ACTIVATION';
 const HUB_DB_PORT = 14000 + (process.pid % 300);
 const HUB_DB_NAME = 'xchain-archive-count-hubdb-' + process.pid;
 const SNAPSHOT_BLOCK = Number(process.env.ARCHIVE_COUNT_SNAPSHOT_BLOCK) ||
@@ -42,6 +43,33 @@ let signerDir = null;
 let signerHooks = null;
 let checkpointSeqBase = 0;
 let batchSeqBase = 0;
+
+function indexerGateRegistryPath(){
+    const relative = path.join('src', 'consensus', 'gate_registry.js');
+    const candidates = [
+        process.env.XCHAIN_INDEXER_PATH && path.join(process.env.XCHAIN_INDEXER_PATH, relative),
+        process.env.XCHAIN_INDEXER_DIR && path.join(process.env.XCHAIN_INDEXER_DIR, relative),
+        path.resolve(__dirname, '../../../xchain-indexer', relative),
+        path.resolve(__dirname, '../../../../xchain-indexer', relative),
+        path.resolve(__dirname, '../../../../../xchain-indexer', relative),
+        path.resolve(__dirname, '../../../../../../modules/xchain-indexer', relative)
+    ].filter(Boolean);
+    const resolved = candidates.find((candidate) => fs.existsSync(candidate));
+    if(resolved) return resolved;
+    throw new Error('cannot resolve the xchain-indexer gate registry; tried: ' +
+        candidates.join(', '));
+}
+
+function assertMatchCountGateArmed(){
+    const gates = require(indexerGateRegistryPath());
+    const activation = gates.copy(MATCH_COUNT_GATE);
+    assert.strictEqual(activation.regtest, 0,
+        'the archive MATCH_COUNT rail requires regtest activation at height 0');
+    assert.strictEqual(gates.activeAt(MATCH_COUNT_GATE, 'regtest', null, 0, null), true,
+        'the archive MATCH_COUNT rule must be active from the regtest genesis block');
+}
+
+assertMatchCountGateArmed();
 
 async function indexerQuery(sql, params){
     const conn = await indexerDatabase.getConnection();
