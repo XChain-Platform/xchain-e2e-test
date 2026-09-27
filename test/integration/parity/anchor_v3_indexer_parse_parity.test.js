@@ -19,14 +19,13 @@ const {
     makeAnchorParseContext,
     anchorParseArgs
 } = require('../../helpers/anchor_fold/anchor_parse_stub');
-const { expectedFoldRows } = require('../../helpers/anchor_fold/expected_fold_rows');
 
 const ROOT = path.resolve(__dirname, '../../../..');
 const INDEXER_ANCHOR = path.join(ROOT, 'xchain-indexer/src/actions/anchor/index.js');
-const INDEXER_VALIDATE = path.join(ROOT, 'xchain-indexer/src/actions/anchor/validate.js');
 const VECTOR_PATH = path.join(
     ROOT, 'xchain-documentation/protocol/test-vectors/anchor_canonical.json');
 const ACTIVATION_ENV = 'XC_ANCHOR_FOLD_REGTEST_ACTIVATION';
+const WIRE_CHAINS = ['BTC', 'DOGE', 'LTC'];
 
 function restoreEnvironment(hadActivation, activation){
     if(hadActivation) process.env[ACTIVATION_ENV] = activation;
@@ -47,39 +46,33 @@ async function withActivatedAnchor(run){
     process.env[ACTIVATION_ENV] = '0';
     try {
         delete require.cache[require.resolve(INDEXER_ANCHOR)];
-        const validate = require(INDEXER_VALIDATE);
-        return await run(require(INDEXER_ANCHOR), validate);
+        return await run(require(INDEXER_ANCHOR));
     } finally {
         restoreEnvironment(hadActivation, activation);
         restoreRequireCache(before);
     }
 }
 
-async function withFrozenArchivePlaceholder(Anchor, validate, bundle, run){
-    const validateHeadShape = validate.validateHeadShape;
-    const archiveCrc = Anchor.prototype.archiveCrc;
-    const archiveMatchCount = Anchor.prototype.archiveMatchCount;
-    validate.validateHeadShape = (config, data, error) => validateHeadShape(
-        config, Object.assign({}, data, { ARCHIVE_B64: 'A' }), error);
-    Anchor.prototype.archiveCrc = () => bundle.batch_crc32;
-    Anchor.prototype.archiveMatchCount = () => bundle.match_count;
-    try {
-        return await run();
-    } finally {
-        validate.validateHeadShape = validateHeadShape;
-        Anchor.prototype.archiveCrc = archiveCrc;
-        Anchor.prototype.archiveMatchCount = archiveMatchCount;
-    }
-}
-
 function fixtureSections(bundle){
-    const sections = Array.isArray(bundle.sections)
-        ? bundle.sections : require(VECTOR_PATH).fixture.bundle_v3.sections;
-    return sections.slice().sort((a, b) => a.chain.localeCompare(b.chain));
+    if(Array.isArray(bundle.sections)) return bundle.sections;
+    return require(VECTOR_PATH).fixture.bundle_v3.sections;
 }
 
 function expectedRows(bundle){
-    return expectedFoldRows(Object.assign({}, bundle, { sections: fixtureSections(bundle) }));
+    const sections = fixtureSections(bundle);
+    const chainRows = WIRE_CHAINS.map((chain, sectionIndex) => {
+        const section = sections.find(candidate => candidate.chain === chain);
+        assert.ok(section, 'fixture section for ' + chain);
+        return { section_index: sectionIndex, chain, checkpoint_seq: section.checkpoint_seq };
+    });
+    const archiveRow = bundle.archive_count === 0 ? null : {
+        section_index: chainRows.length,
+        match_batch_seq: bundle.match_batch_seq,
+        match_count: bundle.match_count,
+        batch_crc32: bundle.batch_crc32,
+        total_chunks: bundle.total_chunks
+    };
+    return { chainRows, archiveRow };
 }
 
 async function parseVector(vectorName, fixtureName){
@@ -92,10 +85,8 @@ async function parseVector(vectorName, fixtureName){
         txHash: 'anchor-v3-' + vectorName,
         source: 'anchor-v3-publisher'
     });
-    await withActivatedAnchor(async (Anchor, validate) => {
-        const parse = () => new Anchor(action).parse(args.params, args.data, args.error);
-        if(bundle.archive_count === 0) return await parse();
-        await withFrozenArchivePlaceholder(Anchor, validate, bundle, parse);
+    await withActivatedAnchor(async Anchor => {
+        await new Anchor(action).parse(args.params, args.data, args.error);
     });
     return { bundle, rows };
 }
@@ -130,7 +121,7 @@ describe('ANCHOR v3 indexer parse parity', function () {
         assert.strictEqual(rows.length, expected.chainRows.length + 1, 'one archive row');
         assert.deepStrictEqual(actualRows(rows, expected.chainRows.length), expected);
         assert.deepStrictEqual(rows.map(row => row.STATUS),
-            rows.map(() => 'unverified'), 'unverified rows');
+            rows.map(() => 'invalid: ARCHIVE_B64 (format)'), 'real archive verdict');
     });
 
     it('records no archive row for the frozen archive-free vector', async function () {
