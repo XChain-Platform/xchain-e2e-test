@@ -16,6 +16,7 @@
 
 const assert            = require('assert');
 const transactionHelper = require('../../../transactionHelper');
+const fixture           = require('../../../attestMirror/mirrorDrillFixture');
 const {
     listCreateWire,
     policyListsWire,
@@ -47,8 +48,28 @@ function records() {
     };
 }
 
+function fallbackTicks(label) {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const space = alphabet.length ** 4;
+    let seed = 0;
+    for (const c of String(label)) seed = (seed * 33 + c.charCodeAt(0)) % space;
+    return Array.from({ length: 128 }, (_, offset) => {
+        let n = (seed + offset * 7919) % space;
+        let tick = '';
+        for (let i = 0; i < 4; i++) { tick = alphabet[n % alphabet.length] + tick; n = Math.floor(n / alphabet.length); }
+        return tick;
+    });
+}
+
 function bind(state, T) {
     const P = state.policy;
+
+    function refreshDestinationMirror() {
+        const doge = state.venue.dogeVenue;
+        const indexer = doge && doge.indexers && doge.indexers[0];
+        assert.ok(indexer && indexer.mirrorProxy, 'the DOGE venue has no mirror proxy to refresh');
+        indexer.mirrorProxy.dropSockets();
+    }
 
     // The origin read, at the confirmed height the hub reads it at unless one is named.
     async function originPolicy(tick, originBlock) {
@@ -86,14 +107,38 @@ function bind(state, T) {
     async function waitForFinalizedSeq(tick, seq, opts) {
         const o = opts || {};
         let found = null;
-        await state.venue.waitUntil('a finalized policy_snapshots row for ' + tick + ' at seq >= ' + seq,
-            async () => {
-                const rows = (await hubPolicyRows(tick)).filter((r) => String(r.status) === 'finalized' &&
-                    Number(r.policy_seq) >= Number(seq));
-                found = rows.length ? rows[rows.length - 1] : null;
-                return !!found;
-            }, { timeoutMs: o.timeoutMs || 20 * 60 * 1000, everyMs: 5000 });
+        const poll = async () => {
+            // Confirm the origin change before freezing one snapshot block for every hub.
+            await regtestMinerConnector.generateBlocks(Number(state.venue.confirmations.BTC || 2));
+            await fixture.waitForVenueIndexersAtTip(state.venue.btcVenue, { maxLag: 1 });
+            await state.venue.waitUntil('a finalized policy_snapshots row for ' + tick + ' at seq >= ' + seq,
+                async () => {
+                    const rows = (await hubPolicyRows(tick)).filter((r) => String(r.status) === 'finalized' &&
+                        Number(r.policy_seq) >= Number(seq));
+                    found = rows.length ? rows[rows.length - 1] : null;
+                    return !!found;
+                }, { timeoutMs: o.timeoutMs || 20 * 60 * 1000, everyMs: 5000 });
+        };
+        if (o.pauseMining === false) await poll();
+        else await withMiningPaused(regtestMinerConnector, poll,
+            { pauseFile: process.env.BRIDGE_RAIL_MINER_PAUSE_FILE || '' });
+        refreshDestinationMirror();
         return found;
+    }
+
+    async function settleLeg(what, match, destChain, opts) {
+        const o = opts || {};
+        const row = await state.venue.waitForFinalizedTransfer(match,
+            { timeoutMs: o.finalizeMs || 30 * 60 * 1000 });
+        assert.ok(row, what + ' never finalized on any venue hub.\n' + state.venue.hubTails(30));
+        if (String(destChain).toUpperCase() === 'DOGE') refreshDestinationMirror();
+        const applied = await state.venue.waitForBridgeApplied(destChain, row.transfer_id,
+            o.applyMs ? { timeoutMs: o.applyMs } : undefined);
+        assert.ok(applied, 'the venue ' + destChain + ' indexer never applied ' + what + ' (' + row.transfer_id +
+            ').\n' + state.venue.indexerTails(40));
+        return { row, applied, transfer: { transferId: row.transfer_id,
+            snapshotBlock: String(row.snapshot_block), tick: String(row.tick), decimals: String(row.decimals),
+            amount: String(row.amount), appliedBlock: String(applied.block_index) } };
     }
 
     // What the DOGE ledger applied for `tick`, joined to the mirrored rows: every applied
@@ -138,7 +183,8 @@ function bind(state, T) {
             'LEFT JOIN transactions t ON (t.tx_index = a.tx_index) ' +
             'LEFT JOIN index_transactions it ON (it.id = t.tx_hash_id) ' +
             'WHERE l.action_index = ? LIMIT 1', [String(listIndex)]);
-        return rows[0] || null;
+        if (!rows[0]) return null;
+        return { type: Number(rows[0].type), source: rows[0].source, tx_hash: rows[0].tx_hash };
     }
 
     // A type-2 address LIST on BTC from `owner`, answered as its action index.
@@ -151,6 +197,18 @@ function bind(state, T) {
     // Broadcast several actions from one address and mine them into ONE BTC block, so the hub
     // reads their combined effect at one origin height and signs one snapshot for it.
     async function oneBtcBlock(from, wires, table) {
+        const funding = [];
+        for (let i = 1; i < wires.length; i++) {
+            funding.push(await regtestMinerConnector.sendFunds(from.address, 1));
+        }
+        if (funding.length) {
+            await regtestMinerConnector.generateBlocks(1);
+            await state.venue.waitUntil('the policy issuer to hold independent confirmed inputs', async () => {
+                const found = await utxoTrackerConnector.getUtxosFromAddress(from.address);
+                const txids = new Set((found.utxos || []).map((u) => String(u.txid)));
+                return funding.every((txid) => txids.has(String(txid)));
+            }, { timeoutMs: 5 * 60 * 1000, everyMs: 1000 });
+        }
         const txs = await withMiningPaused(regtestMinerConnector, async () => {
             const sent = [];
             for (const wire of wires) sent.push(await transactionHelper.createAndSendTransaction(from, wire));
@@ -168,7 +226,7 @@ function bind(state, T) {
 
     // A policy-bearing token on BTC: issued, given a BLOCK_LIST of `blocked`, opted in to DOGE.
     async function listedToken(label, candidates, blocked) {
-        const tick = await T.pickFreeTick(candidates);
+        const tick = await T.pickFreeTick(candidates.concat(fallbackTicks(label)));
         assert.ok(tick, 'no free tick among ' + candidates.join(', '));
         const issuer = await T.fundBtc('POLICY.' + label + '.ISSUER');
         const issue = await T.btcAction(issuer, () => require('../../../helpers/issueHelper').sendIssueV0Raw(
@@ -197,7 +255,7 @@ function bind(state, T) {
 
     return {
         originPolicy, copyPolicy, appliedPolicyRead, hubPolicyRows, waitForFinalizedSeq, appliedLedger,
-        waitForAppliedSeq, listOrigin, btcAddressList, oneBtcBlock, listedToken, sendCopy, policyLines,
+        waitForAppliedSeq, listOrigin, btcAddressList, oneBtcBlock, listedToken, settleLeg, sendCopy, policyLines,
     };
 }
 
