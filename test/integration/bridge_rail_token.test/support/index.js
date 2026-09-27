@@ -15,6 +15,7 @@
 'use strict';
 
 const assert = require('assert');
+const axios = require('axios');
 
 const chainRail         = require('../../../helpers/chainRail');
 const stakeTeardown     = require('../../../helpers/stakeTeardown');
@@ -22,6 +23,7 @@ const cryptoHelper      = require('../../../cryptoHelper');
 const transactionHelper = require('../../../transactionHelper');
 const issueHelper       = require('../../../helpers/issueHelper');
 const fixture           = require('../../../attestMirror/mirrorDrillFixture');
+const { requireHealthyHub } = require('../../../helpers/rail_preflight/hub_health_gate');
 const {
     BridgeRailVenue,
     resolveVenueQuorum,
@@ -29,6 +31,19 @@ const {
     journalCase,
 } = require('../../../helpers/bridgeRailVenue');
 const token = require('./token');
+
+async function pingDriveHub() {
+    const response = await axios.post(hubConnector.urls[0], {
+        jsonrpc: '2.0',
+        method: 'ping',
+        id: 1,
+    }, {
+        timeout: 5000,
+        validateStatus: () => true,
+        transformResponse: [(body) => body],
+    });
+    return { statusCode: response.status, bodyText: response.data };
+}
 
 // The venue bring-up, the per-case hooks and the suite registration, in the shape of
 // `bridge_rail_base.test/support` (the same quorum gate, the same replayed DOGE ledger, the
@@ -158,6 +173,7 @@ function createRailDrive(cfg) {
     }
 
     async function prepareDrive() {
+        await requireHealthyHub(pingDriveHub);
         await recordSourceContext();
         const mesh = await prepareQuorum();
         if (!mesh) return;
