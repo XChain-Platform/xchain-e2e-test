@@ -10,8 +10,8 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 
-const ROOT = path.resolve(__dirname, '..', '..', '..')
-const MOCHA = path.join(ROOT, 'node_modules', 'mocha', 'bin', 'mocha.js')
+const ROOT = path.resolve(__dirname, '..', '..')
+const MOCHA = path.join(ROOT, '..', 'node_modules', 'mocha', 'bin', 'mocha.js')
 let reportSequence = 0
 
 function readReport(reportFile) {

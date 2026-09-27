@@ -24,7 +24,9 @@ describe('child Mocha driver report helpers', function () {
         scratchDir = fs.mkdtempSync(path.join(os.tmpdir(), 'anchor-fold-driver-test-'))
         passingDriver = path.join(scratchDir, 'passing.test.js')
         failingDriver = path.join(scratchDir, 'failing.test.js')
-        fs.writeFileSync(passingDriver, "it('passes', function () {})\n")
+        const expectedCwd = path.resolve(__dirname, '..', '..', '..')
+        fs.writeFileSync(passingDriver, "const assert = require('assert')\n" +
+            "it('passes', function () { assert.strictEqual(process.cwd(), " + JSON.stringify(expectedCwd) + ") })\n")
         fs.writeFileSync(failingDriver, "it('fails', function () { throw new Error('distinctive driver failure') })\n")
     })
 
