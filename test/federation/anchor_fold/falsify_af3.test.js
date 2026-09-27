@@ -73,7 +73,7 @@ async function requireRedDriver() {
     throw new Error(runDetails(run))
 }
 
-describe.skip('anchor fold late CRC scope falsification', function () {
+describe('anchor fold late CRC scope falsification', function () {
     this.timeout(0)
 
     it('turns chainwide invalidation red, restores exact bytes, and returns green', async function () {
