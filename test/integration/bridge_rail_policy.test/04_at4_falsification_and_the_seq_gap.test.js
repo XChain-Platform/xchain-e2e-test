@@ -49,6 +49,7 @@ const {
     copyPolicy,
     appliedLedger,
     policyLines,
+    policyTransferMatches,
     needsFederation,
     bridgeRailSuite,
 } = require('./support');
@@ -132,9 +133,12 @@ bridgeRailSuite(GROUP, function () {
         assert.strictEqual(G.optIn.status, 'valid', 'ISSUE|7 of the gap token graded ' + G.optIn.status);
         const lock = await btcAction(G.issuer, lockWireV3(G.tick, 'DOGE', G.dest.address, 1, 'policy AT4 gap'), 'xbridges');
         assert.strictEqual(lock.status, 'valid', 'the gap token lock graded ' + lock.status);
-        await settleLeg('the policy AT4 gap lock', (r) => String(r.dest_address) === G.dest.address && String(r.tick) === G.tick, 'DOGE');
+        await settleLeg('the policy AT4 gap lock', (r) => policyTransferMatches(r, {
+            srcChain: 'BTC', srcActionIndex: lock.actionIndex, destChain: 'DOGE',
+            destAddress: G.dest.address, tick: G.tick,
+        }), 'DOGE');
         G.seq1 = await waitForFinalizedSeq(G.tick, 1);
-        await waitForAppliedSeq(G.tick, 1);
+        await waitForAppliedSeq(G.tick, 1, { snapshotId: G.seq1.snapshot_id });
     });
 });
 
@@ -151,11 +155,11 @@ bridgeRailSuite(GROUP, function () {
         }), venueSigners());
         await state.venue.dogeVenue.injectMirrorRow(row, { table: 'policy_snapshots', key: ['snapshot_id'],
             hubs: state.venue.hubs.map((h) => h.index) });
-        const applied = await waitForAppliedSeq(G.tick, 3);
+        const applied = await waitForAppliedSeq(G.tick, 3, { snapshotId: row.snapshot_id });
         const copyAt3 = await copyPolicy(G.tick);
         const lines = policyLines(row.snapshot_id);
         const seq4 = await waitForFinalizedSeq(G.tick, 4);
-        await waitForAppliedSeq(G.tick, 4);
+        await waitForAppliedSeq(G.tick, 4, { snapshotId: seq4.snapshot_id });
         const copyAt4 = await copyPolicy(G.tick);
         state.evidence.at4_seqGap = { snapshotId: row.snapshot_id, applied, copyAt3, lines, seq4: seq4 && seq4.snapshot_id,
             copyAt4, ledger: await appliedLedger(G.tick) };
