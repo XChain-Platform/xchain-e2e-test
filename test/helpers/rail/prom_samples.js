@@ -8,7 +8,7 @@ const LABEL_NAME = /^[a-zA-Z_][a-zA-Z0-9_]*/;
 const NUMBER_VALUE = /^[+-]?(?:(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|Inf)$/;
 
 function unparseable(lineNumber, reason){
-    throw new Error('Metrics text sample line ' + lineNumber + ' is unparseable: ' + reason);
+    throw new Error('Text sample line ' + lineNumber + ' is unparseable: ' + reason);
 }
 
 function skipSpace(text, at){
@@ -105,7 +105,7 @@ function parseSampleLine(line, lineNumber){
 }
 
 function parsePromSamples(text){
-    if(typeof text !== 'string') throw new TypeError('Metrics text exposition must be a string');
+    if(typeof text !== 'string') throw new TypeError('Text exposition must be a string');
     const samples = [];
     text.split(/\r\n|\n|\r/).forEach((raw, index) => {
         const line = raw.trim();

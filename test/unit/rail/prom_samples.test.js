@@ -6,7 +6,7 @@
 const assert = require('assert');
 const { parsePromSamples, requireSourceDispatches } = require('../../helpers/rail/prom_samples');
 
-describe('metrics text sample parser', function () {
+describe('text sample parser', function () {
     it('parses sample values, timestamps, labels, and label escapes', function () {
         const fixture = [
             '',

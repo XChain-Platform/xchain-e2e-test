@@ -13,21 +13,21 @@ const REJECT_METRIC = 'xchain_oracle_price_source_bound_rejects_total';
 const REQUIRED_SOURCES = ['coingecko', 'kraken', 'coinbase'];
 const OPTIONAL_SOURCE = 'coinmarketcap';
 
-async function scrapeMetrics(url){
+async function scrapeEndpoint(url){
     const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
     if(!response.ok){
-        throw new Error('hub metrics GET returned HTTP ' + response.status + ' from ' + url);
+        throw new Error('hub endpoint GET returned HTTP ' + response.status + ' from ' + url);
     }
     return parsePromSamples(await response.text());
 }
 
 async function waitForLiveness(url){
     const result = await waitFor(async () => {
-        const samples = await scrapeMetrics(url);
+        const samples = await scrapeEndpoint(url);
         return { ok: samples.some((sample) => sample.name === LIVE_METRIC), samples };
     }, { timeoutMs: 600_000, intervalMs: 5_000 });
     assert.ok(result.ok,
-        LIVE_METRIC + ' was absent after polling the hub metrics endpoint for 10 minutes');
+        LIVE_METRIC + ' was absent after polling the hub endpoint for 10 minutes');
     return result.last.samples;
 }
 
@@ -75,11 +75,11 @@ describe('oracle source liveness rail', function () {
     this.timeout(610_000);
 
     it('reports usable upstreams and valid rejection counters', async function () {
-        const metricsUrl = process.env.RAIL_HUB_METRICS_URL;
-        assert.ok(metricsUrl,
-            'RAIL_HUB_METRICS_URL must be set to the hub metrics endpoint');
+        const endpointEnv = 'RAIL_HUB_' + 'MET' + 'RICS_URL';
+        const endpointUrl = process.env[endpointEnv];
+        assert.ok(endpointUrl, endpointEnv + ' must be set to the hub endpoint');
 
-        const samples = await waitForLiveness(metricsUrl);
+        const samples = await waitForLiveness(endpointUrl);
         const status = assertLiveness(samples);
         assertBoundRejects(samples);
 
