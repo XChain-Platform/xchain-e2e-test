@@ -67,16 +67,19 @@ async function submitBinding(owner, tick, guardIndex) {
 }
 
 async function submitWithdrawal(testCase, owner, custodyIndex, tick) {
-    if (testCase.expect === 'valid') {
+    const waitForWithdrawal = indexerDatabase.waitForWithdrawal
+    if (testCase.expect === 'invalid') {
+        indexerDatabase.waitForWithdrawal = function (params, timeMax) {
+            return waitForWithdrawal.call(this, { ...params, status: undefined }, timeMax)
+        }
+    }
+    try {
         return (await vmHelper.sendWithdrawV0(
             owner, custodyIndex, tick, WITHDRAW_AMOUNT
         )).withdrawal
+    } finally {
+        indexerDatabase.waitForWithdrawal = waitForWithdrawal
     }
-
-    const wire = ['WITHDRAW', '0', custodyIndex, tick, WITHDRAW_AMOUNT].join('|')
-    const txHash = await transactionHelper.createAndSendTransaction(owner, wire)
-    await waitForTxIndexed(txHash, { timeoutMs: 120000, intervalMs: 250 })
-    return await indexerDatabase.checkWithdrawal({ txHash })
 }
 
 function assertVerdict(testCase, withdrawal) {
