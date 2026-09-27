@@ -59,6 +59,26 @@ const INTENTIONALLY_UNRUN = [
         why: 'Hermetic cover for the drill library, run by the npx line in test/drills/README.md. Folding the drill lane into test:unit would change what the CI unit job runs, which is a decision to take deliberately rather than a side effect of this guard.'
     },
     {
+        file: 'test/drills/unit/testnet_settle_counter_leg.test.js',
+        why: 'Hermetic cover for the testnet settlement drill, run by the npx line in test/drills/README.md like the other drill unit files; folding it into test:unit is the same deliberate decision.'
+    },
+    {
+        file: 'test/drills/unit/testnet_settle_match_wait.test.js',
+        why: 'Hermetic cover for the testnet settlement drill, run by the npx line in test/drills/README.md like the other drill unit files; folding it into test:unit is the same deliberate decision.'
+    },
+    {
+        file: 'test/drills/unit/testnet_settle_order_leg.test.js',
+        why: 'Hermetic cover for the testnet settlement drill, run by the npx line in test/drills/README.md like the other drill unit files; folding it into test:unit is the same deliberate decision.'
+    },
+    {
+        file: 'test/drills/unit/testnet_settle_settlement_wait.test.js',
+        why: 'Hermetic cover for the testnet settlement drill, run by the npx line in test/drills/README.md like the other drill unit files; folding it into test:unit is the same deliberate decision.'
+    },
+    {
+        file: 'test/drills/unit/testnet_settle_topology.test.js',
+        why: 'Hermetic cover for the testnet settlement drill, run by the npx line in test/drills/README.md like the other drill unit files; folding it into test:unit is the same deliberate decision.'
+    },
+    {
         file: 'test/sdk/xcallStakeValidators.js',
         why: 'A one-shot federation staking driver rather than a regression suite: its header carries the XCALL_STAKE_PUBKEYS invocation, and the XCALL expiry suite names it as a step to run by hand first.'
     }
