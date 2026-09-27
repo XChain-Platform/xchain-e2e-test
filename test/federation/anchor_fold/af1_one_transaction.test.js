@@ -54,7 +54,6 @@ let checkpointEngine = null;
 let weightSeed = null;
 let signerDir = null;
 let broadcasts = [];
-let venueSetupAttempted = false;
 
 function restoreManagedEnv(){
     for(const key of MANAGED_ENV){
@@ -152,14 +151,7 @@ async function insertArchiveFloor(batchSequence){
 }
 
 async function startVenue(){
-    venueSetupAttempted = true;
-    try { await venueHooks.beforeAll.call(this); }
-    catch(error){
-        if(!/trying to connect to the node/.test(String(error && error.message))) throw error;
-        console.log('Skipping ANCHOR fold acceptance: DOGE regtest node is unavailable');
-        this.skip();
-        return;
-    }
+    await venueHooks.beforeAll.call(this);
     // Keep this acceptance tied to the DOGE regtest venue.
     assert.strictEqual(COIN + '-' + NETWORK, 'dogecoin-regtest');
 }
@@ -175,10 +167,7 @@ async function startHub(){
     if(!process.env.DOGE_INDEXER_URL)
         process.env.DOGE_INDEXER_URL = 'http://localhost:' + (process.env.INDEXER_API_PORT || '3124');
     hubDb = await startDisposableHubDb({ forceDocker: true, port: HUB_DB_PORT, name: HUB_DB_NAME });
-    if(!hubDb){
-        console.log('Skipping ANCHOR fold acceptance: no Docker available for the disposable hub DB');
-        this.skip();
-    }
+    assert.ok(hubDb, 'Docker is required for the disposable hub DB');
     mvh = new MultiValidatorHub({
         count: 1, basePort: 34700, startCrossChain: true, startAttestation: false,
         dbNamePrefix: 'XChain_DOGE_Regtest_Anchor_Fold_' + process.pid + '_'
@@ -223,9 +212,7 @@ async function stopHub(){
 }
 
 async function stopVenue(){
-    try {
-        if(venueSetupAttempted) await venueHooks.afterAll.call(this);
-    }
+    try { await venueHooks.afterAll.call(this); }
     finally { restoreManagedEnv(); }
 }
 
