@@ -65,7 +65,9 @@ async function run(h) {
     });
 }
 
-describe('testnet cross-chain settlement runner', function () {
+const drillSuite = describe;
+
+drillSuite('testnet cross-chain settlement runner', function () {
     it('runs every step in order and records a successful verdict', async function () {
         const h = harness();
         const verdict = await run(h);
