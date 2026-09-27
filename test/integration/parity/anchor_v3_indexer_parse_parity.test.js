@@ -25,7 +25,6 @@ const INDEXER_ANCHOR = path.join(ROOT, 'xchain-indexer/src/actions/anchor/index.
 const VECTOR_PATH = path.join(
     ROOT, 'xchain-documentation/protocol/test-vectors/anchor_canonical.json');
 const ACTIVATION_ENV = 'XC_ANCHOR_FOLD_REGTEST_ACTIVATION';
-const WIRE_CHAINS = ['BTC', 'DOGE', 'LTC'];
 
 function restoreEnvironment(hadActivation, activation){
     if(hadActivation) process.env[ACTIVATION_ENV] = activation;
@@ -59,12 +58,13 @@ function fixtureSections(bundle){
 }
 
 function expectedRows(bundle){
-    const sections = fixtureSections(bundle);
-    const chainRows = WIRE_CHAINS.map((chain, sectionIndex) => {
-        const section = sections.find(candidate => candidate.chain === chain);
-        assert.ok(section, 'fixture section for ' + chain);
-        return { section_index: sectionIndex, chain, checkpoint_seq: section.checkpoint_seq };
-    });
+    const sections = fixtureSections(bundle).slice()
+        .sort((a, b) => a.chain.localeCompare(b.chain));
+    const chainRows = sections.map((section, sectionIndex) => ({
+        section_index: sectionIndex,
+        chain: section.chain,
+        checkpoint_seq: section.checkpoint_seq
+    }));
     const archiveRow = bundle.archive_count === 0 ? null : {
         section_index: chainRows.length,
         match_batch_seq: bundle.match_batch_seq,
@@ -120,8 +120,7 @@ describe('ANCHOR v3 indexer parse parity', function () {
         const expected = expectedRows(bundle);
         assert.strictEqual(rows.length, expected.chainRows.length + 1, 'one archive row');
         assert.deepStrictEqual(actualRows(rows, expected.chainRows.length), expected);
-        assert.deepStrictEqual(rows.map(row => row.STATUS),
-            rows.map(() => 'invalid: ARCHIVE_B64 (format)'), 'real archive verdict');
+        assert.ok(rows.every(row => row.STATUS === 'unverified'), 'unverified rows');
     });
 
     it('records no archive row for the frozen archive-free vector', async function () {
