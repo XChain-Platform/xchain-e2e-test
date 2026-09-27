@@ -188,7 +188,7 @@ module.exports = {
         return { txHash, deposit: depositRow }
     },
 
-    async sendWithdrawV0(addressInfo, contractActionIndex, tick, quantity){
+    async sendWithdrawV0(addressInfo, contractActionIndex, tick, quantity, expectedStatus = "valid"){
         let address = addressInfo["address"]
         let msg = "WITHDRAW|0|" + contractActionIndex + "|" + tick + "|" + quantity
 
@@ -202,9 +202,9 @@ module.exports = {
             tick: tick,
             amount: quantity,
             txHash: txHash,
-            status: "valid"
+            status: expectedStatus
         }), "sendWithdrawV0: WITHDRAW of " + quantity + " " + tick + " from contract "
-            + contractActionIndex + " (tx " + txHash + ") at status=valid")
+            + contractActionIndex + " (tx " + txHash + ") at status=" + expectedStatus)
 
         return { txHash, withdrawal: withdrawalRow }
     }
