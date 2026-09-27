@@ -32,8 +32,8 @@ const {
 } = require('../../../helpers/bridgeRailVenue');
 const token = require('./token');
 
-async function pingDriveHub() {
-    const response = await axios.post(hubConnector.urls[0], {
+async function pingDriveHub(connector) {
+    const response = await axios.post(connector.urls[0], {
         jsonrpc: '2.0',
         method: 'ping',
         id: 1,
@@ -173,7 +173,7 @@ function createRailDrive(cfg) {
     }
 
     async function prepareDrive() {
-        await requireHealthyHub(pingDriveHub);
+        await requireHealthyHub(() => pingDriveHub(global.hubConnector));
         await recordSourceContext();
         const mesh = await prepareQuorum();
         if (!mesh) return;
