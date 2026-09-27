@@ -23,6 +23,7 @@ const { expectedFoldRows } = require('../../helpers/anchor_fold/expected_fold_ro
 
 const ROOT = path.resolve(__dirname, '../../../..');
 const INDEXER_ANCHOR = path.join(ROOT, 'xchain-indexer/src/actions/anchor/index.js');
+const INDEXER_VALIDATE = path.join(ROOT, 'xchain-indexer/src/actions/anchor/validate.js');
 const VECTOR_PATH = path.join(
     ROOT, 'xchain-documentation/protocol/test-vectors/anchor_canonical.json');
 const ACTIVATION_ENV = 'XC_ANCHOR_FOLD_REGTEST_ACTIVATION';
@@ -46,10 +47,28 @@ async function withActivatedAnchor(run){
     process.env[ACTIVATION_ENV] = '0';
     try {
         delete require.cache[require.resolve(INDEXER_ANCHOR)];
-        return await run(require(INDEXER_ANCHOR));
+        const validate = require(INDEXER_VALIDATE);
+        return await run(require(INDEXER_ANCHOR), validate);
     } finally {
         restoreEnvironment(hadActivation, activation);
         restoreRequireCache(before);
+    }
+}
+
+async function withFrozenArchivePlaceholder(Anchor, validate, bundle, run){
+    const validateHeadShape = validate.validateHeadShape;
+    const archiveCrc = Anchor.prototype.archiveCrc;
+    const archiveMatchCount = Anchor.prototype.archiveMatchCount;
+    validate.validateHeadShape = (config, data, error) => validateHeadShape(
+        config, Object.assign({}, data, { ARCHIVE_B64: 'A' }), error);
+    Anchor.prototype.archiveCrc = () => bundle.batch_crc32;
+    Anchor.prototype.archiveMatchCount = () => bundle.match_count;
+    try {
+        return await run();
+    } finally {
+        validate.validateHeadShape = validateHeadShape;
+        Anchor.prototype.archiveCrc = archiveCrc;
+        Anchor.prototype.archiveMatchCount = archiveMatchCount;
     }
 }
 
@@ -65,16 +84,20 @@ function expectedRows(bundle){
 
 async function parseVector(vectorName, fixtureName){
     const golden = require(VECTOR_PATH);
+    const bundle = golden.fixture[fixtureName];
     const { action, rows } = makeAnchorParseContext({ coin: 'DOGE', network: 'regtest' });
+    action.indexerDb.getArchiveHeadsByAuthorAndSeq = async () => [];
     const args = anchorParseArgs(golden.vectors[vectorName], {
         blockIndex: 1000000000,
         txHash: 'anchor-v3-' + vectorName,
         source: 'anchor-v3-publisher'
     });
-    await withActivatedAnchor(async Anchor => {
-        await new Anchor(action).parse(args.params, args.data, args.error);
+    await withActivatedAnchor(async (Anchor, validate) => {
+        const parse = () => new Anchor(action).parse(args.params, args.data, args.error);
+        if(bundle.archive_count === 0) return await parse();
+        await withFrozenArchivePlaceholder(Anchor, validate, bundle, parse);
     });
-    return { bundle: golden.fixture[fixtureName], rows };
+    return { bundle, rows };
 }
 
 function actualRows(rows, sectionCount){
