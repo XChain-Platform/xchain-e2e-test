@@ -25,8 +25,10 @@ function sha256(value) {
 }
 
 function resolveHubRoot() {
+    const hubRoot = path.join(path.resolve(__dirname, '../../../..'), 'xchain-hub');
     try {
-        return path.dirname(require.resolve('xchain-hub/package.json'));
+        require.resolve(path.join(hubRoot, 'package.json'));
+        return hubRoot;
     } catch (error) {
         if (error.code === 'MODULE_NOT_FOUND') return null;
         throw error;
