@@ -34,7 +34,7 @@ const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || '
 
 const COUNTER = `
         module.exports = {
-            meta: { name: 'Extended Counter', description: 'Increments a stored counter and returns its new value.', version: '1.0.0' },
+            meta: { name: 'Extended Counter', description: 'Increments a stored counter and returns its new value.', version: '1.0.0', ownerWithdraw: true },
             increment: function() {
                 var c = parseInt(xchain.state.get('count') || '0');
                 xchain.state.set('count', String(c + 1));
