@@ -54,6 +54,23 @@ describe('broadcastHelper', () => {
             assert.strictEqual(result.txHash, 'abc123')
             assert.deepStrictEqual(result.broadcast, { id: 30 })
         })
+
+        it('should use the expected status and default to valid', async () => {
+            await helper.sendBroadcastV1(addressInfo, 'hello', '42', '0.5', 'mymemo', 'invalid')
+            await helper.sendBroadcastV1(addressInfo, 'hello', '42', '0.5', 'mymemo')
+
+            assert.strictEqual(global.indexerDatabase.waitForBroadcast.firstCall.args[0].status, 'invalid')
+            assert.strictEqual(global.indexerDatabase.waitForBroadcast.secondCall.args[0].status, 'valid')
+        })
+
+        it('should include the expected status when the broadcast never lands', async () => {
+            global.indexerDatabase.waitForBroadcast.resolves(null)
+
+            await assert.rejects(
+                helper.sendBroadcastV1(addressInfo, 'hello', '42', '0.5', 'mymemo', 'invalid'),
+                /status=invalid never landed/
+            )
+        })
     })
 
     describe('sendBroadcastV2', () => {
