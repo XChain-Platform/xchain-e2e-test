@@ -57,9 +57,23 @@ function fixtureSections(bundle){
     return require(VECTOR_PATH).fixture.bundle_v3.sections;
 }
 
-function expectedRows(bundle){
-    const sections = fixtureSections(bundle).slice()
-        .sort((a, b) => a.chain.localeCompare(b.chain));
+function fixtureSectionsInWireOrder(bundle, wire){
+    const sections = fixtureSections(bundle);
+    const byPrefix = new Map(sections.map(section => [
+        section.chain + '|' + section.block_index, section
+    ]));
+    const fields = String(wire).split('|');
+    const ordered = [];
+    for(let index = 0; index < fields.length - 1; index++){
+        const section = byPrefix.get(fields[index] + '|' + fields[index + 1]);
+        if(section) ordered.push(section);
+    }
+    assert.strictEqual(ordered.length, sections.length, 'fixture sections in wire');
+    return ordered;
+}
+
+function expectedRows(bundle, wire){
+    const sections = fixtureSectionsInWireOrder(bundle, wire);
     const chainRows = sections.map((section, sectionIndex) => ({
         section_index: sectionIndex,
         chain: section.chain,
@@ -78,9 +92,10 @@ function expectedRows(bundle){
 async function parseVector(vectorName, fixtureName){
     const golden = require(VECTOR_PATH);
     const bundle = golden.fixture[fixtureName];
+    const wire = golden.vectors[vectorName];
     const { action, rows } = makeAnchorParseContext({ coin: 'DOGE', network: 'regtest' });
     action.indexerDb.getArchiveHeadsByAuthorAndSeq = async () => [];
-    const args = anchorParseArgs(golden.vectors[vectorName], {
+    const args = anchorParseArgs(wire, {
         blockIndex: 1000000000,
         txHash: 'anchor-v3-' + vectorName,
         source: 'anchor-v3-publisher'
@@ -88,7 +103,7 @@ async function parseVector(vectorName, fixtureName){
     await withActivatedAnchor(async Anchor => {
         await new Anchor(action).parse(args.params, args.data, args.error);
     });
-    return { bundle, rows };
+    return { bundle, rows, wire };
 }
 
 function actualRows(rows, sectionCount){
@@ -116,16 +131,16 @@ describe('ANCHOR v3 indexer parse parity', function () {
     });
 
     it('records the frozen archive-bearing vector in wire order', async function () {
-        const { bundle, rows } = await parseVector('v3', 'bundle_v3');
-        const expected = expectedRows(bundle);
+        const { bundle, rows, wire } = await parseVector('v3', 'bundle_v3');
+        const expected = expectedRows(bundle, wire);
         assert.strictEqual(rows.length, expected.chainRows.length + 1, 'one archive row');
         assert.deepStrictEqual(actualRows(rows, expected.chainRows.length), expected);
         assert.ok(rows.every(row => row.STATUS === 'unverified'), 'unverified rows');
     });
 
     it('records no archive row for the frozen archive-free vector', async function () {
-        const { bundle, rows } = await parseVector('v3_no_archive', 'bundle_v3_no_archive');
-        const expected = expectedRows(bundle);
+        const { bundle, rows, wire } = await parseVector('v3_no_archive', 'bundle_v3_no_archive');
+        const expected = expectedRows(bundle, wire);
         assert.strictEqual(rows.length, expected.chainRows.length, 'no archive row');
         assert.deepStrictEqual(actualRows(rows, expected.chainRows.length), expected);
         assert.ok(rows.every(row => row.STATUS === 'unverified'), 'unverified chain rows');
