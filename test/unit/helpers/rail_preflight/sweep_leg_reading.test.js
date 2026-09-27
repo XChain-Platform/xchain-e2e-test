@@ -121,7 +121,7 @@ describe('sweep report leg reading CLI', function () {
         tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sweep-leg-reading-'))
         reportPath = path.join(tempDir, 'report.md')
         fs.writeFileSync(reportPath, [
-            'LEG policy at1 PASS passed=5 failed=0 root=0 cascade=0 missing=0',
+            'LEG policy at1 PASS passed=05 failed=0 root=0 cascade=0 missing=0',
             '## policy',
             'root failure: policy T0: setup durationMs=21 ' +
                 'error=' + SECRET + ' durationMs=999 error=secondary',
@@ -141,7 +141,7 @@ describe('sweep report leg reading CLI', function () {
         const result = run(['--report', reportPath, '--drive', 'policy', '--leg', 'at1'])
         assert.strictEqual(result.status, 0)
         assert.strictEqual(result.stdout,
-            'LEG policy at1 PASS passed=5 failed=0 root=0 cascade=0 missing=0\n' +
+            'LEG policy at1 PASS passed=05 failed=0 root=0 cascade=0 missing=0\n' +
             'ROOT policy T0: setup durationMs=21\nCLEAN yes\n')
         assert.strictEqual(result.stderr, '')
         assert.doesNotMatch(result.stdout + result.stderr, /error=/)

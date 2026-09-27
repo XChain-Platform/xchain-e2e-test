@@ -100,10 +100,13 @@ function parseArgs (argv) {
     return options
 }
 
-function legLine (line) {
-    return 'LEG ' + line.drive + ' ' + line.leg + ' ' + line.verdict +
-        ' passed=' + line.passed + ' failed=' + line.failed +
-        ' root=' + line.root + ' cascade=' + line.cascade + ' missing=' + line.missing
+function reportLegLine (text, drive, leg) {
+    let found = null
+    for (const reportLine of String(text).split(/\r?\n/)) {
+        const match = LEG_PATTERN.exec(reportLine)
+        if (match && match[1] === drive && match[2] === leg) found = reportLine
+    }
+    return found
 }
 
 function main (argv) {
@@ -128,7 +131,7 @@ function main (argv) {
         console.error(error.message)
         return 2
     }
-    console.log(reading.line ? legLine(reading.line) :
+    console.log(reading.line ? reportLegLine(text, options.drive, options.leg) :
         'LEG ' + options.drive + ' ' + options.leg + ' ABSENT')
     for (const failure of reading.rootFailures) {
         console.log('ROOT ' + failure.title + ' durationMs=' + failure.durationMs)
