@@ -7,7 +7,7 @@ const { execFileSync, spawn } = require('child_process')
 
 const { RAIL_DRIVES } = require('../test/helpers/bridge_rail_legs')
 const { triageJournal } = require('./rail_journal_triage')
-const { limitSchedule, parseGraceMinutes } = require('./rail_leg_limit')
+const { limitSchedule, parseGraceMinutes } = require('./rail_leg/rail_leg_limit')
 
 const REPO_ROOT = path.resolve(__dirname, '..')
 const MOCHA = './node_modules/.bin/mocha'

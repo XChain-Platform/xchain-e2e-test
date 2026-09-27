@@ -5,7 +5,7 @@ const MS_PER_MINUTE = 60 * 1000
 function limitSchedule (limitMinutes, graceMinutes = 20) {
     return {
         termAtMs: limitMinutes * MS_PER_MINUTE,
-        killAtMs: limitMinutes * MS_PER_MINUTE + graceMinutes * MS_PER_MINUTE,
+        killAtMs: (limitMinutes + graceMinutes) * MS_PER_MINUTE,
     }
 }
 

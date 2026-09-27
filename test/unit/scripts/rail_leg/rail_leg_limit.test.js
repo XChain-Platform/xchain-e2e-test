@@ -2,7 +2,7 @@
 
 const assert = require('assert')
 
-const { limitSchedule, parseGraceMinutes } = require('../../../scripts/rail_leg_limit')
+const { limitSchedule, parseGraceMinutes } = require('../../../../scripts/rail_leg/rail_leg_limit')
 
 describe('rail leg limit schedule', function () {
     it('uses a 45 minute limit and the default 20 minute grace', function () {
