@@ -38,7 +38,6 @@ const HUB_DB_NAME = 'xchain-anchor-fold-late-crc-' + process.pid;
 const SNAPSHOT_BLOCK = 1900000 + (Date.now() % 100000);
 const CHUNK_BYTES = 512;
 const CHAINS = ['BTC', 'DOGE'];
-const HARNESS_UNAVAILABLE = /^(There was an error trying to connect|Can't connect to)/;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -68,7 +67,6 @@ async function startDriverHarness(){
     try { await hooks.beforeAll(); }
     catch(error){
         try { await hooks.afterAll(); } catch(_) {}
-        if(HARNESS_UNAVAILABLE.test(String(error && error.message))) return error;
         throw error;
     }
     driverHooks = hooks;
@@ -267,12 +265,7 @@ async function waitForArchiveVerdict(totalChunks){
 }
 
 async function setup(){
-    const harnessError = await startDriverHarness();
-    if(harnessError){
-        console.log('Skipping ANCHOR fold late CRC scope: E2E harness unavailable: ' +
-            harnessError.message);
-        this.skip();
-    }
+    await startDriverHarness();
     process.env[FOLD_ENV] = '0';
     process.env.XDEX_SNAPSHOT_BLOCK = String(SNAPSHOT_BLOCK);
     process.env.CHECKPOINT_CHAINS = 'DOGE';
