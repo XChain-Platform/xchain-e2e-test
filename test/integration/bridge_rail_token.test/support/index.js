@@ -24,6 +24,7 @@ const transactionHelper = require('../../../transactionHelper');
 const issueHelper       = require('../../../helpers/issueHelper');
 const fixture           = require('../../../attestMirror/mirrorDrillFixture');
 const { requireHealthyHub } = require('../../../helpers/rail_preflight/hub_health_gate');
+const { withDogeFeeSchedule } = require('../../../helpers/rail_preflight/token_doge_fee');
 const {
     BridgeRailVenue,
     resolveVenueQuorum,
@@ -285,7 +286,7 @@ function createRailDrive(cfg) {
         state,
         needsFederation,
         bridgeRailSuite,
-    }, token.bind(state));
+    }, withDogeFeeSchedule(token.bind(state), state));
 }
 
 // Requiring this module builds the token drive and nothing else: `describe` is only called
