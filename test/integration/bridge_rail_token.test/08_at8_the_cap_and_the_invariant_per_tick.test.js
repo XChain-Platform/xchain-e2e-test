@@ -56,6 +56,7 @@ const {
     bridgeRailSuite,
 } = require('./support');
 const { withMiningPaused } = require('../../helpers/bridgeRailVenue');
+const { policyApplyBudgetMs } = require('../../helpers/rail_preflight/policy_at2_at4');
 
 const GROUP = 'token AT8: the cap and the invariant per tick';
 const PER_TICK = 15;
@@ -154,7 +155,7 @@ bridgeRailSuite(GROUP, function () {
             settlements = await state.venue.queryIndexerDb('DOGE',
                 'SELECT transfer_id, block_index FROM bridge_settlements WHERE transfer_id IN (' + ids.map(() => '?').join(',') + ')', ids);
             return settlements.length >= ids.length;
-        }, { timeoutMs: 30 * 60 * 1000 });
+        }, { timeoutMs: policyApplyBudgetMs("DOGE") });
         const reading = capOrderReading(held.rows, settlements, cap);
         state.evidence.at8_cap = { block: mined.block, locks: mined.txs.length, dogeHeld: held.held, reading,
             destA: await state.venue.addressBalance('DOGE', C.dest.address, T.bridged),
