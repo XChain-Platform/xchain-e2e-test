@@ -115,6 +115,7 @@ bridgeRailSuite(GROUP, function () {
     it('token AT5 (existing row): a federation-signed in-leg at other decimals than BTC.<tick> with supply outstanding is refused with one line naming the id', async function () {
         this.timeout(0);
         if (needsFederation(this, 'token AT5 decimals with supply')) return;
+        assert.ok(state.evidence.at1_dogeChild, 'AT1 must have run');
         const T = state.tokens;
         const template = await signedTokenTemplate();
         const child = await state.venue.tokenParameters('DOGE', T.bridged);
