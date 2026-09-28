@@ -16,30 +16,39 @@ function armFold(){
     process.env[FOLD_ENV] = '0'
 }
 
+function unarmFold(){
+    delete process.env[FOLD_ENV]
+}
+
+armFold()
 describe('fold activation: AF1', function(){
     before(armFold)
     require('./anchor_fold/af1_one_transaction.test.js')
     after(restoreFoldEnv)
 })
 restoreFoldEnv()
+armFold()
 describe('fold activation: AF2', function(){
     before(armFold)
     require('./anchor_fold/af2_archive_silenced.test.js')
     after(restoreFoldEnv)
 })
 restoreFoldEnv()
+armFold()
 describe('fold activation: AF3', function(){
     before(armFold)
     require('./anchor_fold/af3_late_crc_scope.test.js')
     after(restoreFoldEnv)
 })
 restoreFoldEnv()
+unarmFold()
 describe('fold activation: AF4', function(){
-    before(restoreFoldEnv)
+    before(unarmFold)
     require('./anchor_fold/af4_unarmed_replay.test.js')
     after(restoreFoldEnv)
 })
 restoreFoldEnv()
+armFold()
 describe('fold activation: AF5', function(){
     before(armFold)
     require('./anchor_fold/af5_follower_recompute.test.js')
