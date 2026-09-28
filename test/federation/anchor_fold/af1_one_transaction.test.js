@@ -186,7 +186,7 @@ async function startHub(){
 
 async function wireBroadcastHook(){
     const address = await cryptoHelper.getNewFundedAddress(
-        'anchor-fold-publisher', COIN, NETWORK, null, 'legacy', 0, 2.0
+        'anchor-fold-publisher', COIN, NETWORK, null, 'legacy', 0, 2.0, false
     );
     await regtestMinerConnector.generateBlocks(2);
     await utxoTrackerConnector.quiesce({
