@@ -25,6 +25,7 @@ const issueHelper       = require('../../../helpers/issueHelper');
 const fixture           = require('../../../attestMirror/mirrorDrillFixture');
 const { requireHealthyHub } = require('../../../helpers/rail_preflight/hub_health_gate');
 const { withDogeFeeSchedule } = require('../../../helpers/rail_preflight/token_doge_fee');
+const { caseJournalEntry } = require('../../../helpers/rail_preflight/case_journal_entry');
 const {
     BridgeRailVenue,
     resolveVenueQuorum,
@@ -184,15 +185,7 @@ function createRailDrive(cfg) {
     // Every case's verdict, written as it ends: a mocha failure message exists only in the
     // epilogue and an interrupted drive never prints one (the base support's drive 13).
     function recordCase() {
-        const test = this.currentTest || {};
-        const err = test.err || null;
-        journalCase({
-            suite: cfg.journalSuite,
-            title: String(test.title || ''),
-            state: String(test.state || 'unfinished'),
-            durationMs: Number(test.duration || 0),
-            error: err ? String(err.message).slice(0, 4000) : null,
-        });
+        journalCase(caseJournalEntry(this.currentTest || {}, cfg.journalSuite, state.blocked));
     }
 
     async function finishDrive() {
