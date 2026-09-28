@@ -17,6 +17,7 @@ const { encode: wifEncode } = require('wif');
 
 const cryptoHelper = require('../../cryptoHelper');
 const CryptoNetworks = require('../../../src/CryptoNetworks');
+const Database = require('../../../src/db');
 const {
     MultiValidatorHub,
     ValidatorIdentity,
@@ -42,6 +43,7 @@ const CHAINS = ['BTC', 'DOGE'];
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 let hubDb = null;
+let indexerDb = null;
 let mvh = null;
 let publisher = null;
 let identity = null;
@@ -61,9 +63,23 @@ function restoreFoldEnv(){
 }
 
 async function indexerQuery(sql, params){
-    const conn = await indexerDatabase.getConnection();
+    const conn = await indexerDb.getConnection();
     try { return await conn.query(sql, params); }
     finally { await conn.release(); }
+}
+
+async function openIndexerDb(){
+    const shared = global.indexerDatabase;
+    assert.ok(shared, 'the venue exposes its indexer database configuration');
+    indexerDb = new Database(shared.host, shared.port, shared.dbName, shared.user, shared.pass);
+    assert.ok(await indexerDb.ping(), 'the AF3 indexer database pool is ready');
+}
+
+async function closeIndexerDb(){
+    if(!indexerDb) return;
+    const owned = indexerDb;
+    indexerDb = null;
+    await owned.pool.end();
 }
 
 function signerDependencyPath(dep){
@@ -255,6 +271,7 @@ async function setup(){
         process.env.DOGE_INDEXER_URL = 'http://localhost:' +
             (process.env.INDEXER_API_PORT || '3124');
 
+    await openIndexerDb();
     hubDb = await startDisposableHubDb({
         forceDocker: true,
         port: HUB_DB_PORT,
@@ -285,12 +302,16 @@ async function setup(){
 }
 
 async function teardown(){
-    if(mvh){ await mvh.stop(); await mvh.dropDatabases(); }
-    if(hubDb) await hubDb.stop();
-    if(signerDir) fs.rmSync(signerDir, { recursive: true, force: true });
-    delete process.env.DOGE_WIF;
-    delete process.env.HUB_SIGNER_MODULE;
-    restoreFoldEnv();
+    try {
+        if(mvh){ await mvh.stop(); await mvh.dropDatabases(); }
+        if(hubDb) await hubDb.stop();
+        if(signerDir) fs.rmSync(signerDir, { recursive: true, force: true });
+        delete process.env.DOGE_WIF;
+        delete process.env.HUB_SIGNER_MODULE;
+        restoreFoldEnv();
+    } finally {
+        await closeIndexerDb();
+    }
 }
 
 describe('ANCHOR fold late CRC verdict scope', function () {
