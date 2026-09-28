@@ -36,6 +36,7 @@ const {
     policyTransferMatches,
     spendableInputCount,
 } = require('../../../helpers/rail_preflight/policy_at2_at4');
+const { policyFinalizationBudgetMs } = require('../../../helpers/rail_preflight/policy_at7_at8');
 
 // The policy legs' shared readings, bound to the drive state by `bind`. Three sources, and
 // which one a leg reads is the claim it makes:
@@ -134,19 +135,27 @@ async function waitForDestinationApply(state, destChain, transferId, timeoutMs) 
     }
 }
 
+async function findFinalizedSeq(state, tick, seq, opts) {
+    let found = null;
+    await state.venue.waitUntil('a finalized policy_snapshots row for ' + tick + ' at seq >= ' + seq, async () => {
+        const rows = (await hubPolicyRows(state, tick)).filter((r) => String(r.status) === 'finalized' &&
+            Number(r.policy_seq) >= Number(seq));
+        found = rows.length ? rows[rows.length - 1] : null;
+        return !!found;
+    }, { timeoutMs: opts.timeoutMs || policyFinalizationBudgetMs(state.venue.pollMs || 15000), everyMs: 5000 });
+    return found;
+}
+
 async function waitForFinalizedSeq(state, tick, seq, opts) {
     const o = opts || {};
+    // A venue without a BTC side has no origin tip to freeze, so the wait reads the hub rows alone.
+    if (!state.venue.btcVenue) return findFinalizedSeq(state, tick, seq, o);
     let found = null;
     const poll = async () => {
         // Confirm the origin change before freezing one snapshot block for every hub.
         await regtestMinerConnector.generateBlocks(Number(state.venue.confirmations.BTC || 2));
         await fixture.waitForVenueIndexersAtTip(state.venue.btcVenue, { maxLag: 1 });
-        await state.venue.waitUntil('a finalized policy_snapshots row for ' + tick + ' at seq >= ' + seq, async () => {
-            const rows = (await hubPolicyRows(state, tick)).filter((r) => String(r.status) === 'finalized' &&
-                Number(r.policy_seq) >= Number(seq));
-            found = rows.length ? rows[rows.length - 1] : null;
-            return !!found;
-        }, { timeoutMs: o.timeoutMs || 20 * 60 * 1000, everyMs: 5000 });
+        found = await findFinalizedSeq(state, tick, seq, o);
     };
     if (o.pauseMining === false) await poll();
     else await withMiningPaused(regtestMinerConnector, poll,
