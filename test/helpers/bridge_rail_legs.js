@@ -3,9 +3,9 @@
 // Copyright (c) 2025-2026 Dankest, LLC
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-const POLICY_T0 = 'policy T0:';
+const POLICY_ROOT = ['policy AT1 precondition:', 'policy AT8 control'];
 const POLICY_AT1 = 'policy AT1 \\((?:opt-in|mirror|enforced)\\):';
-const TOKEN_T0 = 'token T0:';
+const TOKEN_ROOT = ['token AT1 precondition:', 'token AT8 control'];
 const TOKEN_AT1 = 'token AT1:';
 
 const RAIL_DRIVES = {
@@ -14,38 +14,38 @@ const RAIL_DRIVES = {
         glob: 'test/integration/bridge_rail_policy.test/*.test.js',
         legs: {
             at1: {
-                grep: [POLICY_T0, POLICY_AT1].join('|'),
+                grep: [...POLICY_ROOT, POLICY_AT1].join('|'),
                 minPassed: 5,
             },
             at2_chain: {
-                grep: [POLICY_T0, POLICY_AT1, 'policy AT2 \\(', 'policy AT3:',
+                grep: [...POLICY_ROOT, POLICY_AT1, 'policy AT2 \\(', 'policy AT3:',
                     'policy AT4 \\(falsification\\):'].join('|'),
                 minPassed: 14,
             },
             at6_at9: {
-                grep: [POLICY_T0, POLICY_AT1, 'policy AT2 \\(', 'policy AT6 \\(',
+                grep: [...POLICY_ROOT, POLICY_AT1, 'policy AT2 \\(', 'policy AT6 \\(',
                     'policy AT9 \\('].join('|'),
                 minPassed: 13,
             },
             at4_gap: {
-                grep: [POLICY_T0, 'policy AT4 \\(seq gap(?: setup)?\\):'].join('|'),
+                grep: [...POLICY_ROOT, 'policy AT4 \\(seq gap(?: setup)?\\):'].join('|'),
                 minPassed: 4,
             },
             at5_barrier: {
-                grep: [POLICY_T0, 'policy AT5 \\((?:barrier|release)\\):'].join('|'),
+                grep: [...POLICY_ROOT, 'policy AT5 \\((?:barrier|release)\\):'].join('|'),
                 minPassed: 4,
             },
             at5_abstain: {
-                grep: [POLICY_T0, 'policy AT5 \\(abstain\\):'].join('|'),
+                grep: [...POLICY_ROOT, 'policy AT5 \\(abstain\\):'].join('|'),
                 minPassed: 3,
             },
             at7_at8: {
-                grep: [POLICY_T0, 'policy AT7 \\(above the flag\\):',
+                grep: [...POLICY_ROOT, 'policy AT7 \\(above the flag\\):',
                     'policy AT8 \\((?:cap|reorg)\\):'].join('|'),
                 minPassed: 5,
             },
             at11_detach: {
-                grep: [POLICY_T0, 'policy AT11:'].join('|'),
+                grep: [...POLICY_ROOT, 'policy AT11:'].join('|'),
                 minPassed: 8,
             },
             full: { grep: null, minPassed: 34 },
@@ -56,20 +56,20 @@ const RAIL_DRIVES = {
         glob: 'test/integration/bridge_rail_token.test/*.test.js',
         legs: {
             retract_at1_at2: {
-                grep: [TOKEN_T0, TOKEN_AT1, 'token AT2:',
-                    'token AT8 \\(retraction, first in-leg\\):'].join('|'),
+                grep: [...TOKEN_ROOT, TOKEN_AT1, 'token AT2:', 'token AT8:',
+                    'token AT8 \\(ride-back\\):'].join('|'),
                 minPassed: 8,
             },
             at3_at4: {
-                grep: [TOKEN_T0, TOKEN_AT1, 'token AT3:', 'token AT4:'].join('|'),
+                grep: [...TOKEN_ROOT, TOKEN_AT1, 'token AT3:', 'token AT4:'].join('|'),
                 minPassed: 11,
             },
             at5_at6: {
-                grep: [TOKEN_T0, TOKEN_AT1, 'token AT5:', 'token AT6:'].join('|'),
+                grep: [...TOKEN_ROOT, TOKEN_AT1, 'token AT5 \\(', 'token AT6 \\('].join('|'),
                 minPassed: 13,
             },
             at7_at8: {
-                grep: [TOKEN_T0, TOKEN_AT1, 'token AT7:',
+                grep: [...TOKEN_ROOT, TOKEN_AT1, 'token AT7:',
                     'token AT8 \\((?:cap|invariant)\\):'].join('|'),
                 minPassed: 8,
             },
