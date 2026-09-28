@@ -45,6 +45,9 @@ const BOOTSTRAP_MAX_INDEXER_LAG = 2;
 const BOOTSTRAP_NUDGE_MS = 30000;
 const BOOTSTRAP_SYNC_TIMEOUT_MS = 20 * 60 * 1000;
 const BOOTSTRAP_WAIT_EXTENSIONS = 12;
+// A block carrying a STAKE or UNSTAKE can take the venue indexer about five minutes, and the
+// release sends one per temporary signer, so the shared 20 minute budget skips the tail.
+const BOOTSTRAP_RELEASE_BUDGET_MS = 45 * 60 * 1000;
 const DOGE_CADENCE_MS = 15000;
 const POLICY_DOGE_DB = 'XChain_AM_MVH_bridgerailpolicydoge_Rpl_Ixr0';
 const bootstrapSeeds = new Map();
@@ -433,6 +436,7 @@ function installBootstrapTeardown(opening) {
     global.stakeTeardownPolicy = Object.assign({}, teardownPolicy, {
         capability: 'cross_chain',
         settleBlocks: Math.max(Number(teardownPolicy.settleBlocks || 0), 20),
+        budgetMs: Math.max(Number(teardownPolicy.budgetMs || 0), BOOTSTRAP_RELEASE_BUDGET_MS),
         strict: false,
     });
     global.stakeTeardownBaseline = opening.set;
