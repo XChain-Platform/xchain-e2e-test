@@ -4,10 +4,81 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 const assert = require('assert');
-const {
-    DETACH_STEPS,
-    detachStepNames
-} = require('../../helpers/bridge_detach_plan');
+const proxyquire = require('proxyquire');
+const { DETACH_STEPS } = require('../../helpers/bridge_detach_plan');
+
+function fakeVenue(calls, detachedBlock = null) {
+    let copyRead = 0;
+    return {
+        rewireHubs: async () => { calls.push(['rewire']); return { BRIDGE_POLICY_DETACH: '0' }; },
+        waitForRailSettled: async () => ({ invariant: 'settled' }),
+        duplicateSourceTransfers: async () => [],
+        indexerTails: () => '',
+        tokenParameters: async () => {
+            copyRead += 1;
+            if (copyRead === 1) return { params: { allow_list: '81', block_list: '82' } };
+            return { params: { allow_list: '81', block_list: detachedBlock } };
+        }
+    };
+}
+
+function fakeSupport(calls, detachedBlock) {
+    const state = { policy: { ticks: [] }, evidence: {}, venue: fakeVenue(calls, detachedBlock) };
+    let listIndex = 80;
+    let policyRead = 0;
+    const support = {
+        assert,
+        GAS_TICK: 'XCHAIN',
+        state,
+        issueHelper: { sendIssueV0Raw: () => 'ISSUE|0|ABCDE' },
+        lockWireV3: () => 'XBRIDGE|3|ABCDE',
+        optInWire: () => 'ISSUE|7|ABCDE',
+        btcAction: async (owner, wire, table) => {
+            calls.push(['btc', table, typeof wire === 'function' ? await wire() : wire]);
+            return { status: 'valid' };
+        },
+        fundBtc: async () => ({ address: 'btc-issuer' }),
+        fundDoge: async (label) => ({ address: label.endsWith('.DEST') ? 'doge-dest' : 'doge-blocked' }),
+        pickFreeTick: async (candidates) => { calls.push(['candidates', candidates.length]); return 'ABCDE'; },
+        settleLeg: async () => ({ transfer: 'transfer-1' }),
+        chainHalves: async () => ({ backed: 0, supply: 0 }),
+        btcAddressList: async () => ++listIndex,
+        copyPolicy: async () => {
+            policyRead += 1;
+            return policyRead === 1
+                ? { allow_list: ['doge-dest', 'doge-blocked'], block_list: ['doge-blocked'] }
+                : { allow_list: ['doge-dest', 'doge-blocked'], block_list: null };
+        },
+        waitForFinalizedSeq: async (tick, seq) => ({ policy_seq: seq, snapshot_id: 'snapshot-' + seq }),
+        waitForAppliedSeq: async (tick, seq, opts) => {
+            calls.push(['applied', seq, opts.snapshotId]);
+            return { snapshotId: opts.snapshotId };
+        },
+        sendCopy: async (from, tick, amount, destination) => {
+            calls.push(['send', tick, amount, destination]);
+            return { status: 'valid' };
+        },
+        needsFederation: () => false,
+        bridgeRailSuite: (title, callback) => { calls.push(['suite', title, callback]); },
+    };
+    return { state, support };
+}
+
+function loadDriver(detachedBlock) {
+    const calls = [];
+    const fixture = fakeSupport(calls, detachedBlock);
+    const wires = {
+        policyListsWire: (tick, allow, block) => {
+            calls.push(['policy-wire', tick, allow, block]);
+            return ['ISSUE', '5', tick, allow || '', block || ''].join('|');
+        }
+    };
+    const driver = proxyquire.noCallThru().noPreserveCache()(
+        '../../integration/bridge_rail_policy.test/11_at11_a_null_list_detaches_the_copy.test.js',
+        { '../../helpers/bridgeRailVenue': wires, './support': fixture.support }
+    );
+    return { calls, driver, state: fixture.state };
+}
 
 describe('bridged list detach plan', function () {
     it('pins the ordered steps and expected copy states', function () {
@@ -45,7 +116,6 @@ describe('bridged list detach plan', function () {
                 expect: { status: 'valid' }
             }
         ]);
-        assert.deepStrictEqual(detachStepNames(), DETACH_STEPS.map(step => step.name));
     });
 
     it('orders detach before the zero snapshot and the unblocked send', function () {
@@ -64,5 +134,45 @@ describe('bridged list detach plan', function () {
         assert(DETACH_STEPS.every(Object.isFrozen));
         assert(DETACH_STEPS.filter(step => step.expect !== null)
             .every(step => Object.isFrozen(step.expect)));
+    });
+
+    it('executes every planned rail action and checks the detach result', async function () {
+        const fixture = loadDriver();
+        for (const step of DETACH_STEPS) await fixture.driver.runDetachStep(step);
+
+        assert.deepStrictEqual(fixture.calls.filter(call => call[0] === 'policy-wire'), [
+            ['policy-wire', 'ABCDE', 81, 82],
+            ['policy-wire', 'ABCDE', null, '0']
+        ]);
+        assert.deepStrictEqual(fixture.calls.filter(call => call[0] === 'applied'), [
+            ['applied', 1, 'snapshot-1'],
+            ['applied', 2, 'snapshot-2']
+        ]);
+        assert.deepStrictEqual(fixture.calls.filter(call => call[0] === 'send'), [
+            ['send', 'ABCDE', 1, 'doge-blocked']
+        ]);
+        assert.deepStrictEqual(fixture.calls.filter(call => call[0] === 'rewire'), [['rewire']]);
+        assert.deepStrictEqual(fixture.calls.filter(call => call[0] === 'candidates'), [['candidates', 16]]);
+        assert.deepStrictEqual(fixture.state.policy.ticks, ['ABCDE']);
+        assert.strictEqual(fixture.state.evidence.at11_detached.ALLOW_LIST, '81');
+        assert.strictEqual(fixture.state.evidence.at11_detached.BLOCK_LIST, 0);
+        assert.strictEqual(fixture.state.evidence.at11_send.status, 'valid');
+    });
+
+    it('fails when the destination keeps the detached block list', async function () {
+        const fixture = loadDriver('82');
+        for (const step of DETACH_STEPS.slice(0, 4)) await fixture.driver.runDetachStep(step);
+        await assert.rejects(
+            () => fixture.driver.runDetachStep(DETACH_STEPS[4]),
+            /the copy BLOCK_LIST did not detach/
+        );
+    });
+
+    it('registers the detach cases with the rail suite during module load', function () {
+        const suites = loadDriver().calls.filter(call => call[0] === 'suite');
+
+        assert.strictEqual(suites.length, 1);
+        assert.strictEqual(suites[0][1], 'policy AT11: a null list detaches the copy');
+        assert.strictEqual(typeof suites[0][2], 'function');
     });
 });
