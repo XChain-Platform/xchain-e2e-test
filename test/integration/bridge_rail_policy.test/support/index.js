@@ -41,6 +41,8 @@ const BOOTSTRAP_MIN_STAKE = 5000;
 const BOOTSTRAP_MAX_LEADER_GAP = 3;
 const BOOTSTRAP_CONCURRENCY = 3;
 const BOOTSTRAP_MINE_POLL_MS = 2000;
+const BOOTSTRAP_MAX_INDEXER_LAG = 2;
+const BOOTSTRAP_NUDGE_MS = 30000;
 const BOOTSTRAP_SYNC_TIMEOUT_MS = 20 * 60 * 1000;
 const BOOTSTRAP_WAIT_EXTENSIONS = 12;
 const DOGE_CADENCE_MS = 15000;
@@ -53,12 +55,13 @@ let dogeCadenceStopped = false;
 let dogeRailPrepared = false;
 let bootstrapPriceSeed = Promise.resolve();
 let bootstrapDonorSend = Promise.resolve();
+let bootstrapDonorLedger = null;
 let bootstrapStakeSend = Promise.resolve();
 let bootstrapDogeRail = null;
 let bootstrapBlocksSinceDoge = 0;
 let bootstrapBtcMiner = null;
+let lastMiningHoldLog = 0;
 const bootstrapStakerAddresses = new Set();
-const bootstrapExhaustedDonors = new Set();
 
 // Include temporary fixture signers when the venue resolves its usable quorum.
 fixture._knownSignerSeeds = function policyKnownSignerSeeds() {
@@ -120,6 +123,12 @@ function createBootstrapIdentities(rows) {
     return identities;
 }
 
+function noteMiningHold(indexed, node) {
+    if (Date.now() - lastMiningHoldLog < 60000) return;
+    lastMiningHoldLog = Date.now();
+    console.log('POLICY RAIL: mining held, indexer at ' + indexed + ' and node at ' + node);
+}
+
 async function mineBootstrapWork(work) {
     let settled = false;
     const result = Promise.resolve(work()).finally(() => { settled = true; });
@@ -131,7 +140,10 @@ async function mineBootstrapWork(work) {
                 const tip = await indexerConnector.call('getblockhashes', {});
                 const indexed = Number(tip && tip.block_index);
                 const node = Number(await nodeConnector.getBlockCount());
-                if (!Number.isFinite(indexed) || !Number.isFinite(node) || indexed < node - 1) continue;
+                if (!Number.isFinite(indexed) || !Number.isFinite(node) || indexed < node - BOOTSTRAP_MAX_INDEXER_LAG) {
+                    noteMiningHold(indexed, node);
+                    continue;
+                }
                 await mineBootstrapBlocks(1);
             } catch (e) { /* the action wait reports its failure */ }
         }
@@ -168,15 +180,28 @@ async function mineBootstrapSettlement(count) {
     await waitForBootstrapIndexer(BOOTSTRAP_SYNC_TIMEOUT_MS);
 }
 
+// Refresh prices and mine one block when the indexer stops advancing behind the tip.
+async function nudgeBootstrapIndexer(indexed, node) {
+    await seedBootstrapPrices(true);
+    if (indexed >= node - BOOTSTRAP_MAX_INDEXER_LAG) await mineBootstrapBlocks(1);
+}
+
 async function waitForBootstrapIndexer(timeoutMs) {
     const deadline = Date.now() + Number(timeoutMs || BOOTSTRAP_SYNC_TIMEOUT_MS);
     let indexed = null;
     let node = null;
+    let movedAt = Date.now();
     while (Date.now() < deadline) {
         const tip = await indexerConnector.call('getblockhashes', {});
-        indexed = Number(tip && tip.block_index);
+        const reading = Number(tip && tip.block_index);
+        if (reading !== indexed) movedAt = Date.now();
+        indexed = reading;
         node = Number(await nodeConnector.getBlockCount());
         if (Number.isFinite(indexed) && Number.isFinite(node) && indexed >= node - 1) return;
+        if (Date.now() - movedAt >= BOOTSTRAP_NUDGE_MS) {
+            await nudgeBootstrapIndexer(indexed, node);
+            movedAt = Date.now();
+        }
         await new Promise((resolve) => setTimeout(resolve, 1000));
     }
     throw new Error('policy rail bootstrap indexer stayed behind the node: ' + indexed + '/' + node);
@@ -204,43 +229,55 @@ function recordedBootstrapEntries() {
     });
 }
 
-function bootstrapDonors() {
-    return recordedBootstrapEntries().filter((entry) =>
-        !bootstrapExhaustedDonors.has(entry.address) && !bootstrapStakerAddresses.has(entry.address));
+async function loadBootstrapDonorLedger() {
+    const rows = [];
+    for (const entry of recordedBootstrapEntries()) {
+        if (bootstrapStakerAddresses.has(entry.address)) continue;
+        const balance = BigInt(await indexerDatabase.getBalance({ address: entry.address, tick: 'XCHAIN' }) || '0');
+        if (balance > 10n) rows.push({ entry, available: balance - 10n });
+    }
+    // Draw the largest donors first so each staker needs the fewest SEND rounds.
+    return rows.sort((x, y) => (x.available === y.available ? 0 : (x.available > y.available ? -1 : 1)));
 }
 
-async function sendDonorGas(entry, destination, left) {
-    const recordedBalance = BigInt(await indexerDatabase.getBalance({ address: entry.address, tick: 'XCHAIN' }) || '0');
-    if (recordedBalance <= 10n) {
-        bootstrapExhaustedDonors.add(entry.address);
-        return 0n;
-    }
+async function sendDonorGas(row, destination, left) {
+    const { entry } = row;
+    const amount = row.available < left ? row.available : left;
+    const started = Date.now();
     const donor = await cryptoHelper.getNewFundedAddress('policy-rail-donor-' + entry.address,
         COIN, NETWORK, entry.mnemonic, 'legacy', 0, 0.01, false);
     await paceBootstrapDoge(1);
-    if (donor.address !== entry.address) return 0n;
-    const balance = BigInt(await indexerDatabase.getBalance({ address: donor.address, tick: 'XCHAIN' }) || '0');
-    const available = balance > 10n ? balance - 10n : 0n;
-    const amount = available < left ? available : left;
-    if (amount <= 0n) {
-        bootstrapExhaustedDonors.add(entry.address);
+    if (donor.address !== entry.address) {
+        row.available = 0n;
         return 0n;
     }
     const result = await mineBootstrapWork(() =>
         sendHelper.sendSendV0(donor, 'XCHAIN', String(amount), destination.address, ''));
-    if (!result.send || result.send.status !== 'valid') return 0n;
-    if (amount === available) bootstrapExhaustedDonors.add(entry.address);
-    console.log('POLICY RAIL: donor SEND moved ' + amount + ' XCHAIN to a bootstrap staker');
+    if (!result.send || result.send.status !== 'valid') {
+        row.available = 0n;
+        return 0n;
+    }
+    row.available -= amount;
+    console.log('POLICY RAIL: donor SEND moved ' + amount + ' XCHAIN to a bootstrap staker in ' +
+        Math.round((Date.now() - started) / 1000) + 's');
     return amount;
 }
 
 async function drawBootstrapDonors(address, amount) {
+    if (!bootstrapDonorLedger) bootstrapDonorLedger = await loadBootstrapDonorLedger();
     let left = BigInt(String(amount));
-    for (const entry of bootstrapDonors()) {
-        left -= await sendDonorGas(entry, address, left);
+    for (const row of bootstrapDonorLedger) {
         if (left <= 0n) break;
+        if (row.available > 0n) left -= await sendDonorGas(row, address, left);
     }
     return left;
+}
+
+function seedBootstrapPrices(force) {
+    // Serialize shared price refreshes while independent transactions run in parallel.
+    const seed = bootstrapPriceSeed.then(() => nativeFeeHelper.seedGlobalPrices(force));
+    bootstrapPriceSeed = seed.catch(() => {});
+    return seed;
 }
 
 async function mintBootstrapGas(address, amount) {
@@ -250,10 +287,7 @@ async function mintBootstrapGas(address, amount) {
     const limit = BigInt(gasHelper.GAS_MAX_MINT);
     while (left > 0n) {
         const chunk = left < limit ? left : limit;
-        // Serialize shared price refreshes while independent mint transactions run in parallel.
-        const seed = bootstrapPriceSeed.then(() => nativeFeeHelper.seedGlobalPrices(false));
-        bootstrapPriceSeed = seed.catch(() => {});
-        await seed;
+        await seedBootstrapPrices(false);
         await mineBootstrapWork(() => gasHelper.mintGas(address, String(chunk)));
         left -= chunk;
     }
@@ -317,22 +351,68 @@ async function waitForBootstrapVisibility(identities, stake) {
         missing.map((pubkey) => pubkey.slice(0, 16)).join(', '));
 }
 
+function seatedRecordedEntries(set) {
+    const seated = new Set(set.pubkeys);
+    return recordedBootstrapEntries().filter((entry) =>
+        entry.signingPubkey && seated.has(String(entry.signingPubkey).toLowerCase()));
+}
+
+async function restoreRecordedStaker(entry) {
+    const restored = await cryptoHelper.getNewFundedAddress('policy-rail-release-' + entry.address,
+        COIN, NETWORK, entry.mnemonic, 'legacy', 0, 0.01, false);
+    if (restored.address !== entry.address) {
+        throw new Error('policy rail could not restore a recorded bootstrap staker');
+    }
+    return restored;
+}
+
+function seedRecordedSigners() {
+    for (const entry of recordedBootstrapEntries()) {
+        if (!entry.signingSeed || !entry.signingPubkey) continue;
+        const pubkey = String(entry.signingPubkey).toLowerCase();
+        // Trust a recorded seed only when it still derives the pubkey it was filed under.
+        if (fixture._pubkeyForSeed(entry.signingSeed) !== pubkey) continue;
+        bootstrapSeeds.set(pubkey, { seedHex: entry.signingSeed, origin: 'policy rail recorded signer' });
+    }
+}
+
+function baselineWithout(set, entries) {
+    const drop = new Set(entries.map((entry) => String(entry.signingPubkey).toLowerCase()));
+    const pubkeys = set.pubkeys.filter((pubkey) => !drop.has(pubkey));
+    const byPubkey = new Map(pubkeys.map((pubkey) => [pubkey, set.byPubkey.get(pubkey)]));
+    return Object.assign({}, set, { pubkeys, byPubkey });
+}
+
+async function reuseRecordedSigners() {
+    const opening = await readBridgeCapability();
+    const recorded = seatedRecordedEntries(opening.set);
+    if (!recorded.length) return false;
+    if (!resolveVenueQuorum(seatedRows(opening.set), fixture._knownSignerSeeds()).ok) return false;
+    // Teardown owns the release, so the roster it restores excludes the reused signers.
+    installBootstrapTeardown({ set: baselineWithout(opening.set, recorded) });
+    for (const entry of recorded) {
+        stakeTeardown.registerStake({
+            signingPubkey: entry.signingPubkey,
+            amount: '0',
+            addressInfo: { address: entry.address, recordedEntry: entry },
+        });
+    }
+    console.log('POLICY RAIL: reusing ' + recorded.length + ' recorded signer(s) already seated');
+    return true;
+}
+
+async function unstakeRecordedEntry(entry) {
+    const restored = await restoreRecordedStaker(entry);
+    await paceBootstrapDoge(1);
+    await fixture.clearWedgeBefore('recorded policy bootstrap unstake');
+    await mineBootstrapWork(() => stakeHelper.sendUnstakeV0(restored, entry.signingPubkey));
+}
+
 async function releaseRecordedBootstrapStakes() {
     const opening = await readBridgeCapability();
-    const seated = new Set(opening.set.pubkeys);
-    const entries = recordedBootstrapEntries().filter((entry) =>
-        entry.signingPubkey && seated.has(String(entry.signingPubkey).toLowerCase()));
+    const entries = seatedRecordedEntries(opening.set);
     if (!entries.length) return;
-    for (const entry of entries) {
-        const restored = await cryptoHelper.getNewFundedAddress('policy-rail-release-' + entry.address,
-            COIN, NETWORK, entry.mnemonic, 'legacy', 0, 0.01, false);
-        if (restored.address !== entry.address) {
-            throw new Error('policy rail could not restore a recorded bootstrap staker');
-        }
-        await paceBootstrapDoge(1);
-        await fixture.clearWedgeBefore('recorded policy bootstrap unstake');
-        await mineBootstrapWork(() => stakeHelper.sendUnstakeV0(restored, entry.signingPubkey));
-    }
+    for (const entry of entries) await unstakeRecordedEntry(entry);
     await mineBootstrapSettlement(stakeTeardown.RELEASE_SETTLE_BLOCKS);
     const closing = await readBridgeCapability();
     const left = entries.filter((entry) => closing.set.pubkeys.includes(String(entry.signingPubkey).toLowerCase()));
@@ -362,6 +442,8 @@ async function stakeBootstrapBatch(batch, start, stake, addresses) {
 async function ensurePolicyQuorum() {
     bootstrapBtcMiner = regtestMinerConnector;
     await waitForBootstrapIndexer(BOOTSTRAP_SYNC_TIMEOUT_MS);
+    seedRecordedSigners();
+    if (await reuseRecordedSigners()) return;
     await releaseRecordedBootstrapStakes();
     await mineBootstrapBlocks(fixture.stakeVisibilityBlocks(COIN, NETWORK));
     await fixture.settleStack();
@@ -470,7 +552,12 @@ async function releaseBootstrapStakes() {
             baseline: global.stakeTeardownBaseline,
             indexer: global.indexerConnector,
             unstake: async (entry) => {
-                await stakeHelper.sendUnstakeV0(entry.addressInfo, entry.signingPubkey);
+                const recorded = entry.addressInfo.recordedEntry;
+                if (!recorded) {
+                    await stakeHelper.sendUnstakeV0(entry.addressInfo, entry.signingPubkey);
+                    return;
+                }
+                await unstakeRecordedEntry(recorded);
             },
             mine: mineBootstrapSettlement,
             waitForSync: async () => { await global.utxoTrackerConnector.waitForSync(); },
