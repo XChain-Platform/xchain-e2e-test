@@ -71,13 +71,9 @@ bridgeRailSuite(GROUP, function () {
 });
 
 bridgeRailSuite(GROUP, function () {
-    it('token AT6 (R8): a ^id edit of a pre-flag three-character row applies', function () {
-        // Not drivable on this rail: TICK_NAMESPACE_ACTIVATION is height 0 on regtest, so
-        // no three-character row can exist below the flag to be edited above it. The
-        // indexer's unit tier carries it; named here so the gap is visible.
-        console.log('  token AT6 pre-flag ^id edit NOT DRIVABLE on regtest (TICK_NAMESPACE_ACTIVATION is 0); unit-covered in xchain-indexer');
-        this.skip();
-    });
+    // The indexer's unit tier carries it; named here so the gap is visible.
+    it.skip('token AT6 (R8): a ^id edit of a pre-flag three-character row applies. ' +
+        'NOT DRIVABLE on regtest: TICK_NAMESPACE_ACTIVATION is height 0 on regtest, so no three-character row can exist below the flag to be edited above it');
 });
 
 // A type-2 LIST on BTC from `owner`, the list every policy leg below points at.
