@@ -35,6 +35,7 @@ const {
     policyTransferMatches,
     spendableInputCount,
 } = require('../../../helpers/rail_preflight/policy_at2_at4');
+const { policyFinalizationBudgetMs } = require('../../../helpers/rail_preflight/policy_at7_at8');
 
 // The policy legs' shared readings, bound to the drive state by `bind`. Three sources, and
 // which one a leg reads is the claim it makes:
@@ -107,7 +108,7 @@ async function waitForFinalizedSeq(state, tick, seq, opts) {
             Number(r.policy_seq) >= Number(seq));
         found = rows.length ? rows[rows.length - 1] : null;
         return !!found;
-    }, { timeoutMs: o.timeoutMs || 20 * 60 * 1000, everyMs: 5000 });
+    }, { timeoutMs: o.timeoutMs || policyFinalizationBudgetMs(state.venue.pollMs || 15000), everyMs: 5000 });
     return found;
 }
 
