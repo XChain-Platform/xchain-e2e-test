@@ -24,15 +24,15 @@ const { startDisposableHubDb } = require('../../helpers/disposableHubDb');
 const { seedWeightSnapshot } = require('../../helpers/seededWeightSnapshot');
 const { silenceArchiveAttestor } = require('../../helpers/byzantineFaults');
 const { parseAnchorV3 } = require('../../helpers/anchor_fold/parse_anchor_v3');
+const { summarizeAnchorCycle } = require('../../helpers/anchor_fold/anchor_fold_readings');
 
 const REQUIRE_FEDERATION = process.env.E2E_REQUIRE_FEDERATION === '1';
 const N = 2;
 const ARCHIVE_SUBDEADLINE_MS = 10;
 const PUBLISH_CADENCE_BOUND_MS = 5000;
+const INDEX_WAIT_MS = 3 * 60 * 1000;
 const HUB_DB_NAME = 'xchain-anchor-fold-silenced-' + process.pid;
-
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
 let snapshotBlock = null;
 let hubDb = null;
 let mvh = null;
@@ -163,16 +163,13 @@ async function proveFederationReady(){
     for(let i = 0; i < N; i++){
         const sap = mvh.hubs[i].stateAnchorPublisher;
         const eligible = await sap.getActiveOraclePublishPubkeys(snapshotBlock);
-        // Keep checkpoint publication on the complete two-validator set.
         assert.deepStrictEqual([...eligible].sort(), [...pubkeys].sort(),
             'hub' + i + ' resolves the complete oracle_publish set');
         const signingSet = await sap.resolveCapabilitySet('oracle_publish', snapshotBlock, 'regtest');
-        // Keep stake-weighted quorum sources distinct and non-blank.
         assert.strictEqual(new Set(signingSet.map((row) => String(row.source))).size, N,
             'hub' + i + ' resolves one source per validator');
     }
     const peers = await waitForPeers();
-    // Keep the normal bundle-attestation path deliverable while archive replies are silenced.
     assert.ok(peers.every((count) => count >= N - 1),
         'every hub has an open peer connection: ' + JSON.stringify(peers));
 }
@@ -294,6 +291,22 @@ function silenceFoldArchiveCosigner(hub){
     };
 }
 
+async function waitForIndexedCycle(txid){
+    await regtestMinerConnector.generateBlocks(3);
+    const deadline = Date.now() + INDEX_WAIT_MS;
+    while(Date.now() < deadline){
+        const rows = await indexerQuery(
+            `SELECT a.*, s.status FROM index_transactions it
+             JOIN transactions t ON t.tx_hash_id = it.id
+             JOIN actions ac ON ac.tx_index = t.tx_index
+             JOIN anchor_actions a ON a.action_index = ac.action_index
+             LEFT JOIN index_statuses s ON s.id = a.status_id
+             WHERE it.hash = ? ORDER BY a.action_index, a.section_index`, [txid]);
+        if(rows.length) return rows;
+        await sleep(2000);
+    }
+    return [];
+}
 async function driveAcceptance(){
     await startFederation();
     const checkpoint = signedCheckpoint(await nextCheckpointSeq());
@@ -307,21 +320,25 @@ async function driveAcceptance(){
     await mvh.hubs[leader].stateAnchorPublisher.flush();
     const parsed = broadcasts.map((entry) => ({ entry, parsed: parseAnchorV3(entry.payload) }))
         .filter((item) => item.parsed !== null);
-    // Publish exactly one folded checkpoint transaction for this cycle.
     assert.strictEqual(parsed.length, 1, 'one v3 transaction was broadcast');
     assert.match(String(parsed[0].entry.txid), /^[0-9a-f]{64}$/, 'the checkpoint transaction was broadcast');
-    // Drop only the archive section after its co-signers stay silent.
     assert.strictEqual(parsed[0].parsed.archiveCount, 0, 'the v3 wire carries ARCHIVE_COUNT 0');
     assert.strictEqual(parsed[0].parsed.archive, null, 'the v3 wire carries no archive fields');
-    // Prove the archive attempt reached a silenced co-signer before the fallback.
     assert.ok(cosigners.every((index) => foldRequests[index] >= 1),
         'every archive co-signer received the folded archive request');
     const publishDelay = parsed[0].entry.startedAt - flushStartedAt;
-    // Keep the checkpoint publish on the short fold cadence, not the legacy round timeout.
     assert.ok(publishDelay <= PUBLISH_CADENCE_BOUND_MS,
         'checkpoint publish took ' + publishDelay + 'ms, bound ' + PUBLISH_CADENCE_BOUND_MS + 'ms');
+
+    const rows = await waitForIndexedCycle(parsed[0].entry.txid);
+    assert.ok(rows.length > 0, 'the v3 checkpoint transaction was indexed');
+    assert.ok(rows.every((row) => String(row.status) === 'valid'), 'every indexed v3 row is valid');
+    const summary = summarizeAnchorCycle(rows);
+    assert.strictEqual(new Set(rows.map((row) => String(row.action_index))).size, 1, 'one indexed action');
+    assert.strictEqual(summary.chainSections, 1, 'the indexed cycle retains its checkpoint section');
+    assert.strictEqual(summary.archiveSections, 0, 'the indexed cycle has no archive section');
     console.log('    folded checkpoint ' + parsed[0].entry.txid + ' published in ' + publishDelay +
-        'ms with ARCHIVE_COUNT 0');
+        'ms with ARCHIVE_COUNT 0; indexed archiveSections ' + summary.archiveSections);
 }
 
 async function cleanup(){
