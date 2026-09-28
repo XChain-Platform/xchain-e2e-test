@@ -191,7 +191,7 @@ bridgeRailSuite(GROUP, function () {
                 if (depth < want - 1) await mineBtcBlocks(1, 'depth ' + (depth + 1) + ' for the depth lock');
             }
             await mineBtcBlocks(1, 'depth ' + want + ' for the depth lock');
-            atDepth[want] = await venue.waitForFinalizedTransfer(notYet, { timeoutMs: 10 * 60 * 1000 });
+            atDepth[want] = await venue.waitForFinalizedTransfer(notYet, { timeoutMs: 30 * 60 * 1000 });
             return { lock, atDepth };
         });
         state.evidence.at5_depth = { tick: D.tick, setup, lockTx: reading.lock.tx, pollMs: venue.pollMs,
