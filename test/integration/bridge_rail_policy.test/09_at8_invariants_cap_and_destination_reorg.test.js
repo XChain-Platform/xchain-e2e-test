@@ -136,7 +136,7 @@ bridgeRailSuite(GROUP, function () {
         this.timeout(0);
         if (needsFederation(this, 'policy AT8 cap')) return;
         const tokens = [state.policy.main, state.policy.lag];
-        assert.ok(tokens.every((t) => t.tick && t.listIndex), 'AT1 and AT5 must have bridged their tokens');
+        assert.ok(tokens.every((t) => t.tick && t.listIndex), 'AT1 and AT5 must have run and bridged their tokens');
         const doge = state.venue.dogeVenue;
         doge.withholdMirrorTable(0, TABLE);
         let rows = [];
