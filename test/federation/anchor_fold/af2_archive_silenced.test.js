@@ -367,7 +367,7 @@ function registerSuite(){
         SAP = loadHubModule('src/anchor/publisher.js');
         SCE = loadHubModule('src/anchor/checkpoint_engine.js');
         const address = await cryptoHelper.getNewFundedAddress(
-            'anchor-fold-silenced-publisher', COIN, NETWORK, null, 'legacy', 0, 4.0);
+            'anchor-fold-silenced-publisher', COIN, NETWORK, null, 'legacy', 0, 4.0, false);
         await regtestMinerConnector.generateBlocks(2);
         await utxoTrackerConnector.quiesce({
             timeoutMs: 60000, pollMs: 250, regtestMiner: regtestMinerConnector

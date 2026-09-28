@@ -46,13 +46,26 @@ describe('bridge rail leg map', function () {
         for (const [name, drive] of Object.entries(RAIL_DRIVES)) reports[name] = dryRun(drive);
     });
 
-    it('matches every leg minimum to the non-pending dry-run titles', function () {
+    it('matches every leg minimum to the non-pending dry-run bare titles', function () {
         for (const [driveName, drive] of Object.entries(RAIL_DRIVES)) {
-            const titles = reports[driveName].passes.map((test) => test.fullTitle);
+            const titles = reports[driveName].passes.map((test) => test.title);
             for (const [legName, leg] of Object.entries(drive.legs)) {
                 const selected = selectedTitles(titles, leg.grep);
                 assert.strictEqual(selected.length, leg.minPassed,
                     driveName + '.' + legName + ' selected:\n' + selected.join('\n'));
+            }
+        }
+    });
+
+    it('full-title selection contains every bare-title selection', function () {
+        for (const [driveName, drive] of Object.entries(RAIL_DRIVES)) {
+            for (const [legName, leg] of Object.entries(drive.legs)) {
+                const titleSelected = reports[driveName].passes.filter((test) =>
+                    selectedTitles([test.title], leg.grep).length > 0);
+                const fullSelected = new Set(reports[driveName].passes.filter((test) =>
+                    selectedTitles([test.fullTitle], leg.grep).length > 0));
+                assert.ok(titleSelected.every((test) => fullSelected.has(test)),
+                    driveName + '.' + legName);
             }
         }
     });

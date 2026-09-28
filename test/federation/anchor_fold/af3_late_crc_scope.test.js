@@ -27,6 +27,7 @@ const {
 const { startDisposableHubDb } = require('../../helpers/disposableHubDb');
 const { corruptFinalChunk } = require('../../helpers/anchor_fold/corrupt_final_chunk');
 const { statusesForAction } = require('../../helpers/anchor_fold/action_row_statuses');
+const { ensureOpenIndexerDatabase } = require('../../helpers/anchor_fold/indexer_pool');
 
 const CheckpointEngine = loadHubModule('src/anchor/checkpoint_engine.js');
 const { foldArchiveCanonical } = loadHubModule('src/anchor/publisher/canonical_forms.js');
@@ -261,6 +262,7 @@ async function waitForArchiveVerdict(totalChunks){
 }
 
 async function setup(){
+    await ensureOpenIndexerDatabase();
     process.env[FOLD_ENV] = '0';
     process.env.XDEX_SNAPSHOT_BLOCK = String(SNAPSHOT_BLOCK);
     process.env.CHECKPOINT_CHAINS = 'DOGE';
@@ -293,7 +295,7 @@ async function setup(){
     await readSequenceBases();
 
     const addressInfo = await cryptoHelper.getNewFundedAddress(
-        'anchor-fold-crc-publisher', COIN, NETWORK, null, 'legacy', 0, 10.0);
+        'anchor-fold-crc-publisher', COIN, NETWORK, null, 'legacy', 0, 10.0, false);
     await settleTracker();
     signerHooks = stageProductionSigner(addressInfo);
     // Require the same signer-loader path used by an operator deployment.
