@@ -60,6 +60,7 @@ let bootstrapStakeSend = Promise.resolve();
 let bootstrapDogeRail = null;
 let bootstrapBlocksSinceDoge = 0;
 let bootstrapBtcMiner = null;
+let bootstrapTeardownInstalled = false;
 let lastMiningHoldLog = 0;
 const bootstrapStakerAddresses = new Set();
 
@@ -180,11 +181,16 @@ async function mineBootstrapSettlement(count) {
     await waitForBootstrapIndexer(BOOTSTRAP_SYNC_TIMEOUT_MS);
 }
 
+function indexerPoolClosed() {
+    const pool = global.indexerDatabase && global.indexerDatabase.pool;
+    return !pool || pool.closed === true;
+}
+
 // Refresh prices and mine one block when the indexer stops advancing behind the tip.
 // The refresh is best effort: a closed database pool must not replace the stall
 // error the wait itself reports.
 async function nudgeBootstrapIndexer(indexed, node) {
-    await seedBootstrapPrices(true).catch(() => {});
+    if (!indexerPoolClosed()) await seedBootstrapPrices(true).catch(() => {});
     if (indexed >= node - BOOTSTRAP_MAX_INDEXER_LAG) await mineBootstrapBlocks(1);
 }
 
@@ -430,6 +436,7 @@ function installBootstrapTeardown(opening) {
         strict: false,
     });
     global.stakeTeardownBaseline = opening.set;
+    bootstrapTeardownInstalled = true;
 }
 
 async function stakeBootstrapBatch(batch, start, stake, addresses) {
@@ -546,7 +553,7 @@ async function stopDogeCadence() {
 }
 
 async function releaseBootstrapStakes() {
-    if (!global.stakeTeardownBaseline) return;
+    if (!bootstrapTeardownInstalled || !global.stakeTeardownBaseline) return;
     await withPolicyMiningPaused(async () => {
         await waitForBootstrapIndexer(BOOTSTRAP_SYNC_TIMEOUT_MS);
         await stakeTeardown.runTeardown({
