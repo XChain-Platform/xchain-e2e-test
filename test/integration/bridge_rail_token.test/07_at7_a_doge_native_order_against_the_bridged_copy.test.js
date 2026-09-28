@@ -30,6 +30,7 @@ const {
     needsFederation,
     bridgeRailSuite,
 } = require('./support');
+const { expandPolicyTickCandidates } = require('../../helpers/rail_preflight/policy_at2_at4');
 
 // The order_matches row for the maker/taker pair, polled on the venue DOGE ledger.
 async function waitForMatch(makerIndex, takerIndex) {
@@ -53,7 +54,7 @@ bridgeRailSuite('token AT7: a DOGE-native token ordered against the bridged copy
         assert.ok(state.evidence.at1_dogeChild, 'AT1 must have run');
         const maker = await fundDoge('TOKEN.AT7.MAKER', 5);
         let natv = null;
-        for (const cand of ['NATV', 'NATW', 'NATX']) { if (!(await state.venue.hasTokenRow('DOGE', cand))) { natv = cand; break; } }
+        for (const cand of expandPolicyTickCandidates(['NATV', 'NATW', 'NATX'])) { if (!(await state.venue.hasTokenRow('DOGE', cand))) { natv = cand; break; } }
         assert.ok(natv, 'no free DOGE-native tick');
         const issue = await dogeAction(maker, () => issueHelper.sendIssueV0Raw(maker, natv, 1000, 1000, 0, 'AT7 native', 100), 'issues');
         assert.strictEqual(issue.status, 'valid', 'ISSUE ' + natv + ' graded ' + issue.status);
