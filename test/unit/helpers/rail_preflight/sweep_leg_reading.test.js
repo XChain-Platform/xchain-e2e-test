@@ -123,7 +123,7 @@ describe('sweep report leg reading CLI', function () {
         fs.writeFileSync(reportPath, [
             'LEG policy at1 PASS passed=05 failed=0 root=0 cascade=0 missing=0',
             '## policy',
-            'root failure: policy T0: setup durationMs=21 ' +
+            'root failure: policy AT1 precondition: setup durationMs=21 ' +
                 'error=' + SECRET + ' durationMs=999 error=secondary',
             'SWEEP legs=1 pass=1 fail=0',
         ].join('\n'))
@@ -142,7 +142,7 @@ describe('sweep report leg reading CLI', function () {
         assert.strictEqual(result.status, 0)
         assert.strictEqual(result.stdout,
             'LEG policy at1 PASS passed=05 failed=0 root=0 cascade=0 missing=0\n' +
-            'ROOT policy T0: setup durationMs=21\nCLEAN yes\n')
+            'ROOT policy AT1 precondition: setup durationMs=21\nCLEAN yes\n')
         assert.strictEqual(result.stderr, '')
         assert.doesNotMatch(result.stdout + result.stderr, /error=/)
         assert.ok(!(result.stdout + result.stderr).includes(SECRET))
@@ -152,7 +152,7 @@ describe('sweep report leg reading CLI', function () {
         const result = run(['--report', reportPath, '--drive', 'policy', '--leg', 'full'])
         assert.strictEqual(result.status, 1)
         assert.strictEqual(result.stdout,
-            'LEG policy full ABSENT\nROOT policy T0: setup durationMs=21\nCLEAN no\n')
+            'LEG policy full ABSENT\nROOT policy AT1 precondition: setup durationMs=21\nCLEAN no\n')
         assert.strictEqual(result.stderr, '')
     })
 

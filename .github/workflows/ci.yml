@@ -192,6 +192,32 @@ jobs:
           git -C xchain-sdk fetch --no-tags --depth=1 origin +refs/heads/develop:refs/remotes/origin/develop
           git -C xchain-sdk checkout --force --detach refs/remotes/origin/develop
 
+      - name: Check out xchain-documentation
+        id: unit_documentation_checkout
+        continue-on-error: ${{ startsWith(github.head_ref, 'release/') }}
+        uses: actions/checkout@v4
+        with:
+          repository: XChain-Platform/xchain-documentation
+          ref: ${{ startsWith(github.head_ref, 'release/') && github.head_ref || ((github.base_ref == 'master' || github.ref == 'refs/heads/master') && 'master' || 'develop') }}
+          path: xchain-documentation
+
+      - name: Fall back to xchain-documentation develop when its release branch is absent
+        if: startsWith(github.head_ref, 'release/') && steps.unit_documentation_checkout.outcome == 'failure'
+        env:
+          RELEASE_REF: ${{ github.head_ref }}
+        run: |
+          set +e
+          git -C xchain-documentation ls-remote --exit-code --heads origin "refs/heads/$RELEASE_REF" >/dev/null
+          release_status=$?
+          set -e
+          if [ "$release_status" -eq 0 ]; then
+            echo "Release branch exists but checkout failed" >&2
+            exit 1
+          fi
+          if [ "$release_status" -ne 2 ]; then exit "$release_status"; fi
+          git -C xchain-documentation fetch --no-tags --depth=1 origin +refs/heads/develop:refs/remotes/origin/develop
+          git -C xchain-documentation checkout --force --detach refs/remotes/origin/develop
+
       - name: Use Node.js 22
         uses: actions/setup-node@v4
         with:
