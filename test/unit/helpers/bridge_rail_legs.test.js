@@ -7,6 +7,7 @@ const assert = require('assert');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
+const { DETACH_STEPS } = require('../../helpers/bridge_detach_plan');
 const { RAIL_DRIVES } = require('../../helpers/bridge_rail_legs');
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
@@ -80,6 +81,16 @@ describe('bridge rail leg map', function () {
         const uncovered = titles.filter((title) => !covered.has(title));
         assert.strictEqual(uncovered.length, 1, uncovered.join('\n'));
         assert.match(uncovered[0], /policy AT8 \(invariant\):/);
+    });
+
+    it('includes every detach title in the full drive and its split leg', function () {
+        const titles = reports.policy.passes.map((test) => test.fullTitle);
+        const detachTitles = titles.filter((title) => title.includes('policy AT11:'));
+        const selected = selectedTitles(titles, RAIL_DRIVES.policy.legs.at11_detach.grep);
+
+        assert.deepStrictEqual(detachTitles.map((title) => title.split('policy AT11: ').pop()),
+            DETACH_STEPS.map((step) => step.name));
+        assert.ok(detachTitles.every((title) => selected.includes(title)));
     });
 
     it('prints grep sources and names unknown CLI arguments', function () {

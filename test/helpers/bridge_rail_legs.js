@@ -44,7 +44,11 @@ const RAIL_DRIVES = {
                     'policy AT8 \\((?:cap|reorg)\\):'].join('|'),
                 minPassed: 5,
             },
-            full: { grep: null, minPassed: 28 },
+            at11_detach: {
+                grep: [POLICY_T0, 'policy AT11:'].join('|'),
+                minPassed: 8,
+            },
+            full: { grep: null, minPassed: 34 },
         },
     },
     token: {
