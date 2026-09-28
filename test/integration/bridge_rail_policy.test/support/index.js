@@ -181,8 +181,10 @@ async function mineBootstrapSettlement(count) {
 }
 
 // Refresh prices and mine one block when the indexer stops advancing behind the tip.
+// The refresh is best effort: a closed database pool must not replace the stall
+// error the wait itself reports.
 async function nudgeBootstrapIndexer(indexed, node) {
-    await seedBootstrapPrices(true);
+    await seedBootstrapPrices(true).catch(() => {});
     if (indexed >= node - BOOTSTRAP_MAX_INDEXER_LAG) await mineBootstrapBlocks(1);
 }
 
