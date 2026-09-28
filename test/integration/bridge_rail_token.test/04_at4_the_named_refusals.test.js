@@ -78,12 +78,8 @@ bridgeRailSuite(GROUP, function () {
 });
 
 bridgeRailSuite(GROUP, function () {
-    it('token AT4: an ISSUE|7 below TOKEN_BRIDGE_ACTIVATION is invalid: VERSION (unknown)', function () {
-        // Not drivable on this rail: the activation is height 0 on regtest, so no block a
-        // drive can broadcast into is below it. The below-activation verdict is the
-        // indexer's own unit coverage; named here so the frontier can tell "not driven
-        // because it cannot be" from "not written".
-        console.log('  token AT4 below-activation leg NOT DRIVABLE on regtest (TOKEN_BRIDGE_ACTIVATION is 0); unit-covered in xchain-indexer');
-        this.skip();
-    });
+    // The below-activation verdict is the indexer's own unit coverage; named here so the
+    // frontier can tell "not driven because it cannot be" from "not written".
+    it.skip('token AT4: an ISSUE|7 below TOKEN_BRIDGE_ACTIVATION is invalid: VERSION (unknown). ' +
+        'NOT DRIVABLE on regtest: the activation is height 0 on regtest, so no block a drive can broadcast into is below it');
 });
