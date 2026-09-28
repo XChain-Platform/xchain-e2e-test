@@ -133,8 +133,8 @@ bridgeRailSuite(GROUP, function () {
         if (needsFederation(this, 'token AT6 policy direction')) return;
         const active = await flagAtTip();
         const D = state.tokens.at5, A = state.tokens.at3;
-        assert.ok(D.issuer && state.evidence.at5_depth && state.evidence.at5_depth.transfer, 'the AT5 depth leg must have bridged its token');
-        assert.ok(A.issuer && state.evidence.at3 && state.evidence.at3.lockBridge, 'AT3 must have bridged and then closed its token');
+        assert.ok(D.issuer && state.evidence.at5_depth && state.evidence.at5_depth.transfer, 'the AT5 depth leg must have run and bridged its token');
+        assert.ok(A.issuer && state.evidence.at3 && state.evidence.at3.lockBridge, 'AT3 must have run, bridging and then closing its token');
         const listIndex = await addressList(D.issuer, state.tokens.btcReceiver.address);
         const want = active ? 'valid' : NOT_BINDABLE_BRIDGED;
         const r = { listIndex };
