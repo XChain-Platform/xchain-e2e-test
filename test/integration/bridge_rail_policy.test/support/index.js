@@ -64,6 +64,7 @@ let bootstrapDogeRail = null;
 let bootstrapBlocksSinceDoge = 0;
 let bootstrapBtcMiner = null;
 let bootstrapTeardownInstalled = false;
+let bootstrapReleaseBatch = null;
 let lastMiningHoldLog = 0;
 const bootstrapStakerAddresses = new Set();
 
@@ -556,6 +557,30 @@ async function stopDogeCadence() {
     if (dogeCadenceWork) await dogeCadenceWork;
 }
 
+async function prepareBootstrapUnstake(entry) {
+    const recorded = entry.addressInfo.recordedEntry;
+    if (!recorded) return entry.addressInfo;
+    const restored = await restoreRecordedStaker(recorded);
+    await paceBootstrapDoge(1);
+    return restored;
+}
+
+async function startBootstrapReleaseBatch() {
+    const entries = stakeTeardown.outstanding();
+    const addresses = await Promise.all(entries.map(prepareBootstrapUnstake));
+    await fixture.clearWedgeBefore('policy bootstrap unstake batch');
+    const settled = await mineBootstrapWork(() => Promise.allSettled(entries.map((entry, index) =>
+        stakeHelper.sendUnstakeV0(addresses[index], entry.signingPubkey))));
+    return new Map(entries.map((entry, index) => [entry.key, settled[index]]));
+}
+
+async function releaseBootstrapEntry(entry) {
+    if (!bootstrapReleaseBatch) bootstrapReleaseBatch = startBootstrapReleaseBatch();
+    const result = (await bootstrapReleaseBatch).get(entry.key);
+    if (!result) throw new Error('policy rail bootstrap release did not include its signer');
+    if (result.status === 'rejected') throw result.reason;
+}
+
 async function releaseBootstrapStakes() {
     if (!bootstrapTeardownInstalled || !global.stakeTeardownBaseline) return;
     await withPolicyMiningPaused(async () => {
@@ -564,14 +589,7 @@ async function releaseBootstrapStakes() {
             policy: Object.assign({}, global.stakeTeardownPolicy, { strict: true }),
             baseline: global.stakeTeardownBaseline,
             indexer: global.indexerConnector,
-            unstake: async (entry) => {
-                const recorded = entry.addressInfo.recordedEntry;
-                if (!recorded) {
-                    await stakeHelper.sendUnstakeV0(entry.addressInfo, entry.signingPubkey);
-                    return;
-                }
-                await unstakeRecordedEntry(recorded);
-            },
+            unstake: releaseBootstrapEntry,
             mine: mineBootstrapSettlement,
             waitForSync: async () => { await global.utxoTrackerConnector.waitForSync(); },
         });
