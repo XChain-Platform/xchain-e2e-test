@@ -71,9 +71,10 @@ bridgeRailSuite(GROUP, function () {
         assert.strictEqual(steps.lockApplies.status, 'valid', 'the same lock after the opt-in graded ' + steps.lockApplies.status);
         const leg = await settleLeg('the AT3 lock',
             (r) => String(r.src_chain) === 'BTC' && String(r.dest_address) === A.dest.address && String(r.tick) === A.tick, 'DOGE');
-        steps.lockTransfer = leg.transfer;
+        steps.lockTransferReading = leg.transfer;
         steps.destBalance = await state.venue.addressBalance('DOGE', A.dest.address, 'BTC.' + A.tick);
         assert.strictEqual(Number(steps.destBalance), 3, A.dest.address + ' holds ' + steps.destBalance + ' BTC.' + A.tick);
+        steps.lockTransfer = leg.transfer;
     });
 });
 
