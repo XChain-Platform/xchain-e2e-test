@@ -933,6 +933,71 @@ describe('attestMirrorVenue: database naming', function () {
     })
 })
 
+describe('attestMirrorVenue: reusable chain databases', function () {
+    const { AttestMirrorVenue } = require('../../helpers/attestMirrorVenue')
+    const envKeys = ['INDEXER_DB_NAME', 'INDEXER_DB_USER', 'INDEXER_DB_PASS']
+    const originalLog = console.log
+    let savedEnv
+
+    beforeEach(() => {
+        savedEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]))
+        process.env.INDEXER_DB_NAME = 'Standing_Chain'
+        process.env.INDEXER_DB_USER = 'reader'
+        process.env.INDEXER_DB_PASS = 'not-a-real-password'
+    })
+
+    afterEach(() => {
+        console.log = originalLog
+        for (const key of envKeys) {
+            if (savedEnv[key] === undefined) delete process.env[key]
+            else process.env[key] = savedEnv[key]
+        }
+    })
+
+    function reuseFixture(standingLedger) {
+        const state = { seeded: 0, logs: [], sourceEnded: false }
+        const venue = new AttestMirrorVenue({ label: 'reuse', hubDb: DB })
+        venue._conn = {
+            query: async (sql) => {
+                if (sql.startsWith('CREATE DATABASE')) return []
+                if (sql.includes('information_schema.TABLES')) return [{ c: 1 }]
+                if (sql.includes('MAX(block_index)')) return [{ hi: 73 }]
+                if (sql.includes('COUNT(*)')) return [{ n: 19 }]
+                if (sql.includes('ledger_hash')) return [{ ledger_hash: 'venue-ledger' }]
+                throw new Error('unexpected venue query: ' + sql)
+            }
+        }
+        venue._createChainDbConnection = async () => ({
+            query: async (sql) => {
+                if (sql.includes('MAX(block_index)')) return [{ hi: 75 }]
+                if (sql.includes('COUNT(*)')) return [{ n: 19 }]
+                if (sql.includes('ledger_hash')) return [{ ledger_hash: standingLedger }]
+                throw new Error('unexpected standing query: ' + sql)
+            },
+            end: async () => { state.sourceEnded = true }
+        })
+        venue._seedChainDbFromStanding = async () => { state.seeded++ }
+        console.log = (line) => state.logs.push(String(line))
+        return { venue, state, ix: { index: 5, indexerDbName: 'XChain_AM_reuse_Ixr5' } }
+    }
+
+    it('re-seeds equal action counts when the ledger hash differs', async () => {
+        const { venue, state, ix } = reuseFixture('standing-ledger')
+        await venue._cloneChainDbFromStanding(ix)
+        assert.strictEqual(state.seeded, 1)
+        assert.strictEqual(state.sourceEnded, true)
+        assert.match(state.logs.join('\n'), /indexer 5.*matching action counts.*different ledger hash.*re-seeded/i)
+    })
+
+    it('reuses equal action counts when the ledger hash matches', async () => {
+        const { venue, state, ix } = reuseFixture('venue-ledger')
+        await venue._cloneChainDbFromStanding(ix)
+        assert.strictEqual(state.seeded, 0)
+        assert.strictEqual(state.sourceEnded, true)
+        assert.match(state.logs.join('\n'), /indexer 5.*same ledger hash.*not re-seeding/i)
+    })
+})
+
 describe('attestMirrorVenue: coin codes', function () {
     it('maps the three chains the venue can index', () => {
         assert.strictEqual(coinCode('bitcoin'),  'BTC')

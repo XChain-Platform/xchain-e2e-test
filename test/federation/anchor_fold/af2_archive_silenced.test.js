@@ -30,13 +30,10 @@ const REQUIRE_FEDERATION = process.env.E2E_REQUIRE_FEDERATION === '1';
 const N = 2;
 const ARCHIVE_SUBDEADLINE_MS = 10;
 const PUBLISH_CADENCE_BOUND_MS = 5000;
-const INDEX_WAIT_MS = 180000;
-const SNAPSHOT_BLOCK = 900000 + (Date.now() % 600000);
-const HUB_DB_PORT = 14000 + (process.pid % 300);
+const INDEX_WAIT_MS = 3 * 60 * 1000;
 const HUB_DB_NAME = 'xchain-anchor-fold-silenced-' + process.pid;
-
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
+let snapshotBlock = null;
 let hubDb = null;
 let mvh = null;
 let weightSeed = null;
@@ -54,6 +51,37 @@ async function indexerQuery(sql, params){
     const conn = await indexerDatabase.getConnection();
     try { return await conn.query(sql, params); }
     finally { await conn.release(); }
+}
+
+async function indexedBtcBlock(){
+    const url = process.env.BTC_INDEXER_API_URL;
+    assert.ok(url, 'the BTC indexer URL is configured');
+    const headers = { 'content-type': 'application/json' };
+    if(process.env.BTC_INDEXER_API_KEY) headers['x-api-key'] = process.env.BTC_INDEXER_API_KEY;
+    const response = await fetch(url, {
+        method: 'POST', headers,
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getlatestblock', params: {} })
+    });
+    assert.ok(response.ok, 'the BTC indexer latest-block request succeeded');
+    const body = await response.json();
+    const block = Number(body.result && body.result.block_index);
+    assert.ok(Number.isSafeInteger(block) && block >= 0, 'the BTC indexer returned a committed block');
+    return block;
+}
+
+async function unusedSnapshotBlock(){
+    const latest = await indexedBtcBlock();
+    const floor = Math.max(0, latest - 1024);
+    const ceiling = Math.max(0, latest - 12);
+    const rows = await indexerQuery(
+        'SELECT DISTINCT snapshot_block FROM capability_snapshots ' +
+        'WHERE snapshot_block BETWEEN ? AND ?', [floor, ceiling]
+    );
+    const occupied = new Set(rows.map((row) => Number(row.snapshot_block)));
+    for(let candidate = ceiling; candidate >= floor; candidate--){
+        if(!occupied.has(candidate)) return candidate;
+    }
+    assert.fail('no unused BTC snapshot block is available for the isolated capability fixture');
 }
 
 async function allHubs(sql, params){
@@ -132,34 +160,38 @@ function observePublisher(hub, index){
 }
 
 async function seedCapabilities(){
-    for(const capability of ['oracle_publish', 'cross_chain']){
-        for(const pubkey of pubkeys){
-            await indexerQuery(
-                'INSERT INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount, source) ' +
-                'VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE amount = VALUES(amount), source = VALUES(source)',
-                [SNAPSHOT_BLOCK, capability, pubkey, '1', pubkey]);
+    for(const pubkey of pubkeys){
+        await indexerQuery(
+            'INSERT INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount, source) ' +
+            'VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE amount = VALUES(amount), source = VALUES(source)',
+            [snapshotBlock, 'oracle_publish', pubkey, '1', pubkey]);
+        for(const capability of ['oracle_publish', 'cross_chain']){
             await allHubs(
                 'INSERT IGNORE INTO capability_snapshots ' +
                 '(snapshot_block, capability, signing_pubkey, amount, source) VALUES (?, ?, ?, ?, ?)',
-                [SNAPSHOT_BLOCK, capability, pubkey, '1', pubkey]);
+                [snapshotBlock, capability, pubkey, '1', pubkey]);
         }
     }
+    const rows = await indexerQuery(
+        'SELECT signing_pubkey, source, amount FROM capability_snapshots WHERE snapshot_block = ? ' +
+        "AND capability = 'oracle_publish' ORDER BY signing_pubkey, source", [snapshotBlock]
+    );
+    const expected = [...pubkeys].sort().map((pubkey) => [pubkey, pubkey, '1']);
+    assert.deepStrictEqual(rows.map((row) => [row.signing_pubkey, row.source, String(row.amount)]), expected,
+        'the indexer oracle_publish fixture contains only the AF2 validators');
 }
 
 async function proveFederationReady(){
     for(let i = 0; i < N; i++){
         const sap = mvh.hubs[i].stateAnchorPublisher;
-        const eligible = await sap.getActiveOraclePublishPubkeys(SNAPSHOT_BLOCK);
-        // Keep checkpoint publication on the complete two-validator set.
+        const eligible = await sap.getActiveOraclePublishPubkeys(snapshotBlock);
         assert.deepStrictEqual([...eligible].sort(), [...pubkeys].sort(),
             'hub' + i + ' resolves the complete oracle_publish set');
-        const signingSet = await sap.resolveCapabilitySet('oracle_publish', SNAPSHOT_BLOCK, 'regtest');
-        // Keep stake-weighted quorum sources distinct and non-blank.
+        const signingSet = await sap.resolveCapabilitySet('oracle_publish', snapshotBlock, 'regtest');
         assert.strictEqual(new Set(signingSet.map((row) => String(row.source))).size, N,
             'hub' + i + ' resolves one source per validator');
     }
     const peers = await waitForPeers();
-    // Keep the normal bundle-attestation path deliverable while archive replies are silenced.
     assert.ok(peers.every((count) => count >= N - 1),
         'every hub has an open peer connection: ' + JSON.stringify(peers));
 }
@@ -177,11 +209,12 @@ async function seedBatchFloor(){
              validator_signatures, status, batch_seq, archived_status)
          VALUES ('fold-silenced-seq-floor', ?, 'regtest', 'DOGE', 0, 'X', '0', 'x',
                  'LTC', 0, 'X', '0', 'x', 0, '[]', 'finalized', ?, 'finalized')`,
-        [SNAPSHOT_BLOCK, Number(maxBatch)]);
+        [snapshotBlock, Number(maxBatch)]);
 }
 
 async function startFederation(){
-    process.env.XDEX_SNAPSHOT_BLOCK = String(SNAPSHOT_BLOCK);
+    snapshotBlock = await unusedSnapshotBlock();
+    process.env.XDEX_SNAPSHOT_BLOCK = String(snapshotBlock);
     mvh = new MultiValidatorHub({
         count: N,
         basePort: 35000 + (process.pid % 400),
@@ -192,8 +225,12 @@ async function startFederation(){
     await mvh.start();
     identities = mvh.identities.map((item) => new ValidatorIdentity(item.privkeyHex));
     pubkeys = mvh.getPubkeys().map((pubkey) => pubkey.toLowerCase());
+    mvh.hubs.forEach((hub) => {
+        hub.peerManager.setEffectiveSignerSet = () => {};
+        hub.peerManager.effectiveSignerSet = new Set(pubkeys);
+    });
     foldRequests = Array(N).fill(0);
-    weightSeed = seedWeightSnapshot(mvh, { blockIndex: SNAPSHOT_BLOCK, network: 'regtest' });
+    weightSeed = seedWeightSnapshot(mvh, { blockIndex: snapshotBlock, network: 'regtest' });
     mvh.hubs.forEach(observePublisher);
     await seedCapabilities();
     await proveFederationReady();
@@ -214,7 +251,7 @@ function signedCheckpoint(seq){
         ledger_hash: crypto.randomBytes(32).toString('hex'),
         actions_hash: crypto.randomBytes(32).toString('hex'),
         contract_hash: crypto.randomBytes(32).toString('hex'),
-        checkpoint_seq: seq, snapshot_block: SNAPSHOT_BLOCK,
+        checkpoint_seq: seq, snapshot_block: snapshotBlock,
         state_root: crypto.randomBytes(32).toString('hex'), state_root_version: 1,
         block_merkle_root: crypto.randomBytes(32).toString('hex'), block_merkle_version: 1
     };
@@ -237,7 +274,7 @@ async function insertCheckpoint(row){
 
 async function insertPendingMatch(){
     const row = {
-        match_id: crypto.randomBytes(32).toString('hex'), snapshot_block: SNAPSHOT_BLOCK, network: 'regtest',
+        match_id: crypto.randomBytes(32).toString('hex'), snapshot_block: snapshotBlock, network: 'regtest',
         a_chain: 'DOGE', a_action_index: 11, a_kind: 'swap', a_tick: 'TOKA', a_amount: '1000',
         a_filled_before: '0', a_ownership: 0, a_payout_addr: 'fold_payout_a',
         b_chain: 'LTC', b_action_index: 22, b_kind: 'swap', b_tick: 'TOKB', b_amount: '2000',
@@ -263,7 +300,7 @@ async function insertPendingMatch(){
 
 function bundleLeader(){
     const key = mvh.hubs[0].stateAnchorPublisher.bundleElectionKey({
-        network: 'regtest', snapshot_block: SNAPSHOT_BLOCK
+        network: 'regtest', snapshot_block: snapshotBlock
     });
     return pubkeys.indexOf(SAP.hashOrder(key, pubkeys)[0]);
 }
@@ -279,25 +316,22 @@ function silenceFoldArchiveCosigner(hub){
     };
 }
 
-async function waitForIndexedCycle(ledgerHash){
+async function waitForIndexedCycle(txid){
+    await regtestMinerConnector.generateBlocks(3);
     const deadline = Date.now() + INDEX_WAIT_MS;
     while(Date.now() < deadline){
-        const found = await indexerQuery(
-            `SELECT a.*, s.status FROM anchor_actions a
+        const rows = await indexerQuery(
+            `SELECT a.*, s.status FROM index_transactions it
+             JOIN transactions t ON t.tx_hash_id = it.id
+             JOIN actions ac ON ac.tx_index = t.tx_index
+             JOIN anchor_actions a ON a.action_index = ac.action_index
              LEFT JOIN index_statuses s ON s.id = a.status_id
-             WHERE a.version = 3 AND a.ledger_hash = ?`, [ledgerHash]);
-        if(found.length){
-            return await indexerQuery(
-                `SELECT a.*, s.status FROM anchor_actions a
-                 LEFT JOIN index_statuses s ON s.id = a.status_id
-                 WHERE a.version = 3 AND a.tx_hash = ?`, [found[0].tx_hash]);
-        }
-        await regtestMinerConnector.generateBlocks(1);
+             WHERE it.hash = ? ORDER BY a.action_index, a.section_index`, [txid]);
+        if(rows.length) return rows;
         await sleep(2000);
     }
     return [];
 }
-
 async function driveAcceptance(){
     await startFederation();
     const checkpoint = signedCheckpoint(await nextCheckpointSeq());
@@ -311,25 +345,23 @@ async function driveAcceptance(){
     await mvh.hubs[leader].stateAnchorPublisher.flush();
     const parsed = broadcasts.map((entry) => ({ entry, parsed: parseAnchorV3(entry.payload) }))
         .filter((item) => item.parsed !== null);
-    // Publish exactly one folded checkpoint transaction for this cycle.
     assert.strictEqual(parsed.length, 1, 'one v3 transaction was broadcast');
-    // Drop only the archive section after its co-signers stay silent.
+    assert.match(String(parsed[0].entry.txid), /^[0-9a-f]{64}$/, 'the checkpoint transaction was broadcast');
     assert.strictEqual(parsed[0].parsed.archiveCount, 0, 'the v3 wire carries ARCHIVE_COUNT 0');
     assert.strictEqual(parsed[0].parsed.archive, null, 'the v3 wire carries no archive fields');
-    // Prove the archive attempt reached a silenced co-signer before the fallback.
     assert.ok(cosigners.every((index) => foldRequests[index] >= 1),
         'every archive co-signer received the folded archive request');
     const publishDelay = parsed[0].entry.startedAt - flushStartedAt;
-    // Keep the checkpoint publish on the short fold cadence, not the legacy round timeout.
     assert.ok(publishDelay <= PUBLISH_CADENCE_BOUND_MS,
         'checkpoint publish took ' + publishDelay + 'ms, bound ' + PUBLISH_CADENCE_BOUND_MS + 'ms');
 
-    const rows = await waitForIndexedCycle(checkpoint.ledger_hash);
-    // Require the indexer to store the checkpoint rows from this exact transaction.
+    const rows = await waitForIndexedCycle(parsed[0].entry.txid);
     assert.ok(rows.length > 0, 'the v3 checkpoint transaction was indexed');
-    assert.ok(rows.every((row) => String(row.status) === 'valid'), 'every indexed v3 row is valid');
+    const statuses = rows.map((row) => String(row.status));
+    assert.deepStrictEqual(statuses, Array(rows.length).fill('valid'),
+        'every indexed v3 row is valid: ' + JSON.stringify(statuses));
     const summary = summarizeAnchorCycle(rows);
-    assert.strictEqual(summary.txCount, 1, 'the indexed cycle has one transaction');
+    assert.strictEqual(new Set(rows.map((row) => String(row.action_index))).size, 1, 'one indexed action');
     assert.strictEqual(summary.chainSections, 1, 'the indexed cycle retains its checkpoint section');
     assert.strictEqual(summary.archiveSections, 0, 'the indexed cycle has no archive section');
     console.log('    folded checkpoint ' + parsed[0].entry.txid + ' published in ' + publishDelay +
@@ -338,6 +370,13 @@ async function driveAcceptance(){
 
 async function cleanup(){
     for(const restore of faultRestores.splice(0)) restore();
+    if(snapshotBlock !== null && pubkeys.length){
+        await indexerQuery(
+            'DELETE FROM capability_snapshots WHERE snapshot_block = ? AND signing_pubkey IN (' +
+            pubkeys.map(() => '?').join(',') + ") AND capability IN ('oracle_publish', 'cross_chain')",
+            [snapshotBlock, ...pubkeys]
+        );
+    }
     if(weightSeed){ weightSeed.restore(); weightSeed = null; }
     if(mvh){ await mvh.stop(); await mvh.dropDatabases(); mvh = null; }
     if(hubDb){ await hubDb.stop(); hubDb = null; }
@@ -359,7 +398,7 @@ function registerSuite(){
         process.env.ANCHOR_ELECTION_TOLERANCE_BLOCKS = '100000';
         delete process.env.XDEX_SEED_LOCAL_VALIDATOR;
         process.env.XCHAIN_CONFIRMATIONS_DOGE = '1';
-        hubDb = await startDisposableHubDb({ forceDocker: true, port: HUB_DB_PORT, name: HUB_DB_NAME });
+        hubDb = await startDisposableHubDb({ forceDocker: true, name: HUB_DB_NAME });
         if(!hubDb){
             console.log('Skipping ANCHOR fold archive-silenced acceptance: no Docker available for the disposable hub DB');
             this.skip();
@@ -367,7 +406,7 @@ function registerSuite(){
         SAP = loadHubModule('src/anchor/publisher.js');
         SCE = loadHubModule('src/anchor/checkpoint_engine.js');
         const address = await cryptoHelper.getNewFundedAddress(
-            'anchor-fold-silenced-publisher', COIN, NETWORK, null, 'legacy', 0, 4.0, false);
+            'anchor-fold-silenced-publisher', COIN, NETWORK, null, 'legacy', 0, 12.0, false);
         await regtestMinerConnector.generateBlocks(2);
         await utxoTrackerConnector.quiesce({
             timeoutMs: 60000, pollMs: 250, regtestMiner: regtestMinerConnector
