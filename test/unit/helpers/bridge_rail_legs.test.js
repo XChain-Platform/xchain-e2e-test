@@ -83,7 +83,40 @@ describe('bridge rail leg map', function () {
         }
     });
 
-    it('covers every split-drivable policy title except the AT8 invariant', function () {
+    it('selects, in every split policy leg, the upstream cases each selected case reads', function () {
+        const dependencies = [
+            ['policy AT1 (mirror):', ['policy AT1 (opt-in):']],
+            ['policy AT1 (enforced):', ['policy AT1 (mirror):']],
+            ['policy AT2 (edit):', ['policy AT1 (enforced):']],
+            ['policy AT2 (reads):', ['policy AT2 (edit):']],
+            ['policy AT2 (verdicts flip):', ['policy AT2 (edit):']],
+            ['policy AT3:', ['policy AT2 (edit):']],
+            ['policy AT4 (falsification):', ['policy AT2 (edit):']],
+            ['policy AT4 (seq gap):', ['policy AT4 (seq gap setup):']],
+            ['policy AT5 (release):', ['policy AT5 (barrier):']],
+            ['policy AT5 (abstain):', ['policy AT5 (barrier):']],
+            ['policy AT6 (sleep):', ['policy AT2 (edit):']],
+            ['policy AT6 (burn):', ['policy AT6 (sleep):']],
+            ['policy AT6 (wake):', ['policy AT6 (sleep):']],
+            ['policy AT9 (origin):', ['policy AT2 (edit):']],
+            ['policy AT9 (copy):', ['policy AT9 (origin):']],
+            ['policy AT8 (cap):', ['policy AT1 (mirror):', 'policy AT5 (barrier):']],
+        ];
+        const titles = reports.policy.passes.map((test) => test.title);
+        for (const [legName, leg] of Object.entries(RAIL_DRIVES.policy.legs)) {
+            if (legName === 'full') continue;
+            const selected = selectedTitles(titles, leg.grep);
+            for (const [readerPrefix, prerequisitePrefixes] of dependencies) {
+                if (!selected.some((title) => title.startsWith(readerPrefix))) continue;
+                for (const prefix of prerequisitePrefixes) {
+                    assert.ok(selected.some((title) => title.startsWith(prefix)),
+                        legName + ': ' + readerPrefix + ' requires ' + prefix);
+                }
+            }
+        }
+    });
+
+    it('covers every split-drivable policy title', function () {
         const drive = RAIL_DRIVES.policy;
         const titles = reports.policy.passes.map((test) => test.fullTitle);
         const covered = new Set();
@@ -92,8 +125,18 @@ describe('bridge rail leg map', function () {
             for (const title of selectedTitles(titles, leg.grep)) covered.add(title);
         }
         const uncovered = titles.filter((title) => !covered.has(title));
-        assert.strictEqual(uncovered.length, 1, uncovered.join('\n'));
-        assert.match(uncovered[0], /policy AT8 \(invariant\):/);
+        assert.strictEqual(uncovered.length, 0, uncovered.join('\n'));
+    });
+
+    it('selects the AT8 invariant and its prerequisite ticks', function () {
+        const grep = RAIL_DRIVES.policy.legs.at8_invariant.grep;
+        const titles = [
+            'policy AT4 (seq gap setup):',
+            'policy AT5 (barrier):',
+            'policy AT5 (release):',
+            'policy AT8 (invariant):',
+        ];
+        assert.deepStrictEqual(selectedTitles(titles, grep), titles);
     });
 
     it('includes every detach title in the full drive and its split leg', function () {
