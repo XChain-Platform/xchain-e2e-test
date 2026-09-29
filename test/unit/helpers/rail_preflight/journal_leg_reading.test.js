@@ -151,10 +151,10 @@ describe('journal leg reading CLI', function () {
     })
 
     it('exits one for an absent stdin reading', function () {
-        const result = run(['--journal', '-', '--drive', 'token', '--leg', 'at5_at6'],
+        const result = run(['--journal', '-', '--drive', 'token', '--leg', 'at7_at8'],
             journal)
         assert.strictEqual(result.status, 1)
-        assert.strictEqual(result.stdout, 'LEG token at5_at6 ABSENT\nCLEAN no\n')
+        assert.strictEqual(result.stdout, 'LEG token at7_at8 ABSENT\nCLEAN no\n')
         assert.strictEqual(result.stderr, '')
         assert.ok(!(result.stdout + result.stderr).includes(SECRET))
     })

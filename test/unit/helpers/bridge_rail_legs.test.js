@@ -116,6 +116,35 @@ describe('bridge rail leg map', function () {
         }
     });
 
+    it('selects, in every split token leg, the upstream cases each selected case reads', function () {
+        const dependencies = [
+            ['token AT8 (ride-back):', ['token AT8: ']],
+            ['token AT2:', ['token AT1:']],
+            ['token AT4:', ['token AT1:']],
+            ['token AT5 (falsification):', ['token AT1:']],
+            ['token AT5 (existing row):', ['token AT1:']],
+            ['token AT7:', ['token AT1:']],
+            ['token AT8 (cap):', ['token AT1:']],
+            ['token AT6 (opt-in direction):', ['token AT2:']],
+            ['token AT6 (policy direction):',
+                ['token AT2:', 'token AT3:', 'token AT5 (depth):']],
+            ['token AT8 (invariant):',
+                ['token AT1:', 'token AT2:', 'token AT8 (cap):']],
+        ];
+        const titles = reports.token.passes.map((test) => test.title);
+        for (const [legName, leg] of Object.entries(RAIL_DRIVES.token.legs)) {
+            if (legName === 'full') continue;
+            const selected = selectedTitles(titles, leg.grep);
+            for (const [readerPrefix, prerequisitePrefixes] of dependencies) {
+                if (!selected.some((title) => title.startsWith(readerPrefix))) continue;
+                for (const prefix of prerequisitePrefixes) {
+                    assert.ok(selected.some((title) => title.startsWith(prefix)),
+                        legName + ': ' + readerPrefix + ' requires ' + prefix);
+                }
+            }
+        }
+    });
+
     it('covers every split-drivable policy title', function () {
         const drive = RAIL_DRIVES.policy;
         const titles = reports.policy.passes.map((test) => test.fullTitle);
