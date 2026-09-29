@@ -106,12 +106,13 @@ bridgeRailSuite(GROUP, function () {
         const A = state.tokens.at3;
         const steps = state.evidence.at3;
         assert.ok(steps && steps.burnTransfer, 'the close half must have run');
-        steps.lockBridge = await btcAction(A.issuer, optInWire(A.tick, '', '', '1', 'AT3 lock'), 'issues');
-        assert.strictEqual(steps.lockBridge.status, 'valid', 'ISSUE|7 LOCK_BRIDGE=1 graded ' + steps.lockBridge.status);
+        steps.lockBridgeReading = await btcAction(A.issuer, optInWire(A.tick, '', '', '1', 'AT3 lock'), 'issues');
+        assert.strictEqual(steps.lockBridgeReading.status, 'valid', 'ISSUE|7 LOCK_BRIDGE=1 graded ' + steps.lockBridgeReading.status);
         steps.optInAfterLock = await btcAction(A.issuer, optInWire(A.tick, 'DOGE', '', '', 'AT3 after lock'), 'issues');
         assert.strictEqual(steps.optInAfterLock.status, 'invalid: BRIDGE_CHAINS (locked)');
         const row = await state.venue.tokenParameters('BTC', A.tick);
         steps.btcRow = row;
         assert.strictEqual(String(row.params.lock_bridge), '1', 'the BTC row reads lock_bridge ' + row.params.lock_bridge);
+        steps.lockBridge = steps.lockBridgeReading;
     });
 });
