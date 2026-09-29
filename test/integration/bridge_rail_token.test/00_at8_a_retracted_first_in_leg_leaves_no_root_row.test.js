@@ -98,7 +98,7 @@ bridgeRailSuite(GROUP, function () {
         // confirms the lock again and hands the federation a legitimate leg.
         const reading = await withMiningPaused(regtestMinerConnector, () => orphanAndRead(lock, row));
         Object.assign(state.evidence.at8_retraction, { minedAt: reading.orphan.height,
-            orphanedHash: reading.orphan.hash, retracted: !!reading.retracted,
+            orphanedHash: reading.orphan.hash, retractedReading: !!reading.retracted,
             rootRowsDuringOrphan: reading.rootRows.map((r) => r.tick), childDuringOrphan: reading.childPresent });
         assert.ok(reading.retracted,
             'transfer ' + row.transfer_id + ' stayed finalized for 180s after its source lock left the BTC ' +
@@ -108,6 +108,7 @@ bridgeRailSuite(GROUP, function () {
         assert.strictEqual(reading.balance, '0', R.dest.address + ' was credited from a lock that is not on the BTC chain');
         assert.strictEqual(String(reading.hashesAfter[0].ledger_hash), String(R.hashesBefore[0].ledger_hash),
             'the DOGE ledger_hash at block ' + R.hashesBefore[0].block_index + ' moved');
+        state.evidence.at8_retraction.retracted = true;
     });
 });
 
