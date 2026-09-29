@@ -114,9 +114,10 @@ bridgeRailSuite(GROUP, function () {
         assert.ok(state.evidence.at1_mirror, 'the mirror half must have run');
         const blocked = await sendCopy(M.dest, M.tick, 1, M.blocked.address, 'policy AT1 blocked');
         const other = await sendCopy(M.dest, M.tick, 1, M.other.address, 'policy AT1 other');
-        state.evidence.at1_sends = { blocked, other, specString: 'invalid: BLOCK_LIST' };
+        state.evidence.at1_sendsReading = { blocked, other, specString: 'invalid: BLOCK_LIST' };
         assert.strictEqual(blocked.status, 'invalid: DESTINATION (not authorized)',
             'a SEND of BTC.' + M.tick + ' to the blocked address graded ' + blocked.status);
         assert.strictEqual(other.status, 'valid', 'a SEND of BTC.' + M.tick + ' to an unlisted address graded ' + other.status);
+        state.evidence.at1_sends = state.evidence.at1_sendsReading;
     });
 });
