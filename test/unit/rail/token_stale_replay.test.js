@@ -4,6 +4,7 @@ const assert = require('assert');
 const {
     databaseNames,
     dropStaleReplay,
+    dropStaleReplayBeforeVenue,
 } = require('../../integration/bridge_rail_token.test/support/stale_replay');
 
 function stubConnection(options) {
@@ -11,6 +12,7 @@ function stubConnection(options) {
     const queries = [];
     return {
         queries,
+        ended: false,
         async query(sql, params) {
             queries.push({ sql, params: params || [] });
             if (sql.includes('information_schema.SCHEMATA')) {
@@ -22,6 +24,7 @@ function stubConnection(options) {
             if (sql.startsWith('SELECT ti.tick')) return opts.rows || [];
             return [];
         },
+        async end() { this.ended = true; },
     };
 }
 
@@ -33,13 +36,31 @@ describe('token stale replay cleanup', function () {
     it('a stale root row drops exactly the two named databases', async function () {
         const connection = stubConnection({ rows: [{ tick: 'btc' }] });
         const logs = [];
+        const venueDb = {
+            host: 'stable-host', port: '3310', user: 'venue-user', pass: 'venue-pass',
+            stopped: false,
+            async stop() { this.stopped = true; },
+        };
+        let connectionOptions = null;
 
-        const dropped = await dropStaleReplay(connection, label, {
+        const dropped = await dropStaleReplayBeforeVenue(label, {
             dbPrefix,
             log: (line) => logs.push(line),
+            startVenueDb: async () => venueDb,
+            createConnection: async (options) => {
+                connectionOptions = options;
+                return connection;
+            },
         });
 
         assert.deepStrictEqual(dropped, [names.indexer, names.mirror]);
+        assert.deepStrictEqual(connectionOptions, {
+            host: venueDb.host,
+            port: 3310,
+            user: venueDb.user,
+            password: venueDb.pass,
+            connectTimeout: 10000,
+        });
         assert.deepStrictEqual(connection.queries.map((entry) => entry.sql)
             .filter((sql) => sql.startsWith('DROP DATABASE')), [
             'DROP DATABASE IF EXISTS `' + names.indexer + '`',
@@ -50,6 +71,8 @@ describe('token stale replay cleanup', function () {
         assert.strictEqual(logs.length, 1);
         assert.ok(logs[0].includes(names.indexer));
         assert.ok(logs[0].includes(names.mirror));
+        assert.strictEqual(connection.ended, true);
+        assert.strictEqual(venueDb.stopped, true);
     });
 
     it('a clean ledger drops none', async function () {

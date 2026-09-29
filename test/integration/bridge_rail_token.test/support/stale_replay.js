@@ -14,9 +14,10 @@
 
 'use strict';
 
+const mariadb = require('mariadb');
+
 const { DB_PREFIX } = require('../../../helpers/attestMirrorVenue');
 const { startDisposableHubDb } = require('../../../helpers/disposableHubDb');
-const { connectTo } = require('../../../helpers/oracleBatchReplay');
 
 function databaseNames(label, prefix) {
     const venueLabel = String(label || 'bridgerail').replace(/[^A-Za-z0-9]/g, '') + 'doge';
@@ -64,14 +65,26 @@ async function dropStaleReplay(connection, label, options) {
     return dropped;
 }
 
-async function dropStaleReplayBeforeVenue(label) {
-    if (!process.env.HUB_DB_USER || !process.env.HUB_DB_PASS) return [];
-    const venueDb = await startDisposableHubDb();
+async function connectVenueDatabase(venueDb, createConnection) {
+    const open = createConnection || mariadb.createConnection;
+    return open({
+        host: venueDb.host,
+        port: parseInt(venueDb.port, 10),
+        user: venueDb.user,
+        password: venueDb.pass,
+        connectTimeout: 10000,
+    });
+}
+
+async function dropStaleReplayBeforeVenue(label, options) {
+    const opts = options || {};
+    if (!opts.startVenueDb && (!process.env.HUB_DB_USER || !process.env.HUB_DB_PASS)) return [];
+    const venueDb = await (opts.startVenueDb || startDisposableHubDb)();
     if (!venueDb) return [];
     let connection = null;
     try {
-        connection = await connectTo(venueDb);
-        return await dropStaleReplay(connection, label);
+        connection = await connectVenueDatabase(venueDb, opts.createConnection);
+        return await dropStaleReplay(connection, label, opts);
     } finally {
         if (connection) await connection.end().catch(() => {});
         await venueDb.stop();
@@ -79,6 +92,7 @@ async function dropStaleReplayBeforeVenue(label) {
 }
 
 module.exports = {
+    connectVenueDatabase,
     databaseNames,
     dropStaleReplay,
     dropStaleReplayBeforeVenue,
