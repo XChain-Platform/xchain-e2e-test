@@ -15,7 +15,7 @@ const assert = require('assert')
 const chainRail = require('../../../helpers/chainRail')
 
 describe('chainRail: DOGE indexer port', function () {
-    it('uses port 3004 by default', function () {
-        assert.strictEqual(chainRail.DEFAULT_PORTS.DOGE.indexer, 3004)
+    it('uses host port 3124 rather than container port 3004 by default', function () {
+        assert.strictEqual(chainRail.DEFAULT_PORTS.DOGE.indexer, 3124)
     })
 })
