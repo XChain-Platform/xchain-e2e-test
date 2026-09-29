@@ -119,6 +119,7 @@ async function holdDogeUntilDue(dest, count) {
         await venue.waitUntil('all ' + count + ' cap locks to finalize', async () => {
             const seen = new Map();
             for (const hub of venue.hubs) {
+                // status = finalized
                 const hubRows = await venue.queryHubDb(hub.dbName,
                     "SELECT transfer_id, snapshot_block, effective_time, tick FROM bridge_transfers " +
                     "WHERE dest_address = ? AND status = 'finalized'", [dest.address]);
