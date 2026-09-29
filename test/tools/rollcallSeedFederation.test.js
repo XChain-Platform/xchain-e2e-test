@@ -235,7 +235,7 @@ async function stakeRosterKeys(){
     // Activation is not instant: the stake rows carry activation_block and
     // the capability predicate only admits them at or past it.
     await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
-    await utxoTrackerConnector.waitForSync()
+    await utxoTrackerConnector.requireSync()
 }
 
 async function continueActivation(tip, lastTip, stalls, missing){

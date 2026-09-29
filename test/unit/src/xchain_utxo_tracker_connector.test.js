@@ -244,6 +244,48 @@ describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
     });
 });
 
+// requireSync is the barrier form: same release condition as waitForSync, but a
+// tracker that never became serve-ready fails AT the wait with the reason.
+describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
+    beforeEach(setupTracker);
+    afterEach(teardownTracker);
+    describe('requireSync', function () {
+        it('returns the status once both verdicts hold, or mempool_ready is absent', async function () {
+            sinon.stub(tracker, 'sleep').resolves();
+            const status = sinon.stub(tracker, 'getSyncStatus');
+            status.resolves({ synced: true, mempool_ready: true });
+            assert.deepStrictEqual(await tracker.requireSync(20, 1), { synced: true, mempool_ready: true });
+            status.resolves({ synced: true });
+            assert.deepStrictEqual(await tracker.requireSync(20, 1), { synced: true });
+        });
+
+        it('throws when block sync never completes', async function () {
+            sinon.stub(tracker, 'getSyncStatus').resolves({ synced: false });
+            sinon.stub(tracker, 'sleep').resolves();
+            await assert.rejects(() => tracker.requireSync(20, 1), /not serve-ready after 20ms: synced=false/);
+        });
+
+        it('throws on a synced tracker whose mempool has not reconverged', async function () {
+            sinon.stub(tracker, 'getSyncStatus').resolves({ synced: true, mempool_ready: false });
+            sinon.stub(tracker, 'sleep').resolves();
+            await assert.rejects(() => tracker.requireSync(20, 1), /mempool_ready=false/);
+        });
+
+        it('says the tracker is unreachable when no status ever came back', async function () {
+            sinon.stub(tracker, 'getSyncStatus').resolves(null);
+            sinon.stub(tracker, 'sleep').resolves();
+            await assert.rejects(() => tracker.requireSync(20, 1), /no status \(tracker unreachable\)/);
+        });
+
+        it('names the caller context in the failure', async function () {
+            sinon.stub(tracker, 'getSyncStatus').resolves({ synced: false });
+            sinon.stub(tracker, 'sleep').resolves();
+            await assert.rejects(() => tracker.requireSync(20, 1, 'after DEADLINE_BLOCK mining'),
+                /\(after DEADLINE_BLOCK mining\)/);
+        });
+    });
+});
+
 describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
     beforeEach(setupTracker);
     afterEach(teardownTracker);

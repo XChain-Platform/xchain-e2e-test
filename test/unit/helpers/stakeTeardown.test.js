@@ -208,7 +208,7 @@ describe('stakeTeardown, the fixture-stake teardown policy', () => {
             const r = await teardown.releaseStakes({
                 unstake:      async (e) => { unstaked.push(e.signingPubkey) },
                 mine:         async (n) => { mined.push(n) },
-                waitForSync:  async ()  => { synced = true },
+                requireSync:  async ()  => { synced = true },
                 settleBlocks: 14,
                 log:          () => {}
             })
@@ -218,6 +218,25 @@ describe('stakeTeardown, the fixture-stake teardown policy', () => {
             assert.strictEqual(synced, true)
             assert.strictEqual(r.released.length, 2)
             assert.strictEqual(teardown.outstanding().length, 0)
+        })
+
+        it('reports a tracker that never caught up as its own error, not an unmined block', async () => {
+            teardown.registerStake({ addressInfo: addr('s1'), signingPubkey: 'aa', amount: '1000' })
+
+            const r = await teardown.releaseStakes({
+                unstake:      async () => {},
+                mine:         async () => {},
+                requireSync:  async () => { throw new Error('utxo-tracker not serve-ready after 60000ms') },
+                settleBlocks: 14,
+                log:          () => {}
+            })
+
+            assert.strictEqual(r.mined, 14, 'the settle blocks were mined')
+            assert.strictEqual(r.mineError, undefined)
+            assert.match(r.syncError, /not serve-ready/)
+            const text = teardown.formatReport({ policy: teardown.policy({}), release: r })
+            assert.match(text, /tracker did not catch up after the settle blocks: utxo-tracker not serve-ready/)
+            assert.doesNotMatch(text, /settle blocks were not mined/)
         })
 
         it('a stake that will not release is reported, and the rest still go back', async () => {

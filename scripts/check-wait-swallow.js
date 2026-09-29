@@ -42,6 +42,12 @@
  * The marker is deliberately a sentence, not a bare pragma: the whole point of
  * this gate is that a reader can tell a swallow from a decision.
  *
+ * `utxoTrackerConnector.waitForSync` gets a stricter rule. On timeout it hands
+ * back the last status, a truthy object, so `if (!s) throw` and `assert(s)`
+ * prove nothing and `assert(s.synced)` misses mempool_ready. A waitForSync call
+ * passes only as a `return` hand-back or with a `// give-up-ok:` reason; the
+ * fix is `utxoTrackerConnector.requireSync()`, which throws at the wait.
+ *
  * Usage:  node scripts/check-wait-swallow.js [--list]
  *
  ********************************************************************/
@@ -67,6 +73,10 @@ const SKIP_DIRS = new Set(['node_modules', 'unit'])
 // the real class under them.
 const WAIT_CALL = /(?:^|[^\w.])(?:[\w.]+\.)?(?:indexerDatabase|db)\.waitFor[A-Z]\w*\s*\(/
 const OPT_OUT   = /\/\/\s*give-up-ok:\s*\S/
+// Match the tracker barrier on any receiver (the connector is the tree's only
+// waitForSync), so `global.utxoTrackerConnector.waitForSync()` and aliases count.
+const SYNC_CALL = /\bwaitForSync\s*\(/
+const SYNC_HANDED_BACK = /\breturn\s+(?:await\s+)?[\w.]*\bwaitForSync\s*\(/
 
 // Where the enclosing function ends and the next one begins: an object-literal
 // or class method head (`async sendSendV0(addressInfo, tick){`), the closing
@@ -128,7 +138,8 @@ function scanLines(lines, rel, isHelper){
     lines.forEach((line, idx) => {
         // A comment describing a wait is not a wait.
         const code = line.replace(/\/\/.*$/, '')
-        if (!WAIT_CALL.test(code)) return
+        const isSync = SYNC_CALL.test(code)
+        if (!WAIT_CALL.test(code) && !isSync) return
         // The marker counts on the call's own line or anywhere in the comment
         // block directly above it, because the reason usually needs a sentence
         // and a one-line-only rule would push it onto the code line.
@@ -138,6 +149,11 @@ function scanLines(lines, rel, isHelper){
             if (OPT_OUT.test(lines[k])) { opted = true; break }
         }
         if (opted) return
+        // The tracker barrier earns no guard or assertion credit (header above).
+        if (isSync){
+            if (!SYNC_HANDED_BACK.test(code)) hits.push({ file: rel, line: idx + 1, helper: isHelper, text: line.trim() })
+            return
+        }
         // Wrapped at the call: requireRow(await db.waitForX({...}), '...').
         if (/requireRow\s*\(\s*(?:await\s+)?[\w.]*\bwaitFor[A-Z]/.test(code)) return
         // Handed straight back or tested inline, so no null is stored here and
@@ -193,6 +209,7 @@ function main(){
     }
     console.error('Fix a site by wrapping the wait in requireRow() (test/helpers/requireRow.js),')
     console.error('guarding it with `if (!row) throw`, or asserting on the row before using it.')
+    console.error('A utxo-tracker waitForSync is fixed by calling utxoTrackerConnector.requireSync() instead.')
     console.error('If an empty result is genuinely fine, say why on the call line or the one above:')
     console.error('    // give-up-ok: <reason>')
     return 1

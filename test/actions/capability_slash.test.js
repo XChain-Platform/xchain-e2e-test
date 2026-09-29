@@ -197,10 +197,9 @@ async function setupCapabilitySlash(testContext) {
     if (tip < snapshotBlock) {
         await regtestMinerConnector.generateBlocks(snapshotBlock - tip)
         // The encoder refuses to pick UTXOs while the tracker trails the node, so the
-        // SLASH below cannot be built until the mining above has been absorbed.
-        const synced = await utxoTrackerConnector.waitForSync(120000)
-        assert.ok(synced && synced.synced,
-            'the utxo-tracker never caught up with the blocks mined for the activation delay')
+        // SLASH below cannot be built until the mining above has been absorbed. A
+        // `.synced` check alone would pass a tracker whose mempool has not reconverged.
+        await utxoTrackerConnector.requireSync(120000, 500, 'blocks mined for the activation delay')
     }
 
     await submitSlashProof()

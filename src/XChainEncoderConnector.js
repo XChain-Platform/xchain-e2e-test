@@ -92,7 +92,9 @@ class XChainEncoderConnector {
     // encoder's own default in force (XCHAIN_COMPRESSION_DEFAULT, on unless the
     // deploy sets it off), while true/false are the caller's explicit choice.
     // Every existing caller omits it and keeps the shipped behaviour.
-    async createTx(utxosList, pubkey, customOutputs, data, rawData, exactFee, rbf, outputType, changeAddress, p2shHash, p2shHex, compressedPubKey, unconfirmed, compress = null){
+    // `extra` carries the newer create_tx fields (feePerKb, dust, feeQuote,
+    // attachPrevTx, options); each is sent only when given, so omitting it keeps the old payload.
+    async createTx(utxosList, pubkey, customOutputs, data, rawData, exactFee, rbf, outputType, changeAddress, p2shHash, p2shHex, compressedPubKey, unconfirmed, compress = null, extra = {}){
         const dataToSend = {
             jsonrpc: '2.0',
             method: 'create_tx',
@@ -114,7 +116,12 @@ class XChainEncoderConnector {
             },
             id: 1
         }
-        
+        // Forward each extra field as given, untouched, so the encoder's strict validators judge it.
+        const extras = extra == null ? {} : extra
+        for (const key of ['feePerKb', 'dust', 'feeQuote', 'attachPrevTx', 'options']){
+            if (extras[key] !== undefined) dataToSend.params[key] = extras[key]
+        }
+
         let response = null
         try{
             response = await axios.post(this.url, dataToSend, this.reqConfig)

@@ -128,8 +128,20 @@ describe('SPV Phase 2: CHECKPOINT_COMMITMENT cross-service parity', function () 
     });
 
     it('every local isCheckpointCommitmentActive agrees on the verdict for the same input', function () {
-        for (const net of ['mainnet', 'testnet', 'regtest']) {
-            for (const sb of [0, 100, 1000, 999999998, 999999999, 1000000000]) {
+        // Probe each armed flag day h at h-1, h and h+1, read from the canonical map so the probes
+        // follow a re-arm: a one-sided `>` against `>=` in one registry disagrees only at h itself.
+        const canonical = protocolConstants.CHECKPOINT_COMMITMENT_ACTIVATION;
+        const nets = new Set(['mainnet', 'testnet', 'regtest', 'bogusnet'].concat(Object.keys(canonical)));
+        for (const net of nets) {
+            const h = canonical[net];
+            const edges = Number.isInteger(h) ? [h - 1, h, h + 1] : [];
+            const probes = new Set([0, 100, 1000, 999999998, 999999999, 1000000000].concat(edges).filter(sb => sb >= 0));
+            // Assert the verdict flips at a non-zero flag day, or probing the edge would pin nothing.
+            if (Number.isInteger(h) && h > 0) {
+                assert.strictEqual(idxCkpt.activeAt(CKPT_KEY, net, null, h - 1, null), false, net + ' gate must be off one block below its flag day ' + h);
+                assert.strictEqual(idxCkpt.activeAt(CKPT_KEY, net, null, h, null), true, net + ' gate must be on at its flag day ' + h);
+            }
+            for (const sb of probes) {
                 const verdicts = [hubCkpt, idxCkpt, sdkCkpt, expCkpt, syncCkpt].map(m => m.activeAt(CKPT_KEY, net, null, sb, null));
                 assert.ok(verdicts.every(v => v === verdicts[0]),
                     'gate verdict disagreement for ' + net + '@' + sb + ': ' + JSON.stringify(verdicts));
