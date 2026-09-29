@@ -2052,9 +2052,8 @@ class BridgeRailVenue {
     }
 
     /**
-     * The source legs this venue's federation finalized more than once, read off hub 0's
-     * own database. See `overFinalizedSourceLegs` for what the answer means and the reading
-     * that put it here.
+     * The source legs this venue's federation finalized more than once, read from every
+     * hub database. See `overFinalizedSourceLegs` for what the answer means.
      *
      * Read from the HUB rather than from the destination's `bridge_settlements`, because the
      * duplication happens at finalization: a destination that refused the second mint would
@@ -2063,12 +2062,8 @@ class BridgeRailVenue {
      * @returns {Promise<Array>} empty when every finalized leg is unique
      */
     async duplicateSourceTransfers() {
-        const hubDbName = this.hubs[0] ? this.hubs[0].dbName : null;
-        assert.ok(hubDbName, 'bridgeRailVenue: no hub database to read');
-        const rows = await this.queryHubDb(hubDbName,
-            'SELECT transfer_id, src_chain, src_action_index, amount, status, snapshot_block ' +
-            'FROM bridge_transfers');
-        return overFinalizedSourceLegs(rows);
+        assert.ok(this.hubs.length, 'bridgeRailVenue: no hub database to read');
+        return overFinalizedSourceLegsByHub(this.hubs, this.queryHubDb.bind(this));
     }
 
     /**
@@ -2475,6 +2470,38 @@ function overFinalizedSourceLegs(rows) {
     return dupes;
 }
 
+async function overFinalizedSourceLegsByHub(hubs, readHub) {
+    const sql = 'SELECT transfer_id, src_chain, src_action_index, amount, status, snapshot_block ' +
+        'FROM bridge_transfers';
+    const byLeg = new Map();
+    let successfulReads = 0;
+    let lastError = null;
+    for (const hub of (Array.isArray(hubs) ? hubs : [])) {
+        let duplicates;
+        try {
+            duplicates = overFinalizedSourceLegs(await readHub(hub.dbName, sql));
+            successfulReads += 1;
+        } catch (e) {
+            lastError = e;
+            continue;
+        }
+        for (const duplicate of duplicates) {
+            const key = duplicate.srcChain + ':' + duplicate.actionIndex;
+            const reading = byLeg.get(key);
+            if (!reading) {
+                byLeg.set(key, { entry: duplicate, hubs: [hub.index] });
+                continue;
+            }
+            reading.hubs.push(hub.index);
+            if (duplicate.count > reading.entry.count) reading.entry = duplicate;
+        }
+    }
+    if (!successfulReads && lastError) throw lastError;
+    return [...byLeg.values()].map((reading) => Object.assign({}, reading.entry, {
+        hubs: reading.hubs.sort((a, b) => Number(a) - Number(b)),
+    }));
+}
+
 /**
  * How many blocks deep an orphan at `height` would reach, given the chain's current tip.
  *
@@ -2776,6 +2803,7 @@ module.exports = {
     outstandingFinalizedLegs,
     expectedInvariantReading,
     overFinalizedSourceLegs,
+    overFinalizedSourceLegsByHub,
     orphanDepth,
     assertShallowOrphan,
     replacementBlockCount,
