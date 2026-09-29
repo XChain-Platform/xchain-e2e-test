@@ -171,7 +171,7 @@ async function runFailureSetupOnce() {
     await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
     // The encoder refuses UTXO selection while the tracker trails the node, so the
     // next tx build races these blocks unless the tracker is caught up first.
-    await utxoTrackerConnector.waitForSync()
+    await utxoTrackerConnector.requireSync()
 
     const deploy = await vmHelper.sendDeployV0(operatorAddr, CONTRACT_CODE, 500000)
     assert.strictEqual(deploy.contract.status, 'valid', 'deploy status: ' + deploy.contract.status)
@@ -279,7 +279,7 @@ describe('REAL-URL attestation FAILURE paths: expired + no_quorum over a 3-valid
         // 3. Advance past DEADLINE_BLOCK. deadlineBlocks=2 + margin so the per-block
         //    expiry pipeline definitely runs at deadline+1.
         await regtestMinerConnector.generateBlocks(5)
-        await utxoTrackerConnector.waitForSync()
+        await utxoTrackerConnector.requireSync()
 
         // 4. Request status flips to 'expired'.
         const expired = await indexerDatabase.waitForAttestationRequest({

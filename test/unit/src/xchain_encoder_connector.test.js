@@ -222,3 +222,74 @@ describe('XChainEncoderConnector', function () {
         });
     });
 });
+
+// The trailing `extra` object reaches the encoder fields the positional list never had.
+const EXTRA_KEYS = ['feePerKb', 'dust', 'feeQuote', 'attachPrevTx', 'options'];
+
+function callWithExtra(extra) {
+    return connector.createTx(
+        utxosList, pubkey, customOutputs, data, rawData,
+        exactFee, rbf, outputType, changeAddress,
+        p2shHash, p2shHex, compressedPubKey, false, null, extra
+    );
+}
+
+describe('XChainEncoderConnector', function () {
+    beforeEach(setupConnector);
+    afterEach(teardownConnector);
+    describe('createTx extra fields', function () {
+        it('forwards each extra field under its create_tx key', async function () {
+            axiosPostStub.resolves({ data: { result: fakeResult } });
+            const extra = {
+                feePerKb: 2000,
+                dust: 1000,
+                feeQuote: { address: 'quote-addr', amount: 5000 },
+                attachPrevTx: true,
+                options: { exactInputs: true }
+            };
+            await callWithExtra(extra);
+            const [, payload] = axiosPostStub.firstCall.args;
+            for (const key of EXTRA_KEYS) {
+                assert.deepStrictEqual(payload.params[key], extra[key], key);
+            }
+        });
+
+        it('sends none of the extra keys when extra is omitted or null', async function () {
+            axiosPostStub.resolves({ data: { result: fakeResult } });
+            await callCreateTx();
+            await callWithExtra(null);
+            for (const call of axiosPostStub.getCalls()) {
+                const p = call.args[1].params;
+                for (const key of EXTRA_KEYS) {
+                    assert.strictEqual(key in p, false, `${key} must be absent`);
+                }
+            }
+        });
+    });
+});
+
+describe('XChainEncoderConnector', function () {
+    beforeEach(setupConnector);
+    afterEach(teardownConnector);
+    describe('createTx extra fields, values as given', function () {
+        it('forwards attachPrevTx false and a null field as given, uncoerced', async function () {
+            axiosPostStub.resolves({ data: { result: fakeResult } });
+            await callWithExtra({ attachPrevTx: false, feePerKb: null, dust: '1000' });
+            const p = axiosPostStub.firstCall.args[1].params;
+            assert.strictEqual(p.attachPrevTx, false);
+            assert.strictEqual('feePerKb' in p, true);
+            assert.strictEqual(p.feePerKb, null);
+            assert.strictEqual(p.dust, '1000');
+            assert.strictEqual('options' in p, false);
+        });
+
+        it('keeps the api key header when extra is passed', async function () {
+            axiosPostStub.resolves({ data: { result: fakeResult } });
+            const keyed = new XChainEncoderConnector(URL, PORT, API_KEY);
+            await keyed.createTx([], 'pk', [], {}, '', 1, false, 'OP_RETURN', 'chg', null, null, null, false, null, { feePerKb: 1000 });
+            const [, payload, config] = axiosPostStub.firstCall.args;
+            assert.strictEqual(payload.params.feePerKb, 1000);
+            assert.deepStrictEqual(config, { headers: { 'x-api-key': API_KEY } });
+        });
+    });
+});

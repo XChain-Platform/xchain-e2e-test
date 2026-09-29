@@ -366,9 +366,17 @@ async function releaseStakes(opts){
         try {
             await o.mine(o.settleBlocks)
             result.mined = o.settleBlocks
-            if(o.waitForSync) await o.waitForSync()
         } catch (err){
             result.mineError = (err && err.message) ? err.message : String(err)
+        }
+    }
+    // Wait for the tracker on its own, so a tracker that never caught up is not
+    // reported as unmined blocks. o.requireSync must THROW when it did not sync.
+    if(result.mined && o.requireSync){
+        try {
+            await o.requireSync()
+        } catch (err){
+            result.syncError = (err && err.message) ? err.message : String(err)
         }
     }
 
@@ -393,6 +401,8 @@ function formatReport(state){
             lines.push('[stake teardown]   SKIPPED ' + s.entry.source + ' / ' + String(s.entry.signingPubkey).slice(0, 16) + '...: ' + s.reason)
         if(r.mineError)
             lines.push('[stake teardown]   settle blocks were not mined: ' + r.mineError)
+        if(r.syncError)
+            lines.push('[stake teardown]   tracker did not catch up after the settle blocks: ' + r.syncError)
     }
 
     if(state.baseline && state.baseline.error)
@@ -488,7 +498,7 @@ async function runTeardown(opts){
         state.release = await releaseStakes({
             unstake:      o.unstake,
             mine:         o.mine,
-            waitForSync:  o.waitForSync,
+            requireSync:  o.requireSync,
             settleBlocks: pol.settleBlocks,
             budgetMs:     pol.budgetMs,
             log:          log

@@ -154,6 +154,32 @@ describe('check-wait-swallow: the gate that keeps helpers loud', function () {
     })
 })
 
+// waitForSync returns a truthy status on timeout, so the row-poll credits
+// (null guard, assertion) prove nothing for it and must not apply.
+describe('check-wait-swallow: the utxo-tracker barrier', function () {
+    it('flags a bare waitForSync on any receiver', function () {
+        assert.strictEqual(findings("        await utxoTrackerConnector.waitForSync()").length, 1)
+        assert.strictEqual(findings("        await global.utxoTrackerConnector.waitForSync(120000)").length, 1)
+        assert.strictEqual(findings("            if(o.waitForSync) await o.waitForSync()", { helper: true }).length, 1)
+    })
+
+    it('gives no credit to a null guard or an assertion on the status', function () {
+        for (const guard of ["        assert(s, 'x')", "        if (!s) throw new Error('x')",
+            "        assert.ok(s && s.synced, 'x')"]) {
+            assert.strictEqual(findings(["        const s = await utxoTrackerConnector.waitForSync()", guard].join('\n')).length, 1, guard)
+        }
+    })
+
+    it('accepts requireSync, a hand-back, and a stated reason', function () {
+        assert.deepStrictEqual(findings("        await utxoTrackerConnector.requireSync()"), [])
+        assert.deepStrictEqual(findings("        return await utxoTrackerConnector.waitForSync(1000, 1)"), [])
+        assert.deepStrictEqual(findings([
+            "        // give-up-ok: the status is read below as data",
+            "        const s = await utxoTrackerConnector.waitForSync()",
+        ].join('\n')), [])
+    })
+})
+
 describe('check-wait-swallow: the live tree', function () {
     // The gate is only worth its CI slot if the tree it guards is clean now;
     // a report of "42 known swallows" is a number nobody acts on.

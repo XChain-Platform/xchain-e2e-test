@@ -31,7 +31,7 @@ async function prepareRedundancyValidators() {
     // redundancy=3, so ALL THREE stakes must be selectable at its block; mining only
     // the activation delay left the two just staked here invisible and the set at 2.
     await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
-    await utxoTrackerConnector.waitForSync()
+    await utxoTrackerConnector.requireSync()
     return [v2, v3]
 }
 

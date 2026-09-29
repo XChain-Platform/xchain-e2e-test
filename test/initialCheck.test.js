@@ -493,7 +493,7 @@ exports.mochaHooks = {
                     // unset, and a ReferenceError here would replace whatever
                     // real failure the run is trying to report.
                     mine:        async (n) => { await global.regtestMinerConnector.generateBlocks(n) },
-                    waitForSync: async ()  => { await global.utxoTrackerConnector.waitForSync() }
+                    requireSync: async ()  => { await global.utxoTrackerConnector.requireSync() }
                 })
             } catch (err) {
                 teardownError = err

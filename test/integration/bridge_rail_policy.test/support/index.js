@@ -617,7 +617,7 @@ async function releaseBootstrapStakes() {
             indexer: global.indexerConnector,
             unstake: releaseBootstrapEntry,
             mine: mineBootstrapSettlement,
-            waitForSync: async () => { await global.utxoTrackerConnector.waitForSync(); },
+            requireSync: async () => { await global.utxoTrackerConnector.requireSync(); },
         });
         const current = await waitForCapabilityBaseline({
             baseline: global.stakeTeardownBaseline,
