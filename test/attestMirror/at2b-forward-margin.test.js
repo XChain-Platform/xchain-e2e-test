@@ -198,6 +198,11 @@ describe('AT2 second clause: delivery past the forward margin holds the barrier 
     })
 
     it('waits on the named barrier and still binds at the same block on both nodes', async function () {
+        // Clear the deploy backlog first: the EXECUTE and burial mine the blocks that cross
+        // the row's effective time, and a delayed indexer reaching one a full grace late
+        // finds its barrier already satisfied and parses it without the row.
+        await waitForVenueIndexersAtTip(venue, { maxLag: 0 })
+
         // Armed BEFORE the request, so the row is delayed from the moment it exists
         // rather than after this indexer has already seen it.
         delayArmedAtMs = Date.now()
