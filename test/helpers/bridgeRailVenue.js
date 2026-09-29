@@ -757,6 +757,27 @@ function escrowOf(balances, chain) {
     return null;
 }
 
+async function firstHubRowsForSourceLeg(hubs, readHub, srcChain, srcActionIndex) {
+    let failed = 0;
+    let lastError = null;
+    for (const hub of hubs) {
+        let rows;
+        try {
+            rows = await readHub(hub.dbName,
+                'SELECT transfer_id, status FROM bridge_transfers ' +
+                'WHERE src_chain = ? AND src_action_index = ? LIMIT 1',
+                [srcChain, Number(srcActionIndex)]);
+        } catch (e) {
+            failed += 1;
+            lastError = e;
+            continue;
+        }
+        if (rows.length) return rows;
+    }
+    if (failed === hubs.length && lastError) throw lastError;
+    return [];
+}
+
 /**
  * The finalized legs a drained rail still owes, from the hubs' own records.
  *
@@ -1922,8 +1943,7 @@ class BridgeRailVenue {
     async waitForRailSettled(tick, opts) {
         const o = opts || {};
         const deadline = Date.now() + Number(o.timeoutMs || 45 * 60 * 1000);
-        const hubDbName = this.hubs[0] ? this.hubs[0].dbName : null;
-        assert.ok(hubDbName, 'bridgeRailVenue: no hub database to poll');
+        assert.ok(this.hubs.length, 'bridgeRailVenue: no hub database to poll');
         let last = null;
         while (Date.now() < deadline) {
             const pending = [];
@@ -1963,10 +1983,8 @@ class BridgeRailVenue {
                     }
                     const where = { chain: src, dest: dest, actionIndex: String(leg.src_action_index),
                                     amount: String(leg.amount) };
-                    const hubRows = await this.queryHubDb(hubDbName,
-                        'SELECT transfer_id, status FROM bridge_transfers ' +
-                        'WHERE src_chain = ? AND src_action_index = ? LIMIT 1',
-                        [src, Number(leg.src_action_index)]);
+                    const hubRows = await firstHubRowsForSourceLeg(this.hubs,
+                        this.queryHubDb.bind(this), src, leg.src_action_index);
                     if (!hubRows.length) { pending.push(Object.assign({ stage: 'unfinalized' }, where)); continue; }
                     const transferId = String(hubRows[0].transfer_id);
                     let settled = [];
@@ -2754,6 +2772,7 @@ module.exports = {
     classifyInvariant,
     bridgeSettled,
     escrowOf,
+    firstHubRowsForSourceLeg,
     outstandingFinalizedLegs,
     expectedInvariantReading,
     overFinalizedSourceLegs,
