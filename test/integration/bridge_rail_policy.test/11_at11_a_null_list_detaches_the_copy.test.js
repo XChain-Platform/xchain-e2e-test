@@ -85,7 +85,7 @@ async function issueListedTick() {
 
 async function bridgeTick() {
     const M = detachState();
-    assert.ok(M.tick, 'the issue step must have run');
+    assert.ok(state.evidence.at11_issue, 'the issue step must have run');
     M.lock = await btcAction(M.issuer,
         lockWireV3(M.tick, 'DOGE', M.dest.address, LOCK, 'policy AT11'), 'xbridges');
     assert.strictEqual(M.lock.status, 'valid', 'the v3 lock of ' + M.tick + ' graded ' + M.lock.status);
@@ -115,7 +115,7 @@ async function settleInitialSnapshot(step) {
 
 async function detachOrigin(step) {
     const M = detachState();
-    assert.ok(M.copy1, 'the initial snapshot step must have run');
+    assert.ok(state.evidence.at11_initial, 'the initial snapshot step must have run');
     M.detach = await btcAction(M.issuer,
         policyListsWire(M.tick, null, step.sentinel, 'policy AT11 detach'), 'issues');
     assert.strictEqual(M.detach.status, 'valid',
@@ -147,7 +147,7 @@ async function settleDetachedSnapshot(step) {
 
 async function sendToFormerlyBlocked(step) {
     const M = detachState();
-    assert.ok(M.copy2, 'the detached snapshot step must have run');
+    assert.ok(state.evidence.at11_detached, 'the detached snapshot step must have run');
     M.send = await sendCopy(M.dest, M.tick, 1, M.blocked.address, 'policy AT11 formerly blocked');
     assert.strictEqual(M.send.status, step.expect.status,
         'a SEND to the formerly blocked address graded ' + M.send.status);
