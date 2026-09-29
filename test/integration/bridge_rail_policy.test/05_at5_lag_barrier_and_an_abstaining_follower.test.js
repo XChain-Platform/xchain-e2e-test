@@ -63,13 +63,16 @@ const TABLE = 'policy_snapshots';
 
 // The finalized transfer of the lag token's lock, and its settlement on DOGE if any.
 async function lagTransfer(L) {
-    const rows = await state.venue.queryHubDb(state.venue.hubs[0].dbName,
-        "SELECT transfer_id, effective_time FROM bridge_transfers WHERE tick = ? AND dest_address = ? AND status = 'finalized'",
-        [L.tick, L.dest.address]);
-    if (!rows.length) return null;
-    const settled = await state.venue.queryIndexerDb('DOGE',
-        "SELECT block_index, action_index FROM bridge_settlements WHERE kind = 'transfer' AND transfer_id = ?", [rows[0].transfer_id]);
-    return { transferId: String(rows[0].transfer_id), effectiveTime: Number(rows[0].effective_time), settled: settled[0] || null };
+    for (const hub of state.venue.hubs) {
+        const rows = await state.venue.queryHubDb(hub.dbName,
+            "SELECT transfer_id, effective_time FROM bridge_transfers WHERE tick = ? AND dest_address = ? AND status = 'finalized'",
+            [L.tick, L.dest.address]);
+        if (!rows.length) continue;
+        const settled = await state.venue.queryIndexerDb('DOGE',
+            "SELECT block_index, action_index FROM bridge_settlements WHERE kind = 'transfer' AND transfer_id = ?", [rows[0].transfer_id]);
+        return { transferId: String(rows[0].transfer_id), effectiveTime: Number(rows[0].effective_time), settled: settled[0] || null };
+    }
+    return null;
 }
 
 bridgeRailSuite(GROUP, function () {
