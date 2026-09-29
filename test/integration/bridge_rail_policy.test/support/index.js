@@ -31,6 +31,7 @@ const stakeTeardown = require('../../../helpers/stakeTeardown');
 const { resolveDogeFeeDestination } = require('../../../helpers/rail_preflight/policy_fee_destination');
 const { requireHealthyHub } = require('../../../helpers/rail_preflight/hub_health_gate');
 const fixture = require('../../../attestMirror/mirrorDrillFixture');
+const { standingHubConnector } = require('./standing_hub');
 const {
     resolveVenueQuorum,
     withMiningPaused,
@@ -43,10 +44,10 @@ const BOOTSTRAP_CONCURRENCY = 3;
 const BOOTSTRAP_MINE_POLL_MS = 2000;
 const BOOTSTRAP_MAX_INDEXER_LAG = 2;
 const BOOTSTRAP_NUDGE_MS = 30000;
-const BOOTSTRAP_SYNC_TIMEOUT_MS = 20 * 60 * 1000;
+// Slow action blocks can consume most of the venue indexer's 30 minute block watchdog.
+const BOOTSTRAP_SYNC_TIMEOUT_MS = 45 * 60 * 1000;
 const BOOTSTRAP_WAIT_EXTENSIONS = 12;
-// A block carrying a STAKE or UNSTAKE can take the venue indexer about five minutes, and the
-// release sends one per temporary signer, so the shared 20 minute budget skips the tail.
+// The release batch needs the same allowance before teardown can prove the restored roster.
 const BOOTSTRAP_RELEASE_BUDGET_MS = 45 * 60 * 1000;
 const DOGE_CADENCE_MS = 15000;
 const POLICY_DOGE_DB = 'XChain_AM_MVH_bridgerailpolicydoge_Rpl_Ixr0';
@@ -310,8 +311,10 @@ async function prepareBootstrapStaker(identity, index, stake) {
     const mintCount = Math.ceil((stake + 1000) / gasHelper.GAS_MAX_MINT);
     const nativeCoins = Number((0.02 + mintCount * 0.001).toFixed(8));
     // Cover every mint's native fee output plus its transaction fee before the stake is sent.
-    const address = await fixture.withWedgeClear('funding ' + label, () => mineBootstrapWork(() =>
-        cryptoHelper.getNewFundedAddress(label, COIN, NETWORK, null, 'legacy', 0, nativeCoins)));
+    const address = await fixture.withWedgeClear('funding ' + label, () =>
+        cryptoHelper.getNewFundedAddress(label, COIN, NETWORK, null, 'legacy', 0, nativeCoins, false));
+    await fixture.withWedgeClear('gas seed for ' + label, () => mineBootstrapWork(() =>
+        gasHelper.ensureGasBalance(address, 100)));
     await paceBootstrapDoge(1);
     await mineBootstrapBlocks(2);
     await fixture.settleStack();
@@ -395,6 +398,16 @@ function baselineWithout(set, entries) {
     return Object.assign({}, set, { pubkeys, byPubkey });
 }
 
+function registerRecordedSigners(entries) {
+    for (const entry of entries) {
+        stakeTeardown.registerStake({
+            signingPubkey: entry.signingPubkey,
+            amount: '0',
+            addressInfo: { address: entry.address, recordedEntry: entry },
+        });
+    }
+}
+
 async function reuseRecordedSigners() {
     const opening = await readBridgeCapability();
     const recorded = seatedRecordedEntries(opening.set);
@@ -402,13 +415,7 @@ async function reuseRecordedSigners() {
     if (!resolveVenueQuorum(seatedRows(opening.set), fixture._knownSignerSeeds()).ok) return false;
     // Teardown owns the release, so the roster it restores excludes the reused signers.
     installBootstrapTeardown({ set: baselineWithout(opening.set, recorded) });
-    for (const entry of recorded) {
-        stakeTeardown.registerStake({
-            signingPubkey: entry.signingPubkey,
-            amount: '0',
-            addressInfo: { address: entry.address, recordedEntry: entry },
-        });
-    }
+    registerRecordedSigners(recorded);
     console.log('POLICY RAIL: reusing ' + recorded.length + ' recorded signer(s) already seated');
     return true;
 }
@@ -462,13 +469,16 @@ async function ensurePolicyQuorum() {
     await mineBootstrapBlocks(fixture.stakeVisibilityBlocks(COIN, NETWORK));
     await fixture.settleStack();
     await waitForBootstrapIndexer(BOOTSTRAP_SYNC_TIMEOUT_MS);
+    if (await reuseRecordedSigners()) return;
     const opening = await readBridgeCapability();
     const rows = seatedRows(opening.set);
     const existing = resolveVenueQuorum(rows, fixture._knownSignerSeeds());
     // Preserve an already-signable venue without adding redundant fixture stakes.
     if (existing.ok) return;
     // Make the root stake teardown restore and prove the capability this bootstrap changes.
-    installBootstrapTeardown(opening);
+    const recorded = seatedRecordedEntries(opening.set);
+    installBootstrapTeardown({ set: baselineWithout(opening.set, recorded) });
+    registerRecordedSigners(recorded);
     const totalStake = rows.reduce((sum, row) => sum + row.stake, 0);
     const identities = createBootstrapIdentities(rows);
     const stake = Math.max(BOOTSTRAP_MIN_STAKE,
@@ -630,11 +640,12 @@ async function withPolicyMiningPaused(work) {
 
 async function waitForStandingHub() {
     const deadline = Date.now() + BOOTSTRAP_SYNC_TIMEOUT_MS;
+    const connector = standingHubConnector();
     let last = null;
     while (Date.now() < deadline) {
         try {
             await requireHealthyHub(async () => {
-                const response = await axios.post(global.hubConnector.urls[0],
+                const response = await axios.post(connector.urls[0],
                     { jsonrpc: '2.0', method: 'ping', id: 1 }, {
                         timeout: 5000,
                         validateStatus: () => true,
