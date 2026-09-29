@@ -35,6 +35,12 @@ const RAIL_DRIVES = {
                 grep: [...POLICY_ROOT, 'policy AT5 \\((?:barrier|release)\\):'].join('|'),
                 minPassed: 4,
             },
+            at8_invariant: {
+                grep: [...POLICY_ROOT, 'policy AT4 \\(seq gap(?: setup)?\\):',
+                    'policy AT5 \\((?:barrier|release)\\):',
+                    'policy AT8 \\(invariant\\):'].join('|'),
+                minPassed: 7,
+            },
             at5_abstain: {
                 grep: [...POLICY_ROOT, 'policy AT5 \\(abstain\\):'].join('|'),
                 minPassed: 3,
