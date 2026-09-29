@@ -46,8 +46,8 @@ function fakeSupport(calls, detachedBlock) {
         copyPolicy: async () => {
             policyRead += 1;
             return policyRead === 1
-                ? { allow_list: ['doge-dest', 'doge-blocked'], block_list: ['doge-blocked'] }
-                : { allow_list: ['doge-dest', 'doge-blocked'], block_list: null };
+                ? { allow_list: ['btc-issuer', 'doge-blocked', 'doge-dest'], block_list: ['doge-blocked'] }
+                : { allow_list: ['btc-issuer', 'doge-blocked', 'doge-dest'], block_list: null };
         },
         waitForFinalizedSeq: async (tick, seq) => ({ policy_seq: seq, snapshot_id: 'snapshot-' + seq }),
         waitForAppliedSeq: async (tick, seq, opts) => {

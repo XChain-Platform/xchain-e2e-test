@@ -221,7 +221,7 @@ jobs:
       - name: Use Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "22.22.3"
 
       # Every suite in this repo requires exactly Node 22; 18 and 24 fail, and
       # some of those failures are silent skips rather than errors.
@@ -344,7 +344,7 @@ jobs:
       - name: Use Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "22.22.3"
 
       # All three, not just the suite's own repo. See the `ws` note above.
       - name: Install dependencies (all three trees)
@@ -406,7 +406,7 @@ jobs:
       - name: Use Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "22.22.3"
 
       - name: Coin-registry byte-identity vs canonical
         run: xchain-hub/bin/sync-coins.sh --check --only xchain-e2e-test

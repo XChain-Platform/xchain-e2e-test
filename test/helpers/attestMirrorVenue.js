@@ -127,9 +127,26 @@ const VENUE_REDUNDANCY = 3;
 // HUB_DB_NAME.
 const CHAIN_CLONE_SKIP_TABLES = new Set(['price_snapshots']);
 
+// A chain database is reused only when a seed or venue copy finished writing it.
+// The reuse check reads blocks, actions and one ledger hash, and a seed cut off
+// after those tables passed it with other tables short: measured 2026-09-29,
+// a venue database interrupted mid-seed held 59 of the standing node's
+// 71 unstakes, and every indexer built from it halted at the next block with
+// "escrowJournal: locked total ... nets negative". The marker is dropped before
+// the first table is copied and written after the last one.
+const CHAIN_SEED_MARKER = 'venue_seed_complete';
+
 // Rows per page when seeding. Big enough that the 283k-row state tree copies in
 // tens of pages, small enough that no single batch holds the table in memory.
 const CHAIN_CLONE_PAGE = 10000;
+
+// Record that every table of a venue chain database was written, and from where.
+async function writeSeedMarker(conn, source) {
+    await conn.query('CREATE TABLE `' + CHAIN_SEED_MARKER + '` ' +
+        '(source VARCHAR(128) NOT NULL, completed_at DATETIME NOT NULL)');
+    await conn.query('INSERT INTO `' + CHAIN_SEED_MARKER + '` (source, completed_at) VALUES (?, UTC_TIMESTAMP())',
+        [String(source)]);
+}
 
 const DEFAULT_FORWARD_S = 5;
 
@@ -2562,7 +2579,82 @@ class AttestMirrorVenue {
                 connector: null
             });
         }
+        // Every chain database is ready before the first indexer runs, so one seed
+        // from the standing node can be copied inside the venue for the rest.
+        await this._prepareChainDbs();
         for (let i = 0; i < this.indexerCount; i++) await this._spawnIndexer(i);
+    }
+
+    /**
+     * Seed the first venue chain database from the standing node and copy it to
+     * the rest server-side, before any indexer writes to one.
+     *
+     * Measured 2026-09-29: the client row copy from the standing node took about
+     * 1400 s per indexer on a venue with a spinning-disk database and 235 to 568 s
+     * on the faster venues, paid once per indexer (five to seven per bridge drive). A copy
+     * inside the venue's own schemas is one INSERT ... SELECT per table on the
+     * server, needs no new grant (the venue account owns both schemas), and gives
+     * every indexer the same seed height. A database that already agrees with the
+     * standing node is still reused as before.
+     */
+    async _prepareChainDbs() {
+        if (this.replayChain) return;
+        let template = null;
+        for (const ix of this.indexers) {
+            await this._cloneChainDbFromStanding(ix, template);
+            ix.chainDbPrepared = true;
+            if (!template) template = ix.indexerDbName;
+        }
+    }
+
+    /**
+     * Copy a ready venue chain database into another venue chain database on the
+     * server, table by table, with the same table set the standing seed copies.
+     */
+    async _copyChainDbWithinVenue(fromName, ix) {
+        const from = ident(fromName, 'database name');
+        const conn = await this._createChainDbConnection({
+            host: this.hubDb.host, port: parseInt(this.hubDb.port, 10),
+            user: this.hubDb.user, password: this.hubDb.pass,
+            database: ident(ix.indexerDbName, 'database name'), connectTimeout: 15000,
+        });
+        const started = Date.now();
+        let tables = 0, rows = 0;
+        try {
+            await conn.query('DROP TABLE IF EXISTS `' + CHAIN_SEED_MARKER + '`');
+            // Bulk-load into empty tables; MariaDB 10.6+ builds the indexes by sort.
+            await conn.query('SET SESSION FOREIGN_KEY_CHECKS = 0');
+            await conn.query('SET SESSION UNIQUE_CHECKS = 0');
+            const names = (await conn.query('SHOW FULL TABLES FROM `' + from + '` WHERE Table_type = \'BASE TABLE\''))
+                .map((r) => Object.values(r)[0]);
+            for (const t of names) {
+                // Same exclusions as the standing seed: hub-authored tables are per-run state.
+                // The template's own marker is not copied; this copy writes its own when done.
+                if (CHAIN_CLONE_SKIP_TABLES.has(t) || t === CHAIN_SEED_MARKER) continue;
+                const table = ident(t, 'table name');
+                // SHOW CREATE keeps the source AUTO_INCREMENT, as the standing seed does.
+                const create = (await conn.query('SHOW CREATE TABLE `' + from + '`.`' + table + '`'))[0]['Create Table'];
+                await conn.query('DROP TABLE IF EXISTS `' + table + '`');
+                await conn.query(create);
+                // Generated columns are computed on insert and cannot be written.
+                const cols = (await conn.query('SHOW COLUMNS FROM `' + from + '`.`' + table + '`'))
+                    .filter((c) => !/GENERATED/i.test(String(c.Extra || ''))).map((c) => '`' + c.Field + '`');
+                tables++;
+                if (cols.length === 0) continue;
+                const list = cols.join(', ');
+                const res = await conn.query('INSERT INTO `' + table + '` (' + list + ') SELECT ' + list +
+                    ' FROM `' + from + '`.`' + table + '`');
+                rows += Number(res && res.affectedRows !== undefined ? res.affectedRows : 0);
+            }
+            await writeSeedMarker(conn, from);
+        } finally {
+            try { await conn.query('SET SESSION FOREIGN_KEY_CHECKS = 1'); } catch (e) { /* closing anyway */ }
+            try { await conn.query('SET SESSION UNIQUE_CHECKS = 1'); } catch (e) { /* closing anyway */ }
+            await conn.end().catch(() => {});
+        }
+        console.log('attestMirrorVenue[' + this.label + ']: copied indexer ' + ix.index + '\'s chain database from ' +
+                    from + ' inside the venue - ' + tables + ' table(s), ' + rows + ' row(s) in ' +
+                    Math.round((Date.now() - started) / 1000) + 's, instead of a second row copy from the standing node.');
     }
 
     /**
@@ -2662,6 +2754,14 @@ class AttestMirrorVenue {
             'SELECT COUNT(*) AS c FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?',
             [ix.indexerDbName, 'actions']);
         if (Number(have[0].c) === 0) return false;
+        const marked = await this._conn.query(
+            'SELECT COUNT(*) AS c FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?',
+            [ix.indexerDbName, CHAIN_SEED_MARKER]);
+        if (Number(marked[0].c) === 0) {
+            console.log('attestMirrorVenue[' + this.label + ']: indexer ' + ix.index + ' holds a chain database ' +
+                        'with no ' + CHAIN_SEED_MARKER + ' marker, so its seed never finished; it is re-seeded.');
+            return false;
+        }
         const agrees = await this._chainDbAgreesWithStanding(ix, srcName);
         // Reuse only when both independent agreement checks pass.
         if (agrees.ok) {
@@ -2698,8 +2798,13 @@ class AttestMirrorVenue {
             // The copy is bulk-loaded into an empty schema, so the checks buy
             // nothing and the ordering constraint they impose would force a
             // dependency sort over 131 tables.
+            await dst.query('DROP TABLE IF EXISTS `' + CHAIN_SEED_MARKER + '`');
             await dst.query('SET FOREIGN_KEY_CHECKS = 0');
             await dst.query('SET UNIQUE_CHECKS = 0');
+            // Read every table at one instant: the standing node commits a block about
+            // every 20 s, and a table-by-table read without a snapshot mixes heights.
+            await src.query('SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+            await src.query('START TRANSACTION WITH CONSISTENT SNAPSHOT');
 
             const names = (await src.query('SHOW TABLES')).map((r) => Object.values(r)[0]);
             for (const t of names) {
@@ -2713,7 +2818,9 @@ class AttestMirrorVenue {
                 rows += await this._copyChainTable(src, dst, t);
                 tables++;
             }
+            await writeSeedMarker(dst, srcName);
         } finally {
+            try { await src.query('COMMIT'); } catch (e) { /* closing anyway */ }
             try { await dst.query('SET FOREIGN_KEY_CHECKS = 1'); } catch (e) { /* closing anyway */ }
             await src.end().catch(() => {});
             await dst.end().catch(() => {});
@@ -2785,7 +2892,7 @@ class AttestMirrorVenue {
         return rows;
     }
 
-    async _cloneChainDbFromStanding(ix) {
+    async _cloneChainDbFromStanding(ix, template) {
         // THE REPLAY PATH: make the database and hand it over empty. `XChainIndexer.start()`
         // calls verifyTables() on its own indexer database, so it builds its schema and then
         // parses the chain from genesis under this tree's rules.
@@ -2809,14 +2916,18 @@ class AttestMirrorVenue {
 
         await this._conn.query('CREATE DATABASE IF NOT EXISTS `' + ident(ix.indexerDbName, 'database name') + '`');
         if (await this._reuseChainDbIfMatching(ix, srcName)) return;
-        await this._seedChainDbFromStanding(ix, srcName);
+        // A template is a venue database this bring-up already seeded or verified.
+        if (template) await this._copyChainDbWithinVenue(template, ix);
+        else await this._seedChainDbFromStanding(ix, srcName);
     }
 
     async _spawnIndexer(i) {
         const ix = this.indexers[i];
 
-        // The chain database comes from the standing node, not from a replay.
-        await this._cloneChainDbFromStanding(ix);
+        // The chain database comes from the standing node, not from a replay. A
+        // bring-up prepares it once; a later respawn (a rebuild) seeds it again.
+        if (ix.chainDbPrepared) ix.chainDbPrepared = false;
+        else await this._cloneChainDbFromStanding(ix);
 
         // The mirror database is the one NOBODY creates for itself, and that is a
         // property of the code rather than an oversight here: `XChainIndexer.start()`
