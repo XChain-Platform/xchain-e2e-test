@@ -56,7 +56,7 @@ bridgeRailSuite('token AT2: a v4 burn of ' + BURN + ' back to a BTC address', fu
         const leg = await settleLeg('the AT2 burn',
             (r) => String(r.src_chain) === 'DOGE' && String(r.dest_chain) === 'BTC' &&
                    String(r.dest_address) === T.btcReceiver.address && String(r.tick) === T.tick, 'BTC');
-        state.evidence.at2_transfer = leg.transfer;
+        state.evidence.at2_transferReading = leg.transfer;
         const after = await tokenSnapshot('at2_after', T.tick, T.dest);
         after.receiver = await state.venue.addressBalance('BTC', T.btcReceiver.address, T.tick);
         state.evidence.at2 = { before, after };
@@ -65,5 +65,6 @@ bridgeRailSuite('token AT2: a v4 burn of ' + BURN + ' back to a BTC address', fu
         assert.strictEqual(after.escrow, LOCK - BURN, 'escrow reads ' + after.escrow);
         assert.strictEqual(after.supply, LOCK - BURN, 'DOGE supply reads ' + after.supply);
         assert.strictEqual(Number(after.destBridged), LOCK - BURN, T.dest.address + ' holds ' + after.destBridged);
+        state.evidence.at2_transfer = leg.transfer;
     });
 });
