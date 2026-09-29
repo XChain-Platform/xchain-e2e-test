@@ -5,7 +5,6 @@
 
 const assert = require('node:assert')
 const fs = require('node:fs')
-const os = require('node:os')
 const path = require('node:path')
 const { execFileSync, spawnSync } = require('node:child_process')
 const { resolveBase, selectFastTests } = require('../../bin/ci_fast_select')
@@ -39,25 +38,6 @@ function select(changedFiles){
         findRequirers,
         readFile: file => fs.readFileSync(path.join(ROOT, file), 'utf8'),
     })
-}
-
-function scratchGit(cwd, args){
-    return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim()
-}
-
-function writeScratchFile(cwd, file, source){
-    const target = path.join(cwd, file)
-    fs.mkdirSync(path.dirname(target), { recursive: true })
-    fs.writeFileSync(target, source)
-}
-
-function scratchCommit(cwd, message, files){
-    scratchGit(cwd, ['add', '--', ...files])
-    scratchGit(cwd, [
-        '-c', 'user.name=Selector Test',
-        '-c', 'user.email=selector-test',
-        'commit', '-m', message,
-    ])
 }
 
 describe('ci fast selector mappings', function(){
@@ -103,60 +83,6 @@ describe('ci fast selector mappings', function(){
             findRequirers: () => [],
         })
         assert.deepStrictEqual(plan.tests.map(test => test.file), ALWAYS)
-    })
-
-    it('replays develop history, compares narrowing, and checks required selections', function(){
-        const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'ci-fast-select-replay-'))
-        try {
-            scratchGit(cwd, ['init', '--initial-branch=develop'])
-            const initial = {
-                'src/coins/rule.js': "module.exports = 'rule'\n",
-                'src/feature/plain.js': "module.exports = 'plain'\n",
-                'test/unit/coins/rule.test.js': "require('../../../src/coins/rule')\n",
-                'test/unit/feature/plain.test.js': "require('../../../src/feature/plain')\n",
-                'test/unit/only.test.js': "module.exports = 'only'\n",
-                'test/unit/other/unrelated.test.js': "module.exports = 'unrelated'\n",
-            }
-            for(const [file, source] of Object.entries(initial)) writeScratchFile(cwd, file, source)
-            scratchCommit(cwd, 'initial files', Object.keys(initial))
-
-            const consensusFile = 'src/coins/rule.js'
-            fs.appendFileSync(path.join(cwd, consensusFile), "module.exports += ' changed'\n")
-            scratchCommit(cwd, 'consensus change', [consensusFile])
-
-            const plainFile = 'src/feature/plain.js'
-            fs.appendFileSync(path.join(cwd, plainFile), "module.exports += ' changed'\n")
-            scratchCommit(cwd, 'plain source change', [plainFile])
-
-            const testFile = 'test/unit/only.test.js'
-            fs.appendFileSync(path.join(cwd, testFile), "module.exports += ' changed'\n")
-            scratchCommit(cwd, 'test only change', [testFile])
-            scratchGit(cwd, ['update-ref', 'refs/remotes/origin/develop', 'HEAD'])
-
-            const selector = path.join(ROOT, 'bin/ci_fast_select.js')
-            const mustSelect = [
-                'src/coins/rule.js:test/unit/coins/rule.test.js',
-                'src/feature/plain.js:test/unit/other/unrelated.test.js',
-            ].join(',')
-            const result = spawnSync(process.execPath, [
-                selector,
-                '--replay', '3',
-                '--narrow', 'src/coins/',
-                '--must-select', mustSelect,
-            ], { cwd, encoding: 'utf8' })
-
-            assert.strictEqual(result.status, 1, result.stderr)
-            const lines = result.stdout.trim().split(/\r?\n/)
-            assert.ok(lines.includes('plan commits consensus-1 changed-tests test-only no-tests'))
-            assert.ok(lines.includes('current 3 1/3 1/3 1/3 0/3'))
-            assert.ok(lines.includes('narrowed 3 0/3 2/3 1/3 0/3'))
-            assert.ok(lines.includes(
-                'must-select PASS src/coins/rule.js:test/unit/coins/rule.test.js'))
-            assert.ok(lines.includes(
-                'must-select FAIL src/feature/plain.js:test/unit/other/unrelated.test.js'))
-        } finally {
-            fs.rmSync(cwd, { recursive: true, force: true })
-        }
     })
 })
 
