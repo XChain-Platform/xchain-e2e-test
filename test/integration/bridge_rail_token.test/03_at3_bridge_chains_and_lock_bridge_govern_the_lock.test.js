@@ -96,7 +96,7 @@ bridgeRailSuite(GROUP, function () {
         steps.burnAfterNone = await dogeAction(A.dest, burnWireV4('BTC.' + A.tick, A.issuer.address, 1, 'AT3 burn'), 'xbridges');
         assert.strictEqual(steps.burnAfterNone.status, 'valid', 'the v4 burn after BRIDGE_CHAINS=- graded ' + steps.burnAfterNone.status);
         const leg = await settleLeg('the AT3 burn',
-            (r) => String(r.src_chain) === 'DOGE' && String(r.dest_address) === A.issuer.address && String(r.tick) === A.tick, 'BTC');
+            (r) => String(r.src_chain) === 'DOGE' && String(r.dest_address) === A.issuer.address && String(r.tick) === 'BTC.' + A.tick, 'BTC');
         steps.burnTransferReading = leg.transfer;
         steps.destBalanceAfterBurn = await state.venue.addressBalance('DOGE', A.dest.address, 'BTC.' + A.tick);
         assert.strictEqual(Number(steps.destBalanceAfterBurn), 2, A.dest.address + ' holds ' + steps.destBalanceAfterBurn + ' after the burn');
