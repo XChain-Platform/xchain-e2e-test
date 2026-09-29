@@ -33,6 +33,7 @@ const {
     journalCase,
 } = require('../../../helpers/bridgeRailVenue');
 const token = require('./token');
+const { dropStaleReplayBeforeVenue } = require('./stale_replay');
 
 async function pingDriveHub(connector) {
     const response = await axios.post(connector.urls[0], {
@@ -73,6 +74,7 @@ const TOKEN_DRIVE = {
     journalSuite: 'bridgeRailToken',
     logTag: 'TOKEN RAIL',
     readoutTitle: 'token rail drive readouts',
+    dropStaleReplay: true,
     // BTC at 2, not the rail's pinned 1 (token rail drive 25): at depth 1 the hub can stamp a
     // snapshot_block below the lock's own block and the DOGE escrow proof then refuses a
     // correct lock (hub finding 1 of 2026-09-17_pb-v020-rail-token.md).
@@ -146,6 +148,7 @@ function createRailDrive(cfg) {
     }
 
     async function startVenue(mesh) {
+        if (cfg.dropStaleReplay) await dropStaleReplayBeforeVenue(cfg.label);
         state.venue = new BridgeRailVenue({
             label: cfg.label,
             basePort: cfg.basePort,
