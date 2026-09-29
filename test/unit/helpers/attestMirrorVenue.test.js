@@ -996,6 +996,102 @@ describe('attestMirrorVenue: reusable chain databases', function () {
         assert.strictEqual(state.sourceEnded, true)
         assert.match(state.logs.join('\n'), /indexer 5.*same ledger hash.*not re-seeding/i)
     })
+
+    function prepareFixture(agreeing) {
+        const calls = []
+        const venue = new AttestMirrorVenue({ label: 'prep', hubDb: DB })
+        venue.indexers = [0, 1, 2].map((i) => ({ index: i, indexerDbName: 'XChain_AM_MVH_prep_Ixr' + i }))
+        venue._conn = { query: async () => [] }
+        venue._reuseChainDbIfMatching = async (ix) => agreeing.includes(ix.index)
+        venue._seedChainDbFromStanding = async (ix) => { calls.push('seed ' + ix.index) }
+        venue._copyChainDbWithinVenue = async (from, ix) => { calls.push('copy ' + from + ' -> ' + ix.index) }
+        return { venue, calls }
+    }
+
+    it('seeds the first chain database once and copies it to the rest inside the venue', async () => {
+        const { venue, calls } = prepareFixture([])
+        await venue._prepareChainDbs()
+        assert.deepStrictEqual(calls, [
+            'seed 0',
+            'copy XChain_AM_MVH_prep_Ixr0 -> 1',
+            'copy XChain_AM_MVH_prep_Ixr0 -> 2',
+        ])
+        assert.ok(venue.indexers.every((ix) => ix.chainDbPrepared === true))
+    })
+
+    it('keeps an agreeing database and copies it to one that diverged', async () => {
+        const { venue, calls } = prepareFixture([0, 2])
+        await venue._prepareChainDbs()
+        assert.deepStrictEqual(calls, ['copy XChain_AM_MVH_prep_Ixr0 -> 1'])
+    })
+
+    it('leaves a replay venue to replay each indexer itself', async () => {
+        const { venue, calls } = prepareFixture([])
+        venue.replayChain = true
+        await venue._prepareChainDbs()
+        assert.deepStrictEqual(calls, [])
+        assert.ok(venue.indexers.every((ix) => ix.chainDbPrepared === undefined))
+    })
+
+    it('spawns a prepared indexer without seeding and seeds a respawned one again', async () => {
+        const venue = new AttestMirrorVenue({ label: 'prep', hubDb: DB })
+        const ix = { index: 0, indexerDbName: 'XChain_AM_MVH_prep_Ixr0', mirrorDbName: 'XChain_AM_MVH_prep_Mirror0', chainDbPrepared: true }
+        venue.indexers = [ix]
+        let seeded = 0
+        venue._cloneChainDbFromStanding = async () => { seeded++ }
+        // Stop right after the chain database step; the mirror step is not under test.
+        venue._conn = { query: async () => { throw new Error('stop') } }
+        await assert.rejects(venue._spawnIndexer(0), /stop/)
+        assert.strictEqual(seeded, 0)
+        assert.strictEqual(ix.chainDbPrepared, false)
+        await assert.rejects(venue._spawnIndexer(0), /stop/)
+        assert.strictEqual(seeded, 1)
+    })
+
+    it('copies every base table server-side except the hub-authored ones, skipping generated columns', async () => {
+        const venue = new AttestMirrorVenue({ label: 'prep', hubDb: DB })
+        const sql = []
+        let opened = null, ended = false
+        venue._createChainDbConnection = async (opts) => {
+            opened = opts
+            return {
+                query: async (q) => {
+                    sql.push(q)
+                    if (q.startsWith('SHOW FULL TABLES')) return [{ t: 'blocks' }, { t: 'price_snapshots' }, { t: 'actions' }]
+                    if (q.startsWith('SHOW CREATE TABLE')) return [{ 'Create Table': 'CREATE TABLE `x` (id int) AUTO_INCREMENT=9' }]
+                    if (q.startsWith('SHOW COLUMNS')) return [{ Field: 'id', Extra: '' }, { Field: 'g', Extra: 'VIRTUAL GENERATED' }]
+                    if (q.startsWith('INSERT')) return { affectedRows: 5 }
+                    return []
+                },
+                end: async () => { ended = true },
+            }
+        }
+        const logs = []
+        const saved = console.log
+        console.log = (line) => logs.push(String(line))
+        try {
+            await venue._copyChainDbWithinVenue('XChain_AM_MVH_prep_Ixr0', { index: 3, indexerDbName: 'XChain_AM_MVH_prep_Ixr3' })
+        } finally { console.log = saved }
+        assert.strictEqual(opened.database, 'XChain_AM_MVH_prep_Ixr3')
+        assert.strictEqual(opened.user, DB.user)
+        assert.ok(!sql.some((q) => q.includes('price_snapshots') && !q.startsWith('SHOW FULL')))
+        const inserts = sql.filter((q) => q.startsWith('INSERT'))
+        assert.deepStrictEqual(inserts, [
+            'INSERT INTO `blocks` (`id`) SELECT `id` FROM `XChain_AM_MVH_prep_Ixr0`.`blocks`',
+            'INSERT INTO `actions` (`id`) SELECT `id` FROM `XChain_AM_MVH_prep_Ixr0`.`actions`',
+        ])
+        assert.ok(sql.includes('DROP TABLE IF EXISTS `blocks`'))
+        assert.strictEqual(sql[sql.length - 1], 'SET SESSION UNIQUE_CHECKS = 1')
+        assert.ok(ended)
+        assert.match(logs.join('\n'), /copied indexer 3.*2 table\(s\), 10 row\(s\)/)
+    })
+
+    it('refuses an unsafe template name before connecting', async () => {
+        const venue = new AttestMirrorVenue({ label: 'prep', hubDb: DB })
+        venue._createChainDbConnection = async () => { throw new Error('connected') }
+        await assert.rejects(venue._copyChainDbWithinVenue('bad name; DROP', { index: 1, indexerDbName: 'XChain_AM_MVH_prep_Ixr1' }),
+            /database name/i)
+    })
 })
 
 describe('attestMirrorVenue: coin codes', function () {
