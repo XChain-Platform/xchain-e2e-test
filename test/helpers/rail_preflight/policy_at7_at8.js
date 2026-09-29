@@ -77,6 +77,19 @@ function policyInvariantReading(readings, minimum) {
     return { enough: rows.length >= needed, covered: rows.length, mismatches };
 }
 
+function policyAt8Upstream(policy, evidence) {
+    const state = policy || {};
+    const proof = evidence || {};
+    const main = state.main || {};
+    const lag = state.lag || {};
+    const gap = state.gap || {};
+    const finalizedUpstream = [proof.at1_mirror, gap.seq1, lag.seq1]
+        .filter(Boolean).length;
+    const cap = !!(main.tick && main.listIndex && lag.tick && lag.listIndex &&
+        proof.at1_mirror && lag.seq1);
+    return { cap, finalizedUpstream };
+}
+
 function bridgeLockRowMatches(row, expected) {
     if (!row || !expected) return false;
     return String(row.tick) === String(expected.tick) &&
@@ -90,6 +103,7 @@ module.exports = {
     feeScheduleReady,
     newestFinalizedSnapshot,
     nextFinalizedSnapshot,
+    policyAt8Upstream,
     policyFinalizationBudgetMs,
     policyInvariantOriginLookup,
     policyInvariantReading,

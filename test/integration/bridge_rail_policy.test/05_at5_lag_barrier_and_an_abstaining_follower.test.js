@@ -105,6 +105,7 @@ bridgeRailSuite(GROUP, function () {
         if (needsFederation(this, 'policy AT5 release')) return;
         const L = state.policy.lag;
         assert.ok(L.withheld, 'the barrier half must have run');
+        assert.ok(L.seq1, 'the barrier half must have run and finalized seq 1');
         state.venue.dogeVenue.releaseMirrorTable(0, TABLE);
         L.withheld = false;
         const policy = await waitForAppliedSeq(L.tick, 1);
