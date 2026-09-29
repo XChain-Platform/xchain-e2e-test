@@ -157,18 +157,19 @@ bridgeRailSuite(GROUP, function () {
             return settlements.length >= ids.length;
         }, { timeoutMs: policyApplyBudgetMs("DOGE") });
         const reading = capOrderReading(held.rows, settlements, cap);
-        state.evidence.at8_cap = { block: mined.block, locks: mined.txs.length, dogeHeld: held.held, reading,
+        state.evidence.at8_capReading = { block: mined.block, locks: mined.txs.length, dogeHeld: held.held, reading,
             destA: await state.venue.addressBalance('DOGE', C.dest.address, T.bridged),
             destB: await state.venue.addressBalance('DOGE', C.dest.address, 'BTC.' + C.tick2) };
         assert.ok(reading.ok, reading.reason);
-        assert.strictEqual(Number(state.evidence.at8_cap.destA), PER_TICK, C.dest.address + ' holds ' + state.evidence.at8_cap.destA + ' ' + T.bridged);
-        assert.strictEqual(Number(state.evidence.at8_cap.destB), PER_TICK, C.dest.address + ' holds ' + state.evidence.at8_cap.destB + ' BTC.' + C.tick2);
+        assert.strictEqual(Number(state.evidence.at8_capReading.destA), PER_TICK, C.dest.address + ' holds ' + state.evidence.at8_capReading.destA + ' ' + T.bridged);
+        assert.strictEqual(Number(state.evidence.at8_capReading.destB), PER_TICK, C.dest.address + ' holds ' + state.evidence.at8_capReading.destB + ' BTC.' + C.tick2);
         if (held.held) {
             assert.deepStrictEqual(reading.groups.map((g) => g.count), [cap, 5],
                 'a held destination applied the thirty legs as ' + JSON.stringify(reading.groups) + ' and not as ' + cap + ' then 5');
         } else {
             console.log('  token AT8 cap split read ' + JSON.stringify(reading.groups) + ' with the DOGE loop NOT held (no BRIDGE_RAIL_DOGE_MINER_PAUSE_FILE)');
         }
+        state.evidence.at8_cap = state.evidence.at8_capReading;
     });
 });
 
