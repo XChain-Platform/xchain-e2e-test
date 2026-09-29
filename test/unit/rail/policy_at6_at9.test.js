@@ -61,3 +61,19 @@ describe('bridged copy ISSUE verdict', function () {
         });
     }
 });
+
+describe('policy AT6 burn while the tick sleeps', function () {
+    const text = () => fs.readFileSync(path.join(POLICY_DIR, '06_at6_the_origin_sleep_reaches_the_copy.test.js'), 'utf8');
+    const burnCase = () => text().split("it('policy AT6 (burn)")[1].split("it('policy AT6 (wake)")[0];
+
+    it('expects the refusal the indexer gives a v4 burn of a sleeping copy (operator ruling 2026-09-29)', function () {
+        assert.ok(/burn\.status, 'invalid: TICK \(sleeping\)'/.test(burnCase()),
+            'the AT6 burn case does not assert invalid: TICK (sleeping)');
+        assert.ok(!/burn\.status, 'valid'/.test(burnCase()), 'the AT6 burn case still expects the burn to apply');
+    });
+
+    it('still proves the refused burn moved no balance on either chain', function () {
+        assert.ok(/Number\(after\), Number\(before\)/.test(burnCase()), 'the copy holder balance is not compared');
+        assert.ok(/Number\(received\), 0/.test(burnCase()), 'the BTC receiver balance is not checked');
+    });
+});

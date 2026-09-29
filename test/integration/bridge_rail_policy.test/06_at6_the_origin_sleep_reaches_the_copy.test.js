@@ -13,8 +13,8 @@
  **********************************************************************
  *
  * Policy AT6 (sleep): the issuer sleeps the token on BTC; DOGE applies a snapshot with
- * sleeping 1 and transfers of the copy are `invalid: TICK (sleeping)`; a v4 burn still applies
- * (token spec D44); the issuer wakes it and the copy wakes within one cycle.
+ * sleeping 1 and transfers of the copy are `invalid: TICK (sleeping)`; a v4 burn is refused while
+ * the tick sleeps (operator ruling 2026-09-29); the issuer wakes it and the copy wakes within one cycle.
  *
  * THE WAKE is a SLEEP format 1 whose RESUME_BLOCK is the next BTC block: the sleep read treats
  * a row as asleep only at -1 or a future block (policy spec section 4, D8), so the origin reads
@@ -37,7 +37,6 @@ const {
     btcAction,
     dogeAction,
     fundBtc,
-    settleLeg,
     hubPolicyRows,
     waitForAppliedSeq,
     copyPolicy,
@@ -90,21 +89,21 @@ bridgeRailSuite(GROUP, function () {
 });
 
 bridgeRailSuite(GROUP, function () {
-    it('policy AT6 (burn): a v4 burn of the sleeping copy still applies and the BTC side releases it', async function () {
+    it('policy AT6 (burn): a v4 burn of the sleeping copy is refused while the tick sleeps and moves no balance', async function () {
         this.timeout(0);
         if (needsFederation(this, 'policy AT6 burn')) return;
         const M = state.policy.main;
         assert.ok(M.sleepSeq, 'the sleep half must have run');
         assert.ok(state.evidence.at6_sleep && state.evidence.at6_sleep.copySleeping === true, 'the sleep half must have run and slept the copy');
         M.btcReceiver = await fundBtc('POLICY.AT6.RECEIVER');
+        const before = await state.venue.addressBalance('DOGE', M.dest.address, 'BTC.' + M.tick);
         const burn = await dogeAction(M.dest, burnWireV4('BTC.' + M.tick, M.btcReceiver.address, 1, 'policy AT6 burn'), 'xbridges');
-        state.evidence.at6_burn = { burn };
-        assert.strictEqual(burn.status, 'valid', 'a v4 burn of the sleeping copy graded ' + burn.status);
-        const leg = await settleLeg('the policy AT6 burn',
-            (r) => String(r.src_chain) === 'DOGE' && String(r.dest_address) === M.btcReceiver.address && String(r.tick) === M.tick, 'BTC');
-        state.evidence.at6_burn.transfer = leg.transfer;
+        const after = await state.venue.addressBalance('DOGE', M.dest.address, 'BTC.' + M.tick);
         const received = await state.venue.addressBalance('BTC', M.btcReceiver.address, M.tick);
-        assert.strictEqual(Number(received), 1, M.btcReceiver.address + ' holds ' + received + ' ' + M.tick + ' after the burn released');
+        state.evidence.at6_burn = { burn, before, after, received };
+        assert.strictEqual(burn.status, 'invalid: TICK (sleeping)', 'a v4 burn of the sleeping copy graded ' + burn.status);
+        assert.strictEqual(Number(after), Number(before), M.dest.address + ' holds ' + after + ' BTC.' + M.tick + ' after the refused burn, was ' + before);
+        assert.strictEqual(Number(received), 0, M.btcReceiver.address + ' holds ' + received + ' ' + M.tick + ' after a refused burn');
     });
 });
 
