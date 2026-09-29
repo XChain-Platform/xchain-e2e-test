@@ -31,6 +31,69 @@ function recordedWait(method, venue, opts) {
     return bound[method]('POLA', 1, opts).then(() => recorded);
 }
 
+function snapshot(id, seq, status) {
+    return { snapshot_id: id, policy_seq: seq, status: status, tick: 'POLA' };
+}
+
+function snapshotSupport(readings) {
+    const hubs = [0, 1, 2, 3].map((index) => ({ index: index, dbName: 'hub' + index }));
+    const venue = {
+        hubs: hubs,
+        queryHubDb: async (dbName) => {
+            const reading = readings[dbName];
+            if (reading instanceof Error) throw reading;
+            return reading.map((row) => Object.assign({}, row));
+        },
+    };
+    return policy.bind({ venue: venue }, {});
+}
+
+describe('policy support snapshot rows across every venue hub', function () {
+    it('reads a snapshot held on hubs 2 and 3 when hub 0 has no row', async function () {
+        const support = snapshotSupport({
+            hub0: [],
+            hub1: [],
+            hub2: [snapshot('snapshot-2', 2, 'finalized')],
+            hub3: [snapshot('snapshot-2', 2, 'finalized')],
+        });
+
+        const rows = await support.hubPolicyRows('POLA');
+        assert.deepStrictEqual(rows.map((row) => row.snapshot_id), ['snapshot-2']);
+    });
+
+    it('reads one snapshot once and keeps its finalized row', async function () {
+        const support = snapshotSupport({
+            hub0: [],
+            hub1: [snapshot('snapshot-2', 2, 'pending')],
+            hub2: [snapshot('snapshot-1', 1, 'finalized'), snapshot('snapshot-2', 2, 'finalized')],
+            hub3: [],
+        });
+
+        const rows = await support.hubPolicyRows('POLA');
+        assert.deepStrictEqual(rows.map((row) => row.snapshot_id), ['snapshot-1', 'snapshot-2']);
+        assert.strictEqual(rows[1].status, 'finalized');
+    });
+
+    it('keeps other hubs visible when one hub read throws', async function () {
+        const support = snapshotSupport({
+            hub0: new Error('hub 0 unavailable'),
+            hub1: [],
+            hub2: [snapshot('snapshot-1', 1, 'finalized')],
+            hub3: [],
+        });
+
+        const rows = await support.hubPolicyRows('POLA');
+        assert.deepStrictEqual(rows.map((row) => row.snapshot_id), ['snapshot-1']);
+    });
+
+    it('rejects when every hub read throws', async function () {
+        const errors = [0, 1, 2, 3].map((index) => new Error('hub ' + index + ' unavailable'));
+        const support = snapshotSupport({ hub0: errors[0], hub1: errors[1], hub2: errors[2], hub3: errors[3] });
+
+        await assert.rejects(support.hubPolicyRows('POLA'), (error) => error === errors[3]);
+    });
+});
+
 describe('policy support finalized-snapshot wait', function () {
     it('defaults to the policy finalization budget of the venue poll cadence', async function () {
         const short = await recordedWait('waitForFinalizedSeq', { pollMs: 15000 });

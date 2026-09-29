@@ -117,9 +117,14 @@ async function holdDogeUntilDue(dest, count) {
     const rows = await withMiningPaused(dogeMiner, async () => {
         let finalized = [];
         await venue.waitUntil('all ' + count + ' cap locks to finalize', async () => {
-            finalized = await venue.queryHubDb(venue.hubs[0].dbName,
-                "SELECT transfer_id, snapshot_block, effective_time, tick FROM bridge_transfers " +
-                "WHERE dest_address = ? AND status = 'finalized'", [dest.address]);
+            const seen = new Map();
+            for (const hub of venue.hubs) {
+                const hubRows = await venue.queryHubDb(hub.dbName,
+                    "SELECT transfer_id, snapshot_block, effective_time, tick FROM bridge_transfers " +
+                    "WHERE dest_address = ? AND status = 'finalized'", [dest.address]);
+                for (const row of hubRows) seen.set(String(row.transfer_id), row);
+            }
+            finalized = [...seen.values()];
             return finalized.length >= count;
         }, { timeoutMs: 45 * 60 * 1000 });
         const due = Math.max(...finalized.map((r) => Number(r.effective_time))) + 5;
