@@ -69,6 +69,20 @@ async function indexedBtcBlock(){
     return block;
 }
 
+async function unusedSnapshotBlock(){
+    const latest = await indexedBtcBlock();
+    const floor = Math.max(0, latest - 1024);
+    const rows = await indexerQuery(
+        'SELECT DISTINCT snapshot_block FROM capability_snapshots ' +
+        'WHERE snapshot_block BETWEEN ? AND ?', [floor, latest]
+    );
+    const occupied = new Set(rows.map((row) => Number(row.snapshot_block)));
+    for(let candidate = latest; candidate >= floor; candidate--){
+        if(!occupied.has(candidate)) return candidate;
+    }
+    assert.fail('no unused BTC snapshot block is available for the isolated capability fixture');
+}
+
 async function allHubs(sql, params){
     for(const hub of mvh.hubs) await hub.db.doQuery(sql, params);
 }
@@ -157,6 +171,14 @@ async function seedCapabilities(){
                 [snapshotBlock, capability, pubkey, '1', pubkey]);
         }
     }
+    const rows = await indexerQuery(
+        'SELECT capability, signing_pubkey, source FROM capability_snapshots WHERE snapshot_block = ? ' +
+        'ORDER BY capability, signing_pubkey, source', [snapshotBlock]
+    );
+    const expected = ['cross_chain', 'oracle_publish'].flatMap((capability) =>
+        [...pubkeys].sort().map((pubkey) => [capability, pubkey, pubkey]));
+    assert.deepStrictEqual(rows.map((row) => [row.capability, row.signing_pubkey, row.source]), expected,
+        'the indexer capability fixture contains only the AF2 validators');
 }
 
 async function proveFederationReady(){
@@ -191,7 +213,7 @@ async function seedBatchFloor(){
 }
 
 async function startFederation(){
-    snapshotBlock = await indexedBtcBlock();
+    snapshotBlock = await unusedSnapshotBlock();
     process.env.XDEX_SNAPSHOT_BLOCK = String(snapshotBlock);
     mvh = new MultiValidatorHub({
         count: N,
@@ -203,7 +225,10 @@ async function startFederation(){
     await mvh.start();
     identities = mvh.identities.map((item) => new ValidatorIdentity(item.privkeyHex));
     pubkeys = mvh.getPubkeys().map((pubkey) => pubkey.toLowerCase());
-    mvh.hubs.forEach((hub) => { hub.peerManager.effectiveSignerSet = new Set(pubkeys); });
+    mvh.hubs.forEach((hub) => {
+        hub.peerManager.setEffectiveSignerSet = () => {};
+        hub.peerManager.effectiveSignerSet = new Set(pubkeys);
+    });
     foldRequests = Array(N).fill(0);
     weightSeed = seedWeightSnapshot(mvh, { blockIndex: snapshotBlock, network: 'regtest' });
     mvh.hubs.forEach(observePublisher);
@@ -332,7 +357,9 @@ async function driveAcceptance(){
 
     const rows = await waitForIndexedCycle(parsed[0].entry.txid);
     assert.ok(rows.length > 0, 'the v3 checkpoint transaction was indexed');
-    assert.ok(rows.every((row) => String(row.status) === 'valid'), 'every indexed v3 row is valid');
+    const statuses = rows.map((row) => String(row.status));
+    assert.deepStrictEqual(statuses, Array(rows.length).fill('valid'),
+        'every indexed v3 row is valid: ' + JSON.stringify(statuses));
     const summary = summarizeAnchorCycle(rows);
     assert.strictEqual(new Set(rows.map((row) => String(row.action_index))).size, 1, 'one indexed action');
     assert.strictEqual(summary.chainSections, 1, 'the indexed cycle retains its checkpoint section');
@@ -343,6 +370,13 @@ async function driveAcceptance(){
 
 async function cleanup(){
     for(const restore of faultRestores.splice(0)) restore();
+    if(snapshotBlock !== null && pubkeys.length){
+        await indexerQuery(
+            'DELETE FROM capability_snapshots WHERE snapshot_block = ? AND signing_pubkey IN (' +
+            pubkeys.map(() => '?').join(',') + ") AND capability IN ('oracle_publish', 'cross_chain')",
+            [snapshotBlock, ...pubkeys]
+        );
+    }
     if(weightSeed){ weightSeed.restore(); weightSeed = null; }
     if(mvh){ await mvh.stop(); await mvh.dropDatabases(); mvh = null; }
     if(hubDb){ await hubDb.stop(); hubDb = null; }

@@ -106,6 +106,20 @@ async function indexedBtcBlock(){
     return block;
 }
 
+async function unusedSnapshotBlock(){
+    const latest = await indexedBtcBlock();
+    const floor = Math.max(0, latest - 1024);
+    const rows = await indexerQuery(
+        'SELECT DISTINCT snapshot_block FROM capability_snapshots ' +
+        'WHERE snapshot_block BETWEEN ? AND ?', [floor, latest]
+    );
+    const occupied = new Set(rows.map((row) => Number(row.snapshot_block)));
+    for(let candidate = latest; candidate >= floor; candidate--){
+        if(!occupied.has(candidate)) return candidate;
+    }
+    assert.fail('no unused BTC snapshot block is available for the isolated capability fixture');
+}
+
 function signedCheckpoint(chain, sequence, snapshotBlock){
     const row = {
         chain, network: 'regtest', block_index: 100000 + sequence,
@@ -164,7 +178,7 @@ async function startVenue(){
 }
 
 async function startHub(){
-    snapshotBlock = await indexedBtcBlock();
+    snapshotBlock = await unusedSnapshotBlock();
     process.env.XDEX_SEED_LOCAL_VALIDATOR = '1';
     process.env.XDEX_SNAPSHOT_BLOCK = String(snapshotBlock);
     process.env.CHECKPOINT_CHAINS = 'DOGE';
@@ -183,6 +197,7 @@ async function startHub(){
     await mvh.start();
     hub = mvh.hubs[0];
     identity = new ValidatorIdentity(mvh.identities[0].privkeyHex);
+    hub.peerManager.setEffectiveSignerSet = () => {};
     hub.peerManager.effectiveSignerSet = new Set([identity.getPubkeyHex().toLowerCase()]);
     checkpointEngine = loadHubModule('src/anchor/checkpoint_engine.js');
     weightSeed = seedWeightSnapshot(mvh, { blockIndex: snapshotBlock, network: 'regtest' });
@@ -214,6 +229,14 @@ async function wireBroadcastHook(){
 }
 
 async function stopHub(){
+    if(identity && snapshotBlock !== null){
+        const pubkey = identity.getPubkeyHex().toLowerCase();
+        await indexerQuery(
+            "DELETE FROM capability_snapshots WHERE snapshot_block = ? AND signing_pubkey = ? " +
+            "AND capability IN ('oracle_publish', 'cross_chain')",
+            [snapshotBlock, pubkey]
+        );
+    }
     if(weightSeed) weightSeed.restore();
     if(mvh){ await mvh.stop(); await mvh.dropDatabases(); }
     if(hubDb) await hubDb.stop();
@@ -261,6 +284,13 @@ async function seedCapabilities(snapshotBlock){
             [snapshotBlock, capability, pubkey, '1', pubkey]
         );
     }
+    const rows = await indexerQuery(
+        'SELECT capability, signing_pubkey, source FROM capability_snapshots WHERE snapshot_block = ? ' +
+        'ORDER BY capability, signing_pubkey, source', [snapshotBlock]
+    );
+    assert.deepStrictEqual(rows.map((row) => [row.capability, row.signing_pubkey, row.source]), [
+        ['cross_chain', pubkey, pubkey], ['oracle_publish', pubkey, pubkey]
+    ], 'the indexer capability fixture contains only the AF1 validator');
 }
 
 async function insertPendingArchive(snapshotBlock){
@@ -311,10 +341,16 @@ async function indexedCycle(txid){
 async function acceptFoldedCycle(){
     const doge = await createCheckpointSet();
     const snapshotBlock = Number(doge.snapshot_block);
+    const prior = await indexerQuery(
+        'SELECT COALESCE(MAX(checkpoint_seq), -1) + 1 AS sequence FROM anchor_actions ' +
+        "WHERE chain = 'DOGE' AND network = 'regtest'"
+    );
+    await insertCheckpoint(signedCheckpoint('DOGE', Number(prior[0].sequence), snapshotBlock));
     await seedCapabilities(snapshotBlock);
     await insertPendingArchive(snapshotBlock);
     const checkpointRows = await hub.db.doQuery(
-        'SELECT chain FROM state_checkpoints WHERE network = ? AND snapshot_block = ? AND anchor_txid IS NULL',
+        'SELECT DISTINCT chain FROM state_checkpoints ' +
+        'WHERE network = ? AND snapshot_block = ? AND anchor_txid IS NULL',
         ['regtest', snapshotBlock]
     );
     const checkpointChains = checkpointRows.map((row) => String(row.chain)).sort();
@@ -336,7 +372,9 @@ async function acceptFoldedCycle(){
     assert.strictEqual(parsed.archiveCount, 1, 'the v3 wire carries one archive section');
     const rows = await indexedCycle(broadcasts[0].txid);
     assert.strictEqual(rows.length, checkpointChains.length + 1, 'indexer stored all folded rows');
-    assert.ok(rows.every((row) => String(row.status) === 'valid'), 'every indexed v3 row is valid');
+    const statuses = rows.map((row) => String(row.status));
+    assert.deepStrictEqual(statuses, Array(rows.length).fill('valid'),
+        'every indexed v3 row is valid: ' + JSON.stringify(statuses));
     const reading = summarizeAnchorCycle(rows);
     assert.strictEqual(new Set(rows.map((row) => String(row.action_index))).size, 1,
         'indexed cycle has one action index');
