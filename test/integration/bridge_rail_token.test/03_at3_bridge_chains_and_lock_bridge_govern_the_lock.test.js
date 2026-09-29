@@ -93,9 +93,10 @@ bridgeRailSuite(GROUP, function () {
         assert.strictEqual(steps.burnAfterNone.status, 'valid', 'the v4 burn after BRIDGE_CHAINS=- graded ' + steps.burnAfterNone.status);
         const leg = await settleLeg('the AT3 burn',
             (r) => String(r.src_chain) === 'DOGE' && String(r.dest_address) === A.issuer.address && String(r.tick) === A.tick, 'BTC');
-        steps.burnTransfer = leg.transfer;
+        steps.burnTransferReading = leg.transfer;
         steps.destBalanceAfterBurn = await state.venue.addressBalance('DOGE', A.dest.address, 'BTC.' + A.tick);
         assert.strictEqual(Number(steps.destBalanceAfterBurn), 2, A.dest.address + ' holds ' + steps.destBalanceAfterBurn + ' after the burn');
+        steps.burnTransfer = steps.burnTransferReading;
     });
 });
 
