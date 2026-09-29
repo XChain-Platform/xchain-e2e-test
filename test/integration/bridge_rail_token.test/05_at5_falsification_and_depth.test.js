@@ -58,10 +58,8 @@ async function signedTokenTemplate() {
     let rows = [];
     for (const hub of state.venue.hubs) {
         rows = await state.venue.queryHubDb(hub.dbName,
-            ("SELECT * FROM bridge_transfers WHERE tick = ? AND dest_chain = 'DOGE' AND status = finalized " +
-                "AND transfer_id NOT LIKE at5% ORDER BY id DESC LIMIT 1")
-                .replace('status = finalized', "status = 'finalized'")
-                .replace('NOT LIKE at5%', "NOT LIKE 'at5%'"), [state.tokens.tick]);
+            "SELECT * FROM bridge_transfers WHERE tick = ? AND dest_chain = 'DOGE' AND status = 'finalized' " +
+            "AND transfer_id NOT LIKE 'at5%' ORDER BY id DESC LIMIT 1", [state.tokens.tick]);
         if (rows.length) break;
     }
     assert.ok(rows.length, 'AT5 perturbs a row the federation really signed for ' + state.tokens.tick + ', so AT1 must have run');
