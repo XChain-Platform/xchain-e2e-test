@@ -101,7 +101,7 @@ bridgeRailSuite(GROUP, function () {
         const root = await state.venue.tokenParameters('DOGE', ((await rowsLike('DOGE', 'BTC'))[0] || {}).tick || 'BTC');
         const child = await state.venue.tokenParameters('DOGE', T.bridged);
         state.evidence.at1_dogeRoot = root;
-        state.evidence.at1_dogeChild = child;
+        state.evidence.at1_dogeChildReading = child;
         assert.ok(root, 'DOGE holds no BTC root row after the in leg');
         assert.ok(child, 'DOGE holds no ' + T.bridged + ' row after the in leg');
         assert.strictEqual(root.ownerAddress, state.evidence.bridgeRoleDoge, 'the BTC root on DOGE is owned by ' + root.ownerAddress);
@@ -111,6 +111,7 @@ bridgeRailSuite(GROUP, function () {
         assert.strictEqual(Number(snap.destBridged), LOCK, T.dest.address + ' holds ' + snap.destBridged + ' ' + T.bridged);
         assert.strictEqual(snap.supply, LOCK, T.bridged + ' supply on DOGE reads ' + snap.supply);
         assert.strictEqual(snap.escrow, LOCK, 'the BTC escrow holds ' + snap.escrow);
+        state.evidence.at1_dogeChild = child;
     });
 });
 
