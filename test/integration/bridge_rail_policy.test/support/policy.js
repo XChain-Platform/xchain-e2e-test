@@ -33,7 +33,10 @@ const {
     policyTransferMatches,
     spendableInputCount,
 } = require('../../../helpers/rail_preflight/policy_at2_at4');
-const { policyFinalizationBudgetMs } = require('../../../helpers/rail_preflight/policy_at7_at8');
+const {
+    feeScheduleBudgetMs,
+    policyFinalizationBudgetMs,
+} = require('../../../helpers/rail_preflight/policy_at7_at8');
 
 // The policy legs' shared readings, bound to the drive state by `bind`. Three sources, and
 // which one a leg reads is the claim it makes:
@@ -66,7 +69,7 @@ async function ensureDogeFeeSchedule(state) {
         try { decision = dogeFeeSchedule(await state.venue.indexerRpc('DOGE', 'feeschedule', {})); }
         catch (e) { decision = dogeFeeSchedule(null); }
         return decision.ready;
-    }, { timeoutMs: 2 * 60 * 1000, everyMs: 2000 });
+    }, { timeoutMs: feeScheduleBudgetMs(state.venue.pollMs || 15000), everyMs: 2000 });
     policyDogeFeeDestinations.set(state, decision.destination);
     state.dogeRail.env.FEE_DESTINATION = decision.destination;
     return decision.destination;
