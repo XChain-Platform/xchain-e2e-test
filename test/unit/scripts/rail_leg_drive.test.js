@@ -5,6 +5,8 @@ const path = require('path')
 const { spawnSync } = require('child_process')
 const proxyquire = require('proxyquire')
 
+const { ancestorPids } = require('../../helpers/rail_preflight/rail_drive_processes')
+
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..')
 const SCRIPT = path.join(REPO_ROOT, 'scripts', 'rail_leg_drive.js')
 const POLICY_ROOT = 'test/integration/bridge_rail_policy.test.js'
@@ -107,6 +109,30 @@ describe('bridge rail overlap detection', function () {
         assert.deepStrictEqual(runner.otherRailDrives(psText, [202]), [{
             pid: 101,
             args: 'node ./node_modules/.bin/mocha test/integration/bridge_rail_policy.test.js',
+        }])
+    })
+})
+
+describe('bridge rail overlap detection over the process tree', function () {
+    it('counts only a foreign node-executed rail drive', function () {
+        const psText = [
+            ' 1 0 /sbin/init',
+            ' 500 1 sshd: rail@notty',
+            ' 501 500 bash -c while pgrep -f ^node.*mocha.*bridge_rail_ >/dev/null; do sleep 60; done; env A=1 ./node_modules/.bin/mocha --timeout 0 test/integration/bridge_rail_token.test.js',
+            ' 502 501 npm exec mocha --timeout 0 test/integration/bridge_rail_token.test.js',
+            ' 503 502 sh -c mocha --timeout 0 test/integration/bridge_rail_token.test.js',
+            ' 504 503 node ./node_modules/.bin/mocha --timeout 0 test/integration/bridge_rail_token.test.js',
+            ' 600 1 bash -c while pgrep -f mocha.*bridge_rail_ >/dev/null; do sleep 60; done; ./node_modules/.bin/mocha test/integration/bridge_rail_policy.test.js',
+            ' 601 600 sleep 60',
+            ' 602 600 pgrep -c -f mocha.*bridge_rail_',
+            ' 700 1 node ./node_modules/.bin/mocha --timeout 0 test/integration/bridge_rail_policy.test.js',
+        ].join('\n')
+        const ownPids = ancestorPids(psText, 504)
+
+        assert.deepStrictEqual(ownPids, [504, 503, 502, 501, 500, 1])
+        assert.deepStrictEqual(runner.otherRailDrives(psText, ownPids), [{
+            pid: 700,
+            args: 'node ./node_modules/.bin/mocha --timeout 0 test/integration/bridge_rail_policy.test.js',
         }])
     })
 })
