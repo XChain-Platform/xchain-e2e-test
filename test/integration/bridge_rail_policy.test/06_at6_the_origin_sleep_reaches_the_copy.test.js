@@ -47,6 +47,20 @@ const {
 } = require('./support');
 
 const GROUP = 'policy AT6: the origin sleep reaches the copy';
+const WAKE_SENDS = 3;
+const STALE_RESUME_BLOCK = 'invalid: RESUME_BLOCK (block_index)';
+
+async function sendWakeAtFreshTip(M) {
+    const attempts = [];
+    let wake = null;
+    for (let send = 0; send < WAKE_SENDS; send++) {
+        const resumeBlock = Number(await nodeConnector.getBlockCount()) + 1;
+        wake = await btcAction(M.issuer, sleepTickWire(M.tick, resumeBlock, 'policy AT6 wake'), 'sleeps');
+        attempts.push({ tx: wake.tx, resumeBlock, status: wake.status });
+        if (wake.status !== STALE_RESUME_BLOCK) break;
+    }
+    return { wake, attempts };
+}
 
 bridgeRailSuite(GROUP, function () {
     it('policy AT6 (sleep): the issuer sleeps the token on BTC, DOGE applies sleeping 1 and a SEND of the copy is invalid: TICK (sleeping)', async function () {
@@ -103,8 +117,8 @@ bridgeRailSuite(GROUP, function () {
         assert.ok(state.evidence.at6_sleep && state.evidence.at6_sleep.copySleeping === true, 'the sleep half must have run and slept the copy');
         const previous = newestFinalizedSnapshot(await hubPolicyRows(M.tick), M.tick);
         assert.ok(previous, 'the wake needs an existing finalized snapshot for ' + M.tick);
-        const wakeAt = Number(await nodeConnector.getBlockCount()) + 1;
-        const wake = await btcAction(M.issuer, sleepTickWire(M.tick, wakeAt, 'policy AT6 wake'), 'sleeps');
+        const { wake, attempts } = await sendWakeAtFreshTip(M);
+        state.evidence.at6_wake = { wake, attempts };
         assert.strictEqual(wake.status, 'valid', 'the issuer wake of ' + M.tick + ' graded ' + wake.status);
         let woke = null;
         await state.venue.waitUntil('a later finalized policy_snapshots row for ' + M.tick, async () => {
@@ -118,7 +132,7 @@ bridgeRailSuite(GROUP, function () {
         await waitForAppliedSeq(M.tick, Number(woke.policy_seq));
         const copy = await copyPolicy(M.tick);
         const send = await sendCopy(M.dest, M.tick, 1, M.other.address, 'policy AT6 awake');
-        state.evidence.at6_wake = { wake, wakeAt, seq: String(woke.snapshot_id), copySleeping: copy.sleeping, send };
+        Object.assign(state.evidence.at6_wake, { seq: String(woke.snapshot_id), copySleeping: copy.sleeping, send });
         assert.strictEqual(copy.sleeping, false, 'the copy still reads sleeping after the wake snapshot applied');
         assert.strictEqual(send.status, 'valid', 'a SEND of the woken copy graded ' + send.status);
     });
