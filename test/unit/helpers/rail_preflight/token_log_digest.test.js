@@ -105,13 +105,33 @@ describe('token log digest CLI', function () {
         assert.strictEqual(child.status, 0, child.stderr);
         assert.strictEqual(child.stderr, '');
         assert.deepStrictEqual(child.stdout.trim().split('\n'), [
-            'LOG a.log spawns=0 finalized=BTC:1/XCP:KEEP since_spawn=BTC:1/XCP:KEEP write_failed=0 round_failed=1 held=none retraction_errors=0',
-            'LOG b.log spawns=1 finalized=none since_spawn=none write_failed=0 round_failed=0 held=none retraction_errors=0'
+            'LOG a.log spawns=0 finalized=BTC:1/XCP:KEEP since_spawn=BTC:1/XCP:KEEP write_failed=0 round_failed=1 held=none retraction_errors=0 adopted=0 stale_rounds=0',
+            'LOG b.log spawns=1 finalized=none since_spawn=none write_failed=0 round_failed=0 held=none retraction_errors=0 adopted=0 stale_rounds=0'
         ]);
         assert.ok(!child.stdout.includes(secret));
         assert.ok(!child.stdout.includes(fullId));
         assert.ok(!child.stderr.includes(secret));
         assert.ok(!child.stderr.includes(fullId));
+    });
+
+    it('reports an abandoned stale round after adopted leader lines', function () {
+        const round = '0123456789abcdef';
+        const text = [
+            'CrossChainDexConsensus: adopted leader canonical for ' + round + '... from peer-a',
+            'CrossChainDexConsensus: adopted leader canonical for ' + round + '... from peer-b',
+            'CrossChainDexConsensus: abandoned stale round ' + round + '... after 480s unfinalized; engine will re-propose',
+            '\x1b[33mCrossChainDexConsensus: abandoned stale round ' + round +
+                '... after 481s unfinalized; engine will re-propose\x1b[0m'
+        ].join('\n');
+        fs.writeFileSync(path.join(directory, 'round.log'), text);
+
+        const digest = digestTokenLog(text);
+        const child = spawnSync(process.execPath, [SCRIPT, directory], { encoding: 'utf8' });
+
+        assert.deepStrictEqual(digest.adopted, { [round]: 2 });
+        assert.deepStrictEqual(digest.staleRounds, { [round]: { count: 2, maxAgeS: 481 } });
+        assert.strictEqual(child.status, 0, child.stderr);
+        assert.ok(child.stdout.trim().endsWith('adopted=2 stale_rounds=2'));
     });
 
     it('exits 2 for a missing directory and an unknown flag', function () {

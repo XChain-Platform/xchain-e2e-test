@@ -8,6 +8,8 @@ const SPAWN_LINE = /^=== \S+ spawn \S+ pid \d+ ===$/;
 const FINALIZED_LINE = /CrossChainBridge: finalized transfer [0-9a-fA-F]{16}\.\.\. ([^:\s]+):(\d+) -> (\S+) (\S+) (\S+) \((\d+) sigs\)/;
 const ROUND_FAILED_LINE = /CrossChainBridge: transfer round failed for ([^:\s]+):(\d+):/;
 const HELD_LINE = /CrossChainBridge: not proposing ([^:\s]+):(\d+) \((.*)\)\s*$/;
+const ADOPTED_LINE = /CrossChainDexConsensus: adopted leader canonical for ([0-9a-fA-F]{16})\.\.\./;
+const STALE_ROUND_LINE = /CrossChainDexConsensus: abandoned stale round ([0-9a-fA-F]{16})\.\.\. after (\d+)s unfinalized; engine will re-propose/;
 
 function increment(map, key){
     map[key] = (map[key] || 0) + 1;
@@ -37,7 +39,9 @@ function digestTokenLog(text, opts = {}){
         writeFailed: 0,
         roundFailed: {},
         held: {},
-        retractionErrors: 0
+        retractionErrors: 0,
+        adopted: {},
+        staleRounds: {}
     };
 
     for(const line of String(text).replace(ANSI_ESCAPE, '').split(/\r?\n/)){
@@ -62,6 +66,16 @@ function digestTokenLog(text, opts = {}){
             increment(result.held[leg], held[3]);
         }
         if(line.includes('CrossChainBridge: retraction submit error:')) result.retractionErrors++;
+        const adopted = line.match(ADOPTED_LINE);
+        if(adopted) increment(result.adopted, adopted[1]);
+        const staleRound = line.match(STALE_ROUND_LINE);
+        if(staleRound){
+            const round = staleRound[1];
+            const ageS = Number(staleRound[2]);
+            if(!result.staleRounds[round]) result.staleRounds[round] = { count: 0, maxAgeS: 0 };
+            result.staleRounds[round].count++;
+            result.staleRounds[round].maxAgeS = Math.max(result.staleRounds[round].maxAgeS, ageS);
+        }
     }
     return result;
 }
@@ -89,6 +103,8 @@ function formatDigest(file, digest){
     const finalized = digest.finalized.map(formatTransfer);
     const sinceSpawn = digest.finalizedSinceLastSpawn.map(formatTransfer);
     const roundFailed = Object.values(digest.roundFailed).reduce((sum, count) => sum + count, 0);
+    const adopted = Object.values(digest.adopted).reduce((sum, count) => sum + count, 0);
+    const staleRounds = Object.values(digest.staleRounds).reduce((sum, round) => sum + round.count, 0);
     return 'LOG ' + file +
         ' spawns=' + digest.spawns +
         ' finalized=' + listOrNone(finalized) +
@@ -96,7 +112,9 @@ function formatDigest(file, digest){
         ' write_failed=' + digest.writeFailed +
         ' round_failed=' + roundFailed +
         ' held=' + listOrNone(Object.keys(digest.held)) +
-        ' retraction_errors=' + digest.retractionErrors;
+        ' retraction_errors=' + digest.retractionErrors +
+        ' adopted=' + adopted +
+        ' stale_rounds=' + staleRounds;
 }
 
 function runCli(args){
