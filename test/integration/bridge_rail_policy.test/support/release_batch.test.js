@@ -16,7 +16,7 @@
 
 const assert = require('assert');
 
-const { settleReleaseBatch } = require('./release_batch');
+const { settleReleaseBatch, waitForCapabilityBaseline } = require('./release_batch');
 
 describe('policy rail bootstrap release batch', function () {
     it('mines once after every release transaction reaches the mempool', async function () {
@@ -66,5 +66,35 @@ describe('policy rail bootstrap release batch', function () {
             now: () => clock,
             sleep: async () => { clock++; },
         }), /saw 0\/1 UNSTAKE transaction/);
+    });
+
+    it('waits for the buried capability view to return to its baseline', async function () {
+        let clock = 0;
+        let reads = 0;
+        let advances = 0;
+        const baseline = { pubkeys: ['keeper'] };
+        const current = await waitForCapabilityBaseline({
+            baseline,
+            timeoutMs: 10,
+            now: () => clock,
+            read: async () => ({ pubkeys: ++reads < 3 ? ['keeper', 'temporary'] : ['keeper'] }),
+            advance: async () => { advances++; clock++; },
+        });
+        assert.deepStrictEqual(current.pubkeys, ['keeper']);
+        assert.strictEqual(reads, 3);
+        assert.strictEqual(advances, 2);
+    });
+
+    it('fails within its budget when a temporary capability member remains', async function () {
+        let clock = 0;
+        let advances = 0;
+        await assert.rejects(waitForCapabilityBaseline({
+            baseline: { pubkeys: ['keeper'] },
+            timeoutMs: 2,
+            now: () => clock,
+            read: async () => ({ pubkeys: ['keeper', 'temporary'] }),
+            advance: async () => { advances++; clock++; },
+        }), /did not restore its capability baseline: temporary/);
+        assert.strictEqual(advances, 2);
     });
 });

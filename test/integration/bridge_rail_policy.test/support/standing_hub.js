@@ -23,4 +23,11 @@ function standingHubConnector() {
     return new XChainHubConnector(XChainHubConnector.parseEndpoints());
 }
 
-module.exports = { standingHubConnector };
+function installStandingHubConnector() {
+    const connector = standingHubConnector();
+    // Preserve a connector the caller already selected and fill only the missing drive dependency.
+    if (!global.hubConnector) global.hubConnector = connector;
+    return connector;
+}
+
+module.exports = { installStandingHubConnector, standingHubConnector };

@@ -49,4 +49,28 @@ async function settleReleaseBatch(options) {
     return settlement;
 }
 
-module.exports = { settleReleaseBatch };
+function addedCapabilityMembers(baseline, current) {
+    // Treat an unreadable view as pending instead of claiming the release completed.
+    if (!current || current.error) return null;
+    const before = new Set(baseline.pubkeys);
+    return current.pubkeys.filter((pubkey) => !before.has(pubkey));
+}
+
+async function waitForCapabilityBaseline(options) {
+    const now = options.now || Date.now;
+    const deadline = now() + Number(options.timeoutMs || 0);
+    let added = null;
+    do {
+        const current = await options.read();
+        added = addedCapabilityMembers(options.baseline, current);
+        // Finish only after every signer outside the opening roster has left the buried view.
+        if (added && !added.length) return current;
+        // Stop advancing the shared chain once the release budget is spent.
+        if (now() >= deadline) break;
+        await options.advance(Math.max(1, deadline - now()));
+    } while (now() <= deadline);
+    const detail = added ? added.map((pubkey) => String(pubkey).slice(0, 16)).join(', ') : 'unreadable set';
+    throw new Error('policy rail bootstrap release did not restore its capability baseline: ' + detail);
+}
+
+module.exports = { settleReleaseBatch, waitForCapabilityBaseline };

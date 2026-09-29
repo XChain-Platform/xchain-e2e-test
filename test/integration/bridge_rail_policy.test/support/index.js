@@ -31,8 +31,8 @@ const stakeTeardown = require('../../../helpers/stakeTeardown');
 const { resolveDogeFeeDestination } = require('../../../helpers/rail_preflight/policy_fee_destination');
 const { requireHealthyHub } = require('../../../helpers/rail_preflight/hub_health_gate');
 const fixture = require('../../../attestMirror/mirrorDrillFixture');
-const { settleReleaseBatch } = require('./release_batch');
-const { standingHubConnector } = require('./standing_hub');
+const { settleReleaseBatch, waitForCapabilityBaseline } = require('./release_batch');
+const { installStandingHubConnector } = require('./standing_hub');
 const {
     resolveVenueQuorum,
     withMiningPaused,
@@ -599,15 +599,28 @@ async function releaseBootstrapEntry(entry) {
 async function releaseBootstrapStakes() {
     if (!bootstrapTeardownInstalled || !global.stakeTeardownBaseline) return;
     await withPolicyMiningPaused(async () => {
+        const policy = Object.assign({}, global.stakeTeardownPolicy, { check: false, strict: false });
         await waitForBootstrapIndexer(BOOTSTRAP_SYNC_TIMEOUT_MS);
+        const deadline = Date.now() + policy.budgetMs;
         await stakeTeardown.runTeardown({
-            policy: Object.assign({}, global.stakeTeardownPolicy, { strict: true }),
+            policy,
             baseline: global.stakeTeardownBaseline,
             indexer: global.indexerConnector,
             unstake: releaseBootstrapEntry,
             mine: mineBootstrapSettlement,
             waitForSync: async () => { await global.utxoTrackerConnector.waitForSync(); },
         });
+        const current = await waitForCapabilityBaseline({
+            baseline: global.stakeTeardownBaseline,
+            timeoutMs: Math.max(0, deadline - Date.now()),
+            read: async () => (await readBridgeCapability()).set,
+            advance: async (leftMs) => {
+                await mineBootstrapBlocks(1);
+                await waitForBootstrapIndexer(Math.min(leftMs, BOOTSTRAP_SYNC_TIMEOUT_MS));
+            },
+        });
+        console.log('[stake teardown] cross_chain: ' + global.stakeTeardownBaseline.pubkeys.length +
+            ' -> ' + current.pubkeys.length + ' member(s)');
     });
 }
 
@@ -645,7 +658,7 @@ async function withPolicyMiningPaused(work) {
 
 async function waitForStandingHub() {
     const deadline = Date.now() + BOOTSTRAP_SYNC_TIMEOUT_MS;
-    const connector = standingHubConnector();
+    const connector = installStandingHubConnector();
     let last = null;
     while (Date.now() < deadline) {
         try {

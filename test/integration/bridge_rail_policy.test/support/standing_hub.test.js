@@ -16,7 +16,7 @@
 
 const assert = require('assert');
 
-const { standingHubConnector } = require('./standing_hub');
+const { installStandingHubConnector, standingHubConnector } = require('./standing_hub');
 
 describe('policy rail standing hub connector', function () {
     let inherited;
@@ -42,5 +42,18 @@ describe('policy rail standing hub connector', function () {
         const connector = { urls: ['http://standing.example.test:1234'] };
         global.hubConnector = connector;
         assert.strictEqual(standingHubConnector(), connector);
+    });
+
+    it('installs a configured connector when the global connector is unset', function () {
+        const connector = installStandingHubConnector();
+        assert.strictEqual(global.hubConnector, connector);
+        assert.ok(connector.urls.length > 0);
+    });
+
+    it('leaves an existing global connector unchanged', function () {
+        const connector = { urls: ['http://standing.example.test:1234'] };
+        global.hubConnector = connector;
+        assert.strictEqual(installStandingHubConnector(), connector);
+        assert.strictEqual(global.hubConnector, connector);
     });
 });
