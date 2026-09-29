@@ -59,7 +59,7 @@ const GROUP = 'policy AT4: falsification and the seq gap';
 // A genuine finalized row, the template every forgery copies its snapshot_block, view and
 // chain id from so the only defect in each is the one named.
 function template() {
-    const row = state.policy.main.seq2;
+    const row = state.policy.main.seq2Row;
     assert.ok(row, 'AT4 forges against a snapshot the federation really signed, so AT2 must have run');
     return row;
 }
