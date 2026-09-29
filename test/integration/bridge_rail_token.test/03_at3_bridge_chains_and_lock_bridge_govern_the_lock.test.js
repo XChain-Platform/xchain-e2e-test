@@ -72,7 +72,11 @@ bridgeRailSuite(GROUP, function () {
         steps.lockApplies = await btcAction(A.issuer, lockWireV3(A.tick, 'DOGE', A.dest.address, 3, 'AT3 applies'), 'xbridges');
         assert.strictEqual(steps.lockApplies.status, 'valid', 'the same lock after the opt-in graded ' + steps.lockApplies.status);
         await mineBtcBlocks(1, 'the AT3 lock reaching bridge depth');
-        await waitForFinalizedPolicy(A.tick, 2);
+        // Seq 1, not 2: the hub signs a policy snapshot only for a (tick, destination) pair it
+        // holds a transfer for, and only when the list policy hash changes (xchain-hub
+        // src/cross_chain/bridge/policy_poll.js maybeSnapshotPolicy). BRIDGE_CHAINS is not in
+        // that hash, so the LTC-only opt-in signs nothing and this lock's pair gets seq 1.
+        await waitForFinalizedPolicy(A.tick, 1);
         const leg = await settleLeg('the AT3 lock',
             (r) => String(r.src_chain) === 'BTC' && String(r.dest_address) === A.dest.address && String(r.tick) === A.tick, 'DOGE');
         steps.lockTransferReading = leg.transfer;
