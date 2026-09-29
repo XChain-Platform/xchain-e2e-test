@@ -65,25 +65,20 @@ async function dropStaleReplay(connection, label, options) {
     return dropped;
 }
 
-async function connectVenueDatabase(venueDb, createConnection) {
-    const open = createConnection || mariadb.createConnection;
-    return open({
-        host: venueDb.host,
-        port: parseInt(venueDb.port, 10),
-        user: venueDb.user,
-        password: venueDb.pass,
-        connectTimeout: 10000,
-    });
-}
-
 async function dropStaleReplayBeforeVenue(label, options) {
     const opts = options || {};
-    if (!opts.startVenueDb && (!process.env.HUB_DB_USER || !process.env.HUB_DB_PASS)) return [];
-    const venueDb = await (opts.startVenueDb || startDisposableHubDb)();
+    if (!process.env.HUB_DB_USER || !process.env.HUB_DB_PASS) return [];
+    const venueDb = await startDisposableHubDb();
     if (!venueDb) return [];
     let connection = null;
     try {
-        connection = await connectVenueDatabase(venueDb, opts.createConnection);
+        connection = await mariadb.createConnection({
+            host: venueDb.host,
+            port: parseInt(venueDb.port, 10),
+            user: venueDb.user,
+            password: venueDb.pass,
+            connectTimeout: 10000,
+        });
         return await dropStaleReplay(connection, label, opts);
     } finally {
         if (connection) await connection.end().catch(() => {});
@@ -92,7 +87,6 @@ async function dropStaleReplayBeforeVenue(label, options) {
 }
 
 module.exports = {
-    connectVenueDatabase,
     databaseNames,
     dropStaleReplay,
     dropStaleReplayBeforeVenue,

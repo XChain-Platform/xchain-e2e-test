@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('assert');
+const proxyquire = require('proxyquire');
 const {
     databaseNames,
     dropStaleReplay,
@@ -36,31 +37,13 @@ describe('token stale replay cleanup', function () {
     it('a stale root row drops exactly the two named databases', async function () {
         const connection = stubConnection({ rows: [{ tick: 'btc' }] });
         const logs = [];
-        const venueDb = {
-            host: 'stable-host', port: '3310', user: 'venue-user', pass: 'venue-pass',
-            stopped: false,
-            async stop() { this.stopped = true; },
-        };
-        let connectionOptions = null;
 
-        const dropped = await dropStaleReplayBeforeVenue(label, {
+        const dropped = await dropStaleReplay(connection, label, {
             dbPrefix,
             log: (line) => logs.push(line),
-            startVenueDb: async () => venueDb,
-            createConnection: async (options) => {
-                connectionOptions = options;
-                return connection;
-            },
         });
 
         assert.deepStrictEqual(dropped, [names.indexer, names.mirror]);
-        assert.deepStrictEqual(connectionOptions, {
-            host: venueDb.host,
-            port: 3310,
-            user: venueDb.user,
-            password: venueDb.pass,
-            connectTimeout: 10000,
-        });
         assert.deepStrictEqual(connection.queries.map((entry) => entry.sql)
             .filter((sql) => sql.startsWith('DROP DATABASE')), [
             'DROP DATABASE IF EXISTS `' + names.indexer + '`',
@@ -71,6 +54,55 @@ describe('token stale replay cleanup', function () {
         assert.strictEqual(logs.length, 1);
         assert.ok(logs[0].includes(names.indexer));
         assert.ok(logs[0].includes(names.mirror));
+    });
+
+    it('the default connector uses the disposable database coordinates', async function () {
+        const connection = stubConnection({ absent: true });
+        const venueDb = {
+            host: 'default-host', port: '3311', user: 'default-user', pass: 'default-pass',
+            stopped: false,
+            async stop() { this.stopped = true; },
+        };
+        const calls = [];
+        let connectionOptions = null;
+        const replay = proxyquire.noCallThru().noPreserveCache()(
+            '../../integration/bridge_rail_token.test/support/stale_replay', {
+                '../../../helpers/disposableHubDb': {
+                    startDisposableHubDb: async () => {
+                        calls.push('startDisposableHubDb');
+                        return venueDb;
+                    },
+                },
+                mariadb: {
+                    createConnection: async (options) => {
+                        calls.push('mariadb.createConnection');
+                        connectionOptions = options;
+                        return connection;
+                    },
+                },
+            });
+        const previousUser = process.env.HUB_DB_USER;
+        const previousPass = process.env.HUB_DB_PASS;
+        process.env.HUB_DB_USER = venueDb.user;
+        process.env.HUB_DB_PASS = venueDb.pass;
+
+        try {
+            assert.deepStrictEqual(await replay.dropStaleReplayBeforeVenue(label, { dbPrefix }), []);
+        } finally {
+            if (previousUser === undefined) delete process.env.HUB_DB_USER;
+            else process.env.HUB_DB_USER = previousUser;
+            if (previousPass === undefined) delete process.env.HUB_DB_PASS;
+            else process.env.HUB_DB_PASS = previousPass;
+        }
+
+        assert.deepStrictEqual(calls, ['startDisposableHubDb', 'mariadb.createConnection']);
+        assert.deepStrictEqual(connectionOptions, {
+            host: venueDb.host,
+            port: 3311,
+            user: venueDb.user,
+            password: venueDb.pass,
+            connectTimeout: 10000,
+        });
         assert.strictEqual(connection.ended, true);
         assert.strictEqual(venueDb.stopped, true);
     });
