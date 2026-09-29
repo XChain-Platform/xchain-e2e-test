@@ -72,7 +72,11 @@ async function issueListedTick() {
     M.issue = await btcAction(M.issuer, () => issueHelper.sendIssueV0Raw(
         M.issuer, M.tick, 100000, 100000, 0, 'policy AT11', 1000), 'issues');
     assert.strictEqual(M.issue.status, 'valid', 'ISSUE ' + M.tick + ' graded ' + M.issue.status);
-    M.allowList = await btcAddressList(M.issuer, [M.dest.address, M.blocked.address], 'policy AT11 allow list');
+    // The issuer locks the tick in the bridge step, and a v3 lock checks its SOURCE against the
+    // tick's lists the way SEND does, so an allow list without the issuer refuses that lock.
+    // Blocked stays on the allow list so the final SEND to it is valid once the block list detaches.
+    M.allowMembers = [M.issuer.address, M.dest.address, M.blocked.address];
+    M.allowList = await btcAddressList(M.issuer, M.allowMembers, 'policy AT11 allow list');
     M.blockList = await btcAddressList(M.issuer, [M.blocked.address], 'policy AT11 block list');
     M.attach = await btcAction(M.issuer,
         policyListsWire(M.tick, M.allowList, M.blockList, 'policy AT11 attach'), 'issues');
@@ -105,7 +109,8 @@ async function settleInitialSnapshot(step) {
         'the copy ALLOW_LIST is not ' + step.expect.ALLOW_LIST);
     assert.ok(Number(M.copy1.params.block_list) > 0,
         'the copy BLOCK_LIST is not ' + step.expect.BLOCK_LIST);
-    assert.deepStrictEqual(M.policy1.allow_list, [M.dest.address, M.blocked.address],
+    // gettokenpolicy returns members in utf8_bin ascending order, not LIST insertion order.
+    assert.deepStrictEqual(M.policy1.allow_list, [...M.allowMembers].sort(),
         'the copy allow list reads ' + JSON.stringify(M.policy1.allow_list));
     assert.deepStrictEqual(M.policy1.block_list, [M.blocked.address],
         'the copy block list reads ' + JSON.stringify(M.policy1.block_list));
