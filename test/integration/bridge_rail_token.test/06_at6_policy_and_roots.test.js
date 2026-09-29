@@ -95,6 +95,7 @@ bridgeRailSuite(GROUP, function () {
     it('token AT6 (opt-in direction): format 7 on a token with a BLOCK_LIST is refused below the policy flag and applies above it', async function () {
         this.timeout(0);
         if (needsFederation(this, 'token AT6 opt-in direction')) return;
+        assert.ok(state.tokens.btcReceiver, 'AT2 must have run and chosen its BTC receiver');
         const active = await flagAtTip();
         const owner = await fundBtc('TOKEN.AT6.LISTED.OWNER');
         const tick = await pickFreeTick(['LSTD', 'LSTE', 'LSTF']);
@@ -131,6 +132,7 @@ bridgeRailSuite(GROUP, function () {
         const D = state.tokens.at5, A = state.tokens.at3;
         assert.ok(D.issuer && state.evidence.at5_depth && state.evidence.at5_depth.transfer, 'the AT5 depth leg must have run and bridged its token');
         assert.ok(A.issuer && state.evidence.at3 && state.evidence.at3.lockBridge, 'AT3 must have run, bridging and then closing its token');
+        assert.ok(state.tokens.btcReceiver, 'AT2 must have run and chosen its BTC receiver');
         const listIndex = await addressList(D.issuer, state.tokens.btcReceiver.address);
         const want = active ? 'valid' : NOT_BINDABLE_BRIDGED;
         const r = { listIndex };
