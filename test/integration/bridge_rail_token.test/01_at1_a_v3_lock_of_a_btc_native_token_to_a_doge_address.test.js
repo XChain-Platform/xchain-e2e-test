@@ -39,6 +39,8 @@ const {
     fundDoge,
     tokenSnapshot,
     settleLeg,
+    waitForFinalizedPolicy,
+    mineBtcBlocks,
     rowsLike,
     needsFederation,
     bridgeRailSuite,
@@ -74,6 +76,8 @@ bridgeRailSuite(GROUP, function () {
         const lock = await btcAction(T.issuer, lockWireV3(T.tick, 'DOGE', T.dest.address, LOCK, 'token AT1'), 'xbridges');
         state.evidence.at1_lockReading = lock;
         assert.strictEqual(lock.status, 'valid', 'XBRIDGE v3 lock of ' + LOCK + ' ' + T.tick + ' graded ' + lock.status);
+        await mineBtcBlocks(1, 'the AT1 lock reaching bridge depth');
+        await waitForFinalizedPolicy(T.tick, 1);
         const after = await tokenSnapshot('at1_after_lock', T.tick, T.dest);
         assert.strictEqual(after.escrow - before.escrow, LOCK,
             'the BTC escrow for DOGE did not gain exactly ' + LOCK + ' ' + T.tick + ': ' + JSON.stringify(after.btc));

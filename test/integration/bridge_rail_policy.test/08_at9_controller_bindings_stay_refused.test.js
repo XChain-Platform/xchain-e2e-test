@@ -24,7 +24,7 @@
  *
  * FORMAT 6 IN BOTH PLACES THE SPEC'S SENTENCE CAN MEAN. On the ORIGIN row, by its owner, the
  * milestone-1 bridge rule is what refuses it. On the DOGE COPY the keyless owner refuses any
- * user first (`invalid: issued by another address`), which is recorded as the copy half.
+ * user first (`invalid: TICK (parent issued by another address)`), which is recorded as the copy half.
  *
  ********************************************************************/
 
@@ -32,6 +32,7 @@
 
 const gasHelper = require('../../helpers/gasHelper');
 const { controllerBindWire } = require('../../helpers/bridgeRailVenue');
+const { COPY_ISSUE_REFUSED } = require('../../helpers/rail_preflight/copy_issue_verdict');
 const {
     assert,
     optInWire,
@@ -100,7 +101,7 @@ bridgeRailSuite(GROUP, function () {
             'SELECT COUNT(*) AS n FROM token_controllers tc INNER JOIN index_tickers ti ON (ti.id = tc.tick_id) WHERE ti.tick = ?',
             ['BTC.' + M.tick]);
         state.evidence.at9_copy = { got, controllerEvents: Number(bound[0].n) };
-        assert.strictEqual(got.status, 'invalid: issued by another address', 'format 6 on the DOGE copy graded ' + got.status);
+        assert.strictEqual(got.status, COPY_ISSUE_REFUSED, 'format 6 on the DOGE copy graded ' + got.status);
         assert.strictEqual(Number(bound[0].n), 0, 'the DOGE copy holds ' + bound[0].n + ' controller events');
     });
 });

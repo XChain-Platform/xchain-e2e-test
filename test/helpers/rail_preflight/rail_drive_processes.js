@@ -34,6 +34,13 @@ function ancestorPids (psText, pid) {
     return ancestors
 }
 
+function launchParentIsAttached (psText, pid, launchParentPid) {
+    const rows = processRows(psText)
+    const own = rows.find((row) => row.pid === Number(pid))
+    const parent = Number(launchParentPid)
+    return Boolean(own && own.ppid === parent && rows.some((row) => row.pid === parent))
+}
+
 function otherRailDrives (psText, ownPids) {
     const ignored = new Set([...ownPids].map(Number))
     return processRows(psText)
@@ -41,4 +48,4 @@ function otherRailDrives (psText, ownPids) {
         .map((row) => ({ pid: row.pid, args: row.args }))
 }
 
-module.exports = { RAIL_DRIVE_ARGS, ancestorPids, otherRailDrives }
+module.exports = { RAIL_DRIVE_ARGS, ancestorPids, launchParentIsAttached, otherRailDrives }

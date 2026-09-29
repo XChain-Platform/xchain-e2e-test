@@ -6,7 +6,10 @@ const path = require('path')
 const { execFileSync, spawn } = require('child_process')
 
 const { RAIL_DRIVES } = require('../test/helpers/bridge_rail_legs')
-const { ancestorPids, otherRailDrives } = require('../test/helpers/rail_preflight/rail_drive_processes')
+const {
+    ancestorPids,
+    otherRailDrives,
+} = require('../test/helpers/rail_preflight/rail_drive_processes')
 const { triageJournal } = require('./rail_journal_triage')
 const { limitSchedule, parseGraceMinutes } = require('./rail_leg/rail_leg_limit')
 

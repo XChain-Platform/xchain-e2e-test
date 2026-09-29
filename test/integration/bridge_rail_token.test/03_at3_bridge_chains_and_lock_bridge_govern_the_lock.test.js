@@ -34,6 +34,8 @@ const {
     fundDoge,
     pickFreeTick,
     settleLeg,
+    waitForFinalizedPolicy,
+    mineBtcBlocks,
     needsFederation,
     bridgeRailSuite,
 } = require('./support');
@@ -69,6 +71,12 @@ bridgeRailSuite(GROUP, function () {
         assert.strictEqual(steps.optInAddDoge.status, 'valid', 'ISSUE|7 BRIDGE_CHAINS=DOGE,LTC graded ' + steps.optInAddDoge.status);
         steps.lockApplies = await btcAction(A.issuer, lockWireV3(A.tick, 'DOGE', A.dest.address, 3, 'AT3 applies'), 'xbridges');
         assert.strictEqual(steps.lockApplies.status, 'valid', 'the same lock after the opt-in graded ' + steps.lockApplies.status);
+        await mineBtcBlocks(1, 'the AT3 lock reaching bridge depth');
+        // Seq 1, not 2: the hub signs a policy snapshot only for a (tick, destination) pair it
+        // holds a transfer for, and only when the list policy hash changes (xchain-hub
+        // src/cross_chain/bridge/policy_poll.js maybeSnapshotPolicy). BRIDGE_CHAINS is not in
+        // that hash, so the LTC-only opt-in signs nothing and this lock's pair gets seq 1.
+        await waitForFinalizedPolicy(A.tick, 1);
         const leg = await settleLeg('the AT3 lock',
             (r) => String(r.src_chain) === 'BTC' && String(r.dest_address) === A.dest.address && String(r.tick) === A.tick, 'DOGE');
         steps.lockTransferReading = leg.transfer;
@@ -92,7 +100,7 @@ bridgeRailSuite(GROUP, function () {
         steps.burnAfterNone = await dogeAction(A.dest, burnWireV4('BTC.' + A.tick, A.issuer.address, 1, 'AT3 burn'), 'xbridges');
         assert.strictEqual(steps.burnAfterNone.status, 'valid', 'the v4 burn after BRIDGE_CHAINS=- graded ' + steps.burnAfterNone.status);
         const leg = await settleLeg('the AT3 burn',
-            (r) => String(r.src_chain) === 'DOGE' && String(r.dest_address) === A.issuer.address && String(r.tick) === A.tick, 'BTC');
+            (r) => String(r.src_chain) === 'DOGE' && String(r.dest_address) === A.issuer.address && String(r.tick) === 'BTC.' + A.tick, 'BTC');
         steps.burnTransferReading = leg.transfer;
         steps.destBalanceAfterBurn = await state.venue.addressBalance('DOGE', A.dest.address, 'BTC.' + A.tick);
         assert.strictEqual(Number(steps.destBalanceAfterBurn), 2, A.dest.address + ' holds ' + steps.destBalanceAfterBurn + ' after the burn');

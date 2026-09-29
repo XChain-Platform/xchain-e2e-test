@@ -99,6 +99,7 @@ const mariadb = require('mariadb');
 const { AttestMirrorVenue } = require('./attestMirrorVenue');
 const chainRail             = require('./chainRail');
 const xchainPrice           = require('./xchainPriceConstants');
+const { evidenceJson }      = require('./rail_preflight/evidence_json');
 
 // The four chains the hub engine knows, as the hub spells them. Kept local rather
 // than imported from the hub so a unit run needs no hub module on NODE_PATH.
@@ -1092,7 +1093,7 @@ function journalCase(entry) {
         const fs = require('fs');
         const path = require('path');
         fs.appendFileSync(path.join(dir, 'case-journal.jsonl'),
-            JSON.stringify(Object.assign({ at: new Date().toISOString() }, entry)) + '\n');
+            evidenceJson(Object.assign({ at: new Date().toISOString() }, entry)) + '\n');
         return true;
     } catch (e) { return false; }
 }
