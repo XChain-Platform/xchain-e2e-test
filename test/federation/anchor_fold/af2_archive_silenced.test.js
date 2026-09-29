@@ -72,12 +72,13 @@ async function indexedBtcBlock(){
 async function unusedSnapshotBlock(){
     const latest = await indexedBtcBlock();
     const floor = Math.max(0, latest - 1024);
+    const ceiling = Math.max(0, latest - 12);
     const rows = await indexerQuery(
         'SELECT DISTINCT snapshot_block FROM capability_snapshots ' +
-        'WHERE snapshot_block BETWEEN ? AND ?', [floor, latest]
+        'WHERE snapshot_block BETWEEN ? AND ?', [floor, ceiling]
     );
     const occupied = new Set(rows.map((row) => Number(row.snapshot_block)));
-    for(let candidate = latest; candidate >= floor; candidate--){
+    for(let candidate = ceiling; candidate >= floor; candidate--){
         if(!occupied.has(candidate)) return candidate;
     }
     assert.fail('no unused BTC snapshot block is available for the isolated capability fixture');
@@ -159,12 +160,12 @@ function observePublisher(hub, index){
 }
 
 async function seedCapabilities(){
-    for(const capability of ['oracle_publish', 'cross_chain']){
-        for(const pubkey of pubkeys){
-            await indexerQuery(
-                'INSERT INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount, source) ' +
-                'VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE amount = VALUES(amount), source = VALUES(source)',
-                [snapshotBlock, capability, pubkey, '1', pubkey]);
+    for(const pubkey of pubkeys){
+        await indexerQuery(
+            'INSERT INTO capability_snapshots (snapshot_block, capability, signing_pubkey, amount, source) ' +
+            'VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE amount = VALUES(amount), source = VALUES(source)',
+            [snapshotBlock, 'oracle_publish', pubkey, '1', pubkey]);
+        for(const capability of ['oracle_publish', 'cross_chain']){
             await allHubs(
                 'INSERT IGNORE INTO capability_snapshots ' +
                 '(snapshot_block, capability, signing_pubkey, amount, source) VALUES (?, ?, ?, ?, ?)',
@@ -172,13 +173,12 @@ async function seedCapabilities(){
         }
     }
     const rows = await indexerQuery(
-        'SELECT capability, signing_pubkey, source FROM capability_snapshots WHERE snapshot_block = ? ' +
-        'ORDER BY capability, signing_pubkey, source', [snapshotBlock]
+        'SELECT signing_pubkey, source, amount FROM capability_snapshots WHERE snapshot_block = ? ' +
+        "AND capability = 'oracle_publish' ORDER BY signing_pubkey, source", [snapshotBlock]
     );
-    const expected = ['cross_chain', 'oracle_publish'].flatMap((capability) =>
-        [...pubkeys].sort().map((pubkey) => [capability, pubkey, pubkey]));
-    assert.deepStrictEqual(rows.map((row) => [row.capability, row.signing_pubkey, row.source]), expected,
-        'the indexer capability fixture contains only the AF2 validators');
+    const expected = [...pubkeys].sort().map((pubkey) => [pubkey, pubkey, '1']);
+    assert.deepStrictEqual(rows.map((row) => [row.signing_pubkey, row.source, String(row.amount)]), expected,
+        'the indexer oracle_publish fixture contains only the AF2 validators');
 }
 
 async function proveFederationReady(){
