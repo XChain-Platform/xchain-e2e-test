@@ -22,8 +22,6 @@ const {
     policyListsWire,
     sendWireV0,
     withMiningPaused,
-    destinationApplyBudgetMs,
-    hubRelayMarginFloorS,
 } = require('../../../helpers/bridgeRailVenue');
 const {
     appliedPolicyMatch,
@@ -129,7 +127,7 @@ async function waitForAppliedSeq(state, tick, seq, opts) {
     await state.venue.waitUntil('the DOGE ledger to apply ' + tick + ' policy seq ' + seq, async () => {
         found = appliedPolicyMatch(await appliedLedger(state, tick), { minSeq: seq, snapshotId: o.snapshotId });
         return !!found;
-    }, { timeoutMs: o.timeoutMs || destinationApplyBudgetMs(hubRelayMarginFloorS('DOGE')), everyMs: 5000 });
+    }, { timeoutMs: o.timeoutMs || policyApplyBudgetMs('DOGE'), everyMs: 5000 });
     return found;
 }
 
