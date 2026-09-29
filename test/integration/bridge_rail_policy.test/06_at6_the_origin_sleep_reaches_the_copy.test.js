@@ -81,6 +81,7 @@ bridgeRailSuite(GROUP, function () {
         if (needsFederation(this, 'policy AT6 burn')) return;
         const M = state.policy.main;
         assert.ok(M.sleepSeq, 'the sleep half must have run');
+        assert.ok(state.evidence.at6_sleep && state.evidence.at6_sleep.copySleeping === true, 'the sleep half must have run and slept the copy');
         M.btcReceiver = await fundBtc('POLICY.AT6.RECEIVER');
         const burn = await dogeAction(M.dest, burnWireV4('BTC.' + M.tick, M.btcReceiver.address, 1, 'policy AT6 burn'), 'xbridges');
         state.evidence.at6_burn = { burn };
@@ -99,6 +100,7 @@ bridgeRailSuite(GROUP, function () {
         if (needsFederation(this, 'policy AT6 wake')) return;
         const M = state.policy.main;
         assert.ok(M.sleepSeq, 'the sleep half must have run');
+        assert.ok(state.evidence.at6_sleep && state.evidence.at6_sleep.copySleeping === true, 'the sleep half must have run and slept the copy');
         const previous = newestFinalizedSnapshot(await hubPolicyRows(M.tick), M.tick);
         assert.ok(previous, 'the wake needs an existing finalized snapshot for ' + M.tick);
         const wakeAt = Number(await nodeConnector.getBlockCount()) + 1;
