@@ -83,8 +83,8 @@ describe('token stale replay cleanup', function () {
             });
         const previousUser = process.env.HUB_DB_USER;
         const previousPass = process.env.HUB_DB_PASS;
-        process.env.HUB_DB_USER = venueDb.user;
-        process.env.HUB_DB_PASS = venueDb.pass;
+        delete process.env.HUB_DB_USER;
+        delete process.env.HUB_DB_PASS;
 
         try {
             assert.deepStrictEqual(await replay.dropStaleReplayBeforeVenue(label, { dbPrefix }), []);
@@ -105,6 +105,47 @@ describe('token stale replay cleanup', function () {
         });
         assert.strictEqual(connection.ended, true);
         assert.strictEqual(venueDb.stopped, true);
+    });
+
+    it('logs once and drops nothing when no disposable database is reachable', async function () {
+        const calls = [];
+        const logs = [];
+        const replay = proxyquire.noCallThru().noPreserveCache()(
+            '../../integration/bridge_rail_token.test/support/stale_replay', {
+                '../../../helpers/disposableHubDb': {
+                    startDisposableHubDb: async () => {
+                        calls.push('startDisposableHubDb');
+                        return null;
+                    },
+                },
+                mariadb: {
+                    createConnection: async () => {
+                        calls.push('mariadb.createConnection');
+                        return stubConnection();
+                    },
+                },
+            });
+        const previousUser = process.env.HUB_DB_USER;
+        const previousPass = process.env.HUB_DB_PASS;
+        delete process.env.HUB_DB_USER;
+        delete process.env.HUB_DB_PASS;
+
+        try {
+            assert.deepStrictEqual(await replay.dropStaleReplayBeforeVenue(label, {
+                dbPrefix,
+                log: (line) => logs.push(line),
+            }), []);
+        } finally {
+            if (previousUser === undefined) delete process.env.HUB_DB_USER;
+            else process.env.HUB_DB_USER = previousUser;
+            if (previousPass === undefined) delete process.env.HUB_DB_PASS;
+            else process.env.HUB_DB_PASS = previousPass;
+        }
+
+        assert.deepStrictEqual(calls, ['startDisposableHubDb']);
+        assert.deepStrictEqual(logs, [
+            'token rail: no disposable database is reachable, so the venue cannot be built',
+        ]);
     });
 
     it('a clean ledger drops none', async function () {

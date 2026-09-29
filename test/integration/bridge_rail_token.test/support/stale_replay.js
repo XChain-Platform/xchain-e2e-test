@@ -67,9 +67,12 @@ async function dropStaleReplay(connection, label, options) {
 
 async function dropStaleReplayBeforeVenue(label, options) {
     const opts = options || {};
-    if (!process.env.HUB_DB_USER || !process.env.HUB_DB_PASS) return [];
     const venueDb = await startDisposableHubDb();
-    if (!venueDb) return [];
+    if (!venueDb) {
+        const log = opts.log || console.log;
+        log('token rail: no disposable database is reachable, so the venue cannot be built');
+        return [];
+    }
     let connection = null;
     try {
         connection = await mariadb.createConnection({
