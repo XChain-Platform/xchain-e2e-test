@@ -20,7 +20,16 @@ const fs = require('fs');
 const mariadb = require('mariadb');
 const path = require('path');
 
-const { createRailDrive } = require('../../bridge_rail_token.test/support');
+const bridgeRailVenue = require('../../../helpers/bridgeRailVenue');
+const { policyBridgeRailVenue } = require('./policy_venue');
+// Bind the shared drive factory to the policy venue subclass only while the factory loads.
+function loadPolicyDriveFactory() {
+    const inherited = bridgeRailVenue.BridgeRailVenue;
+    bridgeRailVenue.BridgeRailVenue = policyBridgeRailVenue(inherited);
+    try { return require('../../bridge_rail_token.test/support').createRailDrive; }
+    finally { bridgeRailVenue.BridgeRailVenue = inherited; }
+}
+const createRailDrive = loadPolicyDriveFactory();
 const chainRail = require('../../../helpers/chainRail');
 const cryptoHelper = require('../../../cryptoHelper');
 const gasHelper = require('../../../helpers/gasHelper');
@@ -36,7 +45,7 @@ const { installStandingHubConnector } = require('./standing_hub');
 const {
     resolveVenueQuorum,
     withMiningPaused,
-} = require('../../../helpers/bridgeRailVenue');
+} = bridgeRailVenue;
 const policy = require('./policy');
 
 const BOOTSTRAP_MIN_STAKE = 5000;
