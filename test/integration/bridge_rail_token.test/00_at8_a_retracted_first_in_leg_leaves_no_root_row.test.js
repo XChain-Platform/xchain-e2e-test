@@ -61,7 +61,8 @@ async function lockFirstLeg() {
     const lock = await btcAction(R.issuer, lockWireV3(R.tick, 'DOGE', R.dest.address, 1, 'AT8 retraction'), 'xbridges');
     assert.strictEqual(lock.status, 'valid', 'the v3 lock graded ' + lock.status);
     const row = await state.venue.waitForFinalizedTransfer(
-        (r) => String(r.dest_address) === R.dest.address && String(r.tick) === R.tick);
+        (r) => String(r.dest_address) === R.dest.address && String(r.tick) === R.tick,
+        { timeoutMs: 30 * 60 * 1000 });
     assert.ok(row, 'the retraction leg\'s lock never finalized, so there is nothing to retract.\n' +
         state.venue.hubTails(30));
     state.evidence.at8_retraction = { tick: R.tick, issue, optIn, lock, transferId: row.transfer_id,

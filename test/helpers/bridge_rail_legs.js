@@ -73,13 +73,14 @@ const RAIL_DRIVES = {
                 minPassed: 10,
             },
             at5_at6: {
-                grep: [...TOKEN_ROOT, TOKEN_AT1, 'token AT5 \\(', 'token AT6 \\('].join('|'),
-                minPassed: 12,
+                grep: [...TOKEN_ROOT, TOKEN_AT1, 'token AT2:', 'token AT3:',
+                    'token AT5 \\(', 'token AT6 \\('].join('|'),
+                minPassed: 16,
             },
             at7_at8: {
-                grep: [...TOKEN_ROOT, TOKEN_AT1, 'token AT7:',
+                grep: [...TOKEN_ROOT, TOKEN_AT1, 'token AT2:', 'token AT7:',
                     'token AT8 \\((?:cap|invariant)\\):'].join('|'),
-                minPassed: 8,
+                minPassed: 9,
             },
             full: { grep: null, minPassed: 27 },
         },
