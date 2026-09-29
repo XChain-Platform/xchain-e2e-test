@@ -26,6 +26,7 @@ const fixture           = require('../../../attestMirror/mirrorDrillFixture');
 const { requireHealthyHub } = require('../../../helpers/rail_preflight/hub_health_gate');
 const { withDogeFeeSchedule } = require('../../../helpers/rail_preflight/token_doge_fee');
 const { caseJournalEntry } = require('../../../helpers/rail_preflight/case_journal_entry');
+const { evidenceJson } = require('../../../helpers/rail_preflight/evidence_json');
 const {
     BridgeRailVenue,
     resolveVenueQuorum,
@@ -194,7 +195,7 @@ function createRailDrive(cfg) {
     async function finishDrive() {
         this.timeout(0);
         if (state.venue) await state.venue.stop();
-        console.log('\n=== ' + cfg.readoutTitle + ' ===\n' + JSON.stringify(state.evidence, null, 2) + '\n');
+        console.log('\n=== ' + cfg.readoutTitle + ' ===\n' + evidenceJson(state.evidence, 2) + '\n');
         journalCase({ suite: cfg.journalSuite, title: '=== readouts ===', state: 'evidence',
             evidence: state.evidence });
         // A leg that reorgs the SHARED BTC regtest chain must not leave it shorter than it
