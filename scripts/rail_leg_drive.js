@@ -6,6 +6,7 @@ const path = require('path')
 const { execFileSync, spawn } = require('child_process')
 
 const { RAIL_DRIVES } = require('../test/helpers/bridge_rail_legs')
+const { ancestorPids, otherRailDrives } = require('../test/helpers/rail_preflight/rail_drive_processes')
 const { triageJournal } = require('./rail_journal_triage')
 const { limitSchedule, parseGraceMinutes } = require('./rail_leg/rail_leg_limit')
 
@@ -69,21 +70,6 @@ function buildLegCommand (driveName, legName, opts = {}) {
     }
 }
 
-function otherRailDrives (psText, ownPids) {
-    const ignored = new Set([...ownPids].map(Number))
-    const matches = []
-    for (const line of String(psText).split(/\r?\n/)) {
-        const match = /^\s*(\d+)\s+(.+)$/.exec(line)
-        if (!match) continue
-        const pid = Number(match[1])
-        const args = match[2]
-        if (!ignored.has(pid) && /mocha/.test(args) && /bridge_rail_/.test(args)) {
-            matches.push({ pid, args })
-        }
-    }
-    return matches
-}
-
 function parseArgs (argv) {
     if (argv.length < 2) throw new Error('drive and leg are required')
     const options = {
@@ -115,8 +101,8 @@ function printDryRun (command) {
 }
 
 function findCompetingDrive () {
-    const psText = execFileSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf8' })
-    return otherRailDrives(psText, [process.pid, process.ppid])[0]
+    const psText = execFileSync('ps', ['-eo', 'pid=,ppid=,args='], { encoding: 'utf8' })
+    return otherRailDrives(psText, ancestorPids(psText, process.pid))[0]
 }
 
 function runChild (command, limitMinutes, graceMinutes) {
