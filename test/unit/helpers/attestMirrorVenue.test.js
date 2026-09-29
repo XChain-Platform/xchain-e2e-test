@@ -997,6 +997,69 @@ describe('attestMirrorVenue: reusable chain databases', function () {
         assert.match(state.logs.join('\n'), /indexer 5.*same ledger hash.*not re-seeding/i)
     })
 
+    it('re-seeds a database whose seed never finished, even when its ledger hash matches', async () => {
+        const { venue, state, ix } = reuseFixture('venue-ledger')
+        let standingOpened = false
+        venue._conn = {
+            query: async (sql, params) => {
+                if (sql.startsWith('CREATE DATABASE')) return []
+                if (sql.includes('information_schema.TABLES'))
+                    return [{ c: params[1] === 'venue_seed_complete' ? 0 : 1 }]
+                throw new Error('unexpected venue query: ' + sql)
+            }
+        }
+        venue._createChainDbConnection = async () => { standingOpened = true; throw new Error('no agreement read expected') }
+        await venue._cloneChainDbFromStanding(ix)
+        assert.strictEqual(state.seeded, 1)
+        assert.strictEqual(standingOpened, false)
+        assert.match(state.logs.join('\n'), /indexer 5.*no venue_seed_complete marker.*re-seeded/i)
+    })
+
+    function seedFixture(failOn) {
+        const venue = new AttestMirrorVenue({ label: 'seed', hubDb: DB })
+        const src = [], dst = []
+        venue._createChainDbConnection = async (opts) => {
+            const log = opts.user === DB.user ? dst : src
+            return {
+                query: async (q) => {
+                    log.push(q)
+                    if (q === 'SHOW TABLES') return [{ t: 'blocks' }, { t: 'unstakes' }]
+                    return []
+                },
+                end: async () => { log.push('END') },
+            }
+        }
+        venue._copyChainTable = async (s, d, t) => {
+            if (t === failOn) throw new Error('copy cut off at ' + t)
+            dst.push('COPY ' + t)
+            return 2
+        }
+        return { venue, src, dst }
+    }
+
+    it('seeds from one standing snapshot and marks the database complete only after the last table', async () => {
+        const { venue, src, dst } = seedFixture(null)
+        const saved = console.log
+        console.log = () => {}
+        try { await venue._seedChainDbFromStanding({ index: 0, indexerDbName: 'XChain_AM_MVH_seed_Ixr0' }, 'XChain_BTC_Regtest_Indexer') }
+        finally { console.log = saved }
+        assert.strictEqual(dst[0], 'DROP TABLE IF EXISTS `venue_seed_complete`')
+        assert.ok(src.indexOf('START TRANSACTION WITH CONSISTENT SNAPSHOT') < src.indexOf('SHOW TABLES'))
+        assert.ok(src.indexOf('START TRANSACTION WITH CONSISTENT SNAPSHOT') >= 0)
+        assert.ok(src.includes('COMMIT'))
+        const create = dst.findIndex((q) => q.startsWith('CREATE TABLE `venue_seed_complete`'))
+        assert.ok(create > dst.lastIndexOf('COPY unstakes'), 'the marker is written after the last table')
+        assert.ok(dst[create + 1].startsWith('INSERT INTO `venue_seed_complete`'))
+    })
+
+    it('leaves no completion marker when the seed is cut off part way', async () => {
+        const { venue, dst } = seedFixture('unstakes')
+        await assert.rejects(venue._seedChainDbFromStanding({ index: 0, indexerDbName: 'XChain_AM_MVH_seed_Ixr0' },
+            'XChain_BTC_Regtest_Indexer'), /cut off at unstakes/)
+        assert.strictEqual(dst[0], 'DROP TABLE IF EXISTS `venue_seed_complete`')
+        assert.ok(!dst.some((q) => q.startsWith('CREATE TABLE `venue_seed_complete`')))
+    })
+
     function prepareFixture(agreeing) {
         const calls = []
         const venue = new AttestMirrorVenue({ label: 'prep', hubDb: DB })
@@ -1057,7 +1120,7 @@ describe('attestMirrorVenue: reusable chain databases', function () {
             return {
                 query: async (q) => {
                     sql.push(q)
-                    if (q.startsWith('SHOW FULL TABLES')) return [{ t: 'blocks' }, { t: 'price_snapshots' }, { t: 'actions' }]
+                    if (q.startsWith('SHOW FULL TABLES')) return [{ t: 'blocks' }, { t: 'price_snapshots' }, { t: 'venue_seed_complete' }, { t: 'actions' }]
                     if (q.startsWith('SHOW CREATE TABLE')) return [{ 'Create Table': 'CREATE TABLE `x` (id int) AUTO_INCREMENT=9' }]
                     if (q.startsWith('SHOW COLUMNS')) return [{ Field: 'id', Extra: '' }, { Field: 'g', Extra: 'VIRTUAL GENERATED' }]
                     if (q.startsWith('INSERT')) return { affectedRows: 5 }
@@ -1079,7 +1142,9 @@ describe('attestMirrorVenue: reusable chain databases', function () {
         assert.deepStrictEqual(inserts, [
             'INSERT INTO `blocks` (`id`) SELECT `id` FROM `XChain_AM_MVH_prep_Ixr0`.`blocks`',
             'INSERT INTO `actions` (`id`) SELECT `id` FROM `XChain_AM_MVH_prep_Ixr0`.`actions`',
+            'INSERT INTO `venue_seed_complete` (source, completed_at) VALUES (?, UTC_TIMESTAMP())',
         ])
+        assert.strictEqual(sql[0], 'DROP TABLE IF EXISTS `venue_seed_complete`')
         assert.ok(sql.includes('DROP TABLE IF EXISTS `blocks`'))
         assert.strictEqual(sql[sql.length - 1], 'SET SESSION UNIQUE_CHECKS = 1')
         assert.ok(ended)
