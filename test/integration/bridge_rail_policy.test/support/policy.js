@@ -94,11 +94,32 @@ async function appliedPolicyRead(state, tick) {
 }
 
 async function hubPolicyRows(state, tick) {
-    return state.venue.queryHubDb(state.venue.hubs[0].dbName,
-        "SELECT snapshot_id, snapshot_block, origin_chain, tick, policy_seq, origin_block, policy_hash, " +
+    const sql = "SELECT snapshot_id, snapshot_block, origin_chain, tick, policy_seq, origin_block, policy_hash, " +
         "allow_list, block_list, sleeping, effective_time, network, finalizing_view, validator_signatures, " +
         "status, push_generation, btc_chain_id FROM policy_snapshots " +
-        "WHERE origin_chain = 'BTC' AND tick = ? ORDER BY policy_seq ASC", [String(tick)]);
+        "WHERE origin_chain = 'BTC' AND tick = ? ORDER BY policy_seq ASC";
+    const snapshots = new Map();
+    let successfulReads = 0;
+    let lastError = null;
+    for (const hub of state.venue.hubs) {
+        let rows;
+        try {
+            rows = await state.venue.queryHubDb(hub.dbName, sql, [String(tick)]);
+            successfulReads++;
+        } catch (e) {
+            lastError = e;
+            continue;
+        }
+        for (const row of rows) {
+            const id = String(row.snapshot_id);
+            const current = snapshots.get(id);
+            if (!current || String(current.status) !== 'finalized' && String(row.status) === 'finalized') {
+                snapshots.set(id, row);
+            }
+        }
+    }
+    if (!successfulReads && lastError) throw lastError;
+    return Array.from(snapshots.values()).sort((a, b) => Number(a.policy_seq) - Number(b.policy_seq));
 }
 
 async function waitForFinalizedSeq(state, tick, seq, opts) {

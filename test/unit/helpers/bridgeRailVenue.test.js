@@ -1245,4 +1245,55 @@ describe('bridgeRailVenue: the pure layer', function () {
             assert.match(msg, /1320s elapsed against a budget of 480s/);
         });
     });
+
+    describe('waitForRailSettled reads each still-listed leg across every venue hub', function () {
+        const row = { transfer_id: 't1', status: 'finalized', src_chain: 'BTC',
+            src_action_index: 7, dest_chain: 'DOGE', amount: '5', tick: 'GAS' };
+        const venueWith = (db) => {
+            const venue = Object.create(BridgeRailVenue.prototype);
+            venue.btcVenue = { hubs: [0, 1, 2, 3].map((index) => (
+                { index: index, dbName: 'h' + index })) };
+            venue.indexerRpc = async (src) => ({ transfers: src === 'BTC'
+                ? [{ tick: 'GAS', dest_chain: 'DOGE', src_action_index: 7, amount: '5' }]
+                : [] });
+            venue.queryHubDb = async (name) => {
+                const rows = db[name];
+                if (rows instanceof Error) throw rows;
+                return rows.map((entry) => Object.assign({}, entry));
+            };
+            venue.queryIndexerDb = async (chain, sql, params) => (
+                params && String(params[0]) === 't1' ? [{ block_index: 12 }] : []);
+            venue.bridgeInvariant = async () => ({ ok: true });
+            return venue;
+        };
+
+        it('settles a listed leg finalized on hubs 1 and 2 but absent on hub 0', async function () {
+            const answer = await venueWith({ h0: [], h1: [row], h2: [row], h3: [] })
+                .waitForRailSettled('GAS', { timeoutMs: 50 });
+            assert.ok(answer);
+            assert.deepStrictEqual(answer.applied.map((leg) => leg.transferId), ['t1']);
+        });
+
+        it('settles from another hub when hub 0 throws', async function () {
+            const answer = await venueWith({ h0: new Error('hub 0 down'), h1: [row], h2: [], h3: [] })
+                .waitForRailSettled('GAS', { timeoutMs: 50 });
+            assert.ok(answer);
+            assert.deepStrictEqual(answer.applied.map((leg) => leg.transferId), ['t1']);
+        });
+
+        it('does not settle a listed leg held by no hub', async function () {
+            this.timeout(10000);
+            const answer = await venueWith({ h0: [], h1: [], h2: [], h3: [] })
+                .waitForRailSettled('GAS', { timeoutMs: 50 });
+            assert.strictEqual(answer, null);
+        });
+
+        it('rejects with the last read error when every hub throws', async function () {
+            await assert.rejects(
+                () => venueWith({ h0: new Error('hub 0 down'), h1: new Error('hub 1 down'),
+                    h2: new Error('hub 2 down'), h3: new Error('hub 3 down') })
+                    .waitForRailSettled('GAS', { timeoutMs: 50 }),
+                /hub 3 down/);
+        });
+    });
 });
