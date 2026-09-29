@@ -144,7 +144,7 @@ describe('journal leg reading CLI', function () {
             '--leg', 'at3_at4'])
         assert.strictEqual(result.status, 0)
         assert.strictEqual(result.stdout,
-            'LEG token at3_at4 FAIL passed=0 failed=1 root=1 cascade=0 missing=10\n' +
+            'LEG token at3_at4 FAIL passed=0 failed=1 root=1 cascade=0 missing=9\n' +
             'ROOT token AT3: root failure durationMs=81\nCLEAN no\n')
         assert.strictEqual(result.stderr, '')
         assert.ok(!(result.stdout + result.stderr).includes(SECRET))

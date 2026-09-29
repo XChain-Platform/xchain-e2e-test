@@ -43,6 +43,7 @@ const {
     bridgeLockRowMatches,
     newestFinalizedSnapshot,
     nextFinalizedSnapshot,
+    policyAt8Upstream,
     policyFinalizationBudgetMs,
     policyInvariantOriginLookup,
     policyInvariantReading,
@@ -92,6 +93,8 @@ bridgeRailSuite(GROUP, function () {
     it('policy AT8 (invariant): every bridged tick\'s applied policy on DOGE equals its origin policy, by hash and by getappliedpolicy', async function () {
         this.timeout(0);
         if (needsFederation(this, 'policy AT8 invariant')) return;
+        assert.ok(policyAt8Upstream(state.policy, state.evidence).finalizedUpstream >= 2,
+            'two of AT1, AT4 (seq gap setup) and AT5 must have run and finalized seq 1');
         const readings = [];
         for (const tick of state.policy.ticks) {
             const newest = await newestFinalized(tick);
@@ -136,7 +139,9 @@ bridgeRailSuite(GROUP, function () {
         this.timeout(0);
         if (needsFederation(this, 'policy AT8 cap')) return;
         const tokens = [state.policy.main, state.policy.lag];
-        assert.ok(tokens.every((t) => t.tick && t.listIndex), 'AT1 and AT5 must have run and bridged their tokens');
+        assert.ok(tokens.every((t) => t.tick && t.listIndex) &&
+            policyAt8Upstream(state.policy, state.evidence).cap,
+            'AT1 and AT5 must have run and finalized seq 1 of their tokens');
         const doge = state.venue.dogeVenue;
         doge.withholdMirrorTable(0, TABLE);
         let rows = [];
