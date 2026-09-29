@@ -162,6 +162,14 @@ function joinedSnapshotBlocks (seeds) {
     return Array.from(blocks).sort((a, b) => a - b)
 }
 
+function syntheticSnapshotSeed (block) {
+    return {
+        table: 'capability_snapshots',
+        row: snapshotRow({ snapshotBlock: block }, 'required|cross_chain|' + block),
+        key: NATURAL_KEYS.capability_snapshots,
+    }
+}
+
 /**
  * One deterministic cross_chain capability snapshot for every distinct block named by
  * a match or call seed. Blocks are derived only from the seeds, never from caller input.
@@ -170,11 +178,33 @@ function joinedSnapshotBlocks (seeds) {
  * @returns {Array<{table: string, row: object, key: string[]}>}
  */
 function requiredCapabilitySnapshots (seeds) {
-    return joinedSnapshotBlocks(seeds).map((block) => ({
+    return joinedSnapshotBlocks(seeds).map(syntheticSnapshotSeed)
+}
+
+function stakeSnapshotSeeds (block, weights) {
+    if (!Array.isArray(weights) || weights.length === 0) {
+        throw new Error('barrierFamilyRows: cross_chain capability has no stake weights at block ' + block)
+    }
+    return weights.map((entry) => ({
         table: 'capability_snapshots',
-        row: snapshotRow({ snapshotBlock: block }, 'required|cross_chain|' + block),
+        row: {
+            snapshot_block: block, capability: 'cross_chain', signing_pubkey: entry.pubkey,
+            amount: String(entry.weight), source: entry.source,
+        },
         key: NATURAL_KEYS.capability_snapshots,
     }))
+}
+
+async function requiredSnapshotSeeds (seeds, reachedTip, weightsAt) {
+    const out = []
+    for (const block of joinedSnapshotBlocks(seeds)) {
+        if (block > Number(reachedTip)) {
+            out.push(syntheticSnapshotSeed(block))
+        } else {
+            out.push(...stakeSnapshotSeeds(block, await weightsAt(block)))
+        }
+    }
+    return out
 }
 
 /**
@@ -675,6 +705,7 @@ module.exports = {
     finalizedClause,
     inertRow,
     requiredCapabilitySnapshots,
+    requiredSnapshotSeeds,
     snapshotCapabilityCoverage,
     familySeedRows,
     admissionColumns,

@@ -15,6 +15,7 @@
 'use strict';
 
 const assert = require('assert');
+const axios = require('axios');
 
 const chainRail         = require('../../../helpers/chainRail');
 const stakeTeardown     = require('../../../helpers/stakeTeardown');
@@ -22,6 +23,9 @@ const cryptoHelper      = require('../../../cryptoHelper');
 const transactionHelper = require('../../../transactionHelper');
 const issueHelper       = require('../../../helpers/issueHelper');
 const fixture           = require('../../../attestMirror/mirrorDrillFixture');
+const { requireHealthyHub } = require('../../../helpers/rail_preflight/hub_health_gate');
+const { withDogeFeeSchedule } = require('../../../helpers/rail_preflight/token_doge_fee');
+const { caseJournalEntry } = require('../../../helpers/rail_preflight/case_journal_entry');
 const {
     BridgeRailVenue,
     resolveVenueQuorum,
@@ -29,6 +33,19 @@ const {
     journalCase,
 } = require('../../../helpers/bridgeRailVenue');
 const token = require('./token');
+
+async function pingDriveHub(connector) {
+    const response = await axios.post(connector.urls[0], {
+        jsonrpc: '2.0',
+        method: 'ping',
+        id: 1,
+    }, {
+        timeout: 5000,
+        validateStatus: () => true,
+        transformResponse: [(body) => body],
+    });
+    return { statusCode: response.status, bodyText: response.data };
+}
 
 // The venue bring-up, the per-case hooks and the suite registration, in the shape of
 // `bridge_rail_base.test/support` (the same quorum gate, the same replayed DOGE ledger, the
@@ -158,6 +175,7 @@ function createRailDrive(cfg) {
     }
 
     async function prepareDrive() {
+        await requireHealthyHub(() => pingDriveHub(global.hubConnector));
         await recordSourceContext();
         const mesh = await prepareQuorum();
         if (!mesh) return;
@@ -167,15 +185,7 @@ function createRailDrive(cfg) {
     // Every case's verdict, written as it ends: a mocha failure message exists only in the
     // epilogue and an interrupted drive never prints one (the base support's drive 13).
     function recordCase() {
-        const test = this.currentTest || {};
-        const err = test.err || null;
-        journalCase({
-            suite: cfg.journalSuite,
-            title: String(test.title || ''),
-            state: String(test.state || 'unfinished'),
-            durationMs: Number(test.duration || 0),
-            error: err ? String(err.message).slice(0, 4000) : null,
-        });
+        journalCase(caseJournalEntry(this.currentTest || {}, cfg.journalSuite, state.blocked));
     }
 
     async function finishDrive() {
@@ -269,7 +279,7 @@ function createRailDrive(cfg) {
         state,
         needsFederation,
         bridgeRailSuite,
-    }, token.bind(state));
+    }, withDogeFeeSchedule(token.bind(state), state));
 }
 
 // Requiring this module builds the token drive and nothing else: `describe` is only called

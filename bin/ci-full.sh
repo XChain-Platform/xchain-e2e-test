@@ -14,7 +14,7 @@
 #*********************************************************************
 
 #
-# bin/ci-full.sh: run EVERY tier this repo's GitHub CI runs, in one process.
+# bin/ci-full.sh: run every full-sweep tier or the selected fast tiers.
 #
 # .github/workflows/ci.yml fans this repo out as three parallel jobs (unit,
 # live-tier, drift-guards). The pre-push venue gate used to run only
@@ -50,7 +50,7 @@
 #     guarantee the workflow's install loop provides (the hub tree resolving
 #     its own `ws` and `mariadb`). A hand run needs node_modules present in
 #     ../xchain-hub and ../xchain-indexer for the same reason.
-# Nothing in ci.yml is SKIPPED-BY-DESIGN: all three jobs run in full here.
+# Full sweeps skip no ci.yml work; fast runs name every deferred tier.
 #
 # The last two tiers are LOCAL-ONLY additions rather than transcriptions, and
 # are marked as such: they are the part of `npm run ci` (the command this gate
@@ -79,6 +79,11 @@ run_tier() {
     echo "ci:full ----- $name FAIL"
   fi
 }
+fast_defer() {
+  local name="$1"
+  DEFERRED="${DEFERRED:-} [$name]"
+  echo "ci:full ===== $name DEFERRED (CI_TIER=fast, runs in the full sweep) ====="
+}
 need_sib() {
   local s
   for s in "$@"; do
@@ -104,29 +109,64 @@ need_sib xchain-documentation xchain-explorer xchain-sdk xchain-sync
 need_sib xchain-contracts xchain-decoder xchain-encoder xchain-vm \
   xchain-utxo-tracker xchain-regtest-miner xchain-wallet
 
-# The live-tier job self-provisions its database through Docker, which
-# ubuntu-latest supplies. Probe it up front so a venue without one says so in
-# its own words instead of arriving as a run-live-tier VENUE exit mid-chain.
-docker info >/dev/null 2>&1 || { echo "ci:full: VENUE LACKS DOCKER for live-tier (npm run ci:live); pin a docker venue with CI_VENUES=..."; exit 1; }
+# The full sweep's live-tier job self-provisions its database through Docker.
+# Probe full runs up front so a venue without Docker fails in its own words.
+if [ "${CI_TIER:-}" != "fast" ]; then
+  docker info >/dev/null 2>&1 || { echo "ci:full: VENUE LACKS DOCKER for live-tier (npm run ci:live); pin a docker venue with CI_VENUES=..."; exit 1; }
+fi
+
+FAST_SELECTOR_READY=0
+FAST_SELECTOR_CONSENSUS=1
+if [ "${CI_TIER:-}" = "fast" ]; then
+  if [ ! -f bin/ci_fast_select.js ]; then
+    FAST_SELECTOR_WHY="helper missing"
+  else
+    FAST_PLAN_OUTPUT="$(node bin/ci_fast_select.js --plan 2>&1)"
+    FAST_PLAN_STATUS=$?
+    [ -z "$FAST_PLAN_OUTPUT" ] || printf '%s\n' "$FAST_PLAN_OUTPUT"
+    if [ "$FAST_PLAN_STATUS" -ne 0 ]; then
+      FAST_SELECTOR_WHY="${FAST_PLAN_OUTPUT##*$'\n'}"
+      [ -n "$FAST_SELECTOR_WHY" ] || FAST_SELECTOR_WHY="exit status $FAST_PLAN_STATUS"
+    elif [ "${FAST_PLAN_OUTPUT%%$'\n'*}" = "consensus 0" ]; then
+      FAST_SELECTOR_READY=1
+      FAST_SELECTOR_CONSENSUS=0
+    elif [ "${FAST_PLAN_OUTPUT%%$'\n'*}" = "consensus 1" ]; then
+      FAST_SELECTOR_READY=1
+    else
+      FAST_SELECTOR_WHY="invalid plan output"
+    fi
+  fi
+  if [ "$FAST_SELECTOR_READY" -ne 1 ]; then
+    echo "ci:full: fast selector unavailable ($FAST_SELECTOR_WHY); running the full unit tier"
+  fi
+fi
 
 # --- job: unit -------------------------------------------------------------
-# The hermetic unit tier, the full glob rather than the subset `npm run ci`
-# names. A handful of cases skip for want of a .env, which CI lacks too.
+# Full and consensus runs use the hermetic unit glob; narrow fast runs use the
+# selector's mapped unit files. A handful skip for want of CI-only inputs.
 # XCHAIN_REQUIRE_SIBLINGS=1 turns every cross-repo guard's "sibling absent, skip"
 # into a failure, so a sibling-reading unit suite can never gate green by skip.
 # This is stricter than the workflow's unit job, which checks out only hub and
 # indexer; the venue lays the full .ci-siblings roster, so it can afford it.
-run_tier "unit (test:unit, siblings required)" \
-  env XCHAIN_REQUIRE_SIBLINGS=1 npm run test:unit
+if [ "${CI_TIER:-}" = "fast" ] && [ "$FAST_SELECTOR_READY" -eq 1 ] && [ "$FAST_SELECTOR_CONSENSUS" -eq 0 ]; then
+  run_tier "unit (changed tests, siblings required)" \
+    env XCHAIN_REQUIRE_SIBLINGS=1 node bin/ci_fast_select.js --run
+  fast_defer "unit (test:unit, siblings required)"
+else
+  run_tier "unit (test:unit, siblings required)" \
+    env XCHAIN_REQUIRE_SIBLINGS=1 npm run test:unit
+fi
 
 # --- job: live-tier --------------------------------------------------------
-# `npm run ci:live` -> scripts/run-live-tier.js over test/integration/
-# live-tier.json. HUB_DB_* is unset exactly as the workflow does it: with those
-# present the fixture reuses a pre-provisioned database, and this lane wants
-# the Docker self-provisioning path that needs no credentials.
-run_tier "live-tier (ci:live)" \
-  env -u HUB_DB_HOST -u HUB_DB_USER -u HUB_DB_PASS -u HUB_DB_NAME -u HUB_DB_PORT \
-  npm run ci:live
+# Full runs call scripts/run-live-tier.js over test/integration/live-tier.json.
+# HUB_DB_* stays unset so the fixture uses Docker instead of external credentials.
+if [ "${CI_TIER:-}" = "fast" ]; then
+  fast_defer "live-tier (ci:live)"
+else
+  run_tier "live-tier (ci:live)" \
+    env -u HUB_DB_HOST -u HUB_DB_USER -u HUB_DB_PASS -u HUB_DB_NAME -u HUB_DB_PORT \
+    npm run ci:live
+fi
 
 # --- job: drift-guards -----------------------------------------------------
 # Run FROM the parent so sync-coins.sh sees the canonical + vendored pair the
@@ -152,8 +192,16 @@ run_tier "local: cross-repo parity suites (siblings required)" \
   ./node_modules/.bin/mocha --no-config --timeout 30000 --exit 'test/integration/parity/**/*.test.js'
 
 echo
+if [ "${CI_TIER:-}" = "fast" ]; then
+  echo "ci:full: tier class fast"
+  echo "ci:full: DEFERRED to the full sweep:$DEFERRED"
+fi
 if [ -n "$FAILED" ]; then
   echo "ci:full: RED tiers:$FAILED"
   exit 1
 fi
-echo "ci:full: all tiers green (same set GitHub CI runs, plus the local-only tail)"
+if [ "${CI_TIER:-}" = "fast" ]; then
+  echo "ci:full: all FAST tiers green; the DEFERRED tiers above were NOT graded here"
+else
+  echo "ci:full: all tiers green (same set GitHub CI runs, plus the local-only tail)"
+fi

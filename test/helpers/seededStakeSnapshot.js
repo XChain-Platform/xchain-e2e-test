@@ -27,6 +27,7 @@
  * and no chain. It overrides, per hub:
  *   - capabilitySnapshot.getActiveValidatorSnapshot(blockIndex)  (federation set)
  *   - capabilitySnapshot.getSnapshot(capability, blockIndex)     (per-capability set)
+ *   - capabilitySnapshot.getWeightSnapshot(capability, blockIndex) (weighted set)
  *   - hub.resolveBtcLatestBlock()                               (the block to snapshot at)
  *
  * Quorum is 2·⌊(N−1)/3⌋+1, so for a meaningful (fault-tolerant) quorum use
@@ -42,26 +43,38 @@ function seedStakeSnapshot(mvh, opts = {}) {
     // Every harness validator is a staker, so PBFT participants (registered by
     // addr) all correspond to a pubkey present in the snapshot.
     const validators = mvh.identities.map((id) => ({ pubkey: id.pubkeyHex, amount }));
+    const weightValidators = validators.map(({ pubkey, amount: weight }) => ({
+        pubkey,
+        source: pubkey,
+        weight
+    }));
     const base = { validators, count: validators.length, blockIndex };
 
     // Fresh copy per call so a caller mutating one hub's snapshot can't bleed
     // into another's (and so the hub's own cache can't be aliased).
     const fresh = (extra) => Object.assign({}, base, extra, { validators: validators.slice() });
+    const freshWeight = (extra) => Object.assign({}, base, extra, {
+        sourceCount: weightValidators.length,
+        validators: weightValidators.slice()
+    });
 
     const restores = [];
     for (const hub of mvh.hubs) {
         const cs        = hub.capabilitySnapshot;
         const origActive = cs.getActiveValidatorSnapshot;
         const origPerCap = cs.getSnapshot;
+        const origWeight = cs.getWeightSnapshot;
         const origBlock  = hub.resolveBtcLatestBlock;
 
         cs.getActiveValidatorSnapshot = async () => fresh({ capability: null });
         cs.getSnapshot                = async (capability) => fresh({ capability });
+        cs.getWeightSnapshot          = async (capability) => freshWeight({ capability });
         hub.resolveBtcLatestBlock    = async () => blockIndex;
 
         restores.push(() => {
             cs.getActiveValidatorSnapshot = origActive;
             cs.getSnapshot                = origPerCap;
+            cs.getWeightSnapshot          = origWeight;
             hub.resolveBtcLatestBlock    = origBlock;
         });
     }

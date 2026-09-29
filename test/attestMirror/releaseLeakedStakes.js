@@ -63,6 +63,7 @@ const stakeHelper   = require('../helpers/stakeHelper')
 const stakeTeardown = require('../helpers/stakeTeardown')
 const { DRILL_KEYS_DIR } = require('./mirrorDrillFixture')
 const { mineBtcKeepingDogeAlive } = require('./mirrorDrillWaits')
+const { restoreRecordedStaker } = require('./restoreRecordedStaker')
 const { clearWedgeIfPresent } = require('../helpers/stakeTeardown')
 
 const LABEL = process.env.RELEASE_LABEL || 'at2b'
@@ -87,19 +88,19 @@ async function broadcastUnstakes(entries, mine) {
         }
         let restored = null
         try {
-            // The mnemonic goes in here and nowhere else. Same label, type and
-            // index as the prologue used, which is what makes it the same address.
-            restored = await cryptoHelper.getNewAddress(
-                entry.staker, COIN, NETWORK, entry.mnemonic, 'legacy', 0)
+            const restoration = await restoreRecordedStaker(entry, {
+                cryptoHelper,
+                wallets: global.wallets,
+                coin: COIN,
+                network: NETWORK
+            })
+            if (restoration.refused) {
+                verdicts.push({ pubkey: short, unstake: restoration.refused })
+                continue
+            }
+            restored = restoration.restored
         } catch (e) {
             verdicts.push({ pubkey: short, unstake: 'restore failed: ' + (e && e.message) })
-            continue
-        }
-        if (String(restored.address) !== String(entry.address)) {
-            // Refused rather than broadcast: an UNSTAKE signed by the wrong
-            // address cannot release this stake and would only spend a fee.
-            verdicts.push({ pubkey: short,
-                unstake: 'restore produced ' + restored.address + ' rather than the recorded ' + entry.address })
             continue
         }
         try {

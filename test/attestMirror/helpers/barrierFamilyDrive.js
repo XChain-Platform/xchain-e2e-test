@@ -182,6 +182,33 @@ async function holdSnapshot (venue, i) {
     }
 }
 
+function venueIndexerApiKey (venue, i) {
+    const perIndex = venue.indexerEnv && venue.indexerEnv[i]
+    if (perIndex && perIndex.INDEXER_API_KEY) return String(perIndex.INDEXER_API_KEY)
+    if (venue.indexerExtraEnv && venue.indexerExtraEnv.INDEXER_API_KEY) {
+        return String(venue.indexerExtraEnv.INDEXER_API_KEY)
+    }
+    const ix = venue.indexers[i]
+    return ix && ix.apiKey ? String(ix.apiKey) : null
+}
+
+function stakeWeightsAt (venue, i) {
+    const ix = venue.indexers[i]
+    const conn = new XChainIndexerConnector('127.0.0.1', ix.apiPort, venueIndexerApiKey(venue, i))
+    return async (block) => {
+        const params = { capability: 'cross_chain', block_index: Number(block), min_stake: '0' }
+        const answer = await conn.call('getstakeweightsbycapability', params)
+        if (!answer || answer.error) {
+            throw new Error('indexer ' + i + ' stake weights failed at block ' + block + ': ' +
+                JSON.stringify(answer && answer.error))
+        }
+        if (answer.truncated === true) {
+            throw new Error('indexer ' + i + ' returned truncated cross_chain stake weights at block ' + block)
+        }
+        return answer.validators
+    }
+}
+
 /** Poll `/status` of indexer `i` until `pred(snapshot)` holds; returns the last snapshot either way. */
 async function waitForStatus (venue, i, pred, timeoutMs) {
     const got = await until(async () => {
@@ -636,6 +663,7 @@ module.exports = {
     mirrorReady,
     statusSnapshot,
     holdSnapshot,
+    stakeWeightsAt,
     waitForStatus,
     ADMISSION_HEIGHT_WAIT_MS,
     waitForAdmissionHeights,

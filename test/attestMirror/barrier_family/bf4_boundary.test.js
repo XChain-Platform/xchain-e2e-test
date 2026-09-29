@@ -247,7 +247,7 @@ async function seedThree (ctx) {
     const floor = await drive.minimumStamp(ctx.btc)
     // Both drill blocks must be stampable: T sits comfortably above the tip's median time.
     ctx.T = Math.max(Math.floor(Date.now() / 1000), floor.floor + 60) + 120
-    // Snapshot at the next height, not the reached tip: a fresh node's stake re-derivation rejects a synthetic capability row at a reached height.
+    // Snapshot every joined block: reached blocks use indexer stake weights, while the next height uses the synthetic row.
     const base = { network: ctx.venue.network, coin: ctx.coin, effectiveTime: ctx.T, snapshotBlock: ctx.tip + 1 }
     // The crossing, asserted before anything is seeded: the legacy block is a real block BELOW the
     // activation and the drill blocks land at or above it, so both eras exist on this one venue.
@@ -266,8 +266,14 @@ async function seedThree (ctx) {
     // canonical; the guard fails this case, not the drill block, if it is ever moved to bridge or policy.
     const hazards = rows.armedLegacyApplyHazards([legacy, omits, control], ctx.armHeight)
     assert.deepStrictEqual(hazards, [], assertionMessage('no armed legacy apply hazards', hazards, 'the BF4 seed rows'))
-    await drive.seedMirrors(ctx.venue, [rows.inertRow('capability_snapshots', Object.assign({ tag: 'bf4|snap|' + ctx.tip }, base)), legacy, omits, control])
+    const snapshots = await rows.requiredSnapshotSeeds([legacy, omits, control], ctx.tip, drive.stakeWeightsAt(ctx.venue, ARMED))
+    const coverage = rows.snapshotCapabilityCoverage([legacy, omits, control].concat(snapshots))
+    // Refuse incomplete snapshot coverage before any mirror rows are seeded.
+    assert.ok(coverage.satisfied, assertionMessage('no missing capability snapshot blocks', coverage.missingBlocks,
+        coverage.refusal || 'the BF4 snapshot seed set'))
+    await drive.seedMirrors(ctx.venue, snapshots.concat([legacy, omits, control]))
     await drive.waitForMirrorRows(ctx.venue, ARMED, TABLE, 3)
+    await drive.waitForMirrorRows(ctx.venue, ARMED, 'capability_snapshots', snapshots.length)
     ctx.keys = { legacy: legacy.row.match_id, omits: omits.row.match_id, control: control.row.match_id }
     assert.strictEqual(omits.row[fixture.admissionColumn(TABLE, 'BTC')], null,
         assertionMessage('BTC admission height=NULL', omits.row[fixture.admissionColumn(TABLE, 'BTC')], 'the BF4 chain-omitting seed'))

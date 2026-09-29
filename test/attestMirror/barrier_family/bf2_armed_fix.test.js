@@ -130,7 +130,7 @@ async function seedAdmissionRows (ctx) {
     const tip = held.tip
     ctx.B = tip + 1
     const now = Math.floor(Date.now() / 1000)
-    // Snapshot at B, not the reached tip: a fresh node's stake re-derivation rejects a synthetic capability row at a reached height.
+    // Reached blocks take stake-derived rows; unreached blocks take synthetic rows.
     const base = { network: ctx.venue.network, coin: ctx.coin, effectiveTime: now, snapshotBlock: ctx.B }
     // The crossing, asserted before anything is seeded: both eras exist on this one venue.
     assert.strictEqual(ctx.legacyBlock, fixture.legacyEraBlock(ctx.armHeight),
@@ -143,14 +143,19 @@ async function seedAdmissionRows (ctx) {
     // Refuse before seeding: a NULL-map row at or above the activation stalls the drill block, not this case.
     const hazards = rows.armedLegacyApplyHazards(members, ctx.armHeight)
     assert.deepStrictEqual(hazards, [], assertionMessage('no armed legacy apply hazards', hazards, 'the BF2 member seeds'))
-    const seeds = [rows.inertRow('capability_snapshots', Object.assign({ tag: 'bf2|snap|' + tip }, base))].concat(members)
+    const snapshots = await rows.requiredSnapshotSeeds(members, tip, drive.stakeWeightsAt(ctx.venue, ARMED))
+    const coverage = rows.snapshotCapabilityCoverage(members.concat(snapshots))
+    // Verify every joined block has a capability snapshot before any row is seeded.
+    assert.ok(coverage.satisfied,
+        assertionMessage('no missing snapshot blocks', coverage.missingBlocks, 'the BF2 snapshot seeds'))
+    const seeds = snapshots.concat(members)
     await drive.seedMirrors(ctx.venue, seeds)
     ctx.seeded = {}
     for (const t of TABLES) {
         ctx.seeded[t] = members.filter((m) => m.table === t).length
         await drive.waitForMirrorRows(ctx.venue, ARMED, t, ctx.seeded[t])
     }
-    await drive.waitForMirrorRows(ctx.venue, ARMED, 'capability_snapshots', 1)
+    await drive.waitForMirrorRows(ctx.venue, ARMED, 'capability_snapshots', snapshots.length)
     console.log('BF2 seeded ' + JSON.stringify(ctx.seeded) + ' rows per member table against B=' + ctx.B +
                 ', activation ' + ctx.armHeight + ', legacy era block ' + ctx.legacyBlock)
 }

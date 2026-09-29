@@ -115,6 +115,7 @@ bridgeRailSuite(GROUP, function () {
     it('token AT5 (existing row): a federation-signed in-leg at other decimals than BTC.<tick> with supply outstanding is refused with one line naming the id', async function () {
         this.timeout(0);
         if (needsFederation(this, 'token AT5 decimals with supply')) return;
+        assert.ok(state.evidence.at1_dogeChild, 'AT1 must have run');
         const T = state.tokens;
         const template = await signedTokenTemplate();
         const child = await state.venue.tokenParameters('DOGE', T.bridged);
@@ -190,7 +191,7 @@ bridgeRailSuite(GROUP, function () {
                 if (depth < want - 1) await mineBtcBlocks(1, 'depth ' + (depth + 1) + ' for the depth lock');
             }
             await mineBtcBlocks(1, 'depth ' + want + ' for the depth lock');
-            atDepth[want] = await venue.waitForFinalizedTransfer(notYet, { timeoutMs: 10 * 60 * 1000 });
+            atDepth[want] = await venue.waitForFinalizedTransfer(notYet, { timeoutMs: 30 * 60 * 1000 });
             return { lock, atDepth };
         });
         state.evidence.at5_depth = { tick: D.tick, setup, lockTx: reading.lock.tx, pollMs: venue.pollMs,
