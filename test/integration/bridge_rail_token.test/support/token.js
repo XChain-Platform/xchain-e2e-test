@@ -146,6 +146,22 @@ function bind(state) {
                 decimals: String(row.decimals), amount: String(row.amount), appliedBlock: String(applied.block_index) } };
     }
 
+    async function waitForFinalizedPolicy(tick, seq, opts) {
+        const o = opts || {};
+        let found = null;
+        await state.venue.waitUntil('a finalized policy snapshot for ' + tick + ' at seq >= ' + seq, async () => {
+            for (const hub of state.venue.hubs) {
+                const rows = await state.venue.queryHubDb(hub.dbName,
+                    "SELECT * FROM policy_snapshots WHERE origin_chain='BTC' AND tick=? " +
+                    "AND status='finalized' AND policy_seq>=? ORDER BY policy_seq DESC LIMIT 1",
+                    [String(tick), Number(seq)]);
+                if (rows.length) { found = rows[0]; return true; }
+            }
+            return false;
+        }, { timeoutMs: o.timeoutMs || 30 * 60 * 1000, everyMs: 3000 });
+        return found;
+    }
+
     // The XCHAIN chain halves, AT8's control: the token legs must leave them untouched.
     async function chainHalves() {
         const escrow = escrowOf(await state.venue.bridgeBalances('BTC', GAS_TICK), 'DOGE');
@@ -207,6 +223,7 @@ function bind(state) {
         lockWireV3, burnWireV4, optInWire, escrowOf, classifyInvariant, effectiveLockDepth, capOrderReading,
         GAS_TICK, LOCK, BURN, DECIMALS, MINT, EXPIRY,
         btcAction, dogeAction, fundBtc, fundDoge, rowsLike, pickFreeTick, tokenSnapshot, settleLeg,
+        waitForFinalizedPolicy,
         chainHalves, policyInheritanceActive, capPerBlock, mineBtcBlocks, reorgBtcFrom,
     };
 }

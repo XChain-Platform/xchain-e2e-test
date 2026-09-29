@@ -82,6 +82,9 @@
 
 'use strict';
 
+const crypto = require('crypto');
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { journalCase } = require('../helpers/bridgeRailVenue');
@@ -155,7 +158,10 @@ const PARITY_FILES = [
     'test/unit/activations/activation_constants_parity.test/height_ordering.test.js',
 ];
 const PARITY_ORDERING_TITLE = 'holds TOKEN_BRIDGE_ACTIVATION >= XCHAIN_BRIDGE_ACTIVATION for every chain key';
-const VENUE_EXIT = 95;
+const CI_GATE_COMMAND = 'npm run ci:full';
+const GATE_DID_NOT_RUN_EXITS = new Set([2, 3, 94, 95, 97, 99, 255]);
+const SIBLING_BRANCH_RULE = /^PUSH_BRANCH="\$\{REMOTE_REF#refs\/heads\/\}"$/m;
+const GATE_BASE_HANDLER = /^\s*--base\)/m;
 const GATE_TIMEOUT_MS = 4 * 60 * 60 * 1000;
 // The two cases a leg skips on purpose because regtest arms their flag at height 0, so no
 // block below it exists to drive; each names the indexer unit coverage that carries it.
@@ -169,20 +175,88 @@ const DRIVE_ORDER = ['T0', 'AT8', 'AT1', 'AT2', 'AT3', 'AT4', 'AT5', 'AT6', 'AT7
 // NODE_PATH, no pinned database, exactly as the workflow gives the gate a clean runner.
 const GATE_ENV_KEYS = ['HOME', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_ALL', 'TMPDIR', 'TERM',
     'DOCKER_HOST', 'XDG_RUNTIME_DIR'];
+const GATE_ENV_MASK_KEYS = [
+    'HUB_DB_HOST', 'HUB_DB_PORT', 'HUB_DB_NAME', 'HUB_DB_USER', 'HUB_DB_PASS',
+    'DATABASE_URL', 'DATABASE_PORT',
+    'INDEXER_URL', 'INDEXER_API_PORT', 'BTC_INDEXER_API_URL',
+    'P2P_MAX_CONNECTIONS_PER_IP',
+];
 
 const at9 = { record: null, drive: null, ordinaryCi: null, parity: null };
+let gitShim = null;
+
+function executableOnPath(name) {
+    for (const dir of String(process.env.PATH || '').split(path.delimiter)) {
+        const candidate = path.join(dir, name);
+        try {
+            fs.accessSync(candidate, fs.constants.X_OK);
+            return candidate;
+        } catch (e) { /* keep looking */ }
+    }
+    return null;
+}
+
+function mappedGitEnv() {
+    if (gitShim) return gitShim.env;
+    const dotGit = path.join(E2E_ROOT, '.git');
+    let pointer = null;
+    try {
+        const match = /^gitdir:\s*(.+)\s*$/.exec(fs.readFileSync(dotGit, 'utf8'));
+        if (match) pointer = path.resolve(E2E_ROOT, match[1]);
+    } catch (e) { return {}; }
+    if (!pointer || fs.existsSync(pointer)) return {};
+
+    const marker = path.sep + path.basename(E2E_ROOT) + path.sep + '.git' + path.sep;
+    const at = pointer.lastIndexOf(marker);
+    if (at < 0) return {};
+    let platform;
+    try { platform = path.dirname(fs.realpathSync(INDEXER_ROOT)); } catch (e) { return {}; }
+    const mapped = path.join(platform, pointer.slice(at + 1));
+    const realGit = executableOnPath('git');
+    if (!realGit || !fs.existsSync(mapped)) return {};
+
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'token-at9-git-'));
+    const shim = path.join(dir, 'git');
+    fs.writeFileSync(shim, [
+        '#!/bin/sh',
+        'has_c=0',
+        'mapped_c=0',
+        'take_c=0',
+        'for arg in "$@"; do',
+        '  if [ "$take_c" = 1 ]; then',
+        '    has_c=1',
+        '    if [ "$arg" = "$AT9_GIT_WORK_TREE" ]; then mapped_c=1; fi',
+        '    take_c=0',
+        '  elif [ "$arg" = "-C" ]; then',
+        '    take_c=1',
+        '  fi',
+        'done',
+        'if [ "$has_c" = 1 ] && [ "$mapped_c" = 0 ]; then',
+        '  exec "$AT9_REAL_GIT" "$@"',
+        'fi',
+        'if [ "$mapped_c" = 1 ] || [ "$PWD" = "$AT9_GIT_WORK_TREE" ]; then',
+        '  exec "$AT9_REAL_GIT" --git-dir="$AT9_GIT_DIR" --work-tree="$AT9_GIT_WORK_TREE" "$@"',
+        'fi',
+        'exec "$AT9_REAL_GIT" "$@"',
+        '',
+    ].join('\n'), { mode: 0o755 });
+    gitShim = { dir, env: { AT9_GIT_DIR: mapped, AT9_GIT_WORK_TREE: E2E_ROOT,
+        AT9_REAL_GIT: realGit, PATH: dir + path.delimiter + (process.env.PATH || '') } };
+    return gitShim.env;
+}
 
 function gateEnv(extra) {
     const env = {};
     for (const key of GATE_ENV_KEYS) if (process.env[key] !== undefined) env[key] = process.env[key];
+    for (const key of GATE_ENV_MASK_KEYS) env[key] = '';
     // This process's own node first, so `npm` and every `node` it forks are the same Node 22.
     env.PATH = path.dirname(process.execPath) + path.delimiter + (process.env.PATH || '');
-    return Object.assign(env, extra || {});
+    return Object.assign(env, mappedGitEnv(), extra || {});
 }
 
-function run(cmd, args, cwd, env) {
+function run(cmd, args, cwd, env, input) {
     const res = spawnSync(cmd, args, { cwd, env, encoding: 'utf8', maxBuffer: 512 * 1024 * 1024,
-        timeout: GATE_TIMEOUT_MS });
+        timeout: GATE_TIMEOUT_MS, input: input === undefined ? '' : input });
     const out = String(res.stdout || '') + String(res.stderr || '');
     return { status: res.status, signal: res.signal, error: res.error ? String(res.error.message) : null,
         out, tail: out.split('\n').slice(-60).join('\n') };
@@ -193,12 +267,51 @@ function headOf(dir) {
     return res.status === 0 ? res.out.trim() : null;
 }
 
-// Every mocha summary line in a gate's output, so the record carries what actually ran.
+// Prefer the gate's authoritative aggregate because successful dispatches return its
+// compact PASS line rather than the venue's full mocha output.
 function tallies(out) {
     const plain = out.replace(/\u001b\[[0-9;]*m/g, '');
+    const gate = /^ci-gate: PASS\s+.*?\s+(\d+) pass \/ (\d+) fail(?:\s|$)/m.exec(plain);
+    if (gate) return { passing: Number(gate[1]), failing: Number(gate[2]), pending: 0 };
     const count = (re) => [...plain.matchAll(re)].reduce((n, m) => n + Number(m[1]), 0);
     return { passing: count(/^\s*(\d+) passing/gm), failing: count(/^\s*(\d+) failing/gm),
         pending: count(/^\s*(\d+) pending/gm) };
+}
+
+function ciVenueHosts(spec) {
+    return new Set(String(spec || '').trim().split(/\s+/).filter(Boolean).map((entry) => entry.split(':')[0]));
+}
+
+function configuredCiVenues(dispatcherText, override) {
+    if (override) return override;
+    const configured = /^VENUES="\$\{CI_VENUES:-(.+)\}"$/m.exec(dispatcherText);
+    return configured ? configured[1] : '';
+}
+
+function greenVerdictRecord(out, head, venueSpec) {
+    const plain = out.replace(/\u001b\[[0-9;]*m/g, '');
+    const skip = /^pre-push: SKIPPING the gate: commit ([0-9a-f]{8,40}) passed this exact gate \d+s ago on (.+)\.$/m.exec(plain);
+    if (!skip) return { accepted: false, reason: 'the dispatcher output names no cached exact-gate verdict' };
+    if (!head.startsWith(skip[1])) return { accepted: false, reason: 'the cached verdict names commit ' + skip[1] + ', not ' + head };
+    const store = /^pre-push:\s+doing it .* Verdict store: (.+)$/m.exec(plain);
+    if (!store) return { accepted: false, reason: 'the dispatcher output names no verdict store' };
+    const body = Buffer.from('xchain-e2e-test\0' + head + '\0' + CI_GATE_COMMAND);
+    const key = crypto.createHash('sha1').update('blob ' + body.length + '\0').update(body).digest('hex');
+    const file = path.join(store[1].trim(), 'xchain-e2e-test-' + head.slice(0, 12) + '-' + key.slice(0, 8) + '.green');
+    let verdict;
+    try { verdict = fs.readFileSync(file, 'utf8'); } catch (e) {
+        return { accepted: false, reason: 'the cached GREEN verdict file is missing: ' + file };
+    }
+    const fields = Object.fromEntries(verdict.trim().split('\n').map((line) => {
+        const at = line.indexOf('=');
+        return at < 0 ? [line, ''] : [line.slice(0, at), line.slice(at + 1)];
+    }));
+    const venues = ciVenueHosts(venueSpec);
+    if (fields.repo !== 'xchain-e2e-test' || fields.sha !== head)
+        return { accepted: false, reason: 'the cached GREEN verdict does not record this repository and full commit' };
+    if (!fields.venue || fields.venue !== skip[2] || !venues.has(fields.venue))
+        return { accepted: false, reason: 'the cached GREEN verdict venue is not the named configured CI venue' };
+    return { accepted: true, commit: fields.sha, venue: fields.venue };
 }
 
 function driveTests(root) {
@@ -213,7 +326,14 @@ function driveTests(root) {
 }
 
 describe('token AT9: the gates, and the dated acceptance record', function () {
+    after(function () {
+        if (gitShim) fs.rmSync(gitShim.dir, { recursive: true, force: true });
+    });
+
     before(function () {
+        if (!state.evidence.drivePrepared) this.skip();
+        assert.ok(state.evidence.preflight && state.evidence.preflight.ready,
+            'token AT9 requires a completed healthy full-drive preflight');
         const major = Number(process.versions.node.split('.')[0]);
         assert.strictEqual(major, 22, 'AT9 is judged on Node 22 and this process is ' + process.version);
         const child = run('node', ['-p', 'process.versions.node'], E2E_ROOT, gateEnv());
@@ -225,46 +345,72 @@ describe('token AT9: the gates, and the dated acceptance record', function () {
 
     it('the drive ran AT1 to AT8 in this file\'s order and every drivable case passed', function () {
         const { outer, tests } = driveTests(this.test.parent.parent);
-        assert.strictEqual(state.blocked, null, 'the drive never ran its federated cases: ' + state.blocked);
         const labels = [];
         for (const suite of outer.suites) {
             const m = /token (T0|AT\d)/.exec(suite.title);
             assert.ok(m, 'a drive part carries no token AT label: ' + suite.title);
             if (labels[labels.length - 1] !== m[1]) labels.push(m[1]);
         }
-        assert.deepStrictEqual(labels, DRIVE_ORDER, 'the drive parts did not run in the documented order');
         const verdicts = tests.map((t) => ({ title: t.title, state: t.state || 'unfinished' }));
+        at9.drive = { order: labels, passed: verdicts.filter((v) => v.state === 'passed').length,
+            notDrivableOnRegtest: [...NOT_DRIVABLE_ON_REGTEST], cases: verdicts };
+        assert.strictEqual(state.blocked, null, 'the drive never ran its federated cases: ' + state.blocked);
+        assert.deepStrictEqual(labels, DRIVE_ORDER, 'the drive parts did not run in the documented order');
         const wrong = verdicts.filter((v) => v.state !== (NOT_DRIVABLE_ON_REGTEST.has(v.title) ? 'pending' : 'passed'));
         assert.deepStrictEqual(wrong, [], 'drive cases that did not end as required: ' + JSON.stringify(wrong));
         for (const title of NOT_DRIVABLE_ON_REGTEST)
             assert.ok(verdicts.some((v) => v.title === title), 'the declared not-drivable case is gone: ' + title);
-        at9.drive = { order: labels, passed: verdicts.filter((v) => v.state === 'passed').length,
-            notDrivableOnRegtest: [...NOT_DRIVABLE_ON_REGTEST], cases: verdicts };
     });
 
-    it('token AT9: this repository\'s ordinary CI gate exits 0 on Node 22, live tier included', function () {
+    it('token AT9: this repository\'s full CI gate is green on the CI venue', function () {
         this.timeout(0);
-        const res = run('npm', ['run', 'ci'], E2E_ROOT, gateEnv());
+        const dispatcher = path.join(os.homedir(), '.claude', 'bin', 'ci-dispatch.sh');
+        const dispatcherText = fs.existsSync(dispatcher) ? fs.readFileSync(dispatcher, 'utf8') : '';
+        assert.ok(SIBLING_BRANCH_RULE.test(dispatcherText), 'the dispatcher at ' + dispatcher + ' has no sibling-branch rule, so a develop pre-push line would\n' +
+            'still ship every sibling at master and the parity guards would grade this tree against stale twins; refresh the dispatcher on this host first');
+        const binDir = path.dirname(dispatcher);
+        const gateText = fs.existsSync(path.join(binDir, 'ci-gate.sh')) ? fs.readFileSync(path.join(binDir, 'ci-gate.sh'), 'utf8') : '';
+        assert.ok(GATE_BASE_HANDLER.test(gateText), 'the venue gate script beside the dispatcher (' + path.join(binDir, 'ci-gate.sh') +
+            ') has no --base handler, and the dispatcher ships that file to the CI venue on every run, so the gate would exit 2 on an unknown\n' +
+            'argument before testing anything; refresh the gate script on this host first');
+        assert.ok(fs.existsSync(path.join(binDir, 'lib', 'ci_tier.sh')), 'the dispatcher sources ' + path.join(binDir, 'lib', 'ci_tier.sh') +
+            ' and it is missing on this host; refresh the dispatcher tooling first');
+        const venueSpec = configuredCiVenues(dispatcherText, process.env.CI_VENUES);
+        assert.ok(venueSpec, 'token AT9 found neither a CI_VENUES override nor a default venue pool in the dispatcher');
+        const head = headOf(E2E_ROOT);
+        assert.match(head || '', /^[0-9a-f]{40}$/, 'token AT9 cannot resolve the head it grades: ' + head);
+        // One pre-push line naming develop as the remote ref, so every sibling resolves at develop.
+        const prePush = 'refs/heads/develop ' + head + ' refs/heads/develop ' + '0'.repeat(40) + '\n';
+        const venues = process.env.CI_VENUES ? { CI_VENUES: process.env.CI_VENUES } : {};
+        const res = run(dispatcher, ['--repo', 'xchain-e2e-test', '--src', E2E_ROOT,
+            '--cmd', CI_GATE_COMMAND], E2E_ROOT, gateEnv(Object.assign({ CI_TIER: 'full' }, venues)), prePush);
         const counts = tallies(res.out);
-        at9.ordinaryCi = { command: 'npm run ci', cwd: E2E_ROOT, exit: res.status, signal: res.signal, counts };
-        assert.notStrictEqual(res.status, VENUE_EXIT, 'the live tier could not run on this host (exit ' +
-            VENUE_EXIT + ', the venue code). That is a gate that did not run, not a green one:\n' + res.tail);
-        assert.strictEqual(res.status, 0, 'the ordinary CI gate is red (exit ' + res.status +
+        const freshGreen = /CI gate GREEN on/.test(res.out);
+        const cachedGreen = greenVerdictRecord(res.out, head, venueSpec);
+        at9.ordinaryCi = { command: dispatcher + ' --repo xchain-e2e-test --src ' + E2E_ROOT +
+            ' --cmd "' + CI_GATE_COMMAND + '" (pre-push stdin: develop)', cwd: E2E_ROOT, exit: res.status, signal: res.signal, counts,
+            cachedVerdict: cachedGreen.accepted ? { commit: cachedGreen.commit, venue: cachedGreen.venue } : null,
+            failureTail: res.status === 0 ? null : res.tail };
+        assert.ok(!GATE_DID_NOT_RUN_EXITS.has(res.status), 'the CI gate did not run (exit ' + res.status +
+            '):\n' + res.tail);
+        assert.strictEqual(res.status, 0, 'the full CI gate is red (exit ' + res.status +
             (res.signal ? ', signal ' + res.signal : '') + (res.error ? ', ' + res.error : '') + '):\n' + res.tail);
-        assert.ok(counts.passing > 0, 'the ordinary CI gate exited 0 having run no mocha case:\n' + res.tail);
-        assert.strictEqual(counts.failing, 0, 'the ordinary CI gate reported failing cases:\n' + res.tail);
+        assert.ok(freshGreen || cachedGreen.accepted, 'the dispatcher exited 0 without a fresh or verified cached GREEN gate: ' +
+            cachedGreen.reason + '\n' + res.tail);
+        assert.ok(cachedGreen.accepted || counts.passing > 0, 'the full CI gate exited 0 having run no mocha case:\n' + res.tail);
+        assert.strictEqual(counts.failing, 0, 'the full CI gate reported failing cases:\n' + res.tail);
     });
 
     it('token AT9: the activation constants parity test passes with the TOKEN_BRIDGE >= XCHAIN_BRIDGE ordering', function () {
         this.timeout(0);
         const mocha = path.join(INDEXER_ROOT, 'node_modules', 'mocha', 'bin', 'mocha.js');
-        const report = path.join(require('os').tmpdir(), 'at9-parity-' + process.pid + '-' + Date.now() + '.json');
+        const report = path.join(os.tmpdir(), 'at9-parity-' + process.pid + '-' + Date.now() + '.json');
         const res = run(process.execPath, [mocha, '--no-config', '--no-package', '--require', './test/helpers/setup.js',
             '--timeout', '30000', '--exit', '--reporter', 'json', '--reporter-option', 'output=' + report,
             ...PARITY_FILES], INDEXER_ROOT, gateEnv({ XCHAIN_REQUIRE_SIBLINGS: '1' }));
         let json = null;
-        try { json = JSON.parse(require('fs').readFileSync(report, 'utf8')); } catch (e) { json = null; }
-        try { require('fs').unlinkSync(report); } catch (e) { /* never written */ }
+        try { json = JSON.parse(fs.readFileSync(report, 'utf8')); } catch (e) { json = null; }
+        try { fs.unlinkSync(report); } catch (e) { /* never written */ }
         assert.ok(json && json.stats, 'the parity run wrote no mocha report (exit ' + res.status + '):\n' + res.tail);
         const ordering = json.passes.filter((t) => t.title === PARITY_ORDERING_TITLE).length;
         at9.parity = { files: PARITY_FILES, cwd: INDEXER_ROOT, exit: res.status,

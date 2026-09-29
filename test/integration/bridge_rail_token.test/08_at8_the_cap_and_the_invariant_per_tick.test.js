@@ -52,6 +52,7 @@ const {
     chainHalves,
     capPerBlock,
     mineBtcBlocks,
+    waitForFinalizedPolicy,
     needsFederation,
     bridgeRailSuite,
 } = require('./support');
@@ -60,6 +61,17 @@ const { policyApplyBudgetMs } = require('../../helpers/rail_preflight/policy_at2
 
 const GROUP = 'token AT8: the cap and the invariant per tick';
 const PER_TICK = 15;
+const INVARIANT_SETTLE_MS = 2 * 60 * 1000;
+
+async function waitForEqualInvariant(tick) {
+    let entry = null;
+    await state.venue.waitUntil('the hub invariant for ' + tick + ' to read equal with nothing in flight', async () => {
+        const invariant = await state.venue.bridgeInvariant(tick);
+        entry = invariant && invariant[tick] && invariant[tick].DOGE;
+        return String(entry && entry.in_flight) === '0' && classifyInvariant(entry).verdict === 'equal';
+    }, { timeoutMs: INVARIANT_SETTLE_MS, everyMs: 3000 });
+    return entry;
+}
 
 // A second bridgeable tick beside FUFU, minted to a fresh issuer.
 async function secondCapTick() {
@@ -153,6 +165,8 @@ bridgeRailSuite(GROUP, function () {
         for (const s of await fundSenders(C.issuer2, C.tick2, 'B')) legs.push({ tick: C.tick2, sender: s });
         C.dest = await fundDoge('TOKEN.AT8.CAP.DEST', 2);
         const mined = await lockThirtyInOneBlock(legs, C.dest);
+        await mineBtcBlocks(1, 'the cap locks reaching bridge depth');
+        await waitForFinalizedPolicy(C.tick2, 1);
         const held = await holdDogeUntilDue(C.dest, legs.length);
         const ids = held.rows.map((r) => String(r.transfer_id));
         let settlements = [];
@@ -190,8 +204,7 @@ bridgeRailSuite(GROUP, function () {
             const settled = await state.venue.waitForRailSettled(tick, { timeoutMs: 30 * 60 * 1000 });
             assert.ok(settled, 'the rail never settled for ' + tick + ': ' + JSON.stringify(state.venue._lastSettlePoll));
             const snap = await tokenSnapshot('at8_' + tick, tick, null);
-            const inv = await state.venue.bridgeInvariant(tick);
-            const entry = inv && inv[tick] && inv[tick].DOGE;
+            const entry = await waitForEqualInvariant(tick);
             r.perTick[tick] = { escrow: snap.escrow, supply: snap.supply, hub: entry, verdict: classifyInvariant(entry).verdict };
             assert.strictEqual(snap.escrow, snap.supply, tick + ': BTC escrow ' + snap.escrow + ' against DOGE supply ' + snap.supply);
             assert.strictEqual(String(entry && entry.in_flight), '0', tick + ': in_flight reads ' + JSON.stringify(entry));
