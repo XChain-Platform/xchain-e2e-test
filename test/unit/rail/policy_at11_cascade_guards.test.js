@@ -12,7 +12,8 @@ const DRIVER = '../../integration/bridge_rail_policy.test/11_at11_a_null_list_de
 function fixtureOptions(overrides = {}) {
     return Object.assign({
         copy1: { params: { allow_list: '81', block_list: '82' } },
-        policy1: { allow_list: ['doge-dest', 'doge-blocked'], block_list: ['doge-blocked'] },
+        // gettokenpolicy answers members in utf8_bin ascending order.
+        policy1: { allow_list: ['btc-issuer', 'doge-blocked', 'doge-dest'], block_list: ['doge-blocked'] },
         block2: null,
         rejectedWire: null,
     }, overrides);
@@ -36,7 +37,11 @@ function fakeVenue(options) {
 function fakeSupport(options, calls) {
     let policyRead = 0;
     const state = { policy: { ticks: [] }, evidence: {}, venue: fakeVenue(options) };
+    const lists = [];
+    const lockSources = [];
     return {
+        lists,
+        lockSources,
         assert,
         GAS_TICK: 'XCHAIN',
         state,
@@ -46,6 +51,7 @@ function fakeSupport(options, calls) {
         btcAction: async (owner, wire) => {
             const payload = typeof wire === 'function' ? await wire() : wire;
             calls.push(payload);
+            if (payload === 'LOCK-3') lockSources.push(owner.address);
             return { status: payload === options.rejectedWire ? 'invalid: refused' : 'valid' };
         },
         fundBtc: async () => ({ address: 'btc-issuer' }),
@@ -53,7 +59,10 @@ function fakeSupport(options, calls) {
         pickFreeTick: async () => 'ABCDE',
         settleLeg: async () => ({ transfer: 'transfer-1' }),
         chainHalves: async () => ({ backed: 0, supply: 0 }),
-        btcAddressList: async (owner, entries) => entries.length === 2 ? 81 : 82,
+        btcAddressList: async (owner, entries) => {
+            lists.push(entries);
+            return lists.length === 1 ? 81 : 82;
+        },
         copyPolicy: async () => {
             policyRead += 1;
             if (policyRead === 1) return options.policy1;
@@ -73,7 +82,7 @@ function loadDriver(overrides) {
     const support = fakeSupport(options, calls);
     const wires = { policyListsWire: (tick, allow, block) => 'ISSUE-5-' + allow + '-' + block };
     const driver = proxyquire(DRIVER, { '../../helpers/bridgeRailVenue': wires, './support': support });
-    return { calls, driver, state: support.state };
+    return { calls, driver, state: support.state, support };
 }
 
 async function expectCascade(fixture, failedIndex, failurePattern) {
@@ -107,6 +116,23 @@ describe('policy AT11 cascade guards', function () {
 
     it('does not send after the block list remains attached', async function () {
         await expectCascade(loadDriver({ block2: '82' }), 4, /copy BLOCK_LIST did not detach/);
+    });
+
+    it('puts the locking issuer on the allow list it attaches', async function () {
+        const fixture = loadDriver();
+        for (const step of DETACH_STEPS.slice(0, 3)) await fixture.driver.runDetachStep(step);
+        const [allow, block] = fixture.support.lists;
+        assert.deepStrictEqual(fixture.support.lockSources, ['btc-issuer']);
+        for (const source of fixture.support.lockSources) assert.ok(allow.includes(source), source + ' is off the allow list');
+        assert.ok(allow.includes('doge-dest') && allow.includes('doge-blocked'));
+        assert.deepStrictEqual(block, ['doge-blocked']);
+    });
+
+    it('reads the copy allow list in sorted order, not insertion order', async function () {
+        const fixture = loadDriver({
+            policy1: { allow_list: ['btc-issuer', 'doge-dest', 'doge-blocked'], block_list: ['doge-blocked'] },
+        });
+        await expectCascade(fixture, 2, /copy allow list reads/);
     });
 
     it('runs all six steps in order for a good fixture', async function () {
