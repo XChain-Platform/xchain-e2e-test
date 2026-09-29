@@ -536,6 +536,78 @@ describe('bridgeRailVenue: the pure layer', function () {
         });
     });
 
+    describe('duplicateSourceTransfers judges every venue hub', function () {
+        const row = (transferId, snapshotBlock, status) => ({
+            transfer_id: transferId,
+            src_chain: 'BTC',
+            src_action_index: 7,
+            amount: '5',
+            status: status || 'finalized',
+            snapshot_block: snapshotBlock,
+        });
+        const one = () => [row('transfer-1', 1017)];
+        const two = () => [row('transfer-1', 1017), row('transfer-2', 1018)];
+        const venueFor = (answers) => {
+            const venue = Object.create(BridgeRailVenue.prototype);
+            venue.btcVenue = {
+                hubs: [0, 1, 2, 3].map((index) => ({ index, dbName: 'hub-' + index })),
+            };
+            venue.queryHubDb = async (dbName) => {
+                const answer = answers[dbName];
+                if (answer instanceof Error) throw answer;
+                return answer.map((entry) => Object.assign({}, entry));
+            };
+            return venue;
+        };
+
+        it('reports a leg duplicated on hubs 1 and 2 when hub 0 holds it once', async function () {
+            const venue = venueFor({
+                'hub-0': one(), 'hub-1': two(), 'hub-2': two(), 'hub-3': [],
+            });
+            const duplicates = await venue.duplicateSourceTransfers();
+            assert.strictEqual(duplicates.length, 1);
+            assert.strictEqual(duplicates[0].count, 2);
+            assert.deepStrictEqual(duplicates[0].hubs, [1, 2]);
+        });
+
+        it('keeps the highest per-hub count instead of pooling rows between hubs', async function () {
+            const three = two().concat(row('transfer-3', 1019));
+            const venue = venueFor({
+                'hub-0': one(), 'hub-1': two(), 'hub-2': three, 'hub-3': two(),
+            });
+            const duplicates = await venue.duplicateSourceTransfers();
+            assert.strictEqual(duplicates.length, 1);
+            assert.strictEqual(duplicates[0].count, 3);
+            assert.strictEqual(duplicates[0].amountTotal, 15);
+            assert.deepStrictEqual(duplicates[0].hubs, [1, 2, 3]);
+        });
+
+        it('continues to the other hubs when hub 0 throws', async function () {
+            const venue = venueFor({
+                'hub-0': new Error('hub 0 down'), 'hub-1': two(), 'hub-2': [], 'hub-3': [],
+            });
+            const duplicates = await venue.duplicateSourceTransfers();
+            assert.strictEqual(duplicates.length, 1);
+            assert.deepStrictEqual(duplicates[0].hubs, [1]);
+        });
+
+        it('reports neither a unique leg nor a retracted re-finalization', async function () {
+            const retracted = [row('transfer-1', 1017), row('transfer-2', 1018, 'retracted')];
+            const venue = venueFor({
+                'hub-0': one(), 'hub-1': one(), 'hub-2': retracted, 'hub-3': [],
+            });
+            assert.deepStrictEqual(await venue.duplicateSourceTransfers(), []);
+        });
+
+        it('rejects with the last error when every hub read throws', async function () {
+            const errors = [0, 1, 2, 3].map((index) => new Error('hub ' + index + ' down'));
+            const venue = venueFor({
+                'hub-0': errors[0], 'hub-1': errors[1], 'hub-2': errors[2], 'hub-3': errors[3],
+            });
+            await assert.rejects(venue.duplicateSourceTransfers(), (error) => error === errors[3]);
+        });
+    });
+
     describe('escrowOf', function () {
 
         it('finds the escrow however the answer spells the chain', function () {
