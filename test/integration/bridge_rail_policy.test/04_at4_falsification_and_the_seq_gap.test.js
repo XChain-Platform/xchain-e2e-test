@@ -138,7 +138,7 @@ bridgeRailSuite(GROUP, function () {
             destAddress: G.dest.address, tick: G.tick,
         }), 'DOGE');
         G.seq1 = await waitForFinalizedSeq(G.tick, 1);
-        await waitForAppliedSeq(G.tick, 1, { snapshotId: G.seq1.snapshot_id });
+        G.applied1 = await waitForAppliedSeq(G.tick, 1, { snapshotId: G.seq1.snapshot_id });
     });
 });
 
@@ -148,6 +148,7 @@ bridgeRailSuite(GROUP, function () {
         if (needsFederation(this, 'policy AT4 seq gap')) return;
         const G = state.policy.gap;
         assert.ok(G.seq1, 'the seq gap setup must have run');
+        assert.ok(G.applied1, 'the seq gap setup must have run and applied seq 1 on DOGE');
         const row = HUB.signRecord(HUB.buildPolicyRow({
             snapshotBlock: Number(G.seq1.snapshot_block), originChain: 'BTC', tick: G.tick, policySeq: 3,
             originBlock: Number(G.seq1.origin_block), effectiveTime: Number(G.seq1.effective_time), network: String(G.seq1.network),
