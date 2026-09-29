@@ -5,6 +5,7 @@
 
 const POLICY_ROOT = ['policy AT1 precondition:', 'policy AT8 control'];
 const POLICY_AT1 = 'policy AT1 \\((?:opt-in|mirror|enforced)\\):';
+const POLICY_AT5_LAG = 'policy AT5 \\((?:barrier|release)\\):';
 const TOKEN_ROOT = ['token AT1 precondition:', 'token AT8 control'];
 const TOKEN_AT1 = 'token AT1:';
 
@@ -32,23 +33,24 @@ const RAIL_DRIVES = {
                 minPassed: 4,
             },
             at5_barrier: {
-                grep: [...POLICY_ROOT, 'policy AT5 \\((?:barrier|release)\\):'].join('|'),
+                grep: [...POLICY_ROOT, POLICY_AT5_LAG].join('|'),
                 minPassed: 4,
             },
             at8_invariant: {
                 grep: [...POLICY_ROOT, 'policy AT4 \\(seq gap(?: setup)?\\):',
-                    'policy AT5 \\((?:barrier|release)\\):',
+                    POLICY_AT5_LAG,
                     'policy AT8 \\(invariant\\):'].join('|'),
                 minPassed: 7,
             },
             at5_abstain: {
-                grep: [...POLICY_ROOT, 'policy AT5 \\(abstain\\):'].join('|'),
-                minPassed: 3,
+                grep: [...POLICY_ROOT, POLICY_AT5_LAG, 'policy AT5 \\(abstain\\):'].join('|'),
+                minPassed: 5,
             },
             at7_at8: {
-                grep: [...POLICY_ROOT, 'policy AT7 \\(above the flag\\):',
+                grep: [...POLICY_ROOT, POLICY_AT1, POLICY_AT5_LAG,
+                    'policy AT7 \\(above the flag\\):',
                     'policy AT8 \\((?:cap|reorg)\\):'].join('|'),
-                minPassed: 5,
+                minPassed: 10,
             },
             at11_detach: {
                 grep: [...POLICY_ROOT, 'policy AT11:'].join('|'),
