@@ -30,6 +30,19 @@ async function createMode1Dispenser() {
 
     let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
 
+    // DISPENSER_SETTLEMENT_PRICE_ACTIVATION (live on regtest) refuses a FIAT
+    // create unless a dispense at that block could settle, so a Mode 1 create
+    // needs a validator snapshot for its pair inside the window first. The
+    // settle step below clears and reseeds the pair against the later block.
+    let pair = COIN_CODE + "/" + FIAT_MODE1
+    await priceSnapshotHelper.clearPair(pair)
+    await priceSnapshotHelper.seedSnapshot({
+        coinPair: pair,
+        price: (50000).toFixed(8),
+        blockTimestamp: (await priceSnapshotHelper.latestBlockTime()) - 120,
+        roundNumber: 999000000
+    })
+
     // FIAT dispenser: priced at 100.00 (FIAT_MODE1) per 1 token. GET_AMOUNT is
     // ignored for FIAT dispensers (pass 0).
     let dispenserResult = await dispenserHelper.sendDispenserV0(

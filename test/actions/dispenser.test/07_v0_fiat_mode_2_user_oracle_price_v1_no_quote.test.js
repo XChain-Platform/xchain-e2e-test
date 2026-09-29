@@ -32,6 +32,16 @@ async function createNoQuoteDispenser() {
     let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
     let chainNow   = await priceSnapshotHelper.latestBlockTime()
 
+    // Seed a validator snapshot at or before the quote's effective_at, and the
+    // quote itself, so the create is accepted: the Mode 2 settlement-price check
+    // pairs the quote with a validator price before it admits the create.
+    let pair = COIN_CODE + "/" + FIAT_NOQ
+    await priceSnapshotHelper.clearPair(pair)
+    await priceSnapshotHelper.seedSnapshot({
+        coinPair: pair, price: (50000).toFixed(8),
+        blockTimestamp: chainNow - 120, roundNumber: 999000004
+    })
+
     // Seed a quote so the create is accepted...
     await oraclePriceHelper.seedQuote({
         sourceAddress: oracleAddr["address"], sourceChain: COIN_CODE,
