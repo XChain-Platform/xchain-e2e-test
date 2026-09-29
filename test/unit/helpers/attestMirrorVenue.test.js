@@ -1119,3 +1119,41 @@ describe('attestMirrorVenue: the second-coin venue (BF8, R6 (a))', function () {
         assert.throws(() => secondCoinHubEnv('litecoin', '10.0.0.5:3224'), /needs an http\(s\) indexer URL/)
     })
 })
+
+describe('attestMirrorVenue waitForChildBoot', () => {
+    const { waitForChildBoot, BOOT_WAIT_MS } = require('../../helpers/attestMirrorVenue')
+
+    it('gives a slow disk room: the boot bound is far above the 163 s a hub took there', () => {
+        assert.ok(BOOT_WAIT_MS >= 600_000, 'BOOT_WAIT_MS is ' + BOOT_WAIT_MS)
+    })
+
+    it('returns as soon as a live child answers', async () => {
+        const proc = { exitCode: null }
+        let polls = 0
+        const res = await waitForChildBoot(proc, () => ({ ok: ++polls >= 3 }), { intervalMs: 1 })
+        assert.strictEqual(res.ok, true)
+        assert.strictEqual(res.dead, false)
+        assert.strictEqual(polls, 3)
+    })
+
+    it('ends the wait at once when the child exits, instead of polling it out to the deadline', async () => {
+        const proc = { exitCode: null }
+        let polls = 0
+        const started = Date.now()
+        const res = await waitForChildBoot(proc, () => {
+            if (++polls === 2) proc.exitCode = 1
+            return { ok: false }
+        }, { intervalMs: 1 })
+        assert.strictEqual(res.ok, false)
+        assert.strictEqual(res.dead, true)
+        assert.strictEqual(polls, 2)
+        assert.ok(Date.now() - started < 5_000, 'waited ' + (Date.now() - started) + 'ms')
+    })
+
+    it('reports a live child that never answers as a timeout, not a death', async () => {
+        const res = await waitForChildBoot({ exitCode: null }, () => ({ ok: false }), { timeoutMs: 20, intervalMs: 5 })
+        assert.strictEqual(res.ok, false)
+        assert.strictEqual(res.dead, false)
+        assert.ok(res.waitedMs >= 20)
+    })
+})

@@ -287,7 +287,30 @@ const DEFAULT_GRACE_S = 0;
 
 // How long a child has to boot far enough to answer. The indexer's
 // verifyTables/runMigrations against an empty database is where most of it goes.
-const BOOT_WAIT_MS = 180_000;
+// Sized for a venue whose database shares a spinning disk with CI gates: there a
+// hub's table bootstrap took 163 s and then over 180 s, against 18 s on an idle
+// disk. A child that exits ends the wait at once (waitForChildBoot), so the long
+// bound costs time only while the child is alive and still booting.
+const BOOT_WAIT_MS = 600_000;
+
+/**
+ * Poll a spawned child's readiness probe until it answers, the child exits, or
+ * the deadline passes. An exit ends the wait immediately instead of polling a
+ * dead process out to the deadline.
+ *
+ * @param proc   the ChildProcess (its exitCode is read on every poll)
+ * @param probe  () => {ok:boolean, ...} | Promise of same
+ * @param opts   {timeoutMs, intervalMs, now} passed to waitFor
+ * @returns {ok, waitedMs, last, dead}
+ */
+async function waitForChildBoot(proc, probe, opts) {
+    const res = await waitFor(async () => {
+        if (proc.exitCode !== null) return { ok: true, dead: true };
+        return probe();
+    }, Object.assign({ timeoutMs: BOOT_WAIT_MS }, opts));
+    const dead = Boolean(res.last && res.last.dead);
+    return { ok: res.ok && !dead, waitedMs: res.waitedMs, last: res.last, dead: dead };
+}
 
 // The indexer JSON-RPC ports as the stack PUBLISHES them, which are not the ports the
 // hub's config oracle stores (those are container-internal, 3004 on every chain). Same
@@ -2441,13 +2464,13 @@ class AttestMirrorVenue {
         hub.proc = this._spawn('hub' + i, path.join(this.hubRepoRoot(i), 'xchain-hub', 'src', 'api.js'), [], env);
 
         const connector = new XChainHubConnector(['http://127.0.0.1:' + hub.apiPort]);
-        const up = await waitFor(async () => {
-            if (hub.proc.exitCode !== null) return { ok: false, dead: true };
+        const up = await waitForChildBoot(hub.proc, async () => {
             try { return { ok: await connector.ping() }; } catch (_) { return { ok: false }; }
-        }, { timeoutMs: BOOT_WAIT_MS, intervalMs: 500 });
+        }, { intervalMs: 500 });
         if (!up.ok) {
             throw new Error('attestMirrorVenue[' + this.label + ']: hub ' + i + ' did not answer on 127.0.0.1:' +
-                hub.apiPort + ' within ' + up.waitedMs + 'ms.\n' + this._tail('hub' + i));
+                hub.apiPort + ' within ' + up.waitedMs + 'ms' + (up.dead ? ' (the process exited)' : '') +
+                '.\n' + this._tail('hub' + i));
         }
         hub.connector = connector;
 
@@ -2865,17 +2888,17 @@ class AttestMirrorVenue {
         ix.proc = this._spawn('indexer' + i, path.join(this.repoRoot, 'xchain-indexer', 'src', 'api.js'),
             ['--no-node-snapshot'], env);
 
-        const up = await waitFor(async () => {
-            if (ix.proc.exitCode !== null) return { ok: false, dead: true };
+        const up = await waitForChildBoot(ix.proc, async () => {
             try {
                 const rows = await this._conn.query(
                     'SELECT COUNT(*) AS c FROM information_schema.TABLES WHERE TABLE_SCHEMA = ?', [ix.indexerDbName]);
                 return { ok: Number(rows[0].c) > 0, tables: Number(rows[0].c) };
             } catch (_) { return { ok: false }; }
-        }, { timeoutMs: BOOT_WAIT_MS, intervalMs: 1000 });
+        }, { intervalMs: 1000 });
         if (!up.ok) {
             throw new Error('attestMirrorVenue[' + this.label + ']: indexer ' + i + ' never created its schema in ' +
-                ix.indexerDbName + ' within ' + up.waitedMs + 'ms.\n' + this._tail('indexer' + i));
+                ix.indexerDbName + ' within ' + up.waitedMs + 'ms' + (up.dead ? ' (the process exited)' : '') +
+                '.\n' + this._tail('indexer' + i));
         }
 
         // The schema wait proves the indexer reached its DATABASE, not that its HTTP
@@ -2890,17 +2913,16 @@ class AttestMirrorVenue {
         // ANY answer counts, 503 included. A stalled indexer that reports its stall is
         // listening, and a barrier drill's whole subject is a node parked on a stall: a wait
         // for HTTP 200 here would hang exactly the legs this is meant to let run.
-        const answering = await waitFor(async () => {
-            if (ix.proc.exitCode !== null) return { ok: false, dead: true };
+        const answering = await waitForChildBoot(ix.proc, async () => {
             try {
                 const res = await axios.get(ix.apiUrl + '/status', { timeout: 5_000, validateStatus: () => true });
                 return { ok: true, httpStatus: res.status };
             } catch (_) { return { ok: false }; }
-        }, { timeoutMs: BOOT_WAIT_MS, intervalMs: 1000 });
+        }, { intervalMs: 1000 });
         if (!answering.ok) {
             throw new Error('attestMirrorVenue[' + this.label + ']: indexer ' + i + ' never answered /status on ' +
                 ix.apiUrl + ' within ' + answering.waitedMs + 'ms' +
-                (answering.last && answering.last.dead ? ' (the process exited)' : '') +
+                (answering.dead ? ' (the process exited)' : '') +
                 '.\n' + this._tail('indexer' + i));
         }
         ix.connector = new XChainIndexerConnector('127.0.0.1', ix.apiPort, null);
@@ -4122,6 +4144,8 @@ module.exports = {
     gracedBarrierReason,
     ungracedMirrorBarrierReasons,
     DEFAULT_HUB_COUNT,
+    BOOT_WAIT_MS,
+    waitForChildBoot,
     DEFAULT_INDEXER_COUNT,
     DEFAULT_FORWARD_S,
     DEFAULT_BATCH_WINDOW_S,
