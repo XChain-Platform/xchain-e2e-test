@@ -31,6 +31,7 @@ const stakeTeardown = require('../../../helpers/stakeTeardown');
 const { resolveDogeFeeDestination } = require('../../../helpers/rail_preflight/policy_fee_destination');
 const { requireHealthyHub } = require('../../../helpers/rail_preflight/hub_health_gate');
 const fixture = require('../../../attestMirror/mirrorDrillFixture');
+const { settleReleaseBatch } = require('./release_batch');
 const { standingHubConnector } = require('./standing_hub');
 const {
     resolveVenueQuorum,
@@ -579,8 +580,12 @@ async function startBootstrapReleaseBatch() {
     const entries = stakeTeardown.outstanding();
     const addresses = await Promise.all(entries.map(prepareBootstrapUnstake));
     await fixture.clearWedgeBefore('policy bootstrap unstake batch');
-    const settled = await mineBootstrapWork(() => Promise.allSettled(entries.map((entry, index) =>
-        stakeHelper.sendUnstakeV0(addresses[index], entry.signingPubkey))));
+    const settled = await settleReleaseBatch({
+        entries,
+        node: nodeConnector,
+        send: (entry, index) => stakeHelper.sendUnstakeV0(addresses[index], entry.signingPubkey),
+        mine: mineBootstrapBlocks,
+    });
     return new Map(entries.map((entry, index) => [entry.key, settled[index]]));
 }
 
