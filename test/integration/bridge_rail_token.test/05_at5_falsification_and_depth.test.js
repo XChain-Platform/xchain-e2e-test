@@ -55,9 +55,13 @@ const GROUP = 'token AT5: falsification and depth';
 
 // A row the federation really signed for THIS token, the template every injection perturbs.
 async function signedTokenTemplate() {
-    const rows = await state.venue.queryHubDb(state.venue.hubs[0].dbName,
-        "SELECT * FROM bridge_transfers WHERE tick = ? AND dest_chain = 'DOGE' AND status = 'finalized' " +
-        "AND transfer_id NOT LIKE 'at5%' ORDER BY id DESC LIMIT 1", [state.tokens.tick]);
+    let rows = [];
+    for (const hub of state.venue.hubs) {
+        rows = await state.venue.queryHubDb(hub.dbName,
+            "SELECT * FROM bridge_transfers WHERE tick = ? AND dest_chain = 'DOGE' AND status = 'finalized' " +
+            "AND transfer_id NOT LIKE 'at5%' ORDER BY id DESC LIMIT 1", [state.tokens.tick]);
+        if (rows.length) break;
+    }
     assert.ok(rows.length, 'AT5 perturbs a row the federation really signed for ' + state.tokens.tick + ', so AT1 must have run');
     return rows[0];
 }
