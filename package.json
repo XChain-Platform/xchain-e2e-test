@@ -81,7 +81,7 @@
     "test:integration:live": "mocha --timeout 0 --exit 'test/integration/*.integration.test.js'",
     "test:e2e": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/e2e/**/*.e2e.js'",
     "test:boundary": "mocha 'test/boundary/**/*.boundary.js'",
-    "test:fuzz": "mocha --timeout 60000 'test/fuzz/**/*.fuzz.js'",
+    "test:fuzz": "mocha --timeout 60000 'test/fuzz/**/*.fuzz.js' 'test/fuzz/**/*.test.js' test/fuzz/action-messages.fuzz/support/message_construction.js",
     "test:fuzz:quick": "mocha --timeout 30000 'test/fuzz/**/*.fuzz.js'",
     "test:chaos": "mocha --timeout 10000 'test/chaos/**/*.chaos.js'",
     "test:chaos:quick": "mocha --timeout 10000 --grep '@P0' 'test/chaos/**/*.chaos.js'",
