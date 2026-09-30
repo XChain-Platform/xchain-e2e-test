@@ -28,12 +28,13 @@ const {
     reverseSections,
     reverseSectionPairs
 } = require('../../helpers/flag_days/anchor_order_tamper');
+const { unusedBtcSnapshotBlock, pinMeshSignerSet } = require('../../helpers/flag_days/snapshot_block');
 
 const VALIDATOR_COUNT = 2;
 const HUB_DB_PORT = 14100 + (process.pid % 300);
 const HUB_DB_NAME = 'xchain-anchor-order-hubdb-' + process.pid;
-const SNAPSHOT_BLOCK = Number(process.env.ANCHOR_ORDER_SNAPSHOT_BLOCK) ||
-    (1600000 + (Date.now() % 300000));
+// Set in bootFederation to an unused committed BTC block (ANCHOR_ORDER_SNAPSHOT_BLOCK pins one).
+let SNAPSHOT_BLOCK = null;
 
 describe('ANCHOR v0 bundle ordering on DOGE regtest', function () {
     this.timeout(20 * 60 * 1000);
@@ -140,6 +141,9 @@ describe('ANCHOR v0 bundle ordering on DOGE regtest', function () {
     }
 
     async function bootFederation(){
+        SNAPSHOT_BLOCK = await unusedBtcSnapshotBlock({
+            indexerQuery, override: process.env.ANCHOR_ORDER_SNAPSHOT_BLOCK
+        });
         process.env.XDEX_SNAPSHOT_BLOCK = String(SNAPSHOT_BLOCK);
         process.env.CHECKPOINT_CHAINS = 'DOGE';
         process.env.CHECKPOINT_POLL_MS = '600000000';
@@ -160,6 +164,7 @@ describe('ANCHOR v0 bundle ordering on DOGE regtest', function () {
         await mvh.start();
         identities = mvh.identities.map(id => new ValidatorIdentity(id.privkeyHex));
         weightSeed = seedWeightSnapshot(mvh, { blockIndex: SNAPSHOT_BLOCK, network: 'regtest' });
+        pinMeshSignerSet(mvh);
         for(const hub of mvh.hubs){
             hub.stateAnchorPublisher.network = 'regtest';
             hub.stateAnchorPublisher.roundTimeoutMs = 20000;
@@ -197,8 +202,9 @@ describe('ANCHOR v0 bundle ordering on DOGE regtest', function () {
     }
 
     async function fundProductionSigner(){
+        // Funds native coin only: the publisher pays no XCHAIN, and the DOGE gas seed is a bridge.
         const addressInfo = await cryptoHelper.getNewFundedAddress(
-            'anchor-order-publisher', COIN, NETWORK, null, 'legacy', 0, 5.0
+            'anchor-order-publisher', COIN, NETWORK, null, 'legacy', 0, 5.0, false
         );
         await regtestMinerConnector.generateBlocks(2);
         const status = await utxoTrackerConnector.quiesce({
@@ -249,6 +255,13 @@ describe('ANCHOR v0 bundle ordering on DOGE regtest', function () {
     });
 
     after(async function () {
+        // Removes the capability rows seeded at a real BTC block.
+        if(mvh && SNAPSHOT_BLOCK !== null){
+            for(const pubkey of mvh.getPubkeys().map(key => key.toLowerCase()))
+                await indexerQuery(
+                    "DELETE FROM capability_snapshots WHERE snapshot_block = ? AND signing_pubkey = ? " +
+                    "AND capability = 'oracle_publish'", [SNAPSHOT_BLOCK, pubkey]);
+        }
         if(weightSeed) weightSeed.restore();
         if(mvh){ await mvh.stop(); await mvh.dropDatabases(); }
         if(hubDb) await hubDb.stop();

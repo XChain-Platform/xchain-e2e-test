@@ -20,6 +20,8 @@ const sendHelper = require('../../helpers/sendHelper')
 const chainRail = require('../../helpers/chainRail')
 const helper = require('../../helpers/gasHelper')
 const path = require('path')
+const os = require('os')
+const fs = require('fs')
 // The hub's own relay-margin table, resolved the way loadSdk resolves the SDK so
 // the numbers asserted below are the hub's, not a copy typed into this file.
 function loadRelayMargin() {
@@ -60,8 +62,13 @@ const addressInfo = { address: 'addr1', privateKey: Buffer.alloc(32), publicKey:
 
 describe('gasHelper', () => {
     let mintStub
+    let savedFaucetFile
 
     beforeEach(() => {
+        // Keeps the developer's own drill-keys/ faucet out of these cases.
+        savedFaucetFile = process.env.E2E_GAS_FAUCET_FILE
+        process.env.E2E_GAS_FAUCET_FILE = path.join(os.tmpdir(), 'gas-faucet-absent-' + process.pid + '.json')
+        helper._resetGasFaucet()
         mintStub = sinon.stub(mintHelper, 'sendMintV0').resolves({
             txHash: 'abc123',
             mint: { id: 200 },
@@ -80,6 +87,81 @@ describe('gasHelper', () => {
         delete global.COIN
         delete global.COIN_CODE
         delete global.NETWORK
+        if (savedFaucetFile === undefined) delete process.env.E2E_GAS_FAUCET_FILE
+        else process.env.E2E_GAS_FAUCET_FILE = savedFaucetFile
+        helper._resetGasFaucet()
+    })
+
+    // A long-lived BTC regtest spends the gas tick's MAX_SUPPLY, so a grant there is a
+    // SEND from a keyed faucet holder; a fresh chain keeps the MINT.
+    describe('fundGas', () => {
+        const faucetPath = path.join(os.tmpdir(), 'gas-faucet-test-' + process.pid + '.json')
+        let sendStub, deriveStub
+
+        function supplyDb(supply, maxSupply, balances) {
+            return {
+                async getConnection() { return { async query() { return [{ supply, max_supply: maxSupply }] }, async release() {} } },
+                async getBalance({ address }) { return balances[address] || '0' },
+            }
+        }
+
+        beforeEach(() => {
+            global.COIN = 'bitcoin'
+            global.COIN_CODE = 'BTC'
+            global.NETWORK = 'regtest'
+            fs.writeFileSync(faucetPath, JSON.stringify([
+                { address: 'faucetA', mnemonic: 'words a' },
+                { address: 'faucetB', mnemonic: 'words b' },
+                { address: 'wrongKey', mnemonic: 'words c' },
+            ]))
+            process.env.E2E_GAS_FAUCET_FILE = faucetPath
+            sendStub = sinon.stub(sendHelper, 'sendSendV0').resolves({ txHash: 'send1' })
+            // A record signs only when its mnemonic derives its own address.
+            deriveStub = sinon.stub(cryptoHelper, 'getNewAddress').callsFake(async (label, coin, network, mnemonic) => ({
+                address: mnemonic === 'words a' ? 'faucetA' : mnemonic === 'words b' ? 'faucetB' : 'somethingElse',
+                privateKey: Buffer.alloc(32), publicKey: Buffer.alloc(33),
+            }))
+        })
+
+        afterEach(() => { try { fs.unlinkSync(faucetPath) } catch (e) {} })
+
+        it('SENDs from the faucet holder instead of minting on a spent chain', async () => {
+            global.indexerDatabase = supplyDb('99999796', '100000000', { faucetA: '26244473', faucetB: '10', wrongKey: '99999999' })
+            await helper.ensureGasBalance(addressInfo, '5000')
+            assert(mintStub.notCalled, 'no MINT once the supply is spent')
+            assert.strictEqual(sendStub.callCount, 1)
+            const [holder, tick, amount, dest, memo] = sendStub.firstCall.args
+            assert.deepStrictEqual([holder.address, tick, amount, dest, memo], ['faucetA', 'XCHAIN', '5000', 'addr1', ''])
+            assert.strictEqual(deriveStub.firstCall.args[3], 'words a', 'the holder signs with its own record key')
+            assert.strictEqual(deriveStub.firstCall.args[1], 'bitcoin')
+        })
+
+        it('never picks a record whose key does not derive its address, however large its balance', async () => {
+            global.indexerDatabase = supplyDb('99999796', '100000000', { faucetA: '1', faucetB: '1', wrongKey: '99999999' })
+            await assert.rejects(helper.fundGas(addressInfo, '5000'), /no faucet holder covers 5000 XCHAIN \(2 holder/)
+            assert(sendStub.notCalled)
+            assert(mintStub.notCalled)
+        })
+
+        it('alternates holders on back-to-back grants', async () => {
+            global.indexerDatabase = supplyDb('99999796', '100000000', { faucetA: '900000', faucetB: '800000' })
+            await helper.fundGas(addressInfo, '100')
+            await helper.fundGas(addressInfo, '100')
+            assert.deepStrictEqual(sendStub.getCalls().map((c) => c.args[0].address), ['faucetA', 'faucetB'])
+        })
+
+        it('MINTs on a fresh chain with no faucet file, chunked to MAX_MINT', async () => {
+            process.env.E2E_GAS_FAUCET_FILE = faucetPath + '.absent'
+            global.indexerDatabase = supplyDb('0', '100000000', {})
+            await helper.fundGas(addressInfo, '250000')
+            assert.deepStrictEqual(mintStub.getCalls().map((c) => c.args[2]), ['100000', '100000', '50000'])
+            assert(sendStub.notCalled)
+        })
+
+        it('refuses off BTC: XCHAIN has no local supply there', async () => {
+            global.COIN_CODE = 'DOGE'
+            await assert.rejects(helper.fundGas(addressInfo, '1'), /funded on BTC only, not DOGE/)
+        })
     })
 
     describe('mintGas', () => {

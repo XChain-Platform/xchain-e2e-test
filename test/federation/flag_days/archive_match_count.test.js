@@ -23,14 +23,15 @@ const {
 const { startDisposableHubDb } = require('../../helpers/disposableHubDb');
 const { seedWeightSnapshot } = require('../../helpers/seededWeightSnapshot');
 const { archiveCountCases } = require('../../helpers/flag_days/archive_count_cases');
+const { unusedBtcSnapshotBlock, pinMeshSignerSet } = require('../../helpers/flag_days/snapshot_block');
 
 const MATCHES_LENGTH = 3;
 const CASES = archiveCountCases(MATCHES_LENGTH);
 const MATCH_COUNT_GATE = 'archive_match_count_activation.ARCHIVE_MATCH_COUNT_ACTIVATION';
 const HUB_DB_PORT = 14000 + (process.pid % 300);
 const HUB_DB_NAME = 'xchain-archive-count-hubdb-' + process.pid;
-const SNAPSHOT_BLOCK = Number(process.env.ARCHIVE_COUNT_SNAPSHOT_BLOCK) ||
-    (1600000 + (Date.now() % 300000));
+// Set in setup to an unused committed BTC block (ARCHIVE_COUNT_SNAPSHOT_BLOCK pins one).
+let SNAPSHOT_BLOCK = null;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -250,6 +251,9 @@ async function waitForStatus(wire, expected){
 }
 
 async function setup(){
+    SNAPSHOT_BLOCK = await unusedBtcSnapshotBlock({
+        indexerQuery, override: process.env.ARCHIVE_COUNT_SNAPSHOT_BLOCK
+    });
     process.env.XDEX_SNAPSHOT_BLOCK = String(SNAPSHOT_BLOCK);
     process.env.CHECKPOINT_CHAINS = 'DOGE';
     process.env.CHECKPOINT_POLL_MS = '600000000';
@@ -275,6 +279,7 @@ async function setup(){
     await mvh.start();
     identities = mvh.identities.map((identity) => new ValidatorIdentity(identity.privkeyHex));
     weightSeed = seedWeightSnapshot(mvh, { blockIndex: SNAPSHOT_BLOCK, network: 'regtest' });
+    pinMeshSignerSet(mvh);
     publisher = mvh.hubs[0].stateAnchorPublisher;
     publisher.network = 'regtest';
     publisher.indexers = publisher.indexers || {};
@@ -285,8 +290,9 @@ async function setup(){
     await seedCapabilityRows();
     await nextSequenceBases();
 
+    // Funds native coin only: the publisher pays no XCHAIN, and the DOGE gas seed is a bridge.
     const addressInfo = await cryptoHelper.getNewFundedAddress(
-        'archive-count-publisher', COIN, NETWORK, null, 'legacy', 0, 10.0);
+        'archive-count-publisher', COIN, NETWORK, null, 'legacy', 0, 10.0, false);
     await settleTracker();
     signerHooks = stageProductionSigner(addressInfo);
     assert.ok(signerHooks && signerHooks.broadcastFn,
@@ -294,6 +300,14 @@ async function setup(){
 }
 
 async function teardown(){
+    // Removes the capability rows seeded at a real BTC block.
+    if(identities.length && SNAPSHOT_BLOCK !== null){
+        for(const identity of identities)
+            await indexerQuery(
+                "DELETE FROM capability_snapshots WHERE snapshot_block = ? AND signing_pubkey = ? " +
+                "AND capability IN ('oracle_publish', 'cross_chain')",
+                [SNAPSHOT_BLOCK, identity.getPubkeyHex().toLowerCase()]);
+    }
     if(weightSeed) weightSeed.restore();
     if(mvh){ await mvh.stop(); await mvh.dropDatabases(); }
     if(hubDb) await hubDb.stop();

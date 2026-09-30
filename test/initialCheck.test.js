@@ -8,8 +8,12 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-const dotenv = require('dotenv')
-dotenv.config()
+// Loads the env file for the requested coin from cwd (helpers/rail/coin_env.js).
+const coinEnv = require('./helpers/rail/coin_env').loadCoinEnv({ dir: process.cwd() })
+if (coinEnv.warning) console.warn('[e2e setup] WARNING: ' + coinEnv.warning)
+else if (coinEnv.reason === 'coin-file')
+    console.log('[e2e setup] env from ' + require('path').basename(coinEnv.file) +
+        (coinEnv.derived.BTC_INDEXER_API_URL ? ' (BTC indexer URL from .env)' : ''))
 
 const fs   = require('fs')
 const path = require('path')

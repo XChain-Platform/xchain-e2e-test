@@ -17,7 +17,7 @@
 const {
     assert,
     cryptoHelper,
-    mintHelper,
+    gasHelper,
     classifyInvariant,
     GAS_TICK,
     state,
@@ -35,7 +35,7 @@ async function createSurplus(escrowAddr) {
     const hubBefore = classifyInvariant((await state.venue.bridgeInvariant(GAS_TICK))[GAS_TICK].DOGE);
     const sender = await state.venue.funded('AT6.SEND',
         () => cryptoHelper.getNewFundedAddress('AT6.SEND', 'bitcoin', NETWORK, null, 'legacy', 0, 1, false));
-    await mintHelper.sendMintV0(sender, GAS_TICK, 1, sender.address, '');
+    await gasHelper.fundGas(sender, 1);
     const sendHelper = require('../../helpers/sendHelper');
     const sent = await sendHelper.sendSendV0(sender, GAS_TICK, 1, escrowAddr, '');
     // `sendSendV0` returns on the STANDING indexer's grading. Every reading below is taken

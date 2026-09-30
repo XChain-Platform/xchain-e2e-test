@@ -133,6 +133,20 @@ const SNAPSHOT_COMPARE_KEYS = ['round_number', 'coin_pair', 'price', 'block_time
 // that is not a plain identifier rather than to escape it.
 const SAFE_IDENT = /^[A-Za-z0-9_]+$/;
 
+// Names the replay's databases inside the platform hub account's only CREATE grant,
+// `XChain\_%\_MVH\_%` (as attestMirrorVenue's DB_PREFIX does); a name outside it is
+// refused with MariaDB 1044. MariaDB caps a database name at 64 characters.
+const REPLAY_DB_PREFIX = 'XChain_AT2_MVH_';
+function replayDbNames(label, stamp) {
+    const base = REPLAY_DB_PREFIX + label + '_' + stamp;
+    const names = { hub: base + '_Hub', indexer: base + '_Indexer', mirror: base + '_HubMirror' };
+    for (const name of Object.values(names)) {
+        if (!SAFE_IDENT.test(name) || name.length > 64)
+            throw new Error('oracleBatchReplay: replay database name ' + name + ' is not a plain identifier of at most 64 characters');
+    }
+    return names;
+}
+
 // Coin name to the three-letter code every per-chain env var and database name
 // is keyed on. Same map chainRail carries; kept local so this rig can build a
 // node without entering a rail.
@@ -712,9 +726,10 @@ class OracleBatchReplayNode {
         }
 
         const stamp = process.pid + '_' + Date.now().toString(36);
-        this.hubDbName     = 'XChain_AT2_' + this.label + '_' + stamp + '_Hub';
-        this.indexerDbName = 'XChain_AT2_' + this.label + '_' + stamp + '_Indexer';
-        this.mirrorDbName  = 'XChain_AT2_' + this.label + '_' + stamp + '_HubMirror';
+        const dbNames = replayDbNames(this.label, stamp);
+        this.hubDbName     = dbNames.hub;
+        this.indexerDbName = dbNames.indexer;
+        this.mirrorDbName  = dbNames.mirror;
 
         this._conn = await mariadb.createConnection({
             host: this.hubDb.host, port: parseInt(this.hubDb.port, 10),
@@ -1682,6 +1697,7 @@ async function connectTo(params) {
 
 module.exports = {
     OracleBatchReplayNode,
+    replayDbNames,
     SNAPSHOT_COMPARE_KEYS,
     readPriceSnapshots,
     readPriceActions,

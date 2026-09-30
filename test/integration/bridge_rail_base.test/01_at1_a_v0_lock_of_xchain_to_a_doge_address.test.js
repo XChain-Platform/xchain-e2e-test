@@ -19,7 +19,7 @@ const {
     chainRail,
     cryptoHelper,
     transactionHelper,
-    mintHelper,
+    gasHelper,
     lockWireV0,
     escrowOf,
     GAS_TICK,
@@ -45,7 +45,7 @@ async function prepareAt1Lock() {
     state.at1Dest = dest;
     const sender = await state.venue.funded('AT1.SENDER',
         () => cryptoHelper.getNewFundedAddress('AT1.SENDER', 'bitcoin', NETWORK, null, 'legacy', 0, 1, false));
-    await mintHelper.sendMintV0(sender, GAS_TICK, AT1_LOCK, sender.address, '');
+    await gasHelper.fundGas(sender, AT1_LOCK);
 
     const before = {
         senderBtc: await state.venue.addressBalance('BTC', sender.address, GAS_TICK),

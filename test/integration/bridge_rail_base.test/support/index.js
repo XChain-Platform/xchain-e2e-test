@@ -22,6 +22,8 @@ const cryptoHelper      = require('../../../cryptoHelper');
 const transactionHelper = require('../../../transactionHelper');
 const issueHelper       = require('../../../helpers/issueHelper');
 const mintHelper        = require('../../../helpers/mintHelper');
+// Funds a leg's BTC-side XCHAIN: a faucet SEND once the supply is spent, else a MINT.
+const gasHelper         = require('../../../helpers/gasHelper');
 const fixture           = require('../../../attestMirror/mirrorDrillFixture');
 const {
     BridgeRailVenue,
@@ -388,6 +390,7 @@ module.exports = {
     transactionHelper,
     issueHelper,
     mintHelper,
+    gasHelper,
     lockWireV0,
     burnWireV1,
     classifyInvariant,
