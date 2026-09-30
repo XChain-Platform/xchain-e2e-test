@@ -11,6 +11,9 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..', '..')
 const SCRIPT = path.join(REPO_ROOT, 'scripts', 'rail_leg_drive.js')
 const POLICY_ROOT = 'test/integration/bridge_rail_policy.test.js'
 const POLICY_GLOB = 'test/integration/bridge_rail_policy.test/*.test.js'
+const GUARDS = 'test/integration/bridge_rail_doge_guards.test.js'
+const BASE_ROOT = 'test/integration/bridge_rail_base.test.js'
+const BASE_GLOB = 'test/integration/bridge_rail_base.test/*.test.js'
 const RAIL_DRIVES = {
     policy: {
         root: POLICY_ROOT,
@@ -19,6 +22,12 @@ const RAIL_DRIVES = {
             at1: { grep: 'policy T0:|policy AT1:', minPassed: 5 },
             full: { grep: null, minPassed: 28 },
         },
+    },
+    base: {
+        before: [GUARDS],
+        root: BASE_ROOT,
+        glob: BASE_GLOB,
+        legs: { full: { grep: null, minPassed: 16 } },
     },
 }
 const runner = proxyquire.noCallThru()(SCRIPT, {
@@ -77,6 +86,19 @@ describe('bridge rail leg drive command', function () {
 
         assert.strictEqual(command.argv.includes('--grep'), false)
         assert.ok(command.argv.indexOf(POLICY_ROOT) < command.argv.indexOf(POLICY_GLOB))
+    })
+
+    it('runs a drive\'s leading suites before its root and glob', function () {
+        const command = runner.buildLegCommand('base', 'full', {
+            journalDir: '/tmp/rail-leg-drive-test',
+            repoRoot: REPO_ROOT,
+            env: {},
+        })
+        const guardsAt = command.argv.indexOf(GUARDS)
+
+        assert.ok(guardsAt > command.argv.indexOf('./test/initialCheck.test.js'))
+        assert.ok(command.argv.indexOf(BASE_ROOT) > guardsAt)
+        assert.ok(command.argv.indexOf(BASE_GLOB) > command.argv.indexOf(BASE_ROOT))
     })
 
     it('sets journal destinations and drops idle generation', function () {

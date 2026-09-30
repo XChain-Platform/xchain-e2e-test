@@ -61,7 +61,7 @@ function buildLegCommand (driveName, legName, opts = {}) {
     if (!journalDir) throw new Error('--journal-dir is required')
     const argv = ['--no-config', '--reporter', 'spec', '--timeout', '0', '--exit']
     if (leg.grep) argv.push('--grep', leg.grep)
-    argv.push('--require', './test/initialCheck.test.js', drive.root, drive.glob)
+    argv.push('--require', './test/initialCheck.test.js', ...(drive.before || []), drive.root, drive.glob)
     return {
         command: MOCHA,
         argv,

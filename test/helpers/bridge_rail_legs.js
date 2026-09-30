@@ -59,6 +59,18 @@ const RAIL_DRIVES = {
             full: { grep: null, minPassed: 34 },
         },
     },
+    // The base spec's AT1 to AT9. Its cases share one venue and read each other's
+    // evidence, so it runs whole. The DOGE guards suite goes first on the same command
+    // line, as bridge_rail_base.test.js's header requires; its three cases are the
+    // federation-free half of AT6, AT7 and AT9.
+    base: {
+        before: ['test/integration/bridge_rail_doge_guards.test.js'],
+        root: 'test/integration/bridge_rail_base.test.js',
+        glob: 'test/integration/bridge_rail_base.test/*.test.js',
+        legs: {
+            full: { grep: null, minPassed: 16 },
+        },
+    },
     token: {
         root: 'test/integration/bridge_rail_token.test.js',
         glob: 'test/integration/bridge_rail_token.test/*.test.js',

@@ -17,7 +17,7 @@ const reports = {};
 
 function dryRun(drive) {
     const child = spawnSync(MOCHA,
-        ['--no-config', '--dry-run', '--reporter', 'json', drive.root, drive.glob], {
+        ['--no-config', '--dry-run', '--reporter', 'json', ...(drive.before || []), drive.root, drive.glob], {
             cwd: REPO_ROOT,
             encoding: 'utf8',
             env: { COIN: 'bitcoin', NETWORK: 'regtest', PATH: process.env.PATH },
@@ -72,6 +72,8 @@ describe('bridge rail leg map', function () {
 
     it('includes both root T0 cases in every split leg', function () {
         for (const [driveName, drive] of Object.entries(RAIL_DRIVES)) {
+            // A drive that only runs whole has no split leg to carry its T0 cases into.
+            if (Object.keys(drive.legs).every((legName) => legName === 'full')) continue;
             const titles = reports[driveName].passes.map((test) => test.fullTitle);
             const t0 = titles.filter((title) => title.includes(driveName + ' T0:'));
             assert.strictEqual(t0.length, 2, driveName + ' root T0 count');
