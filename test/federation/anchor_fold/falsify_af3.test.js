@@ -29,8 +29,11 @@ function readReport(reportFile) {
 
 function runDriver() {
     const reportFile = path.join(os.tmpdir(), 'anchor-fold-falsify-' + process.pid + '-' + Date.now() + '.json')
+    // Loads the harness bootstrap: the AF3 driver reads the live DOGE indexer through
+    // the globals initialCheck sets, which a bare child mocha never has.
     const args = [MOCHA, '--no-config', '--no-package', '--timeout', '0', '--exit',
-        '--reporter', 'json', '--reporter-option', 'output=' + reportFile, DRIVER]
+        '--reporter', 'json', '--reporter-option', 'output=' + reportFile,
+        '--require', path.join(ROOT, 'test', 'initialCheck.test.js'), DRIVER]
     const child = childProcess.spawnSync(process.execPath, args, {
         cwd: ROOT,
         encoding: 'utf8',

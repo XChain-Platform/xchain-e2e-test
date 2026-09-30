@@ -179,6 +179,8 @@ async function startVenue(){
 }
 
 async function startHub(){
+    // Re-arms here as well as at load: the publisher reads the fold variable at each flush.
+    if(requireFederation) process.env.XC_ANCHOR_FOLD_REGTEST_ACTIVATION = '0';
     snapshotBlock = await unusedSnapshotBlock();
     process.env.XDEX_SEED_LOCAL_VALIDATOR = '1';
     process.env.XDEX_SNAPSHOT_BLOCK = String(snapshotBlock);

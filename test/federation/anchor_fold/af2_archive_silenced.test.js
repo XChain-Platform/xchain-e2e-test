@@ -392,6 +392,9 @@ function registerSuite(){
 
     before(async function () {
         await venueHooks.beforeAll.call(this);
+        // Re-arms here: a suite run before this one in the same process restores the
+        // fold variable in its own teardown, and the publisher reads it at each flush.
+        process.env[FOLD_ENV] = '0';
         process.env.CHECKPOINT_CHAINS = 'DOGE';
         process.env.CHECKPOINT_POLL_MS = '600000000';
         process.env.ANCHOR_INTERVAL_MS = '600000000';

@@ -82,6 +82,9 @@ let proposer = null;
 let follower = null;
 
 async function setupHubs(){
+    // Re-arms here: a suite run before this one in the same process restores the fold
+    // variable in its own teardown, and the hubs read it at runtime.
+    process.env[FOLD_ENV] = '0';
     hubDb = await startDisposableHubDb({
         forceDocker: true,
         name: 'xchain-anchor-fold-follower-' + process.pid

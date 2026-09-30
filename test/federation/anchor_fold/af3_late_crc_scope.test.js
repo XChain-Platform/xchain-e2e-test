@@ -196,9 +196,11 @@ function foldedWire(){
         chunks: archive.chunks,
         signatures: [{ pubkey, sig: identity.sign(canonical) }]
     };
-    const payload = publisher.buildV3Payload(
-        { network: 'regtest', snapshot_block: SNAPSHOT_BLOCK },
-        sections, archiveSection, pubkey, []);
+    // Signs the publisher attestation the indexer requires on every v3 bundle tail
+    // (ATTEST_SIG_COUNT at least 1); without it every chain section reads invalid.
+    const header = { network: 'regtest', snapshot_block: SNAPSHOT_BLOCK };
+    const attestSigs = [{ pubkey, sig: identity.sign(publisher.attestationCanonical(header, pubkey)) }];
+    const payload = publisher.buildV3Payload(header, sections, archiveSection, pubkey, attestSigs);
     return { payload, chunks: archive.chunks };
 }
 
