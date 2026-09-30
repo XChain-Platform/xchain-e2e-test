@@ -1111,9 +1111,10 @@ class BridgeRailVenue {
      *                            finalizes nothing and a generated key would look identical
      *                            at boot
      * @param opts.network        default regtest; the venue refuses anything else
-     * @param opts.confirmations  `{BTC: 1, DOGE: 1}`; the rail's pinned depth
+     * @param opts.confirmations  `{BTC: 1, DOGE: 1, LTC: 1}`; the rail's pinned depth
      * @param opts.basePort       port probe base
      * @param opts.dogeRail       a chainRail for dogecoin; built here when omitted
+     * @param opts.withLtc        build an attached Litecoin indexer; default false
      * @param opts.pollMs         engine poll cadence
      */
     constructor(opts) {
@@ -1129,7 +1130,10 @@ class BridgeRailVenue {
         this.confirmations = Object.assign({}, DEFAULT_CONFIRMATIONS, o.confirmations || {});
         this.basePort      = o.basePort || 43000;
         this.pollMs        = o.pollMs === undefined ? DEFAULT_POLL_MS : o.pollMs;
+        this.withLtc       = o.withLtc === true;
+        this.btcRail       = o.btcRail || null;
         this.dogeRail      = o.dogeRail || null;
+        this.ltcRail       = o.ltcRail || null;
         // WHICH TREE THE IN-PROCESS HUBS AND INDEXERS ARE LOADED FROM, and the evidence
         // depends on it. attestMirrorVenue spawns `<repoRoot>/xchain-hub/src/api.js` and
         // `<repoRoot>/xchain-indexer/src/api.js` and defaults repoRoot to the checkout this
@@ -1179,7 +1183,10 @@ class BridgeRailVenue {
 
         this.btcVenue  = null;   // hubs + the BTC indexer
         this.dogeVenue = null;   // the DOGE indexer, attached to the same hubs
+        this.ltcVenue  = null;   // the optional LTC indexer, attached to the same hubs
         this.unavailable = null; // non-null means the caller should SKIP
+        this._replayVenues = new Set();
+        this._replaySerial = 0;
 
         // Which indexer answered which readout, recorded rather than assumed. The ruling
         // named the standing BTC indexer; the header says why it cannot serve today, and
@@ -1191,12 +1198,30 @@ class BridgeRailVenue {
     get hubDb()   { return this.btcVenue ? this.btcVenue.hubDb : null; }
     btcIndexer()  { return this.btcVenue  ? this.btcVenue.indexers[0]  : null; }
     dogeIndexer() { return this.dogeVenue ? this.dogeVenue.indexers[0] : null; }
+    ltcIndexer()  { return this.ltcVenue  ? this.ltcVenue.indexers[0]  : null; }
     btcIndexerUrl()  {
         if (this.standingBtcIndexerUrl) return this.standingBtcIndexerUrl;
         const ix = this.btcIndexer();
         return ix ? ix.apiUrl : '';
     }
     dogeIndexerUrl() { const ix = this.dogeIndexer(); return ix ? ix.apiUrl : ''; }
+    ltcIndexerUrl()  { const ix = this.ltcIndexer();  return ix ? ix.apiUrl : ''; }
+
+    _chainIndexer(chain) {
+        const tick = String(chain).toUpperCase();
+        if (tick === 'BTC') return this.btcIndexer();
+        if (tick === 'DOGE') return this.dogeIndexer();
+        if (tick === 'LTC') return this.ltcIndexer();
+        throw new Error('bridgeRailVenue: unsupported chain ' + chain);
+    }
+
+    _chainIndexerUrl(chain) {
+        const tick = String(chain).toUpperCase();
+        if (tick === 'BTC') return this.btcIndexerUrl();
+        if (tick === 'DOGE') return this.dogeIndexerUrl();
+        if (tick === 'LTC') return this.ltcIndexerUrl();
+        throw new Error('bridgeRailVenue: unsupported chain ' + chain);
+    }
 
     /**
      * Record and report which service served a readout, so the evidence names it.
@@ -1215,6 +1240,10 @@ class BridgeRailVenue {
             'bridgeRailVenue: identities are required. A venue on generated keys holds no stake, ' +
             'so its rounds time out at `0 commits` and the drive reads an engine fault where the ' +
             'real fact is an unstaked federation.');
+
+        if (!this.btcRail && typeof chainRail.captureCurrentRail === 'function') {
+            this.btcRail = chainRail.captureCurrentRail();
+        }
 
         // PHASE 1: the hubs, and the BTC indexer that follows them. The bridge engine
         // constructs itself here with no indexer URLs and idles, which is exactly what it
@@ -1304,7 +1333,41 @@ class BridgeRailVenue {
             return false;
         }
 
-        // PHASE 3: rewire. Every hub is restarted carrying the two venue indexer URLs, so
+        // PHASE 3: the optional LTC indexer, built in the Litecoin rail and attached to
+        // the same hubs and hub database as the other two venue indexers.
+        if (this.withLtc) {
+            const ltcRail = this.ltcRail || await chainRail.createRail('litecoin', this.network);
+            this.ltcRail = ltcRail;
+            this.ltcVenue = await chainRail.withRail(ltcRail, async () => {
+                const lv = new AttestMirrorVenue({
+                    label: this.label + 'ltc',
+                    coin: 'litecoin',
+                    network: this.network,
+                    attachHubs: this.btcVenue.hubs,
+                    hubDb: this.btcVenue.hubDb,
+                    indexerCount: 1,
+                    useEnvDecoderCredential: false,
+                    basePort: this.basePort + 400,
+                    graces: {},
+                    repoRoot: this.repoRoot || undefined,
+                    replayChain: true,
+                    seedAttachedHubPrices: true,
+                    indexerExtraEnv: bridgeProofIndexerEnv({
+                        indexerUrls: { BTC: this.btcIndexerUrl(), DOGE: this.dogeIndexerUrl() },
+                    }),
+                });
+                const ok = await lv.start();
+                if (!ok) return { failed: lv.unavailable };
+                return lv;
+            });
+            if (this.ltcVenue && this.ltcVenue.failed) {
+                this.unavailable = 'the attached LTC venue did not start: ' + this.ltcVenue.failed;
+                this.ltcVenue = null;
+                return false;
+            }
+        }
+
+        // PHASE 4: rewire. Every hub is restarted carrying the venue indexer URLs, so
         // its bridge engine polls the BTC indexer for confirmed locks and the DOGE indexer
         // for the destination's chain state. Deferred when the caller says so; see
         // `deferBridgeWiring` for the reading that has to happen first.
@@ -1326,7 +1389,9 @@ class BridgeRailVenue {
         assert.ok(this.btcVenue, 'bridgeRailVenue: rewireHubs before start');
         if (confirmations) this.confirmations = Object.assign({}, this.confirmations, confirmations);
         const overlay = bridgeEngineHubEnv({
-            indexerUrls: { BTC: this.btcIndexerUrl(), DOGE: this.dogeIndexerUrl() },
+            indexerUrls: {
+                BTC: this.btcIndexerUrl(), DOGE: this.dogeIndexerUrl(), LTC: this.ltcIndexerUrl(),
+            },
             confirmations: this.confirmations,
             pollMs: this.pollMs,
         });
@@ -1401,7 +1466,11 @@ class BridgeRailVenue {
      * JSON-RPC against a venue indexer by chain code.
      */
     async indexerRpc(chain, method, params) {
-        const url = String(chain).toUpperCase() === 'BTC' ? this.btcIndexerUrl() : this.dogeIndexerUrl();
+        const url = this._chainIndexerUrl(chain);
+        return this._indexerRpcUrl(chain, url, method, params);
+    }
+
+    async _indexerRpcUrl(chain, url, method, params) {
         assert.ok(url, 'bridgeRailVenue: no venue indexer for ' + chain);
         const res = await axios.post(url,
             { jsonrpc: '2.0', id: Date.now(), method: method, params: params || {} },
@@ -1422,8 +1491,7 @@ class BridgeRailVenue {
      */
     async bridgeBalances(chain, tick) {
         const answer = await this.indexerRpc(chain, 'getbridgebalances', { tick: String(tick || 'XCHAIN') });
-        this.servedBy('bridgebalances:' + chain, 'venue ' + chain + ' indexer ' +
-            (String(chain).toUpperCase() === 'BTC' ? this.btcIndexerUrl() : this.dogeIndexerUrl()));
+        this.servedBy('bridgebalances:' + chain, 'venue ' + chain + ' indexer ' + this._chainIndexerUrl(chain));
         return answer;
     }
 
@@ -1448,8 +1516,12 @@ class BridgeRailVenue {
      * disposable MariaDB, never the standing stack's.
      */
     async queryIndexerDb(chain, sql, params) {
-        const ix = String(chain).toUpperCase() === 'BTC' ? this.btcIndexer() : this.dogeIndexer();
+        const ix = this._chainIndexer(chain);
         assert.ok(ix, 'bridgeRailVenue: no venue indexer for ' + chain);
+        return this._queryIndexerDb(ix, sql, params);
+    }
+
+    async _queryIndexerDb(ix, sql, params) {
         const db = this.hubDb;
         assert.ok(db, 'bridgeRailVenue: the venue has no hubDb; it is not started');
         assert.ok(/^[A-Za-z0-9_]+$/.test(String(ix.indexerDbName)),
@@ -1463,6 +1535,73 @@ class BridgeRailVenue {
             return await conn.query(sql, params || []);
         } finally {
             if (conn) await conn.end().catch(() => {});
+        }
+    }
+
+    /**
+     * Replay one borrowed chain from genesis into a new venue database.
+     *
+     * The returned handle owns only the replay indexer. Its database and process are
+     * separate from the live venue indexer, while both follow the same venue hubs.
+     */
+    async replayIndexer(chain) {
+        const tick = String(chain).toUpperCase();
+        const coins = { BTC: 'bitcoin', DOGE: 'dogecoin', LTC: 'litecoin' };
+        assert.ok(coins[tick], 'bridgeRailVenue: unsupported replay chain ' + chain);
+        const liveIx = this._chainIndexer(tick);
+        assert.ok(liveIx, 'bridgeRailVenue: no live venue indexer to replay ' + tick);
+        const rail = tick === 'BTC' ? this.btcRail : (tick === 'DOGE' ? this.dogeRail : this.ltcRail);
+        assert.ok(rail, 'bridgeRailVenue: no ' + tick + ' rail is available for replay');
+        const serial = ++this._replaySerial;
+        const replay = new AttestMirrorVenue({
+            label: this.label + tick.toLowerCase() + 'replay' + serial,
+            coin: coins[tick],
+            network: this.network,
+            attachHubs: this.btcVenue.hubs,
+            hubDb: this.btcVenue.hubDb,
+            indexerCount: 1,
+            useEnvDecoderCredential: tick === 'BTC',
+            basePort: this.basePort + 600 + (serial * 200),
+            graces: {},
+            repoRoot: this.repoRoot || undefined,
+            freshIndexers: true,
+            replayChain: true,
+            seedAttachedHubPrices: true,
+            indexerExtraEnv: bridgeProofIndexerEnv({ indexerUrls: {
+                BTC: this.btcIndexerUrl(), DOGE: this.dogeIndexerUrl(), LTC: this.ltcIndexerUrl(),
+            } }),
+        });
+        try {
+            const up = await chainRail.withRail(rail, () => replay.start());
+            if (!up) throw new Error('bridgeRailVenue: replay ' + tick + ' indexer did not start: ' +
+                String(replay.unavailable || 'unknown reason'));
+            const replayIx = replay.indexers[0];
+            assert.ok(replayIx, 'bridgeRailVenue: replay ' + tick + ' venue built no indexer');
+            assert.notStrictEqual(String(replayIx.indexerDbName), String(liveIx.indexerDbName),
+                'bridgeRailVenue: replay ' + tick + ' must use a fresh database');
+            const tip = await this.indexerRpc(tick, 'getblockhashes', {});
+            const target = indexerCaughtUp(null, tip && tip.block_index).want;
+            await this.waitUntil('the replay ' + tick + ' indexer to reach live venue block ' + target,
+                async () => {
+                    const answer = await this._indexerRpcUrl(tick, replayIx.apiUrl, 'getblockhashes', {});
+                    return indexerCaughtUp(answer && answer.block_index, target).caughtUp;
+                }, { timeoutMs: 14400000, everyMs: 2000 });
+            let stopped = false;
+            const handle = {
+                chain: tick, indexer: replayIx, databaseName: replayIx.indexerDbName,
+                queryDb: (sql, params) => this._queryIndexerDb(replayIx, sql, params),
+                stop: async () => {
+                    if (stopped) return;
+                    stopped = true;
+                    this._replayVenues.delete(handle);
+                    await replay.stop();
+                },
+            };
+            this._replayVenues.add(handle);
+            return handle;
+        } catch (e) {
+            await replay.stop().catch(() => {});
+            throw e;
         }
     }
 
@@ -1617,7 +1756,7 @@ class BridgeRailVenue {
             }
             if (rows.length) {
                 this.servedBy('bridgesettlement:' + chain, 'venue ' + chain + ' indexer ' +
-                    (String(chain).toUpperCase() === 'BTC' ? this.btcIndexerUrl() : this.dogeIndexerUrl()));
+                    this._chainIndexerUrl(chain));
                 return rows[0];
             }
             await new Promise((r) => setTimeout(r, 3000));
@@ -1795,7 +1934,7 @@ class BridgeRailVenue {
      *   stale, rowCount} or null when that venue indexer is not up
      */
     async readMirrorPrice(chain, pair) {
-        const ix = String(chain).toUpperCase() === 'BTC' ? this.btcIndexer() : this.dogeIndexer();
+        const ix = this._chainIndexer(chain);
         if (!ix) return null;
         let rows = [];
         try {
@@ -1867,7 +2006,7 @@ class BridgeRailVenue {
      * while the mirror database held both rows the whole time.
      */
     async queryMirrorDb(chain, sql, params) {
-        const ix = String(chain).toUpperCase() === 'BTC' ? this.btcIndexer() : this.dogeIndexer();
+        const ix = this._chainIndexer(chain);
         assert.ok(ix, 'bridgeRailVenue: no venue indexer for ' + chain);
         const db = this.hubDb;
         assert.ok(db, 'bridgeRailVenue: the venue has no hubDb; it is not started');
@@ -2128,7 +2267,8 @@ class BridgeRailVenue {
      */
     async venueTips() {
         const tips = {};
-        for (const chain of ['BTC', 'DOGE']) {
+        const chains = this.ltcIndexer() ? BRIDGE_CHAINS : ['BTC', 'DOGE'];
+        for (const chain of chains) {
             try {
                 const answer = await this.indexerRpc(chain, 'getblockhashes', {});
                 tips[chain] = answer ? Number(answer.block_index) : null;
@@ -2276,12 +2416,18 @@ class BridgeRailVenue {
         }
         if (this.dogeVenue) out.push('--- venue DOGE indexer ---\n' +
             String(this.dogeVenue.logTail('indexer0') || '').split('\n').slice(-n).join('\n'));
+        if (this.ltcVenue) out.push('--- venue LTC indexer ---\n' +
+            String(this.ltcVenue.logTail('indexer0') || '').split('\n').slice(-n).join('\n'));
         return out.join('\n');
     }
 
     async stop() {
-        // The DOGE venue first: it borrows the BTC venue's hubs and hub database, so
-        // stopping the owner first would leave it talking to a mesh that is gone.
+        // Attached and replay venues borrow the BTC venue's hubs and hub database, so
+        // stopping the owner first would leave them talking to a mesh that is gone.
+        for (const replay of [...this._replayVenues]) {
+            await replay.stop().catch(() => {});
+        }
+        if (this.ltcVenue)  { await this.ltcVenue.stop().catch(() => {});  this.ltcVenue = null; }
         if (this.dogeVenue) { await this.dogeVenue.stop().catch(() => {}); this.dogeVenue = null; }
         if (this.btcVenue)  { await this.btcVenue.stop().catch(() => {});  this.btcVenue = null; }
     }
