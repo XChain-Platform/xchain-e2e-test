@@ -137,6 +137,18 @@ const SAFE_IDENT = /^[A-Za-z0-9_]+$/;
 // `XChain\_%\_MVH\_%` (as attestMirrorVenue's DB_PREFIX does); a name outside it is
 // refused with MariaDB 1044. MariaDB caps a database name at 64 characters.
 const REPLAY_DB_PREFIX = 'XChain_AT2_MVH_';
+
+// Maps { PRICE: 5, BRIDGE: 0 } to HUB_SYNC_PRICE_GRACE_S=5 and HUB_SYNC_BRIDGE_GRACE_S=0,
+// refusing a name or value the indexer could not have meant.
+function watermarkGraceEnv(graces) {
+    const env = {};
+    for (const [name, value] of Object.entries(graces || {})) {
+        if (!/^[A-Z][A-Z_]*$/.test(name) || !Number.isSafeInteger(value) || value < 0)
+            throw new Error('oracleBatchReplay: watermark grace ' + name + '=' + value + ' is not NAME=<whole seconds>');
+        env['HUB_SYNC_' + name + '_GRACE_S'] = String(value);
+    }
+    return env;
+}
 function replayDbNames(label, stamp) {
     const base = REPLAY_DB_PREFIX + label + '_' + stamp;
     const names = { hub: base + '_Hub', indexer: base + '_Indexer', mirror: base + '_HubMirror' };
@@ -640,6 +652,9 @@ class OracleBatchReplayNode {
      *                            documents it as test tunability; see the note on
      *                            `_startIndexer` for what setting it trades away, and
      *                            NEVER give two nodes in one comparison different values.
+     * @param opts.watermarkGraces  { PRICE: s, ORACLE: s, BRIDGE: s, ... } set as
+     *                            HUB_SYNC_<NAME>_GRACE_S, the same regtest-only override
+     *                            for every barrier; priceGraceS still wins for PRICE.
      * @param opts.liveChain      the live-chain endpoints, supplied instead of discovered.
      *                            Same shape `_resolveLiveChain` returns; see there for why
      *                            a host may have to supply them and what is validated.
@@ -661,6 +676,7 @@ class OracleBatchReplayNode {
         this.basePort = opts.basePort || 61000;
         this.repoRoot = opts.repoRoot || path.resolve(__dirname, '../../..');
         this.priceGraceS = opts.priceGraceS === undefined ? null : opts.priceGraceS;
+        this.watermarkGraces = watermarkGraceEnv(opts.watermarkGraces);
         this.liveChain   = opts.liveChain || null;
         this._onLog      = typeof opts.onLog === 'function' ? opts.onLog : null;
 
@@ -1433,6 +1449,7 @@ class OracleBatchReplayNode {
         // a node insists on before processing a block, which is a real property, so
         // any comparison must give BOTH nodes the same value and a drill about the
         // barrier itself (AT5) must not set it at all.
+        Object.assign(env, this.watermarkGraces);
         if (this.priceGraceS !== null) env.HUB_SYNC_PRICE_GRACE_S = String(this.priceGraceS);
 
         // --no-node-snapshot mirrors the package's own `api` script: the contract VM
@@ -1698,6 +1715,7 @@ async function connectTo(params) {
 module.exports = {
     OracleBatchReplayNode,
     replayDbNames,
+    watermarkGraceEnv,
     SNAPSHOT_COMPARE_KEYS,
     readPriceSnapshots,
     readPriceActions,

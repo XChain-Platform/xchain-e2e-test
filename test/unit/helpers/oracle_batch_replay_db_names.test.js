@@ -28,3 +28,19 @@ describe('oracleBatchReplay replayDbNames', function () {
         assert.throws(() => replayDbNames('bad-label', '1_a'), /plain identifier/)
     })
 })
+
+describe('oracleBatchReplay watermarkGraceEnv', function () {
+    const { watermarkGraceEnv } = require('../../helpers/oracleBatchReplay')
+
+    it('maps each barrier name to its regtest grace variable', function () {
+        assert.deepStrictEqual(watermarkGraceEnv({ PRICE: 5, ANCHOR_ATTEST: 5, BRIDGE: 0 }), {
+            HUB_SYNC_PRICE_GRACE_S: '5', HUB_SYNC_ANCHOR_ATTEST_GRACE_S: '5', HUB_SYNC_BRIDGE_GRACE_S: '0'
+        })
+        assert.deepStrictEqual(watermarkGraceEnv(undefined), {})
+    })
+
+    it('refuses a lower-case name, a negative or a fractional value', function () {
+        for (const bad of [{ price: 5 }, { PRICE: -1 }, { PRICE: 1.5 }, { PRICE: '5' }])
+            assert.throws(() => watermarkGraceEnv(bad), /whole seconds/)
+    })
+})

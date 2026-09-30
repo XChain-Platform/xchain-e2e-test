@@ -11,6 +11,13 @@ const { OracleBatchReplayNode } = require('../../helpers/oracleBatchReplay');
 const { anchorRowsDigest } = require('../../helpers/anchor_fold/anchor_fold_readings');
 const { normalizeAnchorRowsForDigest } = require('../../helpers/anchor_fold/normalize_digest_rows');
 
+// The regtest watermark graces the DOGE rail indexers run with, given to BOTH replay
+// nodes: at the frozen graces a replay cannot pass a block younger than 4800 s of wall
+// time, so AF4 would wait out every near-tip block. AF4 compares nodes, not barriers.
+const REPLAY_WATERMARK_GRACES = {
+    PRICE: 5, ORACLE: 5, MATCH: 5, CALL: 5, ANCHOR_ATTEST: 5, BRIDGE: 0, POLICY: 0
+};
+
 function assertReplayIdentical(firstDigest, replayDigest) {
     assert.strictEqual(replayDigest, firstDigest, 'unarmed replay reproduced byte-identical anchor_actions rows');
 }
@@ -21,7 +28,8 @@ async function startReplayNode(label, hubDb, basePort) {
         coin: 'dogecoin',
         network: 'regtest',
         hubDb: hubDb,
-        basePort: basePort
+        basePort: basePort,
+        watermarkGraces: REPLAY_WATERMARK_GRACES
     });
     try {
         if (await node.up()) return { node: node, reason: null };
