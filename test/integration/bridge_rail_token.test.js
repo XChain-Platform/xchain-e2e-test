@@ -164,7 +164,8 @@ const SIBLING_BRANCH_RULE = /^PUSH_BRANCH="\$\{REMOTE_REF#refs\/heads\/\}"$/m;
 const GATE_BASE_HANDLER = /^\s*--base\)/m;
 const GATE_TIMEOUT_MS = 4 * 60 * 60 * 1000;
 // The two cases a leg skips on purpose because regtest arms their flag at height 0, so no
-// block below it exists to drive; each names the indexer unit coverage that carries it.
+// block below it exists to drive; each names the indexer unit coverage that carries it. A skip
+// title is the declared name, or the declared name followed by '. ' and the reason it is skipped.
 const NOT_DRIVABLE_ON_REGTEST = new Set([
     'token AT4: an ISSUE|7 below TOKEN_BRIDGE_ACTIVATION is invalid: VERSION (unknown)',
     'token AT6 (R8): a ^id edit of a pre-flag three-character row applies',
@@ -356,10 +357,11 @@ describe('token AT9: the gates, and the dated acceptance record', function () {
             notDrivableOnRegtest: [...NOT_DRIVABLE_ON_REGTEST], cases: verdicts };
         assert.strictEqual(state.blocked, null, 'the drive never ran its federated cases: ' + state.blocked);
         assert.deepStrictEqual(labels, DRIVE_ORDER, 'the drive parts did not run in the documented order');
-        const wrong = verdicts.filter((v) => v.state !== (NOT_DRIVABLE_ON_REGTEST.has(v.title) ? 'pending' : 'passed'));
+        const declared = (t) => [...NOT_DRIVABLE_ON_REGTEST].find((n) => t === n || t.startsWith(n + '. '));
+        const wrong = verdicts.filter((v) => v.state !== (declared(v.title) ? 'pending' : 'passed'));
         assert.deepStrictEqual(wrong, [], 'drive cases that did not end as required: ' + JSON.stringify(wrong));
         for (const title of NOT_DRIVABLE_ON_REGTEST)
-            assert.ok(verdicts.some((v) => v.title === title), 'the declared not-drivable case is gone: ' + title);
+            assert.ok(verdicts.some((v) => declared(v.title) === title), 'the declared not-drivable case is gone: ' + title);
     });
 
     it('token AT9: this repository\'s full CI gate is green on the CI venue', function () {
