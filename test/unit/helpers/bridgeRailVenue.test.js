@@ -536,6 +536,78 @@ describe('bridgeRailVenue: the pure layer', function () {
         });
     });
 
+    describe('duplicateSourceTransfers judges every venue hub', function () {
+        const row = (transferId, snapshotBlock, status) => ({
+            transfer_id: transferId,
+            src_chain: 'BTC',
+            src_action_index: 7,
+            amount: '5',
+            status: status || 'finalized',
+            snapshot_block: snapshotBlock,
+        });
+        const one = () => [row('transfer-1', 1017)];
+        const two = () => [row('transfer-1', 1017), row('transfer-2', 1018)];
+        const venueFor = (answers) => {
+            const venue = Object.create(BridgeRailVenue.prototype);
+            venue.btcVenue = {
+                hubs: [0, 1, 2, 3].map((index) => ({ index, dbName: 'hub-' + index })),
+            };
+            venue.queryHubDb = async (dbName) => {
+                const answer = answers[dbName];
+                if (answer instanceof Error) throw answer;
+                return answer.map((entry) => Object.assign({}, entry));
+            };
+            return venue;
+        };
+
+        it('reports a leg duplicated on hubs 1 and 2 when hub 0 holds it once', async function () {
+            const venue = venueFor({
+                'hub-0': one(), 'hub-1': two(), 'hub-2': two(), 'hub-3': [],
+            });
+            const duplicates = await venue.duplicateSourceTransfers();
+            assert.strictEqual(duplicates.length, 1);
+            assert.strictEqual(duplicates[0].count, 2);
+            assert.deepStrictEqual(duplicates[0].hubs, [1, 2]);
+        });
+
+        it('keeps the highest per-hub count instead of pooling rows between hubs', async function () {
+            const three = two().concat(row('transfer-3', 1019));
+            const venue = venueFor({
+                'hub-0': one(), 'hub-1': two(), 'hub-2': three, 'hub-3': two(),
+            });
+            const duplicates = await venue.duplicateSourceTransfers();
+            assert.strictEqual(duplicates.length, 1);
+            assert.strictEqual(duplicates[0].count, 3);
+            assert.strictEqual(duplicates[0].amountTotal, 15);
+            assert.deepStrictEqual(duplicates[0].hubs, [1, 2, 3]);
+        });
+
+        it('continues to the other hubs when hub 0 throws', async function () {
+            const venue = venueFor({
+                'hub-0': new Error('hub 0 down'), 'hub-1': two(), 'hub-2': [], 'hub-3': [],
+            });
+            const duplicates = await venue.duplicateSourceTransfers();
+            assert.strictEqual(duplicates.length, 1);
+            assert.deepStrictEqual(duplicates[0].hubs, [1]);
+        });
+
+        it('reports neither a unique leg nor a retracted re-finalization', async function () {
+            const retracted = [row('transfer-1', 1017), row('transfer-2', 1018, 'retracted')];
+            const venue = venueFor({
+                'hub-0': one(), 'hub-1': one(), 'hub-2': retracted, 'hub-3': [],
+            });
+            assert.deepStrictEqual(await venue.duplicateSourceTransfers(), []);
+        });
+
+        it('rejects with the last error when every hub read throws', async function () {
+            const errors = [0, 1, 2, 3].map((index) => new Error('hub ' + index + ' down'));
+            const venue = venueFor({
+                'hub-0': errors[0], 'hub-1': errors[1], 'hub-2': errors[2], 'hub-3': errors[3],
+            });
+            await assert.rejects(venue.duplicateSourceTransfers(), (error) => error === errors[3]);
+        });
+    });
+
     describe('escrowOf', function () {
 
         it('finds the escrow however the answer spells the chain', function () {
@@ -897,6 +969,74 @@ describe('bridgeRailVenue: the pure layer', function () {
         });
     });
 
+    describe('BridgeRailVenue.setHubOriginIndexer', function () {
+
+        const identity = [{ pubkeyHex: 'a'.repeat(64), privkeyHex: 'b'.repeat(64) }];
+
+        function fakeBtcVenue(events) {
+            return {
+                hubs: [{ index: 0 }, { index: 1 }, { index: 2 }],
+                indexers: [
+                    { followsHub: 0, apiUrl: 'http://127.0.0.1:41000' },
+                    { followsHub: 1, apiUrl: 'http://127.0.0.1:41001' },
+                    { followsHub: 2, apiUrl: 'http://127.0.0.1:41002' },
+                ],
+                hubEnv: { stale: true },
+                stopHub: async (index) => { events.push('stop:' + index); },
+                startHub: async (index) => { events.push('start:' + index); },
+            };
+        }
+
+        it('rebuilds every per-hub BTC environment, restarts only the selected hub in order, and returns its environment',
+            async function () {
+                const events = [];
+                const venue = new BridgeRailVenue({ label: 'unit', identities: identity });
+                venue.btcVenue = fakeBtcVenue(events);
+
+                const selected = await venue.setHubOriginIndexer(1, 'http://127.0.0.1:1');
+
+                assert.deepStrictEqual(venue.btcVenue.hubEnv, {
+                    0: { BTC_INDEXER_URL: 'http://127.0.0.1:41000' },
+                    1: { BTC_INDEXER_URL: 'http://127.0.0.1:1' },
+                    2: { BTC_INDEXER_URL: 'http://127.0.0.1:41002' },
+                });
+                assert.strictEqual(selected, venue.btcVenue.hubEnv[1]);
+                assert.deepStrictEqual(events, ['stop:1', 'start:1']);
+            });
+
+        it('removes a null override and restores the selected hub\'s own BTC indexer URL', async function () {
+            const events = [];
+            const venue = new BridgeRailVenue({ label: 'unit', identities: identity });
+            venue.btcVenue = fakeBtcVenue(events);
+            venue._hubIndexerOverrides[1] = 'http://127.0.0.1:1';
+
+            const selected = await venue.setHubOriginIndexer(1, null);
+
+            assert.deepStrictEqual(selected, { BTC_INDEXER_URL: 'http://127.0.0.1:41001' });
+            assert.ok(!Object.prototype.hasOwnProperty.call(venue._hubIndexerOverrides, 1));
+            assert.deepStrictEqual(events, ['stop:1', 'start:1']);
+        });
+
+        it('rejects a missing hub or standing BTC indexer before any restart', async function () {
+            const events = [];
+            const venue = new BridgeRailVenue({ label: 'unit', identities: identity });
+            venue.btcVenue = fakeBtcVenue(events);
+            const originalHubEnv = venue.btcVenue.hubEnv;
+
+            await assert.rejects(
+                () => venue.setHubOriginIndexer(9, 'http://127.0.0.1:1'),
+                /bridgeRailVenue: no hub 9/);
+            venue.standingBtcIndexerUrl = 'http://127.0.0.1:3024';
+            await assert.rejects(
+                () => venue.setHubOriginIndexer(1, 'http://127.0.0.1:1'),
+                /standing BTC indexer has no per-hub origin endpoint to replace/);
+
+            assert.strictEqual(venue.btcVenue.hubEnv, originalHubEnv);
+            assert.deepStrictEqual(venue._hubIndexerOverrides, {});
+            assert.deepStrictEqual(events, []);
+        });
+    });
+
     describe('the funding budget', function () {
 
         // VERBATIM from drive 13's log, the three lines the harness printed on a loop for
@@ -1175,6 +1315,57 @@ describe('bridgeRailVenue: the pure layer', function () {
             const msg = fundingBudgetMessage('AT5.MAKER', 480000, 1320000,
                 classifyFundingWait(DRIVE_13_STALL), {});
             assert.match(msg, /1320s elapsed against a budget of 480s/);
+        });
+    });
+
+    describe('waitForRailSettled reads each still-listed leg across every venue hub', function () {
+        const row = { transfer_id: 't1', status: 'finalized', src_chain: 'BTC',
+            src_action_index: 7, dest_chain: 'DOGE', amount: '5', tick: 'GAS' };
+        const venueWith = (db) => {
+            const venue = Object.create(BridgeRailVenue.prototype);
+            venue.btcVenue = { hubs: [0, 1, 2, 3].map((index) => (
+                { index: index, dbName: 'h' + index })) };
+            venue.indexerRpc = async (src) => ({ transfers: src === 'BTC'
+                ? [{ tick: 'GAS', dest_chain: 'DOGE', src_action_index: 7, amount: '5' }]
+                : [] });
+            venue.queryHubDb = async (name) => {
+                const rows = db[name];
+                if (rows instanceof Error) throw rows;
+                return rows.map((entry) => Object.assign({}, entry));
+            };
+            venue.queryIndexerDb = async (chain, sql, params) => (
+                params && String(params[0]) === 't1' ? [{ block_index: 12 }] : []);
+            venue.bridgeInvariant = async () => ({ ok: true });
+            return venue;
+        };
+
+        it('settles a listed leg finalized on hubs 1 and 2 but absent on hub 0', async function () {
+            const answer = await venueWith({ h0: [], h1: [row], h2: [row], h3: [] })
+                .waitForRailSettled('GAS', { timeoutMs: 50 });
+            assert.ok(answer);
+            assert.deepStrictEqual(answer.applied.map((leg) => leg.transferId), ['t1']);
+        });
+
+        it('settles from another hub when hub 0 throws', async function () {
+            const answer = await venueWith({ h0: new Error('hub 0 down'), h1: [row], h2: [], h3: [] })
+                .waitForRailSettled('GAS', { timeoutMs: 50 });
+            assert.ok(answer);
+            assert.deepStrictEqual(answer.applied.map((leg) => leg.transferId), ['t1']);
+        });
+
+        it('does not settle a listed leg held by no hub', async function () {
+            this.timeout(10000);
+            const answer = await venueWith({ h0: [], h1: [], h2: [], h3: [] })
+                .waitForRailSettled('GAS', { timeoutMs: 50 });
+            assert.strictEqual(answer, null);
+        });
+
+        it('rejects with the last read error when every hub throws', async function () {
+            await assert.rejects(
+                () => venueWith({ h0: new Error('hub 0 down'), h1: new Error('hub 1 down'),
+                    h2: new Error('hub 2 down'), h3: new Error('hub 3 down') })
+                    .waitForRailSettled('GAS', { timeoutMs: 50 }),
+                /hub 3 down/);
         });
     });
 });

@@ -88,7 +88,7 @@ bridgeRailSuite(GROUP, function () {
             "SELECT snapshot_id FROM policy_snapshots WHERE origin_chain = 'BTC' AND tick = ? AND policy_seq = 1", [M.tick]);
         const copy = await state.venue.tokenParameters('DOGE', 'BTC.' + M.tick);
         const origin = copy ? await listOrigin('DOGE', copy.params.block_list) : null;
-        state.evidence.at1_mirror = { seq1: seq1.snapshot_id, applied, copyLists: copy && { allow: copy.params.allow_list,
+        state.evidence.at1_mirrorReading = { seq1: seq1.snapshot_id, applied, copyLists: copy && { allow: copy.params.allow_list,
             block: copy.params.block_list }, listOrigin: origin, hubRows: (await hubPolicyRows(M.tick)).length };
         assert.strictEqual(mirrored.length, 1, 'the DOGE mirror holds ' + mirrored.length + ' seq 1 rows for ' + M.tick);
         assert.strictEqual(applied.snapshotId, String(seq1.snapshot_id), 'DOGE applied ' + applied.snapshotId + ', not the finalized seq 1');
@@ -102,6 +102,7 @@ bridgeRailSuite(GROUP, function () {
         const membership = await state.venue.indexerRpc('DOGE', 'gettokenpolicy',
             { tick: 'BTC.' + M.tick, origin_block: Number((await state.venue.venueTips()).DOGE) });
         assert.deepStrictEqual(membership.block_list, [M.blocked.address], 'the copy\'s block list reads ' + JSON.stringify(membership.block_list));
+        state.evidence.at1_mirror = state.evidence.at1_mirrorReading;
     });
 });
 
@@ -113,9 +114,10 @@ bridgeRailSuite(GROUP, function () {
         assert.ok(state.evidence.at1_mirror, 'the mirror half must have run');
         const blocked = await sendCopy(M.dest, M.tick, 1, M.blocked.address, 'policy AT1 blocked');
         const other = await sendCopy(M.dest, M.tick, 1, M.other.address, 'policy AT1 other');
-        state.evidence.at1_sends = { blocked, other, specString: 'invalid: BLOCK_LIST' };
+        state.evidence.at1_sendsReading = { blocked, other, specString: 'invalid: BLOCK_LIST' };
         assert.strictEqual(blocked.status, 'invalid: DESTINATION (not authorized)',
             'a SEND of BTC.' + M.tick + ' to the blocked address graded ' + blocked.status);
         assert.strictEqual(other.status, 'valid', 'a SEND of BTC.' + M.tick + ' to an unlisted address graded ' + other.status);
+        state.evidence.at1_sends = state.evidence.at1_sendsReading;
     });
 });

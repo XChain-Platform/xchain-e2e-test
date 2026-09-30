@@ -49,6 +49,9 @@
 
 'use strict';
 
+const dotenv                    = require('dotenv');
+const path                      = require('path');
+const fs                        = require('fs');
 const BlockchainConnector        = require('../../src/BlockchainConnector.js');
 const XChainUtxoTrackerConnector = require('../../src/XChainUtxoTrackerConnector.js');
 const XChainEncoderConnector     = require('../../src/XChainEncoderConnector.js');
@@ -69,7 +72,7 @@ const COIN_CODE_MAP = { bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' };
 const DEFAULT_PORTS = {
     BTC:  { node: 3020, tracker: 3021, decoder: 3022, encoder: 3023, indexer: 3024, miner: 3025 },
     LTC:  { node: 3220, tracker: 3221, decoder: 3222, encoder: 3223, indexer: 3224, miner: 3225 },
-    DOGE: { node: 3120, tracker: 3121, decoder: 3122, encoder: 3123, indexer: 3004, miner: 3125 },
+    DOGE: { node: 3120, tracker: 3121, decoder: 3122, encoder: 3123, indexer: 3124, miner: 3125 },
 };
 
 // Globals a rail owns. Restoring exactly this list is what makes withRail safe
@@ -111,12 +114,85 @@ function envPort(code, key, fallback) {
 // run a second coin. Parsed, never loaded into process.env, so it cannot shadow
 // the running chain's own settings.
 function readChainEnvFile(code) {
-    const path = require('path');
-    const fs = require('fs');
     const file = path.resolve(__dirname, '../../.env.' + String(code).toLowerCase());
     if (!fs.existsSync(file)) return {};
-    try { return require('dotenv').parse(fs.readFileSync(file)); }
+    try { return dotenv.parse(fs.readFileSync(file)); }
     catch (e) { return {}; }
+}
+
+function resolveNodeConfigSidecar(coin, network = 'regtest') {
+    const filename = coin + '-' + network + '.local';
+    const rel = path.join('xchain-node', 'config', filename);
+    const candidates = [
+        process.env.XCHAIN_NODE_CONFIG_DIR && path.join(process.env.XCHAIN_NODE_CONFIG_DIR, filename),
+        path.resolve(__dirname, '../../..', rel),
+        path.resolve(__dirname, '../../../..', rel),
+    ].filter(Boolean);
+    return candidates.find((candidate) => fs.existsSync(candidate)) || null;
+}
+
+function readNodeConfigSidecar(coin, network) {
+    const file = resolveNodeConfigSidecar(coin, network);
+    if (!file) return { file: null, values: {} };
+    try { return { file, values: dotenv.parse(fs.readFileSync(file)) }; }
+    catch (e) { return { file, values: {} }; }
+}
+
+function venueCredentialStores(code, chainEnv, ix, sidecar) {
+    const lowerCode = code.toLowerCase();
+    return [
+        { name: code + '_INDEXER_DB_PASS in the environment', value: process.env[code + '_INDEXER_DB_PASS'] },
+        { name: 'INDEXER_DB_PASS in .env.' + lowerCode, value: chainEnv.INDEXER_DB_PASS },
+        { name: "the hub's install-time config", value: ix.pass },
+        { name: sidecar.file || 'the ' + lowerCode + ' node config sidecar', value: sidecar.values.INDEXER_DB_PASS },
+    ].filter((store) => store.value !== undefined && store.value !== null && store.value !== '');
+}
+
+async function probeVenueDbPassword(params, pass) {
+    const db = new Database(params.host, params.port, params.name, params.user, pass);
+    try { return await db.ping(); }
+    catch (e) { return false; }
+    finally {
+        if (db.pool && typeof db.pool.end === 'function') {
+            try { await db.pool.end(); } catch (e) {}
+        }
+    }
+}
+
+async function reconcileVenueDbCredential(coin, network = 'regtest') {
+    const code = COIN_CODE_MAP[coin] || String(coin).toUpperCase().slice(0, 3);
+    const chainEnv = readChainEnvFile(code);
+    const sidecar = readNodeConfigSidecar(coin, network);
+    const hub = new XChainHubConnector(XChainHubConnector.parseEndpoints());
+    const cfg = await hub.getAllConfig();
+    const svc = cfg && cfg[coin] && cfg[coin][network];
+    const ix = (svc && svc['xchain-indexer']) || {};
+    const stores = venueCredentialStores(code, chainEnv, ix, sidecar);
+    const candidates = new Map();
+    for (const store of stores) {
+        if (!candidates.has(store.value)) candidates.set(store.value, []);
+        candidates.get(store.value).push(store.name);
+    }
+    if (candidates.size <= 1) return { agree: true, checked: stores.length };
+
+    const db = resolveIndexerDb(code, chainEnv, ix);
+    const params = {
+        host: process.env.DATABASE_URL || '127.0.0.1',
+        port: parseInt(process.env.DATABASE_PORT, 10) || 13306,
+        name: db.name || sidecar.values.INDEXER_DB_NAME,
+        user: db.user || sidecar.values.INDEXER_DB_USER,
+    };
+    const stale = [];
+    for (const [pass, names] of candidates) {
+        if (!(await probeVenueDbPassword(params, pass))) stale.push(...names);
+    }
+    if (stale.length) {
+        throw new Error('[chainRail] ' + coin + '/' + network +
+            ' indexer DB credential stores disagree; stale: ' + stale.join(', '));
+    }
+    throw new Error('[chainRail] ' + coin + '/' + network +
+        ' indexer DB credential stores disagree, but the database accepted every candidate from: ' +
+        stores.map((store) => store.name).join(', '));
 }
 
 // Node RPC credentials, in precedence order:
@@ -348,6 +424,8 @@ function captureCurrentRail() {
 module.exports = {
     COIN_CODE_MAP,
     DEFAULT_PORTS,
+    resolveNodeConfigSidecar,
+    reconcileVenueDbCredential,
     createRail,
     railFailures,
     withRail,

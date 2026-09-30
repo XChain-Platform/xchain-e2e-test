@@ -39,6 +39,8 @@ const {
     fundDoge,
     tokenSnapshot,
     settleLeg,
+    waitForFinalizedPolicy,
+    mineBtcBlocks,
     rowsLike,
     needsFederation,
     bridgeRailSuite,
@@ -52,6 +54,7 @@ bridgeRailSuite(GROUP, function () {
         if (needsFederation(this, 'token AT1 issue and lock')) return;
         assert.ok(state.baseline, 'the arming case must have run');
         const T = state.tokens;
+        assert.ok(T.tick && T.bridged && state.evidence.bridgeRoleDoge, 'the AT1 precondition case must have run: it chooses the native tick and reads the DOGE bridge role');
         T.issuer = await fundBtc('TOKEN.ISSUER');
         const issue = await btcAction(T.issuer, () => issueHelper.sendIssueV0Raw(
             T.issuer, T.tick, 1000000, 1000000, DECIMALS, 'token AT1', MINT), 'issues');
@@ -71,8 +74,10 @@ bridgeRailSuite(GROUP, function () {
             'DOGE already holds ' + T.bridged + ' before the AT1 lock');
         const before = await tokenSnapshot('at1_before_lock', T.tick, T.dest);
         const lock = await btcAction(T.issuer, lockWireV3(T.tick, 'DOGE', T.dest.address, LOCK, 'token AT1'), 'xbridges');
-        state.evidence.at1_lock = lock;
+        state.evidence.at1_lockReading = lock;
         assert.strictEqual(lock.status, 'valid', 'XBRIDGE v3 lock of ' + LOCK + ' ' + T.tick + ' graded ' + lock.status);
+        await mineBtcBlocks(1, 'the AT1 lock reaching bridge depth');
+        await waitForFinalizedPolicy(T.tick, 1);
         const after = await tokenSnapshot('at1_after_lock', T.tick, T.dest);
         assert.strictEqual(after.escrow - before.escrow, LOCK,
             'the BTC escrow for DOGE did not gain exactly ' + LOCK + ' ' + T.tick + ': ' + JSON.stringify(after.btc));
@@ -81,6 +86,7 @@ bridgeRailSuite(GROUP, function () {
         const bridgedBit = await state.venue.queryIndexerDb('BTC',
             'SELECT tk.bridged FROM tokens tk INNER JOIN index_tickers ti ON (ti.id=tk.tick_id) WHERE ti.tick=? LIMIT 1', [T.tick]);
         assert.strictEqual(String(bridgedBit[0] && bridgedBit[0].bridged), '1', 'the applied lock did not set the origin row\'s bridged bit');
+        state.evidence.at1_lock = state.evidence.at1_lockReading;
     });
 });
 
@@ -101,7 +107,7 @@ bridgeRailSuite(GROUP, function () {
         const root = await state.venue.tokenParameters('DOGE', ((await rowsLike('DOGE', 'BTC'))[0] || {}).tick || 'BTC');
         const child = await state.venue.tokenParameters('DOGE', T.bridged);
         state.evidence.at1_dogeRoot = root;
-        state.evidence.at1_dogeChild = child;
+        state.evidence.at1_dogeChildReading = child;
         assert.ok(root, 'DOGE holds no BTC root row after the in leg');
         assert.ok(child, 'DOGE holds no ' + T.bridged + ' row after the in leg');
         assert.strictEqual(root.ownerAddress, state.evidence.bridgeRoleDoge, 'the BTC root on DOGE is owned by ' + root.ownerAddress);
@@ -111,6 +117,7 @@ bridgeRailSuite(GROUP, function () {
         assert.strictEqual(Number(snap.destBridged), LOCK, T.dest.address + ' holds ' + snap.destBridged + ' ' + T.bridged);
         assert.strictEqual(snap.supply, LOCK, T.bridged + ' supply on DOGE reads ' + snap.supply);
         assert.strictEqual(snap.escrow, LOCK, 'the BTC escrow holds ' + snap.escrow);
+        state.evidence.at1_dogeChild = child;
     });
 });
 

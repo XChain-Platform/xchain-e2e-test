@@ -1,7 +1,7 @@
 {
   "name": "xchain-e2e-test",
   "description": "xchain-e2e-test is an end-to-end testing suite for the XChain platform to ensure data integrity",
-  "version": "0.20.1",
+  "version": "0.21.0",
   "license": "AGPL-3.0-or-later",
   "repository": {
     "type": "git",
@@ -20,13 +20,16 @@
     "xchain-sdk": "file:./xchain-sdk"
   },
   "scripts": {
+    "test:rail": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/rail/**/*.rail.test.js'",
     "test:rollcall": "E2E_REQUIRE_FEDERATION=1 mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/actions/rollcall*.test.js'",
     "venue:seed-rollcall": "E2E_STAKE_TEARDOWN=off mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/tools/rollcallSeedFederation.test.js",
     "venue:age-rollcall-absences": "E2E_REQUIRE_FEDERATION=1 mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/tools/rollcall_age_absences.test.js",
     "venue:clear-rollcall-outsiders": "E2E_STAKE_TEARDOWN=off E2E_REQUIRE_FEDERATION=1 XC_ROLLCALL_CLEAR_OUTSIDERS=1 mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/tools/rollcallClearOutsiders.test.js",
     "venue:seed-attestation": "E2E_STAKE_TEARDOWN=off mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/tools/reseedAttestationRoster.test.js test/tools/reseedAttestationRoster.test/01_seed_the_attestation_roster_on_a_reset_chain.test.js",
     "test:attest-mirror": "node scripts/run-attest-mirror.js 'test/attestMirror/*.test.js' 'test/attestMirror/barrier_family/*.test.js'",
-    "test:bridge-rail": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/integration/bridge_rail_*.test.js'",
+    "test:bridge-rail": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/integration/bridge_rail_*.test.js' --ignore 'test/integration/bridge_rail_token.test.js' --ignore 'test/integration/bridge_rail_token.test/*.test.js' --ignore 'test/integration/bridge_rail_policy.test.js' --ignore 'test/integration/bridge_rail_policy.test/*.test.js'",
+    "test:bridge-rail-token": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/integration/bridge_rail_token.test.js 'test/integration/bridge_rail_token.test/*.test.js'",
+    "test:bridge-rail-policy": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/integration/bridge_rail_policy.test.js 'test/integration/bridge_rail_policy.test/*.test.js'",
     "lint:sleep-flake": "node scripts/check-sleep-flake.js",
     "lint:wait-swallow": "node scripts/check-wait-swallow.js",
     "lint:stake-teardown": "node scripts/check-stake-teardown.js",
@@ -78,7 +81,7 @@
     "test:integration:live": "mocha --timeout 0 --exit 'test/integration/*.integration.test.js'",
     "test:e2e": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/e2e/**/*.e2e.js'",
     "test:boundary": "mocha 'test/boundary/**/*.boundary.js'",
-    "test:fuzz": "mocha --timeout 60000 'test/fuzz/**/*.fuzz.js'",
+    "test:fuzz": "mocha --timeout 60000 'test/fuzz/**/*.fuzz.js' 'test/fuzz/**/*.test.js' test/fuzz/action-messages.fuzz/support/message_construction.js",
     "test:fuzz:quick": "mocha --timeout 30000 'test/fuzz/**/*.fuzz.js'",
     "test:chaos": "mocha --timeout 10000 'test/chaos/**/*.chaos.js'",
     "test:chaos:quick": "mocha --timeout 10000 --grep '@P0' 'test/chaos/**/*.chaos.js'",
@@ -110,6 +113,7 @@
   "devDependencies": {
     "@stryker-mutator/core": "^9.6.1",
     "@stryker-mutator/mocha-runner": "^9.6.1",
+    "acorn": "^8.15.0",
     "brace-expansion": "^5.0.9",
     "chai": "^4.5.0",
     "fast-check": "^4.8.0",

@@ -99,6 +99,7 @@ const mariadb = require('mariadb');
 const { AttestMirrorVenue } = require('./attestMirrorVenue');
 const chainRail             = require('./chainRail');
 const xchainPrice           = require('./xchainPriceConstants');
+const { evidenceJson }      = require('./rail_preflight/evidence_json');
 
 // The four chains the hub engine knows, as the hub spells them. Kept local rather
 // than imported from the hub so a unit run needs no hub module on NODE_PATH.
@@ -757,6 +758,27 @@ function escrowOf(balances, chain) {
     return null;
 }
 
+async function firstHubRowsForSourceLeg(hubs, readHub, srcChain, srcActionIndex) {
+    let failed = 0;
+    let lastError = null;
+    for (const hub of hubs) {
+        let rows;
+        try {
+            rows = await readHub(hub.dbName,
+                'SELECT transfer_id, status FROM bridge_transfers ' +
+                'WHERE src_chain = ? AND src_action_index = ? LIMIT 1',
+                [srcChain, Number(srcActionIndex)]);
+        } catch (e) {
+            failed += 1;
+            lastError = e;
+            continue;
+        }
+        if (rows.length) return rows;
+    }
+    if (failed === hubs.length && lastError) throw lastError;
+    return [];
+}
+
 /**
  * The finalized legs a drained rail still owes, from the hubs' own records.
  *
@@ -1071,7 +1093,7 @@ function journalCase(entry) {
         const fs = require('fs');
         const path = require('path');
         fs.appendFileSync(path.join(dir, 'case-journal.jsonl'),
-            JSON.stringify(Object.assign({ at: new Date().toISOString() }, entry)) + '\n');
+            evidenceJson(Object.assign({ at: new Date().toISOString() }, entry)) + '\n');
         return true;
     } catch (e) { return false; }
 }
@@ -1324,8 +1346,8 @@ class BridgeRailVenue {
     }
 
     /**
-     * Point ONE hub's origin (BTC) indexer somewhere else, or back at its own with `null`,
-     * and restart that hub alone so its engine reads the new endpoint.
+     * Point ONE hub's origin (BTC) indexer somewhere else, or back at its own with `null`.
+     * Restart that hub alone by default, or restart an explicit ordered set during recovery.
      *
      * Exists for policy AT5's abstain leg: a follower whose origin indexer is unreachable
      * must abstain rather than refuse, and stopping a shared indexer would take every hub's
@@ -1333,16 +1355,25 @@ class BridgeRailVenue {
      *
      * @param {number} hubIndex
      * @param {string|null} url  an endpoint, or null to restore the hub's own indexer
+     * @param {{restartIndexes?: number[]}} [opts]
      */
-    async setHubOriginIndexer(hubIndex, url) {
+    async setHubOriginIndexer(hubIndex, url, opts) {
         assert.ok(this.btcVenue && this.hubs[hubIndex], 'bridgeRailVenue: no hub ' + hubIndex);
         assert.ok(!this.standingBtcIndexerUrl, 'bridgeRailVenue: a venue served by the standing BTC ' +
             'indexer has no per-hub origin endpoint to replace');
         if (url === null || url === undefined) delete this._hubIndexerOverrides[hubIndex];
         else this._hubIndexerOverrides[hubIndex] = String(url);
         this.btcVenue.hubEnv = hubIndexerEnvMap(this.btcVenue.indexers, 'BTC', this._hubIndexerOverrides);
-        await this.btcVenue.stopHub(hubIndex);
-        await this.btcVenue.startHub(hubIndex);
+        const requested = opts && Array.isArray(opts.restartIndexes) ? opts.restartIndexes : [hubIndex];
+        const restartIndexes = [...new Set(requested.map(Number))];
+        assert.ok(restartIndexes.includes(Number(hubIndex)),
+            'bridgeRailVenue: origin indexer restart plan omits hub ' + hubIndex);
+        for (const index of restartIndexes) {
+            assert.ok(Number.isInteger(index) && this.hubs[index],
+                'bridgeRailVenue: origin indexer restart plan names no hub ' + index);
+            await this.btcVenue.stopHub(index);
+            await this.btcVenue.startHub(index);
+        }
         return this.btcVenue.hubEnv[hubIndex];
     }
 
@@ -1913,8 +1944,7 @@ class BridgeRailVenue {
     async waitForRailSettled(tick, opts) {
         const o = opts || {};
         const deadline = Date.now() + Number(o.timeoutMs || 45 * 60 * 1000);
-        const hubDbName = this.hubs[0] ? this.hubs[0].dbName : null;
-        assert.ok(hubDbName, 'bridgeRailVenue: no hub database to poll');
+        assert.ok(this.hubs.length, 'bridgeRailVenue: no hub database to poll');
         let last = null;
         while (Date.now() < deadline) {
             const pending = [];
@@ -1954,10 +1984,8 @@ class BridgeRailVenue {
                     }
                     const where = { chain: src, dest: dest, actionIndex: String(leg.src_action_index),
                                     amount: String(leg.amount) };
-                    const hubRows = await this.queryHubDb(hubDbName,
-                        'SELECT transfer_id, status FROM bridge_transfers ' +
-                        'WHERE src_chain = ? AND src_action_index = ? LIMIT 1',
-                        [src, Number(leg.src_action_index)]);
+                    const hubRows = await firstHubRowsForSourceLeg(this.hubs,
+                        this.queryHubDb.bind(this), src, leg.src_action_index);
                     if (!hubRows.length) { pending.push(Object.assign({ stage: 'unfinalized' }, where)); continue; }
                     const transferId = String(hubRows[0].transfer_id);
                     let settled = [];
@@ -2025,9 +2053,8 @@ class BridgeRailVenue {
     }
 
     /**
-     * The source legs this venue's federation finalized more than once, read off hub 0's
-     * own database. See `overFinalizedSourceLegs` for what the answer means and the reading
-     * that put it here.
+     * The source legs this venue's federation finalized more than once, read from every
+     * hub database. See `overFinalizedSourceLegs` for what the answer means.
      *
      * Read from the HUB rather than from the destination's `bridge_settlements`, because the
      * duplication happens at finalization: a destination that refused the second mint would
@@ -2036,12 +2063,8 @@ class BridgeRailVenue {
      * @returns {Promise<Array>} empty when every finalized leg is unique
      */
     async duplicateSourceTransfers() {
-        const hubDbName = this.hubs[0] ? this.hubs[0].dbName : null;
-        assert.ok(hubDbName, 'bridgeRailVenue: no hub database to read');
-        const rows = await this.queryHubDb(hubDbName,
-            'SELECT transfer_id, src_chain, src_action_index, amount, status, snapshot_block ' +
-            'FROM bridge_transfers');
-        return overFinalizedSourceLegs(rows);
+        assert.ok(this.hubs.length, 'bridgeRailVenue: no hub database to read');
+        return overFinalizedSourceLegsByHub(this.hubs, this.queryHubDb.bind(this));
     }
 
     /**
@@ -2448,6 +2471,38 @@ function overFinalizedSourceLegs(rows) {
     return dupes;
 }
 
+async function overFinalizedSourceLegsByHub(hubs, readHub) {
+    const sql = 'SELECT transfer_id, src_chain, src_action_index, amount, status, snapshot_block ' +
+        'FROM bridge_transfers';
+    const byLeg = new Map();
+    let successfulReads = 0;
+    let lastError = null;
+    for (const hub of (Array.isArray(hubs) ? hubs : [])) {
+        let duplicates;
+        try {
+            duplicates = overFinalizedSourceLegs(await readHub(hub.dbName, sql));
+            successfulReads += 1;
+        } catch (e) {
+            lastError = e;
+            continue;
+        }
+        for (const duplicate of duplicates) {
+            const key = duplicate.srcChain + ':' + duplicate.actionIndex;
+            const reading = byLeg.get(key);
+            if (!reading) {
+                byLeg.set(key, { entry: duplicate, hubs: [hub.index] });
+                continue;
+            }
+            reading.hubs.push(hub.index);
+            if (duplicate.count > reading.entry.count) reading.entry = duplicate;
+        }
+    }
+    if (!successfulReads && lastError) throw lastError;
+    return [...byLeg.values()].map((reading) => Object.assign({}, reading.entry, {
+        hubs: reading.hubs.sort((a, b) => Number(a) - Number(b)),
+    }));
+}
+
 /**
  * How many blocks deep an orphan at `height` would reach, given the chain's current tip.
  *
@@ -2745,9 +2800,11 @@ module.exports = {
     classifyInvariant,
     bridgeSettled,
     escrowOf,
+    firstHubRowsForSourceLeg,
     outstandingFinalizedLegs,
     expectedInvariantReading,
     overFinalizedSourceLegs,
+    overFinalizedSourceLegsByHub,
     orphanDepth,
     assertShallowOrphan,
     replacementBlockCount,

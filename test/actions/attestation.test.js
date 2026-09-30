@@ -137,7 +137,7 @@ describe(TITLE, function () {
         // Advance past DEADLINE_BLOCK. deadlineBlocks=2 + comfortable margin so the
         // per-block expiry pipeline definitely runs at deadline+1.
         await regtestMinerConnector.generateBlocks(5)
-        await utxoTrackerConnector.waitForSync()
+        await utxoTrackerConnector.requireSync()
 
         // Request status should flip to 'expired'
         let expired = await indexerDatabase.waitForAttestationRequest({

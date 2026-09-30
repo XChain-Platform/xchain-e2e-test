@@ -141,7 +141,7 @@ async function setupRealUrlAttestation() {
     await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
     // The encoder refuses UTXO selection while the tracker trails the node, so the
     // next tx build races these blocks unless the tracker is caught up first.
-    await utxoTrackerConnector.waitForSync()
+    await utxoTrackerConnector.requireSync()
 
     const deploy = await vmHelper.sendDeployV0(operatorAddr, CONTRACT_CODE, 500000)
     assert.strictEqual(deploy.contract.status, 'valid', 'deploy status: ' + deploy.contract.status)

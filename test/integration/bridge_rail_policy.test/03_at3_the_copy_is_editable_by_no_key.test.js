@@ -16,8 +16,9 @@
  * `invalid: LIST_ACTION_INDEX (bridge-owned)`; ISSUE format 5 by a user on the copy is refused
  * (keyless owner); a user SLEEP of the copy is refused.
  *
- * THE TWO STRINGS THE SPEC DOES NOT PIN. The ISSUE 5 refusal is the generic ownership check,
- * `invalid: issued by another address` (xchain-indexer src/actions/issue/token_state.js). The
+ * THE TWO STRINGS THE SPEC DOES NOT PIN. The ISSUE 5 refusal is the parent-owner tick rule,
+ * `invalid: TICK (parent issued by another address)` (xchain-indexer src/actions/issue/tick_rules.js),
+ * which runs before the tick-owner check because the copy root is the keyless bridge role. The
  * SLEEP refusal the spec names `LOCK_SLEEP`, but the sleep handler refuses a non-owner FIRST,
  * with `invalid: TICK (not authorized)` (src/actions/sleep.js, the owner check precedes the
  * LOCK_SLEEP guard), so a user's SLEEP never reaches LOCK_SLEEP. The case asserts the handler's
@@ -33,6 +34,7 @@ const {
     policyListsWire,
     sleepTickWire,
 } = require('../../helpers/bridgeRailVenue');
+const { COPY_ISSUE_REFUSED } = require('../../helpers/rail_preflight/copy_issue_verdict');
 const {
     assert,
     state,
@@ -61,7 +63,7 @@ bridgeRailSuite(GROUP, function () {
         r.sleep = await dogeAction(user, sleepTickWire('BTC.' + M.tick, tip + 1000, 'policy AT3'), 'sleeps');
         state.evidence.at3 = Object.assign({ specSleepString: 'invalid: LOCK_SLEEP' }, r);
         assert.strictEqual(r.listEdit.status, 'invalid: LIST_ACTION_INDEX (bridge-owned)', 'the user LIST edit graded ' + r.listEdit.status);
-        assert.strictEqual(r.issue5.status, 'invalid: issued by another address', 'the user ISSUE 5 graded ' + r.issue5.status);
+        assert.strictEqual(r.issue5.status, COPY_ISSUE_REFUSED, 'the user ISSUE 5 graded ' + r.issue5.status);
         assert.strictEqual(r.sleep.status, 'invalid: TICK (not authorized)', 'the user SLEEP graded ' + r.sleep.status);
         const after = await state.venue.indexerRpc('DOGE', 'gettokenpolicy',
             { tick: 'BTC.' + M.tick, origin_block: Number((await state.venue.venueTips()).DOGE) });

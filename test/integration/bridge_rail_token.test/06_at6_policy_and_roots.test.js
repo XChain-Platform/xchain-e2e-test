@@ -71,13 +71,9 @@ bridgeRailSuite(GROUP, function () {
 });
 
 bridgeRailSuite(GROUP, function () {
-    it('token AT6 (R8): a ^id edit of a pre-flag three-character row applies', function () {
-        // Not drivable on this rail: TICK_NAMESPACE_ACTIVATION is height 0 on regtest, so
-        // no three-character row can exist below the flag to be edited above it. The
-        // indexer's unit tier carries it; named here so the gap is visible.
-        console.log('  token AT6 pre-flag ^id edit NOT DRIVABLE on regtest (TICK_NAMESPACE_ACTIVATION is 0); unit-covered in xchain-indexer');
-        this.skip();
-    });
+    // The indexer's unit tier carries it; named here so the gap is visible.
+    it.skip('token AT6 (R8): a ^id edit of a pre-flag three-character row applies. ' +
+        'NOT DRIVABLE on regtest: TICK_NAMESPACE_ACTIVATION is height 0 on regtest, so no three-character row can exist below the flag to be edited above it');
 });
 
 // A type-2 LIST on BTC from `owner`, the list every policy leg below points at.
@@ -99,6 +95,7 @@ bridgeRailSuite(GROUP, function () {
     it('token AT6 (opt-in direction): format 7 on a token with a BLOCK_LIST is refused below the policy flag and applies above it', async function () {
         this.timeout(0);
         if (needsFederation(this, 'token AT6 opt-in direction')) return;
+        assert.ok(state.tokens.btcReceiver, 'AT2 must have run and chosen its BTC receiver');
         const active = await flagAtTip();
         const owner = await fundBtc('TOKEN.AT6.LISTED.OWNER');
         const tick = await pickFreeTick(['LSTD', 'LSTE', 'LSTF']);
@@ -133,8 +130,9 @@ bridgeRailSuite(GROUP, function () {
         if (needsFederation(this, 'token AT6 policy direction')) return;
         const active = await flagAtTip();
         const D = state.tokens.at5, A = state.tokens.at3;
-        assert.ok(D.issuer && state.evidence.at5_depth && state.evidence.at5_depth.transfer, 'the AT5 depth leg must have bridged its token');
-        assert.ok(A.issuer && state.evidence.at3 && state.evidence.at3.lockBridge, 'AT3 must have bridged and then closed its token');
+        assert.ok(D.issuer && state.evidence.at5_depth && state.evidence.at5_depth.transfer, 'the AT5 depth leg must have run and bridged its token');
+        assert.ok(A.issuer && state.evidence.at3 && state.evidence.at3.lockBridge, 'AT3 must have run, bridging and then closing its token');
+        assert.ok(state.tokens.btcReceiver, 'AT2 must have run and chosen its BTC receiver');
         const listIndex = await addressList(D.issuer, state.tokens.btcReceiver.address);
         const want = active ? 'valid' : NOT_BINDABLE_BRIDGED;
         const r = { listIndex };

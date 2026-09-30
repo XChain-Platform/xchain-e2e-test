@@ -43,6 +43,10 @@ const INTENTIONALLY_UNRUN = [
         why: 'Hand-driven Byzantine drill against a live multi-host stack; test/drills/README.md carries the invocation and the operator preconditions it needs.'
     },
     {
+        file: 'test/drills/unit/cross_chain_settle_testnet_drill.test.js',
+        why: 'Hermetic cover for the testnet settlement drill, run by its row verification command like the other drill unit files; folding it into test:unit is the same deliberate decision.'
+    },
+    {
         file: 'test/drills/unit/drill_plan.test.js',
         why: 'Hermetic cover for the drill library, run by the npx line in test/drills/README.md. Folding the drill lane into test:unit would change what the CI unit job runs, which is a decision to take deliberately rather than a side effect of this guard.'
     },
@@ -57,6 +61,26 @@ const INTENTIONALLY_UNRUN = [
     {
         file: 'test/drills/unit/live_byzantine_faults.test.js',
         why: 'Hermetic cover for the drill library, run by the npx line in test/drills/README.md. Folding the drill lane into test:unit would change what the CI unit job runs, which is a decision to take deliberately rather than a side effect of this guard.'
+    },
+    {
+        file: 'test/drills/unit/testnet_settle_counter_leg.test.js',
+        why: 'Hermetic cover for the testnet settlement drill, run by the npx line in test/drills/README.md like the other drill unit files; folding it into test:unit is the same deliberate decision.'
+    },
+    {
+        file: 'test/drills/unit/testnet_settle_match_wait.test.js',
+        why: 'Hermetic cover for the testnet settlement drill, run by the npx line in test/drills/README.md like the other drill unit files; folding it into test:unit is the same deliberate decision.'
+    },
+    {
+        file: 'test/drills/unit/testnet_settle_order_leg.test.js',
+        why: 'Hermetic cover for the testnet settlement drill, run by the npx line in test/drills/README.md like the other drill unit files; folding it into test:unit is the same deliberate decision.'
+    },
+    {
+        file: 'test/drills/unit/testnet_settle_settlement_wait.test.js',
+        why: 'Hermetic cover for the testnet settlement drill, run by the npx line in test/drills/README.md like the other drill unit files; folding it into test:unit is the same deliberate decision.'
+    },
+    {
+        file: 'test/drills/unit/testnet_settle_topology.test.js',
+        why: 'Hermetic cover for the testnet settlement drill, run by the npx line in test/drills/README.md like the other drill unit files; folding it into test:unit is the same deliberate decision.'
     },
     {
         file: 'test/sdk/xcallStakeValidators.js',

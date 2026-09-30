@@ -49,6 +49,7 @@ const {
     copyPolicy,
     appliedLedger,
     policyLines,
+    policyTransferMatches,
     needsFederation,
     bridgeRailSuite,
 } = require('./support');
@@ -58,7 +59,7 @@ const GROUP = 'policy AT4: falsification and the seq gap';
 // A genuine finalized row, the template every forgery copies its snapshot_block, view and
 // chain id from so the only defect in each is the one named.
 function template() {
-    const row = state.policy.main.seq2;
+    const row = state.policy.main.seq2Row;
     assert.ok(row, 'AT4 forges against a snapshot the federation really signed, so AT2 must have run');
     return row;
 }
@@ -132,9 +133,12 @@ bridgeRailSuite(GROUP, function () {
         assert.strictEqual(G.optIn.status, 'valid', 'ISSUE|7 of the gap token graded ' + G.optIn.status);
         const lock = await btcAction(G.issuer, lockWireV3(G.tick, 'DOGE', G.dest.address, 1, 'policy AT4 gap'), 'xbridges');
         assert.strictEqual(lock.status, 'valid', 'the gap token lock graded ' + lock.status);
-        await settleLeg('the policy AT4 gap lock', (r) => String(r.dest_address) === G.dest.address && String(r.tick) === G.tick, 'DOGE');
+        await settleLeg('the policy AT4 gap lock', (r) => policyTransferMatches(r, {
+            srcChain: 'BTC', srcActionIndex: lock.actionIndex, destChain: 'DOGE',
+            destAddress: G.dest.address, tick: G.tick,
+        }), 'DOGE');
         G.seq1 = await waitForFinalizedSeq(G.tick, 1);
-        await waitForAppliedSeq(G.tick, 1);
+        G.applied1 = await waitForAppliedSeq(G.tick, 1, { snapshotId: G.seq1.snapshot_id });
     });
 });
 
@@ -144,6 +148,7 @@ bridgeRailSuite(GROUP, function () {
         if (needsFederation(this, 'policy AT4 seq gap')) return;
         const G = state.policy.gap;
         assert.ok(G.seq1, 'the seq gap setup must have run');
+        assert.ok(G.applied1, 'the seq gap setup must have run and applied seq 1 on DOGE');
         const row = HUB.signRecord(HUB.buildPolicyRow({
             snapshotBlock: Number(G.seq1.snapshot_block), originChain: 'BTC', tick: G.tick, policySeq: 3,
             originBlock: Number(G.seq1.origin_block), effectiveTime: Number(G.seq1.effective_time), network: String(G.seq1.network),
@@ -151,11 +156,11 @@ bridgeRailSuite(GROUP, function () {
         }), venueSigners());
         await state.venue.dogeVenue.injectMirrorRow(row, { table: 'policy_snapshots', key: ['snapshot_id'],
             hubs: state.venue.hubs.map((h) => h.index) });
-        const applied = await waitForAppliedSeq(G.tick, 3);
+        const applied = await waitForAppliedSeq(G.tick, 3, { snapshotId: row.snapshot_id });
         const copyAt3 = await copyPolicy(G.tick);
         const lines = policyLines(row.snapshot_id);
         const seq4 = await waitForFinalizedSeq(G.tick, 4);
-        await waitForAppliedSeq(G.tick, 4);
+        await waitForAppliedSeq(G.tick, 4, { snapshotId: seq4.snapshot_id });
         const copyAt4 = await copyPolicy(G.tick);
         state.evidence.at4_seqGap = { snapshotId: row.snapshot_id, applied, copyAt3, lines, seq4: seq4 && seq4.snapshot_id,
             copyAt4, ledger: await appliedLedger(G.tick) };

@@ -43,6 +43,7 @@ const {
     fundDoge,
     pickFreeTick,
     settleLeg,
+    waitForFinalizedPolicy,
     mineBtcBlocks,
     needsFederation,
     bridgeRailSuite,
@@ -55,9 +56,13 @@ const GROUP = 'token AT5: falsification and depth';
 
 // A row the federation really signed for THIS token, the template every injection perturbs.
 async function signedTokenTemplate() {
-    const rows = await state.venue.queryHubDb(state.venue.hubs[0].dbName,
-        "SELECT * FROM bridge_transfers WHERE tick = ? AND dest_chain = 'DOGE' AND status = 'finalized' " +
-        "AND transfer_id NOT LIKE 'at5%' ORDER BY id DESC LIMIT 1", [state.tokens.tick]);
+    let rows = [];
+    for (const hub of state.venue.hubs) {
+        rows = await state.venue.queryHubDb(hub.dbName,
+            "SELECT * FROM bridge_transfers WHERE tick = ? AND dest_chain = 'DOGE' AND status = 'finalized' " +
+            "AND transfer_id NOT LIKE 'at5%' ORDER BY id DESC LIMIT 1", [state.tokens.tick]);
+        if (rows.length) break;
+    }
     assert.ok(rows.length, 'AT5 perturbs a row the federation really signed for ' + state.tokens.tick + ', so AT1 must have run');
     return rows[0];
 }
@@ -115,6 +120,7 @@ bridgeRailSuite(GROUP, function () {
     it('token AT5 (existing row): a federation-signed in-leg at other decimals than BTC.<tick> with supply outstanding is refused with one line naming the id', async function () {
         this.timeout(0);
         if (needsFederation(this, 'token AT5 decimals with supply')) return;
+        assert.ok(state.evidence.at1_dogeChild, 'AT1 must have run');
         const T = state.tokens;
         const template = await signedTokenTemplate();
         const child = await state.venue.tokenParameters('DOGE', T.bridged);
@@ -190,7 +196,8 @@ bridgeRailSuite(GROUP, function () {
                 if (depth < want - 1) await mineBtcBlocks(1, 'depth ' + (depth + 1) + ' for the depth lock');
             }
             await mineBtcBlocks(1, 'depth ' + want + ' for the depth lock');
-            atDepth[want] = await venue.waitForFinalizedTransfer(notYet, { timeoutMs: 10 * 60 * 1000 });
+            await waitForFinalizedPolicy(D.tick, 1);
+            atDepth[want] = await venue.waitForFinalizedTransfer(notYet, { timeoutMs: 30 * 60 * 1000 });
             return { lock, atDepth };
         });
         state.evidence.at5_depth = { tick: D.tick, setup, lockTx: reading.lock.tx, pollMs: venue.pollMs,

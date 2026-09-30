@@ -163,10 +163,29 @@ class UtxoTracker {
         while (Date.now() < deadline){
             const status = await this.getSyncStatus()
             last = status
-            if (status && status.synced && status.mempool_ready !== false) return status
+            if (this.isServeReady(status)) return status
             await this.sleep(pollMs)
         }
         return last
+    }
+
+    // Test a sync status against the release condition waitForSync polls for.
+    isServeReady(status){
+        return !!(status && status.synced && status.mempool_ready !== false)
+    }
+
+    // Fail-loud form of waitForSync for callers that are a barrier: throw, naming
+    // the reason, when the tracker never became serve-ready. waitForSync stays
+    // non-throwing for callers that want the status back as data.
+    async requireSync(timeMax = 60000, pollMs = 500, context = ''){
+        const status = await this.waitForSync(timeMax, pollMs)
+        if (this.isServeReady(status)) return status
+        // A null status means get_sync_status never answered at all.
+        const why = status
+            ? 'synced=' + status.synced + ' mempool_ready=' + status.mempool_ready + ' ' + JSON.stringify(status)
+            : 'no status (tracker unreachable)'
+        throw new Error('utxo-tracker not serve-ready after ' + timeMax + 'ms' +
+                        (context ? ' (' + context + ')' : '') + ': ' + why)
     }
 
     async waitForUtxos(address, timeMax = 60000){

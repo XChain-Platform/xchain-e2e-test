@@ -56,6 +56,7 @@ const phase = perfCollector
     : (name, fn) => fn()
 
 const GAS_TICK = "XCHAIN"
+const BOOTSTRAP_ISSUE_WAIT_MS = 240000
 
 global.COIN = process.env.COIN
 global.NETWORK = process.env.NETWORK
@@ -372,7 +373,8 @@ exports.mochaHooks = {
                 // mintStartBlock unset => 0). MAX_MINT is held high here so the e2e suite
                 // (mints 100-5000 gas per call via gasHelper) is not throttled; the real testnet
                 // bootstrap can impose a tighter per-mint cap separately.
-                await issueHelper.sendIssueV0(
+                await issueHelper.sendIssueV0Waiting(
+                    BOOTSTRAP_ISSUE_WAIT_MS,
                     gasAddressInfo,
                     GAS_TICK,
                     100000000,   // MAX_SUPPLY
@@ -491,7 +493,7 @@ exports.mochaHooks = {
                     // unset, and a ReferenceError here would replace whatever
                     // real failure the run is trying to report.
                     mine:        async (n) => { await global.regtestMinerConnector.generateBlocks(n) },
-                    waitForSync: async ()  => { await global.utxoTrackerConnector.waitForSync() }
+                    requireSync: async ()  => { await global.utxoTrackerConnector.requireSync() }
                 })
             } catch (err) {
                 teardownError = err

@@ -229,9 +229,8 @@ module.exports = {
  * environment, on the reasoning that a funded wallet on another chain is not a
  * test's to invent. Every part of that fell to measurement:
  *
- *   - FUNDING ON REGTEST IS A BLOCK, NOT MONEY. `getNewFundedAddress` on the DOGE
- *     rail funds an address the same way every other drill funds one; there is
- *     nothing to be granted.
+ *   - FUNDING ON REGTEST IS A BLOCK, NOT MONEY: the publisher pays native fees
+ *     only, so no bridged gas is seeded.
  *   - `HUB_SIGNER_MODULE` IS A PATH, and this venue spawns hubs as processes with
  *     an environment this file constructs, not as containers with a mounted
  *     operator directory. The module it points at is the one the hub repo SHIPS as
@@ -264,7 +263,8 @@ async function stageDogeSigner (label, rail) {
         // a retry re-funds one publisher rather than minting a second wallet.
         const addr = await withWedgeClear('funding the batch publisher on the other rail',
             () => cryptoHelper.getNewFundedAddress(
-                label + '-batch-publisher', COIN, NETWORK, null, 'legacy', 0, PUBLISHER_FUND_DOGE))
+                label + '-batch-publisher', COIN, NETWORK, null, 'legacy', 0,
+                PUBLISHER_FUND_DOGE, false))
         // The remaining outputs, each its own transaction from the miner's wallet
         // (see PUBLISHER_FUND_OUTPUTS). Idempotency is not needed here: a retry
         // that re-funds simply leaves the publisher richer.

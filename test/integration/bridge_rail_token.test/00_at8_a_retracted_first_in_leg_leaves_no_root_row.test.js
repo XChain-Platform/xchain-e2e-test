@@ -33,6 +33,8 @@ const {
     rowsLike,
     pickFreeTick,
     settleLeg,
+    waitForFinalizedPolicy,
+    mineBtcBlocks,
     reorgBtcFrom,
     needsFederation,
     bridgeRailSuite,
@@ -60,13 +62,9 @@ async function lockFirstLeg() {
     R.rootBefore = (await rowsLike('DOGE', 'BTC')).map((r) => r.tick);
     const lock = await btcAction(R.issuer, lockWireV3(R.tick, 'DOGE', R.dest.address, 1, 'AT8 retraction'), 'xbridges');
     assert.strictEqual(lock.status, 'valid', 'the v3 lock graded ' + lock.status);
-    const row = await state.venue.waitForFinalizedTransfer(
-        (r) => String(r.dest_address) === R.dest.address && String(r.tick) === R.tick);
-    assert.ok(row, 'the retraction leg\'s lock never finalized, so there is nothing to retract.\n' +
-        state.venue.hubTails(30));
-    state.evidence.at8_retraction = { tick: R.tick, issue, optIn, lock, transferId: row.transfer_id,
-        snapshotBlock: String(row.snapshot_block), destAddress: R.dest.address };
-    return { lock, row };
+    state.evidence.at8_retraction = { tick: R.tick, issue, optIn, lock,
+        destAddress: R.dest.address };
+    return lock;
 }
 
 // The orphan and every reading that depends on the lock being off the chain, under the
@@ -93,12 +91,24 @@ bridgeRailSuite(GROUP, function () {
         if (needsFederation(this, 'token AT8 retraction')) return;
         assert.ok(state.baseline, 'the arming case must have run');
         const R = state.tokens.reorg;
-        const { lock, row } = await lockFirstLeg();
+        const lock = await lockFirstLeg();
         // Mining stays paused through every read: the first block mined afterwards
         // confirms the lock again and hands the federation a legitimate leg.
-        const reading = await withMiningPaused(regtestMinerConnector, () => orphanAndRead(lock, row));
+        const result = await withMiningPaused(regtestMinerConnector, async () => {
+            await mineBtcBlocks(1, 'the retraction lock reaching bridge depth');
+            await waitForFinalizedPolicy(R.tick, 1);
+            const row = await state.venue.waitForFinalizedTransfer(
+                (r) => String(r.dest_address) === R.dest.address && String(r.tick) === R.tick,
+                { timeoutMs: 30 * 60 * 1000 });
+            assert.ok(row, 'the retraction leg\'s lock never finalized, so there is nothing to retract.\n' +
+                state.venue.hubTails(30));
+            Object.assign(state.evidence.at8_retraction, { transferId: row.transfer_id,
+                snapshotBlock: String(row.snapshot_block) });
+            return { row, reading: await orphanAndRead(lock, row) };
+        });
+        const { row, reading } = result;
         Object.assign(state.evidence.at8_retraction, { minedAt: reading.orphan.height,
-            orphanedHash: reading.orphan.hash, retracted: !!reading.retracted,
+            orphanedHash: reading.orphan.hash, retractedReading: !!reading.retracted,
             rootRowsDuringOrphan: reading.rootRows.map((r) => r.tick), childDuringOrphan: reading.childPresent });
         assert.ok(reading.retracted,
             'transfer ' + row.transfer_id + ' stayed finalized for 180s after its source lock left the BTC ' +
@@ -108,6 +118,7 @@ bridgeRailSuite(GROUP, function () {
         assert.strictEqual(reading.balance, '0', R.dest.address + ' was credited from a lock that is not on the BTC chain');
         assert.strictEqual(String(reading.hashesAfter[0].ledger_hash), String(R.hashesBefore[0].ledger_hash),
             'the DOGE ledger_hash at block ' + R.hashesBefore[0].block_index + ' moved');
+        state.evidence.at8_retraction.retracted = true;
     });
 });
 

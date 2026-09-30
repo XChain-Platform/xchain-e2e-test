@@ -92,12 +92,31 @@ jobs:
       # test/unit/ci_sibling_ref_expression.test.js, which evaluates this literal
       # expression read out of this file rather than a copy of it.
       - name: Check out xchain-hub (required at require time by the hub helper)
+        id: unit_hub_checkout
+        continue-on-error: ${{ startsWith(github.head_ref, 'release/') }}
         uses: actions/checkout@v4
         with:
           repository: XChain-Platform/xchain-hub
           ref: ${{ startsWith(github.head_ref, 'release/') && github.head_ref || ((github.base_ref == 'master' || github.ref == 'refs/heads/master') && 'master' || 'develop') }}
           ssh-key: ${{ secrets.XCHAIN_HUB_DEPLOY_KEY }}
           path: xchain-hub
+
+      - name: Fall back to xchain-hub develop when its release branch is absent
+        if: startsWith(github.head_ref, 'release/') && steps.unit_hub_checkout.outcome == 'failure'
+        env:
+          RELEASE_REF: ${{ github.head_ref }}
+        run: |
+          set +e
+          git -C xchain-hub ls-remote --exit-code --heads origin "refs/heads/$RELEASE_REF" >/dev/null
+          release_status=$?
+          set -e
+          if [ "$release_status" -eq 0 ]; then
+            echo "Release branch exists but checkout failed" >&2
+            exit 1
+          fi
+          if [ "$release_status" -ne 2 ]; then exit "$release_status"; fi
+          git -C xchain-hub fetch --no-tags --depth=1 origin +refs/heads/develop:refs/remotes/origin/develop
+          git -C xchain-hub checkout --force --detach refs/remotes/origin/develop
 
       # The seed-escrow-state gate tests resolve
       # ../../xchain-indexer/src/state_subtree_activation.js from bin/ and FAIL
@@ -113,12 +132,31 @@ jobs:
       # rather than deleted, because the next sibling added here will be bare
       # for the same good reason and will stop being safe the same way.
       - name: Check out xchain-indexer (arming-height constants read by the escrow gate tests)
+        id: unit_indexer_checkout
+        continue-on-error: ${{ startsWith(github.head_ref, 'release/') }}
         uses: actions/checkout@v4
         with:
           repository: XChain-Platform/xchain-indexer
           ref: ${{ startsWith(github.head_ref, 'release/') && github.head_ref || ((github.base_ref == 'master' || github.ref == 'refs/heads/master') && 'master' || 'develop') }}
           ssh-key: ${{ secrets.XCHAIN_INDEXER_DEPLOY_KEY }}
           path: xchain-indexer
+
+      - name: Fall back to xchain-indexer develop when its release branch is absent
+        if: startsWith(github.head_ref, 'release/') && steps.unit_indexer_checkout.outcome == 'failure'
+        env:
+          RELEASE_REF: ${{ github.head_ref }}
+        run: |
+          set +e
+          git -C xchain-indexer ls-remote --exit-code --heads origin "refs/heads/$RELEASE_REF" >/dev/null
+          release_status=$?
+          set -e
+          if [ "$release_status" -eq 0 ]; then
+            echo "Release branch exists but checkout failed" >&2
+            exit 1
+          fi
+          if [ "$release_status" -ne 2 ]; then exit "$release_status"; fi
+          git -C xchain-indexer fetch --no-tags --depth=1 origin +refs/heads/develop:refs/remotes/origin/develop
+          git -C xchain-indexer checkout --force --detach refs/remotes/origin/develop
 
       # test/sdk/sdkHelper.js resolves the SDK by trying `xchain-sdk` first and
       # then two paths BESIDE this repo, and throws its own error when none
@@ -129,16 +167,61 @@ jobs:
       # No deploy key: this repository is public now, unlike when the two keys
       # above were added, so a plain checkout resolves it.
       - name: Check out xchain-sdk (resolved beside this repo by the sdk helper)
+        id: unit_sdk_checkout
+        continue-on-error: ${{ startsWith(github.head_ref, 'release/') }}
         uses: actions/checkout@v4
         with:
           repository: XChain-Platform/xchain-sdk
           ref: ${{ startsWith(github.head_ref, 'release/') && github.head_ref || ((github.base_ref == 'master' || github.ref == 'refs/heads/master') && 'master' || 'develop') }}
           path: xchain-sdk
 
+      - name: Fall back to xchain-sdk develop when its release branch is absent
+        if: startsWith(github.head_ref, 'release/') && steps.unit_sdk_checkout.outcome == 'failure'
+        env:
+          RELEASE_REF: ${{ github.head_ref }}
+        run: |
+          set +e
+          git -C xchain-sdk ls-remote --exit-code --heads origin "refs/heads/$RELEASE_REF" >/dev/null
+          release_status=$?
+          set -e
+          if [ "$release_status" -eq 0 ]; then
+            echo "Release branch exists but checkout failed" >&2
+            exit 1
+          fi
+          if [ "$release_status" -ne 2 ]; then exit "$release_status"; fi
+          git -C xchain-sdk fetch --no-tags --depth=1 origin +refs/heads/develop:refs/remotes/origin/develop
+          git -C xchain-sdk checkout --force --detach refs/remotes/origin/develop
+
+      - name: Check out xchain-documentation
+        id: unit_documentation_checkout
+        continue-on-error: ${{ startsWith(github.head_ref, 'release/') }}
+        uses: actions/checkout@v4
+        with:
+          repository: XChain-Platform/xchain-documentation
+          ref: ${{ startsWith(github.head_ref, 'release/') && github.head_ref || ((github.base_ref == 'master' || github.ref == 'refs/heads/master') && 'master' || 'develop') }}
+          path: xchain-documentation
+
+      - name: Fall back to xchain-documentation develop when its release branch is absent
+        if: startsWith(github.head_ref, 'release/') && steps.unit_documentation_checkout.outcome == 'failure'
+        env:
+          RELEASE_REF: ${{ github.head_ref }}
+        run: |
+          set +e
+          git -C xchain-documentation ls-remote --exit-code --heads origin "refs/heads/$RELEASE_REF" >/dev/null
+          release_status=$?
+          set -e
+          if [ "$release_status" -eq 0 ]; then
+            echo "Release branch exists but checkout failed" >&2
+            exit 1
+          fi
+          if [ "$release_status" -ne 2 ]; then exit "$release_status"; fi
+          git -C xchain-documentation fetch --no-tags --depth=1 origin +refs/heads/develop:refs/remotes/origin/develop
+          git -C xchain-documentation checkout --force --detach refs/remotes/origin/develop
+
       - name: Use Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "22.22.3"
 
       # Every suite in this repo requires exactly Node 22; 18 and 24 fail, and
       # some of those failures are silent skips rather than errors.
@@ -205,6 +288,8 @@ jobs:
           path: xchain-e2e-test
 
       - name: Check out xchain-hub (broadcaster side of the mirror)
+        id: live_hub_checkout
+        continue-on-error: ${{ startsWith(github.head_ref, 'release/') }}
         uses: actions/checkout@v4
         with:
           repository: XChain-Platform/xchain-hub
@@ -212,7 +297,26 @@ jobs:
           ssh-key: ${{ secrets.XCHAIN_HUB_DEPLOY_KEY }}
           path: xchain-hub
 
+      - name: Fall back to xchain-hub develop when its release branch is absent
+        if: startsWith(github.head_ref, 'release/') && steps.live_hub_checkout.outcome == 'failure'
+        env:
+          RELEASE_REF: ${{ github.head_ref }}
+        run: |
+          set +e
+          git -C xchain-hub ls-remote --exit-code --heads origin "refs/heads/$RELEASE_REF" >/dev/null
+          release_status=$?
+          set -e
+          if [ "$release_status" -eq 0 ]; then
+            echo "Release branch exists but checkout failed" >&2
+            exit 1
+          fi
+          if [ "$release_status" -ne 2 ]; then exit "$release_status"; fi
+          git -C xchain-hub fetch --no-tags --depth=1 origin +refs/heads/develop:refs/remotes/origin/develop
+          git -C xchain-hub checkout --force --detach refs/remotes/origin/develop
+
       - name: Check out xchain-indexer (sync side of the mirror)
+        id: live_indexer_checkout
+        continue-on-error: ${{ startsWith(github.head_ref, 'release/') }}
         uses: actions/checkout@v4
         with:
           repository: XChain-Platform/xchain-indexer
@@ -220,10 +324,27 @@ jobs:
           ssh-key: ${{ secrets.XCHAIN_INDEXER_DEPLOY_KEY }}
           path: xchain-indexer
 
+      - name: Fall back to xchain-indexer develop when its release branch is absent
+        if: startsWith(github.head_ref, 'release/') && steps.live_indexer_checkout.outcome == 'failure'
+        env:
+          RELEASE_REF: ${{ github.head_ref }}
+        run: |
+          set +e
+          git -C xchain-indexer ls-remote --exit-code --heads origin "refs/heads/$RELEASE_REF" >/dev/null
+          release_status=$?
+          set -e
+          if [ "$release_status" -eq 0 ]; then
+            echo "Release branch exists but checkout failed" >&2
+            exit 1
+          fi
+          if [ "$release_status" -ne 2 ]; then exit "$release_status"; fi
+          git -C xchain-indexer fetch --no-tags --depth=1 origin +refs/heads/develop:refs/remotes/origin/develop
+          git -C xchain-indexer checkout --force --detach refs/remotes/origin/develop
+
       - name: Use Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "22.22.3"
 
       # All three, not just the suite's own repo. See the `ws` note above.
       - name: Install dependencies (all three trees)
@@ -256,6 +377,8 @@ jobs:
           path: xchain-e2e-test
 
       - name: Check out the canonical coin registry (xchain-hub)
+        id: drift_hub_checkout
+        continue-on-error: ${{ startsWith(github.head_ref, 'release/') }}
         uses: actions/checkout@v4
         with:
           repository: XChain-Platform/xchain-hub
@@ -263,10 +386,27 @@ jobs:
           ssh-key: ${{ secrets.XCHAIN_HUB_DEPLOY_KEY }}
           path: xchain-hub
 
+      - name: Fall back to xchain-hub develop when its release branch is absent
+        if: startsWith(github.head_ref, 'release/') && steps.drift_hub_checkout.outcome == 'failure'
+        env:
+          RELEASE_REF: ${{ github.head_ref }}
+        run: |
+          set +e
+          git -C xchain-hub ls-remote --exit-code --heads origin "refs/heads/$RELEASE_REF" >/dev/null
+          release_status=$?
+          set -e
+          if [ "$release_status" -eq 0 ]; then
+            echo "Release branch exists but checkout failed" >&2
+            exit 1
+          fi
+          if [ "$release_status" -ne 2 ]; then exit "$release_status"; fi
+          git -C xchain-hub fetch --no-tags --depth=1 origin +refs/heads/develop:refs/remotes/origin/develop
+          git -C xchain-hub checkout --force --detach refs/remotes/origin/develop
+
       - name: Use Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "22.22.3"
 
       - name: Coin-registry byte-identity vs canonical
         run: xchain-hub/bin/sync-coins.sh --check --only xchain-e2e-test

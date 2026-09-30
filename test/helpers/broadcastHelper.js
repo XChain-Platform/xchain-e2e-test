@@ -27,7 +27,7 @@ module.exports = {
         return { txHash, broadcast: broadcastRow }
     },
 
-    async sendBroadcastV1(addressInfo, message, value, fee, memo){
+    async sendBroadcastV1(addressInfo, message, value, fee, memo, expectedStatus = "valid"){
         let address = addressInfo["address"]
         let broadcastMessage = "BROADCAST|1|"+message+"|"+value+"|"+fee+"|"+memo
 
@@ -36,8 +36,8 @@ module.exports = {
 
         let broadcastRow = requireRow(await indexerDatabase.waitForBroadcast({
             source: address, txHash: txHash, message: message,
-            value: value, fee: fee, memo: memo, status: "valid"
-        }), "sendBroadcastV1: BROADCAST from " + address + " (tx " + txHash + ") at status=valid")
+            value: value, fee: fee, memo: memo, status: expectedStatus
+        }), "sendBroadcastV1: BROADCAST from " + address + " (tx " + txHash + ") at status=" + expectedStatus)
 
         return { txHash, broadcast: broadcastRow }
     },

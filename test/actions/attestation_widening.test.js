@@ -151,7 +151,7 @@ async function setupAttestationWidening(testContext) {
 
     for (let i = 0; i < OWNED; i++) await stakeOwnedValidator()
     await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
-    await utxoTrackerConnector.waitForSync()
+    await utxoTrackerConnector.requireSync()
 
     const deploy = await vmHelper.sendDeployV0(operatorAddr, CONTRACT_CODE, 500000)
     assert.strictEqual(deploy.contract.status, 'valid', 'deploy status: ' + deploy.contract.status)
@@ -193,7 +193,7 @@ async function reachPhaseA(requestBlock) {
     const phaseATarget = requestBlock + CONFIRMATIONS + 1
     if (tip < phaseATarget) {
         await regtestMinerConnector.generateBlocks(phaseATarget - tip)
-        await utxoTrackerConnector.waitForSync()
+        await utxoTrackerConnector.requireSync()
     }
     return nodeConnector.getBlockCount()
 }
@@ -216,7 +216,7 @@ async function reachPhaseB(requestBlock, deadlineBlock) {
     let tip = await nodeConnector.getBlockCount()
     if (tip < phaseBTarget) {
         await regtestMinerConnector.generateBlocks(phaseBTarget - tip)
-        await utxoTrackerConnector.waitForSync()
+        await utxoTrackerConnector.requireSync()
     }
     return nodeConnector.getBlockCount()
 }

@@ -13,8 +13,8 @@
  **********************************************************************
  *
  * Policy AT6 (sleep): the issuer sleeps the token on BTC; DOGE applies a snapshot with
- * sleeping 1 and transfers of the copy are `invalid: TICK (sleeping)`; a v4 burn still applies
- * (token spec D44); the issuer wakes it and the copy wakes within one cycle.
+ * sleeping 1 and transfers of the copy are `invalid: TICK (sleeping)`; a v4 burn is refused while
+ * the tick sleeps (operator ruling 2026-09-29); the issuer wakes it and the copy wakes within one cycle.
  *
  * THE WAKE is a SLEEP format 1 whose RESUME_BLOCK is the next BTC block: the sleep read treats
  * a row as asleep only at -1 or a future block (policy spec section 4, D8), so the origin reads
@@ -26,15 +26,18 @@
 
 const { sleepTickWire } = require('../../helpers/bridgeRailVenue');
 const {
+    newestFinalizedSnapshot,
+    nextFinalizedSnapshot,
+    policyFinalizationBudgetMs,
+} = require('../../helpers/rail_preflight/policy_at7_at8');
+const {
     assert,
     burnWireV4,
     state,
     btcAction,
     dogeAction,
     fundBtc,
-    settleLeg,
     hubPolicyRows,
-    waitForFinalizedSeq,
     waitForAppliedSeq,
     copyPolicy,
     sendCopy,
@@ -43,11 +46,19 @@ const {
 } = require('./support');
 
 const GROUP = 'policy AT6: the origin sleep reaches the copy';
+const WAKE_SENDS = 3;
+const STALE_RESUME_BLOCK = 'invalid: RESUME_BLOCK (block_index)';
 
-// The next seq the federation must sign for `tick`: one past its newest finalized row.
-async function nextSeq(tick) {
-    const rows = (await hubPolicyRows(tick)).filter((r) => String(r.status) === 'finalized');
-    return rows.length ? Number(rows[rows.length - 1].policy_seq) + 1 : 1;
+async function sendWakeAtFreshTip(M) {
+    const attempts = [];
+    let wake = null;
+    for (let send = 0; send < WAKE_SENDS; send++) {
+        const resumeBlock = Number(await nodeConnector.getBlockCount()) + 1;
+        wake = await btcAction(M.issuer, sleepTickWire(M.tick, resumeBlock, 'policy AT6 wake'), 'sleeps');
+        attempts.push({ tx: wake.tx, resumeBlock, status: wake.status });
+        if (wake.status !== STALE_RESUME_BLOCK) break;
+    }
+    return { wake, attempts };
 }
 
 bridgeRailSuite(GROUP, function () {
@@ -56,10 +67,17 @@ bridgeRailSuite(GROUP, function () {
         if (needsFederation(this, 'policy AT6 sleep')) return;
         const M = state.policy.main;
         assert.ok(M.seq2, 'AT2 must have run');
-        const seq = await nextSeq(M.tick);
+        const previous = newestFinalizedSnapshot(await hubPolicyRows(M.tick), M.tick);
+        assert.ok(previous, 'the sleep needs an existing finalized snapshot for ' + M.tick);
         const sleep = await btcAction(M.issuer, sleepTickWire(M.tick, -1, 'policy AT6 sleep'), 'sleeps');
         assert.strictEqual(sleep.status, 'valid', 'the issuer SLEEP of ' + M.tick + ' graded ' + sleep.status);
-        M.sleepSeq = await waitForFinalizedSeq(M.tick, seq);
+        await state.venue.waitUntil('a later finalized policy_snapshots row for ' + M.tick, async () => {
+            M.sleepSeq = nextFinalizedSnapshot(await hubPolicyRows(M.tick), M.tick, previous);
+            return !!M.sleepSeq;
+        }, {
+            timeoutMs: policyFinalizationBudgetMs(state.venue.pollMs || 15000),
+            everyMs: 5000,
+        });
         assert.strictEqual(Number(M.sleepSeq.sleeping), 1, 'seq ' + M.sleepSeq.policy_seq + ' carries sleeping ' + M.sleepSeq.sleeping);
         await waitForAppliedSeq(M.tick, Number(M.sleepSeq.policy_seq));
         const copy = await copyPolicy(M.tick);
@@ -71,20 +89,21 @@ bridgeRailSuite(GROUP, function () {
 });
 
 bridgeRailSuite(GROUP, function () {
-    it('policy AT6 (burn): a v4 burn of the sleeping copy still applies and the BTC side releases it', async function () {
+    it('policy AT6 (burn): a v4 burn of the sleeping copy is refused while the tick sleeps and moves no balance', async function () {
         this.timeout(0);
         if (needsFederation(this, 'policy AT6 burn')) return;
         const M = state.policy.main;
         assert.ok(M.sleepSeq, 'the sleep half must have run');
+        assert.ok(state.evidence.at6_sleep && state.evidence.at6_sleep.copySleeping === true, 'the sleep half must have run and slept the copy');
         M.btcReceiver = await fundBtc('POLICY.AT6.RECEIVER');
+        const before = await state.venue.addressBalance('DOGE', M.dest.address, 'BTC.' + M.tick);
         const burn = await dogeAction(M.dest, burnWireV4('BTC.' + M.tick, M.btcReceiver.address, 1, 'policy AT6 burn'), 'xbridges');
-        state.evidence.at6_burn = { burn };
-        assert.strictEqual(burn.status, 'valid', 'a v4 burn of the sleeping copy graded ' + burn.status);
-        const leg = await settleLeg('the policy AT6 burn',
-            (r) => String(r.src_chain) === 'DOGE' && String(r.dest_address) === M.btcReceiver.address && String(r.tick) === M.tick, 'BTC');
-        state.evidence.at6_burn.transfer = leg.transfer;
+        const after = await state.venue.addressBalance('DOGE', M.dest.address, 'BTC.' + M.tick);
         const received = await state.venue.addressBalance('BTC', M.btcReceiver.address, M.tick);
-        assert.strictEqual(Number(received), 1, M.btcReceiver.address + ' holds ' + received + ' ' + M.tick + ' after the burn released');
+        state.evidence.at6_burn = { burn, before, after, received };
+        assert.strictEqual(burn.status, 'invalid: TICK (sleeping)', 'a v4 burn of the sleeping copy graded ' + burn.status);
+        assert.strictEqual(Number(after), Number(before), M.dest.address + ' holds ' + after + ' BTC.' + M.tick + ' after the refused burn, was ' + before);
+        assert.strictEqual(Number(received), 0, M.btcReceiver.address + ' holds ' + received + ' ' + M.tick + ' after a refused burn');
     });
 });
 
@@ -94,16 +113,25 @@ bridgeRailSuite(GROUP, function () {
         if (needsFederation(this, 'policy AT6 wake')) return;
         const M = state.policy.main;
         assert.ok(M.sleepSeq, 'the sleep half must have run');
-        const seq = await nextSeq(M.tick);
-        const wakeAt = Number(await nodeConnector.getBlockCount()) + 1;
-        const wake = await btcAction(M.issuer, sleepTickWire(M.tick, wakeAt, 'policy AT6 wake'), 'sleeps');
+        assert.ok(state.evidence.at6_sleep && state.evidence.at6_sleep.copySleeping === true, 'the sleep half must have run and slept the copy');
+        const previous = newestFinalizedSnapshot(await hubPolicyRows(M.tick), M.tick);
+        assert.ok(previous, 'the wake needs an existing finalized snapshot for ' + M.tick);
+        const { wake, attempts } = await sendWakeAtFreshTip(M);
+        state.evidence.at6_wake = { wake, attempts };
         assert.strictEqual(wake.status, 'valid', 'the issuer wake of ' + M.tick + ' graded ' + wake.status);
-        const woke = await waitForFinalizedSeq(M.tick, seq);
+        let woke = null;
+        await state.venue.waitUntil('a later finalized policy_snapshots row for ' + M.tick, async () => {
+            woke = nextFinalizedSnapshot(await hubPolicyRows(M.tick), M.tick, previous);
+            return !!woke;
+        }, {
+            timeoutMs: policyFinalizationBudgetMs(state.venue.pollMs || 15000),
+            everyMs: 5000,
+        });
         assert.strictEqual(Number(woke.sleeping), 0, 'seq ' + woke.policy_seq + ' carries sleeping ' + woke.sleeping);
         await waitForAppliedSeq(M.tick, Number(woke.policy_seq));
         const copy = await copyPolicy(M.tick);
         const send = await sendCopy(M.dest, M.tick, 1, M.other.address, 'policy AT6 awake');
-        state.evidence.at6_wake = { wake, wakeAt, seq: String(woke.snapshot_id), copySleeping: copy.sleeping, send };
+        Object.assign(state.evidence.at6_wake, { seq: String(woke.snapshot_id), copySleeping: copy.sleeping, send });
         assert.strictEqual(copy.sleeping, false, 'the copy still reads sleeping after the wake snapshot applied');
         assert.strictEqual(send.status, 'valid', 'a SEND of the woken copy graded ' + send.status);
     });

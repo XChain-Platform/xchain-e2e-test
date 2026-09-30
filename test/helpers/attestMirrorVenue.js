@@ -127,9 +127,26 @@ const VENUE_REDUNDANCY = 3;
 // HUB_DB_NAME.
 const CHAIN_CLONE_SKIP_TABLES = new Set(['price_snapshots']);
 
+// A chain database is reused only when a seed or venue copy finished writing it.
+// The reuse check reads blocks, actions and one ledger hash, and a seed cut off
+// after those tables passed it with other tables short: measured 2026-09-29,
+// a venue database interrupted mid-seed held 59 of the standing node's
+// 71 unstakes, and every indexer built from it halted at the next block with
+// "escrowJournal: locked total ... nets negative". The marker is dropped before
+// the first table is copied and written after the last one.
+const CHAIN_SEED_MARKER = 'venue_seed_complete';
+
 // Rows per page when seeding. Big enough that the 283k-row state tree copies in
 // tens of pages, small enough that no single batch holds the table in memory.
 const CHAIN_CLONE_PAGE = 10000;
+
+// Record that every table of a venue chain database was written, and from where.
+async function writeSeedMarker(conn, source) {
+    await conn.query('CREATE TABLE `' + CHAIN_SEED_MARKER + '` ' +
+        '(source VARCHAR(128) NOT NULL, completed_at DATETIME NOT NULL)');
+    await conn.query('INSERT INTO `' + CHAIN_SEED_MARKER + '` (source, completed_at) VALUES (?, UTC_TIMESTAMP())',
+        [String(source)]);
+}
 
 const DEFAULT_FORWARD_S = 5;
 
@@ -287,7 +304,30 @@ const DEFAULT_GRACE_S = 0;
 
 // How long a child has to boot far enough to answer. The indexer's
 // verifyTables/runMigrations against an empty database is where most of it goes.
-const BOOT_WAIT_MS = 180_000;
+// Sized for a venue whose database shares a spinning disk with CI gates: there a
+// hub's table bootstrap took 163 s and then over 180 s, against 18 s on an idle
+// disk. A child that exits ends the wait at once (waitForChildBoot), so the long
+// bound costs time only while the child is alive and still booting.
+const BOOT_WAIT_MS = 600_000;
+
+/**
+ * Poll a spawned child's readiness probe until it answers, the child exits, or
+ * the deadline passes. An exit ends the wait immediately instead of polling a
+ * dead process out to the deadline.
+ *
+ * @param proc   the ChildProcess (its exitCode is read on every poll)
+ * @param probe  () => {ok:boolean, ...} | Promise of same
+ * @param opts   {timeoutMs, intervalMs, now} passed to waitFor
+ * @returns {ok, waitedMs, last, dead}
+ */
+async function waitForChildBoot(proc, probe, opts) {
+    const res = await waitFor(async () => {
+        if (proc.exitCode !== null) return { ok: true, dead: true };
+        return probe();
+    }, Object.assign({ timeoutMs: BOOT_WAIT_MS }, opts));
+    const dead = Boolean(res.last && res.last.dead);
+    return { ok: res.ok && !dead, waitedMs: res.waitedMs, last: res.last, dead: dead };
+}
 
 // The indexer JSON-RPC ports as the stack PUBLISHES them, which are not the ports the
 // hub's config oracle stores (those are container-internal, 3004 on every chain). Same
@@ -2441,13 +2481,13 @@ class AttestMirrorVenue {
         hub.proc = this._spawn('hub' + i, path.join(this.hubRepoRoot(i), 'xchain-hub', 'src', 'api.js'), [], env);
 
         const connector = new XChainHubConnector(['http://127.0.0.1:' + hub.apiPort]);
-        const up = await waitFor(async () => {
-            if (hub.proc.exitCode !== null) return { ok: false, dead: true };
+        const up = await waitForChildBoot(hub.proc, async () => {
             try { return { ok: await connector.ping() }; } catch (_) { return { ok: false }; }
-        }, { timeoutMs: BOOT_WAIT_MS, intervalMs: 500 });
+        }, { intervalMs: 500 });
         if (!up.ok) {
             throw new Error('attestMirrorVenue[' + this.label + ']: hub ' + i + ' did not answer on 127.0.0.1:' +
-                hub.apiPort + ' within ' + up.waitedMs + 'ms.\n' + this._tail('hub' + i));
+                hub.apiPort + ' within ' + up.waitedMs + 'ms' + (up.dead ? ' (the process exited)' : '') +
+                '.\n' + this._tail('hub' + i));
         }
         hub.connector = connector;
 
@@ -2539,7 +2579,82 @@ class AttestMirrorVenue {
                 connector: null
             });
         }
+        // Every chain database is ready before the first indexer runs, so one seed
+        // from the standing node can be copied inside the venue for the rest.
+        await this._prepareChainDbs();
         for (let i = 0; i < this.indexerCount; i++) await this._spawnIndexer(i);
+    }
+
+    /**
+     * Seed the first venue chain database from the standing node and copy it to
+     * the rest server-side, before any indexer writes to one.
+     *
+     * Measured 2026-09-29: the client row copy from the standing node took about
+     * 1400 s per indexer on a venue with a spinning-disk database and 235 to 568 s
+     * on the faster venues, paid once per indexer (five to seven per bridge drive). A copy
+     * inside the venue's own schemas is one INSERT ... SELECT per table on the
+     * server, needs no new grant (the venue account owns both schemas), and gives
+     * every indexer the same seed height. A database that already agrees with the
+     * standing node is still reused as before.
+     */
+    async _prepareChainDbs() {
+        if (this.replayChain) return;
+        let template = null;
+        for (const ix of this.indexers) {
+            await this._cloneChainDbFromStanding(ix, template);
+            ix.chainDbPrepared = true;
+            if (!template) template = ix.indexerDbName;
+        }
+    }
+
+    /**
+     * Copy a ready venue chain database into another venue chain database on the
+     * server, table by table, with the same table set the standing seed copies.
+     */
+    async _copyChainDbWithinVenue(fromName, ix) {
+        const from = ident(fromName, 'database name');
+        const conn = await this._createChainDbConnection({
+            host: this.hubDb.host, port: parseInt(this.hubDb.port, 10),
+            user: this.hubDb.user, password: this.hubDb.pass,
+            database: ident(ix.indexerDbName, 'database name'), connectTimeout: 15000,
+        });
+        const started = Date.now();
+        let tables = 0, rows = 0;
+        try {
+            await conn.query('DROP TABLE IF EXISTS `' + CHAIN_SEED_MARKER + '`');
+            // Bulk-load into empty tables; MariaDB 10.6+ builds the indexes by sort.
+            await conn.query('SET SESSION FOREIGN_KEY_CHECKS = 0');
+            await conn.query('SET SESSION UNIQUE_CHECKS = 0');
+            const names = (await conn.query('SHOW FULL TABLES FROM `' + from + '` WHERE Table_type = \'BASE TABLE\''))
+                .map((r) => Object.values(r)[0]);
+            for (const t of names) {
+                // Same exclusions as the standing seed: hub-authored tables are per-run state.
+                // The template's own marker is not copied; this copy writes its own when done.
+                if (CHAIN_CLONE_SKIP_TABLES.has(t) || t === CHAIN_SEED_MARKER) continue;
+                const table = ident(t, 'table name');
+                // SHOW CREATE keeps the source AUTO_INCREMENT, as the standing seed does.
+                const create = (await conn.query('SHOW CREATE TABLE `' + from + '`.`' + table + '`'))[0]['Create Table'];
+                await conn.query('DROP TABLE IF EXISTS `' + table + '`');
+                await conn.query(create);
+                // Generated columns are computed on insert and cannot be written.
+                const cols = (await conn.query('SHOW COLUMNS FROM `' + from + '`.`' + table + '`'))
+                    .filter((c) => !/GENERATED/i.test(String(c.Extra || ''))).map((c) => '`' + c.Field + '`');
+                tables++;
+                if (cols.length === 0) continue;
+                const list = cols.join(', ');
+                const res = await conn.query('INSERT INTO `' + table + '` (' + list + ') SELECT ' + list +
+                    ' FROM `' + from + '`.`' + table + '`');
+                rows += Number(res && res.affectedRows !== undefined ? res.affectedRows : 0);
+            }
+            await writeSeedMarker(conn, from);
+        } finally {
+            try { await conn.query('SET SESSION FOREIGN_KEY_CHECKS = 1'); } catch (e) { /* closing anyway */ }
+            try { await conn.query('SET SESSION UNIQUE_CHECKS = 1'); } catch (e) { /* closing anyway */ }
+            await conn.end().catch(() => {});
+        }
+        console.log('attestMirrorVenue[' + this.label + ']: copied indexer ' + ix.index + '\'s chain database from ' +
+                    from + ' inside the venue - ' + tables + ' table(s), ' + rows + ' row(s) in ' +
+                    Math.round((Date.now() - started) / 1000) + 's, instead of a second row copy from the standing node.');
     }
 
     /**
@@ -2574,46 +2689,213 @@ class AttestMirrorVenue {
      * database and cannot write the venue's. So this copies across two
      * connections rather than asking for a grant that would widen either.
      */
+    // Route chain connections through one seam for deterministic reuse checks.
+    // Keep production ownership in the MariaDB client.
+    _createChainDbConnection(options) {
+        return mariadb.createConnection(options);
+    }
+
     /**
      * Does this venue chain database hold the SAME LEDGER as the standing node?
      *
-     * Compared at a height BOTH have reached, by action count, because that is
-     * the quantity whose divergence broke AT1: an EXECUTE names a contract by
-     * `action_index`, so two nodes that number actions differently cannot even
-     * exchange a contract reference. Lag is not divergence - a venue node simply
-     * behind the standing node still agrees about the blocks it HAS - so the
-     * comparison is scoped to the lower of the two tips.
+     * Compare action numbering and the ledger hash at the lower tip. Lag is not
+     * divergence, but matching action counts alone do not prove equal state.
      */
     async _chainDbAgreesWithStanding(ix, srcName) {
         const db = ident(ix.indexerDbName, 'database name');
-        let mine = null, theirs = null, height = null;
-        const src = await mariadb.createConnection({
+        let mine = null, theirs = null, mineLedger = null, theirsLedger = null, height = null;
+        const src = await this._createChainDbConnection({
             host: this.hubDb.host, port: parseInt(this.hubDb.port, 10),
             user: process.env.INDEXER_DB_USER, password: process.env.INDEXER_DB_PASS,
             database: srcName, connectTimeout: 15000,
         });
         try {
+            // Compare at the lower tip so lag alone never forces a rebuild.
             const a = await this._conn.query('SELECT MAX(block_index) AS hi FROM `' + db + '`.blocks');
             const b = await src.query('SELECT MAX(block_index) AS hi FROM blocks');
             if (a[0].hi === null || b[0].hi === null) return { ok: false, mine, theirs, height };
             height = Math.min(Number(a[0].hi), Number(b[0].hi));
+            // Preserve action numbering used by cross-node contract references.
             const m = await this._conn.query(
                 'SELECT COUNT(*) AS n FROM `' + db + '`.actions WHERE block_index <= ?', [height]);
             const t = await src.query('SELECT COUNT(*) AS n FROM actions WHERE block_index <= ?', [height]);
             mine = Number(m[0].n); theirs = Number(t[0].n);
-            return { ok: mine === theirs, mine, theirs, height };
+            // Resolve each ledger hash through its transaction row.
+            // Blocks stores only the corresponding transaction id.
+            const localHash = await this._conn.query(
+                'SELECT h.hash AS ledger_hash FROM `' + db + '`.blocks b ' +
+                'LEFT JOIN `' + db + '`.index_transactions h ON (h.id = b.ledger_hash_id) ' +
+                'WHERE b.block_index = ? LIMIT 1', [height]);
+            const standingHash = await src.query(
+                'SELECT h.hash AS ledger_hash FROM blocks b ' +
+                'LEFT JOIN index_transactions h ON (h.id = b.ledger_hash_id) ' +
+                'WHERE b.block_index = ? LIMIT 1', [height]);
+            // Refuse reuse when either side has no resolvable ledger hash.
+            mineLedger = localHash.length && localHash[0].ledger_hash !== null &&
+                localHash[0].ledger_hash !== undefined
+                ? String(localHash[0].ledger_hash) : null;
+            theirsLedger = standingHash.length && standingHash[0].ledger_hash !== null &&
+                standingHash[0].ledger_hash !== undefined
+                ? String(standingHash[0].ledger_hash) : null;
+            // Require matching action numbering and matching state.
+            return { ok: mine === theirs && mineLedger !== null && mineLedger === theirsLedger,
+                mine, theirs, mineLedger, theirsLedger, height };
         } catch (e) {
-            return { ok: false, mine, theirs, height };
+            return { ok: false, mine, theirs, mineLedger, theirsLedger, height };
         } finally {
             await src.end().catch(() => {});
         }
     }
 
-    async _cloneChainDbFromStanding(ix) {
+    async _reuseChainDbIfMatching(ix, srcName) {
+        // Reuse only a database that agrees at a common height.
+        // Treat existing blocks as insufficient because old replay databases may diverge.
+        const have = await this._conn.query(
+            'SELECT COUNT(*) AS c FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?',
+            [ix.indexerDbName, 'actions']);
+        if (Number(have[0].c) === 0) return false;
+        const marked = await this._conn.query(
+            'SELECT COUNT(*) AS c FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?',
+            [ix.indexerDbName, CHAIN_SEED_MARKER]);
+        if (Number(marked[0].c) === 0) {
+            console.log('attestMirrorVenue[' + this.label + ']: indexer ' + ix.index + ' holds a chain database ' +
+                        'with no ' + CHAIN_SEED_MARKER + ' marker, so its seed never finished; it is re-seeded.');
+            return false;
+        }
+        const agrees = await this._chainDbAgreesWithStanding(ix, srcName);
+        // Reuse only when both independent agreement checks pass.
+        if (agrees.ok) {
+            console.log('attestMirrorVenue[' + this.label + ']: indexer ' + ix.index + ' already agrees with ' +
+                        srcName + ' (' + agrees.mine + ' action(s) and the same ledger hash at block ' +
+                        agrees.height + '); not re-seeding.');
+            return true;
+        }
+        if (agrees.mine !== null) {
+            const why = agrees.mine === agrees.theirs
+                ? 'matching action counts but a different ledger hash at block ' + agrees.height
+                : agrees.mine + ' action(s) at or below block ' + agrees.height +
+                    ' where the standing node holds ' + agrees.theirs;
+            console.log('attestMirrorVenue[' + this.label + ']: indexer ' + ix.index + ' has ' + why +
+                        '. That is a DIFFERENT LEDGER, not lag, so it is re-seeded from the standing node.');
+        }
+        return false;
+    }
+
+    async _seedChainDbFromStanding(ix, srcName) {
+        const src = await this._createChainDbConnection({
+            host: this.hubDb.host, port: parseInt(this.hubDb.port, 10),
+            user: process.env.INDEXER_DB_USER, password: process.env.INDEXER_DB_PASS,
+            database: srcName, connectTimeout: 15000,
+        });
+        const dst = await this._createChainDbConnection({
+            host: this.hubDb.host, port: parseInt(this.hubDb.port, 10),
+            user: this.hubDb.user, password: this.hubDb.pass,
+            database: ix.indexerDbName, connectTimeout: 15000,
+        });
+        const started = Date.now();
+        let tables = 0, rows = 0;
+        try {
+            // The copy is bulk-loaded into an empty schema, so the checks buy
+            // nothing and the ordering constraint they impose would force a
+            // dependency sort over 131 tables.
+            await dst.query('DROP TABLE IF EXISTS `' + CHAIN_SEED_MARKER + '`');
+            await dst.query('SET FOREIGN_KEY_CHECKS = 0');
+            await dst.query('SET UNIQUE_CHECKS = 0');
+            // Read every table at one instant: the standing node commits a block about
+            // every 20 s, and a table-by-table read without a snapshot mixes heights.
+            await src.query('SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+            await src.query('START TRANSACTION WITH CONSISTENT SNAPSHOT');
+
+            const names = (await src.query('SHOW TABLES')).map((r) => Object.values(r)[0]);
+            for (const t of names) {
+                // Hub-authored tables are NOT chain state. The venue reads them
+                // from its own mirror database, which is rebuilt per run from
+                // this run's hubs, so copying the standing node's would be both
+                // wasted work (price_snapshots alone is ~87 MB here) and a second
+                // copy of exactly the cross-run staleness the mirror rebuild
+                // exists to prevent.
+                if (CHAIN_CLONE_SKIP_TABLES.has(t)) continue;
+                rows += await this._copyChainTable(src, dst, t);
+                tables++;
+            }
+            await writeSeedMarker(dst, srcName);
+        } finally {
+            try { await src.query('COMMIT'); } catch (e) { /* closing anyway */ }
+            try { await dst.query('SET FOREIGN_KEY_CHECKS = 1'); } catch (e) { /* closing anyway */ }
+            await src.end().catch(() => {});
+            await dst.end().catch(() => {});
+        }
+        console.log('attestMirrorVenue[' + this.label + ']: seeded indexer ' + ix.index + ' from ' + srcName +
+                    ' - ' + tables + ' table(s), ' + rows + ' row(s) in ' +
+                    Math.round((Date.now() - started) / 1000) + 's. It shares the standing node\'s action ' +
+                    'numbering by construction rather than by replaying a chain whose mirror-era ATTEST ' +
+                    'responses no replay can re-derive.');
+    }
+
+    async _copyChainTable(src, dst, table) {
+        const create = (await src.query('SHOW CREATE TABLE `' + table + '`'))[0]['Create Table'];
+        await dst.query('DROP TABLE IF EXISTS `' + table + '`');
+        await dst.query(create);
+
+        // Generated columns are computed on insert and cannot be written.
+        const colInfo = (await src.query('SHOW COLUMNS FROM `' + table + '`'))
+            .filter((c) => !/GENERATED/i.test(String(c.Extra || '')));
+        const cols = colInfo.map((c) => c.Field);
+        if (cols.length === 0) return 0;
+        const pk = colInfo.filter((c) => String(c.Key) === 'PRI');
+        const keyCol = (pk.length === 1 && /int/i.test(String(pk[0].Type))) ? pk[0].Field : null;
+        return this._copyChainTableRows(src, dst, table, cols, keyCol);
+    }
+
+    async _copyChainTableRows(src, dst, table, cols, keyCol) {
+        const list = cols.map((c) => '`' + c + '`').join(', ');
+        const marks = cols.map(() => '?').join(', ');
+        let rows = 0;
+
+        // KEYSET, NOT OFFSET, wherever the table has a single integer
+        // primary key. `LIMIT n OFFSET m` re-reads the table from row
+        // zero on every page, which made this copy quadratic in table
+        // size: measured 2026-09-05 as the regtest database reading
+        // 126 MB/s for ten minutes to move a 256 MB seed, on a host that
+        // was IO-bound the whole time, at 5 to 15 minutes per indexer.
+        // Paging on the key reads each row once. OFFSET stays only as
+        // the fallback for a table with a composite or non-integer key,
+        // and those are the small ones.
+        if (keyCol) {
+            let last = null;
+            for (;;) {
+                const page = await src.query(
+                    'SELECT ' + list + ' FROM `' + table + '`' +
+                    (last === null ? '' : ' WHERE `' + keyCol + '` > ?') +
+                    ' ORDER BY `' + keyCol + '` LIMIT ' + CHAIN_CLONE_PAGE,
+                    last === null ? [] : [last]);
+                if (!page.length) break;
+                await dst.batch('INSERT INTO `' + table + '` (' + list + ') VALUES (' + marks + ')',
+                    page.map((r) => cols.map((c) => r[c])));
+                rows += page.length;
+                last = page[page.length - 1][keyCol];
+                if (page.length < CHAIN_CLONE_PAGE) break;
+            }
+            return rows;
+        }
+
+        // Fall back to offsets for tables without one integer primary key.
+        for (let off = 0; ; off += CHAIN_CLONE_PAGE) {
+            const page = await src.query(
+                'SELECT ' + list + ' FROM `' + table + '` LIMIT ' + CHAIN_CLONE_PAGE + ' OFFSET ' + off);
+            if (!page.length) break;
+            await dst.batch('INSERT INTO `' + table + '` (' + list + ') VALUES (' + marks + ')',
+                page.map((r) => cols.map((c) => r[c])));
+            rows += page.length;
+            if (page.length < CHAIN_CLONE_PAGE) break;
+        }
+        return rows;
+    }
+
+    async _cloneChainDbFromStanding(ix, template) {
         // THE REPLAY PATH: make the database and hand it over empty. `XChainIndexer.start()`
         // calls verifyTables() on its own indexer database, so it builds its schema and then
-        // parses the chain from genesis under this tree's rules. See the `replayChain`
-        // comment in the constructor for what that buys and what it costs.
+        // parses the chain from genesis under this tree's rules.
         if (this.replayChain) {
             await this._conn.query('CREATE DATABASE IF NOT EXISTS `' +
                 ident(ix.indexerDbName, 'database name') + '`');
@@ -2630,133 +2912,22 @@ class AttestMirrorVenue {
             throw new Error(
                 'attestMirrorVenue: INDEXER_DB_NAME/USER/PASS must be in the environment to seed a venue ' +
                 'indexer from the standing node. Without them the venue would replay the chain and derive ' +
-                'a different ledger, which is the AT1 blocker measured on 2026-09-05.');
+                'a different ledger.');
 
         await this._conn.query('CREATE DATABASE IF NOT EXISTS `' + ident(ix.indexerDbName, 'database name') + '`');
-
-        // REUSE ONLY WHAT AGREES. "It already has blocks" is the wrong question:
-        // every venue database built by the old replay path HAS blocks and is
-        // exactly the divergent ledger this method exists to stop using. So the
-        // reuse test is agreement with the standing node - the same action count
-        // at a common height, which is the quantity that actually broke - and a
-        // database that fails it is rebuilt once, here, rather than being carried
-        // into another run and read as an applier fault.
-        const have = await this._conn.query(
-            'SELECT COUNT(*) AS c FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?',
-            [ix.indexerDbName, 'actions']);
-        if (Number(have[0].c) > 0) {
-            const agrees = await this._chainDbAgreesWithStanding(ix, srcName);
-            if (agrees.ok) {
-                console.log('attestMirrorVenue[' + this.label + ']: indexer ' + ix.index + ' already agrees with ' +
-                            srcName + ' (' + agrees.mine + ' action(s) at or below block ' + agrees.height +
-                            '); not re-seeding.');
-                return;
-            }
-            if (agrees.mine !== null)
-                console.log('attestMirrorVenue[' + this.label + ']: indexer ' + ix.index + ' holds ' + agrees.mine +
-                            ' action(s) at or below block ' + agrees.height + ' where the standing node holds ' +
-                            agrees.theirs + '. That is a DIFFERENT LEDGER, not lag, so it is rebuilt from the ' +
-                            'standing node rather than reused.');
-        }
-
-        const src = await mariadb.createConnection({
-            host: this.hubDb.host, port: parseInt(this.hubDb.port, 10),
-            user: process.env.INDEXER_DB_USER, password: process.env.INDEXER_DB_PASS,
-            database: srcName, connectTimeout: 15000,
-        });
-        const dst = await mariadb.createConnection({
-            host: this.hubDb.host, port: parseInt(this.hubDb.port, 10),
-            user: this.hubDb.user, password: this.hubDb.pass,
-            database: ix.indexerDbName, connectTimeout: 15000,
-        });
-        const started = Date.now();
-        let tables = 0, rows = 0;
-        try {
-            // The copy is bulk-loaded into an empty schema, so the checks buy
-            // nothing and the ordering constraint they impose would force a
-            // dependency sort over 131 tables.
-            await dst.query('SET FOREIGN_KEY_CHECKS = 0');
-            await dst.query('SET UNIQUE_CHECKS = 0');
-
-            const names = (await src.query('SHOW TABLES')).map((r) => Object.values(r)[0]);
-            for (const t of names) {
-                // Hub-authored tables are NOT chain state. The venue reads them
-                // from its own mirror database, which is rebuilt per run from
-                // this run's hubs, so copying the standing node's would be both
-                // wasted work (price_snapshots alone is ~87 MB here) and a second
-                // copy of exactly the cross-run staleness the mirror rebuild
-                // exists to prevent.
-                if (CHAIN_CLONE_SKIP_TABLES.has(t)) continue;
-
-                const create = (await src.query('SHOW CREATE TABLE `' + t + '`'))[0]['Create Table'];
-                await dst.query('DROP TABLE IF EXISTS `' + t + '`');
-                await dst.query(create);
-                tables++;
-
-                // Generated columns are computed on insert and cannot be written.
-                const colInfo = (await src.query('SHOW COLUMNS FROM `' + t + '`'))
-                    .filter((c) => !/GENERATED/i.test(String(c.Extra || '')));
-                const cols = colInfo.map((c) => c.Field);
-                if (cols.length === 0) continue;
-                const list = cols.map((c) => '`' + c + '`').join(', ');
-                const marks = cols.map(() => '?').join(', ');
-
-                // KEYSET, NOT OFFSET, wherever the table has a single integer
-                // primary key. `LIMIT n OFFSET m` re-reads the table from row
-                // zero on every page, which made this copy quadratic in table
-                // size: measured 2026-09-05 as the regtest database reading
-                // 126 MB/s for ten minutes to move a 256 MB seed, on a host that
-                // was IO-bound the whole time, at 5 to 15 minutes per indexer.
-                // Paging on the key reads each row once. OFFSET stays only as
-                // the fallback for a table with a composite or non-integer key,
-                // and those are the small ones.
-                const pk = colInfo.filter((c) => String(c.Key) === 'PRI');
-                const keyCol = (pk.length === 1 && /int/i.test(String(pk[0].Type))) ? pk[0].Field : null;
-
-                if (keyCol) {
-                    let last = null;
-                    for (;;) {
-                        const page = await src.query(
-                            'SELECT ' + list + ' FROM `' + t + '`' +
-                            (last === null ? '' : ' WHERE `' + keyCol + '` > ?') +
-                            ' ORDER BY `' + keyCol + '` LIMIT ' + CHAIN_CLONE_PAGE,
-                            last === null ? [] : [last]);
-                        if (!page.length) break;
-                        await dst.batch('INSERT INTO `' + t + '` (' + list + ') VALUES (' + marks + ')',
-                            page.map((r) => cols.map((c) => r[c])));
-                        rows += page.length;
-                        last = page[page.length - 1][keyCol];
-                        if (page.length < CHAIN_CLONE_PAGE) break;
-                    }
-                } else {
-                    for (let off = 0; ; off += CHAIN_CLONE_PAGE) {
-                        const page = await src.query(
-                            'SELECT ' + list + ' FROM `' + t + '` LIMIT ' + CHAIN_CLONE_PAGE + ' OFFSET ' + off);
-                        if (!page.length) break;
-                        await dst.batch('INSERT INTO `' + t + '` (' + list + ') VALUES (' + marks + ')',
-                            page.map((r) => cols.map((c) => r[c])));
-                        rows += page.length;
-                        if (page.length < CHAIN_CLONE_PAGE) break;
-                    }
-                }
-            }
-        } finally {
-            try { await dst.query('SET FOREIGN_KEY_CHECKS = 1'); } catch (e) { /* closing anyway */ }
-            await src.end().catch(() => {});
-            await dst.end().catch(() => {});
-        }
-        console.log('attestMirrorVenue[' + this.label + ']: seeded indexer ' + ix.index + ' from ' + srcName +
-                    ' - ' + tables + ' table(s), ' + rows + ' row(s) in ' +
-                    Math.round((Date.now() - started) / 1000) + 's. It shares the standing node\'s action ' +
-                    'numbering by construction rather than by replaying a chain whose mirror-era ATTEST ' +
-                    'responses no replay can re-derive.');
+        if (await this._reuseChainDbIfMatching(ix, srcName)) return;
+        // A template is a venue database this bring-up already seeded or verified.
+        if (template) await this._copyChainDbWithinVenue(template, ix);
+        else await this._seedChainDbFromStanding(ix, srcName);
     }
 
     async _spawnIndexer(i) {
         const ix = this.indexers[i];
 
-        // The chain database comes from the standing node, not from a replay.
-        await this._cloneChainDbFromStanding(ix);
+        // The chain database comes from the standing node, not from a replay. A
+        // bring-up prepares it once; a later respawn (a rebuild) seeds it again.
+        if (ix.chainDbPrepared) ix.chainDbPrepared = false;
+        else await this._cloneChainDbFromStanding(ix);
 
         // The mirror database is the one NOBODY creates for itself, and that is a
         // property of the code rather than an oversight here: `XChainIndexer.start()`
@@ -2828,17 +2999,17 @@ class AttestMirrorVenue {
         ix.proc = this._spawn('indexer' + i, path.join(this.repoRoot, 'xchain-indexer', 'src', 'api.js'),
             ['--no-node-snapshot'], env);
 
-        const up = await waitFor(async () => {
-            if (ix.proc.exitCode !== null) return { ok: false, dead: true };
+        const up = await waitForChildBoot(ix.proc, async () => {
             try {
                 const rows = await this._conn.query(
                     'SELECT COUNT(*) AS c FROM information_schema.TABLES WHERE TABLE_SCHEMA = ?', [ix.indexerDbName]);
                 return { ok: Number(rows[0].c) > 0, tables: Number(rows[0].c) };
             } catch (_) { return { ok: false }; }
-        }, { timeoutMs: BOOT_WAIT_MS, intervalMs: 1000 });
+        }, { intervalMs: 1000 });
         if (!up.ok) {
             throw new Error('attestMirrorVenue[' + this.label + ']: indexer ' + i + ' never created its schema in ' +
-                ix.indexerDbName + ' within ' + up.waitedMs + 'ms.\n' + this._tail('indexer' + i));
+                ix.indexerDbName + ' within ' + up.waitedMs + 'ms' + (up.dead ? ' (the process exited)' : '') +
+                '.\n' + this._tail('indexer' + i));
         }
 
         // The schema wait proves the indexer reached its DATABASE, not that its HTTP
@@ -2853,17 +3024,16 @@ class AttestMirrorVenue {
         // ANY answer counts, 503 included. A stalled indexer that reports its stall is
         // listening, and a barrier drill's whole subject is a node parked on a stall: a wait
         // for HTTP 200 here would hang exactly the legs this is meant to let run.
-        const answering = await waitFor(async () => {
-            if (ix.proc.exitCode !== null) return { ok: false, dead: true };
+        const answering = await waitForChildBoot(ix.proc, async () => {
             try {
                 const res = await axios.get(ix.apiUrl + '/status', { timeout: 5_000, validateStatus: () => true });
                 return { ok: true, httpStatus: res.status };
             } catch (_) { return { ok: false }; }
-        }, { timeoutMs: BOOT_WAIT_MS, intervalMs: 1000 });
+        }, { intervalMs: 1000 });
         if (!answering.ok) {
             throw new Error('attestMirrorVenue[' + this.label + ']: indexer ' + i + ' never answered /status on ' +
                 ix.apiUrl + ' within ' + answering.waitedMs + 'ms' +
-                (answering.last && answering.last.dead ? ' (the process exited)' : '') +
+                (answering.dead ? ' (the process exited)' : '') +
                 '.\n' + this._tail('indexer' + i));
         }
         ix.connector = new XChainIndexerConnector('127.0.0.1', ix.apiPort, null);
@@ -4085,6 +4255,8 @@ module.exports = {
     gracedBarrierReason,
     ungracedMirrorBarrierReasons,
     DEFAULT_HUB_COUNT,
+    BOOT_WAIT_MS,
+    waitForChildBoot,
     DEFAULT_INDEXER_COUNT,
     DEFAULT_FORWARD_S,
     DEFAULT_BATCH_WINDOW_S,

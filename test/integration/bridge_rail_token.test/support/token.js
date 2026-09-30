@@ -19,6 +19,10 @@ const chainRail         = require('../../../helpers/chainRail');
 const cryptoHelper      = require('../../../cryptoHelper');
 const transactionHelper = require('../../../transactionHelper');
 const {
+    expandPolicyTickCandidates,
+    policyApplyBudgetMs,
+} = require('../../../helpers/rail_preflight/policy_at2_at4');
+const {
     lockWireV3,
     burnWireV4,
     optInWire,
@@ -102,7 +106,7 @@ function bind(state) {
     // The first candidate free on BOTH ledgers: the spec's name unless the rail already
     // carries it from an earlier attempt, in which case the next spelling.
     async function pickFreeTick(candidates) {
-        for (const cand of candidates) {
+        for (const cand of expandPolicyTickCandidates(candidates)) {
             const onBtc = await state.venue.hasTokenRow('BTC', cand);
             const onDoge = await state.venue.hasTokenRow('DOGE', 'BTC.' + cand);
             if (!onBtc && !onDoge) return cand;
@@ -127,18 +131,35 @@ function bind(state) {
     }
 
     // Finalized by the federation, then applied on `destChain`: the two waits every
-    // settling leg needs, with the destination budget the venue sizes per chain.
+    // settling leg needs, with the shared policy budget sized per chain.
     async function settleLeg(what, match, destChain, opts) {
         const o = opts || {};
         const row = await state.venue.waitForFinalizedTransfer(match, { timeoutMs: o.finalizeMs || 30 * 60 * 1000 });
-        assert.ok(row, what + ' never finalized on any venue hub.\n' + state.venue.hubTails(30));
+        if (!row) assert.fail(what + ' never finalized on any venue hub.\n' + state.venue.hubTails(30));
+        const applyMs = o.applyMs === undefined ? policyApplyBudgetMs(destChain) : o.applyMs;
         const applied = await state.venue.waitForBridgeApplied(destChain, row.transfer_id,
-            o.applyMs ? { timeoutMs: o.applyMs } : undefined);
-        assert.ok(applied, 'the venue ' + destChain + ' indexer never applied ' + what + ' (' + row.transfer_id +
+            { timeoutMs: applyMs });
+        if (!applied) assert.fail('the venue ' + destChain + ' indexer never applied ' + what + ' (' + row.transfer_id +
             ').\n' + state.venue.indexerTails(40));
         return { row: row, applied: applied,
             transfer: { transferId: row.transfer_id, snapshotBlock: String(row.snapshot_block), tick: String(row.tick),
                 decimals: String(row.decimals), amount: String(row.amount), appliedBlock: String(applied.block_index) } };
+    }
+
+    async function waitForFinalizedPolicy(tick, seq, opts) {
+        const o = opts || {};
+        let found = null;
+        await state.venue.waitUntil('a finalized policy snapshot for ' + tick + ' at seq >= ' + seq, async () => {
+            for (const hub of state.venue.hubs) {
+                const rows = await state.venue.queryHubDb(hub.dbName,
+                    "SELECT * FROM policy_snapshots WHERE origin_chain='BTC' AND tick=? " +
+                    "AND status='finalized' AND policy_seq>=? ORDER BY policy_seq DESC LIMIT 1",
+                    [String(tick), Number(seq)]);
+                if (rows.length) { found = rows[0]; return true; }
+            }
+            return false;
+        }, { timeoutMs: o.timeoutMs || 30 * 60 * 1000, everyMs: 3000 });
+        return found;
     }
 
     // The XCHAIN chain halves, AT8's control: the token legs must leave them untouched.
@@ -202,6 +223,7 @@ function bind(state) {
         lockWireV3, burnWireV4, optInWire, escrowOf, classifyInvariant, effectiveLockDepth, capOrderReading,
         GAS_TICK, LOCK, BURN, DECIMALS, MINT, EXPIRY,
         btcAction, dogeAction, fundBtc, fundDoge, rowsLike, pickFreeTick, tokenSnapshot, settleLeg,
+        waitForFinalizedPolicy,
         chainHalves, policyInheritanceActive, capPerBlock, mineBtcBlocks, reorgBtcFrom,
     };
 }

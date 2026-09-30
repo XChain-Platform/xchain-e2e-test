@@ -38,6 +38,12 @@ const {
     listEditWire,
 } = require('../../helpers/bridgeRailVenue');
 const {
+    barrierWaitReady,
+    finalizedPolicyRows,
+    followerRecoveryPlan,
+    policyReleaseReading,
+} = require('../../helpers/rail_preflight/policy_at5');
+const {
     assert,
     lockWireV3,
     state,
@@ -57,13 +63,16 @@ const TABLE = 'policy_snapshots';
 
 // The finalized transfer of the lag token's lock, and its settlement on DOGE if any.
 async function lagTransfer(L) {
-    const rows = await state.venue.queryHubDb(state.venue.hubs[0].dbName,
-        "SELECT transfer_id, effective_time FROM bridge_transfers WHERE tick = ? AND dest_address = ? AND status = 'finalized'",
-        [L.tick, L.dest.address]);
-    if (!rows.length) return null;
-    const settled = await state.venue.queryIndexerDb('DOGE',
-        "SELECT block_index, action_index FROM bridge_settlements WHERE kind = 'transfer' AND transfer_id = ?", [rows[0].transfer_id]);
-    return { transferId: String(rows[0].transfer_id), effectiveTime: Number(rows[0].effective_time), settled: settled[0] || null };
+    for (const hub of state.venue.hubs) {
+        const rows = await state.venue.queryHubDb(hub.dbName,
+            "SELECT transfer_id, effective_time FROM bridge_transfers WHERE tick = ? AND dest_address = ? AND status = 'finalized'",
+            [L.tick, L.dest.address]);
+        if (!rows.length) continue;
+        const settled = await state.venue.queryIndexerDb('DOGE',
+            "SELECT block_index, action_index FROM bridge_settlements WHERE kind = 'transfer' AND transfer_id = ?", [rows[0].transfer_id]);
+        return { transferId: String(rows[0].transfer_id), effectiveTime: Number(rows[0].effective_time), settled: settled[0] || null };
+    }
+    return null;
 }
 
 bridgeRailSuite(GROUP, function () {
@@ -83,10 +92,9 @@ bridgeRailSuite(GROUP, function () {
         await state.venue.waitUntil('the lag lock to finalize on the hub', async () => { reading = await lagTransfer(L); return !!reading; },
             { timeoutMs: 30 * 60 * 1000, everyMs: 5000 });
         L.seq1 = await waitForFinalizedSeq(L.tick, 1);
-        await state.venue.waitUntil('the lag transfer\'s effective_time to pass', () => Date.now() / 1000 >= reading.effectiveTime + 5,
+        await state.venue.waitUntil('the lag transfer\'s effective_time to pass',
+            () => barrierWaitReady(reading, Date.now() / 1000),
             { timeoutMs: 60 * 60 * 1000, everyMs: 5000 });
-        const tip = Number((await state.venue.venueTips()).DOGE);
-        await state.venue.waitForVenueTip('DOGE', tip + 3, 'past the lag transfer\'s effective_time', { timeoutMs: 15 * 60 * 1000, everyMs: 5000 });
         reading = await lagTransfer(L);
         state.evidence.at5_barrier = { tick: L.tick, transfer: reading, seq1: String(L.seq1.snapshot_id) };
         assert.strictEqual(reading.settled, null, 'DOGE applied the in-leg of a policy-bearing token at block ' +
@@ -100,6 +108,7 @@ bridgeRailSuite(GROUP, function () {
         if (needsFederation(this, 'policy AT5 release')) return;
         const L = state.policy.lag;
         assert.ok(L.withheld, 'the barrier half must have run');
+        assert.ok(L.seq1, 'the barrier half must have run and finalized seq 1');
         state.venue.dogeVenue.releaseMirrorTable(0, TABLE);
         L.withheld = false;
         const policy = await waitForAppliedSeq(L.tick, 1);
@@ -107,9 +116,10 @@ bridgeRailSuite(GROUP, function () {
         await state.venue.waitUntil('the lag in-leg to apply on DOGE', async () => { reading = await lagTransfer(L); return !!(reading && reading.settled); },
             { timeoutMs: 20 * 60 * 1000, everyMs: 5000 });
         state.evidence.at5_release = { policy, transfer: reading };
-        assert.strictEqual(Number(reading.settled.block_index), policy.block,
-            'the in-leg applied at DOGE block ' + reading.settled.block_index + ' and seq 1 at ' + policy.block);
-        assert.ok(policy.actionIndex < Number(reading.settled.action_index),
+        const release = policyReleaseReading(policy, reading);
+        assert.strictEqual(release.sameBlock, true,
+            'the in-leg applied at DOGE block ' + release.transferBlock + ' and seq 1 at ' + release.policyBlock);
+        assert.strictEqual(release.policyFirst, true,
             'seq 1 (action ' + policy.actionIndex + ') did not apply before the in-leg (action ' + reading.settled.action_index + ')');
     });
 
@@ -139,9 +149,10 @@ bridgeRailSuite(GROUP, function () {
             const since = Date.now();
             await state.venue.waitUntil('three poll cycles with the follower abstaining', () => Date.now() - since >= cycles,
                 { timeoutMs: cycles + 60000, everyMs: 5000 });
-            during = (await hubPolicyRows(L.tick)).filter((r) => Number(r.policy_seq) >= 2 && String(r.status) === 'finalized');
+            during = finalizedPolicyRows(await hubPolicyRows(L.tick), 2);
         } finally {
-            await state.venue.setHubOriginIndexer(follower, null);
+            const restartIndexes = followerRecoveryPlan(state.venue.hubs.length, follower);
+            await state.venue.setHubOriginIndexer(follower, null, { restartIndexes });
         }
         const restoredAt = Date.now();
         const seq2 = await waitForFinalizedSeq(L.tick, 2);

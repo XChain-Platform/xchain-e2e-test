@@ -26,6 +26,10 @@
 
 const { listCreateWire } = require('../../helpers/bridgeRailVenue');
 const {
+    feeScheduleBudgetMs,
+    feeScheduleReady,
+} = require('../../helpers/rail_preflight/policy_at7_at8');
+const {
     assert,
     cryptoHelper,
     state,
@@ -37,6 +41,19 @@ const {
 
 const GROUP = 'policy AT7: any-coin list items';
 
+async function waitForDogeFeeSchedule() {
+    let schedule = null;
+    await state.venue.waitUntil('the DOGE feeschedule to publish its native-fee destination', async () => {
+        try { schedule = await state.venue.indexerRpc('DOGE', 'feeschedule', {}); }
+        catch (e) { schedule = null; }
+        return feeScheduleReady(schedule);
+    }, {
+        timeoutMs: feeScheduleBudgetMs(state.venue.pollMs || 15000),
+        everyMs: Math.min(Number(state.venue.pollMs || 15000), 5000),
+    });
+    return schedule;
+}
+
 bridgeRailSuite(GROUP, function () {
     it('policy AT7 (above the flag): a LIST on DOGE carrying a BTC bech32 item admits it into list_items', async function () {
         this.timeout(0);
@@ -44,6 +61,7 @@ bridgeRailSuite(GROUP, function () {
         const btcAddress = await cryptoHelper.getNewAddress('POLICY.AT7.BECH32', 'bitcoin', NETWORK, null, 'segwit', 0);
         const bech32 = String(btcAddress.address);
         assert.ok(/^bcrt1/.test(bech32), 'the BTC fixture address is not bech32: ' + bech32);
+        await waitForDogeFeeSchedule();
         const owner = await fundDoge('POLICY.AT7.OWNER', 2);
         const list = await dogeAction(owner, listCreateWire(2, [bech32], 'policy AT7'), 'lists');
         const admitted = await state.venue.queryIndexerDb('DOGE',

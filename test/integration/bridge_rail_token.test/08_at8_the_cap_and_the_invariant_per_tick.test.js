@@ -52,13 +52,26 @@ const {
     chainHalves,
     capPerBlock,
     mineBtcBlocks,
+    waitForFinalizedPolicy,
     needsFederation,
     bridgeRailSuite,
 } = require('./support');
 const { withMiningPaused } = require('../../helpers/bridgeRailVenue');
+const { policyApplyBudgetMs } = require('../../helpers/rail_preflight/policy_at2_at4');
 
 const GROUP = 'token AT8: the cap and the invariant per tick';
 const PER_TICK = 15;
+const INVARIANT_SETTLE_MS = 2 * 60 * 1000;
+
+async function waitForEqualInvariant(tick) {
+    let entry = null;
+    await state.venue.waitUntil('the hub invariant for ' + tick + ' to read equal with nothing in flight', async () => {
+        const invariant = await state.venue.bridgeInvariant(tick);
+        entry = invariant && invariant[tick] && invariant[tick].DOGE;
+        return String(entry && entry.in_flight) === '0' && classifyInvariant(entry).verdict === 'equal';
+    }, { timeoutMs: INVARIANT_SETTLE_MS, everyMs: 3000 });
+    return entry;
+}
 
 // A second bridgeable tick beside FUFU, minted to a fresh issuer.
 async function secondCapTick() {
@@ -116,9 +129,14 @@ async function holdDogeUntilDue(dest, count) {
     const rows = await withMiningPaused(dogeMiner, async () => {
         let finalized = [];
         await venue.waitUntil('all ' + count + ' cap locks to finalize', async () => {
-            finalized = await venue.queryHubDb(venue.hubs[0].dbName,
-                "SELECT transfer_id, snapshot_block, effective_time, tick FROM bridge_transfers " +
-                "WHERE dest_address = ? AND status = 'finalized'", [dest.address]);
+            const seen = new Map();
+            for (const hub of venue.hubs) {
+                const hubRows = await venue.queryHubDb(hub.dbName,
+                    "SELECT transfer_id, snapshot_block, effective_time, tick FROM bridge_transfers " +
+                    "WHERE dest_address = ? AND status = 'finalized'", [dest.address]);
+                for (const row of hubRows) seen.set(String(row.transfer_id), row);
+            }
+            finalized = [...seen.values()];
             return finalized.length >= count;
         }, { timeoutMs: 45 * 60 * 1000 });
         const due = Math.max(...finalized.map((r) => Number(r.effective_time))) + 5;
@@ -147,6 +165,8 @@ bridgeRailSuite(GROUP, function () {
         for (const s of await fundSenders(C.issuer2, C.tick2, 'B')) legs.push({ tick: C.tick2, sender: s });
         C.dest = await fundDoge('TOKEN.AT8.CAP.DEST', 2);
         const mined = await lockThirtyInOneBlock(legs, C.dest);
+        await mineBtcBlocks(1, 'the cap locks reaching bridge depth');
+        await waitForFinalizedPolicy(C.tick2, 1);
         const held = await holdDogeUntilDue(C.dest, legs.length);
         const ids = held.rows.map((r) => String(r.transfer_id));
         let settlements = [];
@@ -154,20 +174,21 @@ bridgeRailSuite(GROUP, function () {
             settlements = await state.venue.queryIndexerDb('DOGE',
                 'SELECT transfer_id, block_index FROM bridge_settlements WHERE transfer_id IN (' + ids.map(() => '?').join(',') + ')', ids);
             return settlements.length >= ids.length;
-        }, { timeoutMs: 30 * 60 * 1000 });
+        }, { timeoutMs: policyApplyBudgetMs("DOGE") });
         const reading = capOrderReading(held.rows, settlements, cap);
-        state.evidence.at8_cap = { block: mined.block, locks: mined.txs.length, dogeHeld: held.held, reading,
+        state.evidence.at8_capReading = { block: mined.block, locks: mined.txs.length, dogeHeld: held.held, reading,
             destA: await state.venue.addressBalance('DOGE', C.dest.address, T.bridged),
             destB: await state.venue.addressBalance('DOGE', C.dest.address, 'BTC.' + C.tick2) };
         assert.ok(reading.ok, reading.reason);
-        assert.strictEqual(Number(state.evidence.at8_cap.destA), PER_TICK, C.dest.address + ' holds ' + state.evidence.at8_cap.destA + ' ' + T.bridged);
-        assert.strictEqual(Number(state.evidence.at8_cap.destB), PER_TICK, C.dest.address + ' holds ' + state.evidence.at8_cap.destB + ' BTC.' + C.tick2);
+        assert.strictEqual(Number(state.evidence.at8_capReading.destA), PER_TICK, C.dest.address + ' holds ' + state.evidence.at8_capReading.destA + ' ' + T.bridged);
+        assert.strictEqual(Number(state.evidence.at8_capReading.destB), PER_TICK, C.dest.address + ' holds ' + state.evidence.at8_capReading.destB + ' BTC.' + C.tick2);
         if (held.held) {
             assert.deepStrictEqual(reading.groups.map((g) => g.count), [cap, 5],
                 'a held destination applied the thirty legs as ' + JSON.stringify(reading.groups) + ' and not as ' + cap + ' then 5');
         } else {
             console.log('  token AT8 cap split read ' + JSON.stringify(reading.groups) + ' with the DOGE loop NOT held (no BRIDGE_RAIL_DOGE_MINER_PAUSE_FILE)');
         }
+        state.evidence.at8_cap = state.evidence.at8_capReading;
     });
 });
 
@@ -183,13 +204,14 @@ bridgeRailSuite(GROUP, function () {
             const settled = await state.venue.waitForRailSettled(tick, { timeoutMs: 30 * 60 * 1000 });
             assert.ok(settled, 'the rail never settled for ' + tick + ': ' + JSON.stringify(state.venue._lastSettlePoll));
             const snap = await tokenSnapshot('at8_' + tick, tick, null);
-            const inv = await state.venue.bridgeInvariant(tick);
-            const entry = inv && inv[tick] && inv[tick].DOGE;
+            const entry = await waitForEqualInvariant(tick);
             r.perTick[tick] = { escrow: snap.escrow, supply: snap.supply, hub: entry, verdict: classifyInvariant(entry).verdict };
             assert.strictEqual(snap.escrow, snap.supply, tick + ': BTC escrow ' + snap.escrow + ' against DOGE supply ' + snap.supply);
             assert.strictEqual(String(entry && entry.in_flight), '0', tick + ': in_flight reads ' + JSON.stringify(entry));
             assert.strictEqual(classifyInvariant(entry).verdict, 'equal', tick + ': the hub reads ' + JSON.stringify(entry));
         }
+        assert.ok(state.evidence.at2_transfer && state.evidence.at8_cap,
+            'AT2 and the token AT8 cap leg must have run before the escrow sum');
         // AT1 locked 5, AT2 burned 2, AT7 moved units inside DOGE, the cap leg locked 15 more.
         assert.strictEqual(r.perTick[T.tick].escrow, LOCK - BURN + PER_TICK, T.tick + ' escrow reads ' + r.perTick[T.tick].escrow);
         r.xchainNow = await chainHalves();

@@ -70,17 +70,17 @@ function silenceConsensus(hub) {
  * carries a signature that does not verify, so honest peers drop its votes at
  * the transport verification step while it counts itself as having voted.
  *
- * Wraps PeerManager._buildEnvelope, which is the single place an outbound
+ * Wraps PeerManager.buildEnvelope, which is the single place an outbound
  * envelope is signed. Restoring puts the original method back.
  */
 function forgeConsensusSignatures(hub) {
     const pm = hub && hub.peerManager;
-    if (!pm || typeof pm._buildEnvelope !== 'function') {
+    if (!pm || typeof pm.buildEnvelope !== 'function') {
         throw new Error('forgeConsensusSignatures: hub has no started peer manager');
     }
-    const orig = pm._buildEnvelope;
+    const orig = pm.buildEnvelope;
     let forged = 0;
-    pm._buildEnvelope = function (type, data) {
+    pm.buildEnvelope = function (type, data) {
         const env = orig.call(this, type, data);
         if (env && env.sig && shouldForge(type)) {
             env.sig = corruptSignature(env.sig);
@@ -88,7 +88,7 @@ function forgeConsensusSignatures(hub) {
         }
         return env;
     };
-    const restore = () => { pm._buildEnvelope = orig; };
+    const restore = () => { pm.buildEnvelope = orig; };
     restore.forgedCount = () => forged;
     return restore;
 }

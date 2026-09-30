@@ -97,7 +97,7 @@ function makeFakeNode(id) {
         async peers() { return { peers: 0 }; },
         async quorum() { return { quorum: null }; },
         async fault(a) { mode = a.mode; return { mode }; },
-        async dropDb() { return { dropped: false, reason: 'fake node has no database' }; },
+        async dropDb() { return { dropped: false, skipped: true, reason: 'fake node has no database' }; },
         async propose(a) {
             if (mode === 'silent') return { accepted: false, reason: 'silenced' };
             Object.assign(applied, a.values || {});
@@ -291,7 +291,7 @@ function makeHubNode(id) {
         // than a follow-up chore.
         async dropDb() {
             const name = process.env.DRILL_DB_NAME;
-            if (!name) return { dropped: false, reason: 'no DRILL_DB_NAME' };
+            if (!name) return { dropped: false, skipped: true, reason: 'no DRILL_DB_NAME' };
             if (hub && hub.stop) { try { await hub.stop(); } catch (e) { /* dropping anyway */ } hub = null; }
             const mariadb = require(path.join(process.env.DRILL_HUB_PATH
                 || path.resolve(__dirname, '../../../../xchain-hub'), 'node_modules/mariadb'));
@@ -301,7 +301,12 @@ function makeHubNode(id) {
                 user: process.env.HUB_DB_USER,
                 password: process.env.HUB_DB_PASS
             });
-            try { await conn.query('DROP DATABASE IF EXISTS \`' + name.replace(/`/g, '') + '\`'); }
+            try {
+                const bare = name.replace(/`/g, '');
+                await conn.query('DROP DATABASE IF EXISTS \`' + bare + '\`');
+                const left = await conn.query('SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = ?', [bare]);
+                if (left.length) throw new Error('schema still present after drop: ' + bare);
+            }
             finally { await conn.end(); }
             return { dropped: true, database: name };
         },

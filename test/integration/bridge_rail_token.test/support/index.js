@@ -15,20 +15,114 @@
 'use strict';
 
 const assert = require('assert');
+const fs = require('fs');
+const { execFileSync } = require('child_process');
+const axios = require('axios');
 
+const XChainHubConnector = require('../../../../src/XChainHubConnector');
 const chainRail         = require('../../../helpers/chainRail');
 const stakeTeardown     = require('../../../helpers/stakeTeardown');
 const cryptoHelper      = require('../../../cryptoHelper');
 const transactionHelper = require('../../../transactionHelper');
 const issueHelper       = require('../../../helpers/issueHelper');
 const fixture           = require('../../../attestMirror/mirrorDrillFixture');
+const { checkFullDriveReady } = require('../../../helpers/rail_preflight/full_drive_ready');
+const { requireHealthyHub } = require('../../../helpers/rail_preflight/hub_health_gate');
+const {
+    ancestorPids,
+    launchParentIsAttached,
+} = require('../../../helpers/rail_preflight/rail_drive_processes');
+const { withDogeFeeSchedule } = require('../../../helpers/rail_preflight/token_doge_fee');
+const { caseJournalEntry } = require('../../../helpers/rail_preflight/case_journal_entry');
+const { evidenceJson } = require('../../../helpers/rail_preflight/evidence_json');
 const {
     BridgeRailVenue,
     resolveVenueQuorum,
     minimalQuorumSigners,
     journalCase,
+    withMiningPaused,
 } = require('../../../helpers/bridgeRailVenue');
 const token = require('./token');
+const { ensureBridgeRailQuorum, releaseBridgeRailQuorum } = require('./quorum');
+const {
+    DEFAULT_BUDGET_MS,
+    miningNodeTipReaders,
+    readTipAdvance,
+    minerStallReason,
+} = require('./miner_liveness');
+const { DOGE_INDEXER_CANDIDATE_PORTS, resolveIndexerPort, tcpAccepts } = require('./rail_ports');
+const { dropStaleReplayBeforeVenue } = require('./stale_replay');
+
+const RAIL_WAIT_ATTEMPTS = 120;
+const RAIL_WAIT_MS = 60 * 1000;
+const LAUNCH_MONITOR_MS = 5 * 1000;
+
+function wait(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// The standing hub connector, published on the global when nothing set one, so every
+// later reader of global.hubConnector in the drive (policy or token) sees the same hub
+// the preflight verified. A connector the caller already selected is kept.
+function driveHubConnector() {
+    if (!global.hubConnector || !Array.isArray(global.hubConnector.urls) || !global.hubConnector.urls.length)
+        global.hubConnector = new XChainHubConnector(XChainHubConnector.parseEndpoints());
+    return global.hubConnector;
+}
+
+async function fullDrivePreflight(connector) {
+    const endpoint = connector && Array.isArray(connector.urls) ? connector.urls[0] : null;
+    let pingStatusCode = 0;
+    let pingBodyText = '';
+    if (endpoint) {
+        try {
+            const response = await axios.post(endpoint, {
+                jsonrpc: '2.0', method: 'ping', id: 1,
+            }, {
+                timeout: 5000,
+                validateStatus: () => true,
+                transformResponse: [(body) => body],
+            });
+            pingStatusCode = response.status;
+            pingBodyText = response.data;
+        } catch (error) {
+            pingBodyText = JSON.stringify({ error: { code: error.code || 'unreachable' } });
+        }
+    }
+    const psText = execFileSync('ps', ['-eo', 'pid=,ppid=,args='], { encoding: 'utf8' });
+    return Object.assign({ hubStatusCode: pingStatusCode }, checkFullDriveReady({
+        pingStatusCode,
+        pingBodyText,
+        psText,
+        ownPids: ancestorPids(psText, process.pid),
+    }));
+}
+async function pingDriveHub(connector) {
+    const response = await axios.post(connector.urls[0], {
+        jsonrpc: '2.0',
+        method: 'ping',
+        id: 1,
+    }, {
+        timeout: 5000,
+        validateStatus: () => true,
+        transformResponse: [(body) => body],
+    });
+    return { statusCode: response.status, bodyText: response.data };
+}
+
+async function waitForCompetingDrive(connector) {
+    let preflight = null;
+    for (let attempt = 1; attempt <= RAIL_WAIT_ATTEMPTS; attempt++) {
+        preflight = await fullDrivePreflight(connector);
+        if (preflight.reason !== 'other-drive' && preflight.reason !== 'hub+other-drive') return;
+        if (attempt === RAIL_WAIT_ATTEMPTS) break;
+        console.log('RAIL WAIT: another bridge rail drive is running (' + attempt + '/' +
+            RAIL_WAIT_ATTEMPTS + ')');
+        await wait(RAIL_WAIT_MS);
+    }
+    assert.ok(false, 'token rail full-drive preflight timed out waiting for the other drive: ' +
+        (preflight && preflight.reason));
+}
 
 // The venue bring-up, the per-case hooks and the suite registration, in the shape of
 // `bridge_rail_base.test/support` (the same quorum gate, the same replayed DOGE ledger, the
@@ -51,11 +145,13 @@ const token = require('./token');
 // The token drive's identity: its own databases, ports, suite title and journal name.
 const TOKEN_DRIVE = {
     label: 'bridgerailtoken',
+    stakerLabel: 'bridge-rail-token',
     basePort: 45000,
     outerTitle: 'XBRIDGE token acceptance drive on the BTC/DOGE regtest rail (token AT1 to AT8)',
     journalSuite: 'bridgeRailToken',
     logTag: 'TOKEN RAIL',
     readoutTitle: 'token rail drive readouts',
+    dropStaleReplay: true,
     // BTC at 2, not the rail's pinned 1 (token rail drive 25): at depth 1 the hub can stamp a
     // snapshot_block below the lock's own block and the DOGE escrow proof then refuses a
     // correct lock (hub finding 1 of 2026-09-17_pb-v020-rail-token.md).
@@ -80,6 +176,9 @@ function createRailDrive(cfg) {
         evidence: {},       // every readout this drive took, printed at the end
         tokens: token.records(),
     };
+    let driveEnding = false;
+    let quorumReleaseRequired = false;
+    let launchMonitor = null;
     if (typeof cfg.records === 'function') Object.assign(state, cfg.records());
 
     async function recordSourceContext() {
@@ -89,7 +188,31 @@ function createRailDrive(cfg) {
         state.evidence.repoRoot = process.env.BRIDGE_RAIL_REPO_ROOT || null;
         state.evidence.indexerModulesLoaded = Object.keys(require.cache)
             .filter((p) => /xchain-indexer[\\/]src[\\/]/.test(String(p))).sort();
+        const dogeIndexer = await resolveIndexerPort({
+            configured: process.env.DOGE_INDEXER_API_PORT,
+            candidates: DOGE_INDEXER_CANDIDATE_PORTS,
+            accepts: tcpAccepts(process.env.DOGE_SERVICE_HOST || 'localhost', 2000),
+        });
+        if (dogeIndexer.source === 'probe') process.env.DOGE_INDEXER_API_PORT = String(dogeIndexer.port);
+        state.evidence.dogeIndexerPort = dogeIndexer;
         state.dogeRail = await chainRail.createRail('dogecoin', NETWORK);
+    }
+
+    async function requireMinersAlive() {
+        const watched = await readTipAdvance({
+            readers: miningNodeTipReaders({
+                btcNode: nodeConnector,
+                dogeRail: state.dogeRail,
+                withRail: chainRail.withRail,
+            }),
+            sleep: wait,
+            now: Date.now,
+        });
+        state.evidence.minerLiveness = watched;
+        const pauseFilesPresent = [process.env.BRIDGE_RAIL_MINER_PAUSE_FILE,
+            process.env.BRIDGE_RAIL_DOGE_MINER_PAUSE_FILE]
+            .filter((file) => file && fs.existsSync(file));
+        assert.ok(watched.alive, minerStallReason(watched.stalled, DEFAULT_BUDGET_MS, pauseFilesPresent));
     }
 
     async function prepareQuorum() {
@@ -129,6 +252,7 @@ function createRailDrive(cfg) {
     }
 
     async function startVenue(mesh) {
+        if (cfg.dropStaleReplay) await dropStaleReplayBeforeVenue(cfg.label);
         state.venue = new BridgeRailVenue({
             label: cfg.label,
             basePort: cfg.basePort,
@@ -158,30 +282,49 @@ function createRailDrive(cfg) {
     }
 
     async function prepareDrive() {
+        const connector = driveHubConnector();
+        await waitForCompetingDrive(connector);
+        await requireHealthyHub(() => pingDriveHub(connector));
+        const preflight = await fullDrivePreflight(connector);
+        state.evidence.preflight = preflight;
+        assert.ok(preflight.ready, 'token rail full-drive preflight failed: ' + preflight.reason);
         await recordSourceContext();
+        await requireMinersAlive();
+        // Only a drive that names a staker label brings up this shared quorum. The policy
+        // drive names none: it stakes and releases its signers through its own bring-up,
+        // which reuses recorded signers and batches its releases.
+        if (cfg.stakerLabel) {
+            quorumReleaseRequired = true;
+            await withMiningPaused(regtestMinerConnector,
+                () => ensureBridgeRailQuorum(cfg.stakerLabel),
+                { pauseFile: process.env.BRIDGE_RAIL_MINER_PAUSE_FILE || '' });
+        }
         const mesh = await prepareQuorum();
         if (!mesh) return;
         await startVenue(mesh);
+        if (!state.blocked) state.evidence.drivePrepared = true;
     }
 
     // Every case's verdict, written as it ends: a mocha failure message exists only in the
     // epilogue and an interrupted drive never prints one (the base support's drive 13).
     function recordCase() {
-        const test = this.currentTest || {};
-        const err = test.err || null;
-        journalCase({
-            suite: cfg.journalSuite,
-            title: String(test.title || ''),
-            state: String(test.state || 'unfinished'),
-            durationMs: Number(test.duration || 0),
-            error: err ? String(err.message).slice(0, 4000) : null,
-        });
+        journalCase(caseJournalEntry(this.currentTest || {}, cfg.journalSuite, state.blocked));
+    }
+
+    async function stopVenueAndReleaseQuorum() {
+        try {
+            if (state.venue) await state.venue.stop();
+        } finally {
+            if (quorumReleaseRequired) await releaseBridgeRailQuorum();
+        }
     }
 
     async function finishDrive() {
         this.timeout(0);
-        if (state.venue) await state.venue.stop();
-        console.log('\n=== ' + cfg.readoutTitle + ' ===\n' + JSON.stringify(state.evidence, null, 2) + '\n');
+        driveEnding = true;
+        if (launchMonitor) clearInterval(launchMonitor);
+        await stopVenueAndReleaseQuorum();
+        console.log('\n=== ' + cfg.readoutTitle + ' ===\n' + evidenceJson(state.evidence, 2) + '\n');
         journalCase({ suite: cfg.journalSuite, title: '=== readouts ===', state: 'evidence',
             evidence: state.evidence });
         // A leg that reorgs the SHARED BTC regtest chain must not leave it shorter than it
@@ -234,11 +377,42 @@ function createRailDrive(cfg) {
         return true;
     }
 
+    function exitWhenLaunchSessionLeaves() {
+        const launchParentPid = process.ppid;
+        const leave = (reason) => {
+            if (driveEnding) return;
+            driveEnding = true;
+            if (launchMonitor) clearInterval(launchMonitor);
+            journalCase({ suite: cfg.journalSuite, title: '=== drive orphaned ===', state: 'evidence',
+                evidence: { reason } });
+            Promise.resolve()
+                .then(stopVenueAndReleaseQuorum)
+                .catch(() => {})
+                .then(() => process.exit(2));
+        };
+        process.stdout.on('error', (err) => {
+            if (err && err.code === 'EPIPE') leave('the output pipe closed, so the launching session is gone');
+        });
+        launchMonitor = setInterval(() => {
+            let psText;
+            try {
+                psText = execFileSync('ps', ['-eo', 'pid=,ppid=,args='], { encoding: 'utf8' });
+            } catch (error) {
+                return;
+            }
+            if (!launchParentIsAttached(psText, process.pid, launchParentPid)) {
+                leave('the launch parent is gone, so the launching session is gone');
+            }
+        }, LAUNCH_MONITOR_MS);
+        launchMonitor.unref();
+    }
+
     let outerSuite = null;
 
     function registerHooks() {
         before(async function () {
             this.timeout(0);
+            exitWhenLaunchSessionLeaves();
             await prepareDrive();
         });
         afterEach(recordCase);
@@ -269,7 +443,7 @@ function createRailDrive(cfg) {
         state,
         needsFederation,
         bridgeRailSuite,
-    }, token.bind(state));
+    }, withDogeFeeSchedule(token.bind(state), state));
 }
 
 // Requiring this module builds the token drive and nothing else: `describe` is only called
