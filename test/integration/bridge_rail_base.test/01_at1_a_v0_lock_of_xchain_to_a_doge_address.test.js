@@ -20,6 +20,7 @@ const {
     cryptoHelper,
     transactionHelper,
     gasHelper,
+    confirmedHeight,
     lockWireV0,
     escrowOf,
     GAS_TICK,
@@ -28,6 +29,10 @@ const {
     needsFederation,
     bridgeRailSuite,
 } = require('./support');
+
+// The same finalize budget the token and policy drives give a leg. A round's wall time is
+// the venue's, not the bridge's: on a hosted runner a DOGE-sourced round took 3.8 minutes.
+const FINALIZE_MS = 30 * 60 * 1000;
 
 async function prepareAt1Lock() {
     // FUNDED WITH 5 COIN, NOT 1: this address is the source of four later DOGE legs
@@ -45,7 +50,13 @@ async function prepareAt1Lock() {
     state.at1Dest = dest;
     const sender = await state.venue.funded('AT1.SENDER',
         () => cryptoHelper.getNewFundedAddress('AT1.SENDER', 'bitcoin', NETWORK, null, 'legacy', 0, 1, false));
-    await gasHelper.fundGas(sender, AT1_LOCK);
+    const funding = await gasHelper.fundGas(sender, AT1_LOCK);
+    // fundGas returns on the STANDING indexer's grading, while `before` is read off the
+    // VENUE BTC indexer, which parses the same block on its own clock. Read early, the
+    // sender shows 0 and the debit below reads 0 for a lock that took exactly 5.
+    state.evidence.at1_fundingParsed = Object.assign({ txHash: funding.txHash },
+        await state.venue.waitForVenueTip('BTC', await confirmedHeight(nodeConnector, funding.txHash),
+            'holding the AT1 sender funding'));
 
     const before = {
         senderBtc: await state.venue.addressBalance('BTC', sender.address, GAS_TICK),
@@ -59,7 +70,8 @@ async function prepareAt1Lock() {
 
     const row = await state.venue.waitForFinalizedTransfer(
         (r) => String(r.src_chain) === 'BTC' && String(r.dest_chain) === 'DOGE' &&
-               String(r.dest_address) === dest.address && String(r.tick) === GAS_TICK);
+               String(r.dest_address) === dest.address && String(r.tick) === GAS_TICK,
+        { timeoutMs: FINALIZE_MS });
     return { dest, sender, before, row };
 }
 

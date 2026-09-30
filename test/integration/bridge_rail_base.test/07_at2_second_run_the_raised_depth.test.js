@@ -53,7 +53,10 @@ bridgeRailSuite('AT2, second run: the raised depth', function () {
             transactionHelper.createAndSendTransaction(
                 state.at1Dest, burnWireV1(dest.address, 1, '')));
         const row = await state.venue.waitForFinalizedTransfer(
-            (r) => String(r.dest_address) === dest.address, { timeoutMs: 60 * 60 * 1000 });
+            // Sixty DOGE blocks plus one round. A hosted runner's miner makes about one block
+            // a minute, so sixty took the whole of a 60-minute budget and the round opened 30 s
+            // before it ended; the depth itself is asserted below, not the wall clock.
+            (r) => String(r.dest_address) === dest.address, { timeoutMs: 120 * 60 * 1000 });
         const endHeight = await heightAt();
         state.evidence.at2b = { burnTx, startHeight, endHeight, depth: endHeight - startHeight,
             finalized: !!row, transferId: row ? row.transfer_id : null };

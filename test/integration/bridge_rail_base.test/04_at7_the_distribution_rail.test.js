@@ -56,7 +56,8 @@ async function startDistributionLock() {
     const lockTx = await transactionHelper.createAndSendTransaction(
         gasIssuer, lockWireV0('DOGE', operator.address, AT7_MINT, ''));
     const row = await state.venue.waitForFinalizedTransfer(
-        (r) => String(r.dest_address) === operator.address && Number(r.amount) === AT7_MINT);
+        (r) => String(r.dest_address) === operator.address && Number(r.amount) === AT7_MINT,
+        { timeoutMs: 30 * 60 * 1000 });
     return { operator, lockTx, row };
 }
 
