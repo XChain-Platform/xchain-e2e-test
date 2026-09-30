@@ -16,6 +16,12 @@ function freshTick() {
     return tick;
 }
 
+// The indexer keeps the class ('valid' or 'invalid') in prices.validation_status and the
+// reason ('invalid: VALUE (format)') in the joined index_statuses row, read back as `status`.
+function validationClass(expect) {
+    return expect === 'valid' ? 'valid' : 'invalid';
+}
+
 describe('PRICE v1 canonical decimal bound', function () {
     this.timeout(0);
 
@@ -32,10 +38,11 @@ describe('PRICE v1 canonical decimal bound', function () {
                 value: testCase.value,
                 fee: testCase.fee,
                 memo: 'canonical decimal bound'
-            }, testCase.expect);
+            }, validationClass(testCase.expect));
 
             assert(result.price, 'PRICE v1 row should exist in the index');
-            assert.strictEqual(result.price.validation_status, testCase.expect);
+            assert.strictEqual(result.price.validation_status, validationClass(testCase.expect));
+            assert.strictEqual(result.price.status, testCase.expect);
         });
     }
 });

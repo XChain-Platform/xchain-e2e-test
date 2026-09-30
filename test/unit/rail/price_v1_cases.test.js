@@ -97,7 +97,11 @@ describe('PRICE v1 canonical-bound rail cases', function () {
 
     it('executes every rail case with a fresh oracle and the expected status', async function () {
         const harness = loadRailSuite((address, price, validationStatus) => ({
-            price: { validation_status: validationStatus }
+            price: {
+                validation_status: validationStatus,
+                status: PRICE_V1_CASES.find(testCase =>
+                    testCase.value === price.value && testCase.fee === price.fee).expect
+            }
         }));
 
         assert.deepStrictEqual(harness.tests.map(test => test.title), PRICE_V1_CASES.map(testCase =>
@@ -114,7 +118,7 @@ describe('PRICE v1 canonical-bound rail cases', function () {
             const call = harness.sendCalls[i];
             assert.strictEqual(call[1].value, PRICE_V1_CASES[i].value);
             assert.strictEqual(call[1].fee, PRICE_V1_CASES[i].fee);
-            assert.strictEqual(call[2], PRICE_V1_CASES[i].expect);
+            assert.strictEqual(call[2], PRICE_V1_CASES[i].expect === 'valid' ? 'valid' : 'invalid');
         }
     });
 
@@ -132,6 +136,19 @@ describe('PRICE v1 canonical-bound rail cases', function () {
             assert.strictEqual(error.code, 'ERR_ASSERTION');
             assert.strictEqual(error.actual, 'wrong status');
             assert.strictEqual(error.expected, PRICE_V1_CASES[0].expect);
+            return true;
+        });
+    });
+
+    it('fails when the indexed refusal reason differs', async function () {
+        const harness = loadRailSuite(() => ({
+            price: { validation_status: 'invalid', status: 'invalid: FEE (format)' }
+        }));
+
+        await assert.rejects(() => runRailTests([harness.tests[1]]), error => {
+            assert.strictEqual(error.code, 'ERR_ASSERTION');
+            assert.strictEqual(error.actual, 'invalid: FEE (format)');
+            assert.strictEqual(error.expected, PRICE_V1_CASES[1].expect);
             return true;
         });
     });
