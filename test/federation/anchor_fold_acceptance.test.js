@@ -35,7 +35,7 @@ describe('fold activation: AF2', function(){
 })
 restoreFoldEnv()
 armFold()
-describe.skip('fold activation: AF3', function(){
+describe('fold activation: AF3', function(){
     before(armFold)
     require('./anchor_fold/af3_late_crc_scope.test.js')
     after(restoreFoldEnv)

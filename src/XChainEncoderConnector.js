@@ -67,13 +67,15 @@ class XChainEncoderConnector {
     // between calls, so this genuinely reconstructs the BIP341 tweak from the record
     // rather than from anything left over from the build; losing that record is what
     // strands the commit's value in an address the wallet cannot re-derive.
-    async createEnvelopeCancelTx({ commitTxid, commitVout, commitValue, internalPubkey, tapleafHash, destination, feePerKb = null }){
+    // Send replacebyfee only when given, untouched, so the encoder's strict validator judges it.
+    async createEnvelopeCancelTx({ commitTxid, commitVout, commitValue, internalPubkey, tapleafHash, destination, feePerKb = null, replacebyfee }){
         const dataToSend = {
             jsonrpc: '2.0',
             method: 'create_envelope_cancel_tx',
             params: { commitTxid, commitVout, commitValue, internalPubkey, tapleafHash, destination, feePerKb },
             id: 1
         }
+        if (replacebyfee !== undefined) dataToSend.params.replacebyfee = replacebyfee
 
         let response = null
         try {

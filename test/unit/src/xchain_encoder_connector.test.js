@@ -293,3 +293,38 @@ describe('XChainEncoderConnector', function () {
         });
     });
 });
+
+const CANCEL_RECORD = {
+    commitTxid: 'tx', commitVout: 0, commitValue: 1000,
+    internalPubkey: 'ipk', tapleafHash: 'tlh', destination: 'dest'
+};
+
+async function cancelParams(extra) {
+    axiosPostStub.resolves({ data: { result: fakeResult } });
+    await connector.createEnvelopeCancelTx({ ...CANCEL_RECORD, ...extra });
+    return axiosPostStub.firstCall.args[1].params;
+}
+
+describe('XChainEncoderConnector', function () {
+    beforeEach(setupConnector);
+    afterEach(teardownConnector);
+    describe('createEnvelopeCancelTx replacebyfee', function () {
+        it('maps the recovery record to create_envelope_cancel_tx params', async function () {
+            const params = await cancelParams({});
+            assert.strictEqual(axiosPostStub.firstCall.args[1].method, 'create_envelope_cancel_tx');
+            assert.deepStrictEqual(params, { ...CANCEL_RECORD, feePerKb: null });
+        });
+
+        for (const value of [true, false, 'true']) {
+            it(`forwards replacebyfee ${JSON.stringify(value)} as given, uncoerced`, async function () {
+                const params = await cancelParams({ replacebyfee: value });
+                assert.strictEqual(params.replacebyfee, value);
+            });
+        }
+
+        it('leaves replacebyfee absent when the caller omits it', async function () {
+            const params = await cancelParams({});
+            assert.strictEqual('replacebyfee' in params, false);
+        });
+    });
+});
