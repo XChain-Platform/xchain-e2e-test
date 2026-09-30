@@ -33,6 +33,21 @@ const mariadb = require('mariadb')
 
 const topology = require('./hubMirrorTopology')
 
+// initialCheck builds global.hubConnector only on its hub-config path, which a venue whose
+// .env names every service never takes, so a mirrored seed there found no hub to push to.
+// Build the same connector from the same endpoints, once, and only when the hub answers.
+let ownHubConnector = null
+async function hubForPush(){
+    if (global.hubConnector) return global.hubConnector
+    if (!ownHubConnector){
+        const XChainHubConnector = require('../../src/XChainHubConnector.js')
+        const hub = new XChainHubConnector(XChainHubConnector.parseEndpoints())
+        if (!(await hub.ping())) return null
+        ownHubConnector = hub
+    }
+    return ownHubConnector
+}
+
 // See hubMirrorTopology for the three database roles. The short version: seeding
 // and reading are the same database only while no mirror is carrying rows, and
 // the read side is the indexer's hubDb rather than its own DB whenever one is
@@ -162,7 +177,8 @@ module.exports = {
     // hour ago. This is faithful rather than a cheat, since reverse matching walks
     // back from the payment block's own time and cannot tell how the row aged.
     async pushQuoteViaHub({ sourceAddress, sourceChain, coin, tick, fiat, value, fee, blockTime, actionIndex, memo, pushGeneration }){
-        if (!global.hubConnector) throw new Error('oraclePriceHelper.pushQuoteViaHub: no hubConnector; the hub is unreachable from this venue')
+        const hub = await hubForPush()
+        if (!hub) throw new Error('oraclePriceHelper.pushQuoteViaHub: no hubConnector; the hub is unreachable from this venue')
         // The hub's upsert is generation-FENCED: an equal-or-lower push_generation
         // is refused as a duplicate rather than applied. The raw-INSERT path can
         // ignore this because its ON DUPLICATE KEY UPDATE refreshes every column
@@ -178,7 +194,7 @@ module.exports = {
                 sourceChain: sourceChain || 'BTC', actionIndex
             })) + 1
         }
-        let result = await global.hubConnector._call({
+        let result = await hub._call({
             jsonrpc: '2.0', id: 1, method: 'pushoracleprice',
             params: {
                 source_chain:    sourceChain || 'BTC',
