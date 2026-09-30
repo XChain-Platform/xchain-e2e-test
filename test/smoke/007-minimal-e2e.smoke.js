@@ -14,7 +14,11 @@ const issueHelper = require('../helpers/issueHelper')
 const sendHelper = require('../helpers/sendHelper')
 
 describe('SMOKE: Minimal E2E: ISSUE + SEND', () => {
-    it('should issue a token and send it to another address', async () => {
+    it('should issue a token and send it to another address', async function () {
+        // Three confirmed blocks (funding, ISSUE, SEND), each indexed about 10 s after it is
+        // mined on a regtest rail where the decoder and indexer each poll every 5 s, so the
+        // suite-wide 30 s smoke budget is missed by about a second while both actions land valid.
+        this.timeout(90000)
         const senderAddress = await cryptoHelper.getNewFundedAddress(
             'SMOKE.E2E', COIN, NETWORK, null, 'legacy', 0, 1
         )
