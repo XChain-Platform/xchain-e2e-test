@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-09-29
+
+### Added
+- Added a testnet cross-chain settlement runner with GAS funding and per-suite bridge rail scripts.
+- Added ANCHOR v3 vector parity coverage.
+
+### Changed
+- Accepted mirror barriers held by the configured grace period.
+
+### Fixed
+- Improved oracle replay diagnostics for validator weight resolution disagreements.
+- Seeded the settlement price before each FIAT dispenser create.
+
 ## [0.20.1] - 2026-09-23
 
 ### Changed
