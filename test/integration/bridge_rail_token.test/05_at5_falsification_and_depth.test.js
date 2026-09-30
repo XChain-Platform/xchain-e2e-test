@@ -69,7 +69,45 @@ async function signedTokenTemplate() {
 
 // Inject `row` into the DOGE mirror and hold until the destination has logged a refusal
 // naming it and run two more passes over it; answer the balance and the refusal lines.
+//
+// THE ROW IS REMOVED AGAIN once it has been judged, pass or fail. A refused row is never
+// recorded as settled, so it stays due on every DOGE block and takes one of the
+// XBRIDGE_MAX_PER_BLOCK slots for the rest of the drive: left behind, the three AT5 rows
+// turned token AT8 (cap) into 22 then 8 and held the FUFU rail unsettled for token AT8
+// (invariant) in every full drive.
 async function injectAndObserve(row, dest) {
+    let got;
+    try {
+        got = await observeInjected(row, dest);
+    } catch (e) {
+        // The observation's own failure is the one to report; a cleanup failure behind it
+        // is logged rather than allowed to replace it.
+        await removeInjected(row.transfer_id).catch((c) => console.log('  AT5 cleanup after a failed case: ' + c.message));
+        throw e;
+    }
+    await removeInjected(row.transfer_id);
+    return got;
+}
+
+// Delete the injected row from the shared hubs and from every venue indexer's mirror copy
+// (BTC and DOGE both mirror the same hubs), then confirm the DOGE mirror no longer holds it.
+async function removeInjected(transferId) {
+    const venue = state.venue;
+    const key = { transfer_id: transferId };
+    const opts = { table: 'bridge_transfers' };
+    const removed = [];
+    for (const v of [venue.dogeVenue, venue.btcVenue]) {
+        if (v) removed.push(await v.deleteMirrorRow(key, opts));
+    }
+    const left = await venue.queryMirrorDb('DOGE', 'SELECT transfer_id FROM bridge_transfers WHERE transfer_id = ?', [transferId]);
+    assert.strictEqual(left.length, 0, 'the injected row ' + transferId + ' is still in the DOGE mirror after ' + JSON.stringify(removed));
+    for (const hub of venue.hubs) {
+        const onHub = await venue.queryHubDb(hub.dbName, 'SELECT transfer_id FROM bridge_transfers WHERE transfer_id = ?', [transferId]);
+        assert.strictEqual(onHub.length, 0, 'the injected row ' + transferId + ' is still on hub ' + hub.index);
+    }
+}
+
+async function observeInjected(row, dest) {
     const venue = state.venue;
     await venue.dogeVenue.injectMirrorRow(row, { table: 'bridge_transfers', key: ['transfer_id'] });
     const idPrefix = row.transfer_id.slice(0, 16);

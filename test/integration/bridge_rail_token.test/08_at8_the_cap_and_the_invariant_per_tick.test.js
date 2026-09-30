@@ -121,6 +121,29 @@ async function lockThirtyInOneBlock(legs, dest) {
     });
 }
 
+// The DOGE settle pass takes the first XBRIDGE_MAX_PER_BLOCK DUE rows, applied or refused
+// (xchain-indexer src/consensus/bridge_settle/pass.js dueBridgeTransfers), so any other
+// finalized, effective, unsettled DOGE-bound row in the mirror shares the release block's
+// cap with the thirty legs. This answers every such row except the cap legs themselves,
+// dropping the ones the pass drops too (settled by id, or by source leg).
+async function otherDueRows(ownIds, due) {
+    const venue = state.venue;
+    const own = new Set(ownIds);
+    const rows = (await venue.queryMirrorDb('DOGE',
+        "SELECT transfer_id, snapshot_block, effective_time, tick, src_chain, src_action_index FROM bridge_transfers " +
+        "WHERE status = 'finalized' AND dest_chain = 'DOGE' AND effective_time <= ?", [due]))
+        .filter((r) => !own.has(String(r.transfer_id)));
+    if (rows.length === 0) return [];
+    const settled = await venue.queryIndexerDb('DOGE',
+        "SELECT transfer_id, src_chain, src_action_index FROM bridge_settlements WHERE kind = 'transfer'", []);
+    const byId = new Set(settled.map((s) => String(s.transfer_id)));
+    const byLeg = new Set(settled.map((s) => String(s.src_chain) + ':' + String(s.src_action_index)));
+    return rows
+        .filter((r) => !byId.has(String(r.transfer_id)) && !byLeg.has(String(r.src_chain) + ':' + String(r.src_action_index)))
+        .map((r) => ({ transfer_id: String(r.transfer_id), tick: String(r.tick),
+                       snapshot_block: String(r.snapshot_block), effective_time: String(r.effective_time) }));
+}
+
 // Hold the DOGE side still until every leg has finalized and is due, then release it.
 async function holdDogeUntilDue(dest, count) {
     const venue = state.venue;
@@ -146,6 +169,12 @@ async function holdDogeUntilDue(dest, count) {
         // the last effective_time, and the hold is exactly as long as that takes.
         await venue.waitUntil('every cap leg\'s effective_time to pass', () => Date.now() >= due * 1000,
             { timeoutMs: waitMs + 60000, everyMs: 5000 });
+        // Read while DOGE is still held, so the settled set cannot move under the reading.
+        const others = await otherDueRows(finalized.map((r) => String(r.transfer_id)), due);
+        assert.strictEqual(others.length, 0,
+            'the release block would not be the cap legs\' alone: ' + others.length + ' other due, unsettled ' +
+            'DOGE-bound row(s) share XBRIDGE_MAX_PER_BLOCK with them, so "' + capPerBlock() + ' then 5" cannot ' +
+            'hold. An earlier case left them behind: ' + JSON.stringify(others));
         return finalized;
     }, { pauseFile });
     return { rows, held: !!pauseFile };

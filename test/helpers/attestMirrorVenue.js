@@ -3584,6 +3584,68 @@ class AttestMirrorVenue {
     }
 
     /**
+     * Remove ONE row that `injectMirrorRow` wrote, from the hub databases AND from every
+     * venue indexer's mirror copy, so a drill leaves nothing behind for the next case.
+     *
+     * WHY BOTH PLACES. The hub is where the injection landed, so a later reconnect would
+     * re-page the row back if only the mirror copy went. The mirror copy is what the
+     * indexer reads every block, and deleting at the hub alone never reaches it: a
+     * follower learns a deletion only from a `row:deleted` live event, which the hub
+     * broadcasts from its own retraction paths and never for a row it did not write.
+     *
+     * WHY IT MATTERS. An injected `bridge_transfers` row the destination refuses without
+     * a settlement record (a quorum or token-row refusal) stays finalized and due on
+     * every block, and the settle pass caps due rows, not applied ones, at
+     * XBRIDGE_MAX_PER_BLOCK. Left in place, three AT5 rows took three of the 25 slots
+     * in token AT8 (cap) and held the FUFU rail unsettled for token AT8 (invariant).
+     * Removing an unapplied mirror row is the product's own meaning of a retraction:
+     * it is never applied.
+     *
+     * @param {object} keyValues  the row's key columns -> values (e.g. `{transfer_id}`)
+     * @param {object} [opts]     `{hubs: [i], table, mirrors: false}`; hubs defaults to the
+     *                            hubs this venue's indexers follow, table to
+     *                            `attestation_responses`; `mirrors: false` skips the copies
+     * @returns {Promise<{hubs: Array, mirrors: Array}>} one `{hub|indexer, deleted}` each
+     */
+    async deleteMirrorRow(keyValues, opts) {
+        const o = opts || {};
+        const keyCols = Object.keys(keyValues || {});
+        if (keyCols.length === 0) {
+            throw new Error('attestMirrorVenue: deleteMirrorRow was given no key columns, ' +
+                'and an unkeyed DELETE would empty the table');
+        }
+        for (const c of keyCols) {
+            ident(c, 'mirror key column');
+            if (keyValues[c] === undefined || keyValues[c] === null) {
+                throw new Error('attestMirrorVenue: deleteMirrorRow key column ' + c + ' has no value');
+            }
+        }
+        const table = ident(String(o.table || 'attestation_responses'), 'mirror table');
+        const where = keyCols.map((c) => '`' + c + '` = ?').join(' AND ');
+        const args = keyCols.map((c) => keyValues[c]);
+
+        const hubIndexes = (Array.isArray(o.hubs) && o.hubs.length)
+            ? o.hubs.slice()
+            : Array.from(new Set(this.indexers.map((ix) => ix.followsHub)));
+        const out = { hubs: [], mirrors: [] };
+        for (const hubIndex of hubIndexes) {
+            const hub = this.hubs[hubIndex];
+            if (!hub) throw new Error('attestMirrorVenue: no hub ' + hubIndex);
+            const db = ident(hub.dbName, 'database name');
+            const res = await this._conn.query('DELETE FROM `' + db + '`.`' + table + '` WHERE ' + where, args);
+            out.hubs.push({ hub: hubIndex, deleted: Number(res && res.affectedRows) || 0 });
+        }
+        if (o.mirrors !== false) {
+            for (const ix of this.indexers) {
+                const db = ident(ix.mirrorDbName, 'database name');
+                const res = await this._conn.query('DELETE FROM `' + db + '`.`' + table + '` WHERE ' + where, args);
+                out.mirrors.push({ indexer: ix.index, deleted: Number(res && res.affectedRows) || 0 });
+            }
+        }
+        return out;
+    }
+
+    /**
      * Starve indexer `i`'s mirror of ONE table, indefinitely, until released.
      *
      * Route-level and edge-scoped: the hub keeps writing, keeps gossiping and keeps
