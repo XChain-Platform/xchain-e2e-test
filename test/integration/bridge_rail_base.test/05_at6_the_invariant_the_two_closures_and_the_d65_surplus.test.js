@@ -29,6 +29,8 @@ const {
     bridgeRailSuite,
     confirmedHeight,
 } = require('./support');
+const { journalCase } = require('../../helpers/bridgeRailVenue');
+const { WATCH_INPUT_TITLE } = require('../../../scripts/rail_leg/rail_watch_verdict');
 
 async function createSurplus(escrowAddr) {
     const before = await chainHalves();
@@ -98,7 +100,7 @@ bridgeRailSuite('AT6: the invariant, the two closures and the D65 surplus', func
 });
 
 bridgeRailSuite('AT6: the invariant, the two closures and the D65 surplus', function () {
-    it('reports a surplus of exactly 1 for DOGE after a plain SEND to the escrow, and the watch raises WARN not CRIT', async function () {
+    it('reports a surplus of exactly 1 for DOGE after a plain SEND to the escrow, and records the hub answer for the watch', async function () {
         this.timeout(0);
         if (needsFederation(this, 'AT6 D65 surplus')) return;
 
@@ -134,23 +136,15 @@ bridgeRailSuite('AT6: the invariant, the two closures and the D65 surplus', func
             ' on a plain SEND of 1 to the escrow, so the surplus it reports is not this ' +
             'stray credit: ' + JSON.stringify(doge));
 
-        // THE WATCH ITEM, driven rather than described: the real classifier from
-        // the platform's own watch script is handed the real answer.
-        const watch = require('../../../../claude/scripts/xchain-watch.js');
-        const items = watch.bridgeInvariantVerdicts([{ label: 'venue-hub-0', ok: true, byTick: inv }]);
-        const forDoge = items.filter((i) => i.tick === GAS_TICK && i.chain === 'DOGE');
-        state.evidence.at6_watch = forDoge.map((i) => ({ sev: i.sev, kind: i.kind }));
-        assert.strictEqual(forDoge.length, 1);
-        // D65's asymmetry, driven on the REAL hub answer and deliberately not on a
-        // corrected copy of it. A CRIT here is not the classifier being wrong: it means
-        // the hub read a deficit (an in_flight term that did not drain, or a destination
-        // holding more than the escrow backs), which is a production finding, and feeding
-        // this assertion a patched invariant would hide it.
-        assert.strictEqual(forDoge[0].sev, 'warn',
-            'the watch raised ' + forDoge[0].sev + '/' + forDoge[0].kind + ' on the hub answer ' +
-            JSON.stringify(doge) + '. A deficit here with the chain halves level (escrow ' +
-            after.escrow + ', non-bridge ' + after.nonBridge.net + ', supply ' + after.supply +
-            ') is the in_flight term, not a real deficit.');
-        assert.strictEqual(forDoge[0].kind, 'BRIDGE_INVARIANT_SURPLUS');
+        // The watch half runs where the platform watch script is: this records the real hub
+        // answer, uncorrected, and scripts/rail_leg/rail_watch_verdict.js asserts WARN
+        // BRIDGE_INVARIANT_SURPLUS on it (a CRIT would be a hub-side deficit finding).
+        const watchInput = { tick: GAS_TICK, chain: 'DOGE',
+            reports: [{ label: 'venue-hub-0', ok: true, byTick: inv }],
+            chainHalves: { escrow: after.escrow, nonBridge: after.nonBridge.net, supply: after.supply } };
+        state.evidence.at6_watchInput = watchInput;
+        assert.ok(journalCase({ suite: 'bridgeRailBase', title: WATCH_INPUT_TITLE, state: 'evidence',
+            evidence: watchInput }), 'the AT6 watch input could not be written to the case journal, ' +
+            'so the classifier half has nothing to read (BRIDGE_RAIL_JOURNAL_DIR unset?)');
     });
 });
