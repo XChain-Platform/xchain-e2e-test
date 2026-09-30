@@ -38,7 +38,9 @@
  * first `redundancy` slots is what makes the headroom slot load-bearing, because
  * the third signature can then only come from it. Rank 1 rather than rank 0
  * because rank 0 is the leader at escalation step 0 and stopping it would be a
- * test of leader rotation instead.
+ * test of leader rotation instead. Rank 1 is never a hub a venue indexer follows:
+ * that indexer would lose its only mirror stream and never see the row, so such a
+ * draw is discarded before anything stops and drawn again.
  *
  * WHY THE POLL IS SLOWED DOWN HERE, and what it is NOT. `attestationPollMs` is
  * raised to open a window between the request becoming visible and the first round
@@ -83,6 +85,7 @@ const POLL_MS = 20000
 // request changes both the draw and which hub occupies rank 1, so a bounded retry
 // turns that race into one discarded request without turning the leg into a hang.
 const VICTIM_WINDOW_ATTEMPTS = 4
+const FOLLOWED_REDRAW_ATTEMPTS = 8 // rank 1 is a followed hub about 2 draws in 5
 
 const FORWARD_S = 3
 
@@ -315,7 +318,7 @@ describe('ZC3: a drawn member that cannot sign is covered by the headroom slot',
         let victimStarted = true
         const victimAttempts = []
 
-        for (let attempt = 1; attempt <= VICTIM_WINDOW_ATTEMPTS; attempt++) {
+        for (let attempt = 1, redraws = 0; attempt <= VICTIM_WINDOW_ATTEMPTS; attempt++) {
             const { exec, sinceAction, requestVisibleAtMs } = await issueRequest()
             assert.strictEqual(exec.execution.status, 'valid',
                 'the EXECUTE that emits the request came back ' + exec.execution.status)
@@ -334,6 +337,11 @@ describe('ZC3: a drawn member that cannot sign is covered by the headroom slot',
             victimHub = selected.victimHub
             assert.ok(victimHub >= 0,
                 'the drawn member at rank 1 (' + victimKey.slice(0, 16) + '...) belongs to no venue hub. ' + 'The venue adopts the roster precisely so every drawn key has a live hub here.')
+            if (venue.indexers.some((ix) => ix.followsHub === victimHub)) {
+                assert.ok(++redraws <= FOLLOWED_REDRAW_ATTEMPTS, 'ZC3 drew ' + redraws + ' requests (across all window attempts) whose rank 1 is a hub a venue indexer follows; stopping it would starve that indexer\'s mirror')
+                console.log('ZC3: discarded request ' + requestId.slice(0, 12) + ' before stopping anything: rank 1 is hub ' + victimHub + ', which a venue indexer follows (redraw ' + redraws + ')')
+                attempt--; continue
+            }
             const observation = await stopVictim(
                 victimHub, victimKey, requestId, requestVisibleAtMs)
             victimStarted = observation.victimStarted
