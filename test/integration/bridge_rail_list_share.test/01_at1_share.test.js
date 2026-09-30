@@ -13,6 +13,7 @@ const {
     assert,
     state,
     fundChain,
+    sharedBtcLtcAddress,
     chainAction,
     listCreateWire,
     listShareWire,
@@ -28,7 +29,7 @@ bridgeRailSuite('list_share AT1: a DOGE address list becomes a signed full versi
         assert.ok(state.evidence.t0, 'T0 must have armed the venue');
         const M = state.listShare.home;
         M.owner = await fundChain('DOGE', 'LISTSHARE.AT1.OWNER', 10);
-        M.old = await fundChain('BTC', 'LISTSHARE.AT1.BTC');
+        M.old = await sharedBtcLtcAddress('LISTSHARE.AT1.OLD');
         M.ltc = await fundChain('LTC', 'LISTSHARE.AT1.LTC', 1);
         M.doge = await fundChain('DOGE', 'LISTSHARE.AT1.DOGE', 1);
         M.members = [M.old.address, M.ltc.address, M.doge.address];

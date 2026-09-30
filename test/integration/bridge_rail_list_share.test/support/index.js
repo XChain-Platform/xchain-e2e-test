@@ -31,6 +31,7 @@ const createRailDrive = loadDriveFactory();
 const chainRail = require('../../../helpers/chainRail');
 const { transactionState } = require('../../../transactionHelper/lib/01_create_and_send_transaction');
 const { spendableInputCount, freshInputCount } = require('../../../helpers/rail_preflight/policy_at2_at4');
+const { withDogeFeeSchedule } = require('../../../helpers/rail_preflight/token_doge_fee');
 const { withMiningPaused, verdictOf } = bridgeRailVenue;
 
 const CHAINS = ['BTC', 'LTC', 'DOGE'];
@@ -55,7 +56,8 @@ const DRIVE = {
     confirmations: { BTC: 1, DOGE: 1, LTC: 1 },
     records: () => ({ listShare: { home: {}, mirrors: {}, tokens: {} } }),
 };
-const drive = createRailDrive(DRIVE);
+const baseDrive = createRailDrive(DRIVE);
+const drive = withDogeFeeSchedule(baseDrive, baseDrive.state);
 
 function listCreateWire(type, items, memo) {
     drive.assert.ok([1, 2, 3].includes(Number(type)), 'LIST create type must be 1, 2 or 3');
@@ -119,11 +121,19 @@ async function fundChain(chain, label, coins) {
             coins || 5, false)));
 }
 
-async function newAddress(chain, label) {
+async function newAddress(chain, label, mnemonic) {
     const coins = { BTC: 'bitcoin', LTC: 'litecoin', DOGE: 'dogecoin' };
     const name = String(chain).toUpperCase();
     return onChain(name, () => drive.cryptoHelper.getNewAddress(
-        label, coins[name], NETWORK, null, 'legacy', 0));
+        label, coins[name], NETWORK, mnemonic || null, 'legacy', 0));
+}
+
+async function sharedBtcLtcAddress(label) {
+    const btc = await newAddress('BTC', label + '.BTC');
+    const ltc = await newAddress('LTC', label + '.LTC', btc.mnemonic);
+    drive.assert.strictEqual(ltc.address, btc.address,
+        'BTC and LTC regtest legacy derivations differ for ' + label);
+    return { BTC: btc, LTC: ltc, address: btc.address };
 }
 
 function tickCandidates(label) {
@@ -290,6 +300,6 @@ function gateReadings() {
 
 module.exports = Object.assign({ DRIVE, CHAINS, LIST_GATES, MIRROR_GATE }, drive, {
     listCreateWire, listEditWire, listShareWire, listTransferWire, issueListsWire, sendWire,
-    chainAction, fundChain, newAddress, pickFreeTick, hubListRows, waitForFinalizedSeq,
+    chainAction, fundChain, newAddress, sharedBtcLtcAddress, pickFreeTick, hubListRows, waitForFinalizedSeq,
     mirrorIndex, waitForMirrorSeq, listOrigin, oneDogeBlock, gateReadings,
 });

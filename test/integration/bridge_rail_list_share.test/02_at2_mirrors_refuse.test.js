@@ -59,12 +59,13 @@ async function assertRefusals(chain) {
     const M = state.listShare.home;
     const T = state.listShare.tokens[chain];
     const mirrorIndex = state.listShare.mirrors[chain].mapping.action_index;
+    const listedAddress = M.old[chain].address;
     const blocked = await chainAction(chain, T.issuer,
-        sendWire(T.tick, 1, M.old.address, 'list share AT2 blocked'), 'sends');
+        sendWire(T.tick, 1, listedAddress, 'list share AT2 blocked'), 'sends');
     const allowed = await chainAction(chain, T.issuer,
         sendWire(T.tick, 1, T.other.address, 'list share AT2 allowed'), 'sends');
     const edit = await chainAction(chain, T.issuer,
-        listEditWire(2, mirrorIndex, [M.old.address], 'list share AT2 refused edit'), 'lists');
+        listEditWire(2, mirrorIndex, [listedAddress], 'list share AT2 refused edit'), 'lists');
     assert.strictEqual(blocked.status, 'invalid: DESTINATION (not authorized)',
         chain + ' listed SEND graded ' + blocked.status);
     assert.strictEqual(allowed.status, 'valid', chain + ' unlisted SEND graded ' + allowed.status);

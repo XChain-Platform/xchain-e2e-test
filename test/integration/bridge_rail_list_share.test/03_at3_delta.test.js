@@ -12,7 +12,7 @@
 const {
     assert,
     state,
-    fundChain,
+    sharedBtcLtcAddress,
     chainAction,
     listEditWire,
     sendWire,
@@ -38,9 +38,9 @@ async function assertFlippedVerdicts(chain) {
     const M = state.listShare.home;
     const T = state.listShare.tokens[chain];
     const blocked = await chainAction(chain, T.issuer,
-        sendWire(T.tick, 1, M.added.address, 'list share AT3 newly blocked'), 'sends');
+        sendWire(T.tick, 1, M.added[chain].address, 'list share AT3 newly blocked'), 'sends');
     const allowed = await chainAction(chain, T.issuer,
-        sendWire(T.tick, 1, M.old.address, 'list share AT3 removed'), 'sends');
+        sendWire(T.tick, 1, M.old[chain].address, 'list share AT3 removed'), 'sends');
     assert.strictEqual(blocked.status, 'invalid: DESTINATION (not authorized)',
         chain + ' newly listed SEND graded ' + blocked.status);
     assert.strictEqual(allowed.status, 'valid', chain + ' removed-member SEND graded ' + allowed.status);
@@ -53,7 +53,7 @@ bridgeRailSuite('list_share AT3: one home delta reaches both mirrors', function 
         if (needsFederation(this, 'list_share AT3 home delta')) return;
         const M = state.listShare.home;
         assert.ok(state.evidence.at2, 'AT2 must have established the two token bindings');
-        M.added = await fundChain('BTC', 'LISTSHARE.AT3.ADDED');
+        M.added = await sharedBtcLtcAddress('LISTSHARE.AT3.ADDED');
         const edits = await oneDogeBlock(M.owner, [
             listEditWire(1, M.rootIndex, [M.added.address], 'list share AT3 add'),
             listEditWire(2, M.rootIndex, [M.old.address], 'list share AT3 remove'),
