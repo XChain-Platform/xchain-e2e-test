@@ -34,18 +34,17 @@ const {
 const LOCK = 5;
 
 async function hubPolicyCount(tick) {
-    const ids = new Set();
-    let reads = 0, lastError = null;
+    let count = 0, reads = 0, lastError = null;
     for (const hub of state.venue.hubs) {
         try {
             const rows = await state.venue.queryHubDb(hub.dbName,
-                'SELECT snapshot_id FROM policy_snapshots WHERE tick = ?', [String(tick)]);
+                'SELECT COUNT(*) AS n FROM policy_snapshots WHERE tick = ?', [String(tick)]);
             reads++;
-            for (const row of rows) ids.add(String(row.snapshot_id));
+            count += Number(rows[0].n);
         } catch (error) { lastError = error; }
     }
     if (!reads && lastError) throw lastError;
-    return ids.size;
+    return count;
 }
 
 async function btcPolicySettlements() {

@@ -47,6 +47,13 @@ async function btcIndexerTip() {
     return Number(answer.block_index);
 }
 
+async function btcListMirrorWatermark() {
+    const status = await state.venue.btcVenue.statusOf(0);
+    const hubMirror = status.body && status.body.hubMirror;
+    const listHeights = hubMirror && hubMirror.heights && hubMirror.heights.list_snapshots;
+    return Number(listHeights && listHeights.BTC);
+}
+
 async function btcListSettlements() {
     const rows = await state.venue.queryIndexerDb('BTC',
         "SELECT COUNT(*) AS n FROM bridge_settlements WHERE kind = 'list'", []);
@@ -111,17 +118,23 @@ bridgeRailSuite('list_share AT7: stopped hubs defer the venue and a restart resu
             await regtestMinerConnector.generateBlocks(2);
             await pause(30000);
             D.heldAgain = await btcIndexerTip();
+            D.mirrorWatermark = await btcListMirrorWatermark();
             D.nodeTip = await nodeBtcTip();
             assert.ok(D.nodeTip > target, 'the BTC chain did not grow while the hubs were stopped');
             assert.ok(D.held < D.nodeTip, 'the BTC indexer reached the chain tip ' + D.nodeTip + ' with every hub stopped');
             assert.strictEqual(D.heldAgain, D.held, 'the BTC indexer moved from ' + D.held + ' to ' + D.heldAgain +
                 ' with every hub stopped');
+            assert.ok(Number.isSafeInteger(D.mirrorWatermark),
+                'the BTC indexer reports no list_snapshots mirror watermark');
+            assert.strictEqual(D.heldAgain, D.mirrorWatermark,
+                'the deferred BTC indexer tip differs from its list_snapshots mirror watermark');
             assert.strictEqual(await btcListSettlements(), D.settlementsBefore,
                 'BTC applied a shared-list version with every hub stopped');
         } finally {
             await startEveryHub();
         }
-        state.evidence.at7_deferred = { held: D.held, nodeTip: D.nodeTip, edit: D.tx };
+        state.evidence.at7_deferred = { held: D.held, mirrorWatermark: D.mirrorWatermark,
+            nodeTip: D.nodeTip, edit: D.tx };
     });
 
     it('list_share AT7: the restarted hubs finalize the next seq and the BTC mirror applies it', async function () {
