@@ -400,6 +400,19 @@ function resolveDecoderCredential(dec, coin, network, allowEnv = true) {
 // only on a live venue, never in a pure test.
 const DB_PREFIX = 'XChain_AM_MVH_';
 
+// MariaDB caps a database name at 64 characters and refuses a longer one only at
+// CREATE DATABASE, deep inside a live drill (LS-ACC AT6 lost both replay cases to it).
+// Refuse it at composition instead, naming the label to shorten.
+const MAX_DB_NAME = 64;
+
+function dbName(name) {
+    if (name.length > MAX_DB_NAME) {
+        throw new Error('attestMirrorVenue: database name ' + name + ' is ' + name.length +
+            ' characters, over MariaDB\'s ' + MAX_DB_NAME + '; shorten the venue label');
+    }
+    return name;
+}
+
 function ident(name, what) {
     if (!SAFE_IDENT.test(String(name || ''))) {
         throw new Error('attestMirrorVenue: refusing to interpolate an unsafe ' + what + ': ' + name);
@@ -2572,9 +2585,9 @@ class AttestMirrorVenue {
                 // to prevent. It has to be stable because the replay is the whole chain from
                 // genesis and a stamped name would pay for it again on every run; resuming
                 // one costs only the blocks added since.
-                indexerDbName: DB_PREFIX + this.label + (this.freshIndexers ? '_' + stamp : '') +
-                    (this.replayChain ? '_Rpl' : '') + '_Ixr' + i,
-                mirrorDbName:  DB_PREFIX + this.label + (this.freshIndexers ? '_' + stamp : '') + '_Mirror' + i,
+                indexerDbName: dbName(DB_PREFIX + this.label + (this.freshIndexers ? '_' + stamp : '') +
+                    (this.replayChain ? '_Rpl' : '') + '_Ixr' + i),
+                mirrorDbName:  dbName(DB_PREFIX + this.label + (this.freshIndexers ? '_' + stamp : '') + '_Mirror' + i),
                 proc: null,
                 connector: null
             });

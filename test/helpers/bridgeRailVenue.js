@@ -1610,7 +1610,8 @@ class BridgeRailVenue {
         assert.ok(rail, 'bridgeRailVenue: no ' + tick + ' rail is available for replay');
         const serial = ++this._replaySerial;
         const replay = new AttestMirrorVenue({
-            label: this.label + tick.toLowerCase() + 'replay' + serial,
+            // Short enough that the stamped replay database names stay under MariaDB's 64.
+            label: this.label.replace(/^bridgerail/, 'br') + tick.toLowerCase() + 'rp' + serial,
             coin: coins[tick],
             network: this.network,
             attachHubs: this.btcVenue.hubs,
