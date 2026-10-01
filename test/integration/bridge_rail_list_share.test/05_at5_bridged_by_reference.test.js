@@ -106,8 +106,11 @@ bridgeRailSuite('list_share AT5: a bridged token carries its shared list by refe
         const timer = setInterval(refreshBtcMirror, 30000);
         try {
             refreshBtcMirror();
+            // The signed BTC relay floor alone is 4 nominal blocks (2400 s), before median-time-past
+            // lag, so a 35-minute cap gave up before the transfer could settle (LS-ACC AT5);
+            // take the helper's 70-minute BTC budget.
             R.applied = await state.venue.waitForBridgeApplied('BTC', R.row.transfer_id,
-                { timeoutMs: 35 * 60 * 1000 });
+                { timeoutMs: 70 * 60 * 1000 });
         } finally { clearInterval(timer); }
         assert.ok(R.applied, 'BTC never applied the lock ' + R.row.transfer_id);
         const held = await state.venue.addressBalance('BTC', R.holder.address, 'DOGE.' + R.tick);
