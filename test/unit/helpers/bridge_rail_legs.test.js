@@ -70,13 +70,15 @@ describe('bridge rail leg map', function () {
         }
     });
 
-    it('includes both root T0 cases in every split leg', function () {
+    it('includes every root T0 case in every split leg', function () {
+        // The policy and token drives open with two T0 cases; list_share opens with one.
+        const T0_COUNT = { list_share: 1 };
         for (const [driveName, drive] of Object.entries(RAIL_DRIVES)) {
             // A drive that only runs whole has no split leg to carry its T0 cases into.
             if (Object.keys(drive.legs).every((legName) => legName === 'full')) continue;
             const titles = reports[driveName].passes.map((test) => test.fullTitle);
             const t0 = titles.filter((title) => title.includes(driveName + ' T0:'));
-            assert.strictEqual(t0.length, 2, driveName + ' root T0 count');
+            assert.strictEqual(t0.length, T0_COUNT[driveName] || 2, driveName + ' root T0 count');
             for (const [legName, leg] of Object.entries(drive.legs)) {
                 if (legName === 'full') continue;
                 const selected = new Set(selectedTitles(titles, leg.grep));

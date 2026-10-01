@@ -100,7 +100,13 @@ const RAIL_DRIVES = {
     list_share: {
         root: 'test/integration/bridge_rail_list_share.test.js',
         glob: 'test/integration/bridge_rail_list_share.test/*.test.js',
+        // Split legs run beside `full` on separate runners: each carries the cases its
+        // last case depends on (AT2 to AT4 chain on AT1, AT6 needs AT3's seq 2, AT7 needs
+        // AT5's seq 3), so a fix is judged without waiting on the whole drive.
         legs: {
+            core: { grep: 'list_share T0:|list_share AT1:|list_share AT2:|list_share AT3:|list_share AT4:', minPassed: 10 },
+            replay: { grep: 'list_share T0:|list_share AT1:|list_share AT2:|list_share AT3:|list_share AT6:', minPassed: 10 },
+            bridged: { grep: 'list_share T0:|list_share AT1:|list_share AT2:|list_share AT3:|list_share AT5:|list_share AT7:', minPassed: 14 },
             full: { grep: null, minPassed: 18 },
         },
     },
