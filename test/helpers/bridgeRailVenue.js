@@ -304,6 +304,27 @@ function bridgeProofIndexerEnv(spec) {
 }
 
 /**
+ * The complete venue-wide environment for one destination indexer's bridge proofs.
+ *
+ * PURE. Admission and bridge proof wiring share AttestMirrorVenue's one
+ * `indexerExtraEnv` slot, so every venue must compose them before assigning it. Returning
+ * null for an empty overlay preserves AttestMirrorVenue's unset behavior.
+ *
+ * @param {object} spec
+ * @param {object} [spec.indexerUrls] origin-chain endpoints
+ * @param {object} [spec.admission] mirror-admission indexer environment
+ * @returns {object|null}
+ */
+function bridgeVenueIndexerEnv(spec) {
+    const s = spec || {};
+    const env = Object.assign({}, bridgeProofIndexerEnv({
+        indexerUrls: s.indexerUrls || {},
+        proofTimeoutMs: s.proofTimeoutMs,
+    }), s.admission || {});
+    return Object.keys(env).length ? env : null;
+}
+
+/**
  * Which seated keys this harness can sign for, and what share of the stake that buys.
  *
  * PURE, and the reason it is a function rather than a constant: the seated set is read
@@ -1314,8 +1335,7 @@ class BridgeRailVenue {
                     XCHAIN_CONFIRMATIONS_DOGE: '1000000',
                     XCHAIN_CONFIRMATIONS_LTC:  '1000000',
                 } : {}),
-            indexerExtraEnv: Object.keys(this.admission.indexer).length
-                ? this.admission.indexer : null,
+            indexerExtraEnv: bridgeVenueIndexerEnv({ admission: this.admission.indexer }),
             // The proof client and the settle pass both live on the block-processing path,
             // so an indexer barrier that stays shut parks the block. Every grace at 0 is
             // the venue default and is what the attest drills already rely on.
@@ -1358,9 +1378,10 @@ class BridgeRailVenue {
                 // `getbridgeescrowproof` from the ORIGIN chain's endpoint. The BTC venue
                 // indexer exists by now, which is the other half of why bring-up is
                 // ordered the way it is.
-                indexerExtraEnv: Object.assign({}, bridgeProofIndexerEnv({
+                indexerExtraEnv: bridgeVenueIndexerEnv({
                     indexerUrls: { BTC: this.btcIndexerUrl() },
-                }), this.admission.indexer),
+                    admission: this.admission.indexer,
+                }),
             });
             const ok = await dv.start();
             if (!ok) return { failed: dv.unavailable };
@@ -1391,9 +1412,10 @@ class BridgeRailVenue {
                     repoRoot: this.repoRoot || undefined,
                     replayChain: true,
                     seedAttachedHubPrices: true,
-                    indexerExtraEnv: Object.assign({}, bridgeProofIndexerEnv({
+                    indexerExtraEnv: bridgeVenueIndexerEnv({
                         indexerUrls: { BTC: this.btcIndexerUrl(), DOGE: this.dogeIndexerUrl() },
-                    }), this.admission.indexer),
+                        admission: this.admission.indexer,
+                    }),
                 });
                 const ok = await lv.start();
                 if (!ok) return { failed: lv.unavailable };
@@ -1406,7 +1428,12 @@ class BridgeRailVenue {
             }
         }
 
-        // PHASE 4: rewire. Every hub is restarted carrying the venue indexer URLs, so
+        // PHASE 4: the BTC indexers could not know their origin endpoints at boot: DOGE
+        // and optional LTC are constructed after them. Restart them now with the complete
+        // proof environment before any caller can submit a DOGE->BTC or LTC->BTC in leg.
+        await this.wireBtcIndexerProofs();
+
+        // PHASE 5: rewire. Every hub is restarted carrying the venue indexer URLs, so
         // its bridge engine polls the BTC indexer for confirmed locks and the DOGE indexer
         // for the destination's chain state. Deferred when the caller says so; see
         // `deferBridgeWiring` for the reading that has to happen first.
@@ -1414,6 +1441,25 @@ class BridgeRailVenue {
         else if (Object.keys(this.admission.hub).length) await this.wireAdmissionTips();
 
         return true;
+    }
+
+    /**
+     * Restart every BTC venue indexer with the late-built origin-chain endpoints.
+     */
+    async wireBtcIndexerProofs() {
+        assert.ok(this.btcVenue, 'bridgeRailVenue: wireBtcIndexerProofs before start');
+        const overlay = bridgeVenueIndexerEnv({
+            indexerUrls: { DOGE: this.dogeIndexerUrl(), LTC: this.ltcIndexerUrl() },
+            admission: this.admission.indexer,
+        });
+        this.btcVenue.indexerExtraEnv = overlay;
+        for (const ix of this.btcVenue.indexers) {
+            await this.btcVenue._kill(ix.proc);
+            ix.proc = null;
+            ix.connector = null;
+            await this.btcVenue._spawnIndexer(ix.index);
+        }
+        return overlay;
     }
 
     /**
@@ -1624,9 +1670,9 @@ class BridgeRailVenue {
             freshIndexers: true,
             replayChain: true,
             seedAttachedHubPrices: true,
-            indexerExtraEnv: Object.assign({}, bridgeProofIndexerEnv({ indexerUrls: {
+            indexerExtraEnv: bridgeVenueIndexerEnv({ indexerUrls: {
                 BTC: this.btcIndexerUrl(), DOGE: this.dogeIndexerUrl(), LTC: this.ltcIndexerUrl(),
-            } }), this.admission.indexer),
+            }, admission: this.admission.indexer }),
         });
         try {
             const up = await chainRail.withRail(rail, () => replay.start());
@@ -2981,6 +3027,7 @@ module.exports = {
     venueCheckpointEnv,
     venueAdmissionEnv,
     bridgeProofIndexerEnv,
+    bridgeVenueIndexerEnv,
     selectBridgeSigners,
     resolveVenueQuorum,
     lockWireV0,

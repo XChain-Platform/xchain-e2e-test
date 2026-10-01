@@ -59,7 +59,9 @@ function harness() {
                 apiUrl: 'http://indexer-' + this.serial + '-' + index,
                 indexerDbName: 'Venue_' + opts.label + (opts.freshIndexers ? '_Fresh' : '') + '_Ixr' + index,
                 mirrorDbName: 'Venue_' + opts.label + '_Mirror' + index,
+                proc: { index: index },
             }));
+            this.indexerExtraEnv = opts.indexerExtraEnv || null;
             venues.push(this);
         }
 
@@ -71,6 +73,11 @@ function harness() {
         async stop() { this.stops += 1; events.push('stop:' + this.opts.coin); }
         async stopHub(index) { events.push('stopHub:' + index); }
         async startHub(index) { events.push('startHub:' + index); }
+        async _kill(proc) { events.push('stopIndexer:' + proc.index); }
+        async _spawnIndexer(index) {
+            this.indexers[index].proc = { index: index };
+            events.push('startIndexer:' + index);
+        }
         logTail() { return ''; }
     }
 
@@ -120,8 +127,29 @@ function harness() {
         axios: axios,
         mariadb: mariadb,
     });
-    return { BridgeRailVenue: mod.BridgeRailVenue, events, venues, rpcCalls, dbCalls, hubDb };
+    return {
+        BridgeRailVenue: mod.BridgeRailVenue,
+        bridgeVenueIndexerEnv: mod.bridgeVenueIndexerEnv,
+        events, venues, rpcCalls, dbCalls, hubDb,
+    };
 }
+
+describe('bridgeRailVenue BTC indexer environment', function () {
+
+    it('composes admission and DOGE proof wiring in the one BTC venue option', function () {
+        const h = harness();
+        const btcOptions = {
+            indexerExtraEnv: h.bridgeVenueIndexerEnv({
+                admission: { XC_MIRROR_ADMISSION_ACTIVATION: '7' },
+                indexerUrls: { DOGE: 'http://127.0.0.1:41201' },
+            }),
+        };
+        assert.deepStrictEqual(btcOptions.indexerExtraEnv, {
+            DOGE_INDEXER_URL: 'http://127.0.0.1:41201',
+            XC_MIRROR_ADMISSION_ACTIVATION: '7',
+        });
+    });
+});
 
 describe('bridgeRailVenue optional LTC venue', function () {
 
@@ -236,8 +264,14 @@ describe('bridgeRailVenue mirror admission armed venue', function () {
                 assert.strictEqual(btc.opts.hubExtraEnv[key], value);
             }
             assert.strictEqual(btc.opts.hubExtraEnv.XCHAIN_CONFIRMATIONS_DOGE, '1000000');
+            assert.strictEqual(btc.indexerExtraEnv.XC_MIRROR_ADMISSION_ACTIVATION, '7');
+            assert.strictEqual(btc.indexerExtraEnv.DOGE_INDEXER_URL, venue.dogeIndexerUrl());
+            assert.strictEqual(btc.indexerExtraEnv.LTC_INDEXER_URL, venue.ltcIndexerUrl());
             assert.strictEqual(btc.hubExtraEnv.DOGE_INDEXER_URL, venue.dogeIndexerUrl());
             assert.strictEqual(btc.hubExtraEnv.LTC_INDEXER_URL, venue.ltcIndexerUrl());
+            assert.deepStrictEqual(h.events.filter((event) => /^(stop|start)Indexer:/.test(event)), [
+                'stopIndexer:0', 'startIndexer:0', 'stopIndexer:1', 'startIndexer:1',
+            ]);
             assert.deepStrictEqual(h.events.filter((event) => /^(stop|start)Hub:/.test(event)), [
                 'stopHub:0', 'startHub:0', 'stopHub:1', 'startHub:1',
             ]);
