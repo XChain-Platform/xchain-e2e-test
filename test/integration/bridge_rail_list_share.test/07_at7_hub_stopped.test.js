@@ -60,6 +60,14 @@ async function btcListSettlements() {
     return Number(rows[0].n);
 }
 
+async function btcMirrorVersion(block) {
+    const mirror = state.listShare.mirrors.BTC;
+    const list = await state.venue.indexerRpc('BTC', 'getlistat', {
+        list_index: Number(mirror.mapping.action_index), block: Number(block),
+    });
+    return String(list.hash);
+}
+
 async function stopEveryHub() {
     for (const hub of state.venue.hubs) await state.venue.btcVenue.stopHub(hub.index);
 }
@@ -106,7 +114,8 @@ bridgeRailSuite('list_share AT7: stopped hubs defer the venue and a restart resu
         D.added = await sharedBtcLtcAddress('LISTSHARE.AT7.ADDED');
         await fundOwnerInput(M.owner);
         D.settlementsBefore = await btcListSettlements();
-        D.mirrorHashBefore = String(state.listShare.mirrors.BTC.list.hash);
+        D.tipBefore = await btcIndexerTip();
+        D.mirrorHashBefore = await btcMirrorVersion(D.tipBefore);
         await stopEveryHub();
         try {
             D.tx = await broadcastHomeEdit(M.owner,
@@ -115,9 +124,13 @@ bridgeRailSuite('list_share AT7: stopped hubs defer the venue and a restart resu
             const target = await nodeBtcTip();
             await pause(30000);
             D.held = await btcIndexerTip();
+            D.settlementsHeld = await btcListSettlements();
+            D.mirrorHashHeld = await btcMirrorVersion(D.held);
             await regtestMinerConnector.generateBlocks(2);
             await pause(30000);
             D.heldAgain = await btcIndexerTip();
+            D.settlementsHeldAgain = await btcListSettlements();
+            D.mirrorHashHeldAgain = await btcMirrorVersion(D.heldAgain);
             D.mirrorWatermark = await btcListMirrorWatermark();
             D.nodeTip = await nodeBtcTip();
             assert.ok(D.nodeTip > target, 'the BTC chain did not grow while the hubs were stopped');
@@ -128,8 +141,14 @@ bridgeRailSuite('list_share AT7: stopped hubs defer the venue and a restart resu
                 'the BTC indexer reports no list_snapshots mirror watermark');
             assert.strictEqual(D.heldAgain, D.mirrorWatermark,
                 'the deferred BTC indexer tip differs from its list_snapshots mirror watermark');
-            assert.strictEqual(await btcListSettlements(), D.settlementsBefore,
-                'BTC applied a shared-list version with every hub stopped');
+            assert.strictEqual(D.settlementsHeld, D.settlementsBefore,
+                'BTC applied a shared-list settlement during the first stopped-hub window');
+            assert.strictEqual(D.mirrorHashHeld, D.mirrorHashBefore,
+                'the BTC mirror version changed during the first stopped-hub window');
+            assert.strictEqual(D.settlementsHeldAgain, D.settlementsBefore,
+                'BTC applied a shared-list settlement during the second stopped-hub window');
+            assert.strictEqual(D.mirrorHashHeldAgain, D.mirrorHashBefore,
+                'the BTC mirror version changed during the second stopped-hub window');
         } finally {
             await startEveryHub();
         }
