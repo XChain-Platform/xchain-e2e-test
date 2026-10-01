@@ -97,6 +97,13 @@ const RAIL_DRIVES = {
             full: { grep: null, minPassed: 27 },
         },
     },
+    list_share: {
+        root: 'test/integration/bridge_rail_list_share.test.js',
+        glob: 'test/integration/bridge_rail_list_share.test/*.test.js',
+        legs: {
+            full: { grep: null, minPassed: 18 },
+        },
+    },
 };
 
 module.exports = { RAIL_DRIVES };
