@@ -137,10 +137,10 @@ describe('barrierFamilyFixture: the crossing a legacy-era seed needs', function 
 
 describe('barrierFamilyFixture: the family in loop order', function () {
     it('is the nine reasons the indexer source derives, as a set, in the block-loop order', () => {
-        assert.strictEqual(F.FAMILY_REASONS_LOOP_ORDER.length, 9)
+        assert.strictEqual(F.FAMILY_REASONS_LOOP_ORDER.length, 10)
         assert.deepStrictEqual([...F.FAMILY_REASONS_LOOP_ORDER].sort(), [...F.mirrorBarrierReasons()])
         assert.strictEqual(F.FAMILY_REASONS_LOOP_ORDER[0], 'price_sync_barrier')
-        assert.strictEqual(F.FAMILY_REASONS_LOOP_ORDER[8], 'snapshot_sync_barrier')
+        assert.strictEqual(F.FAMILY_REASONS_LOOP_ORDER[9], 'snapshot_sync_barrier')
     })
 
     it('names the admission column each table binds on', () => {

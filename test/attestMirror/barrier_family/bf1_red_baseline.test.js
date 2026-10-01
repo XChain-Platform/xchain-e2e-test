@@ -225,7 +225,7 @@ function assertRedBaseline (ctx) {
 function assertEnumeration (ctx) {
     const seen = rows.distinctRuns(ctx.walk.map((x) => x.stallReason))
     assert.deepStrictEqual(seen, fixture.FAMILY_REASONS_LOOP_ORDER.slice(),
-        'the walker named ' + JSON.stringify(seen) + ' rather than the nine reasons in loop order')
+        'the walker named ' + JSON.stringify(seen) + ' rather than the ten reasons in loop order')
     assert.ok(rows.inLoopOrder(seen), 'the sequence is not in block-loop order')
     assert.strictEqual(new Set(fixture.mirrorBarrierReasons()).size, 9, 'the indexer source no longer carries nine reasons')
     const ladderByReason = {}
