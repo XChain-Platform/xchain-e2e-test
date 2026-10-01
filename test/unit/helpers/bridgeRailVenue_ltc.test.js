@@ -19,6 +19,19 @@ const proxyquire = require('proxyquire').noCallThru().noPreserveCache();
 
 const IDENTITY = [{ pubkeyHex: 'a'.repeat(64), privkeyHex: 'b'.repeat(64) }];
 
+async function withMirrorAdmission(value, fn) {
+    const key = 'XC_MIRROR_ADMISSION_ACTIVATION';
+    const hadValue = Object.prototype.hasOwnProperty.call(process.env, key);
+    const saved = process.env[key];
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+    try { return await fn(); }
+    finally {
+        if (hadValue) process.env[key] = saved;
+        else delete process.env[key];
+    }
+}
+
 function harness() {
     const events = [];
     const venues = [];
@@ -32,7 +45,9 @@ function harness() {
         constructor(opts) {
             this.opts = opts;
             this.serial = ++venueSerial;
-            this.hubs = opts.attachHubs || [{ index: 0, dbName: 'Hub0' }];
+            this.hubs = opts.attachHubs || Array.from({ length: opts.hubCount || 1 }, (_, index) => ({
+                index: index, dbName: 'Hub' + index,
+            }));
             this.hubDb = opts.hubDb || hubDb;
             this.hubExtraEnv = opts.hubExtraEnv || {};
             this.hubEnv = {};
@@ -196,5 +211,70 @@ describe('bridgeRailVenue optional LTC venue', function () {
         await venue.stop();
         const stops = h.events.filter((e) => e.startsWith('stop:'));
         assert.deepStrictEqual(stops, ['stop:litecoin', 'stop:dogecoin', 'stop:bitcoin']);
+    });
+});
+
+describe('bridgeRailVenue mirror admission armed venue', function () {
+
+    it('arms every child and wires admission tips without releasing bridge depths', async function () {
+        await withMirrorAdmission('7', async () => {
+            const h = harness();
+            const identities = IDENTITY.concat([
+                { pubkeyHex: 'c'.repeat(64), privkeyHex: 'd'.repeat(64) },
+            ]);
+            const venue = new h.BridgeRailVenue({
+                label: 'armed', identities: identities, withLtc: true, deferBridgeWiring: true,
+            });
+            assert.strictEqual(await venue.start(), true);
+            const hubKeys = {
+                XC_MIRROR_ADMISSION_ACTIVATION: '7', ORACLE_ROUND_INTERVAL: '60000',
+                ORACLE_SUBMISSION_WINDOW: '20000', ADMISSION_WATERMARK_SAMPLE_MS: '5000',
+                XDEX_ROUND_TIMEOUT_MS: '15000', XDEX_ROUND_MAX_LIFETIME_MS: '60000',
+            };
+            const btc = h.venues[0];
+            for (const [key, value] of Object.entries(hubKeys)) {
+                assert.strictEqual(btc.opts.hubExtraEnv[key], value);
+            }
+            assert.strictEqual(btc.opts.hubExtraEnv.XCHAIN_CONFIRMATIONS_DOGE, '1000000');
+            assert.strictEqual(btc.hubExtraEnv.DOGE_INDEXER_URL, venue.dogeIndexerUrl());
+            assert.strictEqual(btc.hubExtraEnv.LTC_INDEXER_URL, venue.ltcIndexerUrl());
+            assert.deepStrictEqual(h.events.filter((event) => /^(stop|start)Hub:/.test(event)), [
+                'stopHub:0', 'startHub:0', 'stopHub:1', 'startHub:1',
+            ]);
+            venue.waitUntil = async (what, predicate) => Boolean(await predicate()) || predicate();
+            const handle = await venue.replayIndexer('DOGE');
+            for (const built of h.venues) {
+                assert.strictEqual(built.opts.indexerExtraEnv.XC_MIRROR_ADMISSION_ACTIVATION, '7');
+            }
+            await handle.stop();
+        });
+    });
+});
+
+describe('bridgeRailVenue mirror admission inert venue', function () {
+
+    it('keeps empty, unset, and inert activations out of child environments', async function () {
+        for (const activation of ['', undefined, 'off', 'inert', 'false', 'no', 'none']) {
+            await withMirrorAdmission(activation, async () => {
+                const h = harness();
+                const venue = new h.BridgeRailVenue({
+                    label: 'inert', identities: IDENTITY, withLtc: true, deferBridgeWiring: true,
+                });
+                assert.strictEqual(await venue.start(), true);
+                const forbidden = [
+                    'XC_MIRROR_ADMISSION_ACTIVATION', 'ORACLE_ROUND_INTERVAL',
+                    'ORACLE_SUBMISSION_WINDOW', 'ADMISSION_WATERMARK_SAMPLE_MS',
+                    'XDEX_ROUND_TIMEOUT_MS', 'XDEX_ROUND_MAX_LIFETIME_MS',
+                ];
+                assert.strictEqual(h.venues[0].opts.indexerExtraEnv, null);
+                for (const built of h.venues) {
+                    for (const key of forbidden) {
+                        assert.ok(!Object.prototype.hasOwnProperty.call(built.opts.hubExtraEnv || {}, key));
+                        assert.ok(!Object.prototype.hasOwnProperty.call(built.opts.indexerExtraEnv || {}, key));
+                    }
+                }
+                assert.deepStrictEqual(h.events.filter((event) => /^(stop|start)Hub:/.test(event)), []);
+            });
+        }
     });
 });

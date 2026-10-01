@@ -242,6 +242,41 @@ function venueCheckpointEnv(spec) {
 }
 
 /**
+ * The mirror-admission environment shared by every child in an armed venue.
+ *
+ * PURE. Admission ages each decoder tip by the round window of its table. Price uses
+ * the oracle interval, whose default is 600000 ms, while list_snapshots and
+ * bridge_transfers use the XDEX maximum lifetime, whose default is four 120000 ms
+ * rounds. The one-minute oracle interval lowers the age assigned to price tips, and its
+ * twenty-second submission window lets that round close inside the interval. Sampling
+ * every five seconds makes a newly eligible tip visible promptly. The fifteen-second
+ * XDEX timeout closes regtest rounds promptly, while its one-minute maximum lifetime
+ * lowers the age assigned to list and bridge tips. The venue's existing 30000 ms
+ * attestation round timeout is intentionally left unchanged.
+ *
+ * @param {*} raw mirror-admission activation, or an inert spelling
+ * @returns {{hub: object, indexer: object}}
+ */
+function venueAdmissionEnv(raw) {
+    const value = raw === undefined || raw === null ? '' : String(raw);
+    const normalized = value.trim().toLowerCase();
+    if (!normalized || ['off', 'inert', 'false', 'no', 'none'].includes(normalized)) {
+        return { hub: {}, indexer: {} };
+    }
+    return {
+        hub: {
+            XC_MIRROR_ADMISSION_ACTIVATION: value,
+            ORACLE_ROUND_INTERVAL: '60000',
+            ORACLE_SUBMISSION_WINDOW: '20000',
+            ADMISSION_WATERMARK_SAMPLE_MS: '5000',
+            XDEX_ROUND_TIMEOUT_MS: '15000',
+            XDEX_ROUND_MAX_LIFETIME_MS: '60000',
+        },
+        indexer: { XC_MIRROR_ADMISSION_ACTIVATION: value },
+    };
+}
+
+/**
  * The environment overlay a venue INDEXER needs to fetch a D2 escrow proof.
  *
  * PURE. The destination indexer's settle pass resolves the origin chain's endpoint as
@@ -1144,6 +1179,8 @@ class BridgeRailVenue {
         // readout attributable. Env fallback so a drive script can set it without a code
         // edit; unset keeps the old shared-tree behaviour.
         this.repoRoot = o.repoRoot || process.env.BRIDGE_RAIL_REPO_ROOT || null;
+        this.admission = venueAdmissionEnv(o.mirrorAdmission !== undefined
+            ? o.mirrorAdmission : process.env.XC_MIRROR_ADMISSION_ACTIVATION);
         // The ruled shape: the STANDING BTC indexer serves the BTC-side legs. Unset means
         // build a venue BTC indexer instead; see the header for when each is right.
         this.standingBtcIndexerUrl = o.btcIndexerUrl || null;
@@ -1261,7 +1298,7 @@ class BridgeRailVenue {
             // FROM BOOT, not from the rewire: the checkpoint engine starts with the hub, and
             // a transfer the engine finalizes before the rewire is stamped against a tip that
             // only a tip-height checkpoint can serve. See venueCheckpointEnv.
-            hubExtraEnv: Object.assign({}, venueCheckpointEnv({}),
+            hubExtraEnv: Object.assign({}, venueCheckpointEnv({}), this.admission.hub,
                 // AND THE DISARM IS A DEPTH, not a missing URL. A venue hub already carries a
                 // BTC indexer URL at boot for its other engines, so `deferBridgeWiring` alone
                 // leaves the bridge engine free to finalize the rail's backlog while the
@@ -1277,6 +1314,8 @@ class BridgeRailVenue {
                     XCHAIN_CONFIRMATIONS_DOGE: '1000000',
                     XCHAIN_CONFIRMATIONS_LTC:  '1000000',
                 } : {}),
+            indexerExtraEnv: Object.keys(this.admission.indexer).length
+                ? this.admission.indexer : null,
             // The proof client and the settle pass both live on the block-processing path,
             // so an indexer barrier that stays shut parks the block. Every grace at 0 is
             // the venue default and is what the attest drills already rely on.
@@ -1319,9 +1358,9 @@ class BridgeRailVenue {
                 // `getbridgeescrowproof` from the ORIGIN chain's endpoint. The BTC venue
                 // indexer exists by now, which is the other half of why bring-up is
                 // ordered the way it is.
-                indexerExtraEnv: bridgeProofIndexerEnv({
+                indexerExtraEnv: Object.assign({}, bridgeProofIndexerEnv({
                     indexerUrls: { BTC: this.btcIndexerUrl() },
-                }),
+                }), this.admission.indexer),
             });
             const ok = await dv.start();
             if (!ok) return { failed: dv.unavailable };
@@ -1352,9 +1391,9 @@ class BridgeRailVenue {
                     repoRoot: this.repoRoot || undefined,
                     replayChain: true,
                     seedAttachedHubPrices: true,
-                    indexerExtraEnv: bridgeProofIndexerEnv({
+                    indexerExtraEnv: Object.assign({}, bridgeProofIndexerEnv({
                         indexerUrls: { BTC: this.btcIndexerUrl(), DOGE: this.dogeIndexerUrl() },
-                    }),
+                    }), this.admission.indexer),
                 });
                 const ok = await lv.start();
                 if (!ok) return { failed: lv.unavailable };
@@ -1372,8 +1411,25 @@ class BridgeRailVenue {
         // for the destination's chain state. Deferred when the caller says so; see
         // `deferBridgeWiring` for the reading that has to happen first.
         if (!this.deferBridgeWiring) await this.rewireHubs();
+        else if (Object.keys(this.admission.hub).length) await this.wireAdmissionTips();
 
         return true;
+    }
+
+    /**
+     * Restart armed, deferred hubs with admission tip URLs but keep bridge depths pinned.
+     */
+    async wireAdmissionTips() {
+        assert.ok(this.btcVenue, 'bridgeRailVenue: wireAdmissionTips before start');
+        const overlay = {};
+        if (this.dogeIndexerUrl()) overlay.DOGE_INDEXER_URL = this.dogeIndexerUrl();
+        if (this.ltcIndexerUrl()) overlay.LTC_INDEXER_URL = this.ltcIndexerUrl();
+        this.btcVenue.hubExtraEnv = Object.assign({}, this.btcVenue.hubExtraEnv || {}, overlay);
+        for (const hub of this.btcVenue.hubs) {
+            await this.btcVenue.stopHub(hub.index);
+            await this.btcVenue.startHub(hub.index);
+        }
+        return overlay;
     }
 
     /**
@@ -1567,9 +1623,9 @@ class BridgeRailVenue {
             freshIndexers: true,
             replayChain: true,
             seedAttachedHubPrices: true,
-            indexerExtraEnv: bridgeProofIndexerEnv({ indexerUrls: {
+            indexerExtraEnv: Object.assign({}, bridgeProofIndexerEnv({ indexerUrls: {
                 BTC: this.btcIndexerUrl(), DOGE: this.dogeIndexerUrl(), LTC: this.ltcIndexerUrl(),
-            } }),
+            } }), this.admission.indexer),
         });
         try {
             const up = await chainRail.withRail(rail, () => replay.start());
@@ -2922,6 +2978,7 @@ module.exports = {
     // The pure layer, exported for the unit tier.
     bridgeEngineHubEnv,
     venueCheckpointEnv,
+    venueAdmissionEnv,
     bridgeProofIndexerEnv,
     selectBridgeSigners,
     resolveVenueQuorum,
