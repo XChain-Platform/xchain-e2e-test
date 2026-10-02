@@ -35,6 +35,7 @@ const path = require('path');
 const fs   = require('fs');
 const net  = require('net');
 const mariadb = require('mariadb');
+const { applyCapturedArmHeights } = require('./anchorArmHeight');
 
 // Locate the xchain-hub package. Lives adjacent in the monorepo
 // (host-process dev), under xchain-node's modules/, or staged into the
@@ -171,6 +172,7 @@ class MultiValidatorHub {
      */
     constructor(opts) {
         opts = opts || {};
+        applyCapturedArmHeights();
         this.count         = opts.count || 3;
         this.dbHost        = opts.dbHost || process.env.HUB_DB_HOST || process.env.DATABASE_URL || 'mariadb';
         this.dbPort        = opts.dbPort || process.env.HUB_DB_PORT || process.env.DATABASE_PORT || 3306;

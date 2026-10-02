@@ -866,7 +866,13 @@ describe('nativeFeeHelper.nativeFeeSats', () => {
 })
 
 describe('anchorArmHeight', () => {
-    const { armHeight, applyArmHeight } = require('../../helpers/anchorArmHeight')
+    const {
+        ANCHOR_GATE_ENVS,
+        armHeight,
+        applyArmHeight,
+        captureArmHeights,
+        applyCapturedArmHeights
+    } = require('../../helpers/anchorArmHeight')
     const NAME = 'XC_ANCHOR_FOLD_REGTEST_ACTIVATION'
 
     it('defaults to genesis when unset or unparseable', () => {
@@ -880,5 +886,59 @@ describe('anchorArmHeight', () => {
         assert.strictEqual(armHeight(NAME, env), '250')
         assert.strictEqual(applyArmHeight(NAME, env), '250')
         assert.strictEqual(env[NAME], '250')
+    })
+
+    it('restores shell-provided arm heights after a suite forces genesis', () => {
+        const shellEnv = {
+            XC_ANCHOR_FOLD_REGTEST_ACTIVATION: '250',
+            XC_ANCHOR_STAKE_REGTEST_ACTIVATION: ' 251 ',
+            XC_ANCHOR_SLASH_REGTEST_ACTIVATION: 'later'
+        }
+        assert.deepStrictEqual(captureArmHeights(shellEnv), {
+            XC_ANCHOR_FOLD_REGTEST_ACTIVATION: '250',
+            XC_ANCHOR_STAKE_REGTEST_ACTIVATION: '251',
+            XC_ANCHOR_SLASH_REGTEST_ACTIVATION: '0'
+        })
+
+        const suiteEnv = Object.fromEntries(ANCHOR_GATE_ENVS.map((envName) => [envName, '0']))
+        assert.deepStrictEqual(applyCapturedArmHeights(suiteEnv), {
+            XC_ANCHOR_FOLD_REGTEST_ACTIVATION: '250',
+            XC_ANCHOR_STAKE_REGTEST_ACTIVATION: '251',
+            XC_ANCHOR_SLASH_REGTEST_ACTIVATION: '0'
+        })
+        assert.deepStrictEqual(suiteEnv, {
+            XC_ANCHOR_FOLD_REGTEST_ACTIVATION: '250',
+            XC_ANCHOR_STAKE_REGTEST_ACTIVATION: '251',
+            XC_ANCHOR_SLASH_REGTEST_ACTIVATION: '0'
+        })
+    })
+
+    it('reapplies the captured heights when the federation hub harness is constructed', () => {
+        const saved = Object.fromEntries(ANCHOR_GATE_ENVS.map((envName) => [envName, process.env[envName]]))
+        try {
+            captureArmHeights({
+                XC_ANCHOR_FOLD_REGTEST_ACTIVATION: '350',
+                XC_ANCHOR_STAKE_REGTEST_ACTIVATION: '351',
+                XC_ANCHOR_SLASH_REGTEST_ACTIVATION: '352'
+            })
+            for (const envName of ANCHOR_GATE_ENVS) process.env[envName] = '0'
+
+            const { MultiValidatorHub } = require('../../helpers/multiValidatorHubHelper')
+            new MultiValidatorHub({ count: 1, btcIndexerApiUrl: 'http://127.0.0.1:1' })
+
+            assert.deepStrictEqual(
+                Object.fromEntries(ANCHOR_GATE_ENVS.map((envName) => [envName, process.env[envName]])),
+                {
+                    XC_ANCHOR_FOLD_REGTEST_ACTIVATION: '350',
+                    XC_ANCHOR_STAKE_REGTEST_ACTIVATION: '351',
+                    XC_ANCHOR_SLASH_REGTEST_ACTIVATION: '352'
+                }
+            )
+        } finally {
+            for (const envName of ANCHOR_GATE_ENVS) {
+                if (saved[envName] === undefined) delete process.env[envName]
+                else process.env[envName] = saved[envName]
+            }
+        }
     })
 })
