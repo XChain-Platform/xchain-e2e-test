@@ -16,8 +16,6 @@ const ANCHOR_GATE_ENVS = Object.freeze([
     'XC_ANCHOR_SLASH_REGTEST_ACTIVATION'
 ])
 
-let capturedArmHeights = null
-
 function armHeight(envName, env = process.env){
     const raw = env[envName]
     if (raw === undefined || raw === null) return '0'
@@ -26,28 +24,23 @@ function armHeight(envName, env = process.env){
     return '0'
 }
 
+const capturedArmHeights = Object.freeze(Object.fromEntries(
+    ANCHOR_GATE_ENVS.map((envName) => [envName, armHeight(envName)])
+))
+
 function applyArmHeight(envName, env = process.env){
     env[envName] = armHeight(envName, env)
     return env[envName]
 }
 
-function captureArmHeights(env = process.env){
-    capturedArmHeights = Object.fromEntries(
-        ANCHOR_GATE_ENVS.map((envName) => [envName, armHeight(envName, env)])
-    )
-    return Object.assign({}, capturedArmHeights)
-}
-
 function applyCapturedArmHeights(env = process.env){
-    const heights = capturedArmHeights || captureArmHeights(env)
-    for (const envName of ANCHOR_GATE_ENVS) env[envName] = heights[envName]
-    return Object.assign({}, heights)
+    for (const envName of ANCHOR_GATE_ENVS) env[envName] = capturedArmHeights[envName]
+    return Object.assign({}, capturedArmHeights)
 }
 
 module.exports = {
     ANCHOR_GATE_ENVS,
     armHeight,
     applyArmHeight,
-    captureArmHeights,
     applyCapturedArmHeights
 }

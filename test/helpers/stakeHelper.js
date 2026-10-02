@@ -11,9 +11,7 @@
 const transactionHelper = require('../transactionHelper')
 const stakeTeardown = require('./stakeTeardown')
 const requireRow = require('./requireRow')
-const { captureArmHeights } = require('./anchorArmHeight')
-
-captureArmHeights()
+require('./anchorArmHeight')
 
 // Blocks to mine after a STAKE before that stake can be SELECTED into an
 // attestation request's responsible set.
