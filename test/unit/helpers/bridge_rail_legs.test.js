@@ -184,6 +184,30 @@ describe('bridge rail leg map', function () {
         }
     });
 
+    it('selects, in every split list_share leg, the upstream cases each selected case reads', function () {
+        const dependencies = [
+            ['list_share AT2:', ['list_share AT1:']],
+            ['list_share AT3:', ['list_share AT1:']],
+            ['list_share AT4:', ['list_share AT1:']],
+            ['list_share AT5:', ['list_share AT4:']],
+            ['list_share AT6:', ['list_share AT3:']],
+            ['list_share AT7:', ['list_share AT5:']],
+            ['list_share AT8:', ['list_share AT7:']],
+        ];
+        const titles = reports.list_share.full.passes.map((test) => test.title);
+        for (const [legName, leg] of Object.entries(RAIL_DRIVES.list_share.legs)) {
+            if (legName === 'full') continue;
+            const selected = selectedTitles(titles, leg.grep);
+            for (const [readerPrefix, prerequisitePrefixes] of dependencies) {
+                if (!selected.some((title) => title.startsWith(readerPrefix))) continue;
+                for (const prefix of prerequisitePrefixes) {
+                    assert.ok(selected.some((title) => title.startsWith(prefix)),
+                        legName + ': ' + readerPrefix + ' requires ' + prefix);
+                }
+            }
+        }
+    });
+
     it('covers every split-drivable policy title', function () {
         const drive = RAIL_DRIVES.policy;
         const titles = reports.policy.full.passes.map((test) => test.fullTitle);
