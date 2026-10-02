@@ -61,13 +61,14 @@ function buildLegCommand (driveName, legName, opts = {}) {
     if (!journalDir) throw new Error('--journal-dir is required')
     const argv = ['--no-config', '--reporter', 'spec', '--timeout', '0', '--exit']
     if (leg.grep) argv.push('--grep', leg.grep)
-    argv.push('--require', './test/initialCheck.test.js', ...(drive.before || []), drive.root, drive.glob)
+    const files = leg.files || [...(drive.before || []), drive.root, drive.glob]
+    argv.push('--require', './test/initialCheck.test.js', ...files)
     return {
         command: MOCHA,
         argv,
         cwd: repoRoot,
         env: childEnvironment(opts.env || {}, journalDir, repoRoot),
-        envKeys: ENV_KEYS_SET.slice(),
+        envKeys: [...ENV_KEYS_SET, ...(drive.envKeys || [])],
         journalPath: path.join(journalDir, 'case-journal.jsonl'),
         minPassed: leg.minPassed,
     }

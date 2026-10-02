@@ -8,6 +8,11 @@ const POLICY_AT1 = 'policy AT1 \\((?:opt-in|mirror|enforced)\\):';
 const POLICY_AT5_LAG = 'policy AT5 \\((?:barrier|release)\\):';
 const TOKEN_ROOT = ['token AT1 precondition:', 'token AT8 control'];
 const TOKEN_AT1 = 'token AT1:';
+const ANCHOR_ARM_ENV_KEYS = [
+    'XC_ANCHOR_FOLD_REGTEST_ACTIVATION',
+    'XC_ANCHOR_STAKE_REGTEST_ACTIVATION',
+    'XC_ANCHOR_SLASH_REGTEST_ACTIVATION',
+];
 
 const RAIL_DRIVES = {
     policy: {
@@ -108,6 +113,31 @@ const RAIL_DRIVES = {
             replay: { grep: 'list_share T0:|list_share AT1:|list_share AT2:|list_share AT3:|list_share AT6:', minPassed: 10 },
             bridged: { grep: 'list_share T0:|list_share AT1:|list_share AT2:|list_share AT3:|list_share AT4:|list_share AT5:|list_share AT7:', minPassed: 16 },
             full: { grep: null, minPassed: 23 },
+        },
+    },
+    anchor_stake: {
+        envKeys: ANCHOR_ARM_ENV_KEYS,
+        legs: {
+            anchor_fold: {
+                files: ['test/federation/anchor_fold_acceptance.test.js'],
+                minPassed: 5,
+            },
+            anchor_bundle: {
+                files: ['test/federation/flag_days/anchor_bundle_order.test.js'],
+                minPassed: 3,
+            },
+            staking: {
+                files: ['test/actions/staking.test.js'],
+                minPassed: 7,
+            },
+            capability_slash: {
+                files: ['test/actions/capability_slash.test.js'],
+                minPassed: 4,
+            },
+            vm_contract_slash: {
+                files: ['test/actions/vm_contract_slash.test.js'],
+                minPassed: 3,
+            },
         },
     },
 };
