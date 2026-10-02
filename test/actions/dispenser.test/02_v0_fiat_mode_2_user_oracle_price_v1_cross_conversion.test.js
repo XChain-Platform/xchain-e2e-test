@@ -43,11 +43,12 @@ async function createCrossConversionDispenser() {
     let coinPrice   = 50000     // 1 coin = 50,000 fiat  (validator)
     let tokenPrice  = 100       // 1 token = 100 fiat    (user oracle)
     let chainNow    = await priceSnapshotHelper.latestBlockTime()
+    let oracleActionIndex = Date.now() * 1000 + (process.pid % 1000)
 
     await priceSnapshotHelper.clearPair(pair)
     await priceSnapshotHelper.seedSnapshot({
         coinPair: pair, price: coinPrice.toFixed(8),
-        blockTimestamp: chainNow - 120, roundNumber: 999000002
+        blockTimestamp: chainNow - 120, roundNumber: 999000102
     })
     await oraclePriceHelper.clearQuotes({
         sourceAddress: oracleAddress, coin: COIN_CODE, tick: tick, fiat: FIAT_MODE2
@@ -56,7 +57,7 @@ async function createCrossConversionDispenser() {
         sourceAddress: oracleAddress, sourceChain: COIN_CODE,
         coin: COIN_CODE, tick: tick, fiat: FIAT_MODE2,
         value: tokenPrice.toFixed(8), fee: '0',
-        effectiveAt: chainNow - 60, actionIndex: 999000002
+        effectiveAt: chainNow - 60, actionIndex: oracleActionIndex
     })
 
     // Now the oracle has an effective price, so the create is accepted.

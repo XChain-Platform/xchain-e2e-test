@@ -188,11 +188,12 @@ function hubSeedTarget(){
 // mark it hub-finalized, which is what a round with no source-chain PRICE tx is.
 const HUB_SEED_SQL = `INSERT INTO price_snapshots
     (round_number, coin_pair, price, reference_block, reference_chain,
-     block_timestamp, validator_count, consensus_round, consensus_proof, status)
-    VALUES (?, ?, ?, 0, 'BTC', ?, 1, 1, '[]', 'finalized')
+     block_timestamp, batch_block_time, validator_count, consensus_round, consensus_proof, status)
+    VALUES (?, ?, ?, 0, 'BTC', ?, ?, 1, 1, '[]', 'finalized')
     ON DUPLICATE KEY UPDATE
      price = VALUES(price),
      block_timestamp = VALUES(block_timestamp),
+     batch_block_time = VALUES(batch_block_time),
      status = 'finalized'`
 
 async function seedIntoHub(target, rows){
@@ -202,7 +203,8 @@ async function seedIntoHub(target, rows){
     const conn = await mariadb.createConnection(Object.assign({ connectTimeout: 5000 }, target))
     try {
         for (const row of rows)
-            await conn.query(HUB_SEED_SQL, [row.roundNumber, row.coinPair, row.price, row.blockTimestamp])
+            await conn.query(HUB_SEED_SQL,
+                [row.roundNumber, row.coinPair, row.price, row.blockTimestamp, row.batchBlockTime])
     } finally {
         if (conn && typeof conn.end === 'function') await conn.end().catch(() => {})
     }
@@ -336,12 +338,16 @@ async function seedGlobalPrices(force){
     // higher round (see the anchor note above). Built once and handed to BOTH targets,
     // so the durable hub copy and the copy the indexer reads today cannot disagree.
     const rows = [
-        { coinPair: 'XCHAIN/USD', price: XCHAIN_USD, blockTimestamp: chainTime, roundNumber: XCHAIN_ROUND },
-        { coinPair: global.COIN_CODE + '/USD', price: COIN_USD, blockTimestamp: chainTime, roundNumber: COIN_ROUND }
+        { coinPair: 'XCHAIN/USD', price: XCHAIN_USD, blockTimestamp: chainTime,
+            batchBlockTime: chainTime, roundNumber: XCHAIN_ROUND },
+        { coinPair: global.COIN_CODE + '/USD', price: COIN_USD, blockTimestamp: chainTime,
+            batchBlockTime: chainTime, roundNumber: COIN_ROUND }
     ]
     if (wallTime > chainTime) {
-        rows.push({ coinPair: 'XCHAIN/USD', price: XCHAIN_USD, blockTimestamp: wallTime, roundNumber: XCHAIN_ROUND_NOW })
-        rows.push({ coinPair: global.COIN_CODE + '/USD', price: COIN_USD, blockTimestamp: wallTime, roundNumber: COIN_ROUND_NOW })
+        rows.push({ coinPair: 'XCHAIN/USD', price: XCHAIN_USD, blockTimestamp: wallTime,
+            batchBlockTime: wallTime, roundNumber: XCHAIN_ROUND_NOW })
+        rows.push({ coinPair: global.COIN_CODE + '/USD', price: COIN_USD, blockTimestamp: wallTime,
+            batchBlockTime: wallTime, roundNumber: COIN_ROUND_NOW })
     }
 
     // The durable half, first (see hubSeedTarget). Non-fatal by construction: a venue

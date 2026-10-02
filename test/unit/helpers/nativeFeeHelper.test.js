@@ -15,6 +15,7 @@
 // feeschedule probe hit the indexer's startup window ('indexer not ready').
 
 const assert = require('assert')
+const proxyquire = require('proxyquire')
 
 const HELPER_PATH = require.resolve('../../helpers/nativeFeeHelper')
 
@@ -169,6 +170,12 @@ describe('nativeFeeHelper.seedGlobalPrices anchoring', () => {
         return seeded.filter(r => r.coinPair === pair).map(r => r.blockTimestamp)
     }
 
+    function assertLandedAtSnapshotTime(){
+        for (const row of seeded)
+            assert.strictEqual(row.batchBlockTime, row.blockTimestamp,
+                row.coinPair + ' round ' + row.roundNumber + ' must be landed no later than its action block')
+    }
+
     it('seeds BOTH the chain-clock and wall-clock anchors when the chain trails', async () => {
         const wall = Math.floor(Date.now() / 1000)
         chainTime = wall - 2547                    // the LTC stack as found: pinned in the past
@@ -183,6 +190,7 @@ describe('nativeFeeHelper.seedGlobalPrices anchoring', () => {
         // orders by round_number, so the later anchor needs the higher round.
         const rows = seeded.filter(r => r.coinPair === 'LTC/USD')
         assert(rows[1].roundNumber > rows[0].roundNumber, 'the fresher anchor must carry the higher round')
+        assertLandedAtSnapshotTime()
     })
 
     it('seeds ONE chain-anchored row when the chain leads wall time (post-jump)', async () => {
@@ -190,6 +198,7 @@ describe('nativeFeeHelper.seedGlobalPrices anchoring', () => {
         await freshHelper().seedGlobalPrices(true)
         for (const pair of ['XCHAIN/USD', 'LTC/USD'])
             assert.deepStrictEqual(anchorsFor(pair), [chainTime], pair + ' must anchor on the chain, not the wall clock')
+        assertLandedAtSnapshotTime()
     })
 
     it('re-seeds inside the wall-clock throttle once the CHAIN clock jumps', async () => {
@@ -218,6 +227,51 @@ describe('nativeFeeHelper.seedGlobalPrices anchoring', () => {
         chainTime -= 1
         await helper.seedGlobalPrices()
         assert(seeded.length > afterFirst, 'a rewound chain clock must re-seed')
+    })
+})
+
+describe('priceSnapshotHelper landed fixture metadata', () => {
+    function loadSnapshotHelper(){
+        const queries = []
+        const target = { database: 'fixture' }
+        const helper = proxyquire('../../helpers/priceSnapshotHelper', {
+            mariadb: {
+                createConnection: async () => ({
+                    query: async (sql, args) => { queries.push({ sql: String(sql), args }) },
+                    end: async () => {}
+                }),
+                '@noCallThru': true
+            },
+            './hubMirrorTopology': {
+                readParams: () => target,
+                sameTarget: () => true,
+                assertCoherent: () => {},
+                '@noCallThru': true
+            }
+        })
+        return { helper, queries }
+    }
+
+    it('writes an explicit landed batch time when native fee seeding supplies one', async () => {
+        const { helper, queries } = loadSnapshotHelper()
+        await helper.seedSnapshot({
+            coinPair: 'LTC/USD', price: '100000.00000000', blockTimestamp: 1790000000,
+            batchBlockTime: 1790000000, roundNumber: 888100002
+        })
+        const insert = queries.find(q => /^INSERT/i.test(q.sql.trim()))
+        assert.match(insert.sql, /batch_block_time/)
+        assert.strictEqual(insert.args[insert.args.length - 1], 1790000000)
+    })
+
+    it('keeps the unlanded insert for fixtures that omit batch metadata', async () => {
+        const { helper, queries } = loadSnapshotHelper()
+        await helper.seedSnapshot({
+            coinPair: 'LTC/EUR', price: '90000.00000000', blockTimestamp: 1790000000,
+            roundNumber: 999000001
+        })
+        const insert = queries.find(q => /^INSERT/i.test(q.sql.trim()))
+        assert.doesNotMatch(insert.sql, /batch_block_time/)
+        assert.strictEqual(insert.args.length, 6)
     })
 })
 
@@ -427,6 +481,8 @@ describe('nativeFeeHelper.seedGlobalPrices hub seeding', () => {
             ['XCHAIN/USD', 'LTC/USD', 'XCHAIN/USD', 'LTC/USD'])
         assert.deepStrictEqual(conn.queries.map(q => q.args[3]),
             [chainTime, chainTime, Math.floor(Date.now() / 1000), Math.floor(Date.now() / 1000)])
+        assert.deepStrictEqual(conn.queries.map(q => q.args[4]), conn.queries.map(q => q.args[3]),
+            'each hub seed must carry a landed batch time equal to its visible snapshot time')
     })
 
     it('upserts finalized rows and never deletes on the hub', async () => {
@@ -436,6 +492,7 @@ describe('nativeFeeHelper.seedGlobalPrices hub seeding', () => {
             assert(/INSERT INTO price_snapshots/.test(q.sql), q.sql)
             assert(/ON DUPLICATE KEY UPDATE/.test(q.sql), q.sql)
             assert(/'finalized'/.test(q.sql), q.sql)
+            assert(/batch_block_time\s*=\s*VALUES\(batch_block_time\)/.test(q.sql), q.sql)
             // The hub's table is the federation's authoritative price history; clearing a
             // pair there would destroy real validator rounds.
             assert(!/DELETE/i.test(q.sql), 'the hub path must never delete: ' + q.sql)
