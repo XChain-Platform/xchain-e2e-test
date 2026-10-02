@@ -59,17 +59,28 @@ function buildLegCommand (driveName, legName, opts = {}) {
     const repoRoot = opts.repoRoot || REPO_ROOT
     const journalDir = opts.journalDir
     if (!journalDir) throw new Error('--journal-dir is required')
-    const argv = ['--no-config', '--reporter', 'spec', '--timeout', '0', '--exit']
+    const reportPath = leg.files
+        ? path.join(journalDir, 'mocha-report.json')
+        : null
+    const argv = ['--no-config', '--reporter', reportPath ? 'json' : 'spec',
+        '--timeout', '0', '--exit']
     if (leg.grep) argv.push('--grep', leg.grep)
     const files = leg.files || [...(drive.before || []), drive.root, drive.glob]
     argv.push('--require', './test/initialCheck.test.js', ...files)
+    const env = childEnvironment(opts.env || {}, journalDir, repoRoot)
+    Object.assign(env, leg.env || {})
     return {
         command: MOCHA,
         argv,
         cwd: repoRoot,
-        env: childEnvironment(opts.env || {}, journalDir, repoRoot),
-        envKeys: [...ENV_KEYS_SET, ...(drive.envKeys || [])],
+        env,
+        envKeys: [...new Set([
+            ...ENV_KEYS_SET,
+            ...(drive.envKeys || []),
+            ...Object.keys(leg.env || {}),
+        ])],
         journalPath: path.join(journalDir, 'case-journal.jsonl'),
+        reportPath,
         minPassed: leg.minPassed,
     }
 }
@@ -112,11 +123,19 @@ function findCompetingDrive () {
 function runChild (command, limitMinutes, graceMinutes) {
     return new Promise((resolve, reject) => {
         const schedule = limitSchedule(limitMinutes, graceMinutes)
-        const child = spawn(command.command, command.argv, {
-            cwd: command.cwd,
-            env: command.env,
-            stdio: 'inherit',
-        })
+        const reportFd = command.reportPath
+            ? fs.openSync(command.reportPath, 'w')
+            : null
+        let child
+        try {
+            child = spawn(command.command, command.argv, {
+                cwd: command.cwd,
+                env: command.env,
+                stdio: ['inherit', reportFd === null ? 'inherit' : reportFd, 'inherit'],
+            })
+        } finally {
+            if (reportFd !== null) fs.closeSync(reportFd)
+        }
         let timedOut = false
         let killTimer
         const limitTimer = setTimeout(() => {
@@ -158,6 +177,7 @@ function printTriage (result) {
 }
 
 function triageFile (command) {
+    if (command.reportPath) return triageMochaReport(command)
     let text
     try {
         text = fs.readFileSync(command.journalPath, 'utf8')
@@ -169,6 +189,48 @@ function triageFile (command) {
     const result = triageJournal(text, { minPassed: command.minPassed })
     printTriage(result)
     return result.pass
+}
+
+function mochaFailureLine (test) {
+    const error = String(test.err && (test.err.message || test.err.stack) || '')
+        .replace(/[\r\n]+/g, ' ')
+        .slice(0, 240)
+    return 'case failure: ' + test.fullTitle + ' error=' + error
+}
+
+function readMochaReport (reportPath) {
+    const text = fs.readFileSync(reportPath, 'utf8')
+    const reportStart = text.lastIndexOf('{\n  "stats":')
+    return JSON.parse(reportStart === -1 ? text : text.slice(reportStart))
+}
+
+function triageMochaReport (command) {
+    let report
+    try {
+        report = readMochaReport(command.reportPath)
+    } catch (error) {
+        if (error && error.code === 'ENOENT') {
+            console.log('VERDICT FAIL no mocha report at ' + command.reportPath)
+        } else {
+            console.log('VERDICT FAIL cannot read mocha report at ' + command.reportPath)
+        }
+        return false
+    }
+    const passed = Number(report.stats && report.stats.passes) || 0
+    const failed = Number(report.stats && report.stats.failures) || 0
+    const pending = Number(report.stats && report.stats.pending) || 0
+    for (const failure of report.failures || []) console.log(mochaFailureLine(failure))
+    console.log('triage: passed=' + passed + ' failed=' + failed + ' pending=' + pending)
+    if (failed > 0) {
+        console.log('VERDICT FAIL ' + failed + ' failed case(s)')
+        return false
+    }
+    if (passed < command.minPassed) {
+        console.log('VERDICT FAIL passed=' + passed + ' below minPassed=' + command.minPassed)
+        return false
+    }
+    console.log('VERDICT PASS')
+    return true
 }
 
 async function main (argv) {
@@ -188,6 +250,7 @@ async function main (argv) {
     }
     fs.mkdirSync(options.journalDir, { recursive: true })
     fs.rmSync(command.journalPath, { force: true })
+    if (command.reportPath) fs.rmSync(command.reportPath, { force: true })
     const childResult = await runChild(command, options.limitMinutes, options.teardownGraceMinutes)
     const passed = triageFile(command)
     return passed && !childResult.timedOut ? 0 : 1
