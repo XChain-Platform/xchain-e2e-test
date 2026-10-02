@@ -226,11 +226,12 @@ function lastSeedReport(){ return _lastSeedReport }
 // venue derives the pair itself (NO_PRICE_SEED below).
 // The landed-batch stamp a seeded round carries. A venue that arms the landed-batch fee
 // gate (XC_E2E_PRICE_FEE_BATCH_LANDED=armed) prices fees only from rounds whose PRICE batch
-// landed at or before the action's block, so each seeded round is stamped landed at its
-// own block time. With the variable unset or off the stamp is 0, today's behaviour.
-function landedBatchTime(blockTimestamp){
+// landed at or before the action's block. The caller supplies the current chain time,
+// which is at or before the action's next block even for a wall-clock freshness row.
+// With the variable unset or off the stamp is 0, today's behaviour.
+function landedBatchTime(chainTime){
     const raw = String(process.env.XC_E2E_PRICE_FEE_BATCH_LANDED || '').trim().toLowerCase()
-    return ['armed', 'on', 'true', 'yes', '1'].includes(raw) ? blockTimestamp : 0
+    return ['armed', 'on', 'true', 'yes', '1'].includes(raw) ? chainTime : 0
 }
 
 async function seedGlobalPrices(force){
@@ -354,9 +355,9 @@ async function seedGlobalPrices(force){
     ]
     if (wallTime > chainTime) {
         rows.push({ coinPair: 'XCHAIN/USD', price: XCHAIN_USD, blockTimestamp: wallTime,
-            batchBlockTime: landedBatchTime(wallTime), roundNumber: XCHAIN_ROUND_NOW })
+            batchBlockTime: landedBatchTime(chainTime), roundNumber: XCHAIN_ROUND_NOW })
         rows.push({ coinPair: global.COIN_CODE + '/USD', price: COIN_USD, blockTimestamp: wallTime,
-            batchBlockTime: landedBatchTime(wallTime), roundNumber: COIN_ROUND_NOW })
+            batchBlockTime: landedBatchTime(chainTime), roundNumber: COIN_ROUND_NOW })
     }
 
     // The durable half, first (see hubSeedTarget). Non-fatal by construction: a venue

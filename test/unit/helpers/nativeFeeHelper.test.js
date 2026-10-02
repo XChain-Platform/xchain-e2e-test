@@ -15,6 +15,8 @@
 // feeschedule probe hit the indexer's startup window ('indexer not ready').
 
 const assert = require('assert')
+const fs = require('fs')
+const path = require('path')
 const proxyquire = require('proxyquire')
 
 const HELPER_PATH = require.resolve('../../helpers/nativeFeeHelper')
@@ -174,10 +176,10 @@ describe('nativeFeeHelper.seedGlobalPrices anchoring', () => {
         return seeded.filter(r => r.coinPair === pair).map(r => r.blockTimestamp)
     }
 
-    function assertLandedAtSnapshotTime(){
+    function assertLandedNoLaterThanActionBlock(){
         for (const row of seeded)
-            assert.strictEqual(row.batchBlockTime, row.blockTimestamp,
-                row.coinPair + ' round ' + row.roundNumber + ' must be landed no later than its action block')
+            assert(row.batchBlockTime <= chainTime,
+                row.coinPair + ' round ' + row.roundNumber + ' landed after the current chain tip')
     }
 
     it('seeds BOTH the chain-clock and wall-clock anchors when the chain trails', async () => {
@@ -194,7 +196,10 @@ describe('nativeFeeHelper.seedGlobalPrices anchoring', () => {
         // orders by round_number, so the later anchor needs the higher round.
         const rows = seeded.filter(r => r.coinPair === 'LTC/USD')
         assert(rows[1].roundNumber > rows[0].roundNumber, 'the fresher anchor must carry the higher round')
-        assertLandedAtSnapshotTime()
+        assertLandedNoLaterThanActionBlock()
+        for (const row of seeded.filter(r => r.blockTimestamp > chainTime))
+            assert.strictEqual(row.batchBlockTime, chainTime,
+                'a wall-clock row must use the chain tip as its landed time')
     })
 
     it('keeps the unlanded stamp 0 when the landed-batch gate is not armed', async () => {
@@ -214,7 +219,7 @@ describe('nativeFeeHelper.seedGlobalPrices anchoring', () => {
         await freshHelper().seedGlobalPrices(true)
         for (const pair of ['XCHAIN/USD', 'LTC/USD'])
             assert.deepStrictEqual(anchorsFor(pair), [chainTime], pair + ' must anchor on the chain, not the wall clock')
-        assertLandedAtSnapshotTime()
+        assertLandedNoLaterThanActionBlock()
     })
 
     it('re-seeds inside the wall-clock throttle once the CHAIN clock jumps', async () => {
@@ -498,8 +503,9 @@ describe('nativeFeeHelper.seedGlobalPrices hub seeding', () => {
             ['XCHAIN/USD', 'LTC/USD', 'XCHAIN/USD', 'LTC/USD'])
         assert.deepStrictEqual(conn.queries.map(q => q.args[3]),
             [chainTime, chainTime, Math.floor(Date.now() / 1000), Math.floor(Date.now() / 1000)])
-        assert.deepStrictEqual(conn.queries.map(q => q.args[4]), conn.queries.map(q => q.args[3]),
-            'each hub seed must carry a landed batch time equal to its visible snapshot time')
+        assert.deepStrictEqual(conn.queries.map(q => q.args[4]),
+            [chainTime, chainTime, chainTime, chainTime],
+            'each hub seed must be landed no later than the next action block')
     })
 
     it('upserts finalized rows and never deletes on the hub', async () => {
@@ -873,6 +879,23 @@ describe('anchorArmHeight', () => {
         applyCapturedArmHeights
     } = require('../../helpers/anchorArmHeight')
     const NAME = 'XC_ANCHOR_FOLD_REGTEST_ACTIVATION'
+
+    it('is captured by the federation bootstrap before suite files are evaluated', () => {
+        const root = path.resolve(__dirname, '../../..')
+        const scripts = require(path.join(root, 'package.json')).scripts
+        assert.match(scripts['test:federation:all'],
+            /--require \.\/test\/initialCheck\.test\.js/)
+
+        const bootstrap = fs.readFileSync(path.join(root, 'test/initialCheck.test.js'), 'utf8')
+        const stakeAt = bootstrap.indexOf("require('./helpers/stakeHelper')")
+        const hooksAt = bootstrap.indexOf('exports.mochaHooks')
+        assert(stakeAt >= 0 && hooksAt > stakeAt,
+            'the federation bootstrap must load stakeHelper before exporting its hooks')
+
+        const stake = fs.readFileSync(path.join(root, 'test/helpers/stakeHelper.js'), 'utf8')
+        assert.match(stake, /require\('\.\/anchorArmHeight'\)/,
+            'stakeHelper must snapshot anchor heights during federation bootstrap')
+    })
 
     it('defaults to genesis when unset or unparseable', () => {
         assert.strictEqual(armHeight(NAME, {}), '0')
