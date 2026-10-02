@@ -23,6 +23,12 @@ const nodeUtil = require('node:util');
 const { getLogger } = require('./lib/logger');
 const logger = getLogger();
 
+// Cap each call the deadline loops poll: axios has no default timeout and the
+// loops check the deadline only between requests, so a silent tracker would hang
+// quiesce/waitForSync/waitForUtxos past their budget.
+const PROBE_TIMEOUT_MS = 5000;
+const READ_TIMEOUT_MS = 15000;
+
 class UtxoTracker {
     constructor(url, port) {
         this.url = "http://"+url+":"+port
@@ -42,7 +48,8 @@ class UtxoTracker {
 
         try {
             const response = await axios.post(this.url, data, {
-                headers: { 'Content-Type': 'application/json' }
+                headers: { 'Content-Type': 'application/json' },
+                timeout: PROBE_TIMEOUT_MS
             });
 
             const responseData = response.data;
@@ -65,7 +72,8 @@ class UtxoTracker {
                 id: 1
             };
             const response = await axios.post(this.url, data, {
-                headers: { 'Content-Type': 'application/json' }
+                headers: { 'Content-Type': 'application/json' },
+                timeout: PROBE_TIMEOUT_MS
             });
             const responseData = response.data;
             return responseData.result === undefined ? null : responseData.result;
@@ -80,7 +88,8 @@ class UtxoTracker {
         try {
             const data = { jsonrpc: '2.0', method: 'is_quiescent', id: 1 };
             const response = await axios.post(this.url, data, {
-                headers: { 'Content-Type': 'application/json' }
+                headers: { 'Content-Type': 'application/json' },
+                timeout: PROBE_TIMEOUT_MS
             });
             const responseData = response.data;
             return responseData.result === undefined ? null : responseData.result;
@@ -218,7 +227,8 @@ class UtxoTracker {
             };
 
             const response = await axios.post(this.url, data, {
-                headers: { 'Content-Type': 'application/json' }
+                headers: { 'Content-Type': 'application/json' },
+                timeout: READ_TIMEOUT_MS
             });
 
             const responseData = response.data;

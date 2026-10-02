@@ -142,3 +142,29 @@ describe('XChainIndexerConnector', function () {
         });
     });
 });
+
+// waitForIndexedBlock checks its deadline only between health calls, so the probes
+// carry their own request timeout; call() is general RPC and stays unbounded.
+describe('XChainIndexerConnector probe timeouts', function () {
+    let connector;
+    let post;
+    beforeEach(function () {
+        post = sinon.stub(axios, 'post');
+        connector = new XChainIndexerConnector('localhost', 4000);
+    });
+    afterEach(function () { sinon.restore(); });
+
+    it('bounds ping and health, and a timed-out probe keeps its sentinel', async function () {
+        post.resolves({ data: { result: { ok: true } } });
+        await connector.ping();
+        await connector.health();
+        assert.ok(post.firstCall.args[2].timeout > 0, 'ping posted with no timeout');
+        assert.ok(post.secondCall.args[2].timeout > 0, 'health posted with no timeout');
+        post.rejects(Object.assign(new Error('timeout of 5000ms exceeded'), { code: 'ECONNABORTED' }));
+        const info = sinon.stub(console, 'info');
+        try {
+            assert.strictEqual(await connector.ping(), false);
+            assert.strictEqual(await connector.health(), null);
+        } finally { info.restore(); }
+    });
+});

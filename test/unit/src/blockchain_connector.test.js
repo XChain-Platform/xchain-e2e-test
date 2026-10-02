@@ -126,6 +126,7 @@ describe('BlockchainConnector', function () {
             const data = axiosPostStub.firstCall.args[1];
             assert.strictEqual(data.method, 'getrawtransaction');
             assert.deepStrictEqual(data.params, [TXID, true]);
+            assert.ok(axiosPostStub.firstCall.args[2].timeout > 0, 'waitForTx polls this read, so it must carry a timeout');
         });
 
         it('returns result.hex on success', async function () {

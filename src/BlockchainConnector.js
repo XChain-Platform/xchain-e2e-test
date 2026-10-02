@@ -15,6 +15,9 @@
 const axios = require('axios')
 const config = require('./config')
 
+// Cap the read waitForTx polls, so a silent node cannot hang it past timeMax.
+const READ_TIMEOUT_MS = 15000
+
 class BlockchainConnector {
     constructor(url, port, rpcUser, rpcPassword) {
         this.url = "http://"+url+":"+port
@@ -92,7 +95,8 @@ class BlockchainConnector {
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Basic ${auth}`
-                }
+                },
+                timeout: READ_TIMEOUT_MS
             };
 
             const response = await axios.post(this.url, data, options);

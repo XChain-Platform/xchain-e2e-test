@@ -22,6 +22,10 @@ const axios = require('axios');
 const { getLogger } = require('./lib/logger');
 const logger = getLogger();
 
+// Cap ping/health: axios has no default timeout, so a decoder that accepts the
+// socket and never answers would leave a readiness poll pending forever.
+const PROBE_TIMEOUT_MS = 5000;
+
 class XChainDecoderConnector {
     constructor(url, port) {
         this.url = "http://"+url+":"+port
@@ -41,7 +45,7 @@ class XChainDecoderConnector {
 
         var response = null
         try {
-            response = await axios.post(this.url, data)
+            response = await axios.post(this.url, data, { timeout: PROBE_TIMEOUT_MS })
         } catch (err) {
             logger.info(err)
             return false
@@ -65,7 +69,7 @@ class XChainDecoderConnector {
 
         var response = null
         try {
-            response = await axios.post(this.url, data)
+            response = await axios.post(this.url, data, { timeout: PROBE_TIMEOUT_MS })
         } catch (err) {
             logger.info(err)
             return null

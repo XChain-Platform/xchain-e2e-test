@@ -37,6 +37,10 @@ function serviceRefusal(err){
     return 'HTTP ' + res.status + (res.statusText ? ' ' + res.statusText : '')
 }
 
+// Cap ping/health: waitForIndexedBlock polls health and checks its deadline only
+// between requests, so a silent indexer would otherwise hang it. call() stays unbounded.
+const PROBE_TIMEOUT_MS = 5000;
+
 class XChainIndexerConnector {
     constructor(url, port, apiKey) {
         this.url = "http://"+url+":"+port
@@ -57,7 +61,7 @@ class XChainIndexerConnector {
 
         var response = null
         try {
-            response = await axios.post(this.url, data)
+            response = await axios.post(this.url, data, { timeout: PROBE_TIMEOUT_MS })
         } catch (err) {
             // A probe keeps its boolean sentinel: callers poll on false. Name the
             // refusal in the log so a gated port is not read as a dead one.
@@ -85,7 +89,7 @@ class XChainIndexerConnector {
 
         var response = null
         try {
-            response = await axios.post(this.url, data)
+            response = await axios.post(this.url, data, { timeout: PROBE_TIMEOUT_MS })
         } catch (err) {
             // health() keeps its null sentinel deliberately: waitForIndexedBlock
             // polls it in a loop and must ride out a restarting indexer's non-2xx

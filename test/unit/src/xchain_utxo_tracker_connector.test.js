@@ -335,3 +335,35 @@ describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
         });
     });
 });
+
+// The deadline loops check their budget only between requests, so every call they
+// poll must carry its own request timeout or a silent tracker hangs the barrier.
+describe('XChainUtxoTrackerConnector (UtxoTracker)', function () {
+    beforeEach(setupTracker);
+    afterEach(teardownTracker);
+    describe('deadline-polled calls carry a request timeout', function () {
+        const timedOut = () => Object.assign(new Error('timeout of 5000ms exceeded'), { code: 'ECONNABORTED' });
+        const polled = [
+            ['ping', () => tracker.ping(), { result: 'pong' }],
+            ['getSyncStatus', () => tracker.getSyncStatus(), { result: { synced: true } }],
+            ['getQuiescentStatus', () => tracker.getQuiescentStatus(), { result: { ready: true } }],
+            ['getUtxosFromAddress', () => tracker.getUtxosFromAddress('bcrt1qtest'), { result: { utxos: [] } }],
+        ];
+        for (const [name, call, body] of polled) {
+            it(`${name} bounds its request and keeps the JSON header`, async function () {
+                axiosPostStub.resolves(makeResponse(body));
+                await call();
+                const opts = axiosPostStub.firstCall.args[2];
+                assert.ok(opts.timeout > 0, `${name} posted with no timeout`);
+                assert.strictEqual(opts.headers['Content-Type'], 'application/json');
+            });
+        }
+
+        it('maps a timed-out status probe to the null sentinel the loops poll on', async function () {
+            axiosPostStub.rejects(timedOut());
+            assert.strictEqual(await tracker.getQuiescentStatus(), null);
+            assert.strictEqual(await tracker.getSyncStatus(), null);
+            assert.strictEqual(await tracker.ping(), false);
+        });
+    });
+});

@@ -22,6 +22,10 @@ const axios = require('axios');
 const { getLogger } = require('./lib/logger');
 const logger = getLogger();
 
+// Cap only the readiness probe: tx building legitimately runs long, so createTx
+// and the cancel builder keep the unbounded config.
+const PING_TIMEOUT_MS = 5000;
+
 class XChainEncoderConnector {
     constructor(url, port, apiKey = null) {
         this.url = "http://"+url+":"+port
@@ -48,7 +52,7 @@ class XChainEncoderConnector {
 
         var response = null
         try {
-            response = await axios.post(this.url, data, this.reqConfig)
+            response = await axios.post(this.url, data, { ...this.reqConfig, timeout: PING_TIMEOUT_MS })
         } catch (err) {
             logger.info(err)
             return false

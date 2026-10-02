@@ -102,29 +102,31 @@ describe('XChainEncoderConnector', function () {
     beforeEach(setupConnector);
     afterEach(teardownConnector);
     describe('api key header', function () {
+        // Only the readiness probe carries a request timeout; tx builds stay unbounded.
         const methods = [
-            ['ping', (c) => c.ping()],
-            ['createTx', (c) => c.createTx([], 'pk', [], {}, '', 1, false, 'OP_RETURN', 'chg', null, null, null)],
+            ['ping', (c) => c.ping(), { timeout: 5000 }],
+            ['createTx', (c) => c.createTx([], 'pk', [], {}, '', 1, false, 'OP_RETURN', 'chg', null, null, null), {}],
             ['createEnvelopeCancelTx', (c) => c.createEnvelopeCancelTx({
                 commitTxid: 'tx', commitVout: 0, commitValue: 1000,
                 internalPubkey: 'ipk', tapleafHash: 'tlh', destination: 'dest'
-            })]
+            }), {}]
         ];
 
-        methods.forEach(function ([name, invoke]) {
+        methods.forEach(function ([name, invoke, bound]) {
             it(`${name} sends x-api-key when a key is configured`, async function () {
                 axiosPostStub.resolves({ data: { result: 'ok' } });
                 const keyed = new XChainEncoderConnector(URL, PORT, API_KEY);
                 await invoke(keyed);
                 const [, , config] = axiosPostStub.firstCall.args;
-                assert.deepStrictEqual(config, { headers: { 'x-api-key': API_KEY } });
+                assert.deepStrictEqual(config, { headers: { 'x-api-key': API_KEY }, ...bound });
+                assert.deepStrictEqual(keyed.reqConfig, { headers: { 'x-api-key': API_KEY } });
             });
 
             it(`${name} sends an empty config when no key is configured`, async function () {
                 axiosPostStub.resolves({ data: { result: 'ok' } });
                 await invoke(connector);
                 const [, , config] = axiosPostStub.firstCall.args;
-                assert.deepStrictEqual(config, {});
+                assert.deepStrictEqual(config, { ...bound });
             });
         });
     });
