@@ -15,6 +15,9 @@
 // feeschedule probe hit the indexer's startup window ('indexer not ready').
 
 const assert = require('assert')
+const fs = require('fs')
+const path = require('path')
+const proxyquire = require('proxyquire')
 
 const HELPER_PATH = require.resolve('../../helpers/nativeFeeHelper')
 
@@ -133,7 +136,7 @@ describe('nativeFeeHelper.discoverFeeMode', () => {
 // every fee-bearing action rejected `no current oracle price`.
 describe('nativeFeeHelper.seedGlobalPrices anchoring', () => {
     const SNAPSHOT_PATH = require.resolve('../../helpers/priceSnapshotHelper')
-    let savedSnapshotModule, savedCoin, savedIndexerDb
+    let savedSnapshotModule, savedCoin, savedIndexerDb, savedLanded
     let seeded, cleared, chainTime
 
     // Stub priceSnapshotHelper through require.cache so the helper's own
@@ -153,6 +156,8 @@ describe('nativeFeeHelper.seedGlobalPrices anchoring', () => {
         savedSnapshotModule = require.cache[SNAPSHOT_PATH]
         savedCoin = global.COIN_CODE
         savedIndexerDb = global.indexerDatabase
+        savedLanded = process.env.XC_E2E_PRICE_FEE_BATCH_LANDED
+        process.env.XC_E2E_PRICE_FEE_BATCH_LANDED = 'armed'
         global.COIN_CODE = 'LTC'
         stubSnapshots()
     })
@@ -160,6 +165,8 @@ describe('nativeFeeHelper.seedGlobalPrices anchoring', () => {
     afterEach(() => {
         if (savedSnapshotModule) require.cache[SNAPSHOT_PATH] = savedSnapshotModule
         else delete require.cache[SNAPSHOT_PATH]
+        if (savedLanded === undefined) delete process.env.XC_E2E_PRICE_FEE_BATCH_LANDED
+        else process.env.XC_E2E_PRICE_FEE_BATCH_LANDED = savedLanded
         global.COIN_CODE = savedCoin
         global.indexerDatabase = savedIndexerDb
         delete require.cache[HELPER_PATH]
@@ -167,6 +174,12 @@ describe('nativeFeeHelper.seedGlobalPrices anchoring', () => {
 
     function anchorsFor(pair){
         return seeded.filter(r => r.coinPair === pair).map(r => r.blockTimestamp)
+    }
+
+    function assertLandedNoLaterThanActionBlock(){
+        for (const row of seeded)
+            assert(row.batchBlockTime <= chainTime,
+                row.coinPair + ' round ' + row.roundNumber + ' landed after the current chain tip')
     }
 
     it('seeds BOTH the chain-clock and wall-clock anchors when the chain trails', async () => {
@@ -183,6 +196,22 @@ describe('nativeFeeHelper.seedGlobalPrices anchoring', () => {
         // orders by round_number, so the later anchor needs the higher round.
         const rows = seeded.filter(r => r.coinPair === 'LTC/USD')
         assert(rows[1].roundNumber > rows[0].roundNumber, 'the fresher anchor must carry the higher round')
+        assertLandedNoLaterThanActionBlock()
+        for (const row of seeded.filter(r => r.blockTimestamp > chainTime))
+            assert.strictEqual(row.batchBlockTime, chainTime,
+                'a wall-clock row must use the chain tip as its landed time')
+    })
+
+    it('keeps the unlanded stamp 0 when the landed-batch gate is not armed', async () => {
+        chainTime = Math.floor(Date.now() / 1000) + 600
+        for (const off of [undefined, 'off', '']) {
+            if (off === undefined) delete process.env.XC_E2E_PRICE_FEE_BATCH_LANDED
+            else process.env.XC_E2E_PRICE_FEE_BATCH_LANDED = off
+            seeded.length = 0
+            await freshHelper().seedGlobalPrices(true)
+            assert(seeded.length > 0)
+            for (const row of seeded) assert.strictEqual(row.batchBlockTime, 0)
+        }
     })
 
     it('seeds ONE chain-anchored row when the chain leads wall time (post-jump)', async () => {
@@ -190,6 +219,7 @@ describe('nativeFeeHelper.seedGlobalPrices anchoring', () => {
         await freshHelper().seedGlobalPrices(true)
         for (const pair of ['XCHAIN/USD', 'LTC/USD'])
             assert.deepStrictEqual(anchorsFor(pair), [chainTime], pair + ' must anchor on the chain, not the wall clock')
+        assertLandedNoLaterThanActionBlock()
     })
 
     it('re-seeds inside the wall-clock throttle once the CHAIN clock jumps', async () => {
@@ -218,6 +248,51 @@ describe('nativeFeeHelper.seedGlobalPrices anchoring', () => {
         chainTime -= 1
         await helper.seedGlobalPrices()
         assert(seeded.length > afterFirst, 'a rewound chain clock must re-seed')
+    })
+})
+
+describe('priceSnapshotHelper landed fixture metadata', () => {
+    function loadSnapshotHelper(){
+        const queries = []
+        const target = { database: 'fixture' }
+        const helper = proxyquire('../../helpers/priceSnapshotHelper', {
+            mariadb: {
+                createConnection: async () => ({
+                    query: async (sql, args) => { queries.push({ sql: String(sql), args }) },
+                    end: async () => {}
+                }),
+                '@noCallThru': true
+            },
+            './hubMirrorTopology': {
+                readParams: () => target,
+                sameTarget: () => true,
+                assertCoherent: () => {},
+                '@noCallThru': true
+            }
+        })
+        return { helper, queries }
+    }
+
+    it('writes an explicit landed batch time when native fee seeding supplies one', async () => {
+        const { helper, queries } = loadSnapshotHelper()
+        await helper.seedSnapshot({
+            coinPair: 'LTC/USD', price: '100000.00000000', blockTimestamp: 1790000000,
+            batchBlockTime: 1790000000, roundNumber: 888100002
+        })
+        const insert = queries.find(q => /^INSERT/i.test(q.sql.trim()))
+        assert.match(insert.sql, /batch_block_time/)
+        assert.strictEqual(insert.args[insert.args.length - 1], 1790000000)
+    })
+
+    it('keeps the unlanded insert for fixtures that omit batch metadata', async () => {
+        const { helper, queries } = loadSnapshotHelper()
+        await helper.seedSnapshot({
+            coinPair: 'LTC/EUR', price: '90000.00000000', blockTimestamp: 1790000000,
+            roundNumber: 999000001
+        })
+        const insert = queries.find(q => /^INSERT/i.test(q.sql.trim()))
+        assert.doesNotMatch(insert.sql, /batch_block_time/)
+        assert.strictEqual(insert.args.length, 6)
     })
 })
 
@@ -409,6 +484,7 @@ describe('nativeFeeHelper.seedGlobalPrices hub seeding', () => {
 
     it('writes the seed rows into the hub database the mirror bootstraps from', async () => {
         mirroredVenue()
+        process.env.XC_E2E_PRICE_FEE_BATCH_LANDED = 'armed'
         const helper = freshHelper()
         assert.strictEqual(helper.hubSeedTarget().database, 'XChain_Hub')
         await helper.seedGlobalPrices(true)
@@ -427,6 +503,9 @@ describe('nativeFeeHelper.seedGlobalPrices hub seeding', () => {
             ['XCHAIN/USD', 'LTC/USD', 'XCHAIN/USD', 'LTC/USD'])
         assert.deepStrictEqual(conn.queries.map(q => q.args[3]),
             [chainTime, chainTime, Math.floor(Date.now() / 1000), Math.floor(Date.now() / 1000)])
+        assert.deepStrictEqual(conn.queries.map(q => q.args[4]),
+            [chainTime, chainTime, chainTime, chainTime],
+            'each hub seed must be landed no later than the next action block')
     })
 
     it('upserts finalized rows and never deletes on the hub', async () => {
@@ -436,6 +515,7 @@ describe('nativeFeeHelper.seedGlobalPrices hub seeding', () => {
             assert(/INSERT INTO price_snapshots/.test(q.sql), q.sql)
             assert(/ON DUPLICATE KEY UPDATE/.test(q.sql), q.sql)
             assert(/'finalized'/.test(q.sql), q.sql)
+            assert(/batch_block_time\s*=\s*VALUES\(batch_block_time\)/.test(q.sql), q.sql)
             // The hub's table is the federation's authoritative price history; clearing a
             // pair there would destroy real validator rounds.
             assert(!/DELETE/i.test(q.sql), 'the hub path must never delete: ' + q.sql)
@@ -788,5 +868,109 @@ describe('nativeFeeHelper.nativeFeeSats', () => {
         const helper = freshHelper()
         const out = await helper.getNativeFeeOutput('ISSUE|0|TICK|1000|100|0|d|10', 'DSrc111')
         assert.deepStrictEqual(out, { address: 'DFeeDest111', value: Math.ceil(200000 * helper.FEE_HEADROOM) })
+    })
+})
+
+describe('anchorArmHeight', () => {
+    const {
+        ANCHOR_GATE_ENVS,
+        armHeight,
+        applyArmHeight,
+        applyCapturedArmHeights
+    } = require('../../helpers/anchorArmHeight')
+    const NAME = 'XC_ANCHOR_FOLD_REGTEST_ACTIVATION'
+
+    it('is captured by the federation bootstrap before suite files are evaluated', () => {
+        const root = path.resolve(__dirname, '../../..')
+        const scripts = require(path.join(root, 'package.json')).scripts
+        assert.match(scripts['test:federation:all'],
+            /--require \.\/test\/initialCheck\.test\.js/)
+
+        const bootstrap = fs.readFileSync(path.join(root, 'test/initialCheck.test.js'), 'utf8')
+        const stakeAt = bootstrap.indexOf("require('./helpers/stakeHelper')")
+        const hooksAt = bootstrap.indexOf('exports.mochaHooks')
+        assert(stakeAt >= 0 && hooksAt > stakeAt,
+            'the federation bootstrap must load stakeHelper before exporting its hooks')
+
+        const stake = fs.readFileSync(path.join(root, 'test/helpers/stakeHelper.js'), 'utf8')
+        assert.match(stake, /require\('\.\/anchorArmHeight'\)/,
+            'stakeHelper must snapshot anchor heights during federation bootstrap')
+    })
+
+    it('defaults to genesis when unset or unparseable', () => {
+        assert.strictEqual(armHeight(NAME, {}), '0')
+        assert.strictEqual(armHeight(NAME, { [NAME]: 'soon' }), '0')
+        assert.strictEqual(armHeight(NAME, { [NAME]: '' }), '0')
+    })
+
+    it('honours a mid-chain height from the environment', () => {
+        const env = { [NAME]: ' 250 ' }
+        assert.strictEqual(armHeight(NAME, env), '250')
+        assert.strictEqual(applyArmHeight(NAME, env), '250')
+        assert.strictEqual(env[NAME], '250')
+    })
+
+    it('automatically captures shell heights before a suite forces genesis', () => {
+        const armPath = require.resolve('../../helpers/anchorArmHeight')
+        const savedModule = require.cache[armPath]
+        const saved = Object.fromEntries(ANCHOR_GATE_ENVS.map((envName) => [envName, process.env[envName]]))
+        try {
+            process.env.XC_ANCHOR_FOLD_REGTEST_ACTIVATION = '250'
+            process.env.XC_ANCHOR_STAKE_REGTEST_ACTIVATION = ' 251 '
+            process.env.XC_ANCHOR_SLASH_REGTEST_ACTIVATION = 'later'
+            delete require.cache[armPath]
+            const freshArmHeight = require(armPath)
+
+            const suiteEnv = Object.fromEntries(ANCHOR_GATE_ENVS.map((envName) => [envName, '0']))
+            assert.deepStrictEqual(freshArmHeight.applyCapturedArmHeights(suiteEnv), {
+                XC_ANCHOR_FOLD_REGTEST_ACTIVATION: '250',
+                XC_ANCHOR_STAKE_REGTEST_ACTIVATION: '251',
+                XC_ANCHOR_SLASH_REGTEST_ACTIVATION: '0'
+            })
+        } finally {
+            for (const envName of ANCHOR_GATE_ENVS) {
+                if (saved[envName] === undefined) delete process.env[envName]
+                else process.env[envName] = saved[envName]
+            }
+            delete require.cache[armPath]
+            if (savedModule) require.cache[armPath] = savedModule
+        }
+    })
+
+    it('reapplies bootstrap-captured heights when the federation hub harness is constructed', () => {
+        const armPath = require.resolve('../../helpers/anchorArmHeight')
+        const stakePath = require.resolve('../../helpers/stakeHelper')
+        const hubPath = require.resolve('../../helpers/multiValidatorHubHelper')
+        const savedModules = new Map([armPath, stakePath, hubPath].map((path) => [path, require.cache[path]]))
+        const saved = Object.fromEntries(ANCHOR_GATE_ENVS.map((envName) => [envName, process.env[envName]]))
+        try {
+            for (const path of savedModules.keys()) delete require.cache[path]
+            process.env.XC_ANCHOR_FOLD_REGTEST_ACTIVATION = '350'
+            process.env.XC_ANCHOR_STAKE_REGTEST_ACTIVATION = '351'
+            process.env.XC_ANCHOR_SLASH_REGTEST_ACTIVATION = '352'
+            require(stakePath)
+
+            for (const envName of ANCHOR_GATE_ENVS) process.env[envName] = '0'
+            const { MultiValidatorHub } = require(hubPath)
+            new MultiValidatorHub({ count: 1, btcIndexerApiUrl: 'http://127.0.0.1:1' })
+
+            assert.deepStrictEqual(
+                Object.fromEntries(ANCHOR_GATE_ENVS.map((envName) => [envName, process.env[envName]])),
+                {
+                    XC_ANCHOR_FOLD_REGTEST_ACTIVATION: '350',
+                    XC_ANCHOR_STAKE_REGTEST_ACTIVATION: '351',
+                    XC_ANCHOR_SLASH_REGTEST_ACTIVATION: '352'
+                }
+            )
+        } finally {
+            for (const envName of ANCHOR_GATE_ENVS) {
+                if (saved[envName] === undefined) delete process.env[envName]
+                else process.env[envName] = saved[envName]
+            }
+            for (const [path, module] of savedModules) {
+                delete require.cache[path]
+                if (module) require.cache[path] = module
+            }
+        }
     })
 })

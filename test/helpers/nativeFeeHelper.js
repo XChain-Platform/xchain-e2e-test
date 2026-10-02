@@ -188,11 +188,12 @@ function hubSeedTarget(){
 // mark it hub-finalized, which is what a round with no source-chain PRICE tx is.
 const HUB_SEED_SQL = `INSERT INTO price_snapshots
     (round_number, coin_pair, price, reference_block, reference_chain,
-     block_timestamp, validator_count, consensus_round, consensus_proof, status)
-    VALUES (?, ?, ?, 0, 'BTC', ?, 1, 1, '[]', 'finalized')
+     block_timestamp, batch_block_time, validator_count, consensus_round, consensus_proof, status)
+    VALUES (?, ?, ?, 0, 'BTC', ?, ?, 1, 1, '[]', 'finalized')
     ON DUPLICATE KEY UPDATE
      price = VALUES(price),
      block_timestamp = VALUES(block_timestamp),
+     batch_block_time = VALUES(batch_block_time),
      status = 'finalized'`
 
 async function seedIntoHub(target, rows){
@@ -202,7 +203,8 @@ async function seedIntoHub(target, rows){
     const conn = await mariadb.createConnection(Object.assign({ connectTimeout: 5000 }, target))
     try {
         for (const row of rows)
-            await conn.query(HUB_SEED_SQL, [row.roundNumber, row.coinPair, row.price, row.blockTimestamp])
+            await conn.query(HUB_SEED_SQL,
+                [row.roundNumber, row.coinPair, row.price, row.blockTimestamp, row.batchBlockTime])
     } finally {
         if (conn && typeof conn.end === 'function') await conn.end().catch(() => {})
     }
@@ -222,6 +224,16 @@ function lastSeedReport(){ return _lastSeedReport }
 // BTC/USD`, a false red/green by timing on runs past ORACLE_MAX_PRICE_AGE).
 // No-op only when the last seed is still fresh (unless force=true), or when the
 // venue derives the pair itself (NO_PRICE_SEED below).
+// The landed-batch stamp a seeded round carries. A venue that arms the landed-batch fee
+// gate (XC_E2E_PRICE_FEE_BATCH_LANDED=armed) prices fees only from rounds whose PRICE batch
+// landed at or before the action's block. The caller supplies the current chain time,
+// which is at or before the action's next block even for a wall-clock freshness row.
+// With the variable unset or off the stamp is 0, today's behaviour.
+function landedBatchTime(chainTime){
+    const raw = String(process.env.XC_E2E_PRICE_FEE_BATCH_LANDED || '').trim().toLowerCase()
+    return ['armed', 'on', 'true', 'yes', '1'].includes(raw) ? chainTime : 0
+}
+
 async function seedGlobalPrices(force){
     // The full de-seed. On a venue whose own hub publishes XCHAIN/USD (a
     // price-capability oracle validator), seeding it is a defect rather than a
@@ -336,12 +348,16 @@ async function seedGlobalPrices(force){
     // higher round (see the anchor note above). Built once and handed to BOTH targets,
     // so the durable hub copy and the copy the indexer reads today cannot disagree.
     const rows = [
-        { coinPair: 'XCHAIN/USD', price: XCHAIN_USD, blockTimestamp: chainTime, roundNumber: XCHAIN_ROUND },
-        { coinPair: global.COIN_CODE + '/USD', price: COIN_USD, blockTimestamp: chainTime, roundNumber: COIN_ROUND }
+        { coinPair: 'XCHAIN/USD', price: XCHAIN_USD, blockTimestamp: chainTime,
+            batchBlockTime: landedBatchTime(chainTime), roundNumber: XCHAIN_ROUND },
+        { coinPair: global.COIN_CODE + '/USD', price: COIN_USD, blockTimestamp: chainTime,
+            batchBlockTime: landedBatchTime(chainTime), roundNumber: COIN_ROUND }
     ]
     if (wallTime > chainTime) {
-        rows.push({ coinPair: 'XCHAIN/USD', price: XCHAIN_USD, blockTimestamp: wallTime, roundNumber: XCHAIN_ROUND_NOW })
-        rows.push({ coinPair: global.COIN_CODE + '/USD', price: COIN_USD, blockTimestamp: wallTime, roundNumber: COIN_ROUND_NOW })
+        rows.push({ coinPair: 'XCHAIN/USD', price: XCHAIN_USD, blockTimestamp: wallTime,
+            batchBlockTime: landedBatchTime(chainTime), roundNumber: XCHAIN_ROUND_NOW })
+        rows.push({ coinPair: global.COIN_CODE + '/USD', price: COIN_USD, blockTimestamp: wallTime,
+            batchBlockTime: landedBatchTime(chainTime), roundNumber: COIN_ROUND_NOW })
     }
 
     // The durable half, first (see hubSeedTarget). Non-fatal by construction: a venue
@@ -682,5 +698,5 @@ async function getNativeFeeOutput(wire, source){
 }
 
 module.exports = { resolveFeeDestination, discoverFeeMode, seedGlobalPrices, getNativeFeeOutput,
-    nativeFeeSats, warnIfSeedInvisible, hubSeedTarget, lastSeedReport, FLAT_FEE_SATS,
+    nativeFeeSats, warnIfSeedInvisible, hubSeedTarget, lastSeedReport, landedBatchTime, FLAT_FEE_SATS,
     FEE_BUDGET_XCHAIN, FEE_HEADROOM }

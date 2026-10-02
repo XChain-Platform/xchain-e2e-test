@@ -87,6 +87,12 @@ const FIXTURE_INSERT_SQL = `INSERT INTO price_snapshots
     SELECT GREATEST(COALESCE(MAX(id), 0) + 1, ?), ?, ?, ?, ?, 'BTC', ?, 1, 1, '[]', 'finalized'
       FROM price_snapshots`
 
+const LANDED_FIXTURE_INSERT_SQL = `INSERT INTO price_snapshots
+    (id, round_number, coin_pair, price, reference_block, reference_chain,
+     block_timestamp, batch_block_time, validator_count, consensus_round, consensus_proof, status)
+    SELECT GREATEST(COALESCE(MAX(id), 0) + 1, ?), ?, ?, ?, ?, 'BTC', ?, ?, 1, 1, '[]', 'finalized'
+      FROM price_snapshots`
+
 const FIXTURE_DELETE_SQL = 'DELETE FROM price_snapshots WHERE round_number = ? AND coin_pair = ?'
 
 module.exports = {
@@ -94,6 +100,7 @@ module.exports = {
 
     FIXTURE_ID_FLOOR,
     FIXTURE_INSERT_SQL,
+    LANDED_FIXTURE_INSERT_SQL,
     FIXTURE_DELETE_SQL,
 
     // Exposed for tests: which database this helper writes to and which one
@@ -292,15 +299,20 @@ module.exports = {
     //                  the current tip when the contract under test checks
     //                  oracle freshness (getPrice consumers); getPriceAtRound
     //                  consumers can leave it 0 (no staleness filter there).
-    async seedSnapshot({ coinPair, price, blockTimestamp, roundNumber, referenceBlock }){
+    //   batchBlockTime optional landed PRICE batch timestamp. Other fixtures retain
+    //                  the schema default of 0 when it is omitted.
+    async seedSnapshot({ coinPair, price, blockTimestamp, roundNumber, referenceBlock, batchBlockTime }){
         let params = resolveParams()
         let conn = await mariadb.createConnection(params)
         try {
             // Delete, then insert above the hub's id space (see FIXTURE_ID_FLOOR). This
             // replaces an upsert, so a re-seed of the same round still replaces its row.
             await conn.query(FIXTURE_DELETE_SQL, [roundNumber, coinPair])
-            await conn.query(FIXTURE_INSERT_SQL,
-                [FIXTURE_ID_FLOOR, roundNumber, coinPair, price, referenceBlock || 0, blockTimestamp])
+            const args = [FIXTURE_ID_FLOOR, roundNumber, coinPair, price,
+                referenceBlock || 0, blockTimestamp]
+            if (batchBlockTime === undefined || batchBlockTime === null)
+                await conn.query(FIXTURE_INSERT_SQL, args)
+            else await conn.query(LANDED_FIXTURE_INSERT_SQL, args.concat(batchBlockTime))
         } finally {
             await conn.end().catch(() => {})
         }
