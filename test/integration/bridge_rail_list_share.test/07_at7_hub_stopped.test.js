@@ -47,11 +47,9 @@ async function btcIndexerTip() {
     return Number(answer.block_index);
 }
 
-async function btcListMirrorWatermark() {
+async function btcListMirrorStatus() {
     const status = await state.venue.btcVenue.statusOf(0);
-    const hubMirror = status.body && status.body.hubMirror;
-    const listHeights = hubMirror && hubMirror.heights && hubMirror.heights.list_snapshots;
-    return Number(listHeights && listHeights.BTC);
+    return status.body && status.body.hubMirror;
 }
 
 async function btcListSettlements() {
@@ -131,16 +129,24 @@ bridgeRailSuite('list_share AT7: stopped hubs defer the venue and a restart resu
             D.heldAgain = await btcIndexerTip();
             D.settlementsHeldAgain = await btcListSettlements();
             D.mirrorHashHeldAgain = await btcMirrorVersion(D.heldAgain);
-            D.mirrorWatermark = await btcListMirrorWatermark();
+            D.mirrorStatus = await btcListMirrorStatus();
             D.nodeTip = await nodeBtcTip();
             assert.ok(D.nodeTip > target, 'the BTC chain did not grow while the hubs were stopped');
             assert.ok(D.held < D.nodeTip, 'the BTC indexer reached the chain tip ' + D.nodeTip + ' with every hub stopped');
             assert.strictEqual(D.heldAgain, D.held, 'the BTC indexer moved from ' + D.held + ' to ' + D.heldAgain +
                 ' with every hub stopped');
-            assert.ok(Number.isSafeInteger(D.mirrorWatermark),
-                'the BTC indexer reports no list_snapshots mirror watermark');
-            assert.strictEqual(D.heldAgain, D.mirrorWatermark,
-                'the deferred BTC indexer tip differs from its list_snapshots mirror watermark');
+            assert.ok(D.mirrorStatus, 'the BTC indexer reports no hub mirror status');
+            assert.strictEqual(D.mirrorStatus.connected, false,
+                'the BTC indexer reports its hub mirror connected with every hub stopped');
+            assert.strictEqual(D.mirrorStatus.bootstrapped, false,
+                'the BTC indexer reports its hub mirror bootstrapped with every hub stopped');
+            const listHeights = D.mirrorStatus.heights && D.mirrorStatus.heights.list_snapshots;
+            assert.strictEqual(listHeights && listHeights.BTC, undefined,
+                'the BTC indexer retained an active list_snapshots height with every hub stopped');
+            D.mirrorHeightShortfall = D.mirrorStatus.heightShortfalls &&
+                D.mirrorStatus.heightShortfalls['list_snapshots|BTC'];
+            assert.ok(Number.isSafeInteger(D.mirrorHeightShortfall),
+                'the BTC indexer reports no list_snapshots height shortfall with every hub stopped');
             assert.strictEqual(D.settlementsHeld, D.settlementsBefore,
                 'BTC applied a shared-list settlement during the first stopped-hub window');
             assert.strictEqual(D.mirrorHashHeld, D.mirrorHashBefore,
@@ -152,7 +158,7 @@ bridgeRailSuite('list_share AT7: stopped hubs defer the venue and a restart resu
         } finally {
             await startEveryHub();
         }
-        state.evidence.at7_deferred = { held: D.held, mirrorWatermark: D.mirrorWatermark,
+        state.evidence.at7_deferred = { held: D.held, mirrorHeightShortfall: D.mirrorHeightShortfall,
             nodeTip: D.nodeTip, edit: D.tx };
     });
 
