@@ -13,6 +13,13 @@ const ANCHOR_ARM_ENV_KEYS = [
     'XC_ANCHOR_STAKE_REGTEST_ACTIVATION',
     'XC_ANCHOR_SLASH_REGTEST_ACTIVATION',
 ];
+const CONTRACTS_PRICE_ENV_KEYS = [
+    'XC_AMOUNTS_PRICE_REGTEST_ACTIVATION',
+    'XC_AMOUNTS_PRICE_REGTEST_TIME',
+    'XC_CONTRACTS_REGTEST_ACTIVATION',
+    'XC_E2E_PRICE_FEE_BATCH_LANDED',
+    'XC_VOTE_CALLBACK_BINDING_EXPECT',
+];
 
 const RAIL_DRIVES = {
     policy: {
@@ -139,6 +146,49 @@ const RAIL_DRIVES = {
             vm_contract_slash: {
                 files: ['test/actions/vm_contract_slash.test.js'],
                 minPassed: 3,
+            },
+        },
+    },
+    contracts_price: {
+        envKeys: CONTRACTS_PRICE_ENV_KEYS,
+        legs: {
+            dispenser: {
+                files: [
+                    'test/actions/dispenser.test.js',
+                    'test/actions/dispenser.test/01_v0_fiat_mode_1_validator_price_oracle.test.js',
+                    'test/actions/dispenser.test/02_v0_fiat_mode_2_user_oracle_price_v1_cross_conversion.test.js',
+                    'test/actions/dispenser.test/03_v0_fiat_mode_2_user_oracle_price_v1_per_token.test.js',
+                    'test/actions/dispenser.test/04_v0_fiat_mode_2_user_oracle_price_v1_oracle_fee.test.js',
+                    'test/actions/dispenser.test/05_v0_fiat_mode_2_user_oracle_price_v1_price_window.test.js',
+                    'test/actions/dispenser.test/06_v0_fiat_mode_2_user_oracle_price_v1_activation_delay.test.js',
+                    'test/actions/dispenser.test/07_v0_fiat_mode_2_user_oracle_price_v1_no_quote.test.js',
+                    'test/actions/dispenser.test/08_v1_cancel.test.js',
+                    'test/actions/dispenser.test/09_v2_edit.test.js',
+                ],
+                minPassed: 13,
+            },
+            order: {
+                files: [
+                    'test/actions/order.test.js',
+                    'test/actions/order.test/02_v1_cancel.test.js',
+                    'test/actions/order.test/03_match_full_exchange.test.js',
+                    'test/actions/order.test/04_match_repeating_decimal_price.test.js',
+                    'test/actions/order.test/05_match_partial_fill.test.js',
+                    'test/actions/order.test/06_match_high_precision_decimals.test.js',
+                    'test/actions/order.test/07_v2_edit.test.js',
+                ],
+                minPassed: 7,
+            },
+            price: {
+                files: [
+                    'test/actions/price.test.js',
+                    'test/actions/price.test/02_invalid_quotes.test.js',
+                ],
+                minPassed: 7,
+            },
+            vote_binding: {
+                files: ['test/rail/vote_binding/usable_method.rail.test.js'],
+                minPassed: 2,
             },
         },
     },
