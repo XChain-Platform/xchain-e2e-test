@@ -118,7 +118,7 @@ class XChainIndexerConnector {
     //     method-level rejection. That envelope is truthy, so returning it let a
     //     caller that only tests the return for truthiness read a rejected query
     //     as its success payload.
-    // The sibling RegtestMinerConnector._unwrap enforces the same contract for
+    // The sibling RegtestMinerConnector.unwrap enforces the same contract for
     // the same reason; this is that contract applied to the indexer.
     async call(method, params){
         const data = {

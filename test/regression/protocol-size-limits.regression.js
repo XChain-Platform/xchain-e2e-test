@@ -816,6 +816,54 @@ describe('Protocol size-limit drift guard', () => {
                     'the indexer is where the gates predicate is judged, so its copy decides what is accepted')
             })
         })
+
+        // Read one bare literal declaration out of a sibling source file, for copies that are
+        // not exported (sdk validator) or live in an ESM package this suite cannot require.
+        function readLiteral(relPath, pattern, label) {
+            const abs = path.join(__dirname, '../../../', relPath)
+            assert.ok(fs.existsSync(abs), relPath + ' is missing; this tripwire needs the full sibling tree')
+            const hit = pattern.exec(fs.readFileSync(abs, 'utf8'))
+            assert.ok(hit, label + ' is no longer a bare literal declaration; re-point this guard')
+            return Number(hit[1])
+        }
+
+        // Pin the shared-list membership ceiling on every bare-literal copy. The indexer's
+        // vendored copy is pinned by its own activation_constants_parity test; the hub and
+        // wallet copies are pinned only to the literal 10000 in their own suites, so a
+        // canonical edit leaves both green while the hub declines, or the wallet offers,
+        // shares the indexer sizes differently.
+        it('[regression:p0] LIST_SHARE_MAX_MEMBERS === canonical across hub list constants + wallet share eligibility', () => {
+            const hubList = require('../../../xchain-hub/src/cross_chain/list/constants.js')
+            assert.ok(Number.isFinite(protocol.LIST_SHARE_MAX_MEMBERS),
+                'LIST_SHARE_MAX_MEMBERS is not a finite value on the canonical protocol constants module')
+            assert.strictEqual(hubList.LIST_SHARE_MAX_MEMBERS, protocol.LIST_SHARE_MAX_MEMBERS,
+                'hub cross_chain/list/constants.js LIST_SHARE_MAX_MEMBERS drifted from the canonical protocol constant')
+            assert.strictEqual(readLiteral('xchain-wallet/packages/core/src/flows/listShareEligibility.js',
+                /^export const LIST_SHARE_MAX_MEMBERS = (\d+);$/m, 'wallet listShareEligibility LIST_SHARE_MAX_MEMBERS'),
+            protocol.LIST_SHARE_MAX_MEMBERS,
+            'wallet listShareEligibility LIST_SHARE_MAX_MEMBERS drifted from the canonical protocol constant')
+        })
+
+        // Pin the union direct-member cap on the SDK validator's un-exported literal, so the
+        // SDK cannot build a union the indexer refuses or refuse one it accepts.
+        it('[regression:p0] LIST_UNION_MAX_MEMBERS === canonical in the SDK market_and_contract validator', () => {
+            assert.ok(Number.isFinite(protocol.LIST_UNION_MAX_MEMBERS),
+                'LIST_UNION_MAX_MEMBERS is not a finite value on the canonical protocol constants module')
+            assert.strictEqual(readLiteral('xchain-sdk/src/protocol/validator/market_and_contract.js',
+                /^const LIST_UNION_MAX_MEMBERS = (\d+);$/m, 'SDK market_and_contract LIST_UNION_MAX_MEMBERS'),
+            protocol.LIST_UNION_MAX_MEMBERS,
+            'SDK market_and_contract LIST_UNION_MAX_MEMBERS drifted from the canonical protocol constant')
+        })
+
+        // Pin the rounds carried in one hourly PRICE wire on the hub's own literal, which
+        // sizes every hourly window the publisher plans.
+        it('[regression:p0] ORACLE_HOURLY_WINDOW_ROUNDS === canonical in hub oracle window_plan', () => {
+            const hubWindow = require('../../../xchain-hub/src/oracle/publisher/window_plan.js')
+            assert.ok(Number.isFinite(protocol.ORACLE_HOURLY_WINDOW_ROUNDS),
+                'ORACLE_HOURLY_WINDOW_ROUNDS is not a finite value on the canonical protocol constants module')
+            assert.strictEqual(hubWindow.ORACLE_HOURLY_WINDOW_ROUNDS, protocol.ORACLE_HOURLY_WINDOW_ROUNDS,
+                'hub oracle/publisher/window_plan.js ORACLE_HOURLY_WINDOW_ROUNDS drifted from the canonical protocol constant')
+        })
     })
 
     describe('Vendored protocol-constants byte-identity', () => {

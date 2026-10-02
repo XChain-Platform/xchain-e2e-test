@@ -159,7 +159,7 @@ class RegtestMinerConnector {
         // The controller returns the bare string "ok" on success and an
         // {error: "..."} body on rejected input (uuid:24c35056). Both are
         // truthy, so a plain truthiness check would read a rejected input as
-        // success; _unwrap() throws instead so callers stop believing the
+        // success; unwrap() throws instead so callers stop believing the
         // cadence changed when it did not.
         return this.unwrap(response)
     }
@@ -197,7 +197,7 @@ class RegtestMinerConnector {
             response = await axios.post(this.url, data, this.reqConfig)
 
             // "ok" on success, {error:"..."} on refusal (mainnet / bad input); both
-            // truthy, so _unwrap throws on the error envelope rather than reporting a
+            // truthy, so unwrap throws on the error envelope rather than reporting a
             // clock pin that never happened.
             return this.unwrap(response)
         } catch (e) {
