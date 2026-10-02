@@ -15,12 +15,18 @@ const MOCHA = './node_modules/.bin/mocha';
 const HELPER = path.join(REPO_ROOT, 'test', 'helpers', 'bridge_rail_legs.js');
 const reports = {};
 
-function dryRun(files) {
+function dryRun(files, extraEnv = {}) {
     const child = spawnSync(MOCHA,
         ['--no-config', '--dry-run', '--reporter', 'json', ...files], {
             cwd: REPO_ROOT,
             encoding: 'utf8',
-            env: { COIN: 'bitcoin', NETWORK: 'regtest', PATH: process.env.PATH },
+            env: {
+                COIN: 'bitcoin',
+                NETWORK: 'regtest',
+                PATH: process.env.PATH,
+                XCHAIN_HUB_PATH: process.env.XCHAIN_HUB_PATH,
+                ...extraEnv,
+            },
             maxBuffer: 64 * 1024 * 1024,
         });
     assert.strictEqual(child.status, 0, child.stderr || child.stdout);
@@ -65,6 +71,13 @@ function runCli(drive, leg) {
 }
 
 describe('bridge rail leg map', function () {
+    it('requires federation for every anchor fold case', function () {
+        const leg = RAIL_DRIVES.anchor_stake.legs.anchor_fold;
+
+        assert.deepStrictEqual(leg.env, { E2E_REQUIRE_FEDERATION: '1' });
+        assert.strictEqual(leg.minPassed, 5);
+    });
+
     before(function () {
         this.timeout(120000);
         const allFiles = [...new Set(Object.values(RAIL_DRIVES).flatMap((drive) =>
@@ -75,7 +88,8 @@ describe('bridge rail leg map', function () {
             reports[driveName] = {};
             for (const [legName, leg] of Object.entries(drive.legs)) {
                 const files = leg.files || [...(drive.before || []), drive.root, drive.glob];
-                reports[driveName][legName] = reportForFiles(report, files);
+                const legReport = leg.env ? dryRun(files, leg.env) : report;
+                reports[driveName][legName] = reportForFiles(legReport, files);
             }
         }
     });

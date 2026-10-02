@@ -122,7 +122,8 @@ const RAIL_DRIVES = {
         legs: {
             anchor_fold: {
                 files: ['test/federation/anchor_fold_acceptance.test.js'],
-                minPassed: 3,
+                env: { E2E_REQUIRE_FEDERATION: '1' },
+                minPassed: 5,
             },
             anchor_bundle: {
                 files: ['test/federation/flag_days/anchor_bundle_order.test.js'],
