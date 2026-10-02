@@ -17,10 +17,10 @@
  * even though no response was ever broadcast individually.
  *
  * The spec's own test: a window of responses lands as v5 plus v6 continuations on
- * DOGE regtest, `valid`, with `batch_action_index` set; an empty window lands a
- * `row_count 0` head; a fresh chain-only node rebuilds the mirror table from the
- * batches and re-derives every callback with 0 mismatches; an over-budget window
- * dead-letters loudly.
+ * DOGE regtest, `valid`, with `batch_action_index` set; an empty window leaves a
+ * local `skipped` marker and no head; a fresh chain-only node rebuilds the mirror
+ * table from the batches and re-derives every callback with 0 mismatches; an
+ * over-budget window dead-letters loudly.
  *
  * WHAT THIS FILE DRIVES AND WHAT IT CANNOT, stated up front because the split is
  * the useful part of it. Two of the four clauses are driven here. The other two
@@ -94,6 +94,7 @@ const {
     settleOrReport,
     jsonSafe,
 } = require('./mirrorDrillWaits')
+const { oneValidHeadVerdict, emptyWindowVerdict } = require('./helpers/batchWindowVerdicts')
 const vmHelper     = require('../helpers/vmHelper')
 const chainRail    = require('../helpers/chainRail')
 const cryptoHelper = require('../cryptoHelper')
@@ -120,9 +121,9 @@ const FORWARD_S = 90
 const TIP_FEED_MS = 3000
 
 // DOGE funded to the publisher, as MANY INDEPENDENT OUTPUTS rather than one. The
-// encoder spends confirmed outputs only, and every window (empty ones too, one per
-// BATCH_WINDOW_S) spends the wallet's largest output into fresh, unconfirmed
-// change; with one funding output the publisher can reach only the small
+// encoder spends confirmed outputs only, and every non-empty window spends the
+// wallet's largest output into fresh, unconfirmed change; with one funding output
+// the publisher can reach only the small
 // carrier outputs earlier windows left behind, and a 3-wire batch needing
 // 2,000,000 against `selected inputs total 600000` failed at the one window that
 // carried the responses (pass 10, 2026-09-05; the publisher never retries a
@@ -736,6 +737,30 @@ describe('AT5: the responses of a window land on chain as one batch', function (
                 landed.heads.filter((h) => String(h.verdict) !== 'valid').map((h) => h.action_index + '=' + h.verdict).join(', '))
         }
 
+        // Let one further window close before judging uniqueness, so another hub's
+        // age-based turn has passed and a duplicate valid head cannot hide behind
+        // an assertion made as soon as the first head lands.
+        const oneHead = await untilOrClearDogeStall(async () => {
+            const markers = await readMarkers()
+            const later = markers.filter((m) => Number(m.window_start) >= Number(marker.window_end))
+            if (later.length === 0) return { ok: false, markers: markers }
+            await nudgeDoge()
+            const actions = await readDogeBatchActions()
+            return {
+                ok: true,
+                markers: markers,
+                actions: actions,
+                verdict: oneValidHeadVerdict(actions, marker.window_start),
+            }
+        }, { timeoutMs: 30 * 60 * 1000, intervalMs: 5000, tipProbe: venueTipProbe(venue, 0) })
+        assert.ok(oneHead.ok,
+            'no further window closed after response window ' + marker.window_start +
+            '. Markers seen: ' + jsonSafe(oneHead.markers))
+        assert.ok(oneHead.verdict.ok,
+            'response window ' + marker.window_start + ' did not carry exactly one valid v5 head ' +
+            'after a further window closed. Heads seen: ' + jsonSafe(oneHead.verdict.heads) +
+            '. All batch actions seen: ' + jsonSafe(oneHead.actions))
+
         const head = landed.valid[0]
         assert.strictEqual(Number(head.batch_row_count), Number(marker.row_count),
             'the head declares ' + head.batch_row_count + ' rows and the publisher recorded ' +
@@ -787,37 +812,45 @@ describe('AT5: the responses of a window land on chain as one batch', function (
         console.log('AT5: batch_action_index set on every carried row')
     })
 
-    it('publishes an empty window as a row_count 0 head, which is what makes coverage provable', async function () {
-        // Nothing is requested here on purpose. Every window publishes, including one
-        // with no rows, and that is exactly what lets a chain-only node prove it has
-        // missed nothing rather than assume it.
-        const empty = await untilOrClearDogeStall(async () => {
+    it('publishes nothing for an empty window', async function () {
+        // Start beyond every window already observed, so the marker belongs to a
+        // quiet window created by this case rather than venue setup or the request case.
+        const before = await readMarkers()
+        const newestBefore = before.reduce((latest, m) =>
+            Math.max(latest, Number(m.window_start)), Number.NEGATIVE_INFINITY)
+        const skipped = await untilOrClearDogeStall(async () => {
             const markers = await readMarkers()
-            const hit = markers.filter((m) => Number(m.row_count) === 0 &&
-                (String(m.status) === 'sent' || String(m.status) === 'landed'))
+            const hit = markers.filter((m) => Number(m.window_start) > newestBefore &&
+                Number(m.row_count) === 0 && String(m.status) === 'skipped')
             return { ok: hit.length > 0, hit: hit, markers: markers }
         }, { timeoutMs: 30 * 60 * 1000, intervalMs: 5000, tipProbe: venueTipProbe(venue, 0) })
-        assert.ok(empty.ok,
-            'no empty window was ever published. Markers: ' + jsonSafe(empty.markers) +
-            '. An empty window that is skipped rather than published leaves a hole a chain-only node ' +
-            'cannot tell from a window it simply did not receive.')
+        assert.ok(skipped.ok,
+            'no hub recorded a fresh empty window as skipped. Markers: ' + jsonSafe(skipped.markers))
 
-        const marker = empty.hit[0]
-        const landed = await untilOrClearDogeStall(async () => {
+        const marker = skipped.hit[0]
+        const quiet = await untilOrClearDogeStall(async () => {
+            const markers = await readMarkers()
+            const later = markers.filter((m) => Number(m.window_start) >= Number(marker.window_end))
+            if (later.length === 0) return { ok: false, markers: markers }
             await nudgeDoge()
             const actions = await readDogeBatchActions()
-            const heads = actions.filter((a) => Number(a.version) === BATCH_HEAD_VERSION &&
-                Number(a.batch_window_start) === Number(marker.window_start))
-            return { ok: heads.length > 0, heads: heads }
-        }, { timeoutMs: 20 * 60 * 1000, intervalMs: 5000, tipProbe: venueTipProbe(venue, 0) })
-        assert.ok(landed.ok, 'the empty window was marked published but never landed on DOGE')
-        assert.strictEqual(Number(landed.heads[0].batch_row_count), 0,
-            'the empty window landed declaring ' + landed.heads[0].batch_row_count + ' rows')
-        assert.strictEqual(String(landed.heads[0].verdict), 'valid',
-            'the empty head was judged ' + landed.heads[0].verdict)
-        assert.strictEqual(Number(landed.heads[0].batch_total_chunks), 1,
-            'an empty window should be a single wire, not ' + landed.heads[0].batch_total_chunks)
-        console.log('AT5: empty window ' + marker.window_start + ' landed as a valid row_count 0 head')
+            const sameWindow = markers.filter((m) =>
+                Number(m.window_start) === Number(marker.window_start))
+            return {
+                ok: true,
+                markers: markers,
+                actions: actions,
+                verdict: emptyWindowVerdict(sameWindow, actions),
+            }
+        }, { timeoutMs: 30 * 60 * 1000, intervalMs: 5000, tipProbe: venueTipProbe(venue, 0) })
+        assert.ok(quiet.ok,
+            'no further window closed after skipped window ' + marker.window_start +
+            '. Markers seen: ' + jsonSafe(quiet.markers))
+        assert.ok(quiet.verdict.ok,
+            'skipped empty window ' + marker.window_start + ' published a v5 head after a further ' +
+            'window closed. Heads seen: ' + jsonSafe(quiet.verdict.heads) +
+            '. All batch actions seen: ' + jsonSafe(quiet.actions))
+        console.log('AT5: empty window ' + marker.window_start + ' stayed skipped with no v5 head')
     })
 
     /**
