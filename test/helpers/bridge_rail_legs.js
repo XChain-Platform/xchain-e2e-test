@@ -192,6 +192,30 @@ const RAIL_DRIVES = {
             },
         },
     },
+    contracts_vm: {
+        envKeys: ['XC_JSON_STRINGIFY_HOOK_EXPECT'],
+        legs: {
+            json_stringify_hook: {
+                files: ['test/contracts/json_stringify_hook.test.js'],
+                minPassed: 4,
+            },
+            custody_guard: {
+                files: [
+                    'test/rail/custody_guard/deposit.rail.test.js',
+                    'test/rail/custody_guard/withdraw.rail.test.js',
+                ],
+                minPassed: 5,
+            },
+            broadcast_fee: {
+                files: ['test/rail/flag_days/broadcast_fee_length.rail.test.js'],
+                minPassed: 3,
+            },
+            vm_lint: {
+                files: ['test/rail/vm_lint/optional_chain_deploy.rail.test.js'],
+                minPassed: 2,
+            },
+        },
+    },
 };
 
 module.exports = { RAIL_DRIVES };
