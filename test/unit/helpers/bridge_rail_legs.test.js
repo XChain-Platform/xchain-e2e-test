@@ -15,16 +15,40 @@ const MOCHA = './node_modules/.bin/mocha';
 const HELPER = path.join(REPO_ROOT, 'test', 'helpers', 'bridge_rail_legs.js');
 const reports = {};
 
-function dryRun(drive) {
+function dryRun(files) {
     const child = spawnSync(MOCHA,
-        ['--no-config', '--dry-run', '--reporter', 'json', ...(drive.before || []), drive.root, drive.glob], {
+        ['--no-config', '--dry-run', '--reporter', 'json', ...files], {
             cwd: REPO_ROOT,
             encoding: 'utf8',
             env: { COIN: 'bitcoin', NETWORK: 'regtest', PATH: process.env.PATH },
             maxBuffer: 64 * 1024 * 1024,
         });
     assert.strictEqual(child.status, 0, child.stderr || child.stdout);
-    return JSON.parse(child.stdout);
+    const reportStart = child.stdout.indexOf('{\n  "stats":');
+    assert.notStrictEqual(reportStart, -1, child.stdout);
+    return JSON.parse(child.stdout.slice(reportStart));
+}
+
+function matchesFile(file, pattern) {
+    const absolutePattern = path.resolve(REPO_ROOT, pattern);
+    const wildcardAt = absolutePattern.indexOf('*');
+    if (wildcardAt === -1) return file === absolutePattern;
+    const prefix = absolutePattern.slice(0, wildcardAt);
+    const suffix = absolutePattern.slice(wildcardAt + 1);
+    const middle = file.slice(prefix.length, file.length - suffix.length);
+    return file.startsWith(prefix) && file.endsWith(suffix) && !middle.includes(path.sep);
+}
+
+function reportForFiles(report, files) {
+    const selected = (tests) => tests.filter((test) =>
+        files.some((file) => matchesFile(test.file, file)));
+    return {
+        ...report,
+        tests: selected(report.tests),
+        passes: selected(report.passes),
+        pending: selected(report.pending),
+        failures: selected(report.failures),
+    };
 }
 
 function selectedTitles(titles, grep) {
@@ -43,13 +67,23 @@ function runCli(drive, leg) {
 describe('bridge rail leg map', function () {
     before(function () {
         this.timeout(120000);
-        for (const [name, drive] of Object.entries(RAIL_DRIVES)) reports[name] = dryRun(drive);
+        const allFiles = [...new Set(Object.values(RAIL_DRIVES).flatMap((drive) =>
+            Object.values(drive.legs).flatMap((leg) =>
+                leg.files || [...(drive.before || []), drive.root, drive.glob])))];
+        const report = dryRun(allFiles);
+        for (const [driveName, drive] of Object.entries(RAIL_DRIVES)) {
+            reports[driveName] = {};
+            for (const [legName, leg] of Object.entries(drive.legs)) {
+                const files = leg.files || [...(drive.before || []), drive.root, drive.glob];
+                reports[driveName][legName] = reportForFiles(report, files);
+            }
+        }
     });
 
     it('matches every leg minimum to the non-pending dry-run bare titles', function () {
         for (const [driveName, drive] of Object.entries(RAIL_DRIVES)) {
-            const titles = reports[driveName].passes.map((test) => test.title);
             for (const [legName, leg] of Object.entries(drive.legs)) {
+                const titles = reports[driveName][legName].passes.map((test) => test.title);
                 const selected = selectedTitles(titles, leg.grep);
                 assert.strictEqual(selected.length, leg.minPassed,
                     driveName + '.' + legName + ' selected:\n' + selected.join('\n'));
@@ -60,9 +94,9 @@ describe('bridge rail leg map', function () {
     it('full-title selection contains every bare-title selection', function () {
         for (const [driveName, drive] of Object.entries(RAIL_DRIVES)) {
             for (const [legName, leg] of Object.entries(drive.legs)) {
-                const titleSelected = reports[driveName].passes.filter((test) =>
+                const titleSelected = reports[driveName][legName].passes.filter((test) =>
                     selectedTitles([test.title], leg.grep).length > 0);
-                const fullSelected = new Set(reports[driveName].passes.filter((test) =>
+                const fullSelected = new Set(reports[driveName][legName].passes.filter((test) =>
                     selectedTitles([test.fullTitle], leg.grep).length > 0));
                 assert.ok(titleSelected.every((test) => fullSelected.has(test)),
                     driveName + '.' + legName);
@@ -76,7 +110,8 @@ describe('bridge rail leg map', function () {
         for (const [driveName, drive] of Object.entries(RAIL_DRIVES)) {
             // A drive that only runs whole has no split leg to carry its T0 cases into.
             if (Object.keys(drive.legs).every((legName) => legName === 'full')) continue;
-            const titles = reports[driveName].passes.map((test) => test.fullTitle);
+            if (Object.values(drive.legs).some((leg) => leg.files)) continue;
+            const titles = reports[driveName].full.passes.map((test) => test.fullTitle);
             const t0 = titles.filter((title) => title.includes(driveName + ' T0:'));
             assert.strictEqual(t0.length, T0_COUNT[driveName] || 2, driveName + ' root T0 count');
             for (const [legName, leg] of Object.entries(drive.legs)) {
@@ -106,7 +141,7 @@ describe('bridge rail leg map', function () {
             ['policy AT9 (copy):', ['policy AT9 (origin):']],
             ['policy AT8 (cap):', ['policy AT1 (mirror):', 'policy AT5 (barrier):']],
         ];
-        const titles = reports.policy.passes.map((test) => test.title);
+        const titles = reports.policy.full.passes.map((test) => test.title);
         for (const [legName, leg] of Object.entries(RAIL_DRIVES.policy.legs)) {
             if (legName === 'full') continue;
             const selected = selectedTitles(titles, leg.grep);
@@ -135,7 +170,7 @@ describe('bridge rail leg map', function () {
             ['token AT8 (invariant):',
                 ['token AT1:', 'token AT2:', 'token AT8 (cap):']],
         ];
-        const titles = reports.token.passes.map((test) => test.title);
+        const titles = reports.token.full.passes.map((test) => test.title);
         for (const [legName, leg] of Object.entries(RAIL_DRIVES.token.legs)) {
             if (legName === 'full') continue;
             const selected = selectedTitles(titles, leg.grep);
@@ -151,7 +186,7 @@ describe('bridge rail leg map', function () {
 
     it('covers every split-drivable policy title', function () {
         const drive = RAIL_DRIVES.policy;
-        const titles = reports.policy.passes.map((test) => test.fullTitle);
+        const titles = reports.policy.full.passes.map((test) => test.fullTitle);
         const covered = new Set();
         for (const [legName, leg] of Object.entries(drive.legs)) {
             if (legName === 'full') continue;
@@ -173,7 +208,7 @@ describe('bridge rail leg map', function () {
     });
 
     it('includes every detach title in the full drive and its split leg', function () {
-        const titles = reports.policy.passes.map((test) => test.fullTitle);
+        const titles = reports.policy.full.passes.map((test) => test.fullTitle);
         const detachTitles = titles.filter((title) => title.includes('policy AT11:'));
         const selected = selectedTitles(titles, RAIL_DRIVES.policy.legs.at11_detach.grep);
 
