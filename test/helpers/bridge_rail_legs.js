@@ -107,7 +107,7 @@ const RAIL_DRIVES = {
             core: { grep: 'list_share T0:|list_share AT1:|list_share AT2:|list_share AT3:|list_share AT4:', minPassed: 10 },
             replay: { grep: 'list_share T0:|list_share AT1:|list_share AT2:|list_share AT3:|list_share AT6:', minPassed: 10 },
             bridged: { grep: 'list_share T0:|list_share AT1:|list_share AT2:|list_share AT3:|list_share AT4:|list_share AT5:|list_share AT7:', minPassed: 16 },
-            full: { grep: null, minPassed: 18 },
+            full: { grep: null, minPassed: 23 },
         },
     },
 };
