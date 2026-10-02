@@ -134,7 +134,7 @@ describe('nativeFeeHelper.discoverFeeMode', () => {
 // every fee-bearing action rejected `no current oracle price`.
 describe('nativeFeeHelper.seedGlobalPrices anchoring', () => {
     const SNAPSHOT_PATH = require.resolve('../../helpers/priceSnapshotHelper')
-    let savedSnapshotModule, savedCoin, savedIndexerDb
+    let savedSnapshotModule, savedCoin, savedIndexerDb, savedLanded
     let seeded, cleared, chainTime
 
     // Stub priceSnapshotHelper through require.cache so the helper's own
@@ -154,6 +154,8 @@ describe('nativeFeeHelper.seedGlobalPrices anchoring', () => {
         savedSnapshotModule = require.cache[SNAPSHOT_PATH]
         savedCoin = global.COIN_CODE
         savedIndexerDb = global.indexerDatabase
+        savedLanded = process.env.XC_E2E_PRICE_FEE_BATCH_LANDED
+        process.env.XC_E2E_PRICE_FEE_BATCH_LANDED = 'armed'
         global.COIN_CODE = 'LTC'
         stubSnapshots()
     })
@@ -161,6 +163,8 @@ describe('nativeFeeHelper.seedGlobalPrices anchoring', () => {
     afterEach(() => {
         if (savedSnapshotModule) require.cache[SNAPSHOT_PATH] = savedSnapshotModule
         else delete require.cache[SNAPSHOT_PATH]
+        if (savedLanded === undefined) delete process.env.XC_E2E_PRICE_FEE_BATCH_LANDED
+        else process.env.XC_E2E_PRICE_FEE_BATCH_LANDED = savedLanded
         global.COIN_CODE = savedCoin
         global.indexerDatabase = savedIndexerDb
         delete require.cache[HELPER_PATH]
@@ -191,6 +195,18 @@ describe('nativeFeeHelper.seedGlobalPrices anchoring', () => {
         const rows = seeded.filter(r => r.coinPair === 'LTC/USD')
         assert(rows[1].roundNumber > rows[0].roundNumber, 'the fresher anchor must carry the higher round')
         assertLandedAtSnapshotTime()
+    })
+
+    it('keeps the unlanded stamp 0 when the landed-batch gate is not armed', async () => {
+        chainTime = Math.floor(Date.now() / 1000) + 600
+        for (const off of [undefined, 'off', '']) {
+            if (off === undefined) delete process.env.XC_E2E_PRICE_FEE_BATCH_LANDED
+            else process.env.XC_E2E_PRICE_FEE_BATCH_LANDED = off
+            seeded.length = 0
+            await freshHelper().seedGlobalPrices(true)
+            assert(seeded.length > 0)
+            for (const row of seeded) assert.strictEqual(row.batchBlockTime, 0)
+        }
     })
 
     it('seeds ONE chain-anchored row when the chain leads wall time (post-jump)', async () => {
@@ -463,6 +479,7 @@ describe('nativeFeeHelper.seedGlobalPrices hub seeding', () => {
 
     it('writes the seed rows into the hub database the mirror bootstraps from', async () => {
         mirroredVenue()
+        process.env.XC_E2E_PRICE_FEE_BATCH_LANDED = 'armed'
         const helper = freshHelper()
         assert.strictEqual(helper.hubSeedTarget().database, 'XChain_Hub')
         await helper.seedGlobalPrices(true)
@@ -845,5 +862,23 @@ describe('nativeFeeHelper.nativeFeeSats', () => {
         const helper = freshHelper()
         const out = await helper.getNativeFeeOutput('ISSUE|0|TICK|1000|100|0|d|10', 'DSrc111')
         assert.deepStrictEqual(out, { address: 'DFeeDest111', value: Math.ceil(200000 * helper.FEE_HEADROOM) })
+    })
+})
+
+describe('anchorArmHeight', () => {
+    const { armHeight, applyArmHeight } = require('../../helpers/anchorArmHeight')
+    const NAME = 'XC_ANCHOR_FOLD_REGTEST_ACTIVATION'
+
+    it('defaults to genesis when unset or unparseable', () => {
+        assert.strictEqual(armHeight(NAME, {}), '0')
+        assert.strictEqual(armHeight(NAME, { [NAME]: 'soon' }), '0')
+        assert.strictEqual(armHeight(NAME, { [NAME]: '' }), '0')
+    })
+
+    it('honours a mid-chain height from the environment', () => {
+        const env = { [NAME]: ' 250 ' }
+        assert.strictEqual(armHeight(NAME, env), '250')
+        assert.strictEqual(applyArmHeight(NAME, env), '250')
+        assert.strictEqual(env[NAME], '250')
     })
 })

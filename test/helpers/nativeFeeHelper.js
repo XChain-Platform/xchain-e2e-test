@@ -224,6 +224,15 @@ function lastSeedReport(){ return _lastSeedReport }
 // BTC/USD`, a false red/green by timing on runs past ORACLE_MAX_PRICE_AGE).
 // No-op only when the last seed is still fresh (unless force=true), or when the
 // venue derives the pair itself (NO_PRICE_SEED below).
+// The landed-batch stamp a seeded round carries. A venue that arms the landed-batch fee
+// gate (XC_E2E_PRICE_FEE_BATCH_LANDED=armed) prices fees only from rounds whose PRICE batch
+// landed at or before the action's block, so each seeded round is stamped landed at its
+// own block time. With the variable unset or off the stamp is 0, today's behaviour.
+function landedBatchTime(blockTimestamp){
+    const raw = String(process.env.XC_E2E_PRICE_FEE_BATCH_LANDED || '').trim().toLowerCase()
+    return ['armed', 'on', 'true', 'yes', '1'].includes(raw) ? blockTimestamp : 0
+}
+
 async function seedGlobalPrices(force){
     // The full de-seed. On a venue whose own hub publishes XCHAIN/USD (a
     // price-capability oracle validator), seeding it is a defect rather than a
@@ -339,15 +348,15 @@ async function seedGlobalPrices(force){
     // so the durable hub copy and the copy the indexer reads today cannot disagree.
     const rows = [
         { coinPair: 'XCHAIN/USD', price: XCHAIN_USD, blockTimestamp: chainTime,
-            batchBlockTime: chainTime, roundNumber: XCHAIN_ROUND },
+            batchBlockTime: landedBatchTime(chainTime), roundNumber: XCHAIN_ROUND },
         { coinPair: global.COIN_CODE + '/USD', price: COIN_USD, blockTimestamp: chainTime,
-            batchBlockTime: chainTime, roundNumber: COIN_ROUND }
+            batchBlockTime: landedBatchTime(chainTime), roundNumber: COIN_ROUND }
     ]
     if (wallTime > chainTime) {
         rows.push({ coinPair: 'XCHAIN/USD', price: XCHAIN_USD, blockTimestamp: wallTime,
-            batchBlockTime: wallTime, roundNumber: XCHAIN_ROUND_NOW })
+            batchBlockTime: landedBatchTime(wallTime), roundNumber: XCHAIN_ROUND_NOW })
         rows.push({ coinPair: global.COIN_CODE + '/USD', price: COIN_USD, blockTimestamp: wallTime,
-            batchBlockTime: wallTime, roundNumber: COIN_ROUND_NOW })
+            batchBlockTime: landedBatchTime(wallTime), roundNumber: COIN_ROUND_NOW })
     }
 
     // The durable half, first (see hubSeedTarget). Non-fatal by construction: a venue
@@ -688,5 +697,5 @@ async function getNativeFeeOutput(wire, source){
 }
 
 module.exports = { resolveFeeDestination, discoverFeeMode, seedGlobalPrices, getNativeFeeOutput,
-    nativeFeeSats, warnIfSeedInvisible, hubSeedTarget, lastSeedReport, FLAT_FEE_SATS,
+    nativeFeeSats, warnIfSeedInvisible, hubSeedTarget, lastSeedReport, landedBatchTime, FLAT_FEE_SATS,
     FEE_BUDGET_XCHAIN, FEE_HEADROOM }
