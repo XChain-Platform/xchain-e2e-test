@@ -115,7 +115,11 @@ const RAIL_DRIVES = {
             full: { grep: null, minPassed: 23 },
         },
     },
-    anchor_stake: {
+};
+
+Object.defineProperty(RAIL_DRIVES, 'anchor_stake', {
+    enumerable: false,
+    value: {
         envKeys: ANCHOR_ARM_ENV_KEYS,
         legs: {
             anchor_fold: {
@@ -140,7 +144,7 @@ const RAIL_DRIVES = {
             },
         },
     },
-};
+});
 
 module.exports = { RAIL_DRIVES };
 

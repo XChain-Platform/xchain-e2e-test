@@ -4,9 +4,11 @@ const assert = require('assert')
 const path = require('path')
 
 const { RAIL_DRIVES } = require('../../../helpers/bridge_rail_legs')
-const { buildLegCommand } = require('../../../../scripts/rail_leg_drive')
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..')
+const DRIVER = path.join(REPO_ROOT, 'scripts', 'rail_leg_drive.js')
+delete require.cache[require.resolve(DRIVER)]
+const { buildLegCommand } = require(DRIVER)
 const ARM_ENV = {
     XC_ANCHOR_FOLD_REGTEST_ACTIVATION: '701',
     XC_ANCHOR_STAKE_REGTEST_ACTIVATION: '702',
