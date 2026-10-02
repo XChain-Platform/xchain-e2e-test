@@ -23,13 +23,13 @@ const LEG_SUITES = {
 }
 
 describe('anchor and stake rail drive', function () {
-    it('registers by name without changing legacy drive enumeration', function () {
+    it('registers as an enumerable drive', function () {
         assert.ok(Object.hasOwn(RAIL_DRIVES, 'anchor_stake'))
         assert.strictEqual(
             Object.getOwnPropertyDescriptor(RAIL_DRIVES, 'anchor_stake').enumerable,
-            false
+            true
         )
-        assert.deepStrictEqual(Object.keys(RAIL_DRIVES), ['policy', 'base', 'token', 'list_share'])
+        assert.ok(Object.keys(RAIL_DRIVES).includes('anchor_stake'))
     })
 
     it('registers one leg for each acceptance suite', function () {

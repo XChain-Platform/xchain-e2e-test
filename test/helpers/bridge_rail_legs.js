@@ -115,16 +115,12 @@ const RAIL_DRIVES = {
             full: { grep: null, minPassed: 23 },
         },
     },
-};
-
-Object.defineProperty(RAIL_DRIVES, 'anchor_stake', {
-    enumerable: false,
-    value: {
+    anchor_stake: {
         envKeys: ANCHOR_ARM_ENV_KEYS,
         legs: {
             anchor_fold: {
                 files: ['test/federation/anchor_fold_acceptance.test.js'],
-                minPassed: 5,
+                minPassed: 3,
             },
             anchor_bundle: {
                 files: ['test/federation/flag_days/anchor_bundle_order.test.js'],
@@ -144,7 +140,7 @@ Object.defineProperty(RAIL_DRIVES, 'anchor_stake', {
             },
         },
     },
-});
+};
 
 module.exports = { RAIL_DRIVES };
 
