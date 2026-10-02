@@ -41,10 +41,22 @@ function fixtureArray(bundle, field) {
 }
 
 function normalizedSections(bundle) {
-    return fixtureArray(bundle, 'sections').map(section => Object.assign({}, section, {
+    const sections = fixtureArray(bundle, 'sections').map(section => Object.assign({}, section, {
         validator_signatures: section.validator_signatures.slice()
             .sort((a, b) => a.pubkey.localeCompare(b.pubkey))
     })).sort((a, b) => a.chain.localeCompare(b.chain));
+    // The parser hangs the archive header on the one section signed over it,
+    // counted in wire order, which is this chain order.
+    const archive = expectedArchive(bundle);
+    if (archive) {
+        sections[archive.wrapper_section_index].fold_archive = {
+            match_batch_seq: archive.match_batch_seq,
+            match_count: archive.match_count,
+            batch_crc32: archive.batch_crc32,
+            total_chunks: archive.total_chunks
+        };
+    }
+    return sections;
 }
 
 function expectedArchive(bundle) {
