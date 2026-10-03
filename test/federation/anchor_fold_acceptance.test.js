@@ -27,7 +27,14 @@ function unarmFold(){
 const foldArmHeight = /^\d+$/.test(String(priorFoldEnv || '').trim()) ? Number(priorFoldEnv) : 0
 
 async function mineDogeToFoldArm(){
-    if(!(foldArmHeight > 0) || typeof indexerConnector === 'undefined') return
+    if(!(foldArmHeight > 0)) return
+    if(typeof indexerConnector === 'undefined'){
+        // A seeded federation run must cross the arm here; skipping it silently would
+        // repeat R-3 attempt 4, where the fold anchors mined below the arm.
+        if(process.env.E2E_REQUIRE_FEDERATION === '1')
+            throw new Error('no venue indexer connector to mine DOGE to the fold arm height ' + foldArmHeight)
+        return
+    }
     const latest = await indexerConnector.call('getlatestblock', {})
     const tip = Number(latest && latest.block_index)
     if(!Number.isSafeInteger(tip)) throw new Error('the DOGE indexer reported no tip before the fold suites')
