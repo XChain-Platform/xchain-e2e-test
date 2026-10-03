@@ -262,7 +262,7 @@ function quoteSql (value) {
 
 function oraclePayload (actionIndex, sourceAddress, generation) {
     return {
-        source_chain: 'BTC', source_address: sourceAddress, coin: 'BTC', tick: 'HF15B', fiat: 'USD',
+        source_chain: 'BTC', source_address: sourceAddress, coin: 'BTC', tick: 'FAILOVER', fiat: 'USD',
         value: '1', fee: null, memo: 'hub failover drill', block_time: Math.floor(Date.now() / 1000),
         action_index: actionIndex, push_generation: generation,
     }
@@ -291,7 +291,7 @@ async function queueReport (config) {
     const generationRows = await dbRows(config, 'XChain_BTC_Regtest_Indexer',
         "SELECT generation FROM push_generations WHERE coin='BTC' LIMIT 1")
     const generation = Number(generationRows[0] && generationRows[0][0]) || 0
-    const reportPayload = oraclePayload(actionIndex, 'hf15b-report-' + actionIndex, generation)
+    const reportPayload = oraclePayload(actionIndex, 'failover-report-' + actionIndex, generation)
     const sql = 'INSERT INTO pending_hub_pushes ' +
         '(push_type, action_index, payload, status, attempts, created_at) VALUES ' +
         `('oracle_price',${actionIndex},${quoteSql(JSON.stringify(reportPayload))},'pending',0,NOW()); ` +
@@ -300,7 +300,7 @@ async function queueReport (config) {
     const pushId = Number(rows[rows.length - 1] && rows[rows.length - 1][0])
     if (!Number.isInteger(pushId) || pushId < 1) throw new Error('failed to enqueue the outage report')
     const catchupActionIndex = actionIndex + 1
-    const sourceAddress = 'hf15b-catchup-' + catchupActionIndex
+    const sourceAddress = 'failover-catchup-' + catchupActionIndex
     await pushCatchupRow(config, survivors[0],
         oraclePayload(catchupActionIndex, sourceAddress, generation))
     const rowKey = 'BTC:' + sourceAddress + ':' + catchupActionIndex
