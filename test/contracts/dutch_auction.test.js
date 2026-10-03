@@ -119,6 +119,19 @@ function cp(x) {
         try { return await conn.query(sql, params) }
         finally { await conn.release() }
     }
+    async function waitIndexedTip() {
+        const deadline = Date.now() + 240000
+        let indexerTip = 0
+        let nodeTip = 0
+        while (Date.now() < deadline) {
+            const rows = await q(`SELECT MAX(block_index) h FROM blocks`)
+            indexerTip = Number(rows[0].h)
+            nodeTip = await nodeConnector.getBlockCount()
+            if (indexerTip >= nodeTip) return
+            await new Promise(resolve => setTimeout(resolve, 1000))
+        }
+        throw new Error(`Indexer tip ${indexerTip} did not reach node tip ${nodeTip} within 240 seconds`)
+    }
     async function balanceOf(address, tick) {
         const rows = await q(`SELECT b.amount FROM balances b
             JOIN index_addresses ia ON ia.id=b.address_id
@@ -192,7 +205,8 @@ describe('Dutch Auction: descending price, first acceptance wins', function () {
     it('forcing extra blocks between funding and buying lowers the price, and the floor holds past the full duration', async function () {
         // Short duration so a handful of forced blocks clearly land at the floor.
         const { ci: ciFloor, itemTick: itemFloor, seller: sellerFloor } = await deployAndFund('5', 3)
-        await regtestMinerConnector.generateBlocks(50) // far past duration=3
+        await regtestMinerConnector.generateBlocks(10) // far past duration=3
+        await waitIndexedTip()
         const buyerFloor = await cryptoHelper.getNewFundedAddress('dut-auc-buyer2', COIN, NETWORK, null, 'legacy', 0, 0.02)
         await gasHelper.ensureGasBalance(buyerFloor, String(Number(START_PRICE) + 50))
         await vmHelper.sendDepositV0(buyerFloor, ciFloor, BID, START_PRICE)
@@ -214,6 +228,7 @@ describe('Dutch Auction: descending price, first acceptance wins', function () {
 
         const { ci: ciB, itemTick: itemB, seller: sellerB } = await deployAndFund('3', 200)
         await regtestMinerConnector.generateBlocks(20) // force elapsed blocks before buying
+        await waitIndexedTip()
         const buyerB = await cryptoHelper.getNewFundedAddress('dut-auc-buyer4', COIN, NETWORK, null, 'legacy', 0, 0.02)
         await gasHelper.ensureGasBalance(buyerB, String(Number(START_PRICE) + 50))
         await vmHelper.sendDepositV0(buyerB, ciB, BID, START_PRICE)

@@ -188,16 +188,16 @@ const { HUB_SYNC_WATERMARK_GRACE_S } = require(
         : '../../../xchain-indexer/src/hub/hub_db_sync.js');
 const MIRROR_BARRIERS = Object.freeze(Object.keys(HUB_SYNC_WATERMARK_GRACE_S));
 
-// THE GRACE TABLE IS NOT THE FAMILY, and the difference is one whole member.
+// THE GRACE TABLE IS NOT THE FAMILY, and the difference is two whole members.
 //
 // `MIRROR_BARRIERS` above is the eight keys of the indexer's grace table (price,
 // oracle, match, call, anchorAttest, attestResponse, bridge, policy). The indexer
-// reports NINE watermark-keyed barrier reasons: `snapshot_sync_barrier` is pure
-// content and has no grace, so it has no key, so the venue's zero-grace pinning
-// never reaches it and a list derived from the grace table cannot see it at all.
-// A leg enumerating the family has to name it explicitly, and inventing a grace
-// for it to make the derived list line up would change the indexer's behaviour to
-// suit the harness.
+// reports TEN watermark-keyed barrier reasons: `list_share_sync_barrier` and
+// `snapshot_sync_barrier` are pure content and have no grace, so they have no keys,
+// so the venue's zero-grace pinning never reaches them and a list derived from the
+// grace table cannot see them at all. A leg enumerating the family has to name them
+// explicitly, and inventing graces for them to make the derived list line up would
+// change the indexer's behaviour to suit the harness.
 //
 // So the family is derived from the indexer's OWN source instead of the grace
 // table, and the gap between the two is exported rather than papered over. The
@@ -266,8 +266,9 @@ function gracedBarrierReason(barrier) {
 
 /**
  * The members the venue's grace pinning CANNOT reach, because they have no grace
- * key. Today that is `snapshot_sync_barrier` alone, and it is computed rather than
- * asserted so a second ungraced member shows up here the day it is added.
+ * key. Today those are `list_share_sync_barrier` and `snapshot_sync_barrier`, and
+ * the set is computed rather than asserted so another ungraced member shows up here
+ * the day it is added.
  */
 function ungracedMirrorBarrierReasons() {
     const graced = new Set(MIRROR_BARRIERS.map(gracedBarrierReason));
