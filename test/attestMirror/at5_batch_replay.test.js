@@ -47,22 +47,14 @@
  * The drill pushes it to every hub itself, because on this venue no production BTC
  * indexer is pointed at these hubs to do it.
  *
- * WHY THIS DRILL ASKS `llm` AND NOT `http_get`, which is a property of the chain
- * rather than a preference about providers. The BTC regtest chain re-genesised on
- * 2026-09-08 came back seating ONE attestation validator, and it is the standing
- * xchain-node hub's own identity at 10000 stake. Its signing seed lives only in
- * that hub's container, so no drill can adopt it; and a venue hub carrying the
- * same key beside the live one would equivocate and get the real validator
- * slashed, so no drill may adopt it even if it could. Every draw containing it
- * stalls to timeout, and at redundancy 3 on a small set that is a guarantee
- * rather than a risk. The provider stake floor is the only lever that removes it
- * from a draw without touching it at all: `computeResponsibleSet` filters on
- * `meetsProviderFloor` BEFORE the hash ranking, and `llm` declares
- * min_stake_xchain 25000 against `http_get`'s 10000, so an llm request cannot
- * draw that key while an http_get request cannot avoid it. THAT IS WHY THIS IS
- * NOT A FALLBACK AND MUST NOT BECOME ONE: on a box that cannot serve llm this
- * drill skips loudly rather than asking http_get, because an http_get drive here
- * would not measure the batch, it would measure a round that cannot finalize.
+ * THE RESPONSE PROVIDER DEFAULTS TO `llm`, preserving the original drive. An
+ * isolated stack whose whole seated roster is recoverable from the federation
+ * mnemonic can opt in to `http_get` with AT5_RESPONSE_PROVIDER=http_get. That
+ * mode serves a deterministic response from the runner's throwaway TLS fixture
+ * and hands the fixture CA plus the regtest-only private-address allowance to the
+ * venue hubs. It is never an automatic credential fallback. On a standing chain
+ * with an inaccessible seated key, `provisionDrillIdentities` still refuses the
+ * http_get drive before any request can be made.
  *
  * THE ELECTION IS WHY THIS DRILL IS PATIENT. Publication is elected by
  * `sha256(batch_key + pubkey)` rank against the window's age, so on a five-hub
@@ -82,8 +74,8 @@ const fs = require('fs')
 
 const { AttestMirrorVenue, assertLlmAvailable, llmProbes, hubCredentialEnv } = require('../helpers/attestMirrorVenue')
 const {
-    provisionDrillIdentities, waitForVenueIndexersAtTip, deployRequestContract, queryVenueDb, withWedgeClear,
-    mineWhile,
+    provisionDrillIdentities, waitForVenueIndexersAtTip, startAttestTestServer, deployRequestContract,
+    queryVenueDb, withWedgeClear, mineWhile,
 } = require("./mirrorDrillFixture")
 const {
     untilOrClearDogeStall, waitForMirrorRowEverywhere,
@@ -96,6 +88,11 @@ const {
 } = require('./mirrorDrillWaits')
 const { oneValidHeadVerdict, emptyWindowVerdict } = require('./helpers/batchWindowVerdicts')
 const { readHubsReading } = require('./helpers/hubsReading')
+const {
+    resolveAt5ResponseProvider,
+    buildAt5DogeIndexerConfig,
+    at5ResponseRedundancy,
+} = require('./helpers/at5ResponseProvider')
 const vmHelper     = require('../helpers/vmHelper')
 const chainRail    = require('../helpers/chainRail')
 const cryptoHelper = require('../cryptoHelper')
@@ -140,9 +137,9 @@ const PUBLISHER_FUND_OUTPUTS = 40
 // than the request landing and expiring. Pass 25 proved that the expensive way at
 // 150 against http_get's 100: `EXECUTE : contract=1791 : method=ask : failed`.
 //
-// `llm` DECLARES 20, not 100, so switching provider moved this ceiling by a factor
-// of five and that is the single largest consequence of the switch. It is also why
-// this drill no longer waits for the response to be APPLIED: see the first case.
+// Twenty is valid for both supported providers. Keeping the smaller llm ceiling
+// makes provider selection independent from contract construction and leaves the
+// default path byte-for-byte equivalent at the request boundary.
 const DEADLINE_BLOCKS = 20
 const BURIAL_BLOCKS   = 6
 
@@ -155,6 +152,9 @@ const BURIAL_BLOCKS   = 6
 // design. This is AT1's llm payload verbatim, which is the one that has been
 // driven green on this venue.
 const LLM_PAYLOAD = JSON.stringify({ prompt: 'What is 2+2? Reply with only the number.' })
+const HTTP_GET_BODY = JSON.stringify({ answer: 4, fixture: 'at5-batch-response' })
+const RESPONSE_PROVIDER = resolveAt5ResponseProvider(process.env)
+const REQUEST_REDUNDANCY = at5ResponseRedundancy(RESPONSE_PROVIDER)
 
 // The DOGE encoder this venue publishes through, taken from the rail's own port map
 // so the drill and the rail cannot disagree about where that service lives.
@@ -174,10 +174,8 @@ const BATCH_CONTINUATION_VERSION = 6
  * and reality ever disagree, because `start()` re-checks with this same predicate
  * rather than trusting the flag.
  *
- * THE SKIP IS LOUD AND NAMES THE MISSING HALF, and it never degrades to http_get:
- * on this chain an http_get round draws a validator nothing here can sign for, so
- * a "fallback" would report a failure of the batch rail that is really a failure
- * of the draw. See the header.
+ * THE SKIP IS LOUD AND NAMES THE MISSING HALF. The explicit http_get mode does
+ * not call this predicate and is never selected automatically.
  */
 // The credential this drill forwards to its hub children: the OAuth token when the
 // harness environment carries one, nothing otherwise. One function, called by the
@@ -211,7 +209,7 @@ module.exports = {
             xchain.getInputParam(1),
             'handleResponse',
             [xchain.getInputParam(2)],
-            { redundancy: 3, deadlineBlocks: ${DEADLINE_BLOCKS} }
+            { redundancy: ${REQUEST_REDUNDANCY}, deadlineBlocks: ${DEADLINE_BLOCKS} }
         );
         return requestId;
     },
@@ -399,6 +397,49 @@ async function recordHubsReading (venue, marker, readMarkers, nudgeDoge) {
     }
 }
 
+/**
+ * Point every publisher hub at the attached DOGE venue indexer through the
+ * hub's public config-consensus RPC. The attached reader does not exist until
+ * after the owner hubs start, so this coordinate cannot be part of hubExtraEnv.
+ * Waiting for every hub database proves the config committed federation-wide
+ * before a response window can close and ask the chain what already landed.
+ */
+async function configureDogeReconcileIndexer (venue, dogeVenue) {
+    const indexer = dogeVenue && dogeVenue.indexers && dogeVenue.indexers[0]
+    assert.ok(indexer && indexer.apiUrl, 'AT5: attached DOGE venue has no indexer API coordinate')
+    const config = buildAt5DogeIndexerConfig(indexer.apiUrl, venue.network)
+    const moduleConfig = config.dogecoin[venue.network]['xchain-indexer']
+    let result = null
+    for (const hub of venue.hubs) {
+        result = await hub.connector._call({
+            jsonrpc: '2.0', id: Date.now(), method: 'updateconfig',
+            params: { config: config },
+        })
+        if (result && String(result.status) === 'success') break
+    }
+    assert.ok(result && String(result.status) === 'success',
+        'AT5: hub config consensus refused the attached DOGE indexer: ' + jsonSafe(result))
+
+    const deadline = Date.now() + 60_000
+    let missing = venue.hubs.map((hub) => hub.index)
+    while (missing.length > 0 && Date.now() < deadline) {
+        missing = []
+        for (const hub of venue.hubs) {
+            const rows = await queryVenueDb(venue, hub.dbName,
+                'SELECT param_name, param_value FROM configs ' +
+                'WHERE coin = ? AND network = ? AND module = ?',
+                ['dogecoin', venue.network, 'xchain-indexer'])
+            const config = Object.fromEntries(rows.map((row) => [String(row.param_name), String(row.param_value)]))
+            if (config.host !== moduleConfig.host || config.port !== moduleConfig.port) missing.push(hub.index)
+        }
+        if (missing.length > 0) await new Promise((resolve) => setTimeout(resolve, 500))
+    }
+    assert.deepStrictEqual(missing, [],
+        'AT5: attached DOGE indexer config did not reach hub(s) ' + missing.join(', '))
+    console.log('AT5: attached DOGE venue indexer committed to all ' + venue.hubs.length +
+        ' publisher hubs for chain reconcile')
+}
+
 describe('AT5: the responses of a window land on chain as one batch', function () {
     this.timeout(120 * 60 * 1000)
 
@@ -408,7 +449,9 @@ describe('AT5: the responses of a window land on chain as one batch', function (
     let contract   = null
     let publisher  = null
     let dogeRail   = null
+    let testServer = null
     let llm        = { ok: false, why: 'not probed' }
+    const responseProvider = RESPONSE_PROVIDER
     // The live BTC tip feeder (see the before-hook), and its re-entrancy latch so a
     // slow push never stacks a second one behind it.
     let tipFeeder   = null
@@ -419,12 +462,17 @@ describe('AT5: the responses of a window land on chain as one batch', function (
 
     before(async function () {
         btcNode = nodeConnector
-        llm = llmRunnableHere()
-        if (!llm.ok) {
+        if (responseProvider === 'http_get') {
+            llm = { ok: true, why: null }
+            testServer = await startAttestTestServer({ body: HTTP_GET_BODY, path: '/at5-response' })
+            console.log('AT5: explicit http_get response mode enabled with the local deterministic TLS fixture')
+        } else {
+            llm = llmRunnableHere()
+        }
+        if (responseProvider === 'llm' && !llm.ok) {
             console.log('AT5: the response-carrying window case will SKIP on this box.\n' + llm.why +
-                '\nIt does NOT fall back to http_get: on this chain the only key an http_get draw can ' +
-                'reach beside the venue is the standing hub\'s own, which nothing here may sign for, ' +
-                'so such a round can never finalize and the batch would never have a row to carry.')
+                '\nIt does not fall back to http_get. Set AT5_RESPONSE_PROVIDER=http_get only on an ' +
+                'isolated stack whose complete seated roster the harness can adopt.')
         }
         // The DOGE rail first: the signer's wallet is funded on it, and every wait
         // below confirms batches through it.
@@ -440,13 +488,11 @@ describe('AT5: the responses of a window land on chain as one batch', function (
 
         publisher = await stageDogeSigner('at5', dogeRail)
 
-        // SCOPED TO `llm`, which is what lets this run at all on the re-genesised
-        // chain: the one seated validator this venue does not run sits at 10000 and
-        // misses the llm floor of 25000, so it is filtered out of every draw before
-        // the ranking and `provisionDrillIdentities` passes it over instead of
-        // refusing on it. Declaring http_get here would put it back in the draw.
+        // Scoped to the provider this run will request. On the isolated seeded
+        // stack the harness can adopt every eligible key for http_get. On a shared
+        // chain an inaccessible eligible key makes this call refuse the run.
         const staked = await provisionDrillIdentities({
-            label: 'at5', count: 5, redundancy: 3, providers: ['llm'],
+            label: 'at5', count: 5, redundancy: REQUEST_REDUNDANCY, providers: [responseProvider],
         })
 
         // THE HUB CREDENTIAL TRAVELS WITH THE DRILL, not with the venue, and AT1
@@ -458,12 +504,13 @@ describe('AT5: the responses of a window land on chain as one batch', function (
         venue = new AttestMirrorVenue({
             label: 'at5',
             identities: staked.identities,
-            needsLlm: llm.ok,
+            needsLlm: responseProvider === 'llm' && llm.ok,
             forwardS: FORWARD_S,
             batchWindowS: BATCH_WINDOW_S,
             // BOTH, merged: the signer's WIF and the model credential are needed by
             // the same hub children, and passing either alone silently drops the other.
-            hubExtraEnv: Object.assign({}, publisher.env, forwardedHubCredentialEnv()),
+            hubExtraEnv: Object.assign({}, publisher.env,
+                responseProvider === 'http_get' ? testServer.hubEnv : forwardedHubCredentialEnv()),
         })
         up = await venue.start()
         if (!up) {
@@ -503,6 +550,7 @@ describe('AT5: the responses of a window land on chain as one batch', function (
             return dv
         })
         await waitForVenueIndexersAtTip(dogeVenue)
+        await configureDogeReconcileIndexer(venue, dogeVenue)
         console.log('AT5: DOGE venue indexer follows hub ' + dogeVenue.indexers[0].followsHub +
             ' and reads ' + dogeVenue.indexers[0].indexerDbName)
 
@@ -586,6 +634,7 @@ describe('AT5: the responses of a window land on chain as one batch', function (
         // The attached venue first: its indexer follows a hub the owner is about to kill.
         if (dogeVenue) await dogeVenue.stop()
         if (venue) await venue.stop()
+        if (testServer) await testServer.close()
         // The staged signer holds a WIF only in the hub children's environment, but the
         // directory itself is this drill's litter and goes back.
         if (publisher && publisher.signerDir) {
@@ -662,7 +711,7 @@ describe('AT5: the responses of a window land on chain as one batch', function (
     }
 
     it('lands a window of responses on DOGE as a valid v5 head with its continuations', async function () {
-        if (!llm.ok) {
+        if (responseProvider === 'llm' && !llm.ok) {
             // Skipped, not passed, and not silently re-aimed at http_get. AT5's
             // response-carrying clause is unproven by a run that reports this case
             // pending, and the reason is printed in the before-hook rather than left
@@ -679,15 +728,16 @@ describe('AT5: the responses of a window land on chain as one batch', function (
         // prompts are in fact the safer choice here, because every responsible hub
         // must converge byte for byte on each answer.
         const ids = []
+        const responsePayload = responseProvider === 'http_get' ? testServer.url : LLM_PAYLOAD
         for (const tag of ['b1', 'b2']) {
             const sinceAction = await attestRequestWatermark(contract.contractIndex)
             await clearBeforeBroadcast()
             const exec = await mineWhile(() => vmHelper.sendExecuteV0(
-                contract.owner, contract.contractIndex, 'ask', ['llm', LLM_PAYLOAD, tag]))
+                contract.owner, contract.contractIndex, 'ask', [responseProvider, responsePayload, tag]))
             assert.strictEqual(exec.execution.status, 'valid',
                 tag + ': the EXECUTE that emits the request came back ' + exec.execution.status +
                 '. A deadline above the provider\'s own window is rejected by the VM gateway at CALL ' +
-                'time, and llm allows only ' + DEADLINE_BLOCKS + ', so this is the shape an over-long ' +
+                'time, and this drill requests ' + DEADLINE_BLOCKS + ' blocks, so this is the shape an over-long ' +
                 'deadline takes as well as the shape a short responsible set takes.')
             // Correlated on the emitting action, never on the broadcast txid: for a
             // P2SH-encoded EXECUTE that hash is not the one recorded against the row.
@@ -818,17 +868,11 @@ describe('AT5: the responses of a window land on chain as one batch', function (
                 ' continuation(s) landed, so the window cannot be reassembled from chain alone')
             console.log('AT5: window landed as a v5 head plus ' + conts.length + ' v6 continuation(s)')
         } else {
-            // Said out loud rather than passed over, and on the llm rail it is the
-            // EXPECTED outcome rather than an unlucky one. The http_get form of this
-            // drill served 6000 bytes of incompressible filler per response so that
-            // two of them exceeded one 8189-byte wire and the batch had to chunk;
-            // an llm answer of "4" fits in a head many times over, and the payload
-            // is not the drill's to inflate because every responsible hub must
-            // converge on it byte for byte. So the v6 half of this clause is not
-            // exercised by an llm window and needs its own item.
+            // Said out loud rather than passed over. Both deterministic response
+            // modes intentionally use a small body, because this reading is about
+            // one batch head and publisher reconcile rather than chunk capacity.
             console.log('AT5 NOTE: the window fitted in ONE wire, so no v6 continuation was produced ' +
-                'and the continuation half of this clause was NOT exercised. An llm response is too ' +
-                'small to chunk, and forcing it would mean a payload the federation cannot agree on.')
+                'and the continuation half of this clause was NOT exercised by provider ' + responseProvider + '.')
         }
 
         // AND THE LINK COMES BACK. The DOGE side pushes the batch to the hub, the hub
