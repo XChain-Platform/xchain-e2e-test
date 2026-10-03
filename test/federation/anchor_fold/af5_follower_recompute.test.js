@@ -116,6 +116,10 @@ async function setupHubs(){
         hubFactory: localTipHub
     });
     await mvh.start();
+    // MultiValidatorHub re-applies the arm heights captured when its helper loaded (the
+    // venue's 112 on a rail run), so the fold goes back to genesis here, after it: these
+    // hubs read a DOGE tip of 0 and the co-sign gate checks the fold at that height.
+    process.env[FOLD_ENV] = '0';
     [proposer, follower] = mvh.hubs.map((hub) => hub.stateAnchorPublisher);
     weightSeed = seedWeightSnapshot(mvh, { blockIndex: SNAPSHOT_BLOCK, network: 'regtest' });
     for(const hub of mvh.hubs) hub.stateAnchorPublisher.network = 'regtest';
