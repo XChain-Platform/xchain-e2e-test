@@ -101,6 +101,12 @@ class UnarmedAnchorSeed {
 
     async start(){
         process.env[FOLD_ENV] = FOLD_OFF_HEIGHT;
+        // An earlier fold suite can leave its own publisher wallet in the environment, and a
+        // hub that boots with it reads that drained address for the balance gate (R-3 attempt
+        // 5: 9.992 DOGE below the 10 DOGE floor). Boot without one, as AF1 does; the staged
+        // signer below sets this seed's own.
+        for(const key of ['DOGE_ADDRESS', 'DOGE_WIF', 'DOGE_NETWORK', 'DOGE_ENCODER_URL', 'HUB_SIGNER_MODULE'])
+            delete process.env[key];
         this.snapshotBlock = await unusedSnapshotBlock();
         process.env.XDEX_SEED_LOCAL_VALIDATOR = '1';
         process.env.XDEX_SNAPSHOT_BLOCK = String(this.snapshotBlock);
@@ -155,7 +161,7 @@ class UnarmedAnchorSeed {
 
     async wireBroadcastHook(){
         const address = await cryptoHelper.getNewFundedAddress(
-            'anchor-fold-af4-publisher', COIN, NETWORK, null, 'legacy', 0, 12.0, false
+            'anchor-fold-af4-publisher', COIN, NETWORK, null, 'legacy', 0, 25.0, false
         );
         await regtestMinerConnector.generateBlocks(2);
         await utxoTrackerConnector.quiesce({ timeoutMs: 60000, pollMs: 250, regtestMiner: regtestMinerConnector });
