@@ -34,8 +34,9 @@
  *
  * The one thing it reads from outside the package is the indexer's own source,
  * to derive the barrier family. That is deliberate: the venue pins graces over
- * EIGHT keys and the indexer reports NINE reasons, and a test that hardcoded
- * either number would go green through the exact gap it exists to watch.
+ * EIGHT keys while the indexer reports TEN reasons, including the two ungraced
+ * members, and a test that hardcoded either number would go green through the
+ * exact gap it exists to watch.
  ********************************************************************/
 
 const assert = require('assert')
@@ -480,15 +481,18 @@ describe('attestMirror venue levers (pure: no venue, no children, no database, n
     // -----------------------------------------------------------------------
     describe('the barrier family versus the grace table the venue pins over', () => {
 
-        it('reads NINE reasons from the indexer while the grace table has EIGHT keys', () => {
-            assert.strictEqual(mirrorBarrierReasons().length, 9,
+        it('reads TEN reasons from the indexer while the grace table has EIGHT keys', () => {
+            assert.strictEqual(mirrorBarrierReasons().length, 10,
                 'the mirror barrier family changed size; a leg enumerating it from /status is now ' +
                 'asserting the wrong count')
             assert.strictEqual(MIRROR_BARRIERS.length, 8)
         })
 
-        it('names the gap rather than inventing a grace to close it', () => {
-            assert.deepStrictEqual(ungracedMirrorBarrierReasons(), ['snapshot_sync_barrier'],
+        it('names both ungraced members rather than inventing graces to close the gap', () => {
+            assert.deepStrictEqual(ungracedMirrorBarrierReasons(), [
+                'list_share_sync_barrier',
+                'snapshot_sync_barrier',
+            ],
                 'the set of barriers the venue CANNOT pin a grace for changed; a leg that leaves one ' +
                 'of them at its frozen grace parks every block behind it')
             assert.ok(!Object.prototype.hasOwnProperty.call(
