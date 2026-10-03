@@ -44,8 +44,9 @@ describe('Price Bet: inline copy matches the canonical template', function () {
     })
 
     it('fits the combined compiled payload cap for the suite deploy', function () {
+        const pair = 'BT' + Math.floor(Math.random() * 900 + 100) + '/USD'
         const params = [
-            'a'.repeat(35), 'BT123/USD', '60000', 'OVER', 'XCHAIN', '100', '7', '50'
+            'a'.repeat(35), pair, '60000', 'OVER', 'XCHAIN', '100', '7', '50'
         ].join('|')
         const codeB64 = Buffer.from(PRICE_BET, 'utf8').toString('base64')
         const msg = 'DEPLOY|0|' + codeB64 + '|1000000|' + params
