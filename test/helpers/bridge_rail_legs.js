@@ -155,6 +155,7 @@ const RAIL_DRIVES = {
             },
             archive_count: {
                 files: ['test/federation/flag_days/archive_match_count.test.js'],
+                env: { COIN: 'dogecoin' },
                 minPassed: 3,
             },
         },

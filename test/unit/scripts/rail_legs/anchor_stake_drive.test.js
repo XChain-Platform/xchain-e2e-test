@@ -59,14 +59,14 @@ describe('anchor and stake rail drive', function () {
         }
     })
 
-    it('gives the fold and bundle children a dogecoin COIN over the bitcoin default', function () {
+    it('gives the fold, bundle and archive count children a dogecoin COIN over the bitcoin default', function () {
         for (const legName of Object.keys(LEG_SUITES)) {
             const command = buildLegCommand('anchor_stake', legName, {
                 journalDir: '/tmp/anchor-stake-drive-test',
                 repoRoot: REPO_ROOT,
                 env: ARM_ENV,
             })
-            const expected = ['anchor_fold', 'anchor_bundle'].includes(legName) ? 'dogecoin' : 'bitcoin'
+            const expected = ['anchor_fold', 'anchor_bundle', 'archive_count'].includes(legName) ? 'dogecoin' : 'bitcoin'
             assert.strictEqual(command.env.COIN, expected, legName)
             assert.strictEqual(command.env.NETWORK, 'regtest', legName)
         }
