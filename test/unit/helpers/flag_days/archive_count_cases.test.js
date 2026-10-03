@@ -29,4 +29,15 @@ describe('archiveCountCases', function () {
         for(const value of [0, -1, 1.5, NaN, '3', null])
             assert.throws(() => archiveCountCases(value), /positive integer/);
     });
+
+    it('expects every case to be valid while the gate is inactive', function () {
+        for(const matchesLength of [1, 3])
+            assert.ok(archiveCountCases(matchesLength, { active: false })
+                .every((testCase) => testCase.expect === 'valid'));
+    });
+
+    it('rejects a non-boolean active option', function () {
+        for(const active of [0, 1, 'false', null, {}, []])
+            assert.throws(() => archiveCountCases(3, { active }), /boolean/);
+    });
 });
