@@ -20,6 +20,8 @@ const { seedWeightSnapshot } = require('../../helpers/seededWeightSnapshot');
 
 const CheckpointEngine = loadHubModule('src/anchor/checkpoint_engine.js');
 const XChainHub = loadHubModule('src/XChainHub.js');
+const { isAnchorFoldActive, foldArchiveCanonical } =
+    loadHubModule('src/anchor/publisher/canonical_forms.js');
 const { extendWrapperCanonicalBase, foldArchiveSuffix } =
     loadHubModule('src/anchor/publisher/fold/wrapper_canonical.js');
 
@@ -158,8 +160,29 @@ async function recomputeAndCosign(){
     assert.ok(decoded && await follower.verifyArchiveAgainstLocal(decoded, Number(mine.snapshot_block)),
         'follower verifies the proposer archive against its local checkpoint and capability rows');
 
-    const signed = await follower.coSignFoldArchiveRequest(
-        foldedRequest(proposer, proposerRows, proposerArchive));
+    // The co-sign path refuses silently, so each of its remaining gates is checked here
+    // first and a refusal names the gate and its inputs instead of a bare null.
+    const request = foldedRequest(proposer, proposerRows, proposerArchive);
+    const foldBlock = await follower.hub.resolveDogeLatestBlock();
+    assert.ok(isAnchorFoldActive(Number(foldBlock), 'regtest'),
+        'fold gate active for the follower at DOGE ' + foldBlock + ' (' + FOLD_ENV + '=' + process.env[FOLD_ENV] + ')');
+    const section = request.data.sections[Number(proposerArchive.wrapper_section_index)];
+    assert.ok(section && String(section.chain) === String(proposerArchive.checkpoint.chain) &&
+        Number(section.block_index) === Number(proposerArchive.checkpoint.block_index) &&
+        Number(section.checkpoint_seq) === Number(proposerArchive.checkpoint.checkpoint_seq),
+        'wrapper section ' + proposerArchive.wrapper_section_index + ' of ' + request.data.sections.length +
+        ' matches the archive checkpoint ' + JSON.stringify(proposerArchive.checkpoint));
+    const nextSeq = await follower.getNextBatchSeq();
+    assert.strictEqual(Number(nextSeq), Number(proposerArchive.batch_seq),
+        'follower next batch seq matches the proposer archive batch seq');
+    const localCanonical = foldArchiveCanonical(local[0], Number(proposerArchive.batch_seq),
+        Number(proposerArchive.match_count), String(proposerArchive.batch_crc32), Number(proposerArchive.total_chunks));
+    assert.strictEqual(localCanonical, proposerRound.canonical,
+        'follower local archive canonical matches the proposer round canonical');
+    assert.ok(ValidatorIdentity.verify(localCanonical, String(proposerArchive.sig || ''), request.data.sig_pubkey),
+        'proposer archive signature verifies against the follower local canonical');
+
+    const signed = await follower.coSignFoldArchiveRequest(request);
     assert.ok(signed && signed.reply.archive_sig, 'follower returned an archive co-signature');
     assert.ok(ValidatorIdentity.verify(proposerCanonical, signed.reply.archive_sig, followerPubkey),
         'follower co-signature verifies against the proposer canonical');
