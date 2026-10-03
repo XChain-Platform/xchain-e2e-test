@@ -64,6 +64,7 @@ const stakeHelper = require('../helpers/stakeHelper')
 const gasHelper = require('../helpers/gasHelper')
 const vmHelper = require('../helpers/vmHelper')
 const attestationHelper = require('../helpers/attestationHelper')
+const { skipIfResponseMirrorEra } = require('../helpers/attestLegacyResponsePath')
 
 // Resolve the REAL http_get provider the same way realUrlAttestation.test.js does.
 const _hubBase = (function () {
@@ -292,6 +293,7 @@ describe('Counterparty Bridge: a REAL tokenscan.io burn check driving a mint or 
     before(prepareCounterpartyBridge)
 
     it('a fresh regtest address settles a REAL tokenscan.io burn-history check and is a harmless no-op (never burned anything)', async function () {
+        if (skipIfResponseMirrorEra(this, NETWORK)) return
         const { claimer, dep } = await deployBridge()
         assert.strictEqual(dep.contract.status, 'valid', 'deploy status: ' + dep.contract.status)
         const ci = dep.contract.action_index
