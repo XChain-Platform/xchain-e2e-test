@@ -130,15 +130,17 @@ const RAIL_DRIVES = {
             // The fold and bundle suites anchor on DOGE. The workflow writes a dogecoin
             // drive .env for these legs (test/helpers/rail_leg_coins.js), and COIN here
             // replaces the bitcoin COIN that scripts/rail_leg_drive.js gives every child,
-            // which dotenv would not override (R-3 attempt 4 gaps A and C).
+            // which dotenv would not override (R-3 attempt 4 gaps A and C). Their suites pay only
+            // native DOGE, so they skip the off-BTC gas bootstrap, which needs a bridge relay
+            // the GitHub rail does not run (R-3 attempt 5).
             anchor_fold: {
                 files: ['test/federation/anchor_fold_acceptance.test.js'],
-                env: { E2E_REQUIRE_FEDERATION: '1', COIN: 'dogecoin' },
+                env: { E2E_REQUIRE_FEDERATION: '1', COIN: 'dogecoin', E2E_GAS_BOOTSTRAP: 'off' },
                 minPassed: 5,
             },
             anchor_bundle: {
                 files: ['test/federation/flag_days/anchor_bundle_order.test.js'],
-                env: { COIN: 'dogecoin' },
+                env: { COIN: 'dogecoin', E2E_GAS_BOOTSTRAP: 'off' },
                 minPassed: 3,
             },
             staking: {
@@ -155,7 +157,7 @@ const RAIL_DRIVES = {
             },
             archive_count: {
                 files: ['test/federation/flag_days/archive_match_count.test.js'],
-                env: { COIN: 'dogecoin' },
+                env: { COIN: 'dogecoin', E2E_GAS_BOOTSTRAP: 'off' },
                 minPassed: 3,
             },
         },

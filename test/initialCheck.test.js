@@ -357,6 +357,14 @@ exports.mochaHooks = {
             // token row on that chain is instead created lazily by the first
             // XBRIDGE v2 in-leg (section 9) - so bootstrap asks gasHelper for a
             // (throwaway) bridged balance instead of broadcasting ISSUE locally.
+            // A leg whose suites pay only native coin (the anchor legs) on a venue with no
+            // bridge relay (the GitHub rail) skips the off-BTC reservoir fill, which waits on
+            // a federation credit that never comes (R-3 attempt 5). Read here, not at load,
+            // because suites call this hook again.
+            if (process.env.E2E_GAS_BOOTSTRAP === "off" && global.COIN_CODE !== "BTC") {
+                console.log("Skipping the GAS token bootstrap on " + global.COIN_CODE + ": E2E_GAS_BOOTSTRAP=off")
+                return
+            }
             console.log("Checking if GAS token ("+GAS_TICK+") exists...")
             const gasTokenExists = await indexerDatabase.checkIssue({ tick: GAS_TICK, status: 'valid' })
             if (gasTokenExists) {

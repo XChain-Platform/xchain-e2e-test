@@ -68,6 +68,7 @@ describe('anchor and stake rail drive', function () {
             })
             const expected = ['anchor_fold', 'anchor_bundle', 'archive_count'].includes(legName) ? 'dogecoin' : 'bitcoin'
             assert.strictEqual(command.env.COIN, expected, legName)
+            assert.strictEqual(command.env.E2E_GAS_BOOTSTRAP, expected === 'dogecoin' ? 'off' : undefined, legName)
             assert.strictEqual(command.env.NETWORK, 'regtest', legName)
         }
     })
