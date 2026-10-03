@@ -29,12 +29,18 @@ const {
     reverseSectionPairs
 } = require('../../helpers/flag_days/anchor_order_tamper');
 const { unusedBtcSnapshotBlock, pinMeshSignerSet } = require('../../helpers/flag_days/snapshot_block');
+const { armHeight } = require('../../helpers/anchorArmHeight');
 
 const VALIDATOR_COUNT = 2;
 const HUB_DB_PORT = 14100 + (process.pid % 300);
 const HUB_DB_NAME = 'xchain-anchor-order-hubdb-' + process.pid;
 // Set in bootFederation to an unused committed BTC block (ANCHOR_ORDER_SNAPSHOT_BLOCK pins one).
 let SNAPSHOT_BLOCK = null;
+// The hubs read the fold arm at every gate lookup. A rehearsal arms it mid-chain, and at or
+// past that height they build ANCHOR v3, which this v0 suite never captures (R-3 attempt 4
+// gap C), so the bundle is prepared with the fold off for the in-process hubs only.
+const FOLD_ENV = 'XC_ANCHOR_FOLD_REGTEST_ACTIVATION';
+const FOLD_OFF_HEIGHT = '999999999';
 
 describe('ANCHOR v0 bundle ordering on DOGE regtest', function () {
     this.timeout(20 * 60 * 1000);
@@ -185,10 +191,21 @@ describe('ANCHOR v0 bundle ordering on DOGE regtest', function () {
                 return { txid: 'f'.repeat(64) };
             });
         }
-        for(const hub of mvh.hubs) await hub.stateAnchorPublisher.flush();
-        await waitUntil(() => ({ ok: captured.length > 0, saw: captured.length }), {
-            timeoutMs: 30000, intervalMs: 100, what: 'the publisher to build a v0 bundle'
-        });
+        const priorFold = process.env[FOLD_ENV];
+        process.env[FOLD_ENV] = FOLD_OFF_HEIGHT;
+        try {
+            // Each summary names the gate that held a flush (skipped) or the error it hit.
+            const summaries = [];
+            for(const hub of mvh.hubs) summaries.push(await hub.stateAnchorPublisher.flush());
+            console.log('    anchor bundle flush summaries: ' + JSON.stringify(summaries));
+            await waitUntil(() => ({ ok: captured.length > 0, saw: captured.length }), {
+                timeoutMs: 30000, intervalMs: 100,
+                what: 'the publisher to build a v0 bundle (flush summaries ' + JSON.stringify(summaries) + ')'
+            });
+        } finally {
+            if(priorFold === undefined) delete process.env[FOLD_ENV];
+            else process.env[FOLD_ENV] = priorFold;
+        }
         assert.strictEqual(captured.length, 1, 'one elected publisher builds the bundle');
         preparedPayload = captured[0];
 
@@ -212,6 +229,26 @@ describe('ANCHOR v0 bundle ordering on DOGE regtest', function () {
         });
         assert.ok(status && status.ready, 'UTXO tracker is ready after funding the publisher');
         signerHooks = stageProductionSigner(addressInfo);
+    }
+
+    // ANCHOR_BUNDLE_ORDER_ACTIVATION follows XC_ANCHOR_STAKE_REGTEST_ACTIVATION on regtest and is
+    // keyed on the anchor's own DOGE height. A rehearsal arms it mid-chain, so the bundles this
+    // suite publishes must land at or past that height for the order verdicts to be in force.
+    async function mineToOrderArmHeight(){
+        const target = Number(armHeight('XC_ANCHOR_STAKE_REGTEST_ACTIVATION'));
+        if(!(target > 0)) return;
+        const latest = await indexerConnector.call('getlatestblock', {});
+        const tip = Number(latest && latest.block_index);
+        assert.ok(Number.isSafeInteger(tip) && tip >= 0, 'the DOGE indexer reports its tip');
+        if(tip < target){
+            await regtestMinerConnector.generateBlocks(target - tip);
+            const status = await utxoTrackerConnector.quiesce({
+                timeoutMs: 60000, pollMs: 250, regtestMiner: regtestMinerConnector
+            });
+            assert.ok(status && status.ready, 'UTXO tracker is ready after mining to the order arm height');
+        }
+        assert.ok(await indexerConnector.waitForIndexedBlock(target, 120000),
+            'the DOGE indexer reached the bundle order arm height ' + target);
     }
 
     async function rowsForTransaction(txid){
@@ -252,6 +289,7 @@ describe('ANCHOR v0 bundle ordering on DOGE regtest', function () {
         await bootFederation();
         await prepareCanonicalBundle();
         await fundProductionSigner();
+        await mineToOrderArmHeight();
     });
 
     after(async function () {

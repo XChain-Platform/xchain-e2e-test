@@ -127,13 +127,18 @@ const RAIL_DRIVES = {
     anchor_stake: {
         envKeys: ANCHOR_ARM_ENV_KEYS,
         legs: {
+            // The fold and bundle suites anchor on DOGE. The workflow writes a dogecoin
+            // drive .env for these legs (test/helpers/rail_leg_coins.js), and COIN here
+            // replaces the bitcoin COIN that scripts/rail_leg_drive.js gives every child,
+            // which dotenv would not override (R-3 attempt 4 gaps A and C).
             anchor_fold: {
                 files: ['test/federation/anchor_fold_acceptance.test.js'],
-                env: { E2E_REQUIRE_FEDERATION: '1' },
+                env: { E2E_REQUIRE_FEDERATION: '1', COIN: 'dogecoin' },
                 minPassed: 5,
             },
             anchor_bundle: {
                 files: ['test/federation/flag_days/anchor_bundle_order.test.js'],
+                env: { COIN: 'dogecoin' },
                 minPassed: 3,
             },
             staking: {

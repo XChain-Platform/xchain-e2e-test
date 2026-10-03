@@ -74,8 +74,17 @@ describe('bridge rail leg map', function () {
     it('requires federation for every anchor fold case', function () {
         const leg = RAIL_DRIVES.anchor_stake.legs.anchor_fold;
 
-        assert.deepStrictEqual(leg.env, { E2E_REQUIRE_FEDERATION: '1' });
+        assert.deepStrictEqual(leg.env, { E2E_REQUIRE_FEDERATION: '1', COIN: 'dogecoin' });
         assert.strictEqual(leg.minPassed, 5);
+    });
+
+    it('runs every DOGE-only anchor leg as dogecoin and the rest as bitcoin', function () {
+        const { driveEnvCoin } = require('../../helpers/rail_leg_coins');
+        assert.deepStrictEqual(RAIL_DRIVES.anchor_stake.legs.anchor_bundle.env, { COIN: 'dogecoin' });
+        for (const [legName, leg] of Object.entries(RAIL_DRIVES.anchor_stake.legs)) {
+            const coin = (leg.env && leg.env.COIN) || 'bitcoin';
+            assert.strictEqual(coin, driveEnvCoin('anchor_stake', legName), legName);
+        }
     });
 
     before(function () {
