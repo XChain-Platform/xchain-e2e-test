@@ -50,6 +50,7 @@ const stakeHelper = require('../helpers/stakeHelper')
 const gasHelper = require('../helpers/gasHelper')
 const vmHelper = require('../helpers/vmHelper')
 const attestationHelper = require('../helpers/attestationHelper')
+const { skipIfResponseMirrorEra } = require('../helpers/attestLegacyResponsePath')
 
 // Resolve the REAL http_get provider the same way realUrlAttestation.test.js does.
 const _hubBase = (function () {
@@ -271,6 +272,7 @@ describe('Escrow Delivery: custody + a REAL delivery attestation driving on-chai
     before(prepareEscrowDelivery)
 
     it('a matching delivery body auto-releases the escrow to the seller - no release() call', async function () {
+        if (skipIfResponseMirrorEra(this, NETWORK)) return
         const { ci, contractAddr, requestId, buyer, seller } = await deployFundAndRequest(MARKER_MATCH, 0)
         // getNewFundedAddress auto-seeds every fresh address with 100 XCHAIN
         // gas, so the seller's balance isn't 0 going in - measure the delta.
@@ -302,6 +304,7 @@ describe('Escrow Delivery: custody + a REAL delivery attestation driving on-chai
     before(prepareEscrowDelivery)
 
     it('a non-matching delivery body is a no-op; the arbiter then settles the dispute manually', async function () {
+        if (skipIfResponseMirrorEra(this, NETWORK)) return
         const { ci, contractAddr, requestId, arbiter, buyer } = await deployFundAndRequest(MARKER_NO_MATCH, 1)
 
         await fetchSignAndBroadcast(buyer, requestId)
