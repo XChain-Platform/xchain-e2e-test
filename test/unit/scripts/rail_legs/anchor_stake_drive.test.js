@@ -20,6 +20,7 @@ const LEG_SUITES = {
     staking: 'test/actions/staking.test.js',
     capability_slash: 'test/actions/capability_slash.test.js',
     vm_contract_slash: 'test/actions/vm_contract_slash.test.js',
+    archive_count: 'test/federation/flag_days/archive_match_count.test.js',
 }
 
 describe('anchor and stake rail drive', function () {

@@ -153,6 +153,10 @@ const RAIL_DRIVES = {
                 files: ['test/actions/vm_contract_slash.test.js'],
                 minPassed: 3,
             },
+            archive_count: {
+                files: ['test/federation/flag_days/archive_match_count.test.js'],
+                minPassed: 3,
+            },
         },
     },
     contracts_price: {
