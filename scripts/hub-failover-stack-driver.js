@@ -214,17 +214,16 @@ async function rowPresence (config, hubId, state) {
 }
 
 async function deliveryEvidence (config, state) {
-    if (!state) return { complete: false, delivered: new Set() }
+    if (!state) return new Set()
     const database = INDEXERS.find((row) => row.id === 'btc-indexer').database
-    const pending = await dbRows(config, database,
-        'SELECT COUNT(*) FROM pending_hub_pushes WHERE id=' + Number(state.pushId))
     const rows = await dbRows(config, database,
         'SELECT hub_address, status FROM hub_push_deliveries WHERE push_id=' + Number(state.pushId))
-    return {
-        complete: Number(pending[0] && pending[0][0]) === 0,
-        delivered: new Set(rows.filter((row) => row[1] === 'delivered')
-            .map((row) => hubIdFromAddress(row[0])).filter(Boolean)),
-    }
+    return new Set(rows.filter((row) => row[1] === 'delivered')
+        .map((row) => hubIdFromAddress(row[0])).filter(Boolean))
+}
+
+function reportsForHub (state, delivered, hubId) {
+    return state && delivered.has(hubId) ? [state.reportId] : []
 }
 
 async function observeHubs (config, services, state) {
@@ -233,12 +232,11 @@ async function observeHubs (config, services, state) {
         const running = services.has(id)
         const frame = running ? await readReadyFrame(config, id) : null
         const present = await rowPresence(config, id, state)
-        const reportSeen = state && (delivery.complete || delivery.delivered.has(id))
         return {
             id,
             running,
             caught_up: running ? frame.caught_up : false,
-            reports: reportSeen ? [state.reportId] : [],
+            reports: reportsForHub(state, delivery, id),
             rows: { oracle_prices: present ? [state.rowKey] : [] },
         }
     }))
@@ -371,7 +369,7 @@ async function main () {
 
 module.exports = {
     HUBS, INDEXERS, MINERS, createConfig, followedValue, hubIdFromAddress,
-    normalizeIndexer, quoteSql, dispatch,
+    normalizeIndexer, reportsForHub, quoteSql, dispatch,
 }
 
 if (require.main === module) {

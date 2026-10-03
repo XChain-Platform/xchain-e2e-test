@@ -8,6 +8,7 @@ const {
     hubIdFromAddress,
     normalizeIndexer,
     quoteSql,
+    reportsForHub,
 } = require('../../../scripts/hub-failover-stack-driver')
 
 describe('two-hub failover stack driver', function () {
@@ -63,5 +64,12 @@ describe('two-hub failover stack driver', function () {
 
     it('quotes fixture report values for the MariaDB command', function () {
         assert.strictEqual(quoteSql("a'b\\c"), "'a''b\\\\c'")
+    })
+
+    it('credits report delivery only to the hub with its own delivered record', function () {
+        const state = { reportId: 'push:7' }
+        const delivered = new Set(['hub-b'])
+        assert.deepStrictEqual(reportsForHub(state, delivered, 'hub-a'), [])
+        assert.deepStrictEqual(reportsForHub(state, delivered, 'hub-b'), ['push:7'])
     })
 })
