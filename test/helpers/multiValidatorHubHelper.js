@@ -66,6 +66,35 @@ function _loadHubModule(rel){
 const XChainHub        = _loadHubModule('src/XChainHub.js');
 const ValidatorIdentity = _loadHubModule('src/validators/identity.js');
 
+// The signing members of the rail-seeded ROLLCALL federation, as rollcallHelper's
+// roster lists the keys the seed tool stakes (test/tools/rollcallSeedFederation.test.js).
+// A seeded federation run (E2E_REQUIRE_FEDERATION=1 with the rail's federation
+// mnemonic set) must sign with those keys, or every in-process hub runs as an
+// observer and refuses to co-sign. Each identity is built through the hub's own
+// ValidatorIdentity and must agree with the roster's independently derived pubkey,
+// so a drift between the two derivations fails here instead of as a silent absence.
+// Explicit identities win; a mesh larger than the signing roster keeps generated keys.
+function _resolvePresetIdentities(opts, env, rosterFn) {
+    if (opts.identities) return opts.identities;
+    if (env.E2E_REQUIRE_FEDERATION !== '1' || !env.XC_ROLLCALL_FEDERATION_MNEMONIC) return null;
+    const roster = (rosterFn || _seededSigningRoster)();
+    if (opts.count > roster.length) return null;
+    return roster.slice(0, opts.count).map((member) => {
+        const pubkeyHex = new ValidatorIdentity(member.seed).getPubkeyHex().toLowerCase();
+        if (pubkeyHex !== member.pubkey) {
+            throw new Error('MultiValidatorHub: hub identity for roster member ' + member.index +
+                ' derives ' + pubkeyHex + ' but the seeded federation staked ' + member.pubkey);
+        }
+        return { pubkeyHex, privkeyHex: member.seed };
+    });
+}
+
+// Required lazily: rollcallHelper reaches sibling repos, and most hub meshes never need it.
+function _seededSigningRoster() {
+    const rollcall = require('./rollcallHelper');
+    return rollcall.federationRoster().filter((member) => member.index !== rollcall.IDLE_SEED_INDEX);
+}
+
 // Check whether a TCP port is free. Used for picking unused P2P ports
 // at startup so concurrent test runs don't collide.
 function _portFree(port) {
@@ -222,8 +251,10 @@ class MultiValidatorHub {
         // Pre-supplied validator identities (`[{pubkeyHex, privkeyHex}, ...]`). When given,
         // the harness uses these instead of generating fresh keypairs. This is required for a
         // live on-chain proof where the hubs' signing keys MUST equal the pubkeys staked on BTC.
-        // Length must be >= count (extras ignored).
-        this.presetIdentities = opts.identities || null;
+        // Length must be >= count (extras ignored). A seeded federation run with none given
+        // takes the seeded signing roster (_resolvePresetIdentities).
+        this.presetIdentities = _resolvePresetIdentities({ identities: opts.identities, count: this.count },
+            process.env);
 
         // Full-node tier (NODEPROOF). When `fullnode` is set, each hub receives it as
         // its p2pConfig.FULLNODE block (REWARD_SHARE, GENESIS_VERIFIERS, challenge
@@ -524,4 +555,5 @@ class MultiValidatorHub {
 // a passing integration run and only shows itself as a rare EADDRINUSE, so it is
 // pinned directly (test/unit/helpers/multiValidatorHubPorts.test.js).
 module.exports = { MultiValidatorHub, ValidatorIdentity, loadHubModule: _loadHubModule, resolveHubFile: _resolveHubFile,
-    pickFreePorts: _pickFreePorts, ephemeralRange: _ephemeralRange, resolveMeshBtcIndexerUrl: _resolveMeshBtcIndexerUrl };
+    pickFreePorts: _pickFreePorts, ephemeralRange: _ephemeralRange, resolveMeshBtcIndexerUrl: _resolveMeshBtcIndexerUrl,
+    resolvePresetIdentities: _resolvePresetIdentities };
