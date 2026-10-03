@@ -98,3 +98,28 @@ describe('the legacy on-chain ATTEST response path guard', function () {
         })
     })
 })
+
+describe('contract tests that broadcast legacy ATTEST responses', function () {
+
+    it('reference the mirror-era skip guard', function () {
+        const contractsDir = path.join(__dirname, '..', '..', 'test/contracts')
+        const pendingDirs = [contractsDir]
+        const testFiles = []
+        while (pendingDirs.length > 0) {
+            const dir = pendingDirs.pop()
+            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+                const entryPath = path.join(dir, entry.name)
+                if (entry.isDirectory()) pendingDirs.push(entryPath)
+                else if (entry.isFile() && entry.name.endsWith('.test.js')) testFiles.push(entryPath)
+            }
+        }
+        const unguarded = testFiles.filter(file => {
+            const source = fs.readFileSync(file, 'utf8')
+            const broadcastsResponse = /\b(?:broadcastAttestationResponse|fetchSignAndBroadcast)\s*\(/.test(source)
+            return broadcastsResponse && !source.includes('skipIfResponseMirrorEra')
+        }).map(file => path.relative(contractsDir, file)).sort()
+
+        assert.deepStrictEqual(unguarded, [],
+            'contract tests that broadcast an ATTEST response must reference skipIfResponseMirrorEra')
+    })
+})
