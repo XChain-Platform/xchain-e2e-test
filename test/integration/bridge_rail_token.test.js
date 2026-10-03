@@ -414,12 +414,14 @@ describe('token AT9: the gates, and the dated acceptance record', function () {
         try { json = JSON.parse(fs.readFileSync(report, 'utf8')); } catch (e) { json = null; }
         try { fs.unlinkSync(report); } catch (e) { /* never written */ }
         assert.ok(json && json.stats, 'the parity run wrote no mocha report (exit ' + res.status + '):\n' + res.tail);
+        const parityFailureTitles = json.failures.map((t) => t.fullTitle);
         const ordering = json.passes.filter((t) => t.title === PARITY_ORDERING_TITLE).length;
         at9.parity = { files: PARITY_FILES, cwd: INDEXER_ROOT, exit: res.status,
             counts: { passing: json.stats.passes, failing: json.stats.failures, pending: json.stats.pending },
-            orderingCasesPassed: ordering };
-        assert.strictEqual(res.status, 0, 'the parity test is red (exit ' + res.status + '):\n' + res.tail);
-        assert.strictEqual(json.stats.failures, 0, 'parity failures: ' + JSON.stringify(json.failures.map((t) => t.fullTitle)));
+            orderingCasesPassed: ordering, failureTitles: parityFailureTitles };
+        assert.strictEqual(res.status, 0, 'the parity test is red (exit ' + res.status + '):\n' + res.tail +
+            '\nparity failures: ' + JSON.stringify(parityFailureTitles));
+        assert.strictEqual(json.stats.failures, 0, 'parity failures: ' + JSON.stringify(parityFailureTitles));
         assert.strictEqual(json.stats.pending, 0, 'parity cases skipped, so they compared nothing: ' +
             JSON.stringify(json.pending.map((t) => t.fullTitle)));
         assert.ok(json.stats.passes > 0, 'the parity run passed no case');
