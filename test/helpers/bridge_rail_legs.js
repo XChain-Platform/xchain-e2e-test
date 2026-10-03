@@ -205,6 +205,58 @@ const RAIL_DRIVES = {
             },
         },
     },
+    lists_market: {
+        envKeys: [
+            'XC_LISTS_MARKET_REGTEST_ACTIVATION',
+            'XC_LISTS_MARKET_REGTEST_TIME',
+        ],
+        legs: {
+            list: {
+                files: ['test/actions/list.test.js'],
+                minPassed: 3,
+            },
+            order: {
+                files: [
+                    'test/actions/order.test.js',
+                    'test/actions/order.test/02_v1_cancel.test.js',
+                    'test/actions/order.test/03_match_full_exchange.test.js',
+                    'test/actions/order.test/04_match_repeating_decimal_price.test.js',
+                    'test/actions/order.test/05_match_partial_fill.test.js',
+                    'test/actions/order.test/06_match_high_precision_decimals.test.js',
+                    'test/actions/order.test/07_v2_edit.test.js',
+                ],
+                minPassed: 7,
+            },
+            swap: {
+                files: [
+                    'test/actions/swap.test.js',
+                    'test/actions/swap.test/02_v1_cancel.test.js',
+                    'test/actions/swap.test/03_match_full_exchange.test.js',
+                    'test/actions/swap.test/04_v2_edit.test.js',
+                ],
+                minPassed: 4,
+            },
+            dispenser: {
+                files: [
+                    'test/actions/dispenser.test.js',
+                    'test/actions/dispenser.test/01_v0_fiat_mode_1_validator_price_oracle.test.js',
+                    'test/actions/dispenser.test/02_v0_fiat_mode_2_user_oracle_price_v1_cross_conversion.test.js',
+                    'test/actions/dispenser.test/03_v0_fiat_mode_2_user_oracle_price_v1_per_token.test.js',
+                    'test/actions/dispenser.test/04_v0_fiat_mode_2_user_oracle_price_v1_oracle_fee.test.js',
+                    'test/actions/dispenser.test/05_v0_fiat_mode_2_user_oracle_price_v1_price_window.test.js',
+                    'test/actions/dispenser.test/06_v0_fiat_mode_2_user_oracle_price_v1_activation_delay.test.js',
+                    'test/actions/dispenser.test/07_v0_fiat_mode_2_user_oracle_price_v1_no_quote.test.js',
+                    'test/actions/dispenser.test/08_v1_cancel.test.js',
+                    'test/actions/dispenser.test/09_v2_edit.test.js',
+                ],
+                minPassed: 13,
+            },
+            callback: {
+                files: ['test/actions/callback.test.js'],
+                minPassed: 1,
+            },
+        },
+    },
     contracts_vm: {
         envKeys: ['XC_JSON_STRINGIFY_HOOK_EXPECT'],
         legs: {
