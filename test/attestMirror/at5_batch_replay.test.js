@@ -95,6 +95,7 @@ const {
     jsonSafe,
 } = require('./mirrorDrillWaits')
 const { oneValidHeadVerdict, emptyWindowVerdict } = require('./helpers/batchWindowVerdicts')
+const { readHubsReading } = require('./helpers/hubsReading')
 const vmHelper     = require('../helpers/vmHelper')
 const chainRail    = require('../helpers/chainRail')
 const cryptoHelper = require('../cryptoHelper')
@@ -355,6 +356,47 @@ async function stageDogeSigner (label, rail) {
 
     console.log('AT5: staged the reference DOGE signer at ' + signerDir + ' for a funded publisher address')
     return { env: env, signerDir: signerDir, address: funded.address }
+}
+
+// True once a hub other than the window's publishers shows it learned the window
+// landed: a `landed` marker for it, or a chain reconcile that found a landed window.
+// The same rule the platform's judge-attest-reconcile.js grades; this only decides
+// when the reading is worth keeping.
+function reconcileSeen (reading, windowStart) {
+    const forWindow = (entry) => entry.markers.filter((m) => m.window_start === Number(windowStart))
+    const publishers = reading.filter((e) => forWindow(e).some((m) => m.status === 'intent' || m.status === 'sent'))
+    const others = reading.filter((e) => !publishers.includes(e))
+    return others.length > 0 && others.every((e) => forWindow(e).some((m) => m.status === 'landed') ||
+        Number((e.stats || {}).chainReconcileLandedWindows) > 0)
+}
+
+/**
+ * AQ-ACC's hub reading, taken while the venue is still up because it dies with the
+ * leg: each hub's batch publisher stats (from its `health` answer) and its markers,
+ * polled for up to ten minutes until a non-publishing hub shows it saw the landed
+ * window, then written as `at5-hubs-reading.json` beside the venue logs. It never
+ * fails the case: the leg's own assertions stay the verdict, and the reading is
+ * judged afterwards from the uploaded logs.
+ */
+async function recordHubsReading (venue, marker, readMarkers, nudgeDoge) {
+    const dir = process.env.ATTEST_VENUE_LOG_DIR
+    if (!dir) return
+    const file = require('path').join(dir, 'at5-hubs-reading.json')
+    try {
+        let reading = []
+        const deadline = Date.now() + 10 * 60 * 1000
+        do {
+            await nudgeDoge()
+            reading = await readHubsReading(venue.hubs, await readMarkers())
+            fs.writeFileSync(file, JSON.stringify(reading, null, 2) + '\n')
+            if (reconcileSeen(reading, marker.window_start)) break
+            await new Promise((resolve) => setTimeout(resolve, 15000))
+        } while (Date.now() < deadline)
+        console.log('AT5 READING: hubs reading for window ' + marker.window_start + ' written to ' + file +
+            ' (reconcile seen: ' + reconcileSeen(reading, marker.window_start) + '): ' + JSON.stringify(reading))
+    } catch (e) {
+        console.log('AT5 READING: could not take the hubs reading: ' + (e && e.message))
+    }
 }
 
 describe('AT5: the responses of a window land on chain as one batch', function () {
@@ -760,6 +802,7 @@ describe('AT5: the responses of a window land on chain as one batch', function (
             'response window ' + marker.window_start + ' did not carry exactly one valid v5 head ' +
             'after a further window closed. Heads seen: ' + jsonSafe(oneHead.verdict.heads) +
             '. All batch actions seen: ' + jsonSafe(oneHead.actions))
+        await recordHubsReading(venue, marker, readMarkers, nudgeDoge)
 
         const head = landed.valid[0]
         assert.strictEqual(Number(head.batch_row_count), Number(marker.row_count),
