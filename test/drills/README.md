@@ -3,17 +3,24 @@
 ## Two-hub indexer failover drill
 
 `hubFailover.drill.js` drives the two-hub regtest venue built by xchain-node.
-The stack supplies a command adapter in
-`XCHAIN_HUB_FAILOVER_DRIVER`; optional fixed arguments are a JSON string array in
-`XCHAIN_HUB_FAILOVER_DRIVER_ARGS`. Each invocation must print exactly one JSON
-object on stdout. Diagnostic output belongs on stderr.
+By default it invokes `scripts/hub-failover-stack-driver.js`, which directly
+drives the two-hub Compose services, status endpoints, miners, durable report
+queue, and fixture databases. Each invocation prints exactly one JSON object on
+stdout. Diagnostic output belongs on stderr.
 
 Run it with:
 
 ```
-XCHAIN_HUB_FAILOVER_DRIVER=/path/to/hf15a-driver \
-  npm run test:drill:hub-failover
+docker compose -p hub-failover \
+  -f ../xchain-node/.github/hub-failover/compose.yml up -d --wait
+npm run test:drill:hub-failover
 ```
+
+`XCHAIN_HUB_FAILOVER_NODE_DIR` can point at a non-sibling xchain-node checkout.
+The Compose path, project, state file, Docker executable, and published ports
+also have `XCHAIN_HUB_FAILOVER_*` overrides matching the names in the driver.
+`XCHAIN_HUB_FAILOVER_DRIVER` and its JSON-array
+`XCHAIN_HUB_FAILOVER_DRIVER_ARGS` remain available for a venue-specific adapter.
 
 The adapter operations are:
 
@@ -36,11 +43,14 @@ the pinned BTC control follows the other.
 
 The drill refuses partial evidence. It times the autonomous move, requires a
 certified mirror before treating barriers as reopened, checks that all four
-indexers advance after mining, observes the outage report and its finalized row
-on the survivor, observes `caught_up: false` on the restarted hub's first ready
+indexers advance after mining, observes the outage report and a survivor-only
+finalized row, observes `caught_up: false` on the restarted hub's first ready
 frame and then the copied row plus report delivery after catch-up, samples the
 whole minimum dwell for a flap, and compares all four BTC hashes at one height.
-It skips when no driver is configured, matching the other venue-gated drills.
+The default driver keeps report and catch-up evidence independent: the report is
+a durable indexer outbox row with per-hub delivery state, while the row named in
+the drill evidence is submitted only to the survivor and must reach the stopped
+hub through peer catch-up.
 Timing overrides are `XCHAIN_HUB_FAILOVER_MOVE_TIMEOUT_MS` (default 20000),
 `XCHAIN_HUB_FAILOVER_CATCHUP_TIMEOUT_MS` (120000),
 `XCHAIN_HUB_FAILOVER_BLOCK_TIMEOUT_MS` (60000),

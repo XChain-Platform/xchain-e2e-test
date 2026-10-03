@@ -185,7 +185,7 @@ async function runHubFailoverDrill (driver, rawOptions) {
             const hub = byId(normalizeSnapshot(snapshot).hubs, venue.survivor, 'hub')
             return reportPresent(hub, queued.reportId) && rowPresent(hub, queued.table, queued.rowKey)
         }, options.catchupTimeoutMs, options.pollMs, clock,
-        'the outage report and its finalized row to reach the surviving hub')
+        'the outage report and survivor-only finalized row to reach the surviving hub')
     const beforeRestart = normalizeSnapshot(survivingReport.value)
     assert.strictEqual(rowPresent(byId(beforeRestart.hubs, venue.target, 'hub'), queued.table, queued.rowKey), false,
         'the stopped hub already held the outage row before restart')
