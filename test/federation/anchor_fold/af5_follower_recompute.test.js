@@ -59,6 +59,20 @@ async function insertCheckpoint(hub, row){
     );
 }
 
+async function seedArchiveSigningSet(hubs, snapshot){
+    for(const hub of hubs){
+        for(const validator of snapshot.validators){
+            await hub.db.doQuery(
+                'INSERT INTO capability_snapshots ' +
+                '(snapshot_block, capability, signing_pubkey, amount, source) VALUES (?, ?, ?, ?, ?) ' +
+                'ON DUPLICATE KEY UPDATE amount = VALUES(amount), source = VALUES(source)',
+                [SNAPSHOT_BLOCK, 'oracle_publish', validator.pubkey,
+                    String(validator.weight), String(validator.source)]
+            );
+        }
+    }
+}
+
 function wrapperCanonical(round, archive, overrides){
     archive = Object.assign({ match_batch_seq: archive.batch_seq }, archive, overrides);
     const suffix = foldArchiveSuffix(archive);
@@ -103,6 +117,7 @@ async function setupHubs(){
     [proposer, follower] = mvh.hubs.map((hub) => hub.stateAnchorPublisher);
     weightSeed = seedWeightSnapshot(mvh, { blockIndex: SNAPSHOT_BLOCK, network: 'regtest' });
     for(const hub of mvh.hubs) hub.stateAnchorPublisher.network = 'regtest';
+    await seedArchiveSigningSet(mvh.hubs, weightSeed.snapshot);
     const identities = mvh.identities.map((item) => new ValidatorIdentity(item.privkeyHex));
     const checkpoint = checkpointFixture(identities);
     for(const hub of mvh.hubs) await insertCheckpoint(hub, checkpoint);
@@ -131,10 +146,21 @@ async function recomputeAndCosign(){
     const followerCanonical = wrapperCanonical(followerRound, followerArchive);
     assert.strictEqual(followerCanonical, proposerCanonical, 'follower recomputed the proposer wrapper-section archive canonical');
 
+    const local = await follower.db.getStateCheckpointByChain(
+        String(proposerArchive.checkpoint.chain), 'regtest',
+        Number(proposerArchive.checkpoint.block_index), Number(proposerArchive.checkpoint.checkpoint_seq));
+    const mine = follower.ownArchiveWrapper(local, proposerArchive.checkpoint);
+    const signingSet = await follower.archiveSigningSet(mine);
+    const followerPubkey = follower.identity.getPubkeyHex().toLowerCase();
+    assert.ok(signingSet.some((validator) => String(validator.pubkey).toLowerCase() === followerPubkey),
+        'follower belongs to the oracle_publish archive signing set at snapshot block 240');
+    const decoded = follower.decodeArchiveProposal(proposerArchive);
+    assert.ok(decoded && await follower.verifyArchiveAgainstLocal(decoded, Number(mine.snapshot_block)),
+        'follower verifies the proposer archive against its local checkpoint and capability rows');
+
     const signed = await follower.coSignFoldArchiveRequest(
         foldedRequest(proposer, proposerRows, proposerArchive));
     assert.ok(signed && signed.reply.archive_sig, 'follower returned an archive co-signature');
-    const followerPubkey = follower.identity.getPubkeyHex().toLowerCase();
     assert.ok(ValidatorIdentity.verify(proposerCanonical, signed.reply.archive_sig, followerPubkey),
         'follower co-signature verifies against the proposer canonical');
 
