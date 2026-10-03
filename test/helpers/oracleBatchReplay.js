@@ -387,6 +387,31 @@ function portFree(port) {
     });
 }
 
+// A spawned hub cannot answer JSON-RPC until its HTTP server is listening. Probe
+// that lifecycle boundary without using XChainHubConnector: the connector logs a
+// full warning and Axios stack for every expected ECONNREFUSED while the child is
+// still migrating its fresh database, making a normal boot look like a failed
+// endpoint on the rail. The real connector ping follows once the listener exists.
+function processListening(proc, host, port) {
+    if (proc && (proc.exitCode !== null || proc.signalCode !== null)) {
+        return Promise.resolve({ ok: false, dead: true });
+    }
+    return new Promise((resolve) => {
+        let settled = false;
+        const socket = net.createConnection({ host: host, port: port });
+        const finish = (result) => {
+            if (settled) return;
+            settled = true;
+            socket.destroy();
+            resolve(result);
+        };
+        socket.setTimeout(1000);
+        socket.once('connect', () => finish({ ok: true }));
+        socket.once('error', () => finish({ ok: false }));
+        socket.once('timeout', () => finish({ ok: false }));
+    });
+}
+
 // The kernel's OUTBOUND port range. A port inside it is free when probed and
 // taken a moment later by some other socket the run opens, and the child then
 // dies on listen EADDRINUSE; multiValidatorHubHelper documents the same lottery
@@ -1344,14 +1369,19 @@ class OracleBatchReplayNode {
         if (this._live.btcOracle.apiKey) env.BTC_INDEXER_API_KEY = String(this._live.btcOracle.apiKey);
         this._hubProc = this._spawn('hub', path.join(this.repoRoot, 'xchain-hub', 'src', 'api.js'), [], env);
 
-        const connector = new XChainHubConnector(['http://127.0.0.1:' + this.hubPort]);
-        const up = await waitFor(async () => {
-            if (this._hubProc.exitCode !== null) return { ok: false, dead: true };
-            try { return { ok: await connector.ping() }; } catch (_) { return { ok: false }; }
-        }, { timeoutMs: BOOT_WAIT_MS, intervalMs: 500 });
+        const up = await waitFor(
+            () => processListening(this._hubProc, '127.0.0.1', this.hubPort),
+            { timeoutMs: BOOT_WAIT_MS, intervalMs: 500 }
+        );
         if (!up.ok) {
-            throw new Error('oracleBatchReplay[' + this.label + ']: the fresh hub did not answer on 127.0.0.1:' +
+            throw new Error('oracleBatchReplay[' + this.label + ']: the fresh hub did not listen on 127.0.0.1:' +
                 this.hubPort + ' within ' + up.waitedMs + 'ms.\n' + this._tail('hub'));
+        }
+
+        const connector = new XChainHubConnector(['http://127.0.0.1:' + this.hubPort]);
+        if (!(await connector.ping())) {
+            throw new Error('oracleBatchReplay[' + this.label + ']: the fresh hub listened on 127.0.0.1:' +
+                this.hubPort + ' but did not answer ping.\n' + this._tail('hub'));
         }
         this.hubConnector = connector;
 
@@ -1694,7 +1724,7 @@ class OracleBatchReplayNode {
     }
 
     async _kill(proc) {
-        if (!proc || proc.exitCode !== null) return;
+        if (!proc || proc.exitCode !== null || proc.signalCode !== null) return;
         const ended = new Promise((resolve) => proc.once('exit', resolve));
         proc.kill('SIGTERM');
         const settled = await Promise.race([ended.then(() => true), new Promise((r) => setTimeout(() => r(false), 15_000))]);
@@ -1727,6 +1757,7 @@ module.exports = {
     diffVerdicts,
     connectTo,
     pickFreePorts,
+    processListening,
     // The credential layer, exported because it is pure and can be falsified
     // without a hub, a chain or a database, and because attestMirrorVenue.js
     // builds its own decoder resolution on exactly this.

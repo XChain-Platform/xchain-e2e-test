@@ -5,9 +5,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 const assert = require('assert')
+const net = require('net')
 const sinon = require('sinon')
 const XChainIndexerConnector = require('../../../src/XChainIndexerConnector')
-const { OracleBatchReplayNode } = require('../../helpers/oracleBatchReplay')
+const { OracleBatchReplayNode, processListening } = require('../../helpers/oracleBatchReplay')
 const { CANONICAL_REORG_BUFFER } = require('../../helpers/oracleBatchVenue')
 
 function replayNode() {
@@ -19,6 +20,31 @@ function replayNode() {
     node._priceMinStake = '10'
     return node
 }
+
+describe('oracleBatchReplay hub listener readiness', function () {
+    it('reports ready only while the child port is accepting connections', async function () {
+        const server = net.createServer()
+        await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+        const port = server.address().port
+
+        try {
+            assert.deepStrictEqual(await processListening({ exitCode: null, signalCode: null }, '127.0.0.1', port),
+                { ok: true })
+        } finally {
+            await new Promise((resolve) => server.close(resolve))
+        }
+
+        assert.deepStrictEqual(await processListening({ exitCode: null, signalCode: null }, '127.0.0.1', port),
+            { ok: false })
+    })
+
+    it('stops waiting when the child exited by status or signal', async function () {
+        assert.deepStrictEqual(await processListening({ exitCode: 1, signalCode: null }, '127.0.0.1', 1),
+            { ok: false, dead: true })
+        assert.deepStrictEqual(await processListening({ exitCode: null, signalCode: 'SIGKILL' }, '127.0.0.1', 1),
+            { ok: false, dead: true })
+    })
+})
 
 describe('oracleBatchReplay Bitcoin oracle diagnostics', function () {
     let sandbox
