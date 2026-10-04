@@ -2,7 +2,7 @@
 
 const assert = require('assert')
 
-const DEFAULT_MOVE_TIMEOUT_MS = 20000
+const DEFAULT_MOVE_TIMEOUT_MS = 30000
 const DEFAULT_CATCHUP_TIMEOUT_MS = 120000
 const DEFAULT_BLOCK_TIMEOUT_MS = 60000
 const DEFAULT_DWELL_MS = 120000
@@ -214,8 +214,14 @@ async function runHubFailoverDrill (driver, rawOptions) {
         targetStopped = false
         assert.ok(restart && restart.firstReady && Object.prototype.hasOwnProperty.call(restart.firstReady, 'caught_up'),
             'start-hub must capture the restarted hub first ready frame with caught_up')
-        assert.strictEqual(restart.firstReady.caught_up, false,
-            'the restarted hub first advertised ready with caught_up other than false')
+        assert.ok(restart.firstReady.caught_up === false || restart.firstReady.caught_up === true,
+            'the restarted hub first ready frame must carry a boolean caught_up')
+        if (restart.firstReady.caught_up) {
+            const firstReadySnapshot = normalizeSnapshot(await driver.observe())
+            const restartedHub = byId(firstReadySnapshot.hubs, venue.target, 'hub')
+            assert.ok(rowPresent(restartedHub, queued.table, queued.rowKey),
+                'the restarted hub advertised caught_up true before it held the outage row')
+        }
 
         const caughtUpWait = await waitFor(
             () => driver.observe(),

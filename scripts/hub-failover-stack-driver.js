@@ -211,6 +211,7 @@ async function waitForStartedIndexer (config, indexer, readStatus, dependencies)
 }
 
 async function prepare (config, dependencies) {
+    fs.rmSync(config.stateFile, { force: true })
     const readStatus = dependencies && dependencies.indexerStatus
         ? dependencies.indexerStatus
         : indexerStatus
@@ -274,38 +275,31 @@ function writeState (config, state) {
     fs.renameSync(temporary, config.stateFile)
 }
 
-async function rowPresence (config, hubId, state) {
-    if (!state) return false
-    const sql = 'SELECT COUNT(*) FROM oracle_prices WHERE source_address=' + quoteSql(state.sourceAddress) +
-        ' AND source_chain=\'BTC\' AND action_index=' + Number(state.actionIndex)
+async function oraclePricePresence (config, hubId, sourceAddress, actionIndex) {
+    if (!sourceAddress || !Number.isInteger(Number(actionIndex))) return false
+    const sql = 'SELECT COUNT(*) FROM oracle_prices WHERE source_address=' + quoteSql(sourceAddress) +
+        ' AND source_chain=\'BTC\' AND action_index=' + Number(actionIndex)
     const rows = await dbRows(config, HUBS[hubId].database, sql)
     return Number(rows[0] && rows[0][0]) > 0
 }
 
-async function deliveryEvidence (config, state) {
-    if (!state) return new Set()
-    const database = INDEXERS.find((row) => row.id === 'btc-indexer').database
-    const rows = await dbRows(config, database,
-        'SELECT hub_address, status FROM hub_push_deliveries WHERE push_id=' + Number(state.pushId))
-    return new Set(rows.filter((row) => row[1] === 'delivered')
-        .map((row) => hubIdFromAddress(row[0])).filter(Boolean))
-}
-
-function reportsForHub (state, delivered, hubId) {
-    return state && delivered.has(hubId) ? [state.reportId] : []
+function reportsForHub (state, reportPresent) {
+    return state && reportPresent ? [state.reportId] : []
 }
 
 async function observeHubs (config, services, state) {
-    const delivery = await deliveryEvidence(config, state)
     return Promise.all(Object.keys(HUBS).map(async (id) => {
         const running = services.has(id)
         const frame = running ? await readReadyFrame(config, id) : null
-        const present = await rowPresence(config, id, state)
+        const [present, reportPresent] = state ? await Promise.all([
+            oraclePricePresence(config, id, state.sourceAddress, state.actionIndex),
+            oraclePricePresence(config, id, state.reportSourceAddress, state.reportActionIndex),
+        ]) : [false, false]
         return {
             id,
             running,
             caught_up: running ? frame.caught_up : false,
-            reports: reportsForHub(state, delivery, id),
+            reports: reportsForHub(state, reportPresent),
             rows: { oracle_prices: present ? [state.rowKey] : [] },
         }
     }))
@@ -373,6 +367,7 @@ async function queueReport (config) {
     const rowKey = 'BTC:' + sourceAddress + ':' + catchupActionIndex
     const state = {
         pushId, actionIndex: catchupActionIndex, sourceAddress,
+        reportActionIndex: actionIndex, reportSourceAddress: reportPayload.source_address,
         reportId: 'push:' + pushId, rowKey,
     }
     writeState(config, state)

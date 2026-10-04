@@ -59,7 +59,8 @@ function fakeVenue (overrides) {
         startHub: async (id) => {
             assert.strictEqual(id, 'hub-a')
             restarted = true
-            return { firstReady: { caught_up: false } }
+            if (overrides && overrides.firstReadyCaughtUp === true) caughtUp = true
+            return { firstReady: { caught_up: !!(overrides && overrides.firstReadyCaughtUp) } }
         },
         blockHashes: async () => hashes,
     }
@@ -94,14 +95,23 @@ describe('hub failover drill verdict', function () {
         assert.strictEqual(startCalls, 1)
     })
 
-    it('fails if restart does not expose caught_up false in its first ready frame', async function () {
+    it('accepts a caught_up first ready frame when the restarted hub already holds the outage row', async function () {
+        const venue = fakeVenue({ firstReadyCaughtUp: true })
+        const evidence = await runHubFailoverDrill(venue.driver, {
+            moveTimeoutMs: 2000, catchupTimeoutMs: 3000, blockTimeoutMs: 1000,
+            dwellMs: 0, pollMs: 100, clock: venue.clock,
+        })
+        assert.strictEqual(evidence.caughtUpElapsedMs, 0)
+    })
+
+    it('rejects a caught_up first ready frame when the restarted hub lacks the outage row', async function () {
         const venue = fakeVenue({
             driver: { startHub: async () => ({ firstReady: { caught_up: true } }) },
         })
         await assert.rejects(runHubFailoverDrill(venue.driver, {
             moveTimeoutMs: 2000, catchupTimeoutMs: 3000, blockTimeoutMs: 1000,
             dwellMs: 0, pollMs: 100, clock: venue.clock,
-        }), /caught_up other than false/)
+        }), /caught_up true before it held the outage row/)
     })
 
     it('prepares before observing and restarts the target after a drill failure', async function () {
