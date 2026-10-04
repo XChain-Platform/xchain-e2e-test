@@ -35,8 +35,8 @@ function setupWalletTest() {
     global.wallets = {}
 
     // Fresh require to reset module state
-    delete require.cache[require.resolve('../cryptoHelper')]
-    return { saved, cryptoHelper: require('../cryptoHelper') }
+    delete require.cache[require.resolve('../helpers/core/cryptoHelper')]
+    return { saved, cryptoHelper: require('../helpers/core/cryptoHelper') }
 }
 
 function teardownWalletTest(saved) {

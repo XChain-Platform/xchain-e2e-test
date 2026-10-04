@@ -37,13 +37,13 @@
  *          feed is re-latched against a block on the LIVE chain rather than
  *          left stamped with an orphaned block_index.
  *
- * Run: COIN=bitcoin NETWORK=regtest npx mocha --require ./test/initialCheck.test.js \
+ * Run: COIN=bitcoin NETWORK=regtest npx mocha --require ./test/initial_check.test.js \
  *        test/sdk/betReorgDrill.sdk.test.js
  *
  ********************************************************************/
 
 const { expect } = require('chai');
-const cryptoHelper = require('../cryptoHelper');
+const cryptoHelper = require('../helpers/core/cryptoHelper');
 const { makeSdk, fundedGasAddress } = require('./helpers/sdkHelper');
 const {
     MIN_REFUND_WINDOW, dbQuery, getFeed, getBets, balanceOf, amtEq, actionIndexOf,

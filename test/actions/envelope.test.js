@@ -24,8 +24,8 @@
 // bytes the user handed us.
 
 const assert = require('assert')
-const cryptoHelper = require('../cryptoHelper')
-const transactionHelper = require('../transactionHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
+const transactionHelper = require('../helpers/core/transactionHelper')
 const envelopeHelper = require('../helpers/envelopeHelper')
 
 // Compressible, and big enough that the legacy lane would need a fan of chunk

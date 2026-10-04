@@ -8,7 +8,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-const transactionHelper = require('../transactionHelper')
+const transactionHelper = require('./core/transactionHelper')
 const stakeTeardown = require('./stakeTeardown')
 const requireRow = require('./requireRow')
 require('./anchorArmHeight')

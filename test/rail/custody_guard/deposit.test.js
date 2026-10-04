@@ -11,13 +11,13 @@
 // contact legal@dankest.llc.
 
 const assert = require('assert')
-const cryptoHelper = require('../../cryptoHelper')
+const cryptoHelper = require('../../helpers/core/cryptoHelper')
 const gasHelper = require('../../helpers/gasHelper')
 const issueHelper = require('../../helpers/issueHelper')
 const vmHelper = require('../../helpers/vmHelper')
-const transactionHelper = require('../../transactionHelper')
+const transactionHelper = require('../../helpers/core/transactionHelper')
 const { waitForTxIndexed } = require('../../helpers/indexerWait')
-const { custodyWires, DEPOSIT_CASES } = require('./plan')
+const { custodyWires, DEPOSIT_CASES } = require('./helpers/plan')
 
 const ALL_DENY_GATE = `module.exports = { meta: { name: 'All Deny Gate', description: 'Controller guard that denies every action class it is bound to.', version: '1.0.0' }, guard: function(){
     xchain.revert('all-class denied');

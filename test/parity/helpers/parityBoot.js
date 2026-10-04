@@ -11,7 +11,7 @@
  * contact legal@dankest.llc.
  *
  * P3(b): deterministic bootstrap, a TRIMMED replacement for
- * test/initialCheck.test.js (use as the mocha --require for the parity suite).
+ * test/initial_check.test.js (use as the mocha --require for the parity suite).
  *
  * initialCheck cannot be used for the parity run for two reasons, both of
  * which break the determinism contract:

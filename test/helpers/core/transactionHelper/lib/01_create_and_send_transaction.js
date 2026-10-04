@@ -69,7 +69,7 @@ module.exports = {
             // nativeFeeLive/nativeFeeDispenser) aren't double-charged.
             // The action string and its sender let the helper size the output from the
             // indexer's quote for this action rather than a fixed amount.
-            const nativeFeeHelper = require('../../helpers/nativeFeeHelper')
+            const nativeFeeHelper = require('../../../nativeFeeHelper')
             const feeOutput = await nativeFeeHelper.getNativeFeeOutput(
                 typeof data === 'string' ? data : null, addressInfo && addressInfo["address"])
             if (feeOutput) {

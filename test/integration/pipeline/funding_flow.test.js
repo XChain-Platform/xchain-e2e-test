@@ -19,7 +19,7 @@ const bitcoin = require('bitcoinjs-lib')
 
 const CryptoNetworks = require('../../../src/crypto_networks')
 
-const cryptoHelper = require('../../../test/cryptoHelper')
+const cryptoHelper = require('../../helpers/core/cryptoHelper')
 
 let savedGlobals
 

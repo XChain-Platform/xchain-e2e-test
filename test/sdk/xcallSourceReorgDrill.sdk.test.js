@@ -54,7 +54,7 @@
 
 const { expect } = require('chai');
 const mariadb = require('mariadb');
-const cryptoHelper = require('../cryptoHelper');
+const cryptoHelper = require('../helpers/core/cryptoHelper');
 const { makeSdk, submit, fundedGasAddress, mine, submitOpts } = require('./helpers/sdkHelper');
 
 const CONTRACT_A = `

@@ -378,7 +378,7 @@ function selectBridgeSigners(seated, known) {
  * MEASURED 2026-09-12 ON THE RAIL. All four capability sets on BTC regtest (cross_chain,
  * price, oracle_publish, attestation) hold the same five keys at block 597: the four
  * roster keys at 50000 each and the standing hub's at 10000. The seated four were staked
- * on 2026-09-08 by `test/tools/reseedAttestationRoster.test.js`, which draws from
+ * on 2026-09-08 by `test/tools/reseed_attestation_roster.test.js`, which draws from
  * `_knownSignerSeeds()`, and they are idle generations 0 to 3 of the venue's seeding
  * mnemonic. `_knownSignerSeeds()` reproduces them ONLY when
  * `XC_ROLLCALL_FEDERATION_MNEMONIC` is in the environment: it sweeps generations 0 to

@@ -287,8 +287,8 @@ describe('the reachability audit reports the misses it is built for', function()
     });
 
     it('reads a --require hook as loaded, because it is', function(){
-        const specs = scriptSpecs({ test: 'mocha --require ./test/initialCheck.test.js test/actions/a.test.js' });
+        const specs = scriptSpecs({ test: 'mocha --require ./test/initial_check.test.js test/actions/a.test.js' });
         assert.deepStrictEqual(specs.map(s => s.spec).sort(),
-            ['test/actions/a.test.js', 'test/initialCheck.test.js']);
+            ['test/actions/a.test.js', 'test/initial_check.test.js']);
     });
 });

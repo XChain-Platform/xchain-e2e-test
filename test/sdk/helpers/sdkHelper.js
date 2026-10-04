@@ -22,7 +22,7 @@
  * and indexer confirmation) is what is under test.
  *
  * Reuses the live regtest stack + global connectors that
- * test/initialCheck.test.js stands up (regtestMinerConnector,
+ * test/initial_check.test.js stands up (regtestMinerConnector,
  * utxoTrackerConnector, nodeConnector). Run with:
  *
  *     npm run test:sdk

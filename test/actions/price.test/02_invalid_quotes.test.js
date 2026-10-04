@@ -30,7 +30,7 @@
  ********************************************************************/
 
 const assert       = require('assert')
-const cryptoHelper = require('../../cryptoHelper')
+const cryptoHelper = require('../../helpers/core/cryptoHelper')
 const priceHelper  = require('../../helpers/priceHelper')
 
 // Covers negatives (recorded invalid). One part of price.test.js.

@@ -78,7 +78,7 @@ const {
     rawAttestRewards,
 } = require('./helpers/mirrorDrillWaits')
 const vmHelper          = require('../helpers/vmHelper')
-const cryptoHelper      = require('../cryptoHelper')
+const cryptoHelper      = require('../helpers/core/cryptoHelper')
 const attestationHelper = require('../helpers/attestationHelper')
 
 const FIXED_BODY = '{"score":19,"meta":"at6-flagday"}'

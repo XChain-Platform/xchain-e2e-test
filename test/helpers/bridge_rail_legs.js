@@ -200,7 +200,7 @@ const RAIL_DRIVES = {
                 minPassed: 7,
             },
             vote_binding: {
-                files: ['test/rail/vote_binding/usable_method.rail.test.js'],
+                files: ['test/rail/vote_binding/usable_method.test.js'],
                 minPassed: 2,
             },
         },
@@ -266,17 +266,17 @@ const RAIL_DRIVES = {
             },
             custody_guard: {
                 files: [
-                    'test/rail/custody_guard/deposit.rail.test.js',
-                    'test/rail/custody_guard/withdraw.rail.test.js',
+                    'test/rail/custody_guard/deposit.test.js',
+                    'test/rail/custody_guard/withdraw.test.js',
                 ],
                 minPassed: 5,
             },
             broadcast_fee: {
-                files: ['test/rail/flag_days/broadcast_fee_length.rail.test.js'],
+                files: ['test/rail/flag_days/broadcast_fee_length.test.js'],
                 minPassed: 3,
             },
             vm_lint: {
-                files: ['test/rail/vm_lint/optional_chain_deploy.rail.test.js'],
+                files: ['test/rail/vm_lint/optional_chain_deploy.test.js'],
                 minPassed: 2,
             },
         },

@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// Integration tests for initialCheck.test.js: environment variable bootstrap path.
+// Integration tests for initial_check.test.js: environment variable bootstrap path.
 //
 // initialCheck.js has deep side effects at require-time (reads process.env, sets globals,
 // requires connector classes). We cannot require it directly in integration tests.
@@ -60,7 +60,7 @@ describe('Bootstrap: environment variable path', function () {
         sinon.restore()
     })
 
-    // Replicate the bootstrap sequence from initialCheck.test.js lines 17-158
+    // Replicate the bootstrap sequence from initial_check.test.js lines 17-158
     function bootstrapFromEnv(envVars) {
         const COIN = envVars.COIN
         const NETWORK = envVars.NETWORK

@@ -31,7 +31,7 @@ function loadPolicyDriveFactory() {
 }
 const createRailDrive = loadPolicyDriveFactory();
 const chainRail = require('../../../helpers/chainRail');
-const cryptoHelper = require('../../../cryptoHelper');
+const cryptoHelper = require('../../../helpers/core/cryptoHelper');
 const gasHelper = require('../../../helpers/gasHelper');
 const nativeFeeHelper = require('../../../helpers/nativeFeeHelper');
 const sendHelper = require('../../../helpers/sendHelper');
@@ -39,7 +39,7 @@ const stakeHelper = require('../../../helpers/stakeHelper');
 const stakeTeardown = require('../../../helpers/stakeTeardown');
 const { resolveDogeFeeDestination } = require('../../../helpers/rail_preflight/policy_fee_destination');
 const { requireHealthyHub } = require('../../../helpers/rail_preflight/hub_health_gate');
-const fixture = require('../../../attestMirror/mirrorDrillFixture');
+const fixture = require('../../../attestMirror/helpers/mirrorDrillFixture');
 const { settleReleaseBatch, waitForCapabilityBaseline } = require('./release_batch');
 const { installStandingHubConnector } = require('./standing_hub');
 const {

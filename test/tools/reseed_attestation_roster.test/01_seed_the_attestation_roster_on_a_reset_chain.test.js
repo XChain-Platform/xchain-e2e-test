@@ -71,8 +71,8 @@
  * USAGE, on a venue whose attestation capability is EMPTY:
  *
  *   E2E_STAKE_TEARDOWN=off npx mocha --timeout 0 --exit \
- *     --require ./test/initialCheck.test.js \
- *     test/tools/reseedAttestationRoster.test.js
+ *     --require ./test/initial_check.test.js \
+ *     test/tools/reseed_attestation_roster.test.js
  *
  * Env: RESEED_COUNT (default 5), RESEED_STAKE_XCHAIN (default 50000, which
  * clears both ProviderRegistry floors: http_get 10000, llm 25000),

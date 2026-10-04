@@ -39,7 +39,7 @@ const assert = require('assert')
 const crypto = require('crypto')
 const path = require('path')
 const fs = require('fs')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const stakeHelper = require('../helpers/stakeHelper')
 const gasHelper = require('../helpers/gasHelper')
 // Load the MASTER (fixed) xchain-indexer stake-source resolver. Prefer a

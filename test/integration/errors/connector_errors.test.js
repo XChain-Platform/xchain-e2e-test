@@ -19,7 +19,7 @@ const { ECPairFactory } = require('ecpair')
 const ecc = require('tiny-secp256k1')
 const ECPair = ECPairFactory(ecc)
 
-const transactionHelper = require('../../transactionHelper')
+const transactionHelper = require('../../helpers/core/transactionHelper')
 const issueHelper = require('../../helpers/issueHelper')
 
 describe('Error Propagation: Connector Errors', function () {

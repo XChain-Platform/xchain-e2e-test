@@ -12,8 +12,8 @@
 
 
 const { classifySeatedForReseed, ALLOW_PREFIX_MIN_HEX } =
-    require('./reseedAttestationRoster.test/helpers/reseed_attestation_roster')
+    require('./reseed_attestation_roster.test/helpers/reseed_attestation_roster')
 
 module.exports = { classifySeatedForReseed, ALLOW_PREFIX_MIN_HEX }
 
-require('./reseedAttestationRoster.test/01_seed_the_attestation_roster_on_a_reset_chain.test')
+require('./reseed_attestation_roster.test/01_seed_the_attestation_roster_on_a_reset_chain.test')

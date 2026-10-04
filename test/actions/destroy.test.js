@@ -9,7 +9,7 @@
 // contact legal@dankest.llc.
 
 const assert = require('assert')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const issueHelper = require('../helpers/issueHelper')
 const destroyHelper = require('../helpers/destroyHelper')
 

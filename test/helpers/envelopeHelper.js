@@ -18,7 +18,7 @@
 
 const crypto = require('crypto')
 const zlib = require('zlib')
-const transactionHelper = require('../transactionHelper')
+const transactionHelper = require('./core/transactionHelper')
 const requireRow = require('./requireRow')
 
 const OP_0 = 0x00
@@ -154,7 +154,7 @@ module.exports = {
         }
         if (!built) throw lastErr
 
-        const transactionHelper = require('../transactionHelper')
+        const transactionHelper = require('./core/transactionHelper')
         const commitPsbt = bitcoin.Psbt.fromHex(built["psbt"])
         const ecc = require('tiny-secp256k1')
         const { ECPairFactory } = require('ecpair')

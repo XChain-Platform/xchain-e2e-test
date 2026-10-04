@@ -1,6 +1,6 @@
 'use strict';
 
-const { XChainSDK, submit } = require('../sdk/sdkHelper');
+const { XChainSDK, submit } = require('../sdk/helpers/sdkHelper');
 const { fundedGasAddress } = require('./lib/testnetGasFunding');
 const { waitForBlocks } = require('./lib/testnetBlockWait');
 const { readTestnetTreasury, buildTestnetSdk } = require('./lib/testnetDrillEnv');

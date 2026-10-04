@@ -370,7 +370,7 @@ async function queueMarkerTransaction (btc, label) {
 /** Fund the marker's address with the miner RUNNING; the blocks this mines land now, not later. */
 async function fundMarkerAddress (btc, label) {
     return withRail(btc, async () => {
-        const cryptoHelper = require('../../cryptoHelper')
+        const cryptoHelper = require('../../helpers/core/cryptoHelper')
         return cryptoHelper.getNewFundedAddress(label, global.COIN, global.NETWORK, null, 'legacy', 0, 1)
     })
 }
@@ -378,7 +378,7 @@ async function fundMarkerAddress (btc, label) {
 /** Broadcast the marker from a funded address with the miner PAUSED, so it waits for the drill block. */
 async function broadcastMarker (btc, addr, label) {
     return withRail(btc, async () => {
-        const transactionHelper = require('../../transactionHelper')
+        const transactionHelper = require('../../helpers/core/transactionHelper')
         // Idempotent when the leg already holds the chain; the pause is what keeps the marker
         // out of any block but the one `mineStamped` mines next.
         await btc.globals.regtestMinerConnector.pauseMining()

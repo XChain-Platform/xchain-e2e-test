@@ -21,7 +21,7 @@
  * helpers need the initialCheck bootstrap):
  *
  *   XCALL_STAKE_PUBKEYS=<hex>,<hex> npx mocha --timeout 0 --exit \
- *     --require ./test/initialCheck.test.js test/sdk/helpers/xcallStakeValidators.js
+ *     --require ./test/initial_check.test.js test/sdk/helpers/xcallStakeValidators.js
  *
  ********************************************************************/
 

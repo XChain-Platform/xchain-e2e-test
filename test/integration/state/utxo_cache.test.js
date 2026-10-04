@@ -19,7 +19,7 @@ const { ECPairFactory } = require('ecpair')
 const ecc = require('tiny-secp256k1')
 const ECPair = ECPairFactory(ecc)
 
-const transactionHelper = require('../../../test/transactionHelper')
+const transactionHelper = require('../../helpers/core/transactionHelper')
 
 let savedGlobals
 

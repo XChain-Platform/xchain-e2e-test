@@ -33,7 +33,7 @@
  * and a repair tool must never be collected into an acceptance run. Drive it by
  * naming it:
  *
- *   npx mocha --no-config --timeout 0 --exit --require ./test/initialCheck.test.js \
+ *   npx mocha --no-config --timeout 0 --exit --require ./test/initial_check.test.js \
  *     test/attestMirror/helpers/releaseLeakedStakes.js
  *
  * with `RELEASE_LABEL` naming the drill whose keys to release (default `at2b`).
@@ -58,12 +58,12 @@ const path   = require('path')
 const dotenv = require('dotenv')
 dotenv.config()
 
-const cryptoHelper  = require('../../cryptoHelper')
+const cryptoHelper  = require('../../helpers/core/cryptoHelper')
 const stakeHelper   = require('../../helpers/stakeHelper')
 const stakeTeardown = require('../../helpers/stakeTeardown')
 const { DRILL_KEYS_DIR } = require('./mirrorDrillFixture')
 const { mineBtcKeepingDogeAlive } = require('./mirrorDrillWaits')
-const { restoreRecordedStaker } = require('../restoreRecordedStaker')
+const { restoreRecordedStaker } = require('./restoreRecordedStaker')
 const { clearWedgeIfPresent } = require('../../helpers/stakeTeardown')
 
 const LABEL = process.env.RELEASE_LABEL || 'at2b'

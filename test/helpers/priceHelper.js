@@ -8,7 +8,7 @@
 // license (without AGPL source-disclosure terms) is available:
 // contact legal@dankest.llc.
 
-const transactionHelper = require('../transactionHelper')
+const transactionHelper = require('./core/transactionHelper')
 const requireRow = require('./requireRow')
 
 // PRICE v1 is the permissionless user TOKEN/FIAT oracle action (no stake).

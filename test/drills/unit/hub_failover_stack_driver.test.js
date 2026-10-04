@@ -17,7 +17,7 @@ const {
 
 describe('two-hub failover stack driver', function () {
     it('is the non-skipping default for the failover drill', function () {
-        const entry = fs.readFileSync(path.resolve(__dirname, '../hubFailover.drill.js'), 'utf8')
+        const entry = fs.readFileSync(path.resolve(__dirname, '../hub_failover.test.js'), 'utf8')
         assert.match(entry, /hub-failover-stack-driver\.js/)
         assert.doesNotMatch(entry, /\.skip\s*\(/)
     })

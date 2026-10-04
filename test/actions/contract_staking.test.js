@@ -10,7 +10,7 @@
 
 const assert = require('assert')
 const crypto = require('crypto')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const stakeHelper = require('../helpers/stakeHelper')
 const vmHelper = require('../helpers/vmHelper')
 const gasHelper = require('../helpers/gasHelper')
@@ -23,7 +23,7 @@ function newSigningPubkey(){
 }
 
 // Contract staking is multi-chain; exercised against the XCHAIN token that
-// initialCheck.test.js ISSUEs on every chain at suite startup. Capability
+// initial_check.test.js ISSUEs on every chain at suite startup. Capability
 // staking (STAKE v1/v2 / UNSTAKE v0 / DELEGATE v0/v2 / COLLECT) remains
 // BTC-only at the protocol level.
 

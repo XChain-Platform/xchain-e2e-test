@@ -15,7 +15,7 @@
  * Global singleton that collects performance metrics during test runs.
  * Used by:
  *   - src/db.js (poll tracking via recordPoll)
- *   - test/initialCheck.test.js (bootstrap phase timing via phase)
+ *   - test/initial_check.test.js (bootstrap phase timing via phase)
  *   - test/reporters/lib/performance_reporter.js (reads collected data)
  *
  ********************************************************************/

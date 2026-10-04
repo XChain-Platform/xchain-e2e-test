@@ -29,7 +29,7 @@ function loadDriveFactory() {
 
 const createRailDrive = loadDriveFactory();
 const chainRail = require('../../../helpers/chainRail');
-const { transactionState } = require('../../../transactionHelper/lib/01_create_and_send_transaction');
+const { transactionState } = require('../../../helpers/core/transactionHelper/lib/01_create_and_send_transaction');
 const { spendableInputCount, freshInputCount } = require('../../../helpers/rail_preflight/policy_at2_at4');
 const { withDogeFeeSchedule } = require('../../../helpers/rail_preflight/token_doge_fee');
 const { withMiningPaused, verdictOf } = bridgeRailVenue;

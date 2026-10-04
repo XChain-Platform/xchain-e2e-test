@@ -38,8 +38,8 @@
 // Run: ~/action-run-btc.sh test/actions/compaction_fix_live.test.js
 
 const assert            = require('assert')
-const cryptoHelper      = require('../cryptoHelper')
-const transactionHelper = require('../transactionHelper')
+const cryptoHelper      = require('../helpers/core/cryptoHelper')
+const transactionHelper = require('../helpers/core/transactionHelper')
 const issueHelper       = require('../helpers/issueHelper')
 
 const COIN    = global.COIN    || process.env.COIN    || 'bitcoin'

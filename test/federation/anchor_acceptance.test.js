@@ -127,7 +127,7 @@ const path   = require('path');
 const fs = require('fs');
 const { encode: wifEncode } = require('wif');
 
-const cryptoHelper      = require('../cryptoHelper');
+const cryptoHelper      = require('../helpers/core/cryptoHelper');
 const CryptoNetworks    = require('../../src/crypto_networks');
 const { MultiValidatorHub, ValidatorIdentity, loadHubModule, resolveHubFile } = require('../helpers/multiValidatorHubHelper');
 const anchorVersions    = require('../helpers/anchorVersionHelper');

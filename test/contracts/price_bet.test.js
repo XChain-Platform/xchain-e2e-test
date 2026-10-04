@@ -25,11 +25,11 @@
 // note getPriceAtRound has NO staleness filter, only reference_block <= tip).
 //
 const assert = require('assert')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const vmHelper = require('../helpers/vmHelper')
 const gasHelper = require('../helpers/gasHelper')
 const priceSnapshotHelper = require('../helpers/priceSnapshotHelper')
-const { PRICE_BET } = require('./sources/price_bet_source')
+const { PRICE_BET } = require('./fixtures/price_bet_source')
 
     const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
     const TICK = 'XCHAIN'      // stakes in the gas token; nothing extra to issue

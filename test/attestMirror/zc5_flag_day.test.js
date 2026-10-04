@@ -72,7 +72,7 @@ const {
     clearBeforeBroadcast, settleOrReport, allHubTails, jsonSafe,
 } = require('./helpers/mirrorDrillWaits')
 const vmHelper               = require('../helpers/vmHelper')
-const cryptoHelper           = require('../cryptoHelper')
+const cryptoHelper           = require('../helpers/core/cryptoHelper')
 const XChainIndexerConnector = require('../../src/XChainIndexerConnector.js')
 
 // ---------------------------------------------------------------------------

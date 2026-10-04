@@ -53,7 +53,7 @@ const LEG_SUITES = {
         minPassed: 7,
     },
     vote_binding: {
-        files: ['test/rail/vote_binding/usable_method.rail.test.js'],
+        files: ['test/rail/vote_binding/usable_method.test.js'],
         minPassed: 2,
     },
 }

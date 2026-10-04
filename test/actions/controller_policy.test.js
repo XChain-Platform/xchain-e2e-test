@@ -31,14 +31,14 @@
  ********************************************************************/
 
 const assert            = require('assert')
-const cryptoHelper      = require('../cryptoHelper')
+const cryptoHelper      = require('../helpers/core/cryptoHelper')
 const gasHelper         = require('../helpers/gasHelper')
 const issueHelper       = require('../helpers/issueHelper')
 const orderHelper       = require('../helpers/orderHelper')
 const sendHelper        = require('../helpers/sendHelper')
 const destroyHelper     = require('../helpers/destroyHelper')
 const vmHelper          = require('../helpers/vmHelper')
-const transactionHelper = require('../transactionHelper')
+const transactionHelper = require('../helpers/core/transactionHelper')
 const { waitForTxIndexed } = require('../helpers/indexerWait')
 
 async function q(sql, params) {

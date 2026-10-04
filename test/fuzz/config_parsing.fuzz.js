@@ -33,7 +33,7 @@ function createDb() {
     return new Database('localhost', 3306, 'test_db', 'user', 'pass')
 }
 
-// Replicate the config destructuring pattern from initialCheck.test.js lines 113-140
+// Replicate the config destructuring pattern from initial_check.test.js lines 113-140
 function extractNodeConfig(hubConfigs, coin, network) {
     return {
         nodeUrl: hubConfigs[coin][network]['node']['host'],
@@ -250,7 +250,7 @@ describe('Fuzz: Config Parsing', function () {
 
     describe('Environment variable validation pattern', function () {
 
-        // Replicate the check pattern from initialCheck.test.js
+        // Replicate the check pattern from initial_check.test.js
         function checkAllVars(vars) {
             return vars.every(v => v !== null && v !== undefined)
         }

@@ -7,9 +7,9 @@
  ********************************************************************/
 
 const assert = require('assert');
-const cryptoHelper = require('../../cryptoHelper');
+const cryptoHelper = require('../../helpers/core/cryptoHelper');
 const broadcastHelper = require('../../helpers/broadcastHelper');
-const { BROADCAST_FEE_CASES } = require('./broadcast_fee_cases');
+const { BROADCAST_FEE_CASES } = require('./helpers/broadcast_fee_cases');
 
 async function sendCase(addressInfo, testCase){
     const database = global.indexerDatabase;

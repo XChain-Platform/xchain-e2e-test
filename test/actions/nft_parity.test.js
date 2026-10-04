@@ -29,9 +29,9 @@
  ********************************************************************/
 
 const assert            = require('assert')
-const cryptoHelper      = require('../cryptoHelper')
+const cryptoHelper      = require('../helpers/core/cryptoHelper')
 const issueHelper       = require('../helpers/issueHelper')
-const transactionHelper = require('../transactionHelper')
+const transactionHelper = require('../helpers/core/transactionHelper')
 const { waitForTxIndexed } = require('../helpers/indexerWait')
 
 async function q(sql, params) {

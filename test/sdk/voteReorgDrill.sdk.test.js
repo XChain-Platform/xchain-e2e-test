@@ -39,7 +39,7 @@
 'use strict';
 
 const { expect } = require('chai');
-const cryptoHelper = require('../cryptoHelper');
+const cryptoHelper = require('../helpers/core/cryptoHelper');
 const { makeSdk, submit, fundedGasAddress, mine, uniqueTick, submitOpts } = require('./helpers/sdkHelper');
 
 function haveConnectors() {

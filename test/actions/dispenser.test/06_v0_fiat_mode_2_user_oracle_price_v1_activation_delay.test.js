@@ -10,8 +10,8 @@
 
 
 const assert = require('assert')
-const cryptoHelper = require('../../cryptoHelper')
-const transactionHelper = require('../../transactionHelper')
+const cryptoHelper = require('../../helpers/core/cryptoHelper')
+const transactionHelper = require('../../helpers/core/transactionHelper')
 const issueHelper = require('../../helpers/issueHelper')
 const dispenserHelper = require('../../helpers/dispenserHelper')
 const priceSnapshotHelper = require('../../helpers/priceSnapshotHelper')

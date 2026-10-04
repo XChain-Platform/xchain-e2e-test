@@ -64,7 +64,7 @@ const {
     clearBeforeBroadcast, settleOrReport, feeLines, allHubTails, jsonSafe,
 } = require('./helpers/mirrorDrillWaits')
 const vmHelper     = require('../helpers/vmHelper')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 
 const FIXED_BODY = '{"score":13,"meta":"zc2-remine"}'
 

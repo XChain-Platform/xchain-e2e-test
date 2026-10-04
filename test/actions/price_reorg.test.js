@@ -27,7 +27,7 @@
  ********************************************************************/
 
 const assert       = require('assert')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const priceHelper  = require('../helpers/priceHelper')
 
 async function q(sql, params) {

@@ -11,7 +11,7 @@ const {
     CALLBACK_TARGET_SOURCE,
     USABLE_METHOD_CASES,
     expectMode
-} = require('../../rail/vote_binding/usable_method_cases');
+} = require('../../rail/vote_binding/helpers/usable_method_cases');
 
 describe('VOTE callback binding usable method rail cases', function(){
     it('pins the ordered cases', function(){

@@ -26,12 +26,12 @@
 
 const assert = require('assert')
 const crypto = require('crypto')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const issueHelper = require('../helpers/issueHelper')
 const fileHelper = require('../helpers/fileHelper')
 const sendHelper = require('../helpers/sendHelper')
 const batchHelper = require('../helpers/batchHelper')
-const transactionHelper = require('../transactionHelper')
+const transactionHelper = require('../helpers/core/transactionHelper')
 
 // Encrypt plaintext under a fresh AES-256-GCM key. Returns the raw
 // ciphertext buffer (12-byte IV || GCM tag || ct) and the key + hex

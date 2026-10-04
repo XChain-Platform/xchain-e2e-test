@@ -15,9 +15,9 @@
 'use strict';
 
 const assert            = require('assert');
-const transactionHelper = require('../../../transactionHelper');
-const { transactionState } = require('../../../transactionHelper/lib/01_create_and_send_transaction');
-const fixture           = require('../../../attestMirror/mirrorDrillFixture');
+const transactionHelper = require('../../../helpers/core/transactionHelper');
+const { transactionState } = require('../../../helpers/core/transactionHelper/lib/01_create_and_send_transaction');
+const fixture           = require('../../../attestMirror/helpers/mirrorDrillFixture');
 const {
     listCreateWire,
     policyListsWire,

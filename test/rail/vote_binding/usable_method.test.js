@@ -14,12 +14,12 @@ const {
     mine,
     uniqueTick,
     submitOpts
-} = require('../../sdk/sdkHelper');
+} = require('../../sdk/helpers/sdkHelper');
 const {
     CALLBACK_TARGET_SOURCE,
     USABLE_METHOD_CASES,
     expectMode
-} = require('./usable_method_cases');
+} = require('./helpers/usable_method_cases');
 
 const MODE = expectMode(process.env.XC_VOTE_CALLBACK_BINDING_EXPECT);
 

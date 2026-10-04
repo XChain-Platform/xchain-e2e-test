@@ -14,7 +14,7 @@
 
 const { expect } = require('chai');
 const path       = require('path');
-const cryptoHelper = require('../../../cryptoHelper');
+const cryptoHelper = require('../../../helpers/core/cryptoHelper');
 const { dbQuery } = require('../../helpers/betHelper');
 
 // The follower's copy of the state-hash preimage builder. Byte-aligned twin of
@@ -148,7 +148,7 @@ async function waitNodeB(height, timeoutMs = 420000) {
 //     took to restore, and
 //   * node A is routinely behind the CHAIN on this venue regardless of betting.
 //     A near-empty block costs it 1.5-3s to parse while the e2e harness sets the
-//     miner to one block per SECOND (initialCheck.test.js), so any suite that
+//     miner to one block per SECOND (initial_check.test.js), so any suite that
 //     mines steadily outruns it. Running a second indexer roughly doubles the
 //     per-block cost and pushes the lag past the SDK's 120s indexing wait, which
 //     then surfaces as "Timed out waiting for transaction ... to be indexed"

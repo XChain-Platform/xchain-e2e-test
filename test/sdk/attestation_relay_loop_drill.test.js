@@ -68,7 +68,7 @@
  * RUN:
  *   npm run test:attest-relay-loop
  * or
- *   npx mocha --timeout 0 --exit --require ./test/initialCheck.test.js \
+ *   npx mocha --timeout 0 --exit --require ./test/initial_check.test.js \
  *       test/sdk/attestation_relay_loop_drill.test.js
  *
  * Env knobs: XC974_ORIGIN_COIN (default litecoin), XC974_ATTEST_URL,
@@ -82,8 +82,8 @@ const crypto = require('crypto');
 const _path  = require('path');
 const _fs    = require('fs');
 
-const cryptoHelper      = require('../cryptoHelper');
-const transactionHelper = require('../transactionHelper');
+const cryptoHelper      = require('../helpers/core/cryptoHelper');
+const transactionHelper = require('../helpers/core/transactionHelper');
 const gasHelper         = require('../helpers/gasHelper');
 const vmHelper          = require('../helpers/vmHelper');
 const attestationHelper = require('../helpers/attestationHelper');

@@ -85,7 +85,7 @@ async function ensureSpecialAddressLedgerRecord(dbAdapter) {
     }
     if (donate1) {
         console.log('no special-address ledger record on this venue yet; sending 1 XCHAIN to DONATE1 ' + donate1);
-        const cryptoHelper = require('../cryptoHelper');
+        const cryptoHelper = require('../helpers/core/cryptoHelper');
         const sendHelper   = require('../helpers/sendHelper');
         const gasTick      = (typeof GAS_TICK !== 'undefined' && GAS_TICK) ? GAS_TICK : 'XCHAIN';
         const addr = await cryptoHelper.getNewFundedAddress('CONF.DONATE', COIN, NETWORK, null, 'legacy', 0, 1);

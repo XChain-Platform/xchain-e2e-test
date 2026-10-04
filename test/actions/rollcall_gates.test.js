@@ -83,7 +83,7 @@
 const assert = require('assert')
 
 const rc                = require('../helpers/rollcallHelper')
-const cryptoHelper      = require('../cryptoHelper')
+const cryptoHelper      = require('../helpers/core/cryptoHelper')
 const gasHelper         = require('../helpers/gasHelper')
 const vmHelper          = require('../helpers/vmHelper')
 const { requireFederationEnv } = require('../helpers/federationGuards')

@@ -12,8 +12,8 @@
 
 const sinon = require('sinon')
 const assert = require('assert')
-const transactionHelper = require('../../transactionHelper')
-const cryptoHelper = require('../../cryptoHelper')
+const transactionHelper = require('../../helpers/core/transactionHelper')
+const cryptoHelper = require('../../helpers/core/cryptoHelper')
 const mintHelper = require('../../helpers/mintHelper')
 const issueHelper = require('../../helpers/issueHelper')
 const sendHelper = require('../../helpers/sendHelper')

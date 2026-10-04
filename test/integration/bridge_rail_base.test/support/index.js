@@ -18,8 +18,8 @@ const assert = require('assert');
 
 const chainRail         = require('../../../helpers/chainRail');
 const stakeTeardown     = require('../../../helpers/stakeTeardown');
-const cryptoHelper      = require('../../../cryptoHelper');
-const transactionHelper = require('../../../transactionHelper');
+const cryptoHelper      = require('../../../helpers/core/cryptoHelper');
+const transactionHelper = require('../../../helpers/core/transactionHelper');
 const issueHelper       = require('../../../helpers/issueHelper');
 const mintHelper        = require('../../../helpers/mintHelper');
 // Funds a leg's BTC-side XCHAIN: a faucet SEND once the supply is spent, else a MINT.

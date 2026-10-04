@@ -23,7 +23,7 @@ const { saveGlobals, restoreGlobals, GLOBAL_KEYS } = require('./helpers/chaos_he
 
 const GAS_TICK = 'XCHAIN'
 
-// Replicate the GAS token bootstrap logic from initialCheck.test.js
+// Replicate the GAS token bootstrap logic from initial_check.test.js
 async function runGasBootstrap(db, cryptoHelper, issueHelper) {
     const gasTokenExists = await db.checkIssue({ tick: GAS_TICK, status: 'valid' })
     if (!gasTokenExists) {

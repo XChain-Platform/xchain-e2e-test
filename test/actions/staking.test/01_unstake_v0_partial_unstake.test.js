@@ -10,10 +10,10 @@
 
 const assert = require('assert')
 const crypto = require('crypto')
-const cryptoHelper = require('../../cryptoHelper')
+const cryptoHelper = require('../../helpers/core/cryptoHelper')
 const stakeHelper = require('../../helpers/stakeHelper')
 const gasHelper = require('../../helpers/gasHelper')
-const transactionHelper = require('../../transactionHelper')
+const transactionHelper = require('../../helpers/core/transactionHelper')
 
 // Self-contained staker so run order in the outer suite cannot disturb
 // the partial-unstake lifecycle asserted here.

@@ -95,7 +95,7 @@ const {
 } = require('./helpers/at5ResponseProvider')
 const vmHelper     = require('../helpers/vmHelper')
 const chainRail    = require('../helpers/chainRail')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const { loadHubModule } = require('../helpers/multiValidatorHubHelper')
 
 // Short enough that several windows close inside a drill, and comfortably above

@@ -100,7 +100,7 @@ for COIN in "${COINS[@]}"; do
     PARITY_OUT_DIR="$PARITY_OUT_DIR" PARITY_BASELINE="$PARITY_BASELINE" \
     COIN="$PKG" NETWORK="regtest" \
     ./node_modules/.bin/mocha --timeout 0 \
-      --require ./test/initialCheck.test.js \
+      --require ./test/initial_check.test.js \
       test/parity/multichain_parity.test.js )
 
   echo "[parity] $COIN - tearing down"

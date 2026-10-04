@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// Integration tests for the hub discovery fallback path in initialCheck.test.js.
+// Integration tests for the hub discovery fallback path in initial_check.test.js.
 //
 // When env vars are incomplete, the bootstrap falls back to XChainHubConnector
 // to discover all service endpoints. These tests verify that hub config responses
@@ -60,7 +60,7 @@ describe('Bootstrap: hub discovery fallback', function () {
         sinon.restore()
     })
 
-    // Replicate the hub fallback bootstrap from initialCheck.test.js lines 100-158
+    // Replicate the hub fallback bootstrap from initial_check.test.js lines 100-158
     async function bootstrapFromHub(coin, network) {
         global.COIN = coin
         global.NETWORK = network

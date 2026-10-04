@@ -63,7 +63,7 @@
  *
  * The harness globals (`indexerDatabase`, `indexerConnector`,
  * `regtestMinerConnector`, `utxoTrackerConnector`, `COIN`, `NETWORK`) come from
- * `test/initialCheck.test.js`, which mocha loads with --require. Same
+ * `test/initial_check.test.js`, which mocha loads with --require. Same
  * convention as the federation drills.
  ********************************************************************/
 
@@ -72,7 +72,7 @@ const crypto = require('crypto')
 const fsx    = require('fs')
 const pathx  = require('path')
 
-const cryptoHelper = require('../../cryptoHelper')
+const cryptoHelper = require('../../helpers/core/cryptoHelper')
 const stakeHelper  = require('../../helpers/stakeHelper')
 const gasHelper    = require('../../helpers/gasHelper')
 const vmHelper     = require('../../helpers/vmHelper')

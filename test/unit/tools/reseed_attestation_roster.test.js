@@ -30,7 +30,7 @@ const assert = require('assert')
 // broader run which also loads the tool as a spec still registers the real suite
 // rather than getting a cached, suite-less copy of it.
 function loadTool () {
-    const toolPath = require.resolve('../../tools/reseedAttestationRoster.test.js')
+    const toolPath = require.resolve('../../tools/reseed_attestation_roster.test.js')
     const saved = { describe: global.describe, it: global.it }
     global.describe = () => {}
     global.it = () => {}

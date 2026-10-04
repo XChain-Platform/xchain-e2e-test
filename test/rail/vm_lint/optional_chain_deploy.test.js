@@ -9,10 +9,10 @@
 // contact legal@dankest.llc.
 
 const assert = require('assert')
-const cryptoHelper = require('../../cryptoHelper')
+const cryptoHelper = require('../../helpers/core/cryptoHelper')
 const gasHelper = require('../../helpers/gasHelper')
 const vmHelper = require('../../helpers/vmHelper')
-const { HIDDEN_SOURCE, CONTROL_SOURCE } = require('./optional_chain_sources')
+const { HIDDEN_SOURCE, CONTROL_SOURCE } = require('./helpers/optional_chain_sources')
 
 const LINT_REFUSAL = 'banned async surface: promise at line 1 (Promise schedules microtasks whose drain timing is isolated-vm version-dependent and unpinned)'
 

@@ -884,9 +884,9 @@ describe('anchorArmHeight', () => {
         const root = path.resolve(__dirname, '../../..')
         const scripts = require(path.join(root, 'package.json')).scripts
         assert.match(scripts['test:federation:all'],
-            /--require \.\/test\/initialCheck\.test\.js/)
+            /--require \.\/test\/initial_check\.test\.js/)
 
-        const bootstrap = fs.readFileSync(path.join(root, 'test/initialCheck.test.js'), 'utf8')
+        const bootstrap = fs.readFileSync(path.join(root, 'test/initial_check.test.js'), 'utf8')
         const stakeAt = bootstrap.indexOf("require('./helpers/stakeHelper')")
         const hooksAt = bootstrap.indexOf('exports.mochaHooks')
         assert(stakeAt >= 0 && hooksAt > stakeAt,

@@ -33,8 +33,8 @@ function setUpWalletCache() {
     global.NETWORK_OBJECT = CryptoNetworks.getBitcoinJsNetwork('bitcoin-regtest')
 
     // Clear module cache for a clean cryptoHelper
-    delete require.cache[require.resolve('../../../test/cryptoHelper')]
-    cryptoHelper = require('../../../test/cryptoHelper')
+    delete require.cache[require.resolve('../../helpers/core/cryptoHelper')]
+    cryptoHelper = require('../../helpers/core/cryptoHelper')
 }
 
 function tearDownWalletCache() {

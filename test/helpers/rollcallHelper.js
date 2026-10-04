@@ -1440,7 +1440,7 @@ async function bringUpVenue(opts){
     ctx.federationMnemonic = process.env.XC_ROLLCALL_FEDERATION_MNEMONIC || null
     ctx.sourceAddressInfo  = new Map()
     if (ctx.federationMnemonic){
-        const cryptoHelper = require('../cryptoHelper')
+        const cryptoHelper = require('./core/cryptoHelper')
         for (const r of ctx.roster){
             const info = await cryptoHelper.getNewAddress(
                 'rollcall-source-' + r.addressIndex, COIN, NETWORK, ctx.federationMnemonic, 'legacy', r.addressIndex)
@@ -1521,7 +1521,7 @@ async function bringUpVenue(opts){
     // every ROLLCALL takes to that chain - the engines' hook and a drill's
     // hand-built action must ride the SAME pipeline, or a drill could land a
     // payload shape no hub could have produced.
-    const cryptoHelper = require('../cryptoHelper')
+    const cryptoHelper = require('./core/cryptoHelper')
     ctx.dogePublisher = await chainRail.withRail(ctx.dogeRail, async () => {
         // seedGas=false, and it is load-bearing on DOGE. The default seeds the
         // new address with an XCHAIN gas MINT, but ROLLCALL carries NO protocol
@@ -1678,7 +1678,7 @@ async function mineWhile(ctx, work, everyMs){
 // anything but the bytes, and every landed payload appears in ctx.publishedWires
 // whoever built it.
 async function publishWire(ctx, payload){
-    const transactionHelper = require('../transactionHelper')
+    const transactionHelper = require('./core/transactionHelper')
     return await chainRail.withRail(ctx.dogeRail, async () => {
         const txid = await transactionHelper.createAndSendTransaction(ctx.dogePublisher, payload)
         ctx.publishedWires.push({ payload, txid })

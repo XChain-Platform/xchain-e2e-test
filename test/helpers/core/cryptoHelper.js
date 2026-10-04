@@ -15,7 +15,7 @@ const ecc = require('tiny-secp256k1')
 const { BIP32Factory } = require('bip32')
 const bip32 = BIP32Factory(ecc)
 const bitcoin = require('bitcoinjs-lib')
-const CryptoNetworks = require('../src/crypto_networks')
+const CryptoNetworks = require('../../../src/crypto_networks')
 
 global.wallets = {}
 
@@ -126,7 +126,7 @@ module.exports = {
             // XCHAIN is an open-mint faucet on test networks; grab gas here so every
             // "funded" address is actually usable. Tests that need a zero-gas address
             // (e.g. the native-fee negative case) pass seedGas=false.
-            const gasHelper = require('./helpers/gasHelper')
+            const gasHelper = require('../gasHelper')
             console.log("Minting 100 XCHAIN gas to " + newAddress)
             await gasHelper.ensureGasBalance(newAddressInfo, 100)
         }

@@ -4,9 +4,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 const assert       = require('assert');
-const cryptoHelper = require('../../cryptoHelper');
+const cryptoHelper = require('../../helpers/core/cryptoHelper');
 const priceHelper  = require('../../helpers/priceHelper');
-const { PRICE_V1_CASES } = require('./price_v1_cases');
+const { PRICE_V1_CASES } = require('./helpers/price_v1_cases');
 
 function freshTick() {
     let tick = 'PVC';

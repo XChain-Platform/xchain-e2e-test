@@ -28,7 +28,7 @@
  * is REJECTED by the node, which is exactly why xchain-wallet must (and
  * now does) forbid T<N taproot-musig2 configs.
  *
- * Reuses the global connectors stood up by test/initialCheck.test.js
+ * Reuses the global connectors stood up by test/initial_check.test.js
  * (regtestMinerConnector, nodeConnector). BTC-only: taproot is not
  * available on the DOGE regtest node, so the suite self-skips off BTC.
  *

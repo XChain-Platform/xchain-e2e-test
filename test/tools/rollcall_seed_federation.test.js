@@ -20,13 +20,13 @@
  * accident. Run it explicitly:
  *
  *   XC_ROLLCALL_FEDERATION_MNEMONIC="<twelve words>" \
- *     npx mocha --timeout 0 --exit --require ./test/initialCheck.test.js \
+ *     npx mocha --timeout 0 --exit --require ./test/initial_check.test.js \
  *     test/tools/rollcall_seed_federation.test.js
  *
  * WHY A MOCHA FILE AND NOT A PLAIN SCRIPT. Every helper this needs
  * (cryptoHelper's funded-address path, gasHelper's faucet MINT,
  * stakeHelper's two-phase P2SH STAKE) reads the globals that
- * test/initialCheck.test.js installs. Re-deriving that bootstrap in a
+ * test/initial_check.test.js installs. Re-deriving that bootstrap in a
  * standalone script would give the venue a second, subtly different client
  * of the same chain, which is exactly the divergence the regtest
  * gas-bootstrap script's header warns about.
@@ -80,7 +80,7 @@
 
 const assert = require('assert')
 
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const gasHelper    = require('../helpers/gasHelper')
 const stakeHelper  = require('../helpers/stakeHelper')
 const rc           = require('../helpers/rollcallHelper')

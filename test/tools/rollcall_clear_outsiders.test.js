@@ -24,7 +24,7 @@
  * AND THEY CANNOT BE UNSTAKED. On the BTC regtest acceptance venue, measured
  * 2026-09-03, the four outsiders were three orphan fixture stakes plus the
  * venue's own validator hub. The fixture path derives each source address from a
- * mnemonic generated per run (test/cryptoHelper.js getNewAddress falls back to
+ * mnemonic generated per run (test/helpers/core/cryptoHelper.js getNewAddress falls back to
  * bip39.generateMnemonic()), so an orphan fixture stake's key does not survive
  * the run that made it and no UNSTAKE can ever be signed for it. Rebuilding the
  * chain was the only other remedy, and the chain is shared with other lanes.
