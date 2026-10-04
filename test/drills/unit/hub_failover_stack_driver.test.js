@@ -2,6 +2,7 @@
 
 const assert = require('assert')
 const fs = require('fs')
+const os = require('os')
 const path = require('path')
 const { EventEmitter } = require('events')
 const {
@@ -72,6 +73,29 @@ describe('two-hub failover stack driver', function () {
         assert.strictEqual(restartCount, 15)
     })
 
+    it('removes stale driver state before checking the prepared indexers', async function () {
+        const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'hub-failover-prepare-'))
+        const stateFile = path.join(directory, 'driver-state.json')
+        fs.writeFileSync(stateFile, '{"stale":true}\n')
+        try {
+            await prepare(createConfig({ XCHAIN_HUB_FAILOVER_STATE_FILE: stateFile }), {
+                indexerStatus: async () => {
+                    assert.strictEqual(fs.existsSync(stateFile), false)
+                    return {
+                        hubMirror: {
+                            followedAddress: 'http://hub-a:10000',
+                            connected: true,
+                            bootstrapped: true,
+                        },
+                    }
+                },
+            })
+            assert.strictEqual(fs.existsSync(stateFile), false)
+        } finally {
+            fs.rmSync(directory, { recursive: true, force: true })
+        }
+    })
+
     it('retries ready-frame connection errors and keeps the first ready frame', async function () {
         let connections = 0
         class FakeWebSocket extends EventEmitter {
@@ -115,10 +139,9 @@ describe('two-hub failover stack driver', function () {
         assert.strictEqual(quoteSql("a'b\\c"), "'a''b\\\\c'")
     })
 
-    it('credits report delivery only to the hub with its own delivered record', function () {
+    it('credits report delivery only when the report row exists in that hub', function () {
         const state = { reportId: 'push:7' }
-        const delivered = new Set(['hub-b'])
-        assert.deepStrictEqual(reportsForHub(state, delivered, 'hub-a'), [])
-        assert.deepStrictEqual(reportsForHub(state, delivered, 'hub-b'), ['push:7'])
+        assert.deepStrictEqual(reportsForHub(state, false), [])
+        assert.deepStrictEqual(reportsForHub(state, true), ['push:7'])
     })
 })
