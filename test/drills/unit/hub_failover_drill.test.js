@@ -30,7 +30,7 @@ function fakeVenue (overrides) {
         if (restarted && now >= 2500) caughtUp = true
         const survivorRows = queued ? { oracle_prices: [queued.rowKey] } : { oracle_prices: [] }
         const targetRows = caughtUp && queued ? { oracle_prices: [queued.rowKey] } : { oracle_prices: [] }
-        return {
+        const snapshot = {
             hubs: [
                 { id: 'hub-a', running: !stopped || restarted, caught_up: restarted ? caughtUp : !stopped,
                     reports: caughtUp && queued ? [queued.reportId] : [], rows: targetRows },
@@ -42,6 +42,9 @@ function fakeVenue (overrides) {
                 indexer('doge', 'DOGE', 'failover'), indexer('control', 'BTC', 'pinned-control', true),
             ],
         }
+        return overrides && overrides.transformObservation
+            ? overrides.transformObservation(snapshot, { now })
+            : snapshot
     }
 
     const driver = {
@@ -91,6 +94,23 @@ describe('hub failover drill verdict', function () {
             moveTimeoutMs: 2000, catchupTimeoutMs: 3000, blockTimeoutMs: 1000,
             dwellMs: 0, pollMs: 100, clock: venue.clock,
         }), /caught_up other than false/)
+    })
+
+    it('fails on a transient flap while report and catch-up work is still running', async function () {
+        const venue = fakeVenue({
+            transformObservation: (snapshot, state) => {
+                if (state.now >= 1500 && state.now < 2000) {
+                    const btc = snapshot.indexers.find((indexer) => indexer.id === 'btc')
+                    btc.followedHub = 'hub-a'
+                    btc.hubMirror.moveCount = 2
+                }
+                return snapshot
+            },
+        })
+        await assert.rejects(runHubFailoverDrill(venue.driver, {
+            moveTimeoutMs: 2000, catchupTimeoutMs: 3000, blockTimeoutMs: 1000,
+            dwellMs: 2000, pollMs: 100, clock: venue.clock,
+        }), /btc flapped away from hub-b/)
     })
 
     it('fails when the moved BTC state hash differs from the pinned control', async function () {

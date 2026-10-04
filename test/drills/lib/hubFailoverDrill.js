@@ -172,6 +172,10 @@ async function runHubFailoverDrill (driver, rawOptions) {
     const movedAt = clock.now()
     const expectedMoveCounts = new Map(movableIds.map((id) => [id,
         Number(byId(moved.indexers, id, 'indexer').hubMirror.moveCount)]))
+    const noFlapCheck = holdNoFlap(driver, movableIds, venue.survivor, expectedMoveCounts,
+        movedAt + options.dwellMs, options.pollMs, clock).then(
+        (samples) => ({ samples }),
+        (error) => ({ error }))
 
     const queued = await driver.queueReport()
     assert.ok(queued && typeof queued.reportId === 'string' && queued.reportId,
@@ -216,8 +220,9 @@ async function runHubFailoverDrill (driver, rawOptions) {
         }, options.catchupTimeoutMs, options.pollMs, clock,
         'the restarted hub to catch up, receive the report, and hold the outage row')
 
-    const noFlapSamples = await holdNoFlap(driver, movableIds, venue.survivor, expectedMoveCounts,
-        movedAt + options.dwellMs, options.pollMs, clock)
+    const noFlapResult = await noFlapCheck
+    if (noFlapResult.error) throw noFlapResult.error
+    const noFlapSamples = noFlapResult.samples
     const finalSnapshot = normalizeSnapshot(await driver.observe())
     const movedBtc = finalSnapshot.indexers.find((indexer) =>
         indexer.role === 'failover' && indexer.coin === 'BTC')
