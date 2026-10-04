@@ -140,7 +140,8 @@ async function holdNoFlap (driver, ids, survivor, expectedMoveCounts, untilMs, p
 }
 
 async function runHubFailoverDrill (driver, rawOptions) {
-    assert.ok(driver && typeof driver.observe === 'function', 'driver.observe is required')
+    assert.ok(driver && typeof driver.prepare === 'function', 'driver.prepare is required')
+    assert.strictEqual(typeof driver.observe, 'function', 'driver.observe is required')
     for (const method of ['stopHub', 'queueReport', 'mine', 'startHub', 'blockHashes'])
         assert.strictEqual(typeof driver[method], 'function', 'driver.' + method + ' is required')
 
@@ -153,103 +154,111 @@ async function runHubFailoverDrill (driver, rawOptions) {
         clock: { now: () => Date.now(), sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)) },
     }, rawOptions || {})
     const clock = options.clock
+    await driver.prepare()
     const baseline = normalizeSnapshot(await driver.observe())
     const venue = validateBaseline(baseline)
     const movableIds = venue.movable.map((indexer) => indexer.id)
     const baselineById = new Map(baseline.indexers.map((indexer) => [indexer.id, indexer]))
     const stoppedAt = clock.now()
 
+    let targetStopped = false
     await driver.stopHub(venue.target)
-    const stopped = normalizeSnapshot(await driver.observe())
-    assert.strictEqual(byId(stopped.hubs, venue.target, 'hub').running, false,
-        'target hub still reports running after stop')
+    targetStopped = true
+    try {
+        const stopped = normalizeSnapshot(await driver.observe())
+        assert.strictEqual(byId(stopped.hubs, venue.target, 'hub').running, false,
+            'target hub still reports running after stop')
 
-    const movedWait = await waitFor(
-        () => driver.observe(),
-        (snapshot) => assertMoved(snapshot, movableIds, venue.survivor, baselineById),
-        options.moveTimeoutMs, options.pollMs, clock, 'all failover indexers to move and certify their new hub')
-    const moved = normalizeSnapshot(movedWait.value)
-    const movedAt = clock.now()
-    const expectedMoveCounts = new Map(movableIds.map((id) => [id,
-        Number(byId(moved.indexers, id, 'indexer').hubMirror.moveCount)]))
-    const noFlapCheck = holdNoFlap(driver, movableIds, venue.survivor, expectedMoveCounts,
-        movedAt + options.dwellMs, options.pollMs, clock).then(
-        (samples) => ({ samples }),
-        (error) => ({ error }))
+        const movedWait = await waitFor(
+            () => driver.observe(),
+            (snapshot) => assertMoved(snapshot, movableIds, venue.survivor, baselineById),
+            options.moveTimeoutMs, options.pollMs, clock, 'all failover indexers to move and certify their new hub')
+        const moved = normalizeSnapshot(movedWait.value)
+        const movedAt = clock.now()
+        const expectedMoveCounts = new Map(movableIds.map((id) => [id,
+            Number(byId(moved.indexers, id, 'indexer').hubMirror.moveCount)]))
+        const noFlapCheck = holdNoFlap(driver, movableIds, venue.survivor, expectedMoveCounts,
+            movedAt + options.dwellMs, options.pollMs, clock).then(
+            (samples) => ({ samples }),
+            (error) => ({ error }))
 
-    const queued = await driver.queueReport()
-    assert.ok(queued && typeof queued.reportId === 'string' && queued.reportId,
-        'queue-report must return a non-empty reportId')
-    assert.ok(typeof queued.table === 'string' && queued.table, 'queue-report must return its mirrored table')
-    assert.ok(typeof queued.rowKey === 'string' && queued.rowKey, 'queue-report must return its content rowKey')
+        const queued = await driver.queueReport()
+        assert.ok(queued && typeof queued.reportId === 'string' && queued.reportId,
+            'queue-report must return a non-empty reportId')
+        assert.ok(typeof queued.table === 'string' && queued.table, 'queue-report must return its mirrored table')
+        assert.ok(typeof queued.rowKey === 'string' && queued.rowKey, 'queue-report must return its content rowKey')
 
-    const survivingReport = await waitFor(
-        () => driver.observe(),
-        (snapshot) => {
-            const hub = byId(normalizeSnapshot(snapshot).hubs, venue.survivor, 'hub')
-            return reportPresent(hub, queued.reportId) && rowPresent(hub, queued.table, queued.rowKey)
-        }, options.catchupTimeoutMs, options.pollMs, clock,
-        'the outage report and survivor-only finalized row to reach the surviving hub')
-    const beforeRestart = normalizeSnapshot(survivingReport.value)
-    assert.strictEqual(rowPresent(byId(beforeRestart.hubs, venue.target, 'hub'), queued.table, queued.rowKey), false,
-        'the stopped hub already held the outage row before restart')
+        const survivingReport = await waitFor(
+            () => driver.observe(),
+            (snapshot) => {
+                const hub = byId(normalizeSnapshot(snapshot).hubs, venue.survivor, 'hub')
+                return reportPresent(hub, queued.reportId) && rowPresent(hub, queued.table, queued.rowKey)
+            }, options.catchupTimeoutMs, options.pollMs, clock,
+            'the outage report and survivor-only finalized row to reach the surviving hub')
+        const beforeRestart = normalizeSnapshot(survivingReport.value)
+        assert.strictEqual(rowPresent(byId(beforeRestart.hubs, venue.target, 'hub'), queued.table, queued.rowKey), false,
+            'the stopped hub already held the outage row before restart')
 
-    const preMineBlocks = new Map(beforeRestart.indexers.map((indexer) => [indexer.id, indexer.indexerBlock]))
-    const mineResult = await driver.mine(2)
-    assert.ok(mineResult && Number(mineResult.blocks) >= 2, 'mine must confirm at least two new blocks')
-    const advancedWait = await waitFor(
-        () => driver.observe(),
-        (snapshot) => normalizeSnapshot(snapshot).indexers.every((indexer) =>
-            mirrorReady(indexer) && indexer.indexerBlock > preMineBlocks.get(indexer.id)),
-        options.blockTimeoutMs, options.pollMs, clock,
-        'all mirrors to reopen their barriers and every indexer to advance')
-    const advanced = normalizeSnapshot(advancedWait.value)
+        const preMineBlocks = new Map(beforeRestart.indexers.map((indexer) => [indexer.id, indexer.indexerBlock]))
+        const mineResult = await driver.mine(2)
+        assert.ok(mineResult && Number(mineResult.blocks) >= 2, 'mine must confirm at least two new blocks')
+        const advancedWait = await waitFor(
+            () => driver.observe(),
+            (snapshot) => normalizeSnapshot(snapshot).indexers.every((indexer) =>
+                mirrorReady(indexer) && indexer.indexerBlock > preMineBlocks.get(indexer.id)),
+            options.blockTimeoutMs, options.pollMs, clock,
+            'all mirrors to reopen their barriers and every indexer to advance')
+        const advanced = normalizeSnapshot(advancedWait.value)
 
-    const restart = await driver.startHub(venue.target)
-    assert.ok(restart && restart.firstReady && Object.prototype.hasOwnProperty.call(restart.firstReady, 'caught_up'),
-        'start-hub must capture the restarted hub first ready frame with caught_up')
-    assert.strictEqual(restart.firstReady.caught_up, false,
-        'the restarted hub first advertised ready with caught_up other than false')
+        const restart = await driver.startHub(venue.target)
+        targetStopped = false
+        assert.ok(restart && restart.firstReady && Object.prototype.hasOwnProperty.call(restart.firstReady, 'caught_up'),
+            'start-hub must capture the restarted hub first ready frame with caught_up')
+        assert.strictEqual(restart.firstReady.caught_up, false,
+            'the restarted hub first advertised ready with caught_up other than false')
 
-    const caughtUpWait = await waitFor(
-        () => driver.observe(),
-        (snapshot) => {
-            const hub = byId(normalizeSnapshot(snapshot).hubs, venue.target, 'hub')
-            return hub.running === true && hub.caught_up === true &&
-                reportPresent(hub, queued.reportId) && rowPresent(hub, queued.table, queued.rowKey)
-        }, options.catchupTimeoutMs, options.pollMs, clock,
-        'the restarted hub to catch up, receive the report, and hold the outage row')
+        const caughtUpWait = await waitFor(
+            () => driver.observe(),
+            (snapshot) => {
+                const hub = byId(normalizeSnapshot(snapshot).hubs, venue.target, 'hub')
+                return hub.running === true && hub.caught_up === true &&
+                    reportPresent(hub, queued.reportId) && rowPresent(hub, queued.table, queued.rowKey)
+            }, options.catchupTimeoutMs, options.pollMs, clock,
+            'the restarted hub to catch up, receive the report, and hold the outage row')
 
-    const noFlapResult = await noFlapCheck
-    if (noFlapResult.error) throw noFlapResult.error
-    const noFlapSamples = noFlapResult.samples
-    const finalSnapshot = normalizeSnapshot(await driver.observe())
-    const movedBtc = finalSnapshot.indexers.find((indexer) =>
-        indexer.role === 'failover' && indexer.coin === 'BTC')
-    const control = byId(finalSnapshot.indexers, venue.control.id, 'indexer')
-    const parityHeight = Math.min(movedBtc.indexerBlock, control.indexerBlock)
-    assert.ok(Number.isInteger(parityHeight) && parityHeight >= 0, 'no common BTC parity height')
-    const movedHashes = await driver.blockHashes(movedBtc.id, parityHeight)
-    const controlHashes = await driver.blockHashes(control.id, parityHeight)
-    assertHashParity(movedHashes, controlHashes, parityHeight)
+        const noFlapResult = await noFlapCheck
+        if (noFlapResult.error) throw noFlapResult.error
+        const noFlapSamples = noFlapResult.samples
+        const finalSnapshot = normalizeSnapshot(await driver.observe())
+        const movedBtc = finalSnapshot.indexers.find((indexer) =>
+            indexer.role === 'failover' && indexer.coin === 'BTC')
+        const control = byId(finalSnapshot.indexers, venue.control.id, 'indexer')
+        const parityHeight = Math.min(movedBtc.indexerBlock, control.indexerBlock)
+        assert.ok(Number.isInteger(parityHeight) && parityHeight >= 0, 'no common BTC parity height')
+        const movedHashes = await driver.blockHashes(movedBtc.id, parityHeight)
+        const controlHashes = await driver.blockHashes(control.id, parityHeight)
+        assertHashParity(movedHashes, controlHashes, parityHeight)
 
-    return {
-        targetHub: venue.target,
-        survivingHub: venue.survivor,
-        initialFollowedHubs: Object.fromEntries(baseline.indexers.map((indexer) =>
-            [indexer.id, indexer.followedHub])),
-        moveElapsedMs: movedWait.elapsedMs,
-        movedIndexers: movableIds,
-        outageReport: queued,
-        caughtUpElapsedMs: caughtUpWait.elapsedMs,
-        blocksBefore: Object.fromEntries(preMineBlocks),
-        blocksAfter: Object.fromEntries(advanced.indexers.map((indexer) =>
-            [indexer.id, indexer.indexerBlock])),
-        noFlapSamples,
-        dwellMs: options.dwellMs,
-        parityHeight,
-        hashes: Object.fromEntries(HASH_FIELDS.map((field) => [field, movedHashes[field]])),
-        stoppedAt,
+        return {
+            targetHub: venue.target,
+            survivingHub: venue.survivor,
+            initialFollowedHubs: Object.fromEntries(baseline.indexers.map((indexer) =>
+                [indexer.id, indexer.followedHub])),
+            moveElapsedMs: movedWait.elapsedMs,
+            movedIndexers: movableIds,
+            outageReport: queued,
+            caughtUpElapsedMs: caughtUpWait.elapsedMs,
+            blocksBefore: Object.fromEntries(preMineBlocks),
+            blocksAfter: Object.fromEntries(advanced.indexers.map((indexer) =>
+                [indexer.id, indexer.indexerBlock])),
+            noFlapSamples,
+            dwellMs: options.dwellMs,
+            parityHeight,
+            hashes: Object.fromEntries(HASH_FIELDS.map((field) => [field, movedHashes[field]])),
+            stoppedAt,
+        }
+    } finally {
+        if (targetStopped) await driver.startHub(venue.target)
     }
 }
 

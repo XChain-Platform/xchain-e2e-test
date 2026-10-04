@@ -30,6 +30,9 @@ const MINERS = Object.freeze([
     { portEnv: 'DOGE_MINER_HOST_PORT', port: 64225 },
 ])
 const MAX_OUTPUT_BYTES = 1024 * 1024
+const PREPARE_ATTEMPTS = 15
+const RETRY_DELAY_MS = 200
+const PREPARE_FOLLOWED_ADDRESS = 'http://hub-a:10000'
 
 function setting (env, name, fallback) {
     return env[name] === undefined || env[name] === '' ? fallback : env[name]
@@ -112,31 +115,52 @@ function hostPort (env, row) {
     return portSetting(env, row.portEnv, row.port)
 }
 
-function readReadyFrame (config, hubId) {
+function readReadyFrame (config, hubId, dependencies) {
     const hub = HUBS[hubId]
     if (!hub) throw new Error('unknown two-hub failover hub ' + hubId)
     const port = hostPort(config.env, hub)
+    const WebSocketImpl = dependencies && dependencies.WebSocketImpl
+        ? dependencies.WebSocketImpl
+        : WebSocket
     return new Promise((resolve, reject) => {
         let settled = false
-        const ws = new WebSocket('ws://127.0.0.1:' + port + '/hub-db/subscribe', {
-            headers: { Authorization: 'Bearer ' + config.feedKey },
-        })
+        let ws
+        let retryTimer
         const finish = (fn, value) => {
             if (settled) return
             settled = true
             clearTimeout(timer)
-            try { ws.close() } catch (error) {}
+            clearTimeout(retryTimer)
+            if (ws) try { ws.close() } catch (error) {}
             fn(value)
         }
         const timer = setTimeout(() => finish(reject,
             new Error(hubId + ' did not publish a ready frame')), config.readyTimeoutMs)
-        ws.on('message', (data) => {
-            let frame
-            try { frame = JSON.parse(data.toString()) } catch (error) { return }
-            if (frame.type === 'ready') finish(resolve, frame)
-        })
-        ws.once('error', (error) => finish(reject, error))
-        ws.once('close', () => finish(reject, new Error(hubId + ' closed before its ready frame')))
+
+        const connect = () => {
+            if (settled) return
+            let connectionFailed = false
+            const socket = new WebSocketImpl('ws://127.0.0.1:' + port + '/hub-db/subscribe', {
+                headers: { Authorization: 'Bearer ' + config.feedKey },
+            })
+            ws = socket
+            socket.on('message', (data) => {
+                let frame
+                try { frame = JSON.parse(data.toString()) } catch (error) { return }
+                if (frame.type === 'ready') finish(resolve, frame)
+            })
+            socket.once('error', () => {
+                if (settled || connectionFailed) return
+                connectionFailed = true
+                try { socket.close() } catch (error) {}
+                retryTimer = setTimeout(connect, RETRY_DELAY_MS)
+            })
+            socket.once('close', () => {
+                if (!settled && !connectionFailed)
+                    finish(reject, new Error(hubId + ' closed before its ready frame'))
+            })
+        }
+        connect()
     })
 }
 
@@ -153,7 +177,7 @@ async function indexerStatus (config, indexer) {
 
 function followedValue (mirror) {
     const sources = [mirror, mirror && mirror.selector, mirror && mirror.hubSelector]
-    const keys = ['followedHub', 'followed', 'hubUrl', 'currentUrl', 'current', 'address']
+    const keys = ['followedAddress', 'followedHub', 'followed', 'hubUrl', 'currentUrl', 'current', 'address']
     for (const source of sources) {
         if (!source || typeof source !== 'object') continue
         for (const key of keys) {
@@ -161,6 +185,51 @@ function followedValue (mirror) {
         }
     }
     return null
+}
+
+function preparedStatus (status) {
+    const mirror = status && status.hubMirror
+    return !!mirror && followedValue(mirror) === PREPARE_FOLLOWED_ADDRESS &&
+        mirror.connected === true && mirror.bootstrapped === true
+}
+
+async function waitForStartedIndexer (config, indexer, readStatus, dependencies) {
+    const now = dependencies && dependencies.now ? dependencies.now : () => Date.now()
+    const sleep = dependencies && dependencies.sleep
+        ? dependencies.sleep
+        : (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+    const deadline = now() + config.readyTimeoutMs
+    let status
+    do {
+        try { status = await readStatus(config, indexer) } catch (error) { status = null }
+        const mirror = status && status.hubMirror
+        if (mirror && mirror.connected === true && mirror.bootstrapped === true) return status
+        if (now() >= deadline) return status
+        await sleep(Math.min(RETRY_DELAY_MS, Math.max(0, deadline - now())))
+    } while (now() <= deadline)
+    return status
+}
+
+async function prepare (config, dependencies) {
+    const readStatus = dependencies && dependencies.indexerStatus
+        ? dependencies.indexerStatus
+        : indexerStatus
+    const restart = dependencies && dependencies.restartIndexer
+        ? dependencies.restartIndexer
+        : (indexer) => compose(config, ['restart', indexer.id])
+    const seedDriven = INDEXERS.filter((indexer) => indexer.role === 'failover')
+
+    for (const indexer of seedDriven) {
+        for (let restarts = 0; ; restarts++) {
+            const status = await waitForStartedIndexer(config, indexer, readStatus, dependencies)
+            if (preparedStatus(status)) break
+            if (restarts >= PREPARE_ATTEMPTS)
+                throw new Error(indexer.id + ' did not follow ' + PREPARE_FOLLOWED_ADDRESS +
+                    ' connected and bootstrapped after ' + PREPARE_ATTEMPTS + ' restarts')
+            await restart(indexer)
+        }
+    }
+    return { followedAddress: PREPARE_FOLLOWED_ADDRESS }
 }
 
 function hubIdFromAddress (address) {
@@ -345,6 +414,7 @@ async function blockHashes (config, indexerId, rawHeight) {
 }
 
 async function dispatch (config, operation, args) {
+    if (operation === 'prepare') return prepare(config)
     if (operation === 'observe') return observe(config)
     if (operation === 'stop-hub') {
         if (!HUBS[args[0]]) throw new Error('unknown two-hub failover hub ' + args[0])
@@ -369,7 +439,7 @@ async function main () {
 
 module.exports = {
     HUBS, INDEXERS, MINERS, createConfig, followedValue, hubIdFromAddress,
-    normalizeIndexer, reportsForHub, quoteSql, dispatch,
+    normalizeIndexer, reportsForHub, quoteSql, readReadyFrame, prepare, dispatch,
 }
 
 if (require.main === module) {

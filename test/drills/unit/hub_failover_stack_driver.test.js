@@ -3,11 +3,14 @@
 const assert = require('assert')
 const fs = require('fs')
 const path = require('path')
+const { EventEmitter } = require('events')
 const {
     createConfig,
     hubIdFromAddress,
     normalizeIndexer,
+    prepare,
     quoteSql,
+    readReadyFrame,
     reportsForHub,
 } = require('../../../scripts/hub-failover-stack-driver')
 
@@ -34,7 +37,7 @@ describe('two-hub failover stack driver', function () {
                 connected: true,
                 bootstrapped: true,
                 moveCount: 2,
-                selector: { followed: 'http://hub-b:10000' },
+                followedAddress: 'http://hub-b:10000',
             },
         })
         assert.deepStrictEqual(normalized, {
@@ -42,6 +45,52 @@ describe('two-hub failover stack driver', function () {
             indexerBlock: 101, stallReason: null,
             hubMirror: { connected: true, bootstrapped: true, moveCount: 2 },
         })
+    })
+
+    it('restarts seed-driven indexers until each follows hub-a ready, with a 15 restart bound', async function () {
+        const restarts = []
+        const reads = new Map()
+        const status = (address) => ({
+            hubMirror: { followedAddress: address, connected: true, bootstrapped: true },
+        })
+        const result = await prepare(createConfig({}), {
+            indexerStatus: async (config, indexer) => {
+                const count = (reads.get(indexer.id) || 0) + 1
+                reads.set(indexer.id, count)
+                return status(count === 1 ? 'http://hub-b:10000' : 'http://hub-a:10000')
+            },
+            restartIndexer: async (indexer) => { restarts.push(indexer.id) },
+        })
+        assert.deepStrictEqual(restarts, ['btc-indexer', 'ltc-indexer', 'doge-indexer'])
+        assert.deepStrictEqual(result, { followedAddress: 'http://hub-a:10000' })
+
+        let restartCount = 0
+        await assert.rejects(prepare(createConfig({}), {
+            indexerStatus: async () => status('http://hub-b:10000'),
+            restartIndexer: async () => { restartCount++ },
+        }), /after 15 restarts/)
+        assert.strictEqual(restartCount, 15)
+    })
+
+    it('retries ready-frame connection errors and keeps the first ready frame', async function () {
+        let connections = 0
+        class FakeWebSocket extends EventEmitter {
+            constructor () {
+                super()
+                connections++
+                if (connections === 1) process.nextTick(() => this.emit('error', new Error('refused')))
+                else process.nextTick(() => {
+                    this.emit('message', Buffer.from(JSON.stringify({ type: 'ready', caught_up: false })))
+                    this.emit('message', Buffer.from(JSON.stringify({ type: 'ready', caught_up: true })))
+                })
+            }
+
+            close () {}
+        }
+        const config = createConfig({ XCHAIN_HUB_FAILOVER_READY_TIMEOUT_MS: '1000' })
+        const frame = await readReadyFrame(config, 'hub-a', { WebSocketImpl: FakeWebSocket })
+        assert.deepStrictEqual(frame, { type: 'ready', caught_up: false })
+        assert.strictEqual(connections, 2)
     })
 
     it('refuses status that cannot prove a followed hub or move count', function () {

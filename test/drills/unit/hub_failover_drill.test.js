@@ -48,6 +48,7 @@ function fakeVenue (overrides) {
     }
 
     const driver = {
+        prepare: async () => ({ followedAddress: 'http://hub-a:10000' }),
         observe: async () => observe(),
         stopHub: async (id) => { assert.strictEqual(id, 'hub-a'); stopped = true; return { stopped: id } },
         queueReport: async () => {
@@ -75,6 +76,12 @@ function fakeVenue (overrides) {
 describe('hub failover drill verdict', function () {
     it('proves the move, catch-up, report fan-out, dwell, and four-hash parity', async function () {
         const venue = fakeVenue()
+        const startHub = venue.driver.startHub
+        let startCalls = 0
+        venue.driver.startHub = async (id) => {
+            startCalls++
+            return startHub(id)
+        }
         const evidence = await runHubFailoverDrill(venue.driver, {
             moveTimeoutMs: 2000, catchupTimeoutMs: 3000, blockTimeoutMs: 1000,
             dwellMs: 2000, pollMs: 100, clock: venue.clock,
@@ -84,6 +91,7 @@ describe('hub failover drill verdict', function () {
         assert.strictEqual(evidence.moveElapsedMs, 1000)
         assert.strictEqual(evidence.parityHeight, 102)
         assert.ok(evidence.noFlapSamples > 0)
+        assert.strictEqual(startCalls, 1)
     })
 
     it('fails if restart does not expose caught_up false in its first ready frame', async function () {
@@ -94,6 +102,23 @@ describe('hub failover drill verdict', function () {
             moveTimeoutMs: 2000, catchupTimeoutMs: 3000, blockTimeoutMs: 1000,
             dwellMs: 0, pollMs: 100, clock: venue.clock,
         }), /caught_up other than false/)
+    })
+
+    it('prepares before observing and restarts the target after a drill failure', async function () {
+        const calls = []
+        const venue = fakeVenue()
+        const observe = venue.driver.observe
+        const startHub = venue.driver.startHub
+        venue.driver.prepare = async () => { calls.push('prepare') }
+        venue.driver.observe = async () => { calls.push('observe'); return observe() }
+        venue.driver.queueReport = async () => { throw new Error('queue failed') }
+        venue.driver.startHub = async (id) => { calls.push('start'); return startHub(id) }
+        await assert.rejects(runHubFailoverDrill(venue.driver, {
+            moveTimeoutMs: 2000, catchupTimeoutMs: 0, blockTimeoutMs: 0,
+            dwellMs: 0, pollMs: 100, clock: venue.clock,
+        }), /queue failed/)
+        assert.strictEqual(calls[0], 'prepare')
+        assert.strictEqual(calls.filter((call) => call === 'start').length, 1)
     })
 
     it('fails on a transient flap while report and catch-up work is still running', async function () {
