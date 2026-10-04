@@ -179,6 +179,54 @@ describe('live integration tier roster', () => {
 })
 
 describe('live integration tier roster', () => {
+    describe('fresh-process retry reports replace only their failed suites', () => {
+
+        const root = '/ci/work/xchain-e2e-test'
+        const file = name => root + '/test/integration/' + name + '.integration.test.js'
+
+        it('turns a transient suite failure into its passing retry verdict', () => {
+            const base = {
+                passes: [{ file: file('steady') }],
+                failures: [{ file: file('flaky') }],
+                pending: []
+            }
+            const retry = { passes: [{ file: file('flaky') }], failures: [], pending: [] }
+            const merged = lane.replaceReportFiles(base, retry,
+                ['test/integration/flaky.integration.test.js'], root)
+
+            assert.deepStrictEqual(lane.classify([
+                'test/integration/steady.integration.test.js',
+                'test/integration/flaky.integration.test.js'
+            ], lane.tallyByFile(merged, root)), [])
+            assert.strictEqual(merged.stats.passes, 2)
+            assert.strictEqual(merged.stats.failures, 0)
+        })
+
+        it('keeps a repeated failure red and leaves other suite results untouched', () => {
+            const base = {
+                passes: [{ file: file('steady') }],
+                failures: [{ file: file('broken'), err: { message: 'first' } }],
+                pending: []
+            }
+            const retry = {
+                passes: [],
+                failures: [{ file: file('broken'), err: { message: 'again' } }],
+                pending: []
+            }
+            const merged = lane.replaceReportFiles(base, retry,
+                ['test/integration/broken.integration.test.js'], root)
+            const tally = lane.tallyByFile(merged, root)
+
+            assert.deepStrictEqual(tally.get('test/integration/steady.integration.test.js'),
+                { passing: 1, failing: 0, pending: 0 })
+            assert.strictEqual(lane.classify(
+                ['test/integration/broken.integration.test.js'], tally)[0].kind, 'failing')
+            assert.strictEqual(merged.failures[0].err.message, 'again')
+        })
+    })
+})
+
+describe('live integration tier roster', () => {
     describe('a host that cannot run the tier is not the commit\'s fault', () => {
 
         it('accepts a pre-provisioned database without consulting docker', () => {

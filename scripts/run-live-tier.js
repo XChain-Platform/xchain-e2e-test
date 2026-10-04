@@ -308,6 +308,28 @@ function mochaSummary(report) {
     return lines
 }
 
+function reportFile(entry, repoRoot = REPO_ROOT) {
+    if (!entry || !entry.file) return null
+    return parentOf(path.relative(repoRoot, entry.file).split(path.sep).join('/'))
+}
+
+function replaceReportFiles(base, retry, files, repoRoot = REPO_ROOT) {
+    const replacing = new Set(files)
+    const merged = { ...base }
+    for (const field of ['passes', 'failures', 'pending']) {
+        const kept = (base[field] || []).filter(entry => !replacing.has(reportFile(entry, repoRoot)))
+        merged[field] = kept.concat(retry[field] || [])
+    }
+    merged.stats = {
+        ...(base.stats || {}),
+        passes: merged.passes.length,
+        failures: merged.failures.length,
+        pending: merged.pending.length,
+        tests: merged.passes.length + merged.failures.length + merged.pending.length
+    }
+    return merged
+}
+
 const DB_PRIVILEGE_CODES = new Set([
     'ER_ACCESS_DENIED_ERROR',
     'ER_DBACCESS_DENIED_ERROR',
@@ -510,9 +532,34 @@ function main(argv) {
         return 1
     }
 
-    const tally    = tallyByFile(report)
-    const problems = classify(expected, tally)
-    const outcome  = classifyReport(report, problems)
+    let tally    = tallyByFile(report)
+    let problems = classify(expected, tally)
+    let outcome  = classifyReport(report, problems)
+
+    const retryCount = Number.isInteger(roster.retryCount) ? roster.retryCount : 0
+    for (let attempt = 1; outcome.exitCode === 1 && attempt <= retryCount; attempt++) {
+        const retryFiles = Array.from(new Set(problems.map(problem => problem.file)))
+        if (!retryFiles.length) break
+        console.log('\nlive tier: retry ' + attempt + '/' + retryCount + ' in a fresh process for:')
+        for (const file of retryFiles) console.log('  ' + file)
+        reapStaleFixtureContainers()
+        const retried = runMocha(retryFiles, roster, { forceDocker })
+        if (retried.error) {
+            console.error('live tier: could not start retry: ' + retried.error.message)
+            break
+        }
+        let retryReport
+        try {
+            retryReport = JSON.parse(fs.readFileSync(retried.out, 'utf8'))
+        } catch (e) {
+            console.error('live tier: retry wrote no readable report (' + e.message + ')')
+            break
+        }
+        report = replaceReportFiles(report, retryReport, retryFiles)
+        tally = tallyByFile(report)
+        problems = classify(expected, tally)
+        outcome = classifyReport(report, problems)
+    }
 
     console.log('')
     for (const line of mochaSummary(report)) console.log(line)
@@ -552,7 +599,7 @@ function main(argv) {
 }
 
 module.exports = { requiredSpecifiers, requiresChild, formatTally, childTally, childFiles, parentOf, discoverSuites, readRoster, auditRoster, suitesToRun, suitesExcluded, tallyByFile, classify,
-    mochaSummary, isDbPrivilegeError, isBeforeAllHookFailure, isDbPrivilegeBeforeAllFailure, classifyReport,
+    mochaSummary, reportFile, replaceReportFiles, isDbPrivilegeError, isBeforeAllHookFailure, isDbPrivilegeBeforeAllFailure, classifyReport,
     liveTierBlocker, mochaEnvironment, VENUE_EXIT, ROSTER_FILE, LIVE_DIR }
 
 if (require.main === module) process.exit(main(process.argv.slice(2)))
