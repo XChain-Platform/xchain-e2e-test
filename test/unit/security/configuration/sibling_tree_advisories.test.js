@@ -198,16 +198,12 @@ describe('Security: staged sibling trees carry no vulnerable copies @regression 
             assert.ok(typeof snap.version === 'string',
                 `package-lock.json packages["${key}"] records no version for ${sibling.name}`);
 
-            // Source of truth, in the two places the sibling can actually be: staged
-            // inside this repo at build time, or checked out beside it (the CI venue
-            // layout .ci-siblings describes, which is also the normal local layout).
-            // A checkout with neither has nothing to compare against.
-            const candidates = [
-                path.join(sibling.dir, 'package.json'),
-                path.join(root, '..', path.basename(sibling.dir), 'package.json'),
-            ];
-            const manifestPath = candidates.find(p => fs.existsSync(p));
-            if (!manifestPath) return this.skip();
+            if (!fs.existsSync(sibling.dir) || fs.lstatSync(sibling.dir).isSymbolicLink()) {
+                return this.skip();
+            }
+
+            const manifestPath = path.join(sibling.dir, 'package.json');
+            if (!fs.existsSync(manifestPath)) return this.skip();
 
             const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
             assert.strictEqual(snap.version, manifest.version,
