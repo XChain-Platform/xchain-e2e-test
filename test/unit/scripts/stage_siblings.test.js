@@ -22,6 +22,7 @@ let root
 let script
 let logs
 let errors
+let mutations
 let originalLog
 let originalError
 
@@ -33,8 +34,27 @@ function sandboxJoin(...parts) {
 function setUp() {
     sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-siblings-'))
     root = path.join(sandbox, 'project')
+    mutations = []
+    const instrumentedFs = {
+        ...fs,
+        rmSync(...args) {
+            mutations.push('rm')
+            return fs.rmSync(...args)
+        },
+        symlinkSync(...args) {
+            mutations.push('symlink')
+            return fs.symlinkSync(...args)
+        },
+        unlinkSync(...args) {
+            mutations.push('unlink')
+            return fs.unlinkSync(...args)
+        }
+    }
     fs.mkdirSync(root)
-    script = proxyquire('../../../scripts/stage-siblings', { path: { join: sandboxJoin } })
+    script = proxyquire('../../../scripts/stage-siblings', {
+        fs: instrumentedFs,
+        path: { join: sandboxJoin }
+    })
     logs = []
     errors = []
     originalLog = console.log
@@ -95,9 +115,12 @@ describe('stage-siblings helpers', () => {
         addSibling('fixture-package')
         assert.strictEqual(script.stageOne('fixture-package'), true)
         const firstTarget = fs.readlinkSync(path.join(root, 'fixture-package'))
+        assert.deepStrictEqual(mutations, ['symlink'])
+        mutations.length = 0
 
         assert.strictEqual(script.stageOne('fixture-package'), true)
         assert.strictEqual(fs.readlinkSync(path.join(root, 'fixture-package')), firstTarget)
+        assert.deepStrictEqual(mutations, [])
         assert.match(logs.join('\n'), /already a symlink/)
     })
 })
