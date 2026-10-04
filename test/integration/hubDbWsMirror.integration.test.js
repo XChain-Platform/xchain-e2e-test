@@ -41,6 +41,9 @@ const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { MIRROR_SQL, readDDL } = require('../helpers/hubDbMirrorSchema');
 
 // HubDbSync must find every mirrored local table before startup and bootstrap.
+// Omitting even an unasserted table leaves the bootstrap barrier closed, which
+// prevents watermark advancement and heartbeat delivery without a direct table
+// assertion failing.
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function waitFor(fn, timeoutMs = 10000, stepMs = 150) {
     const end = Date.now() + timeoutMs;
