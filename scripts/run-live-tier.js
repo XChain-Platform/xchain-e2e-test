@@ -448,6 +448,42 @@ function reapStaleFixtureContainers(now = Date.now()) {
     return stale.length
 }
 
+function evaluate(report, expected) {
+    const tally    = tallyByFile(report)
+    const problems = classify(expected, tally)
+    return { report, tally, problems, outcome: classifyReport(report, problems) }
+}
+
+function runRetry(retryFiles, roster, forceDocker) {
+    reapStaleFixtureContainers()
+    const retried = runMocha(retryFiles, roster, { forceDocker })
+    if (retried.error) {
+        console.error('live tier: could not start retry: ' + retried.error.message)
+        return null
+    }
+    try {
+        return JSON.parse(fs.readFileSync(retried.out, 'utf8'))
+    } catch (e) {
+        console.error('live tier: retry wrote no readable report (' + e.message + ')')
+        return null
+    }
+}
+
+function retryRedSuites(report, expected, roster, rerun) {
+    let state = evaluate(report, expected)
+    const retryCount = Number.isInteger(roster.retryCount) ? roster.retryCount : 0
+    for (let attempt = 1; state.outcome.exitCode === 1 && attempt <= retryCount; attempt++) {
+        const retryFiles = Array.from(new Set(state.problems.map(problem => problem.file)))
+        if (!retryFiles.length) break
+        console.log('\nlive tier: retry ' + attempt + '/' + retryCount + ' in a fresh process for:')
+        for (const file of retryFiles) console.log('  ' + file)
+        const retryReport = rerun(retryFiles)
+        if (!retryReport) break
+        state = evaluate(replaceReportFiles(state.report, retryReport, retryFiles), expected)
+    }
+    return state
+}
+
 function runMocha(files, roster, options = {}) {
     const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'xc714-live-')), 'report.json')
     const bin = path.join(REPO_ROOT, 'node_modules', '.bin', 'mocha')
@@ -532,34 +568,9 @@ function main(argv) {
         return 1
     }
 
-    let tally    = tallyByFile(report)
-    let problems = classify(expected, tally)
-    let outcome  = classifyReport(report, problems)
-
-    const retryCount = Number.isInteger(roster.retryCount) ? roster.retryCount : 0
-    for (let attempt = 1; outcome.exitCode === 1 && attempt <= retryCount; attempt++) {
-        const retryFiles = Array.from(new Set(problems.map(problem => problem.file)))
-        if (!retryFiles.length) break
-        console.log('\nlive tier: retry ' + attempt + '/' + retryCount + ' in a fresh process for:')
-        for (const file of retryFiles) console.log('  ' + file)
-        reapStaleFixtureContainers()
-        const retried = runMocha(retryFiles, roster, { forceDocker })
-        if (retried.error) {
-            console.error('live tier: could not start retry: ' + retried.error.message)
-            break
-        }
-        let retryReport
-        try {
-            retryReport = JSON.parse(fs.readFileSync(retried.out, 'utf8'))
-        } catch (e) {
-            console.error('live tier: retry wrote no readable report (' + e.message + ')')
-            break
-        }
-        report = replaceReportFiles(report, retryReport, retryFiles)
-        tally = tallyByFile(report)
-        problems = classify(expected, tally)
-        outcome = classifyReport(report, problems)
-    }
+    const settled = retryRedSuites(report, expected, roster, file => runRetry(file, roster, forceDocker))
+    report = settled.report
+    const { tally, problems, outcome } = settled
 
     console.log('')
     for (const line of mochaSummary(report)) console.log(line)
@@ -599,7 +610,7 @@ function main(argv) {
 }
 
 module.exports = { requiredSpecifiers, requiresChild, formatTally, childTally, childFiles, parentOf, discoverSuites, readRoster, auditRoster, suitesToRun, suitesExcluded, tallyByFile, classify,
-    mochaSummary, reportFile, replaceReportFiles, isDbPrivilegeError, isBeforeAllHookFailure, isDbPrivilegeBeforeAllFailure, classifyReport,
+    mochaSummary, reportFile, replaceReportFiles, retryRedSuites, isDbPrivilegeError, isBeforeAllHookFailure, isDbPrivilegeBeforeAllFailure, classifyReport,
     liveTierBlocker, mochaEnvironment, VENUE_EXIT, ROSTER_FILE, LIVE_DIR }
 
 if (require.main === module) process.exit(main(process.argv.slice(2)))
