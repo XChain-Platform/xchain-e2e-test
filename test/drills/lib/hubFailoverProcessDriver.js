@@ -82,6 +82,7 @@ class HubFailoverProcessDriver {
         })
     }
 
+    prepare () { return this.call('prepare') }
     observe () { return this.call('observe') }
     stopHub (id) { return this.call('stop-hub', [id]) }
     queueReport () { return this.call('queue-report') }
