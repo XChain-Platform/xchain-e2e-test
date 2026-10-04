@@ -12,7 +12,7 @@
 
 const assert = require('assert')
 const path = require('path')
-const { judgeRailRun, formatVerdict } = require('../../../scripts/rail-run-verdict')
+const { judgeRailRun, formatVerdict } = require('../../../../scripts/rail-run-verdict')
 
 const REPO_ROOT = path.join(path.sep, 'fake', 'rail-repo')
 const ALPHA = 'test/rail/alpha.rail.test.js'
