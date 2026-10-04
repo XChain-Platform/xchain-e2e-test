@@ -160,7 +160,7 @@ describe('MultiValidatorHub: cross-chain DEX match to indexer CROSS_SETTLE e2e (
                         "SELECT match_id FROM cross_chain_matches WHERE match_id = ? AND status = 'finalized'",
                         [matchId]);
                     if (r.length >= 1) held++;
-                } catch (_) { /* a hub that cannot be read has not persisted it */ }
+                } catch (internal) { /* a hub that cannot be read has not persisted it */ }
             }
             return { ok: held === mvh.hubs.length, held: held };
         }, { timeoutMs: SETTLE_MS, intervalMs: 100 });

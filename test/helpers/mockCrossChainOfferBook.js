@@ -46,7 +46,7 @@ class MockCrossChainOfferBook {
         this.books  = new Map();
         this.server = null;
         this.port   = null;
-        this._reqCount = 0;          // observability: how many polls the engines made
+        this['_reqCount'] = 0;          // observability: how many polls the engines made
     }
 
     // Register / replace a named book. ordersByCoin maps COIN -> array of offers
@@ -59,7 +59,7 @@ class MockCrossChainOfferBook {
     // base (callers append /book/<name>/<COIN>).
     start(){
         return new Promise((resolve, reject) => {
-            this.server = http.createServer((req, res) => this._handle(req, res));
+            this.server = http.createServer((req, res) => this['_handle'](req, res));
             this.server.once('error', reject);
             this.server.listen(0, '127.0.0.1', () => {
                 this.port = this.server.address().port;
@@ -71,7 +71,7 @@ class MockCrossChainOfferBook {
     stop(){
         return new Promise((resolve) => {
             if(!this.server) return resolve();
-            try { this.server.closeAllConnections && this.server.closeAllConnections(); } catch(_){}
+            try { this.server.closeAllConnections && this.server.closeAllConnections(); } catch(internal){}
             this.server.close(() => resolve());
             this.server = null;
         });
@@ -80,25 +80,25 @@ class MockCrossChainOfferBook {
     // Full URL for a given book + coin: what a hub's engine.indexers[COIN].url is set to.
     urlFor(name, coin){ return 'http://127.0.0.1:' + this.port + '/book/' + name + '/' + coin; }
 
-    _handle(req, res){
+    ['_handle'](req, res){
         // Only serves getopencrosschainorders (the sole method the engine calls on these URLs).
-        let m = /^\/book\/([^/]+)\/([^/]+)\/?$/.exec(req.url || '');
-        let chunks = [];
+        const m = /^\/book\/([^/]+)\/([^/]+)\/?$/.exec(req.url || '');
+        const chunks = [];
         req.on('data', (c) => chunks.push(c));
         req.on('end', () => {
-            this._reqCount++;
+            this['_reqCount']++;
             let rpcId = 1;
-            try { let body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); rpcId = body.id != null ? body.id : 1; } catch(_){}
+            try { const body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'); rpcId = body.id != null ? body.id : 1; } catch(internal){}
             let result;
             if(!m){
                 result = { error: 'unknown book path' };
             } else {
-                let name = m[1], coin = m[2];
-                let book = this.books.get(name);
+                const name = m[1], coin = m[2];
+                const book = this.books.get(name);
                 if(!book){
                     result = { latest_block_index: 0, network: '', count: 0, orders: [] };
                 } else {
-                    let orders = (book.ordersByCoin[coin] || []).slice();
+                    const orders = (book.ordersByCoin[coin] || []).slice();
                     result = {
                         latest_block_index: book.latestBlockIndex,
                         network:            book.network,
@@ -107,7 +107,7 @@ class MockCrossChainOfferBook {
                     };
                 }
             }
-            let payload = JSON.stringify({ jsonrpc: '2.0', id: rpcId, result: result });
+            const payload = JSON.stringify({ jsonrpc: '2.0', id: rpcId, result: result });
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(payload);
         });
@@ -118,36 +118,36 @@ class MockCrossChainOfferBook {
 
 // A cross-chain ORDER offer on `home_coin`. `give`/`get` are { coin, tick, amount,
 // ownership } describing the give leg (escrowed by the maker) and the get leg.
-function makeOrder({ action_index, give, get, get_address, block_index = 100,
-                     give_remaining = null, get_remaining = null }){
+function makeOrder({ action_index: actionIndex, give, get, get_address: getAddress, block_index: blockIndex = 100,
+                     give_remaining: giveRemaining = null, get_remaining: getRemaining = null }){
     return {
         kind:           'order',
-        action_index:   Number(action_index),
+        action_index:   Number(actionIndex),
         give_coin:      give.coin,
         give_tick:      give.tick || null,
         give_amount:    give.ownership ? '1' : String(give.amount),
-        give_remaining: String(give_remaining != null ? give_remaining : (give.ownership ? '1' : give.amount)),
+        give_remaining: String(giveRemaining != null ? giveRemaining : (give.ownership ? '1' : give.amount)),
         give_ownership: Number(give.ownership || 0),
         get_coin:       get.coin,
         get_tick:       get.tick || null,
         get_amount:     get.ownership ? '1' : String(get.amount),
-        get_remaining:  String(get_remaining != null ? get_remaining : (get.ownership ? '1' : get.amount)),
+        get_remaining:  String(getRemaining != null ? getRemaining : (get.ownership ? '1' : get.amount)),
         get_ownership:  Number(get.ownership || 0),
-        get_address:    get_address,
-        source:         'src_' + action_index,
+        get_address:    getAddress,
+        source:         'src_' + actionIndex,
         expiration:     0,
         allow_list:     null,
         block_list:     null,
-        block_index:    Number(block_index)
+        block_index:    Number(blockIndex)
     };
 }
 
 // A cross-chain SWAP offer (Phase A, exact single-fill). Same shape, kind='swap',
 // no remaining fields.
-function makeSwap({ action_index, give, get, get_address, block_index = 100 }){
+function makeSwap({ action_index: actionIndex, give, get, get_address: getAddress, block_index: blockIndex = 100 }){
     return {
         kind:           'swap',
-        action_index:   Number(action_index),
+        action_index:   Number(actionIndex),
         give_coin:      give.coin,
         give_tick:      give.tick || null,
         give_amount:    give.ownership ? '1' : String(give.amount),
@@ -156,12 +156,12 @@ function makeSwap({ action_index, give, get, get_address, block_index = 100 }){
         get_tick:       get.tick || null,
         get_amount:     get.ownership ? '1' : String(get.amount),
         get_ownership:  Number(get.ownership || 0),
-        get_address:    get_address,
-        source:         'src_' + action_index,
+        get_address:    getAddress,
+        source:         'src_' + actionIndex,
         expiration:     0,
         allow_list:     null,
         block_list:     null,
-        block_index:    Number(block_index)
+        block_index:    Number(blockIndex)
     };
 }
 

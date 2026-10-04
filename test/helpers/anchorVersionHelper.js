@@ -60,30 +60,30 @@
 
 const { loadHubModule } = require('./multiValidatorHubHelper');
 
-let _hubFlagDays = null;
+let internalHubFlagDays = null;
 
 // The hub's frozen flag-day predicates. Loaded lazily so a unit test that
 // injects its own flagDays never needs an xchain-hub checkout on disk.
 function hubFlagDays(){
-    if(!_hubFlagDays){
+    if(!internalHubFlagDays){
         const ckpt = loadHubModule('src/checkpoint_commitment_activation.js');
         const ar   = loadHubModule('src/consensus/gates/anchor_reward_gate.js');
-        _hubFlagDays = {
+        internalHubFlagDays = {
             isCheckpointCommitmentActive: ckpt.isCheckpointCommitmentActive,
             isAnchorRewardActive:         ar.isAnchorRewardActive,
             isArchiveRewardActive:        ar.isArchiveRewardActive
         };
     }
-    return _hubFlagDays;
+    return internalHubFlagDays;
 }
 
 // Version byte of an ANCHOR wire payload ('ANCHOR|<version>|...'), or null when
 // the payload is not an ANCHOR at all.
 function anchorPayloadVersion(payload){
     if(typeof payload !== 'string') return null;
-    let parts = payload.split('|');
+    const parts = payload.split('|');
     if(parts[0] !== 'ANCHOR') return null;
-    let v = Number(parts[1]);
+    const v = Number(parts[1]);
     return Number.isInteger(v) ? v : null;
 }
 
@@ -97,13 +97,13 @@ function checkpointCarriesRoots(cp){
            cp.state_root_version != null && cp.block_merkle_version != null;
 }
 
-function _resolve(cp, opts){
-    let flagDays      = (opts && opts.flagDays) || hubFlagDays();
-    let network       = String((opts && opts.network) || (cp && cp.network) || '');
-    let snapshotBlock = Number(cp && cp.snapshot_block);
+function internalResolve(cp, opts){
+    const flagDays      = (opts && opts.flagDays) || hubFlagDays();
+    const network       = String((opts && opts.network) || (cp && cp.network) || '');
+    const snapshotBlock = Number(cp && cp.snapshot_block);
     // The publisher only runs an attestation round when the hub has an identity
     // to name as the earner (`me`); without one it always takes the legacy leg.
-    let hasIdentity   = !opts || opts.hasIdentity !== false;
+    const hasIdentity   = !opts || opts.hasIdentity !== false;
     return { flagDays, network, snapshotBlock, hasIdentity };
 }
 
@@ -113,10 +113,10 @@ function _resolve(cp, opts){
 // `anchor_bundle` reward should follow; neither moves the version.
 // Returns { rootBearing, rewardActive, preferred, fallback, accepted, describe }.
 function expectedCheckpointAnchor(cp, opts = {}){
-    let { flagDays, network, snapshotBlock, hasIdentity } = _resolve(cp, opts);
-    let rootBearing  = flagDays.isCheckpointCommitmentActive(snapshotBlock, network) &&
+    const { flagDays, network, snapshotBlock, hasIdentity } = internalResolve(cp, opts);
+    const rootBearing  = flagDays.isCheckpointCommitmentActive(snapshotBlock, network) &&
                        checkpointCarriesRoots(cp);
-    let rewardActive = hasIdentity && flagDays.isAnchorRewardActive(snapshotBlock, network);
+    const rewardActive = hasIdentity && flagDays.isAnchorRewardActive(snapshotBlock, network);
     return {
         rootBearing, rewardActive,
         preferred: 0,
@@ -136,8 +136,8 @@ function expectedCheckpointAnchor(cp, opts = {}){
 // should follow; it no longer selects a version, because a degraded round now
 // stays WITHIN v1 as `ATTEST_SIG_COUNT 0`.
 function expectedArchiveAnchor(cp, opts = {}){
-    let { flagDays, network, snapshotBlock, hasIdentity } = _resolve(cp, opts);
-    let rewardActive = hasIdentity && flagDays.isArchiveRewardActive(snapshotBlock, network);
+    const { flagDays, network, snapshotBlock, hasIdentity } = internalResolve(cp, opts);
+    const rewardActive = hasIdentity && flagDays.isArchiveRewardActive(snapshotBlock, network);
     return {
         rewardActive,
         preferred: 1,
@@ -153,7 +153,7 @@ function expectedArchiveAnchor(cp, opts = {}){
 // First broadcast whose payload version is one of `accepted`. Broadcast entries
 // are { payload, txid, phase1_txid } as recorded by the acceptance suite's hook.
 function findAnchorBroadcast(broadcasts, accepted){
-    let want = new Set(accepted || []);
+    const want = new Set(accepted || []);
     return (broadcasts || []).find(b => want.has(anchorPayloadVersion(b && b.payload))) || null;
 }
 
@@ -161,7 +161,7 @@ function findAnchorBroadcast(broadcasts, accepted){
 // one of `accepted`, optionally narrowed to one ledger_hash so a dirty regtest
 // chain carrying a previous run's anchors cannot satisfy the assert.
 function findAnchorRow(rows, accepted, ledgerHash){
-    let want = new Set(accepted || []);
+    const want = new Set(accepted || []);
     return (rows || []).find(r =>
         want.has(Number(r && r.version)) &&
         (ledgerHash === undefined || String(r.ledger_hash) === String(ledgerHash))) || null;
@@ -185,22 +185,23 @@ const V0_SECTION_FIXED_FIELDS = 13;
 // different tests.
 function parseAnchorV0(payload){
     if(typeof payload !== 'string') return null;
-    let f = payload.split('|');
+    const f = payload.split('|');
     if(f[0] !== 'ANCHOR' || f[1] !== '0') return null;
-    let sectionCount = Number(f[4]);
+    const sectionCount = Number(f[4]);
     if(!Number.isInteger(sectionCount) || sectionCount < 1) return null;
 
-    let i = 5, sections = [];
+    let i = 5;
+    const sections = [];
     for(let n = 0; n < sectionCount; n++){
         if(i + V0_SECTION_FIXED_FIELDS > f.length)
             throw new Error('ANCHOR v0 truncated in section ' + n + ' of ' + sectionCount);
-        let sigCount = Number(f[i + 12]);
+        const sigCount = Number(f[i + 12]);
         if(!Number.isInteger(sigCount) || sigCount < 0)
             throw new Error('ANCHOR v0 section ' + n + ' has a non-numeric SIG_COUNT');
-        let sigBase = i + V0_SECTION_FIXED_FIELDS;
+        const sigBase = i + V0_SECTION_FIXED_FIELDS;
         if(sigBase + (sigCount * 2) > f.length)
             throw new Error('ANCHOR v0 section ' + n + ' declares ' + sigCount + ' signature(s) the wire does not carry');
-        let sigs = [];
+        const sigs = [];
         for(let s = 0; s < sigCount; s++)
             sigs.push({ pubkey: f[sigBase + (s * 2)], sig: f[sigBase + (s * 2) + 1] });
         sections.push({
@@ -215,11 +216,11 @@ function parseAnchorV0(payload){
     }
 
     if(i + 2 > f.length) throw new Error('ANCHOR v0 carries no publisher tail');
-    let publisher      = f[i];
-    let attestSigCount = Number(f[i + 1]);
+    const publisher      = f[i];
+    const attestSigCount = Number(f[i + 1]);
     if(!Number.isInteger(attestSigCount) || attestSigCount < 0)
         throw new Error('ANCHOR v0 has a non-numeric ATTEST_SIG_COUNT');
-    let attestSigs = [];
+    const attestSigs = [];
     for(let s = 0; s < attestSigCount; s++)
         attestSigs.push({ pubkey: f[i + 2 + (s * 2)], sig: f[i + 3 + (s * 2)] });
 
@@ -234,8 +235,8 @@ function parseAnchorV0(payload){
 // Every v0 bundle among a run's recorded broadcasts, parsed. The archive leg
 // (v1) and any prior run's wires are filtered out.
 function bundleBroadcasts(broadcasts){
-    let out = [];
-    for(let b of (broadcasts || [])){
+    const out = [];
+    for(const b of (broadcasts || [])){
         let parsed = null;
         try { parsed = parseAnchorV0(b && b.payload); } catch(e){ parsed = null; }
         if(parsed) out.push(Object.assign({}, b, { bundle: parsed }));
@@ -248,7 +249,7 @@ function bundleBroadcasts(broadcasts){
 // its sections' ledger_hash, which is what a caller has after a flush and what
 // keeps a dirty regtest chain's earlier bundles from satisfying an assert.
 function findBundleSectionRows(rows, ledgerHash){
-    let seed = (rows || []).find(r => Number(r && r.version) === 0 &&
+    const seed = (rows || []).find(r => Number(r && r.version) === 0 &&
                                       String(r.ledger_hash) === String(ledgerHash));
     if(!seed) return [];
     return (rows || [])

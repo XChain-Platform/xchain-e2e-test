@@ -28,22 +28,22 @@ module.exports = {
         // Wire-format: ownership side carries empty *_AMOUNT, native-coin side carries
         // empty *_TICK. The DB stores NULL for both. The waitFor predicate has to query
         // with null (not "") on those sides or the row will never match.
-        let giveAmountWire = (giveOwnership == 1) ? "" : giveAmount
-        let getAmountWire  = (getOwnership  == 1) ? "" : getAmount
-        let giveAmountQuery = (giveOwnership == 1) ? null : giveAmount
-        let getAmountQuery  = (getOwnership  == 1) ? null : getAmount
-        let giveTickQuery = (giveTick === "" || giveTick == null) ? null : giveTick
-        let getTickQuery  = (getTick  === "" || getTick  == null) ? null : getTick
+        const giveAmountWire = (giveOwnership == 1) ? "" : giveAmount
+        const getAmountWire  = (getOwnership  == 1) ? "" : getAmount
+        const giveAmountQuery = (giveOwnership == 1) ? null : giveAmount
+        const getAmountQuery  = (getOwnership  == 1) ? null : getAmount
+        const giveTickQuery = (giveTick === "" || giveTick == null) ? null : giveTick
+        const getTickQuery  = (getTick  === "" || getTick  == null) ? null : getTick
 
-        let orderMessage = "ORDER|0|"+giveCoin+"|"+giveTick+"|"+giveAmountWire+"|"+giveOwnership
+        const orderMessage = "ORDER|0|"+giveCoin+"|"+giveTick+"|"+giveAmountWire+"|"+giveOwnership
             +"|"+getCoin+"|"+getTick+"|"+getAmountWire+"|"+getOwnership+"|"+getAddress
             +"|"+expiration+"|"+allowList+"|"+blockList+"|"+memo
 
         console.log("Creating and sending ORDER V0 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, orderMessage)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, orderMessage)
 
         console.log("Waiting for ORDER in the database...")
-        let row = requireRow(await indexerDatabase.waitForOrder({
+        const row = requireRow(await indexerDatabase.waitForOrder({
             txHash: txHash,
             source: addressInfo["address"],
             giveCoin: giveCoin,
@@ -60,10 +60,10 @@ module.exports = {
     },
 
     async sendOrderCancelV1(addressInfo, orderActionIndex, memo){
-        let orderMessage = "ORDER|1|"+orderActionIndex+"|"+memo
+        const orderMessage = "ORDER|1|"+orderActionIndex+"|"+memo
 
         console.log("Creating and sending ORDER CANCEL V1 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, orderMessage)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, orderMessage)
 
         console.log("Waiting for ORDER cancel to be indexed...")
         await new Promise(r => setTimeout(r, 5000))
@@ -76,11 +76,11 @@ module.exports = {
         if (allowList == null) allowList = ""
         if (blockList == null) blockList = ""
 
-        let orderMessage = "ORDER|2|"+orderActionIndex
+        const orderMessage = "ORDER|2|"+orderActionIndex
             +"|"+expiration+"|"+allowList+"|"+blockList+"|"+(memo || "")
 
         console.log("Creating and sending ORDER EDIT V2 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, orderMessage)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, orderMessage)
 
         console.log("Waiting for ORDER edit to be indexed...")
         await new Promise(r => setTimeout(r, 5000))

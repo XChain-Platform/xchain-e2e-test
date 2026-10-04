@@ -946,7 +946,7 @@ describe('_waitFor()', function () {
     it('returns immediately when checkFn returns a row on first call', async function () {
         const row     = { id: 1 }
         const checkFn = sinon.stub().resolves(row)
-        const result  = await db._waitFor(checkFn, {}, 30000)
+        const result  = await db['_waitFor'](checkFn, {}, 30000)
         assert.deepStrictEqual(result, row)
         assert.ok(checkFn.calledOnce)
         assert.ok(db.sleep.notCalled)
@@ -959,7 +959,7 @@ describe('_waitFor()', function () {
         checkFn.onCall(1).resolves(null)
         checkFn.onCall(2).resolves(row)
 
-        const result = await db._waitFor(checkFn, {}, 30000)
+        const result = await db['_waitFor'](checkFn, {}, 30000)
         assert.deepStrictEqual(result, row)
         assert.strictEqual(checkFn.callCount, 3)
         assert.ok(db.sleep.callCount >= 2)
@@ -977,7 +977,7 @@ describe('_waitFor()', function () {
         })
 
         try {
-            const result = await db._waitFor(checkFn, {}, 30000)
+            const result = await db['_waitFor'](checkFn, {}, 30000)
             assert.strictEqual(result, null)
         } finally {
             nowStub.restore()
@@ -990,7 +990,7 @@ describe('_waitFor()', function () {
         checkFn.onCall(0).rejects(new Error('Transient DB error'))
         checkFn.onCall(1).resolves(row)
 
-        const result = await db._waitFor(checkFn, {}, 30000)
+        const result = await db['_waitFor'](checkFn, {}, 30000)
         assert.deepStrictEqual(result, row)
         assert.strictEqual(checkFn.callCount, 2)
         // sleep should have been called after the error

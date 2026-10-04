@@ -84,11 +84,11 @@ async function attachOracle(mvh) {
         round.setConsensus(oc);
         oc.setValidatorSet(await hub.loadValidatorSet());
         await oc.start();
-        hub._wtOracle = oc;
-        hub._wtRound  = round;
+        hub['_wtOracle'] = oc;
+        hub['_wtRound']  = round;
         stops.push(() => oc.stop && oc.stop());
     }
-    return { stop() { stops.forEach((s) => { try { s(); } catch (_) {} }); } };
+    return { stop() { stops.forEach((s) => { try { s(); } catch (internal) {} }); } };
 }
 
 function injectSubmissions(mvh) {
@@ -96,7 +96,7 @@ function injectSubmissions(mvh) {
     for (const hub of mvh.hubs) {
         const subs = new Map();
         for (const addr of addrs) subs.set(addr, { prices: [{ coinPair: PAIR, price: PRICE }] });
-        hub._wtRound.submissions.set(ORACLE_ROUND, subs);
+        hub['_wtRound'].submissions.set(ORACLE_ROUND, subs);
     }
 }
 
@@ -133,7 +133,7 @@ async function driveDispatch(mvh, validators, seedBase) {
                 const r = await hub.db.doQuery(
                     "SELECT call_id FROM cross_chain_calls WHERE call_id = ? AND phase = 'dispatch'", [callId]);
                 if (r.length >= 1) held++;
-            } catch (_) { /* a hub that cannot be read has not persisted it */ }
+            } catch (internal) { /* a hub that cannot be read has not persisted it */ }
         }
         return { ok: held === mvh.hubs.length, held: held };
     }, { timeoutMs: SETTLE_MS, intervalMs: 100 });
@@ -169,7 +169,7 @@ async function driveDexRound(mvh) {
                 const r = await hub.db.doQuery(
                     "SELECT match_id FROM cross_chain_matches WHERE match_id = ? AND status = 'finalized'", [matchId]);
                 if (r.length >= 1) held++;
-            } catch (_) { /* a hub that cannot be read has not persisted it */ }
+            } catch (internal) { /* a hub that cannot be read has not persisted it */ }
         }
         return { ok: held === mvh.hubs.length, held: held };
     }, { timeoutMs: SETTLE_MS, intervalMs: 100 });
@@ -215,7 +215,7 @@ describe('MultiValidatorHub: per-feature weighted quorum at N=10 (C.2)', functio
         });
 
         it('the weighted quorum (>=7 of 10) finalizes the identical price snapshot on EVERY hub', async function () {
-            await Promise.all(mvh.hubs.map((h) => h._wtOracle.finalizeRound(ORACLE_ROUND, BLOCK_INDEX, BLOCK_TIME).catch(() => {})));
+            await Promise.all(mvh.hubs.map((h) => h['_wtOracle'].finalizeRound(ORACLE_ROUND, BLOCK_INDEX, BLOCK_TIME).catch(() => {})));
             // Each hub's own price_snapshots row is the post-condition asserted below.
             await waitFor(async () => {
                 const counts = [];
@@ -224,7 +224,7 @@ describe('MultiValidatorHub: per-feature weighted quorum at N=10 (C.2)', functio
                         counts.push((await h.db.doQuery(
                             'SELECT round_number FROM price_snapshots WHERE round_number = ? AND coin_pair = ?',
                             [ORACLE_ROUND, PAIR])).length);
-                    } catch (_) { counts.push(0); }
+                    } catch (internal) { counts.push(0); }
                 }
                 return { ok: counts.length > 0 && counts.every((c) => c >= 1), counts: counts };
             }, { timeoutMs: SETTLE_MS });

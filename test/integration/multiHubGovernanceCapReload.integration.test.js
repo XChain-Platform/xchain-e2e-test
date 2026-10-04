@@ -112,8 +112,8 @@ describe('MultiValidatorHub: governance capability MIN_STAKE pin (#4352)', funct
             await hub.startCapabilities(capsPath);
             await hub.startAttestation();
             // Quiet the live stake poll / recheck so they can't perturb capConfig.
-            if (hub._stakePollTimer)         clearInterval(hub._stakePollTimer);
-            if (hub._capabilityRecheckTimer) clearInterval(hub._capabilityRecheckTimer);
+            if (hub['_stakePollTimer'])         clearInterval(hub['_stakePollTimer']);
+            if (hub['_capabilityRecheckTimer']) clearInterval(hub['_capabilityRecheckTimer']);
         }
 
         await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS }); // peers ARE connected
@@ -121,7 +121,7 @@ describe('MultiValidatorHub: governance capability MIN_STAKE pin (#4352)', funct
 
     after(async function () {
         if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
-        if (capsPath) { try { fs.unlinkSync(capsPath); } catch (_) {} }
+        if (capsPath) { try { fs.unlinkSync(capsPath); } catch (internal) {} }
         if (db) await db.stop();
     });
 

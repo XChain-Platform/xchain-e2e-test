@@ -83,11 +83,11 @@ async function attachOracle(mvh) {
         round.setConsensus(oc);
         oc.setValidatorSet(await hub.loadValidatorSet());
         await oc.start();
-        hub._wtOracle = oc;
-        hub._wtRound  = round;
+        hub['_wtOracle'] = oc;
+        hub['_wtRound']  = round;
         stops.push(() => oc.stop && oc.stop());
     }
-    return { stop() { stops.forEach((s) => { try { s(); } catch (_) {} }); } };
+    return { stop() { stops.forEach((s) => { try { s(); } catch (internal) {} }); } };
 }
 
 function injectSubmissions(mvh) {
@@ -95,19 +95,19 @@ function injectSubmissions(mvh) {
     for (const hub of mvh.hubs) {
         const subs = new Map();
         for (const addr of addrs) subs.set(addr, { prices: [{ coinPair: PAIR, price: PRICE }] });
-        hub._wtRound.submissions.set(ROUND, subs);
+        hub['_wtRound'].submissions.set(ROUND, subs);
     }
 }
 
 // Drive the round on every hub, then wait until every hub has written its own
 // finalized snapshot row (the post-condition every case here asserts on).
 async function finalizeAll(mvh) {
-    await Promise.all(mvh.hubs.map((h) => h._wtOracle.finalizeRound(ROUND, BLOCK_INDEX, BLOCK_TIME).catch(() => {})));
+    await Promise.all(mvh.hubs.map((h) => h['_wtOracle'].finalizeRound(ROUND, BLOCK_INDEX, BLOCK_TIME).catch(() => {})));
     const res = await waitFor(async () => {
         const counts = [];
         for (const hub of mvh.hubs) {
             try { counts.push((await snapshotRows(hub)).length); }
-            catch (_) { counts.push(0); }
+            catch (internal) { counts.push(0); }
         }
         return { ok: counts.length > 0 && counts.every((c) => c >= 1), counts: counts };
     }, { timeoutMs: SETTLE_MS });

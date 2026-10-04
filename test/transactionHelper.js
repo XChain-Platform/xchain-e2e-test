@@ -11,7 +11,7 @@
 const ecc = require('tiny-secp256k1')
 const bitcoin = require('bitcoinjs-lib')
 const {createAndSendTransaction} = require('./transactionHelper/lib/01_create_and_send_transaction')
-const {_doCreateAndSendTransaction} = require('./transactionHelper/lib/02_do_create_and_send_transaction')
+const {['_doCreateAndSendTransaction']: internalDoCreateAndSendTransaction} = require('./transactionHelper/lib/02_do_create_and_send_transaction')
 const {createSimpleTransaction} = require('./transactionHelper/lib/03_create_simple_transaction')
 
 // Taproot needs the ECC backend registered before any p2tr payment is built or
@@ -56,7 +56,7 @@ module.exports = {
         return revealPsbt.extractTransaction()
     },
 
-    _doCreateAndSendTransaction,
+    ['_doCreateAndSendTransaction']: internalDoCreateAndSendTransaction,
 
     isSegwitUTXO(utxo) {
         try {

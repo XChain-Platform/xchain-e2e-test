@@ -76,7 +76,7 @@ describe('PRICE v1 Reorg: a published oracle quote rolls back across an on-chain
         assert(priceActionIndex !== undefined && priceActionIndex !== null, 'price has an action_index')
 
         // Pre-reorg: the quote is recorded valid.
-        let row = await priceRow(priceActionIndex)
+        const row = await priceRow(priceActionIndex)
         assert(row, 'price row exists pre-reorg')
         assert.strictEqual(row.validation_status, 'valid', 'quote is valid pre-reorg')
         const priceBlock = await blockOfAction(priceActionIndex)

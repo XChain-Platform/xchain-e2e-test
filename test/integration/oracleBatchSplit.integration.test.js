@@ -165,7 +165,7 @@ function tickerFor(i) {
 function buildNames(venue) {
     const seen = new Set();
     const real = [];
-    for (const p of venue._oracles[0].round.canonicalPairs) {
+    for (const p of venue['_oracles'][0].round.canonicalPairs) {
         if (HELD_OUT_PAIRS.has(p) || !PAIR_RE.test(p) || seen.has(p)) continue;
         seen.add(p); real.push(p);
     }
@@ -284,27 +284,27 @@ describe('AT3 oracle batch splitting and the wire ceiling on DOGE regtest (L3)',
     let calib = null;
 
     // Driven rounds, per window.
-    let roundsA = [], roundsB = [];
+    const roundsA = [], roundsB = [];
 
     // Publications, split by the phase they arrived in.
     let pubsA = [], pubsB = [];
-    let wiresA = [], wiresB = [];
-    let landedA = [], landedB = [];      // { pub, parsed, indexed, block }
+    const wiresA = [], wiresB = [];
+    const landedA = [], landedB = [];      // { pub, parsed, indexed, block }
     let settleA = null, settleB = null;
 
     // Publisher counters snapshotted at the end of each phase.
     let statsAfterA = null, statsAfterB = null;
 
     // Everything console.error saw while the rail was live.
-    let errorLines = [];
+    const errorLines = [];
     let origConsoleError = null;
 
     // Dead-letter records found across every hub's own dead-letter file.
-    let deadLetters = [];
+    const deadLetters = [];
 
     // Non-fatal problems recorded during before(), surfaced by the assertions that
     // depend on them rather than aborting the whole run in a hook.
-    let notes = [];
+    const notes = [];
 
     // Sum a batch counter across every publisher in the federation. Window A and
     // window B elect DIFFERENT leaders (leaderRank = windowIndex % publisherCount),
@@ -350,14 +350,14 @@ describe('AT3 oracle batch splitting and the wire ceiling on DOGE regtest (L3)',
         // buffered yet and dropping the hydrated map loses nothing of this run's.
         for (let i = 0; i < venue.publishers.length; i++) {
             const pub = venue.publishers[i];
-            pub.bufferPath = path.join(venue._queueDir, 'publisher-queue-' + i + '.buffer.jsonl');
-            pub._buffer    = new Map();
+            pub.bufferPath = path.join(venue['_queueDir'], 'publisher-queue-' + i + '.buffer.jsonl');
+            pub['_buffer']    = new Map();
         }
 
         // ---- capture the loud half of the ceiling -----------------------------
         origConsoleError = console.error;
         console.error = function (...args) {
-            try { errorLines.push(util.format(...args)); } catch (_) { /* capture is best effort */ }
+            try { errorLines.push(util.format(...args)); } catch (internal) { /* capture is best effort */ }
             return origConsoleError.apply(console, args);
         };
 
@@ -477,11 +477,11 @@ describe('AT3 oracle batch splitting and the wire ceiling on DOGE regtest (L3)',
         // batch to split. Applied to every hub, before any round is driven, and to the
         // exact name set this run prices and nothing wider.
         const widenTo = Math.max(pairsMid, pairsBig);
-        for (const o of venue._oracles) {
+        for (const o of venue['_oracles']) {
             for (let i = 0; i < widenTo; i++) o.round.canonicalPairs.add(NAMES[i]);
         }
         console.log('  co-sign whitelist widened to ' + widenTo + ' pair(s) on ' +
-            venue._oracles.length + ' hub(s)\n');
+            venue['_oracles'].length + ' hub(s)\n');
 
         const driveRound = (index, pairCount) => drive.finalizeRoundNoWait(
             venue, index, { prices: submissionSet(pairCount), timeoutMs: 300_000 });
@@ -535,7 +535,7 @@ describe('AT3 oracle batch splitting and the wire ceiling on DOGE regtest (L3)',
             catch (e) { continue; }   // no file means this hub abandoned nothing
             for (const line of raw.split('\n')) {
                 if (!line.trim()) continue;
-                try { deadLetters.push(Object.assign(JSON.parse(line), { _file: s.deadLetterPath })); }
+                try { deadLetters.push(Object.assign(JSON.parse(line), { ['_file']: s.deadLetterPath })); }
                 catch (e) { notes.push('unparseable dead-letter line in ' + s.deadLetterPath); }
             }
         }

@@ -546,7 +546,7 @@ describe('XPOLICY: hub-signed policy snapshot to indexer settle pass (policy AT1
                             "SELECT snapshot_id FROM policy_snapshots WHERE origin_chain = 'BTC' AND tick = ? AND status = 'finalized'",
                             [TICK]);
                         if(r.length >= 1) seen++;
-                    } catch(_){ /* a hub that cannot be read has not persisted it */ }
+                    } catch(internal){ /* a hub that cannot be read has not persisted it */ }
                 }
                 return { ok: seen === mvh.hubs.length, seen: seen };
             }, { timeoutMs: ROUND_MS, intervalMs: 200 });

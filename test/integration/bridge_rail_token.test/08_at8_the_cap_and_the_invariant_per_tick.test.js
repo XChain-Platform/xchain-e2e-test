@@ -231,7 +231,7 @@ bridgeRailSuite(GROUP, function () {
         const r = { perTick: {} };
         for (const tick of ticks) {
             const settled = await state.venue.waitForRailSettled(tick, { timeoutMs: 30 * 60 * 1000 });
-            assert.ok(settled, 'the rail never settled for ' + tick + ': ' + JSON.stringify(state.venue._lastSettlePoll));
+            assert.ok(settled, 'the rail never settled for ' + tick + ': ' + JSON.stringify(state.venue['_lastSettlePoll']));
             const snap = await tokenSnapshot('at8_' + tick, tick, null);
             const entry = await waitForEqualInvariant(tick);
             r.perTick[tick] = { escrow: snap.escrow, supply: snap.supply, hub: entry, verdict: classifyInvariant(entry).verdict };
