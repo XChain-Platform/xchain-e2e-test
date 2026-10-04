@@ -13,7 +13,7 @@
 const assert = require('assert')
 const path = require('path')
 
-const { MIRROR_SQL, readDDL } = require('../../helpers/hubDbMirrorSchema')
+const { MIRROR_SQL, readDDL } = require('../../helpers/hub_db_mirror/schema')
 const registry = require(path.resolve(__dirname,
     '../../../../xchain-indexer/src/hub/hub_db_sync/mirror_tables.js'))
 

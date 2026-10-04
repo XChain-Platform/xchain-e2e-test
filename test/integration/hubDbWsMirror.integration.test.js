@@ -38,7 +38,7 @@ const { WebSocketServer } = require('ws');
 const HubDbBroadcaster = require('../../../xchain-hub/src/peers/hub_db_broadcaster');
 const HubDbSync        = require('../../../xchain-indexer/src/hub/hub_db_sync');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
-const { MIRROR_SQL, readDDL } = require('../helpers/hubDbMirrorSchema');
+const { MIRROR_SQL, readDDL } = require('../helpers/hub_db_mirror/schema');
 
 // HubDbSync must find every mirrored local table before startup and bootstrap.
 // Omitting even an unasserted table leaves the bootstrap barrier closed, which prevents
