@@ -1,0 +1,64 @@
+{
+    "suites": [
+        {
+            "file": "test/smoke/001-bootstrap.smoke.js",
+            "run": true
+        },
+        {
+            "file": "test/smoke/002-connectivity.smoke.js",
+            "run": true
+        },
+        {
+            "file": "test/smoke/003-database.smoke.js",
+            "run": true
+        },
+        {
+            "file": "test/smoke/004-crypto.smoke.js",
+            "run": true
+        },
+        {
+            "file": "test/smoke/005-mining.smoke.js",
+            "run": true
+        },
+        {
+            "file": "test/smoke/006-gas-token.smoke.js",
+            "run": true
+        },
+        {
+            "file": "test/smoke/007-minimal-e2e.smoke.js",
+            "run": true
+        },
+        {
+            "file": "test/actions/send.test.js",
+            "run": true
+        },
+        {
+            "file": "test/actions/issue.test.js",
+            "run": true
+        },
+        {
+            "file": "test/actions/order.test.js",
+            "run": true
+        },
+        {
+            "file": "test/actions/staking.test.js",
+            "run": true
+        },
+        {
+            "file": "test/actions/onboard_validator.test.js",
+            "run": true
+        },
+        {
+            "file": "test/actions/attestation.test.js",
+            "run": true
+        },
+        {
+            "file": "test/actions/price.test.js",
+            "run": true
+        },
+        {
+            "file": "test/actions/consensus_hash_conformance.test.js",
+            "run": true
+        }
+    ]
+}
