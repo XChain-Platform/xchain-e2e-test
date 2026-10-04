@@ -68,8 +68,8 @@ const crypto = require('crypto');
 const { encode: wifEncode } = require('wif');
 
 const cryptoHelper   = require('../cryptoHelper');
-const CryptoNetworks = require('../../src/CryptoNetworks');
-const { makeSdk }    = require('../sdk/sdkHelper');
+const CryptoNetworks = require('../../src/crypto_networks');
+const { makeSdk }    = require('../sdk/helpers/sdkHelper');
 const { MultiValidatorHub, ValidatorIdentity, loadHubModule } = require('../helpers/multiValidatorHubHelper');
 const anchorVersions = require('../helpers/anchorVersionHelper');
 

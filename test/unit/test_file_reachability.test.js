@@ -35,11 +35,11 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..');
 // is itself a failure, so this list cannot quietly outlive its reasons.
 const INTENTIONALLY_UNRUN = [
     {
-        file: 'test/attestMirror/releaseLeakedStakes.js',
+        file: 'test/attestMirror/helpers/releaseLeakedStakes.js',
         why: 'Repair tool, not coverage: it BROADCASTS an UNSTAKE for every staker key a failed drill recorded, so a script that ran it as part of a suite would release stakes a healthy run still needs. Driven by name when a teardown could not finish, with RELEASE_LABEL naming the drill whose keys to release; its own header carries the invocation. It is deliberately not a *.test.js file so the attest-mirror glob cannot collect it either.'
     },
     {
-        file: 'test/drills/physicalByzantine.drill.js',
+        file: 'test/drills/physical_byzantine_drill.test.js',
         why: 'Hand-driven Byzantine drill against a live multi-host stack; test/drills/README.md carries the invocation and the operator preconditions it needs.'
     },
     {
@@ -83,7 +83,7 @@ const INTENTIONALLY_UNRUN = [
         why: 'Hermetic cover for the testnet settlement drill, run by the npx line in test/drills/README.md like the other drill unit files; folding it into test:unit is the same deliberate decision.'
     },
     {
-        file: 'test/sdk/xcallStakeValidators.js',
+        file: 'test/sdk/helpers/xcallStakeValidators.js',
         why: 'A one-shot federation staking driver rather than a regression suite: its header carries the XCALL_STAKE_PUBKEYS invocation, and the XCALL expiry suite names it as a step to run by hand first.'
     }
 ];

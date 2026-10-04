@@ -30,7 +30,7 @@ else console.log('Skipping ANCHOR fold live acceptance: E2E_REQUIRE_FEDERATION=1
 
 const venueHooks = require('../../initialCheck.test.js').mochaHooks;
 const cryptoHelper = require('../../cryptoHelper');
-const CryptoNetworks = require('../../../src/CryptoNetworks');
+const CryptoNetworks = require('../../../src/crypto_networks');
 const {
     MultiValidatorHub,
     ValidatorIdentity,

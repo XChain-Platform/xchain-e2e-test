@@ -27,7 +27,7 @@
  ********************************************************************/
 
 const { expect } = require('chai');
-const { makeSdk, submit, fundedGasAddress, fundedSdkAddress, uniqueTick, submitOpts } = require('./sdkHelper');
+const { makeSdk, submit, fundedGasAddress, fundedSdkAddress, uniqueTick, submitOpts } = require('./helpers/sdkHelper');
 
 function haveConnectors() {
     return !!(global.regtestMinerConnector && global.utxoTrackerConnector && global.nodeConnector);

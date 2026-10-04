@@ -15,7 +15,7 @@ const ecc = require('tiny-secp256k1')
 const { BIP32Factory } = require('bip32')
 const bip32 = BIP32Factory(ecc)
 const bitcoin = require('bitcoinjs-lib')
-const CryptoNetworks = require('../src/CryptoNetworks')
+const CryptoNetworks = require('../src/crypto_networks')
 
 global.wallets = {}
 

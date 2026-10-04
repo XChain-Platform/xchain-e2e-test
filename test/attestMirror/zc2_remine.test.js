@@ -55,14 +55,14 @@ const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
     provisionDrillIdentities, waitForVenueIndexersAtTip, startAttestTestServer, deployRequestContract,
     mineWhile,
-} = require('./mirrorDrillFixture')
+} = require('./helpers/mirrorDrillFixture')
 const {
     APPLIED_FIELDS, untilOrClearDogeStall, diffRows,
     waitForMirrorRowEverywhere, waitForAppliedEverywhere, waitForHeightWithClear,
     readAppliedResponse, readContractState, readRequestRow, readAttestRewards, rawAttestRewards,
     venueTipProbe, findEmittedAttestRequest, attestRequestWatermark,
     clearBeforeBroadcast, settleOrReport, feeLines, allHubTails, jsonSafe,
-} = require('./mirrorDrillWaits')
+} = require('./helpers/mirrorDrillWaits')
 const vmHelper     = require('../helpers/vmHelper')
 const cryptoHelper = require('../cryptoHelper')
 

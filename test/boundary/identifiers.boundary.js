@@ -16,7 +16,7 @@
 const assert = require('assert')
 const sinon = require('sinon')
 
-const CryptoNetworks = require('../../src/CryptoNetworks')
+const CryptoNetworks = require('../../src/crypto_networks')
 
 global.wallets = {}
 global.regtestMinerConnector = { sendFunds: async () => 'txid-stub' }

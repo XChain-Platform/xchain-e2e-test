@@ -31,7 +31,7 @@
 
 const { expect } = require('chai');
 const axios = require('axios');
-const { makeSdk, submit, fundedGasAddress, mine, submitOpts } = require('./sdkHelper');
+const { makeSdk, submit, fundedGasAddress, mine, submitOpts } = require('./helpers/sdkHelper');
 
 const CONTRACT_A = `
     module.exports = {

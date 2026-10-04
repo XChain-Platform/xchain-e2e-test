@@ -87,7 +87,7 @@ with:
 | `lib/drillNode.js` | One validator, one process. Configured by environment, driven over stdio. |
 | `lib/drillRunner.js` | Spawns validators locally or over ssh and speaks the control protocol. |
 | `lib/protocol.js` | The tagged newline-JSON control channel. |
-| `physicalByzantine.drill.js` | The drill: phases A to F at N=7 and N=10. |
+| `physical_byzantine_drill.test.js` | The drill: phases A to F at N=7 and N=10. |
 | `unit/` | Everything above that can be proven without hardware. |
 
 ## Phases
@@ -136,7 +136,7 @@ export XCHAIN_DRILL_HOSTS='[
   {"id":"boxB","ssh":"<user>@boxb.example","advertise":"<boxB routable ip>",
    "hubPath":"<remote hub checkout>","envFile":"<remote credentials file>"}
 ]'
-npx mocha --no-config --timeout 0 --exit test/drills/physicalByzantine.drill.js
+npx mocha --no-config --timeout 0 --exit test/drills/physical_byzantine_drill.test.js
 ```
 
 `advertise` must be the address the **other** boxes dial. Every validator's

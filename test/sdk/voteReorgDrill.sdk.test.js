@@ -40,7 +40,7 @@
 
 const { expect } = require('chai');
 const cryptoHelper = require('../cryptoHelper');
-const { makeSdk, submit, fundedGasAddress, mine, uniqueTick, submitOpts } = require('./sdkHelper');
+const { makeSdk, submit, fundedGasAddress, mine, uniqueTick, submitOpts } = require('./helpers/sdkHelper');
 
 function haveConnectors() {
     return global.nodeConnector && global.regtestMinerConnector && global.indexerDatabase;

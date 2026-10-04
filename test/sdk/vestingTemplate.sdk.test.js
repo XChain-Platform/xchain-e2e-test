@@ -33,7 +33,7 @@
 const fs   = require('fs');
 const path = require('path');
 const { expect } = require('chai');
-const { makeSdk, submit, fundedGasAddress, uniqueTick, mine, submitOpts } = require('./sdkHelper');
+const { makeSdk, submit, fundedGasAddress, uniqueTick, mine, submitOpts } = require('./helpers/sdkHelper');
 
 function loadTemplate(name) {
     const rel = path.join(name, name + '.js');

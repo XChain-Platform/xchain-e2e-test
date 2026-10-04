@@ -52,8 +52,8 @@ const rows = require('../helpers/barrierFamilyRows')
 const drive = require('../helpers/barrierFamilyDrive')
 const {
     provisionDrillIdentities, startAttestTestServer, deployRequestContract, settleStack, readContractState, mineWhile,
-} = require('../mirrorDrillFixture')
-const { findEmittedAttestRequest, waitForMirrorRowEverywhere, waitForAppliedEverywhere, widenArithmetic } = require('../mirrorDrillWaits')
+} = require('../helpers/mirrorDrillFixture')
+const { findEmittedAttestRequest, waitForMirrorRowEverywhere, waitForAppliedEverywhere, widenArithmetic } = require('../helpers/mirrorDrillWaits')
 const vmHelper = require('../../helpers/vmHelper')
 
 const BUILD_ROOT = path.resolve(__dirname, '..', '..', '..', '..')

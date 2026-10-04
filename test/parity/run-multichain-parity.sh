@@ -114,4 +114,4 @@ ARGS=()
 for COIN in "${COINS[@]}"; do
   ARGS+=("$COIN=$PARITY_OUT_DIR/digest-$COIN.json")
 done
-node "$E2E_DIR/test/parity/compare.js" "${ARGS[@]}"
+node "$E2E_DIR/test/parity/helpers/compare.js" "${ARGS[@]}"

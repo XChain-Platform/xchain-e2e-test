@@ -22,7 +22,7 @@ const bitcoin = require('bitcoinjs-lib')
 const { ECPairFactory } = require('ecpair')
 const ecc = require('tiny-secp256k1')
 const ECPair = ECPairFactory(ecc)
-const { saveGlobals, restoreGlobals, GLOBAL_KEYS } = require('./chaos-helpers')
+const { saveGlobals, restoreGlobals, GLOBAL_KEYS } = require('./helpers/chaos_helpers')
 const transactionHelper = require('../transactionHelper')
 
 function createAddressInfo() {

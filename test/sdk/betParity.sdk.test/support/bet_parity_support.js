@@ -15,7 +15,7 @@
 const { expect } = require('chai');
 const path       = require('path');
 const cryptoHelper = require('../../../cryptoHelper');
-const { dbQuery } = require('../../betHelper');
+const { dbQuery } = require('../../helpers/betHelper');
 
 // The follower's copy of the state-hash preimage builder. Byte-aligned twin of
 // xchain-indexer/src/consensus/state_hash.js (their equality is locked by

@@ -69,7 +69,7 @@ const assert = require('assert');
 const chainRail         = require('../helpers/chainRail');
 const stakeTeardown     = require('../helpers/stakeTeardown');
 const cryptoHelper      = require('../cryptoHelper');
-const fixture           = require('../attestMirror/mirrorDrillFixture');
+const fixture           = require('../attestMirror/helpers/mirrorDrillFixture');
 const {
     BridgeRailVenue,
     resolveVenueQuorum,

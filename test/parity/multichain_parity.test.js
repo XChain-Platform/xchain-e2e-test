@@ -35,9 +35,9 @@
 
 const path = require('path');
 const { expect } = require('chai');
-const { makeSdk, GAS_TICK, submitOpts } = require('../sdk/sdkHelper');
-const { buildRoles, corpus, resolveParams, PIN_T0 } = require('./parityCorpus');
-const { captureLiveDigest, writeDigest } = require('./digest');
+const { makeSdk, GAS_TICK, submitOpts } = require('../sdk/helpers/sdkHelper');
+const { buildRoles, corpus, resolveParams, PIN_T0 } = require('./helpers/parityCorpus');
+const { captureLiveDigest, writeDigest } = require('./helpers/digest');
 
 // Baseline height every chain is mined to before the pinned corpus. Must be
 // ABOVE any fresh regtest install's post-funding height AND identical across

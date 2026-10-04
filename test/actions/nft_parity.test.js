@@ -24,8 +24,8 @@
  *   - collection provenance: a child sub-TICK is valid only from the parent owner
  *
  * Native fee is injected automatically by transactionHelper/nativeFeeHelper on
- * fee chains. Run AFTER _ctlseed.test.js so the {COIN}/USD snapshot is fresh:
- *   ctl-run-doge.sh test/actions/_ctlseed.test.js test/actions/nft_parity.test.js
+ * fee chains. Run AFTER ctlseed.test.js so the {COIN}/USD snapshot is fresh:
+ *   ctl-run-doge.sh test/actions/ctlseed.test.js test/actions/nft_parity.test.js
  ********************************************************************/
 
 const assert            = require('assert')

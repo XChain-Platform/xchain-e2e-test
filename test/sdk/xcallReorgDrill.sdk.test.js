@@ -34,7 +34,7 @@ const { expect } = require('chai');
 const axios = require('axios');
 const mariadb = require('mariadb');
 const { execSync } = require('child_process');
-const { makeSdk, submit, fundedGasAddress, mine, submitOpts } = require('./sdkHelper');
+const { makeSdk, submit, fundedGasAddress, mine, submitOpts } = require('./helpers/sdkHelper');
 
 const CONTRACT_A = `
     module.exports = {

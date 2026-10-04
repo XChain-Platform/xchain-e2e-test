@@ -483,7 +483,7 @@ describe('oracleBatchReplay: the credential path', function () {
 
 describe('oracleBatchBarrierTestnet: the launcher environment contract (row 41)', function () {
 
-    const drill = require('../drills/oracleBatchBarrierTestnet.drill.js');
+    const drill = require('../drills/lib/oracle_batch_barrier_testnet.js');
 
     // The complete set the launcher exports, by name.
     function fullEnv() {

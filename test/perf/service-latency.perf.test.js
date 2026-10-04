@@ -27,7 +27,7 @@ const assert = require('assert')
  * are logged for visibility but not gated. Correctness is checked first so a fast
  * failure (connection refused -> instant `false`) can't sneak under a latency bar.
  *
- * Complements test/perf/perfCollector.js + the performance-reporter, which
+ * Complements test/perf/helpers/perfCollector.js + the performance-reporter, which
  * measure whole-suite timing as a wrapper; this file is the only place that
  * asserts per-service latency contracts directly.
  */

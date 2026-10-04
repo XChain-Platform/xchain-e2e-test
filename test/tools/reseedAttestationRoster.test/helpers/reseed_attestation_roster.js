@@ -18,7 +18,7 @@ const stakeHelper   = require('../../../helpers/stakeHelper')
 const gasHelper     = require('../../../helpers/gasHelper')
 const stakeTeardown = require('../../../helpers/stakeTeardown')
 const { loadHubModule } = require('../../../helpers/multiValidatorHubHelper')
-const fixture       = require('../../../attestMirror/mirrorDrillFixture')
+const fixture       = require('../../../attestMirror/helpers/mirrorDrillFixture')
 
 const RESEED_COUNT        = Number(process.env.RESEED_COUNT || 5)
 const RESEED_STAKE_XCHAIN = String(process.env.RESEED_STAKE_XCHAIN || '50000.00000000')
@@ -154,7 +154,7 @@ function classifySeatedForReseed (seatedPubkeys, known, allowRaw) {
 
 // Exported for the unit tier. The suite below stakes on a live venue, so a unit
 // test must reach this function WITHOUT registering that suite; see
-// test/unit/tools/reseedAttestationRoster.test.js for how it does that.
+// test/unit/tools/reseed_attestation_roster.test.js for how it does that.
 module.exports = {
     assert, cryptoHelper, stakeHelper, gasHelper, stakeTeardown, loadHubModule, fixture,
     RESEED_COUNT, RESEED_STAKE_XCHAIN, RESEED_GAS_XCHAIN, RESEED_ALLOW_SEATED,

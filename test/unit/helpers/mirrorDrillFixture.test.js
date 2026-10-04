@@ -22,7 +22,7 @@
 
 const assert = require('assert')
 
-const { stakeVisibilityBlocks } = require('../../attestMirror/mirrorDrillFixture')
+const { stakeVisibilityBlocks } = require('../../attestMirror/helpers/mirrorDrillFixture')
 const stakeHelper = require('../../helpers/stakeHelper')
 const { loadHubModule } = require('../../helpers/multiValidatorHubHelper')
 
@@ -99,8 +99,8 @@ describe('mirrorDrillFixture: stake visibility distance', function () {
 })
 
 describe('mirrorDrillFixture: withWedgeClear', function () {
-    const { withWedgeClear } = require('../../attestMirror/mirrorDrillFixture')
-    const waitsPath = require.resolve('../../attestMirror/mirrorDrillWaits')
+    const { withWedgeClear } = require('../../attestMirror/helpers/mirrorDrillFixture')
+    const waitsPath = require.resolve('../../attestMirror/helpers/mirrorDrillWaits')
     let savedWaits
 
     // The helper lazy-requires mirrorDrillWaits (a cycle otherwise), so the
@@ -210,9 +210,9 @@ describe('mirrorDrillFixture: withWedgeClear', function () {
 })
 
 describe('mirrorDrillFixture: clearWedgeBefore, and the broadcast-safety rule it enforces', function () {
-    const fixturePath = require.resolve('../../attestMirror/mirrorDrillFixture')
-    const { clearWedgeBefore } = require('../../attestMirror/mirrorDrillFixture')
-    const waitsPath = require.resolve('../../attestMirror/mirrorDrillWaits')
+    const fixturePath = require.resolve('../../attestMirror/helpers/mirrorDrillFixture')
+    const { clearWedgeBefore } = require('../../attestMirror/helpers/mirrorDrillFixture')
+    const waitsPath = require.resolve('../../attestMirror/helpers/mirrorDrillWaits')
     let savedWaits
 
     function stubWaits (stub) {
@@ -311,8 +311,8 @@ describe('mirrorDrillFixture: clearWedgeBefore, and the broadcast-safety rule it
 })
 
 describe('mirrorDrillFixture: withWedgeClear also pre-clears', function () {
-    const { withWedgeClear } = require('../../attestMirror/mirrorDrillFixture')
-    const waitsPath = require.resolve('../../attestMirror/mirrorDrillWaits')
+    const { withWedgeClear } = require('../../attestMirror/helpers/mirrorDrillFixture')
+    const waitsPath = require.resolve('../../attestMirror/helpers/mirrorDrillWaits')
     let savedWaits
 
     function stubWaits (stub) {
@@ -379,7 +379,7 @@ describe('mirrorDrillFixture: withWedgeClear also pre-clears', function () {
 })
 
 describe('mirrorDrillFixture: queryVenueDb selects the database it validates', function () {
-    const { queryVenueDb } = require('../../attestMirror/mirrorDrillFixture')
+    const { queryVenueDb } = require('../../attestMirror/helpers/mirrorDrillFixture')
     const mariadbPath = require.resolve('mariadb')
     let saved
 
@@ -433,7 +433,7 @@ describe('mirrorDrillFixture: queryVenueDb selects the database it validates', f
 
 describe('mirrorDrillFixture: the venue adopts the roll-call roster', function () {
     const { _pubkeyForSeed, _knownSignerSeeds, IDLE_GENERATION_SCAN } =
-        require('../../attestMirror/mirrorDrillFixture')
+        require('../../attestMirror/helpers/mirrorDrillFixture')
     const rollcall = require('../../helpers/rollcallHelper')
     const crypto   = require('crypto')
 
@@ -583,7 +583,7 @@ describe('mirrorDrillFixture: the provider floor is INCLUSIVE at equality', func
 })
 
 describe('mirrorDrillFixture: resolveAdoptionPlan scopes the orphan rule by declared provider', function () {
-    const { resolveAdoptionPlan } = require('../../attestMirror/mirrorDrillFixture')
+    const { resolveAdoptionPlan } = require('../../attestMirror/helpers/mirrorDrillFixture')
 
     // A synthetic capability snapshot in the shape `readCapabilitySet` returns:
     // the raw `getstakeweightsbycapability` rows, keyed by pubkey. Weights are
@@ -707,7 +707,7 @@ describe('mirrorDrillFixture: resolveAdoptionPlan scopes the orphan rule by decl
 })
 
 describe('mirrorDrillFixture: assertResponsibleSetIsVenueOnly', function () {
-    const { assertResponsibleSetIsVenueOnly } = require('../../attestMirror/mirrorDrillFixture')
+    const { assertResponsibleSetIsVenueOnly } = require('../../attestMirror/helpers/mirrorDrillFixture')
 
     const venue = { hubs: [
         { pubkey: 'ff5eeb94d7559682aaaa' },

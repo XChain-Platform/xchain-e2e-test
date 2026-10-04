@@ -28,7 +28,7 @@ const fs = require('fs')
 const path = require('path')
 
 const { createRail, withRail } = require('../../helpers/chainRail')
-const { until, untilOrClearDogeStall, venueTipProbe, queryDb } = require('../mirrorDrillWaits')
+const { until, untilOrClearDogeStall, venueTipProbe, queryDb } = require('./mirrorDrillWaits')
 const XChainIndexerConnector = require('../../../src/XChainIndexerConnector.js')
 const fixture = require('./barrierFamilyFixture')
 const rows = require('./barrierFamilyRows')

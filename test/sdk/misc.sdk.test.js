@@ -19,7 +19,7 @@
  ********************************************************************/
 
 const { expect } = require('chai');
-const { makeSdk, submit, fundedSdkAddress, fundedGasAddress, uniqueTick, submitOpts } = require('./sdkHelper');
+const { makeSdk, submit, fundedSdkAddress, fundedGasAddress, uniqueTick, submitOpts } = require('./helpers/sdkHelper');
 
 function actionIndexOf(indexed) {
     const a = indexed && Array.isArray(indexed.actions) ? indexed.actions[0] : null;

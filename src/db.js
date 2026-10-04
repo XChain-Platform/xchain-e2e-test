@@ -123,7 +123,7 @@ class Database {
 
     _recordPerfPoll(method, startMs, polls, resolved) {
         try {
-            const collector = require('../test/perf/perfCollector')
+            const collector = require('../test/perf/helpers/perfCollector')
             collector.recordPoll({ method, startMs, endMs: Date.now(), polls, resolved })
         } catch (e) {
             // perfCollector not loaded (unit tests, etc.); silently skip

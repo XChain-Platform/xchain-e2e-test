@@ -57,14 +57,14 @@ if (!UNIT_ONLY) dotenv.config()
 const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
     provisionDrillIdentities, waitForVenueIndexersAtTip, startAttestTestServer, deployRequestContract,
-} = require('./mirrorDrillFixture')
+} = require('./helpers/mirrorDrillFixture')
 const {
     until, untilOrClearDogeStall, waitForMirrorRowEverywhere,
     readAppliedResponse, readContractState, readRequestRow, readBlockWindow,
     venueTipProbe, findEmittedAttestRequest, attestRequestWatermark,
     clearBeforeBroadcast, settleOrReport, waitForHeightWithClear,
     allHubTails, jsonSafe,
-} = require('./mirrorDrillWaits')
+} = require('./helpers/mirrorDrillWaits')
 const vmHelper = require('../helpers/vmHelper')
 
 const FIXED_BODY = '{"score":7,"meta":"zc1-zero-conf"}'

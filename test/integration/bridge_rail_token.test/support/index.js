@@ -25,7 +25,7 @@ const stakeTeardown     = require('../../../helpers/stakeTeardown');
 const cryptoHelper      = require('../../../cryptoHelper');
 const transactionHelper = require('../../../transactionHelper');
 const issueHelper       = require('../../../helpers/issueHelper');
-const fixture           = require('../../../attestMirror/mirrorDrillFixture');
+const fixture           = require('../../../attestMirror/helpers/mirrorDrillFixture');
 const { checkFullDriveReady } = require('../../../helpers/rail_preflight/full_drive_ready');
 const { requireHealthyHub } = require('../../../helpers/rail_preflight/hub_health_gate');
 const {

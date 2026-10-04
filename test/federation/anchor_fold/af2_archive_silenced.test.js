@@ -16,7 +16,7 @@ process.env[FOLD_ENV] = '0';
 
 const venueHooks = require('../../initialCheck.test.js').mochaHooks;
 const cryptoHelper = require('../../cryptoHelper');
-const CryptoNetworks = require('../../../src/CryptoNetworks');
+const CryptoNetworks = require('../../../src/crypto_networks');
 const {
     MultiValidatorHub, ValidatorIdentity, loadHubModule, resolveHubFile
 } = require('../../helpers/multiValidatorHubHelper');

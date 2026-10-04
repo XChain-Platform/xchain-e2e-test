@@ -30,7 +30,7 @@
 'use strict';
 
 const { expect } = require('chai');
-const { makeSdk, submit, fundedGasAddress, uniqueTick, submitOpts } = require('./sdkHelper');
+const { makeSdk, submit, fundedGasAddress, uniqueTick, submitOpts } = require('./helpers/sdkHelper');
 
 function balanceFor(balances, tick) {
     const list = balances && (Array.isArray(balances) ? balances : balances.data);

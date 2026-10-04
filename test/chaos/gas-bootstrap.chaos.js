@@ -19,7 +19,7 @@
 const assert = require('assert')
 const sinon = require('sinon')
 const bitcoin = require('bitcoinjs-lib')
-const { saveGlobals, restoreGlobals, GLOBAL_KEYS } = require('./chaos-helpers')
+const { saveGlobals, restoreGlobals, GLOBAL_KEYS } = require('./helpers/chaos_helpers')
 
 const GAS_TICK = 'XCHAIN'
 

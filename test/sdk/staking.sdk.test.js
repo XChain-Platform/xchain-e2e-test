@@ -21,7 +21,7 @@
 
 const { expect } = require('chai');
 const crypto = require('crypto');
-const { makeSdk, submit, fundedGasAddress, submitOpts, GAS_TICK } = require('./sdkHelper');
+const { makeSdk, submit, fundedGasAddress, submitOpts, GAS_TICK } = require('./helpers/sdkHelper');
 
 // Ed25519 validator signing pubkey as 64-hex (matches the connector suite).
 function newSigningPubkey() {

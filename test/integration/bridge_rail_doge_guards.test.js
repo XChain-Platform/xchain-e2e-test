@@ -94,7 +94,7 @@ describe('XBRIDGE acceptance drive, the federation-free legs on DOGE regtest (AT
             console.log('\nBRIDGE GUARDS: ' + unavailable + '\n');
             return;
         }
-        const fixture = require('../attestMirror/mirrorDrillFixture');
+        const fixture = require('../attestMirror/helpers/mirrorDrillFixture');
         await chainRail.withRail(dogeRail, () => fixture.waitForVenueIndexersAtTip(venue));
         evidence.venueIndexer = venue.indexers[0].apiUrl;
         evidence.venueIndexerDb = venue.indexers[0].indexerDbName;

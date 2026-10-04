@@ -33,12 +33,12 @@
  ********************************************************************/
 
 const { expect } = require('chai');
-const { makeSdk, submit, submitOpts, fundedGasAddress } = require('./sdkHelper');
+const { makeSdk, submit, submitOpts, fundedGasAddress } = require('./helpers/sdkHelper');
 const {
     MIN_REFUND_WINDOW, dbQuery, getFeed, getBets, balanceOf, amtEq, actionIndexOf,
     blockTime, jumpTo, resumeMiningAtFrozenClock, releaseClock, waitFeedStatus,
     issueWagerToken, submitBet
-} = require('./betHelper');
+} = require('./helpers/betHelper');
 
 const ADDRESS_LIST = 2;   // BET accepts type 2 (address) lists only
 const LIST_ADD     = 1;

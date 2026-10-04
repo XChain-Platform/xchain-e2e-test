@@ -42,12 +42,12 @@
  ********************************************************************/
 
 const { expect } = require('chai');
-const { makeSdk, submit, submitOpts, fundedGasAddress } = require('./sdkHelper');
+const { makeSdk, submit, submitOpts, fundedGasAddress } = require('./helpers/sdkHelper');
 const {
     MIN_REFUND_WINDOW, dbQuery, getFeed, getBets, balanceOf, amtEq, actionIndexOf,
     blockTime, jumpTo, setClock, mineAtFrozenClock, resumeMiningAtFrozenClock,
     releaseClock, waitFeedStatus, issueWagerToken, submitBet
-} = require('./betHelper');
+} = require('./helpers/betHelper');
 
 let sdk, oracle, p1, p2;
 let tickPlain, tickSamePass, tickBoundary, tickEarly, tickCancelWins;

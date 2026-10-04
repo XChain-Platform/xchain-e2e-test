@@ -61,7 +61,7 @@ const envelopeHelper = require('../helpers/envelopeHelper')
 const nativeFeeHelper = require('../helpers/nativeFeeHelper')
 const addressHelper = require('../helpers/addressHelper')
 
-// The SDK is a sibling checkout, resolved the way test/sdk/sdkHelper.js resolves
+// The SDK is a sibling checkout, resolved the way test/sdk/helpers/sdkHelper.js resolves
 // it. These are internal modules rather than package entry points, so they are
 // reached through the package root instead of by deep-requiring a bare specifier.
 function sdkModule(relative){

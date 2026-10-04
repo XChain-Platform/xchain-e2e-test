@@ -58,7 +58,7 @@
  *      passes one explicitly.
  *
  * NOTHING HERE SEEDS THE VENUE. Staking the federation is an operator decision
- * (test/tools/rollcallSeedFederation.test.js is the tool that does it). The
+ * (test/tools/rollcall_seed_federation.test.js is the tool that does it). The
  * asserts report what is missing, with the exact pubkeys to stake, and stop.
  *
  * THREE of the four roster keys are fixed; the IDLE one is per-venue. AT1 evicts
@@ -1214,7 +1214,7 @@ async function assertRosterStreaksClean(ctx, allowDirtyStreaks){
         'On a SIGNING source it is worse than a bad reading: AT2 silences a live hub on purpose, so the ' +
         'streak completes and the protocol evicts a frozen vector key that can never be staked again.\n' +
         'Remedy for the IDLE source: bump XC_ROLLCALL_IDLE_GENERATION (removing any XC_ROLLCALL_IDLE_SEED ' +
-        'pin) and re-run test/tools/rollcallSeedFederation.test.js, which mints a fresh key at a fresh ' +
+        'pin) and re-run test/tools/rollcall_seed_federation.test.js, which mints a fresh key at a fresh ' +
         'address.\n' +
         'The window here is the last ' + lookback + ' ROLLED epoch(s)' +
         (window ? ': ' + Array.from(window).join(', ') : ' (unreadable, so every recorded absence counts)') + '.\n' +

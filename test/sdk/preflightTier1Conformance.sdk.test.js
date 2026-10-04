@@ -37,7 +37,7 @@
 const { expect } = require('chai');
 const {
     makeSdk, submit, fundedSdkAddress, fundedGasAddress, mine, uniqueTick, submitOpts,
-} = require('./sdkHelper');
+} = require('./helpers/sdkHelper');
 
 /**
  * The Tier-1 half of a report, isolated from Tier 2.

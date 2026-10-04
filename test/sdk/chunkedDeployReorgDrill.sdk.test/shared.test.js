@@ -122,7 +122,7 @@
 
 const { expect } = require('chai');
 const cryptoHelper = require('../../cryptoHelper');
-const { makeSdk, submit, fundedGasAddress, mine, submitOpts, uniqueTick } = require('../sdkHelper');
+const { makeSdk, submit, fundedGasAddress, mine, submitOpts, uniqueTick } = require('../helpers/sdkHelper');
 const { snapshotWindow, replayWindowInOrder } = require('../helpers/rawHexBlocks');
 const { chunkHelper } = require('xchain-sdk');
 

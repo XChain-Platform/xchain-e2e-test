@@ -40,7 +40,7 @@
 
 const crypto = require('crypto');
 const { expect } = require('chai');
-const { loadSDK } = require('./sdkHelper');
+const { loadSDK } = require('./helpers/sdkHelper');
 const addressHelper = require('../helpers/addressHelper');
 
 const bitcoin = require('bitcoinjs-lib');

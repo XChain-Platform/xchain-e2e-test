@@ -44,12 +44,12 @@
 
 const { expect } = require('chai');
 const cryptoHelper = require('../cryptoHelper');
-const { makeSdk, fundedGasAddress } = require('./sdkHelper');
+const { makeSdk, fundedGasAddress } = require('./helpers/sdkHelper');
 const {
     MIN_REFUND_WINDOW, dbQuery, getFeed, getBets, balanceOf, amtEq, actionIndexOf,
     blockTime, jumpTo, resumeMiningAtFrozenClock, releaseClock, waitFeedStatus,
     issueWagerToken, submitBet
-} = require('./betHelper');
+} = require('./helpers/betHelper');
 
 function haveConnectors() {
     return global.nodeConnector && global.regtestMinerConnector && global.indexerDatabase;

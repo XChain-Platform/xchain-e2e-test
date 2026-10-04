@@ -161,7 +161,7 @@ describe('VM false-green guard', function() {
         // Named explicitly because it is the one suite in this repo that drives
         // a real contract through the real VM, and it is the suite that was
         // measured reporting 0 passing / 8 pending / exit 0 on macOS.
-        const spec = path.join('test', 'unit', 'spvSeedContract.test.js');
+        const spec = path.join('test', 'unit', 'spv_seed_contract.test.js');
         const code = codeOf(spec);
         assert.ok(/require\.resolve/.test(code),
             spec + ' must resolve the xchain-vm checkout separately from loading it, so ' +

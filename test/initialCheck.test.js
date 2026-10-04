@@ -37,16 +37,16 @@ for (const lib of VENDOR_LIBS) {
     }
 }
 
-const BlockchainConnector = require('../src/BlockchainConnector.js')
+const BlockchainConnector = require('../src/blockchain_connector.js')
 const XChainUtxoTrackerConnector = require('../src/XChainUtxoTrackerConnector.js')
 const XChainEncoderConnector = require('../src/XChainEncoderConnector.js')
 const XChainDecoderConnector = require('../src/XChainDecoderConnector.js')
 const XChainHubConnector = require('../src/XChainHubConnector.js')
 const XChainIndexerConnector = require('../src/XChainIndexerConnector.js')
 const XChainExplorerConnector = require('../src/XChainExplorerConnector.js')
-const RegtestMinerConnector = require('../src/RegtestMinerConnector.js')
+const RegtestMinerConnector = require('../src/regtest_miner_connector.js')
 const Database = require('../src/db.js')
-const CryptoNetworks = require('../src/CryptoNetworks')
+const CryptoNetworks = require('../src/crypto_networks')
 const cryptoHelper = require('./cryptoHelper')
 const issueHelper = require('./helpers/issueHelper')
 const gasHelper = require('./helpers/gasHelper')
@@ -54,7 +54,7 @@ const stakeHelper = require('./helpers/stakeHelper')
 const stakeTeardown = require('./helpers/stakeTeardown')
 
 let perfCollector = null
-try { perfCollector = require('./perf/perfCollector') } catch(e) {}
+try { perfCollector = require('./perf/helpers/perfCollector') } catch(e) {}
 const phase = perfCollector
     ? (name, fn) => perfCollector.phase(name, fn)
     : (name, fn) => fn()

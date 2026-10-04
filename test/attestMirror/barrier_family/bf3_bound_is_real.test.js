@@ -37,7 +37,7 @@ dotenv.config()
 const fixture = require('../helpers/barrierFamilyFixture')
 const rows = require('../helpers/barrierFamilyRows')
 const drive = require('../helpers/barrierFamilyDrive')
-const { diffStateHashes } = require('../mirrorDrillWaits')
+const { diffStateHashes } = require('../helpers/mirrorDrillWaits')
 
 const BUILD_ROOT = path.resolve(__dirname, '..', '..', '..', '..')
 const PINNED = 0

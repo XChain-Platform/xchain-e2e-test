@@ -14,7 +14,7 @@
 
 const { expect } = require('chai');
 const cryptoHelper = require('../../cryptoHelper');
-const { dbQuery, getFeed, getBets, balanceOf, amtEq } = require('../betHelper');
+const { dbQuery, getFeed, getBets, balanceOf, amtEq } = require('../helpers/betHelper');
 const {
     state, sleep, bQuery, tipOf, hashesOf, compareHashes, waitNodeB, reorgPast
 } = require('./support/bet_parity_support');

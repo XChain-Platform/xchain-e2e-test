@@ -63,14 +63,14 @@ const { loadHubModule } = require('../helpers/multiValidatorHubHelper')
 const {
     provisionDrillIdentities, waitForVenueIndexersAtTip, startAttestTestServer, deployRequestContract,
     mineWhile,
-} = require('./mirrorDrillFixture')
+} = require('./helpers/mirrorDrillFixture')
 const {
     APPLIED_FIELDS, STATE_HASH_FIELDS, diffRows, diffStateHashes, untilOrClearDogeStall,
     waitForMirrorRowEverywhere, waitForAppliedEverywhere, waitForHeightWithClear,
     readAppliedResponse, readContractState, readRequestRow,
     venueTipProbe, findEmittedAttestRequest, attestRequestWatermark,
     clearBeforeBroadcast, settleOrReport, allHubTails, jsonSafe,
-} = require('./mirrorDrillWaits')
+} = require('./helpers/mirrorDrillWaits')
 const vmHelper               = require('../helpers/vmHelper')
 const cryptoHelper           = require('../cryptoHelper')
 const XChainIndexerConnector = require('../../src/XChainIndexerConnector.js')

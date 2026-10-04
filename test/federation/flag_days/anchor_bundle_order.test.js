@@ -13,7 +13,7 @@ const previousBundleOrderActivation = process.env.ANCHOR_BUNDLE_ORDER_ACTIVATION
 process.env.ANCHOR_BUNDLE_ORDER_ACTIVATION = '0';
 
 const cryptoHelper = require('../../cryptoHelper');
-const CryptoNetworks = require('../../../src/CryptoNetworks');
+const CryptoNetworks = require('../../../src/crypto_networks');
 const {
     MultiValidatorHub,
     ValidatorIdentity,

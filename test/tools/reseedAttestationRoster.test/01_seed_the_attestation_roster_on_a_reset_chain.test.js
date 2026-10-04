@@ -14,7 +14,7 @@
  * SEED THE ATTESTATION ROSTER ON A FRESHLY RESET REGTEST CHAIN.
  *
  * A venue seeder, not a drill, and it lives beside
- * `rollcallSeedFederation.test.js` for the same reason: it exists to LEAVE
+ * `rollcall_seed_federation.test.js` for the same reason: it exists to LEAVE
  * stake behind, which is the opposite of what every suite under `test/`
  * does. Run it once after a chain reset; every attestation drill assumes it
  * already has.

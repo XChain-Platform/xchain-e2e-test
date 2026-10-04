@@ -24,7 +24,7 @@ const issueHelper       = require('../../../helpers/issueHelper');
 const mintHelper        = require('../../../helpers/mintHelper');
 // Funds a leg's BTC-side XCHAIN: a faucet SEND once the supply is spent, else a MINT.
 const gasHelper         = require('../../../helpers/gasHelper');
-const fixture           = require('../../../attestMirror/mirrorDrillFixture');
+const fixture           = require('../../../attestMirror/helpers/mirrorDrillFixture');
 const {
     BridgeRailVenue,
     resolveVenueQuorum,

@@ -19,8 +19,8 @@ const bitcoin = require('bitcoinjs-lib')
 
 require('../fixtures/mockMariadb')
 
-const CryptoNetworks = require('../../../src/CryptoNetworks')
-const RegtestMinerConnector = require('../../../src/RegtestMinerConnector')
+const CryptoNetworks = require('../../../src/crypto_networks')
+const RegtestMinerConnector = require('../../../src/regtest_miner_connector')
 
 let savedGlobals
 
