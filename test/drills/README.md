@@ -1,4 +1,63 @@
-# Physical multi-box byzantine drill
+# Drills
+
+## Two-hub indexer failover drill
+
+`hubFailover.drill.js` drives the two-hub regtest venue built by xchain-node.
+By default it invokes `scripts/hub-failover-stack-driver.js`, which directly
+drives the two-hub Compose services, status endpoints, miners, durable report
+queue, and fixture databases. Each invocation prints exactly one JSON object on
+stdout. Diagnostic output belongs on stderr.
+
+Run it with:
+
+```
+docker compose -p hub-failover \
+  -f ../xchain-node/.github/hub-failover/compose.yml up -d --wait
+npm run test:drill:hub-failover
+```
+
+`XCHAIN_HUB_FAILOVER_NODE_DIR` can point at a non-sibling xchain-node checkout.
+The Compose path, project, state file, Docker executable, and published ports
+also have `XCHAIN_HUB_FAILOVER_*` overrides matching the names in the driver.
+`XCHAIN_HUB_FAILOVER_DRIVER` and its JSON-array
+`XCHAIN_HUB_FAILOVER_DRIVER_ARGS` remain available for a venue-specific adapter.
+
+The adapter operations are:
+
+| Operation | Arguments | Required result |
+|---|---|---|
+| `observe` | none | `{ hubs, indexers }` snapshot described below |
+| `stop-hub` | hub id | stop the service, then return any JSON object |
+| `queue-report` | none | create a valid durable report during the outage and return `{ reportId, table, rowKey }` |
+| `mine` | block count | mine on all three regtest chains and return `{ blocks }` |
+| `start-hub` | hub id | restart, capture its first ready frame, and return `{ firstReady: { caught_up } }` |
+| `block-hashes` | indexer id, height | return `block_index`, `ledger_hash`, `actions_hash`, `contract_hash`, and `state_hash` from that indexer's own database |
+
+An `observe` snapshot has exactly two hubs and four indexers. Hub rows have
+`id`, `running`, `caught_up`, `reports` (accepted report ids), and `rows` (a map
+from mirrored table name to content keys). Indexer rows have `id`, `coin`,
+`role` (`failover` or `pinned-control`), `followedHub`, `indexerBlock`,
+`stallReason`, and `hubMirror` with `connected`, `bootstrapped`, and `moveCount`.
+The three failover indexers are BTC, LTC, and DOGE and initially follow one hub;
+the pinned BTC control follows the other.
+
+The drill refuses partial evidence. It times the autonomous move, requires a
+certified mirror before treating barriers as reopened, checks that all four
+indexers advance after mining, observes the outage report and a survivor-only
+finalized row, observes `caught_up: false` on the restarted hub's first ready
+frame and then the copied row plus report delivery after catch-up, samples the
+whole minimum dwell for a flap, and compares all four BTC hashes at one height.
+The default driver keeps report and catch-up evidence independent: the report is
+a durable indexer outbox row with per-hub delivery state, while the row named in
+the drill evidence is submitted only to the survivor and must reach the stopped
+hub through peer catch-up.
+Timing overrides are `XCHAIN_HUB_FAILOVER_MOVE_TIMEOUT_MS` (default 20000),
+`XCHAIN_HUB_FAILOVER_CATCHUP_TIMEOUT_MS` (120000),
+`XCHAIN_HUB_FAILOVER_BLOCK_TIMEOUT_MS` (60000),
+`XCHAIN_HUB_FAILOVER_DWELL_MS` (120000), and
+`XCHAIN_HUB_FAILOVER_POLL_MS` (500).
+
+## Physical multi-box byzantine drill
 
 The in-process suite `test/integration/multiHubByzantineF2.integration.test.js`
 already proves f=2 at N=7 and f=3 at N=10. Every validator in it shares one

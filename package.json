@@ -20,6 +20,8 @@
     "xchain-sdk": "file:./xchain-sdk"
   },
   "scripts": {
+    "test:drill:hub-failover": "mocha --no-config --timeout 0 --exit test/drills/hubFailover.drill.js",
+    "test:drill:hub-failover:unit": "mocha --no-config --timeout 30000 --exit test/drills/unit/hub_failover_drill.test.js test/drills/unit/hub_failover_stack_driver.test.js",
     "test:rail": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/rail/**/*.rail.test.js'",
     "test:rollcall": "E2E_REQUIRE_FEDERATION=1 mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/actions/rollcall*.test.js'",
     "venue:seed-rollcall": "E2E_STAKE_TEARDOWN=off mocha --timeout 0 --exit --require ./test/initialCheck.test.js test/tools/rollcallSeedFederation.test.js",
