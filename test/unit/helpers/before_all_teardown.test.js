@@ -58,9 +58,15 @@ describe('before-all teardown guard', function () {
         })
 
         await assert.rejects(guardedSetup(), (err) => err === setupError)
-        assert.match(setupError.message, /venue boot failed/)
-        assert.match(setupError.message, /database drop failed/)
+        assert.strictEqual(
+            setupError.message,
+            'venue boot failed; teardown after failed setup also failed: database drop failed',
+        )
         assert.strictEqual(teardownOutcome(setupError), 'teardown-failed')
+        assert.strictEqual(
+            teardownOutcome(new Error(setupError.message)),
+            'clean',
+        )
         const marker = Object.getOwnPropertySymbols(setupError)[0]
         const markerDescriptor = Object.getOwnPropertyDescriptor(setupError, marker)
         assert.strictEqual(markerDescriptor.enumerable, false)
