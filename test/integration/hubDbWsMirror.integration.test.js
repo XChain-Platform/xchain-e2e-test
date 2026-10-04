@@ -32,43 +32,15 @@
 const assert  = require('assert');
 const http    = require('http');
 const urlMod  = require('url');
-const fs      = require('fs');
-const path    = require('path');
 const mariadb = require('mariadb');
 const { WebSocketServer } = require('ws');
 
 const HubDbBroadcaster = require('../../../xchain-hub/src/peers/hub_db_broadcaster');
 const HubDbSync        = require('../../../xchain-indexer/src/hub/hub_db_sync');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
+const { MIRROR_SQL, readDDL } = require('../helpers/hubDbMirrorSchema');
 
-// Every table HubDbSync bootstraps must be here, not merely the ones a case
-// asserts on. A missing DDL does not fail loudly: the bootstrap logs "not ready
-// ... will retry", _bootstrapDrained stays false, and the run silently never
-// reaches the drained state where the stream watermark advances and the
-// heartbeat gate opens. state_checkpoints and anchor_reward_attestations were
-// absent for exactly that reason, so this suite proved per-row mirroring while
-// leaving the completeness barrier the consensus path depends on uncovered.
-const SQL = {
-    price_snapshots:      '../../../xchain-hub/src/sql/price_snapshots.sql',
-    oracle_prices:        '../../../xchain-hub/src/sql/oracle_prices.sql',
-    cross_chain_calls:    '../../../xchain-indexer/src/sql/cross_chain_calls.sql',
-    cross_chain_matches:  '../../../xchain-indexer/src/sql/cross_chain_matches.sql',
-    capability_snapshots: '../../../xchain-indexer/src/sql/capability_snapshots.sql',
-    state_checkpoints:    '../../../xchain-indexer/src/sql/state_checkpoints.sql',
-    anchor_reward_attestations: '../../../xchain-indexer/src/sql/anchor_reward_attestations.sql',
-};
-
-// Read a shipped DDL file and reduce it to its bare CREATE TABLE statement:
-// strip the /* license */ block + `--` line comments so the driver gets one statement.
-// Inline `--` comments are stripped too (not just full-line ones): a comment may carry
-// a ';' (e.g. "bumped each rollback; a retraction deletes ..."), which would otherwise
-// split the CREATE TABLE mid-statement on the `;` below. Mirrors the hub's own
-// stripSqlLineComments in db.js. The shipped DDL has no `--` inside string literals.
-function readDDL(rel) {
-    let sql = fs.readFileSync(path.resolve(__dirname, rel), 'utf8');
-    sql = sql.replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\n\r]*/g, '');
-    return sql.trim().replace(/;\s*$/, '');
-}
+// HubDbSync must find every mirrored local table before startup and bootstrap.
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function waitFor(fn, timeoutMs = 10000, stepMs = 150) {
     const end = Date.now() + timeoutMs;
@@ -95,8 +67,8 @@ describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration
         repPool = mariadb.createPool({ ...base, database: REP });
         // Some shipped DDLs (cross_chain_calls) carry separate CREATE INDEX statements after the
         // CREATE TABLE; the pools don't enable multipleStatements, so split and run each in order.
-        for (const t of Object.keys(SQL)) {
-            const stmts = readDDL(SQL[t]).split(';').map(s => s.trim()).filter(Boolean);
+        for (const t of Object.keys(MIRROR_SQL)) {
+            const stmts = readDDL(MIRROR_SQL[t]).split(';').map(s => s.trim()).filter(Boolean);
             for (const s of stmts) { await srcPool.query(s); await repPool.query(s); }
         }
 
