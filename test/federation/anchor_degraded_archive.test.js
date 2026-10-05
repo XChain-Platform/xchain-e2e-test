@@ -167,7 +167,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
     let federationCount = 0;
 
     async function indexerQuery(sql, params){
-        let conn = await indexerDatabase.getConnection();
+        const conn = await indexerDatabase.getConnection();
         try { return await conn.query(sql, params); }
         finally { await conn.release(); }
     }
@@ -236,8 +236,8 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
         return mvh.hubs
             .map((h, i) => ({
                 i,
-                collecting: !!h.stateAnchorPublisher._archiveRound,
-                publishing: !!h.stateAnchorPublisher._archivePublishing
+                collecting: !!h.stateAnchorPublisher['_archiveRound'],
+                publishing: !!h.stateAnchorPublisher['_archivePublishing']
             }))
             .filter(s => s.collecting || s.publishing);
     }
@@ -498,7 +498,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
     // with null roots with a log line rather than emitting a rootless section (D8),
     // so a rootless filler would simply be absent and every assert below would misread.
     function signedCheckpoint(chain, seq){
-        let row = {
+        const row = {
             chain, network: 'regtest', block_index: 100000 + seq,
             block_hash:    crypto.randomBytes(32).toString('hex'),
             ledger_hash:   crypto.randomBytes(32).toString('hex'),
@@ -567,7 +567,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
     // needs both sources), inserted identically on every hub. This is the archive's
     // cargo: without a pending row there is no batch to archive at all.
     async function insertMatchEverywhere(matchId){
-        let m = {
+        const m = {
             match_id: matchId, snapshot_block: snapshotBlock, network: 'regtest',
             a_chain: 'DOGE', a_action_index: 11, a_kind: 'swap', a_tick: 'TOKA', a_amount: '1000',
             a_filled_before: '0', a_ownership: 0, a_payout_addr: 'degraded_payout_a',
@@ -575,8 +575,8 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
             b_filled_before: '0', b_ownership: 0, b_payout_addr: 'degraded_payout_b',
             effective_time: Math.floor(Date.now() / 1000)
         };
-        let canonical = mvh.hubs[0].getCrossChainDex().canonicalMatch(m);
-        let sigs = JSON.stringify(identities.map(id =>
+        const canonical = mvh.hubs[0].getCrossChainDex().canonicalMatch(m);
+        const sigs = JSON.stringify(identities.map(id =>
             ({ pubkey: id.getPubkeyHex().toLowerCase(), sig: id.sign(canonical) })));
         await allHubs(
             `INSERT INTO cross_chain_matches
@@ -648,7 +648,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
     // Seqs must clear the indexer's per-chain replay guard: the regtest chain is
     // dirty with earlier runs' anchors while these hub DBs are brand new.
     async function nextSeq(chain){
-        let r = await indexerQuery(
+        const r = await indexerQuery(
             'SELECT COALESCE(MAX(checkpoint_seq), -1) + 1 AS s FROM anchor_actions WHERE chain = ? AND network = ?',
             [chain, 'regtest']);
         return Number(r[0].s);
@@ -664,15 +664,15 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
     // (StateAnchorPublisher.publishArchive builds it; xchain-indexer anchor/index.js
     // formats[1] reads it back at the same offsets.)
     function parseArchiveHead(payload){
-        let f = String(payload).split('|');
+        const f = String(payload).split('|');
         if (f[0] !== 'ANCHOR' || f[1] !== '1') return null;
         const SIG_COUNT_INDEX = 16;
-        let sigCount = Number(f[SIG_COUNT_INDEX]);
+        const sigCount = Number(f[SIG_COUNT_INDEX]);
         if (!Number.isInteger(sigCount) || sigCount < 0)
             throw new Error('ANCHOR v1 has a non-numeric SIG_COUNT');
-        let tail = SIG_COUNT_INDEX + 1 + (2 * sigCount);
+        const tail = SIG_COUNT_INDEX + 1 + (2 * sigCount);
         if (tail + 1 >= f.length) throw new Error('ANCHOR v1 carries no publisher tail');
-        let attestCount = Number(f[tail + 1]);
+        const attestCount = Number(f[tail + 1]);
         if (!Number.isInteger(attestCount) || attestCount < 0)
             throw new Error('ANCHOR v1 has a non-numeric ATTEST_SIG_COUNT');
         return {
@@ -764,7 +764,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
     // spelling deliberately did not move with the wire version, and a drifting copy
     // here would silently elect the wrong hub.
     function electBundle(){
-        let key = mvh.hubs[0].stateAnchorPublisher.bundleElectionKey(
+        const key = mvh.hubs[0].stateAnchorPublisher.bundleElectionKey(
             { network: 'regtest', snapshot_block: snapshotBlock });
         return pubkeys.indexOf(SAP.hashOrder(key, pubkeys)[0]);
     }
@@ -777,7 +777,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
     async function waitForArchiveHead(sinceIndex, timeMax){
         const deadline = Date.now() + timeMax;
         while (Date.now() < deadline) {
-            let head = broadcasts.slice(sinceIndex)
+            const head = broadcasts.slice(sinceIndex)
                 .find(b => anchorVersions.anchorPayloadVersion(b.payload) === 1);
             if (head) return head;
             await sleep(1000);
@@ -791,7 +791,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
     async function waitForIndexedAnchor(version, ledgerHash, timeMax){
         const deadline = Date.now() + timeMax;
         while (Date.now() < deadline) {
-            let rows = await indexerQuery(
+            const rows = await indexerQuery(
                 `SELECT a.*, s.status FROM anchor_actions a
                  LEFT JOIN index_statuses s ON s.id = a.status_id
                  WHERE a.version = ? AND a.ledger_hash = ?`, [version, ledgerHash]);
@@ -815,7 +815,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
         const deadline = Date.now() + timeMax;
         while (Date.now() < deadline) {
             await mvh.hubs[hubIndex].stateAnchorPublisher.drainDeferredRewardAttest();
-            let rows = await mvh.hubs[hubIndex].db.doQuery(
+            const rows = await mvh.hubs[hubIndex].db.doQuery(
                 "SELECT * FROM anchor_reward_attestations " +
                 "WHERE reward_type = 'anchor_archive' AND round_reference = ? AND snapshot_block = ?",
                 [batchSeq, snapshotBlock]);
@@ -830,13 +830,13 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
     // can write its own copy from a federated XANCREWARD, so a leader-only read
     // would miss one).
     async function rewardRecordsAnywhere(batchSeq){
-        let found = [];
+        const found = [];
         for (let i = 0; i < N; i++) {
-            let rows = await mvh.hubs[i].db.doQuery(
+            const rows = await mvh.hubs[i].db.doQuery(
                 "SELECT publisher FROM anchor_reward_attestations " +
                 "WHERE reward_type = 'anchor_archive' AND round_reference = ? AND snapshot_block = ?",
                 [batchSeq, snapshotBlock]);
-            for (let r of rows) found.push('hub' + i + ':' + String(r.publisher).slice(0, 12));
+            for (const r of rows) found.push('hub' + i + ':' + String(r.publisher).slice(0, 12));
         }
         return found;
     }
@@ -864,23 +864,23 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
         // also means the batch seq every election below reads is one the in-flight
         // round is about to consume. On a federation's first cycle this returns
         // immediately; it is AT-F4's second cycle that needs it.
-        let busy = await waitForArchiveQuiescent(ROUND_TIMEOUT_MS + 240000);
+        const busy = await waitForArchiveQuiescent(ROUND_TIMEOUT_MS + 240000);
         assert.strictEqual(busy.length, 0,
             label + ': an archive round from an earlier cycle never settled (' + describeBusy(busy) + '). ' +
             'Flushing now would return round_pending and this cycle would be measuring the previous ' +
             'round rather than its own.');
 
-        let seq = await nextCheckpointSeq('DOGE');
-        let cp  = signedCheckpoint('DOGE', seq);
+        const seq = await nextCheckpointSeq('DOGE');
+        const cp  = signedCheckpoint('DOGE', seq);
         await insertCheckpointEverywhere(cp);
-        let matchId = crypto.createHash('sha256')
+        const matchId = crypto.createHash('sha256')
             .update('degraded-archive-' + label + '-' + Date.now()).digest('hex');
         await insertMatchEverywhere(matchId);
 
         // WHO IS ELECTED, settled and asserted BEFORE anything flushes. A split here
         // fails naming both hubs' views; discovering it after the flush would surface
         // as a missing archive head, which reads like a publisher defect.
-        let election = await electArchive();
+        const election = await electArchive();
         assert.ok(election.converged,
             label + ': the hubs do not agree on the archive election. Views: ' + describeViews(election.views) +
             '. getNextBatchSeq is MAX+1 over each hub\'s OWN tables, so unequal tables mean ' +
@@ -895,9 +895,9 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
             label + ': hub' + election.leader + ' agrees it is rank 0 for batch ' + election.batchSeq +
             ' (' + describeViews(election.views) + ')');
 
-        let bundleLeader = electBundle();
-        let before       = broadcasts.length;
-        let seenBefore   = archiveSignReqSeen.slice();
+        const bundleLeader = electBundle();
+        const before       = broadcasts.length;
+        const seenBefore   = archiveSignReqSeen.slice();
         console.log('    [' + label + '] cp seq ' + seq + ' / batch ' + election.batchSeq +
                     ': archive leader hub' + election.leader + ' (self rank 0), co-signer hub' + election.follower +
                     (requireBundle ? ', bundle leader hub' + bundleLeader : ', archive-only') +
@@ -917,10 +917,10 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
         // Bundle first when it is wanted (it publishes synchronously inside the
         // flush), then the archive round. One flush covers both when the two
         // elections agree on the same hub.
-        let order = requireBundle
+        const order = requireBundle
             ? ((bundleLeader === election.leader) ? [bundleLeader] : [bundleLeader, election.leader])
             : [election.leader];
-        let summaries = {};
+        const summaries = {};
         for (const i of order) summaries[i] = await mvh.hubs[i].stateAnchorPublisher.flush();
 
         // The elected leader must have ACCEPTED the round. 'none' here is the exact
@@ -932,7 +932,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
         // every assertion after this point would be reading the PREVIOUS cycle's head:
         // a green that measures something easier than it claims. The quiesce wait above
         // is the fix; seeing this verdict despite it means a round started in between.
-        let archiveSummary = String(summaries[election.leader] && summaries[election.leader].archive);
+        const archiveSummary = String(summaries[election.leader] && summaries[election.leader].archive);
         assert.ok(archiveSummary === 'round_started' || archiveSummary === 'published',
             label + ': the elected hub' + election.leader + ' started its archive round for batch ' +
             election.batchSeq + ' (flush said archive="' + archiveSummary + '"). ' +
@@ -942,16 +942,16 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
             'checkpoint instead. Views: ' + describeViews(election.views) +
             '; in flight now: ' + (describeBusy(busyArchiveRounds()) || 'nothing'));
 
-        let bundle = anchorVersions.bundleBroadcasts(broadcasts.slice(before))
+        const bundle = anchorVersions.bundleBroadcasts(broadcasts.slice(before))
             .find(b => b.bundle.sections.some(s => String(s.ledger_hash) === String(cp.ledger_hash)));
         if (requireBundle)
             assert.ok(bundle, label + ': the v0 bundle carrying this cycle\'s checkpoint went to the chain');
 
         // A degraded cycle waits out ROUND_TIMEOUT_MS on top of the mine/quiesce
         // legs, so the budget clears it with room rather than racing it.
-        let headWire = await waitForArchiveHead(before, ROUND_TIMEOUT_MS + 240000);
+        const headWire = await waitForArchiveHead(before, ROUND_TIMEOUT_MS + 240000);
         assert.ok(headWire, label + ': the v1 archive head went to the chain');
-        let head = parseArchiveHead(headWire.payload);
+        const head = parseArchiveHead(headWire.payload);
         assert.strictEqual(head.batch_seq, election.batchSeq,
             label + ': the head carries the batch seq the election was keyed on');
         assert.strictEqual(head.checkpoint_seq, seq, label + ': the head wraps this cycle\'s checkpoint');
@@ -1024,8 +1024,8 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
         // snapshot_block, read through the publisher's OWN resolver. >= 2 DISTINCT
         // SOURCES containing the publisher is what makes snapCount <= 1's
         // self-satisfying short-circuit unreachable.
-        let signingSet = await leaderSap.resolveCapabilitySet('oracle_publish', snapshotBlock, 'regtest');
-        let sources    = new Set(signingSet.map(v => String(v.source)));
+        const signingSet = await leaderSap.resolveCapabilitySet('oracle_publish', snapshotBlock, 'regtest');
+        const sources    = new Set(signingSet.map(v => String(v.source)));
         assert.ok(signingSet.length >= 2,
             'the oracle_publish set holds >= 2 members (got ' + signingSet.length + ')');
         assert.ok(sources.size >= 2,
@@ -1044,7 +1044,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
         // AT-F1: the attested v1 head, on the wire and as the indexer stored it.
         assert.ok(c1.head.attest_sig_count >= 1,
             'the v1 head carries an attestation tail (ATTEST_SIG_COUNT ' + c1.head.attest_sig_count + ')');
-        let v1Row = await waitForIndexedAnchor(1, c1.cp.ledger_hash, 180000);
+        const v1Row = await waitForIndexedAnchor(1, c1.cp.ledger_hash, 180000);
         assert.ok(v1Row, 'the indexer parsed and stored the v1 archive head');
         assert.strictEqual(String(v1Row.status), 'valid',
             'the v1 head verified against the mirrored oracle_publish set (got ' + v1Row.status + ')');
@@ -1056,7 +1056,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
         assert.ok(c1.bundle.bundle.attest_sig_count >= 1,
             'the v0 bundle carries its own attestation tail (ATTEST_SIG_COUNT ' +
             c1.bundle.bundle.attest_sig_count + ')');
-        let v0Row = await waitForIndexedAnchor(0, c1.cp.ledger_hash, 180000);
+        const v0Row = await waitForIndexedAnchor(0, c1.cp.ledger_hash, 180000);
         assert.ok(v0Row, 'the indexer parsed and stored the v0 bundle section');
         assert.strictEqual(String(v0Row.status), 'valid',
             'the v0 bundle section is valid (got ' + v0Row.status + ')');
@@ -1064,7 +1064,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
         // AT-F1: the reward. ANCHOR_REWARD_DERIVE_ACTIVATION.regtest is 0, so this is
         // the anchor_reward_attestations row the BTC indexer derives validator_rewards
         // from, written only after the round met quorum AND the head was proven mined.
-        let reward = await waitForRewardRecord(c1.election.leader, c1.election.batchSeq, 240000);
+        const reward = await waitForRewardRecord(c1.election.leader, c1.election.batchSeq, 240000);
         assert.ok(reward, 'an anchor_archive reward record derived for batch ' + c1.election.batchSeq);
         assert.strictEqual(String(reward.publisher).toLowerCase(), pubkeys[c1.election.leader],
             'the reward names the elected publisher');
@@ -1111,7 +1111,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
             'the archive attestation round did not meet quorum, so the tail is empty');
         assert.ok(c2.head.sig_count >= 2,
             'the WRAPPER co-sign quorum was untouched by the fault (' + c2.head.sig_count + ' signatures)');
-        let v1Row = await waitForIndexedAnchor(1, c2.cp.ledger_hash, 180000);
+        const v1Row = await waitForIndexedAnchor(1, c2.cp.ledger_hash, 180000);
         assert.ok(v1Row, 'the indexer parsed and stored the degraded v1 archive head');
         assert.strictEqual(String(v1Row.status), 'valid',
             'a degraded attestation costs the reward, never the checkpoint (got ' + v1Row.status + ')');
@@ -1128,7 +1128,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
         // one in AT-F1 has had its chance.
         // give-up-ok: the null IS the assertion here, and it is only meaningful
         // because the identical call returns a row on the attested path.
-        let none = await waitForRewardRecord(c2.election.leader, c2.election.batchSeq, 60000);
+        const none = await waitForRewardRecord(c2.election.leader, c2.election.batchSeq, 60000);
         assert.strictEqual(none, null,
             'no anchor_archive reward record derived for the degraded batch ' + c2.election.batchSeq);
         assert.deepStrictEqual(await rewardRecordsAnywhere(c2.election.batchSeq), [],
@@ -1139,7 +1139,7 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
         assert.ok(c2.bundle.bundle.attest_sig_count >= 1,
             'the v0 bundle of the degraded cycle still carries its attestation tail (ATTEST_SIG_COUNT ' +
             c2.bundle.bundle.attest_sig_count + ')');
-        let v0Row = await waitForIndexedAnchor(0, c2.cp.ledger_hash, 180000);
+        const v0Row = await waitForIndexedAnchor(0, c2.cp.ledger_hash, 180000);
         assert.ok(v0Row, 'the indexer parsed and stored the v0 bundle section of the degraded cycle');
         assert.strictEqual(String(v0Row.status), 'valid',
             'the v0 bundle of the degraded cycle is still valid (got ' + v0Row.status + ')');
@@ -1180,13 +1180,13 @@ describe('ANCHOR live acceptance: degraded ARCHIVE attestation across two valida
         assert.notStrictEqual(recovered.election.batchSeq, degraded.election.batchSeq,
             'the recovery batch is a NEW batch, not a retry of the degraded one');
 
-        let v1Row = await waitForIndexedAnchor(1, recovered.cp.ledger_hash, 180000);
+        const v1Row = await waitForIndexedAnchor(1, recovered.cp.ledger_hash, 180000);
         assert.ok(v1Row, 'the indexer parsed and stored the recovered v1 archive head');
         assert.strictEqual(String(v1Row.status), 'valid');
         assert.ok(v1Row.publisher_attestations && JSON.parse(String(v1Row.publisher_attestations)).length >= 1,
             'the recovered head stores its attestation tail');
 
-        let reward = await waitForRewardRecord(recovered.election.leader, recovered.election.batchSeq, 240000);
+        const reward = await waitForRewardRecord(recovered.election.leader, recovered.election.batchSeq, 240000);
         assert.ok(reward, 'an anchor_archive reward record derived for the recovered batch ' + recovered.election.batchSeq);
         assert.strictEqual(String(reward.doge_anchor_txid).toLowerCase(), String(recovered.headWire.txid).toLowerCase(),
             'the recovered reward is bound to the recovered head');

@@ -53,7 +53,7 @@ async function landDuplicateAssemblers() {
         // read by its own index, see contractRowAt. Group counts below exclude it.
         await waitFor(async () => (await contractRows(srcId, plan.codeHash)).length === 1, 'the pending assembler row to index');
         const rejected = await waitFor(async () => contractRowAt(A2), 'the rejected assembler row to index');
-        let contracts = await contractRows(srcId, plan.codeHash);
+        const contracts = await contractRows(srcId, plan.codeHash);
         expect(contracts.find(r => r.action_index === A1).status, 'the first assembler lands pending').to.equal(PENDING_STATUS);
         expect(rejected.status, 'a second assembler while one is pending is rejected').to.equal(DUPLICATE_STATUS);
         expect(rejected.code_hash, 'a rejected assembler stores the empty-code hash like every invalid assembler')

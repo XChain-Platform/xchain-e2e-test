@@ -36,9 +36,9 @@ function makeDb({ lag = null, writes = null, lagReason, writesReason,
     maxExtensions = 3, probeEvery } = {}) {
     const db = Object.create(Database.prototype)
     db.sleep = () => new Promise(r => setTimeout(r, TICK))
-    db._recordPerfPoll = () => {}
+    db['_recordPerfPoll'] = () => {}
     db.lagCalls = 0
-    db._pipelineProgress = async () => {
+    db['_pipelineProgress'] = async () => {
         db.lagCalls++
         const lagValue = typeof lag === 'function' ? lag(db.lagCalls) : lag
         const writeValue = typeof writes === 'function' ? writes(db.lagCalls) : writes
@@ -72,7 +72,7 @@ describe('adaptive wait deadline', function () {
     it('returns the row as soon as the check succeeds', async () => {
         const db = makeDb({ lag: 0 })
         let calls = 0
-        const row = await db._waitFor(function checkThing(){ calls++; return calls >= 2 ? { id: 7 } : null }, {}, TIMEMAX)
+        const row = await db['_waitFor'](function checkThing(){ calls++; return calls >= 2 ? { id: 7 } : null }, {}, TIMEMAX)
         assert.deepStrictEqual(row, { id: 7 })
         assert.strictEqual(db.lagCalls, 0, 'a wait that succeeds must never consult the lag signal')
     })
@@ -80,7 +80,7 @@ describe('adaptive wait deadline', function () {
     it('does NOT extend when the indexer has caught up, so a genuinely absent row still fails', async () => {
         const db = makeDb({ lag: 0 })
         const started = Date.now()
-        const row = await db._waitFor(checkThing, {}, TIMEMAX)
+        const row = await db['_waitFor'](checkThing, {}, TIMEMAX)
         const elapsed = Date.now() - started
         assert.strictEqual(row, null)
         assert(db.lagCalls > 0, 'the lag signal should have been consulted at the deadline')
@@ -92,7 +92,7 @@ describe('adaptive wait deadline', function () {
         // Row appears only after the ORIGINAL deadline would have expired.
         const db = makeDb({ lag: 25 })
         const started = Date.now()
-        const row = await db._waitFor(
+        const row = await db['_waitFor'](
             function checkThing(){ return Date.now() - started > TIMEMAX * 1.5 ? { id: 1 } : null },
             {}, TIMEMAX)
         assert.deepStrictEqual(row, { id: 1 },
@@ -106,7 +106,7 @@ describe('adaptive wait deadline', function () {
         for (const lag of [1, 2]) {
             const db = makeDb({ lag })
             const started = Date.now()
-            const row = await db._waitFor(
+            const row = await db['_waitFor'](
                 function checkThing(){ return Date.now() - started > TIMEMAX * 1.5 ? { id: lag } : null },
                 {}, TIMEMAX)
             assert.deepStrictEqual(row, { id: lag },
@@ -131,7 +131,7 @@ describe('adaptive wait deadline', function () {
 
     it('caps extensions so a wedged stack fails instead of hanging the suite', async () => {
         const db = makeDb({ lag: 999, maxExtensions: 2 })
-        const row = await db._waitFor(checkThing, {}, TIMEMAX)
+        const row = await db['_waitFor'](checkThing, {}, TIMEMAX)
         assert.strictEqual(row, null, 'a permanently lagging stack must still terminate')
         // One lag probe per expiry: the original deadline plus each granted extension.
         assert(db.lagCalls <= 3,
@@ -146,7 +146,7 @@ describe('adaptive wait deadline', function () {
             const db = makeDb({ lag })
             db.WAIT_LAG_BLOCKS = threshold
             const started = Date.now()
-            const row = await db._waitFor(checkThing, {}, TIMEMAX)
+            const row = await db['_waitFor'](checkThing, {}, TIMEMAX)
             assert.strictEqual(row, null)
             assert(Date.now() - started < TIMEMAX * 3,
                 'lag ' + lag + ' at threshold ' + threshold + ' must not extend')
@@ -158,7 +158,7 @@ describe('adaptive wait deadline', function () {
         // indistinguishable from hanging, so the fixed deadline stands.
         const db = makeDb({ lag: null })
         const started = Date.now()
-        const row = await db._waitFor(checkThing, {}, TIMEMAX)
+        const row = await db['_waitFor'](checkThing, {}, TIMEMAX)
         assert.strictEqual(row, null)
         assert(Date.now() - started < TIMEMAX * 3, 'null lag must not extend the wait')
     })
@@ -166,7 +166,7 @@ describe('adaptive wait deadline', function () {
     it('keeps polling when the check throws', async () => {
         const db = makeDb({ lag: 0 })
         let calls = 0
-        const row = await db._waitFor(function checkThing(){
+        const row = await db['_waitFor'](function checkThing(){
             calls++
             if (calls < 2) throw new Error('transient DB error')
             return { id: 3 }
@@ -188,7 +188,7 @@ describe('adaptive wait deadline', function () {
             let mark = 1000
             const db = makeDb({ lag: 0, writes: () => ++mark, probeEvery: EVERY })
             const started = Date.now()
-            const row = await db._waitFor(
+            const row = await db['_waitFor'](
                 function checkThing(){ return Date.now() - started > SLOW * 1.4 ? { id: 9 } : null },
                 {}, SLOW)
             assert.deepStrictEqual(row, { id: 9 },
@@ -201,7 +201,7 @@ describe('adaptive wait deadline', function () {
             // so the mark stands still and the original deadline holds.
             const db = makeDb({ lag: 0, writes: 4242, probeEvery: EVERY })
             const started = Date.now()
-            const row = await db._waitFor(checkThing, {}, SLOW)
+            const row = await db['_waitFor'](checkThing, {}, SLOW)
             assert.strictEqual(row, null)
             assert(Date.now() - started < SLOW * 2,
                 'a stalled write mark must not extend the wait (elapsed ' + (Date.now() - started) + 'ms)')
@@ -214,7 +214,7 @@ describe('adaptive wait deadline', function () {
             const db = makeDb({ lag: 0, writes: () => (++calls <= 2 ? 1000 + calls : 1002), probeEvery: EVERY })
             db.WAIT_WRITE_IDLE_MS = EVERY   // "recent" means within one sample here
             const started = Date.now()
-            const row = await db._waitFor(checkThing, {}, SLOW)
+            const row = await db['_waitFor'](checkThing, {}, SLOW)
             assert.strictEqual(row, null)
             assert(Date.now() - started < SLOW * 3,
                 'a stale advance must not keep buying extensions (elapsed ' + (Date.now() - started) + 'ms)')
@@ -224,7 +224,7 @@ describe('adaptive wait deadline', function () {
             let mark = 0
             const db = makeDb({ lag: 0, writes: () => ++mark, maxExtensions: 2, probeEvery: EVERY })
             const started = Date.now()
-            const row = await db._waitFor(checkThing, {}, SLOW)
+            const row = await db['_waitFor'](checkThing, {}, SLOW)
             assert.strictEqual(row, null, 'a permanently busy stack must still terminate')
             assert(Date.now() - started < SLOW * 5,
                 'the extension cap must bound a busy stack too (elapsed ' + (Date.now() - started) + 'ms)')
@@ -235,7 +235,7 @@ describe('adaptive wait deadline', function () {
             const db = makeDb({ lag: 0, writes: () => ++mark, probeEvery: EVERY })
             db.WAIT_MIN_FOR_EXTENSION = 10000   // far above SLOW
             const started = Date.now()
-            const row = await db._waitFor(checkThing, {}, SLOW)
+            const row = await db['_waitFor'](checkThing, {}, SLOW)
             assert.strictEqual(row, null)
             assert.strictEqual(db.lagCalls, 0, 'an ineligible wait must not probe at all')
             assert(Date.now() - started < SLOW * 2, 'an ineligible wait must not be extended')
@@ -248,7 +248,7 @@ describe('adaptive wait deadline', function () {
         const saved = global.nodeConnector
         delete global.nodeConnector
         try {
-            assert.strictEqual(await db._indexerLagBlocks(), null)
+            assert.strictEqual(await db['_indexerLagBlocks'](), null)
         } finally {
             if (saved !== undefined) global.nodeConnector = saved
         }
@@ -264,7 +264,7 @@ describe('adaptive wait deadline', function () {
             release: async () => {}
         }) }
         try {
-            assert.strictEqual(await db._indexerLagBlocks(), 30)
+            assert.strictEqual(await db['_indexerLagBlocks'](), 30)
         } finally {
             if (saved === undefined) delete global.nodeConnector; else global.nodeConnector = saved
         }
@@ -277,7 +277,7 @@ describe('adaptive wait deadline', function () {
         global.nodeConnector = { getBlockCount: async () => 5000 }
         db.pool = { getConnection: async () => { throw new Error('pool exhausted') } }
         try {
-            assert.strictEqual(await db._indexerLagBlocks(), null,
+            assert.strictEqual(await db['_indexerLagBlocks'](), null,
                 'a failing lag probe must degrade to the fixed deadline, not blow up the wait')
         } finally {
             if (saved === undefined) delete global.nodeConnector; else global.nodeConnector = saved
@@ -306,7 +306,7 @@ describe('adaptive wait deadline', function () {
 
         it('names a missing database pool for both unavailable signals', async () => {
             const db = Object.create(Database.prototype)
-            assert.deepStrictEqual(await db._pipelineProgress(), {
+            assert.deepStrictEqual(await db['_pipelineProgress'](), {
                 lag: null, lagReason: 'no database pool wired',
                 writes: null, writesReason: 'no database pool wired'
             })
@@ -315,7 +315,7 @@ describe('adaptive wait deadline', function () {
         it('reports lag and the action-write mark from one round trip', async () => {
             const db = dbWithRows([{ tip: 4970, writes: 88123 }])
             await withConnector({ getBlockCount: async () => 5000 }, async () => {
-                assert.deepStrictEqual(await db._pipelineProgress(), {
+                assert.deepStrictEqual(await db['_pipelineProgress'](), {
                     lag: 30, lagReason: null, writes: 88123, writesReason: null
                 })
             })
@@ -328,7 +328,7 @@ describe('adaptive wait deadline', function () {
             // need the chain: it is exactly the case lag cannot cover.
             const db = dbWithRows([{ tip: 4970, writes: 5 }])
             await withConnector(undefined, async () => {
-                assert.deepStrictEqual(await db._pipelineProgress(), {
+                assert.deepStrictEqual(await db['_pipelineProgress'](), {
                     lag: null, lagReason: 'no node connector wired',
                     writes: 5, writesReason: null
                 })
@@ -338,7 +338,7 @@ describe('adaptive wait deadline', function () {
         it('reports nulls, not NaN, on an empty database', async () => {
             const db = dbWithRows([{ tip: null, writes: null }])
             await withConnector({ getBlockCount: async () => 5000 }, async () => {
-                assert.deepStrictEqual(await db._pipelineProgress(), {
+                assert.deepStrictEqual(await db['_pipelineProgress'](), {
                     lag: null, lagReason: 'blocks table held no rows',
                     writes: null, writesReason: 'actions table held no rows'
                 })
@@ -350,7 +350,7 @@ describe('adaptive wait deadline', function () {
             db.WAIT_LAG_PROBE_MS = 500
             db.pool = { getConnection: async () => { throw new Error('pool exhausted') } }
             await withConnector({ getBlockCount: async () => 5000 }, async () => {
-                assert.deepStrictEqual(await db._pipelineProgress(), {
+                assert.deepStrictEqual(await db['_pipelineProgress'](), {
                     lag: null, lagReason: 'probe failed: pool exhausted',
                     writes: null, writesReason: 'probe failed: pool exhausted'
                 })
@@ -368,9 +368,9 @@ describe('adaptive wait deadline', function () {
             console.log = (...a) => lines.push(a.join(' '))
             try {
                 await withConnector({ getBlockCount: async () => 1 }, async () => {
-                    await db._pipelineProgress()
-                    await db._pipelineProgress()
-                    await db._pipelineProgress()
+                    await db['_pipelineProgress']()
+                    await db['_pipelineProgress']()
+                    await db['_pipelineProgress']()
                 })
             } finally { console.log = orig }
             const warnings = lines.filter(l => l.includes('probe unavailable'))
@@ -385,7 +385,7 @@ describe('adaptive wait deadline', function () {
             db.pool = { getConnection: () => new Promise(() => {}) }
             await withConnector({ getBlockCount: async () => 5000 }, async () => {
                 const started = Date.now()
-                assert.deepStrictEqual(await db._pipelineProgress(), {
+                assert.deepStrictEqual(await db['_pipelineProgress'](), {
                     lag: null, lagReason: 'probe timed out',
                     writes: null, writesReason: 'probe timed out'
                 })
@@ -410,15 +410,15 @@ describe('adaptive wait deadline', function () {
 
         async function gaveUpFor(progress, configure){
             const db = makeDb()
-            db._pipelineProgress = async () => progress
+            db['_pipelineProgress'] = async () => progress
             if (configure) configure(db)
-            const lines = await captureLog(() => db._waitFor(checkThing, {}, TIMEMAX))
+            const lines = await captureLog(() => db['_waitFor'](checkThing, {}, TIMEMAX))
             return lines.find(l => l.includes('GAVE UP'))
         }
 
         it('reports zero lag distinctly, which is the case the current signal cannot see', async () => {
             const db = makeDb({ lag: 0 })
-            const lines = await captureLog(() => db._waitFor(checkThing, {}, TIMEMAX))
+            const lines = await captureLog(() => db['_waitFor'](checkThing, {}, TIMEMAX))
             const gaveUp = lines.find(l => l.includes('GAVE UP'))
             assert(gaveUp, 'a timed-out wait must report why it gave up')
             assert(/checkThing/.test(gaveUp), 'the report names the wait')
@@ -439,7 +439,7 @@ describe('adaptive wait deadline', function () {
             // Separates "the stack was busy and we ran out of budget" from "the stack
             // was idle and the row is genuinely absent", which read identically before.
             const db = makeDb({ lag: 0, writes: 7777 })
-            const lines = await captureLog(() => db._waitFor(checkThing, {}, TIMEMAX))
+            const lines = await captureLog(() => db['_waitFor'](checkThing, {}, TIMEMAX))
             const gaveUp = lines.find(l => l.includes('GAVE UP'))
             assert(/action writes idle at index 7777/.test(gaveUp),
                 'a stalled write mark must be named in the give-up report: ' + gaveUp)
@@ -448,7 +448,7 @@ describe('adaptive wait deadline', function () {
         it('names the extension it granted for writes, not for lag', async () => {
             let mark = 500
             const db = makeDb({ lag: 0, writes: () => ++mark, maxExtensions: 1, probeEvery: TICK * 2 })
-            const lines = await captureLog(() => db._waitFor(checkThing, {}, TICK * 7))
+            const lines = await captureLog(() => db['_waitFor'](checkThing, {}, TICK * 7))
             const granted = lines.find(l => l.includes('extending the wait'))
             assert(granted, 'a write-driven extension must be logged like a lag-driven one')
             assert(/still writing action rows/.test(granted),
@@ -457,7 +457,7 @@ describe('adaptive wait deadline', function () {
 
         it('distinguishes a probe that could not answer from a zero-lag probe', async () => {
             const db = makeDb({ lag: null })
-            const lines = await captureLog(() => db._waitFor(checkThing, {}, TIMEMAX))
+            const lines = await captureLog(() => db['_waitFor'](checkThing, {}, TIMEMAX))
             const gaveUp = lines.find(l => l.includes('GAVE UP'))
             assert(/probe failed: test probe unavailable/.test(gaveUp),
                 'an unanswerable probe must say so: ' + gaveUp)
@@ -501,7 +501,7 @@ describe('adaptive wait deadline', function () {
 
         it('reduces a thrown probe value to its message without logging the object', async () => {
             const db = makeDb()
-            db._pipelineProgress = Database.prototype._pipelineProgress
+            db['_pipelineProgress'] = Database.prototype['_pipelineProgress']
             db.pool = { getConnection: async () => {
                 throw { message: 'safe probe failure', toString: () => 'connection object with secret' }
             } }
@@ -509,7 +509,7 @@ describe('adaptive wait deadline', function () {
             global.nodeConnector = { getBlockCount: async () => 1 }
             let lines
             try {
-                lines = await captureLog(() => db._waitFor(checkThing, {}, TIMEMAX))
+                lines = await captureLog(() => db['_waitFor'](checkThing, {}, TIMEMAX))
             } finally {
                 if (saved === undefined) delete global.nodeConnector; else global.nodeConnector = saved
             }
@@ -522,7 +522,7 @@ describe('adaptive wait deadline', function () {
         it('says when the wait was too short to ever qualify for an extension', async () => {
             const db = makeDb({ lag: 0 })
             db.WAIT_MIN_FOR_EXTENSION = 10000   // far above TIMEMAX
-            const lines = await captureLog(() => db._waitFor(checkThing, {}, TIMEMAX))
+            const lines = await captureLog(() => db['_waitFor'](checkThing, {}, TIMEMAX))
             const gaveUp = lines.find(l => l.includes('GAVE UP'))
             assert(/probe was never run because the wait was not eligible for extension/.test(gaveUp),
                 'an ineligible wait must not be reported as a zero-lag one: ' + gaveUp)
@@ -530,7 +530,7 @@ describe('adaptive wait deadline', function () {
 
         it('says when an eligible wait exhausted its budget before any probe ran', async () => {
             const db = makeDb({ maxExtensions: 0 })
-            const lines = await captureLog(() => db._waitFor(checkThing, {}, TIMEMAX))
+            const lines = await captureLog(() => db['_waitFor'](checkThing, {}, TIMEMAX))
             const gaveUp = lines.find(l => l.includes('GAVE UP'))
             assert(/probe was never run before give-up/.test(gaveUp),
                 'an unrun eligible probe needs its own reason: ' + gaveUp)
@@ -539,7 +539,7 @@ describe('adaptive wait deadline', function () {
         it('stays silent on the success path, so the log only grows when something went wrong', async () => {
             const db = makeDb({ lag: 0 })
             const lines = await captureLog(() =>
-                db._waitFor(function checkThing(){ return { id: 1 } }, {}, TIMEMAX))
+                db['_waitFor'](function checkThing(){ return { id: 1 } }, {}, TIMEMAX))
             assert.strictEqual(lines.filter(l => l.includes('GAVE UP')).length, 0)
         })
     })

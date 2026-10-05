@@ -16,22 +16,22 @@ const batchHelper = require('../helpers/batchHelper')
 describe('BATCH', () => {
     describe('v0', () => {
         it('should execute a batch of SEND commands', async () => {
-            let addr = await cryptoHelper.getNewFundedAddress("BATCH.V0", COIN, NETWORK, null, "legacy", 0, 1)
-            let address = addr["address"]
-            let tick = "BATCHv0"+address.substring(address.length-8)
+            const addr = await cryptoHelper.getNewFundedAddress("BATCH.V0", COIN, NETWORK, null, "legacy", 0, 1)
+            const address = addr["address"]
+            const tick = "BATCHv0"+address.substring(address.length-8)
 
             await issueHelper.sendIssueV0(addr, tick, 100, 50, 0, "Batch test token", 50)
 
-            let dest1 = await cryptoHelper.getNewAddress("BATCH.V0", COIN, NETWORK, null, "legacy", 1)
-            let dest2 = await cryptoHelper.getNewAddress("BATCH.V0", COIN, NETWORK, null, "legacy", 2)
+            const dest1 = await cryptoHelper.getNewAddress("BATCH.V0", COIN, NETWORK, null, "legacy", 1)
+            const dest2 = await cryptoHelper.getNewAddress("BATCH.V0", COIN, NETWORK, null, "legacy", 2)
 
-            let result = await batchHelper.sendBatchV0(addr, [
+            const result = await batchHelper.sendBatchV0(addr, [
                 "SEND|0|"+tick+"|1|"+dest1["address"]+"|Batch send 1",
                 "SEND|0|"+tick+"|2|"+dest2["address"]+"|Batch send 2"
             ])
             assert(result.batch, "Batch v0 should exist in DB")
 
-            let send1 = await indexerDatabase.waitForSend({
+            const send1 = await indexerDatabase.waitForSend({
                 source: address,
                 destination: dest1["address"],
                 tick: tick,
@@ -40,7 +40,7 @@ describe('BATCH', () => {
             })
             assert(send1, "First batched send should exist in DB")
 
-            let send2 = await indexerDatabase.waitForSend({
+            const send2 = await indexerDatabase.waitForSend({
                 source: address,
                 destination: dest2["address"],
                 tick: tick,

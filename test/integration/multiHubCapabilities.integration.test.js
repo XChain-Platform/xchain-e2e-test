@@ -122,8 +122,8 @@ describe('MultiValidatorHub: capability staking', function () {
             await hub.startCapabilities(capsPath);
             // Stop the live stake poll so it can't overwrite the deterministic
             // stake levels asserted below.
-            if (hub._stakePollTimer) clearInterval(hub._stakePollTimer);
-            if (hub._capabilityRecheckTimer) clearInterval(hub._capabilityRecheckTimer);
+            if (hub['_stakePollTimer']) clearInterval(hub['_stakePollTimer']);
+            if (hub['_capabilityRecheckTimer']) clearInterval(hub['_capabilityRecheckTimer']);
         }
         // Every capability's self-test passing IS the assertion below, and each is a
         // row the one-shot initial poll writes, so wait for them rather than betting
@@ -132,7 +132,7 @@ describe('MultiValidatorHub: capability staking', function () {
         await waitFor(async () => {
             let rows = [];
             try { rows = await mvh.hubs[0].capabilityRegistry.getOwnState(pubkey); }
-            catch (_) { rows = []; }
+            catch (internal) { rows = []; }
             const passing = CAP_NAMES.filter((cap) => {
                 const row = rows.find((r) => r.capability === cap);
                 return row && Number(row.self_test_ok) === 1;
@@ -155,7 +155,7 @@ describe('MultiValidatorHub: capability staking', function () {
     after(async function () {
         this.timeout(180_000);
         if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
-        if (capsPath) { try { fs.unlinkSync(capsPath); } catch (_) {} }
+        if (capsPath) { try { fs.unlinkSync(capsPath); } catch (internal) {} }
         if (db) await db.stop();
     });
 

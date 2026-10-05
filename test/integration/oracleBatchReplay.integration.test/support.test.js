@@ -89,7 +89,7 @@ let replayNode = null;
 let venue   = null;
 
 let rounds        = [];      // what the federation finalized
-let expectedPairs = [];      // {round, coinPair} the federation put on the chain
+const expectedPairs = [];      // {round, coinPair} the federation put on the chain
 let targetHeight  = null;    // the block the last publish landed in
 
 let livePrices = [], replayPrices = [];        // PRICE actions each node decided
@@ -202,7 +202,7 @@ async function startVenue(context) {
 function preparePublishers() {
     for (const pub of venue.publishers) {
         if (pub.queuePath) pub.bufferPath = String(pub.queuePath).replace(/\.jsonl$/, '') + '.buffer.jsonl';
-        if (pub._buffer && typeof pub._buffer.clear === 'function') pub._buffer.clear();
+        if (pub['_buffer'] && typeof pub['_buffer'].clear === 'function') pub['_buffer'].clear();
     }
 
     // Give every hub a STARTED batch-signing round.

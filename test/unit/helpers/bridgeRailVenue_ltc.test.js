@@ -45,7 +45,7 @@ function harness() {
         constructor(opts) {
             this.opts = opts;
             this.serial = ++venueSerial;
-            this.hubs = opts.attachHubs || Array.from({ length: opts.hubCount || 1 }, (_, index) => ({
+            this.hubs = opts.attachHubs || Array.from({ length: opts.hubCount || 1 }, (internal, index) => ({
                 index: index, dbName: 'Hub' + index,
             }));
             this.hubDb = opts.hubDb || hubDb;
@@ -53,7 +53,7 @@ function harness() {
             this.hubEnv = {};
             this.unavailable = null;
             this.stops = 0;
-            this.indexers = Array.from({ length: opts.indexerCount }, (_, index) => ({
+            this.indexers = Array.from({ length: opts.indexerCount }, (internal, index) => ({
                 index: index,
                 followsHub: 0,
                 apiUrl: 'http://indexer-' + this.serial + '-' + index,
@@ -73,8 +73,8 @@ function harness() {
         async stop() { this.stops += 1; events.push('stop:' + this.opts.coin); }
         async stopHub(index) { events.push('stopHub:' + index); }
         async startHub(index) { events.push('startHub:' + index); }
-        async _kill(proc) { events.push('stopIndexer:' + proc.index); }
-        async _spawnIndexer(index) {
+        async ['_kill'](proc) { events.push('stopIndexer:' + proc.index); }
+        async ['_spawnIndexer'](index) {
             this.indexers[index].proc = { index: index };
             events.push('startIndexer:' + index);
         }

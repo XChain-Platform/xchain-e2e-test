@@ -24,7 +24,7 @@ class MockAttestationValidator {
         const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
         this.privateKey = privateKey;
         // SPKI DER for Ed25519 is 12-byte prefix + 32-byte raw pubkey
-        let spkiDer = publicKey.export({ format: 'der', type: 'spki' });
+        const spkiDer = publicKey.export({ format: 'der', type: 'spki' });
         this.pubkey = spkiDer.subarray(12).toString('hex');
         // The staking source address this validator was staked from. SWQ source-dedup
         // (active on regtest/testnet at block 0) keeps only ONE key per source in a
@@ -40,7 +40,7 @@ class MockAttestationValidator {
     // ed25519 verification fails. regtest/testnet activate at block 0, so the e2e is
     // always wrapped; the wrapped bytes don't depend on the block value (only the
     // activation gate does), so a default snapshotBlock of 0 reproduces it byte-for-byte.
-    _canonical(requestId, providerId, responsePayload, status, meta, snapshotBlock, network) {
+    ['_canonical'](requestId, providerId, responsePayload, status, meta, snapshotBlock, network) {
         const responseHash = crypto.createHash('sha256').update(String(responsePayload || ''), 'utf8').digest('hex');
         let canonRaw = String(requestId) + String(providerId) + responseHash + String(status) + String(meta || '');
         if (eq.isEquivHeaderActive(snapshotBlock, network))
@@ -49,7 +49,7 @@ class MockAttestationValidator {
     }
 
     sign(requestId, providerId, responsePayload, status, meta, snapshotBlock, network) {
-        const message = this._canonical(requestId, providerId, responsePayload, status, meta, snapshotBlock, network);
+        const message = this['_canonical'](requestId, providerId, responsePayload, status, meta, snapshotBlock, network);
         return crypto.sign(null, message, this.privateKey).toString('hex');
     }
 }
@@ -110,13 +110,13 @@ function computeResponsibleSigners(requestId, redundancy, validators, snapshotBl
             /^\d+(\.\d+)?$/.test(String(v.weight).trim()) &&
             mathjs.bignumber(String(v.weight).trim()).gte(mathjs.bignumber(String(minStake).trim())));
     let withHash = validators.map(v => {
-        let pk = String(v.pubkey).toLowerCase();
-        let h  = crypto.createHash('sha256').update(String(requestId), 'utf8').update(pk, 'utf8').digest('hex');
+        const pk = String(v.pubkey).toLowerCase();
+        const h  = crypto.createHash('sha256').update(String(requestId), 'utf8').update(pk, 'utf8').digest('hex');
         return { v, pubkey: pk, source: (v.source != null ? String(v.source) : null), hash: h };
     });
     withHash.sort((a, b) => (a.hash < b.hash) ? -1 : (a.hash > b.hash ? 1 : 0));
     if (swq.isStakeWeightedQuorumActive(sb, net)) {
-        let seen = new Set();
+        const seen = new Set();
         withHash = withHash.filter(e => {
             if (e.source === null) return true;
             if (seen.has(e.source)) return false;

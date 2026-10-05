@@ -41,7 +41,7 @@ const CONFIGS = {
 
 // The hashes a hub built from the SAME coin files serves.
 function matchingHashes(){
-    let served = {};
+    const served = {};
     for(const network of coins.NETWORKS) served[network] = coins.consensusHashes(network);
     return served;
 }
@@ -71,22 +71,22 @@ describe('XChainHubConnector hub-served consensus-hash cross-check', function(){
     });
 
     it('stays silent when the hub serves the hashes this suite vendors', async function(){
-        let hub = new XChainHubConnector([HUB_BASE]);
+        const hub = new XChainHubConnector([HUB_BASE]);
         stubHub(matchingHashes());
-        let lines = await withCapturedError(async () => {
+        const lines = await withCapturedError(async () => {
             assert.deepStrictEqual(await hub.getAllConfig(), CONFIGS);
         });
         assert.deepStrictEqual(lines, []);
     });
 
     it('reports the drifted coin and network when a served hash differs', async function(){
-        let hub = new XChainHubConnector([HUB_BASE]);
-        let vendored = coins.consensusHashes('regtest').BTC;
-        let served = matchingHashes();
+        const hub = new XChainHubConnector([HUB_BASE]);
+        const vendored = coins.consensusHashes('regtest').BTC;
+        const served = matchingHashes();
         served.regtest = Object.assign({}, served.regtest, { BTC: 'f'.repeat(64) });
 
         stubHub(served);
-        let lines = await withCapturedError(async () => {
+        const lines = await withCapturedError(async () => {
             // The config tree is still returned: the check never fails the fetch.
             assert.deepStrictEqual(await hub.getAllConfig(), CONFIGS);
         });
@@ -107,49 +107,49 @@ describe('XChainHubConnector hub-served consensus-hash cross-check', function(){
     });
 
     it('is silent against an older hub that serves no hashes at all', async function(){
-        let hub = new XChainHubConnector([HUB_BASE]);
+        const hub = new XChainHubConnector([HUB_BASE]);
         nock(HUB_BASE).post('/').reply(200, { jsonrpc: '2.0', id: 1, result: CONFIGS });
-        let lines = await withCapturedError(async () => { await hub.getAllConfig(); });
+        const lines = await withCapturedError(async () => { await hub.getAllConfig(); });
         assert.deepStrictEqual(lines, []);
     });
 
     it('treats a coin the hub does not serve as version skew, not drift', async function(){
-        let hub = new XChainHubConnector([HUB_BASE]);
-        let served = matchingHashes();
+        const hub = new XChainHubConnector([HUB_BASE]);
+        const served = matchingHashes();
         delete served.regtest.DOGE;
         delete served.testnet;
 
         stubHub(served);
-        let lines = await withCapturedError(async () => { await hub.getAllConfig(); });
+        const lines = await withCapturedError(async () => { await hub.getAllConfig(); });
         assert.deepStrictEqual(lines, []);
     });
 
     it('logs a standing divergence once, then again only when the set changes', async function(){
-        let hub = new XChainHubConnector([HUB_BASE]);
-        let drifted = matchingHashes();
+        const hub = new XChainHubConnector([HUB_BASE]);
+        const drifted = matchingHashes();
         drifted.regtest = Object.assign({}, drifted.regtest, { BTC: 'a'.repeat(64) });
 
         stubHub(drifted);
-        let first = await withCapturedError(async () => { await hub.getAllConfig(); });
+        const first = await withCapturedError(async () => { await hub.getAllConfig(); });
         assert.strictEqual(first.length, 1);
 
         stubHub(drifted);
-        let second = await withCapturedError(async () => { await hub.getAllConfig(); });
+        const second = await withCapturedError(async () => { await hub.getAllConfig(); });
         assert.deepStrictEqual(second, [], 'a standing divergence must not flood the run output');
 
-        let wider = matchingHashes();
+        const wider = matchingHashes();
         wider.regtest = Object.assign({}, wider.regtest, { BTC: 'a'.repeat(64), LTC: 'b'.repeat(64) });
         stubHub(wider);
-        let third = await withCapturedError(async () => { await hub.getAllConfig(); });
+        const third = await withCapturedError(async () => { await hub.getAllConfig(); });
         assert.strictEqual(third.length, 1, 'a widened drift must report');
         assert.ok(third[0].includes('LTC/regtest'));
 
         stubHub(matchingHashes());
-        let fourth = await withCapturedError(async () => { await hub.getAllConfig(); });
+        const fourth = await withCapturedError(async () => { await hub.getAllConfig(); });
         assert.deepStrictEqual(fourth, []);
 
         stubHub(drifted);
-        let fifth = await withCapturedError(async () => { await hub.getAllConfig(); });
+        const fifth = await withCapturedError(async () => { await hub.getAllConfig(); });
         assert.strictEqual(fifth.length, 1, 'a re-opened drift must report again');
     });
 });

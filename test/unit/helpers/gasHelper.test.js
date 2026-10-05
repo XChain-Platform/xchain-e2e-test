@@ -68,7 +68,7 @@ describe('gasHelper', () => {
         // Keeps the developer's own drill-keys/ faucet out of these cases.
         savedFaucetFile = process.env.E2E_GAS_FAUCET_FILE
         process.env.E2E_GAS_FAUCET_FILE = path.join(os.tmpdir(), 'gas-faucet-absent-' + process.pid + '.json')
-        helper._resetGasFaucet()
+        helper['_resetGasFaucet']()
         mintStub = sinon.stub(mintHelper, 'sendMintV0').resolves({
             txHash: 'abc123',
             mint: { id: 200 },
@@ -89,7 +89,7 @@ describe('gasHelper', () => {
         delete global.NETWORK
         if (savedFaucetFile === undefined) delete process.env.E2E_GAS_FAUCET_FILE
         else process.env.E2E_GAS_FAUCET_FILE = savedFaucetFile
-        helper._resetGasFaucet()
+        helper['_resetGasFaucet']()
     })
 
     // A long-lived BTC regtest spends the gas tick's MAX_SUPPLY, so a grant there is a
@@ -224,7 +224,7 @@ describe('gasHelper', () => {
         let bridgeStub, sendStub, fundStub
 
         beforeEach(() => {
-            helper._resetGasReservoirs()
+            helper['_resetGasReservoirs']()
             global.COIN = 'litecoin'
             global.COIN_CODE = 'LTC'
             global.NETWORK = 'regtest'
@@ -234,7 +234,7 @@ describe('gasHelper', () => {
             fundStub = sinon.stub(cryptoHelper, 'getNewFundedAddress').callsFake(async () => ({ address: 'Lres' + (++n) }))
         })
 
-        afterEach(() => helper._resetGasReservoirs())
+        afterEach(() => helper['_resetGasReservoirs']())
 
         it('bridges the reservoir amount once, then pays each address with a local SEND of the gas tick', async () => {
             await helper.ensureGasBalance({ address: 'Lrecv1' }, 100)

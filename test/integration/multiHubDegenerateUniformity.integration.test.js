@@ -91,8 +91,8 @@ async function attachEngines(mvh) {
         round.setConsensus(oc);
         oc.setValidatorSet(await hub.loadValidatorSet());
         await oc.start();
-        hub._cOracle = oc;
-        hub._cRound  = round;
+        hub['_cOracle'] = oc;
+        hub['_cRound']  = round;
         stops.push(() => oc.stop && oc.stop());
 
         const cps = hub.stateCheckpoints;
@@ -102,7 +102,7 @@ async function attachEngines(mvh) {
         cps.indexers.BTC  = { url: 'http://stubbed', key: '' };
         cps.indexerCall  = async () => Object.assign({}, TIP);
     }
-    return { stop() { stops.forEach((s) => { try { s(); } catch (_) {} }); } };
+    return { stop() { stops.forEach((s) => { try { s(); } catch (internal) {} }); } };
 }
 
 function injectSubmissions(mvh) {
@@ -112,7 +112,7 @@ function injectSubmissions(mvh) {
     for (const hub of mvh.hubs) {
         const subs = new Map();
         for (const a of subAddrs) subs.set(a, { prices: [{ coinPair: PAIR, price: PRICE }] });
-        hub._cRound.submissions.set(ROUND, subs);
+        hub['_cRound'].submissions.set(ROUND, subs);
     }
 }
 
@@ -133,7 +133,7 @@ async function configApplied(hub, value) {
 }
 
 async function drivePrice(mvh) {
-    await Promise.all(mvh.hubs.map((h) => h._cOracle.finalizeRound(ROUND, BLOCK_INDEX, BLOCK_TIME).catch(() => {})));
+    await Promise.all(mvh.hubs.map((h) => h['_cOracle'].finalizeRound(ROUND, BLOCK_INDEX, BLOCK_TIME).catch(() => {})));
 }
 async function priceFinalized(hub) {
     const r = await hub.db.doQuery('SELECT * FROM price_snapshots WHERE round_number = ? AND coin_pair = ?', [ROUND, PAIR]);

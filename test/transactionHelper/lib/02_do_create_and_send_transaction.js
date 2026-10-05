@@ -69,7 +69,7 @@ function xchainP2shFinalizer(inputIndex, input, script, isSegwit, isP2SH, isP2WS
 }
 
 module.exports = {
-    async _doCreateAndSendTransaction(addressInfo, data, rawData = null, customOutputs = [], outputType = null, compressedPubKey = null, opts = {}){
+    async ['_doCreateAndSendTransaction'](addressInfo, data, rawData = null, customOutputs = [], outputType = null, compressedPubKey = null, opts = {}){
         console.log("Creating the transaction...")
         const utxoListForEncoder = (transactionState.verifiedUtxosAddress === addressInfo["address"] && transactionState.verifiedUtxos) ? transactionState.verifiedUtxos : []
         transactionState.verifiedUtxos = null
@@ -98,8 +98,8 @@ module.exports = {
             (opts && opts.compress !== undefined) ? opts.compress : null
         )
 
-        let built = txPsbtHex
-        let encodeType = txPsbtHex["encoding"]
+        const built = txPsbtHex
+        const encodeType = txPsbtHex["encoding"]
         txPsbtHex = txPsbtHex["psbt"]
         if (capture){
             capture.encoding = encodeType
@@ -108,20 +108,20 @@ module.exports = {
             capture.carrierScripts = built["carrierScripts"] || null
         }
 
-        let psbtToSign = bitcoin.Psbt.fromHex(txPsbtHex)
-        var ECPair = ECPairFactory(ecc);
-        let keyToSign = ECPair.fromPrivateKey(addressInfo["privateKey"], { NETWORK_OBJECT });
+        const psbtToSign = bitcoin.Psbt.fromHex(txPsbtHex)
+        const ECPair = ECPairFactory(ecc);
+        const keyToSign = ECPair.fromPrivateKey(addressInfo["privateKey"], { NETWORK_OBJECT });
 
-        for (let proxInputIndex in psbtToSign.data.inputs){
-            let proxInput = psbtToSign.data.inputs[proxInputIndex]
+        for (const proxInputIndex in psbtToSign.data.inputs){
+            const proxInput = psbtToSign.data.inputs[proxInputIndex]
             psbtToSign.signInput(parseInt(proxInputIndex), keyToSign);
         }
 
         psbtToSign.finalizeAllInputs();
         psbtToSign.setMaximumFeeRate(100000) // regtest fee estimates can exceed bitcoinjs-lib's default 5000 sat/byte threshold
-        let tx = psbtToSign.extractTransaction()
+        const tx = psbtToSign.extractTransaction()
         let txHash = tx.getId()
-        let txHex = tx.toHex()
+        const txHex = tx.toHex()
 
         let spentTx = null
         let spentHex = null
@@ -179,10 +179,10 @@ module.exports = {
 
             spentTxPsbtHex = spentTxPsbtHex["psbt"]
 
-            let spentPsbtToSign = bitcoin.Psbt.fromHex(spentTxPsbtHex)
+            const spentPsbtToSign = bitcoin.Psbt.fromHex(spentTxPsbtHex)
 
-            for (let proxInputIndex in spentPsbtToSign.data.inputs){
-                let proxInput = spentPsbtToSign.data.inputs[proxInputIndex]
+            for (const proxInputIndex in spentPsbtToSign.data.inputs){
+                const proxInput = spentPsbtToSign.data.inputs[proxInputIndex]
                 spentPsbtToSign.signInput(parseInt(proxInputIndex), keyToSign);
             }
 
@@ -212,11 +212,11 @@ module.exports = {
             capture.revealWeight = spentTx ? spentTx.weight() : null
         }
         console.log("Waiting for the transaction ("+txHash+") to be confirmed...")
-        let txExists = await nodeConnector.waitForTx(txHash, 60000)
+        const txExists = await nodeConnector.waitForTx(txHash, 60000)
 
         if (spentTxHash != null){
             console.log("Waiting for the second transaction ("+spentTxHash+") to be confirmed...")
-            let spentTxExists = await nodeConnector.waitForTx(spentTxHash, 60000)
+            const spentTxExists = await nodeConnector.waitForTx(spentTxHash, 60000)
         }
 
         // Wait for the utxo-tracker to show confirmed UTXOs from tx1.
@@ -229,9 +229,9 @@ module.exports = {
         const trackerEnd = Date.now() + 20000
         while (Date.now() < trackerEnd) {
             try {
-                let result = await utxoTrackerConnector.getUtxosFromAddress(addressInfo["address"])
-                let utxos = result["utxos"] || []
-                let confirmedUtxos = utxos.filter(u => u.confirmations > 0)
+                const result = await utxoTrackerConnector.getUtxosFromAddress(addressInfo["address"])
+                const utxos = result["utxos"] || []
+                const confirmedUtxos = utxos.filter(u => u.confirmations > 0)
                 if (confirmedUtxos.some(u => u.txid === txHash)) {
                     transactionState.verifiedUtxos = confirmedUtxos
                     transactionState.verifiedUtxosAddress = addressInfo["address"]
@@ -243,8 +243,8 @@ module.exports = {
         if (!transactionState.verifiedUtxos) {
             // Timed out; save whatever confirmed UTXOs are available as a best-effort fallback
             try {
-                let result = await utxoTrackerConnector.getUtxosFromAddress(addressInfo["address"])
-                let utxos = result["utxos"] || []
+                const result = await utxoTrackerConnector.getUtxosFromAddress(addressInfo["address"])
+                const utxos = result["utxos"] || []
                 transactionState.verifiedUtxos = utxos.filter(u => u.confirmations > 0)
                 transactionState.verifiedUtxosAddress = addressInfo["address"]
             } catch (e) {}

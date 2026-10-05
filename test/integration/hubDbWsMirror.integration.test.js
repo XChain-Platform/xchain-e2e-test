@@ -119,17 +119,17 @@ describe('Hub-DB WS mirror: live broadcaster <-> sync (distributed) @integration
     });
 
     after(async function () {
-        try { if (sync) sync.stop(); } catch (_) {}
-        try { if (wss) wss.close(); } catch (_) {}
-        try { if (server) await new Promise(r => server.close(r)); } catch (_) {}
-        try { if (srcPool) await srcPool.end(); } catch (_) {}
-        try { if (repPool) await repPool.end(); } catch (_) {}
+        try { if (sync) sync.stop(); } catch (internal) {}
+        try { if (wss) wss.close(); } catch (internal) {}
+        try { if (server) await new Promise(r => server.close(r)); } catch (internal) {}
+        try { if (srcPool) await srcPool.end(); } catch (internal) {}
+        try { if (repPool) await repPool.end(); } catch (internal) {}
         try {
             const a = mariadb.createPool({ host: db.host, port: Number(db.port), user: db.user, password: db.pass });
             for (const d of [SRC, REP]) await a.query('DROP DATABASE IF EXISTS ' + d);
             await a.end();
-        } catch (_) {}
-        try { if (db) await db.stop(); } catch (_) {}
+        } catch (internal) {}
+        try { if (db) await db.stop(); } catch (internal) {}
     });
 
     it('BOOTSTRAP: pulls pre-existing SRC rows into REP via the REST snapshot', async function () {

@@ -42,8 +42,8 @@
  */
 
 const assert = require('assert')
-const _path = require('path')
-const _fs = require('fs')
+const internalPath = require('path')
+const internalFs = require('fs')
 
 const cryptoHelper = require('../cryptoHelper')
 const stakeHelper = require('../helpers/stakeHelper')
@@ -54,18 +54,18 @@ const { skipIfResponseMirrorEra } = require('../helpers/attestLegacyResponsePath
 
 // Resolve the REAL http_get provider from the bundled (in-image) xchain-hub,
 // falling back to the monorepo sibling for local dev. Mirrors realUrlAttestation.
-const _hubBase = (function () {
+const internalHubBase = (function () {
     const candidates = [
         process.env.XCHAIN_HUB_PATH,
-        _path.resolve(__dirname, '../../xchain-hub'),
-        _path.resolve(__dirname, '../../../xchain-hub')
+        internalPath.resolve(__dirname, '../../xchain-hub'),
+        internalPath.resolve(__dirname, '../../../xchain-hub')
     ].filter(Boolean)
     for (const c of candidates) {
-        if (_fs.existsSync(_path.join(c, 'src/providers/http_get.js'))) return c
+        if (internalFs.existsSync(internalPath.join(c, 'src/providers/http_get.js'))) return c
     }
     return candidates[candidates.length - 1]
 })()
-const http_get = require(_hubBase + '/src/providers/http_get.js')
+const httpGet = require(internalHubBase + '/src/providers/http_get.js')
 
 // Deterministic public endpoint (same as the happy path): a fixed jsonplaceholder
 // resource returns the same body byte-for-byte, so the expired test can show the
@@ -125,7 +125,7 @@ let contractIndex = null
 // Stake a validator from its OWN distinct funded source (SWQ source-dedup
 // collapses same-source keys into one responsible-set slot).
 async function stakeValidatorFromOwnSource(v, stakedValidators) {
-    let stakeSource = await cryptoHelper.getNewFundedAddress(
+    const stakeSource = await cryptoHelper.getNewFundedAddress(
         'realurl-fail-val', COIN, NETWORK, null, 'legacy', stakedValidators.length, 0.02
     )
     // 15000 clears BOTH the attestation capability min_stake (1000) and the
@@ -193,7 +193,7 @@ async function fetchDroppedRealUrl() {
     //    federation WOULD have signed. We deliberately do NOT broadcast the
     //    ATTEST v1 (modelling a lost/late response tx), so the deadline lapses.
     try {
-        const fetched = await http_get.fetch(REAL_URL, { maxResponseBytes: 32768, timeoutMs: 10000 })
+        const fetched = await httpGet.fetch(REAL_URL, { maxResponseBytes: 32768, timeoutMs: 10000 })
         console.log('LIVE FETCH (will be dropped) status=' + String(fetched.meta) +
             '  bytes=' + Buffer.byteLength(fetched.body.toString('utf8'), 'utf8'))
     } catch (e) {
@@ -208,8 +208,8 @@ async function fetchNondeterministicUrl() {
     //    Best-effort - the core assertions below exercise the indexer's
     //    handling of the no_quorum SIGNAL and don't depend on the fetch.
     try {
-        const a = await http_get.fetch(NONDET_URL, { maxResponseBytes: 8192, timeoutMs: 10000 })
-        const b = await http_get.fetch(NONDET_URL, { maxResponseBytes: 8192, timeoutMs: 10000 })
+        const a = await httpGet.fetch(NONDET_URL, { maxResponseBytes: 8192, timeoutMs: 10000 })
+        const b = await httpGet.fetch(NONDET_URL, { maxResponseBytes: 8192, timeoutMs: 10000 })
         const bodyA = a.body.toString('utf8')
         const bodyB = b.body.toString('utf8')
         console.log('NONDET FETCH #1 ' + JSON.stringify(bodyA))

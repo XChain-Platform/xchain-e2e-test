@@ -158,18 +158,18 @@ const idxDb = {
 }
 const indexerLike = { indexerDb: idxDb }
 function newPubkey() {
-    let { publicKey } = crypto.generateKeyPairSync('ed25519')
+    const { publicKey } = crypto.generateKeyPairSync('ed25519')
     return publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('hex')
 }
 async function syncPast(blockIndex) {
     await regtestMinerConnector.generateBlocks(7)
-    let ok = await indexerConnector.waitForIndexedBlock(Number(blockIndex), 90000)
+    const ok = await indexerConnector.waitForIndexedBlock(Number(blockIndex), 90000)
     assert(ok, 'indexer did not reach block ' + blockIndex + ' in time')
 }
 async function effectivePubkeys() {
-    let health = await indexerConnector.health()
+    const health = await indexerConnector.health()
     assert(health && health.lastIndexedBlock !== null, 'indexer health should report lastIndexedBlock')
-    let result = await indexerConnector.getCapabilityValidators(CAPABILITY, health.lastIndexedBlock, MIN_STAKE)
+    const result = await indexerConnector.getCapabilityValidators(CAPABILITY, health.lastIndexedBlock, MIN_STAKE)
     assert(result && !result.error, 'getcapabilityvalidators should answer; got: ' + (result && result.error))
     return result.validators.map(v => String(v.pubkey).toLowerCase())
 }
@@ -179,7 +179,7 @@ async function effectivePubkeys() {
 // it afterwards if we created it, leaving the venue as found. Inert to a
 // pre-WI-2 indexer, which never queries it.
 async function ensureSlashTable() {
-    let exists = await idxDb.doQuery(
+    const exists = await idxDb.doQuery(
         "SELECT COUNT(*) c FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='capability_slash_events'")
     if (Number(exists[0].c) > 0) return false
     await idxDb.doQuery(`CREATE TABLE capability_slash_events (
@@ -201,18 +201,18 @@ async function ensureSlashTable() {
 }
 function registerEffectiveSetTest() {
     it('STAKE v1 (pubkeyA) then DELEGATE v0 (pubkeyB): both land in the effective set', async function () {
-        let staked = await stakeHelper.sendStakeV1(addrA, STAKE_AMOUNT, pubkeyA)
+        const staked = await stakeHelper.sendStakeV1(addrA, STAKE_AMOUNT, pubkeyA)
         assert(staked.stake && staked.stake.status === 'valid', 'stake should be valid')
         await syncPast(staked.stake.activation_block)
-        let set1 = await effectivePubkeys()
+        const set1 = await effectivePubkeys()
         assert(set1.includes(pubkeyA), 'pubkeyA should be effective after stake activation')
-        let delegated = await stakeHelper.sendDelegateV0(addrA, pubkeyB)
+        const delegated = await stakeHelper.sendDelegateV0(addrA, pubkeyB)
         assert(delegated.delegation && delegated.delegation.status === 'valid', 'delegation should be valid')
         await syncPast(delegated.delegation.activation_block)
-        let set2 = await effectivePubkeys()
+        const set2 = await effectivePubkeys()
         assert(set2.includes(pubkeyA), 'pubkeyA must remain effective (additive-until-revoked)')
         assert(set2.includes(pubkeyB), 'delegated pubkeyB must be effective after activation')
-        let health = await indexerConnector.health()
+        const health = await indexerConnector.health()
         blockB = Number(health.lastIndexedBlock)
     })
 }
@@ -220,16 +220,16 @@ function registerFixedResolverTest() {
     it('FIXED resolver resolves the delegated key to its staking source (and agrees with the live RPC)', async function () {
         // Master stake_source.js (the archive/recovery leg d0abcfd fixed),
         // run directly against the real indexer DB.
-        let viaStake = await getStakeSourceByPubkey(indexerLike, { pubkey: pubkeyA, block_index: blockB })
+        const viaStake = await getStakeSourceByPubkey(indexerLike, { pubkey: pubkeyA, block_index: blockB })
         assert(!viaStake.error, 'pubkeyA resolution should not error: ' + viaStake.error)
         assert.strictEqual(viaStake.source, addrA.address, 'pubkeyA resolves via its stakes row')
-        let viaDelegation = await getStakeSourceByPubkey(indexerLike, { pubkey: pubkeyB, block_index: blockB })
+        const viaDelegation = await getStakeSourceByPubkey(indexerLike, { pubkey: pubkeyB, block_index: blockB })
         assert(!viaDelegation.error, 'pubkeyB resolution should not error: ' + viaDelegation.error)
         assert.strictEqual(viaDelegation.source, addrA.address,
             'delegated pubkeyB resolves to addrA via the delegations fallback (counted -> must resolve)')
         // Live RPC sanity: in the happy path pre- and post-fix agree; this
         // guards that the master resolver matches the deployed service here.
-        let rpc = await indexerConnector.getStakeSourceByPubkey(pubkeyB, blockB)
+        const rpc = await indexerConnector.getStakeSourceByPubkey(pubkeyB, blockB)
         assert(rpc && !rpc.error, 'live RPC resolution should answer')
         assert.strictEqual(rpc.source, addrA.address, 'live RPC also resolves pubkeyB to addrA')
     })
@@ -239,22 +239,22 @@ function registerRecoveryIdentityTest() {
         // Archive/recovery leg: getStakeSourceByPubkey is what the hub pins into
         // the ANCHOR archive, and what recovery.js restores as source_id via
         // createAddress(r.source) (xchain-indexer/bin/recovery.js).
-        let archive = await getStakeSourceByPubkey(indexerLike, { pubkey: pubkeyB, block_index: blockB })
+        const archive = await getStakeSourceByPubkey(indexerLike, { pubkey: pubkeyB, block_index: blockB })
         assert(!archive.error, 'archive-leg resolution should not error: ' + archive.error)
         assert.strictEqual(archive.source, addrA.address, 'archive leg resolves delegated pubkeyB to addrA')
         // Normal-write leg: the REAL master _resolveActiveStakeSourceId, bound to
         // our DB adapter (it uses only this.doQuery + this.getStatusId).
         // createValidatorReward stores exactly this source_id.
-        let pubkeyBId = await idxDb.getPubkeyId(pubkeyB.toLowerCase())
+        const pubkeyBId = await idxDb.getPubkeyId(pubkeyB.toLowerCase())
         assert(pubkeyBId, 'pubkeyB must have an index_pubkeys id')
         // The indexer structure pass dropped the underscore from the mixin name
         // (src/db/capabilities/index.js resolveActiveStakeSourceId); the master
         // class is still the one under test, only its spelling moved.
-        let writerSourceId = await MasterIndexerDb.prototype.resolveActiveStakeSourceId.call(idxDb, pubkeyBId, blockB)
+        const writerSourceId = await MasterIndexerDb.prototype.resolveActiveStakeSourceId.call(idxDb, pubkeyBId, blockB)
         assert(writerSourceId !== null && writerSourceId !== undefined,
             'writer leg must resolve a source_id (a counted key must resolve)')
-        let writerRow = await idxDb.doQuery('SELECT address FROM index_addresses WHERE id=?', [writerSourceId])
-        let writerAddr = writerRow.length ? String(writerRow[0].address) : null
+        const writerRow = await idxDb.doQuery('SELECT address FROM index_addresses WHERE id=?', [writerSourceId])
+        const writerAddr = writerRow.length ? String(writerRow[0].address) : null
         // The invariant ANCHOR recovery relies on: the source_id the normal path
         // STORED must equal the source the archive PINS (and recovery restores),
         // so a recovery rewrite is byte-identical. Pre-828db2d the normal path
@@ -267,15 +267,15 @@ function registerRecoveryIdentityTest() {
 }
 function registerSlashExclusionTest() {
     it('slash exclusion: the FIXED resolver drops a slashed delegated key; the pre-fix SQL would still resolve it', async function () {
-        let pubkeyBId = await idxDb.getPubkeyId(pubkeyB.toLowerCase())
+        const pubkeyBId = await idxDb.getPubkeyId(pubkeyB.toLowerCase())
         assert(pubkeyBId, 'pubkeyB must have an index_pubkeys id')
-        let validId = await idxDb.getStatusId('valid')
+        const validId = await idxDb.getStatusId('valid')
         assert(validId, 'valid status id must exist')
         // Throwaway-regtest fixture: a permanent-slash event for pubkeyB at a
         // block <= our resolution block. Mirrors what the SLASH handler writes;
         // we insert it directly because driving full EQUIV slashing is out of
         // scope, and remove it in finally to leave the shared DB clean.
-        let equivKey = 'drill-' + crypto.randomBytes(8).toString('hex')
+        const equivKey = 'drill-' + crypto.randomBytes(8).toString('hex')
         await idxDb.doQuery(
             `INSERT INTO capability_slash_events
                 (slash_action_index, signing_pubkey_id, capability, equiv_key, amount,
@@ -284,12 +284,12 @@ function registerSlashExclusionTest() {
             [999999999, pubkeyBId, CAPABILITY, equivKey, '0', '0', '0', null, null, blockB])
         try {
             // FIXED resolver: excludes the slashed key, matching effective-set membership.
-            let fixed = await getStakeSourceByPubkey(indexerLike, { pubkey: pubkeyB, block_index: blockB })
+            const fixed = await getStakeSourceByPubkey(indexerLike, { pubkey: pubkeyB, block_index: blockB })
             assert(!fixed.error, 'fixed resolver should not error: ' + fixed.error)
             assert.strictEqual(fixed.source, null,
                 'fixed resolver must EXCLUDE a slashed delegated key (got ' + fixed.source + ')')
             // PRE-FIX delegations leg (no capability_slash_events exclusion): still resolves.
-            let preFix = await idxDb.doQuery(
+            const preFix = await idxDb.doQuery(
                 `SELECT ia.address AS source FROM delegations d
                  JOIN index_addresses ia ON ia.id = d.source_id
                  WHERE d.signing_pubkey_id = ? AND d.status_id = ?
@@ -297,7 +297,7 @@ function registerSlashExclusionTest() {
                    AND (d.deactivation_block IS NULL OR d.deactivation_block > ?)
                  ORDER BY d.action_index DESC LIMIT 1`,
                 [pubkeyBId, validId, blockB, blockB])
-            let preFixSource = (preFix && preFix.length > 0) ? String(preFix[0].source) : null
+            const preFixSource = (preFix && preFix.length > 0) ? String(preFix[0].source) : null
             assert.strictEqual(preFixSource, addrA.address,
                 'pre-fix delegations SQL would still resolve the slashed key (the bug)')
             console.log('    slash divergence proven: fixed=null, pre-fix=' + preFixSource +

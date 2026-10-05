@@ -17,7 +17,7 @@ let reportSequence = 0
 function readReport(reportFile) {
     try {
         return JSON.parse(fs.readFileSync(reportFile, 'utf8'))
-    } catch (_) {
+    } catch (internal) {
         return null
     }
 }
@@ -37,7 +37,7 @@ function runMochaDriver(driverFile) {
         maxBuffer: 64 * 1024 * 1024,
     })
     const report = readReport(reportFile)
-    try { fs.unlinkSync(reportFile) } catch (_) {}
+    try { fs.unlinkSync(reportFile) } catch (internal) {}
     return { child, report }
 }
 
