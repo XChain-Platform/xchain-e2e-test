@@ -33,6 +33,51 @@ const PERF_COLLECTOR_MODULE = '../test/perf/perfCollector';
 
 function mariadbDriver(){ return require(MARIADB_MODULE); }
 
+function buildAirdropFilter({blockIndex,txHash,source,tick,amount,listActionIndex,memo,status}){
+    const whereClauses = []
+    const whereValues = []
+
+    if (blockIndex != null){
+        whereClauses.push("tr.block_index = ?")
+        whereValues.push(blockIndex)
+    }
+    if (txHash != null){
+        whereClauses.push("itx.hash = ?")
+        whereValues.push(txHash)
+    }
+
+    if (source != null){
+        whereClauses.push("ia.address = ?")
+        whereValues.push(source)
+    }
+    if (tick != null){
+        whereClauses.push("itick.tick = ?")
+        whereValues.push(tick)
+    }
+    if (amount != null){
+        whereClauses.push("a.amount = ?")
+        whereValues.push(amount)
+    }
+    if (listActionIndex != null){
+        whereClauses.push("a.list_action_index = ?")
+        whereValues.push(listActionIndex)
+    }
+    if (memo != null){
+        if (memo === ''){
+            whereClauses.push("im.memo IS NULL")
+        } else {
+            whereClauses.push("im.memo = ?")
+            whereValues.push(memo)
+        }
+    }
+    if (status != null){
+        whereClauses.push("ist.status = ?")
+        whereValues.push(status)
+    }
+
+    return {whereClauses, whereValues}
+}
+
 function buildIssueFilter(source, tick, txHash, maxSupply, maxMint, decimals, description, mintSupply, status){
     const filters = [
         ["ia.address = ?", source],
@@ -97,6 +142,29 @@ function buildSendFilters({source,destination,tick,amount,txHash,memo,status}){
     }
 
     return {whereClauses, whereValues}
+}
+
+function buildAirdropQuery(whereClauses){
+    return `
+            SELECT
+                tr.block_index AS block_index,
+                itx.hash AS tx_hash,
+                a.action_index,
+                ia.address AS source,
+                itick.tick AS tick,
+                a.amount,
+                im.memo,
+                a.list_action_index,
+                ist.status AS status
+            FROM airdrops a
+            LEFT JOIN actions act ON act.action_index = a.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ia ON ia.id = tr.source_id
+            LEFT JOIN index_statuses ist ON ist.id = a.status_id
+            LEFT JOIN index_tickers itick ON itick.id = a.tick_id
+            LEFT JOIN index_memos im ON im.id = a.memo_id
+        `+"WHERE "+whereClauses.join(" AND ");
 }
 
 function buildSendQuery(whereClauses){
@@ -976,66 +1044,10 @@ class Database {
     }
     
     async checkAirdrop({blockIndex,txHash,source,tick,amount,listActionIndex,memo,status}){
-        const whereClauses = []
-        const whereValues = []
-
-        if (blockIndex != null){
-            whereClauses.push("tr.block_index = ?")
-            whereValues.push(blockIndex)
-        }
-        if (txHash != null){
-            whereClauses.push("itx.hash = ?")
-            whereValues.push(txHash)
-        }
-        if (source != null){
-            whereClauses.push("ia.address = ?")
-            whereValues.push(source)
-        }
-        if (tick != null){
-            whereClauses.push("itick.tick = ?")
-            whereValues.push(tick)
-        }
-        if (amount != null){
-            whereClauses.push("a.amount = ?")
-            whereValues.push(amount)
-        }
-        if (listActionIndex != null){
-            whereClauses.push("a.list_action_index = ?")
-            whereValues.push(listActionIndex)
-        }
-        if (memo != null){
-            if (memo === ''){
-                whereClauses.push("im.memo IS NULL")
-            } else {
-                whereClauses.push("im.memo = ?")
-                whereValues.push(memo)
-            }
-        }
-        if (status != null){
-            whereClauses.push("ist.status = ?")
-            whereValues.push(status)
-        }
-
-        const query = `
-            SELECT
-                tr.block_index AS block_index,
-                itx.hash AS tx_hash,
-                a.action_index,
-                ia.address AS source,
-                itick.tick AS tick,
-                a.amount,
-                im.memo,
-                a.list_action_index,
-                ist.status AS status
-            FROM airdrops a
-            LEFT JOIN actions act ON act.action_index = a.action_index
-            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
-            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
-            LEFT JOIN index_addresses ia ON ia.id = tr.source_id
-            LEFT JOIN index_statuses ist ON ist.id = a.status_id
-            LEFT JOIN index_tickers itick ON itick.id = a.tick_id
-            LEFT JOIN index_memos im ON im.id = a.memo_id
-        `+"WHERE "+whereClauses.join(" AND ");
+        const {whereClauses, whereValues} = buildAirdropFilter({
+            blockIndex, txHash, source, tick, amount, listActionIndex, memo, status
+        })
+        const query = buildAirdropQuery(whereClauses)
 
         const connection = await this.getConnection()
         try {
