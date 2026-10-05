@@ -81,7 +81,7 @@
     "test:unit": "mocha 'test/unit/**/*.test.js'",
     "test:integration": "npm run test:integration:stubbed && npm run test:integration:live",
     "test:integration:stubbed": "mocha --timeout 0 --exit 'test/integration/database/**/*.test.js' 'test/integration/errors/**/*.test.js' 'test/integration/helpers/**/*.test.js' 'test/integration/parity/**/*.test.js' 'test/integration/pipeline/**/*.test.js' 'test/integration/setup/**/*.test.js' 'test/integration/state/**/*.test.js'",
-    "test:integration:live": "mocha --timeout 0 --exit 'test/integration/*.integration.test.js'",
+    "test:integration:live": "mocha --timeout 0 --exit 'test/integration/*.integration.test.js' 'test/integration/*.integration.test/**/*.test.js' 'test/integration/bridge_rail_*.test/**/*.test.js'",
     "test:e2e": "mocha --timeout 0 --exit --require ./test/initialCheck.test.js 'test/e2e/**/*.e2e.js'",
     "test:boundary": "mocha 'test/boundary/**/*.boundary.js'",
     "test:fuzz": "mocha --timeout 60000 'test/fuzz/**/*.fuzz.js' 'test/fuzz/**/*.test.js' test/fuzz/action-messages.fuzz/support/message_construction.js",
