@@ -886,34 +886,30 @@ class Database {
     }
     
     async waitForAirdrop(airdropObject, timeMax = 60000){ return this['_waitFor'](this.checkAirdrop, airdropObject, timeMax) }
-    
-    async getListAddresses(listActionIndex){
-        let listType = null
+
+    async _getListType(listActionIndex){
         const queryList = "SELECT type FROM lists WHERE action_index = ?"
-        
-        let connection = await this.getConnection()
-        
+        const connection = await this.getConnection()
+
         try {
             const rows = await connection.query(queryList, [listActionIndex])
             if (rows.length > 0){
-                listType = parseInt(rows[0]["type"])
-            } else {
-                logger.info("ERROR! Couldn't get the type of a list")
-                return null
+                return { found: true, listType: parseInt(rows[0]["type"]) }
             }
+            logger.info("ERROR! Couldn't get the type of a list")
+            return { found: false }
         } catch (err) {
             logger.info(err)
-            return null
+            return { found: false }
         } finally {
             await connection.release()
         }
-        
-        if (listType){
-            let addressesQuery = null
-            
-            switch (listType){
-                case 1: //TICK
-                    addressesQuery = `
+    }
+
+    _getListAddressesQuery(listType){
+        switch (listType){
+            case 1: //TICK
+                return `
                         WITH totalCredits AS (
                         SELECT address_id, tick_id, SUM(amount) AS total
                         FROM credits
@@ -933,35 +929,48 @@ class Database {
                     WHERE
                         COALESCE(tc.total, 0) > 0 OR COALESCE(td.total, 0) > 0;
                     `
-                    break
-                case 2: //address
-                    addressesQuery = `
+            case 2: //address
+                return `
                         SELECT 
                             ia.id AS address
                         FROM list_items li
                         LEFT JOIN index_addresses ia ON ia.id = li.item_id
                         WHERE li.action_index = ?
                     `
-                    break
-            }
-            
-            
-            try {
-                connection = await this.getConnection()
-                
-                const rows = await connection.query(addressesQuery, [listActionIndex])
-                const result = []
-                    
-                for (const nextRowIndex in rows){
-                    result.push(rows[nextRowIndex]["address"])
-                }
-                    
-                return result
-            } catch (err) {
-                logger.error("Couldn't get a list of addresses from a list:", err);
-            }
         }
-        
+        return null
+    }
+
+    async _queryListAddresses(addressesQuery, listActionIndex){
+        try {
+            const connection = await this.getConnection()
+            const rows = await connection.query(addressesQuery, [listActionIndex])
+            const addresses = this._addressIdsFromRows(rows)
+            return { succeeded: true, addresses }
+        } catch (err) {
+            logger.error("Couldn't get a list of addresses from a list:", err);
+            return { succeeded: false }
+        }
+    }
+
+    _addressIdsFromRows(rows){
+        const result = []
+        for (const nextRowIndex in rows){
+            result.push(rows[nextRowIndex]["address"])
+        }
+        return result
+    }
+
+    async getListAddresses(listActionIndex){
+        const list = await this._getListType(listActionIndex)
+        if (!list.found) return null
+
+        if (list.listType){
+            const addressesQuery = this._getListAddressesQuery(list.listType)
+            const queryResult = await this._queryListAddresses(addressesQuery, listActionIndex)
+            if (queryResult.succeeded) return queryResult.addresses
+        }
+
         logger.info("ERROR: there is no list with action index "+listActionIndex)
         return null
     }
