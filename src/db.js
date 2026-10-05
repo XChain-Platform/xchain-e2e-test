@@ -107,6 +107,54 @@ const config = require('./config');
 const { getLogger } = require('./lib/logger');
 const logger = getLogger();
 
+function buildBroadcastFilter({blockIndex,txHash,source,message,value,fee,memo,broadcastActionIndex,status}){
+    const whereClauses = []
+    const whereValues = []
+
+    if (blockIndex != null){
+        whereClauses.push("tr.block_index = ?")
+        whereValues.push(blockIndex)
+    }
+    if (txHash != null){
+        whereClauses.push("itx.hash = ?")
+        whereValues.push(txHash)
+    }
+    if (source != null){
+        whereClauses.push("ia.address = ?")
+        whereValues.push(source)
+    }
+    if (message != null){
+        whereClauses.push("b.message = ?")
+        whereValues.push(message)
+    }
+    if (value != null){
+        whereClauses.push("b.value = ?")
+        whereValues.push(value)
+    }
+    if (fee != null){
+        whereClauses.push("b.fee = ?")
+        whereValues.push(fee)
+    }
+    if (memo != null){
+        if (memo === ''){
+            whereClauses.push("im.memo IS NULL")
+        } else {
+            whereClauses.push("im.memo = ?")
+            whereValues.push(memo)
+        }
+    }
+    if (broadcastActionIndex != null){
+        whereClauses.push("b.broadcast_action_index = ?")
+        whereValues.push(broadcastActionIndex)
+    }
+    if (status != null){
+        whereClauses.push("ist.status = ?")
+        whereValues.push(status)
+    }
+
+    return { whereClauses, whereValues }
+}
+
 function getListWhere({blockIndex,txHash,source,type,edit,listActionIndex,memo,status}){
     const whereClauses = []
     const whereValues = []
@@ -785,52 +833,12 @@ class Database {
     }
     
     async waitForBroadcast(broadcastObject, timeMax = 60000){ return this['_waitFor'](this.checkBroadcast, broadcastObject, timeMax) }
-    
+
     async checkBroadcast({blockIndex,txHash,source,message,value,fee,memo,broadcastActionIndex,status}){
-        const whereClauses = []
-        const whereValues = []
-        
-        if (blockIndex != null){
-            whereClauses.push("tr.block_index = ?")
-            whereValues.push(blockIndex)
-        }
-        if (txHash != null){
-            whereClauses.push("itx.hash = ?")
-            whereValues.push(txHash)
-        }
-        if (source != null){
-            whereClauses.push("ia.address = ?")
-            whereValues.push(source)
-        }
-        if (message != null){
-            whereClauses.push("b.message = ?")
-            whereValues.push(message)
-        }
-        if (value != null){
-            whereClauses.push("b.value = ?")
-            whereValues.push(value)
-        }
-        if (fee != null){
-            whereClauses.push("b.fee = ?")
-            whereValues.push(fee)
-        }
-        if (memo != null){
-            if (memo === ''){
-                whereClauses.push("im.memo IS NULL")
-            } else {
-                whereClauses.push("im.memo = ?")
-                whereValues.push(memo)
-            }
-        }
-        if (broadcastActionIndex != null){
-            whereClauses.push("b.broadcast_action_index = ?")
-            whereValues.push(broadcastActionIndex)
-        }
-        if (status != null){
-            whereClauses.push("ist.status = ?")
-            whereValues.push(status)
-        }
-         
+        const { whereClauses, whereValues } = buildBroadcastFilter({
+            blockIndex, txHash, source, message, value, fee, memo, broadcastActionIndex, status
+        })
+
         const query = `
             SELECT 
                 tr.block_index AS block_index,
