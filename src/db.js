@@ -37,6 +37,54 @@ const config = require('./config');
 const { getLogger } = require('./lib/logger');
 const logger = getLogger();
 
+function buildBroadcastFilter({blockIndex,txHash,source,message,value,fee,memo,broadcastActionIndex,status}){
+    const whereClauses = []
+    const whereValues = []
+
+    if (blockIndex != null){
+        whereClauses.push("tr.block_index = ?")
+        whereValues.push(blockIndex)
+    }
+    if (txHash != null){
+        whereClauses.push("itx.hash = ?")
+        whereValues.push(txHash)
+    }
+    if (source != null){
+        whereClauses.push("ia.address = ?")
+        whereValues.push(source)
+    }
+    if (message != null){
+        whereClauses.push("b.message = ?")
+        whereValues.push(message)
+    }
+    if (value != null){
+        whereClauses.push("b.value = ?")
+        whereValues.push(value)
+    }
+    if (fee != null){
+        whereClauses.push("b.fee = ?")
+        whereValues.push(fee)
+    }
+    if (memo != null){
+        if (memo === ''){
+            whereClauses.push("im.memo IS NULL")
+        } else {
+            whereClauses.push("im.memo = ?")
+            whereValues.push(memo)
+        }
+    }
+    if (broadcastActionIndex != null){
+        whereClauses.push("b.broadcast_action_index = ?")
+        whereValues.push(broadcastActionIndex)
+    }
+    if (status != null){
+        whereClauses.push("ist.status = ?")
+        whereValues.push(status)
+    }
+
+    return { whereClauses, whereValues }
+}
+
 /**
  * A named-method wrapper around one mariadb connection pool: every query the
  * e2e suites need lives here as a method, never as a literal SQL string at
@@ -633,56 +681,8 @@ class Database {
     
     async waitForBroadcast(broadcastObject, timeMax = 60000){ return this['_waitFor'](this.checkBroadcast, broadcastObject, timeMax) }
 
-    _getBroadcastFilter({blockIndex,txHash,source,message,value,fee,memo,broadcastActionIndex,status}){
-        const whereClauses = []
-        const whereValues = []
-
-        if (blockIndex != null){
-            whereClauses.push("tr.block_index = ?")
-            whereValues.push(blockIndex)
-        }
-        if (txHash != null){
-            whereClauses.push("itx.hash = ?")
-            whereValues.push(txHash)
-        }
-        if (source != null){
-            whereClauses.push("ia.address = ?")
-            whereValues.push(source)
-        }
-        if (message != null){
-            whereClauses.push("b.message = ?")
-            whereValues.push(message)
-        }
-        if (value != null){
-            whereClauses.push("b.value = ?")
-            whereValues.push(value)
-        }
-        if (fee != null){
-            whereClauses.push("b.fee = ?")
-            whereValues.push(fee)
-        }
-        if (memo != null){
-            if (memo === ''){
-                whereClauses.push("im.memo IS NULL")
-            } else {
-                whereClauses.push("im.memo = ?")
-                whereValues.push(memo)
-            }
-        }
-        if (broadcastActionIndex != null){
-            whereClauses.push("b.broadcast_action_index = ?")
-            whereValues.push(broadcastActionIndex)
-        }
-        if (status != null){
-            whereClauses.push("ist.status = ?")
-            whereValues.push(status)
-        }
-
-        return { whereClauses, whereValues }
-    }
-
     async checkBroadcast({blockIndex,txHash,source,message,value,fee,memo,broadcastActionIndex,status}){
-        const { whereClauses, whereValues } = this._getBroadcastFilter({
+        const { whereClauses, whereValues } = buildBroadcastFilter({
             blockIndex, txHash, source, message, value, fee, memo, broadcastActionIndex, status
         })
 
