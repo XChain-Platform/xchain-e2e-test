@@ -45,7 +45,7 @@ const MARGIN_S = 64800
 function inertStub (watermark) {
     return {
         enabled: true, streamWatermark: watermark, anchorAttestWatermarkGraceS: GRACE_S,
-        coin: 'BTC', network: 'regtest', heightWatermarks: {}, _heightShortfalls: {},
+        coin: 'BTC', network: 'regtest', heightWatermarks: {}, ['_heightShortfalls']: {},
         admissionChain: () => 'BTC', admissionActiveAt: () => false,
         publishedHeight: watermarks.publishedHeight, heightSatisfied: watermarks.heightSatisfied,
     }
@@ -115,7 +115,7 @@ describe('AB4 unit: the derive-set identity on a fixture with real matured rows'
             '--reporter', 'json', 'test/unit/anchor/anchor_reward_derive.test.js', 'test/unit/anchor/anchor_reward_derive.test/anchor_reward_derive_set_is.test.js'],
         { cwd: INDEXER, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
         let report = null
-        try { report = JSON.parse(res.stdout.slice(res.stdout.indexOf('{'))) } catch (_) { report = null }
+        try { report = JSON.parse(res.stdout.slice(res.stdout.indexOf('{'))) } catch (internal) { report = null }
         assert.ok(report && report.stats, 'no mocha JSON from the derive suite (exit ' + res.status + '):\n' + res.stderr.slice(-2000))
         const failed = (report.failures || []).map((t) => t.fullTitle + ': ' + ((t.err && t.err.message) || ''))
         console.log('AB4 derive suite: ' + JSON.stringify(report.stats))

@@ -53,7 +53,7 @@ function registerRunBegin(runner) {
     runner.on(EVENT_RUN_BEGIN, function () {
         try {
             const collector = require('../perf/perfCollector')
-            if (!collector._runMeta.startedAt) collector.startRun()
+            if (!collector['_runMeta'].startedAt) collector.startRun()
         } catch (e) {}
     })
 }
@@ -105,7 +105,7 @@ function registerRunEnd(runner, options, testResults) {
 
         const result = {
             runAt: new Date().toISOString(),
-            meta: perfCollector ? perfCollector._runMeta : {},
+            meta: perfCollector ? perfCollector['_runMeta'] : {},
             mochaStats: {
                 suites: runner.stats.suites,
                 tests: runner.stats.tests,

@@ -13,13 +13,13 @@ const requireRow = require('./requireRow')
 
 module.exports = {
     async sendBatchV0(addressInfo, commands){
-        let batchMessage = "BATCH|0|"+commands.join(";")
+        const batchMessage = "BATCH|0|"+commands.join(";")
 
         console.log("Creating and sending BATCH V0 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, batchMessage)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, batchMessage)
 
         console.log("Waiting for BATCH in the database...")
-        let row = requireRow(await indexerDatabase.waitForBatch({
+        const row = requireRow(await indexerDatabase.waitForBatch({
             txHash: txHash,
             source: addressInfo["address"],
             status: "valid"
@@ -53,11 +53,11 @@ module.exports = {
     //   compressedPubKey        hex public key; the envelope's internal key (§3.1), so
     //                           "TAPROOT" needs it and a segwit-funded source
     async sendBatch(addressInfo, commands, opts = {}){
-        let version = (opts.version === undefined || opts.version === null) ? 0 : opts.version
-        let batchMessage = "BATCH|"+version+"|"+commands.join(";")
+        const version = (opts.version === undefined || opts.version === null) ? 0 : opts.version
+        const batchMessage = "BATCH|"+version+"|"+commands.join(";")
 
         console.log("Creating and sending BATCH v"+version+" tx ("+commands.length+" commands)...")
-        let txHash = await transactionHelper.createAndSendTransaction(
+        const txHash = await transactionHelper.createAndSendTransaction(
             addressInfo,
             batchMessage,
             null,
@@ -69,7 +69,7 @@ module.exports = {
 
         let row = null
         if (opts.status !== null){
-            let status = opts.status || 'valid'
+            const status = opts.status || 'valid'
             console.log("Waiting for BATCH ("+status+") in the database...")
             row = requireRow(await indexerDatabase.waitForBatch({
                 txHash: txHash,

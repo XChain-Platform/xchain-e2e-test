@@ -191,7 +191,7 @@ describe('AT2 second clause: delivery past the forward margin holds the barrier 
 
     after(async function () {
         if (venue) {
-            try { venue.releaseMirrorTable(DELAYED, MIRROR_TABLE) } catch (_) { /* never armed */ }
+            try { venue.releaseMirrorTable(DELAYED, MIRROR_TABLE) } catch (internal) { /* never armed */ }
             await venue.stop()
         }
         if (testServer) await testServer.close()

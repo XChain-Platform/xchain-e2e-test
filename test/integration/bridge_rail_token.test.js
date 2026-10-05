@@ -139,7 +139,7 @@ bridgeRailSuite(T0, function () {
         const overlay = await state.venue.rewireHubs();
         state.evidence.engineEnv = Object.keys(overlay).sort().join(', ');
         const settled = await state.venue.waitForRailSettled(GAS_TICK, { timeoutMs: 60 * 60 * 1000 });
-        assert.ok(settled, 'the XCHAIN backlog never drained: ' + JSON.stringify(state.venue._lastSettlePoll) +
+        assert.ok(settled, 'the XCHAIN backlog never drained: ' + JSON.stringify(state.venue['_lastSettlePoll']) +
             '\n' + state.venue.indexerTails(40));
         state.evidence.backlogApplied = settled.applied;
         const dupes = await state.venue.duplicateSourceTransfers();

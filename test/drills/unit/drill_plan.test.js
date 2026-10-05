@@ -120,7 +120,7 @@ describe('drillPlan: guards', function () {
         // N=10 over 3 boxes: losing the 4-validator box leaves 6 against quorum 7.
         assert.strictEqual(planDrill({ count: 10, hosts: HOSTS3 }).survivesHostLoss, false);
         // Enough boxes and the property holds: N=10 over 10 boxes leaves 9.
-        const ten = Array.from({ length: 10 }, (_, i) => ({ id: 'b' + i, advertise: '10.0.1.' + i }));
+        const ten = Array.from({ length: 10 }, (internal, i) => ({ id: 'b' + i, advertise: '10.0.1.' + i }));
         assert.strictEqual(planDrill({ count: 10, hosts: ten }).survivesHostLoss, true);
     });
 

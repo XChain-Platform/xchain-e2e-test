@@ -35,7 +35,7 @@ const ATTESTATION_STAKE_VISIBLE_BLOCKS = 14 // 6 activation + 6 burial + 2 margi
 async function waitForAnyStake({source, signingPubkey, txHash}, timeMax = 60000){
     const startMs = Date.now(), endTime = startMs + timeMax
     while(Date.now() < endTime){
-        let row = await indexerDatabase.checkStake({source, signingPubkey, txHash}).catch(() => null)
+        const row = await indexerDatabase.checkStake({source, signingPubkey, txHash}).catch(() => null)
         if(row) return row
         await new Promise(r => setTimeout(r, 1000))
     }
@@ -45,7 +45,7 @@ async function waitForAnyStake({source, signingPubkey, txHash}, timeMax = 60000)
 async function waitForAnyUnstake({source, signingPubkey, txHash}, timeMax = 60000){
     const startMs = Date.now(), endTime = startMs + timeMax
     while(Date.now() < endTime){
-        let row = await indexerDatabase.checkUnstake({source, signingPubkey, txHash}).catch(() => null)
+        const row = await indexerDatabase.checkUnstake({source, signingPubkey, txHash}).catch(() => null)
         if(row) return row
         await new Promise(r => setTimeout(r, 1000))
     }
@@ -55,7 +55,7 @@ async function waitForAnyUnstake({source, signingPubkey, txHash}, timeMax = 6000
 async function waitForAnyDelegation({source, txHash}, timeMax = 60000){
     const startMs = Date.now(), endTime = startMs + timeMax
     while(Date.now() < endTime){
-        let row = await indexerDatabase.checkDelegation({source, txHash}).catch(() => null)
+        const row = await indexerDatabase.checkDelegation({source, txHash}).catch(() => null)
         if(row) return row
         await new Promise(r => setTimeout(r, 1000))
     }
@@ -69,7 +69,7 @@ async function waitForAnyDelegation({source, txHash}, timeMax = 60000){
 async function waitForAnyRewardClaim({source, txHash}, timeMax = 60000){
     const startMs = Date.now(), endTime = startMs + timeMax
     while(Date.now() < endTime){
-        let row = await indexerDatabase.checkRewardClaim({source, txHash}).catch(() => null)
+        const row = await indexerDatabase.checkRewardClaim({source, txHash}).catch(() => null)
         if(row) return row
         await new Promise(r => setTimeout(r, 1000))
     }
@@ -86,14 +86,14 @@ module.exports = {
     waitForAnyRewardClaim,
     // STAKE v1: create a new stake (capability model: capabilities auto-qualify by amount).
     async sendStakeV1(addressInfo, amount, signingPubkey){
-        let address = addressInfo["address"]
-        let msg = "STAKE|1|" + amount + "|" + signingPubkey
+        const address = addressInfo["address"]
+        const msg = "STAKE|1|" + amount + "|" + signingPubkey
 
         console.log("Creating and sending STAKE V1 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for stake in the database...")
-        let stakeRow = requireRow(await indexerDatabase.waitForStake({
+        const stakeRow = requireRow(await indexerDatabase.waitForStake({
             source:        address,
             signingPubkey: signingPubkey,
             txHash:        txHash,
@@ -110,14 +110,14 @@ module.exports = {
 
     // STAKE v2: top up an existing stake (same pubkey, same source)
     async sendStakeV2(addressInfo, amount, signingPubkey){
-        let address = addressInfo["address"]
-        let msg = "STAKE|2|" + amount + "|" + signingPubkey
+        const address = addressInfo["address"]
+        const msg = "STAKE|2|" + amount + "|" + signingPubkey
 
         console.log("Creating and sending STAKE V2 (top-up) tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for top-up stake row in the database...")
-        let stakeRow = requireRow(await indexerDatabase.waitForStake({
+        const stakeRow = requireRow(await indexerDatabase.waitForStake({
             source:        address,
             signingPubkey: signingPubkey,
             txHash:        txHash,
@@ -135,16 +135,16 @@ module.exports = {
     // UNSTAKE v0: begin cooldown for a stake identified by pubkey.
     // Optional trailing `amount` (partial unstake): omitted = full sweep.
     async sendUnstakeV0(addressInfo, signingPubkey, amount){
-        let address = addressInfo["address"]
+        const address = addressInfo["address"]
         let msg = "UNSTAKE|0|" + signingPubkey
         if(amount !== undefined && amount !== null)
             msg += "|" + amount
 
         console.log("Creating and sending UNSTAKE V0 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for unstake in the database...")
-        let unstakeRow = requireRow(await indexerDatabase.waitForUnstake({
+        const unstakeRow = requireRow(await indexerDatabase.waitForUnstake({
             source:        address,
             signingPubkey: signingPubkey,
             txHash:        txHash,
@@ -159,14 +159,14 @@ module.exports = {
     },
 
     async sendDelegateV0(addressInfo, newSigningPubkey){
-        let address = addressInfo["address"]
-        let msg = "DELEGATE|0|" + newSigningPubkey
+        const address = addressInfo["address"]
+        const msg = "DELEGATE|0|" + newSigningPubkey
 
         console.log("Creating and sending DELEGATE V0 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for delegation in the database...")
-        let delegationRow = requireRow(await indexerDatabase.waitForDelegation({
+        const delegationRow = requireRow(await indexerDatabase.waitForDelegation({
             source: address,
             txHash: txHash,
             status: "valid"
@@ -185,15 +185,15 @@ module.exports = {
     // observable is the parent going deactivated, and `deactivation_block` on it is
     // the height the key actually leaves the effective set.
     async sendRevokeDelegationV0(addressInfo, signingPubkey){
-        let address = addressInfo["address"]
+        const address = addressInfo["address"]
         // Capability revoke is now DELEGATE v2 (wire); same single-param shape
-        let msg = "DELEGATE|2|" + signingPubkey
+        const msg = "DELEGATE|2|" + signingPubkey
 
         console.log("Creating and sending DELEGATE v2 (capability revoke) tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for the parent delegation to go deactivated...")
-        let revocationRow = requireRow(await indexerDatabase.waitForDelegation({
+        const revocationRow = requireRow(await indexerDatabase.waitForDelegation({
             source:        address,
             signingPubkey: signingPubkey,
             status:        "valid",
@@ -219,14 +219,14 @@ module.exports = {
     // key-compromise completion path. Recorded ONLY in stake_key_revocations
     // (NOT delegations), so it waits on the dedicated revocations checker.
     async sendStakeKeyRevoke(addressInfo, signingPubkey){
-        let address = addressInfo["address"]
-        let msg = "DELEGATE|2|" + signingPubkey
+        const address = addressInfo["address"]
+        const msg = "DELEGATE|2|" + signingPubkey
 
         console.log("Creating and sending DELEGATE v2 (stake-key revoke) tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for stake-key revocation in the database...")
-        let revocationRow = requireRow(await indexerDatabase.waitForStakeKeyRevocation({
+        const revocationRow = requireRow(await indexerDatabase.waitForStakeKeyRevocation({
             source:        address,
             signingPubkey: signingPubkey,
             txHash:        txHash,
@@ -243,14 +243,14 @@ module.exports = {
     // v2 revoke: under DEL-1 a refused revoke writes no row anywhere, so there is
     // nothing to poll for and the test must assert the no-op instead.
     async sendDelegateInvalid(addressInfo, version, signingPubkey){
-        let address = addressInfo["address"]
-        let msg = "DELEGATE|" + version + "|" + signingPubkey
+        const address = addressInfo["address"]
+        const msg = "DELEGATE|" + version + "|" + signingPubkey
 
         console.log("Creating and sending (expected-invalid) DELEGATE v" + version + " tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for the rejected delegations row in the database...")
-        let row = await waitForAnyDelegation({ source: address, txHash: txHash })
+        const row = await waitForAnyDelegation({ source: address, txHash: txHash })
 
         return { txHash, delegation: row }
     },
@@ -258,16 +258,16 @@ module.exports = {
     // COLLECT v0: claim accrued validator rewards.
     // Optional trailing `amount` (partial claim): omitted = claim the full total.
     async sendCollectV0(addressInfo, amount){
-        let address = addressInfo["address"]
+        const address = addressInfo["address"]
         let msg = "COLLECT|0"
         if(amount !== undefined && amount !== null)
             msg += "|" + amount
 
         console.log("Creating and sending COLLECT V0 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for reward claim in the database...")
-        let claimRow = requireRow(await indexerDatabase.waitForRewardClaim({
+        const claimRow = requireRow(await indexerDatabase.waitForRewardClaim({
             source: address,
             txHash: txHash,
             status: "valid"
@@ -283,16 +283,16 @@ module.exports = {
     // rejection status; see xchain-indexer collect.js, which calls createRewardClaim
     // unconditionally). Filters on (source, txHash) so the test asserts the reason.
     async sendCollectInvalid(addressInfo, amount){
-        let address = addressInfo["address"]
+        const address = addressInfo["address"]
         let msg = "COLLECT|0"
         if(amount !== undefined && amount !== null)
             msg += "|" + amount
 
         console.log("Creating and sending (expected-invalid) COLLECT V0 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for the recorded reward_claims row in the database...")
-        let row = await waitForAnyRewardClaim({ source: address, txHash: txHash })
+        const row = await waitForAnyRewardClaim({ source: address, txHash: txHash })
 
         return { txHash, claim: row }
     },
@@ -300,14 +300,14 @@ module.exports = {
     // STAKE v3: contract-targeted stake (any tick). The contract must have been
     // deployed with cooldown_blocks + slash_destination set (DEPLOY v1+).
     async sendStakeV3(addressInfo, amount, signingPubkey, contractIndex, tick){
-        let address = addressInfo["address"]
-        let msg = "STAKE|3|" + amount + "|" + signingPubkey + "|" + contractIndex + "|" + tick
+        const address = addressInfo["address"]
+        const msg = "STAKE|3|" + amount + "|" + signingPubkey + "|" + contractIndex + "|" + tick
 
         console.log("Creating and sending STAKE V3 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for contract stake in the database...")
-        let stakeRow = requireRow(await indexerDatabase.waitForContractStake({
+        const stakeRow = requireRow(await indexerDatabase.waitForContractStake({
             source:         address,
             signingPubkey:  signingPubkey,
             contractIndex:  contractIndex,
@@ -329,14 +329,14 @@ module.exports = {
     // which calls createContractStake unconditionally). Filters on the unique
     // (source, pubkey, target, tick) tuple, not txHash, so it stays robust to encoding.
     async sendStakeV3Invalid(addressInfo, amount, signingPubkey, contractIndex, tick, timeMax = 60000){
-        let address = addressInfo["address"]
-        let msg = "STAKE|3|" + amount + "|" + signingPubkey + "|" + contractIndex + "|" + tick
+        const address = addressInfo["address"]
+        const msg = "STAKE|3|" + amount + "|" + signingPubkey + "|" + contractIndex + "|" + tick
 
         console.log("Creating and sending (expected-invalid) STAKE V3 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for the rejected contract_stakes row in the database...")
-        let end = Date.now() + timeMax
+        const end = Date.now() + timeMax
         let row = null
         while(Date.now() < end){
             row = await indexerDatabase.checkContractStake({
@@ -355,16 +355,16 @@ module.exports = {
     // UNSTAKE v1: begin cooldown for a contract-targeted stake
     // Optional trailing `amount` (partial unstake): omitted = full sweep.
     async sendUnstakeV1(addressInfo, signingPubkey, contractIndex, tick, amount){
-        let address = addressInfo["address"]
+        const address = addressInfo["address"]
         let msg = "UNSTAKE|1|" + signingPubkey + "|" + contractIndex + "|" + tick
         if(amount !== undefined && amount !== null)
             msg += "|" + amount
 
         console.log("Creating and sending UNSTAKE V1 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for contract unstake in the database...")
-        let unstakeRow = requireRow(await indexerDatabase.waitForContractUnstake({
+        const unstakeRow = requireRow(await indexerDatabase.waitForContractUnstake({
             source:        address,
             signingPubkey: signingPubkey,
             contractIndex: contractIndex,
@@ -381,14 +381,14 @@ module.exports = {
 
     // DELEGATE v1: rotate signing key for a contract-targeted stake
     async sendDelegateV1(addressInfo, newSigningPubkey, contractIndex, tick){
-        let address = addressInfo["address"]
-        let msg = "DELEGATE|1|" + newSigningPubkey + "|" + contractIndex + "|" + tick
+        const address = addressInfo["address"]
+        const msg = "DELEGATE|1|" + newSigningPubkey + "|" + contractIndex + "|" + tick
 
         console.log("Creating and sending DELEGATE V1 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for contract delegation in the database...")
-        let delegationRow = requireRow(await indexerDatabase.waitForContractDelegation({
+        const delegationRow = requireRow(await indexerDatabase.waitForContractDelegation({
             source:        address,
             contractIndex: contractIndex,
             tick:          tick,

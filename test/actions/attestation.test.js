@@ -37,11 +37,11 @@ describe(TITLE, function () {
 
     it('emits ATTEST v0 (request) on EXECUTE and stores it pending', async function () {
         const { operatorAddr, contractIndex } = state
-        let exec = await vmHelper.sendExecuteV0(operatorAddr, contractIndex, 'askOracle', ['https://example.com/v1/score/123'])
+        const exec = await vmHelper.sendExecuteV0(operatorAddr, contractIndex, 'askOracle', ['https://example.com/v1/score/123'])
         assert(exec.execution, 'execution row should exist')
         assert.strictEqual(exec.execution.status, 'valid', 'execute status: ' + exec.execution.status)
 
-        let request = await indexerDatabase.waitForAttestationRequest({
+        const request = await indexerDatabase.waitForAttestationRequest({
             txHash:        exec.txHash,
             requestStatus: 'pending'
         })
@@ -49,7 +49,7 @@ describe(TITLE, function () {
         assert.strictEqual(request.provider_id, 'http_get')
         assert.strictEqual(request.callback_method, 'handleResponse')
         assert.strictEqual(Number(request.redundancy), 1)
-        let parsedParams = JSON.parse(request.callback_params_json)
+        const parsedParams = JSON.parse(request.callback_params_json)
         assert.strictEqual(parsedParams[0], 'ctx-42')
 
         // Stash for the next test
@@ -66,13 +66,13 @@ describe(TITLE, function () {
         let requestId = state.requestId
         if (!requestId) {
             // Fallback: look up the pending request
-            let pending = await indexerDatabase.checkAttestationRequest({ requestStatus: 'pending' })
+            const pending = await indexerDatabase.checkAttestationRequest({ requestStatus: 'pending' })
             assert(pending, 'a pending request should exist')
             requestId = pending.request_id
         }
 
         const responsePayload = '{"score":7}'
-        let responseTxHash = await attestationHelper.broadcastAttestationResponse(operatorAddr, {
+        const responseTxHash = await attestationHelper.broadcastAttestationResponse(operatorAddr, {
             requestId:       requestId,
             providerId:      'http_get',
             responsePayload: responsePayload,
@@ -82,7 +82,7 @@ describe(TITLE, function () {
         })
 
         // attestation_responses row with response_status='ok', validation status='valid'
-        let response = await indexerDatabase.waitForAttestationResponse({
+        const response = await indexerDatabase.waitForAttestationResponse({
             requestId:      requestId,
             responseStatus: 'ok',
             status:         'valid'
@@ -91,12 +91,12 @@ describe(TITLE, function () {
         assert.strictEqual(response.provider_id, 'http_get')
 
         // Verified signature row recorded
-        let sigs = await indexerDatabase.getAttestationValidatorSignatures(response.action_index)
+        const sigs = await indexerDatabase.getAttestationValidatorSignatures(response.action_index)
         assert.strictEqual(sigs.length, 1, 'should have exactly 1 verified signature')
         assert.strictEqual(String(sigs[0].validator_pubkey).toLowerCase(), validator.pubkey.toLowerCase())
 
         // Request status flipped to 'fulfilled'
-        let updatedRequest = await indexerDatabase.checkAttestationRequest({
+        const updatedRequest = await indexerDatabase.checkAttestationRequest({
             requestId:     requestId,
             requestStatus: 'fulfilled'
         })
@@ -106,9 +106,9 @@ describe(TITLE, function () {
         assert(response.callback_execute_action_index, 'callback_execute_action_index should be set')
 
         // Contract state reflects the callback's writes
-        let cbStatus  = await indexerDatabase.getContractState(contractIndex, 'callback_status')
-        let cbPayload = await indexerDatabase.getContractState(contractIndex, 'callback_payload')
-        let cbContext = await indexerDatabase.getContractState(contractIndex, 'callback_context')
+        const cbStatus  = await indexerDatabase.getContractState(contractIndex, 'callback_status')
+        const cbPayload = await indexerDatabase.getContractState(contractIndex, 'callback_payload')
+        const cbContext = await indexerDatabase.getContractState(contractIndex, 'callback_context')
         assert(cbStatus,  'callback_status state row should exist')
         assert(cbPayload, 'callback_payload state row should exist')
         assert(cbContext, 'callback_context state row should exist')
@@ -124,15 +124,15 @@ describe(TITLE, function () {
     it('auto-expires a request whose DEADLINE_BLOCK passes without a response, firing the callback with status=expired', async function () {
         const { operatorAddr, contractIndex } = state
         // Fire a fresh request with a short deadline (deadlineBlocks=2)
-        let exec = await vmHelper.sendExecuteV0(operatorAddr, contractIndex, 'askOracleExpiring', ['https://example.com/v1/expiring/789'])
+        const exec = await vmHelper.sendExecuteV0(operatorAddr, contractIndex, 'askOracleExpiring', ['https://example.com/v1/expiring/789'])
         assert.strictEqual(exec.execution.status, 'valid', 'execute status: ' + exec.execution.status)
 
-        let request = await indexerDatabase.waitForAttestationRequest({
+        const request = await indexerDatabase.waitForAttestationRequest({
             txHash:        exec.txHash,
             requestStatus: 'pending'
         })
         assert(request, 'expiring-request row should exist with status=pending')
-        let expiringRequestId = request.request_id
+        const expiringRequestId = request.request_id
 
         // Advance past DEADLINE_BLOCK. deadlineBlocks=2 + comfortable margin so the
         // per-block expiry pipeline definitely runs at deadline+1.
@@ -140,18 +140,18 @@ describe(TITLE, function () {
         await utxoTrackerConnector.requireSync()
 
         // Request status should flip to 'expired'
-        let expired = await indexerDatabase.waitForAttestationRequest({
+        const expired = await indexerDatabase.waitForAttestationRequest({
             requestId:     expiringRequestId,
             requestStatus: 'expired'
         }, 30000)
         assert(expired, 'request should auto-expire past its DEADLINE_BLOCK')
 
         // Callback should have fired with status='expired' (per spec §4.3)
-        let expiryStatus     = await indexerDatabase.getContractState(contractIndex, 'expiry_status')
-        let expiryRequestId  = await indexerDatabase.getContractState(contractIndex, 'expiry_request_id')
-        let expiryProviderId = await indexerDatabase.getContractState(contractIndex, 'expiry_provider_id')
-        let expiryPayload    = await indexerDatabase.getContractState(contractIndex, 'expiry_payload')
-        let expiryContext    = await indexerDatabase.getContractState(contractIndex, 'expiry_context')
+        const expiryStatus     = await indexerDatabase.getContractState(contractIndex, 'expiry_status')
+        const expiryRequestId  = await indexerDatabase.getContractState(contractIndex, 'expiry_request_id')
+        const expiryProviderId = await indexerDatabase.getContractState(contractIndex, 'expiry_provider_id')
+        const expiryPayload    = await indexerDatabase.getContractState(contractIndex, 'expiry_payload')
+        const expiryContext    = await indexerDatabase.getContractState(contractIndex, 'expiry_context')
         assert(expiryStatus,    'expiry_status state row should exist')
         assert(expiryRequestId, 'expiry_request_id state row should exist')
         assert.strictEqual(JSON.parse(expiryStatus.state_value),     'expired')
@@ -168,12 +168,12 @@ describe(TITLE, function () {
     it('rejects a signature from an unstaked pubkey', async function () {
         const { operatorAddr, contractIndex } = state
         // Fresh validator with no stake; sig verification should drop their signature
-        let badValidator = new attestationHelper.MockAttestationValidator()
+        const badValidator = new attestationHelper.MockAttestationValidator()
 
         // Need a fresh pending request to test against
-        let exec = await vmHelper.sendExecuteV0(operatorAddr, contractIndex, 'askOracle', ['https://example.com/v1/score/456'])
+        const exec = await vmHelper.sendExecuteV0(operatorAddr, contractIndex, 'askOracle', ['https://example.com/v1/score/456'])
         assert.strictEqual(exec.execution.status, 'valid')
-        let request = await indexerDatabase.waitForAttestationRequest({ txHash: exec.txHash, requestStatus: 'pending' })
+        const request = await indexerDatabase.waitForAttestationRequest({ txHash: exec.txHash, requestStatus: 'pending' })
         assert(request, 'second pending request should exist')
 
         // Broadcast a response signed only by the unstaked validator; should land as 'invalid'
@@ -187,7 +187,7 @@ describe(TITLE, function () {
         })
 
         // Either no row at all, or status != 'valid'. We'll poll briefly:
-        let invalidResp = await indexerDatabase.waitForAttestationResponse({
+        const invalidResp = await indexerDatabase.waitForAttestationResponse({
             requestId: request.request_id
         }, 10000)
 
@@ -196,7 +196,7 @@ describe(TITLE, function () {
                 'response from unstaked validator should NOT be marked valid; got status=' + invalidResp.status)
         }
         // Request should still be pending (not flipped to fulfilled)
-        let stillPending = await indexerDatabase.checkAttestationRequest({
+        const stillPending = await indexerDatabase.checkAttestationRequest({
             requestId:     request.request_id,
             requestStatus: 'pending'
         })

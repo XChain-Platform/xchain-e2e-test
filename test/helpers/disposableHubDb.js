@@ -48,7 +48,7 @@ const IMAGE        = 'mariadb:11';
 
 function dockerAvailable() {
     try { execFileSync('docker', ['version', '--format', '{{.Server.Version}}'], { stdio: 'ignore' }); return true; }
-    catch (_) { return false; }
+    catch (internal) { return false; }
 }
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
@@ -88,8 +88,8 @@ async function waitForReady(host, port, pass, attempts = 180, user = 'root') {
             await conn.query('SELECT 1');
             await conn.end();
             return true;
-        } catch (_) {
-            if (conn) { try { await conn.end(); } catch (__) {} }
+        } catch (internal) {
+            if (conn) { try { await conn.end(); } catch (internal) {} }
             await sleep(1000);
         }
     }
@@ -131,7 +131,7 @@ async function startDisposableHubDb(opts = {}) {
     // already holding that port: the boot aborts with docker's own port-allocation
     // message, which names neither the venue nor what is in the way.
     const port = String(opts.port || (await firstFreePort(13307)));
-    try { execFileSync('docker', ['rm', '-f', name], { stdio: 'ignore' }); } catch (_) {}
+    try { execFileSync('docker', ['rm', '-f', name], { stdio: 'ignore' }); } catch (internal) {}
     try {
         execFileSync('docker', [
             'run', '-d', '--name', name,
@@ -152,7 +152,7 @@ async function startDisposableHubDb(opts = {}) {
 
     const ready = await waitForReady('127.0.0.1', port, TEST_DB_PASS);
     if (!ready) {
-        try { execFileSync('docker', ['rm', '-f', name], { stdio: 'ignore' }); } catch (_) {}
+        try { execFileSync('docker', ['rm', '-f', name], { stdio: 'ignore' }); } catch (internal) {}
         throw new Error('disposableHubDb: ' + IMAGE + ' did not become ready in time');
     }
 
@@ -174,7 +174,7 @@ async function startDisposableHubDb(opts = {}) {
         host: '127.0.0.1', port, user: 'root', pass: TEST_DB_PASS,
         disposable: true,
         async stop() {
-            try { execFileSync('docker', ['rm', '-f', name], { stdio: 'ignore' }); } catch (_) {}
+            try { execFileSync('docker', ['rm', '-f', name], { stdio: 'ignore' }); } catch (internal) {}
             for (const k of Object.keys(prevEnv)) {
                 if (prevEnv[k] === undefined) delete process.env[k];
                 else process.env[k] = prevEnv[k];

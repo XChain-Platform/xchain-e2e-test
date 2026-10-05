@@ -208,7 +208,7 @@ const MIRROR_BARRIERS = Object.freeze(Object.keys(HUB_SYNC_WATERMARK_GRACE_S));
 // dirname would point the barrier scan one directory below the tree it wants.
 const INDEXER_SRC_DIR = path.dirname(require.resolve('../../../xchain-indexer/src/XChainIndexer.js'));
 const MIRROR_BARRIER_REASON_RE = /'([a-z0-9_]+_sync_barrier|anchor_attest_barrier)'/g;
-let _mirrorBarrierReasons = null;
+let internalMirrorBarrierReasons = null;
 
 /**
  * Every watermark-keyed barrier reason string the indexer can report, read from
@@ -222,7 +222,7 @@ let _mirrorBarrierReasons = null;
  * family pay for reading it.
  */
 function mirrorBarrierReasons() {
-    if (_mirrorBarrierReasons) return _mirrorBarrierReasons;
+    if (internalMirrorBarrierReasons) return internalMirrorBarrierReasons;
     // The entry plus its parts directory: the structure pass split the block loop's
     // barriers out of XChainIndexer.js into XChainIndexer/*.js (price_barriers,
     // mirror_barriers, stall_health), so a scan of the entry alone finds nothing and
@@ -240,8 +240,8 @@ function mirrorBarrierReasons() {
         throw new Error('attestMirrorVenue: no mirror barrier reason strings found in ' +
             files.join(', ') + '; the venue is reading the wrong tree');
     }
-    _mirrorBarrierReasons = Object.freeze(Array.from(seen).sort());
-    return _mirrorBarrierReasons;
+    internalMirrorBarrierReasons = Object.freeze(Array.from(seen).sort());
+    return internalMirrorBarrierReasons;
 }
 
 /**
@@ -701,7 +701,7 @@ function resolveWindowKeying() {
     // so the column it filters on sits in that method's text rather than in selectWindowRows.
     // A hub without src/db/index.js keeps the SQL inline and needs no second read.
     let dbProto = null;
-    try { dbProto = loadHubModule('src/db/index.js').prototype; } catch (_) { dbProto = null; }
+    try { dbProto = loadHubModule('src/db/index.js').prototype; } catch (internal) { dbProto = null; }
     return resolveWindowKeyingFrom(loadHubModule('src/attestation/batch_publisher.js'), dbProto);
 }
 
@@ -738,8 +738,8 @@ function hubCredentialEnv(claudeConfigDir, extraEnv) {
  */
 function llmProbes() {
     return {
-        dirExists: (p) => { try { return fs.statSync(p).isDirectory(); } catch (_) { return false; } },
-        isExecutable: (p) => { try { fs.accessSync(p, fs.constants.X_OK); return true; } catch (_) { return false; } },
+        dirExists: (p) => { try { return fs.statSync(p).isDirectory(); } catch (internal) { return false; } },
+        isExecutable: (p) => { try { fs.accessSync(p, fs.constants.X_OK); return true; } catch (internal) { return false; } },
         resolveCredential: (env) => loadHubModule('src/lib/hub_credentials.js').resolveHubLlmAuth({ env: env })
     };
 }
@@ -775,7 +775,7 @@ function assertLlmAvailable(spec, probes) {
     // missing credential, not a pass: the hub would have thrown at fetch time too.
     let resolved = null;
     try { resolved = typeof probes.resolveCredential === 'function' ? probes.resolveCredential(hubEnv) : null; }
-    catch (_) { resolved = null; }
+    catch (internal) { resolved = null; }
     if (!resolved || resolved.ok !== true) {
         missing.push('no credential the hub can resolve from the environment its children receive ' +
             '(keys present: ' + (Object.keys(hubEnv).join(', ') || '<none>') + '). A directory ' +
@@ -1152,16 +1152,16 @@ class P2pDelayProxy {
         this.targetPort = targetPort;
         this.label      = label || ('p2p:' + listenPort);
         this.delayMs    = 0;
-        this._server    = null;
-        this._sockets   = new Set();
+        this['_server']    = null;
+        this['_sockets']   = new Set();
     }
 
     async start() {
         await new Promise((resolve, reject) => {
-            this._server = net.createServer((client) => this._wire(client));
-            this._server.once('error', reject);
-            this._server.listen(this.listenPort, '127.0.0.1', () => {
-                this._server.removeListener('error', reject);
+            this['_server'] = net.createServer((client) => this['_wire'](client));
+            this['_server'].once('error', reject);
+            this['_server'].listen(this.listenPort, '127.0.0.1', () => {
+                this['_server'].removeListener('error', reject);
                 resolve();
             });
         });
@@ -1173,23 +1173,23 @@ class P2pDelayProxy {
         this.delayMs = v;
     }
 
-    _wire(client) {
+    ['_wire'](client) {
         const upstream = net.connect(this.targetPort, '127.0.0.1');
-        this._sockets.add(client);
-        this._sockets.add(upstream);
+        this['_sockets'].add(client);
+        this['_sockets'].add(upstream);
         const drop = () => {
             for (const s of [client, upstream]) {
-                this._sockets.delete(s);
-                try { s.destroy(); } catch (_) { /* already gone */ }
+                this['_sockets'].delete(s);
+                try { s.destroy(); } catch (internal) { /* already gone */ }
             }
         };
-        this._relay(client, upstream, drop);
-        this._relay(upstream, client, drop);
+        this['_relay'](client, upstream, drop);
+        this['_relay'](upstream, client, drop);
         client.on('error', drop);
         upstream.on('error', drop);
     }
 
-    _relay(from, to, drop) {
+    ['_relay'](from, to, drop) {
         let chain = Promise.resolve();
         from.on('data', (chunk) => {
             const held = this.delayMs;
@@ -1200,16 +1200,16 @@ class P2pDelayProxy {
         });
         // The close is chained too: closing the far side ahead of the bytes still
         // held would silently drop exactly the traffic the delay is modelling.
-        from.on('end', () => { chain = chain.then(() => { try { to.end(); } catch (_) { drop(); } }); });
+        from.on('end', () => { chain = chain.then(() => { try { to.end(); } catch (internal) { drop(); } }); });
         from.on('close', () => { chain = chain.then(drop); });
     }
 
     async stop() {
-        for (const s of this._sockets) { try { s.destroy(); } catch (_) { /* already gone */ } }
-        this._sockets.clear();
-        if (this._server) {
-            await new Promise((resolve) => this._server.close(resolve));
-            this._server = null;
+        for (const s of this['_sockets']) { try { s.destroy(); } catch (internal) { /* already gone */ } }
+        this['_sockets'].clear();
+        if (this['_server']) {
+            await new Promise((resolve) => this['_server'].close(resolve));
+            this['_server'] = null;
         }
     }
 }
@@ -1404,7 +1404,7 @@ function readServerFrames(buf) {
  */
 function mirrorFrameTable(text) {
     let event = null;
-    try { event = JSON.parse(text); } catch (_) { return null; }
+    try { event = JSON.parse(text); } catch (internal) { return null; }
     if (!event || (event.type !== 'row:inserted' && event.type !== 'row:deleted')) return null;
     return event.table ? String(event.table) : null;
 }
@@ -1513,7 +1513,7 @@ const HEIGHT_PIN_FRAME_TYPES = Object.freeze(['watermark', 'ready']);
 function pinHeightsInFrameText(text, pin) {
     const none = { text: null, type: null, pinned: 0, unmatched: 0, absent: false };
     let event = null;
-    try { event = JSON.parse(text); } catch (_) { return none; }
+    try { event = JSON.parse(text); } catch (internal) { return none; }
     if (!event || typeof event !== 'object') return none;
     const type = String(event.type || '');
     if (!HEIGHT_PIN_FRAME_TYPES.includes(type)) return none;
@@ -1578,18 +1578,18 @@ class HubDbMirrorProxy {
             ready:     { pinned: 0, unmatched: 0, absent: 0, frames: 0 },
             snapshot:  { pinned: 0, unmatched: 0, absent: 0, frames: 0 },
         };
-        this._server    = null;
-        this._sockets   = new Set();
-        this._timers    = new Set();
+        this['_server']    = null;
+        this['_sockets']   = new Set();
+        this['_timers']    = new Set();
     }
 
     async start() {
-        this._server = http.createServer((req, res) => this._proxyHttp(req, res));
-        this._server.on('upgrade', (req, socket) => this._proxyUpgrade(req, socket));
+        this['_server'] = http.createServer((req, res) => this['_proxyHttp'](req, res));
+        this['_server'].on('upgrade', (req, socket) => this['_proxyUpgrade'](req, socket));
         await new Promise((resolve, reject) => {
-            this._server.once('error', reject);
-            this._server.listen(this.listenPort, '127.0.0.1', () => {
-                this._server.removeListener('error', reject);
+            this['_server'].once('error', reject);
+            this['_server'].listen(this.listenPort, '127.0.0.1', () => {
+                this['_server'].removeListener('error', reject);
                 resolve();
             });
         });
@@ -1680,13 +1680,13 @@ class HubDbMirrorProxy {
 
     /** Cut every proxied connection, so the client reconnects and re-bootstraps. */
     dropSockets() {
-        for (const s of this._sockets) { try { s.destroy(); } catch (_) { /* already gone */ } }
-        this._sockets.clear();
+        for (const s of this['_sockets']) { try { s.destroy(); } catch (internal) { /* already gone */ } }
+        this['_sockets'].clear();
     }
 
     // ---- plumbing -------------------------------------------------------
 
-    _proxyHttp(req, res) {
+    ['_proxyHttp'](req, res) {
         const table  = snapshotTableOf(req.url);
         const filter = table ? this.filters.get(table) : null;
         const headers = Object.assign({}, req.headers);
@@ -1708,13 +1708,13 @@ class HubDbMirrorProxy {
                 // verbatim relay it has always been.
                 const pinning = table && this.heightPin;
                 if ((!filter && !pinning) || up.statusCode !== 200) {
-                    res.writeHead(up.statusCode, this._forwardableHeaders(up.headers));
+                    res.writeHead(up.statusCode, this['_forwardableHeaders'](up.headers));
                     return res.end(raw);
                 }
                 let parsed = null;
-                try { parsed = JSON.parse(raw.toString('utf8')); } catch (_) { parsed = null; }
+                try { parsed = JSON.parse(raw.toString('utf8')); } catch (internal) { parsed = null; }
                 if (!parsed) {
-                    res.writeHead(up.statusCode, this._forwardableHeaders(up.headers));
+                    res.writeHead(up.statusCode, this['_forwardableHeaders'](up.headers));
                     return res.end(raw);
                 }
                 const filtered = filterSnapshotBody(parsed, table, filter, this.seen, Date.now());
@@ -1723,7 +1723,7 @@ class HubDbMirrorProxy {
                 let rewritten = !!filter;
                 if (pinning) {
                     const pinnedOut = pinHeightsInPayload(served, this.heightPin);
-                    this._tallyHeightPin('snapshot', pinnedOut);
+                    this['_tallyHeightPin']('snapshot', pinnedOut);
                     served = pinnedOut.payload;
                     rewritten = rewritten || pinnedOut.changed;
                 }
@@ -1731,23 +1731,23 @@ class HubDbMirrorProxy {
                 // re-serialized copy: re-encoding a page this proxy had no reason to
                 // touch is how a wire-precision difference gets blamed on the hub.
                 if (!rewritten) {
-                    res.writeHead(up.statusCode, this._forwardableHeaders(up.headers));
+                    res.writeHead(up.statusCode, this['_forwardableHeaders'](up.headers));
                     return res.end(raw);
                 }
                 const body = Buffer.from(JSON.stringify(served), 'utf8');
-                const out = this._forwardableHeaders(up.headers);
+                const out = this['_forwardableHeaders'](up.headers);
                 out['content-length'] = String(body.length);
                 res.writeHead(up.statusCode, out);
                 res.end(body);
             });
         });
-        upstream.on('error', () => { try { res.destroy(); } catch (_) { /* client gone */ } });
+        upstream.on('error', () => { try { res.destroy(); } catch (internal) { /* client gone */ } });
         req.pipe(upstream);
     }
 
     // Content-length is recomputed for a filtered body and transfer-encoding cannot
     // survive a buffered rewrite, so both are dropped here and set deliberately.
-    _forwardableHeaders(headers) {
+    ['_forwardableHeaders'](headers) {
         const out = {};
         for (const [k, v] of Object.entries(headers || {})) {
             const key = k.toLowerCase();
@@ -1757,10 +1757,10 @@ class HubDbMirrorProxy {
         return out;
     }
 
-    _proxyUpgrade(req, socket) {
+    ['_proxyUpgrade'](req, socket) {
         const upstream = net.connect(this.targetPort, '127.0.0.1');
-        this._sockets.add(socket);
-        this._sockets.add(upstream);
+        this['_sockets'].add(socket);
+        this['_sockets'].add(upstream);
 
         const lines = [req.method + ' ' + req.url + ' HTTP/1.1'];
         for (const [k, v] of Object.entries(req.headers)) {
@@ -1784,7 +1784,7 @@ class HubDbMirrorProxy {
                 const end = buffered.indexOf('\r\n\r\n');
                 if (end === -1) return;
                 const head = buffered.subarray(0, end + 4);
-                this._write(socket, head);
+                this['_write'](socket, head);
                 buffered = buffered.subarray(end + 4);
                 handshakeDone = true;
             } else {
@@ -1792,14 +1792,14 @@ class HubDbMirrorProxy {
             }
             const read = readServerFrames(buffered);
             buffered = read.rest;
-            for (const frame of read.frames) this._forwardFrame(socket, frame);
+            for (const frame of read.frames) this['_forwardFrame'](socket, frame);
         });
 
         const close = () => {
-            this._sockets.delete(socket);
-            this._sockets.delete(upstream);
-            try { socket.destroy(); } catch (_) { /* already gone */ }
-            try { upstream.destroy(); } catch (_) { /* already gone */ }
+            this['_sockets'].delete(socket);
+            this['_sockets'].delete(upstream);
+            try { socket.destroy(); } catch (internal) { /* already gone */ }
+            try { upstream.destroy(); } catch (internal) { /* already gone */ }
         };
         socket.on('error', close);
         socket.on('close', close);
@@ -1807,12 +1807,12 @@ class HubDbMirrorProxy {
         upstream.on('close', close);
     }
 
-    _forwardFrame(socket, frame) {
+    ['_forwardFrame'](socket, frame) {
         if (frame.opaque) {
             // Fragmented, binary or control: forwarded untouched. Counted so a drill
             // that expected to filter something can tell that it never saw text.
             this.stats.opaqueFrames++;
-            return this._write(socket, frame.bytes);
+            return this['_write'](socket, frame.bytes);
         }
         // The height pin is read BEFORE the row filters, because the frames it rewrites
         // (`watermark`, `ready`) are precisely the ones `mirrorFrameTable` returns null
@@ -1820,45 +1820,45 @@ class HubDbMirrorProxy {
         if (this.heightPin) {
             const pinned = pinHeightsInFrameText(frame.text, this.heightPin);
             if (pinned.type) {
-                this._tallyHeightPin(pinned.type, pinned);
-                if (pinned.text !== null) return this._write(socket, encodeServerTextFrame(pinned.text));
-                return this._write(socket, frame.bytes);
+                this['_tallyHeightPin'](pinned.type, pinned);
+                if (pinned.text !== null) return this['_write'](socket, encodeServerTextFrame(pinned.text));
+                return this['_write'](socket, frame.bytes);
             }
         }
 
         const table = mirrorFrameTable(frame.text);
         const filter = table ? this.filters.get(table) : null;
-        if (!filter) return this._write(socket, frame.bytes);
+        if (!filter) return this['_write'](socket, frame.bytes);
 
         // A live event's first-seen is now: this is the moment it would have been
         // served. The REST ledger is shared, so a row already seen there keeps its
         // original clock rather than having it reset by arriving twice.
-        const key = table + ':' + this._frameRowId(frame.text);
+        const key = table + ':' + this['_frameRowId'](frame.text);
         if (!this.seen.has(key)) this.seen.set(key, Date.now());
         const verdict = mirrorFilterVerdict(filter, this.seen.get(key), Date.now());
 
-        if (verdict === MIRROR_PASS) return this._write(socket, frame.bytes);
+        if (verdict === MIRROR_PASS) return this['_write'](socket, frame.bytes);
         if (verdict === MIRROR_DROP) { this.stats.framesDropped++; return; }
 
         this.stats.framesHeld++;
         const waitMs = Math.max(0, Number(filter.delayMs) - (Date.now() - this.seen.get(key)));
         const timer = setTimeout(() => {
-            this._timers.delete(timer);
+            this['_timers'].delete(timer);
             // Re-checked on release: a withhold armed while this was in flight must
             // still suppress it, and a released filter must let it through.
             const now = this.filters.get(table);
             if (now && now.mode === MIRROR_WITHHOLD) { this.stats.framesDropped++; return; }
-            this._write(socket, frame.bytes);
+            this['_write'](socket, frame.bytes);
         }, waitMs);
         // Unref'd: a held frame must never keep the mocha process alive.
         if (timer.unref) timer.unref();
-        this._timers.add(timer);
+        this['_timers'].add(timer);
     }
 
     // One carrier's tally. Separate from `stats` because a leg asserts on the three
     // carriers by name, and a single total cannot tell "pinned the heartbeat only"
     // from "pinned all three".
-    _tallyHeightPin(carrier, out) {
+    ['_tallyHeightPin'](carrier, out) {
         const tally = this.heightPinStats[carrier];
         if (!tally) return;
         tally.frames++;
@@ -1867,25 +1867,25 @@ class HubDbMirrorProxy {
         if (out.absent) tally.absent++;
     }
 
-    _frameRowId(text) {
+    ['_frameRowId'](text) {
         try {
             const event = JSON.parse(text);
             const row = event && event.row;
             return String(row && row.id !== undefined ? row.id : text.length);
-        } catch (_) { return 'unparsed'; }
+        } catch (internal) { return 'unparsed'; }
     }
 
-    _write(socket, bytes) {
-        if (!socket.destroyed) { try { socket.write(bytes); } catch (_) { /* client gone */ } }
+    ['_write'](socket, bytes) {
+        if (!socket.destroyed) { try { socket.write(bytes); } catch (internal) { /* client gone */ } }
     }
 
     async stop() {
-        for (const t of this._timers) clearTimeout(t);
-        this._timers.clear();
+        for (const t of this['_timers']) clearTimeout(t);
+        this['_timers'].clear();
         this.dropSockets();
-        if (this._server) {
-            await new Promise((resolve) => this._server.close(resolve));
-            this._server = null;
+        if (this['_server']) {
+            await new Promise((resolve) => this['_server'].close(resolve));
+            this['_server'] = null;
         }
     }
 }
@@ -2300,18 +2300,18 @@ class AttestMirrorVenue {
         this.unavailable = null;
 
         this.hubDb      = opts.hubDb || null;
-        this._ownsHubDb = false;
+        this['_ownsHubDb'] = false;
 
         this.hubs     = [];   // [{index, apiUrl, apiPort, p2pPort, proxyPort, p2pAddr, pubkey, dbName, proc, proxy}]
         this.indexers = [];   // [{index, apiUrl, apiPort, followsHub, hubPubkey, indexerDbName, mirrorDbName, proc}]
 
-        this._conn  = null;   // to the disposable MariaDB (every venue database)
-        this._cwd   = null;   // neutral working directory for the children
-        this._logs  = {};     // per-child stdout/stderr tail
-        this._live  = null;   // resolved standing-stack endpoints
-        this._identities = [];
-        this._capabilityConfigPath = null;
-        this._minStakes = null;
+        this['_conn']  = null;   // to the disposable MariaDB (every venue database)
+        this['_cwd']   = null;   // neutral working directory for the children
+        this['_logs']  = {};     // per-child stdout/stderr tail
+        this['_live']  = null;   // resolved standing-stack endpoints
+        this['_identities'] = [];
+        this['_capabilityConfigPath'] = null;
+        this['_minStakes'] = null;
     }
 
     // ---- bring-up -------------------------------------------------------
@@ -2340,35 +2340,35 @@ class AttestMirrorVenue {
                 llmProbes());
         }
 
-        this._live = await this._resolveStandingStack();
-        if (!this._live) return false;
+        this['_live'] = await this['_resolveStandingStack']();
+        if (!this['_live']) return false;
 
         if (!this.hubDb) {
             this.hubDb = await startDisposableHubDb();
-            this._ownsHubDb = true;
+            this['_ownsHubDb'] = true;
             if (!this.hubDb) { this.unavailable = 'no env hub DB and Docker unavailable'; return false; }
         }
 
-        this._identities = [];
+        this['_identities'] = [];
         for (let i = 0; i < (this.attachHubs ? 0 : this.hubCount); i++) {
             if (this.presetIdentities) {
                 if (!this.presetIdentities[i]) {
                     throw new Error('attestMirrorVenue: identities provided (' + this.presetIdentities.length +
                         ') < hubCount (' + this.hubCount + ')');
                 }
-                this._identities.push({
+                this['_identities'].push({
                     pubkeyHex:  this.presetIdentities[i].pubkeyHex,
                     privkeyHex: this.presetIdentities[i].privkeyHex
                 });
             } else {
-                this._identities.push(ValidatorIdentity.generate());
+                this['_identities'].push(ValidatorIdentity.generate());
             }
         }
 
         const stamp = process.pid + '_' + Date.now().toString(36);
-        this._dbStamp = stamp;
+        this['_dbStamp'] = stamp;
 
-        this._conn = await mariadb.createConnection({
+        this['_conn'] = await mariadb.createConnection({
             host: this.hubDb.host, port: parseInt(this.hubDb.port, 10),
             user: this.hubDb.user, password: this.hubDb.pass, connectTimeout: 10_000
         });
@@ -2377,8 +2377,8 @@ class AttestMirrorVenue {
         // dotenv.config(), which reads `<cwd>/.env`; run from the checkout, a
         // child would silently inherit the standing stack's settings for every
         // variable this venue does not set.
-        this._cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-attestmirror-' + this.label + '-'));
-        this._capabilityConfigPath = this._writeCapabilityConfig();
+        this['_cwd'] = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-attestmirror-' + this.label + '-'));
+        this['_capabilityConfigPath'] = this['_writeCapabilityConfig']();
 
         // ONE PROBE, TWO CONSUMERS, and it has to be one probe.
         //
@@ -2396,7 +2396,7 @@ class AttestMirrorVenue {
         const planned = portCount(this.hubCount, this.indexerCount);
         const pool = await pickFreePorts(planned + this.indexerCount, this.basePort);
         const ports = planPorts(pool.slice(0, planned), this.hubCount, this.indexerCount);
-        this._mirrorProxyPorts = pool.slice(planned);
+        this['_mirrorProxyPorts'] = pool.slice(planned);
         const followed = assignFollowedHubs(this.hubCount, this.indexerCount);
 
         if (this.attachHubs) {
@@ -2418,15 +2418,15 @@ class AttestMirrorVenue {
             // OPT-IN rather than automatic, because seeding a pair moves the fee every
             // priced action on that chain computes, and an existing attach-mode drill
             // that is passing against the live price must keep getting exactly that.
-            if (this.seedAttachedHubPrices) await this._seedHubPrices();
+            if (this.seedAttachedHubPrices) await this['_seedHubPrices']();
         } else {
-            await this._startHubs(ports, stamp);
+            await this['_startHubs'](ports, stamp);
         }
-        await this._startIndexers(ports, followed, stamp);
+        await this['_startIndexers'](ports, followed, stamp);
         return true;
     }
 
-    async _startHubs(ports, stamp) {
+    async ['_startHubs'](ports, stamp) {
         // Proxies first: a hub whose seed list names a proxy that is not
         // listening yet spends its whole reconnect backoff catching up.
         for (let i = 0; i < this.hubCount; i++) {
@@ -2439,7 +2439,7 @@ class AttestMirrorVenue {
                 p2pPort:   ports.p2p[i],
                 proxyPort: ports.p2pProxy[i],
                 p2pAddr:   '127.0.0.1:' + ports.p2pProxy[i],
-                pubkey:    this._identities[i].pubkeyHex,
+                pubkey:    this['_identities'][i].pubkeyHex,
                 dbName:    DB_PREFIX + this.label + '_' + stamp + '_Hub' + i,
                 proxy:     proxy,
                 proc:      null,
@@ -2450,11 +2450,11 @@ class AttestMirrorVenue {
 
         // Sequential, so log lines interleave cleanly and the hubs' schema
         // bootstraps do not race each other on one MariaDB.
-        for (let i = 0; i < this.hubCount; i++) await this._spawnHub(i);
-        await this._seedHubPrices();
+        for (let i = 0; i < this.hubCount; i++) await this['_spawnHub'](i);
+        await this['_seedHubPrices']();
     }
 
-    async _spawnHub(i) {
+    async ['_spawnHub'](i) {
         const hub = this.hubs[i];
         const seeds = this.inboundOnlyHubs.has(i)
             ? []
@@ -2467,13 +2467,13 @@ class AttestMirrorVenue {
             p2pPort:   hub.p2pPort,
             proxyPort: hub.proxyPort,
             seedNodes: seeds,
-            privkeyHex: this._identities[i].privkeyHex,
+            privkeyHex: this['_identities'][i].privkeyHex,
             network:   this.network,
             hubCount:  this.hubCount,
             oracleEpochStart: this.oracleEpochStart,
-            btcIndexerApiUrl: this._live.btcOracle.url,
-            btcIndexerApiKey: this._live.btcOracle.apiKey,
-            capabilityConfigPath: this._capabilityConfigPath,
+            btcIndexerApiUrl: this['_live'].btcOracle.url,
+            btcIndexerApiKey: this['_live'].btcOracle.apiKey,
+            capabilityConfigPath: this['_capabilityConfigPath'],
             forwardS:     this.forwardS,
             batchWindowS: this.batchWindowS,
             attestationPollMs:          this.attestationPollMs,
@@ -2492,16 +2492,16 @@ class AttestMirrorVenue {
             path: process.env.PATH,
             home: process.env.HOME
         });
-        hub.proc = this._spawn('hub' + i, path.join(this.hubRepoRoot(i), 'xchain-hub', 'src', 'api.js'), [], env);
+        hub.proc = this['_spawn']('hub' + i, path.join(this.hubRepoRoot(i), 'xchain-hub', 'src', 'api.js'), [], env);
 
         const connector = new XChainHubConnector(['http://127.0.0.1:' + hub.apiPort]);
         const up = await waitForChildBoot(hub.proc, async () => {
-            try { return { ok: await connector.ping() }; } catch (_) { return { ok: false }; }
+            try { return { ok: await connector.ping() }; } catch (internal) { return { ok: false }; }
         }, { intervalMs: 500 });
         if (!up.ok) {
             throw new Error('attestMirrorVenue[' + this.label + ']: hub ' + i + ' did not answer on 127.0.0.1:' +
                 hub.apiPort + ' within ' + up.waitedMs + 'ms' + (up.dead ? ' (the process exited)' : '') +
-                '.\n' + this._tail('hub' + i));
+                '.\n' + this['_tail']('hub' + i));
         }
         hub.connector = connector;
 
@@ -2514,15 +2514,15 @@ class AttestMirrorVenue {
         // and vice versa, which keeps the mesh complete as it grows.
         for (const other of this.hubs) {
             if (!other.connector) continue;
-            await this._registerValidator(other, hub);
-            if (other.index !== hub.index) await this._registerValidator(hub, other);
+            await this['_registerValidator'](other, hub);
+            if (other.index !== hub.index) await this['_registerValidator'](hub, other);
         }
     }
 
     // The JSON-RPC surface directly rather than through XChainHubConnector: the
     // connector attaches the STANDING stack's HUB_API_KEY from the ambient
     // environment, and these hubs are keyless.
-    async _registerValidator(onHub, forHub) {
+    async ['_registerValidator'](onHub, forHub) {
         try {
             await axios.post(onHub.apiUrl, {
                 jsonrpc: '2.0', id: 1, method: 'registervalidator',
@@ -2534,11 +2534,11 @@ class AttestMirrorVenue {
         }
     }
 
-    async _startIndexers(ports, followed, stamp) {
+    async ['_startIndexers'](ports, followed, stamp) {
         // One mirror proxy per indexer, in front of the hub that indexer follows, on
         // the tail of the single port pool `start()` probed. See the comment there for
         // why these cannot come from a probe of their own.
-        const proxyPorts = this._mirrorProxyPorts;
+        const proxyPorts = this['_mirrorProxyPorts'];
         if (!Array.isArray(proxyPorts) || proxyPorts.length < this.indexerCount) {
             throw new Error('attestMirrorVenue: the mirror proxy ports were not reserved from the ' +
                 'venue port pool; start() must slice them off the single probe');
@@ -2595,8 +2595,8 @@ class AttestMirrorVenue {
         }
         // Every chain database is ready before the first indexer runs, so one seed
         // from the standing node can be copied inside the venue for the rest.
-        await this._prepareChainDbs();
-        for (let i = 0; i < this.indexerCount; i++) await this._spawnIndexer(i);
+        await this['_prepareChainDbs']();
+        for (let i = 0; i < this.indexerCount; i++) await this['_spawnIndexer'](i);
     }
 
     /**
@@ -2611,11 +2611,11 @@ class AttestMirrorVenue {
      * every indexer the same seed height. A database that already agrees with the
      * standing node is still reused as before.
      */
-    async _prepareChainDbs() {
+    async ['_prepareChainDbs']() {
         if (this.replayChain) return;
         let template = null;
         for (const ix of this.indexers) {
-            await this._cloneChainDbFromStanding(ix, template);
+            await this['_cloneChainDbFromStanding'](ix, template);
             ix.chainDbPrepared = true;
             if (!template) template = ix.indexerDbName;
         }
@@ -2625,9 +2625,9 @@ class AttestMirrorVenue {
      * Copy a ready venue chain database into another venue chain database on the
      * server, table by table, with the same table set the standing seed copies.
      */
-    async _copyChainDbWithinVenue(fromName, ix) {
+    async ['_copyChainDbWithinVenue'](fromName, ix) {
         const from = ident(fromName, 'database name');
-        const conn = await this._createChainDbConnection({
+        const conn = await this['_createChainDbConnection']({
             host: this.hubDb.host, port: parseInt(this.hubDb.port, 10),
             user: this.hubDb.user, password: this.hubDb.pass,
             database: ident(ix.indexerDbName, 'database name'), connectTimeout: 15000,
@@ -2705,7 +2705,7 @@ class AttestMirrorVenue {
      */
     // Route chain connections through one seam for deterministic reuse checks.
     // Keep production ownership in the MariaDB client.
-    _createChainDbConnection(options) {
+    ['_createChainDbConnection'](options) {
         return mariadb.createConnection(options);
     }
 
@@ -2715,28 +2715,28 @@ class AttestMirrorVenue {
      * Compare action numbering and the ledger hash at the lower tip. Lag is not
      * divergence, but matching action counts alone do not prove equal state.
      */
-    async _chainDbAgreesWithStanding(ix, srcName) {
+    async ['_chainDbAgreesWithStanding'](ix, srcName) {
         const db = ident(ix.indexerDbName, 'database name');
         let mine = null, theirs = null, mineLedger = null, theirsLedger = null, height = null;
-        const src = await this._createChainDbConnection({
+        const src = await this['_createChainDbConnection']({
             host: this.hubDb.host, port: parseInt(this.hubDb.port, 10),
             user: process.env.INDEXER_DB_USER, password: process.env.INDEXER_DB_PASS,
             database: srcName, connectTimeout: 15000,
         });
         try {
             // Compare at the lower tip so lag alone never forces a rebuild.
-            const a = await this._conn.query('SELECT MAX(block_index) AS hi FROM `' + db + '`.blocks');
+            const a = await this['_conn'].query('SELECT MAX(block_index) AS hi FROM `' + db + '`.blocks');
             const b = await src.query('SELECT MAX(block_index) AS hi FROM blocks');
             if (a[0].hi === null || b[0].hi === null) return { ok: false, mine, theirs, height };
             height = Math.min(Number(a[0].hi), Number(b[0].hi));
             // Preserve action numbering used by cross-node contract references.
-            const m = await this._conn.query(
+            const m = await this['_conn'].query(
                 'SELECT COUNT(*) AS n FROM `' + db + '`.actions WHERE block_index <= ?', [height]);
             const t = await src.query('SELECT COUNT(*) AS n FROM actions WHERE block_index <= ?', [height]);
             mine = Number(m[0].n); theirs = Number(t[0].n);
             // Resolve each ledger hash through its transaction row.
             // Blocks stores only the corresponding transaction id.
-            const localHash = await this._conn.query(
+            const localHash = await this['_conn'].query(
                 'SELECT h.hash AS ledger_hash FROM `' + db + '`.blocks b ' +
                 'LEFT JOIN `' + db + '`.index_transactions h ON (h.id = b.ledger_hash_id) ' +
                 'WHERE b.block_index = ? LIMIT 1', [height]);
@@ -2761,14 +2761,14 @@ class AttestMirrorVenue {
         }
     }
 
-    async _reuseChainDbIfMatching(ix, srcName) {
+    async ['_reuseChainDbIfMatching'](ix, srcName) {
         // Reuse only a database that agrees at a common height.
         // Treat existing blocks as insufficient because old replay databases may diverge.
-        const have = await this._conn.query(
+        const have = await this['_conn'].query(
             'SELECT COUNT(*) AS c FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?',
             [ix.indexerDbName, 'actions']);
         if (Number(have[0].c) === 0) return false;
-        const marked = await this._conn.query(
+        const marked = await this['_conn'].query(
             'SELECT COUNT(*) AS c FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?',
             [ix.indexerDbName, CHAIN_SEED_MARKER]);
         if (Number(marked[0].c) === 0) {
@@ -2776,7 +2776,7 @@ class AttestMirrorVenue {
                         'with no ' + CHAIN_SEED_MARKER + ' marker, so its seed never finished; it is re-seeded.');
             return false;
         }
-        const agrees = await this._chainDbAgreesWithStanding(ix, srcName);
+        const agrees = await this['_chainDbAgreesWithStanding'](ix, srcName);
         // Reuse only when both independent agreement checks pass.
         if (agrees.ok) {
             console.log('attestMirrorVenue[' + this.label + ']: indexer ' + ix.index + ' already agrees with ' +
@@ -2795,13 +2795,13 @@ class AttestMirrorVenue {
         return false;
     }
 
-    async _seedChainDbFromStanding(ix, srcName) {
-        const src = await this._createChainDbConnection({
+    async ['_seedChainDbFromStanding'](ix, srcName) {
+        const src = await this['_createChainDbConnection']({
             host: this.hubDb.host, port: parseInt(this.hubDb.port, 10),
             user: process.env.INDEXER_DB_USER, password: process.env.INDEXER_DB_PASS,
             database: srcName, connectTimeout: 15000,
         });
-        const dst = await this._createChainDbConnection({
+        const dst = await this['_createChainDbConnection']({
             host: this.hubDb.host, port: parseInt(this.hubDb.port, 10),
             user: this.hubDb.user, password: this.hubDb.pass,
             database: ix.indexerDbName, connectTimeout: 15000,
@@ -2829,7 +2829,7 @@ class AttestMirrorVenue {
                 // copy of exactly the cross-run staleness the mirror rebuild
                 // exists to prevent.
                 if (CHAIN_CLONE_SKIP_TABLES.has(t)) continue;
-                rows += await this._copyChainTable(src, dst, t);
+                rows += await this['_copyChainTable'](src, dst, t);
                 tables++;
             }
             await writeSeedMarker(dst, srcName);
@@ -2846,7 +2846,7 @@ class AttestMirrorVenue {
                     'responses no replay can re-derive.');
     }
 
-    async _copyChainTable(src, dst, table) {
+    async ['_copyChainTable'](src, dst, table) {
         const create = (await src.query('SHOW CREATE TABLE `' + table + '`'))[0]['Create Table'];
         await dst.query('DROP TABLE IF EXISTS `' + table + '`');
         await dst.query(create);
@@ -2858,10 +2858,10 @@ class AttestMirrorVenue {
         if (cols.length === 0) return 0;
         const pk = colInfo.filter((c) => String(c.Key) === 'PRI');
         const keyCol = (pk.length === 1 && /int/i.test(String(pk[0].Type))) ? pk[0].Field : null;
-        return this._copyChainTableRows(src, dst, table, cols, keyCol);
+        return this['_copyChainTableRows'](src, dst, table, cols, keyCol);
     }
 
-    async _copyChainTableRows(src, dst, table, cols, keyCol) {
+    async ['_copyChainTableRows'](src, dst, table, cols, keyCol) {
         const list = cols.map((c) => '`' + c + '`').join(', ');
         const marks = cols.map(() => '?').join(', ');
         let rows = 0;
@@ -2906,12 +2906,12 @@ class AttestMirrorVenue {
         return rows;
     }
 
-    async _cloneChainDbFromStanding(ix, template) {
+    async ['_cloneChainDbFromStanding'](ix, template) {
         // THE REPLAY PATH: make the database and hand it over empty. `XChainIndexer.start()`
         // calls verifyTables() on its own indexer database, so it builds its schema and then
         // parses the chain from genesis under this tree's rules.
         if (this.replayChain) {
-            await this._conn.query('CREATE DATABASE IF NOT EXISTS `' +
+            await this['_conn'].query('CREATE DATABASE IF NOT EXISTS `' +
                 ident(ix.indexerDbName, 'database name') + '`');
             console.log('attestMirrorVenue[' + this.label + ']: indexer ' + ix.index +
                         ' REPLAYS the chain into ' + ix.indexerDbName + ' rather than cloning the ' +
@@ -2928,20 +2928,20 @@ class AttestMirrorVenue {
                 'indexer from the standing node. Without them the venue would replay the chain and derive ' +
                 'a different ledger.');
 
-        await this._conn.query('CREATE DATABASE IF NOT EXISTS `' + ident(ix.indexerDbName, 'database name') + '`');
-        if (await this._reuseChainDbIfMatching(ix, srcName)) return;
+        await this['_conn'].query('CREATE DATABASE IF NOT EXISTS `' + ident(ix.indexerDbName, 'database name') + '`');
+        if (await this['_reuseChainDbIfMatching'](ix, srcName)) return;
         // A template is a venue database this bring-up already seeded or verified.
-        if (template) await this._copyChainDbWithinVenue(template, ix);
-        else await this._seedChainDbFromStanding(ix, srcName);
+        if (template) await this['_copyChainDbWithinVenue'](template, ix);
+        else await this['_seedChainDbFromStanding'](ix, srcName);
     }
 
-    async _spawnIndexer(i) {
+    async ['_spawnIndexer'](i) {
         const ix = this.indexers[i];
 
         // The chain database comes from the standing node, not from a replay. A
         // bring-up prepares it once; a later respawn (a rebuild) seeds it again.
         if (ix.chainDbPrepared) ix.chainDbPrepared = false;
-        else await this._cloneChainDbFromStanding(ix);
+        else await this['_cloneChainDbFromStanding'](ix);
 
         // The mirror database is the one NOBODY creates for itself, and that is a
         // property of the code rather than an oversight here: `XChainIndexer.start()`
@@ -2972,9 +2972,9 @@ class AttestMirrorVenue {
         // Reuse is kept where it pays: the `_Ixr` chain database is what saves
         // the genesis replay. The mirror holds only hub-authored state, which
         // MUST come from this run's hubs, so it is worth nothing across runs.
-        await this._conn.query('DROP DATABASE IF EXISTS `' + ident(ix.mirrorDbName, 'database name') + '`');
-        await this._conn.query('CREATE DATABASE `' + ident(ix.mirrorDbName, 'database name') + '`');
-        await this._provisionMirrorSchema(ix.mirrorDbName);
+        await this['_conn'].query('DROP DATABASE IF EXISTS `' + ident(ix.mirrorDbName, 'database name') + '`');
+        await this['_conn'].query('CREATE DATABASE `' + ident(ix.mirrorDbName, 'database name') + '`');
+        await this['_provisionMirrorSchema'](ix.mirrorDbName);
 
         const env = buildIndexerEnv({
             coin:    coinCode(this.coin),
@@ -2984,9 +2984,9 @@ class AttestMirrorVenue {
             mirrorDbName:  ix.mirrorDbName,
             hubApiUrl:     ix.hubApiUrl,
             db:      { host: this.hubDb.host, port: this.hubDb.port, user: this.hubDb.user, pass: this.hubDb.pass },
-            decoder: this._live.decoder,
-            node:    this._live.node,
-            tracker: this._live.tracker,
+            decoder: this['_live'].decoder,
+            node:    this['_live'].node,
+            tracker: this['_live'].tracker,
             // PER-INDEXER graces, layered over the venue-wide set.
             //
             // Every barrier reads the SAME global stream watermark and differs only in
@@ -2996,7 +2996,7 @@ class AttestMirrorVenue {
             // attributed BY NAME. Per indexer rather than venue-wide because the
             // attribution also needs an unaffected peer to advance past the parked node.
             graces:  Object.assign({}, this.graces, this.indexerGraces[i] || {}),
-            feeDestination: this._live.feeDestination,
+            feeDestination: this['_live'].feeDestination,
             path: process.env.PATH,
             home: process.env.HOME,
             // Applied LAST by buildIndexerEnv, so a drill can override anything above
@@ -3010,20 +3010,20 @@ class AttestMirrorVenue {
         // --no-node-snapshot mirrors the package's own `api` script: the contract
         // VM binding will not load under a Node snapshot, and an attestation
         // callback is an EXECUTE.
-        ix.proc = this._spawn('indexer' + i, path.join(this.repoRoot, 'xchain-indexer', 'src', 'api.js'),
+        ix.proc = this['_spawn']('indexer' + i, path.join(this.repoRoot, 'xchain-indexer', 'src', 'api.js'),
             ['--no-node-snapshot'], env);
 
         const up = await waitForChildBoot(ix.proc, async () => {
             try {
-                const rows = await this._conn.query(
+                const rows = await this['_conn'].query(
                     'SELECT COUNT(*) AS c FROM information_schema.TABLES WHERE TABLE_SCHEMA = ?', [ix.indexerDbName]);
                 return { ok: Number(rows[0].c) > 0, tables: Number(rows[0].c) };
-            } catch (_) { return { ok: false }; }
+            } catch (internal) { return { ok: false }; }
         }, { intervalMs: 1000 });
         if (!up.ok) {
             throw new Error('attestMirrorVenue[' + this.label + ']: indexer ' + i + ' never created its schema in ' +
                 ix.indexerDbName + ' within ' + up.waitedMs + 'ms' + (up.dead ? ' (the process exited)' : '') +
-                '.\n' + this._tail('indexer' + i));
+                '.\n' + this['_tail']('indexer' + i));
         }
 
         // The schema wait proves the indexer reached its DATABASE, not that its HTTP
@@ -3042,13 +3042,13 @@ class AttestMirrorVenue {
             try {
                 const res = await axios.get(ix.apiUrl + '/status', { timeout: 5_000, validateStatus: () => true });
                 return { ok: true, httpStatus: res.status };
-            } catch (_) { return { ok: false }; }
+            } catch (internal) { return { ok: false }; }
         }, { intervalMs: 1000 });
         if (!answering.ok) {
             throw new Error('attestMirrorVenue[' + this.label + ']: indexer ' + i + ' never answered /status on ' +
                 ix.apiUrl + ' within ' + answering.waitedMs + 'ms' +
                 (answering.dead ? ' (the process exited)' : '') +
-                '.\n' + this._tail('indexer' + i));
+                '.\n' + this['_tail']('indexer' + i));
         }
         ix.connector = new XChainIndexerConnector('127.0.0.1', ix.apiPort, null);
     }
@@ -3078,7 +3078,7 @@ class AttestMirrorVenue {
      * so the staleness window is covered whichever anchor the reader uses, and
      * with a high round number so a real oracle round always wins on recency.
      */
-    async _seedHubPrices() {
+    async ['_seedHubPrices']() {
         // A venue whose hub publishes the pair for real must be able to say so,
         // and this seed would then be writing over live oracle output.
         xchainPrice.refuseSeedIfSuppressed('attestMirrorVenue._seedHubPrices');
@@ -3098,7 +3098,7 @@ class AttestMirrorVenue {
             for (const [pair, price] of pairs) {
                 for (const [round, ts] of [[9000001, now], [9000002, now - 60]]) {
                     try {
-                        await this._conn.query(
+                        await this['_conn'].query(
                             'INSERT INTO `' + db + '`.price_snapshots ' +
                             '(round_number, coin_pair, price, reference_block, reference_chain, ' +
                             ' block_timestamp, validator_count, consensus_round, consensus_proof, status) ' +
@@ -3120,9 +3120,9 @@ class AttestMirrorVenue {
             'venue indexer is refused and no attestation request is ever emitted there.');
     }
 
-    async _provisionMirrorSchema(dbName) {
+    async ['_provisionMirrorSchema'](dbName) {
         const dir = path.join(this.repoRoot, 'xchain-indexer', 'src', 'sql');
-        await this._conn.query('USE `' + ident(dbName, 'database name') + '`');
+        await this['_conn'].query('USE `' + ident(dbName, 'database name') + '`');
         for (const file of fs.readdirSync(dir)) {
             if (!file.endsWith('.sql')) continue;
             // Strip the license block and every `--` comment before splitting on
@@ -3131,7 +3131,7 @@ class AttestMirrorVenue {
             const sql = fs.readFileSync(path.join(dir, file), 'utf8')
                 .replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\n\r]*/g, '');
             for (const stmt of sql.split(';').map((s) => s.trim()).filter(Boolean)) {
-                try { await this._conn.query(stmt); }
+                try { await this['_conn'].query(stmt); }
                 catch (e) { /* a DDL this schema version cannot apply is not this venue's to fix */ }
             }
         }
@@ -3147,15 +3147,15 @@ class AttestMirrorVenue {
      * rather than typed here, so they cannot drift from the floor the hub asserts
      * them against.
      */
-    _writeCapabilityConfig() {
+    ['_writeCapabilityConfig']() {
         const coins = loadHubModule('src/coins/index.js');
         const cfg = coins.getCoinConfig('BTC', this.network);
         const canonical = (cfg && cfg.STAKING && cfg.STAKING.CAPABILITIES) || null;
         if (!canonical) throw new Error('attestMirrorVenue: the hub coins registry carries no BTC STAKING.CAPABILITIES');
         const caps = {};
         for (const cap of Object.keys(canonical)) caps[cap] = { MIN_STAKE: String(canonical[cap].MIN_STAKE) };
-        this._minStakes = caps;
-        const file = path.join(this._cwd, 'capabilities.json');
+        this['_minStakes'] = caps;
+        const file = path.join(this['_cwd'], 'capabilities.json');
         fs.writeFileSync(file, JSON.stringify({ CAPABILITIES: caps }, null, 2));
         return file;
     }
@@ -3168,7 +3168,7 @@ class AttestMirrorVenue {
      * same route `oracleBatchReplay` takes, so no credential is written to a file
      * or assembled on a command line here.
      */
-    async _resolveStandingStack() {
+    async ['_resolveStandingStack']() {
         let cfg = null;
         try {
             const hub = new XChainHubConnector(XChainHubConnector.parseEndpoints());
@@ -3198,7 +3198,7 @@ class AttestMirrorVenue {
         const dbHost = process.env.DATABASE_URL  || '127.0.0.1';
         const dbPort = parseInt(process.env.DATABASE_PORT, 10) || 13306;
 
-        const btcOracle = this._resolveBtcOracle(cfg);
+        const btcOracle = this['_resolveBtcOracle'](cfg);
         if (!btcOracle) {
             this.unavailable = 'the stack hub names no bitcoin/' + this.network + ' indexer, so the hubs could not ' +
                 'be given the Bitcoin capability oracle a responsible set is resolved from';
@@ -3219,7 +3219,7 @@ class AttestMirrorVenue {
         // the new one back. Without this probe a stale value is discovered by seven
         // children dying on ER_ACCESS_DENIED several minutes in, and the error names the
         // account rather than the store, which is the wrong thing to go looking at.
-        const denied = await this._probeDecoderAccess(
+        const denied = await this['_probeDecoderAccess'](
             { host: dbHost, port: dbPort, name: dec.name, user: cred.user, pass: cred.pass });
         if (denied) {
             this.unavailable = 'the ' + this.coin + '/' + this.network + ' decoder database credential from ' +
@@ -3235,7 +3235,7 @@ class AttestMirrorVenue {
             decoder: { host: dbHost, port: dbPort, name: dec.name, user: cred.user, pass: cred.pass },
             node:    svc['node'] || {},
             tracker: svc['xchain-utxo-tracker'] || {},
-            feeDestination: await this._resolveFeeDestination(svc),
+            feeDestination: await this['_resolveFeeDestination'](svc),
             btcOracle: btcOracle
         };
     }
@@ -3248,7 +3248,7 @@ class AttestMirrorVenue {
      * to see the tables are different failures with different fixes: the first is a wrong
      * password, the second a missing grant, and the message has to say which.
      */
-    async _probeDecoderAccess(d) {
+    async ['_probeDecoderAccess'](d) {
         let conn = null;
         try {
             conn = await mariadb.createConnection({
@@ -3264,7 +3264,7 @@ class AttestMirrorVenue {
             }
             return code;
         } finally {
-            if (conn) { try { await conn.end(); } catch (_) { /* already closed */ } }
+            if (conn) { try { await conn.end(); } catch (internal) { /* already closed */ } }
         }
     }
 
@@ -3275,7 +3275,7 @@ class AttestMirrorVenue {
      * the API port: the hub stores the container-internal one and a host-side
      * process must dial the published one.
      */
-    _resolveBtcOracle(cfg) {
+    ['_resolveBtcOracle'](cfg) {
         if (this.btcIndexerApiUrl) {
             return { url: this.btcIndexerApiUrl, apiKey: process.env.BTC_INDEXER_API_KEY || process.env.INDEXER_API_KEY || null };
         }
@@ -3299,7 +3299,7 @@ class AttestMirrorVenue {
      * node on one network must hold the same value or their fee verdicts diverge
      * by configuration rather than by anything under test.
      */
-    async _resolveFeeDestination(svc) {
+    async ['_resolveFeeDestination'](svc) {
         try {
             const code = coinCode(this.coin);
             const host = process.env[code + '_SERVICE_HOST'] || 'localhost';
@@ -3308,7 +3308,7 @@ class AttestMirrorVenue {
                 const file = path.resolve(__dirname, '../../.env.' + String(code).toLowerCase());
                 if (fs.existsSync(file)) {
                     try { port = require('dotenv').parse(fs.readFileSync(file)).INDEXER_API_PORT; }
-                    catch (_) { /* fall through to the hub's own value */ }
+                    catch (internal) { /* fall through to the hub's own value */ }
                 }
             }
             // The published port BEFORE the hub's own value: the config oracle stores the
@@ -3340,7 +3340,7 @@ class AttestMirrorVenue {
     // The identities the hubs sign with. Handed back so a suite can stake them
     // BEFORE start() (pass them in as opts.identities) or read the generated set
     // afterwards; never logged by this file.
-    identities() { return this._identities.map((id) => ({ pubkeyHex: id.pubkeyHex, privkeyHex: id.privkeyHex })); }
+    identities() { return this['_identities'].map((id) => ({ pubkeyHex: id.pubkeyHex, privkeyHex: id.privkeyHex })); }
 
     /**
      * The responsible set for a request, computed the way the indexer computes it.
@@ -3451,7 +3451,7 @@ class AttestMirrorVenue {
         const rows = await this.readMirrorRows(indexerIndex, { requestId: requestId });
         if (rows.length === 0) return null;
         let keys = rows[0].signer_pubkeys;
-        if (typeof keys === 'string') { try { keys = JSON.parse(keys); } catch (_) { return null; } }
+        if (typeof keys === 'string') { try { keys = JSON.parse(keys); } catch (internal) { return null; } }
         return Array.isArray(keys) ? keys.map((k) => String(k).toLowerCase()) : null;
     }
 
@@ -3469,7 +3469,7 @@ class AttestMirrorVenue {
     async stopHub(i) {
         const hub = this.hubs[i];
         if (!hub) throw new Error('attestMirrorVenue: no hub ' + i);
-        await this._kill(hub.proc);
+        await this['_kill'](hub.proc);
         hub.proc = null;
         hub.connector = null;
     }
@@ -3478,7 +3478,7 @@ class AttestMirrorVenue {
         const hub = this.hubs[i];
         if (!hub) throw new Error('attestMirrorVenue: no hub ' + i);
         if (hub.proc) return;
-        await this._spawnHub(i);
+        await this['_spawnHub'](i);
     }
 
     /**
@@ -3569,7 +3569,7 @@ class AttestMirrorVenue {
             // (network, request_id, effective_time), and re-running a drill against a
             // hub that already holds the row must be ordinary traffic rather than an
             // error the caller has to distinguish from a real failure.
-            const res = await this._conn.query(
+            const res = await this['_conn'].query(
                 'INSERT IGNORE INTO `' + db + '`.`' + table + '` ' +
                 '(' + cols.map((c) => '`' + c + '`').join(', ') + ') ' +
                 'VALUES (' + cols.map(() => '?').join(', ') + ')',
@@ -3577,7 +3577,7 @@ class AttestMirrorVenue {
             // Read the id back rather than trusting insertId, which is 0 on an ignored
             // insert. The id is what the follower pages on, so a drill that cannot name
             // it cannot say the row was reachable at all.
-            const back = await this._conn.query(
+            const back = await this['_conn'].query(
                 'SELECT id FROM `' + db + '`.`' + table + '` ' +
                 'WHERE ' + keyCols.map((c) => '`' + c + '` = ?').join(' AND ') + ' LIMIT 1',
                 keyCols.map((c) => row[c]));
@@ -3646,13 +3646,13 @@ class AttestMirrorVenue {
             const hub = this.hubs[hubIndex];
             if (!hub) throw new Error('attestMirrorVenue: no hub ' + hubIndex);
             const db = ident(hub.dbName, 'database name');
-            const res = await this._conn.query('DELETE FROM `' + db + '`.`' + table + '` WHERE ' + where, args);
+            const res = await this['_conn'].query('DELETE FROM `' + db + '`.`' + table + '` WHERE ' + where, args);
             out.hubs.push({ hub: hubIndex, deleted: Number(res && res.affectedRows) || 0 });
         }
         if (o.mirrors !== false) {
             for (const ix of this.indexers) {
                 const db = ident(ix.mirrorDbName, 'database name');
-                const res = await this._conn.query('DELETE FROM `' + db + '`.`' + table + '` WHERE ' + where, args);
+                const res = await this['_conn'].query('DELETE FROM `' + db + '`.`' + table + '` WHERE ' + where, args);
                 out.mirrors.push({ indexer: ix.index, deleted: Number(res && res.affectedRows) || 0 });
             }
         }
@@ -3817,15 +3817,15 @@ class AttestMirrorVenue {
         const result = await waitFor(async () => {
             if (ix.proc && ix.proc.exitCode !== null) return { ok: false, dead: true };
             try {
-                const rows = await this._conn.query('SELECT MAX(block_index) AS h FROM `' + db + '`.blocks');
+                const rows = await this['_conn'].query('SELECT MAX(block_index) AS h FROM `' + db + '`.blocks');
                 const at = rows[0].h === null ? null : Number(rows[0].h);
                 return { ok: at !== null && at >= target, at: at };
-            } catch (_) { return { ok: false, at: null }; }
+            } catch (internal) { return { ok: false, at: null }; }
         }, { timeoutMs: opts.timeoutMs || 30 * 60 * 1000, intervalMs: opts.intervalMs || 2000 });
         if (!result.ok) {
             const at = result.last && result.last.at;
             throw new Error('attestMirrorVenue[' + this.label + ']: indexer ' + indexerIndex + ' reached block ' +
-                at + ' of ' + target + ' after ' + result.waitedMs + 'ms.\n' + this._tail('indexer' + indexerIndex));
+                at + ' of ' + target + ' after ' + result.waitedMs + 'ms.\n' + this['_tail']('indexer' + indexerIndex));
         }
         return result;
     }
@@ -3878,7 +3878,7 @@ class AttestMirrorVenue {
         const params = [];
         if (opts.requestId) { sql += ' WHERE request_id = ?'; params.push(String(opts.requestId)); }
         sql += ' ORDER BY id ASC';
-        return plain(await this._conn.query(sql, params));
+        return plain(await this['_conn'].query(sql, params));
     }
 
     /**
@@ -3900,7 +3900,7 @@ class AttestMirrorVenue {
         const params = [];
         if (opts.requestId) { sql += ' WHERE request_id = ?'; params.push(String(opts.requestId)); }
         sql += ' ORDER BY id ASC';
-        return plain(await this._conn.query(sql, params));
+        return plain(await this['_conn'].query(sql, params));
     }
 
     // The indexer's `/status`, parsed. Carries `stallReason`, `stallClass`,
@@ -3973,16 +3973,16 @@ class AttestMirrorVenue {
         let tablePresent = false;
         let mirrorRows = null;
         try {
-            const rows = await this._conn.query(
+            const rows = await this['_conn'].query(
                 'SELECT COUNT(*) AS c FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?',
                 [ix.mirrorDbName, 'attestation_responses']);
             tablePresent = Number(rows[0].c) > 0;
             if (tablePresent) {
-                const cnt = await this._conn.query('SELECT COUNT(*) AS c FROM `' +
+                const cnt = await this['_conn'].query('SELECT COUNT(*) AS c FROM `' +
                     ident(ix.mirrorDbName, 'database name') + '`.attestation_responses');
                 mirrorRows = Number(cnt[0].c);
             }
-        } catch (_) { tablePresent = false; }
+        } catch (internal) { tablePresent = false; }
         const hubRows = await this.hubSnapshot(ix.followsHub).then((s) => Number(s.count)).catch(() => null);
         return {
             answering:    status.httpStatus === 200 || status.httpStatus === 503,
@@ -3997,14 +3997,14 @@ class AttestMirrorVenue {
         };
     }
 
-    logTail(which) { return this._tail(which); }
+    logTail(which) { return this['_tail'](which); }
 
     // ---- process plumbing ------------------------------------------------
 
-    _spawn(which, script, nodeArgs, env) {
-        this._logs[which] = this._logs[which] || [];
+    ['_spawn'](which, script, nodeArgs, env) {
+        this['_logs'][which] = this['_logs'][which] || [];
         const proc = spawn(process.execPath, [...nodeArgs, script], {
-            cwd: this._cwd, env: env, stdio: ['ignore', 'pipe', 'pipe']
+            cwd: this['_cwd'], env: env, stdio: ['ignore', 'pipe', 'pipe']
         });
         // ATTEST_VENUE_LOG_DIR: ALSO append every child line to
         // <dir>/<label>-<which>.log. The in-memory tail is only ever printed by a
@@ -4023,12 +4023,12 @@ class AttestMirrorVenue {
                 sink = null;
                 console.log('attestMirrorVenue[' + this.label + ']: no on-disk log for ' + which + ': ' + (e && e.message));
             }
-            proc.once('exit', () => { if (sink !== null) { try { fs.closeSync(sink); } catch (_) { /* closed */ } sink = null; } });
+            proc.once('exit', () => { if (sink !== null) { try { fs.closeSync(sink); } catch (internal) { /* closed */ } sink = null; } });
         }
         const keep = (buf) => {
-            if (sink !== null) { try { fs.writeSync(sink, String(buf)); } catch (_) { /* disk is best effort */ } }
+            if (sink !== null) { try { fs.writeSync(sink, String(buf)); } catch (internal) { /* disk is best effort */ } }
             const lines = String(buf).split('\n').filter((l) => l.length > 0);
-            const log = this._logs[which];
+            const log = this['_logs'][which];
             log.push(...lines);
             if (log.length > LOG_TAIL_LINES) log.splice(0, log.length - LOG_TAIL_LINES);
         };
@@ -4038,16 +4038,16 @@ class AttestMirrorVenue {
         return proc;
     }
 
-    _tail(which) {
-        const log = this._logs[which] || [];
+    ['_tail'](which) {
+        const log = this['_logs'][which] || [];
         return '  last ' + log.length + ' line(s) from ' + which + ':\n    ' + log.join('\n    ');
     }
 
-    async _kill(proc) {
+    async ['_kill'](proc) {
         if (!proc || proc.exitCode !== null) return;
         // A frozen process cannot handle SIGTERM; wake it first or the kill waits
         // out its whole budget and then SIGKILLs.
-        try { proc.kill('SIGCONT'); } catch (_) { /* not frozen */ }
+        try { proc.kill('SIGCONT'); } catch (internal) { /* not frozen */ }
         const ended = new Promise((resolve) => proc.once('exit', resolve));
         proc.kill('SIGTERM');
         const settled = await Promise.race([ended.then(() => true), sleep(15_000).then(() => false)]);
@@ -4068,17 +4068,17 @@ class AttestMirrorVenue {
             try { await fn(); } catch (e) { problems.push(label + ': ' + (e && e.message)); }
         };
 
-        for (const ix of this.indexers) await attempt('indexer ' + ix.index + ' stop', async () => this._kill(ix.proc));
+        for (const ix of this.indexers) await attempt('indexer ' + ix.index + ' stop', async () => this['_kill'](ix.proc));
         for (const ix of this.indexers) {
             await attempt('mirror proxy ' + ix.index + ' stop',
                 async () => ix.mirrorProxy && ix.mirrorProxy.stop());
         }
         // Attached hubs belong to another venue: not killed, not dropped, not ours.
         const ownedHubs = this.attachHubs ? [] : this.hubs;
-        for (const hub of ownedHubs)    await attempt('hub ' + hub.index + ' stop',    async () => this._kill(hub.proc));
+        for (const hub of ownedHubs)    await attempt('hub ' + hub.index + ' stop',    async () => this['_kill'](hub.proc));
         for (const hub of ownedHubs)    await attempt('proxy ' + hub.index + ' stop',  async () => hub.proxy && hub.proxy.stop());
 
-        if (this._conn) {
+        if (this['_conn']) {
             // THE INDEXER DATABASES SURVIVE unless this venue made them throwaway.
             // They hold the parsed chain, which is the expensive thing and is not
             // per-run; dropping them is what forced a genesis replay on every
@@ -4091,20 +4091,20 @@ class AttestMirrorVenue {
             for (const name of names) {
                 if (!name) continue;
                 await attempt('drop ' + name, async () =>
-                    this._conn.query('DROP DATABASE IF EXISTS `' + ident(name, 'database name') + '`'));
+                    this['_conn'].query('DROP DATABASE IF EXISTS `' + ident(name, 'database name') + '`'));
             }
-            await attempt('conn close', async () => this._conn.end());
-            this._conn = null;
+            await attempt('conn close', async () => this['_conn'].end());
+            this['_conn'] = null;
         }
 
         this.indexers = [];
         this.hubs = [];
 
-        if (this._cwd) {
-            await attempt('cwd', async () => fs.rmSync(this._cwd, { recursive: true, force: true }));
-            this._cwd = null;
+        if (this['_cwd']) {
+            await attempt('cwd', async () => fs.rmSync(this['_cwd'], { recursive: true, force: true }));
+            this['_cwd'] = null;
         }
-        if (this.hubDb && this._ownsHubDb) {
+        if (this.hubDb && this['_ownsHubDb']) {
             await attempt('hub db stop', async () => this.hubDb.stop());
             this.hubDb = null;
         }

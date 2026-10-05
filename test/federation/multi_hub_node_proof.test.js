@@ -89,21 +89,21 @@ const FULLNODE_CFG = {
     // GENESIS_VERIFIERS filled in once identities are generated (below).
 }
 
-async function _settleStack() {
+async function internalSettleStack() {
     await utxoTrackerConnector.quiesce({ timeoutMs: 30000, pollMs: 250, regtestMiner: regtestMinerConnector })
 }
 
 // Run a raw query through the e2e indexer DB connector (pooled connection).
-async function _idxQuery(sql, args) {
+async function internalIdxQuery(sql, args) {
     const conn = await indexerDatabase.getConnection()
     try { return await conn.query(sql, args) }
     finally { await conn.release() }
 }
 
-async function _waitForRows(sql, args, timeoutMs = 120000, label = 'rows') {
+async function internalWaitForRows(sql, args, timeoutMs = 120000, label = 'rows') {
     const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
-        const rows = await _idxQuery(sql, args)
+        const rows = await internalIdxQuery(sql, args)
         if (rows && rows.length > 0) return rows
         await regtestMinerConnector.generateBlocks(1)   // advance the tip so the engine ticks
         await new Promise(r => setTimeout(r, 2000))
@@ -146,7 +146,7 @@ async function stakeNodeProofClaimants() {
             // Idempotent on a non-reset chain: a pubkey already staked (e.g. from a
             // prior run) is already a full_node claimant; STAKE v1 would be rejected
             // "SIGNING_PUBKEY already in use", so skip it.
-            const existing = await _idxQuery(
+            const existing = await internalIdxQuery(
                 `SELECT COUNT(*) AS n FROM stakes s
                    LEFT JOIN index_statuses ist ON ist.id = s.status_id
                    LEFT JOIN index_pubkeys ip   ON ip.id  = s.signing_pubkey_id
@@ -159,14 +159,14 @@ async function stakeNodeProofClaimants() {
                 continue
             }
             const addr = await cryptoHelper.getNewFundedAddress('np-staker-' + i, COIN, NETWORK, null, 'legacy', 0, 0.02)
-            await _settleStack()
+            await internalSettleStack()
             await gasHelper.ensureGasBalance(addr, '3000')
-            await _settleStack()
+            await internalSettleStack()
             const res = await stakeHelper.sendStakeV1(addr, '2500.00000000', identities[i].pubkeyHex)
             assert.strictEqual(res.stake.status, 'valid', 'stake ' + i + ' should be valid')
         }
         await regtestMinerConnector.generateBlocks(7)   // activation window
-    await _settleStack()
+    await internalSettleStack()
 }
 
 async function configureNodeProofPublisher() {
@@ -174,7 +174,7 @@ async function configureNodeProofPublisher() {
         // the elected leader invokes it per epoch, so one shared address is fine).
         const publisherAddr = await cryptoHelper.getNewFundedAddress('np-publisher', COIN, NETWORK, null, 'legacy', 0, 0.02)
         await regtestMinerConnector.generateBlocks(2)
-        await _settleStack()
+        await internalSettleStack()
         mvh.setNodeProofBroadcastHook(async (wirePayload) => {
             const txHash = await transactionHelper.createAndSendTransaction(publisherAddr, wirePayload)
             return { txid: txHash }
@@ -218,7 +218,7 @@ async function verifiesFullValidators() {
         let verified = new Set()
         const deadline = Date.now() + 240000
         while (Date.now() < deadline) {
-            const rows = await _idxQuery(sql, [])
+            const rows = await internalIdxQuery(sql, [])
             verified = new Set(rows.map(r => String(r.pubkey).toLowerCase()))
             if (wantFull.every(pk => verified.has(pk))) break
             await regtestMinerConnector.generateBlocks(1)   // advance the tip so the engine ticks
@@ -250,7 +250,7 @@ async function accruesFullHubVerdicts() {
         let byPubkey = new Map()
         const deadline = Date.now() + 240000
         while (Date.now() < deadline) {
-            const rows = await _idxQuery(sql, [])
+            const rows = await internalIdxQuery(sql, [])
             byPubkey = new Map(rows.map(r => [String(r.pubkey).toLowerCase(), Number(r.epochs)]))
             if (wantFull.every(pk => (byPubkey.get(pk) || 0) >= 2)) break
             await regtestMinerConnector.generateBlocks(1)   // advance the tip so the engine ticks

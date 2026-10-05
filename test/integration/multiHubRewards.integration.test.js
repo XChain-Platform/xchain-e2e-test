@@ -61,7 +61,7 @@ describe('MultiValidatorHub: reward distribution (L2)', function () {
     it('persists an equal split to validator_rewards and is idempotent on re-run', async function () {
         const hub = mvh.hubs[0];
         const rt = new RewardTracker(hub);
-        rt._pushRewardsToBtcIndexer = async () => {};   // no indexer in-harness
+        rt['_pushRewardsToBtcIndexer'] = async () => {};   // no indexer in-harness
 
         const round = 5000;
         const participants = [PK('a'), PK('b'), PK('c'), PK('d')];   // 10 / 4 = 2.5 each

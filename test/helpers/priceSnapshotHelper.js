@@ -122,14 +122,14 @@ module.exports = {
     async waitForMirror({ coinPair, roundNumber, timeoutMs = 30000, pollMs = 500 }){
         topology.assertCoherent()
         if (!seedsThroughMirror()) return { mirrored: true, waitedMs: 0, skipped: true }
-        let params = indexerReadParams()
+        const params = indexerReadParams()
         if (!params) throw new Error('priceSnapshotHelper.waitForMirror: no indexer database configured')
-        let started = Date.now()
+        const started = Date.now()
         let conn = null
         try {
             conn = await mariadb.createConnection(params)
             for (;;){
-                let rows = await conn.query(
+                const rows = await conn.query(
                     "SELECT 1 FROM price_snapshots WHERE coin_pair = ? AND round_number = ? AND status = 'finalized' LIMIT 1",
                     [coinPair, roundNumber])
                 if (rows && rows.length) return { mirrored: true, waitedMs: Date.now() - started, skipped: false }
@@ -154,12 +154,12 @@ module.exports = {
         // This helper's own targets only, which collapse to one database. Probing
         // the hub as well would let an unrelated gap there (no price_snapshots on
         // a federation-less hub) skip every Mode A case for no reason.
-        let targets = []
-        for (let p of [resolveParams(), indexerReadParams()]){
+        const targets = []
+        for (const p of [resolveParams(), indexerReadParams()]){
             if (p && !targets.some(q => topology.sameTarget(q, p))) targets.push(p)
         }
         if (!targets.length) return false
-        for (let params of targets){
+        for (const params of targets){
             let conn = null
             try {
                 conn = await mariadb.createConnection(params)
@@ -190,10 +190,10 @@ module.exports = {
     // selection" from "matched nothing and the real problem is elsewhere". Every
     // other delete in this file already reports its count; this one now does too.
     async clearPair(coinPair){
-        let params = resolveParams()
-        let conn = await mariadb.createConnection(params)
+        const params = resolveParams()
+        const conn = await mariadb.createConnection(params)
         try {
-            let res = await conn.query("DELETE FROM price_snapshots WHERE coin_pair = ?", [coinPair])
+            const res = await conn.query("DELETE FROM price_snapshots WHERE coin_pair = ?", [coinPair])
             return Number(res && res.affectedRows ? res.affectedRows : 0)
         } finally {
             await conn.end().catch(() => {})
@@ -216,14 +216,14 @@ module.exports = {
     // Returns the number of rows removed so a caller can say what it cleaned.
     async clearSeedSentinels(coinPair){
         if (!SEED_SENTINEL_ROUNDS.length) return 0
-        let params = resolveParams()
-        let conn = await mariadb.createConnection(params)
+        const params = resolveParams()
+        const conn = await mariadb.createConnection(params)
         try {
-            let placeholders = SEED_SENTINEL_ROUNDS.map(() => '?').join(',')
+            const placeholders = SEED_SENTINEL_ROUNDS.map(() => '?').join(',')
             let sql = "DELETE FROM price_snapshots WHERE round_number IN (" + placeholders + ")"
-            let args = SEED_SENTINEL_ROUNDS.slice()
+            const args = SEED_SENTINEL_ROUNDS.slice()
             if (coinPair) { sql += " AND coin_pair = ?"; args.push(coinPair) }
-            let res = await conn.query(sql, args)
+            const res = await conn.query(sql, args)
             return Number(res && res.affectedRows ? res.affectedRows : 0)
         } finally {
             await conn.end().catch(() => {})
@@ -239,9 +239,9 @@ module.exports = {
     async latestBlockTime(){
         // Always read blocks from the INDEXER DB (the hub DB has no blocks
         // table), via the suite's existing pool.
-        let conn = await global.indexerDatabase.getConnection()
+        const conn = await global.indexerDatabase.getConnection()
         try {
-            let rows = await conn.query("SELECT block_time FROM blocks ORDER BY block_index DESC LIMIT 1")
+            const rows = await conn.query("SELECT block_time FROM blocks ORDER BY block_index DESC LIMIT 1")
             return rows.length ? Number(rows[0].block_time) : Math.floor(Date.now() / 1000)
         } finally {
             await conn.release().catch(() => {})
@@ -281,9 +281,9 @@ module.exports = {
     //
     // See nativeFeeHelper for the same rule applied to the native-fee pairs.
     async usableSeedAnchors(){
-        let chainTime = await module.exports.latestBlockTime()
-        let wallTime  = Math.floor(Date.now() / 1000)
-        let anchors   = wallTime > chainTime ? [chainTime, wallTime] : [chainTime]
+        const chainTime = await module.exports.latestBlockTime()
+        const wallTime  = Math.floor(Date.now() / 1000)
+        const anchors   = wallTime > chainTime ? [chainTime, wallTime] : [chainTime]
         return { chainTime, wallTime, anchors }
     },
 
@@ -302,8 +302,8 @@ module.exports = {
     //   batchBlockTime optional landed PRICE batch timestamp. Other fixtures retain
     //                  the schema default of 0 when it is omitted.
     async seedSnapshot({ coinPair, price, blockTimestamp, roundNumber, referenceBlock, batchBlockTime }){
-        let params = resolveParams()
-        let conn = await mariadb.createConnection(params)
+        const params = resolveParams()
+        const conn = await mariadb.createConnection(params)
         try {
             // Delete, then insert above the hub's id space (see FIXTURE_ID_FLOOR). This
             // replaces an upsert, so a re-seed of the same round still replaces its row.

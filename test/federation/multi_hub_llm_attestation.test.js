@@ -44,14 +44,14 @@ const transactionHelper = require('../transactionHelper')
 const { MultiValidatorHub } = require('../helpers/multiValidatorHubHelper')
 const { requireFederationEnv, assertCleanValidatorSet } = require('../helpers/federationGuards')
 
-async function _settleStack() {
+async function internalSettleStack() {
     await utxoTrackerConnector.quiesce({ timeoutMs: 30000, pollMs: 250, regtestMiner: regtestMinerConnector })
 }
 
 let mvh           = null
 let contractIndex = null
 let owner         = null
-let stakers       = []
+const stakers       = []
 
 // Deterministic arithmetic prompt: every hub's model must answer "4", so
 // the PBFT byte-equality consensus over the responses converges.
@@ -98,9 +98,9 @@ async function setUpMultiHubLlm(context) {
         const addr = await cryptoHelper.getNewFundedAddress(
             'llm-mvh-staker-' + i, COIN, NETWORK, null, 'legacy', 0, 0.02
         )
-        await _settleStack()
+        await internalSettleStack()
         await gasHelper.ensureGasBalance(addr, '35000')
-        await _settleStack()
+        await internalSettleStack()
         const result = await stakeHelper.sendStakeV1(addr, '30000.00000000', pubkeys[i])
         assert.strictEqual(result.stake.status, 'valid', 'stake ' + i + ' should be valid')
         stakers.push({ addressInfo: addr, pubkey: pubkeys[i] })
@@ -109,13 +109,13 @@ async function setUpMultiHubLlm(context) {
     // Activation delay AND snapshot burial: the responsible set resolves at the
     // request's block minus CANONICAL_REORG_BUFFER, so the delay alone is 6 short.
     await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
-    await _settleStack()
+    await internalSettleStack()
 
     owner = await cryptoHelper.getNewFundedAddress(
         'llm-mvh-owner', COIN, NETWORK, null, 'legacy', 0, 0.02
     )
     await regtestMinerConnector.generateBlocks(2)
-    await _settleStack()
+    await internalSettleStack()
     await gasHelper.ensureGasBalance(owner, '5000')
 
     const deploy = await vmHelper.sendDeployV0(owner, CONTRACT_CODE, 500000)
@@ -128,7 +128,7 @@ async function setUpMultiHubLlm(context) {
         'llm-mvh-publisher', COIN, NETWORK, null, 'legacy', 0, 0.02
     )
     await regtestMinerConnector.generateBlocks(2)
-    await _settleStack()
+    await internalSettleStack()
     mvh.setBroadcastHook(async (wirePayload) => {
         const txHash = await transactionHelper.createAndSendTransaction(publisherAddr, wirePayload)
         return { txid: txHash }
