@@ -191,7 +191,7 @@ run_tier "drift: coin consensus-pin conformance" node -e '
 # constants out of five more siblings, which would be five more deploy-key
 # secrets. The venue has all five, so the gate keeps covering them.
 run_tier "local: sleep-flake lint (lint:sleep-flake)" npm run lint:sleep-flake
-run_tier "local: request-row wait lint (lint:request-row-wait)" npm run lint:request-row-wait
+run_tier "local: request-row-wait lint (lint:request-row-wait)" npm run lint:request-row-wait
 run_tier "local: cross-repo parity suites (siblings required)" \
   env XCHAIN_REQUIRE_SIBLINGS=1 \
   ./node_modules/.bin/mocha --no-config --timeout 30000 --exit 'test/integration/parity/**/*.test.js'
