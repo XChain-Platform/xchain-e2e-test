@@ -20,6 +20,7 @@ const {
     USABLE_METHOD_CASES,
     expectMode
 } = require('./usable_method_cases');
+const { seedGlobalPrices } = require('../../helpers/nativeFeeHelper');
 
 const MODE = expectMode(process.env.XC_VOTE_CALLBACK_BINDING_EXPECT);
 
@@ -39,6 +40,7 @@ describe('VOTE callback binding usable method', function(){
     let callbackContract;
 
     before(async function(){
+        await seedGlobalPrices(true);
         sdk = makeSdk({ compactAddresses: false });
         issuer = await fundedGasAddress(sdk, 0.05);
         tick = uniqueTick('VBM');
