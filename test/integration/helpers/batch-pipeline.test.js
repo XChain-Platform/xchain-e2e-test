@@ -20,7 +20,7 @@ const ecc = require('tiny-secp256k1')
 const ECPair = ECPairFactory(ecc)
 
 const batchHelper = require('../../../test/helpers/batchHelper')
-const transactionHelper = require('../../../test/transactionHelper')
+const transactionHelper = require('../../helpers/core/transactionHelper')
 const dbRows = require('../fixtures/dbRows')
 
 describe('Batch Helper → DB Assertion Pipeline', function () {

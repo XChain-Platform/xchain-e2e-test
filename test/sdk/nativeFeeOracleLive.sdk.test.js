@@ -66,7 +66,7 @@
 const { expect } = require('chai');
 const axios   = require('axios');
 const mariadb = require('mariadb');
-const { XChainSDK } = require('./sdkHelper');
+const { XChainSDK } = require('./helpers/sdkHelper');
 
 const MINER_URL   = process.env.XCALL_DOGE_MINER_URL   || 'http://localhost:3125';
 const INDEXER_URL = process.env.XCALL_DOGE_INDEXER_URL || 'http://127.0.0.1:3124';

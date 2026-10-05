@@ -24,8 +24,8 @@ const os = require('os');
 const path = require('path');
 const { encode: wifEncode } = require('wif');
 
-const cryptoHelper = require('../../cryptoHelper');
-const CryptoNetworks = require('../../../src/CryptoNetworks');
+const cryptoHelper = require('../core/cryptoHelper');
+const CryptoNetworks = require('../../../src/crypto_networks');
 const { MultiValidatorHub, ValidatorIdentity, loadHubModule, resolveHubFile } = require('../multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../disposableHubDb');
 const { seedWeightSnapshot } = require('../seededWeightSnapshot');

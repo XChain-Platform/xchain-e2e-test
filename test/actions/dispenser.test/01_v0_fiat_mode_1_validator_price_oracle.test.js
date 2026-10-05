@@ -10,8 +10,8 @@
 
 
 const assert = require('assert')
-const cryptoHelper = require('../../cryptoHelper')
-const transactionHelper = require('../../transactionHelper')
+const cryptoHelper = require('../../helpers/core/cryptoHelper')
+const transactionHelper = require('../../helpers/core/transactionHelper')
 const issueHelper = require('../../helpers/issueHelper')
 const dispenserHelper = require('../../helpers/dispenserHelper')
 const priceSnapshotHelper = require('../../helpers/priceSnapshotHelper')
@@ -98,7 +98,7 @@ async function settleMode1Dispenser(scenario) {
 //
 // `price_snapshots` is global fixture state keyed only by coin_pair, and
 // {COIN}/USD has three writers that each DELETE the whole pair before reseeding
-// it: `_ctlseed.test.js`, the FIAT cases themselves, and
+// it: `ctlseed.test.js`, the FIAT cases themselves, and
 // `nativeFeeHelper.seedGlobalPrices()`. The last one is the dangerous one: it
 // runs from getNativeFeeOutput(), which EVERY action tx passes through, and it
 // reseeds at a present-day timestamp and a different price (100000, not the

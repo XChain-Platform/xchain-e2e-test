@@ -52,8 +52,8 @@ const { spawnSync } = require('child_process')
 
 const fixture = require('../helpers/barrierFamilyFixture')
 const drive = require('../helpers/barrierFamilyDrive')
-const drill = require('../mirrorDrillFixture')
-const { until } = require('../mirrorDrillWaits')
+const drill = require('../helpers/mirrorDrillFixture')
+const { until } = require('../helpers/mirrorDrillWaits')
 
 const BUILD_ROOT = path.resolve(__dirname, '..', '..', '..', '..')
 const HUB = path.join(BUILD_ROOT, 'xchain-hub')

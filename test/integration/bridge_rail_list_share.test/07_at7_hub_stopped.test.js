@@ -21,7 +21,7 @@ const {
     needsFederation,
     bridgeRailSuite,
 } = require('./support');
-const { transactionState } = require('../../transactionHelper/lib/01_create_and_send_transaction');
+const { transactionState } = require('../../helpers/core/transactionHelper/lib/01_create_and_send_transaction');
 const { spendableInputCount } = require('../../helpers/rail_preflight/policy_at2_at4');
 const { verdictOf } = require('../../helpers/bridgeRailVenue');
 

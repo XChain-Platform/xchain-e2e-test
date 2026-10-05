@@ -12,7 +12,7 @@
 
 const sinon = require('sinon')
 const assert = require('assert')
-const transactionHelper = require('../../transactionHelper')
+const transactionHelper = require('../../helpers/core/transactionHelper')
 const helper = require('../../helpers/stakeHelper')
 const stakeTeardown = require('../../helpers/stakeTeardown')
 

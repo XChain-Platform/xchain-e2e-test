@@ -725,9 +725,9 @@ class Database {
         const query = `
             SELECT 1 + 1;
         `
-        
+
         const connection = await this.getConnection()
-        
+
         try {
             const rows = await connection.query(query)
             if (rows.length > 0){
@@ -795,9 +795,9 @@ class Database {
             source, destination, tick, amount, txHash, memo, status
         })
         const query = buildSendQuery(whereClauses)
-        
+
         const connection = await this.getConnection()
-        
+
         try {
             const rows = await connection.query(query, whereValues)
             return firstSendRow(rows)
@@ -808,13 +808,13 @@ class Database {
             await connection.release()
         }
     }
-    
+
     async waitForCredit(creditObject, timeMax = 60000){ return this['_waitFor'](this.checkCredit, creditObject, timeMax) }
-    
+
     async checkCredit({blockIndex,txHash,tick,address,amount}){
         const whereClauses = []
         const whereValues = []
-        
+
         if (blockIndex != null){
             whereClauses.push("tr.block_index = ?")
             whereValues.push(blockIndex)

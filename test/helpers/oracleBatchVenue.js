@@ -494,7 +494,7 @@ class OracleBatchVenue {
     // tracker round trip per publish. seedGas is off: PRICE is carried on a
     // native-fee chain here, so the wallet needs coin, not XCHAIN.
     async ['_fundPublisherWallet']() {
-        const cryptoHelper = require('../cryptoHelper');
+        const cryptoHelper = require('./core/cryptoHelper');
         this.publisherAddress = await cryptoHelper.getNewFundedAddress(
             'oracle-publish-venue', this.coin, this.network, null, 'legacy', 0, this.fundAmount, false);
     }
@@ -625,7 +625,7 @@ class OracleBatchVenue {
     // The wire is passed through untouched, so whatever version the publisher
     // emits is what lands.
     async ['_broadcast'](hubIndex, wire) {
-        const transactionHelper = require('../transactionHelper');
+        const transactionHelper = require('./core/transactionHelper');
         const capture = {};
         const txid = await transactionHelper.createAndSendTransaction(
             this.publisherAddress, wire, null, [], null, null, false, { capture });

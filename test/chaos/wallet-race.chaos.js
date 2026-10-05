@@ -19,7 +19,7 @@
 const assert = require('assert')
 const sinon = require('sinon')
 const bitcoin = require('bitcoinjs-lib')
-const { saveGlobals, restoreGlobals } = require('./chaos-helpers')
+const { saveGlobals, restoreGlobals } = require('./helpers/chaos_helpers')
 
 function setupWalletTest() {
     const saved = {
@@ -35,8 +35,8 @@ function setupWalletTest() {
     global.wallets = {}
 
     // Fresh require to reset module state
-    delete require.cache[require.resolve('../cryptoHelper')]
-    return { saved, cryptoHelper: require('../cryptoHelper') }
+    delete require.cache[require.resolve('../helpers/core/cryptoHelper')]
+    return { saved, cryptoHelper: require('../helpers/core/cryptoHelper') }
 }
 
 function teardownWalletTest(saved) {

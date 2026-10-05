@@ -34,7 +34,7 @@
 const { expect } = require('chai');
 const axios = require('axios');
 const mariadb = require('mariadb');
-const { makeSdk, submit, fundedGasAddress, mine, submitOpts } = require('./sdkHelper');
+const { makeSdk, submit, fundedGasAddress, mine, submitOpts } = require('./helpers/sdkHelper');
 
 const BURST = 28;
 const CAP   = 25;

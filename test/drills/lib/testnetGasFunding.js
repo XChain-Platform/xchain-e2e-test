@@ -3,7 +3,7 @@
 const GAS_TICK = 'XCHAIN';
 
 function defaultSubmit(...args) {
-    return require('../../sdk/sdkHelper').submit(...args);
+    return require('../../sdk/helpers/sdkHelper').submit(...args);
 }
 
 async function fundedGasAddress({ sdk, treasury, amount, log, submitFn = defaultSubmit }) {

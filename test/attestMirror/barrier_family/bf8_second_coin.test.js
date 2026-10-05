@@ -42,7 +42,7 @@ const rows = require('../helpers/barrierFamilyRows')
 const drive = require('../helpers/barrierFamilyDrive')
 const { createRail, withRail } = require('../../helpers/chainRail')
 const { attachedCoinVenueOpts, secondCoinHubEnv } = require('../../helpers/attestMirrorVenue')
-const { diffStateHashes, queryDb, until } = require('../mirrorDrillWaits')
+const { diffStateHashes, queryDb, until } = require('../helpers/mirrorDrillWaits')
 
 const BUILD_ROOT = path.resolve(__dirname, '..', '..', '..', '..')
 const { HUB_SCHEMA_VERSION } = require(path.join(BUILD_ROOT, 'xchain-indexer', 'src', 'hub', 'hub_schema_version.js'))

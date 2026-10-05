@@ -45,7 +45,7 @@ const assert = require('assert')
 const internalPath = require('path')
 const internalFs = require('fs')
 
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const stakeHelper = require('../helpers/stakeHelper')
 const gasHelper = require('../helpers/gasHelper')
 const vmHelper = require('../helpers/vmHelper')

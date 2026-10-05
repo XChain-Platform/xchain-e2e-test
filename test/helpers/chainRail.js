@@ -21,7 +21,7 @@
  * chain and it is why test/sdk/** has been BTC-only in practice; a drill that
  * has to interleave legs on two chains in one flow (an ATTEST v0 on LTC, its
  * materialized v3 on BTC, the v1 back on BTC, the v4 back on LTC) cannot use a
- * per-run env file the way test/sdk/dexDogeSetup.js does.
+ * per-run env file the way test/sdk/helpers/dexDogeSetup.js does.
  *
  * A rail is that same global set, captured as an object. `withRail(rail, fn)`
  * swaps the globals in, runs fn, and restores them, so EVERY existing helper
@@ -30,7 +30,7 @@
  *
  *   1. Endpoints come from env (published HOST ports; the hub only knows the
  *      container-internal ones), while node RPC and indexer DB CREDENTIALS are
- *      discovered from the hub, exactly as test/parity/parityBoot.js does. No
+ *      discovered from the hub, exactly as test/parity/helpers/parityBoot.js does. No
  *      secret is written here or logged.
  *   2. Helpers that MEMOIZE per-chain state are dropped from the require cache
  *      on every swap. nativeFeeHelper caches the resolved fee mode + fee
@@ -52,16 +52,16 @@
 const dotenv                    = require('dotenv');
 const path                      = require('path');
 const fs                        = require('fs');
-const BlockchainConnector        = require('../../src/BlockchainConnector.js');
+const BlockchainConnector        = require('../../src/blockchain_connector.js');
 const XChainUtxoTrackerConnector = require('../../src/XChainUtxoTrackerConnector.js');
 const XChainEncoderConnector     = require('../../src/XChainEncoderConnector.js');
 const XChainDecoderConnector     = require('../../src/XChainDecoderConnector.js');
 const XChainIndexerConnector     = require('../../src/XChainIndexerConnector.js');
 const XChainExplorerConnector    = require('../../src/XChainExplorerConnector.js');
 const XChainHubConnector         = require('../../src/XChainHubConnector.js');
-const RegtestMinerConnector      = require('../../src/RegtestMinerConnector.js');
+const RegtestMinerConnector      = require('../../src/regtest_miner_connector.js');
 const Database                   = require('../../src/db.js');
-const CryptoNetworks             = require('../../src/CryptoNetworks');
+const CryptoNetworks             = require('../../src/crypto_networks');
 
 const COIN_CODE_MAP = { bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' };
 

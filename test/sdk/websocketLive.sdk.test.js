@@ -34,7 +34,7 @@
 'use strict';
 
 const { expect } = require('chai');
-const { makeSdk, submit, fundedGasAddress, uniqueTick, submitOpts } = require('./sdkHelper');
+const { makeSdk, submit, fundedGasAddress, uniqueTick, submitOpts } = require('./helpers/sdkHelper');
 
 function haveConnectors() {
     return global.regtestMinerConnector && global.utxoTrackerConnector && global.nodeConnector;

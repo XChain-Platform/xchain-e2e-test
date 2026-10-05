@@ -39,7 +39,7 @@
 // matrix including the adversarial paths.
 
 const assert = require('assert')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const vmHelper = require('../helpers/vmHelper')
 const issueHelper = require('../helpers/issueHelper')
 const gasHelper = require('../helpers/gasHelper')

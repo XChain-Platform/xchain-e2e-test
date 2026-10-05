@@ -5,9 +5,9 @@
 
 const assert = require('assert');
 const proxyquire = require('proxyquire');
-const { PRICE_V1_CASES } = require('../../rail/flag_days/price_v1_cases');
+const { PRICE_V1_CASES } = require('../../rail/flag_days/helpers/price_v1_cases');
 
-const RAIL_SUITE = '../../rail/flag_days/price_v1_canonical.rail.test';
+const RAIL_SUITE = '../../rail/flag_days/price_v1_canonical.test';
 
 function loadRailSuite(resultFor) {
     const tests = [];
@@ -32,7 +32,7 @@ function loadRailSuite(resultFor) {
     global.it = (title, body) => tests.push({ title, body });
     try {
         proxyquire.noCallThru().noPreserveCache()(RAIL_SUITE, {
-            '../../cryptoHelper': cryptoHelper,
+            '../../helpers/core/cryptoHelper': cryptoHelper,
             '../../helpers/priceHelper': priceHelper
         });
     } finally {

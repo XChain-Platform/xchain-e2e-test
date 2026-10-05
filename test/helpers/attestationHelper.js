@@ -13,7 +13,7 @@
 
 const crypto = require('crypto');
 const axios = require('axios');
-const transactionHelper = require('../transactionHelper');
+const transactionHelper = require('./core/transactionHelper');
 // Sibling modules: same EQUIV header + SWQ gate the indexer's verifier uses (attest/index.js).
 const eq  = require('../../../xchain-indexer/src/consensus/equivocation_header.js');
 const swq = require('../../../xchain-indexer/src/consensus/stake_weighted_quorum.js');

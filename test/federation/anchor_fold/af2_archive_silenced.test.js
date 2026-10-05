@@ -14,9 +14,9 @@ const FOLD_ENV = 'XC_ANCHOR_FOLD_REGTEST_ACTIVATION';
 const priorFoldEnv = process.env[FOLD_ENV];
 process.env[FOLD_ENV] = '0';
 
-const venueHooks = require('../../initialCheck.test.js').mochaHooks;
-const cryptoHelper = require('../../cryptoHelper');
-const CryptoNetworks = require('../../../src/CryptoNetworks');
+const venueHooks = require('../../initial_check.test.js').mochaHooks;
+const cryptoHelper = require('../../helpers/core/cryptoHelper');
+const CryptoNetworks = require('../../../src/crypto_networks');
 const {
     MultiValidatorHub, ValidatorIdentity, loadHubModule, resolveHubFile
 } = require('../../helpers/multiValidatorHubHelper');

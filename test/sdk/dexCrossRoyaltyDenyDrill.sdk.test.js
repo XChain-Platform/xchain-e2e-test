@@ -49,7 +49,7 @@
  ********************************************************************/
 
 const { expect } = require('chai');
-const { makeSdk, submit, fundedGasAddress, mine, submitOpts, uniqueTick, XChainSDK } = require('./sdkHelper');
+const { makeSdk, submit, fundedGasAddress, mine, submitOpts, uniqueTick, XChainSDK } = require('./helpers/sdkHelper');
 
 const MODE = String(process.env.ROYALTY_DENY_MODE || 'allow').trim().toLowerCase();
 const DENY = (MODE === 'deny');

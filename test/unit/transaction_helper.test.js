@@ -17,7 +17,7 @@ const bitcoin = require('bitcoinjs-lib');
 
 // transactionHelper.js references globals at call-time, not module-load time.
 // Reset before each test: other files in this mocha run may clobber them.
-const transactionHelper = require('../../test/transactionHelper');
+const transactionHelper = require('../helpers/core/transactionHelper');
 
 function resetGlobals() {
     global.NETWORK_OBJECT       = { ...bitcoin.networks.regtest, dustThreshold: 546 };

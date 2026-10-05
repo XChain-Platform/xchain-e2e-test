@@ -9,7 +9,7 @@
 // contact legal@dankest.llc.
 
 const assert = require('assert')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const addressHelper = require('../helpers/addressHelper')
 
 describe('ADDRESS', () => {

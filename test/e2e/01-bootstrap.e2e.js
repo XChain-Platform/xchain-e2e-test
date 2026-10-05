@@ -9,7 +9,7 @@
 // contact legal@dankest.llc.
 
 const assert = require('assert')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 
 // MANUAL VERIFICATION REQUIRED:
 // E2E-INIT-002 (hub-only boot): Run `npm test` with only COIN/NETWORK/HUB_URL/HUB_PORT set

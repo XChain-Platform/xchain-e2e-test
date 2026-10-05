@@ -33,7 +33,7 @@
  ********************************************************************/
 
 const assert        = require('assert')
-const cryptoHelper  = require('../cryptoHelper')
+const cryptoHelper  = require('../helpers/core/cryptoHelper')
 const issueHelper   = require('../helpers/issueHelper')
 const orderHelper   = require('../helpers/orderHelper')
 const coinpayHelper = require('../helpers/coinpayHelper')

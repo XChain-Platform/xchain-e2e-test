@@ -76,7 +76,7 @@ const { AttestMirrorVenue, assertLlmAvailable, llmProbes, hubCredentialEnv } = r
 const {
     provisionDrillIdentities, waitForVenueIndexersAtTip, startAttestTestServer, deployRequestContract,
     queryVenueDb, withWedgeClear, mineWhile,
-} = require("./mirrorDrillFixture")
+} = require("./helpers/mirrorDrillFixture")
 const {
     untilOrClearDogeStall, waitForMirrorRowEverywhere,
     venueTipProbe, mineDogeBlocks, findEmittedAttestRequest,
@@ -85,7 +85,7 @@ const {
     attestRequestWatermark,
     settleOrReport,
     jsonSafe,
-} = require('./mirrorDrillWaits')
+} = require('./helpers/mirrorDrillWaits')
 const { oneValidHeadVerdict, emptyWindowVerdict } = require('./helpers/batchWindowVerdicts')
 const { readHubsReading } = require('./helpers/hubsReading')
 const {
@@ -95,7 +95,7 @@ const {
 } = require('./helpers/at5ResponseProvider')
 const vmHelper     = require('../helpers/vmHelper')
 const chainRail    = require('../helpers/chainRail')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const { loadHubModule } = require('../helpers/multiValidatorHubHelper')
 
 // Short enough that several windows close inside a drill, and comfortably above
@@ -253,7 +253,7 @@ async function stageDogeSigner (label, rail) {
     const path   = require('path')
     const crypto = require('crypto')
     const { encode: wifEncode } = require('wif')
-    const CryptoNetworks = require('../../src/CryptoNetworks.js')
+    const CryptoNetworks = require('../../src/crypto_networks.js')
 
     // Funded ON the DOGE rail, which is the whole point: the publisher pays a real
     // fee on that chain for every window it broadcasts.

@@ -46,7 +46,7 @@
 'use strict';
 
 const { expect } = require('chai');
-const { makeSdk, loadSDK } = require('./sdkHelper');
+const { makeSdk, loadSDK } = require('./helpers/sdkHelper');
 const checks = require('./decoderRoundtrip.sdk.test/helpers/corpus_checks');
 
 const { decoder } = loadSDK();

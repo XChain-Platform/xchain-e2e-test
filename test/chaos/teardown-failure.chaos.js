@@ -17,9 +17,9 @@
 
 const assert = require('assert')
 const sinon = require('sinon')
-const { saveGlobals, restoreGlobals, GLOBAL_KEYS } = require('./chaos-helpers')
+const { saveGlobals, restoreGlobals, GLOBAL_KEYS } = require('./helpers/chaos_helpers')
 
-// Replicate the afterAll teardown logic from initialCheck.test.js
+// Replicate the afterAll teardown logic from initial_check.test.js
 async function runTeardown(regtestMinerConnector, indexerDatabase, wallets) {
     try {
         await regtestMinerConnector.setDefaultMiningTime()

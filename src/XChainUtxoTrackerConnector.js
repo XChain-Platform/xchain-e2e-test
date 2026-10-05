@@ -108,7 +108,7 @@ class UtxoTracker {
     // Deliberately does NOT throw on timeout: transactionHelper.submit and
     // anchorElection drive it inside retry loops and need the status object back
     // to decide whether to retry. The hook that must fail on a non-ready status
-    // is the root afterEach in test/initialCheck.test.js, and mineErrors below is
+    // is the root afterEach in test/initial_check.test.js, and mineErrors below is
     // what makes such a failure diagnosable.
     async quiesce({ timeoutMs = 30000, pollMs = 250, regtestMiner = null } = {}){
         const deadline = Date.now() + timeoutMs

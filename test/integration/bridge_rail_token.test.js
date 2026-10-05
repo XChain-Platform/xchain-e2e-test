@@ -32,7 +32,7 @@
  *     BRIDGE_RAIL_REPO_ROOT=<the pinned root the standing containers were built from> \
  *     BRIDGE_RAIL_MINER_PAUSE_FILE=<flag file the BTC loop honours> \
  *     BRIDGE_RAIL_DOGE_MINER_PAUSE_FILE=<flag file the DOGE loop honours> \
- *     npx mocha --timeout 0 --exit --require ./test/initialCheck.test.js \
+ *     npx mocha --timeout 0 --exit --require ./test/initial_check.test.js \
  *     test/integration/bridge_rail_token.test.js "test/integration/bridge_rail_token.test/*.test.js"
  *   kill $(cat ~/scratch/xc-meta/doge-loop.pid)
  *

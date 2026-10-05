@@ -9,7 +9,7 @@
 // contact legal@dankest.llc.
 
 const assert = require('assert')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const vmHelper = require('../helpers/vmHelper')
 const issueHelper = require('../helpers/issueHelper')
 const gasHelper = require('../helpers/gasHelper')
@@ -143,7 +143,7 @@ const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || '
     //   MINT_STOP_BLOCK|LOCK_MINT|LOCK_MINT_SUPPLY  (23 fields after VERSION, mirroring
     //   issueHelper.sendIssueV0's wire layout; all empty but DESCRIPTION)
     async function broadcastIssueDescription(addressInfo, tick, description) {
-        const transactionHelper = require('../transactionHelper')
+        const transactionHelper = require('../helpers/core/transactionHelper')
         const fields = new Array(23).fill('')
         fields[0] = tick          // TICK
         fields[4] = description    // DESCRIPTION (TICK, MAX_SUPPLY, MAX_MINT, DECIMALS, DESCRIPTION)

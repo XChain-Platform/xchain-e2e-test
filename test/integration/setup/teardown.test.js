@@ -10,7 +10,7 @@
 // license (without AGPL source-disclosure terms) is available -
 // contact legal@dankest.llc.
 
-// Integration tests for the afterAll teardown hook in initialCheck.test.js.
+// Integration tests for the afterAll teardown hook in initial_check.test.js.
 
 const assert = require('assert')
 const sinon = require('sinon')
@@ -28,7 +28,7 @@ describe('Bootstrap: teardown resilience', function () {
         sinon.restore()
     })
 
-    // Replicate the afterAll hook from initialCheck.test.js lines 218-225
+    // Replicate the afterAll hook from initial_check.test.js lines 218-225
     async function runAfterAll() {
         try {
             await regtestMinerConnector.setDefaultMiningTime()

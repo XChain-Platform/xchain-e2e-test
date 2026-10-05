@@ -67,7 +67,7 @@ const XChainHub        = internalLoadHubModule('src/XChainHub.js');
 const ValidatorIdentity = internalLoadHubModule('src/validators/identity.js');
 
 // The signing members of the rail-seeded ROLLCALL federation, as rollcallHelper's
-// roster lists the keys the seed tool stakes (test/tools/rollcallSeedFederation.test.js).
+// roster lists the keys the seed tool stakes (test/tools/rollcall_seed_federation.test.js).
 // A seeded federation run (E2E_REQUIRE_FEDERATION=1 with the rail's federation
 // mnemonic set) must sign with those keys, or every in-process hub runs as an
 // observer and refuses to co-sign. Each identity is built through the hub's own

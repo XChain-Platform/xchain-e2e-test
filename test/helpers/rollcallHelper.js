@@ -58,7 +58,7 @@
  *      passes one explicitly.
  *
  * NOTHING HERE SEEDS THE VENUE. Staking the federation is an operator decision
- * (test/tools/rollcallSeedFederation.test.js is the tool that does it). The
+ * (test/tools/rollcall_seed_federation.test.js is the tool that does it). The
  * asserts report what is missing, with the exact pubkeys to stake, and stop.
  *
  * THREE of the four roster keys are fixed; the IDLE one is per-venue. AT1 evicts
@@ -1214,7 +1214,7 @@ async function assertRosterStreaksClean(ctx, allowDirtyStreaks){
         'On a SIGNING source it is worse than a bad reading: AT2 silences a live hub on purpose, so the ' +
         'streak completes and the protocol evicts a frozen vector key that can never be staked again.\n' +
         'Remedy for the IDLE source: bump XC_ROLLCALL_IDLE_GENERATION (removing any XC_ROLLCALL_IDLE_SEED ' +
-        'pin) and re-run test/tools/rollcallSeedFederation.test.js, which mints a fresh key at a fresh ' +
+        'pin) and re-run test/tools/rollcall_seed_federation.test.js, which mints a fresh key at a fresh ' +
         'address.\n' +
         'The window here is the last ' + lookback + ' ROLLED epoch(s)' +
         (window ? ': ' + Array.from(window).join(', ') : ' (unreadable, so every recorded absence counts)') + '.\n' +
@@ -1440,7 +1440,7 @@ async function bringUpVenue(opts){
     ctx.federationMnemonic = process.env.XC_ROLLCALL_FEDERATION_MNEMONIC || null
     ctx.sourceAddressInfo  = new Map()
     if (ctx.federationMnemonic){
-        const cryptoHelper = require('../cryptoHelper')
+        const cryptoHelper = require('./core/cryptoHelper')
         for (const r of ctx.roster){
             const info = await cryptoHelper.getNewAddress(
                 'rollcall-source-' + r.addressIndex, COIN, NETWORK, ctx.federationMnemonic, 'legacy', r.addressIndex)
@@ -1521,7 +1521,7 @@ async function bringUpVenue(opts){
     // every ROLLCALL takes to that chain - the engines' hook and a drill's
     // hand-built action must ride the SAME pipeline, or a drill could land a
     // payload shape no hub could have produced.
-    const cryptoHelper = require('../cryptoHelper')
+    const cryptoHelper = require('./core/cryptoHelper')
     ctx.dogePublisher = await chainRail.withRail(ctx.dogeRail, async () => {
         // seedGas=false, and it is load-bearing on DOGE. The default seeds the
         // new address with an XCHAIN gas MINT, but ROLLCALL carries NO protocol
@@ -1678,7 +1678,7 @@ async function mineWhile(ctx, work, everyMs){
 // anything but the bytes, and every landed payload appears in ctx.publishedWires
 // whoever built it.
 async function publishWire(ctx, payload){
-    const transactionHelper = require('../transactionHelper')
+    const transactionHelper = require('./core/transactionHelper')
     return await chainRail.withRail(ctx.dogeRail, async () => {
         const txid = await transactionHelper.createAndSendTransaction(ctx.dogePublisher, payload)
         ctx.publishedWires.push({ payload, txid })

@@ -19,7 +19,7 @@ const assert = require('assert');
 const sinon  = require('sinon');
 const axios  = require('axios');
 
-const RegtestMinerConnector = require('../../../src/RegtestMinerConnector');
+const RegtestMinerConnector = require('../../../src/regtest_miner_connector');
 
 describe('RegtestMinerConnector.setIdleMineInterval', function () {
 
