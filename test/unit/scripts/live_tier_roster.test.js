@@ -317,9 +317,11 @@ describe('live integration tier roster', () => {
         const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../../package.json'), 'utf8'))
 
         it('npm run ci calls the live lane', () => {
-            assert.match(pkg.scripts.ci, /ci:live/,
-                'the `ci` script is what every venue gate, ci-all.sh sweep and workflow runs;'
-                + ' a live tier outside it is a tier in no lane')
+            const fullGate = fs.readFileSync(path.resolve(__dirname, '../../../bin/ci-full.sh'), 'utf8')
+            assert.strictEqual(pkg.scripts.ci, 'npm run ci:full')
+            assert.match(pkg.scripts['ci:full'], /bin\/ci-full\.sh/)
+            assert.match(fullGate, /npm run ci:live/,
+                'the full gate must run the live tier')
         })
 
         it('ci:live runs this runner rather than a bare glob', () => {
