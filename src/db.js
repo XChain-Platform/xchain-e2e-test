@@ -97,9 +97,296 @@ function buildMintQuery(whereClauses){
     ].join('\n')+"WHERE "+whereClauses.join(" AND ");
 }
 
+function buildIssueFilter(source, tick, txHash, maxSupply, maxMint, decimals, description, mintSupply, status){
+    const filters = [
+        ["ia.address = ?", source],
+        ["itick.tick = ?", tick],
+        ["itx.hash = ?", txHash],
+        ["i.max_supply = ?", maxSupply],
+        ["i.max_mint = ?", maxMint],
+        ["i.decimals = ?", decimals],
+        ["i.description = ?", description],
+        ["i.mint_supply = ?", mintSupply],
+        ["ist.status = ?", status]
+    ]
+    const whereClauses = []
+    const whereValues = []
+
+    for (const [clause, value] of filters){
+        if (value != null){
+            whereClauses.push(clause)
+            whereValues.push(value)
+        }
+    }
+
+    return { whereClauses, whereValues }
+}
+
+function buildSendFilters({source,destination,tick,amount,txHash,memo,status}){
+    const whereClauses = []
+    const whereValues = []
+
+    if (source != null){
+        whereClauses.push("ia.address = ?")
+        whereValues.push(source)
+    }
+    if (destination != null){
+        whereClauses.push("ia2.address = ?")
+        whereValues.push(destination)
+    }
+    if (tick != null){
+        whereClauses.push("itick.tick = ?")
+        whereValues.push(tick)
+    }
+    if (amount != null){
+        whereClauses.push("amount = ?")
+        whereValues.push(amount)
+    }
+    if (txHash != null){
+        whereClauses.push("itx.hash = ?")
+        whereValues.push(txHash)
+    }
+    if (memo != null){
+        // An empty memo matches the NULL representation stored by the indexer.
+        if (memo === ''){
+            whereClauses.push("im.memo IS NULL")
+        } else {
+            whereClauses.push("im.memo = ?")
+            whereValues.push(memo)
+        }
+    }
+    if (status != null){
+        whereClauses.push("ist.status = ?")
+        whereValues.push(status)
+    }
+
+    return {whereClauses, whereValues}
+}
+
+function buildSendQuery(whereClauses){
+    return `
+            SELECT s.*,
+                itick.tick AS tick,
+                itx.hash AS tx_hash,\x20
+                ia.address AS source,\x20
+                ia2.address AS destination,\x20
+                im.memo AS memo,\x20
+                ist.status AS status\x20
+            FROM sends s
+            LEFT JOIN actions act ON act.action_index = s.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ia ON ia.id = tr.source_id
+            LEFT JOIN index_addresses ia2 ON ia2.id = s.destination_id
+            LEFT JOIN index_memos im ON im.id = s.memo_id
+            LEFT JOIN index_statuses ist ON ist.id = s.status_id
+            LEFT JOIN index_tickers itick ON itick.id = s.tick_id\x20
+        `+"WHERE "+whereClauses.join(" AND ");
+}
+
+function firstSendRow(rows){
+    if (rows.length > 0){
+        return rows[0]
+    } else {
+        return null
+    }
+}
+
 const config = require('./config');
 const { getLogger } = require('./lib/logger');
 const logger = getLogger();
+
+function buildBroadcastFilter({blockIndex,txHash,source,message,value,fee,memo,broadcastActionIndex,status}){
+    const whereClauses = []
+    const whereValues = []
+
+    if (blockIndex != null){
+        whereClauses.push("tr.block_index = ?")
+        whereValues.push(blockIndex)
+    }
+    if (txHash != null){
+        whereClauses.push("itx.hash = ?")
+        whereValues.push(txHash)
+    }
+    if (source != null){
+        whereClauses.push("ia.address = ?")
+        whereValues.push(source)
+    }
+    if (message != null){
+        whereClauses.push("b.message = ?")
+        whereValues.push(message)
+    }
+    if (value != null){
+        whereClauses.push("b.value = ?")
+        whereValues.push(value)
+    }
+    if (fee != null){
+        whereClauses.push("b.fee = ?")
+        whereValues.push(fee)
+    }
+    if (memo != null){
+        if (memo === ''){
+            whereClauses.push("im.memo IS NULL")
+        } else {
+            whereClauses.push("im.memo = ?")
+            whereValues.push(memo)
+        }
+    }
+    if (broadcastActionIndex != null){
+        whereClauses.push("b.broadcast_action_index = ?")
+        whereValues.push(broadcastActionIndex)
+    }
+    if (status != null){
+        whereClauses.push("ist.status = ?")
+        whereValues.push(status)
+    }
+
+    return { whereClauses, whereValues }
+}
+
+function getListWhere({blockIndex,txHash,source,type,edit,listActionIndex,memo,status}){
+    const whereClauses = []
+    const whereValues = []
+
+    if (blockIndex != null){
+        whereClauses.push("tr.block_index = ?")
+        whereValues.push(blockIndex)
+    }
+    if (txHash != null){
+        whereClauses.push("itx.hash = ?")
+        whereValues.push(txHash)
+    }
+    if (source != null){
+        whereClauses.push("ia.address = ?")
+        whereValues.push(source)
+    }
+    if (type != null){
+        whereClauses.push("l.type = ?")
+        whereValues.push(type)
+    }
+    if (edit != null){
+        whereClauses.push("l.edit = ?")
+        whereValues.push(edit)
+    }
+    if (listActionIndex != null){
+        whereClauses.push("l.list_action_index = ?")
+        whereValues.push(listActionIndex)
+    }
+    if (memo != null){
+        if (memo === ''){
+            whereClauses.push("im.memo IS NULL")
+        } else {
+            whereClauses.push("im.memo = ?")
+            whereValues.push(memo)
+        }
+    }
+    if (status != null){
+        whereClauses.push("ist.status = ?")
+        whereValues.push(status)
+    }
+
+    return {whereClauses, whereValues}
+}
+
+function getListQuery(whereClauses){
+    return `
+            SELECT
+                tr.block_index AS block_index,
+                itx.hash AS tx_hash,
+                l.action_index,
+                ia.address AS source,
+                l.type,
+                l.edit,
+                l.list_action_index,
+                im.memo AS memo,
+                ist.status AS status
+            FROM lists l
+            LEFT JOIN actions act ON act.action_index = l.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ia ON ia.id = tr.source_id
+            LEFT JOIN index_memos im ON im.id = l.memo_id
+            LEFT JOIN index_statuses ist ON ist.id = l.status_id
+        `+"WHERE "+whereClauses.join(" AND ");
+}
+
+async function findListRow(database, query, whereValues){
+    const connection = await database.getConnection()
+
+    try {
+        const rows = await connection.query(query, whereValues)
+        if (rows.length > 0){
+            return {listRow: rows[0], finished: false}
+        } else {
+            return {listRow: null, finished: true}
+        }
+    } catch (err) {
+        logger.error('Error with database query (list):', err);
+        return {listRow: null, finished: true}
+    } finally {
+        await connection.release()
+    }
+}
+
+function getListItemsQuery(type){
+    let leftJoin = ""
+    let field = ""
+    switch (type){
+        case 1: //TICK
+            leftJoin = " LEFT JOIN index_tickers it ON it.id = li.item_id "
+            field = " it.tick AS item_name "
+            break
+        case 2: //address
+            leftJoin = " LEFT JOIN index_addresses ia ON ia.id = li.item_id "
+            field = " ia.address AS item_name "
+            break
+    }
+
+    return "SELECT "+field+
+        " FROM list_items li "+leftJoin+
+        " WHERE li.action_index = ?"
+}
+
+function listItemsMatch(rows, items){
+    if (rows.length !== items.length){
+        logger.info("ERROR! List items don't have the same length as the items in the database")
+        return false
+    }
+
+    const itemsClone = items.slice()
+    for (const nextRowIndex in rows){
+        const nextRow = rows[nextRowIndex]
+        const itemIndex = itemsClone.indexOf(nextRow["item_name"])
+        if (itemIndex >= 0){
+            itemsClone.splice(itemIndex, 1)
+        }
+    }
+
+    if (itemsClone.length === 0){
+        return true
+    }
+    logger.info("ERROR! List items don't match with the items in the database")
+    return false
+}
+
+async function checkListItems(database, listRow, type, items){
+    const queryItems = getListItemsQuery(type)
+    const connection = await database.getConnection()
+
+    try {
+        const rows = await connection.query(queryItems, [listRow["action_index"]])
+        if (listItemsMatch(rows, items)){
+            return listRow
+        } else {
+            return null
+        }
+    } catch (err) {
+        logger.error('Error with database query (list items):', err);
+        return null;
+    } finally {
+        await connection.release()
+    }
+}
 
 /**
  * A named-method wrapper around one mariadb connection pool: every query the
@@ -309,45 +596,9 @@ class Database {
             lockCallback, callbackBlock, callbackTickId, callbackAmount, allowList, blockList, 
             mintAddressMax, mintStartBlock, mintStopBlock, status}){
 
-        const whereClauses = []
-        const whereValues = []
-
-        if (source != null){
-            whereClauses.push("ia.address = ?")
-            whereValues.push(source)
-        }
-        if (tick != null){
-            whereClauses.push("itick.tick = ?")
-            whereValues.push(tick)
-        }
-        if (txHash != null){
-            whereClauses.push("itx.hash = ?")
-            whereValues.push(txHash)
-        }
-        if (maxSupply != null){
-            whereClauses.push("i.max_supply = ?")
-            whereValues.push(maxSupply)
-        }
-        if (maxMint != null){
-            whereClauses.push("i.max_mint = ?")
-            whereValues.push(maxMint)
-        }
-        if (decimals != null){
-            whereClauses.push("i.decimals = ?")
-            whereValues.push(decimals)
-        }
-        if (description != null){
-            whereClauses.push("i.description = ?")
-            whereValues.push(description)
-        }
-        if (mintSupply != null){
-            whereClauses.push("i.mint_supply = ?")
-            whereValues.push(mintSupply)
-        }
-        if (status != null){
-            whereClauses.push("ist.status = ?")
-            whereValues.push(status)
-        }
+        const { whereClauses, whereValues } = buildIssueFilter(
+            source, tick, txHash, maxSupply, maxMint, decimals, description, mintSupply, status
+        )
             
             
         const query = `
@@ -385,77 +636,16 @@ class Database {
     async waitForSend(sendObject, timeMax = 60000){ return this['_waitFor'](this.checkSend, sendObject, timeMax) }
     
     async checkSend({source,destination,tick,amount,txHash,memo,status}){
-    
-        const whereClauses = []
-        const whereValues = []
-        
-        if (source != null){
-            whereClauses.push("ia.address = ?")
-            whereValues.push(source)
-        }
-        if (destination != null){
-            whereClauses.push("ia2.address = ?")
-            whereValues.push(destination)
-        }
-        if (tick != null){
-            whereClauses.push("itick.tick = ?")
-            whereValues.push(tick)
-        }
-        if (amount != null){
-            whereClauses.push("amount = ?")
-            whereValues.push(amount)
-        }
-        if (txHash != null){
-            whereClauses.push("itx.hash = ?")
-            whereValues.push(txHash)
-        }
-        if (memo != null){
-            // '' means NO MEMO, which the indexer stores as NULL, and `= ''` never
-            // matches a NULL. checkMint and checkList have carried this branch for as
-            // long as the parameter has existed; checkSend never got it, so a caller
-            // asking for a memo-less SEND matched nothing and read the transfer as
-            // one that never landed (the gated-token BATCH case in the 2026-09-05
-            // release matrix, where the SEND was on chain and valid the whole time).
-            if (memo === ''){
-                whereClauses.push("im.memo IS NULL")
-            } else {
-                whereClauses.push("im.memo = ?")
-                whereValues.push(memo)
-            }
-        }
-        if (status != null){
-            whereClauses.push("ist.status = ?")
-            whereValues.push(status)
-        }
-
-        const query = `
-            SELECT s.*,
-                itick.tick AS tick,
-                itx.hash AS tx_hash, 
-                ia.address AS source, 
-                ia2.address AS destination, 
-                im.memo AS memo, 
-                ist.status AS status 
-            FROM sends s
-            LEFT JOIN actions act ON act.action_index = s.action_index
-            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
-            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
-            LEFT JOIN index_addresses ia ON ia.id = tr.source_id
-            LEFT JOIN index_addresses ia2 ON ia2.id = s.destination_id
-            LEFT JOIN index_memos im ON im.id = s.memo_id
-            LEFT JOIN index_statuses ist ON ist.id = s.status_id
-            LEFT JOIN index_tickers itick ON itick.id = s.tick_id 
-        `+"WHERE "+whereClauses.join(" AND ");
+        const {whereClauses, whereValues} = buildSendFilters({
+            source, destination, tick, amount, txHash, memo, status
+        })
+        const query = buildSendQuery(whereClauses)
         
         const connection = await this.getConnection()
         
         try {
-        const rows = await connection.query(query, whereValues)
-            if (rows.length > 0){
-                return rows[0]
-            } else {
-                return null
-            }
+            const rows = await connection.query(query, whereValues)
+            return firstSendRow(rows)
         } catch (err) {
             logger.error('Error with database query (send):', err);
             return null;
@@ -645,52 +835,12 @@ class Database {
     }
     
     async waitForBroadcast(broadcastObject, timeMax = 60000){ return this['_waitFor'](this.checkBroadcast, broadcastObject, timeMax) }
-    
+
     async checkBroadcast({blockIndex,txHash,source,message,value,fee,memo,broadcastActionIndex,status}){
-        const whereClauses = []
-        const whereValues = []
-        
-        if (blockIndex != null){
-            whereClauses.push("tr.block_index = ?")
-            whereValues.push(blockIndex)
-        }
-        if (txHash != null){
-            whereClauses.push("itx.hash = ?")
-            whereValues.push(txHash)
-        }
-        if (source != null){
-            whereClauses.push("ia.address = ?")
-            whereValues.push(source)
-        }
-        if (message != null){
-            whereClauses.push("b.message = ?")
-            whereValues.push(message)
-        }
-        if (value != null){
-            whereClauses.push("b.value = ?")
-            whereValues.push(value)
-        }
-        if (fee != null){
-            whereClauses.push("b.fee = ?")
-            whereValues.push(fee)
-        }
-        if (memo != null){
-            if (memo === ''){
-                whereClauses.push("im.memo IS NULL")
-            } else {
-                whereClauses.push("im.memo = ?")
-                whereValues.push(memo)
-            }
-        }
-        if (broadcastActionIndex != null){
-            whereClauses.push("b.broadcast_action_index = ?")
-            whereValues.push(broadcastActionIndex)
-        }
-        if (status != null){
-            whereClauses.push("ist.status = ?")
-            whereValues.push(status)
-        }
-         
+        const { whereClauses, whereValues } = buildBroadcastFilter({
+            blockIndex, txHash, source, message, value, fee, memo, broadcastActionIndex, status
+        })
+
         const query = `
             SELECT 
                 tr.block_index AS block_index,
@@ -732,143 +882,20 @@ class Database {
     async waitForList(listObject, timeMax = 60000){ return this['_waitFor'](this.checkList, listObject, timeMax) }
     
     async checkList({blockIndex,txHash,source,type,edit,listActionIndex,memo,status,items}){
-        const whereClauses = []
-        const whereValues = []
-        
-        if (blockIndex != null){
-            whereClauses.push("tr.block_index = ?")
-            whereValues.push(blockIndex)
-        }
-        if (txHash != null){
-            whereClauses.push("itx.hash = ?")
-            whereValues.push(txHash)
-        }
-        if (source != null){
-            whereClauses.push("ia.address = ?")
-            whereValues.push(source)
-        }
-        if (type != null){
-            whereClauses.push("l.type = ?")
-            whereValues.push(type)
-        }
-        if (edit != null){
-            whereClauses.push("l.edit = ?")
-            whereValues.push(edit)
-        }
-        if (listActionIndex != null){
-            // Alias is `l`; there is no `b` in this query, so the old `b.` prefix made
-            // every listActionIndex filter throw and return null instead of asserting.
-            whereClauses.push("l.list_action_index = ?")
-            whereValues.push(listActionIndex)
-        }
-        if (memo != null){
-            // The indexer stores an absent or empty LIST memo as memo_id NULL
-            // (xchain-indexer createMemo returns null for '' via util.isNull), so an
-            // asserted empty memo is a NULL check, matching checkMint.
-            if (memo === ''){
-                whereClauses.push("im.memo IS NULL")
-            } else {
-                whereClauses.push("im.memo = ?")
-                whereValues.push(memo)
-            }
-        }
-        if (status != null){
-            whereClauses.push("ist.status = ?")
-            whereValues.push(status)
-        }
+        const {whereClauses, whereValues} = getListWhere({
+            blockIndex, txHash, source, type, edit, listActionIndex, memo, status
+        })
+        const query = getListQuery(whereClauses)
+        const {listRow, finished} = await findListRow(this, query, whereValues)
 
-        const query = `
-            SELECT
-                tr.block_index AS block_index,
-                itx.hash AS tx_hash,
-                l.action_index,
-                ia.address AS source,
-                l.type,
-                l.edit,
-                l.list_action_index,
-                im.memo AS memo,
-                ist.status AS status
-            FROM lists l
-            LEFT JOIN actions act ON act.action_index = l.action_index
-            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
-            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
-            LEFT JOIN index_addresses ia ON ia.id = tr.source_id
-            LEFT JOIN index_memos im ON im.id = l.memo_id
-            LEFT JOIN index_statuses ist ON ist.id = l.status_id
-        `+"WHERE "+whereClauses.join(" AND ");
-        
-        let connection = await this.getConnection()
-        let listRow = null
-        try {
-            const rows = await connection.query(query, whereValues)
-            if (rows.length > 0){
-                listRow = rows[0]
-            } else {
-                return null
-            }
-        } catch (err) {
-            logger.error('Error with database query (list):', err);
+        if (finished){
             return null
-        } finally {
-            await connection.release()
         }
-
-        if (listRow){
-            const newActionIndex = listRow["action_index"]
-            let leftJoin = ""
-            let field = ""
-            switch (type){
-                case 1: //TICK
-                    leftJoin = " LEFT JOIN index_tickers it ON it.id = li.item_id "
-                    field = " it.tick AS item_name "
-                    break
-                case 2: //address
-                    leftJoin = " LEFT JOIN index_addresses ia ON ia.id = li.item_id "
-                    field = " ia.address AS item_name "
-                    break
-            }
-
-            const queryItems = "SELECT "+field+
-                " FROM list_items li "+leftJoin+
-                " WHERE li.action_index = ?"
-
-            connection = await this.getConnection()
-
-            try {
-                const rows = await connection.query(queryItems, [newActionIndex])
-                if (rows.length === items.length){
-                    const itemsClone = items.slice()
-
-                    for (const nextRowIndex in rows){
-                        const nextRow = rows[nextRowIndex]
-
-                        const itemIndex = itemsClone.indexOf(nextRow["item_name"])
-
-                        if (itemIndex >= 0){
-                            itemsClone.splice(itemIndex, 1)
-                        }
-                    }
-
-                    if (itemsClone.length === 0){
-                        return listRow
-                    } else {
-                        logger.info("ERROR! List items don't match with the items in the database")
-                        return null
-                    }
-                } else {
-                    logger.info("ERROR! List items don't have the same length as the items in the database")
-                    return null
-                }
-            } catch (err) {
-                logger.error('Error with database query (list items):', err);
-                return null;
-            } finally {
-                await connection.release()
-            }
-        } else {
+        if (!listRow){
             logger.error("ERROR! Couldn't find the new list action index");
             return null
         }
+        return await checkListItems(this, listRow, type, items)
     }
     
     async waitForAirdrop(airdropObject, timeMax = 60000){ return this['_waitFor'](this.checkAirdrop, airdropObject, timeMax) }
@@ -1161,59 +1188,38 @@ class Database {
     }
     
     async waitForDispense(dispenseObject, timeMax = 60000){ return this['_waitFor'](this.checkDispense, dispenseObject, timeMax) }
-    
-    async checkDispense({blockIndex, txHash, source, giveCoin,
+
+    buildDispenseFilters({blockIndex, txHash, source, giveCoin,
       giveTick, giveAmount, getCoin, getTick, getAmount,
       destination, status}){
         const whereClauses = []
         const whereValues = []
-        
-        if (!this.isNullOrNullString(blockIndex)){
-            whereClauses.push("tr.block_index = ?")
-            whereValues.push(blockIndex)
+
+        const filters = [
+            [blockIndex, "tr.block_index = ?"],
+            [txHash, "itx.hash = ?"],
+            [source, "ias.address = ?"],
+            [giveCoin, "give_ic.coin = ?"],
+            [giveTick, "give_it.tick = ?"],
+            [giveAmount, "d.give_amount = ?"],
+            [getCoin, "get_ic.coin = ?"],
+            [getTick, "get_it.tick = ?"],
+            [getAmount, "d.get_amount = ?"],
+            [destination, "iad.address = ?"],
+            [status, "ist.status = ?"]
+        ]
+        for (const [value, clause] of filters){
+            if (!this.isNullOrNullString(value)){
+                whereClauses.push(clause)
+                whereValues.push(value)
+            }
         }
-        if (!this.isNullOrNullString(txHash)){
-            whereClauses.push("itx.hash = ?")
-            whereValues.push(txHash)
-        }
-        if (!this.isNullOrNullString(source)){
-            whereClauses.push("ias.address = ?")
-            whereValues.push(source)
-        }
-        if (!this.isNullOrNullString(giveCoin)){
-            whereClauses.push("give_ic.coin = ?")
-            whereValues.push(giveCoin)
-        }
-        if (!this.isNullOrNullString(giveTick)){
-            whereClauses.push("give_it.tick = ?")
-            whereValues.push(giveTick)
-        }
-        if (!this.isNullOrNullString(giveAmount)){
-            whereClauses.push("d.give_amount = ?")
-            whereValues.push(giveAmount)
-        }   
-        if (!this.isNullOrNullString(getCoin)){
-            whereClauses.push("get_ic.coin = ?")
-            whereValues.push(getCoin)
-        }
-        if (!this.isNullOrNullString(getTick)){
-            whereClauses.push("get_it.tick = ?")
-            whereValues.push(getTick)
-        }
-        if (!this.isNullOrNullString(getAmount)){
-            whereClauses.push("d.get_amount = ?")
-            whereValues.push(getAmount)
-        }   
-        if (!this.isNullOrNullString(destination)){
-            whereClauses.push("iad.address = ?")
-            whereValues.push(destination)
-        }    
-        if (!this.isNullOrNullString(status)){
-            whereClauses.push("ist.status = ?")
-            whereValues.push(status)
-        }
-         
-        const query = `
+
+        return {whereClauses, whereValues}
+    }
+
+    buildDispenseQuery(whereClauses){
+        return `
             SELECT 
                 tr.block_index AS block_index,
                 itx.hash AS tx_hash,
@@ -1240,7 +1246,12 @@ class Database {
             LEFT JOIN index_addresses iad ON iad.id = d.destination_id
             LEFT JOIN index_statuses ist ON ist.id = d.status_id
         `+"WHERE "+whereClauses.join(" AND ");
-        
+    }
+
+    async checkDispense(dispenseObject){
+        const {whereClauses, whereValues} = this.buildDispenseFilters(dispenseObject)
+        const query = this.buildDispenseQuery(whereClauses)
+
         const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, whereValues)
