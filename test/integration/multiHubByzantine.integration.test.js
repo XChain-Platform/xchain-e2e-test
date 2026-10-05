@@ -134,9 +134,10 @@ describe('MultiValidatorHub: byzantine fault tolerance (L5)', function () {
         assert.ok(!target.consensus.pendingProposals.has(seq),
             'forged PRE_PREPARE created a pending proposal (digest check failed)');
 
-        await assertNeverApplied([target],
+        const observation = await assertNeverApplied([target],
             { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: forgedValue },
             { windowMs: 500 });
+        assert.strictEqual(observation.ok, true, 'safety observation did not complete');
         const after = await target.db.getConfig(COIN, NET, MODULE);
         assert.notStrictEqual(after.GAS_PRICE, forgedValue,
             'forged config was applied (safety violated)');
