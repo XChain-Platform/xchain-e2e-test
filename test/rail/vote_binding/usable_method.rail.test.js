@@ -24,12 +24,40 @@ const { seedGlobalPrices } = require('../../helpers/nativeFeeHelper');
 
 const MODE = expectMode(process.env.XC_VOTE_CALLBACK_BINDING_EXPECT);
 
+function landedBatchFeeGateArmed(env){
+    return String(env.XC_E2E_PRICE_FEE_BATCH_LANDED || '').trim().toLowerCase() === 'armed';
+}
+
+async function seedVoteBindingPrices(env = process.env, seed = seedGlobalPrices){
+    if(!landedBatchFeeGateArmed(env)) return false;
+    await seed(true);
+    return true;
+}
+
 function actionIndexOf(res){
     const actions = res && res.indexed && res.indexed.actions;
     if(!Array.isArray(actions) || actions.length === 0)
         throw new Error('no indexed actions');
     return actions[0].action_index;
 }
+
+describe('VOTE callback binding price seed', function(){
+    it('forces the global fee-price seed only for the armed landed-batch gate', async function(){
+        const calls = [];
+        const seed = async (force) => calls.push(force);
+
+        assert.strictEqual(await seedVoteBindingPrices({
+            XC_E2E_PRICE_FEE_BATCH_LANDED: ' armed '
+        }, seed), true);
+        assert.deepStrictEqual(calls, [true]);
+
+        for(const value of [undefined, '', 'off', 'on']){
+            const env = value === undefined ? {} : { XC_E2E_PRICE_FEE_BATCH_LANDED: value };
+            assert.strictEqual(await seedVoteBindingPrices(env, seed), false);
+        }
+        assert.deepStrictEqual(calls, [true]);
+    });
+});
 
 describe('VOTE callback binding usable method', function(){
     this.timeout(0);
@@ -40,7 +68,7 @@ describe('VOTE callback binding usable method', function(){
     let callbackContract;
 
     before(async function(){
-        await seedGlobalPrices(true);
+        await seedVoteBindingPrices();
         sdk = makeSdk({ compactAddresses: false });
         issuer = await fundedGasAddress(sdk, 0.05);
         tick = uniqueTick('VBM');
