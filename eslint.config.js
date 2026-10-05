@@ -87,4 +87,37 @@ const tests = {
 
 module.exports = [src, configAndEntry, tests];
 
-// Repo-specific additions: none.
+// Repo-specific additions.
+const directoryConfig = {
+    files: ['src/config/index.js'],
+    rules: {
+        'no-restricted-syntax': ['error',
+            {
+                selector: ':function CallExpression[callee.name="require"][arguments.0.type="Literal"]',
+                message: 'require() at the top of the file; inside a body only for a computed path (CODE-STYLE.md, Module shape)',
+            },
+        ],
+    },
+};
+
+const loggerSink = {
+    files: ['src/lib/logger.js'],
+    rules: {
+        'no-console': 'off',
+    },
+};
+
+const canonicalCoinRegistry = {
+    files: ['src/coins/index.js'],
+    rules: {
+        'no-console': 'off',
+        'no-restricted-syntax': ['error',
+            {
+                selector: ':function CallExpression[callee.name="require"][arguments.0.type="Literal"]',
+                message: 'require() at the top of the file; inside a body only for a computed path (CODE-STYLE.md, Module shape)',
+            },
+        ],
+    },
+};
+
+module.exports.push(directoryConfig, loggerSink, canonicalCoinRegistry);
