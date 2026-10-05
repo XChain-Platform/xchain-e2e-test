@@ -18,6 +18,9 @@ const assert = require('assert')
 const fs = require('fs')
 const path = require('path')
 
+// The ladder below is relative to test/helpers, where it lived before the split.
+const HELPERS_DIR = path.resolve(__dirname, '..')
+
 // ── sibling module resolution ────────────────────────────────────────────────
 //
 // Same candidate ladder multiValidatorHubHelper uses for xchain-hub: monorepo
@@ -28,10 +31,10 @@ function internalResolveSibling(pkg, rel){
     const candidates = [
         process.env['XCHAIN_' + pkg.replace('xchain-', '').toUpperCase() + '_PATH'] &&
             path.join(process.env['XCHAIN_' + pkg.replace('xchain-', '').toUpperCase() + '_PATH'], rel),
-        path.resolve(__dirname, '../../', pkg, rel),
-        path.resolve(__dirname, '../../../', pkg, rel),
-        path.resolve(__dirname, '../../../../', pkg, rel),
-        path.resolve(__dirname, '../../../../../modules/', pkg, rel),
+        path.resolve(HELPERS_DIR, '../../', pkg, rel),
+        path.resolve(HELPERS_DIR, '../../../', pkg, rel),
+        path.resolve(HELPERS_DIR, '../../../../', pkg, rel),
+        path.resolve(HELPERS_DIR, '../../../../../modules/', pkg, rel),
     ].filter(Boolean)
     for (const p of candidates) if (fs.existsSync(p)) return p
     throw new Error(
