@@ -12,7 +12,7 @@
  *
  * XChain Platform E2E - SDK WebSocket live action events (on-chain)
  *
- * xchain-sdk/src/websocket.js is the real-time client the wallet uses
+ * xchain-sdk/src/clients/websocket.js is the real-time client the wallet uses
  * for live balance/action updates. It has only unit tests (mocked
  * sockets); nothing exercises it end-to-end against the live explorer
  * WebSocket server (xchain-explorer/src/ws/*). This suite closes that
