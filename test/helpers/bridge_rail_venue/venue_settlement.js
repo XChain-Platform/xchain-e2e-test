@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('assert');
+const { BRIDGE_CHAINS } = require('./constants');
 const {
     bridgeSettled, firstHubRowsForSourceLeg, outstandingFinalizedLegs,
 } = require('./venue_helpers');

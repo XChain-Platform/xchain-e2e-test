@@ -40,7 +40,7 @@ const internalRoleConfigCache = new Map();
 function roleConfigFor(chain, network) {
     const key = String(chain).toUpperCase() + '/' + String(network || 'regtest');
     if (internalRoleConfigCache.has(key)) return internalRoleConfigCache.get(key);
-    const configModule = require('./bridgeSettleContext').loadIndexerModule('src/config.js');
+    const configModule = require('../bridgeSettleContext').loadIndexerModule('src/config.js');
     const config = configModule.getConfig(String(chain).toUpperCase(), String(network || 'regtest'));
     internalRoleConfigCache.set(key, config);
     return config;

@@ -214,7 +214,7 @@ function destinationApplyBudgetMs(relayMarginS, opts) {
  * rather than at load so the pure layer stays loadable without a hub checkout beside it.
  */
 function hubRelayMarginFloorS(chain) {
-    const relay = require('../../../xchain-hub/src/lib/relay_margin.js');
+    const relay = require('../../../../xchain-hub/src/lib/relay_margin.js');
     return Number(relay.relayMarginFloorS(String(chain).toUpperCase()));
 }
 
