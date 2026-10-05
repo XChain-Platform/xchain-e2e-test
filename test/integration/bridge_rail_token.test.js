@@ -69,9 +69,11 @@
  * xchain-indexer's activation constants parity test out of
  * the pinned root with XCHAIN_REQUIRE_SIBLINGS=1. On a hosted venue the CI gate runs
  * directly; a workstation with the dispatcher sends it to one of its configured venues.
- * Each is judged on its exit status and its own counts. A dispatcher exit 95 and every
- * nonzero direct exit are RED verdicts here: a gate that did not run proves nothing. The
- * last case prints the dated record.
+ * The direct child carries its venue as a recursion guard, so a token drive selected by
+ * that full gate does not launch the full gate again. Each outer gate is judged on its
+ * exit status and its own counts. A dispatcher exit 95 and every nonzero direct exit are
+ * RED verdicts here: a gate that did not run proves nothing. The last case prints the
+ * dated record.
  *
  * ── EVERY DOGE-SIDE READ IS ON THE VENUE LEDGER, ASSERT BY IDENTITY ─────────────────
  * As the base drive: the standing DOGE indexer parsed a different history, and a count
@@ -161,6 +163,7 @@ const PARITY_FILES = [
 ];
 const PARITY_ORDERING_TITLE = 'holds TOKEN_BRIDGE_ACTIVATION >= XCHAIN_BRIDGE_ACTIVATION for every chain key';
 const CI_GATE_COMMAND = 'npm run ci:full';
+const ENCLOSING_CI_VENUE_ENV = 'TOKEN_AT9_ENCLOSING_CI_VENUE';
 const GATE_DID_NOT_RUN_EXITS = new Set([2, 3, 94, 95, 97, 99, 255]);
 const SIBLING_BRANCH_RULE = /^PUSH_BRANCH="\$\{REMOTE_REF#refs\/heads\/\}"$/m;
 const GATE_BASE_HANDLER = /^\s*--base\)/m;
@@ -319,7 +322,8 @@ function greenVerdictRecord(out, head, venueSpec) {
 
 function runDirectCiGate() {
     const venue = os.hostname();
-    const res = run('npm', ['run', 'ci:full'], E2E_ROOT, gateEnv({ CI_TIER: 'full' }));
+    const res = run('npm', ['run', 'ci:full'], E2E_ROOT,
+        gateEnv({ CI_TIER: 'full', [ENCLOSING_CI_VENUE_ENV]: venue }));
     const counts = tallies(res.out);
     at9.ordinaryCi = { command: CI_GATE_COMMAND, cwd: E2E_ROOT, venue,
         transport: 'direct', exit: res.status, signal: res.signal, counts,
@@ -330,6 +334,17 @@ function runDirectCiGate() {
         'the direct gate exited 0 without its all-tiers GREEN verdict on venue ' + venue + ':\n' + res.tail);
     assert.ok(counts.passing > 0, 'the full CI gate exited 0 having run no mocha case on venue ' + venue + ':\n' + res.tail);
     assert.strictEqual(counts.failing, 0, 'the full CI gate reported failing cases on venue ' + venue + ':\n' + res.tail);
+}
+
+function recordEnclosingDirectCiGate() {
+    const venue = process.env[ENCLOSING_CI_VENUE_ENV];
+    if (!venue) return false;
+    assert.strictEqual(venue, os.hostname(), 'the enclosing full CI gate names venue ' + venue +
+        ', but token AT9 is running on ' + os.hostname());
+    at9.ordinaryCi = { command: CI_GATE_COMMAND, cwd: E2E_ROOT, venue,
+        transport: 'enclosing-direct', exit: null, signal: null, counts: null,
+        cachedVerdict: null, failureTail: null };
+    return true;
 }
 
 function driveTests(root) {
@@ -383,6 +398,7 @@ describe('token AT9: the gates, and the dated acceptance record', function () {
 
     it('token AT9: this repository\'s full CI gate is green on the CI venue', function () {
         this.timeout(0);
+        if (recordEnclosingDirectCiGate()) return;
         const dispatcher = path.join(os.homedir(), '.claude', 'bin', 'ci-dispatch.sh');
         if (!fs.existsSync(dispatcher)) return runDirectCiGate();
         const dispatcherText = fs.readFileSync(dispatcher, 'utf8');
