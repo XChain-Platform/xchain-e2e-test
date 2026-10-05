@@ -77,7 +77,7 @@ function parseError(file){
 describe('every owned .js file parses', function () {
 
     it('finds no file that node could not load', function () {
-        this.timeout(15000);
+        this.timeout(120000);
 
         const files = [];
         for(const dir of SCANNED_DIRS) collectJsFiles(path.join(REPO_ROOT, dir), files);

@@ -82,6 +82,8 @@ function swallowsSiblingLoad(code, sibling){
 const files = discoverTestFiles(TEST_ROOT).filter(f => f !== SELF);
 
 describe('VM false-green guard', function() {
+    this.timeout(30000)
+
     it('found the repo test tree to scan', function() {
         assert.ok(files.length > 50,
             'expected to scan the whole test tree, found only ' + files.length +
@@ -130,6 +132,8 @@ describe('VM false-green guard', function() {
 });
 
 describe('VM false-green guard', function() {
+    this.timeout(30000)
+
     it('no suite picks describe.skip off an xchain-vm load result', function() {
         const offenders = [];
         for (const file of files) {

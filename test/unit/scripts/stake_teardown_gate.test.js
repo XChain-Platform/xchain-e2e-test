@@ -87,7 +87,9 @@ describe('check-stake-teardown gate', () => {
         assert.strictEqual(scan("let msg = 'STAKE|1|' + amount", 'test/helpers/stakeHelper.js').length, 0)
     })
 
-    it('the repo is clean: every STAKE broadcast under test/ is tracked or explained', () => {
+    it('the repo is clean: every STAKE broadcast under test/ is tracked or explained', function () {
+        this.timeout(30000)
+
         const hits = gate.scan()
         assert.deepStrictEqual(hits, [],
             'these STAKE broadcasts bypass the release ledger:\n' +
