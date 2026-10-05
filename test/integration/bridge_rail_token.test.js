@@ -92,6 +92,7 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const { journalCase } = require('../helpers/bridgeRailVenue');
+const loadRailGateContract = require('./lib/rail_gate_contract');
 const {
     assert,
     GAS_TICK,
@@ -164,7 +165,6 @@ const PARITY_FILES = [
 const PARITY_ORDERING_TITLE = 'holds TOKEN_BRIDGE_ACTIVATION >= XCHAIN_BRIDGE_ACTIVATION for every chain key';
 const CI_GATE_COMMAND = 'npm run ci:full';
 const ENCLOSING_CI_VENUE_ENV = 'TOKEN_AT9_ENCLOSING_CI_VENUE';
-const GATE_DID_NOT_RUN_EXITS = new Set([2, 3, 94, 95, 97, 99, 255]);
 const SIBLING_BRANCH_RULE = /^PUSH_BRANCH="\$\{REMOTE_REF#refs\/heads\/\}"$/m;
 const GATE_BASE_HANDLER = /^\s*--base\)/m;
 const GATE_TIMEOUT_MS = 4 * 60 * 60 * 1000;
@@ -399,7 +399,8 @@ describe('token AT9: the gates, and the dated acceptance record', function () {
     it('token AT9: this repository\'s full CI gate is green on the CI venue', function () {
         this.timeout(0);
         if (recordEnclosingDirectCiGate()) return;
-        const dispatcher = path.join(os.homedir(), '.claude', 'bin', 'ci-dispatch.sh');
+        const gateContract = loadRailGateContract();
+        const dispatcher = loadRailGateContract.dispatcherPath();
         if (!fs.existsSync(dispatcher)) return runDirectCiGate();
         const dispatcherText = fs.readFileSync(dispatcher, 'utf8');
         assert.ok(SIBLING_BRANCH_RULE.test(dispatcherText), 'the dispatcher at ' + dispatcher + ' has no sibling-branch rule, so a develop pre-push line would\n' +
@@ -429,7 +430,7 @@ describe('token AT9: the gates, and the dated acceptance record', function () {
             exit: res.status, signal: res.signal, counts,
             cachedVerdict: cachedGreen.accepted ? { commit: cachedGreen.commit, venue: cachedGreen.venue } : null,
             failureTail: res.status === 0 ? null : res.tail };
-        assert.ok(!GATE_DID_NOT_RUN_EXITS.has(res.status), 'the CI gate did not run (exit ' + res.status +
+        assert.ok(!gateContract.gateDidNotRunExits.includes(res.status), 'the CI gate did not run (exit ' + res.status +
             '):\n' + res.tail);
         assert.strictEqual(res.status, 0, 'the full CI gate is red (exit ' + res.status +
             (res.signal ? ', signal ' + res.signal : '') + (res.error ? ', ' + res.error : '') + '):\n' + res.tail);
