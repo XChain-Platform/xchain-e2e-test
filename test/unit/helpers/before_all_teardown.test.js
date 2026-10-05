@@ -4,7 +4,7 @@ const assert = require('assert')
 const {
     teardownOutcome,
     withTeardownOnFailure,
-} = require('../../attestMirror/helpers/before_all_teardown')
+} = require('../../../scripts/lib/before_all_teardown')
 
 describe('before-all teardown guard', function () {
     it('returns a successful setup value without running teardown', async function () {
