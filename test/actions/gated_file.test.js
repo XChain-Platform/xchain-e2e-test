@@ -36,7 +36,7 @@ const transactionHelper = require('../helpers/core/transactionHelper')
 // Encrypt plaintext under a fresh AES-256-GCM key. Returns the raw
 // ciphertext buffer (12-byte IV || GCM tag || ct) and the key + hex
 // sha256(key) the protocol uses for the gated FILE's KEY_HASH field.
-// Mirrors xchain-sdk/src/gatedFile.js so the e2e harness doesn't have
+// Mirrors xchain-sdk/src/actions/gated_file.js so the e2e harness doesn't have
 // to import the SDK as a runtime dependency.
 function makeGatedCiphertext(plaintext) {
     const key = crypto.randomBytes(32)
