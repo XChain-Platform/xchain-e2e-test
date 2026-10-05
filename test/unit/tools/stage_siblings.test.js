@@ -16,7 +16,7 @@ const os = require('os')
 const path = require('path')
 const proxyquire = require('proxyquire').noPreserveCache()
 
-const SCRIPT_DIR = path.dirname(require.resolve('../../../scripts/stage-siblings'))
+const SCRIPT_DIR = path.dirname(require.resolve('../../../scripts/stage-siblings.js'))
 let sandbox
 let root
 let script
@@ -51,7 +51,7 @@ function setUp() {
         }
     }
     fs.mkdirSync(root)
-    script = proxyquire('../../../scripts/stage-siblings', {
+    script = proxyquire('../../../scripts/stage-siblings.js', {
         fs: instrumentedFs,
         path: { join: sandboxJoin }
     })
