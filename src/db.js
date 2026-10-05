@@ -33,6 +33,76 @@ const PERF_COLLECTOR_MODULE = '../test/perf/perfCollector';
 
 function mariadbDriver(){ return require(MARIADB_MODULE); }
 
+function buildSendFilters({source,destination,tick,amount,txHash,memo,status}){
+    const whereClauses = []
+    const whereValues = []
+
+    if (source != null){
+        whereClauses.push("ia.address = ?")
+        whereValues.push(source)
+    }
+    if (destination != null){
+        whereClauses.push("ia2.address = ?")
+        whereValues.push(destination)
+    }
+    if (tick != null){
+        whereClauses.push("itick.tick = ?")
+        whereValues.push(tick)
+    }
+    if (amount != null){
+        whereClauses.push("amount = ?")
+        whereValues.push(amount)
+    }
+    if (txHash != null){
+        whereClauses.push("itx.hash = ?")
+        whereValues.push(txHash)
+    }
+    if (memo != null){
+        // An empty memo matches the NULL representation stored by the indexer.
+        if (memo === ''){
+            whereClauses.push("im.memo IS NULL")
+        } else {
+            whereClauses.push("im.memo = ?")
+            whereValues.push(memo)
+        }
+    }
+    if (status != null){
+        whereClauses.push("ist.status = ?")
+        whereValues.push(status)
+    }
+
+    return {whereClauses, whereValues}
+}
+
+function buildSendQuery(whereClauses){
+    return `
+            SELECT s.*,
+                itick.tick AS tick,
+                itx.hash AS tx_hash,\x20
+                ia.address AS source,\x20
+                ia2.address AS destination,\x20
+                im.memo AS memo,\x20
+                ist.status AS status\x20
+            FROM sends s
+            LEFT JOIN actions act ON act.action_index = s.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ia ON ia.id = tr.source_id
+            LEFT JOIN index_addresses ia2 ON ia2.id = s.destination_id
+            LEFT JOIN index_memos im ON im.id = s.memo_id
+            LEFT JOIN index_statuses ist ON ist.id = s.status_id
+            LEFT JOIN index_tickers itick ON itick.id = s.tick_id\x20
+        `+"WHERE "+whereClauses.join(" AND ");
+}
+
+function firstSendRow(rows){
+    if (rows.length > 0){
+        return rows[0]
+    } else {
+        return null
+    }
+}
+
 const config = require('./config');
 const { getLogger } = require('./lib/logger');
 const logger = getLogger();
@@ -465,77 +535,16 @@ class Database {
     async waitForSend(sendObject, timeMax = 60000){ return this['_waitFor'](this.checkSend, sendObject, timeMax) }
     
     async checkSend({source,destination,tick,amount,txHash,memo,status}){
-    
-        const whereClauses = []
-        const whereValues = []
-        
-        if (source != null){
-            whereClauses.push("ia.address = ?")
-            whereValues.push(source)
-        }
-        if (destination != null){
-            whereClauses.push("ia2.address = ?")
-            whereValues.push(destination)
-        }
-        if (tick != null){
-            whereClauses.push("itick.tick = ?")
-            whereValues.push(tick)
-        }
-        if (amount != null){
-            whereClauses.push("amount = ?")
-            whereValues.push(amount)
-        }
-        if (txHash != null){
-            whereClauses.push("itx.hash = ?")
-            whereValues.push(txHash)
-        }
-        if (memo != null){
-            // '' means NO MEMO, which the indexer stores as NULL, and `= ''` never
-            // matches a NULL. checkMint and checkList have carried this branch for as
-            // long as the parameter has existed; checkSend never got it, so a caller
-            // asking for a memo-less SEND matched nothing and read the transfer as
-            // one that never landed (the gated-token BATCH case in the 2026-09-05
-            // release matrix, where the SEND was on chain and valid the whole time).
-            if (memo === ''){
-                whereClauses.push("im.memo IS NULL")
-            } else {
-                whereClauses.push("im.memo = ?")
-                whereValues.push(memo)
-            }
-        }
-        if (status != null){
-            whereClauses.push("ist.status = ?")
-            whereValues.push(status)
-        }
-
-        const query = `
-            SELECT s.*,
-                itick.tick AS tick,
-                itx.hash AS tx_hash, 
-                ia.address AS source, 
-                ia2.address AS destination, 
-                im.memo AS memo, 
-                ist.status AS status 
-            FROM sends s
-            LEFT JOIN actions act ON act.action_index = s.action_index
-            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
-            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
-            LEFT JOIN index_addresses ia ON ia.id = tr.source_id
-            LEFT JOIN index_addresses ia2 ON ia2.id = s.destination_id
-            LEFT JOIN index_memos im ON im.id = s.memo_id
-            LEFT JOIN index_statuses ist ON ist.id = s.status_id
-            LEFT JOIN index_tickers itick ON itick.id = s.tick_id 
-        `+"WHERE "+whereClauses.join(" AND ");
+        const {whereClauses, whereValues} = buildSendFilters({
+            source, destination, tick, amount, txHash, memo, status
+        })
+        const query = buildSendQuery(whereClauses)
         
         const connection = await this.getConnection()
         
         try {
-        const rows = await connection.query(query, whereValues)
-            if (rows.length > 0){
-                return rows[0]
-            } else {
-                return null
-            }
+            const rows = await connection.query(query, whereValues)
+            return firstSendRow(rows)
         } catch (err) {
             logger.error('Error with database query (send):', err);
             return null;
