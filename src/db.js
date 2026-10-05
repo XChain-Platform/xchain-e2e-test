@@ -33,6 +33,31 @@ const PERF_COLLECTOR_MODULE = '../test/perf/perfCollector';
 
 function mariadbDriver(){ return require(MARIADB_MODULE); }
 
+function buildIssueFilter(source, tick, txHash, maxSupply, maxMint, decimals, description, mintSupply, status){
+    const filters = [
+        ["ia.address = ?", source],
+        ["itick.tick = ?", tick],
+        ["itx.hash = ?", txHash],
+        ["i.max_supply = ?", maxSupply],
+        ["i.max_mint = ?", maxMint],
+        ["i.decimals = ?", decimals],
+        ["i.description = ?", description],
+        ["i.mint_supply = ?", mintSupply],
+        ["ist.status = ?", status]
+    ]
+    const whereClauses = []
+    const whereValues = []
+
+    for (const [clause, value] of filters){
+        if (value != null){
+            whereClauses.push(clause)
+            whereValues.push(value)
+        }
+    }
+
+    return { whereClauses, whereValues }
+}
+
 function buildSendFilters({source,destination,tick,amount,txHash,memo,status}){
     const whereClauses = []
     const whereValues = []
@@ -106,6 +131,54 @@ function firstSendRow(rows){
 const config = require('./config');
 const { getLogger } = require('./lib/logger');
 const logger = getLogger();
+
+function buildBroadcastFilter({blockIndex,txHash,source,message,value,fee,memo,broadcastActionIndex,status}){
+    const whereClauses = []
+    const whereValues = []
+
+    if (blockIndex != null){
+        whereClauses.push("tr.block_index = ?")
+        whereValues.push(blockIndex)
+    }
+    if (txHash != null){
+        whereClauses.push("itx.hash = ?")
+        whereValues.push(txHash)
+    }
+    if (source != null){
+        whereClauses.push("ia.address = ?")
+        whereValues.push(source)
+    }
+    if (message != null){
+        whereClauses.push("b.message = ?")
+        whereValues.push(message)
+    }
+    if (value != null){
+        whereClauses.push("b.value = ?")
+        whereValues.push(value)
+    }
+    if (fee != null){
+        whereClauses.push("b.fee = ?")
+        whereValues.push(fee)
+    }
+    if (memo != null){
+        if (memo === ''){
+            whereClauses.push("im.memo IS NULL")
+        } else {
+            whereClauses.push("im.memo = ?")
+            whereValues.push(memo)
+        }
+    }
+    if (broadcastActionIndex != null){
+        whereClauses.push("b.broadcast_action_index = ?")
+        whereValues.push(broadcastActionIndex)
+    }
+    if (status != null){
+        whereClauses.push("ist.status = ?")
+        whereValues.push(status)
+    }
+
+    return { whereClauses, whereValues }
+}
 
 function getListWhere({blockIndex,txHash,source,type,edit,listActionIndex,memo,status}){
     const whereClauses = []
@@ -459,45 +532,9 @@ class Database {
             lockCallback, callbackBlock, callbackTickId, callbackAmount, allowList, blockList, 
             mintAddressMax, mintStartBlock, mintStopBlock, status}){
 
-        const whereClauses = []
-        const whereValues = []
-
-        if (source != null){
-            whereClauses.push("ia.address = ?")
-            whereValues.push(source)
-        }
-        if (tick != null){
-            whereClauses.push("itick.tick = ?")
-            whereValues.push(tick)
-        }
-        if (txHash != null){
-            whereClauses.push("itx.hash = ?")
-            whereValues.push(txHash)
-        }
-        if (maxSupply != null){
-            whereClauses.push("i.max_supply = ?")
-            whereValues.push(maxSupply)
-        }
-        if (maxMint != null){
-            whereClauses.push("i.max_mint = ?")
-            whereValues.push(maxMint)
-        }
-        if (decimals != null){
-            whereClauses.push("i.decimals = ?")
-            whereValues.push(decimals)
-        }
-        if (description != null){
-            whereClauses.push("i.description = ?")
-            whereValues.push(description)
-        }
-        if (mintSupply != null){
-            whereClauses.push("i.mint_supply = ?")
-            whereValues.push(mintSupply)
-        }
-        if (status != null){
-            whereClauses.push("ist.status = ?")
-            whereValues.push(status)
-        }
+        const { whereClauses, whereValues } = buildIssueFilter(
+            source, tick, txHash, maxSupply, maxMint, decimals, description, mintSupply, status
+        )
             
             
         const query = `
@@ -785,52 +822,12 @@ class Database {
     }
     
     async waitForBroadcast(broadcastObject, timeMax = 60000){ return this['_waitFor'](this.checkBroadcast, broadcastObject, timeMax) }
-    
+
     async checkBroadcast({blockIndex,txHash,source,message,value,fee,memo,broadcastActionIndex,status}){
-        const whereClauses = []
-        const whereValues = []
-        
-        if (blockIndex != null){
-            whereClauses.push("tr.block_index = ?")
-            whereValues.push(blockIndex)
-        }
-        if (txHash != null){
-            whereClauses.push("itx.hash = ?")
-            whereValues.push(txHash)
-        }
-        if (source != null){
-            whereClauses.push("ia.address = ?")
-            whereValues.push(source)
-        }
-        if (message != null){
-            whereClauses.push("b.message = ?")
-            whereValues.push(message)
-        }
-        if (value != null){
-            whereClauses.push("b.value = ?")
-            whereValues.push(value)
-        }
-        if (fee != null){
-            whereClauses.push("b.fee = ?")
-            whereValues.push(fee)
-        }
-        if (memo != null){
-            if (memo === ''){
-                whereClauses.push("im.memo IS NULL")
-            } else {
-                whereClauses.push("im.memo = ?")
-                whereValues.push(memo)
-            }
-        }
-        if (broadcastActionIndex != null){
-            whereClauses.push("b.broadcast_action_index = ?")
-            whereValues.push(broadcastActionIndex)
-        }
-        if (status != null){
-            whereClauses.push("ist.status = ?")
-            whereValues.push(status)
-        }
-         
+        const { whereClauses, whereValues } = buildBroadcastFilter({
+            blockIndex, txHash, source, message, value, fee, memo, broadcastActionIndex, status
+        })
+
         const query = `
             SELECT 
                 tr.block_index AS block_index,
