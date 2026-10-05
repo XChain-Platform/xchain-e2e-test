@@ -948,7 +948,8 @@ class Database {
         try {
             const connection = await this.getConnection()
             const rows = await connection.query(addressesQuery, [listActionIndex])
-            return { succeeded: true, rows }
+            const addresses = this._addressIdsFromRows(rows)
+            return { succeeded: true, addresses }
         } catch (err) {
             logger.error("Couldn't get a list of addresses from a list:", err);
             return { succeeded: false }
@@ -970,7 +971,7 @@ class Database {
         if (list.listType){
             const addressesQuery = this._getListAddressesQuery(list.listType)
             const queryResult = await this._queryListAddresses(addressesQuery, listActionIndex)
-            if (queryResult.succeeded) return this._addressIdsFromRows(queryResult.rows)
+            if (queryResult.succeeded) return queryResult.addresses
         }
 
         logger.info("ERROR: there is no list with action index "+listActionIndex)
