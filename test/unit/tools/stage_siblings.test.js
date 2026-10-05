@@ -91,18 +91,18 @@ describe('stage-siblings helpers', () => {
         assert.strictEqual(script.hasSnapshot(debris), false)
     })
 
-    it('stages, checks, unstages, and checks the missing vendor path', () => {
+    it('stages, reports, unstages, and reports the missing vendor path', () => {
         addSibling('fixture-package')
 
         assert.strictEqual(script.stageOne('fixture-package'), true)
         assert.strictEqual(fs.lstatSync(path.join(root, 'fixture-package')).isSymbolicLink(), true)
         script.checkOne('fixture-package')
-        assert.match(logs.join('\n'), /fixture-package: symlink -> \.\.\/fixture-package/)
+        assert(logs.includes('fixture-package: symlink -> ../fixture-package'))
 
         logs.length = 0
         assert.strictEqual(script.unstageOne('fixture-package'), true)
         script.checkOne('fixture-package')
-        assert.match(logs.join('\n'), /fixture-package: absent/)
+        assert(logs.includes('fixture-package: absent'))
     })
 
     it('reports a missing sibling without creating a vendor path', () => {
