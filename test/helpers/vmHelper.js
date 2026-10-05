@@ -13,8 +13,8 @@ const requireRow = require('./requireRow')
 
 module.exports = {
     async sendDeployV0(addressInfo, code, gasLimit, constructorParams){
-        let address = addressInfo["address"]
-        let codeB64 = Buffer.from(code, 'utf8').toString('base64')
+        const address = addressInfo["address"]
+        const codeB64 = Buffer.from(code, 'utf8').toString('base64')
         let msg = "DEPLOY|0|" + codeB64 + "|" + gasLimit
         if(constructorParams) msg += "|" + constructorParams
 
@@ -23,10 +23,10 @@ module.exports = {
         // OP_RETURN limits, so force P2SH (the helper supports its 2-tx finalizer).
         // Auto-selected P2WSH encoding hits "Not finalized" because the helper's
         // PSBT signing path only handles legacy P2PKH inputs + the P2SH finalizer.
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg, null, [], "P2SH")
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg, null, [], "P2SH")
 
         console.log("Waiting for contract in the database...")
-        let contractRow = requireRow(await indexerDatabase.waitForContract({
+        const contractRow = requireRow(await indexerDatabase.waitForContract({
             source: address,
             txHash: txHash,
             status: "valid"
@@ -40,16 +40,16 @@ module.exports = {
     // contract to accept STAKE v3. slashDestination may be the string 'BURN' to route slashed
     // funds to the chain's burn address. Pass an empty string for constructorParams to skip.
     async sendDeployV1(addressInfo, code, gasLimit, constructorParams, cooldownBlocks, slashDestination){
-        let address = addressInfo["address"]
-        let codeB64 = Buffer.from(code, 'utf8').toString('base64')
-        let msg = "DEPLOY|1|" + codeB64 + "|" + gasLimit + "|" + (constructorParams || '')
+        const address = addressInfo["address"]
+        const codeB64 = Buffer.from(code, 'utf8').toString('base64')
+        const msg = "DEPLOY|1|" + codeB64 + "|" + gasLimit + "|" + (constructorParams || '')
                   + "|" + cooldownBlocks + "|" + (slashDestination || '')
 
         console.log("Creating and sending DEPLOY V1 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg, null, [], "P2SH")
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg, null, [], "P2SH")
 
         console.log("Waiting for stakeable contract in the database...")
-        let contractRow = requireRow(await indexerDatabase.waitForContract({
+        const contractRow = requireRow(await indexerDatabase.waitForContract({
             source: address,
             txHash: txHash,
             status: "valid"
@@ -63,16 +63,16 @@ module.exports = {
     // intentionally-invalid deploy, so broadcast and poll the contract row status-agnostically
     // (invalid deploys still write a contracts row, carrying the rejection status).
     async sendDeployV1Invalid(addressInfo, code, gasLimit, constructorParams, cooldownBlocks, slashDestination){
-        let address = addressInfo["address"]
-        let codeB64 = Buffer.from(code, 'utf8').toString('base64')
-        let msg = "DEPLOY|1|" + codeB64 + "|" + gasLimit + "|" + (constructorParams || '')
+        const address = addressInfo["address"]
+        const codeB64 = Buffer.from(code, 'utf8').toString('base64')
+        const msg = "DEPLOY|1|" + codeB64 + "|" + gasLimit + "|" + (constructorParams || '')
                   + "|" + cooldownBlocks + "|" + (slashDestination || '')
 
         console.log("Creating and sending (expected-invalid) DEPLOY V1 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg, null, [], "P2SH")
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg, null, [], "P2SH")
 
         console.log("Waiting for the rejected contract row in the database...")
-        let end = Date.now() + 60000
+        const end = Date.now() + 60000
         let row = null
         while(Date.now() < end){
             row = await indexerDatabase.checkContract({ source: address })
@@ -84,12 +84,12 @@ module.exports = {
     },
 
     async sendExecuteV0(addressInfo, contractActionIndex, method, params){
-        let address = addressInfo["address"]
+        const address = addressInfo["address"]
         let msg = "EXECUTE|0|" + contractActionIndex + "|" + method
         if(params && params.length > 0) msg += "|" + params.join("|")
 
         console.log("Creating and sending EXECUTE V0 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for execution in the database...")
         // For P2SH-encoded txes the broadcast txid returned by sendrawtransaction
@@ -125,7 +125,7 @@ module.exports = {
         // a contract bug rather than an execution that never landed. Say which of
         // the two happened AND stop here.
         if(!executionRow){
-            let anyRow = await indexerDatabase.checkExecution({
+            const anyRow = await indexerDatabase.checkExecution({
                 contractIndex: contractActionIndex,
                 caller:        address,
                 methodName:    method
@@ -144,15 +144,15 @@ module.exports = {
     // waitForExecution can never observe a failed execution, so broadcast and poll the
     // row status-agnostically on (contract, caller, method), mirroring sendDeployV1Invalid.
     async sendExecuteV0Invalid(addressInfo, contractActionIndex, method, params, timeMax = 40000){
-        let address = addressInfo["address"]
+        const address = addressInfo["address"]
         let msg = "EXECUTE|0|" + contractActionIndex + "|" + method
         if(params && params.length > 0) msg += "|" + params.join("|")
 
         console.log("Creating and sending (expected-failed) EXECUTE V0 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for the failed execution row in the database...")
-        let end = Date.now() + timeMax
+        const end = Date.now() + timeMax
         let row = null
         while(Date.now() < end){
             row = await indexerDatabase.checkExecution({
@@ -168,14 +168,14 @@ module.exports = {
     },
 
     async sendDepositV0(addressInfo, contractActionIndex, tick, quantity){
-        let address = addressInfo["address"]
-        let msg = "DEPOSIT|0|" + contractActionIndex + "|" + tick + "|" + quantity
+        const address = addressInfo["address"]
+        const msg = "DEPOSIT|0|" + contractActionIndex + "|" + tick + "|" + quantity
 
         console.log("Creating and sending DEPOSIT V0 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for deposit in the database...")
-        let depositRow = requireRow(await indexerDatabase.waitForDeposit({
+        const depositRow = requireRow(await indexerDatabase.waitForDeposit({
             source: address,
             contractIndex: contractActionIndex,
             tick: tick,
@@ -189,14 +189,14 @@ module.exports = {
     },
 
     async sendWithdrawV0(addressInfo, contractActionIndex, tick, quantity, expectedStatus = "valid"){
-        let address = addressInfo["address"]
-        let msg = "WITHDRAW|0|" + contractActionIndex + "|" + tick + "|" + quantity
+        const address = addressInfo["address"]
+        const msg = "WITHDRAW|0|" + contractActionIndex + "|" + tick + "|" + quantity
 
         console.log("Creating and sending WITHDRAW V0 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, msg)
 
         console.log("Waiting for withdrawal in the database...")
-        let withdrawalRow = requireRow(await indexerDatabase.waitForWithdrawal({
+        const withdrawalRow = requireRow(await indexerDatabase.waitForWithdrawal({
             source: address,
             contractIndex: contractActionIndex,
             tick: tick,

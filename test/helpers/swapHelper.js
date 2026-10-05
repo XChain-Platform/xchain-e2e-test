@@ -27,20 +27,20 @@ module.exports = {
         if (getOwnership == null) getOwnership = ""
         // Wire-format: ownership side carries empty *_AMOUNT. The DB stores NULL
         // for the empty side, so the waitFor predicate has to query with null.
-        let giveAmountWire = (giveOwnership == 1) ? "" : giveAmount
-        let getAmountWire  = (getOwnership  == 1) ? "" : getAmount
-        let giveAmountQuery = (giveOwnership == 1) ? null : giveAmount
-        let getAmountQuery  = (getOwnership  == 1) ? null : getAmount
+        const giveAmountWire = (giveOwnership == 1) ? "" : giveAmount
+        const getAmountWire  = (getOwnership  == 1) ? "" : getAmount
+        const giveAmountQuery = (giveOwnership == 1) ? null : giveAmount
+        const getAmountQuery  = (getOwnership  == 1) ? null : getAmount
 
-        let swapMessage = "SWAP|0|"+giveCoin+"|"+giveTick+"|"+giveAmountWire+"|"+giveOwnership
+        const swapMessage = "SWAP|0|"+giveCoin+"|"+giveTick+"|"+giveAmountWire+"|"+giveOwnership
             +"|"+getCoin+"|"+getTick+"|"+getAmountWire+"|"+getOwnership+"|"+getAddress
             +"|"+expiration+"|"+allowList+"|"+blockList+"|"+memo
 
         console.log("Creating and sending SWAP V0 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, swapMessage)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, swapMessage)
 
         console.log("Waiting for SWAP in the database...")
-        let row = requireRow(await indexerDatabase.waitForSwap({
+        const row = requireRow(await indexerDatabase.waitForSwap({
             txHash: txHash,
             source: addressInfo["address"],
             giveCoin: giveCoin,
@@ -57,10 +57,10 @@ module.exports = {
     },
 
     async sendSwapCancelV1(addressInfo, swapActionIndex, memo){
-        let swapMessage = "SWAP|1|"+swapActionIndex+"|"+memo
+        const swapMessage = "SWAP|1|"+swapActionIndex+"|"+memo
 
         console.log("Creating and sending SWAP CANCEL V1 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, swapMessage)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, swapMessage)
 
         console.log("Waiting for SWAP cancel to be indexed...")
         await new Promise(r => setTimeout(r, 5000))
@@ -73,11 +73,11 @@ module.exports = {
         if (allowList == null) allowList = ""
         if (blockList == null) blockList = ""
 
-        let swapMessage = "SWAP|2|"+swapActionIndex
+        const swapMessage = "SWAP|2|"+swapActionIndex
             +"|"+expiration+"|"+allowList+"|"+blockList+"|"+(memo || "")
 
         console.log("Creating and sending SWAP EDIT V2 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, swapMessage)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, swapMessage)
 
         console.log("Waiting for SWAP edit to be indexed...")
         await new Promise(r => setTimeout(r, 5000))

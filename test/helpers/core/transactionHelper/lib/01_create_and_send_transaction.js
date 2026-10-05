@@ -16,7 +16,7 @@ const transactionState = {
     verifiedUtxosAddress: null
 }
 
-function _isStaleUtxoError(err){
+function internalIsStaleUtxoError(err){
     const msg = (err && err.message) || ''
     // `missingorspent`/`bad-txns-inputs`: node rejected because inputs were already spent.
     // `Missing inputs`: bitcoin/dogecoin's bare RPC error -25 message for the same condition
@@ -90,9 +90,9 @@ module.exports = {
         let lastErr
         for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             try {
-                return await this._doCreateAndSendTransaction(addressInfo, data, rawData, outputs, outputType, compressedPubKey, opts)
+                return await this['_doCreateAndSendTransaction'](addressInfo, data, rawData, outputs, outputType, compressedPubKey, opts)
             } catch (err) {
-                if (attempt < MAX_ATTEMPTS && _isStaleUtxoError(err)) {
+                if (attempt < MAX_ATTEMPTS && internalIsStaleUtxoError(err)) {
                     // TRAP LOG: capture tracker's view of this address at the
                     // moment of failure. The encoder picks utxos[0] (sorted by
                     // value desc), so the first entry is what got rejected.

@@ -264,7 +264,7 @@ module.exports = {
                 // SEND from a faucet holder on a rail whose supply is spent, MINT otherwise.
                 await this.fundGas(issuerInfo, amount)
 
-                let lockMessage = "XBRIDGE|0|" + destCoin + "|" + destAddress + "|" + amount + "|"
+                const lockMessage = "XBRIDGE|0|" + destCoin + "|" + destAddress + "|" + amount + "|"
 
                 console.log("Creating and sending XBRIDGE V0 (lock) tx...")
                 lockTxHash = await transactionHelper.createAndSendTransaction(issuerInfo, lockMessage)
@@ -372,12 +372,12 @@ module.exports = {
     },
 
     // Unit tests only: forget every reservoir so each case starts from none.
-    _resetGasReservoirs(){
+    ['_resetGasReservoirs'](){
         reservoirs.clear()
     },
 
     // Unit tests only: forget every derived faucet holder and its last-use time.
-    _resetGasFaucet(){
+    ['_resetGasFaucet'](){
         faucetHolders.clear()
         faucetLastUsed.clear()
     }

@@ -15,10 +15,10 @@ const messageHelper = require('../helpers/messageHelper')
 describe('MESSAGE', () => {
     describe('v0 - sender key', () => {
         it('should send a sender key exchange v0', async () => {
-            let senderAddr = await cryptoHelper.getNewFundedAddress("MESSAGE.V0", COIN, NETWORK, null, "legacy", 0, 1)
-            let destAddr = await cryptoHelper.getNewAddress("MESSAGE.V0.DEST", COIN, NETWORK, null, "legacy", 0)
+            const senderAddr = await cryptoHelper.getNewFundedAddress("MESSAGE.V0", COIN, NETWORK, null, "legacy", 0, 1)
+            const destAddr = await cryptoHelper.getNewAddress("MESSAGE.V0.DEST", COIN, NETWORK, null, "legacy", 0)
 
-            let result = await messageHelper.sendMessageV0(
+            const result = await messageHelper.sendMessageV0(
                 senderAddr,
                 destAddr["address"],
                 1,
@@ -32,10 +32,10 @@ describe('MESSAGE', () => {
 describe('MESSAGE', () => {
     describe('v1 - receiver key', () => {
         it('should complete a key exchange with v0 and v1', async () => {
-            let senderAddr = await cryptoHelper.getNewFundedAddress("MESSAGE.V1.SENDER", COIN, NETWORK, null, "legacy", 0, 1)
-            let receiverAddr = await cryptoHelper.getNewFundedAddress("MESSAGE.V1.RECEIVER", COIN, NETWORK, null, "legacy", 0, 1)
+            const senderAddr = await cryptoHelper.getNewFundedAddress("MESSAGE.V1.SENDER", COIN, NETWORK, null, "legacy", 0, 1)
+            const receiverAddr = await cryptoHelper.getNewFundedAddress("MESSAGE.V1.RECEIVER", COIN, NETWORK, null, "legacy", 0, 1)
 
-            let v0Result = await messageHelper.sendMessageV0(
+            const v0Result = await messageHelper.sendMessageV0(
                 senderAddr,
                 receiverAddr["address"],
                 1,
@@ -43,7 +43,7 @@ describe('MESSAGE', () => {
             )
             assert(v0Result.message, "Message v0 should exist in DB")
 
-            let v1Result = await messageHelper.sendMessageV1(
+            const v1Result = await messageHelper.sendMessageV1(
                 receiverAddr,
                 senderAddr["address"],
                 1,
@@ -57,8 +57,8 @@ describe('MESSAGE', () => {
 describe('MESSAGE', () => {
     describe('v2 - encrypted message', () => {
         it('should send an encrypted message v2', async () => {
-            let senderAddr = await cryptoHelper.getNewFundedAddress("MESSAGE.V2.SENDER", COIN, NETWORK, null, "legacy", 0, 1)
-            let receiverAddr = await cryptoHelper.getNewFundedAddress("MESSAGE.V2.RECEIVER", COIN, NETWORK, null, "legacy", 0, 1)
+            const senderAddr = await cryptoHelper.getNewFundedAddress("MESSAGE.V2.SENDER", COIN, NETWORK, null, "legacy", 0, 1)
+            const receiverAddr = await cryptoHelper.getNewFundedAddress("MESSAGE.V2.RECEIVER", COIN, NETWORK, null, "legacy", 0, 1)
 
             await messageHelper.sendMessageV0(
                 senderAddr,
@@ -73,7 +73,7 @@ describe('MESSAGE', () => {
                 receiverAddr["publicKey"].toString('hex')
             )
 
-            let result = await messageHelper.sendMessageV2(
+            const result = await messageHelper.sendMessageV2(
                 senderAddr,
                 receiverAddr["address"],
                 "encrypted_test_message_content_here"
@@ -86,10 +86,10 @@ describe('MESSAGE', () => {
 describe('MESSAGE', () => {
     describe('v3 - plaintext', () => {
         it('should send a plaintext message v3', async () => {
-            let senderAddr = await cryptoHelper.getNewFundedAddress("MESSAGE.V3", COIN, NETWORK, null, "legacy", 0, 1)
-            let destAddr = await cryptoHelper.getNewAddress("MESSAGE.V3.DEST", COIN, NETWORK, null, "legacy", 0)
+            const senderAddr = await cryptoHelper.getNewFundedAddress("MESSAGE.V3", COIN, NETWORK, null, "legacy", 0, 1)
+            const destAddr = await cryptoHelper.getNewAddress("MESSAGE.V3.DEST", COIN, NETWORK, null, "legacy", 0)
 
-            let result = await messageHelper.sendMessageV3(
+            const result = await messageHelper.sendMessageV3(
                 senderAddr,
                 destAddr["address"],
                 "Hello from XChain e2e test"

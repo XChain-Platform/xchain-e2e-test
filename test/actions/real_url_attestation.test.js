@@ -38,8 +38,8 @@
  */
 
 const assert = require('assert')
-const _path = require('path')
-const _fs = require('fs')
+const internalPath = require('path')
+const internalFs = require('fs')
 
 const cryptoHelper = require('../helpers/core/cryptoHelper')
 const stakeHelper = require('../helpers/stakeHelper')
@@ -51,18 +51,18 @@ const { skipIfResponseMirrorEra } = require('../helpers/attestLegacyResponsePath
 // Resolve the REAL http_get provider from the bundled (in-image) xchain-hub,
 // falling back to the monorepo sibling for local dev. Mirrors the loader in
 // test/federation/multiHubAttestation.test.js.
-const _hubBase = (function () {
+const internalHubBase = (function () {
     const candidates = [
         process.env.XCHAIN_HUB_PATH,
-        _path.resolve(__dirname, '../../xchain-hub'),
-        _path.resolve(__dirname, '../../../xchain-hub')
+        internalPath.resolve(__dirname, '../../xchain-hub'),
+        internalPath.resolve(__dirname, '../../../xchain-hub')
     ].filter(Boolean)
     for (const c of candidates) {
-        if (_fs.existsSync(_path.join(c, 'src/providers/http_get.js'))) return c
+        if (internalFs.existsSync(internalPath.join(c, 'src/providers/http_get.js'))) return c
     }
     return candidates[candidates.length - 1]
 })()
-const http_get = require(_hubBase + '/src/providers/http_get.js')
+const httpGet = require(internalHubBase + '/src/providers/http_get.js')
 
 // Deterministic public endpoint: a fixed jsonplaceholder resource returns the
 // same body byte-for-byte for the same path, so byte_equality consensus is
@@ -101,7 +101,7 @@ const stakedValidators = []   // full set, mirrors the indexer's responsible-set
 // Stake a validator from its OWN distinct funded source (SWQ source-dedup
 // collapses same-source keys into one responsible-set slot).
 async function stakeValidatorFromOwnSource(v) {
-    let stakeSource = await cryptoHelper.getNewFundedAddress(
+    const stakeSource = await cryptoHelper.getNewFundedAddress(
         'realurl-val', COIN, NETWORK, null, 'legacy', stakedValidators.length, 0.02
     )
     // 15000 clears BOTH the attestation capability min_stake (1000) and the
@@ -151,7 +151,7 @@ async function setupRealUrlAttestation() {
 async function fetchRealUrl() {
     // 2. REAL fetch through the production http_get provider. This is the
     //    actual outbound HTTPS GET - no mock, no local server.
-    const fetched = await http_get.fetch(REAL_URL, { maxResponseBytes: 32768, timeoutMs: 10000 })
+    const fetched = await httpGet.fetch(REAL_URL, { maxResponseBytes: 32768, timeoutMs: 10000 })
     const realBody = fetched.body.toString('utf8')
     const realMeta = String(fetched.meta)   // HTTP status code, part of the signing message
     console.log('LIVE FETCH  status=' + realMeta + '  bytes=' + Buffer.byteLength(realBody, 'utf8'))

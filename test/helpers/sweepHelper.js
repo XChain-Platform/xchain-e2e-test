@@ -24,15 +24,15 @@ module.exports = {
         if (swaps == null) swaps = 0
         if (dispensers == null) dispensers = 0
 
-        let sweepMessage = "SWEEP|0|"+destination
+        const sweepMessage = "SWEEP|0|"+destination
             +"|"+balances+"|"+ownerships
             +"|"+orders+"|"+swaps+"|"+dispensers+"|"+memo
 
         console.log("Creating and sending SWEEP V0 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, sweepMessage)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, sweepMessage)
 
         console.log("Waiting for SWEEP in the database...")
-        let row = requireRow(await indexerDatabase.waitForSweep({
+        const row = requireRow(await indexerDatabase.waitForSweep({
             txHash: txHash,
             source: addressInfo["address"],
             destination: destination,

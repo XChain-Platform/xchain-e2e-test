@@ -71,7 +71,7 @@ function stageProductionSigner(addressInfo){
     for(const dependency of ['xchain-sdk', 'dotenv']){
         let target;
         try { target = path.dirname(require.resolve(dependency + '/package.json')); }
-        catch(_){ target = path.resolve(__dirname, '../../../', dependency); }
+        catch(internal){ target = path.resolve(__dirname, '../../../', dependency); }
         fs.symlinkSync(target, path.join(signerDir, 'node_modules', dependency), 'dir');
     }
     const network = CryptoNetworks.getBitcoinJsNetwork(COIN + '-' + NETWORK);

@@ -29,7 +29,7 @@ const { startMesh, nodeEnv } = require('../lib/drillRunner');
 const { encode, decodeLine, LineSplitter, TAG } = require('../lib/protocol');
 
 function fakeIdentities(n) {
-    return Array.from({ length: n }, (_, i) => ({
+    return Array.from({ length: n }, (internal, i) => ({
         privkeyHex: String(i).padStart(2, '0').repeat(32).slice(0, 64),
         pubkeyHex:  'pub' + i
     }));

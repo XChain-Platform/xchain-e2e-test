@@ -45,7 +45,7 @@ const idxCcr = require(path.join(ROOT, 'xchain-indexer', REGISTRY_ENTRY));
 
 const CrossChainDexEngine  = require(path.join(ROOT, 'xchain-hub/src/cross_chain/dex_engine.js'));
 const StateAnchorPublisher = require(path.join(ROOT, 'xchain-hub/src/anchor/publisher.js'));
-const Cross_Settle         = require(path.join(ROOT, 'xchain-indexer/src/actions/cross_settle/index.js'));
+const CrossSettle          = require(path.join(ROOT, 'xchain-indexer/src/actions/cross_settle/index.js'));
 const AnchorRecovery       = require(path.join(ROOT, 'xchain-indexer/bin/recovery.js'));
 
 // All four builders read only their argument (no `this`), so invoke them directly
@@ -55,7 +55,7 @@ function canonicals(m) {
     return {
         hubEngine:   CrossChainDexEngine.prototype.canonicalMatch.call({}, m, m.finalizing_view || 0),
         hubArchive:  StateAnchorPublisher.prototype.matchCanonical.call({}, m),
-        idxSettle:   Cross_Settle.prototype.canonical.call({}, m),
+        idxSettle:   CrossSettle.prototype.canonical.call({}, m),
         idxRecovery: AnchorRecovery.prototype.matchCanonical.call({}, m),
     };
 }

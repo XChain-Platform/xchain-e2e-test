@@ -82,7 +82,7 @@ const chainRail = require('./chainRail')
 // sibling, e2e image bundle, or an explicit override. Resolved lazily so a
 // suite that only reads its own preconditions does not die at require() time in
 // a checkout without the sibling.
-function _resolveSibling(pkg, rel){
+function internalResolveSibling(pkg, rel){
     const candidates = [
         process.env['XCHAIN_' + pkg.replace('xchain-', '').toUpperCase() + '_PATH'] &&
             path.join(process.env['XCHAIN_' + pkg.replace('xchain-', '').toUpperCase() + '_PATH'], rel),
@@ -101,8 +101,8 @@ function _resolveSibling(pkg, rel){
 
 // The same ladder, answering "is it there" instead of throwing. Used where a
 // missing sibling is a legitimate skip and a broken one must still be loud.
-function _resolveSiblingIfPresent(pkg, rel){
-    try { return _resolveSibling(pkg, rel) }
+function internalResolveSiblingIfPresent(pkg, rel){
+    try { return internalResolveSibling(pkg, rel) }
     catch (e) { return null }
 }
 
@@ -134,20 +134,20 @@ if (!process.env[ROLLCALL_REGTEST_ARMING_ENV]) process.env[ROLLCALL_REGTEST_ARMI
 // leave it unset and every leg here stays v0 exactly as before.
 const ROLLCALL_GATES_ARMING_ENV = 'XC_ROLLCALL_GATES_REGTEST_ACTIVATION'
 
-let _rca = null, _eqh = null, _rga = null, _crd = null
-function rca(){ if (!_rca) _rca = require(_resolveSibling('xchain-indexer', 'src/consensus/gates/rollcall_gate.js')); return _rca }
-function eqh(){ if (!_eqh) _eqh = require(_resolveSibling('xchain-indexer', 'src/consensus/equivocation_header.js')); return _eqh }
-function rga(){ if (!_rga) _rga = require(_resolveSibling('xchain-indexer', 'src/consensus/gates/rollcall_gates_gate.js')); return _rga }
+let internalRca = null, internalEqh = null, internalRga = null, internalCrd = null
+function rca(){ if (!internalRca) internalRca = require(internalResolveSibling('xchain-indexer', 'src/consensus/gates/rollcall_gate.js')); return internalRca }
+function eqh(){ if (!internalEqh) internalEqh = require(internalResolveSibling('xchain-indexer', 'src/consensus/equivocation_header.js')); return internalEqh }
+function rga(){ if (!internalRga) internalRga = require(internalResolveSibling('xchain-indexer', 'src/consensus/gates/rollcall_gates_gate.js')); return internalRga }
 // Any other shipped indexer module, through the SAME candidate ladder. A suite
 // that hard-coded '../../../xchain-indexer/...' would resolve in a monorepo
 // checkout and fail in the e2e image bundle, where the sibling sits elsewhere.
-function indexerModule(rel){ return require(_resolveSibling('xchain-indexer', rel)) }
-function crd(){ if (!_crd) _crd = require(_resolveSibling('xchain-indexer', 'src/consensus_rules_digest.js')); return _crd }
+function indexerModule(rel){ return require(internalResolveSibling('xchain-indexer', rel)) }
+function crd(){ if (!internalCrd) internalCrd = require(internalResolveSibling('xchain-indexer', 'src/consensus_rules_digest.js')); return internalCrd }
 
 // The frozen cross-implementation vector. Authoritative in xchain-documentation;
 // read, never forked.
 function frozenVector(){
-    return require(_resolveSibling('xchain-documentation', 'protocol/test-vectors/rollcall_canonical.json'))
+    return require(internalResolveSibling('xchain-documentation', 'protocol/test-vectors/rollcall_canonical.json'))
 }
 
 // ── the acceptance federation ────────────────────────────────────────────────
@@ -966,7 +966,7 @@ async function assertDogePeerManifest(dogeConn, network){
     // go green having compared nothing - the false-green shape the repo's own
     // vmFalseGreen guard exists to refuse.
     let localHash = null
-    const localManifest = _resolveSiblingIfPresent('xchain-indexer', 'test/fixtures/action-manifest.json')
+    const localManifest = internalResolveSiblingIfPresent('xchain-indexer', 'test/fixtures/action-manifest.json')
     if (localManifest){
         localHash = crypto.createHash('sha256').update(fs.readFileSync(localManifest)).digest('hex')
     }
@@ -1850,7 +1850,7 @@ async function traceRounds(ctx, label){
                ' rank=' + s.our_rank + ' leader=' + String(s.leader || '').slice(0, 12) +
                ' txids=' + (Array.isArray(s.txids) ? s.txids.length : 0)
     })
-    console.log('    [trace] ' + label + ' (btc tip ' + tip + ', since=' + (tip - Number(ctx._traceEpoch || 0)) + ')')
+    console.log('    [trace] ' + label + ' (btc tip ' + tip + ', since=' + (tip - Number(ctx['_traceEpoch'] || 0)) + ')')
     for (const r of rows) console.log(r)
 }
 
@@ -1869,7 +1869,7 @@ async function traceRounds(ctx, label){
 // does, and stop as soon as the DOGE side actually holds every signature we
 // expect rather than after a fixed number of ticks.
 function electionTolerance(network){
-    const mod = require(_resolveSibling('xchain-hub', 'src/rollcall/round.js'))
+    const mod = require(internalResolveSibling('xchain-hub', 'src/rollcall/round.js'))
     const t = mod.ELECTION_TOLERANCE_DEFAULTS && mod.ELECTION_TOLERANCE_DEFAULTS[network]
     assert.ok(Number.isFinite(Number(t)) && Number(t) > 0,
         'cannot read ELECTION_TOLERANCE_DEFAULTS.' + network + ' from the shipped RollcallRound; the ladder ' +
@@ -2005,7 +2005,7 @@ async function driveEpoch(ctx, epoch, opts){
     await mineBtcTo(ctx, epoch + 6, 'burying epoch ' + epoch)
 
     const want = ctx.rounds.length - silentHubs.length
-    ctx._traceEpoch = epoch
+    ctx['_traceEpoch'] = epoch
     const gossiped = await waitForGossip(ctx.mvh, epoch, want, 120000, silentHubs, ctx)
     await traceRounds(ctx, 'after gossip')
     assert.ok(gossiped >= want,
@@ -2020,7 +2020,7 @@ async function driveEpoch(ctx, epoch, opts){
     // with the AT9 leg, because the two drifted apart once already and the copy
     // that ticked in place could never publish the top rank.
     const wantKeys  = ctx.roster.slice(0, ctx.rounds.length)
-        .filter((_, i) => !silentHubs.map(Number).includes(i))
+        .filter((internal, i) => !silentHubs.map(Number).includes(i))
         .map(r => r.pubkey)
     await climbPublishLadder(ctx, epoch, wantKeys, { silentHubs, maxHeight: windowEnd })
 
@@ -2078,7 +2078,7 @@ async function protocolRewardAddress(ctx){
     // throws must be RED: swallowing it would hand the caller null, which reads
     // as "no reward address configured", and the drill would then decline to
     // fund the pool and pass having tested nothing.
-    const cfg = require(_resolveSibling('xchain-indexer', rel));
+    const cfg = require(internalResolveSibling('xchain-indexer', rel));
     const c   = (cfg && typeof cfg.toIndexerConfig === 'function') ? cfg.toIndexerConfig(coin, net) : null;
     if(c && c.ADDRESS && c.ADDRESS.REWARD) return String(c.ADDRESS.REWARD);
     return null;

@@ -77,7 +77,7 @@ async function fundUtxo(address, amountBtc = 0.002) {
     const seen = await global.nodeConnector.waitForTx(txid, 30000);
     if (!seen) throw new Error('funding tx ' + txid + ' never appeared on-chain');
     try { await global.regtestMinerConnector.generateBlocks(1); } catch (e) { /* miner auto-mines anyway */ }
-    const raw = await global.nodeConnector._rpc('getrawtransaction', [txid, true]);
+    const raw = await global.nodeConnector['_rpc']('getrawtransaction', [txid, true]);
     // Both vout shapes: litecoind still reports the pre-Core-22 `addresses`
     // array, so matching only `address` cannot pass on LTC.
     const out = addressHelper.findVoutPayingAddress(raw, address);
@@ -110,7 +110,7 @@ async function spend(musig, agg, utxo, signerCount) {
     tx.ins[0].witness = [sig];
     const localValid = ecc.verifySchnorr(sighash, Buffer.from(p2tr.pubkey), sig);
     try {
-        const txid = await global.nodeConnector._rpc('sendrawtransaction', [tx.toHex()]);
+        const txid = await global.nodeConnector['_rpc']('sendrawtransaction', [tx.toHex()]);
         return { accepted: true, txid, localValid };
     } catch (e) {
         return { accepted: false, reason: e.message, localValid };

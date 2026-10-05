@@ -16,7 +16,7 @@ const { staticSkipTitles, judgePolicyDrive } = require('../../../scripts/rail_po
 function report ({ passes = 28, failures = [], pending = [] } = {}) {
     return {
         stats: { passes, failures: failures.length, pending: pending.length },
-        passes: Array.from({ length: passes }, (_, index) => ({ title: 'pass ' + index })),
+        passes: Array.from({ length: passes }, (internal, index) => ({ title: 'pass ' + index })),
         failures,
         pending,
     }

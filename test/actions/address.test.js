@@ -15,9 +15,9 @@ const addressHelper = require('../helpers/addressHelper')
 describe('ADDRESS', () => {
     describe('v0', () => {
         it('should set address options v0', async () => {
-            let addrInfo = await cryptoHelper.getNewFundedAddress("ADDRESS.V0", COIN, NETWORK, null, "legacy", 0, 1)
+            const addrInfo = await cryptoHelper.getNewFundedAddress("ADDRESS.V0", COIN, NETWORK, null, "legacy", 0, 1)
 
-            let result = await addressHelper.sendAddressV0(
+            const result = await addressHelper.sendAddressV0(
                 addrInfo,
                 1, // feePreference: 1=destroyed
                 0, // requireMemo: 0=not required

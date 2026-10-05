@@ -290,7 +290,7 @@ describe('MultiValidatorHub: LIVE weighted attestation source-dedup through PBFT
         // All responsible hubs fetch the same fixed body, so byte-equality
         // consensus converges in-process with no judge.
         await new Promise((resolve) => {
-            httpServer = http.createServer((_req, res) => {
+            httpServer = http.createServer((internalReq, res) => {
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(FIXED_BODY);
             });
@@ -318,7 +318,7 @@ describe('MultiValidatorHub: LIVE weighted attestation source-dedup through PBFT
         httpGet = mvh.hubs[0].attestationRound.providerRegistry.getModule('http_get');
         assert.ok(httpGet && typeof httpGet.fetch === 'function', 'http_get provider module not resolvable from the hub registry');
         origFetch = httpGet.fetch;
-        httpGet.fetch = async function _testPatchedFetch(payload, options) {
+        httpGet.fetch = async function internalTestPatchedFetch(payload, options) {
             if (typeof payload === 'string' && payload.startsWith('http://127.0.0.1:')) {
                 const axios = require('axios');
                 const res = await axios.get(payload, {

@@ -30,11 +30,11 @@ async function setupPartialUnstake () {
     )
     await gasHelper.ensureGasBalance(partialAddr, '2000')
 
-    let { publicKey } = crypto.generateKeyPairSync('ed25519')
+    const { publicKey } = crypto.generateKeyPairSync('ed25519')
     partialPubkey = publicKey.export({ format: 'der', type: 'spki' })
         .subarray(12).toString('hex')
 
-    let stakeResult = await stakeHelper.sendStakeV1(partialAddr, '1000.00000000', partialPubkey)
+    const stakeResult = await stakeHelper.sendStakeV1(partialAddr, '1000.00000000', partialPubkey)
     assert.strictEqual(stakeResult.stake.status, 'valid', 'setup stake should be valid')
 
     // Activate the stake. Pause the auto-miner around the deterministic
@@ -48,7 +48,7 @@ async function setupPartialUnstake () {
 }
 
 async function movesRequestedAmountIntoCooldown () {
-    let result = await stakeHelper.sendUnstakeV0(partialAddr, partialPubkey, '400')
+    const result = await stakeHelper.sendUnstakeV0(partialAddr, partialPubkey, '400')
     assert(result.unstake, 'partial unstake record should exist in DB')
     assert.strictEqual(result.unstake.status, 'valid', 'partial unstake should be valid')
     assert.strictEqual(Number(result.unstake.amount), 400,
@@ -59,9 +59,9 @@ async function movesRequestedAmountIntoCooldown () {
 async function rejectsUnstakeDuringHandoff () {
     // The residual re-stake activates when the swept rows deactivate
     // (block + 6); until then the pubkey has no unstakeable rows.
-    let msg = 'UNSTAKE|0|' + partialPubkey
-    let txHash = await transactionHelper.createAndSendTransaction(partialAddr, msg)
-    let row = await stakeHelper.waitForAnyUnstake({
+    const msg = 'UNSTAKE|0|' + partialPubkey
+    const txHash = await transactionHelper.createAndSendTransaction(partialAddr, msg)
+    const row = await stakeHelper.waitForAnyUnstake({
         source:        partialAddr.address,
         signingPubkey: partialPubkey,
         txHash:        txHash
@@ -83,7 +83,7 @@ async function unstakesResidualAfterHandoff () {
         await regtestMinerConnector.resumeMining()
     }
 
-    let result = await stakeHelper.sendUnstakeV0(partialAddr, partialPubkey)
+    const result = await stakeHelper.sendUnstakeV0(partialAddr, partialPubkey)
     assert.strictEqual(result.unstake.status, 'valid', 'residual unstake should be valid')
     assert.strictEqual(Number(result.unstake.amount), 600,
         'residual sweep should be the un-unstaked remainder, got ' + result.unstake.amount)
@@ -91,14 +91,14 @@ async function unstakesResidualAfterHandoff () {
 
 async function rejectsOverAsk () {
     // Fresh staker: everything above is already unstaking.
-    let overAddr = await cryptoHelper.getNewFundedAddress(
+    const overAddr = await cryptoHelper.getNewFundedAddress(
         'overask-staker', COIN, NETWORK, null, 'legacy', 0, 1
     )
     await gasHelper.ensureGasBalance(overAddr, '2000')
-    let { publicKey } = crypto.generateKeyPairSync('ed25519')
-    let overPubkey = publicKey.export({ format: 'der', type: 'spki' })
+    const { publicKey } = crypto.generateKeyPairSync('ed25519')
+    const overPubkey = publicKey.export({ format: 'der', type: 'spki' })
         .subarray(12).toString('hex')
-    let stakeResult = await stakeHelper.sendStakeV1(overAddr, '1000.00000000', overPubkey)
+    const stakeResult = await stakeHelper.sendStakeV1(overAddr, '1000.00000000', overPubkey)
     assert.strictEqual(stakeResult.stake.status, 'valid', 'setup stake should be valid')
     await regtestMinerConnector.pauseMining()
     try {
@@ -107,9 +107,9 @@ async function rejectsOverAsk () {
         await regtestMinerConnector.resumeMining()
     }
 
-    let msg = 'UNSTAKE|0|' + overPubkey + '|1000.00000001'
-    let txHash = await transactionHelper.createAndSendTransaction(overAddr, msg)
-    let row = await stakeHelper.waitForAnyUnstake({
+    const msg = 'UNSTAKE|0|' + overPubkey + '|1000.00000001'
+    const txHash = await transactionHelper.createAndSendTransaction(overAddr, msg)
+    const row = await stakeHelper.waitForAnyUnstake({
         source:        overAddr.address,
         signingPubkey: overPubkey,
         txHash:        txHash

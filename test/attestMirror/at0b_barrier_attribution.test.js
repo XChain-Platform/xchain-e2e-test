@@ -135,7 +135,7 @@ describe('AT0 last clause: the mirror stall is attest_response_sync_barrier by n
     after(async function () {
         if (venue) {
             // Released even if a case failed, so teardown is not fighting an armed fault.
-            try { venue.releaseMirrorTable(STARVED, MIRROR_TABLE) } catch (_) { /* never armed */ }
+            try { venue.releaseMirrorTable(STARVED, MIRROR_TABLE) } catch (internal) { /* never armed */ }
             await venue.stop()
         }
     })

@@ -50,7 +50,7 @@ class XChainEncoderConnector {
             id: 1
         }
 
-        var response = null
+        let response = null
         try {
             response = await axios.post(this.url, data, { ...this.reqConfig, timeout: PING_TIMEOUT_MS })
         } catch (err) {

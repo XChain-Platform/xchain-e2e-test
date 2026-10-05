@@ -17,9 +17,10 @@
  *
  * `test/integration/*.integration.test.js` ran in no CI lane at all, so
  * xchain-indexer 521edf2 turned one of its suites red on 2026-07-16 and nobody
- * heard about it for ten days. This script is the lane: `npm run ci` calls it,
- * so every venue gate run, every ci-all.sh sweep and every workflow that runs
- * the repo's own gate exercises the tier.
+ * heard about it for ten days. `npm run ci:live` runs this script, and
+ * bin/ci-full.sh (`npm run ci:full`, which `npm run ci` now aliases) calls it
+ * in its live-tier tier. Every venue gate run, every ci-all.sh sweep and every
+ * workflow that runs the repo's own gate exercises the tier.
  *
  * WHY A RUNNER RATHER THAN ONE MORE GLOB ON THE MOCHA LINE. The rot that
  * started this item was not a red suite, it was a red suite NOBODY SAW, and a
@@ -50,7 +51,7 @@
  * back with a config file in front of it.
  *
  * COST, because it is the reason this was not wired years ago. Measured on
- * 2026-08-09: the 20-suite roster is ~700s, and `npm run ci` end to end
+ * 2026-08-09: the 20-suite roster is ~700s, and `npm run ci:full` end to end
  * is ~12.5 min. That is longer than the ~10 min after which GitHub tends to drop
  * an idle push connection, so a pre-push gate run can outlive the push it is
  * gating. The consequence is one failed push, not a lost gate: ci-dispatch banks
@@ -308,6 +309,28 @@ function mochaSummary(report) {
     return lines
 }
 
+function reportFile(entry, repoRoot = REPO_ROOT) {
+    if (!entry || !entry.file) return null
+    return parentOf(path.relative(repoRoot, entry.file).split(path.sep).join('/'))
+}
+
+function replaceReportFiles(base, retry, files, repoRoot = REPO_ROOT) {
+    const replacing = new Set(files)
+    const merged = { ...base }
+    for (const field of ['passes', 'failures', 'pending']) {
+        const kept = (base[field] || []).filter(entry => !replacing.has(reportFile(entry, repoRoot)))
+        merged[field] = kept.concat(retry[field] || [])
+    }
+    merged.stats = {
+        ...(base.stats || {}),
+        passes: merged.passes.length,
+        failures: merged.failures.length,
+        pending: merged.pending.length,
+        tests: merged.passes.length + merged.failures.length + merged.pending.length
+    }
+    return merged
+}
+
 const DB_PRIVILEGE_CODES = new Set([
     'ER_ACCESS_DENIED_ERROR',
     'ER_DBACCESS_DENIED_ERROR',
@@ -426,6 +449,42 @@ function reapStaleFixtureContainers(now = Date.now()) {
     return stale.length
 }
 
+function evaluate(report, expected) {
+    const tally    = tallyByFile(report)
+    const problems = classify(expected, tally)
+    return { report, tally, problems, outcome: classifyReport(report, problems) }
+}
+
+function runRetry(retryFiles, roster, forceDocker) {
+    reapStaleFixtureContainers()
+    const retried = runMocha(retryFiles, roster, { forceDocker })
+    if (retried.error) {
+        console.error('live tier: could not start retry: ' + retried.error.message)
+        return null
+    }
+    try {
+        return JSON.parse(fs.readFileSync(retried.out, 'utf8'))
+    } catch (e) {
+        console.error('live tier: retry wrote no readable report (' + e.message + ')')
+        return null
+    }
+}
+
+function retryRedSuites(report, expected, roster, rerun) {
+    let state = evaluate(report, expected)
+    const retryCount = Number.isInteger(roster.retryCount) ? roster.retryCount : 0
+    for (let attempt = 1; state.outcome.exitCode === 1 && attempt <= retryCount; attempt++) {
+        const retryFiles = Array.from(new Set(state.problems.map(problem => problem.file)))
+        if (!retryFiles.length) break
+        console.log('\nlive tier: retry ' + attempt + '/' + retryCount + ' in a fresh process for:')
+        for (const file of retryFiles) console.log('  ' + file)
+        const retryReport = rerun(retryFiles)
+        if (!retryReport) break
+        state = evaluate(replaceReportFiles(state.report, retryReport, retryFiles), expected)
+    }
+    return state
+}
+
 function runMocha(files, roster, options = {}) {
     const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'xc714-live-')), 'report.json')
     const bin = path.join(REPO_ROOT, 'node_modules', '.bin', 'mocha')
@@ -510,9 +569,9 @@ function main(argv) {
         return 1
     }
 
-    const tally    = tallyByFile(report)
-    const problems = classify(expected, tally)
-    const outcome  = classifyReport(report, problems)
+    const settled = retryRedSuites(report, expected, roster, file => runRetry(file, roster, forceDocker))
+    report = settled.report
+    const { tally, problems, outcome } = settled
 
     console.log('')
     for (const line of mochaSummary(report)) console.log(line)
@@ -552,7 +611,7 @@ function main(argv) {
 }
 
 module.exports = { requiredSpecifiers, requiresChild, formatTally, childTally, childFiles, parentOf, discoverSuites, readRoster, auditRoster, suitesToRun, suitesExcluded, tallyByFile, classify,
-    mochaSummary, isDbPrivilegeError, isBeforeAllHookFailure, isDbPrivilegeBeforeAllFailure, classifyReport,
+    mochaSummary, reportFile, replaceReportFiles, retryRedSuites, isDbPrivilegeError, isBeforeAllHookFailure, isDbPrivilegeBeforeAllFailure, classifyReport,
     liveTierBlocker, mochaEnvironment, VENUE_EXIT, ROSTER_FILE, LIVE_DIR }
 
 if (require.main === module) process.exit(main(process.argv.slice(2)))

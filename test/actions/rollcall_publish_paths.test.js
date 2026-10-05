@@ -219,7 +219,7 @@ describe('ROLLCALL acceptance: sweeper, self-publish and the below-threshold epo
         // nothing to filter, and republishes the whole set.
         await rc.waitForOnChainSigners(ctx, EA,
             ctx.roster.slice(0, ctx.rounds.length)
-                .filter((_, i) => i !== OMITTED_HUB).map(r => r.pubkey))
+                .filter((internal, i) => i !== OMITTED_HUB).map(r => r.pubkey))
 
         // The omitted hub comes back, signs, and gossips. Its own sweep path stays
         // shut, so anything that lands its signature is somebody else sweeping.
@@ -333,7 +333,7 @@ describe('ROLLCALL acceptance: sweeper, self-publish and the below-threshold epo
         // signature is already there, and an unresolved read publishes anyway.
         await rc.waitForOnChainSigners(ctx, EB,
             ctx.roster.slice(0, ctx.rounds.length)
-                .filter((_, i) => i !== OMITTED_HUB).map(r => r.pubkey))
+                .filter((internal, i) => i !== OMITTED_HUB).map(r => r.pubkey))
 
         // Every sweep path stays shut. The only route left for the omitted hub's
         // signature is the censorship escape hatch: its own one-pair publish.

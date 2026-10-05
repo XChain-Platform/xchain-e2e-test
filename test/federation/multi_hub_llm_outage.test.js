@@ -69,7 +69,7 @@ const { requireFederationEnv, assertCleanValidatorSet } = require('../helpers/fe
 
 function sleep(ms){ return new Promise(r => setTimeout(r, ms)) }
 
-async function _settleStack() {
+async function internalSettleStack() {
     await utxoTrackerConnector.quiesce({ timeoutMs: 30000, pollMs: 250, regtestMiner: regtestMinerConnector })
 }
 
@@ -149,7 +149,7 @@ async function applyLlmGovernance(mvh, activationBlock, additionalConfig){
         const def = Object.assign({}, reg.getDef('llm'), { additional_config: additionalConfig })
         reg.providers.set('llm', def)
         const mod = reg.getModule('llm')
-        if (mod && typeof mod._setConfig === 'function') mod._setConfig(def)
+        if (mod && typeof mod['_setConfig'] === 'function') mod['_setConfig'](def)
     }
 }
 
@@ -242,12 +242,12 @@ module.exports = {
             const addr = await cryptoHelper.getNewFundedAddress(
                 'outage-staker-' + i, COIN, NETWORK, null, 'legacy', 0, 0.02
             )
-            await _settleStack()
+            await internalSettleStack()
             // 30000 clears BOTH the attestation capability min_stake (1000) and the llm
             // PROVIDER floor (25000, higher than http_get's 10000), enforced on
             // the responsible set at/above STAKE_WEIGHTED_QUORUM (armed at genesis on regtest).
             await gasHelper.ensureGasBalance(addr, '35000')
-            await _settleStack()
+            await internalSettleStack()
             const result = await stakeHelper.sendStakeV1(addr, '30000.00000000', pubkeys[i])
             assert.strictEqual(result.stake.status, 'valid', 'stake ' + i + ' should be valid')
         }
@@ -255,13 +255,13 @@ module.exports = {
         // Activation delay AND snapshot burial: the responsible set resolves at the
         // request's block minus CANONICAL_REORG_BUFFER, so the delay alone is 6 short.
         await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
-        await _settleStack()
+        await internalSettleStack()
 
         owner = await cryptoHelper.getNewFundedAddress(
             'outage-owner', COIN, NETWORK, null, 'legacy', 0, 0.02
         )
         await regtestMinerConnector.generateBlocks(2)
-        await _settleStack()
+        await internalSettleStack()
         await gasHelper.ensureGasBalance(owner, '20000')
 
         const deploy = await vmHelper.sendDeployV0(owner, CONTRACT_CODE, 500000)
@@ -272,7 +272,7 @@ module.exports = {
             'outage-publisher', COIN, NETWORK, null, 'legacy', 0, 0.02
         )
         await regtestMinerConnector.generateBlocks(2)
-        await _settleStack()
+        await internalSettleStack()
         mvh.setBroadcastHook(async (wirePayload) => {
             const txHash = await transactionHelper.createAndSendTransaction(publisherAddr, wirePayload)
             return { txid: txHash }
@@ -515,7 +515,7 @@ module.exports = {
         const request = await submitRequest()
         const rid = request.request_id
         const idx = slot0HubIndex(mvh, rid)
-        await mvh._stopOne(mvh.hubs[idx])
+        await mvh['_stopOne'](mvh.hubs[idx])
 
         await regtestMinerConnector.generateBlocks(4)
         await sleep(75000)

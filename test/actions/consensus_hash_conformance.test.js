@@ -275,7 +275,7 @@ describe('state commitment conformance: sync block_merkle_root == indexer commit
         }
         assert.strictEqual(mismatches.length, 0,
             'sync block_merkle_root diverged from indexer committed roots (block-content conformance pair drifted). ' +
-            'Update BOTH xchain-sync/src/db.js getBlockLeafRows / stateCommitment.js and the indexer side, then ' +
+            'Update BOTH xchain-sync/src/db/actions.js getBlockLeafRows / src/state_commitment/index.js and the indexer side, then ' +
             'regenerate the golden:\n' + JSON.stringify(mismatches.slice(0, 10), null, 2));
     });
 });

@@ -97,7 +97,7 @@ async function stakeValidatorFromOwnSource(v) {
     // time would derive the SAME address → same staking source → SWQ dedup collapses
     // them back to one slot (the exact bug this fix targets). Indexing by the current
     // count gives each validator a genuinely distinct source address.
-    let stakeSource = await cryptoHelper.getNewFundedAddress(
+    const stakeSource = await cryptoHelper.getNewFundedAddress(
         'attest-val', COIN, NETWORK, null, 'legacy', state.stakedValidators.length, 0.02
     )
     // Enough XCHAIN to stake 15000 + cover the STAKE protocol fee. 15000 clears BOTH

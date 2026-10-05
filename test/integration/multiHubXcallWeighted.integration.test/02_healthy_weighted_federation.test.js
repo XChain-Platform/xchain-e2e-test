@@ -123,7 +123,7 @@ async function driveDispatch(mvh, validators, seedBase, requireLiveLeader) {
                 const r = await hub.db.doQuery(
                     "SELECT call_id FROM cross_chain_calls WHERE call_id = ? AND phase = 'dispatch'", [callId]);
                 if (r.length >= 1) held++;
-            } catch (_) { /* a hub that cannot be read has not persisted it */ }
+            } catch (internal) { /* a hub that cannot be read has not persisted it */ }
         }
         return { ok: held === mvh.hubs.length, held: held };
     }, { timeoutMs: SETTLE_MS, intervalMs: 100 });

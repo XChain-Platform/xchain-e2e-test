@@ -68,15 +68,15 @@ describe('Bootstrap: hub discovery fallback', function () {
         const COIN_CODE_MAP = { bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' }
         global.COIN_CODE = COIN_CODE_MAP[coin] || coin.toUpperCase().slice(0, 3)
 
-        let hubEndpoints = XChainHubConnector.parseEndpoints()
+        const hubEndpoints = XChainHubConnector.parseEndpoints()
         global.hubConnector = new XChainHubConnector(hubEndpoints)
-        let pingHub = await global.hubConnector.ping()
+        const pingHub = await global.hubConnector.ping()
 
         if (!pingHub) {
             throw new Error("Can't connect to the XChain Hub")
         }
 
-        let hubConfigs = await global.hubConnector.getAllConfig()
+        const hubConfigs = await global.hubConnector.getAllConfig()
         if (!hubConfigs) {
             throw new Error('There was an error trying to get all the configs from the hub')
         }

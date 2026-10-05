@@ -67,7 +67,7 @@ describe('BF3: the bound is real, a pinned height holds one member and only that
         // A case that failed while the chain was held must not leave the miner paused.
         await drive.releaseChain(ctx.btc)
         if (!ctx.venue) return
-        try { ctx.venue.releaseMirrorHeights(PINNED) } catch (_) { /* never armed */ }
+        try { ctx.venue.releaseMirrorHeights(PINNED) } catch (internal) { /* never armed */ }
         await ctx.venue.stop()
     })
 

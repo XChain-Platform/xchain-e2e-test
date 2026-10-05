@@ -20,22 +20,22 @@ const oraclePriceHelper = require('../../helpers/oraclePriceHelper')
 const FIAT_NOQ = 'AUD'   // retracted quote
 
 async function createNoQuoteDispenser() {
-    let dispenserAddr = await cryptoHelper.getNewFundedAddress("DISPENSER.ORACLE.NQ", COIN, NETWORK, null, "legacy", 0, 1)
-    let buyerAddr     = await cryptoHelper.getNewFundedAddress("DISPENSER.ORACLE.NQ.BUYER", COIN, NETWORK, null, "legacy", 0, 1)
-    let oracleAddr    = await cryptoHelper.getNewFundedAddress("DISPENSER.ORACLE.NQ.SRC", COIN, NETWORK, null, "legacy", 0, 1)
-    let dispenserAddress = dispenserAddr["address"]
-    let buyerAddress     = buyerAddr["address"]
-    let tick = "DISPNOQ"+dispenserAddress.substring(dispenserAddress.length-8)
+    const dispenserAddr = await cryptoHelper.getNewFundedAddress("DISPENSER.ORACLE.NQ", COIN, NETWORK, null, "legacy", 0, 1)
+    const buyerAddr     = await cryptoHelper.getNewFundedAddress("DISPENSER.ORACLE.NQ.BUYER", COIN, NETWORK, null, "legacy", 0, 1)
+    const oracleAddr    = await cryptoHelper.getNewFundedAddress("DISPENSER.ORACLE.NQ.SRC", COIN, NETWORK, null, "legacy", 0, 1)
+    const dispenserAddress = dispenserAddr["address"]
+    const buyerAddress     = buyerAddr["address"]
+    const tick = "DISPNOQ"+dispenserAddress.substring(dispenserAddress.length-8)
 
     await issueHelper.sendIssueV0(dispenserAddr, tick, 100, 100, 0, "Oracle dispenser no-quote test", 100)
 
-    let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
-    let chainNow   = await priceSnapshotHelper.latestBlockTime()
+    const expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
+    const chainNow   = await priceSnapshotHelper.latestBlockTime()
 
     // Seed a validator snapshot at or before the quote's effective_at, and the
     // quote itself, so the create is accepted: the Mode 2 settlement-price check
     // pairs the quote with a validator price before it admits the create.
-    let pair = COIN_CODE + "/" + FIAT_NOQ
+    const pair = COIN_CODE + "/" + FIAT_NOQ
     await priceSnapshotHelper.clearPair(pair)
     await priceSnapshotHelper.seedSnapshot({
         coinPair: pair, price: (50000).toFixed(8),
@@ -50,7 +50,7 @@ async function createNoQuoteDispenser() {
         effectiveAt: chainNow - 60, actionIndex: 999000004
     })
 
-    let dispenserResult = await dispenserHelper.sendDispenserV0(
+    const dispenserResult = await dispenserHelper.sendDispenserV0(
         dispenserAddr, COIN_CODE, tick, 1, 50,
         COIN_CODE, null, 0, dispenserAddr["address"],
         FIAT_NOQ, null, oracleAddr["address"], expiration,
@@ -66,7 +66,7 @@ async function settleWithoutQuote(scenario) {
         tick: scenario.tick, fiat: FIAT_NOQ
     })
 
-    let txHash = await transactionHelper.createSimpleTransaction(
+    const txHash = await transactionHelper.createSimpleTransaction(
         scenario.buyerAddr, scenario.dispenserAddress, 1100000
     )
     return indexerDatabase.waitForDispense({
@@ -95,11 +95,11 @@ describe('DISPENSER', () => {
                 return
             }
 
-            let scenario = await createNoQuoteDispenser()
-            let dispenserResult = scenario.dispenserResult
+            const scenario = await createNoQuoteDispenser()
+            const dispenserResult = scenario.dispenserResult
             assert(dispenserResult.dispenser, "Mode 2 dispenser should be created")
 
-            let dispenseRow = await settleWithoutQuote(scenario)
+            const dispenseRow = await settleWithoutQuote(scenario)
             assert(dispenseRow, "dispense should be recorded invalid with no matching oracle price")
         })
     })

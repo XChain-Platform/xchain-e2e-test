@@ -24,7 +24,7 @@ module.exports = {
         if (label in wallets){
                 return wallets[label]
         } else {
-            let newWallet = {
+            const newWallet = {
                 mnemonic: null,
                 seed: null,
                 coin: null,
@@ -39,7 +39,7 @@ module.exports = {
     async getNewAddress(label, coin, network, mnemonic = null, addressType="legacy", addressIndex=0){
         network = CryptoNetworks.getBitcoinJsNetwork(coin+"-"+network)
         
-        let wallet = await this.getWallet(label)
+        const wallet = await this.getWallet(label)
         wallet.coin = coin
         wallet.network = network
         
@@ -49,15 +49,15 @@ module.exports = {
             }
             wallet.mnemonic = mnemonic
             
-            var seed = bip39.mnemonicToSeedSync(mnemonic)
+            const seed = bip39.mnemonicToSeedSync(mnemonic)
             wallet.seed = seed
         }
         
-        var root = bip32.fromSeed(wallet.seed, network)
-        var account = root.derivePath("m/44'/0'/0'") //master -> legacy -> bitcoin coin -> first account
-        var address = account.derive(0).derive(addressIndex) // no change -> address index
+        const root = bip32.fromSeed(wallet.seed, network)
+        const account = root.derivePath("m/44'/0'/0'") //master -> legacy -> bitcoin coin -> first account
+        const address = account.derive(0).derive(addressIndex) // no change -> address index
         
-        var testAddress = null
+        let testAddress = null
         switch (addressType){
             case "legacy":
                 testAddress = bitcoin.payments.p2pkh({ pubkey: address.publicKey, network }).address
@@ -78,13 +78,13 @@ module.exports = {
     },
     
     async getNewFundedAddress(label, coin, network, mnemonic = null, addressType="legacy", addressIndex=0, amountToFund, seedGas = true){
-        let newAddressInfo = await this.getNewAddress(label, coin, network, mnemonic, addressType, addressIndex)
-        let newAddress = newAddressInfo["address"]
+        const newAddressInfo = await this.getNewAddress(label, coin, network, mnemonic, addressType, addressIndex)
+        const newAddress = newAddressInfo["address"]
 
         console.log("Sending funds ("+amountToFund+") to "+newAddress)
-        let txId = await regtestMinerConnector.sendFunds(newAddress, amountToFund)
+        const txId = await regtestMinerConnector.sendFunds(newAddress, amountToFund)
         try {
-            let txExists = await nodeConnector.waitForTx(txId)
+            const txExists = await nodeConnector.waitForTx(txId)
 
             if (!txExists){
                 throw new Error("The sent tx didn't appear in the blockchain")

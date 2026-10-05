@@ -38,7 +38,7 @@ const transactionHelper = require('../helpers/core/transactionHelper')
 const { MultiValidatorHub } = require('../helpers/multiValidatorHubHelper')
 const { requireFederationEnv, assertCleanValidatorSet } = require('../helpers/federationGuards')
 
-async function _settleStack() {
+async function internalSettleStack() {
     await utxoTrackerConnector.quiesce({ timeoutMs: 30000, pollMs: 250, regtestMiner: regtestMinerConnector })
 }
 
@@ -96,23 +96,23 @@ async function setUpLlmHub(context) {
     const staker = await cryptoHelper.getNewFundedAddress(
         'llm-staker', COIN, NETWORK, null, 'legacy', 0, 0.02
     )
-    await _settleStack()
+    await internalSettleStack()
     await gasHelper.ensureGasBalance(staker, '35000')
-    await _settleStack()
+    await internalSettleStack()
     const stakeResult = await stakeHelper.sendStakeV1(staker, '30000.00000000', pubkey)
     assert.strictEqual(stakeResult.stake.status, 'valid', 'stake should be valid')
 
     // Activation window AND snapshot burial: the responsible set resolves at the
     // request's block minus CANONICAL_REORG_BUFFER, so the delay alone is 6 short.
     await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
-    await _settleStack()
+    await internalSettleStack()
 
     // Fund + deploy
     owner = await cryptoHelper.getNewFundedAddress(
         'llm-owner', COIN, NETWORK, null, 'legacy', 0, 0.02
     )
     await regtestMinerConnector.generateBlocks(2)
-    await _settleStack()
+    await internalSettleStack()
     await gasHelper.ensureGasBalance(owner, '5000')
 
     const deploy = await vmHelper.sendDeployV0(owner, CONTRACT_CODE, 500000)
@@ -124,7 +124,7 @@ async function setUpLlmHub(context) {
         'llm-publisher', COIN, NETWORK, null, 'legacy', 0, 0.02
     )
     await regtestMinerConnector.generateBlocks(2)
-    await _settleStack()
+    await internalSettleStack()
     mvh.setBroadcastHook(async (wirePayload) => {
         const txHash = await transactionHelper.createAndSendTransaction(publisherAddr, wirePayload)
         return { txid: txHash }

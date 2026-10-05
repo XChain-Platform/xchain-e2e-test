@@ -90,14 +90,14 @@ describe('anchorVersionHelper', function () {
         // v0/v3/v4/v5 wires (a different, now-retired numbering) were deleted
         // with the per-chain wire, so no flag-day combination can move it.
         it('is v0 with every flag-day off', function () {
-            let e = av.expectedCheckpointAnchor(ROOTLESS_CP, { flagDays: flags({}) });
+            const e = av.expectedCheckpointAnchor(ROOTLESS_CP, { flagDays: flags({}) });
             assert.deepStrictEqual(e.accepted, [0]);
             assert.strictEqual(e.preferred, 0);
             assert.strictEqual(e.fallback, null);
         });
 
         it('is v0 with every flag-day on', function () {
-            let e = av.expectedCheckpointAnchor(ROOTED_CP,
+            const e = av.expectedCheckpointAnchor(ROOTED_CP,
                 { flagDays: flags({ roots: true, anchorReward: true }) });
             assert.deepStrictEqual(e.accepted, [0]);
             assert.strictEqual(e.rootBearing, true);
@@ -107,7 +107,7 @@ describe('anchorVersionHelper', function () {
         it('reports rootBearing as an eligibility fact, not a version selector', function () {
             // A rootless row is SKIPPED by the publisher (D8) rather than anchored
             // on an older rootless wire, so the version stays v0 either way.
-            let e = av.expectedCheckpointAnchor(ROOTLESS_CP, { flagDays: flags({ roots: true }) });
+            const e = av.expectedCheckpointAnchor(ROOTLESS_CP, { flagDays: flags({ roots: true }) });
             assert.strictEqual(e.rootBearing, false);
             assert.deepStrictEqual(e.accepted, [0]);
         });
@@ -115,7 +115,7 @@ describe('anchorVersionHelper', function () {
         it('an identity-less hub still publishes v0, it just earns no reward', function () {
             // The degraded attestation path is ATTEST_SIG_COUNT 0 within v0, not a
             // fallback to an older version.
-            let e = av.expectedCheckpointAnchor(ROOTED_CP,
+            const e = av.expectedCheckpointAnchor(ROOTED_CP,
                 { flagDays: flags({ roots: true, anchorReward: true }), hasIdentity: false });
             assert.deepStrictEqual(e.accepted, [0]);
             assert.strictEqual(e.rewardActive, false);
@@ -128,19 +128,19 @@ describe('anchorVersionHelper', function () {
         // The archive leg has exactly one version now too (D4): the tail is
         // ALWAYS appended, so the old tail-less wire and v6 are both retired.
         it('pre-flag-day: v1 only', function () {
-            let e = av.expectedArchiveAnchor(ROOTLESS_CP, { flagDays: flags({}) });
+            const e = av.expectedArchiveAnchor(ROOTLESS_CP, { flagDays: flags({}) });
             assert.deepStrictEqual(e.accepted, [1]);
             assert.strictEqual(e.preferred, 1);
             assert.strictEqual(e.fallback, null);
         });
         it('archive-reward active: still v1, rewardActive tracks reward derivation rather than the version', function () {
-            let e = av.expectedArchiveAnchor(ROOTED_CP, { flagDays: flags({ archiveReward: true }) });
+            const e = av.expectedArchiveAnchor(ROOTED_CP, { flagDays: flags({ archiveReward: true }) });
             assert.deepStrictEqual(e.accepted, [1]);
             assert.strictEqual(e.rewardActive, true);
             assert.strictEqual(e.fallback, null);
         });
         it('the archive leg does not follow the checkpoint roots gate', function () {
-            let e = av.expectedArchiveAnchor(ROOTED_CP,
+            const e = av.expectedArchiveAnchor(ROOTED_CP,
                 { flagDays: flags({ roots: true, anchorReward: true }) });
             assert.deepStrictEqual(e.accepted, [1]);
         });
@@ -148,8 +148,8 @@ describe('anchorVersionHelper', function () {
             // D4: the degrade stays WITHIN v1 now, so the acceptance set does not
             // move whether or not the attestation round reached quorum; only
             // rewardActive reports the difference.
-            let quorum   = av.expectedArchiveAnchor(ROOTED_CP, { flagDays: flags({ archiveReward: true }) });
-            let degraded = av.expectedArchiveAnchor(ROOTED_CP,
+            const quorum   = av.expectedArchiveAnchor(ROOTED_CP, { flagDays: flags({ archiveReward: true }) });
+            const degraded = av.expectedArchiveAnchor(ROOTED_CP,
                 { flagDays: flags({ archiveReward: true }), hasIdentity: false });
             assert.deepStrictEqual(quorum.accepted, [1]);
             assert.deepStrictEqual(degraded.accepted, [1]);
@@ -167,9 +167,9 @@ describe('anchorVersionHelper', function () {
         ];
 
         it('matches each leg against its derived version set', function () {
-            let cpE  = av.expectedCheckpointAnchor(ROOTED_CP,
+            const cpE  = av.expectedCheckpointAnchor(ROOTED_CP,
                 { flagDays: flags({ roots: true, anchorReward: true }) });
-            let arcE = av.expectedArchiveAnchor(ROOTED_CP, { flagDays: flags({ archiveReward: true }) });
+            const arcE = av.expectedArchiveAnchor(ROOTED_CP, { flagDays: flags({ archiveReward: true }) });
             assert.strictEqual(av.findAnchorBroadcast(broadcasts, cpE.accepted).txid,  'aa');
             assert.strictEqual(av.findAnchorBroadcast(broadcasts, arcE.accepted).txid, 'bb');
         });
@@ -198,7 +198,7 @@ describe('anchorVersionHelper', function () {
 describe('anchorVersionHelper', function () {
     describe('parseAnchorV0', function () {
         it('walks variable-width sections without misreading a signature as a chain', function () {
-            let b = av.parseAnchorV0(TWO_SECTION);
+            const b = av.parseAnchorV0(TWO_SECTION);
             assert.strictEqual(b.version, 0);
             assert.strictEqual(b.network, 'regtest');
             assert.strictEqual(b.snapshot_block, 136);
@@ -231,7 +231,7 @@ describe('anchorVersionHelper', function () {
             let vector;
             try { vector = require('../../../xchain-documentation/protocol/test-vectors/anchor_canonical.json'); }
             catch (e) { return this.skip(); }        // no docs checkout on this box
-            let b = av.parseAnchorV0(vector.vectors.v0);
+            const b = av.parseAnchorV0(vector.vectors.v0);
             assert.strictEqual(b.section_count, b.sections.length);
             assert.deepStrictEqual(b.chains, b.chains.slice().sort(),
                 'the vector proves sections ride CHAIN-ascending (D5)');
@@ -245,7 +245,7 @@ describe('anchorVersionHelper', function () {
 describe('anchorVersionHelper', function () {
     describe('bundleBroadcasts / findBundleSectionRows', function () {
         it('keeps only the v0 wires out of a mixed broadcast list', function () {
-            let out = av.bundleBroadcasts([
+            const out = av.bundleBroadcasts([
                 { payload: 'ANCHOR|1|DOGE|regtest|136', txid: 'arc' },
                 { payload: 'ANCHOR|0|regtest|136|1|BTC|900|bh|lh|ah|ch|11|136|' +
                            'a'.repeat(64) + '|1|' + 'b'.repeat(64) + '|1|0|pub0|0', txid: 'bun' }
@@ -263,7 +263,7 @@ describe('anchorVersionHelper', function () {
                 { version: 0, action_index: 41, section_index: 1, ledger_hash: 'l-doge' },
                 { version: 1, action_index: 42, section_index: 0, ledger_hash: 'l-btc' }
             ];
-            let got = av.findBundleSectionRows(rows, 'l-doge');
+            const got = av.findBundleSectionRows(rows, 'l-doge');
             assert.strictEqual(got.length, 3, 'all three sections of the bundle, and only those');
             assert.deepStrictEqual(got.map(r => r.section_index), [0, 1, 2]);
             // A ledger_hash from a DIFFERENT action must not drag this bundle in.
@@ -294,8 +294,8 @@ describe('anchorVersionHelper', function () {
             // checkpoint leg is always v0, the archive leg is always v1.
             try { av.hubFlagDays(); }
             catch (e) { return this.skip(); }
-            let cp = av.expectedCheckpointAnchor(ROOTED_CP);
-            let ar = av.expectedArchiveAnchor(ROOTED_CP);
+            const cp = av.expectedCheckpointAnchor(ROOTED_CP);
+            const ar = av.expectedArchiveAnchor(ROOTED_CP);
             assert.deepStrictEqual(cp.accepted, [0], 'the checkpoint leg is v0 only');
             assert.strictEqual(cp.rewardActive, true, 'so an anchor_bundle reward is expected');
             assert.deepStrictEqual(ar.accepted, [1], 'the archive leg is v1 only');

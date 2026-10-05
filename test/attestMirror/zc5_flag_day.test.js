@@ -406,6 +406,7 @@ describe('ZC5 above the height: a rollback across a bound response restores the 
 
         await settleOrReport('zc5')
         const beforeRows = await waitForAppliedEverywhere(venue, requestId)
+        await waitForHeightWithClear(venue, 0, request.blockIndex)
         const local      = await readRequestRow(venue, 0, requestId)
         const B          = Number(beforeRows[0].block_index)
         console.log('ZC5: request at ' + local.block_index + ', response bound at ' + B)

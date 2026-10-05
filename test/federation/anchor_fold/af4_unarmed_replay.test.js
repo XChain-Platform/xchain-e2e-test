@@ -47,7 +47,7 @@ async function startReplayNode(label, hubDb, basePort) {
 
 async function readAnchorRows(node, targetHeight) {
     const database = '`' + node.indexerDbName + '`';
-    return node._conn.query(
+    return node['_conn'].query(
         'SELECT * FROM ' + database + '.anchor_actions ' +
         'WHERE block_index_doge <= ? ORDER BY action_index, section_index',
         [targetHeight]

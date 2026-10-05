@@ -70,6 +70,7 @@ const {
     readAttestRewards, readResponseRows, readRequestRow, venueTipProbe,
     findEmittedAttestRequest, captureFederationState,
     clearBeforeBroadcast,
+    waitForHeightWithClear,
     attestRequestWatermark,
     settleOrReport,
     widenArithmetic,
@@ -233,6 +234,7 @@ describe('AT6: above the flag day the chain cannot deliver a response, and the e
 
         await regtestMinerConnector.generateBlocks(BURIAL_BLOCKS)
         await settleOrReport('at6')
+        for (const ix of venue.indexers) await waitForHeightWithClear(venue, ix.index, request.blockIndex)
         await waitForMirrorRowEverywhere(venue, requestId, null, {
             // MINES WHILE WAITING, because the widening ladder is height-driven and a
             // still chain sits at widen 0 forever: a draw containing a key no live hub
@@ -365,6 +367,7 @@ describe('AT6: above the flag day the chain cannot deliver a response, and the e
 
         await regtestMinerConnector.generateBlocks(BURIAL_BLOCKS)
         await settleOrReport('at6')
+        await waitForHeightWithClear(venue, 0, request.blockIndex)
         await waitForMirrorRowEverywhere(venue, requestId, null, {
             // MINES WHILE WAITING, because the widening ladder is height-driven and a
             // still chain sits at widen 0 forever: a draw containing a key no live hub

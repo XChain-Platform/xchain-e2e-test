@@ -132,7 +132,7 @@ describe('attestMirrorVenue: port planning', function () {
     })
 
     it('partitions one distinct list into four non-overlapping roles', () => {
-        const ports = Array.from({ length: 17 }, (_, i) => 41000 + i)
+        const ports = Array.from({ length: 17 }, (internal, i) => 41000 + i)
         const plan  = planPorts(ports, 5, 2)
         assert.strictEqual(plan.hubApi.length, 5)
         assert.strictEqual(plan.p2p.length, 5)
@@ -146,7 +146,7 @@ describe('attestMirrorVenue: port planning', function () {
     it('refuses a list that already contains a duplicate', () => {
         // The failure this guards is silent at plan time and surfaces as one hub
         // dying on listen EADDRINUSE minutes later.
-        const dupes = Array.from({ length: 17 }, (_, i) => 41000 + i)
+        const dupes = Array.from({ length: 17 }, (internal, i) => 41000 + i)
         dupes[9] = dupes[3]
         assert.throws(() => planPorts(dupes, 5, 2), /duplicates/)
     })
@@ -165,7 +165,7 @@ describe('attestMirrorVenue: port planning', function () {
     })
 
     it('walks past a port something else is already holding', async () => {
-        const base = 41500
+        const [base] = await pickFreePorts(1, ephemeralRange().hi + 1)
         const blocker = net.createServer()
         await new Promise(r => blocker.listen(base, '127.0.0.1', r))
         try {
@@ -957,7 +957,7 @@ describe('attestMirrorVenue: reusable chain databases', function () {
     function reuseFixture(standingLedger) {
         const state = { seeded: 0, logs: [], sourceEnded: false }
         const venue = new AttestMirrorVenue({ label: 'reuse', hubDb: DB })
-        venue._conn = {
+        venue['_conn'] = {
             query: async (sql) => {
                 if (sql.startsWith('CREATE DATABASE')) return []
                 if (sql.includes('information_schema.TABLES')) return [{ c: 1 }]
@@ -967,7 +967,7 @@ describe('attestMirrorVenue: reusable chain databases', function () {
                 throw new Error('unexpected venue query: ' + sql)
             }
         }
-        venue._createChainDbConnection = async () => ({
+        venue['_createChainDbConnection'] = async () => ({
             query: async (sql) => {
                 if (sql.includes('MAX(block_index)')) return [{ hi: 75 }]
                 if (sql.includes('COUNT(*)')) return [{ n: 19 }]
@@ -976,14 +976,14 @@ describe('attestMirrorVenue: reusable chain databases', function () {
             },
             end: async () => { state.sourceEnded = true }
         })
-        venue._seedChainDbFromStanding = async () => { state.seeded++ }
+        venue['_seedChainDbFromStanding'] = async () => { state.seeded++ }
         console.log = (line) => state.logs.push(String(line))
         return { venue, state, ix: { index: 5, indexerDbName: 'XChain_AM_reuse_Ixr5' } }
     }
 
     it('re-seeds equal action counts when the ledger hash differs', async () => {
         const { venue, state, ix } = reuseFixture('standing-ledger')
-        await venue._cloneChainDbFromStanding(ix)
+        await venue['_cloneChainDbFromStanding'](ix)
         assert.strictEqual(state.seeded, 1)
         assert.strictEqual(state.sourceEnded, true)
         assert.match(state.logs.join('\n'), /indexer 5.*matching action counts.*different ledger hash.*re-seeded/i)
@@ -991,7 +991,7 @@ describe('attestMirrorVenue: reusable chain databases', function () {
 
     it('reuses equal action counts when the ledger hash matches', async () => {
         const { venue, state, ix } = reuseFixture('venue-ledger')
-        await venue._cloneChainDbFromStanding(ix)
+        await venue['_cloneChainDbFromStanding'](ix)
         assert.strictEqual(state.seeded, 0)
         assert.strictEqual(state.sourceEnded, true)
         assert.match(state.logs.join('\n'), /indexer 5.*same ledger hash.*not re-seeding/i)
@@ -1000,7 +1000,7 @@ describe('attestMirrorVenue: reusable chain databases', function () {
     it('re-seeds a database whose seed never finished, even when its ledger hash matches', async () => {
         const { venue, state, ix } = reuseFixture('venue-ledger')
         let standingOpened = false
-        venue._conn = {
+        venue['_conn'] = {
             query: async (sql, params) => {
                 if (sql.startsWith('CREATE DATABASE')) return []
                 if (sql.includes('information_schema.TABLES'))
@@ -1008,8 +1008,8 @@ describe('attestMirrorVenue: reusable chain databases', function () {
                 throw new Error('unexpected venue query: ' + sql)
             }
         }
-        venue._createChainDbConnection = async () => { standingOpened = true; throw new Error('no agreement read expected') }
-        await venue._cloneChainDbFromStanding(ix)
+        venue['_createChainDbConnection'] = async () => { standingOpened = true; throw new Error('no agreement read expected') }
+        await venue['_cloneChainDbFromStanding'](ix)
         assert.strictEqual(state.seeded, 1)
         assert.strictEqual(standingOpened, false)
         assert.match(state.logs.join('\n'), /indexer 5.*no venue_seed_complete marker.*re-seeded/i)
@@ -1018,7 +1018,7 @@ describe('attestMirrorVenue: reusable chain databases', function () {
     function seedFixture(failOn) {
         const venue = new AttestMirrorVenue({ label: 'seed', hubDb: DB })
         const src = [], dst = []
-        venue._createChainDbConnection = async (opts) => {
+        venue['_createChainDbConnection'] = async (opts) => {
             const log = opts.user === DB.user ? dst : src
             return {
                 query: async (q) => {
@@ -1029,7 +1029,7 @@ describe('attestMirrorVenue: reusable chain databases', function () {
                 end: async () => { log.push('END') },
             }
         }
-        venue._copyChainTable = async (s, d, t) => {
+        venue['_copyChainTable'] = async (s, d, t) => {
             if (t === failOn) throw new Error('copy cut off at ' + t)
             dst.push('COPY ' + t)
             return 2
@@ -1041,7 +1041,7 @@ describe('attestMirrorVenue: reusable chain databases', function () {
         const { venue, src, dst } = seedFixture(null)
         const saved = console.log
         console.log = () => {}
-        try { await venue._seedChainDbFromStanding({ index: 0, indexerDbName: 'XChain_AM_MVH_seed_Ixr0' }, 'XChain_BTC_Regtest_Indexer') }
+        try { await venue['_seedChainDbFromStanding']({ index: 0, indexerDbName: 'XChain_AM_MVH_seed_Ixr0' }, 'XChain_BTC_Regtest_Indexer') }
         finally { console.log = saved }
         assert.strictEqual(dst[0], 'DROP TABLE IF EXISTS `venue_seed_complete`')
         assert.ok(src.indexOf('START TRANSACTION WITH CONSISTENT SNAPSHOT') < src.indexOf('SHOW TABLES'))
@@ -1054,7 +1054,7 @@ describe('attestMirrorVenue: reusable chain databases', function () {
 
     it('leaves no completion marker when the seed is cut off part way', async () => {
         const { venue, dst } = seedFixture('unstakes')
-        await assert.rejects(venue._seedChainDbFromStanding({ index: 0, indexerDbName: 'XChain_AM_MVH_seed_Ixr0' },
+        await assert.rejects(venue['_seedChainDbFromStanding']({ index: 0, indexerDbName: 'XChain_AM_MVH_seed_Ixr0' },
             'XChain_BTC_Regtest_Indexer'), /cut off at unstakes/)
         assert.strictEqual(dst[0], 'DROP TABLE IF EXISTS `venue_seed_complete`')
         assert.ok(!dst.some((q) => q.startsWith('CREATE TABLE `venue_seed_complete`')))
@@ -1064,16 +1064,16 @@ describe('attestMirrorVenue: reusable chain databases', function () {
         const calls = []
         const venue = new AttestMirrorVenue({ label: 'prep', hubDb: DB })
         venue.indexers = [0, 1, 2].map((i) => ({ index: i, indexerDbName: 'XChain_AM_MVH_prep_Ixr' + i }))
-        venue._conn = { query: async () => [] }
-        venue._reuseChainDbIfMatching = async (ix) => agreeing.includes(ix.index)
-        venue._seedChainDbFromStanding = async (ix) => { calls.push('seed ' + ix.index) }
-        venue._copyChainDbWithinVenue = async (from, ix) => { calls.push('copy ' + from + ' -> ' + ix.index) }
+        venue['_conn'] = { query: async () => [] }
+        venue['_reuseChainDbIfMatching'] = async (ix) => agreeing.includes(ix.index)
+        venue['_seedChainDbFromStanding'] = async (ix) => { calls.push('seed ' + ix.index) }
+        venue['_copyChainDbWithinVenue'] = async (from, ix) => { calls.push('copy ' + from + ' -> ' + ix.index) }
         return { venue, calls }
     }
 
     it('seeds the first chain database once and copies it to the rest inside the venue', async () => {
         const { venue, calls } = prepareFixture([])
-        await venue._prepareChainDbs()
+        await venue['_prepareChainDbs']()
         assert.deepStrictEqual(calls, [
             'seed 0',
             'copy XChain_AM_MVH_prep_Ixr0 -> 1',
@@ -1084,14 +1084,14 @@ describe('attestMirrorVenue: reusable chain databases', function () {
 
     it('keeps an agreeing database and copies it to one that diverged', async () => {
         const { venue, calls } = prepareFixture([0, 2])
-        await venue._prepareChainDbs()
+        await venue['_prepareChainDbs']()
         assert.deepStrictEqual(calls, ['copy XChain_AM_MVH_prep_Ixr0 -> 1'])
     })
 
     it('leaves a replay venue to replay each indexer itself', async () => {
         const { venue, calls } = prepareFixture([])
         venue.replayChain = true
-        await venue._prepareChainDbs()
+        await venue['_prepareChainDbs']()
         assert.deepStrictEqual(calls, [])
         assert.ok(venue.indexers.every((ix) => ix.chainDbPrepared === undefined))
     })
@@ -1101,13 +1101,13 @@ describe('attestMirrorVenue: reusable chain databases', function () {
         const ix = { index: 0, indexerDbName: 'XChain_AM_MVH_prep_Ixr0', mirrorDbName: 'XChain_AM_MVH_prep_Mirror0', chainDbPrepared: true }
         venue.indexers = [ix]
         let seeded = 0
-        venue._cloneChainDbFromStanding = async () => { seeded++ }
+        venue['_cloneChainDbFromStanding'] = async () => { seeded++ }
         // Stop right after the chain database step; the mirror step is not under test.
-        venue._conn = { query: async () => { throw new Error('stop') } }
-        await assert.rejects(venue._spawnIndexer(0), /stop/)
+        venue['_conn'] = { query: async () => { throw new Error('stop') } }
+        await assert.rejects(venue['_spawnIndexer'](0), /stop/)
         assert.strictEqual(seeded, 0)
         assert.strictEqual(ix.chainDbPrepared, false)
-        await assert.rejects(venue._spawnIndexer(0), /stop/)
+        await assert.rejects(venue['_spawnIndexer'](0), /stop/)
         assert.strictEqual(seeded, 1)
     })
 
@@ -1115,7 +1115,7 @@ describe('attestMirrorVenue: reusable chain databases', function () {
         const venue = new AttestMirrorVenue({ label: 'prep', hubDb: DB })
         const sql = []
         let opened = null, ended = false
-        venue._createChainDbConnection = async (opts) => {
+        venue['_createChainDbConnection'] = async (opts) => {
             opened = opts
             return {
                 query: async (q) => {
@@ -1133,7 +1133,7 @@ describe('attestMirrorVenue: reusable chain databases', function () {
         const saved = console.log
         console.log = (line) => logs.push(String(line))
         try {
-            await venue._copyChainDbWithinVenue('XChain_AM_MVH_prep_Ixr0', { index: 3, indexerDbName: 'XChain_AM_MVH_prep_Ixr3' })
+            await venue['_copyChainDbWithinVenue']('XChain_AM_MVH_prep_Ixr0', { index: 3, indexerDbName: 'XChain_AM_MVH_prep_Ixr3' })
         } finally { console.log = saved }
         assert.strictEqual(opened.database, 'XChain_AM_MVH_prep_Ixr3')
         assert.strictEqual(opened.user, DB.user)
@@ -1153,8 +1153,8 @@ describe('attestMirrorVenue: reusable chain databases', function () {
 
     it('refuses an unsafe template name before connecting', async () => {
         const venue = new AttestMirrorVenue({ label: 'prep', hubDb: DB })
-        venue._createChainDbConnection = async () => { throw new Error('connected') }
-        await assert.rejects(venue._copyChainDbWithinVenue('bad name; DROP', { index: 1, indexerDbName: 'XChain_AM_MVH_prep_Ixr1' }),
+        venue['_createChainDbConnection'] = async () => { throw new Error('connected') }
+        await assert.rejects(venue['_copyChainDbWithinVenue']('bad name; DROP', { index: 1, indexerDbName: 'XChain_AM_MVH_prep_Ixr1' }),
             /database name/i)
     })
 })
@@ -1214,9 +1214,9 @@ describe('attestMirrorVenue: the per-hub code root (BF6 mixed-version seam)', fu
         // The indexer spawn reads `this.repoRoot` and nothing else; the source is pinned
         // so a later edit that routes indexers through the hub selector reddens here.
         const src = fs.readFileSync(require.resolve('../../helpers/attestMirrorVenue'), 'utf8')
-        assert.ok(/this\._spawn\('indexer' \+ i, path\.join\(this\.repoRoot, 'xchain-indexer', 'src', 'api\.js'\)/.test(src),
+        assert.ok(/this\['_spawn'\]\('indexer' \+ i, path\.join\(this\.repoRoot, 'xchain-indexer', 'src', 'api\.js'\)/.test(src),
             'the indexer spawn no longer reads this.repoRoot directly')
-        assert.ok(/this\._spawn\('hub' \+ i, path\.join\(this\.hubRepoRoot\(i\), 'xchain-hub', 'src', 'api\.js'\)/.test(src),
+        assert.ok(/this\['_spawn'\]\('hub' \+ i, path\.join\(this\.hubRepoRoot\(i\), 'xchain-hub', 'src', 'api\.js'\)/.test(src),
             'the hub spawn does not read hubRepoRoot(i)')
     })
 })

@@ -153,7 +153,7 @@ async function mineOneBlockFor (work) {
             await sleep(1000)
             if (settled) break
             let pool = []
-            try { pool = await nodeConnector.getRawMempool() } catch (_) { pool = [] }
+            try { pool = await nodeConnector.getRawMempool() } catch (internal) { pool = [] }
             if (!pool || pool.length === 0) continue
             await regtestMinerConnector.generateBlocks(1)
             mined++

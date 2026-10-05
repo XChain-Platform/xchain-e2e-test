@@ -32,6 +32,13 @@ const validNetworks = {
 // and regtest-miner never needed indexing start heights). Any sibling repo not
 // checked out is skipped.
 const path = require('path'), fs = require('fs')
+const STRICT = process.env.XCHAIN_REQUIRE_SIBLINGS === '1'
+
+function handleMissingSibling(context, missingPath) {
+    if (STRICT) assert.fail(`Required sibling path is missing: ${missingPath}`)
+    context.skip()
+}
+
 const SIBLINGS = ['xchain-encoder', 'xchain-decoder', 'xchain-utxo-tracker', 'xchain-regtest-miner']
 const FIRST_BLOCK_SIBLINGS = ['xchain-encoder', 'xchain-decoder']
 // repo -> its own CryptoNetworks.js location, repo-relative. Each sibling
@@ -196,7 +203,7 @@ describe('CryptoNetworks', () => {
         SIBLINGS.forEach((repo) => {
             it(`${repo} getBitcoinJsNetwork matches this copy for every network`, function () {
                 const p = path.resolve(__dirname, '../../../../' + repo, (CRYPTO_NETWORKS_PATH[repo] || DEFAULT_CRYPTO_NETWORKS_PATH))
-                if (!fs.existsSync(p)) return this.skip()
+                if (!fs.existsSync(p)) return handleMissingSibling(this, p)
                 const Sib = require(p)
                 for (const net of NETS) {
                     assert.deepStrictEqual(
@@ -209,7 +216,7 @@ describe('CryptoNetworks', () => {
         FIRST_BLOCK_SIBLINGS.forEach((repo) => {
             it(`${repo} getFirstBlock matches this copy for every network`, function () {
                 const p = path.resolve(__dirname, '../../../../' + repo, (CRYPTO_NETWORKS_PATH[repo] || DEFAULT_CRYPTO_NETWORKS_PATH))
-                if (!fs.existsSync(p)) return this.skip()
+                if (!fs.existsSync(p)) return handleMissingSibling(this, p)
                 const Sib = require(p)
                 for (const net of NETS) {
                     assert.strictEqual(
@@ -233,7 +240,7 @@ describe('CryptoNetworks', () => {
         Object.entries(UNKNOWN_CONTRACT).forEach(([repo, contract]) => {
             it(`${repo} getBitcoinJsNetwork honors its unknown-network contract (${contract})`, function () {
                 const p = path.resolve(__dirname, '../../../../' + repo, (CRYPTO_NETWORKS_PATH[repo] || DEFAULT_CRYPTO_NETWORKS_PATH))
-                if (!fs.existsSync(p)) return this.skip()
+                if (!fs.existsSync(p)) return handleMissingSibling(this, p)
                 const Sib = require(p)
                 for (const bad of UNKNOWN_INPUTS) {
                     if (contract === 'undefined') {
@@ -253,7 +260,7 @@ describe('CryptoNetworks', () => {
     describe('cross-repo getBitcoinJsNetwork parity', () => {
         it('getBitcoinJsNetwork and getFirstBlock match the canonical coins registry for every network', function () {
             const p = path.resolve(__dirname, '../../../../xchain-encoder/src/coins/index.js')
-            if (!fs.existsSync(p)) return this.skip()
+            if (!fs.existsSync(p)) return handleMissingSibling(this, p)
             const canonical = require(p)
             for (const net of NETS) {
                 const { tick, network } = NET_MAP[net]

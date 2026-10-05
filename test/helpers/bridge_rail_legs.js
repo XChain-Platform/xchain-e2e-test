@@ -201,6 +201,8 @@ const RAIL_DRIVES = {
             },
             vote_binding: {
                 files: ['test/rail/vote_binding/usable_method.test.js'],
+                grep: '(?:available|unavailable) callback method',
+                env: { COIN: 'bitcoin' },
                 minPassed: 2,
             },
         },

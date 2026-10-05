@@ -28,7 +28,7 @@ const { makeSdk, submit, fundedSdkAddress, fundedGasAddress, mine, uniqueTick, s
 // Logged shapes the first time so we can tighten assertions later.
 function balanceFor(balances, tick) {
     if (!balances) return null;
-    let list = Array.isArray(balances) ? balances
+    const list = Array.isArray(balances) ? balances
         : Array.isArray(balances.data) ? balances.data
         : Array.isArray(balances.balances) ? balances.balances
         : null;

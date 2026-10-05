@@ -296,6 +296,7 @@ describe('ZC2: a re-mined request re-binds once and is paid for once', function 
 
         await settleOrReport('zc2')
         const beforeRows   = await waitForAppliedEverywhere(venue, requestId)
+        await waitForHeightWithClear(venue, 0, request.blockIndex)
         const local        = await readRequestRow(venue, 0, requestId)
         const requestBlock = Number(local.block_index)
         const appliedBlock = Number(beforeRows[0].block_index)

@@ -19,13 +19,13 @@ module.exports = {
         // indexer rejects with `invalid: DESTINATION (format)`.
         if (destination == null) destination = addressInfo["address"]
         if (memo == null) memo = ""
-        let mintMessage = "MINT|0|"+tick+"|"+amount+"|"+destination+"|"+memo
+        const mintMessage = "MINT|0|"+tick+"|"+amount+"|"+destination+"|"+memo
 
         console.log("Creating and sending MINT V0 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, mintMessage)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, mintMessage)
 
         console.log("Waiting for MINT in the database...")
-        let mintRow = requireRow(await indexerDatabase.waitForMint({
+        const mintRow = requireRow(await indexerDatabase.waitForMint({
             txHash: txHash,
             tick: tick,
             destination: destination,
@@ -35,7 +35,7 @@ module.exports = {
         }), "sendMintV0: MINT of " + amount + " " + tick + " to " + destination
             + " (tx " + txHash + ") at status=valid")
 
-        let creditRow = requireRow(await indexerDatabase.waitForCredit({
+        const creditRow = requireRow(await indexerDatabase.waitForCredit({
             address: destination,
             tick: tick,
             txHash: txHash,

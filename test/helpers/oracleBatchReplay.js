@@ -243,14 +243,14 @@ const HUB_CONFIG_REDACTION = '[redacted]';
  * a hub that refuses the credential tier (unauthorized, or older than it).
  */
 async function readHubConfigTree(hub) {
-    if (hub && typeof hub._call === 'function') {
+    if (hub && typeof hub['_call'] === 'function') {
         let envelope = null;
         try {
-            envelope = await hub._call({
+            envelope = await hub['_call']({
                 jsonrpc: '2.0', method: 'getallconfigs',
                 params: { include_secrets: true }, id: 1
             });
-        } catch (_) { envelope = null; }
+        } catch (internal) { envelope = null; }
         // Only the enveloped form can be trusted here: without `secrets_redacted`
         // there is no way to tell a served credential from a withheld one.
         if (envelope && typeof envelope === 'object' && envelope.error === undefined &&
@@ -288,7 +288,7 @@ function resolveCoinConfigSidecar(coin, network, needKey) {
         if (firstExisting === null) firstExisting = p;
         try {
             if (require('dotenv').parse(fs.readFileSync(p))[needKey]) return p;
-        } catch (_) { /* unreadable: keep looking */ }
+        } catch (internal) { /* unreadable: keep looking */ }
     }
     return firstExisting;
 }
@@ -332,7 +332,7 @@ function resolveServiceCredential(o) {
     if (sidecar) {
         let parsed = {};
         try { parsed = require('dotenv').parse(fs.readFileSync(sidecar)); }
-        catch (_) { /* an unreadable sidecar is treated as absent */ }
+        catch (internal) { /* an unreadable sidecar is treated as absent */ }
         if (parsed[o.passKey]) {
             const u = (allowEnv && o.userKey && process.env[o.userKey]) ||
                 (o.userKey && parsed[o.userKey]) || oracle.user;
@@ -421,7 +421,7 @@ function ephemeralRange() {
         const [lo, hi] = fs.readFileSync('/proc/sys/net/ipv4/ip_local_port_range', 'utf8')
             .trim().split(/\s+/).map(Number);
         if (Number.isInteger(lo) && Number.isInteger(hi) && lo < hi) return { lo, hi };
-    } catch (_) { /* not Linux, or a locked-down /proc */ }
+    } catch (internal) { /* not Linux, or a locked-down /proc */ }
     return { lo: 32768, hi: 60999 };
 }
 
@@ -703,7 +703,7 @@ class OracleBatchReplayNode {
         this.priceGraceS = opts.priceGraceS === undefined ? null : opts.priceGraceS;
         this.watermarkGraces = watermarkGraceEnv(opts.watermarkGraces);
         this.liveChain   = opts.liveChain || null;
-        this._onLog      = typeof opts.onLog === 'function' ? opts.onLog : null;
+        this['_onLog']      = typeof opts.onLog === 'function' ? opts.onLog : null;
 
         // Whether the harness environment's credentials apply to THIS rig's coin.
         // Defaulted by what the environment declares rather than assumed, because
@@ -723,7 +723,7 @@ class OracleBatchReplayNode {
         this.unavailable = null;
 
         this.hubDb        = opts.hubDb || null;
-        this._ownsHubDb   = false;
+        this['_ownsHubDb']   = false;
         this.hubDbName    = null;   // the fresh hub's OWN authoritative database
         this.indexerDbName = null;  // the fresh indexer's own database
         this.mirrorDbName = null;   // what hub_db_sync writes the hub's tables down into
@@ -731,25 +731,25 @@ class OracleBatchReplayNode {
         this.hubPort     = null;
         this.indexerPort = null;
 
-        this._hubProc     = null;
-        this._indexerProc = null;
-        this._logs        = { hub: [], indexer: [] };
-        this._conn        = null;   // to the disposable MariaDB (this node's three databases)
-        this._cwd         = null;   // neutral working directory for the children
-        this._hubSnapshotsAtBoot = null;
-        this._live = null;          // resolved live-chain endpoints (decoder, node, tracker)
+        this['_hubProc']     = null;
+        this['_indexerProc'] = null;
+        this['_logs']        = { hub: [], indexer: [] };
+        this['_conn']        = null;   // to the disposable MariaDB (this node's three databases)
+        this['_cwd']         = null;   // neutral working directory for the children
+        this['_hubSnapshotsAtBoot'] = null;
+        this['_live'] = null;          // resolved live-chain endpoints (decoder, node, tracker)
         // This node's registration on the `price` capability precondition list, and
         // the rows it last took. See _registerPriceCapability.
-        this._capabilityTarget = null;
-        this._capabilityRows   = [];
-        this._decoderConn = null;
-        this._liveIndexerConn = null;
+        this['_capabilityTarget'] = null;
+        this['_capabilityRows']   = [];
+        this['_decoderConn'] = null;
+        this['_liveIndexerConn'] = null;
         // The Bitcoin capability oracle this node's hub resolves its signer sets
         // from: the connection its rows are seeded through, the rows written, and
         // the read-back that proves it is a Bitcoin indexer rather than a bypass.
-        this._btcOracleConn  = null;
-        this._btcStakeRows   = [];
-        this._btcOracleProof = null;
+        this['_btcOracleConn']  = null;
+        this['_btcStakeRows']   = [];
+        this['_btcOracleProof'] = null;
     }
 
     // ---- bring-up -------------------------------------------------------
@@ -757,12 +757,12 @@ class OracleBatchReplayNode {
     // Build the node. Returns true when it is usable, false with `unavailable`
     // set when a dependency this rig does not own is missing.
     async up() {
-        const live = await this._resolveLiveChain();
+        const live = await this['_resolveLiveChain']();
         if (!live) return false;
 
         if (!this.hubDb) {
             this.hubDb = await startDisposableHubDb();
-            this._ownsHubDb = true;
+            this['_ownsHubDb'] = true;
             if (!this.hubDb) { this.unavailable = 'no env hub DB and Docker unavailable'; return false; }
         }
 
@@ -772,27 +772,27 @@ class OracleBatchReplayNode {
         this.indexerDbName = dbNames.indexer;
         this.mirrorDbName  = dbNames.mirror;
 
-        this._conn = await mariadb.createConnection({
+        this['_conn'] = await mariadb.createConnection({
             host: this.hubDb.host, port: parseInt(this.hubDb.port, 10),
             user: this.hubDb.user, password: this.hubDb.pass, connectTimeout: 10_000
         });
         // The mirror database is the one neither process creates for itself: the hub
         // makes its own, the indexer makes its own, and hub_db_sync only ever writes
         // into a database that is already there.
-        await this._conn.query('CREATE DATABASE IF NOT EXISTS `' + ident(this.mirrorDbName, 'database name') + '`');
-        await this._provisionMirrorSchema();
+        await this['_conn'].query('CREATE DATABASE IF NOT EXISTS `' + ident(this.mirrorDbName, 'database name') + '`');
+        await this['_provisionMirrorSchema']();
 
         // A neutral working directory. Both `src/api.js` files call dotenv.config(),
         // which reads `<cwd>/.env`; run from the checkout, the indexer would silently
         // inherit the standing stack's settings for every variable this rig does not
         // set, which is exactly the class of contamination AT2 exists to rule out.
-        this._cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-at2-' + this.label + '-'));
+        this['_cwd'] = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-at2-' + this.label + '-'));
 
         const [hubPort, indexerPort] = await pickFreePorts(2, this.basePort);
         this.hubPort     = hubPort;
         this.indexerPort = indexerPort;
 
-        this._live = live;
+        this['_live'] = live;
         // A node with no Bitcoin view cannot resolve who was eligible to sign a
         // batch, so it is not a configuration this rig can measure anything in. Say
         // so and SKIP, rather than running a comparison whose only possible outcome
@@ -802,12 +802,12 @@ class OracleBatchReplayNode {
                 'could not be given the Bitcoin capability oracle chain-only reconstruction requires';
             return false;
         }
-        this._btcOracleProof = await this._verifyBtcOracle(live.btcOracle);
-        if (!this._btcOracleProof) { this.unavailable = this.unavailable || 'BTC capability oracle unusable'; return false; }
+        this['_btcOracleProof'] = await this['_verifyBtcOracle'](live.btcOracle);
+        if (!this['_btcOracleProof']) { this.unavailable = this.unavailable || 'BTC capability oracle unusable'; return false; }
 
-        await this._startHub();
-        await this._startIndexer(live);
-        await this._registerPriceCapability();
+        await this['_startHub']();
+        await this['_startIndexer'](live);
+        await this['_registerPriceCapability']();
         return true;
     }
 
@@ -821,7 +821,7 @@ class OracleBatchReplayNode {
      * take the wiring on trust. A rig that had quietly pointed the hub at the
      * landing chain's own indexer, or switched the guard off, fails here.
      */
-    async _verifyBtcOracle(oracle) {
+    async ['_verifyBtcOracle'](oracle) {
         try {
             const conn = new XChainIndexerConnector(oracle.host, oracle.port, oracle.apiKey);
             const hashes = await conn.call('getblockhashes', {});
@@ -864,31 +864,31 @@ class OracleBatchReplayNode {
      * Both nodes in a comparison register the same way, so neither is given an
      * advantage the other lacks.
      */
-    async _registerPriceCapability() {
+    async ['_registerPriceCapability']() {
         const table = '`' + ident(this.mirrorDbName, 'database name') + '`.capability_snapshots';
-        const query = (sql, args) => this._conn.query(sql, args);
-        this._capabilityRows = [];
-        this._capabilityTarget = {
+        const query = (sql, args) => this['_conn'].query(sql, args);
+        this['_capabilityRows'] = [];
+        this['_capabilityTarget'] = {
             label: 'AT2 node ' + this.label + ' (hub mirror + BTC capability oracle)',
             apply: async (rows) => {
                 await applyPriceCapabilityRows(query, rows, table);
-                this._capabilityRows = rows.slice();
+                this['_capabilityRows'] = rows.slice();
                 // The node's HUB does not read the row above: it asks its Bitcoin
                 // oracle. Both stores get the same set, which is the relationship
                 // production keeps (the hub's Bitcoin read is what it later persists
                 // and mirrors down for its indexer).
-                this._btcStakeRows = await applyPriceCapabilityStakes(await this._btcOracleQuery(), rows);
-                await this._probeBtcOracle(rows);
+                this['_btcStakeRows'] = await applyPriceCapabilityStakes(await this['_btcOracleQuery'](), rows);
+                await this['_probeBtcOracle'](rows);
             },
             remove: async (rows) => {
                 await removePriceCapabilityRows(query, rows, table);
-                if (this._btcStakeRows.length > 0) {
-                    await removePriceCapabilityStakes(await this._btcOracleQuery(), this._btcStakeRows);
-                    this._btcStakeRows = [];
+                if (this['_btcStakeRows'].length > 0) {
+                    await removePriceCapabilityStakes(await this['_btcOracleQuery'](), this['_btcStakeRows']);
+                    this['_btcStakeRows'] = [];
                 }
             }
         };
-        const applied = await registerPriceCapabilityTarget(this._capabilityTarget);
+        const applied = await registerPriceCapabilityTarget(this['_capabilityTarget']);
         if (applied > 0) {
             console.log('oracleBatchReplay[' + this.label + ']: applied ' + applied + ' `price` capability row(s) ' +
                 'to this node\'s hub mirror AND to its Bitcoin capability oracle (setup standing in for the ' +
@@ -898,23 +898,23 @@ class OracleBatchReplayNode {
 
     // A query(sql, args) against the Bitcoin oracle's own database, opened once and
     // pinned to that schema so the row helpers never have to name it.
-    async _btcOracleQuery() {
+    async ['_btcOracleQuery']() {
         // Only a drill that publishes through oracleBatchVenue seeds a signer set
         // into the oracle, and only such a drill can name the oracle's database. A
         // node whose Bitcoin view is a REAL federation's indexer (the live-chain
         // override case) reads a real stake and seeds nothing, so reaching here
         // with no database means a seed was attempted against an oracle this node
         // has no write path to; say that rather than dying inside the driver.
-        if (!this._live.btcOracle.db) {
+        if (!this['_live'].btcOracle.db) {
             throw new Error('oracleBatchReplay[' + this.label + ']: this node\'s Bitcoin capability oracle was ' +
                 'given no database, so a `price` capability seed cannot be applied to it. Only a drill that ' +
                 'publishes its own federation through oracleBatchVenue needs that seed.');
         }
-        if (!this._btcOracleConn) {
-            this._btcOracleConn = await connectTo(this._live.btcOracle.db);
-            await this._btcOracleConn.query('USE `' + ident(this._live.btcOracle.db.name, 'database name') + '`');
+        if (!this['_btcOracleConn']) {
+            this['_btcOracleConn'] = await connectTo(this['_live'].btcOracle.db);
+            await this['_btcOracleConn'].query('USE `' + ident(this['_live'].btcOracle.db.name, 'database name') + '`');
         }
-        return (sql, args) => this._btcOracleConn.query(sql, args);
+        return (sql, args) => this['_btcOracleConn'].query(sql, args);
     }
 
     /**
@@ -928,43 +928,43 @@ class OracleBatchReplayNode {
      * into a number in the run's own log, and a mismatch between this count and the
      * federation's size is the first thing a red rung should be checked against.
      */
-    async _probeBtcOracle(rows) {
+    async ['_probeBtcOracle'](rows) {
         const anchor = Number(rows[0].snapshotBlock);
         const buried = Math.max(0, anchor - CANONICAL_REORG_BUFFER);
         try {
-            const oracle = this._live.btcOracle;
+            const oracle = this['_live'].btcOracle;
             const conn   = new XChainIndexerConnector(oracle.host, oracle.port, oracle.apiKey);
             const at = async (h) => {
                 const r = await conn.call('getcapabilityvalidators',
-                    { capability: 'price', block_index: h, min_stake: this._priceMinStake });
+                    { capability: 'price', block_index: h, min_stake: this['_priceMinStake'] });
                 return (r && r.count !== undefined) ? Number(r.count) : ('error: ' + JSON.stringify(r).slice(0, 120));
             };
             const weightsAt = async (h) => {
                 const r = await conn.call('getstakeweightsbycapability',
-                    { capability: 'price', block_index: h, min_stake: this._priceMinStake });
+                    { capability: 'price', block_index: h, min_stake: this['_priceMinStake'] });
                 if (Array.isArray(r)) return r.length;
                 if (r && Array.isArray(r.validators)) return r.validators.length;
                 if (r && r.count !== undefined) return Number(r.count);
                 return 'error: ' + JSON.stringify(r).slice(0, 120);
             };
-            this._btcOracleProof.anchorHeight    = anchor;
-            this._btcOracleProof.queriedHeight   = buried;
-            this._btcOracleProof.priceSetAtAnchor = await at(anchor);
-            this._btcOracleProof.priceSetAtBuried = await at(buried);
-            this._btcOracleProof.priceWeightSetAtAnchor = await weightsAt(anchor);
-            this._btcOracleProof.priceWeightSetAtBuried = await weightsAt(buried);
+            this['_btcOracleProof'].anchorHeight    = anchor;
+            this['_btcOracleProof'].queriedHeight   = buried;
+            this['_btcOracleProof'].priceSetAtAnchor = await at(anchor);
+            this['_btcOracleProof'].priceSetAtBuried = await at(buried);
+            this['_btcOracleProof'].priceWeightSetAtAnchor = await weightsAt(anchor);
+            this['_btcOracleProof'].priceWeightSetAtBuried = await weightsAt(buried);
             console.log('oracleBatchReplay[' + this.label + ']: Bitcoin capability oracle ' + oracle.url +
-                ' (coin ' + this._btcOracleProof.coin + ', tip ' + this._btcOracleProof.height + ') answers the ' +
-                '`price` set as ' + this._btcOracleProof.priceSetAtBuried + ' validator(s) at block ' + buried +
+                ' (coin ' + this['_btcOracleProof'].coin + ', tip ' + this['_btcOracleProof'].height + ') answers the ' +
+                '`price` set as ' + this['_btcOracleProof'].priceSetAtBuried + ' validator(s) at block ' + buried +
                 ', the buried height CapabilitySnapshot resolves for a batch anchored at ' + anchor +
-                ' (' + this._btcOracleProof.priceSetAtAnchor + ' at the anchor itself). The source-keyed weight ' +
+                ' (' + this['_btcOracleProof'].priceSetAtAnchor + ' at the anchor itself). The source-keyed weight ' +
                 'read used under STAKE_WEIGHTED_QUORUM answers ' +
-                this._btcOracleProof.priceWeightSetAtBuried + ' validator(s) at that buried height (' +
-                this._btcOracleProof.priceWeightSetAtAnchor + ' at the anchor).');
-            if (this._btcOracleProof.priceSetAtBuried > 0 &&
-                this._btcOracleProof.priceWeightSetAtBuried === 0) {
+                this['_btcOracleProof'].priceWeightSetAtBuried + ' validator(s) at that buried height (' +
+                this['_btcOracleProof'].priceWeightSetAtAnchor + ' at the anchor).');
+            if (this['_btcOracleProof'].priceSetAtBuried > 0 &&
+                this['_btcOracleProof'].priceWeightSetAtBuried === 0) {
                 console.warn('oracleBatchReplay[' + this.label + ']: the two resolvers disagree at block ' + buried +
-                    ': the count read sees ' + this._btcOracleProof.priceSetAtBuried + ' validator(s), while the ' +
+                    ': the count read sees ' + this['_btcOracleProof'].priceSetAtBuried + ' validator(s), while the ' +
                     'source-keyed weight read the hub gates on under STAKE_WEIGHTED_QUORUM sees nobody. A `0 ' +
                     'verified signers` refusal means the stake sources or their minimum weights need checking.');
             }
@@ -975,12 +975,12 @@ class OracleBatchReplayNode {
     }
 
     // The fee destination this node was launched with, for the run's evidence.
-    feeDestination() { return this._live ? this._live.feeDestination : null; }
+    feeDestination() { return this['_live'] ? this['_live'].feeDestination : null; }
 
     // What this node's Bitcoin capability oracle is and what it answered: the URL,
     // the coin it reported for ITSELF, its tip, the height the hub resolves at once
     // the reorg burial is applied, and the size of the `price` set there.
-    btcOracleEvidence() { return this._btcOracleProof; }
+    btcOracleEvidence() { return this['_btcOracleProof']; }
 
     // Which actions the STANDING chain charged a fee for, as chain coordinates.
     // See readFeeCoordinates for why the set has to come from a node with a
@@ -991,13 +991,13 @@ class OracleBatchReplayNode {
         // the fee-bearing coordinate set from, while a single-node observation
         // (the barrier drill) never asks. Refusing here names which of the two
         // this node was built for, instead of failing as a null host in the driver.
-        if (!this._live || !this._live.liveIndexer) {
+        if (!this['_live'] || !this['_live'].liveIndexer) {
             throw new Error('oracleBatchReplay[' + this.label + ']: this node was built with a live-chain override ' +
                 'that names no `liveIndexer`, so the standing chain\'s fee-bearing coordinates cannot be read. ' +
                 'A cross-node verdict comparison needs them; a single-node barrier observation does not.');
         }
-        if (!this._liveIndexerConn) this._liveIndexerConn = await connectTo(this._live.liveIndexer);
-        return readFeeCoordinates(this._liveIndexerConn, this._live.liveIndexer.name, opts);
+        if (!this['_liveIndexerConn']) this['_liveIndexerConn'] = await connectTo(this['_live'].liveIndexer);
+        return readFeeCoordinates(this['_liveIndexerConn'], this['_live'].liveIndexer.name, opts);
     }
 
     // The chain's own height, read from the decoder the node reads. This is the
@@ -1005,8 +1005,8 @@ class OracleBatchReplayNode {
     // node's own progress: a node that is caught up and one that has stopped both
     // report a height that stops moving.
     async decoderHeight() {
-        if (!this._decoderConn) this._decoderConn = await connectTo(this._live.decoder);
-        return readChainHeight(this._decoderConn, this._live.decoder.name);
+        if (!this['_decoderConn']) this['_decoderConn'] = await connectTo(this['_live'].decoder);
+        return readChainHeight(this['_decoderConn'], this['_live'].decoder.name);
     }
 
     /**
@@ -1029,10 +1029,10 @@ class OracleBatchReplayNode {
      * topology that connection is a full schema, so making it one here is
      * matching production rather than padding.
      */
-    async _provisionMirrorSchema() {
+    async ['_provisionMirrorSchema']() {
         const dir = path.join(this.repoRoot, 'xchain-indexer', 'src', 'sql');
         const db  = ident(this.mirrorDbName, 'database name');
-        await this._conn.query('USE `' + db + '`');
+        await this['_conn'].query('USE `' + db + '`');
         let created = 0;
         for (const file of fs.readdirSync(dir)) {
             if (!file.endsWith('.sql')) continue;
@@ -1042,11 +1042,11 @@ class OracleBatchReplayNode {
             const sql = fs.readFileSync(path.join(dir, file), 'utf8')
                 .replace(/\/\*[\s\S]*?\*\//g, '').replace(/--[^\n\r]*/g, '');
             for (const stmt of sql.split(';').map((s) => s.trim()).filter(Boolean)) {
-                try { await this._conn.query(stmt); created++; }
+                try { await this['_conn'].query(stmt); created++; }
                 catch (e) { /* a DDL this schema version cannot apply is not this rig's to fix */ }
             }
         }
-        this._mirrorStatements = created;
+        this['_mirrorStatements'] = created;
     }
 
     // Discover the live chain's decoder database and node RPC, the only two
@@ -1066,8 +1066,8 @@ class OracleBatchReplayNode {
     // surfaces as an indexer that boots and then indexes nothing, hours later.
     // A caller sources it from its own process environment, which keeps every
     // credential out of a file, a command line and this rig's log.
-    async _resolveLiveChain() {
-        if (this.liveChain) return this._validateLiveChain(this.liveChain);
+    async ['_resolveLiveChain']() {
+        if (this.liveChain) return this['_validateLiveChain'](this.liveChain);
 
         let cfg = null;
         try {
@@ -1145,10 +1145,10 @@ class OracleBatchReplayNode {
         }
 
         return {
-            feeDestination: await this._resolveFeeDestination(code, ixr),
+            feeDestination: await this['_resolveFeeDestination'](code, ixr),
             decoder: { host: dbHost, port: dbPort, name: dec.name, user: decCred.user, pass: decCred.pass },
             liveIndexer: liveIndexer,
-            btcOracle: this._resolveBtcOracle(cfg, dbHost, dbPort),
+            btcOracle: this['_resolveBtcOracle'](cfg, dbHost, dbPort),
             node: Object.assign({}, nod, { user: nodeCred.user, pass: nodeCred.pass }),
             tracker: svc['xchain-utxo-tracker'] || {}
         };
@@ -1172,7 +1172,7 @@ class OracleBatchReplayNode {
      * destination rejects every fee the chain accepted (see _resolveFeeDestination).
      * `liveIndexer` is genuinely optional: only a cross-node comparison reads it.
      */
-    _validateLiveChain(live) {
+    ['_validateLiveChain'](live) {
         const at = (what) => 'oracleBatchReplay[' + this.label + ']: liveChain override is missing ' + what;
         const need = (obj, where, keys) => {
             if (!obj || typeof obj !== 'object') throw new Error(at('`' + where + '`'));
@@ -1218,7 +1218,7 @@ class OracleBatchReplayNode {
      * here. The one substitution is the API port: the hub stores the
      * CONTAINER-internal one, and a host-side process must dial the published one.
      */
-    _resolveBtcOracle(cfg, dbHost, dbPort) {
+    ['_resolveBtcOracle'](cfg, dbHost, dbPort) {
         const svc = cfg && cfg['bitcoin'] && cfg['bitcoin'][this.network];
         if (!svc) return null;
         const ixr = svc['xchain-indexer'] || {};
@@ -1252,7 +1252,7 @@ class OracleBatchReplayNode {
      * to export"). The `fees` table is NOT usable for this: MEASURED on the same
      * day, all 235 of its rows carry a NULL destination_id.
      */
-    async _resolveFeeDestination(code, cfgIndexer) {
+    async ['_resolveFeeDestination'](code, cfgIndexer) {
         try {
             const host = process.env[code + '_SERVICE_HOST'] || 'localhost';
             let port = process.env[code + '_INDEXER_API_PORT'];
@@ -1263,7 +1263,7 @@ class OracleBatchReplayNode {
                 const file = path.resolve(__dirname, '../../.env.' + String(code).toLowerCase());
                 if (fs.existsSync(file)) {
                     try { port = require('dotenv').parse(fs.readFileSync(file)).INDEXER_API_PORT; }
-                    catch (_) { /* fall through to the hub's own value */ }
+                    catch (internal) { /* fall through to the hub's own value */ }
                 }
             }
             if (!port) port = cfgIndexer && cfgIndexer.port;
@@ -1301,7 +1301,7 @@ class OracleBatchReplayNode {
      * typed here, so they cannot drift from the floor the hub asserts them against
      * (`assertCanonicalMinStakes`, which reads src/coins/BTC.js STAKING.CAPABILITIES).
      */
-    _writeCapabilityConfig() {
+    ['_writeCapabilityConfig']() {
         const coins = loadHubModule('src/coins/index.js');
         // Staking is Bitcoin-anchored, so BTC's floors are the only ones that gate a
         // quorum, and the hub resolves them for 'mainnet' when its own network is
@@ -1311,14 +1311,14 @@ class OracleBatchReplayNode {
         if (!canonical) throw new Error('oracleBatchReplay: the hub coins registry carries no BTC STAKING.CAPABILITIES');
         const caps = {};
         for (const cap of Object.keys(canonical)) caps[cap] = { MIN_STAKE: String(canonical[cap].MIN_STAKE) };
-        this._priceMinStake = caps.price ? caps.price.MIN_STAKE : null;
-        const file = path.join(this._cwd, 'capabilities.json');
+        this['_priceMinStake'] = caps.price ? caps.price.MIN_STAKE : null;
+        const file = path.join(this['_cwd'], 'capabilities.json');
         fs.writeFileSync(file, JSON.stringify({ CAPABILITIES: caps }, null, 2));
         return file;
     }
 
-    async _startHub() {
-        const capabilityConfig = this._writeCapabilityConfig();
+    async ['_startHub']() {
+        const capabilityConfig = this['_writeCapabilityConfig']();
         const env = {
             PATH: process.env.PATH,
             HOME: process.env.HOME,
@@ -1359,39 +1359,39 @@ class OracleBatchReplayNode {
             // BTC-anchored read (`indexerCoinMismatch`), and nothing here switches
             // that check off; _verifyBtcOracle asks the same question first so the
             // drill's own evidence carries the answer.
-            BTC_INDEXER_API_URL: this._live.btcOracle.url,
+            BTC_INDEXER_API_URL: this['_live'].btcOracle.url,
 
             // Per-capability MIN_STAKE. Without it the hub's capability registry is
             // live but empty and every price snapshot is refused; see
             // _writeCapabilityConfig.
             HUB_CAPABILITY_CONFIG: capabilityConfig
         };
-        if (this._live.btcOracle.apiKey) env.BTC_INDEXER_API_KEY = String(this._live.btcOracle.apiKey);
-        this._hubProc = this._spawn('hub', path.join(this.repoRoot, 'xchain-hub', 'src', 'api.js'), [], env);
+        if (this['_live'].btcOracle.apiKey) env.BTC_INDEXER_API_KEY = String(this['_live'].btcOracle.apiKey);
+        this['_hubProc'] = this['_spawn']('hub', path.join(this.repoRoot, 'xchain-hub', 'src', 'api.js'), [], env);
 
         const up = await waitFor(
-            () => processListening(this._hubProc, '127.0.0.1', this.hubPort),
+            () => processListening(this['_hubProc'], '127.0.0.1', this.hubPort),
             { timeoutMs: BOOT_WAIT_MS, intervalMs: 500 }
         );
         if (!up.ok) {
             throw new Error('oracleBatchReplay[' + this.label + ']: the fresh hub did not listen on 127.0.0.1:' +
-                this.hubPort + ' within ' + up.waitedMs + 'ms.\n' + this._tail('hub'));
+                this.hubPort + ' within ' + up.waitedMs + 'ms.\n' + this['_tail']('hub'));
         }
 
         const connector = new XChainHubConnector(['http://127.0.0.1:' + this.hubPort]);
         if (!(await connector.ping())) {
             throw new Error('oracleBatchReplay[' + this.label + ']: the fresh hub listened on 127.0.0.1:' +
-                this.hubPort + ' but did not answer ping.\n' + this._tail('hub'));
+                this.hubPort + ' but did not answer ping.\n' + this['_tail']('hub'));
         }
         this.hubConnector = connector;
 
         // The zero this rig's whole claim rests on, measured rather than assumed:
         // how many price snapshots the fresh hub held BEFORE any block reached it.
         try {
-            const rows = await this._conn.query(
+            const rows = await this['_conn'].query(
                 'SELECT COUNT(*) AS c FROM `' + ident(this.hubDbName, 'database name') + '`.price_snapshots');
-            this._hubSnapshotsAtBoot = Number(rows[0].c);
-        } catch (_) { this._hubSnapshotsAtBoot = null; }
+            this['_hubSnapshotsAtBoot'] = Number(rows[0].c);
+        } catch (internal) { this['_hubSnapshotsAtBoot'] = null; }
     }
 
     // The indexer, pointed at the live decoder (the chain) and at NOTHING else
@@ -1400,7 +1400,7 @@ class OracleBatchReplayNode {
     // hub_db_sync owns and re-pages from the hub on every bootstrap. Pointing it
     // at the hub's own authoritative database instead would put the hub's rows
     // under a replication client that deletes and repages them.
-    async _startIndexer(live) {
+    async ['_startIndexer'](live) {
         const env = {
             PATH: process.env.PATH,
             HOME: process.env.HOME,
@@ -1485,41 +1485,41 @@ class OracleBatchReplayNode {
         // --no-node-snapshot mirrors the package's own `api` script: the contract VM
         // binding will not load under a Node snapshot, and a replay of this chain
         // runs DEPLOY and EXECUTE.
-        this._indexerProc = this._spawn('indexer', path.join(this.repoRoot, 'xchain-indexer', 'src', 'api.js'),
+        this['_indexerProc'] = this['_spawn']('indexer', path.join(this.repoRoot, 'xchain-indexer', 'src', 'api.js'),
             ['--no-node-snapshot'], env);
 
         // Ready when the node has written its own schema and started walking the
         // chain, which is the first moment `blocks` can be read at all.
         const up = await waitFor(async () => {
-            if (this._indexerProc.exitCode !== null) return { ok: false, dead: true };
+            if (this['_indexerProc'].exitCode !== null) return { ok: false, dead: true };
             try {
-                const rows = await this._conn.query(
+                const rows = await this['_conn'].query(
                     'SELECT COUNT(*) AS c FROM information_schema.TABLES WHERE TABLE_SCHEMA = ?', [this.indexerDbName]);
                 return { ok: Number(rows[0].c) > 0, tables: Number(rows[0].c) };
-            } catch (_) { return { ok: false }; }
+            } catch (internal) { return { ok: false }; }
         }, { timeoutMs: BOOT_WAIT_MS, intervalMs: 1000 });
         if (!up.ok) {
             throw new Error('oracleBatchReplay[' + this.label + ']: the fresh indexer never created its schema in ' +
-                this.indexerDbName + ' within ' + up.waitedMs + 'ms.\n' + this._tail('indexer'));
+                this.indexerDbName + ' within ' + up.waitedMs + 'ms.\n' + this['_tail']('indexer'));
         }
     }
 
-    _spawn(which, script, nodeArgs, env) {
+    ['_spawn'](which, script, nodeArgs, env) {
         const proc = spawn(process.execPath, [...nodeArgs, script], {
-            cwd: this._cwd, env: env, stdio: ['ignore', 'pipe', 'pipe']
+            cwd: this['_cwd'], env: env, stdio: ['ignore', 'pipe', 'pipe']
         });
         const keep = (buf) => {
             const lines = String(buf).split('\n').filter((l) => l.length > 0);
-            const log = this._logs[which];
+            const log = this['_logs'][which];
             log.push(...lines);
             if (log.length > LOG_TAIL_LINES) log.splice(0, log.length - LOG_TAIL_LINES);
             // The hook sees every line as it arrives, before the ring drops it. A
             // run measured in hours produces far more than LOG_TAIL_LINES, so a
             // caller that needs a line class kept whole cannot get it from _tail.
             // Its failure is its own: a throwing hook must not kill the node.
-            if (this._onLog) {
+            if (this['_onLog']) {
                 for (const line of lines) {
-                    try { this._onLog(which, line); } catch (_) { /* a log hook cannot break the run */ }
+                    try { this['_onLog'](which, line); } catch (internal) { /* a log hook cannot break the run */ }
                 }
             }
         };
@@ -1529,8 +1529,8 @@ class OracleBatchReplayNode {
         return proc;
     }
 
-    _tail(which) {
-        const log = this._logs[which] || [];
+    ['_tail'](which) {
+        const log = this['_logs'][which] || [];
         return '  last ' + log.length + ' line(s) from the ' + which + ':\n    ' + log.join('\n    ');
     }
 
@@ -1547,11 +1547,11 @@ class OracleBatchReplayNode {
         opts = opts || {};
         const target = Number(height);
         const result = await waitFor(async () => {
-            if (this._indexerProc && this._indexerProc.exitCode !== null) return { ok: false, dead: true };
+            if (this['_indexerProc'] && this['_indexerProc'].exitCode !== null) return { ok: false, dead: true };
             try {
-                const at = await readChainHeight(this._conn, this.indexerDbName);
+                const at = await readChainHeight(this['_conn'], this.indexerDbName);
                 return { ok: at.height !== null && at.height >= target, at: at.height };
-            } catch (_) { return { ok: false, at: null }; }
+            } catch (internal) { return { ok: false, at: null }; }
         }, { timeoutMs: opts.timeoutMs || REPLAY_WAIT_MS, intervalMs: opts.intervalMs || 2000 });
 
         if (!result.ok) {
@@ -1559,7 +1559,7 @@ class OracleBatchReplayNode {
             const dead = result.last && result.last.dead;
             throw new Error('oracleBatchReplay[' + this.label + ']: ' +
                 (dead ? 'the indexer process exited' : 'the node reached block ' + at + ' of ' + target) +
-                ' after ' + result.waitedMs + 'ms.\n' + this._tail('indexer'));
+                ' after ' + result.waitedMs + 'ms.\n' + this['_tail']('indexer'));
         }
         return result;
     }
@@ -1584,10 +1584,10 @@ class OracleBatchReplayNode {
         const db = ident(this.indexerDbName, 'database name');
         const result = await waitFor(async () => {
             try {
-                const rows = await this._conn.query(
+                const rows = await this['_conn'].query(
                     "SELECT COUNT(*) AS c FROM `" + db + "`.pending_hub_pushes WHERE status = 'pending'");
                 return { ok: Number(rows[0].c) === 0, pending: Number(rows[0].c) };
-            } catch (_) {
+            } catch (internal) {
                 // No such table means no hub push path at all, which is not something
                 // to wait on.
                 return { ok: true, pending: null };
@@ -1606,14 +1606,14 @@ class OracleBatchReplayNode {
     // What the node's own hub holds. This is the authoritative reconstruction:
     // rows here arrived through PriceAggregator from a block and from nowhere
     // else, because this hub has no peers and no oracle round.
-    async hubPriceSnapshots(opts)    { return readPriceSnapshots(this._conn, this.hubDbName, opts); }
+    async hubPriceSnapshots(opts)    { return readPriceSnapshots(this['_conn'], this.hubDbName, opts); }
     // What the indexer's settlement path actually reads, once hub_db_sync has
     // carried the hub's rows back down. The full loop is only closed when both
     // agree.
-    async mirrorPriceSnapshots(opts) { return readPriceSnapshots(this._conn, this.mirrorDbName, opts); }
-    async priceActions(opts)         { return readPriceActions(this._conn, this.indexerDbName, opts); }
-    async actionVerdicts(opts)       { return readActionVerdicts(this._conn, this.indexerDbName, opts); }
-    async chainHeight()              { return readChainHeight(this._conn, this.indexerDbName); }
+    async mirrorPriceSnapshots(opts) { return readPriceSnapshots(this['_conn'], this.mirrorDbName, opts); }
+    async priceActions(opts)         { return readPriceActions(this['_conn'], this.indexerDbName, opts); }
+    async actionVerdicts(opts)       { return readActionVerdicts(this['_conn'], this.indexerDbName, opts); }
+    async chainHeight()              { return readChainHeight(this['_conn'], this.indexerDbName); }
 
     // The node's own outbox, for a failure that needs to say whether a push was
     // never made, or was made and refused. Delivered rows are DELETED by design,
@@ -1622,7 +1622,7 @@ class OracleBatchReplayNode {
     async hubPushQueue() {
         const db = ident(this.indexerDbName, 'database name');
         try {
-            return plain(await this._conn.query(
+            return plain(await this['_conn'].query(
                 'SELECT push_type, status, attempts, last_error, COUNT(*) AS c FROM `' + db + '`.pending_hub_pushes ' +
                 'GROUP BY push_type, status, attempts, last_error ORDER BY c DESC LIMIT 20'));
         } catch (e) { return [{ error: 'pending_hub_pushes unreadable: ' + (e && e.message) }]; }
@@ -1638,18 +1638,18 @@ class OracleBatchReplayNode {
         const out = {
             p2pValidatorAddrSet: false,
             seedNodesSet:        false,
-            hubSnapshotsAtBoot:  this._hubSnapshotsAtBoot,
+            hubSnapshotsAtBoot:  this['_hubSnapshotsAtBoot'],
             hubValidators:       null
         };
         try {
-            const rows = await this._conn.query(
+            const rows = await this['_conn'].query(
                 'SELECT COUNT(*) AS c FROM `' + ident(this.hubDbName, 'database name') + '`.validators');
             out.hubValidators = Number(rows[0].c);
-        } catch (_) { out.hubValidators = null; }
+        } catch (internal) { out.hubValidators = null; }
         return out;
     }
 
-    logTail(which) { return this._tail(which || 'indexer'); }
+    logTail(which) { return this['_tail'](which || 'indexer'); }
 
     // ---- teardown -------------------------------------------------------
 
@@ -1665,56 +1665,56 @@ class OracleBatchReplayNode {
 
         // Off the capability-target list first, so a venue still coming up cannot
         // push rows into databases this teardown is about to drop.
-        if (this._capabilityTarget) {
-            await attempt('capability target unregister', async () => unregisterPriceCapabilityTarget(this._capabilityTarget));
-            this._capabilityTarget = null;
+        if (this['_capabilityTarget']) {
+            await attempt('capability target unregister', async () => unregisterPriceCapabilityTarget(this['_capabilityTarget']));
+            this['_capabilityTarget'] = null;
         }
         // The hub-mirror rows need no DELETE: all three of this node's databases are
         // dropped below, which takes them with it. The Bitcoin capability oracle is
         // the STANDING stack's, so its rows are the one thing this node has to give
         // back by hand, and giving them back is what keeps a drill's federation out
         // of every later reader's validator set.
-        if (this._btcStakeRows.length > 0) {
-            const rows = this._btcStakeRows;
-            this._btcStakeRows = [];
+        if (this['_btcStakeRows'].length > 0) {
+            const rows = this['_btcStakeRows'];
+            this['_btcStakeRows'] = [];
             await attempt('btc capability oracle seed cleanup', async () =>
-                removePriceCapabilityStakes(await this._btcOracleQuery(), rows));
+                removePriceCapabilityStakes(await this['_btcOracleQuery'](), rows));
         }
 
-        await attempt('indexer stop', async () => this._kill(this._indexerProc));
-        await attempt('hub stop',     async () => this._kill(this._hubProc));
-        this._indexerProc = this._hubProc = null;
+        await attempt('indexer stop', async () => this['_kill'](this['_indexerProc']));
+        await attempt('hub stop',     async () => this['_kill'](this['_hubProc']));
+        this['_indexerProc'] = this['_hubProc'] = null;
 
-        if (this._conn) {
+        if (this['_conn']) {
             for (const name of [this.mirrorDbName, this.indexerDbName, this.hubDbName]) {
                 if (!name) continue;
                 await attempt('drop ' + name, async () =>
-                    this._conn.query('DROP DATABASE IF EXISTS `' + ident(name, 'database name') + '`'));
+                    this['_conn'].query('DROP DATABASE IF EXISTS `' + ident(name, 'database name') + '`'));
             }
-            await attempt('conn close', async () => this._conn.end());
-            this._conn = null;
+            await attempt('conn close', async () => this['_conn'].end());
+            this['_conn'] = null;
         }
-        if (this._decoderConn) {
-            await attempt('decoder conn close', async () => this._decoderConn.end());
-            this._decoderConn = null;
+        if (this['_decoderConn']) {
+            await attempt('decoder conn close', async () => this['_decoderConn'].end());
+            this['_decoderConn'] = null;
         }
-        if (this._liveIndexerConn) {
-            await attempt('live indexer conn close', async () => this._liveIndexerConn.end());
-            this._liveIndexerConn = null;
+        if (this['_liveIndexerConn']) {
+            await attempt('live indexer conn close', async () => this['_liveIndexerConn'].end());
+            this['_liveIndexerConn'] = null;
         }
         // The oracle's database is the standing stack's, not this rig's, so its
         // seeded rows are removed explicitly (the unregister above already did it)
         // and only the connection is given back here.
-        if (this._btcOracleConn) {
-            await attempt('btc oracle conn close', async () => this._btcOracleConn.end());
-            this._btcOracleConn = null;
+        if (this['_btcOracleConn']) {
+            await attempt('btc oracle conn close', async () => this['_btcOracleConn'].end());
+            this['_btcOracleConn'] = null;
         }
 
-        if (this._cwd) {
-            await attempt('cwd', async () => fs.rmSync(this._cwd, { recursive: true, force: true }));
-            this._cwd = null;
+        if (this['_cwd']) {
+            await attempt('cwd', async () => fs.rmSync(this['_cwd'], { recursive: true, force: true }));
+            this['_cwd'] = null;
         }
-        if (this.hubDb && this._ownsHubDb) {
+        if (this.hubDb && this['_ownsHubDb']) {
             await attempt('hub db stop', async () => this.hubDb.stop());
             this.hubDb = null;
         }
@@ -1723,7 +1723,7 @@ class OracleBatchReplayNode {
         return problems;
     }
 
-    async _kill(proc) {
+    async ['_kill'](proc) {
         if (!proc || proc.exitCode !== null || proc.signalCode !== null) return;
         const ended = new Promise((resolve) => proc.once('exit', resolve));
         proc.kill('SIGTERM');

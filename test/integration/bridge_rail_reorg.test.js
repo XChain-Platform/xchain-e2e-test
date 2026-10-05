@@ -110,7 +110,7 @@ async function setUpBridgeRail() {
         const row = set.byPubkey.get(pk) || {};
         return { pubkey: pk, stake: Number(row.weight || 0) };
     });
-    const quorum = resolveVenueQuorum(seated, fixture._knownSignerSeeds());
+    const quorum = resolveVenueQuorum(seated, fixture['_knownSignerSeeds']());
     if (!quorum.ok) {
         blocked = quorum.reason;
         console.log('\nBRIDGE REORG: no federation can be built here.\n  ' + blocked + '\n');

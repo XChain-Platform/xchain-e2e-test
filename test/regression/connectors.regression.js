@@ -290,7 +290,7 @@ describe('[regression:p0] Service Connectors', function () {
         })
 
         it('[regression:p0] R-CONN-009 : multi-endpoint failover tries all validators', async function () {
-            let callOrder = []
+            const callOrder = []
             const stub = sinon.stub(axios, 'post').callsFake(async (url) => {
                 callOrder.push(url)
                 if (url === 'http://hub1:10000') {

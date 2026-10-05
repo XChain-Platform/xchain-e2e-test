@@ -435,7 +435,7 @@ async function releaseChain (rail) {
     try {
         await rail.globals.regtestMinerConnector.resumeMining()
         return true
-    } catch (_) {
+    } catch (internal) {
         return false
     }
 }
@@ -619,7 +619,7 @@ function corpusCoordinates (venue, i, coinCode) {
     const ix = venue.indexers[i]
     assert.ok(ix, 'corpusCoordinates: no indexer ' + i)
     // `_live` is the venue's resolved standing-stack record; the decoder schema has no public accessor.
-    const decoder = (venue._live && venue._live.decoder) || {}
+    const decoder = (venue['_live'] && venue['_live'].decoder) || {}
     return {
         coin: coinCode,
         network: venue.network,
@@ -644,10 +644,10 @@ function vmLinkProblem (repoRoot) {
     const entry = path.join(repoRoot, 'xchain-indexer', 'node_modules', 'xchain-vm')
     try {
         if (fs.existsSync(path.join(fs.realpathSync(entry), 'package.json'))) return null
-    } catch (_) { /* a dangling link lands here; the hops below name it */ }
+    } catch (internal) { /* a dangling link lands here; the hops below name it */ }
     const hops = [entry, path.join(repoRoot, 'xchain-indexer', 'xchain-vm')].map((p) => {
         let target = null
-        try { target = fs.readlinkSync(p) } catch (_) { target = fs.existsSync(p) ? '(not a link)' : '(missing)' }
+        try { target = fs.readlinkSync(p) } catch (internal) { target = fs.existsSync(p) ? '(not a link)' : '(missing)' }
         return path.relative(repoRoot, p) + ' -> ' + target
     })
     return 'the build root\'s indexer cannot load xchain-vm: ' + hops.join('; ') + '. Re-link it inside the tree: ' +

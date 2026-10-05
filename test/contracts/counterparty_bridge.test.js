@@ -56,8 +56,8 @@
 // a burn, cap enforcement, multi-burn summing).
 
 const assert = require('assert')
-const _path = require('path')
-const _fs = require('fs')
+const internalPath = require('path')
+const internalFs = require('fs')
 
 const cryptoHelper = require('../helpers/core/cryptoHelper')
 const stakeHelper = require('../helpers/stakeHelper')
@@ -67,18 +67,18 @@ const attestationHelper = require('../helpers/attestationHelper')
 const { skipIfResponseMirrorEra } = require('../helpers/attestLegacyResponsePath')
 
 // Resolve the REAL http_get provider the same way realUrlAttestation.test.js does.
-const _hubBase = (function () {
+const internalHubBase = (function () {
     const candidates = [
         process.env.XCHAIN_HUB_PATH,
-        _path.resolve(__dirname, '../../xchain-hub'),
-        _path.resolve(__dirname, '../../../xchain-hub')
+        internalPath.resolve(__dirname, '../../xchain-hub'),
+        internalPath.resolve(__dirname, '../../../xchain-hub')
     ].filter(Boolean)
     for (const c of candidates) {
-        if (_fs.existsSync(_path.join(c, 'src/providers/http_get.js'))) return c
+        if (internalFs.existsSync(internalPath.join(c, 'src/providers/http_get.js'))) return c
     }
     return candidates[candidates.length - 1]
 })()
-const http_get = require(_hubBase + '/src/providers/http_get.js')
+const httpGet = require(internalHubBase + '/src/providers/http_get.js')
 
 // A widely-recognized, industry-standard Bitcoin "burn" address: valid
 // checksum, no known private key. Must match BA in the inline contract copy
@@ -90,12 +90,12 @@ const BURN_ADDRESS = '1BitcoinEaterAddressDontSendf59kuE'
 // inline VM string) to independently re-verify the parsing assumption
 // against a live body.
 function extractBurnSends(payload, asset, source) {
-    var parsed
+    let parsed
     try { parsed = JSON.parse(payload) } catch (e) { return [] }
     if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.data)) return []
-    var out = []
-    for (var i = 0; i < parsed.data.length; i++) {
-        var row = parsed.data[i]
+    const out = []
+    for (let i = 0; i < parsed.data.length; i++) {
+        const row = parsed.data[i]
         if (row && row.asset === asset && row.source === source && row.status === 'valid'
             && typeof row.tx_hash === 'string' && row.tx_hash.length > 0
             && row.quantity !== undefined && row.quantity !== null) {
@@ -193,7 +193,7 @@ module.exports = {
     }
 
     async function stakeValidatorFromOwnSource(v) {
-        let stakeSource = await cryptoHelper.getNewFundedAddress(
+        const stakeSource = await cryptoHelper.getNewFundedAddress(
             'cpbridge-val', COIN, NETWORK, null, 'legacy', stakedValidators.length, 0.02
         )
         // 15000 clears BOTH the attestation capability min_stake (1000) and the
@@ -208,7 +208,7 @@ module.exports = {
 
     // Real GET + real 3/3-signed ATTEST v1 broadcast (mirrors realUrlAttestation.test.js).
     async function fetchSignAndBroadcast(operator, requestId, url) {
-        const fetched = await http_get.fetch(url, { maxResponseBytes: 65536, timeoutMs: 10000 })
+        const fetched = await httpGet.fetch(url, { maxResponseBytes: 65536, timeoutMs: 10000 })
         const realBody = fetched.body.toString('utf8')
         const realMeta = String(fetched.meta)
         assert.strictEqual(realMeta, '200', 'expected HTTP 200 from the live tokenscan.io endpoint')
@@ -332,7 +332,7 @@ describe('Counterparty Bridge: a REAL tokenscan.io burn check driving a mint or 
         // the shared burn address's real send history, re-running the exact
         // extraction logic the contract uses against a real row in it.
         const url = 'https://cp20.tokenscan.io/api/sends/' + BURN_ADDRESS + '/1/50'
-        const fetched = await http_get.fetch(url, { maxResponseBytes: 65536, timeoutMs: 10000 })
+        const fetched = await httpGet.fetch(url, { maxResponseBytes: 65536, timeoutMs: 10000 })
         assert.strictEqual(String(fetched.meta), '200', 'expected HTTP 200 from the live tokenscan.io endpoint')
         const body = fetched.body.toString('utf8')
 

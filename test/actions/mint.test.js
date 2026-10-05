@@ -16,14 +16,14 @@ const mintHelper = require('../helpers/mintHelper')
 describe('MINT', () => {
     describe('v0', () => {
         it('should create a MINT v0', async () => {
-            let issuerAddress = await cryptoHelper.getNewFundedAddress("MINT.V0.ISSUER", COIN, NETWORK, null, "legacy", 0, 1)
-            let mintDestination = await cryptoHelper.getNewAddress("MINT.V0.DEST", COIN, NETWORK, null, "legacy", 0)
-            let tick = "MINTv0"+issuerAddress["address"].substring(issuerAddress["address"].length-8)
+            const issuerAddress = await cryptoHelper.getNewFundedAddress("MINT.V0.ISSUER", COIN, NETWORK, null, "legacy", 0, 1)
+            const mintDestination = await cryptoHelper.getNewAddress("MINT.V0.DEST", COIN, NETWORK, null, "legacy", 0)
+            const tick = "MINTv0"+issuerAddress["address"].substring(issuerAddress["address"].length-8)
 
-            let issueResult = await issueHelper.sendIssueV0(issuerAddress, tick, 100, 2, 0, "MINT test token", 10)
+            const issueResult = await issueHelper.sendIssueV0(issuerAddress, tick, 100, 2, 0, "MINT test token", 10)
             assert(issueResult.issue, "Issue for MINT should exist in DB")
 
-            let mintResult = await mintHelper.sendMintV0(
+            const mintResult = await mintHelper.sendMintV0(
                 issuerAddress, tick, 2, mintDestination["address"], "A simple MINT test v0"
             )
             assert(mintResult.mint, "Mint v0 should exist in DB")

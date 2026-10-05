@@ -20,13 +20,13 @@ module.exports = {
     // `validationStatus` defaults to 'valid'; pass a different value to poll for
     // the expected-invalid record on a negative-path test.
     async sendPriceV1(addressInfo, { coin, tick, fiat, value, fee = '0', memo = '' }, validationStatus = 'valid'){
-        let address = addressInfo['address']
-        let priceMessage = 'PRICE|1|' + coin + '|' + tick + '|' + fiat + '|' + value + '|' + fee + '|' + memo
+        const address = addressInfo['address']
+        const priceMessage = 'PRICE|1|' + coin + '|' + tick + '|' + fiat + '|' + value + '|' + fee + '|' + memo
 
         console.log('Creating and sending PRICE V1 tx...')
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, priceMessage)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, priceMessage)
 
-        let priceRow = requireRow(await indexerDatabase.waitForPrice({
+        const priceRow = requireRow(await indexerDatabase.waitForPrice({
             source: address, txHash: txHash, version: 1, validationStatus: validationStatus
         }), "sendPriceV1: PRICE " + tick + "/" + fiat + " (tx " + txHash + ") at validation_status="
             + validationStatus)

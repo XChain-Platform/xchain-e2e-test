@@ -281,11 +281,11 @@ async function mine(blocks = 1) {
     try { await global.regtestMinerConnector.generateBlocks(blocks); } catch (e) {}
 }
 
-let _tickSeq = 0;
+let internalTickSeq = 0;
 function uniqueTick(prefix = 'SDK') {
-    _tickSeq += 1;
+    internalTickSeq += 1;
     const stamp = Date.now().toString(36).toUpperCase();
-    return (prefix + stamp + _tickSeq).slice(0, 12);
+    return (prefix + stamp + internalTickSeq).slice(0, 12);
 }
 
 function submitOpts(extra = {}) {

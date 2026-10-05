@@ -29,12 +29,12 @@ const sweepHelper = require('../helpers/sweepHelper')
 describe('OWNERSHIP', () => {
     describe('ORDER - ownership for token (instant match)', () => {
         it('should transfer ownership atomically when a counter-order matches', async () => {
-            let addr1 = await cryptoHelper.getNewFundedAddress("OWN.OM1", COIN, NETWORK, null, "legacy", 0, 1)
-            let addr2 = await cryptoHelper.getNewFundedAddress("OWN.OM2", COIN, NETWORK, null, "legacy", 0, 1)
-            let address1 = addr1["address"]
-            let address2 = addr2["address"]
-            let jdog    = "OWNJDG"+address1.substring(address1.length-8)
-            let settle  = "OWNST"+address1.substring(address1.length-8)
+            const addr1 = await cryptoHelper.getNewFundedAddress("OWN.OM1", COIN, NETWORK, null, "legacy", 0, 1)
+            const addr2 = await cryptoHelper.getNewFundedAddress("OWN.OM2", COIN, NETWORK, null, "legacy", 0, 1)
+            const address1 = addr1["address"]
+            const address2 = addr2["address"]
+            const jdog    = "OWNJDG"+address1.substring(address1.length-8)
+            const settle  = "OWNST"+address1.substring(address1.length-8)
 
             // addr1 mints both ticks; addr2 receives a chunk of SETTLE to pay with
             await issueHelper.sendIssueV0(addr1, jdog,   100, 50, 0, "Ownership-sale subject", 50)
@@ -43,10 +43,10 @@ describe('OWNERSHIP', () => {
             await gasHelper.ensureGasBalance(addr1, 100)
             await gasHelper.ensureGasBalance(addr2, 100)
 
-            let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
+            const expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
 
             // Seller lists JDOG ownership for 10 SETTLE (GIVE_AMOUNT must be empty)
-            let sellOrder = await orderHelper.sendOrderV0(
+            const sellOrder = await orderHelper.sendOrderV0(
                 addr1,
                 COIN_CODE, jdog,   null,
                 COIN_CODE, settle, 10,
@@ -56,10 +56,10 @@ describe('OWNERSHIP', () => {
                 0  // getOwnership
             )
             assert(sellOrder.order, "Ownership-sell order should land in DB")
-            let sellAI = Number(sellOrder.order["action_index"])
+            const sellAI = Number(sellOrder.order["action_index"])
 
             // Buyer posts the matching counter-order: GIVE 10 SETTLE, GET JDOG ownership
-            let buyOrder = await orderHelper.sendOrderV0(
+            const buyOrder = await orderHelper.sendOrderV0(
                 addr2,
                 COIN_CODE, settle, 10,
                 COIN_CODE, jdog,   null,
@@ -69,17 +69,17 @@ describe('OWNERSHIP', () => {
                 1  // getOwnership
             )
             assert(buyOrder.order, "Ownership-buy order should land in DB")
-            let buyAI = Number(buyOrder.order["action_index"])
+            const buyAI = Number(buyOrder.order["action_index"])
 
             // Match must exist and settle valid
-            let match = await indexerDatabase.waitForOrderMatch({ giveActionIndex: sellAI, getActionIndex:  buyAI, status: "valid" }, 30000)
+            const match = await indexerDatabase.waitForOrderMatch({ giveActionIndex: sellAI, getActionIndex:  buyAI, status: "valid" }, 30000)
             assert(match, "Ownership orders should match")
 
             // Both orders should now be 'complete' (ownership single-fill)
-            let sellComplete = await indexerDatabase.waitForOrder({ source: address1, giveTick: jdog, orderStatus: "complete" }, 30000)
+            const sellComplete = await indexerDatabase.waitForOrder({ source: address1, giveTick: jdog, orderStatus: "complete" }, 30000)
             assert(sellComplete, "Sell order should be complete after ownership match")
 
-            let buyComplete = await indexerDatabase.waitForOrder({ source: address2, giveTick: settle, orderStatus: "complete" }, 30000)
+            const buyComplete = await indexerDatabase.waitForOrder({ source: address2, giveTick: settle, orderStatus: "complete" }, 30000)
             assert(buyComplete, "Buy order should be complete after ownership match")
         })
     })

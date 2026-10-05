@@ -64,7 +64,8 @@ function loadTemplate(name) {
 // regex literals or `//` inside strings), so this preserves semantics exactly.
 function compactSource(src) {
     let out = '';
-    let i = 0, n = src.length;
+    let i = 0;
+    const n = src.length;
     let state = 'code'; // code | line | block | sq | dq | tpl
     while (i < n) {
         const c = src[i], d = src[i + 1];

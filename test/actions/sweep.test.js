@@ -17,14 +17,14 @@ const sweepHelper = require('../helpers/sweepHelper')
 describe('SWEEP', () => {
     describe('v0', () => {
         it('should sweep balances to a destination v0', async () => {
-            let sourceAddr = await cryptoHelper.getNewFundedAddress("SWEEP.V0", COIN, NETWORK, null, "legacy", 0, 1)
-            let destAddr = await cryptoHelper.getNewAddress("SWEEP.V0.DEST", COIN, NETWORK, null, "legacy", 0)
-            let tick = "SWEEPv0"+sourceAddr["address"].substring(sourceAddr["address"].length-8)
+            const sourceAddr = await cryptoHelper.getNewFundedAddress("SWEEP.V0", COIN, NETWORK, null, "legacy", 0, 1)
+            const destAddr = await cryptoHelper.getNewAddress("SWEEP.V0.DEST", COIN, NETWORK, null, "legacy", 0)
+            const tick = "SWEEPv0"+sourceAddr["address"].substring(sourceAddr["address"].length-8)
 
             await issueHelper.sendIssueV0(sourceAddr, tick, 100, 50, 0, "Sweep v0 test token", 50)
             await gasHelper.ensureGasBalance(sourceAddr, 100)
 
-            let result = await sweepHelper.sendSweepV0(
+            const result = await sweepHelper.sendSweepV0(
                 sourceAddr,
                 destAddr["address"],
                 1, // balances

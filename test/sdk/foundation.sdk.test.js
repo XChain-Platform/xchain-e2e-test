@@ -23,7 +23,7 @@ const { expect } = require('chai');
 const { makeSdk, submit, fundedSdkAddress, fundedGasAddress, mine, uniqueTick, submitOpts } = require('./helpers/sdkHelper');
 
 function balanceFor(balances, tick) {
-    let list = balances && (Array.isArray(balances) ? balances : balances.data);
+    const list = balances && (Array.isArray(balances) ? balances : balances.data);
     if (!Array.isArray(list)) return null;
     const row = list.find(b => (b.tick || b.TICK) === tick);
     return row ? Number(row.amount ?? row.quantity ?? row.balance) : null;

@@ -70,7 +70,7 @@ const {
 const {
     APPLIED_FIELDS, diffRows,
     waitForMirrorRowEverywhere, waitForAppliedEverywhere,
-    readRequestRow, findEmittedAttestRequest, attestRequestWatermark,
+    waitForHeightWithClear, readRequestRow, findEmittedAttestRequest, attestRequestWatermark,
     clearBeforeBroadcast, settleOrReport, allHubTails, jsonSafe,
 } = require('./helpers/mirrorDrillWaits')
 const vmHelper = require('../helpers/vmHelper')
@@ -183,7 +183,7 @@ async function readDraw(sinceAction) {
         const got = await venue.responsibleSetFromHub(hub.index, requestId)
         if (!got.error) { draw = got; drawFrom = hub.index; break }
     }
-    return { requestId, draw, drawFrom }
+    return { request, requestId, draw, drawFrom }
 }
 
 function selectVictim(draw) {
@@ -287,8 +287,9 @@ async function applyResult(requestId) {
     return { applied, diffs }
 }
 
-async function bindingWindow(requestId, applied) {
-    const local        = await readRequestRow(venue, 0, requestId)
+async function bindingWindow(request, applied) {
+    await waitForHeightWithClear(venue, 0, request.blockIndex)
+    const local        = await readRequestRow(venue, 0, request.requestId)
     const requestBlock = Number(local.block_index)
     const deadline     = Number(local.deadline_block)
     const bindBlock    = Number(applied[0].block_index)
@@ -313,6 +314,7 @@ describe('ZC3: a drawn member that cannot sign is covered by the headroom slot',
     it('finalizes with exactly redundancy signatures inside the first ladder segment', async function () {
         let requestId = null
         let draw = null
+        let request = null
         let victimKey = null
         let victimHub = null
         let victimStarted = true
@@ -324,6 +326,7 @@ describe('ZC3: a drawn member that cannot sign is covered by the headroom slot',
                 'the EXECUTE that emits the request came back ' + exec.execution.status)
             const read = await readDraw(sinceAction)
             requestId = read.requestId
+            request = read.request
             draw = read.draw
             assert.ok(draw, 'no venue hub could resolve the responsible set for ' + requestId +
                 ' while it was pending\n' + allHubTails(venue))
@@ -388,7 +391,8 @@ describe('ZC3: a drawn member that cannot sign is covered by the headroom slot',
             '. The applier is deterministic by construction, so a difference here is a fork between ' +
             'two nodes reading the same mirror row.')
         // THE FIRST LADDER SEGMENT, computed from the V2 shape the spec states: the
-        const { requestBlock, deadline, bindBlock, span, cutoff } = await bindingWindow(requestId, applied)
+        const window = await bindingWindow(request, applied)
+        const { requestBlock, deadline, bindBlock, span, cutoff } = window
         assert.ok(bindBlock < cutoff,
             'the response bound at block ' + bindBlock + ', at or past the end of the first ladder ' +
             'segment (' + requestBlock + ' + ' + span + '/3 = ' + cutoff.toFixed(2) + '). Inside the ' +

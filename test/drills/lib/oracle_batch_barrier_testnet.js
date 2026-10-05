@@ -359,7 +359,7 @@ class OriginView {
         this.indexerUnavailable = null;    // why, once it has answered once
     }
 
-    async _rpc(method, params) {
+    async ['_rpc'](method, params) {
         if (!this.indexerUrl) {
             const e = new Error('AT5_ORIGIN_INDEXER_URL not set');
             e.code = 'NOT_CONFIGURED';
@@ -382,7 +382,7 @@ class OriginView {
     // floor on the tip rather than the tip itself, so it is labelled as such.
     async latestBlock() {
         try {
-            const r = await this._rpc('getlatestblock', {});
+            const r = await this['_rpc']('getlatestblock', {});
             this.indexerUnavailable = null;
             return {
                 source: 'origin-indexer',
@@ -766,10 +766,10 @@ async function mirrorNewestRound(conn, dbName, blockTime) {
 // Keyed by checkout, not global: a cache that ignored the root would hand one
 // venue's module to a caller asking about another, which is exactly the kind of
 // silent substitution this whole path exists to stop.
-const _protocolTimeModules = new Map();
+const internalProtocolTimeModules = new Map();
 function loadProtocolTime(repoRoot) {
     const key = String(repoRoot);
-    if (_protocolTimeModules.has(key)) return _protocolTimeModules.get(key);
+    if (internalProtocolTimeModules.has(key)) return internalProtocolTimeModules.get(key);
     // ABSENCE may degrade to an unresolved clock; PRESENT-BUT-BROKEN must be red.
     // Resolving and loading are therefore separate steps: only the resolve is
     // guarded, and the load is unguarded so a module that exists and throws stops
@@ -782,7 +782,7 @@ function loadProtocolTime(repoRoot) {
         present = false;
     }
     const mod = present ? require(modulePath) : null;
-    _protocolTimeModules.set(key, mod);
+    internalProtocolTimeModules.set(key, mod);
     return mod;
 }
 
@@ -1843,7 +1843,7 @@ async function main(env) {
         // it started all go back, whatever happened above. A drill that leaves a
         // container and a schema behind poisons the next run of itself.
         for (const c of [conn, decoderConn]) {
-            if (c) { try { await c.end(); } catch (_) { /* the run is over either way */ } }
+            if (c) { try { await c.end(); } catch (internal) { /* the run is over either way */ } }
         }
         if (node) { try { await node.down(); } catch (e) { console.error('at5: teardown: ' + (e && e.message)); } }
         result.finishedAt = iso(nowS());

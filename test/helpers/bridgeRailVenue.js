@@ -750,13 +750,13 @@ function venueBtcIndexerCount(hubCount, perHub, standingUrl) {
  * requiring the indexer's config module at load time would make the pure layer
  * unrequirable on a box without the indexer checked out beside this repo.
  */
-const _roleConfigCache = new Map();
+const internalRoleConfigCache = new Map();
 function roleConfigFor(chain, network) {
     const key = String(chain).toUpperCase() + '/' + String(network || 'regtest');
-    if (_roleConfigCache.has(key)) return _roleConfigCache.get(key);
+    if (internalRoleConfigCache.has(key)) return internalRoleConfigCache.get(key);
     const configModule = require('./bridgeSettleContext').loadIndexerModule('src/config.js');
     const config = configModule.getConfig(String(chain).toUpperCase(), String(network || 'regtest'));
-    _roleConfigCache.set(key, config);
+    internalRoleConfigCache.set(key, config);
     return config;
 }
 
@@ -1104,7 +1104,7 @@ async function fundUnderBudget(label, fn, opts) {
     let timer = null;
     try {
         const call = Promise.resolve().then(fn);
-        const budget = new Promise((_resolve, reject) => {
+        const budget = new Promise((internalResolve, reject) => {
             timer = setTimeout(() => reject(new Error('__BRIDGE_RAIL_FUNDING_BUDGET__')), budgetMs);
         });
         return await Promise.race([call, budget]).catch(async (err) => {
@@ -1212,7 +1212,7 @@ class BridgeRailVenue {
         this.btcIndexerPerHub = o.btcIndexerPerHub !== false;
         // `{hubIndex: url}`: a hub pointed at an origin endpoint other than its own
         // indexer, set and cleared through `setHubOriginIndexer`.
-        this._hubIndexerOverrides = {};
+        this['_hubIndexerOverrides'] = {};
         // dq 5, ruled (a) 2026-09-12: the venue DOGE indexer REPLAYS the standing DOGE
         // chain under this tree's bridge code rather than copying the standing node's
         // ledger, so the pre-D62 self-seeded XCHAIN ISSUE at DOGE action_index 326 is
@@ -1243,13 +1243,13 @@ class BridgeRailVenue {
         this.dogeVenue = null;   // the DOGE indexer, attached to the same hubs
         this.ltcVenue  = null;   // the optional LTC indexer, attached to the same hubs
         this.unavailable = null; // non-null means the caller should SKIP
-        this._replayVenues = new Set();
-        this._replaySerial = 0;
+        this['_replayVenues'] = new Set();
+        this['_replaySerial'] = 0;
 
         // Which indexer answered which readout, recorded rather than assumed. The ruling
         // named the standing BTC indexer; the header says why it cannot serve today, and
         // this is the record the evidence quotes.
-        this._served = {};
+        this['_served'] = {};
     }
 
     get hubs()    { return this.btcVenue ? this.btcVenue.hubs : []; }
@@ -1265,7 +1265,7 @@ class BridgeRailVenue {
     dogeIndexerUrl() { const ix = this.dogeIndexer(); return ix ? ix.apiUrl : ''; }
     ltcIndexerUrl()  { const ix = this.ltcIndexer();  return ix ? ix.apiUrl : ''; }
 
-    _chainIndexer(chain) {
+    ['_chainIndexer'](chain) {
         const tick = String(chain).toUpperCase();
         if (tick === 'BTC') return this.btcIndexer();
         if (tick === 'DOGE') return this.dogeIndexer();
@@ -1273,7 +1273,7 @@ class BridgeRailVenue {
         throw new Error('bridgeRailVenue: unsupported chain ' + chain);
     }
 
-    _chainIndexerUrl(chain) {
+    ['_chainIndexerUrl'](chain) {
         const tick = String(chain).toUpperCase();
         if (tick === 'BTC') return this.btcIndexerUrl();
         if (tick === 'DOGE') return this.dogeIndexerUrl();
@@ -1285,10 +1285,10 @@ class BridgeRailVenue {
      * Record and report which service served a readout, so the evidence names it.
      */
     servedBy(readout, service) {
-        if (service !== undefined) this._served[readout] = service;
-        return this._served[readout];
+        if (service !== undefined) this['_served'][readout] = service;
+        return this['_served'][readout];
     }
-    servedMap() { return Object.assign({}, this._served); }
+    servedMap() { return Object.assign({}, this['_served']); }
 
     /**
      * Bring the mesh up. Returns true when it is usable, false with `unavailable` set.
@@ -1454,10 +1454,10 @@ class BridgeRailVenue {
         });
         this.btcVenue.indexerExtraEnv = overlay;
         for (const ix of this.btcVenue.indexers) {
-            await this.btcVenue._kill(ix.proc);
+            await this.btcVenue['_kill'](ix.proc);
             ix.proc = null;
             ix.connector = null;
-            await this.btcVenue._spawnIndexer(ix.index);
+            await this.btcVenue['_spawnIndexer'](ix.index);
         }
         return overlay;
     }
@@ -1501,7 +1501,7 @@ class BridgeRailVenue {
         // Each hub then reads its OWN BTC indexer, over the shared URL above; with the
         // standing indexer serving the BTC side there is no per-hub indexer to point at.
         this.btcVenue.hubEnv = this.standingBtcIndexerUrl ? {}
-            : hubIndexerEnvMap(this.btcVenue.indexers, 'BTC', this._hubIndexerOverrides);
+            : hubIndexerEnvMap(this.btcVenue.indexers, 'BTC', this['_hubIndexerOverrides']);
         // ONE AT A TIME, and never all four down at once: the mesh's p2p seed lists name
         // each other, and a hub that boots into a dead mesh spends its whole reconnect
         // backoff before it can take part in a round.
@@ -1528,9 +1528,9 @@ class BridgeRailVenue {
         assert.ok(this.btcVenue && this.hubs[hubIndex], 'bridgeRailVenue: no hub ' + hubIndex);
         assert.ok(!this.standingBtcIndexerUrl, 'bridgeRailVenue: a venue served by the standing BTC ' +
             'indexer has no per-hub origin endpoint to replace');
-        if (url === null || url === undefined) delete this._hubIndexerOverrides[hubIndex];
-        else this._hubIndexerOverrides[hubIndex] = String(url);
-        this.btcVenue.hubEnv = hubIndexerEnvMap(this.btcVenue.indexers, 'BTC', this._hubIndexerOverrides);
+        if (url === null || url === undefined) delete this['_hubIndexerOverrides'][hubIndex];
+        else this['_hubIndexerOverrides'][hubIndex] = String(url);
+        this.btcVenue.hubEnv = hubIndexerEnvMap(this.btcVenue.indexers, 'BTC', this['_hubIndexerOverrides']);
         const requested = opts && Array.isArray(opts.restartIndexes) ? opts.restartIndexes : [hubIndex];
         const restartIndexes = [...new Set(requested.map(Number))];
         assert.ok(restartIndexes.includes(Number(hubIndex)),
@@ -1568,11 +1568,11 @@ class BridgeRailVenue {
      * JSON-RPC against a venue indexer by chain code.
      */
     async indexerRpc(chain, method, params) {
-        const url = this._chainIndexerUrl(chain);
-        return this._indexerRpcUrl(chain, url, method, params);
+        const url = this['_chainIndexerUrl'](chain);
+        return this['_indexerRpcUrl'](chain, url, method, params);
     }
 
-    async _indexerRpcUrl(chain, url, method, params) {
+    async ['_indexerRpcUrl'](chain, url, method, params) {
         assert.ok(url, 'bridgeRailVenue: no venue indexer for ' + chain);
         const res = await axios.post(url,
             { jsonrpc: '2.0', id: Date.now(), method: method, params: params || {} },
@@ -1593,7 +1593,7 @@ class BridgeRailVenue {
      */
     async bridgeBalances(chain, tick) {
         const answer = await this.indexerRpc(chain, 'getbridgebalances', { tick: String(tick || 'XCHAIN') });
-        this.servedBy('bridgebalances:' + chain, 'venue ' + chain + ' indexer ' + this._chainIndexerUrl(chain));
+        this.servedBy('bridgebalances:' + chain, 'venue ' + chain + ' indexer ' + this['_chainIndexerUrl'](chain));
         return answer;
     }
 
@@ -1618,12 +1618,12 @@ class BridgeRailVenue {
      * disposable MariaDB, never the standing stack's.
      */
     async queryIndexerDb(chain, sql, params) {
-        const ix = this._chainIndexer(chain);
+        const ix = this['_chainIndexer'](chain);
         assert.ok(ix, 'bridgeRailVenue: no venue indexer for ' + chain);
-        return this._queryIndexerDb(ix, sql, params);
+        return this['_queryIndexerDb'](ix, sql, params);
     }
 
-    async _queryIndexerDb(ix, sql, params) {
+    async ['_queryIndexerDb'](ix, sql, params) {
         const db = this.hubDb;
         assert.ok(db, 'bridgeRailVenue: the venue has no hubDb; it is not started');
         assert.ok(/^[A-Za-z0-9_]+$/.test(String(ix.indexerDbName)),
@@ -1650,11 +1650,11 @@ class BridgeRailVenue {
         const tick = String(chain).toUpperCase();
         const coins = { BTC: 'bitcoin', DOGE: 'dogecoin', LTC: 'litecoin' };
         assert.ok(coins[tick], 'bridgeRailVenue: unsupported replay chain ' + chain);
-        const liveIx = this._chainIndexer(tick);
+        const liveIx = this['_chainIndexer'](tick);
         assert.ok(liveIx, 'bridgeRailVenue: no live venue indexer to replay ' + tick);
         const rail = tick === 'BTC' ? this.btcRail : (tick === 'DOGE' ? this.dogeRail : this.ltcRail);
         assert.ok(rail, 'bridgeRailVenue: no ' + tick + ' rail is available for replay');
-        const serial = ++this._replaySerial;
+        const serial = ++this['_replaySerial'];
         const replay = new AttestMirrorVenue({
             // Short enough that the stamped replay database names stay under MariaDB's 64.
             label: this.label.replace(/^bridgerail/, 'br') + tick.toLowerCase() + 'rp' + serial,
@@ -1686,21 +1686,21 @@ class BridgeRailVenue {
             const target = indexerCaughtUp(null, tip && tip.block_index).want;
             await this.waitUntil('the replay ' + tick + ' indexer to reach live venue block ' + target,
                 async () => {
-                    const answer = await this._indexerRpcUrl(tick, replayIx.apiUrl, 'getblockhashes', {});
+                    const answer = await this['_indexerRpcUrl'](tick, replayIx.apiUrl, 'getblockhashes', {});
                     return indexerCaughtUp(answer && answer.block_index, target).caughtUp;
                 }, { timeoutMs: 14400000, everyMs: 2000 });
             let stopped = false;
             const handle = {
                 chain: tick, indexer: replayIx, databaseName: replayIx.indexerDbName,
-                queryDb: (sql, params) => this._queryIndexerDb(replayIx, sql, params),
+                queryDb: (sql, params) => this['_queryIndexerDb'](replayIx, sql, params),
                 stop: async () => {
                     if (stopped) return;
                     stopped = true;
-                    this._replayVenues.delete(handle);
+                    this['_replayVenues'].delete(handle);
                     await replay.stop();
                 },
             };
-            this._replayVenues.add(handle);
+            this['_replayVenues'].add(handle);
             return handle;
         } catch (e) {
             await replay.stop().catch(() => {});
@@ -1859,7 +1859,7 @@ class BridgeRailVenue {
             }
             if (rows.length) {
                 this.servedBy('bridgesettlement:' + chain, 'venue ' + chain + ' indexer ' +
-                    this._chainIndexerUrl(chain));
+                    this['_chainIndexerUrl'](chain));
                 return rows[0];
             }
             await new Promise((r) => setTimeout(r, 3000));
@@ -1909,7 +1909,7 @@ class BridgeRailVenue {
             if (found) { found.finalizedOn = seen; return found; }
             await new Promise((r) => setTimeout(r, 2000));
         }
-        this._lastTransferPoll = last;
+        this['_lastTransferPoll'] = last;
         return null;
     }
 
@@ -2037,7 +2037,7 @@ class BridgeRailVenue {
      *   stale, rowCount} or null when that venue indexer is not up
      */
     async readMirrorPrice(chain, pair) {
-        const ix = this._chainIndexer(chain);
+        const ix = this['_chainIndexer'](chain);
         if (!ix) return null;
         let rows = [];
         try {
@@ -2109,7 +2109,7 @@ class BridgeRailVenue {
      * while the mirror database held both rows the whole time.
      */
     async queryMirrorDb(chain, sql, params) {
-        const ix = this._chainIndexer(chain);
+        const ix = this['_chainIndexer'](chain);
         assert.ok(ix, 'bridgeRailVenue: no venue indexer for ' + chain);
         const db = this.hubDb;
         assert.ok(db, 'bridgeRailVenue: the venue has no hubDb; it is not started');
@@ -2220,7 +2220,7 @@ class BridgeRailVenue {
                     // observed applying, so waiting on it would hang the whole drive. It is
                     // recorded as unobservable rather than folded into either answer.
                     if (dest !== 'BTC' && dest !== 'DOGE') {
-                        this._unobservableLegs = (this._unobservableLegs || []).concat(
+                        this['_unobservableLegs'] = (this['_unobservableLegs'] || []).concat(
                             [{ src: src, dest: dest, actionIndex: String(leg.src_action_index) }]);
                         continue;
                     }
@@ -2278,11 +2278,11 @@ class BridgeRailVenue {
             for (const a of finalized.applied) applied.push(a);
             for (const p of finalized.pending) pending.push(p);
             // Reported per poll, not accumulated: a 60 minute wait polls hundreds of times.
-            this._unobservableFinalized = finalized.unobservable;
+            this['_unobservableFinalized'] = finalized.unobservable;
             last = { applied: applied, pending: pending };
             // Published every poll, not only at the timeout: a case that fails for another
             // reason while the drain is still running can then quote how far it had got.
-            this._lastSettlePoll = last;
+            this['_lastSettlePoll'] = last;
             if (!pending.length) {
                 let invariant = null;
                 try { invariant = await this.bridgeInvariant(tick); } catch (e) { invariant = null; }
@@ -2290,7 +2290,7 @@ class BridgeRailVenue {
             }
             await new Promise((r) => setTimeout(r, 5000));
         }
-        this._lastSettlePoll = last;
+        this['_lastSettlePoll'] = last;
         return null;
     }
 
@@ -2527,7 +2527,7 @@ class BridgeRailVenue {
     async stop() {
         // Attached and replay venues borrow the BTC venue's hubs and hub database, so
         // stopping the owner first would leave them talking to a mesh that is gone.
-        for (const replay of [...this._replayVenues]) {
+        for (const replay of [...this['_replayVenues']]) {
             await replay.stop().catch(() => {});
         }
         if (this.ltcVenue)  { await this.ltcVenue.stop().catch(() => {});  this.ltcVenue = null; }

@@ -21,17 +21,17 @@ describe('DISPENSER', () => {
 
     describe('v1 - cancel', () => {
         it('should create and cancel a dispenser', async () => {
-            let addr = await cryptoHelper.getNewFundedAddress("DISPENSER.V1", COIN, NETWORK, null, "legacy", 0, 1)
-            let address = addr["address"]
-            let tick = "DISPv1"+address.substring(address.length-8)
+            const addr = await cryptoHelper.getNewFundedAddress("DISPENSER.V1", COIN, NETWORK, null, "legacy", 0, 1)
+            const address = addr["address"]
+            const tick = "DISPv1"+address.substring(address.length-8)
 
             await issueHelper.sendIssueV0(addr, tick, 100, 100, 0, "Dispenser cancel test", 100)
             await gasHelper.ensureGasBalance(addr, '100')
 
-            let expirationDate = new Date()
+            const expirationDate = new Date()
             expirationDate.setMonth(expirationDate.getMonth() + 3)
 
-            let createResult = await dispenserHelper.sendDispenserV0(
+            const createResult = await dispenserHelper.sendDispenserV0(
                 addr,
                 COIN_CODE, tick, 1, 10,
                 COIN_CODE, null, 5, addr["address"],
@@ -39,12 +39,12 @@ describe('DISPENSER', () => {
                 null, null, 'Dispenser to cancel'
             )
             assert(createResult.dispenser, "Dispenser should be created")
-            let dispenserActionIndex = Number(createResult.dispenser["action_index"])
+            const dispenserActionIndex = Number(createResult.dispenser["action_index"])
 
-            let cancelResult = await dispenserHelper.sendDispenserCancelV1(addr, dispenserActionIndex, "Cancelling dispenser")
+            const cancelResult = await dispenserHelper.sendDispenserCancelV1(addr, dispenserActionIndex, "Cancelling dispenser")
             assert(cancelResult.txHash, "Cancel tx should have been sent")
 
-            let cancellingDispenser = await indexerDatabase.waitForDispenserStatus({
+            const cancellingDispenser = await indexerDatabase.waitForDispenserStatus({
                 dispenserActionIndex: dispenserActionIndex,
                 status: "cancelling"
             }, 30000)

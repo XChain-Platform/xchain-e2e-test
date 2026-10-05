@@ -189,7 +189,7 @@ function logSignerSets(ranked, signers) {
 
 async function reachPhaseA(requestBlock) {
     // ---- PHASE A: inside the first segment, the ladder has granted nothing ----
-    let tip = await nodeConnector.getBlockCount()
+    const tip = await nodeConnector.getBlockCount()
     const phaseATarget = requestBlock + CONFIRMATIONS + 1
     if (tip < phaseATarget) {
         await regtestMinerConnector.generateBlocks(phaseATarget - tip)
@@ -213,7 +213,7 @@ async function reachPhaseB(requestBlock, deadlineBlock) {
     // ---- PHASE B: past the segment boundary, the same signers are in the set ----
     const phaseBTarget = requestBlock + CONFIRMATIONS +
         Math.ceil((deadlineBlock - (requestBlock + CONFIRMATIONS)) / (MAX_SLOTS + 1)) + 1
-    let tip = await nodeConnector.getBlockCount()
+    const tip = await nodeConnector.getBlockCount()
     if (tip < phaseBTarget) {
         await regtestMinerConnector.generateBlocks(phaseBTarget - tip)
         await utxoTrackerConnector.requireSync()

@@ -273,7 +273,7 @@ describe('Controller Policy Layer: bindings, enforcement, royalty split + permis
         console.log('   tip', await tip(), '> cooldown_end', endBlock, '(cooldown expired)')
         await submitRaw(owner, `ORDER|0|${COIN_CODE}|${tick}|50||${COIN_CODE}|XCHAIN|50||${owner.address}||||after-cooldown`)
         await mine(1)
-        let allowed = await waitValidOrder(owner.address, tick, 22500)
+        const allowed = await waitValidOrder(owner.address, tick, 22500)
         assert(allowed && allowed.status === 'valid', 'ORDER ACCEPTED after cooldown expiry')
         console.log('   ORDER accepted after cooldown; expiry OK. order#', allowed.action_index)
     })

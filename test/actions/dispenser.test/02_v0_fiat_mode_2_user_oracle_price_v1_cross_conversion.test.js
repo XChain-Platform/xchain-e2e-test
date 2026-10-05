@@ -21,17 +21,17 @@ const requireRow = require('../../helpers/requireRow')
 const FIAT_MODE2 = 'GBP'   // user-oracle cross-conversion
 
 async function createCrossConversionDispenser() {
-    let dispenserAddr = await cryptoHelper.getNewFundedAddress("DISPENSER.ORACLE", COIN, NETWORK, null, "legacy", 0, 1)
-    let buyerAddr     = await cryptoHelper.getNewFundedAddress("DISPENSER.ORACLE.BUYER", COIN, NETWORK, null, "legacy", 0, 1)
-    let oracleAddr    = await cryptoHelper.getNewFundedAddress("DISPENSER.ORACLE.SRC", COIN, NETWORK, null, "legacy", 0, 1)
-    let dispenserAddress = dispenserAddr["address"]
-    let buyerAddress     = buyerAddr["address"]
-    let oracleAddress    = oracleAddr["address"]
-    let tick = "DISPORCL"+dispenserAddress.substring(dispenserAddress.length-8)
+    const dispenserAddr = await cryptoHelper.getNewFundedAddress("DISPENSER.ORACLE", COIN, NETWORK, null, "legacy", 0, 1)
+    const buyerAddr     = await cryptoHelper.getNewFundedAddress("DISPENSER.ORACLE.BUYER", COIN, NETWORK, null, "legacy", 0, 1)
+    const oracleAddr    = await cryptoHelper.getNewFundedAddress("DISPENSER.ORACLE.SRC", COIN, NETWORK, null, "legacy", 0, 1)
+    const dispenserAddress = dispenserAddr["address"]
+    const buyerAddress     = buyerAddr["address"]
+    const oracleAddress    = oracleAddr["address"]
+    const tick = "DISPORCL"+dispenserAddress.substring(dispenserAddress.length-8)
 
     await issueHelper.sendIssueV0(dispenserAddr, tick, 100, 100, 0, "Oracle dispenser test", 100)
 
-    let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
+    const expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
 
     // Seed both legs BEFORE creating the dispenser. Order matters: a Mode 2
     // create is rejected unless its oracle already has an effective
@@ -39,11 +39,11 @@ async function createCrossConversionDispenser() {
     // CHAIN clock, and the validator snapshot must be at or before the oracle
     // quote's effective_at because the matcher fetches the coin price as of the
     // QUOTE's effective time, not as of the payment block.
-    let pair        = COIN_CODE + "/" + FIAT_MODE2
-    let coinPrice   = 50000     // 1 coin = 50,000 fiat  (validator)
-    let tokenPrice  = 100       // 1 token = 100 fiat    (user oracle)
-    let chainNow    = await priceSnapshotHelper.latestBlockTime()
-    let oracleActionIndex = Date.now() * 1000 + (process.pid % 1000)
+    const pair        = COIN_CODE + "/" + FIAT_MODE2
+    const coinPrice   = 50000     // 1 coin = 50,000 fiat  (validator)
+    const tokenPrice  = 100       // 1 token = 100 fiat    (user oracle)
+    const chainNow    = await priceSnapshotHelper.latestBlockTime()
+    const oracleActionIndex = Date.now() * 1000 + (process.pid % 1000)
 
     await priceSnapshotHelper.clearPair(pair)
     await priceSnapshotHelper.seedSnapshot({
@@ -61,7 +61,7 @@ async function createCrossConversionDispenser() {
     })
 
     // Now the oracle has an effective price, so the create is accepted.
-    let dispenserResult = await dispenserHelper.sendDispenserV0(
+    const dispenserResult = await dispenserHelper.sendDispenserV0(
         dispenserAddr, COIN_CODE, tick, 1, 50,
         COIN_CODE, null, 0, dispenserAddr["address"],
         FIAT_MODE2, null, oracleAddress, expiration,
@@ -73,17 +73,17 @@ async function createCrossConversionDispenser() {
 async function settleCrossConversion(scenario) {
     // Buyer pays 0.011 coin:
     //   tokens = (0.011 * 50000) / 100 = 5.5 => floor => 5
-    let paySats = 1100000
-    let txHash = await transactionHelper.createSimpleTransaction(
+    const paySats = 1100000
+    const txHash = await transactionHelper.createSimpleTransaction(
         scenario.buyerAddr, scenario.dispenserAddress, paySats
     )
 
-    let coinAmount     = paySats / 1e8                                       // 0.011
-    let expectedUnits  = Math.floor((coinAmount * scenario.coinPrice) / scenario.tokenPrice)   // 5
-    let expectedCredit = String(expectedUnits)                               // GIVE_AMOUNT = 1
+    const coinAmount     = paySats / 1e8                                       // 0.011
+    const expectedUnits  = Math.floor((coinAmount * scenario.coinPrice) / scenario.tokenPrice)   // 5
+    const expectedCredit = String(expectedUnits)                               // GIVE_AMOUNT = 1
 
     console.log("Waiting for Mode 2 FIAT DISPENSE in the database (txHash: "+txHash+")...")
-    let dispenseRow = requireRow(await indexerDatabase.waitForDispense({
+    const dispenseRow = requireRow(await indexerDatabase.waitForDispense({
         txHash: txHash, source: scenario.buyerAddress,
         giveTick: scenario.tick, status: "valid"
     }, 60000), 'FIAT dispense')
@@ -106,16 +106,16 @@ describe('DISPENSER', () => {
                 return
             }
 
-            let scenario = await createCrossConversionDispenser()
-            let dispenserResult = scenario.dispenserResult
+            const scenario = await createCrossConversionDispenser()
+            const dispenserResult = scenario.dispenserResult
             assert(dispenserResult.dispenser, "Mode 2 FIAT dispenser should be created")
 
-            let settlement = await settleCrossConversion(scenario)
-            let dispenseRow = settlement.dispenseRow
+            const settlement = await settleCrossConversion(scenario)
+            const dispenseRow = settlement.dispenseRow
             assert(dispenseRow, "Mode 2 FIAT dispense should exist in DB and be valid")
 
-            let expectedCredit = settlement.expectedCredit
-            let credit = await indexerDatabase.waitForCredit({
+            const expectedCredit = settlement.expectedCredit
+            const credit = await indexerDatabase.waitForCredit({
                 address: scenario.buyerAddress,
                 tick: scenario.tick,
                 amount: expectedCredit

@@ -53,7 +53,7 @@ function percentile(sortedAsc, p) {
 // This guarantees we are timing real work, not a fast error path.
 async function measure(label, fn, validate) {
     for (let i = 0; i < WARMUP; i++) {
-        try { await fn() } catch (_) { /* warm-up errors ignored */ }
+        try { await fn() } catch (internal) { /* warm-up errors ignored */ }
     }
     const samples = []
     for (let i = 0; i < SAMPLES; i++) {

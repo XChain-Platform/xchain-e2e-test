@@ -14,6 +14,8 @@
 
 const axios = require('axios')
 const config = require('./config')
+const { getLogger } = require('./lib/logger')
+const logger = getLogger()
 
 // Cap the read waitForTx polls, so a silent node cannot hang it past timeMax.
 const READ_TIMEOUT_MS = 15000
@@ -64,7 +66,7 @@ class BlockchainConnector {
 
         while (Date.now() < endTime){
             try {
-                let txHex = await this.getTransactionHex(txid)
+                const txHex = await this.getTransactionHex(txid)
                 return true
             } catch(err) {
                 await this.sleep(1000)
@@ -109,14 +111,14 @@ class BlockchainConnector {
                 throw new Error('Error getting transaction hex');
             }
         } catch (error) {
-            console.error('Error:', error);
+            logger.error('Error:', error);
             throw error;
         }
     }
 
     async broadcastTx(txHex){
         try {
-            return await this._sendRaw([txHex]);
+            return await this['_sendRaw']([txHex]);
         } catch (error) {
             // Regtest-only fee-cap recovery. A regtest chain that has accumulated
             // test-tx fee history can push estimatesmartfee up to (or just past)
@@ -132,7 +134,7 @@ class BlockchainConnector {
             const net = String(config.NETWORK || (typeof global !== 'undefined' && global.NETWORK) || '');
             const msg = (error && error.message) || '';
             if (/maxfeerate|Fee exceeds maximum/i.test(msg) && /regtest/i.test(net)) {
-                return await this._sendRaw([txHex, 0]);
+                return await this['_sendRaw']([txHex, 0]);
             }
             throw error;
         }
@@ -140,7 +142,7 @@ class BlockchainConnector {
 
     // Single sendrawtransaction RPC to the coin node. `params` is [hex] or
     // [hex, maxfeerate]. Returns the txid; throws carrying the node's error body.
-    async _sendRaw(params){
+    async ['_sendRaw'](params){
         try {
             const data = {
                 jsonrpc: '2.0',
@@ -211,7 +213,7 @@ class BlockchainConnector {
                 return 0.00001000
             }
         } catch (error) {
-            console.error('Error:', error);
+            logger.error('Error:', error);
             throw error;
         }
     }
@@ -220,7 +222,7 @@ class BlockchainConnector {
     // The class's other methods each duplicate the axios boilerplate; this is a thin
     // generic caller used by the chain/reorg helpers below (added for on-chain reorg
     // e2e: invalidateBlock orphans a sub-chain so the indexer's reorg rollback runs).
-    async _rpc(method, params = []){
+    async ['_rpc'](method, params = []){
         const auth = Buffer.from(`${this.rpcUser}:${this.rpcPassword}`).toString('base64');
         const response = await axios.post(this.url, { jsonrpc: '2.0', id: 1, method, params }, {
             headers: { 'Content-Type': 'application/json', 'Authorization': `Basic ${auth}` }
@@ -229,35 +231,35 @@ class BlockchainConnector {
         if (data.error) throw new Error(`${method} RPC error: ` + JSON.stringify(data.error));
         return data.result;
     }
-    async getBlockCount(){ return await this._rpc('getblockcount'); }
-    async getBestBlockHash(){ return await this._rpc('getbestblockhash'); }
-    async getBlockHash(height){ return await this._rpc('getblockhash', [Number(height)]); }
-    async invalidateBlock(hash){ return await this._rpc('invalidateblock', [hash]); }
-    async reconsiderBlock(hash){ return await this._rpc('reconsiderblock', [hash]); }
-    async getRawMempool(){ return await this._rpc('getrawmempool'); }
+    async getBlockCount(){ return await this['_rpc']('getblockcount'); }
+    async getBestBlockHash(){ return await this['_rpc']('getbestblockhash'); }
+    async getBlockHash(height){ return await this['_rpc']('getblockhash', [Number(height)]); }
+    async invalidateBlock(hash){ return await this['_rpc']('invalidateblock', [hash]); }
+    async reconsiderBlock(hash){ return await this['_rpc']('reconsiderblock', [hash]); }
+    async getRawMempool(){ return await this['_rpc']('getrawmempool'); }
     // Block contents by hash. verbosity 1 returns the header fields plus `tx` (txid array),
     // which is what a reorg drill needs to enumerate the transactions it is about to orphan.
-    async getBlock(hash, verbosity = 1){ return await this._rpc('getblock', [hash, Number(verbosity)]); }
+    async getBlock(hash, verbosity = 1){ return await this['_rpc']('getblock', [hash, Number(verbosity)]); }
     // Push a raw transaction straight at the node, bypassing the encoder. Used to RE-INJECT
     // transactions the node dropped during a deep reorg (see below): Bitcoin Core only
     // resurrects disconnected transactions for the first 10 blocks it disconnects, so a drill
     // that orphans more than that must put them back itself. Returns the txid; throws with the
     // node's reject reason (the caller decides which reasons are benign).
-    async sendRawTransaction(txHex){ return await this._rpc('sendrawtransaction', [txHex]); }
+    async sendRawTransaction(txHex){ return await this['_rpc']('sendrawtransaction', [txHex]); }
     // Verbose transaction lookup (needs txindex, which the regtest nodes run). Returns null
     // when the node has never seen the txid; `confirmations` is 0 while it sits in the mempool.
-    async getTransaction(txid){ try { return await this._rpc('getrawtransaction', [txid, true]); } catch (e) { return null; } }
+    async getTransaction(txid){ try { return await this['_rpc']('getrawtransaction', [txid, true]); } catch (e) { return null; } }
     // Mine a block containing EXACTLY `txs` (default: none), ignoring the mempool. This is
     // what lets a reorg DROP an orphaned tx: after invalidateBlock, mine empty blocks to build
     // a longer competing chain that excludes the mempool tx. (Bitcoin Core 0.19+ `generateblock`.)
-    async generateBlock(address, txs = []){ return await this._rpc('generateblock', [address, txs]); }
+    async generateBlock(address, txs = []){ return await this['_rpc']('generateblock', [address, txs]); }
     // Freeze the node's clock at `timestamp` (unix seconds) so blocks mined afterwards
     // carry a chosen block_time. Used by the COINPay obligation-expiry e2e to jump
     // block_time past COINPAY_EXPIRATION (a time-based, not height-based, deadline)
     // without waiting two real hours. Pass 0 to release the mock and return the node
     // to wall-clock time. Always reset to 0 in a finally so the shared regtest node
     // does not stay time-frozen for other tests.
-    async setMockTime(timestamp){ return await this._rpc('setmocktime', [Number(timestamp)]); }
+    async setMockTime(timestamp){ return await this['_rpc']('setmocktime', [Number(timestamp)]); }
 }
 
 module.exports = BlockchainConnector

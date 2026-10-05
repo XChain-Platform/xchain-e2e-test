@@ -35,7 +35,7 @@ const BOOTSTRAP_MAX_LEADER_GAP = 3;
 const BOOTSTRAP_CONCURRENCY = 3;
 const BOOTSTRAP_MINE_POLL_MS = 2000;
 const bootstrapSeeds = new Map();
-const inheritedKnownSignerSeeds = fixture._knownSignerSeeds;
+const inheritedKnownSignerSeeds = fixture['_knownSignerSeeds'];
 let bootstrapPriceSeed = Promise.resolve();
 let bootstrapStakeSend = Promise.resolve();
 let bootstrapDogeRail = null;
@@ -45,7 +45,7 @@ let bootstrapLabel = null;
 
 let recordedSeeds = null;
 
-fixture._knownSignerSeeds = function bridgeRailKnownSignerSeeds() {
+fixture['_knownSignerSeeds'] = function bridgeRailKnownSignerSeeds() {
     const known = inheritedKnownSignerSeeds();
     if (!recordedSeeds) recordedSeeds = readRecordedSignerSeeds();
     for (const [pubkey, hit] of recordedSeeds) if (!known.has(pubkey)) known.set(pubkey, hit);
@@ -84,7 +84,7 @@ function pubkeyInGap(pubkey, lower, upper) {
 function createIdentityInGap(lower, upper, used, index) {
     for (let attempt = 0; attempt < 100000; attempt++) {
         const seedHex = crypto.randomBytes(32).toString('hex');
-        const pubkeyHex = fixture._pubkeyForSeed(seedHex);
+        const pubkeyHex = fixture['_pubkeyForSeed'](seedHex);
         if (used.has(pubkeyHex) || !pubkeyInGap(pubkeyHex, lower, upper)) continue;
         used.add(pubkeyHex);
         bootstrapSeeds.set(pubkeyHex, { seedHex, origin: bootstrapLabel + ' fixture signer ' + index });
@@ -219,7 +219,7 @@ function readRecordedBootstrapEntries() {
 }
 
 function readRecordedSignerSeeds() {
-    return recordedSignerSeeds(readRecordedBootstrapEntries(), (seedHex) => fixture._pubkeyForSeed(seedHex));
+    return recordedSignerSeeds(readRecordedBootstrapEntries(), (seedHex) => fixture['_pubkeyForSeed'](seedHex));
 }
 
 function readBootstrapDonors(currentAddresses) {
@@ -389,7 +389,7 @@ async function ensureBridgeRailQuorum(stakerLabel) {
     await waitForBootstrapIndexer(120000);
     const opening = await readBridgeCapability();
     const rows = seatedRows(opening.set);
-    const existing = resolveVenueQuorum(rows, fixture._knownSignerSeeds());
+    const existing = resolveVenueQuorum(rows, fixture['_knownSignerSeeds']());
     if (existing.ok) return;
     installBootstrapTeardown(opening);
     const totalStake = rows.reduce((sum, row) => sum + row.stake, 0);
@@ -410,7 +410,7 @@ async function ensureBridgeRailQuorum(stakerLabel) {
         }));
     }
     const closing = await waitForBootstrapVisibility(identities, stake);
-    const quorum = resolveVenueQuorum(seatedRows(closing.set), fixture._knownSignerSeeds());
+    const quorum = resolveVenueQuorum(seatedRows(closing.set), fixture['_knownSignerSeeds']());
     if (!quorum.ok) throw new Error(bootstrapLabel + ' bootstrap did not produce a quorum: ' + quorum.reason);
     console.log(bootstrapLabel.toUpperCase() + ': bootstrapped ' + identities.length +
         ' temporary signer(s) at buried block ' + closing.buriedBlock);

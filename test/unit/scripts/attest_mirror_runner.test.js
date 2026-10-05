@@ -49,7 +49,7 @@ function fixture () {
 }
 
 function fakeSpawn (failurePhase, events) {
-    return function (_command, args) {
+    return function (internalCommand, args) {
         const driverOffset = args[0].endsWith('.js') ? 1 : 0
         const phase = args[driverOffset]
         const phaseArgs = args.slice(driverOffset + 1)

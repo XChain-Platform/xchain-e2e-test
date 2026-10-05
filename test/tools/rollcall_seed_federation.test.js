@@ -127,22 +127,22 @@ const FUND_BTC = 0.5
 // The gas token's per-transaction MINT cap, read from the venue once. Falls
 // back to the documented regtest value if the row cannot be read, so a seeding
 // run is never blocked by a diagnostic query.
-let _mintCap = null
+let internalMintCap = null
 async function mintCap(){
-    if (_mintCap !== null) return _mintCap
-    _mintCap = MINT_CAP_FALLBACK
+    if (internalMintCap !== null) return internalMintCap
+    internalMintCap = MINT_CAP_FALLBACK
     try {
         const conn = await indexerDatabase.getConnection()
         try {
             const rows = await conn.query(
                 'SELECT max_mint FROM tokens WHERE tick = ? ORDER BY tick_id DESC LIMIT 1', ['XCHAIN'])
             const v = rows && rows[0] && Number(rows[0].max_mint)
-            if (Number.isFinite(v) && v > 0) _mintCap = v
+            if (Number.isFinite(v) && v > 0) internalMintCap = v
         } finally { await conn.release() }
     } catch (e) {
         console.log('    mint cap       : falling back to ' + MINT_CAP_FALLBACK + ' (' + (e && e.message) + ')')
     }
-    return _mintCap
+    return internalMintCap
 }
 
 let mnemonic = null

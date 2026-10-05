@@ -333,20 +333,20 @@ async function removePriceCapabilityStakes(query, written) {
 // when it registers. The record therefore outlives the venue on purpose: the
 // transactions it explains are on the chain permanently, and each target removes
 // its own rows in its own teardown.
-const _capabilityTargets = new Set();
-let _lastPriceCapabilitySeed = null;
+const internalCapabilityTargets = new Set();
+let internalLastPriceCapabilitySeed = null;
 
 // target: { label, apply(rows), remove(rows) }. Returns how many rows were applied.
 async function registerPriceCapabilityTarget(target) {
-    _capabilityTargets.add(target);
-    if (!_lastPriceCapabilitySeed) return 0;
-    await target.apply(_lastPriceCapabilitySeed.rows);
-    return _lastPriceCapabilitySeed.rows.length;
+    internalCapabilityTargets.add(target);
+    if (!internalLastPriceCapabilitySeed) return 0;
+    await target.apply(internalLastPriceCapabilitySeed.rows);
+    return internalLastPriceCapabilitySeed.rows.length;
 }
 
-function unregisterPriceCapabilityTarget(target) { _capabilityTargets.delete(target); }
+function unregisterPriceCapabilityTarget(target) { internalCapabilityTargets.delete(target); }
 
-function lastPriceCapabilitySeed() { return _lastPriceCapabilitySeed; }
+function lastPriceCapabilitySeed() { return internalLastPriceCapabilitySeed; }
 
 class OracleBatchVenue {
 
@@ -398,16 +398,16 @@ class OracleBatchVenue {
         this.rounds      = [];        // [{round, anchorHeight, anchorTime, prices, signatures}]
         this.publications = [];       // [{round, hubIndex, wire, wireVersion, wireBytes, txid, publishedAt}]
 
-        this._railSaved   = null;
-        this._weightSeed  = null;
-        this._countSeed   = null;
+        this['_railSaved']   = null;
+        this['_weightSeed']  = null;
+        this['_countSeed']   = null;
         // The `price` capability_snapshots rows this venue wrote into the landing
         // chain's indexer DB, so teardown can take back exactly what it put there.
-        this._capabilitySeed = null;
-        this._oracles     = [];
-        this._queueDir    = null;
-        this._portOverrides = null;
-        this._finalizedEvents = new Map();   // round -> [event per hub index]
+        this['_capabilitySeed'] = null;
+        this['_oracles']     = [];
+        this['_queueDir']    = null;
+        this['_portOverrides'] = null;
+        this['_finalizedEvents'] = new Map();   // round -> [event per hub index]
     }
 
     // ---- bring-up -------------------------------------------------------
@@ -416,7 +416,7 @@ class OracleBatchVenue {
     // `unavailable` set to a human-readable reason) when the venue's own
     // dependencies are missing, which is a SKIP for the caller, never a pass.
     async up() {
-        this._applyChainPortOverrides();
+        this['_applyChainPortOverrides']();
         this.rail = await chainRail.createRail(this.coin, this.network);
         const failures = await chainRail.railFailures(this.rail);
         if (failures.length > 0) {
@@ -426,22 +426,22 @@ class OracleBatchVenue {
         // Entered for the venue's whole lifetime, not per call: the broadcast hook
         // runs inside hub code (an EventEmitter callback), so the globals the
         // transaction helpers read have to already be this chain's when it fires.
-        this._railSaved = chainRail.enterRail(this.rail);
+        this['_railSaved'] = chainRail.enterRail(this.rail);
 
         this.hubDb = await startDisposableHubDb();
         if (!this.hubDb) {
-            chainRail.exitRail(this._railSaved);
-            this._railSaved = null;
+            chainRail.exitRail(this['_railSaved']);
+            this['_railSaved'] = null;
             this.unavailable = 'no env hub DB and Docker unavailable';
             return false;
         }
 
-        await this._fundPublisherWallet();
-        await this._startFederation();
-        this._seedSnapshots();
-        await this._seedLandingChainPriceCapability();
-        await this._attachOracles();
-        await this._attachPublishers();
+        await this['_fundPublisherWallet']();
+        await this['_startFederation']();
+        this['_seedSnapshots']();
+        await this['_seedLandingChainPriceCapability']();
+        await this['_attachOracles']();
+        await this['_attachPublishers']();
         return true;
     }
 
@@ -459,7 +459,7 @@ class OracleBatchVenue {
     // ONLY port keys are copied. The same file holds the node RPC password, which
     // chainRail reads out of the file itself; nothing credential-bearing is put
     // into the environment or into a log line here.
-    _applyChainPortOverrides() {
+    ['_applyChainPortOverrides']() {
         const code = chainRail.COIN_CODE_MAP[this.coin] || String(this.coin).toUpperCase().slice(0, 3);
         const file = path.resolve(__dirname, '../../.env.' + String(code).toLowerCase());
         if (!fs.existsSync(file)) return;
@@ -469,22 +469,22 @@ class OracleBatchVenue {
 
         const PORT_KEYS = ['NODE_PORT', 'UTXO_TRACKER_API_PORT', 'DECODER_API_PORT',
                            'ENCODER_API_PORT', 'INDEXER_API_PORT', 'REGTEST_MINER_API_PORT'];
-        this._portOverrides = {};
+        this['_portOverrides'] = {};
         for (const key of PORT_KEYS) {
             if (!parsed[key]) continue;
             const name = code + '_' + key;
-            this._portOverrides[name] = process.env[name];
+            this['_portOverrides'][name] = process.env[name];
             process.env[name] = String(parsed[key]);
         }
     }
 
-    _restoreChainPortOverrides() {
-        if (!this._portOverrides) return;
-        for (const name of Object.keys(this._portOverrides)) {
-            if (this._portOverrides[name] === undefined) delete process.env[name];
-            else process.env[name] = this._portOverrides[name];
+    ['_restoreChainPortOverrides']() {
+        if (!this['_portOverrides']) return;
+        for (const name of Object.keys(this['_portOverrides'])) {
+            if (this['_portOverrides'][name] === undefined) delete process.env[name];
+            else process.env[name] = this['_portOverrides'][name];
         }
-        this._portOverrides = null;
+        this['_portOverrides'] = null;
     }
 
     // One shared publisher wallet rather than one per validator. Publishes are
@@ -493,13 +493,13 @@ class OracleBatchVenue {
     // per-address confirmed-UTXO cache warm across rounds instead of forcing a
     // tracker round trip per publish. seedGas is off: PRICE is carried on a
     // native-fee chain here, so the wallet needs coin, not XCHAIN.
-    async _fundPublisherWallet() {
+    async ['_fundPublisherWallet']() {
         const cryptoHelper = require('./core/cryptoHelper');
         this.publisherAddress = await cryptoHelper.getNewFundedAddress(
             'oracle-publish-venue', this.coin, this.network, null, 'legacy', 0, this.fundAmount, false);
     }
 
-    async _startFederation() {
+    async ['_startFederation']() {
         this.mvh = new MultiValidatorHub({
             count:            this.validatorCount,
             basePort:         this.basePort,
@@ -516,35 +516,35 @@ class OracleBatchVenue {
     // itself in the COUNT snapshot for `oracle_publish`. The two fixtures stub
     // disjoint methods, so both can be applied; seeding only one leaves either a
     // round that never finalizes or a publisher that fails closed with rank null.
-    _seedSnapshots() {
-        this._weightSeed = seedWeightSnapshot(this.mvh, {
+    ['_seedSnapshots']() {
+        this['_weightSeed'] = seedWeightSnapshot(this.mvh, {
             blockIndex: this.anchorHeight,
             network:    this.network
         });
-        this._countSeed = seedStakeSnapshot(this.mvh, { blockIndex: this.anchorHeight });
+        this['_countSeed'] = seedStakeSnapshot(this.mvh, { blockIndex: this.anchorHeight });
     }
 
     // Apply the `price` capability precondition to the LANDING CHAIN this venue
     // publishes to, and to every landing-chain database already registered in this
     // process. See the section above the class for what it substitutes for, why the
     // venue cannot get it the production way, and what would retire it.
-    async _seedLandingChainPriceCapability() {
-        const validators = (this._weightSeed && this._weightSeed.snapshot && this._weightSeed.snapshot.validators) || [];
+    async ['_seedLandingChainPriceCapability']() {
+        const validators = (this['_weightSeed'] && this['_weightSeed'].snapshot && this['_weightSeed'].snapshot.validators) || [];
         if (validators.length === 0) return;
 
         const rows = priceCapabilityRows(validators, this.anchorHeight);
 
         // Credentials come from the rail, which discovered them through the hub
         // config oracle; nothing is hardcoded here and no value is logged.
-        await this._withRailQuery((q) => applyPriceCapabilityRows(q, rows));
-        this._capabilitySeed = { snapshotBlock: this.anchorHeight, rows: rows };
+        await this['_withRailQuery']((q) => applyPriceCapabilityRows(q, rows));
+        this['_capabilitySeed'] = { snapshotBlock: this.anchorHeight, rows: rows };
 
         // The process-wide record, and the push to rigs that were built BEFORE this
         // venue existed (a replay drill's live node is already walking the chain when
         // the first batch lands, so it needs the rows now, not at its own bring-up).
-        _lastPriceCapabilitySeed = { snapshotBlock: this.anchorHeight, rows: rows };
+        internalLastPriceCapabilitySeed = { snapshotBlock: this.anchorHeight, rows: rows };
         const pushed = [];
-        for (const target of _capabilityTargets) {
+        for (const target of internalCapabilityTargets) {
             try { await target.apply(rows); pushed.push(target.label); }
             catch (e) { console.warn('OracleBatchVenue: could not apply the price capability rows to ' + target.label + ': ' + (e && e.message)); }
         }
@@ -559,7 +559,7 @@ class OracleBatchVenue {
     // Run one function against a pooled connection to the rail's indexer database,
     // handing it a plain query(sql, args) so the shared row helpers never have to
     // know which kind of connection they are writing through.
-    async _withRailQuery(fn) {
+    async ['_withRailQuery'](fn) {
         const conn = await this.rail.globals.indexerDatabase.getConnection();
         try { return await fn((sql, args) => conn.query(sql, args)); }
         finally { await conn.release().catch(() => {}); }
@@ -569,7 +569,7 @@ class OracleBatchVenue {
     // OraclePublisher.start() subscribes to). OracleRound is constructed but NOT
     // started: its cadence would fetch live prices off the internet and race the
     // rounds this venue drives deterministically.
-    async _attachOracles() {
+    async ['_attachOracles']() {
         for (const hub of this.mvh.hubs) {
             const round = new OracleRound(hub);
             const oc    = new OracleConsensus(hub, round);
@@ -578,17 +578,17 @@ class OracleBatchVenue {
             await oc.start();
             hub.oracle          = round;
             hub.oracleConsensus = oc;
-            const hubIndex = this._oracles.length;
+            const hubIndex = this['_oracles'].length;
             // The signature set a round finalized on is NOT recoverable from
             // price_snapshots: `consensus_proof` stores the commit ADDRESSES
             // (`JSON.stringify([...pending.commits])`), not the signatures. The
             // signatures exist only on the round:finalized event, which is also
             // exactly what OraclePublisher puts on the wire, so capture them here.
             oc.on('round:finalized', (event) => {
-                if (!this._finalizedEvents.has(event.round)) this._finalizedEvents.set(event.round, []);
-                this._finalizedEvents.get(event.round)[hubIndex] = event;
+                if (!this['_finalizedEvents'].has(event.round)) this['_finalizedEvents'].set(event.round, []);
+                this['_finalizedEvents'].get(event.round)[hubIndex] = event;
             });
-            this._oracles.push({ oc, round });
+            this['_oracles'].push({ oc, round });
         }
     }
 
@@ -597,12 +597,12 @@ class OracleBatchVenue {
     // defaults these are all './data/...' relative to the mocha cwd, so a run
     // would write a durable spend window and a publish queue into the checkout
     // and the NEXT run would inherit them.
-    async _attachPublishers() {
-        this._queueDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-oracle-venue-'));
+    async ['_attachPublishers']() {
+        this['_queueDir'] = fs.mkdtempSync(path.join(os.tmpdir(), 'xchain-oracle-venue-'));
         for (let i = 0; i < this.mvh.hubs.length; i++) {
             const hub = this.mvh.hubs[i];
             const pub = new OraclePublisher(hub);
-            pub.queuePath      = path.join(this._queueDir, 'publisher-queue-' + i + '.jsonl');
+            pub.queuePath      = path.join(this['_queueDir'], 'publisher-queue-' + i + '.jsonl');
             pub.deadLetterPath = pub.queuePath.replace(/\.jsonl$/, '') + '.deadletter.jsonl';
             // bufferPath is derived from queuePath IN THE CONSTRUCTOR, so redirecting
             // queuePath afterwards leaves the batch buffer pointing at the checkout's own
@@ -610,8 +610,8 @@ class OracleBatchVenue {
             // hydrateBuffer() and therefore to restart catch-up, so a stale window in it
             // re-publishes on the next drill and breaks any "exactly one wire" assertion.
             pub.bufferPath     = pub.queuePath.replace(/\.jsonl$/, '') + '.buffer.jsonl';
-            pub.spendGuard.statePath = path.join(this._queueDir, 'spend-state-' + i + '.json');
-            pub.setBroadcastHook((wire) => this._broadcast(i, wire));
+            pub.spendGuard.statePath = path.join(this['_queueDir'], 'spend-state-' + i + '.json');
+            pub.setBroadcastHook((wire) => this['_broadcast'](i, wire));
             await pub.start();
             this.publishers.push(pub);
         }
@@ -624,7 +624,7 @@ class OracleBatchVenue {
     // WHAT to publish, everything below is a real transaction on a real chain.
     // The wire is passed through untouched, so whatever version the publisher
     // emits is what lands.
-    async _broadcast(hubIndex, wire) {
+    async ['_broadcast'](hubIndex, wire) {
         const transactionHelper = require('./core/transactionHelper');
         const capture = {};
         const txid = await transactionHelper.createAndSendTransaction(
@@ -675,19 +675,19 @@ class OracleBatchVenue {
         for (let i = 0; i < this.mvh.hubs.length; i++) {
             const subs = new Map();
             for (const addr of addrs) subs.set(addr, { prices: prices });
-            this._oracles[i].round.submissions.set(round, subs);
+            this['_oracles'][i].round.submissions.set(round, subs);
         }
 
         await Promise.all(this.mvh.hubs.map((h, i) =>
-            this._oracles[i].oc.finalizeRound(round, this.anchorHeight, anchorTime)
+            this['_oracles'][i].oc.finalizeRound(round, this.anchorHeight, anchorTime)
                 .catch((e) => { console.warn('OracleBatchVenue: hub ' + i + ' finalizeRound threw:', e && e.message); })));
 
         // The round is finalized when every hub holds its own price_snapshots row.
         const finalized = await waitFor(async () => {
             const counts = [];
             for (const hub of this.mvh.hubs) {
-                try { counts.push((await this._snapshotRows(hub, round)).length); }
-                catch (_) { counts.push(0); }
+                try { counts.push((await this['_snapshotRows'](hub, round)).length); }
+                catch (internal) { counts.push(0); }
             }
             return { ok: counts.length > 0 && counts.every((c) => c >= 1), counts: counts };
         }, { timeoutMs: PUBLISH_WAIT_MS });
@@ -697,8 +697,8 @@ class OracleBatchVenue {
                 + ((finalized.last && finalized.last.counts) || []).join(', ') + ']');
         }
 
-        const rows   = await this._snapshotRows(this.mvh.hubs[0], round);
-        const events = this._finalizedEvents.get(round) || [];
+        const rows   = await this['_snapshotRows'](this.mvh.hubs[0], round);
+        const events = this['_finalizedEvents'].get(round) || [];
         const leadEvent = events.find((e) => e && Array.isArray(e.signatures)) || null;
         const signatures = leadEvent ? leadEvent.signatures : [];
 
@@ -711,7 +711,7 @@ class OracleBatchVenue {
         if (!landed.ok) {
             throw new Error('OracleBatchVenue: round ' + round + ' finalized on every hub but no publisher '
                 + 'broadcast within ' + landed.waitedMs + 'ms. Leader rank was '
-                + this._rankSummary() + '; check the oracle_publish snapshot seed and the publishers\' stats.');
+                + this['_rankSummary']() + '; check the oracle_publish snapshot seed and the publishers\' stats.');
         }
 
         const record = {
@@ -741,7 +741,7 @@ class OracleBatchVenue {
     // quorum unavailable) also writes price_snapshots rows, with status 'skipped',
     // so a row-count wait that ignored status would report a stalled round as a
     // finalized one and every later assertion would be measuring the skip.
-    async _snapshotRows(hub, round) {
+    async ['_snapshotRows'](hub, round) {
         return hub.db.doQuery(
             "SELECT * FROM price_snapshots WHERE round_number = ? AND status = 'finalized' ORDER BY coin_pair",
             [round]);
@@ -750,7 +750,7 @@ class OracleBatchVenue {
     // Compact view of every publisher's leader-rotation state, for the failure
     // message when nothing published: a rank of null means the oracle_publish
     // snapshot never resolved and every hub failed closed.
-    _rankSummary() {
+    ['_rankSummary']() {
         return this.publishers
             .map((p, i) => i + ':' + JSON.stringify(p.getStats().myRank) + '/' + JSON.stringify(p.getStats().leaderRank))
             .join(' ');
@@ -790,7 +790,7 @@ class OracleBatchVenue {
     // that has nothing to do with the rail. `prices` entries take `pair` or
     // `coinPair`, exactly as the producer does.
     priceCanonical(round, timestamp, prices, anchorHeight) {
-        return this._oracles[0].oc.buildPriceV0Payload(
+        return this['_oracles'][0].oc.buildPriceV0Payload(
             round, timestamp, prices, anchorHeight === undefined ? this.anchorHeight : anchorHeight);
     }
 
@@ -826,14 +826,14 @@ class OracleBatchVenue {
         }
         this.publishers = [];
 
-        for (const o of this._oracles) {
+        for (const o of this['_oracles']) {
             await attempt('oracle stop', async () => { if (o.oc.stop) await o.oc.stop(); });
         }
-        this._oracles = [];
+        this['_oracles'] = [];
 
-        if (this._countSeed)  await attempt('count seed restore',  async () => this._countSeed.restore());
-        if (this._weightSeed) await attempt('weight seed restore', async () => this._weightSeed.restore());
-        this._countSeed = this._weightSeed = null;
+        if (this['_countSeed'])  await attempt('count seed restore',  async () => this['_countSeed'].restore());
+        if (this['_weightSeed']) await attempt('weight seed restore', async () => this['_weightSeed'].restore());
+        this['_countSeed'] = this['_weightSeed'] = null;
 
         // Take back the `price` capability rows this venue wrote INTO ITS OWN RAIL,
         // so a shared regtest indexer is left as it was found. Rows pushed to
@@ -842,11 +842,11 @@ class OracleBatchVenue {
         // reading the chain these batches are on. The process-wide record
         // (_lastPriceCapabilitySeed) deliberately outlives this teardown, because a
         // node built later still has to judge the transactions this venue landed.
-        if (this._capabilitySeed && this.rail) {
+        if (this['_capabilitySeed'] && this.rail) {
             await attempt('capability seed cleanup', async () =>
-                this._withRailQuery((q) => removePriceCapabilityRows(q, this._capabilitySeed.rows)));
+                this['_withRailQuery']((q) => removePriceCapabilityRows(q, this['_capabilitySeed'].rows)));
         }
-        this._capabilitySeed = null;
+        this['_capabilitySeed'] = null;
 
         if (this.mvh) {
             await attempt('mvh stop',  async () => this.mvh.stop());
@@ -855,12 +855,12 @@ class OracleBatchVenue {
         }
         if (this.hubDb) { await attempt('hub db stop', async () => this.hubDb.stop()); this.hubDb = null; }
 
-        if (this._queueDir) {
-            await attempt('queue dir', async () => fs.rmSync(this._queueDir, { recursive: true, force: true }));
-            this._queueDir = null;
+        if (this['_queueDir']) {
+            await attempt('queue dir', async () => fs.rmSync(this['_queueDir'], { recursive: true, force: true }));
+            this['_queueDir'] = null;
         }
-        if (this._railSaved) { chainRail.exitRail(this._railSaved); this._railSaved = null; }
-        this._restoreChainPortOverrides();
+        if (this['_railSaved']) { chainRail.exitRail(this['_railSaved']); this['_railSaved'] = null; }
+        this['_restoreChainPortOverrides']();
 
         if (problems.length > 0) console.warn('OracleBatchVenue: teardown problems: ' + problems.join(' | '));
         return problems;

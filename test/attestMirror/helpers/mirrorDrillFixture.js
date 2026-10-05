@@ -130,7 +130,7 @@ function recordStakerKey (label, entry) {
         fsx.mkdirSync(DRILL_KEYS_DIR, { recursive: true, mode: 0o700 })
         const file = pathx.join(DRILL_KEYS_DIR, label + '.json')
         let all = []
-        try { all = JSON.parse(fsx.readFileSync(file, 'utf8')) } catch (_) { all = [] }
+        try { all = JSON.parse(fsx.readFileSync(file, 'utf8')) } catch (internal) { all = [] }
         all.push(entry)
         fsx.writeFileSync(file, JSON.stringify(all, null, 1), { mode: 0o600 })
         fsx.chmodSync(file, 0o600)
@@ -295,10 +295,10 @@ function stakeVisibilityBlocks (coin, network) {
  * Split out so it can be asked BEFORE a broadcast as well as after a failure.
  * Returns the probe sample when wedged and null otherwise, never throws.
  */
-async function _wedgeSample () {
+async function internalWedgeSample () {
     const waits = require('./mirrorDrillWaits')
     let sample = null
-    try { sample = await waits.standingTipProbe()() } catch (_) { return null }
+    try { sample = await waits.standingTipProbe()() } catch (internal) { return null }
 
     const behind = sample && Number.isFinite(Number(sample.height)) &&
         Number.isFinite(Number(sample.decoder)) && Number(sample.height) < Number(sample.decoder)
@@ -343,7 +343,7 @@ async function _wedgeSample () {
  * only, like the two below.
  */
 async function clearWedgeBefore (what) {
-    const sample = await _wedgeSample()
+    const sample = await internalWedgeSample()
     if (!sample) return false
 
     const waits = require('./mirrorDrillWaits')
@@ -370,7 +370,7 @@ async function withWedgeClear (what, fn) {
         // Lazy require: mirrorDrillWaits requires THIS module at its top level,
         // so a top-level require here would close the cycle.
         const waits = require('./mirrorDrillWaits')
-        const sample = await _wedgeSample()
+        const sample = await internalWedgeSample()
 
         // Not the wedge: the original error is the real one and must escape
         // unchanged rather than be retried into a second, more confusing failure.
@@ -467,7 +467,7 @@ async function startAttestTestServer (opts) {
 
     const server = https.createServer(
         { key: fsx.readFileSync(keyPath), cert: fsx.readFileSync(certPath) },
-        handler || ((_req, res) => {
+        handler || ((internalReq, res) => {
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(body)
         }))
@@ -490,7 +490,7 @@ async function startAttestTestServer (opts) {
         },
         close: async () => {
             await new Promise((resolve) => server.close(() => resolve()))
-            try { fsx.rmSync(dir, { recursive: true, force: true }) } catch (_) { /* tmp */ }
+            try { fsx.rmSync(dir, { recursive: true, force: true }) } catch (internal) { /* tmp */ }
         },
     }
 }
@@ -552,7 +552,7 @@ async function waitForVenueIndexersAtTip (venue, opts) {
         const seen = []
         for (const ix of venue.indexers) {
             let s = null
-            try { s = await venue.statusOf(ix.index) } catch (_) { s = null }
+            try { s = await venue.statusOf(ix.index) } catch (internal) { s = null }
             const b = (s && s.body) || {}
             seen.push({
                 index:   ix.index,
@@ -674,7 +674,7 @@ async function waitForVenuePrices (venue, opts) {
                         'SELECT price, round_number, reference_block, block_timestamp ' +
                         'FROM price_snapshots WHERE coin_pair = ? AND price IS NOT NULL ' +
                         "AND status = 'finalized' ORDER BY round_number DESC LIMIT 3", [pair])
-                } catch (_) { rows = [] }
+                } catch (internal) { rows = [] }
                 // SANE, not merely present. A price that is wrong by orders of
                 // magnitude is worse than none: the venue node then computes a
                 // native fee far above what the harness paid off the STANDING
@@ -724,7 +724,7 @@ async function waitForVenuePrices (venue, opts) {
  * Derive the pubkey a 32-byte Ed25519 seed signs with, through the hub's OWN
  * identity module rather than a second derivation written here.
  */
-function _pubkeyForSeed (seedHex) {
+function internalPubkeyForSeed (seedHex) {
     const ValidatorIdentity = loadHubModule('src/validators/identity.js')
     return String(new ValidatorIdentity(String(seedHex).toLowerCase()).getPubkeyHex()).toLowerCase()
 }
@@ -749,14 +749,14 @@ function _pubkeyForSeed (seedHex) {
  * seats it, and a seated key nobody can sign for is precisely what this whole
  * function exists to detect.
  */
-function _knownSignerSeeds () {
+function internalKnownSignerSeeds () {
     const rollcall = require('../../helpers/rollcallHelper')
     const seeds = new Map()   // pubkey -> {seedHex, origin}
 
     const add = (seedHex, origin) => {
         if (!seedHex || !/^[0-9a-fA-F]{64}$/.test(String(seedHex))) return
         const hex = String(seedHex).toLowerCase()
-        const pk  = _pubkeyForSeed(hex)
+        const pk  = internalPubkeyForSeed(hex)
         if (!seeds.has(pk)) seeds.set(pk, { seedHex: hex, origin: origin })
     }
 
@@ -829,7 +829,7 @@ async function readSeatedAttestationSet (opts) {
 }
 
 /** One seated key's snapshot weight, for a message; '?' when it cannot be read. */
-function _weightOf (seated, pubkeyHex) {
+function internalWeightOf (seated, pubkeyHex) {
     const v = seated && seated.byPubkey && seated.byPubkey.get(pubkeyHex)
     return (v && v.weight !== undefined && v.weight !== null) ? String(v.weight) : '?'
 }
@@ -904,7 +904,7 @@ function resolveAdoptionPlan (seated, known, opts) {
         // when the truth is the opposite.
         const eligible = (floor === undefined || floor === null)
             ? seated.pubkeys.slice()
-            : seated.pubkeys.filter((pk) => meetsFloor.call(null, _rawWeight(seated, pk), floor))
+            : seated.pubkeys.filter((pk) => meetsFloor.call(null, internalRawWeight(seated, pk), floor))
         eligibleBy.set(providerId, eligible)
         for (const pk of eligible) drawable.add(pk)
     }
@@ -925,7 +925,7 @@ function resolveAdoptionPlan (seated, known, opts) {
         ' seated attestation validator(s) at buried block ' + buriedBlock +
         ' have NO signing key this harness can run AND clear the floor of a provider this drill ' +
         'declares (' + declared.join(', ') + '): ' +
-        orphans.map((p) => p.slice(0, 16) + '@' + _weightOf(seated, p)).join(', ') + '.\n' +
+        orphans.map((p) => p.slice(0, 16) + '@' + internalWeightOf(seated, p)).join(', ') + '.\n' +
         'A responsible set is drawn from ALL of them and finalization needs max(quorum, redundancy) ' +
         'signatures from the DRAWN members, so a draw containing one of these stalls to timeout and ' +
         'reads as a missing mirror row. Refusing rather than running that lottery.\n' +
@@ -956,7 +956,7 @@ function resolveAdoptionPlan (seated, known, opts) {
             'anywhere near the floor that caused it.')
     }
 
-    const quorum = _batchQuorumReach(seated, adopted, belowFloor, buriedBlock, network)
+    const quorum = internalBatchQuorumReach(seated, adopted, belowFloor, buriedBlock, network)
 
     return {
         declared:    declared,
@@ -969,7 +969,7 @@ function resolveAdoptionPlan (seated, known, opts) {
 }
 
 /** The raw snapshot weight the hub's comparator is given, undefined when absent. */
-function _rawWeight (seated, pubkeyHex) {
+function internalRawWeight (seated, pubkeyHex) {
     const v = seated.byPubkey.get(pubkeyHex)
     return v && v.weight
 }
@@ -991,7 +991,7 @@ function _rawWeight (seated, pubkeyHex) {
  * two rules are different arithmetic and only the network's activation height
  * decides which one a window is measured by.
  */
-function _batchQuorumReach (seated, adopted, belowFloor, buriedBlock, network) {
+function internalBatchQuorumReach (seated, adopted, belowFloor, buriedBlock, network) {
     const swq = loadHubModule('src/consensus/stake_weighted_quorum.js')
     const { bftQuorumOrSingle } = loadHubModule('src/lib/bft_quorum.js')
 
@@ -1017,7 +1017,7 @@ function _batchQuorumReach (seated, adopted, belowFloor, buriedBlock, network) {
         try {
             totalStake = String(swq.totalStake(validators))
             oursStake  = String(swq.totalStake(ourKeys.map((pk) => seated.byPubkey.get(pk))))
-        } catch (_) { /* the refusal below still names the counts */ }
+        } catch (internal) { /* the refusal below still names the counts */ }
     }
 
     assert.ok(reaches(ourKeys),
@@ -1028,7 +1028,7 @@ function _batchQuorumReach (seated, adopted, belowFloor, buriedBlock, network) {
                     ' needed over a set of ' + seated.pubkeys.length) + '). ' +
         (belowFloor.length
             ? 'The ' + belowFloor.length + ' seated key(s) passed over for the draw (' +
-              belowFloor.map((p) => p.slice(0, 16) + '@' + _weightOf(seated, p)).join(', ') +
+              belowFloor.map((p) => p.slice(0, 16) + '@' + internalWeightOf(seated, p)).join(', ') +
               ') still count as set members here and sign nothing, which is what raises the bar. '
             : '') +
         'Seed more adoptable stake before driving a batch: no window would ever publish, and that ' +
@@ -1125,7 +1125,7 @@ async function provisionDrillIdentities (opts) {
 
     const reading = await readSeatedAttestationSet({ indexer: o.indexer })
     const seated  = reading.set
-    const known   = _knownSignerSeeds()
+    const known   = internalKnownSignerSeeds()
 
     const plan = resolveAdoptionPlan(seated, known, {
         providers:   o.providers,
@@ -1168,7 +1168,7 @@ async function provisionDrillIdentities (opts) {
         // publishes has to be able to see it from the adoption line alone.
         '. Passed over as below the floor of every declared provider (NOT adopted, NOT refused): ' +
         (plan.belowFloor.length
-            ? plan.belowFloor.map((p) => p.slice(0, 16) + '@' + _weightOf(seated, p)).join(', ')
+            ? plan.belowFloor.map((p) => p.slice(0, 16) + '@' + internalWeightOf(seated, p)).join(', ')
             : 'none') +
         '. Batch co-sign quorum ' + (plan.quorum.weighted ? 'stake-weighted' : 'count-based') +
         ': this venue signs ' + plan.quorum.oursStake + ' of ' + plan.quorum.totalStake +
@@ -1471,7 +1471,7 @@ module.exports = {
     // Exported for the unit tier only: these are the pure pieces of the adoption
     // decision, and a guard that cannot reach them can only test adoption by
     // standing up a chain.
-    _knownSignerSeeds,
-    _pubkeyForSeed,
+    ['_knownSignerSeeds']: internalKnownSignerSeeds,
+    ['_pubkeyForSeed']: internalPubkeyForSeed,
     resolveAdoptionPlan,
 }

@@ -624,7 +624,7 @@ describe('XCHAIN price derivation from real fills (spec step 7)', function () {
             //    tip the indexer had not finished serving), so keep evaluating
             //    rounds until one matches exactly.
             let matched = null
-            let attempts = []
+            const attempts = []
             const deadline = Date.now() + 420000
             while (!matched && Date.now() < deadline) {
                 const rows = await hubPriceSnapshots()
