@@ -97,6 +97,50 @@ function buildMintQuery(whereClauses){
     ].join('\n')+"WHERE "+whereClauses.join(" AND ");
 }
 
+function buildAirdropFilter({blockIndex,txHash,source,tick,amount,listActionIndex,memo,status}){
+    const whereClauses = []
+    const whereValues = []
+
+    if (blockIndex != null){
+        whereClauses.push("tr.block_index = ?")
+        whereValues.push(blockIndex)
+    }
+    if (txHash != null){
+        whereClauses.push("itx.hash = ?")
+        whereValues.push(txHash)
+    }
+    if (source != null){
+        whereClauses.push("ia.address = ?")
+        whereValues.push(source)
+    }
+    if (tick != null){
+        whereClauses.push("itick.tick = ?")
+        whereValues.push(tick)
+    }
+    if (amount != null){
+        whereClauses.push("a.amount = ?")
+        whereValues.push(amount)
+    }
+    if (listActionIndex != null){
+        whereClauses.push("a.list_action_index = ?")
+        whereValues.push(listActionIndex)
+    }
+    if (memo != null){
+        if (memo === ''){
+            whereClauses.push("im.memo IS NULL")
+        } else {
+            whereClauses.push("im.memo = ?")
+            whereValues.push(memo)
+        }
+    }
+    if (status != null){
+        whereClauses.push("ist.status = ?")
+        whereValues.push(status)
+    }
+
+    return {whereClauses, whereValues}
+}
+
 function buildIssueFilter(source, tick, txHash, maxSupply, maxMint, decimals, description, mintSupply, status){
     const filters = [
         ["ia.address = ?", source],
@@ -161,6 +205,29 @@ function buildSendFilters({source,destination,tick,amount,txHash,memo,status}){
     }
 
     return {whereClauses, whereValues}
+}
+
+function buildAirdropQuery(whereClauses){
+    return `
+            SELECT
+                tr.block_index AS block_index,
+                itx.hash AS tx_hash,
+                a.action_index,
+                ia.address AS source,
+                itick.tick AS tick,
+                a.amount,
+                im.memo,
+                a.list_action_index,
+                ist.status AS status
+            FROM airdrops a
+            LEFT JOIN actions act ON act.action_index = a.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ia ON ia.id = tr.source_id
+            LEFT JOIN index_statuses ist ON ist.id = a.status_id
+            LEFT JOIN index_tickers itick ON itick.id = a.tick_id
+            LEFT JOIN index_memos im ON im.id = a.memo_id
+        `+"WHERE "+whereClauses.join(" AND ");
 }
 
 function buildSendQuery(whereClauses){
@@ -899,34 +966,30 @@ class Database {
     }
     
     async waitForAirdrop(airdropObject, timeMax = 60000){ return this['_waitFor'](this.checkAirdrop, airdropObject, timeMax) }
-    
-    async getListAddresses(listActionIndex){
-        let listType = null
+
+    async _getListType(listActionIndex){
         const queryList = "SELECT type FROM lists WHERE action_index = ?"
-        
-        let connection = await this.getConnection()
-        
+        const connection = await this.getConnection()
+
         try {
             const rows = await connection.query(queryList, [listActionIndex])
             if (rows.length > 0){
-                listType = parseInt(rows[0]["type"])
-            } else {
-                logger.info("ERROR! Couldn't get the type of a list")
-                return null
+                return { found: true, listType: parseInt(rows[0]["type"]) }
             }
+            logger.info("ERROR! Couldn't get the type of a list")
+            return { found: false }
         } catch (err) {
             logger.info(err)
-            return null
+            return { found: false }
         } finally {
             await connection.release()
         }
-        
-        if (listType){
-            let addressesQuery = null
-            
-            switch (listType){
-                case 1: //TICK
-                    addressesQuery = `
+    }
+
+    _getListAddressesQuery(listType){
+        switch (listType){
+            case 1: //TICK
+                return `
                         WITH totalCredits AS (
                         SELECT address_id, tick_id, SUM(amount) AS total
                         FROM credits
@@ -946,100 +1009,57 @@ class Database {
                     WHERE
                         COALESCE(tc.total, 0) > 0 OR COALESCE(td.total, 0) > 0;
                     `
-                    break
-                case 2: //address
-                    addressesQuery = `
+            case 2: //address
+                return `
                         SELECT 
                             ia.id AS address
                         FROM list_items li
                         LEFT JOIN index_addresses ia ON ia.id = li.item_id
                         WHERE li.action_index = ?
                     `
-                    break
-            }
-            
-            
-            try {
-                connection = await this.getConnection()
-                
-                const rows = await connection.query(addressesQuery, [listActionIndex])
-                const result = []
-                    
-                for (const nextRowIndex in rows){
-                    result.push(rows[nextRowIndex]["address"])
-                }
-                    
-                return result
-            } catch (err) {
-                logger.error("Couldn't get a list of addresses from a list:", err);
-            }
         }
-        
+        return null
+    }
+
+    async _queryListAddresses(addressesQuery, listActionIndex){
+        try {
+            const connection = await this.getConnection()
+            const rows = await connection.query(addressesQuery, [listActionIndex])
+            const addresses = this._addressIdsFromRows(rows)
+            return { succeeded: true, addresses }
+        } catch (err) {
+            logger.error("Couldn't get a list of addresses from a list:", err);
+            return { succeeded: false }
+        }
+    }
+
+    _addressIdsFromRows(rows){
+        const result = []
+        for (const nextRowIndex in rows){
+            result.push(rows[nextRowIndex]["address"])
+        }
+        return result
+    }
+
+    async getListAddresses(listActionIndex){
+        const list = await this._getListType(listActionIndex)
+        if (!list.found) return null
+
+        if (list.listType){
+            const addressesQuery = this._getListAddressesQuery(list.listType)
+            const queryResult = await this._queryListAddresses(addressesQuery, listActionIndex)
+            if (queryResult.succeeded) return queryResult.addresses
+        }
+
         logger.info("ERROR: there is no list with action index "+listActionIndex)
         return null
     }
     
     async checkAirdrop({blockIndex,txHash,source,tick,amount,listActionIndex,memo,status}){
-        const whereClauses = []
-        const whereValues = []
-
-        if (blockIndex != null){
-            whereClauses.push("tr.block_index = ?")
-            whereValues.push(blockIndex)
-        }
-        if (txHash != null){
-            whereClauses.push("itx.hash = ?")
-            whereValues.push(txHash)
-        }
-        if (source != null){
-            whereClauses.push("ia.address = ?")
-            whereValues.push(source)
-        }
-        if (tick != null){
-            whereClauses.push("itick.tick = ?")
-            whereValues.push(tick)
-        }
-        if (amount != null){
-            whereClauses.push("a.amount = ?")
-            whereValues.push(amount)
-        }
-        if (listActionIndex != null){
-            whereClauses.push("a.list_action_index = ?")
-            whereValues.push(listActionIndex)
-        }
-        if (memo != null){
-            if (memo === ''){
-                whereClauses.push("im.memo IS NULL")
-            } else {
-                whereClauses.push("im.memo = ?")
-                whereValues.push(memo)
-            }
-        }
-        if (status != null){
-            whereClauses.push("ist.status = ?")
-            whereValues.push(status)
-        }
-
-        const query = `
-            SELECT
-                tr.block_index AS block_index,
-                itx.hash AS tx_hash,
-                a.action_index,
-                ia.address AS source,
-                itick.tick AS tick,
-                a.amount,
-                im.memo,
-                a.list_action_index,
-                ist.status AS status
-            FROM airdrops a
-            LEFT JOIN actions act ON act.action_index = a.action_index
-            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
-            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
-            LEFT JOIN index_addresses ia ON ia.id = tr.source_id
-            LEFT JOIN index_statuses ist ON ist.id = a.status_id
-            LEFT JOIN index_tickers itick ON itick.id = a.tick_id
-            LEFT JOIN index_memos im ON im.id = a.memo_id
-        `+"WHERE "+whereClauses.join(" AND ");
+        const {whereClauses, whereValues} = buildAirdropFilter({
+            blockIndex, txHash, source, tick, amount, listActionIndex, memo, status
+        })
+        const query = buildAirdropQuery(whereClauses)
 
         const connection = await this.getConnection()
         try {
