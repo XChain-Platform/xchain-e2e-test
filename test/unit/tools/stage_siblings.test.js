@@ -76,12 +76,6 @@ function addSibling(name) {
     return sibling
 }
 
-function checkResult(name) {
-    const firstLog = logs.length
-    script.checkOne(name)
-    return !logs.slice(firstLog).includes(name + ': absent')
-}
-
 describe('stage-siblings helpers', () => {
     beforeEach(setUp)
     afterEach(tearDown)
@@ -102,13 +96,14 @@ describe('stage-siblings helpers', () => {
 
         assert.strictEqual(script.stageOne('fixture-package'), true)
         assert.strictEqual(fs.lstatSync(path.join(root, 'fixture-package')).isSymbolicLink(), true)
-        assert.strictEqual(checkResult('fixture-package'), true)
+        const stagedCheck = script.checkOne('fixture-package')
         assert.match(logs.join('\n'), /fixture-package: symlink -> \.\.\/fixture-package/)
 
         logs.length = 0
         assert.strictEqual(script.unstageOne('fixture-package'), true)
-        assert.strictEqual(checkResult('fixture-package'), false)
+        const unstagedCheck = script.checkOne('fixture-package')
         assert.match(logs.join('\n'), /fixture-package: absent/)
+        assert.deepStrictEqual([stagedCheck, unstagedCheck], [true, false])
     })
 
     it('reports a missing sibling without creating a vendor path', () => {
