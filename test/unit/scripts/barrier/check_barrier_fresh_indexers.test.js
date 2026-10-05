@@ -1,7 +1,7 @@
 'use strict'
 
 const assert = require('assert')
-const { findReusedLabelBoots } = require('../../../scripts/check-barrier-fresh-indexers')
+const { findReusedLabelBoots } = require('../../../../scripts/check-barrier-fresh-indexers')
 
 describe('check-barrier-fresh-indexers', function () {
     it('finds a one-line boot and reports its literal label and line', function () {
