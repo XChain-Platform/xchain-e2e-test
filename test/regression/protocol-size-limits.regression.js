@@ -60,8 +60,8 @@ const explorerVmQuery   = require('../../../xchain-explorer/src/contract/vm_quer
 // as un-exported `const`s. Those consts derive from the vendored
 // src/protocol/constants.js rather than bare literals, so assert the source is
 // wired to the vendored module (no bare literal can re-enter) and read the effective
-// values from that same vendored copy. Byte-identity of the vendored copy to the
-// canonical source is asserted separately below.
+// values from that same vendored copy. Full export identity with the canonical
+// values is asserted separately below.
 //
 // The `../` run in the require is matched rather than counted: the handler moved from
 // src/actions/execute.js to src/actions/execute/index.js and reaches the same vendored
@@ -81,15 +81,90 @@ function readIndexerExecuteCallCaps() {
     return { MAX_CALL_DEPTH: vendored.VM_MAX_CALL_DEPTH, MIN_CALL_GAS: vendored.VM_MIN_CALL_GAS }
 }
 
-// Vendored protocol-constants byte-identity guard. Each service that
-// consumes the shared protocol constants keeps a byte-identical vendored copy in
-// its own src/protocol/constants.js (services ship as independent containers with
-// no shared node_modules tree), and requires that copy instead of bare literals.
-// Assert every vendored copy is byte-for-byte the canonical source, so an edit to
-// one copy that was not propagated fails here.
+// Vendored protocol-constants identity guard. Services now project the constants
+// they consume through their local activation registries, so their source files are
+// intentionally not byte-identical. Compare every export in each vendored module
+// against the canonical module without taking an intersection: a missing canonical
+// export, an extra vendored export, or a changed value must fail.
 const VENDORED_CONSTANTS_SERVICES = [
     'xchain-vm', 'xchain-indexer', 'xchain-sdk', 'xchain-decoder', 'xchain-explorer',
 ]
+
+const VENDORED_CONSTANT_NAMES = {
+    'xchain-vm': [
+        'ANCHOR_REWARD_ACTIVATION', 'ANCHOR_REWARD_AMOUNT', 'ARCHIVE_REWARD_ACTIVATION', 'ARCHIVE_REWARD_AMOUNT', 'ATTEST_MAX_EXPIRIES_PER_BLOCK',
+        'CHECKPOINT_COMMITMENT_ACTIVATION', 'CROSS_CHAIN_ROYALTY_ACTIVATION', 'EQUIV_HEADER_ACTIVATION', 'GAS_TICK', 'MAX_ACTION_DATA_LENGTH',
+        'MAX_CODE_SIZE', 'MAX_DEPLOYCHUNK_PART_BYTES', 'MAX_DEPLOY_CHUNKS', 'OP_RETURN_PUSH_OVERHEAD', 'ORACLE_DEVIATION_THRESHOLD',
+        'PRICE_MAX', 'STAKE_WEIGHTED_QUORUM_ACTIVATION', 'STATE_COMMITMENT_ACTIVATION', 'THRESHOLD_SCALE', 'VALID_FIAT_CODES',
+        'VM_MAX_CALL_DEPTH', 'VM_MIN_CALL_GAS', 'XCALL_MAX_CALLS_PER_BLOCK', 'XCALL_MAX_DEADLINE_BLOCKS', 'XCALL_MAX_GAS',
+        'XCALL_MAX_HOPS', 'XCALL_MAX_RETURN_BYTES', 'XCALL_MIN_DEADLINE_BLOCKS', 'XCALL_MIN_GAS',
+    ],
+    'xchain-indexer': [
+        'ANCHOR_REWARD_ACTIVATION', 'ANCHOR_REWARD_AMOUNT', 'ARCHIVE_REWARD_ACTIVATION', 'ARCHIVE_REWARD_AMOUNT', 'ATTEST_MAX_EXPIRIES_PER_BLOCK',
+        'CHECKPOINT_COMMITMENT_ACTIVATION', 'CROSS_CHAIN_ROYALTY_ACTIVATION', 'CROSS_SETTLE_MAX_PER_BLOCK', 'EQUIV_HEADER_ACTIVATION', 'GAS_TICK',
+        'LIST_META_DESCRIPTION_MAX_BYTES', 'LIST_META_NAME_MAX_BYTES', 'LIST_SHARE_MAX_MEMBERS', 'LIST_UNION_MAX_MEMBERS', 'MAX_ACTION_DATA_LENGTH',
+        'MAX_CODE_SIZE', 'MAX_DEPLOYCHUNK_PART_BYTES', 'MAX_DEPLOY_CHUNKS', 'OP_RETURN_PUSH_OVERHEAD', 'ORACLE_DEVIATION_THRESHOLD',
+        'ORACLE_VM_MAX_ROWS', 'ORACLE_VM_ROUND_WINDOW', 'PRICE_MAX', 'STAKE_WEIGHTED_QUORUM_ACTIVATION', 'STATE_COMMITMENT_ACTIVATION',
+        'THRESHOLD_SCALE', 'VALID_FIAT_CODES', 'VM_MAX_CALL_DEPTH', 'VM_MIN_CALL_GAS', 'XBRIDGE_MAX_PER_BLOCK',
+        'XCALL_MAX_CALLS_PER_BLOCK', 'XCALL_MAX_DEADLINE_BLOCKS', 'XCALL_MAX_GAS', 'XCALL_MAX_HOPS', 'XCALL_MAX_RETURN_BYTES',
+        'XCALL_MIN_DEADLINE_BLOCKS', 'XCALL_MIN_GAS', 'XCALL_RESULT_ORPHAN_GRACE_SECONDS', 'XPOLICY_MAX_MEMBERS', 'XPOLICY_MAX_PER_BLOCK',
+    ],
+    'xchain-sdk': [
+        'ANCHOR_ACTIVATION', 'ANCHOR_REWARD_ACTIVATION', 'ANCHOR_REWARD_AMOUNT', 'ARCHIVE_MATCH_COUNT_ACTIVATION', 'ARCHIVE_REWARD_ACTIVATION',
+        'ARCHIVE_REWARD_AMOUNT', 'ATTEST_MAX_EXPIRIES_PER_BLOCK', 'CHECKPOINT_COMMITMENT_ACTIVATION', 'COMPRESSION_CODE_DEFLATE_RAW', 'COMPRESSION_MAX_INPUT_BYTES',
+        'COMPRESSION_MAX_RATIO', 'CROSS_CHAIN_ROYALTY_ACTIVATION', 'ENVELOPE_MAX_PAYLOAD', 'EQUIV_HEADER_ACTIVATION', 'GAS_TICK',
+        'MAX_ACTION_DATA_LENGTH', 'MAX_CODE_SIZE', 'MAX_DEPLOYCHUNK_PART_BYTES', 'MAX_DEPLOY_CHUNKS', 'OP_RETURN_PUSH_OVERHEAD',
+        'ORACLE_DEVIATION_THRESHOLD', 'PRICE_MAX', 'STAKE_WEIGHTED_QUORUM_ACTIVATION', 'STATE_COMMITMENT_ACTIVATION', 'THRESHOLD_SCALE',
+        'VALID_FIAT_CODES', 'VM_MAX_CALL_DEPTH', 'VM_MIN_CALL_GAS', 'XCALL_MAX_CALLS_PER_BLOCK', 'XCALL_MAX_DEADLINE_BLOCKS',
+        'XCALL_MAX_GAS', 'XCALL_MAX_HOPS', 'XCALL_MAX_RETURN_BYTES', 'XCALL_MIN_DEADLINE_BLOCKS', 'XCALL_MIN_GAS',
+    ],
+    'xchain-decoder': [
+        'ANCHOR_REWARD_ACTIVATION', 'ANCHOR_REWARD_AMOUNT', 'ARCHIVE_REWARD_ACTIVATION', 'ARCHIVE_REWARD_AMOUNT', 'ATTEST_MAX_EXPIRIES_PER_BLOCK',
+        'BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION', 'CHECKPOINT_COMMITMENT_ACTIVATION', 'CROSS_CHAIN_ROYALTY_ACTIVATION', 'DISPENSER_CANCEL_GRACE_ACTIVATION', 'DISPENSER_EXPIRY_REALIGN_ACTIVATION',
+        'ENVELOPE_CARRIER_RECOGNITION_ACTIVATION', 'ENVELOPE_MAX_PAYLOAD', 'ENVELOPE_RECOGNITION_ACTIVATION', 'EQUIV_HEADER_ACTIVATION', 'GAS_TICK',
+        'MAX_ACTION_DATA_LENGTH', 'MAX_CODE_SIZE', 'MAX_DEPLOYCHUNK_PART_BYTES', 'MAX_DEPLOY_CHUNKS', 'OP_RETURN_PUSH_OVERHEAD',
+        'ORACLE_DEVIATION_THRESHOLD', 'ORACLE_FEE_OUTPUT_ACTIVATION', 'ORACLE_FEE_SET_CAPTURE_ACTIVATION', 'PRICE_MAX', 'STAKE_WEIGHTED_QUORUM_ACTIVATION',
+        'STATE_COMMITMENT_ACTIVATION', 'THRESHOLD_SCALE', 'VALID_FIAT_CODES', 'VM_MAX_CALL_DEPTH', 'VM_MIN_CALL_GAS',
+        'XCALL_MAX_CALLS_PER_BLOCK', 'XCALL_MAX_DEADLINE_BLOCKS', 'XCALL_MAX_GAS', 'XCALL_MAX_HOPS', 'XCALL_MAX_RETURN_BYTES',
+        'XCALL_MIN_DEADLINE_BLOCKS', 'XCALL_MIN_GAS',
+    ],
+    'xchain-explorer': [
+        'ANCHOR_ACTIVATION', 'ANCHOR_REWARD_ACTIVATION', 'ANCHOR_REWARD_AMOUNT', 'ARCHIVE_REWARD_ACTIVATION', 'ARCHIVE_REWARD_AMOUNT',
+        'ATTEST_MAX_EXPIRIES_PER_BLOCK', 'CHECKPOINT_COMMITMENT_ACTIVATION', 'CROSS_CHAIN_ROYALTY_ACTIVATION', 'EQUIV_HEADER_ACTIVATION', 'GAS_TICK',
+        'MAX_ACTION_DATA_LENGTH', 'MAX_CODE_SIZE', 'MAX_DEPLOYCHUNK_PART_BYTES', 'MAX_DEPLOY_CHUNKS', 'OP_RETURN_PUSH_OVERHEAD',
+        'ORACLE_DEVIATION_THRESHOLD', 'PRICE_MAX', 'STAKE_WEIGHTED_QUORUM_ACTIVATION', 'STATE_COMMITMENT_ACTIVATION', 'THRESHOLD_SCALE',
+        'VALID_FIAT_CODES', 'VM_MAX_CALL_DEPTH', 'VM_MIN_CALL_GAS', 'XCALL_MAX_CALLS_PER_BLOCK', 'XCALL_MAX_DEADLINE_BLOCKS',
+        'XCALL_MAX_GAS', 'XCALL_MAX_HOPS', 'XCALL_MAX_RETURN_BYTES', 'XCALL_MIN_DEADLINE_BLOCKS', 'XCALL_MIN_GAS',
+    ],
+}
+
+// The oracle VM retention bounds are indexer-only protocol constants. Their
+// canonical declarations live in the indexer activation registry rather than the
+// documentation module, so include those authoritative exports for that service.
+const indexerGateRegistry = require('../../../xchain-indexer/src/consensus/gate_registry.js')
+const CANONICAL_EXPORTS_BY_SERVICE = {
+    'xchain-indexer': Object.assign({}, protocol, {
+        ORACLE_VM_ROUND_WINDOW:
+            indexerGateRegistry.copy('protocol/constants.ORACLE_VM_ROUND_WINDOW'),
+        ORACLE_VM_MAX_ROWS:
+            indexerGateRegistry.copy('protocol/constants.ORACLE_VM_MAX_ROWS'),
+    }),
+}
+
+function assertFullVendoredExportIdentity(vendored, canonical, service, expectedNames) {
+    const vendoredNames = Object.keys(vendored).sort()
+    assert.deepStrictEqual(vendoredNames, expectedNames,
+        service + ' full vendored constant export names drifted')
+    const expected = {}
+    expectedNames.forEach((name) => {
+        assert.ok(Object.prototype.hasOwnProperty.call(canonical, name),
+            service + ' vendored constants exports ' + name +
+            ', but the canonical constants module does not export it')
+        expected[name] = canonical[name]
+    })
+    assert.deepStrictEqual(vendored, expected,
+        service + ' full vendored constant export set drifted from canonical')
+}
 
 describe('Protocol size-limit drift guard', () => {
 
@@ -411,16 +486,14 @@ describe('Protocol size-limit drift guard', () => {
         })
     })
 
-    describe('Family-B constant parity (copies the byte-identity guard does not reach)', () => {
+    describe('Family-B constant parity (copies the full-export guard does not reach)', () => {
 
-        // The byte-identity block below compares whole vendored modules
-        // against the canonical file. It cannot see two other shapes of copy:
+        // The full-export block below compares whole vendored modules against
+        // canonical exports. It cannot see another shape of copy:
         // a service that re-declares a canonical value as a bare literal without
         // vendoring anything (the encoder, the explorer compression reader, both
-        // price-pair activation gates, the wallet gated-send guard), and a
-        // vendored copy whose VALUE for one constant drifted while the file as a
-        // whole was already being compared as one blob. These tests pin the value
-        // per constant, naming the exact surface that would drift.
+        // price-pair activation gates, the wallet gated-send guard). These tests
+        // also pin values per constant, naming the exact surface that drifted.
 
         const vendoredConstants = {
             'xchain-vm':       require('../../../xchain-vm/src/protocol/constants.js'),
@@ -476,7 +549,7 @@ describe('Protocol size-limit drift guard', () => {
         // PRICE_PAIR_TICKER_MAX_LEGACY / _WIDE bound the ticker side of a PRICE v0
         // pair either side of the widening flag day. The indexer is the
         // on-chain arbiter and the hub keeps a verbatim copy of the same module;
-        // both declare bare literals and vendor nothing, so neither the byte-identity
+        // both declare bare literals and vendor nothing, so neither the full-export
         // guard nor any other test compared them to canonical (uuids 3409, 3410).
         // A one-sided edit forks the fleet on the first round naming a 6-char ticker.
         it('[regression:p0] PRICE_PAIR_TICKER_MAX_LEGACY / _WIDE === canonical across indexer + hub', () => {
@@ -591,7 +664,7 @@ describe('Protocol size-limit drift guard', () => {
         // Four fleet-agreed operational bounds with no value-level assertion here: the
         // reorg burial depth, the anchor-reward mirror watermark, the BATCH command cap
         // and the per-block cross-chain settlement slice. Three of them are bare
-        // literals living in a src/ module per repo, which the byte-identity block
+        // literals living in a src/ module per repo, which the full-export block
         // below cannot see at all. The one twin that does exist, for
         // BATCH_COMMAND_LIMIT in xchain-documentation's protocol-constant-claims
         // .test.js, SKIPS in its own repo's CI, which is hermetic by design (no sibling
@@ -734,10 +807,9 @@ describe('Protocol size-limit drift guard', () => {
         // processCrossChainSettlements, db.js getEffectiveUnsettledMatches), so it is
         // consensus-visible once armed: two operators reading different values settle
         // different prefixes at the same block. The indexer's own cap tests read the
-        // value out of the vendored copy and compare it to itself, and the byte-identity
-        // block below compares that whole file as one blob, which goes red for any
-        // unrelated re-vendoring lag and so cannot report that THIS cap is intact. Pin
-        // the value per constant, as the rest of this block does (uuid 0fe9fc61).
+        // value out of the vendored copy and compare it to itself. The full-export
+        // block below catches module drift, while this check identifies this cap by
+        // name, as the rest of this block does (uuid 0fe9fc61).
         it('[regression:p0] CROSS_SETTLE_MAX_PER_BLOCK === canonical in the indexer vendored copy (uuid 0fe9fc61)', () => {
             assertVendored('CROSS_SETTLE_MAX_PER_BLOCK', ['xchain-indexer'])
         })
@@ -866,30 +938,37 @@ describe('Protocol size-limit drift guard', () => {
         })
     })
 
-    describe('Vendored protocol-constants byte-identity', () => {
+    describe('Vendored protocol-constants full-export identity', () => {
 
-        // Each consuming service now requires a byte-identical vendored copy of the
-        // canonical protocol constants (src/protocol/constants.js) instead of bare
-        // literals, so a drift is impossible by construction rather than by
-        // discipline. Assert every vendored copy equals the canonical source AND
-        // that the module actually loads and re-exports the guarded values.
-        const canonSrc = fs.readFileSync(
-            path.join(__dirname, '../../../xchain-documentation/protocol/constants.js'), 'utf8')
+        it('[regression:p0] rejects missing canonical exports, extra vendored exports, and changed values', () => {
+            assert.throws(
+                () => assertFullVendoredExportIdentity({ A: 1 }, {}, 'fixture', ['A']),
+                /canonical constants module does not export it/
+            )
+            assert.throws(
+                () => assertFullVendoredExportIdentity({ A: 1, EXTRA: 2 }, { A: 1, EXTRA: 2 }, 'fixture', ['A']),
+                /full vendored constant export names drifted/
+            )
+            assert.throws(
+                () => assertFullVendoredExportIdentity({}, { A: 1 }, 'fixture', ['A']),
+                /full vendored constant export names drifted/
+            )
+            assert.throws(
+                () => assertFullVendoredExportIdentity({ A: 2 }, { A: 1 }, 'fixture', ['A']),
+                /full vendored constant export set drifted from canonical/
+            )
+        })
 
         VENDORED_CONSTANTS_SERVICES.forEach((svc) => {
-            it('[regression:p0] ' + svc + ' src/protocol/constants.js is byte-identical to canonical', () => {
+            it('[regression:p0] ' + svc + ' full vendored export set equals canonical', () => {
                 const vendoredPath = path.join(
                     __dirname, '../../../', svc, 'src/protocol/constants.js')
                 assert.ok(fs.existsSync(vendoredPath),
                     svc + ' is missing its vendored src/protocol/constants.js copy')
-                const vendoredSrc = fs.readFileSync(vendoredPath, 'utf8')
-                assert.strictEqual(vendoredSrc, canonSrc,
-                    svc + '/src/protocol/constants.js has drifted from the canonical ' +
-                    'xchain-documentation/protocol/constants.js; edit the canonical file and re-vendor all copies')
-                // Sanity: the vendored module loads and carries the size-limit anchor.
                 const mod = require(vendoredPath)
-                assert.strictEqual(mod.MAX_ACTION_DATA_LENGTH, protocol.MAX_ACTION_DATA_LENGTH,
-                    svc + ' vendored constants module failed to load or export MAX_ACTION_DATA_LENGTH')
+                const canonical = CANONICAL_EXPORTS_BY_SERVICE[svc] || protocol
+                assertFullVendoredExportIdentity(
+                    mod, canonical, svc, VENDORED_CONSTANT_NAMES[svc])
             })
         })
     })

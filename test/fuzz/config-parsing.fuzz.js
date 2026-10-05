@@ -216,22 +216,21 @@ describe('Fuzz: Config Parsing', function () {
             }), { numRuns: 500 })
         })
 
-        it('documents loose equality traps: values that are "null-like"', function () {
+        it('documents the scalar values treated as "null-like"', function () {
             const db = createDb()
 
-            // These values are == null or == "" due to JavaScript loose equality
-            const nullLikeValues = [null, undefined, '', 0, false, []]
+            const nullLikeValues = [null, undefined, '', 0, false]
             for (const val of nullLikeValues) {
                 const result = db.isNullOrNullString(val)
                 assert.strictEqual(result, true,
-                    `${JSON.stringify(val)} should be null-like due to loose ==`)
+                    `${JSON.stringify(val)} should be null-like`)
             }
         })
 
         it('documents values that are NOT "null-like"', function () {
             const db = createDb()
 
-            const notNullLike = [' ', 'null', '0', 'false', 'undefined', 1, -1, true, 'x', NaN, {}, [1]]
+            const notNullLike = [' ', 'null', '0', 'false', 'undefined', 1, -1, true, 'x', NaN, {}, [], [1]]
             for (const val of notNullLike) {
                 const result = db.isNullOrNullString(val)
                 assert.strictEqual(result, false,

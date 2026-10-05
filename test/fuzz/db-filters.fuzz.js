@@ -225,17 +225,16 @@ describe('Fuzz: waitFor* with fuzzed timeMax', function () {
         mockMariadb.createPool.resetHistory()
     })
 
-    // Use bounded integers only. Infinity/MAX_VALUE with stubbed sleep causes OOM.
+    // Keep positive values short because the polling deadline uses wall-clock time
+    // even when sleep is stubbed. Larger timeout behavior is covered by boundary tests.
     const boundedTimeMaxArb = fc.oneof(
         fc.constant(0),
         fc.constant(-1),
         fc.constant(-1000),
         fc.constant(1),
         fc.constant(10),
-        fc.constant(100),
-        fc.constant(1000),
         fc.constant(NaN),
-        fc.integer({ min: -10000, max: 10000 })
+        fc.integer({ min: -10000, max: 10 })
     )
 
     it('waitForIssue never hangs with bounded timeMax values', async function () {
