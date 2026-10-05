@@ -79,7 +79,7 @@ const {
     APPLIED_FIELDS, diffRows, until, untilOrClearDogeStall, queryDb,
     readAppliedResponse, readContractState, readRequestRow,
     venueTipProbe, findEmittedAttestRequest, attestRequestWatermark,
-    clearBeforeBroadcast, settleOrReport, allHubTails, jsonSafe,
+    clearBeforeBroadcast, waitForHeightWithClear, settleOrReport, allHubTails, jsonSafe,
 } = require('./mirrorDrillWaits')
 const vmHelper = require('../helpers/vmHelper')
 
@@ -151,7 +151,7 @@ async function teardownFallthrough() {
     // one whose mirrors are permanently starved.
     if (venue && withheld) {
         for (const ix of venue.indexers) {
-            try { venue.releaseMirrorTable(ix.index, MIRROR_TABLE) } catch (_) { /* venue is going away */ }
+            try { venue.releaseMirrorTable(ix.index, MIRROR_TABLE) } catch (internal) { /* venue is going away */ }
         }
     }
     if (testServer) await testServer.close()
@@ -200,8 +200,9 @@ async function findRequest(sinceAction) {
     // allowed to leave NULL (D44). It selects whether the injected row's
     // canonical carries the EQUIV header, so a NULL there would sign the wrong
     // bytes and the row would be refused for a reason this drill is not testing.
+    await waitForHeightWithClear(venue, 0, request.blockIndex)
     const requestRow = await readRequestRow(venue, 0, requestId)
-    return { requestId, requestRow }
+    return { request, requestId, requestRow }
 }
 
 async function findHonestRow(requestId) {
@@ -317,8 +318,9 @@ async function readApplyCounts(bindBlock) {
 async function verifiesFallthrough() {
     const { exec, sinceAction } = await createStarvedRequest()
     assert.strictEqual(exec.execution.status, 'valid', 'the EXECUTE that emits the request came back ' + exec.execution.status)
-    const { requestId, requestRow } = await findRequest(sinceAction)
+    const { request, requestId, requestRow } = await findRequest(sinceAction)
     assert.ok(requestRow, 'the venue indexer holds no v0 request row for ' + requestId)
+    await waitForHeightWithClear(venue, 0, request.blockIndex)
     const honest = await findHonestRow(requestId)
     assert.ok(honest.ok, 'no venue hub finalized a row for ' + requestId + ', so there is no honest row for the ' + 'injected one to lose the tie-break to and the fall-through has nothing to fall to.\n' + allHubTails(venue))
     const honestEffective = Number(honest.row.effective_time)
@@ -347,7 +349,7 @@ async function verifiesFallthrough() {
     for (const { ix, n } of await readApplyCounts(bindBlock)) assert.strictEqual(n, 1, 'indexer ' + ix.index + ' minted ' + n + ' ATTEST format-1 action(s) at block ' + bindBlock + ' rather than exactly one. A skipped candidate must write NOTHING, not ' + 'even an action index, and one request must be dispatched at most once per block.')
     // RE-READ, not the row captured before the injection: the claim is what the
     // request looks like NOW, and the earlier read was taken while it was pending.
-    const settledRow = await readRequestRow(venue, 0, requestId)
+    const settledRow = await readRequestRow(venue, 0, request.requestId)
     assert.strictEqual(String(settledRow.request_status), 'fulfilled', 'the request is ' + settledRow.request_status + ' after the honest row bound')
     const state = await readContractState(venue, 0, contract.contractIndex)
     assert.strictEqual(JSON.parse(state.callback_status), 'ok', 'the callback did not fire from the honest row (status ' + state.callback_status + ')')

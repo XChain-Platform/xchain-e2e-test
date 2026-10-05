@@ -339,7 +339,7 @@ describe('attestMirror venue levers (pure: no venue, no children, no database, n
         })
 
         it('is a byte-for-byte relay with no pin armed', async () => {
-            const res = await get(proxy._server.address().port, '/hub-db/snapshot/' + TABLE)
+            const res = await get(proxy['_server'].address().port, '/hub-db/snapshot/' + TABLE)
             assert.strictEqual(res.raw, JSON.stringify(snapshotPage(TABLE, heights)),
                 'an unarmed proxy rewrote a snapshot page, so every existing leg is now reading a ' +
                 'body this venue re-serialized')
@@ -347,7 +347,7 @@ describe('attestMirror venue levers (pure: no venue, no children, no database, n
 
         it('pins every snapshot page, filtered or not, and counts it', async () => {
             proxy.pinHeights({ [TABLE]: { BTC: 700 } })
-            const port = proxy._server.address().port
+            const port = proxy['_server'].address().port
 
             const pinned = JSON.parse((await get(port, '/hub-db/snapshot/' + TABLE)).raw)
             assert.strictEqual(pinned.heights[TABLE].BTC, 700)
@@ -366,7 +366,7 @@ describe('attestMirror venue levers (pure: no venue, no children, no database, n
         })
 
         it('serves the hub\'s own heights again once released', async () => {
-            const port = proxy._server.address().port
+            const port = proxy['_server'].address().port
             proxy.pinHeights({ [TABLE]: { BTC: 700 } })
             assert.strictEqual(JSON.parse((await get(port, '/hub-db/snapshot/' + TABLE)).raw).heights[TABLE].BTC, 700)
             proxy.releaseHeights()
@@ -378,7 +378,7 @@ describe('attestMirror venue levers (pure: no venue, no children, no database, n
         it('forwards the original bytes and counts an absent map when the hub publishes none', async () => {
             heights = null
             proxy.pinHeights({ [TABLE]: { BTC: 700 } })
-            const res = await get(proxy._server.address().port, '/hub-db/snapshot/' + TABLE)
+            const res = await get(proxy['_server'].address().port, '/hub-db/snapshot/' + TABLE)
             assert.strictEqual(res.raw, JSON.stringify(snapshotPage(TABLE, null)))
             assert.strictEqual(proxy.heightPinStats.snapshot.absent, 1,
                 'an armed pin that found no heights map must say so: that is the signal that the ' +
@@ -396,7 +396,7 @@ describe('attestMirror venue levers (pure: no venue, no children, no database, n
 
             const send = (obj) => {
                 const bytes = encodeServerTextFrame(JSON.stringify(obj))
-                proxy._forwardFrame(socket, readServerFrames(bytes).frames[0])
+                proxy['_forwardFrame'](socket, readServerFrames(bytes).frames[0])
                 return bytes
             }
 
@@ -419,7 +419,7 @@ describe('attestMirror venue levers (pure: no venue, no children, no database, n
         it('refuses to let a leg claim a pin that rewrote nothing', async () => {
             const venue = new AttestMirrorVenue({ label: 'levers' })
             venue.indexers = [{ index: 0, mirrorProxy: proxy }]
-            const port = proxy._server.address().port
+            const port = proxy['_server'].address().port
 
             heights = null
             venue.pinMirrorHeights(0, { [TABLE]: { BTC: 700 } })

@@ -66,7 +66,7 @@ global.COIN = process.env.COIN
 global.NETWORK = process.env.NETWORK
 
 if (COIN === null || COIN === undefined){
-    let networkSplit = NETWORK.split("-")
+    const networkSplit = NETWORK.split("-")
     global.COIN = networkSplit[0]
     global.NETWORK = networkSplit[1]
 }
@@ -86,32 +86,32 @@ const COIN_CODE_MAP = { bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' }
 global.COIN_CODE = COIN_CODE_MAP[COIN] || COIN.toUpperCase().slice(0, 3)
 
 
-var HUB_URL =  process.env.HUB_URL
-var HUB_PORT =  process.env.HUB_PORT
-var NODE_URL = process.env.NODE_URL
-var NODE_PORT = process.env.NODE_PORT
-var NODE_USER = process.env.NODE_USER
-var NODE_PASS = process.env.NODE_PASSWORD
-var DATABASE_URL = process.env.DATABASE_URL || "mariadb"
-var DATABASE_PORT = parseInt(process.env.DATABASE_PORT, 10) || 3306
-var UTXO_TRACKER_URL = process.env.UTXO_TRACKER_URL
-var UTXO_TRACKER_PORT = process.env.UTXO_TRACKER_API_PORT
-var ENCODER_URL = process.env.ENCODER_URL
-var ENCODER_PORT = process.env.ENCODER_API_PORT
-var DECODER_URL = process.env.DECODER_URL
-var DECODER_PORT = process.env.DECODER_API_PORT
-var INDEXER_URL = process.env.INDEXER_URL
-var INDEXER_PORT = process.env.INDEXER_API_PORT
-var EXPLORER_URL = process.env.EXPLORER_URL
-var EXPLORER_PORT = process.env.EXPLORER_API_PORT
-var INDEXER_DATABASE_NAME = process.env.INDEXER_DB_NAME
-var INDEXER_DATABASE_USER = process.env.INDEXER_DB_USER
-var INDEXER_DATABASE_PASS = process.env.INDEXER_DB_PASS
-var REGTEST_MINER_URL = process.env.REGTEST_MINER_URL
-var REGTEST_MINER_PORT = process.env.REGTEST_MINER_API_PORT
+const HUB_URL =  process.env.HUB_URL
+const HUB_PORT =  process.env.HUB_PORT
+let NODE_URL = process.env.NODE_URL
+let NODE_PORT = process.env.NODE_PORT
+let NODE_USER = process.env.NODE_USER
+let NODE_PASS = process.env.NODE_PASSWORD
+let DATABASE_URL = process.env.DATABASE_URL || "mariadb"
+let DATABASE_PORT = parseInt(process.env.DATABASE_PORT, 10) || 3306
+let UTXO_TRACKER_URL = process.env.UTXO_TRACKER_URL
+let UTXO_TRACKER_PORT = process.env.UTXO_TRACKER_API_PORT
+let ENCODER_URL = process.env.ENCODER_URL
+let ENCODER_PORT = process.env.ENCODER_API_PORT
+let DECODER_URL = process.env.DECODER_URL
+let DECODER_PORT = process.env.DECODER_API_PORT
+let INDEXER_URL = process.env.INDEXER_URL
+let INDEXER_PORT = process.env.INDEXER_API_PORT
+const EXPLORER_URL = process.env.EXPLORER_URL
+const EXPLORER_PORT = process.env.EXPLORER_API_PORT
+let INDEXER_DATABASE_NAME = process.env.INDEXER_DB_NAME
+let INDEXER_DATABASE_USER = process.env.INDEXER_DB_USER
+let INDEXER_DATABASE_PASS = process.env.INDEXER_DB_PASS
+let REGTEST_MINER_URL = process.env.REGTEST_MINER_URL
+let REGTEST_MINER_PORT = process.env.REGTEST_MINER_API_PORT
 
 function checkAllEnvironmentalVariables(){
-    let variableArray = [
+    const variableArray = [
         NODE_URL, 
         NODE_PORT,
         NODE_USER,
@@ -199,12 +199,12 @@ exports.mochaHooks = {
 
 
                 console.log("Connecting to the hub")
-                let hubEndpoints = XChainHubConnector.parseEndpoints();
+                const hubEndpoints = XChainHubConnector.parseEndpoints();
                 global.hubConnector = new XChainHubConnector(hubEndpoints)
-                let pingHub = await hubConnector.ping()
+                const pingHub = await hubConnector.ping()
 
                 if (pingHub){
-                    let hubConfigs = await hubConnector.getAllConfig()
+                    const hubConfigs = await hubConnector.getAllConfig()
 
                     if (hubConfigs){
                         const coinNet = hubConfigs[COIN] && hubConfigs[COIN][NETWORK]
@@ -253,7 +253,7 @@ exports.mochaHooks = {
                         throw new Error("There was an error trying to get all the configs from the hub")
                     }
                 } else {
-                    let failures = (hubConnector.lastFailures && hubConnector.lastFailures.length)
+                    const failures = (hubConnector.lastFailures && hubConnector.lastFailures.length)
                         ? ' No hub endpoints reachable: [' + hubConnector.lastFailures.join(', ') + ']'
                         : ''
                     throw new Error("Can't connect to the XChain Hub." + failures)
@@ -278,7 +278,7 @@ exports.mochaHooks = {
 
         await phase('service-pings', async () => {
             try {
-                let pingNode = await nodeConnector.getNetworkInfo()
+                const pingNode = await nodeConnector.getNetworkInfo()
                 if (!pingNode){
                     throw new Error("Can't connect to the node")
                 }
@@ -287,37 +287,37 @@ exports.mochaHooks = {
                 throw new Error("There was an error trying to connect to the node")
             }
 
-            let pingUtxoTracker = await utxoTrackerConnector.ping()
+            const pingUtxoTracker = await utxoTrackerConnector.ping()
             if (!pingUtxoTracker){
                 throw new Error("Can't connect to the XChain Utxo Tracker module")
             }
 
-            let pingEncoder = await encoderConnector.ping()
+            const pingEncoder = await encoderConnector.ping()
             if (!pingEncoder){
                 throw new Error("Can't connect to the XChain Encoder module")
             }
 
-            let pingDecoder = await decoderConnector.ping()
+            const pingDecoder = await decoderConnector.ping()
             if (!pingDecoder){
                 throw new Error("Can't connect to the XChain Decoder module")
             }
 
-            let pingIndexer = await indexerConnector.ping()
+            const pingIndexer = await indexerConnector.ping()
             if (!pingIndexer){
                 throw new Error("Can't connect to the XChain Indexer module")
             }
 
-            let pingExplorer = await explorerConnector.ping()
+            const pingExplorer = await explorerConnector.ping()
             if (!pingExplorer){
                 throw new Error("Can't connect to the XChain Explorer module")
             }
 
-            let pingIndexerDatabase = await indexerDatabase.ping()
+            const pingIndexerDatabase = await indexerDatabase.ping()
             if (!pingIndexerDatabase){
                 throw new Error("Can't connect to the XChain Indexer Database")
             }
 
-            let pingRegtestMiner = await regtestMinerConnector.waitForReady()
+            const pingRegtestMiner = await regtestMinerConnector.waitForReady()
             if (!pingRegtestMiner){
                 throw new Error("Can't connect to the XChain Regtest Miner module (not ready after wait)")
             } else {
@@ -378,7 +378,7 @@ exports.mochaHooks = {
                 // genesis-fresh chain the gas token does not exist yet, so the default
                 // gas-seeding MINT would reject as invalid:TICK(unknown) and hang the
                 // bootstrap. Seed gas only after XCHAIN is issued below.
-                let gasAddressInfo = await cryptoHelper.getNewFundedAddress("GAS.TOKEN", COIN, NETWORK, null, "legacy", 0, 1, false)
+                const gasAddressInfo = await cryptoHelper.getNewFundedAddress("GAS.TOKEN", COIN, NETWORK, null, "legacy", 0, 1, false)
                 // XCHAIN is an open-mint GAS faucet on testnet/regtest: anyone MINTs it (no owner
                 // check, no fee) to grab gas to play. Genesis therefore mints NO initial supply
                 // (mintSupply=0) and leaves minting unlocked + open from genesis (lockMint unset,

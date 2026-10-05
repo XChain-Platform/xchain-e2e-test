@@ -369,7 +369,7 @@ function statusOf(rows, txid) {
 async function waitForPriceRow(conn, dbName, txid, label) {
     const result = await waitFor(async () => {
         let rows = [];
-        try { rows = await readPriceRowByTx(conn, dbName, txid); } catch (_) { rows = []; }
+        try { rows = await readPriceRowByTx(conn, dbName, txid); } catch (internal) { rows = []; }
         return { ok: rows.length > 0, rows: rows };
     }, { timeoutMs: PRICE_ROW_WAIT_MS, intervalMs: 2000 });
     if (!result.ok) {
@@ -409,7 +409,7 @@ describe('AT9 PRICE batch compression: round trip, consensus caps, canonical bas
     let targetHeight = null;
     let publicationCount = 0;
     let railState = '';
-    let liveRows = {}, replayRows = {};          // txid -> prices row
+    const liveRows = {}, replayRows = {};          // txid -> prices row
     let liveGhostSnaps = [], replayGhostSnaps = [], replayGhostMirror = [], liveGhostActions = [];
 
     // One wire onto the chain the venue is pointed at, then block until a real
@@ -420,7 +420,7 @@ describe('AT9 PRICE batch compression: round trip, consensus caps, canonical bas
         const sent = await drive.broadcastWire(venue, wire);
         const mined = await waitFor(async () => {
             let block = null;
-            try { block = await venue.blockOf(sent.txid); } catch (_) { block = null; }
+            try { block = await venue.blockOf(sent.txid); } catch (internal) { block = null; }
             return { ok: block !== null && Number.isFinite(Number(block.height)), block: block };
         }, { timeoutMs: CONFIRM_WAIT_MS, intervalMs: 2000 });
         if (!mined.ok) {
@@ -447,12 +447,12 @@ describe('AT9 PRICE batch compression: round trip, consensus caps, canonical bas
 
         const bail = async (why) => {
             console.log('AT9 unavailable: ' + why);
-            if (signerSet) { try { signerSet.stop(); } catch (_) {} signerSet = null; }
+            if (signerSet) { try { signerSet.stop(); } catch (internal) {} signerSet = null; }
             if (venue)      { await venue.down();      venue = null; }
             if (replayNode) { await replayNode.down(); replayNode = null; }
             if (liveNode)   { await liveNode.down();   liveNode = null; }
             if (pinned)     { pinned.restore();        pinned = null; }
-            if (conn)       { try { await conn.end(); } catch (_) {} conn = null; }
+            if (conn)       { try { await conn.end(); } catch (internal) {} conn = null; }
             if (hubDb)      { await hubDb.stop();      hubDb = null; }
         };
 
@@ -491,7 +491,7 @@ describe('AT9 PRICE batch compression: round trip, consensus caps, canonical bas
         // fail their signing round.
         for (const pub of venue.publishers) {
             if (pub.queuePath) pub.bufferPath = String(pub.queuePath).replace(/\.jsonl$/, '') + '.buffer.jsonl';
-            if (pub._buffer && typeof pub._buffer.clear === 'function') pub._buffer.clear();
+            if (pub['_buffer'] && typeof pub['_buffer'].clear === 'function') pub['_buffer'].clear();
         }
 
         // Every hub, not just the leader: OraclePublisher builds its signer lazily
@@ -727,10 +727,10 @@ describe('AT9 PRICE batch compression: round trip, consensus caps, canonical bas
     });
 
     after(async function () {
-        if (signerSet)  { try { signerSet.stop(); } catch (_) {} }
+        if (signerSet)  { try { signerSet.stop(); } catch (internal) {} }
         if (venue)      await venue.down();
         if (pinned)     pinned.restore();
-        if (conn)       { try { await conn.end(); } catch (_) {} }
+        if (conn)       { try { await conn.end(); } catch (internal) {} }
         if (replayNode) await replayNode.down();
         if (liveNode)   await liveNode.down();
         if (hubDb)      await hubDb.stop();

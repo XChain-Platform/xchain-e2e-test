@@ -36,7 +36,7 @@ function fakeDriverModule(exports) {
     const mod = new Module(mariadbPath, module)
     mod.exports = exports
     mod.loaded  = true
-    mod._isMock = true
+    mod['_isMock'] = true
     return mod
 }
 

@@ -202,7 +202,7 @@ class UtxoTracker {
 
         while (Date.now() < endTime){
             try {
-                let addressUtxos = await this.getUtxosFromAddress(address)
+                const addressUtxos = await this.getUtxosFromAddress(address)
 
                 if (addressUtxos["utxos"].length > 0){
                     return true

@@ -59,7 +59,7 @@ const {
 
 async function test03() {
     const { sdk, operator, validator, contractIndex } = support.state;
-        let requestId = support.state.requestId;
+        const requestId = support.state.requestId;
         expect(requestId, 'requestId from the prior test').to.exist;
 
         // Venue gate: only the elected responsible set can produce a valid v1.

@@ -114,7 +114,7 @@ async function tickAll(mvh) {
         const counts = [];
         for (const hub of mvh.hubs) {
             try { counts.push((await checkpointRows(hub)).length); }
-            catch (_) { counts.push(0); }
+            catch (internal) { counts.push(0); }
         }
         return { ok: counts.length > 0 && counts.every((c) => c >= 1), counts: counts };
     }, { timeoutMs: SETTLE_MS });

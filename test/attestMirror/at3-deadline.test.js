@@ -377,6 +377,7 @@ describe('AT3: the deadline decides whether a mirrored response ever binds', fun
             'it exists to drive')
 
         for (const ix of venue.indexers) {
+            await waitForHeightWithClear(venue, ix.index, driven.requestBlock)
             assert.strictEqual(Number(applied[ix.index].block_index), driven.deadlineBlock,
                 tag + ': indexer ' + ix.index + ' applied at block ' + applied[ix.index].block_index +
                 ' rather than at the deadline block ' + driven.deadlineBlock + '. Inclusive means inclusive: ' +

@@ -56,6 +56,21 @@ describe('rail gate contract loader', function () {
         assert.ok(lines[0].includes(loadRailGateContract.FIXTURE_PATH), lines[0]);
     });
 
+    it('resolves the dispatcher path under HOME', function () {
+        assert.strictEqual(loadRailGateContract.dispatcherPath({ home: scratch }),
+            path.join(scratch, '.claude', 'bin', 'ci-dispatch.sh'));
+    });
+
+    it('honors an explicit dispatcher path', function () {
+        const explicitPath = path.join(scratch, 'dispatcher.sh');
+        assert.strictEqual(loadRailGateContract.dispatcherPath({ dispatcherPath: explicitPath }),
+            explicitPath);
+    });
+
+    it('pins the gate-did-not-run exits consumed by AT9', function () {
+        assert.deepStrictEqual(fixture.gateDidNotRunExits, [2, 3, 94, 95, 97, 99, 255]);
+    });
+
     it('accepts a host dispatcher whose exit table matches the fixture', function () {
         const dispatcher = path.join(scratch, '.claude', 'bin', 'ci-dispatch.sh');
         fs.mkdirSync(path.dirname(dispatcher), { recursive: true });

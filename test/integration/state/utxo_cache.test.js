@@ -74,7 +74,7 @@ describe('State Management: UTXO Cache', function () {
             const psbtHex = buildMockPsbt(addrInfo.publicKey, addrInfo.address)
             const txid = 'cache' + '00'.repeat(29)
 
-            let encoderCalls = []
+            const encoderCalls = []
             global.encoderConnector = {
                 createTx: async (utxos) => {
                     encoderCalls.push([...utxos])
@@ -117,7 +117,7 @@ describe('State Management: UTXO Cache', function () {
             const txid = 'multi' + '00'.repeat(29)
 
             let callIndex = 0
-            let encoderCalls = []
+            const encoderCalls = []
             global.encoderConnector = {
                 createTx: async (utxos, pubkey) => {
                     encoderCalls.push({ utxos: [...utxos], address: pubkey })

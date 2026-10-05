@@ -80,7 +80,7 @@ describe('BF1: the RED baseline, and the family enumerated from the running node
         // held baseline and the walker block must not hand the next leg a paused chain.
         await drive.releaseChain(ctx.btc)
         if (!ctx.venue) return
-        try { ctx.venue.releaseMirrorTable(WALKER, 'capability_snapshots') } catch (_) { /* never armed */ }
+        try { ctx.venue.releaseMirrorTable(WALKER, 'capability_snapshots') } catch (internal) { /* never armed */ }
         await ctx.venue.stop()
     })
 

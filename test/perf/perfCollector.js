@@ -24,7 +24,7 @@ const PerfCollector = {
     bootstrapPhases: [],
     pollMetrics: [],
 
-    _runMeta: {
+    ['_runMeta']: {
         startedAt: null,
         coin: null,
         network: null,
@@ -33,9 +33,9 @@ const PerfCollector = {
     },
 
     startRun() {
-        this._runMeta.startedAt = Date.now()
-        this._runMeta.coin = process.env.COIN || null
-        this._runMeta.network = process.env.NETWORK || null
+        this['_runMeta'].startedAt = Date.now()
+        this['_runMeta'].coin = process.env.COIN || null
+        this['_runMeta'].network = process.env.NETWORK || null
     },
 
     async phase(name, asyncFn) {
@@ -68,12 +68,12 @@ const PerfCollector = {
     reset() {
         this.bootstrapPhases = []
         this.pollMetrics = []
-        this._runMeta.startedAt = null
+        this['_runMeta'].startedAt = null
     },
 
     toJSON() {
         return {
-            meta: this._runMeta,
+            meta: this['_runMeta'],
             bootstrapPhases: this.bootstrapPhases,
             pollMetrics: this.pollMetrics
         }

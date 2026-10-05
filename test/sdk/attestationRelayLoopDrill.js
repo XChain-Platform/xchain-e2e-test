@@ -79,8 +79,8 @@
 
 const assert = require('assert');
 const crypto = require('crypto');
-const _path  = require('path');
-const _fs    = require('fs');
+const internalPath  = require('path');
+const internalFs    = require('fs');
 
 const cryptoHelper      = require('../cryptoHelper');
 const transactionHelper = require('../transactionHelper');
@@ -95,11 +95,11 @@ const stakeTeardown     = require('../helpers/stakeTeardown');
 const HUB_BASE = (function () {
     const candidates = [
         process.env.XCHAIN_HUB_PATH,
-        _path.resolve(__dirname, '../../xchain-hub'),
-        _path.resolve(__dirname, '../../../xchain-hub'),
+        internalPath.resolve(__dirname, '../../xchain-hub'),
+        internalPath.resolve(__dirname, '../../../xchain-hub'),
     ].filter(Boolean);
     for (const c of candidates) {
-        if (_fs.existsSync(_path.join(c, 'src/attestation/relay.js'))) return c;
+        if (internalFs.existsSync(internalPath.join(c, 'src/attestation/relay.js'))) return c;
     }
     return null;
 })();
@@ -154,7 +154,7 @@ module.exports = {
 // producing signatures the indexer silently drops as unquorate.
 function relayCodec() {
     if (!HUB_BASE) throw new Error('xchain-hub checkout not found; the drill signs with the hub\'s own canonical builders');
-    const AttestationRelay = require(_path.join(HUB_BASE, 'src/attestation/relay.js'));
+    const AttestationRelay = require(internalPath.join(HUB_BASE, 'src/attestation/relay.js'));
     const p = AttestationRelay.prototype;
     const codec = {
         sha256: p.sha256,
@@ -424,7 +424,7 @@ describe('[drill] cross-chain attestation relay loop (origin -> BTC -> origin)',
     let relayStakeSource = null; // the address holding the drill's cross_chain stake
     let relayStakeAmount = null;
     let relayStakeUnwound = false;
-    let attestStakeSources = [];
+    const attestStakeSources = [];
     let responsibleValidators = [];
     let snapshotBlock = null;
     let homeResponseActionIndex = null;
@@ -689,8 +689,8 @@ describe('[drill] cross-chain attestation relay loop (origin -> BTC -> origin)',
     });
 
     it('HOME: a real http_get fetch is signed by the pinned set and fulfills the request as an ordinary v1', async function () {
-        const http_get = require(_path.join(HUB_BASE, 'src/providers/http_get.js'));
-        const fetched = await http_get.fetch(ATTEST_URL, { maxResponseBytes: 32768, timeoutMs: 15000 });
+        const httpGet = require(internalPath.join(HUB_BASE, 'src/providers/http_get.js'));
+        const fetched = await httpGet.fetch(ATTEST_URL, { maxResponseBytes: 32768, timeoutMs: 15000 });
         realBody = fetched.body.toString('utf8');
         realMeta = String(fetched.meta);
         assert.strictEqual(realMeta, '200', 'expected HTTP 200 from ' + ATTEST_URL);

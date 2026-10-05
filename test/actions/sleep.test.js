@@ -16,22 +16,22 @@ const sleepHelper = require('../helpers/sleepHelper')
 describe('SLEEP', () => {
     describe('v0 - address sleep', () => {
         it('should sleep an address v0', async () => {
-            let addr = await cryptoHelper.getNewFundedAddress("SLEEP.V0", COIN, NETWORK, null, "legacy", 0, 1)
+            const addr = await cryptoHelper.getNewFundedAddress("SLEEP.V0", COIN, NETWORK, null, "legacy", 0, 1)
 
-            let result = await sleepHelper.sendSleepV0(addr, 999999, "Sleep address test")
+            const result = await sleepHelper.sendSleepV0(addr, 999999, "Sleep address test")
             assert(result.sleep, "Sleep v0 should exist in DB")
         })
     })
 
     describe('v1 - tick sleep', () => {
         it('should sleep a tick v1', async () => {
-            let addr = await cryptoHelper.getNewFundedAddress("SLEEP.V1", COIN, NETWORK, null, "legacy", 0, 1)
-            let tick = "SLEEPv1"+addr["address"].substring(addr["address"].length-8)
+            const addr = await cryptoHelper.getNewFundedAddress("SLEEP.V1", COIN, NETWORK, null, "legacy", 0, 1)
+            const tick = "SLEEPv1"+addr["address"].substring(addr["address"].length-8)
 
             await issueHelper.sendIssueV0(addr, tick, 100, 10, 0, "Sleep v1 test token", 10)
 
             // -1 = indefinite sleep
-            let result = await sleepHelper.sendSleepV1(addr, -1, tick, "Sleep tick test")
+            const result = await sleepHelper.sendSleepV1(addr, -1, tick, "Sleep tick test")
             assert(result.sleep, "Sleep v1 should exist in DB")
         })
     })

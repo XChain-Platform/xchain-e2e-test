@@ -286,7 +286,7 @@ registerOracleTest('the six rounds of the window finalized on a real multi-signa
             'and if it did, nothing below this line can be read.' + drive.railDiagnosis(venue, signerSet));
     }
     assert.deepStrictEqual(rounds.map((r) => r.round),
-        Array.from({ length: WINDOW_ROUNDS }, (_, i) => windowFirst + i),
+        Array.from({ length: WINDOW_ROUNDS }, (internal, i) => windowFirst + i),
         'the drill drove rounds outside window ' + windowIndex + ', so the window it withheld and the ' +
         'window it re-proposed are not the same window');
 });

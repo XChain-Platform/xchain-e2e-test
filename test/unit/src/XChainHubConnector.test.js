@@ -35,7 +35,7 @@ function registerCallBehaviorTests() {
         const conn = new XChainHubConnector(['http://hub1:10000']);
         axiosPostStub.resolves({ data: { result: 'pong' } });
 
-        const result = await conn._call({ method: 'ping' });
+        const result = await conn['_call']({ method: 'ping' });
         assert.strictEqual(result, 'pong');
     });
 
@@ -43,7 +43,7 @@ function registerCallBehaviorTests() {
         const conn = new XChainHubConnector(['http://hub1:10000']);
         axiosPostStub.rejects(new Error('ECONNREFUSED'));
 
-        const result = await conn._call({ method: 'test' });
+        const result = await conn['_call']({ method: 'test' });
         assert.strictEqual(result, null);
     });
 
@@ -53,7 +53,7 @@ function registerCallBehaviorTests() {
         const conn = new XChainHubConnector(['http://hub1:10000']);
         axiosPostStub.resolves({ data: { result: false } });
 
-        const result = await conn._call({ method: 'test' });
+        const result = await conn['_call']({ method: 'test' });
         assert.strictEqual(result, false);
     });
 
@@ -61,7 +61,7 @@ function registerCallBehaviorTests() {
         const conn = new XChainHubConnector(['http://hub1:10000']);
         axiosPostStub.rejects(degraded503Error());
 
-        const result = await conn._call({ method: 'ping' });
+        const result = await conn['_call']({ method: 'ping' });
         // The reachable-but-degraded body is returned, not null.
         assert.deepStrictEqual(result, { status: 'degraded', db: false });
     });
@@ -72,7 +72,7 @@ function registerCallBehaviorTests() {
             .onFirstCall().rejects(degraded503Error())
             .onSecondCall().resolves({ data: { result: 'pong' } });
 
-        const result = await conn._call({ method: 'ping' });
+        const result = await conn['_call']({ method: 'ping' });
         assert.strictEqual(result, 'pong');
         assert.strictEqual(axiosPostStub.callCount, 2);
     });
@@ -186,10 +186,10 @@ function registerCredentialTierConfigurationTests() {
         try {
             axiosPostStub.resolves({ data: { result: { bitcoin: {} } } });
 
-            await conn._call({ method: 'getallconfigs', params: { include_secrets: true }, id: 1 });
+            await conn['_call']({ method: 'getallconfigs', params: { include_secrets: true }, id: 1 });
             assert.strictEqual(axiosPostStub.firstCall.args[2].headers['x-api-key'], 'secrets-key');
 
-            await conn._call({ method: 'ping', params: [], id: 1 });
+            await conn['_call']({ method: 'ping', params: [], id: 1 });
             assert.strictEqual(axiosPostStub.secondCall.args[2].headers['x-api-key'], 'bulk-key');
         } finally {
             delete process.env.HUB_API_KEY;
@@ -203,7 +203,7 @@ function registerCredentialTierConfigurationTests() {
         delete process.env.HUB_CONFIG_SECRETS_API_KEY;
         try {
             axiosPostStub.resolves({ data: { result: { bitcoin: {} } } });
-            await conn._call({ method: 'getallconfigs', params: { include_secrets: true }, id: 1 });
+            await conn['_call']({ method: 'getallconfigs', params: { include_secrets: true }, id: 1 });
             assert.strictEqual(axiosPostStub.firstCall.args[2].headers['x-api-key'], 'bulk-key');
         } finally {
             delete process.env.HUB_API_KEY;

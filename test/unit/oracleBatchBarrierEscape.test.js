@@ -74,7 +74,7 @@ const protocolTime = sibling('consensus/protocol_time.js');
 // constants hung off it as properties.
 const HubDbSync    = sibling('hub/hub_db_sync.js');
 const haveHubDbSync = typeof HubDbSync === 'function' &&
-    typeof HubDbSync.prototype._priceTimeSyncSatisfied === 'function';
+    typeof HubDbSync.prototype['_priceTimeSyncSatisfied'] === 'function';
 
 // ---------------------------------------------------------------------------
 // Run 5's own readings
@@ -151,11 +151,11 @@ describe('AT5 barrier drill: which escape opened the block (row 56)', function (
             const shipped = (maxTs, watermark, blockTime) => {
                 const inst = Object.create(proto);
                 inst.priceBootstrapped     = true;
-                inst._priceMirrorRefloor   = false;
+                inst['_priceMirrorRefloor']   = false;
                 inst.priceSyncMaxTimestamp = maxTs;
                 inst.streamWatermark       = watermark;
                 inst.priceWatermarkGraceS  = GRACE_S;
-                return inst._priceTimeSyncSatisfied(blockTime);
+                return inst['_priceTimeSyncSatisfied'](blockTime);
             };
 
             const blockTime = B.barrierBlockTime;
@@ -567,7 +567,7 @@ describe('AT5 barrier drill: which escape opened the block (row 56)', function (
             const inst = Object.create(HubDbSync.prototype);
             inst.enabled = true;
             inst.ws = null;
-            inst._bootstrapDrained = true;
+            inst['_bootstrapDrained'] = true;
             inst.streamWatermark = 1788987132;
             inst.priceSyncMaxTimestamp = 1788982085;
             inst.oracleSyncTimestamp = 0;

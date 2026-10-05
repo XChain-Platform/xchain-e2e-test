@@ -432,7 +432,7 @@ describe('mirrorDrillFixture: queryVenueDb selects the database it validates', f
 })
 
 describe('mirrorDrillFixture: the venue adopts the roll-call roster', function () {
-    const { _pubkeyForSeed, _knownSignerSeeds, IDLE_GENERATION_SCAN } =
+    const { ['_pubkeyForSeed']: internalPubkeyForSeed, ['_knownSignerSeeds']: internalKnownSignerSeeds, IDLE_GENERATION_SCAN } =
         require('../../attestMirror/mirrorDrillFixture')
     const rollcall = require('../../helpers/rollcallHelper')
     const crypto   = require('crypto')
@@ -453,7 +453,7 @@ describe('mirrorDrillFixture: the venue adopts the roll-call roster', function (
     ]
 
     it('derives the seated roster pubkeys from the federation signing seeds', function () {
-        const derived = (rollcall.SIGNING_SEEDS || []).map((s) => _pubkeyForSeed(s))
+        const derived = (rollcall.SIGNING_SEEDS || []).map((s) => internalPubkeyForSeed(s))
         assert.deepStrictEqual(derived.slice().sort(), SEATED_ON_REGTEST_2026_09_04.slice().sort(),
             'the three federation signing seeds no longer derive the three keys measured as seated ' +
             'for the attestation capability. Either the seeds moved or the roster did; until they ' +
@@ -467,21 +467,21 @@ describe('mirrorDrillFixture: the venue adopts the roll-call roster', function (
         // producing hubs whose pubkeys nobody can match to a seat.
         const ValidatorIdentity = loadHubModule('src/validators/identity.js')
         const seed = '11'.repeat(32)
-        assert.strictEqual(_pubkeyForSeed(seed),
+        assert.strictEqual(internalPubkeyForSeed(seed),
             new ValidatorIdentity(seed).getPubkeyHex().toLowerCase())
     })
 
     it('holds a signer for every federation signing seed', function () {
-        const known = _knownSignerSeeds()
+        const known = internalKnownSignerSeeds()
         for (const seed of (rollcall.SIGNING_SEEDS || [])) {
-            assert.ok(known.has(_pubkeyForSeed(seed)),
-                'no signer held for federation seed deriving ' + _pubkeyForSeed(seed).slice(0, 16))
+            assert.ok(known.has(internalPubkeyForSeed(seed)),
+                'no signer held for federation seed deriving ' + internalPubkeyForSeed(seed).slice(0, 16))
         }
     })
 
     it('holds the legacy idle seed, because an unconfigured venue seats it', function () {
-        const known = _knownSignerSeeds()
-        assert.ok(known.has(_pubkeyForSeed(rollcall.LEGACY_IDLE_SEED)),
+        const known = internalKnownSignerSeeds()
+        assert.ok(known.has(internalPubkeyForSeed(rollcall.LEGACY_IDLE_SEED)),
             'the legacy idle key can be seated by an unconfigured roll-call venue, and a seated ' +
             'key with no signer is exactly what the adoption precondition exists to refuse')
     })
@@ -500,10 +500,10 @@ describe('mirrorDrillFixture: the venue adopts the roll-call roster', function (
             const seed = crypto.createHash('sha256')
                 .update('xchain-rollcall-idle|' + gen + '|' + process.env.XC_ROLLCALL_FEDERATION_MNEMONIC, 'utf8')
                 .digest('hex')
-            const known = _knownSignerSeeds()
-            assert.ok(known.has(_pubkeyForSeed(seed)),
+            const known = internalKnownSignerSeeds()
+            assert.ok(known.has(internalPubkeyForSeed(seed)),
                 'generation ' + gen + ' is inside the sweep and must resolve')
-            assert.strictEqual(known.get(_pubkeyForSeed(seed)).origin, 'idle generation ' + gen)
+            assert.strictEqual(known.get(internalPubkeyForSeed(seed)).origin, 'idle generation ' + gen)
         } finally {
             if (saved === undefined) delete process.env.XC_ROLLCALL_FEDERATION_MNEMONIC
             else process.env.XC_ROLLCALL_FEDERATION_MNEMONIC = saved
@@ -520,7 +520,7 @@ describe('mirrorDrillFixture: the venue adopts the roll-call roster', function (
             const seed = crypto.createHash('sha256')
                 .update('xchain-rollcall-idle|' + beyond + '|' + process.env.XC_ROLLCALL_FEDERATION_MNEMONIC, 'utf8')
                 .digest('hex')
-            assert.ok(!_knownSignerSeeds().has(_pubkeyForSeed(seed)),
+            assert.ok(!internalKnownSignerSeeds().has(internalPubkeyForSeed(seed)),
                 'a generation past the sweep must NOT resolve; a guard that matches everything ' +
                 'would never let the adoption precondition refuse')
         } finally {
@@ -533,8 +533,8 @@ describe('mirrorDrillFixture: the venue adopts the roll-call roster', function (
         const saved = process.env.XC_ROLLCALL_IDLE_SEED
         try {
             process.env.XC_ROLLCALL_IDLE_SEED = '5a'.repeat(32)
-            const known = _knownSignerSeeds()
-            const pk = _pubkeyForSeed('5a'.repeat(32))
+            const known = internalKnownSignerSeeds()
+            const pk = internalPubkeyForSeed('5a'.repeat(32))
             assert.ok(known.has(pk), 'XC_ROLLCALL_IDLE_SEED must resolve')
             assert.strictEqual(known.get(pk).origin, 'XC_ROLLCALL_IDLE_SEED')
         } finally {
