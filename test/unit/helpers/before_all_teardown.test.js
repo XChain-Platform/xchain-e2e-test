@@ -86,4 +86,21 @@ describe('before-all teardown guard', function () {
         await assert.rejects(guardedSetup(), (err) => err === setupError)
         assert.strictEqual(teardownCalls, 1)
     })
+
+    it('preserves a reused setup error across repeated teardown failures', async function () {
+        const setupError = new Error('reused setup failure')
+        let teardownCalls = 0
+        const guardedSetup = withTeardownOnFailure(async function () {
+            throw setupError
+        }, async function () {
+            teardownCalls += 1
+            throw new Error('teardown failure ' + teardownCalls)
+        })
+
+        await assert.rejects(guardedSetup(), (err) => err === setupError)
+        await assert.rejects(guardedSetup(), (err) => err === setupError)
+        assert.strictEqual(teardownCalls, 2)
+        assert.strictEqual(teardownOutcome(setupError), 'teardown-failed')
+        assert.match(setupError.message, /teardown failure 2$/)
+    })
 })

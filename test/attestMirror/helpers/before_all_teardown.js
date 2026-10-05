@@ -7,6 +7,7 @@ function recordTeardownFailure (setupError, teardownError) {
     Object.defineProperty(setupError, TEARDOWN_FAILURE, {
         value: teardownError,
         enumerable: false,
+        writable: true,
     })
 }
 
