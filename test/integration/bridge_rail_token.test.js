@@ -65,11 +65,15 @@
  * The last suite in the run is a plain `describe`, not a drive part, so it runs after the
  * venue is torn down and needs no federation. It audits the drive's own cases (every
  * drivable case passed, in the order above), then spawns, on this process's Node 22 with
- * an allowlisted environment: this repository's ordinary CI gate (`npm run ci`, which
- * ends in the live tier) and xchain-indexer's activation constants parity test out of
- * the pinned root with XCHAIN_REQUIRE_SIBLINGS=1. Each is judged on its exit status and
- * its own counts. The live tier's 95 (the host cannot run it) is a RED verdict here: a
- * gate that did not run proves nothing. The last case prints the dated record.
+ * an allowlisted environment: this repository's full CI gate (`npm run ci:full`) and
+ * xchain-indexer's activation constants parity test out of
+ * the pinned root with XCHAIN_REQUIRE_SIBLINGS=1. On a hosted venue the CI gate runs
+ * directly; a workstation with the dispatcher sends it to one of its configured venues.
+ * The direct child carries its venue as a recursion guard, so a token drive selected by
+ * that full gate does not launch the full gate again. Each outer gate is judged on its
+ * exit status and its own counts. A dispatcher exit 95 and every nonzero direct exit are
+ * RED verdicts here: a gate that did not run proves nothing. The last case prints the
+ * dated record.
  *
  * ── EVERY DOGE-SIDE READ IS ON THE VENUE LEDGER, ASSERT BY IDENTITY ─────────────────
  * As the base drive: the standing DOGE indexer parsed a different history, and a count
@@ -159,6 +163,7 @@ const PARITY_FILES = [
 ];
 const PARITY_ORDERING_TITLE = 'holds TOKEN_BRIDGE_ACTIVATION >= XCHAIN_BRIDGE_ACTIVATION for every chain key';
 const CI_GATE_COMMAND = 'npm run ci:full';
+const ENCLOSING_CI_VENUE_ENV = 'TOKEN_AT9_ENCLOSING_CI_VENUE';
 const GATE_DID_NOT_RUN_EXITS = new Set([2, 3, 94, 95, 97, 99, 255]);
 const SIBLING_BRANCH_RULE = /^PUSH_BRANCH="\$\{REMOTE_REF#refs\/heads\/\}"$/m;
 const GATE_BASE_HANDLER = /^\s*--base\)/m;
@@ -315,6 +320,33 @@ function greenVerdictRecord(out, head, venueSpec) {
     return { accepted: true, commit: fields.sha, venue: fields.venue };
 }
 
+function runDirectCiGate() {
+    const venue = os.hostname();
+    const res = run('npm', ['run', 'ci:full'], E2E_ROOT,
+        gateEnv({ CI_TIER: 'full', [ENCLOSING_CI_VENUE_ENV]: venue }));
+    const counts = tallies(res.out);
+    at9.ordinaryCi = { command: CI_GATE_COMMAND, cwd: E2E_ROOT, venue,
+        transport: 'direct', exit: res.status, signal: res.signal, counts,
+        cachedVerdict: null, failureTail: res.status === 0 ? null : res.tail };
+    assert.strictEqual(res.status, 0, 'the full CI gate is red on venue ' + venue + ' (exit ' + res.status +
+        (res.signal ? ', signal ' + res.signal : '') + (res.error ? ', ' + res.error : '') + '):\n' + res.tail);
+    assert.match(res.out, /^ci:full: all tiers green /m,
+        'the direct gate exited 0 without its all-tiers GREEN verdict on venue ' + venue + ':\n' + res.tail);
+    assert.ok(counts.passing > 0, 'the full CI gate exited 0 having run no mocha case on venue ' + venue + ':\n' + res.tail);
+    assert.strictEqual(counts.failing, 0, 'the full CI gate reported failing cases on venue ' + venue + ':\n' + res.tail);
+}
+
+function recordEnclosingDirectCiGate() {
+    const venue = process.env[ENCLOSING_CI_VENUE_ENV];
+    if (!venue) return false;
+    assert.strictEqual(venue, os.hostname(), 'the enclosing full CI gate names venue ' + venue +
+        ', but token AT9 is running on ' + os.hostname());
+    at9.ordinaryCi = { command: CI_GATE_COMMAND, cwd: E2E_ROOT, venue,
+        transport: 'enclosing-direct', exit: null, signal: null, counts: null,
+        cachedVerdict: null, failureTail: null };
+    return true;
+}
+
 function driveTests(root) {
     const outer = root.suites.find((s) => s.title === TOKEN_DRIVE.outerTitle);
     assert.ok(outer, 'the token drive registered no outer suite: the legs were not in this run');
@@ -366,8 +398,10 @@ describe('token AT9: the gates, and the dated acceptance record', function () {
 
     it('token AT9: this repository\'s full CI gate is green on the CI venue', function () {
         this.timeout(0);
+        if (recordEnclosingDirectCiGate()) return;
         const dispatcher = path.join(os.homedir(), '.claude', 'bin', 'ci-dispatch.sh');
-        const dispatcherText = fs.existsSync(dispatcher) ? fs.readFileSync(dispatcher, 'utf8') : '';
+        if (!fs.existsSync(dispatcher)) return runDirectCiGate();
+        const dispatcherText = fs.readFileSync(dispatcher, 'utf8');
         assert.ok(SIBLING_BRANCH_RULE.test(dispatcherText), 'the dispatcher at ' + dispatcher + ' has no sibling-branch rule, so a develop pre-push line would\n' +
             'still ship every sibling at master and the parity guards would grade this tree against stale twins; refresh the dispatcher on this host first');
         const binDir = path.dirname(dispatcher);
@@ -387,10 +421,12 @@ describe('token AT9: the gates, and the dated acceptance record', function () {
         const res = run(dispatcher, ['--repo', 'xchain-e2e-test', '--src', E2E_ROOT,
             '--cmd', CI_GATE_COMMAND], E2E_ROOT, gateEnv(Object.assign({ CI_TIER: 'full' }, venues)), prePush);
         const counts = tallies(res.out);
-        const freshGreen = /CI gate GREEN on/.test(res.out);
+        const freshGreen = /CI gate GREEN on\s+([^;\s]+)/.exec(res.out);
         const cachedGreen = greenVerdictRecord(res.out, head, venueSpec);
         at9.ordinaryCi = { command: dispatcher + ' --repo xchain-e2e-test --src ' + E2E_ROOT +
-            ' --cmd "' + CI_GATE_COMMAND + '" (pre-push stdin: develop)', cwd: E2E_ROOT, exit: res.status, signal: res.signal, counts,
+            ' --cmd "' + CI_GATE_COMMAND + '" (pre-push stdin: develop)', cwd: E2E_ROOT,
+            venue: freshGreen ? freshGreen[1] : cachedGreen.venue || null, transport: 'dispatcher',
+            exit: res.status, signal: res.signal, counts,
             cachedVerdict: cachedGreen.accepted ? { commit: cachedGreen.commit, venue: cachedGreen.venue } : null,
             failureTail: res.status === 0 ? null : res.tail };
         assert.ok(!GATE_DID_NOT_RUN_EXITS.has(res.status), 'the CI gate did not run (exit ' + res.status +

@@ -165,7 +165,7 @@ describe('attestMirrorVenue: port planning', function () {
     })
 
     it('walks past a port something else is already holding', async () => {
-        const base = 41500
+        const [base] = await pickFreePorts(1, ephemeralRange().hi + 1)
         const blocker = net.createServer()
         await new Promise(r => blocker.listen(base, '127.0.0.1', r))
         try {
