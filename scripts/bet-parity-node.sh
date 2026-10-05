@@ -86,6 +86,30 @@ tip_of() {
     sql "SELECT COALESCE(MAX(block_index), -1) FROM \\\`$1\\\`.blocks" 2>/dev/null || echo "?"
 }
 
+clone_database() {
+    local attempt=1
+    local max_attempts=3
+
+    while [ "$attempt" -le "$max_attempts" ]; do
+        sql "DROP DATABASE IF EXISTS \\\`$PARITY_DB\\\`; CREATE DATABASE \\\`$PARITY_DB\\\`;"
+        if docker exec "$DB_CONTAINER" sh -c \
+            "mariadb-dump --defaults-extra-file=$CNF -h 127.0.0.1 --single-transaction --quick \
+              --skip-lock-tables --routines --events --triggers $SRC_DB" \
+            | docker exec -i "$DB_CONTAINER" sh -c \
+                "mariadb --defaults-extra-file=$CNF -h 127.0.0.1 $PARITY_DB"; then
+            return 0
+        fi
+
+        if [ "$attempt" -eq "$max_attempts" ]; then
+            echo "   FAILED: database clone failed after $max_attempts attempts" >&2
+            return 1
+        fi
+
+        echo "   database clone attempt $attempt failed; retrying" >&2
+        attempt=$((attempt + 1))
+    done
+}
+
 cmd_up() {
     mkdir -p "$WORK"
     write_client_cnf
@@ -104,12 +128,7 @@ cmd_up() {
     fi
 
     echo "== cloning $SRC_DB -> $PARITY_DB (consistent snapshot, node A keeps running)"
-    sql "DROP DATABASE IF EXISTS \\\`$PARITY_DB\\\`; CREATE DATABASE \\\`$PARITY_DB\\\`;"
-    docker exec "$DB_CONTAINER" sh -c \
-        "mariadb-dump --defaults-extra-file=$CNF -h 127.0.0.1 --single-transaction --quick \
-          --skip-lock-tables --routines --events --triggers $SRC_DB" \
-        | docker exec -i "$DB_CONTAINER" sh -c \
-            "mariadb --defaults-extra-file=$CNF -h 127.0.0.1 $PARITY_DB"
+    clone_database
     echo "   node A tip $(tip_of "$SRC_DB") / node B clone tip $(tip_of "$PARITY_DB")"
 
     echo "== env-file for node B (0600, never printed)"
