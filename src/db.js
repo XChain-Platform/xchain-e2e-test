@@ -33,6 +33,31 @@ const PERF_COLLECTOR_MODULE = '../test/perf/perfCollector';
 
 function mariadbDriver(){ return require(MARIADB_MODULE); }
 
+function buildIssueFilter(source, tick, txHash, maxSupply, maxMint, decimals, description, mintSupply, status){
+    const filters = [
+        ["ia.address = ?", source],
+        ["itick.tick = ?", tick],
+        ["itx.hash = ?", txHash],
+        ["i.max_supply = ?", maxSupply],
+        ["i.max_mint = ?", maxMint],
+        ["i.decimals = ?", decimals],
+        ["i.description = ?", description],
+        ["i.mint_supply = ?", mintSupply],
+        ["ist.status = ?", status]
+    ]
+    const whereClauses = []
+    const whereValues = []
+
+    for (const [clause, value] of filters){
+        if (value != null){
+            whereClauses.push(clause)
+            whereValues.push(value)
+        }
+    }
+
+    return { whereClauses, whereValues }
+}
+
 const config = require('./config');
 const { getLogger } = require('./lib/logger');
 const logger = getLogger();
@@ -245,45 +270,9 @@ class Database {
             lockCallback, callbackBlock, callbackTickId, callbackAmount, allowList, blockList, 
             mintAddressMax, mintStartBlock, mintStopBlock, status}){
 
-        const whereClauses = []
-        const whereValues = []
-
-        if (source != null){
-            whereClauses.push("ia.address = ?")
-            whereValues.push(source)
-        }
-        if (tick != null){
-            whereClauses.push("itick.tick = ?")
-            whereValues.push(tick)
-        }
-        if (txHash != null){
-            whereClauses.push("itx.hash = ?")
-            whereValues.push(txHash)
-        }
-        if (maxSupply != null){
-            whereClauses.push("i.max_supply = ?")
-            whereValues.push(maxSupply)
-        }
-        if (maxMint != null){
-            whereClauses.push("i.max_mint = ?")
-            whereValues.push(maxMint)
-        }
-        if (decimals != null){
-            whereClauses.push("i.decimals = ?")
-            whereValues.push(decimals)
-        }
-        if (description != null){
-            whereClauses.push("i.description = ?")
-            whereValues.push(description)
-        }
-        if (mintSupply != null){
-            whereClauses.push("i.mint_supply = ?")
-            whereValues.push(mintSupply)
-        }
-        if (status != null){
-            whereClauses.push("ist.status = ?")
-            whereValues.push(status)
-        }
+        const { whereClauses, whereValues } = buildIssueFilter(
+            source, tick, txHash, maxSupply, maxMint, decimals, description, mintSupply, status
+        )
             
             
         const query = `
