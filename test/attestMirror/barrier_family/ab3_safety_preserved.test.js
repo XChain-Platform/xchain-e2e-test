@@ -74,7 +74,7 @@ describe('AB3: safety preserved, the armed node holds inside the horizon window 
         // held baseline and the drill block must not hand the next leg a paused chain.
         await drive.releaseChain(ctx.btc)
         if (!ctx.venue) return
-        try { ctx.venue.releaseMirrorHeights(HELD) } catch (_) { /* never armed */ }
+        try { ctx.venue.releaseMirrorHeights(HELD) } catch (internal) { /* never armed */ }
         await ctx.venue.stop()
     })
 

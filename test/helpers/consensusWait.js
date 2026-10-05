@@ -179,7 +179,7 @@ async function readConfigEverywhere(hubs, sel) {
     for (const hub of hubs) {
         let cfg = null;
         try { cfg = await hub.db.getConfig(sel.coin, sel.network, sel.module); }
-        catch (_) { cfg = null; }
+        catch (internal) { cfg = null; }
         seen.push(cfg ? cfg[sel.key] : undefined);
     }
     return seen;

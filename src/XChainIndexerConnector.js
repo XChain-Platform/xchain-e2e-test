@@ -59,7 +59,7 @@ class XChainIndexerConnector {
             id: 1
         }
 
-        var response = null
+        let response = null
         try {
             response = await axios.post(this.url, data, { timeout: PROBE_TIMEOUT_MS })
         } catch (err) {
@@ -87,7 +87,7 @@ class XChainIndexerConnector {
             id: 1
         }
 
-        var response = null
+        let response = null
         try {
             response = await axios.post(this.url, data, { timeout: PROBE_TIMEOUT_MS })
         } catch (err) {
@@ -131,7 +131,7 @@ class XChainIndexerConnector {
             params: params,
             id: 1
         }
-        var response = null
+        let response = null
         try {
             const config = this.apiKey ? { headers: { 'x-api-key': this.apiKey } } : {}
             response = await axios.post(this.url, data, config)
@@ -191,7 +191,7 @@ class XChainIndexerConnector {
     async waitForIndexedBlock(minHeight, timeMax = 90000){
         const endTime = Date.now() + timeMax
         while(Date.now() < endTime){
-            let health = await this.health()
+            const health = await this.health()
             if(health && health.lastIndexedBlock !== null && Number(health.lastIndexedBlock) >= Number(minHeight))
                 return true
             await this.sleep(1000)

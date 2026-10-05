@@ -62,7 +62,7 @@ const BOOTSTRAP_RELEASE_BUDGET_MS = 45 * 60 * 1000;
 const DOGE_CADENCE_MS = 15000;
 const POLICY_DOGE_DB = 'XChain_AM_MVH_bridgerailpolicydoge_Rpl_Ixr0';
 const bootstrapSeeds = new Map();
-const inheritedKnownSignerSeeds = fixture._knownSignerSeeds;
+const inheritedKnownSignerSeeds = fixture['_knownSignerSeeds'];
 let dogeCadenceTimer = null;
 let dogeCadenceWork = null;
 let dogeCadenceStopped = false;
@@ -80,7 +80,7 @@ let lastMiningHoldLog = 0;
 const bootstrapStakerAddresses = new Set();
 
 // Include temporary fixture signers when the venue resolves its usable quorum.
-fixture._knownSignerSeeds = function policyKnownSignerSeeds() {
+fixture['_knownSignerSeeds'] = function policyKnownSignerSeeds() {
     const known = inheritedKnownSignerSeeds();
     for (const [pubkey, hit] of bootstrapSeeds) known.set(pubkey, hit);
     return known;
@@ -118,7 +118,7 @@ function pubkeyInGap(pubkey, lower, upper) {
 function createIdentityInGap(lower, upper, used, index) {
     for (let attempt = 0; attempt < 100000; attempt++) {
         const seedHex = crypto.randomBytes(32).toString('hex');
-        const pubkeyHex = fixture._pubkeyForSeed(seedHex);
+        const pubkeyHex = fixture['_pubkeyForSeed'](seedHex);
         if (used.has(pubkeyHex) || !pubkeyInGap(pubkeyHex, lower, upper)) continue;
         used.add(pubkeyHex);
         bootstrapSeeds.set(pubkeyHex, { seedHex, origin: 'policy rail fixture signer ' + index });
@@ -396,7 +396,7 @@ function seedRecordedSigners() {
         if (!entry.signingSeed || !entry.signingPubkey) continue;
         const pubkey = String(entry.signingPubkey).toLowerCase();
         // Trust a recorded seed only when it still derives the pubkey it was filed under.
-        if (fixture._pubkeyForSeed(entry.signingSeed) !== pubkey) continue;
+        if (fixture['_pubkeyForSeed'](entry.signingSeed) !== pubkey) continue;
         bootstrapSeeds.set(pubkey, { seedHex: entry.signingSeed, origin: 'policy rail recorded signer' });
     }
 }
@@ -422,7 +422,7 @@ async function reuseRecordedSigners() {
     const opening = await readBridgeCapability();
     const recorded = seatedRecordedEntries(opening.set);
     if (!recorded.length) return false;
-    if (!resolveVenueQuorum(seatedRows(opening.set), fixture._knownSignerSeeds()).ok) return false;
+    if (!resolveVenueQuorum(seatedRows(opening.set), fixture['_knownSignerSeeds']()).ok) return false;
     // Teardown owns the release, so the roster it restores excludes the reused signers.
     installBootstrapTeardown({ set: baselineWithout(opening.set, recorded) });
     registerRecordedSigners(recorded);
@@ -482,7 +482,7 @@ async function ensurePolicyQuorum() {
     if (await reuseRecordedSigners()) return;
     const opening = await readBridgeCapability();
     const rows = seatedRows(opening.set);
-    const existing = resolveVenueQuorum(rows, fixture._knownSignerSeeds());
+    const existing = resolveVenueQuorum(rows, fixture['_knownSignerSeeds']());
     // Preserve an already-signable venue without adding redundant fixture stakes.
     if (existing.ok) return;
     // Make the root stake teardown restore and prove the capability this bootstrap changes.
@@ -502,7 +502,7 @@ async function ensurePolicyQuorum() {
         await stakeBootstrapBatch(batch, start, stake, addresses);
     }
     const closing = await waitForBootstrapVisibility(identities, stake);
-    const quorum = resolveVenueQuorum(seatedRows(closing.set), fixture._knownSignerSeeds());
+    const quorum = resolveVenueQuorum(seatedRows(closing.set), fixture['_knownSignerSeeds']());
     // Require the final buried set to satisfy the same gate used by the suites.
     if (!quorum.ok) throw new Error('policy rail bootstrap did not produce a quorum: ' + quorum.reason);
     console.log('POLICY RAIL: bootstrapped ' + identities.length +

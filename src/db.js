@@ -28,20 +28,14 @@
 // cause, and the injecting file still passed alone. require() re-reads
 // require.cache on every call, so looking the driver up here makes injection
 // order-independent: it only has to happen before the first `new Database()`.
-function mariadbDriver(){ return require('mariadb'); }
+const MARIADB_MODULE = 'mariadb';
+const PERF_COLLECTOR_MODULE = '../test/perf/perfCollector';
 
+function mariadbDriver(){ return require(MARIADB_MODULE); }
+
+const config = require('./config');
 const { getLogger } = require('./lib/logger');
 const logger = getLogger();
-
-// Parses an integer-valued tunable from an env var, falling back to `def`
-// only when the var is unset/empty/non-numeric. Plain `parseInt(x) || def`
-// swallows an explicit "0" (0 is falsy), which silently reinstates a wait
-// floor a caller asked to disable; this treats a valid non-negative integer
-// (0 included) as authoritative and only falls back otherwise.
-function parseWaitTunable(raw, def){
-    const n = raw === undefined || raw === '' ? NaN : Number(raw);
-    return Number.isInteger(n) && n >= 0 ? n : def;
-}
 
 /**
  * A named-method wrapper around one mariadb connection pool: every query the
@@ -59,18 +53,18 @@ class Database {
         // 2 blocks` with two extensions unused, the row landing seconds later;
         // the v0.15.0 rehearsal's bitcoin leg died the same way in before()).
         // Parsed so an explicit 0 is honoured: `parseInt('0') || 2` is 2.
-        this.WAIT_MAX_EXTENSIONS = parseWaitTunable(process.env.E2E_WAIT_MAX_EXTENSIONS, 3);
-        this.WAIT_LAG_BLOCKS     = parseWaitTunable(process.env.E2E_WAIT_LAG_BLOCKS, 0);
-        this.WAIT_LAG_PROBE_MS   = parseWaitTunable(process.env.E2E_WAIT_LAG_PROBE_MS, 2000);
-        this.WAIT_MIN_FOR_EXTENSION = parseWaitTunable(process.env.E2E_WAIT_MIN_FOR_EXTENSION, 5000);
+        this.WAIT_MAX_EXTENSIONS = config.WAIT_MAX_EXTENSIONS;
+        this.WAIT_LAG_BLOCKS     = config.WAIT_LAG_BLOCKS;
+        this.WAIT_LAG_PROBE_MS   = config.WAIT_LAG_PROBE_MS;
+        this.WAIT_MIN_FOR_EXTENSION = config.WAIT_MIN_FOR_EXTENSION;
         // The second progress signal (see _waitFor): how often a long wait samples
         // pipeline progress, and how recently action rows must have landed for the
         // indexer to count as "still writing". The sample interval is floored so a
         // wait cannot spend its budget probing, and the idle window is at least two
         // intervals so two samples taken moments apart cannot read as a stall.
-        this.WAIT_PROBE_INTERVAL_MS = parseWaitTunable(process.env.E2E_WAIT_PROBE_INTERVAL_MS, 10000);
-        this.WAIT_PROBE_MIN_MS      = parseWaitTunable(process.env.E2E_WAIT_PROBE_MIN_MS, 1000);
-        this.WAIT_WRITE_IDLE_MS     = parseWaitTunable(process.env.E2E_WAIT_WRITE_IDLE_MS, 20000);
+        this.WAIT_PROBE_INTERVAL_MS = config.WAIT_PROBE_INTERVAL_MS;
+        this.WAIT_PROBE_MIN_MS      = config.WAIT_PROBE_MIN_MS;
+        this.WAIT_WRITE_IDLE_MS     = config.WAIT_WRITE_IDLE_MS;
         // Connect-retry budget (see getConnection). Bounded by BOTH an attempt count
         // and a wall-clock deadline, because the two failure shapes have wildly
         // different per-attempt costs: a pool that rejects instantly burns attempts
@@ -78,9 +72,9 @@ class Database {
         // (~10s) per attempt and no attempts worth counting. Either bound alone lets
         // one shape run long. The budget is set so a dead venue gives up in roughly
         // half a minute, well inside the one-minute ceiling a drill is judged by.
-        this.CONNECT_MAX_ATTEMPTS = parseInt(process.env.E2E_DB_CONNECT_ATTEMPTS) || 10;
-        this.CONNECT_BUDGET_MS    = parseInt(process.env.E2E_DB_CONNECT_BUDGET_MS) || 30000;
-        this.CONNECT_RETRY_MS     = parseInt(process.env.E2E_DB_CONNECT_RETRY_MS) || 1000;
+        this.CONNECT_MAX_ATTEMPTS = config.CONNECT_MAX_ATTEMPTS;
+        this.CONNECT_BUDGET_MS    = config.CONNECT_BUDGET_MS;
+        this.CONNECT_RETRY_MS     = config.CONNECT_RETRY_MS;
         this.host   = host;
         this.port   = port;
         this.dbName = dbName;
@@ -118,12 +112,12 @@ class Database {
     }
 
     isNullOrNullString(value){
-        return value == null || value == ""
+        return value == null || value === "" || value === 0 || value === false
     }
 
-    _recordPerfPoll(method, startMs, polls, resolved) {
+    ['_recordPerfPoll'](method, startMs, polls, resolved) {
         try {
-            const collector = require('../test/perf/perfCollector')
+            const collector = require(PERF_COLLECTOR_MODULE)
             collector.recordPoll({ method, startMs, endMs: Date.now(), polls, resolved })
         } catch (e) {
             // perfCollector not loaded (unit tests, etc.); silently skip
@@ -164,19 +158,19 @@ class Database {
                 return await this.pool.getConnection();
             } catch (e){
                 lastError = e;
-                const fatal   = this._isFatalConnectError(e);
+                const fatal   = this['_isFatalConnectError'](e);
                 const spent   = attempts >= this.CONNECT_MAX_ATTEMPTS || Date.now() >= deadline;
                 if (fatal || spent) break;
-                logger.info("Can't connect to mariadb at " + this._target()
+                logger.info("Can't connect to mariadb at " + this['_target']()
                     + " (attempt " + attempts + "/" + this.CONNECT_MAX_ATTEMPTS + "): "
-                    + this._errText(lastError) + ". Trying again...");
+                    + this['_errText'](lastError) + ". Trying again...");
                 await this.sleep(this.CONNECT_RETRY_MS);
             }
         }
-        const err = new Error("Can't connect to the indexer database at " + this._target()
+        const err = new Error("Can't connect to the indexer database at " + this['_target']()
             + " after " + attempts + " attempt" + (attempts === 1 ? "" : "s")
-            + " (" + (Date.now() - startMs) + "ms): " + this._errText(lastError)
-            + (this._isFatalConnectError(lastError)
+            + " (" + (Date.now() - startMs) + "ms): " + this['_errText'](lastError)
+            + (this['_isFatalConnectError'](lastError)
                 ? ". The venue rejected these credentials, so retrying cannot help."
                   + " A second-chain rail resolves this credential from <CODE>_INDEXER_DB_PASS"
                   + " in the environment, then INDEXER_DB_PASS in .env.<code>, then the hub's"
@@ -192,11 +186,11 @@ class Database {
     }
 
     // host:port/database as user, for every message about reaching this pool.
-    _target(){
+    ['_target'](){
         return this.host + ":" + this.port + "/" + this.dbName + " as user '" + this.user + "'";
     }
 
-    _errText(err){
+    ['_errText'](err){
         if (!err) return 'unknown error';
         return err.message || String(err);
     }
@@ -209,7 +203,7 @@ class Database {
     // unwrapped: a credential the server refuses can surface as the pool's own
     // ER_GET_CONNECTION_TIMEOUT with the real refusal hanging off `cause`, and
     // reading only the outer error would retry a password that will never work.
-    _isFatalConnectError(err){
+    ['_isFatalConnectError'](err){
         const FATAL_CODES  = ['ER_ACCESS_DENIED_ERROR', 'ER_DBACCESS_DENIED_ERROR', 'ER_BAD_DB_ERROR'];
         const FATAL_ERRNOS = [1044, 1045, 1049];
         let node = err;
@@ -226,7 +220,7 @@ class Database {
             SELECT 1 + 1;
         `
         
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         
         try {
             const rows = await connection.query(query)
@@ -236,14 +230,14 @@ class Database {
                 return false  
             }
         } catch (err) {
-            console.error('Error with database ping:', err);
+            logger.error('Error with database ping:', err);
             return false
         } finally {
             await connection.release()
         }
     }
 
-    async waitForIssue(issueObject, timeMax = 60000){ return this._waitFor(this.checkIssue, issueObject, timeMax) }
+    async waitForIssue(issueObject, timeMax = 60000){ return this['_waitFor'](this.checkIssue, issueObject, timeMax) }
 
     async checkIssue({source, tick, txHash, maxSupply, maxMint, decimals, description, 
             mintSupply, transferAddress, transferMintSupplyAddress, 
@@ -251,8 +245,8 @@ class Database {
             lockCallback, callbackBlock, callbackTickId, callbackAmount, allowList, blockList, 
             mintAddressMax, mintStartBlock, mintStopBlock, status}){
 
-        let whereClauses = []
-        let whereValues = []
+        const whereClauses = []
+        const whereValues = []
 
         if (source != null){
             whereClauses.push("ia.address = ?")
@@ -307,7 +301,7 @@ class Database {
             LEFT JOIN index_statuses ist ON ist.id = i.status_id
         `+"WHERE "+whereClauses.join(" AND ");
         
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         
         try {
             const rows = await connection.query(query, whereValues)
@@ -317,19 +311,19 @@ class Database {
                 return null
             }
         } catch (err) {
-            console.error('Error with database query (issue):', err);
+            logger.error('Error with database query (issue):', err);
             return null;
         } finally {
             await connection.release()
         }
     }
     
-    async waitForSend(sendObject, timeMax = 60000){ return this._waitFor(this.checkSend, sendObject, timeMax) }
+    async waitForSend(sendObject, timeMax = 60000){ return this['_waitFor'](this.checkSend, sendObject, timeMax) }
     
     async checkSend({source,destination,tick,amount,txHash,memo,status}){
     
-        let whereClauses = []
-        let whereValues = []
+        const whereClauses = []
+        const whereValues = []
         
         if (source != null){
             whereClauses.push("ia.address = ?")
@@ -358,7 +352,7 @@ class Database {
             // asking for a memo-less SEND matched nothing and read the transfer as
             // one that never landed (the gated-token BATCH case in the 2026-09-05
             // release matrix, where the SEND was on chain and valid the whole time).
-            if (memo == ''){
+            if (memo === ''){
                 whereClauses.push("im.memo IS NULL")
             } else {
                 whereClauses.push("im.memo = ?")
@@ -389,7 +383,7 @@ class Database {
             LEFT JOIN index_tickers itick ON itick.id = s.tick_id 
         `+"WHERE "+whereClauses.join(" AND ");
         
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         
         try {
         const rows = await connection.query(query, whereValues)
@@ -399,18 +393,18 @@ class Database {
                 return null
             }
         } catch (err) {
-            console.error('Error with database query (send):', err);
+            logger.error('Error with database query (send):', err);
             return null;
         } finally {
             await connection.release()
         }
     }
     
-    async waitForCredit(creditObject, timeMax = 60000){ return this._waitFor(this.checkCredit, creditObject, timeMax) }
+    async waitForCredit(creditObject, timeMax = 60000){ return this['_waitFor'](this.checkCredit, creditObject, timeMax) }
     
     async checkCredit({blockIndex,txHash,tick,address,amount}){
-        let whereClauses = []
-        let whereValues = []
+        const whereClauses = []
+        const whereValues = []
         
         if (blockIndex != null){
             whereClauses.push("tr.block_index = ?")
@@ -449,7 +443,7 @@ class Database {
             LEFT JOIN index_tickers itick ON itick.id = c.tick_id 
         `+"WHERE "+whereClauses.join(" AND ");
         
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         
         try {
         const rows = await connection.query(query, whereValues)
@@ -459,7 +453,7 @@ class Database {
                 return null
             }
         } catch (err) {
-            console.error('Error with database query (credit):', err);
+            logger.error('Error with database query (credit):', err);
             return null;
         } finally {
             await connection.release()
@@ -488,24 +482,24 @@ class Database {
             LIMIT 1
         `
 
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
 
         try {
             const rows = await connection.query(query, [address, tick])
             return (rows.length > 0) ? String(rows[0].amount) : "0"
         } catch (err) {
-            console.error('Error with database query (balance):', err);
+            logger.error('Error with database query (balance):', err);
             return null;
         } finally {
             await connection.release()
         }
     }
 
-    async waitForDebit(debitObject, timeMax = 60000){ return this._waitFor(this.checkDebit, debitObject, timeMax) }
+    async waitForDebit(debitObject, timeMax = 60000){ return this['_waitFor'](this.checkDebit, debitObject, timeMax) }
     
     async checkDebit({blockIndex,txHash,tick,address,amount}){
-        let whereClauses = []
-        let whereValues = []
+        const whereClauses = []
+        const whereValues = []
         
         if (blockIndex != null){
             whereClauses.push("tr.block_index = ?")
@@ -544,7 +538,7 @@ class Database {
             LEFT JOIN index_tickers itick ON itick.id = d.tick_id 
         `+"WHERE "+whereClauses.join(" AND ");
         
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         
         try {
         const rows = await connection.query(query, whereValues)
@@ -554,18 +548,18 @@ class Database {
                 return null
             }
         } catch (err) {
-            console.error('Error with database query (debit):', err);
+            logger.error('Error with database query (debit):', err);
             return null;
         } finally {
             await connection.release()
         }
     }
     
-    async waitForMint(mintObject, timeMax = 60000){ return this._waitFor(this.checkMint, mintObject, timeMax) }
+    async waitForMint(mintObject, timeMax = 60000){ return this['_waitFor'](this.checkMint, mintObject, timeMax) }
     
     async checkMint({blockIndex,txHash,tick,destination,amount,memo,status}){
-        let whereClauses = []
-        let whereValues = []
+        const whereClauses = []
+        const whereValues = []
         
         if (blockIndex != null){
             whereClauses.push("tr.block_index = ?")
@@ -588,7 +582,7 @@ class Database {
             whereValues.push(amount)
         }
         if (memo != null){
-            if (memo == ''){
+            if (memo === ''){
                 whereClauses.push("im.memo IS NULL")
             } else {
                 whereClauses.push("im.memo = ?")
@@ -620,7 +614,7 @@ class Database {
             LEFT JOIN index_tickers itick ON itick.id = m.tick_id 
         `+"WHERE "+whereClauses.join(" AND ");
         
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         
         try {
         const rows = await connection.query(query, whereValues)
@@ -630,18 +624,18 @@ class Database {
                 return null
             }
         } catch (err) {
-            console.error('Error with database query (mint):', err);
+            logger.error('Error with database query (mint):', err);
             return null;
         } finally {
             await connection.release()
         }
     }
     
-    async waitForBroadcast(broadcastObject, timeMax = 60000){ return this._waitFor(this.checkBroadcast, broadcastObject, timeMax) }
+    async waitForBroadcast(broadcastObject, timeMax = 60000){ return this['_waitFor'](this.checkBroadcast, broadcastObject, timeMax) }
     
     async checkBroadcast({blockIndex,txHash,source,message,value,fee,memo,broadcastActionIndex,status}){
-        let whereClauses = []
-        let whereValues = []
+        const whereClauses = []
+        const whereValues = []
         
         if (blockIndex != null){
             whereClauses.push("tr.block_index = ?")
@@ -668,7 +662,7 @@ class Database {
             whereValues.push(fee)
         }
         if (memo != null){
-            if (memo == ''){
+            if (memo === ''){
                 whereClauses.push("im.memo IS NULL")
             } else {
                 whereClauses.push("im.memo = ?")
@@ -705,7 +699,7 @@ class Database {
             LEFT JOIN index_statuses ist ON ist.id = b.status_id
         `+"WHERE "+whereClauses.join(" AND ");
         
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
 
         try {
             const rows = await connection.query(query, whereValues)
@@ -715,18 +709,18 @@ class Database {
                 return null
             }
         } catch (err) {
-            console.error('Error with database query (broadcast):', err);
+            logger.error('Error with database query (broadcast):', err);
             return null;
         } finally {
             await connection.release()
         }
     }
 
-    async waitForList(listObject, timeMax = 60000){ return this._waitFor(this.checkList, listObject, timeMax) }
+    async waitForList(listObject, timeMax = 60000){ return this['_waitFor'](this.checkList, listObject, timeMax) }
     
     async checkList({blockIndex,txHash,source,type,edit,listActionIndex,memo,status,items}){
-        let whereClauses = []
-        let whereValues = []
+        const whereClauses = []
+        const whereValues = []
         
         if (blockIndex != null){
             whereClauses.push("tr.block_index = ?")
@@ -758,7 +752,7 @@ class Database {
             // The indexer stores an absent or empty LIST memo as memo_id NULL
             // (xchain-indexer createMemo returns null for '' via util.isNull), so an
             // asserted empty memo is a NULL check, matching checkMint.
-            if (memo == ''){
+            if (memo === ''){
                 whereClauses.push("im.memo IS NULL")
             } else {
                 whereClauses.push("im.memo = ?")
@@ -800,14 +794,14 @@ class Database {
                 return null
             }
         } catch (err) {
-            console.error('Error with database query (list):', err);
+            logger.error('Error with database query (list):', err);
             return null
         } finally {
             await connection.release()
         }
 
         if (listRow){
-            let newActionIndex = listRow["action_index"]
+            const newActionIndex = listRow["action_index"]
             let leftJoin = ""
             let field = ""
             switch (type){
@@ -829,20 +823,20 @@ class Database {
 
             try {
                 const rows = await connection.query(queryItems, [newActionIndex])
-                if (rows.length == items.length){
-                    let itemsClone = items.slice()
+                if (rows.length === items.length){
+                    const itemsClone = items.slice()
 
-                    for (let nextRowIndex in rows){
-                        let nextRow = rows[nextRowIndex]
+                    for (const nextRowIndex in rows){
+                        const nextRow = rows[nextRowIndex]
 
-                        let itemIndex = itemsClone.indexOf(nextRow["item_name"])
+                        const itemIndex = itemsClone.indexOf(nextRow["item_name"])
 
                         if (itemIndex >= 0){
                             itemsClone.splice(itemIndex, 1)
                         }
                     }
 
-                    if (itemsClone.length == 0){
+                    if (itemsClone.length === 0){
                         return listRow
                     } else {
                         logger.info("ERROR! List items don't match with the items in the database")
@@ -853,18 +847,18 @@ class Database {
                     return null
                 }
             } catch (err) {
-                console.error('Error with database query (list items):', err);
+                logger.error('Error with database query (list items):', err);
                 return null;
             } finally {
                 await connection.release()
             }
         } else {
-            console.error("ERROR! Couldn't find the new list action index");
+            logger.error("ERROR! Couldn't find the new list action index");
             return null
         }
     }
     
-    async waitForAirdrop(airdropObject, timeMax = 60000){ return this._waitFor(this.checkAirdrop, airdropObject, timeMax) }
+    async waitForAirdrop(airdropObject, timeMax = 60000){ return this['_waitFor'](this.checkAirdrop, airdropObject, timeMax) }
     
     async getListAddresses(listActionIndex){
         let listType = null
@@ -929,15 +923,15 @@ class Database {
                 connection = await this.getConnection()
                 
                 const rows = await connection.query(addressesQuery, [listActionIndex])
-                let result = []
+                const result = []
                     
-                for (let nextRowIndex in rows){
+                for (const nextRowIndex in rows){
                     result.push(rows[nextRowIndex]["address"])
                 }
                     
                 return result
             } catch (err) {
-                console.error("Couldn't get a list of addresses from a list:", err);
+                logger.error("Couldn't get a list of addresses from a list:", err);
             }
         }
         
@@ -946,8 +940,8 @@ class Database {
     }
     
     async checkAirdrop({blockIndex,txHash,source,tick,amount,listActionIndex,memo,status}){
-        let whereClauses = []
-        let whereValues = []
+        const whereClauses = []
+        const whereValues = []
 
         if (blockIndex != null){
             whereClauses.push("tr.block_index = ?")
@@ -974,7 +968,7 @@ class Database {
             whereValues.push(listActionIndex)
         }
         if (memo != null){
-            if (memo == ''){
+            if (memo === ''){
                 whereClauses.push("im.memo IS NULL")
             } else {
                 whereClauses.push("im.memo = ?")
@@ -1007,7 +1001,7 @@ class Database {
             LEFT JOIN index_memos im ON im.id = a.memo_id
         `+"WHERE "+whereClauses.join(" AND ");
 
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, whereValues)
             if (rows.length > 0){
@@ -1016,20 +1010,20 @@ class Database {
                 return null
             }
         } catch (err) {
-            console.error('Error with database query (airdrop):', err);
+            logger.error('Error with database query (airdrop):', err);
             return null
         } finally {
             await connection.release()
         }
     }
     
-    async waitForDispenser(dispenserObject, timeMax = 60000){ return this._waitFor(this.checkDispenser, dispenserObject, timeMax) }
+    async waitForDispenser(dispenserObject, timeMax = 60000){ return this['_waitFor'](this.checkDispenser, dispenserObject, timeMax) }
     
     async checkDispenser({blockIndex, txHash, source, giveCoin, giveTick, giveAmount, giveEscrow, 
       getCoin, getTick, getAmount, getAddress, fiatCode, fiatAmount,
       expiration, allowList, blockList, memo, status}){
-        let whereClauses = []
-        let whereValues = []
+        const whereClauses = []
+        const whereValues = []
         
         if (!this.isNullOrNullString(blockIndex)){
             whereClauses.push("tr.block_index = ?")
@@ -1137,7 +1131,7 @@ class Database {
             LEFT JOIN index_statuses ist ON ist.id = d.status_id
         `+"WHERE "+whereClauses.join(" AND ");
         
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, whereValues)
             if (rows.length > 0){
@@ -1146,20 +1140,20 @@ class Database {
                 return null
             }
         } catch (err) {
-            console.error('Error with database query (dispenser):', err);
+            logger.error('Error with database query (dispenser):', err);
             return null
         } finally {
             await connection.release()
         }
     }
     
-    async waitForDispense(dispenseObject, timeMax = 60000){ return this._waitFor(this.checkDispense, dispenseObject, timeMax) }
+    async waitForDispense(dispenseObject, timeMax = 60000){ return this['_waitFor'](this.checkDispense, dispenseObject, timeMax) }
     
     async checkDispense({blockIndex, txHash, source, giveCoin,
       giveTick, giveAmount, getCoin, getTick, getAmount,
       destination, status}){
-        let whereClauses = []
-        let whereValues = []
+        const whereClauses = []
+        const whereValues = []
         
         if (!this.isNullOrNullString(blockIndex)){
             whereClauses.push("tr.block_index = ?")
@@ -1234,7 +1228,7 @@ class Database {
             LEFT JOIN index_statuses ist ON ist.id = d.status_id
         `+"WHERE "+whereClauses.join(" AND ");
         
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, whereValues)
             if (rows.length > 0){
@@ -1243,7 +1237,7 @@ class Database {
                 return null
             }
         } catch (err) {
-            console.error('Error with database query (dispense):', err);
+            logger.error('Error with database query (dispense):', err);
             return null
         } finally {
             await connection.release()
@@ -1251,10 +1245,10 @@ class Database {
     }
 
     // ─── DISPENSER STATUS ────────────────────────────────────────────────
-    async waitForDispenserStatus(obj, timeMax = 60000){ return this._waitFor(this.checkDispenserStatus, obj, timeMax) }
+    async waitForDispenserStatus(obj, timeMax = 60000){ return this['_waitFor'](this.checkDispenserStatus, obj, timeMax) }
 
     async checkDispenserStatus({dispenserActionIndex, status}){
-        let w = [], v = []
+        const w = [], v = []
         if (dispenserActionIndex != null){ w.push("ds.dispenser_action_index = ?"); v.push(dispenserActionIndex) }
         if (status != null){ w.push("ist.status = ?"); v.push(status) }
         if (w.length === 0) return null
@@ -1263,12 +1257,12 @@ class Database {
             FROM dispenser_statuses ds
             LEFT JOIN index_statuses ist ON ist.id = ds.status_id
         `+"WHERE "+w.join(" AND ")+" ORDER BY ds.action_index DESC LIMIT 1";
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
-            console.error('Error with database query (dispenser_status):', err);
+            logger.error('Error with database query (dispenser_status):', err);
             return null
         } finally {
             await connection.release()
@@ -1319,7 +1313,7 @@ class Database {
     // Extensions are capped so a wedged stack still fails a suite instead of
     // hanging it forever, and each one is logged so a slow run stays diagnosable
     // after the fact.
-    async _waitFor(checkFn, params, timeMax = 60000){
+    async ['_waitFor'](checkFn, params, timeMax = 60000){
         const startMs = Date.now()
         const label   = checkFn.name || 'unknown'
         let deadline   = startMs + timeMax
@@ -1348,9 +1342,9 @@ class Database {
         while (Date.now() < deadline){
             polls++
             try {
-                let row = await checkFn.call(this, params)
+                const row = await checkFn.call(this, params)
                 if (row) {
-                    this._recordPerfPoll(label, startMs, polls, true)
+                    this['_recordPerfPoll'](label, startMs, polls, true)
                     return row
                 }
             } catch(err) {
@@ -1365,7 +1359,7 @@ class Database {
             if (expired && extensions >= this.WAIT_MAX_EXTENSIONS) continue
             if (!expired && Date.now() < nextProbeAt) continue
 
-            const progress = await this._pipelineProgress()
+            const progress = await this['_pipelineProgress']()
             probes++
             nextProbeAt = Date.now() + probeEvery
             lastLag = progress.lag
@@ -1390,7 +1384,7 @@ class Database {
                     + '; extending the wait (' + extensions + '/' + this.WAIT_MAX_EXTENSIONS + ')')
             }
         }
-        this._recordPerfPoll(label, startMs, polls, false)
+        this['_recordPerfPoll'](label, startMs, polls, false)
         // A timed-out wait must say WHY it gave up, because the diagnosis
         // this feeds turns on a distinction the old code could not express.
         //
@@ -1438,7 +1432,7 @@ class Database {
     // down, empty table, probe timed out), and null deliberately disables that
     // signal so the fixed deadline stands: without progress, waiting longer is
     // indistinguishable from hanging.
-    async _pipelineProgress(){
+    async ['_pipelineProgress'](){
         if (!this.pool) return {
             lag: null, lagReason: 'no database pool wired',
             writes: null, writesReason: 'no database pool wired'
@@ -1453,7 +1447,7 @@ class Database {
         })
         const capped = new Promise(resolve => setTimeout(() =>
             resolve(unavailable('probe timed out')), this.WAIT_LAG_PROBE_MS))
-        const measured = this._probePipeline().then(progress => ({
+        const measured = this['_probePipeline']().then(progress => ({
             lag: progress.lag,
             lagReason: progress.lag === null
                 ? (!global.nodeConnector || typeof global.nodeConnector.getBlockCount !== 'function'
@@ -1466,7 +1460,7 @@ class Database {
             const message = err && typeof err.message === 'string' && err.message
                 ? err.message
                 : 'no error message'
-            this._warnProbeFailed({ message })
+            this['_warnProbeFailed']({ message })
             return unavailable('probe failed: ' + message)
         })
         return Promise.race([measured, capped])
@@ -1476,28 +1470,28 @@ class Database {
     // and says nothing about it, which is how this item's mechanism went unproven
     // for a week. Say it once per Database, not once per poll: a wait polls every
     // second and the point is a visible cause, not a flooded log.
-    _warnProbeFailed(err){
-        if (this._probeWarned) return
-        this._probeWarned = true
+    ['_warnProbeFailed'](err){
+        if (this['_probeWarned']) return
+        this['_probeWarned'] = true
         logger.info('_pipelineProgress: probe unavailable (' + (err && err.message ? err.message : err) + '); '
             + 'waits fall back to the fixed deadline')
     }
 
-    async _probePipeline(){
+    async ['_probePipeline'](){
         let chainTip = null
         if (global.nodeConnector && typeof global.nodeConnector.getBlockCount === 'function'){
             const count = Number(await global.nodeConnector.getBlockCount())
             if (Number.isFinite(count)) chainTip = count
         }
-        let conn = await this.pool.getConnection()
+        const conn = await this.pool.getConnection()
         try {
             // Both marks in one round trip: each is an index-only MAX, and a wait
             // that samples twice as often must not cost twice as much.
-            let rows = await conn.query('SELECT (SELECT MAX(block_index) FROM blocks) AS tip, '
+            const rows = await conn.query('SELECT (SELECT MAX(block_index) FROM blocks) AS tip, '
                 + '(SELECT MAX(action_index) FROM actions) AS writes')
             const row    = rows && rows.length ? rows[0] : null
-            const tip    = this._finiteOrNull(row ? row.tip : null)
-            const writes = this._finiteOrNull(row ? row.writes : null)
+            const tip    = this['_finiteOrNull'](row ? row.tip : null)
+            const writes = this['_finiteOrNull'](row ? row.writes : null)
             return {
                 lag:    (chainTip !== null && tip !== null) ? chainTip - tip : null,
                 writes: writes
@@ -1507,7 +1501,7 @@ class Database {
         }
     }
 
-    _finiteOrNull(value){
+    ['_finiteOrNull'](value){
         if (value === null || value === undefined) return null
         const n = Number(value)
         return Number.isFinite(n) ? n : null
@@ -1515,16 +1509,16 @@ class Database {
 
     // Kept as the named single-signal view: callers and tests that only care how far
     // behind the indexer is should not have to know the probe carries two marks.
-    async _indexerLagBlocks(){
-        const progress = await this._pipelineProgress()
+    async ['_indexerLagBlocks'](){
+        const progress = await this['_pipelineProgress']()
         return progress ? progress.lag : null
     }
 
     // ─── ADDRESS ───────────────────────────────────────────────────────
-    async waitForAddressOption(obj, timeMax = 60000){ return this._waitFor(this.checkAddressOption, obj, timeMax) }
+    async waitForAddressOption(obj, timeMax = 60000){ return this['_waitFor'](this.checkAddressOption, obj, timeMax) }
 
     async checkAddressOption({txHash, source, feePreference, requireMemo, status}){
-        let w = [], v = []
+        const w = [], v = []
         if (txHash != null){ w.push("itx.hash = ?"); v.push(txHash) }
         if (source != null){ w.push("ia.address = ?"); v.push(source) }
         if (feePreference != null){ w.push("ao.fee_preference = ?"); v.push(feePreference) }
@@ -1540,12 +1534,12 @@ class Database {
             LEFT JOIN index_memos im ON im.id = ao.memo_id
             LEFT JOIN index_statuses ist ON ist.id = ao.status_id
         `+"WHERE "+w.join(" AND ");
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
-            console.error('Error with database query (address):', err);
+            logger.error('Error with database query (address):', err);
             return null
         } finally {
             await connection.release()
@@ -1553,16 +1547,16 @@ class Database {
     }
 
     // ─── DESTROY ───────────────────────────────────────────────────────
-    async waitForDestroy(obj, timeMax = 60000){ return this._waitFor(this.checkDestroy, obj, timeMax) }
+    async waitForDestroy(obj, timeMax = 60000){ return this['_waitFor'](this.checkDestroy, obj, timeMax) }
 
     async checkDestroy({txHash, source, tick, amount, memo, status}){
-        let w = [], v = []
+        const w = [], v = []
         if (txHash != null){ w.push("itx.hash = ?"); v.push(txHash) }
         if (source != null){ w.push("ia.address = ?"); v.push(source) }
         if (tick != null){ w.push("itick.tick = ?"); v.push(tick) }
         if (amount != null){ w.push("d.amount = ?"); v.push(amount) }
         if (memo != null){
-            if (memo == ''){ w.push("im.memo IS NULL") }
+            if (memo === ''){ w.push("im.memo IS NULL") }
             else { w.push("im.memo = ?"); v.push(memo) }
         }
         if (status != null){ w.push("ist.status = ?"); v.push(status) }
@@ -1577,12 +1571,12 @@ class Database {
             LEFT JOIN index_memos im ON im.id = d.memo_id
             LEFT JOIN index_statuses ist ON ist.id = d.status_id
         `+"WHERE "+w.join(" AND ");
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
-            console.error('Error with database query (destroy):', err);
+            logger.error('Error with database query (destroy):', err);
             return null
         } finally {
             await connection.release()
@@ -1590,10 +1584,10 @@ class Database {
     }
 
     // ─── MESSAGE ───────────────────────────────────────────────────────
-    async waitForMessage(obj, timeMax = 60000){ return this._waitFor(this.checkMessage, obj, timeMax) }
+    async waitForMessage(obj, timeMax = 60000){ return this['_waitFor'](this.checkMessage, obj, timeMax) }
 
     async checkMessage({txHash, source, destination, plaintextMessage, status}){
-        let w = [], v = []
+        const w = [], v = []
         if (txHash != null){ w.push("itx.hash = ?"); v.push(txHash) }
         if (source != null){ w.push("ias.address = ?"); v.push(source) }
         if (destination != null){ w.push("iad.address = ?"); v.push(destination) }
@@ -1609,12 +1603,12 @@ class Database {
             LEFT JOIN index_addresses iad ON iad.id = m.destination_id
             LEFT JOIN index_statuses ist ON ist.id = m.status_id
         `+"WHERE "+w.join(" AND ");
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
-            console.error('Error with database query (message):', err);
+            logger.error('Error with database query (message):', err);
             return null
         } finally {
             await connection.release()
@@ -1622,10 +1616,10 @@ class Database {
     }
 
     // ─── PRICE ─────────────────────────────────────────────────────────
-    async waitForPrice(obj, timeMax = 60000){ return this._waitFor(this.checkPrice, obj, timeMax) }
+    async waitForPrice(obj, timeMax = 60000){ return this['_waitFor'](this.checkPrice, obj, timeMax) }
 
     async checkPrice({txHash, source, version, tick, fiat, value, validationStatus, status}){
-        let w = [], v = []
+        const w = [], v = []
         if (txHash != null){ w.push("itx.hash = ?"); v.push(txHash) }
         if (source != null){ w.push("ias.address = ?"); v.push(source) }
         if (version != null){ w.push("p.version = ?"); v.push(version) }
@@ -1649,12 +1643,12 @@ class Database {
             LEFT JOIN index_fiats ifi ON ifi.id = p.fiat_id
             LEFT JOIN index_statuses ist ON ist.id = p.status_id
         `+"WHERE "+w.join(" AND ")+" ORDER BY p.action_index DESC LIMIT 1";
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
-            console.error('Error with database query (price):', err);
+            logger.error('Error with database query (price):', err);
             return null
         } finally {
             await connection.release()
@@ -1662,10 +1656,10 @@ class Database {
     }
 
     // ─── FILE ──────────────────────────────────────────────────────────
-    async waitForFile(obj, timeMax = 60000){ return this._waitFor(this.checkFile, obj, timeMax) }
+    async waitForFile(obj, timeMax = 60000){ return this['_waitFor'](this.checkFile, obj, timeMax) }
 
     async checkFile({txHash, source, name, title, status}){
-        let w = [], v = []
+        const w = [], v = []
         if (txHash != null){ w.push("itx.hash = ?"); v.push(txHash) }
         if (source != null){ w.push("ia.address = ?"); v.push(source) }
         if (name != null){ w.push("f.name = ?"); v.push(name) }
@@ -1681,12 +1675,12 @@ class Database {
             LEFT JOIN index_memos im ON im.id = f.memo_id
             LEFT JOIN index_statuses ist ON ist.id = f.status_id
         `+"WHERE "+w.join(" AND ");
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
-            console.error('Error with database query (file):', err);
+            logger.error('Error with database query (file):', err);
             return null
         } finally {
             await connection.release()
@@ -1694,10 +1688,10 @@ class Database {
     }
 
     // ─── SLEEP ─────────────────────────────────────────────────────────
-    async waitForSleep(obj, timeMax = 60000){ return this._waitFor(this.checkSleep, obj, timeMax) }
+    async waitForSleep(obj, timeMax = 60000){ return this['_waitFor'](this.checkSleep, obj, timeMax) }
 
     async checkSleep({txHash, source, type, tick, resumeBlock, status}){
-        let w = [], v = []
+        const w = [], v = []
         if (txHash != null){ w.push("itx.hash = ?"); v.push(txHash) }
         if (source != null){ w.push("ia.address = ?"); v.push(source) }
         if (type != null){ w.push("s.type = ?"); v.push(type) }
@@ -1715,12 +1709,12 @@ class Database {
             LEFT JOIN index_memos im ON im.id = s.memo_id
             LEFT JOIN index_statuses ist ON ist.id = s.status_id
         `+"WHERE "+w.join(" AND ");
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
-            console.error('Error with database query (sleep):', err);
+            logger.error('Error with database query (sleep):', err);
             return null
         } finally {
             await connection.release()
@@ -1728,10 +1722,10 @@ class Database {
     }
 
     // ─── SWEEP ─────────────────────────────────────────────────────────
-    async waitForSweep(obj, timeMax = 60000){ return this._waitFor(this.checkSweep, obj, timeMax) }
+    async waitForSweep(obj, timeMax = 60000){ return this['_waitFor'](this.checkSweep, obj, timeMax) }
 
     async checkSweep({txHash, source, destination, balances, ownerships, orders, swaps, dispensers, status}){
-        let w = [], v = []
+        const w = [], v = []
         if (txHash != null){ w.push("itx.hash = ?"); v.push(txHash) }
         if (source != null){ w.push("ias.address = ?"); v.push(source) }
         if (destination != null){ w.push("iad.address = ?"); v.push(destination) }
@@ -1752,12 +1746,12 @@ class Database {
             LEFT JOIN index_memos im ON im.id = sw.memo_id
             LEFT JOIN index_statuses ist ON ist.id = sw.status_id
         `+"WHERE "+w.join(" AND ");
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
-            console.error('Error with database query (sweep):', err);
+            logger.error('Error with database query (sweep):', err);
             return null
         } finally {
             await connection.release()
@@ -1765,10 +1759,10 @@ class Database {
     }
 
     // ─── DIVIDEND ──────────────────────────────────────────────────────
-    async waitForDividend(obj, timeMax = 60000){ return this._waitFor(this.checkDividend, obj, timeMax) }
+    async waitForDividend(obj, timeMax = 60000){ return this['_waitFor'](this.checkDividend, obj, timeMax) }
 
     async checkDividend({txHash, source, tick, dividendTick, amount, status}){
-        let w = [], v = []
+        const w = [], v = []
         if (txHash != null){ w.push("itx.hash = ?"); v.push(txHash) }
         if (source != null){ w.push("ia.address = ?"); v.push(source) }
         if (tick != null){ w.push("itick.tick = ?"); v.push(tick) }
@@ -1787,12 +1781,12 @@ class Database {
             LEFT JOIN index_memos im ON im.id = d.memo_id
             LEFT JOIN index_statuses ist ON ist.id = d.status_id
         `+"WHERE "+w.join(" AND ");
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
-            console.error('Error with database query (dividend):', err);
+            logger.error('Error with database query (dividend):', err);
             return null
         } finally {
             await connection.release()
@@ -1800,10 +1794,10 @@ class Database {
     }
 
     // ─── CALLBACK ──────────────────────────────────────────────────────
-    async waitForCallback(obj, timeMax = 60000){ return this._waitFor(this.checkCallback, obj, timeMax) }
+    async waitForCallback(obj, timeMax = 60000){ return this['_waitFor'](this.checkCallback, obj, timeMax) }
 
     async checkCallback({txHash, source, tick, callbackTick, status}){
-        let w = [], v = []
+        const w = [], v = []
         if (txHash != null){ w.push("itx.hash = ?"); v.push(txHash) }
         if (source != null){ w.push("ia.address = ?"); v.push(source) }
         if (tick != null){ w.push("itick.tick = ?"); v.push(tick) }
@@ -1821,12 +1815,12 @@ class Database {
             LEFT JOIN index_memos im ON im.id = c.memo_id
             LEFT JOIN index_statuses ist ON ist.id = c.status_id
         `+"WHERE "+w.join(" AND ");
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
-            console.error('Error with database query (callback):', err);
+            logger.error('Error with database query (callback):', err);
             return null
         } finally {
             await connection.release()
@@ -1834,10 +1828,10 @@ class Database {
     }
 
     // ─── ORDER ─────────────────────────────────────────────────────────
-    async waitForOrder(obj, timeMax = 60000){ return this._waitFor(this.checkOrder, obj, timeMax) }
+    async waitForOrder(obj, timeMax = 60000){ return this['_waitFor'](this.checkOrder, obj, timeMax) }
 
     async checkOrder({txHash, source, giveCoin, giveTick, giveAmount, getCoin, getTick, getAmount, getAddress, expiration, status, orderStatus}){
-        let w = [], v = []
+        const w = [], v = []
         if (txHash != null){ w.push("itx.hash = ?"); v.push(txHash) }
         if (source != null){ w.push("ias.address = ?"); v.push(source) }
         if (giveCoin != null){ w.push("give_ic.coin = ?"); v.push(giveCoin) }
@@ -1877,12 +1871,12 @@ class Database {
                 AND os.action_index = (SELECT MAX(os2.action_index) FROM order_statuses os2 WHERE os2.order_action_index = o.action_index)
             LEFT JOIN index_statuses os_ist ON os_ist.id = os.status_id
         `+"WHERE "+w.join(" AND ");
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
-            console.error('Error with database query (order):', err);
+            logger.error('Error with database query (order):', err);
             return null
         } finally {
             await connection.release()
@@ -1890,10 +1884,10 @@ class Database {
     }
 
     // ─── ORDER MATCH ──────────────────────────────────────────────────
-    async waitForOrderMatch(obj, timeMax = 60000){ return this._waitFor(this.checkOrderMatch, obj, timeMax) }
+    async waitForOrderMatch(obj, timeMax = 60000){ return this['_waitFor'](this.checkOrderMatch, obj, timeMax) }
 
     async checkOrderMatch({giveActionIndex, getActionIndex, giveTick, getTick, giveAmount, getAmount, status}){
-        let w = [], v = []
+        const w = [], v = []
         if (giveActionIndex != null){ w.push("om.give_action_index = ?"); v.push(giveActionIndex) }
         if (getActionIndex != null){ w.push("om.get_action_index = ?"); v.push(getActionIndex) }
         if (giveTick != null){ w.push("give_it.tick = ?"); v.push(giveTick) }
@@ -1911,12 +1905,12 @@ class Database {
             LEFT JOIN index_tickers get_it ON get_it.id = om.get_tick_id
             LEFT JOIN index_statuses ist ON ist.id = om.status_id
         `+"WHERE "+w.join(" AND ");
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
-            console.error('Error with database query (order_match):', err);
+            logger.error('Error with database query (order_match):', err);
             return null
         } finally {
             await connection.release()
@@ -1924,10 +1918,10 @@ class Database {
     }
 
     // ─── SWAP ──────────────────────────────────────────────────────────
-    async waitForSwap(obj, timeMax = 60000){ return this._waitFor(this.checkSwap, obj, timeMax) }
+    async waitForSwap(obj, timeMax = 60000){ return this['_waitFor'](this.checkSwap, obj, timeMax) }
 
     async checkSwap({txHash, source, giveCoin, giveTick, giveAmount, getCoin, getTick, getAmount, getAddress, expiration, status, swapStatus}){
-        let w = [], v = []
+        const w = [], v = []
         if (txHash != null){ w.push("itx.hash = ?"); v.push(txHash) }
         if (source != null){ w.push("ias.address = ?"); v.push(source) }
         if (giveCoin != null){ w.push("give_ic.coin = ?"); v.push(giveCoin) }
@@ -1962,12 +1956,12 @@ class Database {
                 AND ss.action_index = (SELECT MAX(ss2.action_index) FROM swap_statuses ss2 WHERE ss2.swap_action_index = s.action_index)
             LEFT JOIN index_statuses ss_ist ON ss_ist.id = ss.status_id
         `+"WHERE "+w.join(" AND ");
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
-            console.error('Error with database query (swap):', err);
+            logger.error('Error with database query (swap):', err);
             return null
         } finally {
             await connection.release()
@@ -1975,10 +1969,10 @@ class Database {
     }
 
     // ─── SWAP MATCH ───────────────────────────────────────────────────
-    async waitForSwapMatch(obj, timeMax = 60000){ return this._waitFor(this.checkSwapMatch, obj, timeMax) }
+    async waitForSwapMatch(obj, timeMax = 60000){ return this['_waitFor'](this.checkSwapMatch, obj, timeMax) }
 
     async checkSwapMatch({giveActionIndex, getActionIndex, giveTick, getTick, giveAmount, getAmount, status}){
-        let w = [], v = []
+        const w = [], v = []
         if (giveActionIndex != null){ w.push("sm.give_action_index = ?"); v.push(giveActionIndex) }
         if (getActionIndex != null){ w.push("sm.get_action_index = ?"); v.push(getActionIndex) }
         if (giveTick != null){ w.push("give_it.tick = ?"); v.push(giveTick) }
@@ -1996,12 +1990,12 @@ class Database {
             LEFT JOIN index_tickers get_it ON get_it.id = sm.get_tick_id
             LEFT JOIN index_statuses ist ON ist.id = sm.status_id
         `+"WHERE "+w.join(" AND ");
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
-            console.error('Error with database query (swap_match):', err);
+            logger.error('Error with database query (swap_match):', err);
             return null
         } finally {
             await connection.release()
@@ -2009,10 +2003,10 @@ class Database {
     }
 
     // ─── BATCH ─────────────────────────────────────────────────────────
-    async waitForBatch(obj, timeMax = 60000){ return this._waitFor(this.checkBatch, obj, timeMax) }
+    async waitForBatch(obj, timeMax = 60000){ return this['_waitFor'](this.checkBatch, obj, timeMax) }
 
     async checkBatch({txHash, source, status}){
-        let w = [], v = []
+        const w = [], v = []
         if (txHash != null){ w.push("itx.hash = ?"); v.push(txHash) }
         if (source != null){ w.push("ia.address = ?"); v.push(source) }
         if (status != null){ w.push("ist.status = ?"); v.push(status) }
@@ -2025,12 +2019,12 @@ class Database {
             LEFT JOIN index_addresses ia ON ia.id = tr.source_id
             LEFT JOIN index_statuses ist ON ist.id = b.status_id
         `+"WHERE "+w.join(" AND ");
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
-            console.error('Error with database query (batch):', err);
+            logger.error('Error with database query (batch):', err);
             return null
         } finally {
             await connection.release()
@@ -2038,10 +2032,10 @@ class Database {
     }
 
     // ─── LINK ──────────────────────────────────────────────────────────
-    async waitForLink(obj, timeMax = 60000){ return this._waitFor(this.checkLink, obj, timeMax) }
+    async waitForLink(obj, timeMax = 60000){ return this['_waitFor'](this.checkLink, obj, timeMax) }
 
     async checkLink({txHash, source, coin1, coin1ActionIndex, coin2, coin2ActionIndex, status}){
-        let w = [], v = []
+        const w = [], v = []
         if (txHash != null){ w.push("itx.hash = ?"); v.push(txHash) }
         if (source != null){ w.push("ia.address = ?"); v.push(source) }
         if (coin1 != null){ w.push("ic1.coin = ?"); v.push(coin1) }
@@ -2062,12 +2056,12 @@ class Database {
             LEFT JOIN index_memos im ON im.id = l.memo_id
             LEFT JOIN index_statuses ist ON ist.id = l.status_id
         `+"WHERE "+w.join(" AND ");
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
-            console.error('Error with database query (link):', err);
+            logger.error('Error with database query (link):', err);
             return null
         } finally {
             await connection.release()
@@ -2075,10 +2069,10 @@ class Database {
     }
 
     // ─── ORDER_MATCH ──────────────────────────────────────────────────
-    async waitForOrderMatch(obj, timeMax = 60000){ return this._waitFor(this.checkOrderMatch, obj, timeMax) }
+    async waitForOrderMatch(obj, timeMax = 60000){ return this['_waitFor'](this.checkOrderMatch, obj, timeMax) }
 
     async checkOrderMatch({giveActionIndex, getActionIndex, status}){
-        let w = [], v = []
+        const w = [], v = []
         if (giveActionIndex != null){ w.push("m.give_action_index = ?"); v.push(giveActionIndex) }
         if (getActionIndex != null){ w.push("m.get_action_index = ?"); v.push(getActionIndex) }
         if (status != null){ w.push("ist.status = ?"); v.push(status) }
@@ -2087,12 +2081,12 @@ class Database {
             FROM order_matches m
             LEFT JOIN index_statuses ist ON ist.id = m.status_id
         `+"WHERE "+w.join(" AND ");
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
-            console.error('Error with database query (order_match):', err);
+            logger.error('Error with database query (order_match):', err);
             return null
         } finally {
             await connection.release()
@@ -2100,10 +2094,10 @@ class Database {
     }
 
     // ─── COINPAY ──────────────────────────────────────────────────────
-    async waitForCoinpay(obj, timeMax = 60000){ return this._waitFor(this.checkCoinpay, obj, timeMax) }
+    async waitForCoinpay(obj, timeMax = 60000){ return this['_waitFor'](this.checkCoinpay, obj, timeMax) }
 
     async checkCoinpay({txHash, obligationActionIndex, status}){
-        let w = [], v = []
+        const w = [], v = []
         if (txHash != null){ w.push("itx.hash = ?"); v.push(txHash) }
         if (obligationActionIndex != null){ w.push("m.obligation_action_index = ?"); v.push(obligationActionIndex) }
         if (status != null){ w.push("ist.status = ?"); v.push(status) }
@@ -2115,12 +2109,12 @@ class Database {
             LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
             LEFT JOIN index_statuses ist ON ist.id = m.status_id
         `+"WHERE "+w.join(" AND ");
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
-            console.error('Error with database query (coinpay):', err);
+            logger.error('Error with database query (coinpay):', err);
             return null
         } finally {
             await connection.release()
@@ -2128,10 +2122,10 @@ class Database {
     }
 
     // ─── COINPAY_OBLIGATION ───────────────────────────────────────────
-    async waitForCoinpayObligation(obj, timeMax = 60000){ return this._waitFor(this.checkCoinpayObligation, obj, timeMax) }
+    async waitForCoinpayObligation(obj, timeMax = 60000){ return this['_waitFor'](this.checkCoinpayObligation, obj, timeMax) }
 
     async checkCoinpayObligation({actionIndex, coinpayStatus}){
-        let w = [], v = []
+        const w = [], v = []
         if (actionIndex != null){ w.push("co.action_index = ?"); v.push(actionIndex) }
         if (coinpayStatus != null){ w.push("ist.status = ?"); v.push(coinpayStatus) }
         const query = `
@@ -2144,12 +2138,12 @@ class Database {
             INNER JOIN index_statuses ist ON ist.id = cs.status_id
             WHERE cs.action_index = (SELECT MAX(cs2.action_index) FROM coinpay_statuses cs2 WHERE cs2.coinpay_action_index = co.action_index)
               AND `+w.join(" AND ");
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
         } catch (err) {
-            console.error('Error with database query (coinpay_obligation):', err);
+            logger.error('Error with database query (coinpay_obligation):', err);
             return null
         } finally {
             await connection.release()
@@ -2158,15 +2152,15 @@ class Database {
 
     // ── VM / Contract Methods ──
 
-    async waitForContract(params, timeMax = 60000){ return this._waitFor(this.checkContract, params, timeMax) }
+    async waitForContract(params, timeMax = 60000){ return this['_waitFor'](this.checkContract, params, timeMax) }
 
     async checkContract({source, txHash, status}){
-        let w = [], v = []
+        const w = [], v = []
         if(source){ w.push("ia.address = ?"); v.push(source); }
         if(txHash){ w.push("itx.hash = ?"); v.push(txHash); }
         if(status){ w.push("ist.status = ?"); v.push(status); }
         if(w.length === 0) return null
-        let query = `SELECT c.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status
+        const query = `SELECT c.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status
             FROM contracts c
             LEFT JOIN actions act ON act.action_index = c.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
@@ -2174,24 +2168,24 @@ class Database {
             LEFT JOIN index_addresses ia ON ia.id = c.source_id
             LEFT JOIN index_statuses ist ON ist.id = c.status_id
             WHERE ` + w.join(" AND ")
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
         } catch(err){ return null } finally { await connection.release() }
     }
 
-    async waitForExecution(params, timeMax = 60000){ return this._waitFor(this.checkExecution, params, timeMax) }
+    async waitForExecution(params, timeMax = 60000){ return this['_waitFor'](this.checkExecution, params, timeMax) }
 
     async checkExecution({contractIndex, caller, methodName, txHash, status}){
-        let w = [], v = []
+        const w = [], v = []
         if(contractIndex){ w.push("e.contract_index = ?"); v.push(contractIndex); }
         if(caller){ w.push("ia.address = ?"); v.push(caller); }
         if(methodName){ w.push("e.method_name = ?"); v.push(methodName); }
         if(txHash){ w.push("itx.hash = ?"); v.push(txHash); }
         if(status){ w.push("ist.status = ?"); v.push(status); }
         if(w.length === 0) return null
-        let query = `SELECT e.*, ia.address AS caller, itx.hash AS tx_hash, ist.status AS status
+        const query = `SELECT e.*, ia.address AS caller, itx.hash AS tx_hash, ist.status AS status
             FROM contract_executions e
             LEFT JOIN actions act ON act.action_index = e.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
@@ -2199,17 +2193,17 @@ class Database {
             LEFT JOIN index_addresses ia ON ia.id = e.caller_id
             LEFT JOIN index_statuses ist ON ist.id = e.status_id
             WHERE ` + w.join(" AND ")
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
         } catch(err){ return null } finally { await connection.release() }
     }
 
-    async waitForDeposit(params, timeMax = 60000){ return this._waitFor(this.checkDeposit, params, timeMax) }
+    async waitForDeposit(params, timeMax = 60000){ return this['_waitFor'](this.checkDeposit, params, timeMax) }
 
     async checkDeposit({source, contractIndex, tick, amount, txHash, status}){
-        let w = [], v = []
+        const w = [], v = []
         if(source){ w.push("ia.address = ?"); v.push(source); }
         if(contractIndex){ w.push("d.contract_index = ?"); v.push(contractIndex); }
         if(tick){ w.push("itick.tick = ?"); v.push(tick); }
@@ -2217,7 +2211,7 @@ class Database {
         if(txHash){ w.push("itx.hash = ?"); v.push(txHash); }
         if(status){ w.push("ist.status = ?"); v.push(status); }
         if(w.length === 0) return null
-        let query = `SELECT d.*, ia.address AS source, itick.tick AS tick, itx.hash AS tx_hash, ist.status AS status
+        const query = `SELECT d.*, ia.address AS source, itick.tick AS tick, itx.hash AS tx_hash, ist.status AS status
             FROM deposits d
             LEFT JOIN actions act ON act.action_index = d.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
@@ -2226,17 +2220,17 @@ class Database {
             LEFT JOIN index_tickers itick ON itick.id = d.tick_id
             LEFT JOIN index_statuses ist ON ist.id = d.status_id
             WHERE ` + w.join(" AND ")
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
         } catch(err){ return null } finally { await connection.release() }
     }
 
-    async waitForWithdrawal(params, timeMax = 60000){ return this._waitFor(this.checkWithdrawal, params, timeMax) }
+    async waitForWithdrawal(params, timeMax = 60000){ return this['_waitFor'](this.checkWithdrawal, params, timeMax) }
 
     async checkWithdrawal({source, contractIndex, tick, amount, txHash, status}){
-        let w = [], v = []
+        const w = [], v = []
         if(source){ w.push("ia.address = ?"); v.push(source); }
         if(contractIndex){ w.push("wd.contract_index = ?"); v.push(contractIndex); }
         if(tick){ w.push("itick.tick = ?"); v.push(tick); }
@@ -2244,7 +2238,7 @@ class Database {
         if(txHash){ w.push("itx.hash = ?"); v.push(txHash); }
         if(status){ w.push("ist.status = ?"); v.push(status); }
         if(w.length === 0) return null
-        let query = `SELECT wd.*, ia.address AS source, itick.tick AS tick, itx.hash AS tx_hash, ist.status AS status
+        const query = `SELECT wd.*, ia.address AS source, itick.tick AS tick, itx.hash AS tx_hash, ist.status AS status
             FROM withdrawals wd
             LEFT JOIN actions act ON act.action_index = wd.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
@@ -2253,7 +2247,7 @@ class Database {
             LEFT JOIN index_tickers itick ON itick.id = wd.tick_id
             LEFT JOIN index_statuses ist ON ist.id = wd.status_id
             WHERE ` + w.join(" AND ")
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
@@ -2262,16 +2256,16 @@ class Database {
 
     // ── Staking Methods ──
 
-    async waitForStake(params, timeMax = 60000){ return this._waitFor(this.checkStake, params, timeMax) }
+    async waitForStake(params, timeMax = 60000){ return this['_waitFor'](this.checkStake, params, timeMax) }
 
     async checkStake({source, signingPubkey, txHash, status}){
-        let w = [], v = []
+        const w = [], v = []
         if(source){ w.push("ia.address = ?"); v.push(source); }
         if(signingPubkey){ w.push("ip.pubkey = ?"); v.push(String(signingPubkey).toLowerCase()); }
         if(txHash){ w.push("itx.hash = ?"); v.push(txHash); }
         if(status){ w.push("ist.status = ?"); v.push(status); }
         if(w.length === 0) return null
-        let query = `SELECT s.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status, ip.pubkey AS signing_pubkey
+        const query = `SELECT s.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status, ip.pubkey AS signing_pubkey
             FROM stakes s
             LEFT JOIN actions act ON act.action_index = s.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
@@ -2280,7 +2274,7 @@ class Database {
             LEFT JOIN index_statuses ist ON ist.id = s.status_id
             LEFT JOIN index_pubkeys ip ON ip.id = s.signing_pubkey_id
             WHERE ` + w.join(" AND ")
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
@@ -2293,28 +2287,28 @@ class Database {
     // skew the deterministic responsible-set selection and make those tests
     // flaky. Zero on a freshly-reset regtest chain.
     async getActiveStakeCount(){
-        let query = `SELECT COUNT(*) AS n
+        const query = `SELECT COUNT(*) AS n
             FROM stakes s
             LEFT JOIN index_statuses ist ON ist.id = s.status_id
             WHERE ist.status = 'valid'
               AND (s.deactivation_block IS NULL OR s.deactivation_block = 0)`
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query)
             return rows.length > 0 ? Number(rows[0].n) : 0
         } finally { await connection.release() }
     }
 
-    async waitForUnstake(params, timeMax = 60000){ return this._waitFor(this.checkUnstake, params, timeMax) }
+    async waitForUnstake(params, timeMax = 60000){ return this['_waitFor'](this.checkUnstake, params, timeMax) }
 
     async checkUnstake({source, signingPubkey, txHash, status}){
-        let w = [], v = []
+        const w = [], v = []
         if(source){ w.push("ia.address = ?"); v.push(source); }
         if(signingPubkey){ w.push("ip.pubkey = ?"); v.push(String(signingPubkey).toLowerCase()); }
         if(txHash){ w.push("itx.hash = ?"); v.push(txHash); }
         if(status){ w.push("ist.status = ?"); v.push(status); }
         if(w.length === 0) return null
-        let query = `SELECT u.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status, ip.pubkey AS signing_pubkey
+        const query = `SELECT u.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status, ip.pubkey AS signing_pubkey
             FROM unstakes u
             LEFT JOIN actions act ON act.action_index = u.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
@@ -2323,7 +2317,7 @@ class Database {
             LEFT JOIN index_statuses ist ON ist.id = u.status_id
             LEFT JOIN index_pubkeys ip ON ip.id = u.signing_pubkey_id
             WHERE ` + w.join(" AND ")
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
@@ -2332,41 +2326,41 @@ class Database {
 
     // ── Attestation Methods ──
 
-    async waitForAttestationRequest(params, timeMax = 60000){ return this._waitFor(this.checkAttestationRequest, params, timeMax) }
+    async waitForAttestationRequest(params, timeMax = 60000){ return this['_waitFor'](this.checkAttestationRequest, params, timeMax) }
 
     async checkAttestationRequest({requestId, txHash, requestStatus}){
-        let w = [], v = []
+        const w = [], v = []
         if(requestId){     w.push("ar.request_id = ?");      v.push(String(requestId).toLowerCase()); }
         if(txHash){        w.push("itx.hash = ?");           v.push(txHash); }
         if(requestStatus){ w.push("ar.request_status = ?");  v.push(requestStatus); }
         if(w.length === 0) return null
         // ATTEST request + response rows now share the consolidated `attests`
         // table, version-discriminated (0 = request, 1 = response).
-        let query = `SELECT ar.*, itx.hash AS tx_hash
+        const query = `SELECT ar.*, itx.hash AS tx_hash
             FROM attests ar
             LEFT JOIN actions act ON act.action_index = ar.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
             LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
             WHERE ar.version = 0 AND ` + w.join(" AND ") + `
             LIMIT 1`
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ this._warnOnSchemaError('checkAttestationRequest', err); return null } finally { await connection.release() }
+        } catch(err){ this['_warnOnSchemaError']('checkAttestationRequest', err); return null } finally { await connection.release() }
     }
 
-    async waitForAttestationResponse(params, timeMax = 60000){ return this._waitFor(this.checkAttestationResponse, params, timeMax) }
+    async waitForAttestationResponse(params, timeMax = 60000){ return this['_waitFor'](this.checkAttestationResponse, params, timeMax) }
 
     async checkAttestationResponse({requestId, txHash, responseStatus, status}){
-        let w = [], v = []
+        const w = [], v = []
         if(requestId){       w.push("ar.request_id = ?");       v.push(String(requestId).toLowerCase()); }
         if(txHash){          w.push("itx.hash = ?");            v.push(txHash); }
         if(responseStatus){  w.push("ar.response_status = ?");  v.push(responseStatus); }
         if(status){          w.push("ist.status = ?");          v.push(status); }
         if(w.length === 0) return null
         // Response rows live in the consolidated `attests` table as version = 1.
-        let query = `SELECT ar.*, itx.hash AS tx_hash, ist.status AS status
+        const query = `SELECT ar.*, itx.hash AS tx_hash, ist.status AS status
             FROM attests ar
             LEFT JOIN actions act ON act.action_index = ar.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
@@ -2374,19 +2368,19 @@ class Database {
             LEFT JOIN index_statuses ist ON ist.id = ar.status_id
             WHERE ar.version = 1 AND ` + w.join(" AND ") + `
             LIMIT 1`
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ this._warnOnSchemaError('checkAttestationResponse', err); return null } finally { await connection.release() }
+        } catch(err){ this['_warnOnSchemaError']('checkAttestationResponse', err); return null } finally { await connection.release() }
     }
 
     async getAttestationValidatorSignatures(responseActionIndex){
         // Verified federation sigs are no longer a separate table; they're
         // inlined as a JSON array (`[{pubkey, sig}, ...]`) on the version = 1
         // response row. Parse + reshape to the prior {validator_pubkey, validator_sig} form.
-        let query = `SELECT validator_signatures FROM attests WHERE action_index = ? AND version = 1 LIMIT 1`
-        let connection = await this.getConnection()
+        const query = `SELECT validator_signatures FROM attests WHERE action_index = ? AND version = 1 LIMIT 1`
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, [responseActionIndex])
             // No response row yet, or one with nothing recorded: report no
@@ -2400,10 +2394,10 @@ class Database {
             // array; guard the shape before mapping it below.
             if(!Array.isArray(parsed)) return []
             return parsed.map(s => ({ validator_pubkey: s.pubkey, validator_sig: s.sig }))
-        } catch(err){ this._warnOnSchemaError('getAttestationValidatorSignatures', err); return [] } finally { await connection.release() }
+        } catch(err){ this['_warnOnSchemaError']('getAttestationValidatorSignatures', err); return [] } finally { await connection.release() }
     }
 
-    async waitForAttestationRequestCount(params, timeMax = 60000){ return this._waitFor(this.checkAttestationRequestCount, params, timeMax) }
+    async waitForAttestationRequestCount(params, timeMax = 60000){ return this['_waitFor'](this.checkAttestationRequestCount, params, timeMax) }
 
     // EVERY ATTEST v0 (request) row a contract has emitted, oldest first, with the
     // action-level verdict text joined in; null until there are at least `count` of
@@ -2417,21 +2411,21 @@ class Database {
     // has to see the verdict STRING - request_status only says pending/rejected, it
     // never says which rule refused the row.
     async checkAttestationRequestCount({contractIndex, count}){
-        let rows = await this.getAttestationRequestsByContract(contractIndex)
+        const rows = await this.getAttestationRequestsByContract(contractIndex)
         if(rows.length < (Number(count) || 1)) return null
         return rows
     }
 
     async getAttestationRequestsByContract(contractIndex){
-        let query = `SELECT ar.*, ist.status AS status
+        const query = `SELECT ar.*, ist.status AS status
             FROM attests ar
             LEFT JOIN index_statuses ist ON ist.id = ar.status_id
             WHERE ar.version = 0 AND ar.contract_index = ?
             ORDER BY ar.action_index ASC`
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             return await connection.query(query, [contractIndex])
-        } catch(err){ this._warnOnSchemaError('getAttestationRequestsByContract', err); return [] } finally { await connection.release() }
+        } catch(err){ this['_warnOnSchemaError']('getAttestationRequestsByContract', err); return [] } finally { await connection.release() }
     }
 
     // Distinguish a schema drift (missing table / renamed column) from a normal
@@ -2439,9 +2433,9 @@ class Database {
     // return null/[] while waiting, so a swallowed SQL error can otherwise
     // masquerade as a benign timeout instead of the schema mismatch it is.
     // Surface those loudly.
-    _warnOnSchemaError(where, err){
+    ['_warnOnSchemaError'](where, err){
         if(err && (err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR')){
-            console.error('[db] ' + where + ': attestation schema drift: ' + err.message +
+            logger.error('[db] ' + where + ': attestation schema drift: ' + err.message +
                 ' (a query references a table/column that no longer exists)')
         }
     }
@@ -2460,15 +2454,15 @@ class Database {
     // read-current comment use; block_index/action_index is a second ordering of
     // the same append-only sequence, so aligning removes a needless divergence.
     async getContractState(contractIndex, stateKey){
-        let query = `SELECT * FROM contract_state WHERE contract_index = ? AND state_key_bin = ? ORDER BY id DESC LIMIT 1`
-        let connection = await this.getConnection()
+        const query = `SELECT * FROM contract_state WHERE contract_index = ? AND state_key_bin = ? ORDER BY id DESC LIMIT 1`
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, [contractIndex, stateKey])
             return rows.length > 0 ? rows[0] : null
-        } catch(err){ this._warnOnSchemaError('getContractState', err); return null } finally { await connection.release() }
+        } catch(err){ this['_warnOnSchemaError']('getContractState', err); return null } finally { await connection.release() }
     }
 
-    async waitForDelegation(params, timeMax = 60000){ return this._waitFor(this.checkDelegation, params, timeMax) }
+    async waitForDelegation(params, timeMax = 60000){ return this['_waitFor'](this.checkDelegation, params, timeMax) }
 
     // `signingPubkey` and `deactivated` exist for the DEL-1 revoke shape:
     // at/after DELEGATE_REVOKE_NO_REINSERT (armed from genesis on regtest) a revoke
@@ -2477,7 +2471,7 @@ class Database {
     // (source, pubkey) and read that column. A txHash filter can never see it: the
     // parent row carries the DELEGATE v0 transaction, not the revoke's.
     async checkDelegation({source, signingPubkey, txHash, status, deactivated}){
-        let w = [], v = []
+        const w = [], v = []
         if(source){ w.push("ia.address = ?"); v.push(source); }
         if(signingPubkey){ w.push("ip.pubkey = ?"); v.push(String(signingPubkey).toLowerCase()); }
         if(txHash){ w.push("itx.hash = ?"); v.push(txHash); }
@@ -2485,7 +2479,7 @@ class Database {
         if(deactivated === true)  w.push("d.deactivation_block IS NOT NULL")
         if(deactivated === false) w.push("d.deactivation_block IS NULL")
         if(w.length === 0) return null
-        let query = `SELECT d.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status, ip.pubkey AS signing_pubkey
+        const query = `SELECT d.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status, ip.pubkey AS signing_pubkey
             FROM delegations d
             LEFT JOIN actions act ON act.action_index = d.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
@@ -2494,7 +2488,7 @@ class Database {
             LEFT JOIN index_statuses ist ON ist.id = d.status_id
             LEFT JOIN index_pubkeys ip ON ip.id = d.signing_pubkey_id
             WHERE ` + w.join(" AND ") + ` ORDER BY d.action_index DESC`
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
@@ -2506,16 +2500,16 @@ class Database {
     // row would read as an active delegation and re-add the key to the
     // effective signer set), so they are invisible to checkDelegation.
 
-    async waitForStakeKeyRevocation(params, timeMax = 60000){ return this._waitFor(this.checkStakeKeyRevocation, params, timeMax) }
+    async waitForStakeKeyRevocation(params, timeMax = 60000){ return this['_waitFor'](this.checkStakeKeyRevocation, params, timeMax) }
 
     async checkStakeKeyRevocation({source, signingPubkey, txHash, status}){
-        let w = [], v = []
+        const w = [], v = []
         if(source){ w.push("ia.address = ?"); v.push(source); }
         if(signingPubkey){ w.push("ip.pubkey = ?"); v.push(String(signingPubkey).toLowerCase()); }
         if(txHash){ w.push("itx.hash = ?"); v.push(txHash); }
         if(status){ w.push("ist.status = ?"); v.push(status); }
         if(w.length === 0) return null
-        let query = `SELECT r.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status, ip.pubkey AS signing_pubkey
+        const query = `SELECT r.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status, ip.pubkey AS signing_pubkey
             FROM stake_key_revocations r
             LEFT JOIN actions act ON act.action_index = r.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
@@ -2524,7 +2518,7 @@ class Database {
             LEFT JOIN index_statuses ist ON ist.id = r.status_id
             LEFT JOIN index_pubkeys ip ON ip.id = r.signing_pubkey_id
             WHERE ` + w.join(" AND ")
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
@@ -2533,10 +2527,10 @@ class Database {
 
     // ── Contract-targeted staking (STAKE v3 / UNSTAKE v1 / DELEGATE v1) ──
 
-    async waitForContractStake(params, timeMax = 60000){ return this._waitFor(this.checkContractStake, params, timeMax) }
+    async waitForContractStake(params, timeMax = 60000){ return this['_waitFor'](this.checkContractStake, params, timeMax) }
 
     async checkContractStake({source, signingPubkey, contractIndex, tick, txHash, status}){
-        let w = [], v = []
+        const w = [], v = []
         if(source){ w.push("ia.address = ?"); v.push(source) }
         if(signingPubkey){ w.push("ip.pubkey = ?"); v.push(String(signingPubkey).toLowerCase()) }
         if(contractIndex !== undefined && contractIndex !== null){ w.push("cs.target_contract_index = ?"); v.push(Number(contractIndex)) }
@@ -2544,7 +2538,7 @@ class Database {
         if(txHash){ w.push("itx.hash = ?"); v.push(txHash) }
         if(status){ w.push("ist.status = ?"); v.push(status) }
         if(w.length === 0) return null
-        let query = `SELECT cs.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status,
+        const query = `SELECT cs.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status,
                             ip.pubkey AS signing_pubkey, t.tick AS tick
             FROM contract_stakes cs
             LEFT JOIN actions act ON act.action_index = cs.action_index
@@ -2555,17 +2549,17 @@ class Database {
             LEFT JOIN index_pubkeys ip ON ip.id = cs.signing_pubkey_id
             LEFT JOIN index_tickers t ON t.id = cs.tick_id
             WHERE ` + w.join(" AND ")
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
         } catch(err){ return null } finally { await connection.release() }
     }
 
-    async waitForContractUnstake(params, timeMax = 60000){ return this._waitFor(this.checkContractUnstake, params, timeMax) }
+    async waitForContractUnstake(params, timeMax = 60000){ return this['_waitFor'](this.checkContractUnstake, params, timeMax) }
 
     async checkContractUnstake({source, signingPubkey, contractIndex, tick, txHash, status}){
-        let w = [], v = []
+        const w = [], v = []
         if(source){ w.push("ia.address = ?"); v.push(source) }
         if(signingPubkey){ w.push("ip.pubkey = ?"); v.push(String(signingPubkey).toLowerCase()) }
         if(contractIndex !== undefined && contractIndex !== null){ w.push("cu.target_contract_index = ?"); v.push(Number(contractIndex)) }
@@ -2573,7 +2567,7 @@ class Database {
         if(txHash){ w.push("itx.hash = ?"); v.push(txHash) }
         if(status){ w.push("ist.status = ?"); v.push(status) }
         if(w.length === 0) return null
-        let query = `SELECT cu.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status,
+        const query = `SELECT cu.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status,
                             ip.pubkey AS signing_pubkey, t.tick AS tick
             FROM contract_unstakes cu
             LEFT JOIN actions act ON act.action_index = cu.action_index
@@ -2584,24 +2578,24 @@ class Database {
             LEFT JOIN index_pubkeys ip ON ip.id = cu.signing_pubkey_id
             LEFT JOIN index_tickers t ON t.id = cu.tick_id
             WHERE ` + w.join(" AND ")
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
         } catch(err){ return null } finally { await connection.release() }
     }
 
-    async waitForContractDelegation(params, timeMax = 60000){ return this._waitFor(this.checkContractDelegation, params, timeMax) }
+    async waitForContractDelegation(params, timeMax = 60000){ return this['_waitFor'](this.checkContractDelegation, params, timeMax) }
 
     async checkContractDelegation({source, contractIndex, tick, txHash, status}){
-        let w = [], v = []
+        const w = [], v = []
         if(source){ w.push("ia.address = ?"); v.push(source) }
         if(contractIndex !== undefined && contractIndex !== null){ w.push("cd.target_contract_index = ?"); v.push(Number(contractIndex)) }
         if(tick){ w.push("t.tick = ?"); v.push(tick) }
         if(txHash){ w.push("itx.hash = ?"); v.push(txHash) }
         if(status){ w.push("ist.status = ?"); v.push(status) }
         if(w.length === 0) return null
-        let query = `SELECT cd.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status, t.tick AS tick
+        const query = `SELECT cd.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status, t.tick AS tick
             FROM contract_delegations cd
             LEFT JOIN actions act ON act.action_index = cd.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
@@ -2610,44 +2604,44 @@ class Database {
             LEFT JOIN index_statuses ist ON ist.id = cd.status_id
             LEFT JOIN index_tickers t ON t.id = cd.tick_id
             WHERE ` + w.join(" AND ")
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
         } catch(err){ return null } finally { await connection.release() }
     }
 
-    async waitForSlashEvent(params, timeMax = 60000){ return this._waitFor(this.checkSlashEvent, params, timeMax) }
+    async waitForSlashEvent(params, timeMax = 60000){ return this['_waitFor'](this.checkSlashEvent, params, timeMax) }
 
     async checkSlashEvent({contractIndex, signingPubkey, tick, executionIndex}){
-        let w = [], v = []
+        const w = [], v = []
         if(contractIndex !== undefined && contractIndex !== null){ w.push("se.target_contract_index = ?"); v.push(Number(contractIndex)) }
         if(signingPubkey){ w.push("ip.pubkey = ?"); v.push(String(signingPubkey).toLowerCase()) }
         if(tick){ w.push("t.tick = ?"); v.push(tick) }
         if(executionIndex !== undefined && executionIndex !== null){ w.push("se.execution_index = ?"); v.push(Number(executionIndex)) }
         if(w.length === 0) return null
-        let query = `SELECT se.*, ip.pubkey AS signing_pubkey, t.tick AS tick, ia.address AS destination_address
+        const query = `SELECT se.*, ip.pubkey AS signing_pubkey, t.tick AS tick, ia.address AS destination_address
             FROM slash_events se
             LEFT JOIN index_pubkeys ip ON ip.id = se.signing_pubkey_id
             LEFT JOIN index_tickers t ON t.id = se.tick_id
             LEFT JOIN index_addresses ia ON ia.id = se.destination_id
             WHERE ` + w.join(" AND ") + ` ORDER BY se.id ASC LIMIT 1`
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null
         } catch(err){ return null } finally { await connection.release() }
     }
 
-    async waitForRewardClaim(params, timeMax = 60000){ return this._waitFor(this.checkRewardClaim, params, timeMax) }
+    async waitForRewardClaim(params, timeMax = 60000){ return this['_waitFor'](this.checkRewardClaim, params, timeMax) }
 
     async checkRewardClaim({source, txHash, status}){
-        let w = [], v = []
+        const w = [], v = []
         if(source){ w.push("ia.address = ?"); v.push(source); }
         if(txHash){ w.push("itx.hash = ?"); v.push(txHash); }
         if(status){ w.push("ist.status = ?"); v.push(status); }
         if(w.length === 0) return null
-        let query = `SELECT rc.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status
+        const query = `SELECT rc.*, ia.address AS source, itx.hash AS tx_hash, ist.status AS status
             FROM reward_claims rc
             LEFT JOIN actions act ON act.action_index = rc.action_index
             LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
@@ -2655,7 +2649,7 @@ class Database {
             LEFT JOIN index_addresses ia ON ia.id = rc.source_id
             LEFT JOIN index_statuses ist ON ist.id = rc.status_id
             WHERE ` + w.join(" AND ")
-        let connection = await this.getConnection()
+        const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, v)
             return rows.length > 0 ? rows[0] : null

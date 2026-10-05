@@ -151,7 +151,7 @@ async function teardownFallthrough() {
     // one whose mirrors are permanently starved.
     if (venue && withheld) {
         for (const ix of venue.indexers) {
-            try { venue.releaseMirrorTable(ix.index, MIRROR_TABLE) } catch (_) { /* venue is going away */ }
+            try { venue.releaseMirrorTable(ix.index, MIRROR_TABLE) } catch (internal) { /* venue is going away */ }
         }
     }
     if (testServer) await testServer.close()

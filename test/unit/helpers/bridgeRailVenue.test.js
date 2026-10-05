@@ -1008,12 +1008,12 @@ describe('bridgeRailVenue: the pure layer', function () {
             const events = [];
             const venue = new BridgeRailVenue({ label: 'unit', identities: identity });
             venue.btcVenue = fakeBtcVenue(events);
-            venue._hubIndexerOverrides[1] = 'http://127.0.0.1:1';
+            venue['_hubIndexerOverrides'][1] = 'http://127.0.0.1:1';
 
             const selected = await venue.setHubOriginIndexer(1, null);
 
             assert.deepStrictEqual(selected, { BTC_INDEXER_URL: 'http://127.0.0.1:41001' });
-            assert.ok(!Object.prototype.hasOwnProperty.call(venue._hubIndexerOverrides, 1));
+            assert.ok(!Object.prototype.hasOwnProperty.call(venue['_hubIndexerOverrides'], 1));
             assert.deepStrictEqual(events, ['stop:1', 'start:1']);
         });
 
@@ -1032,7 +1032,7 @@ describe('bridgeRailVenue: the pure layer', function () {
                 /standing BTC indexer has no per-hub origin endpoint to replace/);
 
             assert.strictEqual(venue.btcVenue.hubEnv, originalHubEnv);
-            assert.deepStrictEqual(venue._hubIndexerOverrides, {});
+            assert.deepStrictEqual(venue['_hubIndexerOverrides'], {});
             assert.deepStrictEqual(events, []);
         });
     });
@@ -1201,12 +1201,12 @@ describe('bridgeRailVenue: the pure layer', function () {
             const answer = await venue.waitForRailSettled('XCHAIN', { timeoutMs: 4000 });
             assert.strictEqual(answer, null,
                 'an unreadable source indexer was reported as a drained rail');
-            const stages = (venue._lastSettlePoll.pending || []).map((p) => p.stage + ':' + p.chain);
+            const stages = (venue['_lastSettlePoll'].pending || []).map((p) => p.stage + ':' + p.chain);
             assert.deepStrictEqual(stages.sort(),
                 ['source read unreadable:BTC', 'source read unreadable:DOGE'],
                 'the outstanding list does not name the chains whose read failed: ' +
-                JSON.stringify(venue._lastSettlePoll));
-            assert.match(JSON.stringify(venue._lastSettlePoll), /ECONNREFUSED/,
+                JSON.stringify(venue['_lastSettlePoll']));
+            assert.match(JSON.stringify(venue['_lastSettlePoll']), /ECONNREFUSED/,
                 'the failure that stopped the read is not carried into the outstanding list');
         });
 
@@ -1266,7 +1266,7 @@ describe('bridgeRailVenue: the pure layer', function () {
                 const run = async (row, opts) => {
                     const sqls = [];
                     const fake = {
-                        _conn: { query: async (sql, params) => {
+                        ['_conn']: { query: async (sql, params) => {
                             sqls.push({ sql: sql.replace(/\s+/g, ' ').trim(), params: params });
                             return /^SELECT/.test(sql.trim()) ? [{ id: 7 }] : { affectedRows: 1 };
                         } },
@@ -1300,7 +1300,7 @@ describe('bridgeRailVenue: the pure layer', function () {
         it('refuses a row that cannot be read back, rather than reporting an unreachable id', async function () {
             const { AttestMirrorVenue } = require('../../helpers/attestMirrorVenue');
             const fake = {
-                _conn: { query: async () => ({ affectedRows: 1 }) },
+                ['_conn']: { query: async () => ({ affectedRows: 1 }) },
                 hubs: [{ index: 0, dbName: 'unit_hub_0' }],
                 indexers: [{ followsHub: 0 }],
             };

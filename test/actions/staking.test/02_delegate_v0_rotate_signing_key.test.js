@@ -29,8 +29,8 @@ describe('Staking: STAKE, UNSTAKE, DELEGATE (capability model)', function () {
             )
             await gasHelper.ensureGasBalance(delegateAddr, '2000')
 
-            let { publicKey } = crypto.generateKeyPairSync('ed25519')
-            let spkiDer = publicKey.export({ format: 'der', type: 'spki' })
+            const { publicKey } = crypto.generateKeyPairSync('ed25519')
+            const spkiDer = publicKey.export({ format: 'der', type: 'spki' })
             delegatePubkey = spkiDer.subarray(12).toString('hex')
 
             // Stake first
@@ -46,11 +46,11 @@ describe('Staking: STAKE, UNSTAKE, DELEGATE (capability model)', function () {
         })
 
         it('should delegate to a new signing key', async function () {
-            let { publicKey } = crypto.generateKeyPairSync('ed25519')
-            let spkiDer = publicKey.export({ format: 'der', type: 'spki' })
-            let newPubkey = spkiDer.subarray(12).toString('hex')
+            const { publicKey } = crypto.generateKeyPairSync('ed25519')
+            const spkiDer = publicKey.export({ format: 'der', type: 'spki' })
+            const newPubkey = spkiDer.subarray(12).toString('hex')
 
-            let result = await stakeHelper.sendDelegateV0(delegateAddr, newPubkey)
+            const result = await stakeHelper.sendDelegateV0(delegateAddr, newPubkey)
             assert(result.delegation, 'Delegation record should exist in DB')
             assert.strictEqual(result.delegation.status, 'valid', 'Delegation status should be valid')
         })

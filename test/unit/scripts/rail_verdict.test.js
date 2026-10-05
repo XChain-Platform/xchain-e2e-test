@@ -85,7 +85,7 @@ describe('rail verdict passing reports', function () {
     })
 
     it('fails the all-pending 35-case trap', function () {
-        const pending = Array.from({ length: 35 }, (_, index) =>
+        const pending = Array.from({ length: 35 }, (internal, index) =>
             testCase('pending case ' + (index + 1), '/checkout/' + ALPHA))
         const value = report([], pending)
         const result = run(value, [ALPHA])

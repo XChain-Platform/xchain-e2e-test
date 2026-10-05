@@ -245,7 +245,7 @@ describe('hubDbMirrorProxy: the per-table mirror fault injection', () => {
         })
 
         it('is a transparent relay with nothing armed', async () => {
-            const res = await get(proxy._server.address().port, '/hub-db/snapshot/' + TARGET)
+            const res = await get(proxy['_server'].address().port, '/hub-db/snapshot/' + TARGET)
             assert.strictEqual(res.body.rows.length, 2,
                 'the proxy filtered a table nobody asked it to filter, so every drill using it is suspect')
             assert.strictEqual(res.body.watermark, 1788494058)
@@ -256,7 +256,7 @@ describe('hubDbMirrorProxy: the per-table mirror fault injection', () => {
         // withholds everything, which would starve every barrier.
         it('withholds ONLY the named table, while a control table keeps flowing', async () => {
             proxy.withholdTable(TARGET)
-            const port = proxy._server.address().port
+            const port = proxy['_server'].address().port
 
             const target = await get(port, '/hub-db/snapshot/' + TARGET)
             assert.deepStrictEqual(target.body.rows, [],
@@ -276,7 +276,7 @@ describe('hubDbMirrorProxy: the per-table mirror fault injection', () => {
         // released cannot show an indexer resuming, which is half of the anti-wedge
         // claim.
         it('restores the table on release', async () => {
-            const port = proxy._server.address().port
+            const port = proxy['_server'].address().port
             proxy.withholdTable(TARGET)
             assert.deepStrictEqual((await get(port, '/hub-db/snapshot/' + TARGET)).body.rows, [])
             proxy.releaseTable(TARGET)
@@ -285,7 +285,7 @@ describe('hubDbMirrorProxy: the per-table mirror fault injection', () => {
         })
 
         it('holds a delayed table\'s rows and serves them once the delay elapses', async () => {
-            const port = proxy._server.address().port
+            const port = proxy['_server'].address().port
             proxy.delayTable(TARGET, 10_000)
             const held = await get(port, '/hub-db/snapshot/' + TARGET)
             assert.deepStrictEqual(held.body.rows, [], 'a delayed row was served immediately')
@@ -299,14 +299,14 @@ describe('hubDbMirrorProxy: the per-table mirror fault injection', () => {
 
         it('passes every non-snapshot path through untouched', async () => {
             proxy.withholdTable(TARGET)
-            const res = await get(proxy._server.address().port, '/status')
+            const res = await get(proxy['_server'].address().port, '/status')
             assert.strictEqual(res.status, 200)
             assert.ok(served.includes('/status'), 'the request never reached the hub')
         })
 
         it('counts what it held, so a drill can say the injection actually fired', async () => {
             proxy.withholdTable(TARGET)
-            await get(proxy._server.address().port, '/hub-db/snapshot/' + TARGET)
+            await get(proxy['_server'].address().port, '/hub-db/snapshot/' + TARGET)
             assert.strictEqual(proxy.stats.snapshotRowsHeld, 2)
         })
     })

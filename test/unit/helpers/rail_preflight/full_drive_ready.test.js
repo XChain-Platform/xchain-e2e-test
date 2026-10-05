@@ -5,8 +5,8 @@ const Module = require('module')
 const path = require('path')
 
 const railDriveScript = path.resolve(__dirname, '..', '..', '..', '..', 'scripts', 'rail_leg_drive.js')
-const originalLoad = Module._load
-Module._load = function (request, parent, isMain) {
+const originalLoad = Module['_load']
+Module['_load'] = function (request, parent, isMain) {
     if (request === '../test/helpers/bridge_rail_legs' && parent && parent.filename === railDriveScript) {
         return { RAIL_DRIVES: {} }
     }
@@ -16,7 +16,7 @@ let checkFullDriveReady
 try {
     ({ checkFullDriveReady } = require('../../../helpers/rail_preflight/full_drive_ready'))
 } finally {
-    Module._load = originalLoad
+    Module['_load'] = originalLoad
 }
 
 const healthyPing = JSON.stringify({ result: { status: 'healthy' } })

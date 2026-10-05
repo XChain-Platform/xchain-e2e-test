@@ -62,7 +62,7 @@ async function readHubsReading (hubs, markerRows, options) {
                 ? response.data
                 : response
             healthByHub.set(hub.index, answer)
-        } catch (_) {
+        } catch (internal) {
             healthByHub.set(hub.index, undefined)
         }
     }))

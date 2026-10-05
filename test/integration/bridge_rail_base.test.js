@@ -219,7 +219,7 @@ bridgeRailSuite('the destination ledger before any in leg (AT1 precondition, AT9
         assert.ok(settled, 'the rail backlog never drained: every XBRIDGE leg on the chain must ' +
             'reach a finalized hub row and a destination bridge_settlements row before a baseline ' +
             'means anything. Outstanding at timeout: ' +
-            JSON.stringify(state.venue._lastSettlePoll) + '\n' + state.venue.indexerTails(40));
+            JSON.stringify(state.venue['_lastSettlePoll']) + '\n' + state.venue.indexerTails(40));
         state.evidence.backlogApplied = settled.applied;
 
         state.baseline = {

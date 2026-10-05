@@ -169,7 +169,7 @@ describe('liveByzantineFaults: faults installed by drill phases', function () {
         function planDrill(spec) {
             return Object.assign({}, spec, {
                 hosts: [{}],
-                nodes: Array.from({ length: spec.count }, (_, i) => ({
+                nodes: Array.from({ length: spec.count }, (internal, i) => ({
                     id: 'v' + i,
                     role: i < spec.faults ? 'byzantine' : 'honest',
                     hostId: 'unit'

@@ -33,7 +33,7 @@ async function setupStakeReorg() {
     await gasHelper.ensureGasBalance(stakerAddr, '3000')
 
     // Ed25519 signing keypair (64 hex chars = 32-byte pubkey; strip 12-byte SPKI prefix).
-    let { publicKey } = crypto.generateKeyPairSync('ed25519')
+    const { publicKey } = crypto.generateKeyPairSync('ed25519')
     signingPubkey = publicKey.export({ format: 'der', type: 'spki' }).subarray(12).toString('hex')
 }
 
@@ -109,7 +109,7 @@ describe('Stake Reorg: UNSTAKE rolls back, deactivation_block re-NULLs on the su
         const stakeRes = await stakeHelper.sendStakeV1(stakerAddr, '1000.00000000', signingPubkey)
         assert(stakeRes.stake, 'STAKE must be indexed')
         assert.strictEqual(stakeRes.stake.status, 'valid', 'STAKE status should be valid')
-        let pre = await deactivationOf(signingPubkey)
+        const pre = await deactivationOf(signingPubkey)
         assert(pre && pre.deactivation === null, 'stake should be active (deactivation_block NULL) before UNSTAKE')
 
         // Advance so the STAKE block is strictly below the UNSTAKE block.

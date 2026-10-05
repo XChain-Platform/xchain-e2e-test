@@ -20,21 +20,21 @@ const requireRow = require('../../helpers/requireRow')
 const FIAT_MODE1 = 'EUR'   // validator-snapshot dispenser
 
 async function createMode1Dispenser() {
-    let dispenserAddr = await cryptoHelper.getNewFundedAddress("DISPENSER.FIAT", COIN, NETWORK, null, "legacy", 0, 1)
-    let buyerAddr     = await cryptoHelper.getNewFundedAddress("DISPENSER.FIAT.BUYER", COIN, NETWORK, null, "legacy", 0, 1)
-    let dispenserAddress = dispenserAddr["address"]
-    let buyerAddress     = buyerAddr["address"]
-    let tick = "DISPFIAT"+dispenserAddress.substring(dispenserAddress.length-8)
+    const dispenserAddr = await cryptoHelper.getNewFundedAddress("DISPENSER.FIAT", COIN, NETWORK, null, "legacy", 0, 1)
+    const buyerAddr     = await cryptoHelper.getNewFundedAddress("DISPENSER.FIAT.BUYER", COIN, NETWORK, null, "legacy", 0, 1)
+    const dispenserAddress = dispenserAddr["address"]
+    const buyerAddress     = buyerAddr["address"]
+    const tick = "DISPFIAT"+dispenserAddress.substring(dispenserAddress.length-8)
 
     await issueHelper.sendIssueV0(dispenserAddr, tick, 100, 100, 0, "FIAT dispenser test", 100)
 
-    let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
+    const expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
 
     // DISPENSER_SETTLEMENT_PRICE_ACTIVATION (live on regtest) refuses a FIAT
     // create unless a dispense at that block could settle, so a Mode 1 create
     // needs a validator snapshot for its pair inside the window first. The
     // settle step below clears and reseeds the pair against the later block.
-    let pair = COIN_CODE + "/" + FIAT_MODE1
+    const pair = COIN_CODE + "/" + FIAT_MODE1
     await priceSnapshotHelper.clearPair(pair)
     await priceSnapshotHelper.seedSnapshot({
         coinPair: pair,
@@ -45,7 +45,7 @@ async function createMode1Dispenser() {
 
     // FIAT dispenser: priced at 100.00 (FIAT_MODE1) per 1 token. GET_AMOUNT is
     // ignored for FIAT dispensers (pass 0).
-    let dispenserResult = await dispenserHelper.sendDispenserV0(
+    const dispenserResult = await dispenserHelper.sendDispenserV0(
         dispenserAddr,
         COIN_CODE, tick, 1, 50,
         COIN_CODE, null, 0, dispenserAddr["address"],
@@ -63,9 +63,9 @@ async function settleMode1Dispenser(scenario) {
     // and the staleness cap (ORACLE_MAX_PRICE_AGE_SECONDS = 1800s)
     // measures age vs the processed block; wall-clock seeds raced both
     // rules depending on how far regtest block timestamps drift.
-    let pair  = COIN_CODE + "/" + FIAT_MODE1
-    let price  = 50000
-    let fiatAmount = 100
+    const pair  = COIN_CODE + "/" + FIAT_MODE1
+    const price  = 50000
+    const fiatAmount = 100
     await priceSnapshotHelper.clearPair(pair)
     await priceSnapshotHelper.seedSnapshot({
         coinPair: pair,
@@ -76,18 +76,18 @@ async function settleMode1Dispenser(scenario) {
 
     // Buyer pays 0.011 coin (1,100,000 sats):
     //   units = floor(0.011 / 0.002) = floor(5.5) = 5 tokens
-    let paySats = 1100000
-    let txHash = await transactionHelper.createSimpleTransaction(
+    const paySats = 1100000
+    const txHash = await transactionHelper.createSimpleTransaction(
         scenario.buyerAddr, scenario.dispenserAddress, paySats
     )
 
-    let coinAmount    = paySats / 1e8                 // 0.011
-    let coinPerToken  = fiatAmount / price             // 0.002
-    let expectedUnits = Math.floor(coinAmount / coinPerToken)  // 5
-    let expectedCredit = String(expectedUnits)         // GIVE_AMOUNT = 1, 0 decimals
+    const coinAmount    = paySats / 1e8                 // 0.011
+    const coinPerToken  = fiatAmount / price             // 0.002
+    const expectedUnits = Math.floor(coinAmount / coinPerToken)  // 5
+    const expectedCredit = String(expectedUnits)         // GIVE_AMOUNT = 1, 0 decimals
 
     console.log("Waiting for FIAT DISPENSE in the database (txHash: "+txHash+")...")
-    let dispenseRow = requireRow(await indexerDatabase.waitForDispense({
+    const dispenseRow = requireRow(await indexerDatabase.waitForDispense({
         txHash: txHash, source: scenario.buyerAddress,
         giveTick: scenario.tick, status: "valid"
     }, 60000), 'FIAT dispense')
@@ -136,16 +136,16 @@ describe('DISPENSER', () => {
                 return
             }
 
-            let scenario = await createMode1Dispenser()
-            let dispenserResult = scenario.dispenserResult
+            const scenario = await createMode1Dispenser()
+            const dispenserResult = scenario.dispenserResult
             assert(dispenserResult.dispenser, "FIAT dispenser should be created")
 
-            let settlement = await settleMode1Dispenser(scenario)
-            let dispenseRow = settlement.dispenseRow
+            const settlement = await settleMode1Dispenser(scenario)
+            const dispenseRow = settlement.dispenseRow
             assert(dispenseRow, "FIAT dispense should exist in DB and be valid")
 
-            let expectedCredit = settlement.expectedCredit
-            let credit = await indexerDatabase.waitForCredit({
+            const expectedCredit = settlement.expectedCredit
+            const credit = await indexerDatabase.waitForCredit({
                 address: scenario.buyerAddress,
                 tick: scenario.tick,
                 amount: expectedCredit

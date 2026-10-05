@@ -43,23 +43,23 @@ dotenv.config()
 // This affects only the test process; production code unchanged.
 // Resolution mirrors multiValidatorHubHelper's loader: env override,
 // then bundled (in-image) location, then monorepo-dev sibling.
-const _path = require('path')
-const _fs = require('fs')
-const _hubBase = (function () {
+const internalPath = require('path')
+const internalFs = require('fs')
+const internalHubBase = (function () {
     const candidates = [
         process.env.XCHAIN_HUB_PATH,
-        _path.resolve(__dirname, '../../xchain-hub'),
-        _path.resolve(__dirname, '../../../xchain-hub')
+        internalPath.resolve(__dirname, '../../xchain-hub'),
+        internalPath.resolve(__dirname, '../../../xchain-hub')
     ].filter(Boolean)
     for (const c of candidates) {
-        if (_fs.existsSync(_path.join(c, 'src/providers/http_get.js'))) return c
+        if (internalFs.existsSync(internalPath.join(c, 'src/providers/http_get.js'))) return c
     }
     return candidates[candidates.length - 1]
 })()
-const HUB_HTTP_GET_PATH = _hubBase + '/src/providers/http_get.js'
-const http_get = require(HUB_HTTP_GET_PATH)
-const _origFetch = http_get.fetch
-http_get.fetch = async function _testPatchedFetch(payload, options) {
+const HUB_HTTP_GET_PATH = internalHubBase + '/src/providers/http_get.js'
+const httpGet = require(HUB_HTTP_GET_PATH)
+const internalOrigFetch = httpGet.fetch
+httpGet.fetch = async function internalTestPatchedFetch(payload, options) {
     if (typeof payload === 'string' && payload.startsWith('http://')) {
         const axios = require('axios')
         const res = await axios.get(payload, {
@@ -70,7 +70,7 @@ http_get.fetch = async function _testPatchedFetch(payload, options) {
         })
         return { body: Buffer.from(res.data), meta: String(res.status) }
     }
-    return _origFetch(payload, options)
+    return internalOrigFetch(payload, options)
 }
 
 const assert = require('assert')
@@ -84,7 +84,7 @@ const transactionHelper = require('../transactionHelper')
 const { MultiValidatorHub } = require('../helpers/multiValidatorHubHelper')
 const { requireFederationEnv, assertCleanValidatorSet } = require('../helpers/federationGuards')
 
-async function _settleStack() {
+async function internalSettleStack() {
     // Wait until mempool is empty + tracker is caught up, so subsequent
     // encoder UTXO lookups (with unconfirmed=false) see fully-confirmed
     // state instead of mid-flight mempool entries.
@@ -98,7 +98,7 @@ let httpServer    = null
 let testUrl       = null
 let contractIndex = null
 let owner         = null
-let stakers       = []   // [{addressInfo, pubkey}]
+const stakers       = []   // [{addressInfo, pubkey}]
 
 const CONTRACT_CODE = `
 module.exports = {
@@ -129,7 +129,7 @@ async function startHttpServer() {
     // 1) Start a local HTTP server returning a fixed body. All three hubs
     //    fetch the same URL; byte_equality consensus converges trivially.
     await new Promise((resolve) => {
-        httpServer = http.createServer((_req, res) => {
+        httpServer = http.createServer((internalReq, res) => {
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(FIXED_BODY)
         })
@@ -159,12 +159,12 @@ async function startAndStakeHubs() {
         const addr = await cryptoHelper.getNewFundedAddress(
             'mvh-staker-' + i, COIN, NETWORK, null, 'legacy', 0, 0.02
         )
-        await _settleStack()
+        await internalSettleStack()
         // 15000 clears BOTH the attestation capability min_stake (1000) and the
         // http_get PROVIDER floor (10000), enforced on the responsible set
         // at/above STAKE_WEIGHTED_QUORUM (armed at genesis on regtest).
         await gasHelper.ensureGasBalance(addr, '20000')
-        await _settleStack()
+        await internalSettleStack()
         const result = await stakeHelper.sendStakeV1(addr, '15000.00000000', pubkeys[i])
         assert.strictEqual(result.stake.status, 'valid', 'stake ' + i + ' should be valid')
         stakers.push({ addressInfo: addr, pubkey: pubkeys[i] })
@@ -178,7 +178,7 @@ async function prepareContract() {
     //    the activation delay alone is 6 blocks short. Then wait for the stack to
     //    fully settle so the owner's funding doesn't land into a contended mempool.
     await regtestMinerConnector.generateBlocks(stakeHelper.ATTESTATION_STAKE_VISIBLE_BLOCKS)
-    await _settleStack()
+    await internalSettleStack()
 
     // 5) Fund a separate contract owner + deploy the request contract.
     owner = await cryptoHelper.getNewFundedAddress(
@@ -188,7 +188,7 @@ async function prepareContract() {
     // before MINT: the encoder's unconfirmed=false lookup needs confirmed
     // UTXOs. Quiesce after explicitly mining a block forces this.
     await regtestMinerConnector.generateBlocks(2)
-    await _settleStack()
+    await internalSettleStack()
     await gasHelper.ensureGasBalance(owner, '5000')
 
     const deploy = await vmHelper.sendDeployV0(owner, CONTRACT_CODE, 500000)
@@ -202,7 +202,7 @@ async function prepareContract() {
         'mvh-publisher', COIN, NETWORK, null, 'legacy', 0, 0.02
     )
     await regtestMinerConnector.generateBlocks(2)
-    await _settleStack()
+    await internalSettleStack()
     mvh.setBroadcastHook(async (wirePayload) => {
         const txHash = await transactionHelper.createAndSendTransaction(publisherAddr, wirePayload)
         return { txid: txHash }

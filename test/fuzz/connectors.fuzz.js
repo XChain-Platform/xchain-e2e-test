@@ -205,7 +205,7 @@ describe('Fuzz: Hub _call Response Handling', function () {
             const hub = new XChainHubConnector(['http://localhost:10000'])
 
             // Result is either the extracted value or null; never crashes.
-            await hub._call({ jsonrpc: '2.0', method: 'test', id: 1 })
+            await hub['_call']({ jsonrpc: '2.0', method: 'test', id: 1 })
             postStub.restore()
         }), { numRuns: 100 })
     })
@@ -218,7 +218,7 @@ describe('Fuzz: Hub _call Response Handling', function () {
             const hub = new XChainHubConnector(['http://localhost:10000'])
 
             try {
-                const result = await hub._call({ jsonrpc: '2.0', method: 'test', id: 1 })
+                const result = await hub['_call']({ jsonrpc: '2.0', method: 'test', id: 1 })
                 assert.strictEqual(result, null, '_call should return null on error')
             } catch {
                 // Some fuzz values may cause unexpected behavior in axios stub

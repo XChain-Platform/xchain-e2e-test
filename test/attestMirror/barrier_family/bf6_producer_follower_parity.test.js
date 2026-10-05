@@ -74,7 +74,7 @@ function runSuite (repo, files, env, requires) {
     for (const r of requires || []) args.push('--require', r)
     const res = spawnSync(mocha, args.concat(files), { cwd: repo, env: Object.assign({}, process.env, env || {}), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
     let report = null
-    try { report = JSON.parse(res.stdout.slice(res.stdout.indexOf('{'))) } catch (_) { report = null }
+    try { report = JSON.parse(res.stdout.slice(res.stdout.indexOf('{'))) } catch (internal) { report = null }
     assert.ok(report && report.stats, repo + ' ' + files.join(' ') + ' produced no mocha JSON (exit ' + res.status + '):\n' + res.stdout.slice(-2000) + res.stderr.slice(-2000))
     return { stats: report.stats, tests: report.tests, failures: report.failures || [], status: res.status, stderr: res.stderr }
 }
@@ -193,7 +193,7 @@ function hubUpgradeState (root) {
  */
 async function seatedPairIdentities () {
     const reading = await drill.readSeatedAttestationSet({})
-    const known = drill._knownSignerSeeds()
+    const known = drill['_knownSignerSeeds']()
     const signable = reading.set.pubkeys.filter((pk) => known.has(pk))
     assert.ok(signable.length >= 2, 'FAILED DRIVE (not a skip): only ' + signable.length + ' of the ' + reading.set.pubkeys.length +
         ' seated key(s) at buried block ' + reading.buriedBlock + ' have a seed this harness holds; the mixed pair needs two')
