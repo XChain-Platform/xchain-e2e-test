@@ -632,11 +632,11 @@ class Database {
     }
     
     async waitForBroadcast(broadcastObject, timeMax = 60000){ return this['_waitFor'](this.checkBroadcast, broadcastObject, timeMax) }
-    
-    async checkBroadcast({blockIndex,txHash,source,message,value,fee,memo,broadcastActionIndex,status}){
+
+    _getBroadcastFilter({blockIndex,txHash,source,message,value,fee,memo,broadcastActionIndex,status}){
         const whereClauses = []
         const whereValues = []
-        
+
         if (blockIndex != null){
             whereClauses.push("tr.block_index = ?")
             whereValues.push(blockIndex)
@@ -677,7 +677,15 @@ class Database {
             whereClauses.push("ist.status = ?")
             whereValues.push(status)
         }
-         
+
+        return { whereClauses, whereValues }
+    }
+
+    async checkBroadcast({blockIndex,txHash,source,message,value,fee,memo,broadcastActionIndex,status}){
+        const { whereClauses, whereValues } = this._getBroadcastFilter({
+            blockIndex, txHash, source, message, value, fee, memo, broadcastActionIndex, status
+        })
+
         const query = `
             SELECT 
                 tr.block_index AS block_index,
