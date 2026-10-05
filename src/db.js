@@ -2459,7 +2459,8 @@ class Database {
     // Distinguish a schema drift (missing table / renamed column) from a normal
     // "no rows yet" poll. The attestation helpers above poll and legitimately
     // return null/[] while waiting, so a swallowed SQL error can otherwise
-    // masquerade as a benign timeout instead of the schema mismatch it is.
+    // masquerade as a benign timeout instead of the schema mismatch it is, which
+    // is exactly how a table renamed or merged into another one goes unnoticed.
     // Surface those loudly.
     ['_warnOnSchemaError'](where, err){
         if(err && (err.code === 'ER_NO_SUCH_TABLE' || err.code === 'ER_BAD_FIELD_ERROR')){
