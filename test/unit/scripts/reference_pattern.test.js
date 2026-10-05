@@ -2,6 +2,8 @@
 
 'use strict'
 
+// GENERATED TEST CONTRACT
+
 const assert = require('assert')
 const { spawnSync } = require('child_process')
 
