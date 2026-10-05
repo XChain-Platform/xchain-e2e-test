@@ -89,6 +89,7 @@ describe('stage-siblings helpers', () => {
 
         assert.strictEqual(script.hasSnapshot(snapshot), true)
         assert.strictEqual(script.hasSnapshot(debris), false)
+        assert.strictEqual(script.hasSnapshot(path.join(sandbox, 'absent')), false)
     })
 
     it('stages, reports, unstages, and reports the missing vendor path', () => {
