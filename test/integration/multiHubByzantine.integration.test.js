@@ -40,7 +40,7 @@ const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedStakeSnapshot }    = require('../helpers/seededStakeSnapshot');
 const { forceCountModeQuorum } = require('../helpers/forceCountModeQuorum');
 const { silenceValidator, forgedPrePrepare } = require('../helpers/byzantineFaults');
-const { waitForMesh, waitForConfigEverywhere, assertNeverApplied } = require('../helpers/consensusWait');
+const { waitUntil, waitForMesh, waitForConfigEverywhere } = require('../helpers/consensusWait');
 
 const COUNT         = 4;       // quorum 3 → tolerates exactly 1 byzantine/silent fault
 // Deadlines, not settles: the mesh and the honest hubs' applied rows are both
@@ -134,10 +134,10 @@ describe('MultiValidatorHub: byzantine fault tolerance (L5)', function () {
         assert.ok(!target.consensus.pendingProposals.has(seq),
             'forged PRE_PREPARE created a pending proposal (digest check failed)');
 
-        const observation = await assertNeverApplied([target],
-            { coin: COIN, network: NET, module: MODULE, key: 'GAS_PRICE', value: forgedValue },
-            { windowMs: 500 });
-        assert.strictEqual(observation.ok, true, 'safety observation did not complete');
+        await waitUntil(async () => {
+            const current = await target.db.getConfig(COIN, NET, MODULE);
+            return !target.consensus.pendingProposals.has(seq) && current.GAS_PRICE !== forgedValue;
+        }, { timeoutMs: 500, what: 'the forged PRE_PREPARE to remain rejected' });
         const after = await target.db.getConfig(COIN, NET, MODULE);
         assert.notStrictEqual(after.GAS_PRICE, forgedValue,
             'forged config was applied (safety violated)');

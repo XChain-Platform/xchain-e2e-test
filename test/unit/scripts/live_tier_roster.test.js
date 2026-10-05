@@ -316,12 +316,21 @@ describe('live integration tier roster', () => {
         // assert the wiring itself rather than trusting the script's presence.
         const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../../package.json'), 'utf8'))
 
-        it('npm run ci calls the live lane', () => {
+        it('ci aliases ci:full and the full gate calls the live lane', () => {
             const fullGate = fs.readFileSync(path.resolve(__dirname, '../../../bin/ci-full.sh'), 'utf8')
             assert.strictEqual(pkg.scripts.ci, 'npm run ci:full')
             assert.match(pkg.scripts['ci:full'], /bin\/ci-full\.sh/)
             assert.match(fullGate, /npm run ci:live/,
                 'the full gate must run the live tier')
+        })
+
+        it('runs request-row wait lint beside sleep-flake lint', () => {
+            const lines = fs.readFileSync(path.resolve(__dirname, '../../../bin/ci-full.sh'), 'utf8').split('\n')
+            const sleepFlake = lines.findIndex(line => line.includes('npm run lint:sleep-flake'))
+            const requestRow = lines.findIndex(line => line.includes('npm run lint:request-row-wait'))
+            assert.ok(sleepFlake >= 0, 'the full gate must run sleep-flake lint')
+            assert.strictEqual(requestRow, sleepFlake + 1,
+                'request-row wait lint must run immediately beside sleep-flake lint')
         })
 
         it('ci:live runs this runner rather than a bare glob', () => {
