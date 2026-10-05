@@ -121,6 +121,70 @@ function buildDispenserQuery(whereClauses){
         `+"WHERE "+whereClauses.join(" AND ");
 }
 
+function buildMintWhere({blockIndex,txHash,tick,destination,amount,memo,status}){
+    const whereClauses = []
+    const whereValues = []
+
+    if (blockIndex != null){
+        whereClauses.push("tr.block_index = ?")
+        whereValues.push(blockIndex)
+    }
+    if (txHash != null){
+        whereClauses.push("itx.hash = ?")
+        whereValues.push(txHash)
+    }
+    if (tick != null){
+        whereClauses.push("itick.tick = ?")
+        whereValues.push(tick)
+    }
+    if (destination != null){
+        whereClauses.push("ia.address = ?")
+        whereValues.push(destination)
+    }
+    if (amount != null){
+        whereClauses.push("m.amount = ?")
+        whereValues.push(amount)
+    }
+    if (memo != null){
+        if (memo === ''){
+            whereClauses.push("im.memo IS NULL")
+        } else {
+            whereClauses.push("im.memo = ?")
+            whereValues.push(memo)
+        }
+    }
+    if (status != null){
+        whereClauses.push("ist.status = ?")
+        whereValues.push(status)
+    }
+
+    return {whereClauses, whereValues}
+}
+
+function buildMintQuery(whereClauses){
+    return [
+        '',
+        '            SELECT ',
+        '                tr.block_index AS block_index,',
+        '                itx.hash AS tx_hash,',
+        '                m.action_index,',
+        '                itick.tick AS tick,',
+        '                ia.address AS destination,',
+        '                m.amount,',
+        '                im.memo AS memo, ',
+        '                ist.status AS status ',
+        '            FROM mints m',
+        '            LEFT JOIN actions act ON act.action_index = m.action_index',
+        '            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index',
+        '            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id',
+        '            LEFT JOIN index_addresses ia ON ia.id = m.destination_id',
+        '            LEFT JOIN index_memos im ON im.id = m.memo_id',
+        '            LEFT JOIN index_statuses ist ON ist.id = m.status_id',
+        '            LEFT JOIN index_tickers itick ON itick.id = m.tick_id ',
+        '        '
+    ].join('\n')+"WHERE "+whereClauses.join(" AND ");
+}
+
 function buildAirdropFilter({blockIndex,txHash,source,tick,amount,listActionIndex,memo,status}){
     const whereClauses = []
     const whereValues = []
@@ -133,7 +197,6 @@ function buildAirdropFilter({blockIndex,txHash,source,tick,amount,listActionInde
         whereClauses.push("itx.hash = ?")
         whereValues.push(txHash)
     }
-
     if (source != null){
         whereClauses.push("ia.address = ?")
         whereValues.push(source)
@@ -904,61 +967,10 @@ class Database {
     async waitForMint(mintObject, timeMax = 60000){ return this['_waitFor'](this.checkMint, mintObject, timeMax) }
     
     async checkMint({blockIndex,txHash,tick,destination,amount,memo,status}){
-        const whereClauses = []
-        const whereValues = []
-        
-        if (blockIndex != null){
-            whereClauses.push("tr.block_index = ?")
-            whereValues.push(blockIndex)
-        }
-        if (txHash != null){
-            whereClauses.push("itx.hash = ?")
-            whereValues.push(txHash)
-        }
-        if (tick != null){
-            whereClauses.push("itick.tick = ?")
-            whereValues.push(tick)
-        }
-        if (destination != null){
-            whereClauses.push("ia.address = ?")
-            whereValues.push(destination)
-        }
-        if (amount != null){
-            whereClauses.push("m.amount = ?")
-            whereValues.push(amount)
-        }
-        if (memo != null){
-            if (memo === ''){
-                whereClauses.push("im.memo IS NULL")
-            } else {
-                whereClauses.push("im.memo = ?")
-                whereValues.push(memo)
-            }
-        }
-        if (status != null){
-            whereClauses.push("ist.status = ?")
-            whereValues.push(status)
-        }
-         
-        const query = `
-            SELECT 
-                tr.block_index AS block_index,
-                itx.hash AS tx_hash,
-                m.action_index,
-                itick.tick AS tick,
-                ia.address AS destination,
-                m.amount,
-                im.memo AS memo, 
-                ist.status AS status 
-            FROM mints m
-            LEFT JOIN actions act ON act.action_index = m.action_index
-            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
-            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
-            LEFT JOIN index_addresses ia ON ia.id = m.destination_id
-            LEFT JOIN index_memos im ON im.id = m.memo_id
-            LEFT JOIN index_statuses ist ON ist.id = m.status_id
-            LEFT JOIN index_tickers itick ON itick.id = m.tick_id 
-        `+"WHERE "+whereClauses.join(" AND ");
+        const {whereClauses, whereValues} = buildMintWhere({
+            blockIndex, txHash, tick, destination, amount, memo, status
+        })
+        const query = buildMintQuery(whereClauses)
         
         const connection = await this.getConnection()
         
