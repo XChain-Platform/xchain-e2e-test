@@ -45,25 +45,29 @@ function readFixture(fixturePath) {
     return fixture;
 }
 
+function dispatcherPath(options = {}) {
+    const home = options.home || process.env.HOME || os.homedir();
+    return options.dispatcherPath || path.join(home, '.claude', 'bin', 'ci-dispatch.sh');
+}
+
 function loadRailGateContract(options = {}) {
     const fixturePath = options.fixturePath || FIXTURE_PATH;
-    const home = options.home || process.env.HOME || os.homedir();
-    const dispatcherPath = options.dispatcherPath ||
-        path.join(home, '.claude', 'bin', 'ci-dispatch.sh');
+    const resolvedDispatcherPath = dispatcherPath(options);
     const log = options.log || console.log;
     const fixture = readFixture(fixturePath);
 
-    if (!fs.existsSync(dispatcherPath)) {
+    if (!fs.existsSync(resolvedDispatcherPath)) {
         log('rail gate contract: host tooling absent; using fixture ' + fixturePath);
         return fixture;
     }
 
-    const hostContract = contractFromDispatcher(fs.readFileSync(dispatcherPath, 'utf8'), dispatcherPath);
+    const hostContract = contractFromDispatcher(
+        fs.readFileSync(resolvedDispatcherPath, 'utf8'), resolvedDispatcherPath);
     try {
         assert.deepStrictEqual(hostContract, fixture);
     } catch (cause) {
         const error = new Error('rail gate contract drift: fixture ' + fixturePath +
-            ' does not match host dispatcher ' + dispatcherPath);
+            ' does not match host dispatcher ' + resolvedDispatcherPath);
         error.cause = cause;
         throw error;
     }
@@ -72,4 +76,5 @@ function loadRailGateContract(options = {}) {
 
 module.exports = loadRailGateContract;
 module.exports.contractFromDispatcher = contractFromDispatcher;
+module.exports.dispatcherPath = dispatcherPath;
 module.exports.FIXTURE_PATH = FIXTURE_PATH;

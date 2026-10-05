@@ -29,26 +29,26 @@ describe('OWNERSHIP', () => {
     // SWEEP DESTINATION instead of returning to seller.
     describe('SWEEP - ownership routes to DESTINATION', () => {
         it('should transfer escrowed ownership to the sweep destination', async () => {
-            let sourceAddr = await cryptoHelper.getNewFundedAddress("OWN.SW.SRC", COIN, NETWORK, null, "legacy", 0, 1)
-            let destAddr   = await cryptoHelper.getNewAddress("OWN.SW.DST",   COIN, NETWORK, null, "legacy", 0)
-            let address = sourceAddr["address"]
-            let dest    = destAddr["address"]
-            let jdog    = "OWNSWP"+address.substring(address.length-8)
-            let settle  = "OWNSWS"+address.substring(address.length-8)
+            const sourceAddr = await cryptoHelper.getNewFundedAddress("OWN.SW.SRC", COIN, NETWORK, null, "legacy", 0, 1)
+            const destAddr   = await cryptoHelper.getNewAddress("OWN.SW.DST",   COIN, NETWORK, null, "legacy", 0)
+            const address = sourceAddr["address"]
+            const dest    = destAddr["address"]
+            const jdog    = "OWNSWP"+address.substring(address.length-8)
+            const settle  = "OWNSWS"+address.substring(address.length-8)
 
             await issueHelper.sendIssueV0(sourceAddr, jdog,   100, 50, 0, "Sweep ownership subject", 50)
             await issueHelper.sendIssueV0(sourceAddr, settle, 100, 50, 0, "Sweep settle tick",       50)
             await gasHelper.ensureGasBalance(sourceAddr, 100)
 
-            let expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
+            const expiration = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 90
 
             // List ownership for sale
             await orderHelper.sendOrderV0(sourceAddr, COIN_CODE, jdog,   null, COIN_CODE, settle, 5, address, expiration, null, null, "Listing before sweep", 1, 0)
-            let listedOpen = await indexerDatabase.waitForOrder({ source: address, giveTick: jdog, orderStatus: "open" }, 30000)
+            const listedOpen = await indexerDatabase.waitForOrder({ source: address, giveTick: jdog, orderStatus: "open" }, 30000)
             assert(listedOpen, "Ownership order should be open before sweep")
 
             // SWEEP with ORDERS=1 (no balances/ownerships sweep to keep the test focused)
-            let sweep = await sweepHelper.sendSweepV0(
+            const sweep = await sweepHelper.sendSweepV0(
                 sourceAddr, dest,
                 0, // balances
                 0, // ownerships (direct ownership transfer is a separate code path)
@@ -60,7 +60,7 @@ describe('OWNERSHIP', () => {
             assert(sweep.sweep, "Sweep should land in DB")
 
             // Listed order should now be cancelled
-            let cancelled = await indexerDatabase.waitForOrder({ source: address, giveTick: jdog, orderStatus: "cancelled" }, 30000)
+            const cancelled = await indexerDatabase.waitForOrder({ source: address, giveTick: jdog, orderStatus: "cancelled" }, 30000)
             assert(cancelled, "Ownership order should be cancelled by sweep")
 
             // Owner of jdog tick should be the SWEEP destination (ownership delivered there

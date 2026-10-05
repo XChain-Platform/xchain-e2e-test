@@ -54,7 +54,8 @@ function loadTemplate(name) {
 // Comment/whitespace strip (string-aware) so the DEPLOY payload fits the encoder
 // MAX_DATA_BYTES cap (hex-encoded source is 2 bytes/char). See the escrow suite.
 function compactSource(src) {
-    let out = '', i = 0, n = src.length, state = 'code';
+    let out = '', i = 0, state = 'code';
+    const n = src.length;
     while (i < n) {
         const c = src[i], d = src[i + 1];
         if (state === 'code') {

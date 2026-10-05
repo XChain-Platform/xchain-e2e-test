@@ -66,7 +66,7 @@ function localCoin() {
     return COIN_OF[raw] || 'BTC';
 }
 function networkTier() {
-    let net = String(global.NETWORK || process.env.NETWORK || 'regtest');
+    const net = String(global.NETWORK || process.env.NETWORK || 'regtest');
     return net.includes('-') ? net.split('-')[1] : net;
 }
 

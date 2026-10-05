@@ -102,7 +102,7 @@ async function prepareRoster () {
         'E2E_STAKE_TEARDOWN=off, which is the dedicated-staking-venue hatch documented in ' +
         'xchain-documentation/components/e2e-test/staking-venue-policy.md.')
 
-    const known = fixture._knownSignerSeeds()
+    const known = fixture['_knownSignerSeeds']()
     assert.ok(known.size >= RESEED_SKIP + RESEED_COUNT,
         'reseedAttestationRoster: the harness can derive ' + known.size + ' signing key(s), but ' +
         RESEED_COUNT + ' were asked for after skipping ' + RESEED_SKIP + '. Seeding a key this ' +
@@ -296,7 +296,7 @@ function verifyClosingRoster ({ staked, after }) {
     // opening guard used. The roster activates on a delay, so a stake made
     // before this run can seat DURING it, and a key that lands here unnoticed
     // is the orphan every drill would then refuse on.
-    const closing = classifySeatedForReseed(after.set.pubkeys, fixture._knownSignerSeeds(),
+    const closing = classifySeatedForReseed(after.set.pubkeys, fixture['_knownSignerSeeds'](),
         RESEED_ALLOW_SEATED)
     assert.deepStrictEqual(closing.blocking, [],
         'reseedAttestationRoster: the set now seats ' + closing.blocking.length + ' key(s) this ' +

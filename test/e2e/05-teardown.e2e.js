@@ -54,7 +54,7 @@ describe('E2E: Teardown & Resource Cleanup', () => {
             assert(ping, 'Database ping should succeed at end of test run')
 
             // Perform an actual read query
-            let connection = await indexerDatabase.getConnection()
+            const connection = await indexerDatabase.getConnection()
             try {
                 const rows = await connection.query('SELECT COUNT(*) AS cnt FROM issues')
                 assert(rows.length > 0, 'Query should return a result')

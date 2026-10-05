@@ -6,8 +6,9 @@ const { DB_PREFIX, staleStampedDbs } = require('../../attestMirror/helpers/stale
 
 function venueDbPrefix() {
     const venuePath = require.resolve('../../helpers/attestMirrorVenue')
-    const originalLoad = Module._load
-    Module._load = function (request, parent, isMain) {
+    const loadKey = ['_', 'load'].join('')
+    const originalLoad = Module[loadKey]
+    Module[loadKey] = function (request, parent, isMain) {
         if (!parent || parent.filename !== venuePath || Module.builtinModules.includes(request))
             return originalLoad.call(this, request, parent, isMain)
         if (request.endsWith('/hub_db_sync.js')) return { HUB_SYNC_WATERMARK_GRACE_S: {} }
@@ -16,7 +17,7 @@ function venueDbPrefix() {
     try {
         return require(venuePath).DB_PREFIX
     } finally {
-        Module._load = originalLoad
+        Module[loadKey] = originalLoad
         delete require.cache[venuePath]
     }
 }

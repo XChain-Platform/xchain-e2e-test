@@ -600,7 +600,7 @@ describe('XBRIDGE transfer: hub-signed record to indexer settle pass (base AT1, 
                             "SELECT transfer_id FROM bridge_transfers WHERE src_chain = 'BTC' AND src_action_index = ? AND status = 'finalized'",
                             [FED_SRC_IDX]);
                         if(r.length >= 1) seen++;
-                    } catch(_){ /* a hub that cannot be read has not persisted it */ }
+                    } catch(internal){ /* a hub that cannot be read has not persisted it */ }
                 }
                 return { ok: seen === mvh.hubs.length, seen: seen };
             }, { timeoutMs: ROUND_MS, intervalMs: 200 });

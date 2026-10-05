@@ -101,7 +101,7 @@ async function runCrossChainSettle(args) {
         const secret = args.treasury && args.treasury.wif;
         await driveSettle(args, legs, stepRunner(verdict, args.log, secret));
         verdict.ok = true;
-    } catch (_) {
+    } catch (internal) {
         verdict.ok = false;
     }
     return verdict;

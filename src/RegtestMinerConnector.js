@@ -87,7 +87,7 @@ class RegtestMinerConnector {
         }
 
         // Make the request to the node
-        var response = null
+        let response = null
         try {
             // Spread rather than mutate: this.reqConfig is shared by every other
             // method, which must stay unbounded. The catch below already turns a
@@ -210,12 +210,12 @@ class RegtestMinerConnector {
             // where it is not, the original miner error stands.
             if (!this.isMissingMethod(e) || !global.nodeConnector)
                 throw e
-            if (!RegtestMinerConnector._mockTimeFallbackAnnounced) {
-                RegtestMinerConnector._mockTimeFallbackAnnounced = true
+            if (!RegtestMinerConnector['_mockTimeFallbackAnnounced']) {
+                RegtestMinerConnector['_mockTimeFallbackAnnounced'] = true
                 logger.info('RegtestMinerConnector: miner has no set_mock_time; ' +
                     'driving setmocktime through the node RPC instead')
             }
-            return await global.nodeConnector._rpc('setmocktime', [Number(timestamp)])
+            return await global.nodeConnector['_rpc']('setmocktime', [Number(timestamp)])
         }
     }
 

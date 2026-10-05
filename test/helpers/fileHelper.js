@@ -13,13 +13,13 @@ const requireRow = require('./requireRow')
 
 module.exports = {
     async sendFileV0(addressInfo, name, type, title, memo, rawData){
-        let fileMessage = "FILE|0|"+name+"|"+type+"|"+title+"|"+memo
+        const fileMessage = "FILE|0|"+name+"|"+type+"|"+title+"|"+memo
 
         console.log("Creating and sending FILE V0 tx...")
-        let txHash = await transactionHelper.createAndSendTransaction(addressInfo, fileMessage, rawData)
+        const txHash = await transactionHelper.createAndSendTransaction(addressInfo, fileMessage, rawData)
 
         console.log("Waiting for FILE in the database...")
-        let row = requireRow(await indexerDatabase.waitForFile({
+        const row = requireRow(await indexerDatabase.waitForFile({
             txHash: txHash,
             source: addressInfo["address"],
             name: name,

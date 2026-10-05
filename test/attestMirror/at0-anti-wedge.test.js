@@ -126,7 +126,7 @@ describe('AT0 anti-wedge: the mirror barrier parks a hubless BTC indexer and nev
         // Bring the hub back even if a case failed, so the venue teardown and any
         // following drill do not inherit a half-stopped federation.
         if (venue && stoppedHub !== null) {
-            try { await venue.startHub(stoppedHub) } catch (_) { /* teardown follows */ }
+            try { await venue.startHub(stoppedHub) } catch (internal) { /* teardown follows */ }
         }
         if (venue) await venue.stop()
     })
@@ -256,7 +256,7 @@ describe('AT0 anti-wedge: the mirror barrier parks a hubless BTC indexer and nev
                 const res = await axios.get('http://127.0.0.1:' + port + '/status',
                     { timeout: 10_000, validateStatus: () => true })
                 status = (res.status === 200 || res.status === 503) ? res.data : null
-            } catch (_) { status = null }
+            } catch (internal) { status = null }
             if (!status || status.error) {
                 // Absent rather than contradicting: say so instead of passing quietly.
                 assert.fail(coin + ' regtest indexer on ' + port + ' did not answer, so the off-BTC half of ' +

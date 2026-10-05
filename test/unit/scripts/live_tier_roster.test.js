@@ -179,6 +179,112 @@ describe('live integration tier roster', () => {
 })
 
 describe('live integration tier roster', () => {
+    describe('fresh-process retry reports replace only their failed suites', () => {
+
+        const root = '/ci/work/xchain-e2e-test'
+        const file = name => root + '/test/integration/' + name + '.integration.test.js'
+
+        it('turns a transient suite failure into its passing retry verdict', () => {
+            const base = {
+                passes: [{ file: file('steady') }],
+                failures: [{ file: file('flaky') }],
+                pending: []
+            }
+            const retry = { passes: [{ file: file('flaky') }], failures: [], pending: [] }
+            const merged = lane.replaceReportFiles(base, retry,
+                ['test/integration/flaky.integration.test.js'], root)
+
+            assert.deepStrictEqual(lane.classify([
+                'test/integration/steady.integration.test.js',
+                'test/integration/flaky.integration.test.js'
+            ], lane.tallyByFile(merged, root)), [])
+            assert.strictEqual(merged.stats.passes, 2)
+            assert.strictEqual(merged.stats.failures, 0)
+        })
+
+        it('keeps a repeated failure red and leaves other suite results untouched', () => {
+            const base = {
+                passes: [{ file: file('steady') }],
+                failures: [{ file: file('broken'), err: { message: 'first' } }],
+                pending: []
+            }
+            const retry = {
+                passes: [],
+                failures: [{ file: file('broken'), err: { message: 'again' } }],
+                pending: []
+            }
+            const merged = lane.replaceReportFiles(base, retry,
+                ['test/integration/broken.integration.test.js'], root)
+            const tally = lane.tallyByFile(merged, root)
+
+            assert.deepStrictEqual(tally.get('test/integration/steady.integration.test.js'),
+                { passing: 1, failing: 0, pending: 0 })
+            assert.strictEqual(lane.classify(
+                ['test/integration/broken.integration.test.js'], tally)[0].kind, 'failing')
+            assert.strictEqual(merged.failures[0].err.message, 'again')
+        })
+    })
+})
+
+describe('live integration tier roster', () => {
+    describe('the retry loop reruns only red suites, within retryCount', () => {
+
+        const abs  = rel => path.join(lane.ROSTER_FILE, '..', '..', '..', rel)
+        const flaky  = 'test/integration/flaky.integration.test.js'
+        const steady = 'test/integration/steady.integration.test.js'
+        const expected = [steady, flaky]
+        const quiet = fn => {
+            const log = console.log
+            console.log = () => {}
+            try { return fn() } finally { console.log = log }
+        }
+        const red = () => ({
+            passes: [{ file: abs(steady) }],
+            failures: [{ file: abs(flaky), fullTitle: 'x', err: { message: 'boom' } }],
+            pending: []
+        })
+        const green = () => ({ passes: [{ file: abs(flaky) }], failures: [], pending: [] })
+
+        it('reruns the red suite once and goes green when the retry passes', () => {
+            const calls = []
+            const state = quiet(() => lane.retryRedSuites(red(), expected, { retryCount: 1 },
+                files => { calls.push(files); return green() }))
+            assert.deepStrictEqual(calls, [[flaky]])
+            assert.strictEqual(state.outcome.exitCode, 0)
+            assert.deepStrictEqual(state.problems, [])
+        })
+
+        it('stays red after exhausting retryCount on a repeated failure', () => {
+            let calls = 0
+            const state = quiet(() => lane.retryRedSuites(red(), expected, { retryCount: 2 },
+                () => { calls++; return red() }))
+            assert.strictEqual(calls, 2)
+            assert.strictEqual(state.outcome.exitCode, 1)
+        })
+
+        it('never reruns without retryCount, and never reruns a green report', () => {
+            let calls = 0
+            const rerun = () => { calls++; return green() }
+            const noRetry = quiet(() => lane.retryRedSuites(red(), expected, {}, rerun))
+            const clean = quiet(() => lane.retryRedSuites(
+                { passes: [{ file: abs(steady) }, { file: abs(flaky) }], failures: [], pending: [] },
+                expected, { retryCount: 3 }, rerun))
+            assert.strictEqual(calls, 0)
+            assert.strictEqual(noRetry.outcome.exitCode, 1)
+            assert.strictEqual(clean.outcome.exitCode, 0)
+        })
+
+        it('stops and stays red when the retry produces no report', () => {
+            let calls = 0
+            const state = quiet(() => lane.retryRedSuites(red(), expected, { retryCount: 3 },
+                () => { calls++; return null }))
+            assert.strictEqual(calls, 1)
+            assert.strictEqual(state.outcome.exitCode, 1)
+        })
+    })
+})
+
+describe('live integration tier roster', () => {
     describe('a host that cannot run the tier is not the commit\'s fault', () => {
 
         it('accepts a pre-provisioned database without consulting docker', () => {

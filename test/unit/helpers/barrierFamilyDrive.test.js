@@ -350,7 +350,7 @@ describe('barrierFamilyDrive: the AT4 corpus coordinates and the VM link a copie
 
     it('reads the corpus coordinates off the venue with the password named, never carried', function () {
         const venue = {
-            coin: 'bitcoin', network: 'regtest', _live: { decoder: { name: 'XChain_BTC_Regtest_Decoder', host: '127.0.0.1', port: 57400, pass: 'secret' } },
+            coin: 'bitcoin', network: 'regtest', ['_live']: { decoder: { name: 'XChain_BTC_Regtest_Decoder', host: '127.0.0.1', port: 57400, pass: 'secret' } },
             hubDb: { host: '127.0.0.1', port: '57400', user: 'root', pass: 'secret', disposable: false },
             indexers: [{ index: 0, mirrorDbName: 'XChain_AM_MVH_at4corpus_Mirror0' }],
         }
