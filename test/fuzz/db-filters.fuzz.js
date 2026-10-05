@@ -225,22 +225,25 @@ describe('Fuzz: waitFor* with fuzzed timeMax', function () {
         mockMariadb.createPool.resetHistory()
     })
 
-    // Keep positive values short because the polling deadline uses wall-clock time
-    // even when sleep is stubbed. Larger timeout behavior is covered by boundary tests.
+    // Use bounded integers only. Infinity/MAX_VALUE with stubbed sleep causes OOM.
     const boundedTimeMaxArb = fc.oneof(
         fc.constant(0),
         fc.constant(-1),
         fc.constant(-1000),
         fc.constant(1),
         fc.constant(10),
+        fc.constant(100),
+        fc.constant(1000),
         fc.constant(NaN),
-        fc.integer({ min: -10000, max: 10 })
+        fc.integer({ min: -10000, max: 10000 })
     )
 
     it('waitForIssue never hangs with bounded timeMax values', async function () {
         this.timeout(30000)
+        const clock = sinon.useFakeTimers()
         await fc.assert(fc.asyncProperty(boundedTimeMaxArb, async (timeMax) => {
             const { db, mockConn } = createDb()
+            db.sleep.callsFake(async (ms) => clock.tick(ms))
             mockConn.query.resolves([])
 
             const result = await db.waitForIssue({ tick: 'TOK' }, timeMax)
@@ -250,8 +253,10 @@ describe('Fuzz: waitFor* with fuzzed timeMax', function () {
 
     it('waitForSend never hangs with bounded timeMax values', async function () {
         this.timeout(30000)
+        const clock = sinon.useFakeTimers()
         await fc.assert(fc.asyncProperty(boundedTimeMaxArb, async (timeMax) => {
             const { db, mockConn } = createDb()
+            db.sleep.callsFake(async (ms) => clock.tick(ms))
             mockConn.query.resolves([])
 
             const result = await db.waitForSend({ source: 'addr' }, timeMax)

@@ -90,51 +90,55 @@ const VENDORED_CONSTANTS_SERVICES = [
     'xchain-vm', 'xchain-indexer', 'xchain-sdk', 'xchain-decoder', 'xchain-explorer',
 ]
 
-const VENDORED_CONSTANT_NAMES = {
+const CANONICAL_EXPORTS_OUTSIDE_VENDORED_CONSTANTS = [
+    'ADMIT_MARGIN_BLOCKS', 'ADMIT_MAX_FUTURE_BLOCKS', 'ADMIT_MIN_FUTURE_BLOCKS', 'AMOUNT_REPRESENTABILITY_ACTIVATION', 'ANCHOR_ATTEST_ARRIVAL_MARGIN_S',
+    'ANCHOR_ATTEST_BARRIER_ACTIVATION', 'ANCHOR_BUNDLE_ORDER_ACTIVATION', 'ANCHOR_FOLD_ACTIVATION', 'ANCHOR_REWARD_DERIVE_ACTIVATION', 'ANCHOR_REWARD_MIRROR_MATURITY',
+    'ARCHIVE_SECTION_VERDICT_STATE_HASH_ACTIVATION', 'ATTEST_ADMISSION_ACTIVATION', 'ATTEST_BROADCAST_FEE_ACTIVATION', 'ATTEST_BROADCAST_FEE_CAP', 'ATTEST_RELAY_ACTIVATION',
+    'ATTEST_REQUEST_CAPS', 'ATTEST_REQUEST_CAP_ACTIVATION', 'ATTEST_RESPONSE_MIRROR_ACTIVATION', 'ATTEST_RESPONSIBLE_WIDENING', 'ATTEST_RESPONSIBLE_WIDENING_ACTIVATION',
+    'ATTEST_RESPONSIBLE_WIDENING_V2', 'ATTEST_ZERO_CONF_ACTIVATION', 'BATCH_COMMAND_LIMIT', 'BATCH_COMMAND_WEIGHTS', 'BATCH_WEIGHT_BUDGET',
+    'CANONICAL_REORG_BUFFER', 'DISPENSER_FRESHNESS_SHAPE_ACTIVATION', 'LIST_ADDRESS_REF_ACTIVATION', 'LIST_META_ACTIVATION', 'LIST_OWNER_ACTIVATION',
+    'LIST_SHARE_ACTIVATION', 'LIST_SHARE_CONSUMER_ACTIVATION', 'LIST_SHARE_PRODUCER_ACTIVATION', 'LIST_TICK_COIN_ACTIVATION', 'LIST_TRANSFER_ACTIVATION',
+    'LIST_UNION_ACTIVATION', 'MAX_STANDARD_TX_WEIGHT', 'MIRROR_ADMISSION_ACTIVATION', 'MIRROR_ADMISSION_CONSUMER_ACTIVATION', 'MIRROR_ADMISSION_REGTEST_ARMED_HEIGHT',
+    'MIRROR_ADMISSION_REGTEST_ENV', 'ORACLE_HOURLY_WINDOW_FIRST_ROUND', 'ORACLE_HOURLY_WINDOW_ROUNDS', 'ORACLE_MAX_PRICE_AGE_HOURLY_SECONDS', 'ORACLE_PRICE_AGE_HOURLY_ACTIVATION',
+    'ORACLE_ROUND_TIME_ACTIVATION', 'PRICE_BATCHING_FLOOR_ACTIVATION', 'PRICE_FEE_BATCH_LANDED_ACTIVATION', 'PRICE_PAIR_TICKER_MAX_LEGACY', 'PRICE_PAIR_TICKER_MAX_WIDE',
+    'PRICE_PAIR_WIDEN_ACTIVATION', 'PRICE_SCALE_ACTIVATION', 'PRICE_SIG_TALLY_ACTIVATION', 'PRICE_ZERO_VALIDITY_ACTIVATION', 'RESERVED_FUTURE_ROOTS',
+    'RETRACTION_SIGNING_ACTIVATION', 'ROLLCALL_ACCEPT_WINDOW_BLOCKS', 'ROLLCALL_ACTIVATION', 'ROLLCALL_DOGE_MATURITY', 'ROLLCALL_EVICT_MISSES',
+    'ROLLCALL_GATES_ACTIVATION', 'ROLLCALL_GATES_REGTEST_ARMED_HEIGHT', 'ROLLCALL_GATES_REGTEST_ENV', 'ROLLCALL_INTERVAL_BLOCKS', 'ROLLCALL_PROOF_DELAY_BLOCKS',
+    'ROLLCALL_REGTEST_ARMED_HEIGHT', 'ROLLCALL_REGTEST_ENV', 'ROLLCALL_REWARD_AMOUNT', 'ROLLCALL_STREAK_LOOKBACK', 'SNAPSHOT_BURIAL_ACTIVATION',
+    'STAKE_KEY_REUSE_ACTIVATION', 'SWEEP_ZERO_LEG_ACTIVATION', 'TICK_NAMESPACE_ACTIVATION', 'TOKEN_BRIDGE_ACTIVATION', 'TOKEN_POLICY_INHERITANCE_ACTIVATION',
+    'TRAIN_ACTIVATION', 'XCHAIN_BRIDGE_ACTIVATION', 'XCHAIN_PRICE_ACTIVATION', 'resolveMirrorAdmissionRegtest',
+]
+
+const VENDORED_CONSTANT_OMISSIONS = {
     'xchain-vm': [
-        'ANCHOR_REWARD_ACTIVATION', 'ANCHOR_REWARD_AMOUNT', 'ARCHIVE_REWARD_ACTIVATION', 'ARCHIVE_REWARD_AMOUNT', 'ATTEST_MAX_EXPIRIES_PER_BLOCK',
-        'CHECKPOINT_COMMITMENT_ACTIVATION', 'CROSS_CHAIN_ROYALTY_ACTIVATION', 'EQUIV_HEADER_ACTIVATION', 'GAS_TICK', 'MAX_ACTION_DATA_LENGTH',
-        'MAX_CODE_SIZE', 'MAX_DEPLOYCHUNK_PART_BYTES', 'MAX_DEPLOY_CHUNKS', 'OP_RETURN_PUSH_OVERHEAD', 'ORACLE_DEVIATION_THRESHOLD',
-        'PRICE_MAX', 'STAKE_WEIGHTED_QUORUM_ACTIVATION', 'STATE_COMMITMENT_ACTIVATION', 'THRESHOLD_SCALE', 'VALID_FIAT_CODES',
-        'VM_MAX_CALL_DEPTH', 'VM_MIN_CALL_GAS', 'XCALL_MAX_CALLS_PER_BLOCK', 'XCALL_MAX_DEADLINE_BLOCKS', 'XCALL_MAX_GAS',
-        'XCALL_MAX_HOPS', 'XCALL_MAX_RETURN_BYTES', 'XCALL_MIN_DEADLINE_BLOCKS', 'XCALL_MIN_GAS',
+        'ANCHOR_ACTIVATION', 'ARCHIVE_MATCH_COUNT_ACTIVATION', 'BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION', 'COMPRESSION_CODE_DEFLATE_RAW', 'COMPRESSION_MAX_INPUT_BYTES',
+        'COMPRESSION_MAX_RATIO', 'CROSS_SETTLE_MAX_PER_BLOCK', 'DISPENSER_CANCEL_GRACE_ACTIVATION', 'DISPENSER_EXPIRY_REALIGN_ACTIVATION', 'ENVELOPE_CARRIER_RECOGNITION_ACTIVATION',
+        'ENVELOPE_MAX_PAYLOAD', 'ENVELOPE_RECOGNITION_ACTIVATION', 'LIST_META_DESCRIPTION_MAX_BYTES', 'LIST_META_NAME_MAX_BYTES', 'LIST_SHARE_MAX_MEMBERS',
+        'LIST_UNION_MAX_MEMBERS', 'ORACLE_FEE_OUTPUT_ACTIVATION', 'ORACLE_FEE_SET_CAPTURE_ACTIVATION', 'XBRIDGE_MAX_PER_BLOCK', 'XCALL_RESULT_ORPHAN_GRACE_SECONDS',
+        'XPOLICY_MAX_MEMBERS', 'XPOLICY_MAX_PER_BLOCK',
     ],
     'xchain-indexer': [
-        'ANCHOR_REWARD_ACTIVATION', 'ANCHOR_REWARD_AMOUNT', 'ARCHIVE_REWARD_ACTIVATION', 'ARCHIVE_REWARD_AMOUNT', 'ATTEST_MAX_EXPIRIES_PER_BLOCK',
-        'CHECKPOINT_COMMITMENT_ACTIVATION', 'CROSS_CHAIN_ROYALTY_ACTIVATION', 'CROSS_SETTLE_MAX_PER_BLOCK', 'EQUIV_HEADER_ACTIVATION', 'GAS_TICK',
-        'LIST_META_DESCRIPTION_MAX_BYTES', 'LIST_META_NAME_MAX_BYTES', 'LIST_SHARE_MAX_MEMBERS', 'LIST_UNION_MAX_MEMBERS', 'MAX_ACTION_DATA_LENGTH',
-        'MAX_CODE_SIZE', 'MAX_DEPLOYCHUNK_PART_BYTES', 'MAX_DEPLOY_CHUNKS', 'OP_RETURN_PUSH_OVERHEAD', 'ORACLE_DEVIATION_THRESHOLD',
-        'ORACLE_VM_MAX_ROWS', 'ORACLE_VM_ROUND_WINDOW', 'PRICE_MAX', 'STAKE_WEIGHTED_QUORUM_ACTIVATION', 'STATE_COMMITMENT_ACTIVATION',
-        'THRESHOLD_SCALE', 'VALID_FIAT_CODES', 'VM_MAX_CALL_DEPTH', 'VM_MIN_CALL_GAS', 'XBRIDGE_MAX_PER_BLOCK',
-        'XCALL_MAX_CALLS_PER_BLOCK', 'XCALL_MAX_DEADLINE_BLOCKS', 'XCALL_MAX_GAS', 'XCALL_MAX_HOPS', 'XCALL_MAX_RETURN_BYTES',
-        'XCALL_MIN_DEADLINE_BLOCKS', 'XCALL_MIN_GAS', 'XCALL_RESULT_ORPHAN_GRACE_SECONDS', 'XPOLICY_MAX_MEMBERS', 'XPOLICY_MAX_PER_BLOCK',
+        'ANCHOR_ACTIVATION', 'ARCHIVE_MATCH_COUNT_ACTIVATION', 'BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION', 'COMPRESSION_CODE_DEFLATE_RAW', 'COMPRESSION_MAX_INPUT_BYTES',
+        'COMPRESSION_MAX_RATIO', 'DISPENSER_CANCEL_GRACE_ACTIVATION', 'DISPENSER_EXPIRY_REALIGN_ACTIVATION', 'ENVELOPE_CARRIER_RECOGNITION_ACTIVATION', 'ENVELOPE_MAX_PAYLOAD',
+        'ENVELOPE_RECOGNITION_ACTIVATION', 'ORACLE_FEE_OUTPUT_ACTIVATION', 'ORACLE_FEE_SET_CAPTURE_ACTIVATION',
     ],
     'xchain-sdk': [
-        'ANCHOR_ACTIVATION', 'ANCHOR_REWARD_ACTIVATION', 'ANCHOR_REWARD_AMOUNT', 'ARCHIVE_MATCH_COUNT_ACTIVATION', 'ARCHIVE_REWARD_ACTIVATION',
-        'ARCHIVE_REWARD_AMOUNT', 'ATTEST_MAX_EXPIRIES_PER_BLOCK', 'CHECKPOINT_COMMITMENT_ACTIVATION', 'COMPRESSION_CODE_DEFLATE_RAW', 'COMPRESSION_MAX_INPUT_BYTES',
-        'COMPRESSION_MAX_RATIO', 'CROSS_CHAIN_ROYALTY_ACTIVATION', 'ENVELOPE_MAX_PAYLOAD', 'EQUIV_HEADER_ACTIVATION', 'GAS_TICK',
-        'MAX_ACTION_DATA_LENGTH', 'MAX_CODE_SIZE', 'MAX_DEPLOYCHUNK_PART_BYTES', 'MAX_DEPLOY_CHUNKS', 'OP_RETURN_PUSH_OVERHEAD',
-        'ORACLE_DEVIATION_THRESHOLD', 'PRICE_MAX', 'STAKE_WEIGHTED_QUORUM_ACTIVATION', 'STATE_COMMITMENT_ACTIVATION', 'THRESHOLD_SCALE',
-        'VALID_FIAT_CODES', 'VM_MAX_CALL_DEPTH', 'VM_MIN_CALL_GAS', 'XCALL_MAX_CALLS_PER_BLOCK', 'XCALL_MAX_DEADLINE_BLOCKS',
-        'XCALL_MAX_GAS', 'XCALL_MAX_HOPS', 'XCALL_MAX_RETURN_BYTES', 'XCALL_MIN_DEADLINE_BLOCKS', 'XCALL_MIN_GAS',
+        'BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION', 'CROSS_SETTLE_MAX_PER_BLOCK', 'DISPENSER_CANCEL_GRACE_ACTIVATION', 'DISPENSER_EXPIRY_REALIGN_ACTIVATION', 'ENVELOPE_CARRIER_RECOGNITION_ACTIVATION',
+        'ENVELOPE_RECOGNITION_ACTIVATION', 'LIST_META_DESCRIPTION_MAX_BYTES', 'LIST_META_NAME_MAX_BYTES', 'LIST_SHARE_MAX_MEMBERS', 'LIST_UNION_MAX_MEMBERS',
+        'ORACLE_FEE_OUTPUT_ACTIVATION', 'ORACLE_FEE_SET_CAPTURE_ACTIVATION', 'XBRIDGE_MAX_PER_BLOCK', 'XCALL_RESULT_ORPHAN_GRACE_SECONDS', 'XPOLICY_MAX_MEMBERS',
+        'XPOLICY_MAX_PER_BLOCK',
     ],
     'xchain-decoder': [
-        'ANCHOR_REWARD_ACTIVATION', 'ANCHOR_REWARD_AMOUNT', 'ARCHIVE_REWARD_ACTIVATION', 'ARCHIVE_REWARD_AMOUNT', 'ATTEST_MAX_EXPIRIES_PER_BLOCK',
-        'BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION', 'CHECKPOINT_COMMITMENT_ACTIVATION', 'CROSS_CHAIN_ROYALTY_ACTIVATION', 'DISPENSER_CANCEL_GRACE_ACTIVATION', 'DISPENSER_EXPIRY_REALIGN_ACTIVATION',
-        'ENVELOPE_CARRIER_RECOGNITION_ACTIVATION', 'ENVELOPE_MAX_PAYLOAD', 'ENVELOPE_RECOGNITION_ACTIVATION', 'EQUIV_HEADER_ACTIVATION', 'GAS_TICK',
-        'MAX_ACTION_DATA_LENGTH', 'MAX_CODE_SIZE', 'MAX_DEPLOYCHUNK_PART_BYTES', 'MAX_DEPLOY_CHUNKS', 'OP_RETURN_PUSH_OVERHEAD',
-        'ORACLE_DEVIATION_THRESHOLD', 'ORACLE_FEE_OUTPUT_ACTIVATION', 'ORACLE_FEE_SET_CAPTURE_ACTIVATION', 'PRICE_MAX', 'STAKE_WEIGHTED_QUORUM_ACTIVATION',
-        'STATE_COMMITMENT_ACTIVATION', 'THRESHOLD_SCALE', 'VALID_FIAT_CODES', 'VM_MAX_CALL_DEPTH', 'VM_MIN_CALL_GAS',
-        'XCALL_MAX_CALLS_PER_BLOCK', 'XCALL_MAX_DEADLINE_BLOCKS', 'XCALL_MAX_GAS', 'XCALL_MAX_HOPS', 'XCALL_MAX_RETURN_BYTES',
-        'XCALL_MIN_DEADLINE_BLOCKS', 'XCALL_MIN_GAS',
+        'ANCHOR_ACTIVATION', 'ARCHIVE_MATCH_COUNT_ACTIVATION', 'COMPRESSION_CODE_DEFLATE_RAW', 'COMPRESSION_MAX_INPUT_BYTES', 'COMPRESSION_MAX_RATIO',
+        'CROSS_SETTLE_MAX_PER_BLOCK', 'LIST_META_DESCRIPTION_MAX_BYTES', 'LIST_META_NAME_MAX_BYTES', 'LIST_SHARE_MAX_MEMBERS', 'LIST_UNION_MAX_MEMBERS',
+        'XBRIDGE_MAX_PER_BLOCK', 'XCALL_RESULT_ORPHAN_GRACE_SECONDS', 'XPOLICY_MAX_MEMBERS', 'XPOLICY_MAX_PER_BLOCK',
     ],
     'xchain-explorer': [
-        'ANCHOR_ACTIVATION', 'ANCHOR_REWARD_ACTIVATION', 'ANCHOR_REWARD_AMOUNT', 'ARCHIVE_REWARD_ACTIVATION', 'ARCHIVE_REWARD_AMOUNT',
-        'ATTEST_MAX_EXPIRIES_PER_BLOCK', 'CHECKPOINT_COMMITMENT_ACTIVATION', 'CROSS_CHAIN_ROYALTY_ACTIVATION', 'EQUIV_HEADER_ACTIVATION', 'GAS_TICK',
-        'MAX_ACTION_DATA_LENGTH', 'MAX_CODE_SIZE', 'MAX_DEPLOYCHUNK_PART_BYTES', 'MAX_DEPLOY_CHUNKS', 'OP_RETURN_PUSH_OVERHEAD',
-        'ORACLE_DEVIATION_THRESHOLD', 'PRICE_MAX', 'STAKE_WEIGHTED_QUORUM_ACTIVATION', 'STATE_COMMITMENT_ACTIVATION', 'THRESHOLD_SCALE',
-        'VALID_FIAT_CODES', 'VM_MAX_CALL_DEPTH', 'VM_MIN_CALL_GAS', 'XCALL_MAX_CALLS_PER_BLOCK', 'XCALL_MAX_DEADLINE_BLOCKS',
-        'XCALL_MAX_GAS', 'XCALL_MAX_HOPS', 'XCALL_MAX_RETURN_BYTES', 'XCALL_MIN_DEADLINE_BLOCKS', 'XCALL_MIN_GAS',
+        'ARCHIVE_MATCH_COUNT_ACTIVATION', 'BATCH_SUBCOMMAND_OUTPUT_CAPTURE_ACTIVATION', 'COMPRESSION_CODE_DEFLATE_RAW', 'COMPRESSION_MAX_INPUT_BYTES', 'COMPRESSION_MAX_RATIO',
+        'CROSS_SETTLE_MAX_PER_BLOCK', 'DISPENSER_CANCEL_GRACE_ACTIVATION', 'DISPENSER_EXPIRY_REALIGN_ACTIVATION', 'ENVELOPE_CARRIER_RECOGNITION_ACTIVATION', 'ENVELOPE_MAX_PAYLOAD',
+        'ENVELOPE_RECOGNITION_ACTIVATION', 'LIST_META_DESCRIPTION_MAX_BYTES', 'LIST_META_NAME_MAX_BYTES', 'LIST_SHARE_MAX_MEMBERS', 'LIST_UNION_MAX_MEMBERS',
+        'ORACLE_FEE_OUTPUT_ACTIVATION', 'ORACLE_FEE_SET_CAPTURE_ACTIVATION', 'XBRIDGE_MAX_PER_BLOCK', 'XCALL_RESULT_ORPHAN_GRACE_SECONDS', 'XPOLICY_MAX_MEMBERS',
+        'XPOLICY_MAX_PER_BLOCK',
     ],
 }
 
@@ -142,26 +146,39 @@ const VENDORED_CONSTANT_NAMES = {
 // canonical declarations live in the indexer activation registry rather than the
 // documentation module, so include those authoritative exports for that service.
 const indexerGateRegistry = require('../../../xchain-indexer/src/consensus/gate_registry.js')
-const CANONICAL_EXPORTS_BY_SERVICE = {
-    'xchain-indexer': Object.assign({}, protocol, {
-        ORACLE_VM_ROUND_WINDOW:
-            indexerGateRegistry.copy('protocol/constants.ORACLE_VM_ROUND_WINDOW'),
-        ORACLE_VM_MAX_ROWS:
-            indexerGateRegistry.copy('protocol/constants.ORACLE_VM_MAX_ROWS'),
-    }),
+const CANONICAL_SERVICE_EXTENSIONS = {
+    'xchain-indexer': {
+        ORACLE_VM_ROUND_WINDOW: indexerGateRegistry.copy('protocol/constants.ORACLE_VM_ROUND_WINDOW'),
+        ORACLE_VM_MAX_ROWS: indexerGateRegistry.copy('protocol/constants.ORACLE_VM_MAX_ROWS'),
+    },
 }
 
-function assertFullVendoredExportIdentity(vendored, canonical, service, expectedNames) {
-    const vendoredNames = Object.keys(vendored).sort()
-    assert.deepStrictEqual(vendoredNames, expectedNames,
-        service + ' full vendored constant export names drifted')
-    const expected = {}
-    expectedNames.forEach((name) => {
-        assert.ok(Object.prototype.hasOwnProperty.call(canonical, name),
-            service + ' vendored constants exports ' + name +
-            ', but the canonical constants module does not export it')
-        expected[name] = canonical[name]
+function canonicalExportsForService(service) {
+    return Object.assign({}, protocol, CANONICAL_SERVICE_EXTENSIONS[service])
+}
+
+function omittedExportsForService(service) {
+    return CANONICAL_EXPORTS_OUTSIDE_VENDORED_CONSTANTS.concat(
+        VENDORED_CONSTANT_OMISSIONS[service])
+}
+
+// Every canonical export is either vendored or named in the omission list. An
+// omission must still be a canonical export and must not appear in the vendored
+// copy, so a removed canonical export or a vendored constant that stops being
+// compared both fail rather than hiding behind the list.
+function assertFullVendoredExportIdentity(vendored, canonical, service, omittedNames) {
+    const canonicalNames = Object.keys(canonical)
+    omittedNames.forEach((name) => {
+        assert.ok(canonicalNames.includes(name),
+            service + ' omits ' + name + ', which the canonical constants no longer export')
+        assert.ok(!Object.prototype.hasOwnProperty.call(vendored, name),
+            service + ' vendors ' + name + ' but the identity guard omits it')
     })
+    const omitted = new Set(omittedNames)
+    const expected = Object.fromEntries(
+        Object.entries(canonical).filter(([name]) => !omitted.has(name)))
+    assert.deepStrictEqual(Object.keys(vendored).sort(), Object.keys(expected).sort(),
+        service + ' full vendored constant export names drifted')
     assert.deepStrictEqual(vendored, expected,
         service + ' full vendored constant export set drifted from canonical')
 }
@@ -941,22 +958,28 @@ describe('Protocol size-limit drift guard', () => {
     describe('Vendored protocol-constants full-export identity', () => {
 
         it('[regression:p0] rejects missing canonical exports, extra vendored exports, and changed values', () => {
+            const check = (v, c, omitted) => assertFullVendoredExportIdentity(v, c, 'fixture', omitted || [])
+            check({ A: 1 }, { A: 1, B: 2 }, ['B'])
+            assert.throws(() => check({ A: 1 }, { A: 1, UNLISTED: 2 }),
+                /full vendored constant export names drifted/)
+            assert.throws(() => check({ A: 1 }, { A: 1 }, ['GONE']),
+                /no longer export/)
+            assert.throws(() => check({ A: 1, B: 2 }, { A: 1, B: 2 }, ['B']),
+                /vendors B but the identity guard omits it/)
+            assert.throws(() => check({ A: 1, EXTRA: 2 }, { A: 1 }),
+                /full vendored constant export names drifted/)
+            assert.throws(() => check({}, { A: 1 }),
+                /full vendored constant export names drifted/)
+            assert.throws(() => check({ A: 2 }, { A: 1 }),
+                /full vendored constant export set drifted from canonical/)
+
+            const vendoredVm = require('../../../xchain-vm/src/protocol/constants.js')
+            const canonicalVm = Object.assign({}, canonicalExportsForService('xchain-vm'),
+                { UNLISTED_CANONICAL_EXPORT_FIXTURE: 1 })
             assert.throws(
-                () => assertFullVendoredExportIdentity({ A: 1 }, {}, 'fixture', ['A']),
-                /canonical constants module does not export it/
-            )
-            assert.throws(
-                () => assertFullVendoredExportIdentity({ A: 1, EXTRA: 2 }, { A: 1, EXTRA: 2 }, 'fixture', ['A']),
-                /full vendored constant export names drifted/
-            )
-            assert.throws(
-                () => assertFullVendoredExportIdentity({}, { A: 1 }, 'fixture', ['A']),
-                /full vendored constant export names drifted/
-            )
-            assert.throws(
-                () => assertFullVendoredExportIdentity({ A: 2 }, { A: 1 }, 'fixture', ['A']),
-                /full vendored constant export set drifted from canonical/
-            )
+                () => assertFullVendoredExportIdentity(
+                    vendoredVm, canonicalVm, 'xchain-vm', omittedExportsForService('xchain-vm')),
+                /full vendored constant export names drifted/)
         })
 
         VENDORED_CONSTANTS_SERVICES.forEach((svc) => {
@@ -966,9 +989,8 @@ describe('Protocol size-limit drift guard', () => {
                 assert.ok(fs.existsSync(vendoredPath),
                     svc + ' is missing its vendored src/protocol/constants.js copy')
                 const mod = require(vendoredPath)
-                const canonical = CANONICAL_EXPORTS_BY_SERVICE[svc] || protocol
                 assertFullVendoredExportIdentity(
-                    mod, canonical, svc, VENDORED_CONSTANT_NAMES[svc])
+                    mod, canonicalExportsForService(svc), svc, omittedExportsForService(svc))
             })
         })
     })
