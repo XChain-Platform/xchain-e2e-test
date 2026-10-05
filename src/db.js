@@ -1148,59 +1148,38 @@ class Database {
     }
     
     async waitForDispense(dispenseObject, timeMax = 60000){ return this['_waitFor'](this.checkDispense, dispenseObject, timeMax) }
-    
-    async checkDispense({blockIndex, txHash, source, giveCoin,
+
+    buildDispenseFilters({blockIndex, txHash, source, giveCoin,
       giveTick, giveAmount, getCoin, getTick, getAmount,
       destination, status}){
         const whereClauses = []
         const whereValues = []
-        
-        if (!this.isNullOrNullString(blockIndex)){
-            whereClauses.push("tr.block_index = ?")
-            whereValues.push(blockIndex)
+
+        const filters = [
+            [blockIndex, "tr.block_index = ?"],
+            [txHash, "itx.hash = ?"],
+            [source, "ias.address = ?"],
+            [giveCoin, "give_ic.coin = ?"],
+            [giveTick, "give_it.tick = ?"],
+            [giveAmount, "d.give_amount = ?"],
+            [getCoin, "get_ic.coin = ?"],
+            [getTick, "get_it.tick = ?"],
+            [getAmount, "d.get_amount = ?"],
+            [destination, "iad.address = ?"],
+            [status, "ist.status = ?"]
+        ]
+        for (const [value, clause] of filters){
+            if (!this.isNullOrNullString(value)){
+                whereClauses.push(clause)
+                whereValues.push(value)
+            }
         }
-        if (!this.isNullOrNullString(txHash)){
-            whereClauses.push("itx.hash = ?")
-            whereValues.push(txHash)
-        }
-        if (!this.isNullOrNullString(source)){
-            whereClauses.push("ias.address = ?")
-            whereValues.push(source)
-        }
-        if (!this.isNullOrNullString(giveCoin)){
-            whereClauses.push("give_ic.coin = ?")
-            whereValues.push(giveCoin)
-        }
-        if (!this.isNullOrNullString(giveTick)){
-            whereClauses.push("give_it.tick = ?")
-            whereValues.push(giveTick)
-        }
-        if (!this.isNullOrNullString(giveAmount)){
-            whereClauses.push("d.give_amount = ?")
-            whereValues.push(giveAmount)
-        }   
-        if (!this.isNullOrNullString(getCoin)){
-            whereClauses.push("get_ic.coin = ?")
-            whereValues.push(getCoin)
-        }
-        if (!this.isNullOrNullString(getTick)){
-            whereClauses.push("get_it.tick = ?")
-            whereValues.push(getTick)
-        }
-        if (!this.isNullOrNullString(getAmount)){
-            whereClauses.push("d.get_amount = ?")
-            whereValues.push(getAmount)
-        }   
-        if (!this.isNullOrNullString(destination)){
-            whereClauses.push("iad.address = ?")
-            whereValues.push(destination)
-        }    
-        if (!this.isNullOrNullString(status)){
-            whereClauses.push("ist.status = ?")
-            whereValues.push(status)
-        }
-         
-        const query = `
+
+        return {whereClauses, whereValues}
+    }
+
+    buildDispenseQuery(whereClauses){
+        return `
             SELECT 
                 tr.block_index AS block_index,
                 itx.hash AS tx_hash,
@@ -1227,7 +1206,12 @@ class Database {
             LEFT JOIN index_addresses iad ON iad.id = d.destination_id
             LEFT JOIN index_statuses ist ON ist.id = d.status_id
         `+"WHERE "+whereClauses.join(" AND ");
-        
+    }
+
+    async checkDispense(dispenseObject){
+        const {whereClauses, whereValues} = this.buildDispenseFilters(dispenseObject)
+        const query = this.buildDispenseQuery(whereClauses)
+
         const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, whereValues)
