@@ -17,9 +17,10 @@
  *
  * `test/integration/*.integration.test.js` ran in no CI lane at all, so
  * xchain-indexer 521edf2 turned one of its suites red on 2026-07-16 and nobody
- * heard about it for ten days. This script is the lane: `npm run ci` calls it,
- * so every venue gate run, every ci-all.sh sweep and every workflow that runs
- * the repo's own gate exercises the tier.
+ * heard about it for ten days. `npm run ci:live` runs this script, and
+ * bin/ci-full.sh (`npm run ci:full`, which `npm run ci` now aliases) calls it
+ * in its live-tier tier. Every venue gate run, every ci-all.sh sweep and every
+ * workflow that runs the repo's own gate exercises the tier.
  *
  * WHY A RUNNER RATHER THAN ONE MORE GLOB ON THE MOCHA LINE. The rot that
  * started this item was not a red suite, it was a red suite NOBODY SAW, and a
@@ -50,7 +51,7 @@
  * back with a config file in front of it.
  *
  * COST, because it is the reason this was not wired years ago. Measured on
- * 2026-08-09: the 20-suite roster is ~700s, and `npm run ci` end to end
+ * 2026-08-09: the 20-suite roster is ~700s, and `npm run ci:full` end to end
  * is ~12.5 min. That is longer than the ~10 min after which GitHub tends to drop
  * an idle push connection, so a pre-push gate run can outlive the push it is
  * gating. The consequence is one failed push, not a lost gate: ci-dispatch banks
