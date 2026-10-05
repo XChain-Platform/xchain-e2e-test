@@ -33,6 +33,94 @@ const PERF_COLLECTOR_MODULE = '../test/perf/perfCollector';
 
 function mariadbDriver(){ return require(MARIADB_MODULE); }
 
+function addDispenserWhereValue(database, whereClauses, whereValues, value, clause){
+    if (!database.isNullOrNullString(value)){
+        whereClauses.push(clause)
+        whereValues.push(value)
+    }
+}
+
+function addDispenserIdentityFilters(database, params, whereClauses, whereValues){
+    addDispenserWhereValue(database, whereClauses, whereValues, params.blockIndex, "tr.block_index = ?")
+    addDispenserWhereValue(database, whereClauses, whereValues, params.txHash, "itx.hash = ?")
+    addDispenserWhereValue(database, whereClauses, whereValues, params.source, "ias.address = ?")
+}
+
+function addDispenserGiveFilters(database, params, whereClauses, whereValues){
+    addDispenserWhereValue(database, whereClauses, whereValues, params.giveCoin, "give_ic.coin = ?")
+    addDispenserWhereValue(database, whereClauses, whereValues, params.giveTick, "give_it.tick = ?")
+    addDispenserWhereValue(database, whereClauses, whereValues, params.giveAmount, "d.give_amount = ?")
+    addDispenserWhereValue(database, whereClauses, whereValues, params.giveEscrow, "d.give_escrow = ?")
+}
+
+function addDispenserGetFilters(database, params, whereClauses, whereValues){
+    addDispenserWhereValue(database, whereClauses, whereValues, params.getCoin, "get_ic.coin = ?")
+    addDispenserWhereValue(database, whereClauses, whereValues, params.getTick, "get_it.tick = ?")
+    addDispenserWhereValue(database, whereClauses, whereValues, params.getAmount, "d.get_amount = ?")
+    if (!database.isNullOrNullString(params.getAddress)){
+        whereClauses.push("get_ia.address = ?")
+        whereValues.push(params.getAddress)
+    } else {
+        whereClauses.push("get_ia.address = ias.address")
+    }
+}
+
+function addDispenserConstraintFilters(database, params, whereClauses, whereValues){
+    addDispenserWhereValue(database, whereClauses, whereValues, params.fiatCode, "ifs.code = ?")
+    addDispenserWhereValue(database, whereClauses, whereValues, params.expiration, "d.expiration = ?")
+    addDispenserWhereValue(database, whereClauses, whereValues, params.allowList, "d.allow_list = ?")
+    addDispenserWhereValue(database, whereClauses, whereValues, params.blockList, "d.block_list = ?")
+    addDispenserWhereValue(database, whereClauses, whereValues, params.memo, "im.memo = ?")
+    addDispenserWhereValue(database, whereClauses, whereValues, params.status, "ist.status = ?")
+}
+
+function buildDispenserFilters(database, params){
+    const whereClauses = []
+    const whereValues = []
+    addDispenserIdentityFilters(database, params, whereClauses, whereValues)
+    addDispenserGiveFilters(database, params, whereClauses, whereValues)
+    addDispenserGetFilters(database, params, whereClauses, whereValues)
+    addDispenserConstraintFilters(database, params, whereClauses, whereValues)
+    return {whereClauses, whereValues}
+}
+
+function buildDispenserQuery(whereClauses){
+    return `
+            SELECT${' '}
+                tr.block_index AS block_index,
+                itx.hash AS tx_hash,
+                d.action_index,
+                give_ic.coin AS give_coin,
+                give_it.tick AS give_tick,
+                d.give_amount,
+                d.give_escrow,
+                get_ic.coin AS get_coin,
+                get_it.tick AS get_tick,
+                d.get_amount,
+                get_ia.address AS get_address,
+                ifs.code AS fiat_code,
+                d.fiat_amount,
+                d.expiration,
+                d.allow_list,
+                d.block_list,
+                im.memo AS memo,
+                ist.status AS status${' '}
+            FROM dispensers d
+            LEFT JOIN actions act ON act.action_index = d.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ias ON ias.id = tr.source_id
+            LEFT JOIN index_coins give_ic ON give_ic.id = d.give_coin_id
+            LEFT JOIN index_tickers give_it ON give_it.id = d.give_tick_id
+            LEFT JOIN index_coins get_ic ON get_ic.id = d.get_coin_id
+            LEFT JOIN index_tickers get_it ON get_it.id = d.get_tick_id
+            LEFT JOIN index_addresses get_ia ON get_ia.id = d.get_address_id
+            LEFT JOIN index_fiats ifs ON ifs.id = d.fiat_id
+            LEFT JOIN index_memos im ON im.id = d.memo_id
+            LEFT JOIN index_statuses ist ON ist.id = d.status_id
+        `+"WHERE "+whereClauses.join(" AND ");
+}
+
 const config = require('./config');
 const { getLogger } = require('./lib/logger');
 const logger = getLogger();
@@ -1018,119 +1106,15 @@ class Database {
     }
     
     async waitForDispenser(dispenserObject, timeMax = 60000){ return this['_waitFor'](this.checkDispenser, dispenserObject, timeMax) }
-    
-    async checkDispenser({blockIndex, txHash, source, giveCoin, giveTick, giveAmount, giveEscrow, 
+
+    async checkDispenser({blockIndex, txHash, source, giveCoin, giveTick, giveAmount, giveEscrow,
       getCoin, getTick, getAmount, getAddress, fiatCode, fiatAmount,
       expiration, allowList, blockList, memo, status}){
-        const whereClauses = []
-        const whereValues = []
-        
-        if (!this.isNullOrNullString(blockIndex)){
-            whereClauses.push("tr.block_index = ?")
-            whereValues.push(blockIndex)
-        }
-        if (!this.isNullOrNullString(txHash)){
-            whereClauses.push("itx.hash = ?")
-            whereValues.push(txHash)
-        }
-        if (!this.isNullOrNullString(source)){
-            whereClauses.push("ias.address = ?")
-            whereValues.push(source)
-        }
-        if (!this.isNullOrNullString(giveCoin)){
-            whereClauses.push("give_ic.coin = ?")
-            whereValues.push(giveCoin)
-        }
-        if (!this.isNullOrNullString(giveTick)){
-            whereClauses.push("give_it.tick = ?")
-            whereValues.push(giveTick)
-        }
-        if (!this.isNullOrNullString(giveAmount)){
-            whereClauses.push("d.give_amount = ?")
-            whereValues.push(giveAmount)
-        }   
-        if (!this.isNullOrNullString(giveEscrow)){
-            whereClauses.push("d.give_escrow = ?")
-            whereValues.push(giveEscrow)
-        }   
-        if (!this.isNullOrNullString(getCoin)){
-            whereClauses.push("get_ic.coin = ?")
-            whereValues.push(getCoin)
-        }
-        if (!this.isNullOrNullString(getTick)){
-            whereClauses.push("get_it.tick = ?")
-            whereValues.push(getTick)
-        }
-        if (!this.isNullOrNullString(getAmount)){
-            whereClauses.push("d.get_amount = ?")
-            whereValues.push(getAmount)
-        }   
-        if (!this.isNullOrNullString(getAddress)){
-            whereClauses.push("get_ia.address = ?")
-            whereValues.push(getAddress)
-        } else {
-            whereClauses.push("get_ia.address = ias.address")
-        }
-        if (!this.isNullOrNullString(fiatCode)){
-            whereClauses.push("ifs.code = ?")
-            whereValues.push(fiatCode)
-        }   
-        if (!this.isNullOrNullString(expiration)){
-            whereClauses.push("d.expiration = ?")
-            whereValues.push(expiration)
-        }   
-        if (!this.isNullOrNullString(allowList)){
-            whereClauses.push("d.allow_list = ?")
-            whereValues.push(allowList)
-        }   
-        if (!this.isNullOrNullString(blockList)){
-            whereClauses.push("d.block_list = ?")
-            whereValues.push(blockList)
-        }   
-        if (!this.isNullOrNullString(memo)){
-            whereClauses.push("im.memo = ?")
-            whereValues.push(memo)
-        }   
-        if (!this.isNullOrNullString(status)){
-            whereClauses.push("ist.status = ?")
-            whereValues.push(status)
-        }
-         
-        const query = `
-            SELECT 
-                tr.block_index AS block_index,
-                itx.hash AS tx_hash,
-                d.action_index,
-                give_ic.coin AS give_coin,
-                give_it.tick AS give_tick,
-                d.give_amount,
-                d.give_escrow,
-                get_ic.coin AS get_coin,
-                get_it.tick AS get_tick,
-                d.get_amount,
-                get_ia.address AS get_address,
-                ifs.code AS fiat_code,
-                d.fiat_amount,
-                d.expiration,
-                d.allow_list,
-                d.block_list,
-                im.memo AS memo,
-                ist.status AS status 
-            FROM dispensers d
-            LEFT JOIN actions act ON act.action_index = d.action_index
-            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
-            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
-            LEFT JOIN index_addresses ias ON ias.id = tr.source_id
-            LEFT JOIN index_coins give_ic ON give_ic.id = d.give_coin_id
-            LEFT JOIN index_tickers give_it ON give_it.id = d.give_tick_id
-            LEFT JOIN index_coins get_ic ON get_ic.id = d.get_coin_id
-            LEFT JOIN index_tickers get_it ON get_it.id = d.get_tick_id
-            LEFT JOIN index_addresses get_ia ON get_ia.id = d.get_address_id
-            LEFT JOIN index_fiats ifs ON ifs.id = d.fiat_id
-            LEFT JOIN index_memos im ON im.id = d.memo_id
-            LEFT JOIN index_statuses ist ON ist.id = d.status_id
-        `+"WHERE "+whereClauses.join(" AND ");
-        
+        const params = {blockIndex, txHash, source, giveCoin, giveTick, giveAmount, giveEscrow,
+            getCoin, getTick, getAmount, getAddress, fiatCode, fiatAmount,
+            expiration, allowList, blockList, memo, status}
+        const {whereClauses, whereValues} = buildDispenserFilters(this, params)
+        const query = buildDispenserQuery(whereClauses)
         const connection = await this.getConnection()
         try {
             const rows = await connection.query(query, whereValues)
