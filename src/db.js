@@ -37,6 +37,150 @@ const config = require('./config');
 const { getLogger } = require('./lib/logger');
 const logger = getLogger();
 
+function getListWhere({blockIndex,txHash,source,type,edit,listActionIndex,memo,status}){
+    const whereClauses = []
+    const whereValues = []
+
+    if (blockIndex != null){
+        whereClauses.push("tr.block_index = ?")
+        whereValues.push(blockIndex)
+    }
+    if (txHash != null){
+        whereClauses.push("itx.hash = ?")
+        whereValues.push(txHash)
+    }
+    if (source != null){
+        whereClauses.push("ia.address = ?")
+        whereValues.push(source)
+    }
+    if (type != null){
+        whereClauses.push("l.type = ?")
+        whereValues.push(type)
+    }
+    if (edit != null){
+        whereClauses.push("l.edit = ?")
+        whereValues.push(edit)
+    }
+    if (listActionIndex != null){
+        whereClauses.push("l.list_action_index = ?")
+        whereValues.push(listActionIndex)
+    }
+    if (memo != null){
+        if (memo === ''){
+            whereClauses.push("im.memo IS NULL")
+        } else {
+            whereClauses.push("im.memo = ?")
+            whereValues.push(memo)
+        }
+    }
+    if (status != null){
+        whereClauses.push("ist.status = ?")
+        whereValues.push(status)
+    }
+
+    return {whereClauses, whereValues}
+}
+
+function getListQuery(whereClauses){
+    return `
+            SELECT
+                tr.block_index AS block_index,
+                itx.hash AS tx_hash,
+                l.action_index,
+                ia.address AS source,
+                l.type,
+                l.edit,
+                l.list_action_index,
+                im.memo AS memo,
+                ist.status AS status
+            FROM lists l
+            LEFT JOIN actions act ON act.action_index = l.action_index
+            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
+            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
+            LEFT JOIN index_addresses ia ON ia.id = tr.source_id
+            LEFT JOIN index_memos im ON im.id = l.memo_id
+            LEFT JOIN index_statuses ist ON ist.id = l.status_id
+        `+"WHERE "+whereClauses.join(" AND ");
+}
+
+async function findListRow(database, query, whereValues){
+    const connection = await database.getConnection()
+
+    try {
+        const rows = await connection.query(query, whereValues)
+        if (rows.length > 0){
+            return {listRow: rows[0], finished: false}
+        } else {
+            return {listRow: null, finished: true}
+        }
+    } catch (err) {
+        logger.error('Error with database query (list):', err);
+        return {listRow: null, finished: true}
+    } finally {
+        await connection.release()
+    }
+}
+
+function getListItemsQuery(type){
+    let leftJoin = ""
+    let field = ""
+    switch (type){
+        case 1: //TICK
+            leftJoin = " LEFT JOIN index_tickers it ON it.id = li.item_id "
+            field = " it.tick AS item_name "
+            break
+        case 2: //address
+            leftJoin = " LEFT JOIN index_addresses ia ON ia.id = li.item_id "
+            field = " ia.address AS item_name "
+            break
+    }
+
+    return "SELECT "+field+
+        " FROM list_items li "+leftJoin+
+        " WHERE li.action_index = ?"
+}
+
+function listItemsMatch(rows, items){
+    if (rows.length !== items.length){
+        logger.info("ERROR! List items don't have the same length as the items in the database")
+        return false
+    }
+
+    const itemsClone = items.slice()
+    for (const nextRowIndex in rows){
+        const nextRow = rows[nextRowIndex]
+        const itemIndex = itemsClone.indexOf(nextRow["item_name"])
+        if (itemIndex >= 0){
+            itemsClone.splice(itemIndex, 1)
+        }
+    }
+
+    if (itemsClone.length === 0){
+        return true
+    }
+    logger.info("ERROR! List items don't match with the items in the database")
+    return false
+}
+
+async function checkListItems(database, listRow, type, items){
+    const queryItems = getListItemsQuery(type)
+    const connection = await database.getConnection()
+
+    try {
+        const rows = await connection.query(queryItems, [listRow["action_index"]])
+        if (listItemsMatch(rows, items)){
+            return listRow
+        } else {
+            return null
+        }
+    } catch (err) {
+        logger.error('Error with database query (list items):', err);
+        return null;
+    } finally {
+        await connection.release()
+    }
+}
+
 /**
  * A named-method wrapper around one mariadb connection pool: every query the
  * e2e suites need lives here as a method, never as a literal SQL string at
@@ -719,143 +863,20 @@ class Database {
     async waitForList(listObject, timeMax = 60000){ return this['_waitFor'](this.checkList, listObject, timeMax) }
     
     async checkList({blockIndex,txHash,source,type,edit,listActionIndex,memo,status,items}){
-        const whereClauses = []
-        const whereValues = []
-        
-        if (blockIndex != null){
-            whereClauses.push("tr.block_index = ?")
-            whereValues.push(blockIndex)
-        }
-        if (txHash != null){
-            whereClauses.push("itx.hash = ?")
-            whereValues.push(txHash)
-        }
-        if (source != null){
-            whereClauses.push("ia.address = ?")
-            whereValues.push(source)
-        }
-        if (type != null){
-            whereClauses.push("l.type = ?")
-            whereValues.push(type)
-        }
-        if (edit != null){
-            whereClauses.push("l.edit = ?")
-            whereValues.push(edit)
-        }
-        if (listActionIndex != null){
-            // Alias is `l`; there is no `b` in this query, so the old `b.` prefix made
-            // every listActionIndex filter throw and return null instead of asserting.
-            whereClauses.push("l.list_action_index = ?")
-            whereValues.push(listActionIndex)
-        }
-        if (memo != null){
-            // The indexer stores an absent or empty LIST memo as memo_id NULL
-            // (xchain-indexer createMemo returns null for '' via util.isNull), so an
-            // asserted empty memo is a NULL check, matching checkMint.
-            if (memo === ''){
-                whereClauses.push("im.memo IS NULL")
-            } else {
-                whereClauses.push("im.memo = ?")
-                whereValues.push(memo)
-            }
-        }
-        if (status != null){
-            whereClauses.push("ist.status = ?")
-            whereValues.push(status)
-        }
+        const {whereClauses, whereValues} = getListWhere({
+            blockIndex, txHash, source, type, edit, listActionIndex, memo, status
+        })
+        const query = getListQuery(whereClauses)
+        const {listRow, finished} = await findListRow(this, query, whereValues)
 
-        const query = `
-            SELECT
-                tr.block_index AS block_index,
-                itx.hash AS tx_hash,
-                l.action_index,
-                ia.address AS source,
-                l.type,
-                l.edit,
-                l.list_action_index,
-                im.memo AS memo,
-                ist.status AS status
-            FROM lists l
-            LEFT JOIN actions act ON act.action_index = l.action_index
-            LEFT JOIN transactions tr ON act.tx_index = tr.tx_index
-            LEFT JOIN index_transactions itx ON itx.id = tr.tx_hash_id
-            LEFT JOIN index_addresses ia ON ia.id = tr.source_id
-            LEFT JOIN index_memos im ON im.id = l.memo_id
-            LEFT JOIN index_statuses ist ON ist.id = l.status_id
-        `+"WHERE "+whereClauses.join(" AND ");
-        
-        let connection = await this.getConnection()
-        let listRow = null
-        try {
-            const rows = await connection.query(query, whereValues)
-            if (rows.length > 0){
-                listRow = rows[0]
-            } else {
-                return null
-            }
-        } catch (err) {
-            logger.error('Error with database query (list):', err);
+        if (finished){
             return null
-        } finally {
-            await connection.release()
         }
-
-        if (listRow){
-            const newActionIndex = listRow["action_index"]
-            let leftJoin = ""
-            let field = ""
-            switch (type){
-                case 1: //TICK
-                    leftJoin = " LEFT JOIN index_tickers it ON it.id = li.item_id "
-                    field = " it.tick AS item_name "
-                    break
-                case 2: //address
-                    leftJoin = " LEFT JOIN index_addresses ia ON ia.id = li.item_id "
-                    field = " ia.address AS item_name "
-                    break
-            }
-
-            const queryItems = "SELECT "+field+
-                " FROM list_items li "+leftJoin+
-                " WHERE li.action_index = ?"
-
-            connection = await this.getConnection()
-
-            try {
-                const rows = await connection.query(queryItems, [newActionIndex])
-                if (rows.length === items.length){
-                    const itemsClone = items.slice()
-
-                    for (const nextRowIndex in rows){
-                        const nextRow = rows[nextRowIndex]
-
-                        const itemIndex = itemsClone.indexOf(nextRow["item_name"])
-
-                        if (itemIndex >= 0){
-                            itemsClone.splice(itemIndex, 1)
-                        }
-                    }
-
-                    if (itemsClone.length === 0){
-                        return listRow
-                    } else {
-                        logger.info("ERROR! List items don't match with the items in the database")
-                        return null
-                    }
-                } else {
-                    logger.info("ERROR! List items don't have the same length as the items in the database")
-                    return null
-                }
-            } catch (err) {
-                logger.error('Error with database query (list items):', err);
-                return null;
-            } finally {
-                await connection.release()
-            }
-        } else {
+        if (!listRow){
             logger.error("ERROR! Couldn't find the new list action index");
             return null
         }
+        return await checkListItems(this, listRow, type, items)
     }
     
     async waitForAirdrop(airdropObject, timeMax = 60000){ return this['_waitFor'](this.checkAirdrop, airdropObject, timeMax) }
