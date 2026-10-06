@@ -53,7 +53,7 @@ const ROOT = path.resolve(__dirname, '../../../..');
 const GOLDEN = require(path.join(ROOT, 'xchain-documentation/protocol/test-vectors/anchor_canonical.json'));
 const StateAnchorPublisher = require(path.join(ROOT, 'xchain-hub/src/anchor/publisher.js'));
 const Anchor               = require(path.join(ROOT, 'xchain-indexer/src/actions/anchor/index.js'));
-const sdkLight             = require(path.join(ROOT, 'xchain-sdk/src/light.js'));
+const sdkLight             = require(path.join(ROOT, 'xchain-sdk/src/protocol/light_client.js'));
 
 const BUNDLE = GOLDEN.fixture.bundle;
 const WIRE   = GOLDEN.vectors.v0;
