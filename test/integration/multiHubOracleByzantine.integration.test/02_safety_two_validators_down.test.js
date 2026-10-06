@@ -45,7 +45,7 @@ const { MultiValidatorHub }       = require('../../helpers/multiValidatorHubHelp
 const { startDisposableHubDb }    = require('../../helpers/disposableHubDb');
 const { seedWeightSnapshot }      = require('../../helpers/seededWeightSnapshot');
 const { silenceOracleValidator }  = require('../../helpers/byzantineFaults');
-const { waitForMesh, waitFor }    = require('../../helpers/consensusWait');
+const { waitForMesh, waitFor, nominalOracleRoundTime } = require('../../helpers/consensusWait');
 
 function hubRequire(rel) { return require(path.resolve(__dirname, '../../../../xchain-hub', rel)); }
 const OracleConsensus = hubRequire('src/oracle/consensus.js');
@@ -59,7 +59,6 @@ const PEER_WAIT_MS = 60_000;
 // window). It therefore keeps its measured length.
 const SETTLE_MS    = 6000;
 const BLOCK_INDEX  = 100;
-const BLOCK_TIME   = 1700000000;
 const ROUND        = 100;
 const PAIR         = 'BTC/USD';
 const PRICE        = '60000';
@@ -96,7 +95,7 @@ function injectSubmissions(mvh) {
 async function finalizeAll(mvh, opts) {
     opts = opts || {};
     const expect = opts.expect === undefined ? mvh.hubs.length : opts.expect;
-    await Promise.all(mvh.hubs.map((h) => h['_wtOracle'].finalizeRound(ROUND, BLOCK_INDEX, BLOCK_TIME).catch(() => {})));
+    await Promise.all(mvh.hubs.map((h) => h['_wtOracle'].finalizeRound(ROUND, BLOCK_INDEX, nominalOracleRoundTime(h['_wtOracle'], ROUND)).catch(() => {})));
     await waitFor(async () => {
         let stored = 0;
         for (const hub of mvh.hubs) {

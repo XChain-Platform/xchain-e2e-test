@@ -49,20 +49,12 @@ const crypto = require('crypto');
 const { MultiValidatorHub, ValidatorIdentity, loadHubModule } = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
-const { seedStakeSnapshot }    = require('../helpers/seededStakeSnapshot');
 const { MockCrossChainOfferBook, makeOrder } = require('../helpers/mockCrossChainOfferBook');
-const { waitForMesh, waitFor } = require('../helpers/consensusWait');
+const { withGiveDecimals } = require('../attestMirror/helpers/crossChainOfferDecimals');
+const { waitForMesh, waitFor, nominalOracleRoundTime } = require('../helpers/consensusWait');
 
 const OracleConsensus = loadHubModule('src/oracle/consensus.js');
 const OracleRound     = loadHubModule('src/oracle/round.js');
-
-const setBook = MockCrossChainOfferBook.prototype.setBook;
-MockCrossChainOfferBook.prototype.setBook = function (name, options = {}) {
-    for (const offers of Object.values(options.ordersByCoin || {}))
-        for (const offer of offers)
-            if (offer.give_decimals === undefined) offer.give_decimals = 8;
-    return setBook.call(this, name, options);
-};
 
 const COUNT        = 10;
 const QUORUM_SIGS  = 7;          // tally > 2S/3 with equal weights => >=7 of 10 sources
@@ -113,16 +105,11 @@ function callIdFrom(seed) { return crypto.createHash('sha256').update(String(see
 function dispatchRow(roundId, callId) {
     return {
         round_id: roundId, call_id: callId, phase: 'dispatch', snapshot_block: BLOCK_INDEX,
-        network: NETWORK, source_chain: 'DOGE', source_action_index: 5, source_contract_index: 1,
+        network: NETWORK, source_chain: 'DOGE', source_action_index: 5, push_generation: 0, source_contract_index: 1,
         target_chain: 'LTC', target_contract_index: 2, method: 'ping', params_json: '[]',
         gas_limit: 100000, cross_hops: 0, effective_time: 1700000000,
-        push_generation: 0,
         result_status: null, return_payload_b64: null
     };
-}
-
-function makeSeededOrder(args) {
-    return Object.assign(makeOrder(args), { give_decimals: 8 });
 }
 
 async function driveDispatch(mvh, validators, seedBase) {
@@ -155,12 +142,12 @@ async function driveDispatch(mvh, validators, seedBase) {
 }
 
 function crossingPair({ ltcIdx, dogeIdx, amount = '40' }) {
-    return {
-        LTC:  [ makeSeededOrder({ action_index: ltcIdx,  give: { coin: 'LTC',  tick: 'TOKA', amount },
+    return withGiveDecimals({
+        LTC:  [ makeOrder({ action_index: ltcIdx,  give: { coin: 'LTC',  tick: 'TOKA', amount },
                             get: { coin: 'DOGE', tick: 'TOKB', amount }, get_address: 'addr_ltc_' + ltcIdx, block_index: BLOCK_INDEX }) ],
-        DOGE: [ makeSeededOrder({ action_index: dogeIdx, give: { coin: 'DOGE', tick: 'TOKB', amount },
+        DOGE: [ makeOrder({ action_index: dogeIdx, give: { coin: 'DOGE', tick: 'TOKB', amount },
                             get: { coin: 'LTC',  tick: 'TOKA', amount }, get_address: 'addr_doge_' + dogeIdx, block_index: BLOCK_INDEX }) ]
-    };
+    });
 }
 
 async function driveDexRound(mvh) {
@@ -207,7 +194,7 @@ describe('MultiValidatorHub: per-feature weighted quorum at N=10 (C.2)', functio
     });
 
     describe('Price + Fiat oracle round (OracleConsensus) finalizes at N=10', function () {
-        let db, mvh, seed, countSeed, oracle;
+        let db, mvh, seed, oracle;
 
         before(async function () {
             db = await startDisposableHubDb();
@@ -216,21 +203,19 @@ describe('MultiValidatorHub: per-feature weighted quorum at N=10 (C.2)', functio
             await mvh.start();
             await waitForMesh(mvh, { timeoutMs: PEER_WAIT_MS });
             seed   = seedWeightSnapshot(mvh, { blockIndex: BLOCK_INDEX, validators: equalWeights(mvh) });
-            countSeed = seedStakeSnapshot(mvh, { blockIndex: BLOCK_INDEX });
             oracle = await attachOracle(mvh);
             injectSubmissions(mvh);
         });
 
         after(async function () {
             if (oracle) oracle.stop();
-            if (countSeed) countSeed.restore();
             if (seed) seed.restore();
             if (mvh) { await mvh.stop(); await mvh.dropDatabases(); }
             if (db)  { await db.stop(); }
         });
 
         it('the weighted quorum (>=7 of 10) finalizes the identical price snapshot on EVERY hub', async function () {
-            await Promise.all(mvh.hubs.map((h) => h['_wtOracle'].finalizeRound(ORACLE_ROUND, BLOCK_INDEX).catch(() => {})));
+            await Promise.all(mvh.hubs.map((h) => h['_wtOracle'].finalizeRound(ORACLE_ROUND, BLOCK_INDEX, nominalOracleRoundTime(h['_wtOracle'], ORACLE_ROUND)).catch(() => {})));
             // Each hub's own price_snapshots row is the post-condition asserted below.
             await waitFor(async () => {
                 const counts = [];
@@ -260,5 +245,6 @@ describe('MultiValidatorHub: per-feature weighted quorum at N=10 (C.2)', functio
 });
 
 // Run the split parts in this suite's lane; the stubbed lane ignores their directory.
+require('../attestMirror/helpers/crossChainOfferDecimals').installCrossChainSeeds();
 require('./multiHubFeaturesN10.integration.test/02_cross_chain_dex_match.test');
 require('./multiHubFeaturesN10.integration.test/03_xcall_dispatch_relay.test');

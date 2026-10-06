@@ -21,7 +21,7 @@
 const assert = require('assert')
 const {
     WS_OPEN, waitFor, waitUntil, openPeerCount, meshState, waitForMesh,
-    readConfigEverywhere, waitForConfigEverywhere, assertNeverApplied
+    readConfigEverywhere, waitForConfigEverywhere, assertNeverApplied, nominalOracleRoundTime
 } = require('../../helpers/consensusWait')
 
 // A hub whose peer map holds `open` OPEN sockets and `connecting` entries that
@@ -198,6 +198,14 @@ describe('consensusWait: deterministic PBFT waits', function () {
             await assert.rejects(
                 () => waitUntil(() => { throw new Error('connection reset') }, { timeoutMs: 100 }),
                 /connection reset/)
+        })
+    })
+
+    describe('nominalOracleRoundTime', function () {
+        it('floors the round start in milliseconds to whole seconds', function () {
+            const oc = { oracleRound: { epochStart: 1000500, roundInterval: 60000 } }
+            assert.strictEqual(nominalOracleRoundTime(oc, 0), 1000)
+            assert.strictEqual(nominalOracleRoundTime(oc, 100), 7000)
         })
     })
 })
