@@ -44,7 +44,7 @@ const assert = require('assert');
 const { MultiValidatorHub }    = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
-const { waitForMesh, waitFor } = require('../helpers/consensusWait');
+const { waitForMesh, waitFor, nominalOracleRoundTime } = require('../helpers/consensusWait');
 
 function hubRequire(rel) { return require(path.resolve(__dirname, '../../../xchain-hub', rel)); }
 const OracleConsensus = hubRequire('src/oracle/consensus.js');
@@ -63,7 +63,6 @@ const FIAT_DISPENSER_PRICE_WINDOW = 86400;   // indexer default (24h)
 const PEER_WAIT_MS = 60_000;
 const SETTLE_MS    = 60_000;
 const BLOCK_INDEX  = 100;
-const BLOCK_TIME   = 1700000000;
 const ROUND        = 100;
 const PAIR         = 'BTC/USD';
 const PRICE        = '60000';
@@ -102,7 +101,7 @@ function injectSubmissions(mvh) {
 // Drive the round on every hub, then wait until every hub has written its own
 // finalized snapshot row (the post-condition every case here asserts on).
 async function finalizeAll(mvh) {
-    await Promise.all(mvh.hubs.map((h) => h['_wtOracle'].finalizeRound(ROUND, BLOCK_INDEX, BLOCK_TIME).catch(() => {})));
+    await Promise.all(mvh.hubs.map((h) => h['_wtOracle'].finalizeRound(ROUND, BLOCK_INDEX, nominalOracleRoundTime(h['_wtOracle'], ROUND)).catch(() => {})));
     const res = await waitFor(async () => {
         const counts = [];
         for (const hub of mvh.hubs) {

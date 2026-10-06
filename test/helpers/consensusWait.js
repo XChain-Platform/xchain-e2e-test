@@ -239,8 +239,17 @@ async function assertNeverApplied(hubs, sel, opts) {
     }
 }
 
+// The wire timestamp an oracle leader must carry once the round time gate is
+// active: followers drop a PROPOSE whose time differs from the round's nominal
+// second, so a suite that drives finalizeRound by hand passes this value.
+function nominalOracleRoundTime(oracleConsensus, round) {
+    const { epochStart, roundInterval } = oracleConsensus.oracleRound;
+    return Math.floor((epochStart + round * roundInterval) / 1000);
+}
+
 module.exports = {
     WS_OPEN,
+    nominalOracleRoundTime,
     sleep,
     waitFor,
     waitUntil,

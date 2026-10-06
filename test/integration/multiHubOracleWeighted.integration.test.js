@@ -52,7 +52,7 @@ const assert = require('assert');
 const { MultiValidatorHub }    = require('../helpers/multiValidatorHubHelper');
 const { startDisposableHubDb } = require('../helpers/disposableHubDb');
 const { seedWeightSnapshot }   = require('../helpers/seededWeightSnapshot');
-const { waitForMesh, waitFor } = require('../helpers/consensusWait');
+const { waitForMesh, waitFor, nominalOracleRoundTime } = require('../helpers/consensusWait');
 
 function hubRequire(rel) { return require(path.resolve(__dirname, '../../../xchain-hub', rel)); }
 const OracleConsensus = hubRequire('src/oracle/consensus.js');
@@ -66,7 +66,6 @@ const PEER_WAIT_MS = 60_000;
 // the minority case can never satisfy the poll and still watches the whole window.
 const SETTLE_MS    = 6000;
 const BLOCK_INDEX  = 100;       // BTC block boundary the round locks the snapshot at (>=0 -> weighted on regtest)
-const BLOCK_TIME   = 1700000000;
 const ROUND        = 100;
 const PAIR         = 'BTC/USD';
 const PRICE        = '60000';
@@ -102,7 +101,7 @@ function injectSubmissions(mvh) {
 }
 
 async function finalizeAll(mvh) {
-    await Promise.all(mvh.hubs.map((h) => h['_wtOracle'].finalizeRound(ROUND, BLOCK_INDEX, BLOCK_TIME).catch(() => {})));
+    await Promise.all(mvh.hubs.map((h) => h['_wtOracle'].finalizeRound(ROUND, BLOCK_INDEX, nominalOracleRoundTime(h['_wtOracle'], ROUND)).catch(() => {})));
     await waitFor(async () => {
         const counts = [];
         for (const hub of mvh.hubs) {
