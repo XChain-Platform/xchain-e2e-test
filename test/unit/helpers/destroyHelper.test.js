@@ -12,7 +12,7 @@
 
 const sinon = require('sinon')
 const assert = require('assert')
-const transactionHelper = require('../../transactionHelper')
+const transactionHelper = require('../../helpers/core/transactionHelper')
 const helper = require('../../helpers/destroyHelper')
 
 const addressInfo = { address: 'addr1', privateKey: Buffer.alloc(32), publicKey: Buffer.alloc(33) }

@@ -31,7 +31,7 @@ const os   = require('os');
 const path = require('path');
 const fs   = require('fs');
 const { expect } = require('chai');
-const { makeSdk, submit, fundedGasAddress, uniqueTick, submitOpts, mine } = require('./sdkHelper');
+const { makeSdk, submit, fundedGasAddress, uniqueTick, submitOpts, mine } = require('./helpers/sdkHelper');
 const X402Storefront = require('../helpers/x402Storefront');
 
 const COIN = (typeof global.COIN_CODE !== 'undefined' && global.COIN_CODE) || 'BTC';

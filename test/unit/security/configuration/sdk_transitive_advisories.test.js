@@ -17,7 +17,7 @@ const path   = require('path');
 // Third file in this directory, and deliberately separate from both of its
 // neighbours. dependency-advisories.test.js is byte-identical across every
 // sibling repo that carries it, so nothing repo-specific may be added there,
-// and sibling-tree-advisories.test.js asserts that its own floor list matches
+// and sibling_tree_advisories.test.js asserts that its own floor list matches
 // that shared file exactly. The advisories guarded here arrive through the
 // staged xchain-sdk rather than through anything this repo declares, so they
 // belong in neither list.

@@ -36,7 +36,7 @@
 const { expect } = require('chai');
 const axios = require('axios');
 const mariadb = require('mariadb');
-const { makeSdk, submit, fundedGasAddress, mine, submitOpts } = require('./sdkHelper');
+const { makeSdk, submit, fundedGasAddress, mine, submitOpts } = require('./helpers/sdkHelper');
 
 // Source-side contract (BTC), same shape as xcall.sdk.test.js: parameterized
 // fire-and-record, callback keyed by call_id so concurrent calls don't collide.

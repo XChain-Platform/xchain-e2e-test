@@ -45,7 +45,7 @@
  * RUN IT EXPLICITLY (test/tools/ is outside the default glob):
  *
  *   E2E_REQUIRE_FEDERATION=1 XC_ROLLCALL_REGTEST_ACTIVATION=armed \
- *     npx mocha --timeout 0 --exit --require ./test/initialCheck.test.js \
+ *     npx mocha --timeout 0 --exit --require ./test/initial_check.test.js \
  *     test/tools/rollcall_age_absences.test.js
  *
  * with the federation mnemonic and idle generation the venue was seeded from

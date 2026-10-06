@@ -19,14 +19,14 @@ const fs = require('fs');
 const path = require('path');
 
 const chainRail = require('../../../helpers/chainRail');
-const cryptoHelper = require('../../../cryptoHelper');
+const cryptoHelper = require('../../../helpers/core/cryptoHelper');
 const gasHelper = require('../../../helpers/gasHelper');
 const nativeFeeHelper = require('../../../helpers/nativeFeeHelper');
 const sendHelper = require('../../../helpers/sendHelper');
 const stakeHelper = require('../../../helpers/stakeHelper');
 const stakeTeardown = require('../../../helpers/stakeTeardown');
-const fixture = require('../../../attestMirror/mirrorDrillFixture');
-const { restoreRecordedStaker } = require('../../../attestMirror/restoreRecordedStaker');
+const fixture = require('../../../attestMirror/helpers/mirrorDrillFixture');
+const { restoreRecordedStaker } = require('../../../attestMirror/helpers/restoreRecordedStaker');
 const { resolveVenueQuorum } = require('../../../helpers/bridgeRailVenue');
 const { planBootstrapFunding, recordedSignerSeeds } = require('./quorum_funding');
 

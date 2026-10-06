@@ -4,7 +4,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 const assert = require('assert')
-const { STABLE_VAULT } = require('../../contracts/sources/stable_vault_source')
+const { STABLE_VAULT } = require('../../contracts/fixtures/stable_vault_source')
 
 describe('Stable Vault source', function () {
     const COLL = 'XCHAIN'

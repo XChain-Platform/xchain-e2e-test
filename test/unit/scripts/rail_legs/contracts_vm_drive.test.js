@@ -18,11 +18,11 @@ const DRIVE_ENV = {
 const LEG_SUITES = {
     json_stringify_hook: ['test/contracts/json_stringify_hook.test.js'],
     custody_guard: [
-        'test/rail/custody_guard/deposit.rail.test.js',
-        'test/rail/custody_guard/withdraw.rail.test.js',
+        'test/rail/custody_guard/deposit.test.js',
+        'test/rail/custody_guard/withdraw.test.js',
     ],
-    broadcast_fee: ['test/rail/flag_days/broadcast_fee_length.rail.test.js'],
-    vm_lint: ['test/rail/vm_lint/optional_chain_deploy.rail.test.js'],
+    broadcast_fee: ['test/rail/flag_days/broadcast_fee_length.test.js'],
+    vm_lint: ['test/rail/vm_lint/optional_chain_deploy.test.js'],
 }
 
 function dryRunNonPendingCount(files) {

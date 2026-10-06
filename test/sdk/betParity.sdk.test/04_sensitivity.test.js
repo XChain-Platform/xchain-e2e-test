@@ -13,7 +13,7 @@
  ********************************************************************/
 
 const { expect } = require('chai');
-const { releaseClock } = require('../betHelper');
+const { releaseClock } = require('../helpers/betHelper');
 const { state, bQuery, compareHashes } = require('./support/bet_parity_support');
 
 async function cleanUpParityVenue() {

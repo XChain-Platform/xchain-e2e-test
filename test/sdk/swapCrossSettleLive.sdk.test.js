@@ -78,7 +78,7 @@
 
 const { expect } = require('chai');
 const mariadb = require('mariadb');
-const { makeSdk, submit, fundedGasAddress, mine, submitOpts, XChainSDK } = require('./sdkHelper');
+const { makeSdk, submit, fundedGasAddress, mine, submitOpts, XChainSDK } = require('./helpers/sdkHelper');
 
 const DB_HOST = process.env.XCALL_DB_HOST || '127.0.0.1';
 const DB_PORT = parseInt(process.env.XCALL_DB_PORT || '13306', 10);
@@ -167,7 +167,7 @@ async function setupSwapSettlement() {
         const missing = missingEnv();
         if (missing.length) {
             console.log('    [swap-cross] multi-chain venue env absent (' + missing.join(', ') +
-                '), skipping. Run test/sdk/swapCrossDogeSetup.js on a BTC+DOGE regtest stack first.');
+                '), skipping. Run test/sdk/helpers/swapCrossDogeSetup.js on a BTC+DOGE regtest stack first.');
             this.skip();
             return;
         }

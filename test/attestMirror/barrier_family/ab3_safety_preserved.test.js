@@ -43,7 +43,7 @@ dotenv.config()
 
 const fixture = require('../helpers/barrierFamilyFixture')
 const drive = require('../helpers/barrierFamilyDrive')
-const { until } = require('../mirrorDrillWaits')
+const { until } = require('../helpers/mirrorDrillWaits')
 
 const BUILD_ROOT = path.resolve(__dirname, '..', '..', '..', '..')
 const HELD = 0

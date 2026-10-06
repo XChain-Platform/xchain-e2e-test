@@ -14,7 +14,7 @@ const assert = require('assert');
 const sinon = require('sinon');
 const axios = require('axios');
 
-const BlockchainConnector = require('../../../src/BlockchainConnector');
+const BlockchainConnector = require('../../../src/blockchain_connector');
 
 function makeResponse(body) {
     return { status: 200, data: body };

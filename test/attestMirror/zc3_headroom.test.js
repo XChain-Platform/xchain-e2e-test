@@ -66,13 +66,13 @@ const { AttestMirrorVenue } = require('../helpers/attestMirrorVenue')
 const {
     provisionDrillIdentities, waitForVenueIndexersAtTip, startAttestTestServer, deployRequestContract,
     mineWhile,
-} = require('./mirrorDrillFixture')
+} = require('./helpers/mirrorDrillFixture')
 const {
     APPLIED_FIELDS, diffRows,
     waitForMirrorRowEverywhere, waitForAppliedEverywhere,
     waitForHeightWithClear, readRequestRow, findEmittedAttestRequest, attestRequestWatermark,
     clearBeforeBroadcast, settleOrReport, allHubTails, jsonSafe,
-} = require('./mirrorDrillWaits')
+} = require('./helpers/mirrorDrillWaits')
 const vmHelper = require('../helpers/vmHelper')
 
 const FIXED_BODY = '{"score":23,"meta":"zc3-headroom"}'

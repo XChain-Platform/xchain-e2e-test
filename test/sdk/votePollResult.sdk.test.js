@@ -25,7 +25,7 @@
  ********************************************************************/
 
 const { expect } = require('chai');
-const { makeSdk, submit, fundedGasAddress, mine, uniqueTick, submitOpts } = require('./sdkHelper');
+const { makeSdk, submit, fundedGasAddress, mine, uniqueTick, submitOpts } = require('./helpers/sdkHelper');
 
 // Reads a finalized poll via the VM host function and stashes the result in
 // contract state so the test can assert it through getContractState.

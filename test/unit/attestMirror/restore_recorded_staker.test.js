@@ -2,7 +2,7 @@
 
 const assert = require('assert')
 
-const { restoreRecordedStaker } = require('../../attestMirror/restoreRecordedStaker')
+const { restoreRecordedStaker } = require('../../attestMirror/helpers/restoreRecordedStaker')
 
 function createCryptoHelper(wallets) {
     return {

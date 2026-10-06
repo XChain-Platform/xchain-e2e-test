@@ -11,7 +11,7 @@ const { OracleBatchReplayNode } = require('../../helpers/oracleBatchReplay');
 const { anchorRowsDigest } = require('../../helpers/anchor_fold/anchor_fold_readings');
 const { normalizeAnchorRowsForDigest } = require('../../helpers/anchor_fold/normalize_digest_rows');
 const { seedUnarmedAnchors } = require('../../helpers/anchor_fold/seed_unarmed_anchors');
-const venueHooks = require('../../initialCheck.test.js').mochaHooks;
+const venueHooks = require('../../initial_check.test.js').mochaHooks;
 
 // A seeded federation run (the R-3 rail) starts from a fresh chain that carries no anchors,
 // so AF4 first publishes its own pre-fold v0 bundle and archive (R-3 attempt 4 gap B).

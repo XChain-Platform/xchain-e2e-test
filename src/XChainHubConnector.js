@@ -168,8 +168,9 @@ class XChainHubConnector {
 
     // A degraded hub returns {status:"degraded"} and a failed config fetch
     // returns {error:...}; neither is a config tree. Don't let those
-    // masquerade as config, so the caller takes its "couldn't get configs" path
-    // instead of indexing into a non-config object.
+    // masquerade as config: return false so the config read returns null and the
+    // caller takes its "couldn't get configs" path instead of indexing into a
+    // non-config object.
     ['_usableConfigResult'](result){
         if(result === null || result === undefined) return false;
         if(typeof result === 'object' && (result.status === 'degraded' || result.error !== undefined)){

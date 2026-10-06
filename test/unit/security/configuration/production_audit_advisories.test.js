@@ -17,7 +17,7 @@ const path   = require('path');
 // Fourth file in this directory, and separate from its three neighbours for the
 // same reason sdk-transitive-advisories.test.js is: dependency-advisories.test.js
 // is shared verbatim across the sibling repos that carry it, so a floor raised
-// for this tree alone may not be written there, and sibling-tree-advisories.test.js
+// for this tree alone may not be written there, and sibling_tree_advisories.test.js
 // asserts its own floor table matches that shared file exactly (ADV-6), so it may
 // not be written there either.
 //
@@ -151,7 +151,7 @@ function advisoryChecks() {
     });
 }
 
-// The same staged-tree hazard sibling-tree-advisories.test.js describes, for
+// The same staged-tree hazard sibling_tree_advisories.test.js describes, for
 // the two floors that file cannot carry: xchain-hub and xchain-sdk are
 // gitignored file: dependencies staged at build time, and once a staged
 // directory has lost its package.json npm stops reconciling the node_modules

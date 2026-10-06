@@ -19,8 +19,8 @@ global.regtestMinerConnector = { sendFunds: async () => 'txid-stub' }
 global.nodeConnector         = { waitForTx: async () => true }
 global.utxoTrackerConnector  = { waitForUtxos: async () => true }
 
-const cryptoHelper  = require('../cryptoHelper')
-const CryptoNetworks = require('../../src/CryptoNetworks')
+const cryptoHelper  = require('../helpers/core/cryptoHelper')
+const CryptoNetworks = require('../../src/crypto_networks')
 
 describe('[regression:p0] Crypto & Wallet Management', function () {
 

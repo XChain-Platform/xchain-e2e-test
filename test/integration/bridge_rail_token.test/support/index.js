@@ -22,10 +22,10 @@ const axios = require('axios');
 const XChainHubConnector = require('../../../../src/XChainHubConnector');
 const chainRail         = require('../../../helpers/chainRail');
 const stakeTeardown     = require('../../../helpers/stakeTeardown');
-const cryptoHelper      = require('../../../cryptoHelper');
-const transactionHelper = require('../../../transactionHelper');
+const cryptoHelper      = require('../../../helpers/core/cryptoHelper');
+const transactionHelper = require('../../../helpers/core/transactionHelper');
 const issueHelper       = require('../../../helpers/issueHelper');
-const fixture           = require('../../../attestMirror/mirrorDrillFixture');
+const fixture           = require('../../../attestMirror/helpers/mirrorDrillFixture');
 const { checkFullDriveReady } = require('../../../helpers/rail_preflight/full_drive_ready');
 const { requireHealthyHub } = require('../../../helpers/rail_preflight/hub_health_gate');
 const {

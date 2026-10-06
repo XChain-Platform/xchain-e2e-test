@@ -10,7 +10,7 @@ const { execFileSync, spawnSync } = require('node:child_process')
 
 const CONSENSUS = [
     'src/coins/',
-    'src/CryptoNetworks.js',
+    'src/crypto_networks.js',
     'test/transactionHelper.js',
     'test/cryptoHelper.js',
     'test/transactionHelper/',

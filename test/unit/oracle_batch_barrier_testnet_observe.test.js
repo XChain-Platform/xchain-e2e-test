@@ -44,7 +44,7 @@
 
 const assert = require('assert');
 
-const drill = require('../drills/oracleBatchBarrierTestnet.drill.js');
+const drill = require('../drills/lib/oracle_batch_barrier_testnet.js');
 
 // The frozen barrier grace the drill reasons about (xchain-indexer's
 // HUB_SYNC_WATERMARK_GRACE_S.price). Restated here rather than imported so a

@@ -106,11 +106,11 @@
 
 const { expect } = require('chai');
 const Database   = require('../../src/db');
-const { makeSdk, fundedGasAddress } = require('./sdkHelper');
+const { makeSdk, fundedGasAddress } = require('./helpers/sdkHelper');
 const {
     MIN_REFUND_WINDOW, dbQuery, balanceOf, amtEq, actionIndexOf, blockTime,
     jumpTo, waitFeedStatus, issueWagerToken, submitBet
-} = require('./betHelper');
+} = require('./helpers/betHelper');
 const {
     state, haveConnectors, sleep, bQuery, tipOf, compareHashes, betClasses, waitNodeB,
     levelNodes, mirrorOracleTables

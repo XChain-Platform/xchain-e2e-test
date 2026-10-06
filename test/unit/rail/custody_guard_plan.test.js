@@ -11,7 +11,7 @@
 // contact legal@dankest.llc.
 
 const assert = require('assert')
-const { custodyWires, DEPOSIT_CASES, WITHDRAW_CASES } = require('../../rail/custody_guard/plan')
+const { custodyWires, DEPOSIT_CASES, WITHDRAW_CASES } = require('../../rail/custody_guard/helpers/plan')
 
 describe('custody guard rail plan', function () {
     it('builds the token controller wire field by field', function () {

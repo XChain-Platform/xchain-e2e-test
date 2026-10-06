@@ -14,7 +14,7 @@ const assert  = require('assert')
 const sinon   = require('sinon')
 const bitcoin = require('bitcoinjs-lib')
 
-const transactionHelper = require('../transactionHelper')
+const transactionHelper = require('../helpers/core/transactionHelper')
 
 function resetGlobals() {
     global.NETWORK_OBJECT       = { ...bitcoin.networks.regtest, dustThreshold: 546 }

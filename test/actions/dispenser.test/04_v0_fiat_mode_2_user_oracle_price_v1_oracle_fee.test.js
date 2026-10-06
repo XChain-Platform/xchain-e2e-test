@@ -10,7 +10,7 @@
 
 
 const assert = require('assert')
-const cryptoHelper = require('../../cryptoHelper')
+const cryptoHelper = require('../../helpers/core/cryptoHelper')
 const issueHelper = require('../../helpers/issueHelper')
 const dispenserHelper = require('../../helpers/dispenserHelper')
 const priceSnapshotHelper = require('../../helpers/priceSnapshotHelper')

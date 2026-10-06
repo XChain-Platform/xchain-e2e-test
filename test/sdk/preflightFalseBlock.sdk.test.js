@@ -67,7 +67,7 @@
 const { expect } = require('chai');
 const {
     makeSdk, submit, fundedSdkAddress, fundedGasAddress, mine, uniqueTick, submitOpts,
-} = require('./sdkHelper');
+} = require('./helpers/sdkHelper');
 
 // Venue coin code (BTC/LTC/DOGE), set by the initialCheck beforeAll hook.
 // Same resolution the trading suite uses.

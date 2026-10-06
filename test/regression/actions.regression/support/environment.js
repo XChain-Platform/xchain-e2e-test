@@ -18,7 +18,7 @@ global.indexerDatabase       = {
     waitForSweep:   sinon.stub().resolves({ status: 'valid' }),
 }
 
-const transactionHelper = require('../../../transactionHelper')
+const transactionHelper = require('../../../helpers/core/transactionHelper')
 const issueHelper       = require('../../../helpers/issueHelper')
 const sendHelper        = require('../../../helpers/sendHelper')
 

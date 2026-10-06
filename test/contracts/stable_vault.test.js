@@ -31,11 +31,11 @@
 // unit test (stable_vault.test.js in xchain-contracts) covers the full matrix.
 
 const assert = require('assert')
-const cryptoHelper = require('../cryptoHelper')
+const cryptoHelper = require('../helpers/core/cryptoHelper')
 const vmHelper = require('../helpers/vmHelper')
 const gasHelper = require('../helpers/gasHelper')
 const priceSnapshotHelper = require('../helpers/priceSnapshotHelper')
-const { STABLE_VAULT } = require('./sources/stable_vault_source')
+const { STABLE_VAULT } = require('./fixtures/stable_vault_source')
 
     const CHAIN = ({ bitcoin: 'BTC', litecoin: 'LTC', dogecoin: 'DOGE' })[COIN] || 'BTC'
     const COLL = 'XCHAIN'      // collateral = the gas token; nothing extra to issue

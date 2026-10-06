@@ -27,7 +27,7 @@
  ********************************************************************/
 
 const { expect } = require('chai');
-const { makeSdk, submit, fundedGasAddress, uniqueTick, submitOpts, isTransientStackError } = require('./sdkHelper');
+const { makeSdk, submit, fundedGasAddress, uniqueTick, submitOpts, isTransientStackError } = require('./helpers/sdkHelper');
 
 const COIN = (typeof global.COIN_CODE !== 'undefined' && global.COIN_CODE) || 'BTC';
 
