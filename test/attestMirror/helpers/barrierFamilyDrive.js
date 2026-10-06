@@ -32,6 +32,8 @@ const { until, untilOrClearDogeStall, venueTipProbe, queryDb } = require('./mirr
 const XChainIndexerConnector = require('../../../src/XChainIndexerConnector.js')
 const fixture = require('./barrierFamilyFixture')
 const rows = require('./barrierFamilyRows')
+const { resolveVenueBasePort } = require('../../helpers/attestMirrorVenue')
+const { claimLegIsolation, claimOfflineSuite, PORT_WINDOW_SPAN } = require('./attestMirrorVenue')
 
 const LEVEL_TIMEOUT_MS = 25 * 60 * 1000
 const POLL_MS = 2000
@@ -89,10 +91,17 @@ async function bootFamilyVenue (opts) {
     })
     const evidence = Object.assign(built.evidence, { armHubs: !!o.armHubs, stampAheadS: STAMP_AHEAD_S, legacyBlock })
     console.log('BF EVIDENCE ' + JSON.stringify(evidence))
-    const up = await built.venue.start()
-    assert.ok(up, 'FAILED DRIVE (not a skip): the family venue did not come up: ' + String(built.venue.unavailable))
-    await levelIndexers(built.venue, o.levelTimeoutMs, { requireMirrorReady: !!o.requireMirrorReady })
-    return { venue: built.venue, evidence, btc, armHeight, legacyBlock }
+    const claim = claimLegIsolation({
+        leg: o.leg || built.venue.label, label: built.venue.label, basePort: resolveVenueBasePort(venueOpts.basePort, process.env),
+    })
+    const stop = built.venue.stop && built.venue.stop.bind(built.venue)
+    if (stop) built.venue.stop = async (...args) => { try { return await stop(...args) } finally { claim.release() } }
+    try {
+        const up = await built.venue.start()
+        assert.ok(up, 'FAILED DRIVE (not a skip): the family venue did not come up: ' + String(built.venue.unavailable))
+        await levelIndexers(built.venue, o.levelTimeoutMs, { requireMirrorReady: !!o.requireMirrorReady })
+    } catch (e) { claim.release(); throw e }
+    return { venue: built.venue, evidence, btc, armHeight, legacyBlock, claim }
 }
 
 /**
@@ -659,6 +668,9 @@ module.exports = {
     POLL_MS,
     LEG_FLOOR_MS,
     bootFamilyVenue,
+    claimLegIsolation,
+    claimOfflineSuite,
+    PORT_WINDOW_SPAN,
     levelIndexers,
     mirrorReady,
     statusSnapshot,

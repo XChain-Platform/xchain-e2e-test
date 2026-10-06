@@ -240,8 +240,10 @@ describe('Fuzz: waitFor* with fuzzed timeMax', function () {
 
     it('waitForIssue never hangs with bounded timeMax values', async function () {
         this.timeout(30000)
+        const clock = sinon.useFakeTimers()
         await fc.assert(fc.asyncProperty(boundedTimeMaxArb, async (timeMax) => {
             const { db, mockConn } = createDb()
+            db.sleep.callsFake(async (ms) => clock.tick(ms))
             mockConn.query.resolves([])
 
             const result = await db.waitForIssue({ tick: 'TOK' }, timeMax)
@@ -251,8 +253,10 @@ describe('Fuzz: waitFor* with fuzzed timeMax', function () {
 
     it('waitForSend never hangs with bounded timeMax values', async function () {
         this.timeout(30000)
+        const clock = sinon.useFakeTimers()
         await fc.assert(fc.asyncProperty(boundedTimeMaxArb, async (timeMax) => {
             const { db, mockConn } = createDb()
+            db.sleep.callsFake(async (ms) => clock.tick(ms))
             mockConn.query.resolves([])
 
             const result = await db.waitForSend({ source: 'addr' }, timeMax)

@@ -15,9 +15,15 @@ const sinon  = require('sinon')
 
 // globals required before cryptoHelper load (it reads them at module scope)
 global.wallets               = {}
-global.regtestMinerConnector = { sendFunds: async () => 'txid-stub' }
+global.regtestMinerConnector = {
+    sendFunds:      async () => 'txid-stub',
+    generateBlocks: async () => [],
+}
 global.nodeConnector         = { waitForTx: async () => true }
-global.utxoTrackerConnector  = { waitForUtxos: async () => true }
+global.utxoTrackerConnector  = {
+    waitForUtxos:  async () => true,
+    getSyncStatus: async () => null,
+}
 
 const cryptoHelper  = require('../helpers/core/cryptoHelper')
 const CryptoNetworks = require('../../src/crypto_networks')
@@ -92,7 +98,7 @@ describe('[regression:p0] Crypto & Wallet Management', function () {
         const waitUtxosStub  = sinon.stub(global.utxoTrackerConnector, 'waitForUtxos').resolves(true)
 
         const result = await cryptoHelper.getNewFundedAddress(
-            'funded-test', 'bitcoin', 'regtest', MNEMONIC, 'legacy', 0, 1.0
+            'funded-test', 'bitcoin', 'regtest', MNEMONIC, 'legacy', 0, 1.0, false
         )
 
         assert.ok(sendFundsStub.calledOnce, 'sendFunds should be called')
